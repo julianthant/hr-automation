@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: completed
-stopped_at: Completed 01-02-PLAN.md (Phase 1 complete)
-last_updated: "2026-03-13T11:25:24.287Z"
-last_activity: 2026-03-13 -- Plan 01-02 executed (auth flows + test-login CLI)
+status: in-progress
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-03-13T17:17:00Z"
+last_activity: 2026-03-13 -- Plan 02-01 executed (Zod schema + extraction modules + CLI extract command)
 progress:
   total_phases: 4
   completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
-  percent: 100
+  total_plans: 4
+  completed_plans: 3
+  percent: 75
 ---
 
 # Project State
@@ -21,33 +21,34 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-13)
 
 **Core value:** Reliably transfer employee onboarding data from ACT CRM portal into UCPath's UC_FULL_HIRE template without manual copy-pasting
-**Current focus:** Phase 1 complete -- ready for Phase 2 (Data Extraction from ACT CRM)
+**Current focus:** Phase 2 in progress -- extraction modules built, awaiting live selector verification (Plan 02-02)
 
 ## Current Position
 
-Phase: 1 of 4 (Authentication and Project Foundation) -- COMPLETE
-Plan: 2 of 2 in current phase (01-02 complete, phase done)
-Status: Phase 1 Complete
-Last activity: 2026-03-13 -- Plan 01-02 executed (auth flows + test-login CLI)
+Phase: 2 of 4 (Data Extraction from ACT CRM)
+Plan: 1 of 2 in current phase (02-01 complete, 02-02 pending)
+Status: In Progress
+Last activity: 2026-03-13 -- Plan 02-01 executed (Zod schema + extraction modules + CLI extract command)
 
-Progress: [██████████] 100% (Phase 1)
+Progress: [████████░░] 75%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2
-- Average duration: 25min
-- Total execution time: 0.83 hours
+- Total plans completed: 3
+- Average duration: 18min
+- Total execution time: 0.88 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-auth | 2/2 | 50min | 25min |
+| 02-extraction | 1/2 | 3min | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (5min), 01-02 (45min)
-- Trend: Phase 1 complete
+- Last 5 plans: 01-01 (5min), 01-02 (45min), 02-01 (3min)
+- Trend: Phase 2 in progress
 
 *Updated after each plan completion*
 
@@ -67,6 +68,9 @@ Recent decisions affecting current work:
 - [01-02]: Duo timeout increased to 60s from planned 15s -- real-world approval takes longer
 - [01-02]: Session validator detects a5.ucsd.edu (actual UCSD SSO hostname) not login.ucsd.edu
 - [01-02]: UCPath session check must use actual app URL, not root domain, for reliable redirect detection
+- [02-01]: Zod 4 imported via 'zod/v4' subpath for correct ESM + TypeScript integration
+- [02-01]: effectiveDate uses min(1) not date regex -- format will be tightened after live discovery in Plan 02-02
+- [02-01]: FIELD_MAP pattern with label variants for flexible Salesforce DOM extraction
 
 ### Pending Todos
 
@@ -79,6 +83,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-13T11:19:00Z
-Stopped at: Completed 01-02-PLAN.md (Phase 1 complete)
-Resume file: .planning/phases/01-authentication-and-project-foundation/01-02-SUMMARY.md
+Last session: 2026-03-13T17:17:00Z
+Stopped at: Completed 02-01-PLAN.md
+Resume file: .planning/phases/02-data-extraction-from-act-crm/02-01-SUMMARY.md

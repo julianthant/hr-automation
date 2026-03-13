@@ -15,11 +15,11 @@
 
 ### Data Extraction
 
-- [ ] **EXTR-01**: Automation searches ACT CRM onboarding portal by employee email address
-- [ ] **EXTR-02**: Automation selects the search result row with the latest date
-- [ ] **EXTR-03**: Automation navigates to employee profile and clicks UCPath Entry Sheet
-- [ ] **EXTR-04**: Automation extracts position number, first name, last name, SSN, address, city, state, postal code, wage, and effective date from UCPath Entry Sheet
-- [ ] **EXTR-05**: Extracted data passes Zod schema validation before proceeding (rejects incomplete or malformed data)
+- [x] **EXTR-01**: Automation searches ACT CRM onboarding portal by employee email address
+- [x] **EXTR-02**: Automation selects the search result row with the latest date
+- [x] **EXTR-03**: Automation navigates to employee profile and clicks UCPath Entry Sheet
+- [x] **EXTR-04**: Automation extracts position number, first name, last name, SSN, address, city, state, postal code, wage, and effective date from UCPath Entry Sheet
+- [x] **EXTR-05**: Extracted data passes Zod schema validation before proceeding (rejects incomplete or malformed data)
 
 ### UCPath Entry
 
@@ -74,11 +74,11 @@
 | AUTH-03 | Phase 1 | Complete |
 | AUTH-04 | Phase 1 | Complete |
 | AUTH-05 | Phase 1 | Complete |
-| EXTR-01 | Phase 2 | Pending |
-| EXTR-02 | Phase 2 | Pending |
-| EXTR-03 | Phase 2 | Pending |
-| EXTR-04 | Phase 2 | Pending |
-| EXTR-05 | Phase 2 | Pending |
+| EXTR-01 | Phase 2 | Complete |
+| EXTR-02 | Phase 2 | Complete |
+| EXTR-03 | Phase 2 | Complete |
+| EXTR-04 | Phase 2 | Complete |
+| EXTR-05 | Phase 2 | Complete |
 | ENTR-01 | Phase 3 | Pending |
 | ENTR-02 | Phase 3 | Pending |
 | ENTR-03 | Phase 3 | Pending |
