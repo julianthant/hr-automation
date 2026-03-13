@@ -12,7 +12,7 @@ This roadmap delivers a CLI tool that automates employee onboarding data transfe
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Authentication and Project Foundation** - Establish authenticated browser sessions to both UCPath and ACT CRM through UCSD SSO with Duo MFA pause
+- [x] **Phase 1: Authentication and Project Foundation** - Establish authenticated browser sessions to both UCPath and ACT CRM through UCSD SSO with Duo MFA pause (completed 2026-03-13)
 - [ ] **Phase 2: Data Extraction from ACT CRM** - Search, navigate, and extract validated employee data from the onboarding portal
 - [ ] **Phase 3: UCPath Transaction Entry** - Navigate UCPath Smart HR Transactions and create UC_FULL_HIRE transactions using extracted data, with dry-run safety
 - [ ] **Phase 4: Batch Processing and CLI** - Process multiple employees from file input with per-employee error isolation, progress reporting, and structured logging
@@ -28,11 +28,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. After UCPath login succeeds, the same browser session can navigate to ACT CRM onboarding portal in an authenticated state (or complete a second auth flow if needed)
   3. If the user is already authenticated (valid session), re-running the tool skips the login flow and proceeds directly
   4. Credentials are loaded from a .env file, .gitignore blocks all secrets, and no PII appears in any log output
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 
 Plans:
-- [ ] 01-01-PLAN.md -- Project scaffolding, utilities (env validation, PII-safe logger), browser launch module, and auth type contracts
-- [ ] 01-02-PLAN.md -- Authentication flows (UCPath SSO + Duo MFA + ACT CRM) and test-login CLI command with session persistence
+- [x] 01-01-PLAN.md -- Project scaffolding, utilities (env validation, PII-safe logger), browser launch module, and auth type contracts
+- [x] 01-02-PLAN.md -- Authentication flows (UCPath SSO + Duo MFA + ACT CRM) and test-login CLI command with session persistence
 
 ### Phase 2: Data Extraction from ACT CRM
 **Goal**: User can provide an employee email and the tool extracts all required onboarding data from ACT CRM, validated against a strict schema before any downstream use
@@ -84,7 +84,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Authentication and Project Foundation | 0/2 | Planned | - |
+| 1. Authentication and Project Foundation | 2/2 | Complete   | 2026-03-13 |
 | 2. Data Extraction from ACT CRM | 0/0 | Not started | - |
 | 3. UCPath Transaction Entry | 0/0 | Not started | - |
 | 4. Batch Processing and CLI | 0/0 | Not started | - |

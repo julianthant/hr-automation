@@ -8,9 +8,9 @@
 ### Authentication
 
 - [x] **AUTH-01**: User can launch browser and navigate to UCPath login page (ucpath.ucsd.edu)
-- [ ] **AUTH-02**: Automation clicks "Log in to UCPath", selects UC San Diego, and enters stored credentials
-- [ ] **AUTH-03**: Automation pauses at Duo MFA screen and waits for user to approve on phone, then detects successful login
-- [ ] **AUTH-04**: Automation authenticates to ACT CRM onboarding portal (act-crm.my.site.com) via same SSO session or separate auth flow (if separate login required, select "Active Directory" from dropdown before entering credentials)
+- [x] **AUTH-02**: Automation clicks "Log in to UCPath", selects UC San Diego, and enters stored credentials
+- [x] **AUTH-03**: Automation pauses at Duo MFA screen and waits for user to approve on phone, then detects successful login
+- [x] **AUTH-04**: Automation authenticates to ACT CRM onboarding portal (act-crm.my.site.com) via same SSO session or separate auth flow (if separate login required, select "Active Directory" from dropdown before entering credentials)
 - [x] **AUTH-05**: Automation detects existing valid session and skips login when already authenticated
 
 ### Data Extraction
@@ -70,9 +70,9 @@
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | AUTH-01 | Phase 1 | Complete |
-| AUTH-02 | Phase 1 | Pending |
-| AUTH-03 | Phase 1 | Pending |
-| AUTH-04 | Phase 1 | Pending |
+| AUTH-02 | Phase 1 | Complete |
+| AUTH-03 | Phase 1 | Complete |
+| AUTH-04 | Phase 1 | Complete |
 | AUTH-05 | Phase 1 | Complete |
 | EXTR-01 | Phase 2 | Pending |
 | EXTR-02 | Phase 2 | Pending |
