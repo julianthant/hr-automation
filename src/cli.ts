@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import type { Page } from "playwright";
 import { launchBrowser, saveSession, clearSession } from "./browser/launch.js";
 import { validateEnv } from "./utils/env.js";
 import { log } from "./utils/log.js";
@@ -14,8 +15,57 @@ program
   .version("0.1.0");
 
 /**
- * Run the full authentication flow: UCPath SSO + ACT CRM.
- * Returns the auth result or throws on unrecoverable error.
+ * Authenticate to a single system with its own browser/session.
+ */
+async function authSystem(
+  name: string,
+  sessionName: string,
+  checkUrl: string,
+  loginFn: (page: Page) => Promise<boolean>,
+  fresh: boolean,
+): Promise<boolean> {
+  if (fresh) {
+    clearSession(sessionName);
+  }
+
+  let { browser, context, page } = await launchBrowser(sessionName, fresh);
+
+  try {
+    // Check existing session
+    if (!fresh) {
+      const valid = await isSessionValid(page, checkUrl);
+      if (valid) {
+        log.success(`${name} session valid -- skipping login`);
+        await saveSession(context, sessionName);
+        await browser.close();
+        return true;
+      }
+      // Stale session — relaunch clean
+      log.step(`${name} session expired -- logging in`);
+      clearSession(sessionName);
+      await context.close();
+      context = await browser.newContext();
+      page = await context.newPage();
+    }
+
+    const ok = await loginFn(page);
+    if (!ok) {
+      log.error(`${name} authentication failed`);
+      await browser.close();
+      return false;
+    }
+
+    await saveSession(context, sessionName);
+    await browser.close();
+    return true;
+  } catch (error) {
+    try { await browser.close(); } catch {}
+    throw error;
+  }
+}
+
+/**
+ * Run the full authentication flow: UCPath SSO + ACT CRM (separate sessions).
  */
 async function runAuthFlow(
   options: LoginOptions,
@@ -26,88 +76,37 @@ async function runAuthFlow(
     sessionSaved: false,
   };
 
-  // If --fresh flag, clear any saved session first
-  if (options.fresh) {
-    clearSession();
+  // --- UCPath Authentication (own browser/session) ---
+  result.ucpath = await authSystem(
+    "UCPath",
+    "ucpath",
+    "https://ucphrprdpub.universityofcalifornia.edu/",
+    loginToUCPath,
+    options.fresh,
+  );
+  if (!result.ucpath) {
+    process.exit(1);
   }
 
-  // Launch browser (with or without saved state)
-  let { browser, context, page } = await launchBrowser(options.fresh);
-
-  try {
-    // --- UCPath Authentication ---
-    if (!options.fresh) {
-      const ucpathSessionValid = await isSessionValid(
-        page,
-        "https://ucpath.ucsd.edu",
-      );
-
-      if (ucpathSessionValid) {
-        log.success("UCPath session valid -- skipping login");
-        result.ucpath = true;
-      } else {
-        // Session stale: clear, close context, relaunch without saved state
-        log.step("Stale session detected -- clearing and retrying");
-        clearSession();
-        await context.close();
-        const fresh = await browser.newContext();
-        context = fresh;
-        page = await fresh.newPage();
-      }
-    }
-
-    if (!result.ucpath) {
-      const ucpathOk = await loginToUCPath(page);
-      if (!ucpathOk) {
-        log.error("UCPath authentication failed");
-        await browser.close();
-        process.exit(1);
-      }
-      result.ucpath = true;
-    }
-
-    // --- ACT CRM Authentication ---
-    const actSessionValid = await isSessionValid(
-      page,
-      "https://act-crm.my.site.com",
-    );
-
-    if (actSessionValid) {
-      log.success("ACT CRM session valid -- skipping login");
-      result.actCrm = true;
-    } else {
-      const actOk = await loginToACTCrm(page);
-      if (!actOk) {
-        log.error("ACT CRM authentication failed");
-        await browser.close();
-        process.exit(1);
-      }
-      result.actCrm = true;
-    }
-
-    // --- Save Session ---
-    await saveSession(context);
-    log.success("Session saved to .auth/");
-    result.sessionSaved = true;
-
-    // --- Summary ---
-    log.success("Authentication complete");
-    log.step("UCPath: authenticated");
-    log.step("ACT CRM: authenticated");
-
-    // Close browser after successful test-login
-    await browser.close();
-
-    return result;
-  } catch (error) {
-    // Close browser on unexpected error, then rethrow for retry logic
-    try {
-      await browser.close();
-    } catch {
-      // Browser may already be closed
-    }
-    throw error;
+  // --- ACT CRM Authentication (own browser/session) ---
+  result.actCrm = await authSystem(
+    "ACT CRM",
+    "actcrm",
+    "https://act-crm.my.site.com",
+    loginToACTCrm,
+    options.fresh,
+  );
+  if (!result.actCrm) {
+    process.exit(1);
   }
+
+  result.sessionSaved = true;
+  log.success("Session saved to .auth/");
+  log.success("Authentication complete");
+  log.step("UCPath: authenticated");
+  log.step("ACT CRM: authenticated");
+
+  return result;
 }
 
 program

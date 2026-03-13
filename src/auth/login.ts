@@ -20,38 +20,27 @@ export async function loginToUCPath(page: Page): Promise<boolean> {
   });
   log.step("Login page loaded");
 
-  // Click the "Log in to UCPath" link/button
-  // SELECTOR: may need adjustment after live testing
-  // PeopleSoft generates dynamic IDs -- use text-based locators
-  const loginLink =
-    page.getByRole("link", { name: /log in/i }).or(
-      page.getByText("Log in to UCPath"),
+  // Click the "Log in to UCPath" button in the main banner
+  // The page has a hidden nav link AND a visible banner button -- target the button
+  const loginButton =
+    page.getByRole("button", { name: /log in to ucpath/i }).or(
+      page.getByRole("link", { name: /log in to ucpath/i }),
     );
-  await loginLink.first().click({ timeout: 10_000 });
+  await loginButton.first().click({ timeout: 10_000 });
 
-  // If a campus/institution selector appears, select "UC San Diego"
-  // SELECTOR: may need adjustment after live testing
-  try {
-    const campusOption = page.getByText("UC San Diego");
-    await campusOption.click({ timeout: 5_000 });
-  } catch {
-    // Campus selector may not appear if UCPath redirects directly to UCSD SSO
-    log.step("No campus selector -- proceeding to SSO");
-  }
+  // UC-wide identity provider discovery page -- select UCSD campus
+  log.step("Selecting UC San Diego...");
+  const campusLink = page.getByRole("link", {
+    name: "University of California, San Diego",
+  });
+  await campusLink.click({ timeout: 10_000 });
 
-  // Wait for SSO login page to load (URL should contain "shibboleth" or "login.ucsd.edu")
-  try {
-    await page.waitForURL(
-      (url) =>
-        url.hostname.includes("shibboleth") ||
-        url.hostname.includes("login.ucsd.edu") ||
-        url.pathname.includes("/idp/"),
-      { timeout: 10_000 },
-    );
-  } catch {
-    // May already be on the SSO page or have a different URL pattern
-    log.step("Proceeding with credential entry");
-  }
+  // Wait for UCSD SSO login page (a5.ucsd.edu/tritON)
+  await page.waitForURL(
+    (url) => url.hostname.includes("a5.ucsd.edu"),
+    { timeout: 15_000 },
+  );
+  log.step("SSO login page loaded");
 
   // Get credentials from validated env
   const { userId, password } = validateEnv();
@@ -75,28 +64,27 @@ export async function loginToUCPath(page: Page): Promise<boolean> {
     );
   await passwordField.first().fill(password, { timeout: 5_000 });
 
-  // Click submit/login button
-  // SELECTOR: may need adjustment after live testing
+  // Click the "Login" button on UCSD SSO page
   const submitButton = page.getByRole("button", {
-    name: /log in|sign in|submit/i,
+    name: /^login$|log in|sign in|submit/i,
   });
   await submitButton.first().click({ timeout: 5_000 });
 
-  // Wait for Duo MFA approval (first attempt)
-  log.waiting("Waiting for Duo approval...");
+  // Wait for Duo MFA approval — after Duo, redirects to ucphrprdpub.universityofcalifornia.edu
+  // Give user 120s total (60s + 60s retry) to approve on their phone
+  log.waiting("Waiting for Duo approval (approve on your phone)...");
   let approved = await waitForDuoApproval(
     page,
-    "**/ucpath.ucsd.edu/**",
-    15_000,
+    "**/*universityofcalifornia.edu/**",
+    60_000,
   );
 
-  // Retry once if first attempt times out
   if (!approved) {
-    log.waiting("Retrying -- waiting for Duo approval...");
+    log.waiting("Still waiting for Duo approval...");
     approved = await waitForDuoApproval(
       page,
-      "**/ucpath.ucsd.edu/**",
-      15_000,
+      "**/*universityofcalifornia.edu/**",
+      60_000,
     );
   }
 
@@ -178,9 +166,8 @@ export async function loginToACTCrm(page: Page): Promise<boolean> {
   await passwordField.first().fill(password, { timeout: 5_000 });
 
   // Click login button
-  // SELECTOR: may need adjustment after live testing
   const loginButton = page.getByRole("button", {
-    name: /log in|sign in|submit/i,
+    name: /^login$|log in|sign in|submit/i,
   });
   await loginButton.first().click({ timeout: 5_000 });
 

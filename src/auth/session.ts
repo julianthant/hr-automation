@@ -27,7 +27,10 @@ export async function isSessionValid(
     const isOnLoginPage =
       currentUrl.includes("shibboleth") ||
       currentUrl.includes("login") ||
-      currentUrl.includes("idp");
+      currentUrl.includes("idp") ||
+      currentUrl.includes("a5.ucsd.edu") ||
+      currentUrl.includes("disco.php") ||
+      currentUrl.includes("simplesaml");
 
     if (isOnLoginPage) {
       log.step("Session expired -- login required");
