@@ -1,0 +1,25 @@
+{
+  "name": "hr-automation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test-login": "tsx --env-file=.env src/cli.ts test-login",
+    "test-login:fresh": "tsx --env-file=.env src/cli.ts test-login --fresh",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/**/*.test.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "commander": "^14.0.3",
+    "picocolors": "^1.1.1",
+    "playwright": "^1.58.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
