@@ -10,7 +10,7 @@
 - [ ] **AUTH-01**: User can launch browser and navigate to UCPath login page (ucpath.ucsd.edu)
 - [ ] **AUTH-02**: Automation clicks "Log in to UCPath", selects UC San Diego, and enters stored credentials
 - [ ] **AUTH-03**: Automation pauses at Duo MFA screen and waits for user to approve on phone, then detects successful login
-- [ ] **AUTH-04**: Automation authenticates to ACT CRM onboarding portal (act-crm.my.site.com) via same SSO session or separate auth flow
+- [ ] **AUTH-04**: Automation authenticates to ACT CRM onboarding portal (act-crm.my.site.com) via same SSO session or separate auth flow (if separate login required, select "Active Directory" from dropdown before entering credentials)
 - [ ] **AUTH-05**: Automation detects existing valid session and skips login when already authenticated
 
 ### Data Extraction
@@ -23,7 +23,7 @@
 
 ### UCPath Entry
 
-- [ ] **ENTR-01**: Automation navigates UCPath to Smart HR Transactions (PeopleSoft Homepage → HR Tasks → Smart HR Templates dropdown → Smart HR Transactions)
+- [ ] **ENTR-01**: Automation navigates UCPath to Smart HR Transactions (PeopleSoft Homepage -> HR Tasks -> Smart HR Templates dropdown -> Smart HR Transactions)
 - [ ] **ENTR-02**: Automation selects template UC_FULL_HIRE in the template selector
 - [ ] **ENTR-03**: Automation enters the effective date from extracted data into the date field
 - [ ] **ENTR-04**: Automation clicks Create Transaction
@@ -41,7 +41,7 @@
 ### Full Form Entry
 
 - **FORM-01**: Automation fills in all employee data fields (names, SSN, address, wage) in the UC_FULL_HIRE form after Create Transaction
-- **FORM-02**: Automation performs readback verification — confirms entered values match extracted data
+- **FORM-02**: Automation performs readback verification -- confirms entered values match extracted data
 
 ### Reliability
 
@@ -69,31 +69,31 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| AUTH-01 | — | Pending |
-| AUTH-02 | — | Pending |
-| AUTH-03 | — | Pending |
-| AUTH-04 | — | Pending |
-| AUTH-05 | — | Pending |
-| EXTR-01 | — | Pending |
-| EXTR-02 | — | Pending |
-| EXTR-03 | — | Pending |
-| EXTR-04 | — | Pending |
-| EXTR-05 | — | Pending |
-| ENTR-01 | — | Pending |
-| ENTR-02 | — | Pending |
-| ENTR-03 | — | Pending |
-| ENTR-04 | — | Pending |
-| ENTR-05 | — | Pending |
-| BTCH-01 | — | Pending |
-| BTCH-02 | — | Pending |
-| BTCH-03 | — | Pending |
-| BTCH-04 | — | Pending |
+| AUTH-01 | Phase 1 | Pending |
+| AUTH-02 | Phase 1 | Pending |
+| AUTH-03 | Phase 1 | Pending |
+| AUTH-04 | Phase 1 | Pending |
+| AUTH-05 | Phase 1 | Pending |
+| EXTR-01 | Phase 2 | Pending |
+| EXTR-02 | Phase 2 | Pending |
+| EXTR-03 | Phase 2 | Pending |
+| EXTR-04 | Phase 2 | Pending |
+| EXTR-05 | Phase 2 | Pending |
+| ENTR-01 | Phase 3 | Pending |
+| ENTR-02 | Phase 3 | Pending |
+| ENTR-03 | Phase 3 | Pending |
+| ENTR-04 | Phase 3 | Pending |
+| ENTR-05 | Phase 3 | Pending |
+| BTCH-01 | Phase 4 | Pending |
+| BTCH-02 | Phase 4 | Pending |
+| BTCH-03 | Phase 4 | Pending |
+| BTCH-04 | Phase 4 | Pending |
 
 **Coverage:**
 - v1 requirements: 19 total
-- Mapped to phases: 0
-- Unmapped: 19 ⚠️
+- Mapped to phases: 19
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-13*
-*Last updated: 2026-03-13 after initial definition*
+*Last updated: 2026-03-13 after roadmap creation*
