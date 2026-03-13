@@ -6,6 +6,14 @@ import { log } from "./utils/log.js";
 import { isSessionValid } from "./auth/session.js";
 import { loginToUCPath, loginToACTCrm } from "./auth/login.js";
 import type { LoginOptions, AuthResult } from "./auth/types.js";
+import {
+  searchByEmail,
+  selectLatestResult,
+  navigateToEntrySheet,
+  extractRawFields,
+  validateEmployeeData,
+  ExtractionError,
+} from "./extraction/index.js";
 
 const program = new Command();
 
@@ -140,6 +148,63 @@ program
         log.error(`Authentication failed after retry: ${msg}`);
         process.exit(1);
       }
+    }
+  });
+
+program
+  .command("extract")
+  .description("Extract employee data from ACT CRM")
+  .argument("<email>", "Employee email to search for")
+  .action(async (email: string) => {
+    try {
+      validateEnv();
+    } catch {
+      process.exit(1);
+    }
+
+    const { browser, page } = await launchBrowser("actcrm");
+
+    try {
+      // Verify ACT CRM session is valid
+      const valid = await isSessionValid(
+        page,
+        "https://act-crm.my.site.com",
+      );
+      if (!valid) {
+        log.error("ACT CRM session expired -- run test-login first");
+        await browser.close();
+        process.exit(1);
+      }
+
+      log.step("Searching for employee...");
+      await searchByEmail(page, email);
+
+      log.step("Selecting latest result...");
+      await selectLatestResult(page);
+
+      log.step("Navigating to UCPath Entry Sheet...");
+      await navigateToEntrySheet(page);
+
+      log.step("Extracting employee data...");
+      const rawData = await extractRawFields(page);
+
+      log.step("Validating extracted data...");
+      const data = validateEmployeeData(rawData);
+
+      log.success("Employee data extracted and validated");
+      log.step(`Fields extracted: ${Object.keys(data).length}`);
+    } catch (error) {
+      if (error instanceof ExtractionError) {
+        // Do NOT log raw data -- may contain PII
+        log.error(error.message);
+      } else {
+        const msg =
+          error instanceof Error ? error.message : String(error);
+        log.error(`Extraction failed: ${msg}`);
+      }
+      process.exit(1);
+    } finally {
+      await browser.close();
     }
   });
 
