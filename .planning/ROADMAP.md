@@ -28,11 +28,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. After UCPath login succeeds, the same browser session can navigate to ACT CRM onboarding portal in an authenticated state (or complete a second auth flow if needed)
   3. If the user is already authenticated (valid session), re-running the tool skips the login flow and proceeds directly
   4. Credentials are loaded from a .env file, .gitignore blocks all secrets, and no PII appears in any log output
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 01-01: TBD
-- [ ] 01-02: TBD
+- [ ] 01-01-PLAN.md -- Project scaffolding, utilities (env validation, PII-safe logger), browser launch module, and auth type contracts
+- [ ] 01-02-PLAN.md -- Authentication flows (UCPath SSO + Duo MFA + ACT CRM) and test-login CLI command with session persistence
 
 ### Phase 2: Data Extraction from ACT CRM
 **Goal**: User can provide an employee email and the tool extracts all required onboarding data from ACT CRM, validated against a strict schema before any downstream use
@@ -84,7 +84,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Authentication and Project Foundation | 0/0 | Not started | - |
+| 1. Authentication and Project Foundation | 0/2 | Planned | - |
 | 2. Data Extraction from ACT CRM | 0/0 | Not started | - |
 | 3. UCPath Transaction Entry | 0/0 | Not started | - |
 | 4. Batch Processing and CLI | 0/0 | Not started | - |
