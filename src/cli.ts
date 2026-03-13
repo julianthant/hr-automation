@@ -13,7 +13,7 @@ import {
   extractRawFields,
   validateEmployeeData,
   ExtractionError,
-} from "./extraction/index.js";
+} from "./onboarding/index.js";
 
 const program = new Command();
 
