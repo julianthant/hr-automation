@@ -41,7 +41,7 @@ Reliably transfer employee onboarding data from the ACT CRM portal into UCPath's
 
 - **UCPath**: UC systemwide HR/payroll platform built on PeopleSoft. Accessed via https://ucpath.ucsd.edu/
 - **ACT CRM Onboarding Portal**: Salesforce-based system at https://act-crm.my.site.com/hr/a1Z/o where new hire info is collected
-- **Authentication**: Both systems use UCSD SSO with Duo MFA. A single browser session should carry authentication across both
+- **Authentication**: Both systems use UCSD SSO with Duo MFA. A single browser session should carry authentication across both. If ACT CRM requires separate login, must select "Active Directory" from the login dropdown before entering credentials
 - **No API access**: Neither system exposes APIs for this workflow, requiring browser automation (Playwright/Selenium)
 - **PeopleSoft quirks**: UCPath is PeopleSoft-based — expect iframes, dynamic element IDs, and non-standard HTML patterns
 - **Data flow**: Onboarding Portal → extract employee data → UCPath Smart HR Transactions → UC_FULL_HIRE template
