@@ -42,10 +42,10 @@ Plans:
   1. User can provide an employee email and the tool searches ACT CRM, selects the result row with the latest date, and navigates to the UCPath Entry Sheet
   2. The tool extracts position number, first name, last name, SSN, address, city, state, postal code, wage, and effective date from the entry sheet
   3. Extracted data passes Zod schema validation before being made available for downstream use -- incomplete or malformed data is rejected with a clear error message identifying the failing fields
-**Plans:** 2 plans
+**Plans:** 1/2 plans complete
 
 Plans:
-- [ ] 02-01-PLAN.md -- Zod schema with unit tests, extraction modules (search/navigate/extract) with best-guess selectors, and CLI extract command
+- [x] 02-01-PLAN.md -- Zod schema with unit tests, extraction modules (search/navigate/extract) with best-guess selectors, and CLI extract command
 - [ ] 02-02-PLAN.md -- Live selector discovery against ACT CRM, iterative selector fixes, and user verification of end-to-end extraction
 
 ### Phase 3: UCPath Transaction Entry
@@ -85,6 +85,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Authentication and Project Foundation | 2/2 | Complete   | 2026-03-13 |
-| 2. Data Extraction from ACT CRM | 0/2 | Planned | - |
+| 2. Data Extraction from ACT CRM | 1/2 | In Progress | - |
 | 3. UCPath Transaction Entry | 0/0 | Not started | - |
 | 4. Batch Processing and CLI | 0/0 | Not started | - |
