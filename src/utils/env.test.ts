@@ -1,5 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { validateEnv, EnvValidationError } from "./env.js";
 
 // Store original env values for restoration
 let originalUserId: string | undefined;
@@ -30,14 +31,12 @@ describe("validateEnv", () => {
     process.env.UCPATH_PASSWORD = "test-password";
 
     assert.throws(
-      () => {
-        // Dynamic import not usable in sync assert.throws; use require-like pattern
-        // We test via the function directly
-        const { validateEnv } = require("./env.ts");
-        validateEnv();
-      },
+      () => validateEnv(),
       (err: unknown) => {
-        return err instanceof Error && err.message.includes("UCPATH_USER_ID");
+        return (
+          err instanceof EnvValidationError &&
+          err.message.includes("UCPATH_USER_ID")
+        );
       },
     );
   });
@@ -47,12 +46,12 @@ describe("validateEnv", () => {
     delete process.env.UCPATH_PASSWORD;
 
     assert.throws(
-      () => {
-        const { validateEnv } = require("./env.ts");
-        validateEnv();
-      },
+      () => validateEnv(),
       (err: unknown) => {
-        return err instanceof Error && err.message.includes("UCPATH_PASSWORD");
+        return (
+          err instanceof EnvValidationError &&
+          err.message.includes("UCPATH_PASSWORD")
+        );
       },
     );
   });
@@ -61,7 +60,6 @@ describe("validateEnv", () => {
     process.env.UCPATH_USER_ID = "test-user";
     process.env.UCPATH_PASSWORD = "test-password";
 
-    const { validateEnv } = require("./env.ts");
     const result = validateEnv();
 
     assert.equal(result.userId, "test-user");
