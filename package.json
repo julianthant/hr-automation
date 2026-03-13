@@ -6,6 +6,7 @@
   "scripts": {
     "test-login": "tsx --env-file=.env src/cli.ts test-login",
     "test-login:fresh": "tsx --env-file=.env src/cli.ts test-login --fresh",
+    "extract": "tsx --env-file=.env src/cli.ts extract",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test src/**/*.test.ts"
   },
@@ -15,7 +16,8 @@
   "dependencies": {
     "commander": "^14.0.3",
     "picocolors": "^1.1.1",
-    "playwright": "^1.58.2"
+    "playwright": "^1.58.2",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
