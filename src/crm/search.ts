@@ -48,7 +48,7 @@ export async function selectLatestResult(page: Page): Promise<void> {
 
   log.step(`Found ${count} result(s) -- selecting latest...`);
 
-  let latestIndex = 0;
+  let latestIndex = -1;
   let latestDate = new Date(0);
 
   for (let i = 0; i < count; i++) {
@@ -62,6 +62,10 @@ export async function selectLatestResult(page: Page): Promise<void> {
         latestIndex = i;
       }
     }
+  }
+
+  if (latestIndex === -1) {
+    throw new ExtractionError("No search results found");
   }
 
   // SELECTOR: adjusted from live testing -- click the name link in the
