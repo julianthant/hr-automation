@@ -23,10 +23,10 @@
 
 ### UCPath Entry
 
-- [ ] **ENTR-01**: Automation navigates UCPath to Smart HR Transactions (PeopleSoft Homepage -> HR Tasks -> Smart HR Templates dropdown -> Smart HR Transactions)
-- [ ] **ENTR-02**: Automation selects template UC_FULL_HIRE in the template selector
-- [ ] **ENTR-03**: Automation enters the effective date from extracted data into the date field
-- [ ] **ENTR-04**: Automation clicks Create Transaction
+- [x] **ENTR-01**: Automation navigates UCPath to Smart HR Transactions (PeopleSoft Homepage -> HR Tasks -> Smart HR Templates dropdown -> Smart HR Transactions)
+- [x] **ENTR-02**: Automation selects template UC_FULL_HIRE in the template selector
+- [x] **ENTR-03**: Automation enters the effective date from extracted data into the date field
+- [x] **ENTR-04**: Automation clicks Create Transaction
 - [x] **ENTR-05**: User can run in dry-run mode that shows extracted data and intended actions without submitting to UCPath
 
 ### Batch & CLI
@@ -79,10 +79,10 @@
 | EXTR-03 | Phase 2 | Complete |
 | EXTR-04 | Phase 2 | Complete |
 | EXTR-05 | Phase 2 | Complete |
-| ENTR-01 | Phase 3 | Pending |
-| ENTR-02 | Phase 3 | Pending |
-| ENTR-03 | Phase 3 | Pending |
-| ENTR-04 | Phase 3 | Pending |
+| ENTR-01 | Phase 3 | Complete |
+| ENTR-02 | Phase 3 | Complete |
+| ENTR-03 | Phase 3 | Complete |
+| ENTR-04 | Phase 3 | Complete |
 | ENTR-05 | Phase 3 | Complete |
 | BTCH-01 | Phase 4 | Pending |
 | BTCH-02 | Phase 4 | Pending |
