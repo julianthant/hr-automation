@@ -14,7 +14,9 @@ import {
 import {
   extractRawFields,
   validateEmployeeData,
+  buildTransactionPlan,
 } from "./workflows/onboarding/index.js";
+import { TransactionError } from "./ucpath/types.js";
 
 const program = new Command();
 
@@ -155,6 +157,109 @@ program
       process.exit(1);
     } finally {
       await browser.close();
+    }
+  });
+
+program
+  .command("create-transaction")
+  .description("Create a UC_FULL_HIRE transaction in UCPath")
+  .argument("<email>", "Employee email to extract data for")
+  .option("--dry-run", "Preview actions without creating transaction")
+  .action(async (email: string, options: { dryRun?: boolean }) => {
+    try {
+      validateEnv();
+    } catch {
+      process.exit(1);
+    }
+
+    let data;
+
+    // --- Step 1: Extract data from ACT CRM ---
+    const crmBrowser = await launchBrowser();
+    try {
+      log.step("Authenticating to ACT CRM...");
+      const authOk = await loginToACTCrm(crmBrowser.page);
+      if (!authOk) {
+        log.error("ACT CRM authentication failed -- cannot extract");
+        await crmBrowser.browser.close();
+        process.exit(1);
+      }
+
+      log.step("Searching for employee...");
+      await searchByEmail(crmBrowser.page, email);
+
+      log.step("Selecting latest result...");
+      await selectLatestResult(crmBrowser.page);
+
+      log.step("Navigating to UCPath Entry Sheet...");
+      await navigateToSection(crmBrowser.page, "UCPath Entry Sheet");
+
+      log.step("Extracting employee data...");
+      const rawData = await extractRawFields(crmBrowser.page);
+
+      log.step("Validating extracted data...");
+      data = validateEmployeeData(rawData);
+
+      log.success("Employee data extracted and validated");
+    } catch (error) {
+      if (error instanceof ExtractionError) {
+        log.error(error.message);
+      } else {
+        const msg =
+          error instanceof Error ? error.message : String(error);
+        log.error(`Extraction failed: ${msg}`);
+      }
+      await crmBrowser.browser.close();
+      process.exit(1);
+    }
+
+    // Close ACT CRM browser after extraction -- data is in memory
+    await crmBrowser.browser.close();
+
+    // --- Step 2: Build action plan ---
+    // For dry-run, we need a placeholder page (plan.preview() does not execute actions)
+    // For live mode, we launch a new browser for UCPath
+    if (options.dryRun) {
+      // Dry-run: preview actions without touching UCPath
+      // Use null page since preview() never calls execute functions
+      const plan = buildTransactionPlan(data, null as unknown as Page);
+
+      log.step("=== DRY RUN MODE ===");
+      log.step(`Effective date: ${data.effectiveDate}`);
+      log.step(`Fields validated: ${Object.keys(data).length}`);
+      plan.preview();
+      log.success("Dry run complete -- no changes made to UCPath");
+      return;
+    }
+
+    // --- Step 3: Live mode -- create transaction in UCPath ---
+    const ucpathBrowser = await launchBrowser();
+    try {
+      log.step("Authenticating to UCPath...");
+      const ucpathOk = await loginToUCPath(ucpathBrowser.page);
+      if (!ucpathOk) {
+        log.error("UCPath authentication failed");
+        await ucpathBrowser.browser.close();
+        process.exit(1);
+      }
+
+      const plan = buildTransactionPlan(data, ucpathBrowser.page);
+      log.step("Executing transaction plan...");
+      await plan.execute();
+
+      log.success("Transaction created successfully in UCPath");
+      // Do NOT close UCPath browser -- leave it open per user preference
+    } catch (error) {
+      if (error instanceof TransactionError) {
+        log.error(`Transaction failed at step: ${error.step ?? "unknown"}`);
+        log.error(error.message);
+      } else {
+        const msg =
+          error instanceof Error ? error.message : String(error);
+        log.error(`Transaction failed: ${msg}`);
+      }
+      // Leave browser open for debugging even on failure
+      process.exit(1);
     }
   });
 

@@ -7,6 +7,8 @@
     "test-login": "tsx --env-file=.env src/cli.ts test-login",
     "test-login:fresh": "tsx --env-file=.env src/cli.ts test-login --fresh",
     "extract": "tsx --env-file=.env src/cli.ts extract",
+    "create-transaction": "tsx --env-file=.env src/cli.ts create-transaction",
+    "create-transaction:dry": "tsx --env-file=.env src/cli.ts create-transaction --dry-run",
     "typecheck": "tsc --noEmit",
     "typecheck:all": "tsc --noEmit -p tsconfig.test.json",
     "test": "tsx --test tests/**/*.test.ts"
