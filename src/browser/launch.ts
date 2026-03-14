@@ -53,7 +53,7 @@ export function clearSession(sessionName?: string): void {
     }
   } else {
     // Clear all sessions
-    for (const name of ["ucpath", "actcrm"]) {
+    for (const name of ["ucpath", "onboarding"]) {
       const file = stateFile(name);
       if (fs.existsSync(file)) {
         fs.unlinkSync(file);

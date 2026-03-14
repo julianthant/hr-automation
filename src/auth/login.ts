@@ -98,102 +98,106 @@ export async function loginToUCPath(page: Page): Promise<boolean> {
 }
 
 /**
- * Authenticate to ACT CRM onboarding portal.
+ * Authenticate to ACT CRM onboarding portal via Salesforce Active Directory login.
  *
- * Checks if SSO session from UCPath carries over. If not, runs a
- * separate login flow with Active Directory option.
+ * Flow: Navigate to crm.ucsd.edu/hr -> Salesforce login page ->
+ *       Select "Active Directory" from dropdown -> Enter credentials ->
+ *       Duo MFA -> Redirects to act-crm.my.site.com
  *
- * @param page - Playwright page instance (should already be authenticated to UCPath)
- * @returns true if authentication succeeded, false otherwise
+ * This is a SEPARATE auth system from UCPath (no shared SSO).
  */
 export async function loginToACTCrm(page: Page): Promise<boolean> {
-  log.step("Navigating to ACT CRM...");
-  await page.goto("https://act-crm.my.site.com", {
+  const ss = async (name: string) => {
+    await page.screenshot({ path: `.auth/debug-${name}.png`, fullPage: true });
+    log.step(`Screenshot: .auth/debug-${name}.png (${page.url()})`);
+  };
+
+  log.step("Navigating to ACT CRM onboarding portal...");
+  await page.goto("https://crm.ucsd.edu/hr", {
     waitUntil: "domcontentloaded",
     timeout: 15_000,
   });
+  await page.waitForLoadState("networkidle", { timeout: 15_000 });
+  await ss("01-after-navigate");
 
-  // Check if already authenticated (SSO session may carry over from UCPath)
   const currentUrl = page.url();
-  if (!currentUrl.includes("login")) {
-    log.success("ACT CRM already authenticated (SSO session)");
+  if (currentUrl.includes("act-crm.my.site.com") && !currentUrl.includes("login")) {
+    log.success("ACT CRM already authenticated");
     return true;
   }
 
-  // Login page detected -- need separate authentication
-  log.step("ACT CRM requires separate login");
-
-  // Look for "Active Directory" option in login dropdown
-  // SELECTOR: may need adjustment after live testing
-  // Salesforce Experience Cloud may use a custom component or native select
+  // Select Active Directory
+  log.step("Selecting Active Directory login...");
   try {
-    // Try clicking a visible "Active Directory" text option first
     const adOption = page.getByText("Active Directory");
     await adOption.click({ timeout: 5_000 });
   } catch {
-    // If text click fails, try selecting from a dropdown/select element
     try {
       await page
         .locator("select")
         .first()
         .selectOption({ label: "Active Directory" });
     } catch {
-      // SELECTOR: may need adjustment -- log but continue
       log.step("Active Directory selector not found -- attempting direct login");
     }
   }
 
-  // Get credentials
+  // Wait for SSO Active Directory login page (e1s2)
+  await page.waitForURL(
+    (url) => url.hostname.includes("a5.ucsd.edu"),
+    { timeout: 10_000 },
+  );
+  await page.waitForLoadState("networkidle", { timeout: 10_000 });
+  await ss("02-sso-page");
+
   const { userId, password } = validateEnv();
 
   log.step("Entering credentials...");
-
-  // Fill username field
-  // SELECTOR: may need adjustment after live testing
-  // Salesforce login forms typically use name="username" and name="password"
   const usernameField =
-    page.locator('input[name="username"]').or(
-      page.getByLabel("Username"),
+    page.getByLabel("User name (or email address)").or(
+      page.locator('input[name="j_username"]'),
     );
   await usernameField.first().fill(userId, { timeout: 5_000 });
 
-  // Fill password field
-  // SELECTOR: may need adjustment after live testing
   const passwordField =
-    page.locator('input[name="password"]').or(
-      page.getByLabel("Password"),
+    page.getByLabel("Password:").or(
+      page.locator('input[name="j_password"]'),
     );
   await passwordField.first().fill(password, { timeout: 5_000 });
+  await ss("03-credentials-filled");
 
-  // Click login button
-  const loginButton = page.getByRole("button", {
-    name: /^login$|log in|sign in|submit/i,
-  });
+  const loginButton = page.getByRole("button", { name: "LOGIN" });
   await loginButton.first().click({ timeout: 5_000 });
 
-  // Wait for Duo MFA approval (if triggered for ACT CRM)
-  log.waiting("Waiting for Duo approval...");
+  // Wait a moment for Duo or redirect
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  await ss("04-after-login-click");
+
+  // Wait for Duo MFA approval — after Duo, redirects to act-crm.my.site.com
+  log.waiting("Waiting for Duo approval (approve on your phone)...");
   let approved = await waitForDuoApproval(
     page,
-    "**/*.my.site.com/**",
-    15_000,
+    "**/*crm*/**",
+    60_000,
   );
 
-  // Retry once if first attempt times out
   if (!approved) {
-    log.waiting("Retrying -- waiting for Duo approval...");
+    await ss("05-duo-timeout-1");
+    log.waiting("Still waiting for Duo approval...");
     approved = await waitForDuoApproval(
       page,
-      "**/*.my.site.com/**",
-      15_000,
+      "**/*crm*/**",
+      60_000,
     );
   }
 
   if (!approved) {
+    await ss("06-duo-timeout-2");
     log.error("ACT CRM Duo approval timed out");
     return false;
   }
 
+  await ss("07-authenticated");
   log.success("ACT CRM authenticated");
   return true;
 }

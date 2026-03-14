@@ -12,14 +12,8 @@ export async function searchByEmail(
   page: Page,
   email: string,
 ): Promise<void> {
-  log.step("Navigating to ACT CRM onboarding portal...");
-
+  // After auth, we're already on act-crm.my.site.com
   // SELECTOR: may need adjustment after live testing
-  await page.goto("https://act-crm.my.site.com/hr/a1Z/o", {
-    waitUntil: "domcontentloaded",
-    timeout: 15_000,
-  });
-
   log.step("Entering search query...");
 
   // SELECTOR: Salesforce Experience Cloud -- likely a Lightning input component
