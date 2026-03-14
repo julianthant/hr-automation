@@ -1,4 +1,4 @@
-import type { Page, Locator } from "playwright";
+import type { Page } from "playwright";
 import { log } from "../utils/log.js";
 
 /**
@@ -14,24 +14,23 @@ export async function extractField(
   page: Page,
   label: string,
 ): Promise<string | null> {
-  // SELECTOR: Strategy 1 -- label-based (Salesforce dt/dd, label/span pairs)
-  const byLabel: Locator = page
-    .locator(`text="${label}"`)
-    .locator("xpath=..")
-    .locator("span, dd, td")
-    .last();
+  // SELECTOR: adjusted from live testing on ONB_PPSEntrySheet page.
+  // Visualforce layout: <th class="labelCol"><label>Field:</label></th>
+  //                     <td class="data2Col">value</td>
 
-  // SELECTOR: Strategy 2 -- ARIA label association
-  const byAria: Locator = page.getByLabel(label);
+  // Strategy 1 -- Visualforce: label in <th>, value in sibling <td>
+  const byThSibling = page
+    .locator(`th:has-text("${label}")`)
+    .locator("xpath=following-sibling::td[1]");
 
-  // SELECTOR: Strategy 3 -- table cell lookup (label in one cell, value in next)
-  const byTableCell: Locator = page
+  // Strategy 2 -- fallback: label in <td>, value in sibling <td>
+  const byTdSibling = page
     .locator(`td:has-text("${label}")`)
     .locator("xpath=following-sibling::td[1]");
 
-  for (const locator of [byLabel, byAria, byTableCell]) {
+  for (const locator of [byThSibling, byTdSibling]) {
     try {
-      const text = await locator.first().textContent({ timeout: 3_000 });
+      const text = await locator.first().textContent({ timeout: 2_000 });
       if (text && text.trim()) {
         return text.trim();
       }

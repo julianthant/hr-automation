@@ -75,10 +75,10 @@ export async function loginToUCPath(page: Page): Promise<boolean> {
     );
   await passwordField.first().fill(password, { timeout: 5_000 });
 
-  // Click the "LOGIN" button on UCSD SSO page
-  // SELECTOR: adjusted after live testing -- uppercase "LOGIN" text
-  const submitButton = page.getByRole("button", { name: "LOGIN" });
-  await submitButton.first().click({ timeout: 5_000 });
+  // Click the actual form submit button (not the "Enroll in Two-Step Login" nav link
+  // which also has role="button" and contains "Login" in its text)
+  // SELECTOR: adjusted after live testing -- target by name attribute to avoid nav link match
+  await page.locator('button[name="_eventId_proceed"]').click({ timeout: 5_000 });
 
   // After clicking LOGIN, the SSO may:
   //   a) Show a Duo iframe on the same page
@@ -119,12 +119,9 @@ export async function loginToUCPath(page: Page): Promise<boolean> {
  *
  * This is a SEPARATE auth system from UCPath (no shared SSO).
  *
- * KNOWN ISSUE (from debug session): After clicking LOGIN on the SSO page,
- * the browser was navigating to blink.ucsd.edu "Two-Step Login" info page
- * instead of showing the Duo challenge. The fix:
- * - Do NOT waitForLoadState("networkidle") after login click (captures wrong state)
- * - Instead, wait specifically for Duo URL patterns or the target app URL
- * - Give the redirect chain time to resolve before checking
+ * FIXED: The "Enroll in Two-Step Login" nav link has role="button" and contained
+ * "Login" in its text, causing getByRole("button", { name: "LOGIN" }) to match it
+ * instead of the actual form submit button. Fix: target button[name="_eventId_proceed"].
  */
 export async function loginToACTCrm(page: Page): Promise<boolean> {
   log.step("Navigating to ACT CRM onboarding portal...");
@@ -200,99 +197,12 @@ export async function loginToACTCrm(page: Page): Promise<boolean> {
   await passwordField.first().fill(password, { timeout: 5_000 });
   await ss(page, "03-credentials-filled");
 
-  // SELECTOR: adjusted after live testing -- button text is uppercase "LOGIN"
-  const loginButton = page.getByRole("button", { name: "LOGIN" });
-  await loginButton.first().click({ timeout: 5_000 });
-
-  // CRITICAL FIX: After clicking LOGIN, do NOT wait for networkidle.
-  // The previous code waited for networkidle and got redirected to
-  // blink.ucsd.edu "Two-Step Login" info page instead of the Duo challenge.
-  //
-  // The SSO form submission starts a redirect chain:
-  //   a5.ucsd.edu -> Duo challenge (iframe or Universal Prompt redirect)
-  //
-  // Wait specifically for:
-  // 1. A Duo-related URL (duosecurity.com for Universal Prompt)
-  // 2. The Duo iframe appearing on the SSO page
-  // 3. Direct redirect to act-crm.my.site.com (if Duo remembered)
-
-  log.step("Waiting for Duo challenge to appear...");
-
-  // Give the redirect chain a moment to start
-  // Then check what page we're on
-  try {
-    // Wait for the page to navigate away from the SSO login form
-    // Could be: Duo prompt page, Duo Universal Prompt redirect, or target app
-    await page.waitForURL(
-      (url) => {
-        const href = url.href;
-        return (
-          href.includes("duosecurity.com") ||
-          href.includes("duo.com") ||
-          href.includes("act-crm.my.site.com") ||
-          href.includes("crm.ucsd.edu") ||
-          // The SSO page may show Duo inline (URL stays on a5.ucsd.edu but Duo iframe loads)
-          // In that case URL doesn't change, so we also accept staying on a5.ucsd.edu
-          // as long as we moved past the login form
-          false
-        );
-      },
-      { timeout: 10_000 },
-    ).catch(() => {
-      // URL didn't change to a known Duo URL -- we might still be on a5.ucsd.edu
-      // with a Duo iframe, or we got redirected elsewhere
-    });
-  } catch {
-    // Ignore -- we'll check with screenshot below
-  }
+  // Click the actual form submit button (not the "Enroll in Two-Step Login" nav link
+  // which also has role="button" and contains "Login" in its text)
+  // SELECTOR: adjusted after live testing -- target by name attribute to avoid nav link match
+  await page.locator('button[name="_eventId_proceed"]').click({ timeout: 5_000 });
 
   await ss(page, "04-after-login-click");
-
-  // Check if we ended up on the blink.ucsd.edu help page (the known broken redirect)
-  const postLoginUrl = page.url();
-  if (postLoginUrl.includes("blink.ucsd.edu")) {
-    log.error("Login redirected to Two-Step Login help page instead of Duo challenge");
-    log.step("This usually means the SSO form submission was intercepted.");
-    log.step("The LOGIN button may have triggered a navigation link instead of form submit.");
-    log.step("Attempting alternative: submit the form directly...");
-
-    // Go back to SSO page and try form.submit() instead of button click
-    await page.goBack({ timeout: 10_000 }).catch(() => {});
-
-    // If going back didn't work, re-navigate
-    if (!page.url().includes("a5.ucsd.edu")) {
-      await page.goto("https://crm.ucsd.edu/hr", {
-        waitUntil: "domcontentloaded",
-        timeout: 15_000,
-      });
-      await page.waitForLoadState("networkidle", { timeout: 15_000 });
-
-      // Wait for SSO redirect
-      try {
-        await page.waitForURL(
-          (url) => url.hostname.includes("a5.ucsd.edu"),
-          { timeout: 10_000 },
-        );
-      } catch {
-        // Already on the page or different flow
-      }
-    }
-
-    // Re-fill credentials
-    await usernameField.first().fill(userId, { timeout: 5_000 }).catch(() => {
-      // Fields might have different locators after navigation
-    });
-    await passwordField.first().fill(password, { timeout: 5_000 }).catch(() => {});
-
-    // Try submitting the form directly via JS instead of clicking the button
-    // This avoids any click handler on the button that might redirect to help page
-    await page.evaluate(() => {
-      const form = document.querySelector("form");
-      if (form) form.submit();
-    });
-
-    await ss(page, "04b-after-form-submit");
-  }
 
   // Now wait for Duo approval -- user approves on their phone
   log.waiting("Waiting for Duo approval (approve on your phone)...");
