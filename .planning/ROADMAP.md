@@ -68,11 +68,12 @@ Plans:
   1. The tool navigates UCPath from the homepage through HR Tasks to Smart HR Transactions, selects the UC_FULL_HIRE template, enters the effective date, and clicks Create Transaction
   2. User can run in dry-run mode that displays extracted data and every intended UCPath action without actually submitting -- no UCPath form is modified in dry-run
   3. After a real (non-dry-run) transaction creation, the tool confirms the transaction was created successfully or reports the specific failure
-**Plans**: TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 03-01: TBD
-- [ ] 03-02: TBD
+- [ ] 03-01-PLAN.md -- UCPath types (TransactionResult, TransactionError) and ActionPlan dry-run engine with unit tests
+- [ ] 03-02-PLAN.md -- UCPath navigation and transaction modules with best-guess selectors, onboarding entry workflow, and create-transaction CLI command
+- [ ] 03-03-PLAN.md -- Live PeopleSoft selector discovery against UCPath and human verification of end-to-end transaction creation
 
 ### Phase 4: Batch Processing and CLI
 **Goal**: User can provide a file of employee emails and the tool processes them sequentially with per-employee error isolation, progress reporting, and a structured audit log -- making the tool ready for daily HR use
@@ -99,5 +100,5 @@ Phases execute in numeric order: 1 -> 01.1 -> 2 -> 3 -> 4
 | 1. Authentication and Project Foundation | 2/2 | Complete   | 2026-03-13 |
 | 01.1. Modular Codebase Restructure | 2/2 | Complete    | 2026-03-14 |
 | 2. Data Extraction from ACT CRM | 1/2 | In Progress | - |
-| 3. UCPath Transaction Entry | 0/0 | Not started | - |
+| 3. UCPath Transaction Entry | 0/3 | Not started | - |
 | 4. Batch Processing and CLI | 0/0 | Not started | - |
