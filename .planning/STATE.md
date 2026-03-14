@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 01.1-01-PLAN.md
-last_updated: "2026-03-14T19:08:57.100Z"
-last_activity: 2026-03-14 -- Plan 01.1-01 executed (shared CRM module + onboarding workflow module)
+status: completed
+stopped_at: Completed 01.1-02-PLAN.md
+last_updated: "2026-03-14T19:15:21.389Z"
+last_activity: 2026-03-14 -- Plan 01.1-02 executed (CLI rewiring, test migration, old structure cleanup)
 progress:
   total_phases: 5
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 6
-  completed_plans: 4
-  percent: 67
+  completed_plans: 5
+  percent: 83
 ---
 
 # Project State
@@ -21,23 +21,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-13)
 
 **Core value:** Reliably transfer employee onboarding data from ACT CRM portal into UCPath's UC_FULL_HIRE template without manual copy-pasting
-**Current focus:** Phase 01.1 in progress -- shared CRM module created, cleanup pending (Plan 01.1-02)
+**Current focus:** Phase 01.1 complete -- codebase restructured with shared CRM module and test hierarchy
 
 ## Current Position
 
-Phase: 01.1 of 5 (Modular Codebase Restructure)
-Plan: 1 of 2 in current phase (01.1-01 complete, 01.1-02 pending)
-Status: In Progress
-Last activity: 2026-03-14 -- Plan 01.1-01 executed (shared CRM module + onboarding workflow module)
+Phase: 01.1 of 5 (Modular Codebase Restructure) -- COMPLETE
+Plan: 2 of 2 in current phase (all complete)
+Status: Phase 01.1 Complete
+Last activity: 2026-03-14 -- Plan 01.1-02 executed (CLI rewiring, test migration, old structure cleanup)
 
-Progress: [███████░░░] 67%
+Progress: [████████░░] 83%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 3
-- Average duration: 18min
-- Total execution time: 0.88 hours
+- Total plans completed: 5
+- Average duration: 13min
+- Total execution time: 1.0 hours
 
 **By Phase:**
 
@@ -47,11 +47,12 @@ Progress: [███████░░░] 67%
 | 02-extraction | 1/2 | 3min | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (5min), 01-02 (45min), 02-01 (3min)
-- Trend: Phase 2 in progress
+- Last 5 plans: 01-01 (5min), 01-02 (45min), 02-01 (3min), 01.1-01 (2min), 01.1-02 (3min)
+- Trend: Phase 01.1 complete
 
 *Updated after each plan completion*
 | Phase 01.1 P01 | 2min | 2 tasks | 8 files |
+| Phase 01.1 P02 | 3min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -74,6 +75,9 @@ Recent decisions affecting current work:
 - [02-01]: FIELD_MAP pattern with label variants for flexible Salesforce DOM extraction
 - [Phase 01.1]: ExtractionError is single source of truth in crm/types.ts, imported by both crm/ and workflows/
 - [Phase 01.1]: navigateToSection uses RegExp for case-insensitive section name matching
+- [Phase 01.1]: Tests live in tests/unit/ outside src/ with relative imports back to src/
+- [Phase 01.1]: tsconfig.test.json extends base tsconfig with rootDir . for combined src + tests type checking
+- [Phase 01.1]: Dual typecheck scripts -- typecheck (src only) and typecheck:all (src + tests)
 
 ### Roadmap Evolution
 
@@ -90,6 +94,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14T19:08:57.097Z
-Stopped at: Completed 01.1-01-PLAN.md
+Last session: 2026-03-14T19:15:02.442Z
+Stopped at: Completed 01.1-02-PLAN.md
 Resume file: None
