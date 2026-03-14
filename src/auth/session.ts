@@ -2,45 +2,17 @@ import type { Page } from "playwright";
 import { log } from "../utils/log.js";
 
 /**
- * Check whether a saved session is still valid for a given target URL.
+ * Check if the page is already on an authenticated ACT CRM page.
+ * Used after navigation to detect if login is needed.
  *
- * Navigates to the target URL and checks if we land on the app
- * or get redirected to a login/SSO page.
- *
- * @param page - Playwright page instance (should be in a context with loaded storageState)
- * @param targetUrl - The application URL to check (e.g., "https://ucpath.ucsd.edu")
- * @returns true if session is valid (not redirected to login), false otherwise
+ * This is a lightweight URL check -- NOT session persistence.
+ * Per user requirement: no session state tracking, just login fresh each time.
  */
-export async function isSessionValid(
-  page: Page,
-  targetUrl: string,
-): Promise<boolean> {
-  try {
-    await page.goto(targetUrl, {
-      waitUntil: "domcontentloaded",
-      timeout: 10_000,
-    });
-
-    const currentUrl = page.url();
-
-    // If we ended up on a login/SSO/IdP page, the session is NOT valid
-    const isOnLoginPage =
-      currentUrl.includes("shibboleth") ||
-      currentUrl.includes("login") ||
-      currentUrl.includes("idp") ||
-      currentUrl.includes("a5.ucsd.edu") ||
-      currentUrl.includes("disco.php") ||
-      currentUrl.includes("simplesaml");
-
-    if (isOnLoginPage) {
-      log.step("Session expired -- login required");
-      return false;
-    }
-
+export function isOnAuthenticatedPage(page: Page): boolean {
+  const url = page.url();
+  // If we're on act-crm and NOT on a login page, we're authenticated
+  if (url.includes("act-crm.my.site.com") && !url.includes("login")) {
     return true;
-  } catch {
-    // Network failure, timeout, or other error -- treat as invalid session
-    log.step("Could not verify session -- will attempt login");
-    return false;
   }
+  return false;
 }

@@ -4,61 +4,22 @@ import {
   type BrowserContext,
   type Page,
 } from "playwright";
-import fs from "node:fs";
-import path from "node:path";
 import { log } from "../utils/log.js";
 
-const AUTH_DIR = path.join(process.cwd(), ".auth");
-
-function stateFile(name: string): string {
-  return path.join(AUTH_DIR, `${name}-state.json`);
-}
-
-export async function launchBrowser(
-  sessionName: string,
-  fresh: boolean = false,
-): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
-  log.step(`Launching browser (${sessionName})...`);
+/**
+ * Launch a headed Chromium browser with a fresh context.
+ *
+ * Per user requirement: no session state persistence.
+ * Always starts fresh -- login each time, leave browser open.
+ */
+export async function launchBrowser(): Promise<{
+  browser: Browser;
+  context: BrowserContext;
+  page: Page;
+}> {
+  log.step("Launching browser...");
   const browser = await chromium.launch({ headless: false });
-
-  const file = stateFile(sessionName);
-  const hasState = !fresh && fs.existsSync(file);
-  if (hasState) {
-    log.step(`Loading saved ${sessionName} session...`);
-  }
-
-  const context = await browser.newContext(
-    hasState ? { storageState: file } : undefined,
-  );
+  const context = await browser.newContext();
   const page = await context.newPage();
-
   return { browser, context, page };
-}
-
-export async function saveSession(
-  context: BrowserContext,
-  sessionName: string,
-): Promise<void> {
-  fs.mkdirSync(AUTH_DIR, { recursive: true });
-  await context.storageState({ path: stateFile(sessionName) });
-  log.success(`${sessionName} session saved`);
-}
-
-export function clearSession(sessionName?: string): void {
-  if (sessionName) {
-    const file = stateFile(sessionName);
-    if (fs.existsSync(file)) {
-      fs.unlinkSync(file);
-      log.success(`Cleared ${sessionName} session`);
-    }
-  } else {
-    // Clear all sessions
-    for (const name of ["ucpath", "onboarding"]) {
-      const file = stateFile(name);
-      if (fs.existsSync(file)) {
-        fs.unlinkSync(file);
-      }
-    }
-    log.success("Cleared all saved sessions");
-  }
 }

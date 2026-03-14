@@ -4,6 +4,14 @@ import { waitForDuoApproval } from "./duo-wait.js";
 import { validateEnv } from "../utils/env.js";
 
 /**
+ * Take a debug screenshot and log the path + current URL.
+ */
+async function ss(page: Page, name: string): Promise<void> {
+  await page.screenshot({ path: `.auth/debug-${name}.png`, fullPage: true });
+  log.step(`Screenshot: .auth/debug-${name}.png (${page.url()})`);
+}
+
+/**
  * Authenticate to UCPath through UCSD Shibboleth SSO with Duo MFA.
  *
  * Flow: Navigate to UCPath -> Click "Log in" -> Select UC San Diego ->
@@ -21,7 +29,7 @@ export async function loginToUCPath(page: Page): Promise<boolean> {
   log.step("Login page loaded");
 
   // Click the "Log in to UCPath" button in the main banner
-  // The page has a hidden nav link AND a visible banner button -- target the button
+  // SELECTOR: adjusted after live testing -- button OR link
   const loginButton =
     page.getByRole("button", { name: /log in to ucpath/i }).or(
       page.getByRole("link", { name: /log in to ucpath/i }),
@@ -48,30 +56,35 @@ export async function loginToUCPath(page: Page): Promise<boolean> {
   log.step("Entering credentials...");
 
   // Fill username field
-  // SELECTOR: may need adjustment after live testing
-  // SSO pages typically use name="j_username" or label "Username"
+  // SELECTOR: adjusted after live testing -- "User name (or email address)" label
   const usernameField =
-    page.getByLabel("Username").or(
+    page.getByLabel("User name (or email address)").or(
+      page.getByLabel("Username"),
+    ).or(
       page.locator('input[name="j_username"]'),
     );
   await usernameField.first().fill(userId, { timeout: 5_000 });
 
   // Fill password field
-  // SELECTOR: may need adjustment after live testing
+  // SELECTOR: adjusted after live testing -- "Password:" label with colon
   const passwordField =
-    page.getByLabel("Password").or(
+    page.getByLabel("Password:").or(
+      page.getByLabel("Password"),
+    ).or(
       page.locator('input[name="j_password"]'),
     );
   await passwordField.first().fill(password, { timeout: 5_000 });
 
-  // Click the "Login" button on UCSD SSO page
-  const submitButton = page.getByRole("button", {
-    name: /^login$|log in|sign in|submit/i,
-  });
+  // Click the "LOGIN" button on UCSD SSO page
+  // SELECTOR: adjusted after live testing -- uppercase "LOGIN" text
+  const submitButton = page.getByRole("button", { name: "LOGIN" });
   await submitButton.first().click({ timeout: 5_000 });
 
-  // Wait for Duo MFA approval — after Duo, redirects to ucphrprdpub.universityofcalifornia.edu
-  // Give user 120s total (60s + 60s retry) to approve on their phone
+  // After clicking LOGIN, the SSO may:
+  //   a) Show a Duo iframe on the same page
+  //   b) Redirect to duosecurity.com (Duo Universal Prompt)
+  //   c) Redirect directly to the app if Duo is remembered
+  // Wait for either Duo challenge or the target app URL
   log.waiting("Waiting for Duo approval (approve on your phone)...");
   let approved = await waitForDuoApproval(
     page,
@@ -101,24 +114,26 @@ export async function loginToUCPath(page: Page): Promise<boolean> {
  * Authenticate to ACT CRM onboarding portal via Salesforce Active Directory login.
  *
  * Flow: Navigate to crm.ucsd.edu/hr -> Salesforce login page ->
- *       Select "Active Directory" from dropdown -> Enter credentials ->
- *       Duo MFA -> Redirects to act-crm.my.site.com
+ *       Active Directory is pre-selected -> Enter credentials ->
+ *       Wait for Duo MFA -> Redirects to act-crm.my.site.com
  *
  * This is a SEPARATE auth system from UCPath (no shared SSO).
+ *
+ * KNOWN ISSUE (from debug session): After clicking LOGIN on the SSO page,
+ * the browser was navigating to blink.ucsd.edu "Two-Step Login" info page
+ * instead of showing the Duo challenge. The fix:
+ * - Do NOT waitForLoadState("networkidle") after login click (captures wrong state)
+ * - Instead, wait specifically for Duo URL patterns or the target app URL
+ * - Give the redirect chain time to resolve before checking
  */
 export async function loginToACTCrm(page: Page): Promise<boolean> {
-  const ss = async (name: string) => {
-    await page.screenshot({ path: `.auth/debug-${name}.png`, fullPage: true });
-    log.step(`Screenshot: .auth/debug-${name}.png (${page.url()})`);
-  };
-
   log.step("Navigating to ACT CRM onboarding portal...");
   await page.goto("https://crm.ucsd.edu/hr", {
     waitUntil: "domcontentloaded",
     timeout: 15_000,
   });
   await page.waitForLoadState("networkidle", { timeout: 15_000 });
-  await ss("01-after-navigate");
+  await ss(page, "01-after-navigate");
 
   const currentUrl = page.url();
   if (currentUrl.includes("act-crm.my.site.com") && !currentUrl.includes("login")) {
@@ -126,55 +141,163 @@ export async function loginToACTCrm(page: Page): Promise<boolean> {
     return true;
   }
 
-  // Select Active Directory
-  log.step("Selecting Active Directory login...");
+  // The login page may already show "Active Directory" pre-selected,
+  // or it may need to be selected from a dropdown.
+  // SELECTOR: adjusted after live testing -- check if AD dropdown needs selection
+  log.step("Checking Active Directory selection...");
   try {
-    const adOption = page.getByText("Active Directory");
-    await adOption.click({ timeout: 5_000 });
-  } catch {
-    try {
-      await page
-        .locator("select")
-        .first()
-        .selectOption({ label: "Active Directory" });
-    } catch {
-      log.step("Active Directory selector not found -- attempting direct login");
+    // Try selecting from dropdown first (seen on the SSO page)
+    const adDropdown = page.locator("select");
+    const dropdownCount = await adDropdown.count();
+    if (dropdownCount > 0) {
+      const currentValue = await adDropdown.first().inputValue();
+      if (!currentValue.includes("Active Directory")) {
+        await adDropdown.first().selectOption({ label: "Active Directory" });
+        log.step("Selected Active Directory from dropdown");
+      } else {
+        log.step("Active Directory already selected");
+      }
     }
+  } catch {
+    // No dropdown -- AD might be the only option or selected by default
+    log.step("No login type dropdown found -- proceeding");
   }
 
-  // Wait for SSO Active Directory login page (e1s2)
-  await page.waitForURL(
-    (url) => url.hostname.includes("a5.ucsd.edu"),
-    { timeout: 10_000 },
-  );
-  await page.waitForLoadState("networkidle", { timeout: 10_000 });
-  await ss("02-sso-page");
+  // Wait for SSO Active Directory login page (a5.ucsd.edu)
+  // If we're not already on the SSO page, navigate may be needed
+  const onSsoPage = page.url().includes("a5.ucsd.edu");
+  if (!onSsoPage) {
+    // The initial navigate to crm.ucsd.edu/hr should redirect to SSO
+    // If it didn't, wait for the redirect to complete
+    try {
+      await page.waitForURL(
+        (url) => url.hostname.includes("a5.ucsd.edu"),
+        { timeout: 10_000 },
+      );
+    } catch {
+      // May already be on a login page that's not a5.ucsd.edu
+      log.step(`Current page: ${page.url()} -- attempting login`);
+    }
+  }
+  await ss(page, "02-sso-page");
 
   const { userId, password } = validateEnv();
 
   log.step("Entering credentials...");
+  // SELECTOR: adjusted after live testing -- matches debug-03 screenshot
+  // Label text is "User name (or email address)"
   const usernameField =
     page.getByLabel("User name (or email address)").or(
       page.locator('input[name="j_username"]'),
     );
   await usernameField.first().fill(userId, { timeout: 5_000 });
 
+  // SELECTOR: adjusted after live testing -- label is "Password:" with colon
   const passwordField =
     page.getByLabel("Password:").or(
       page.locator('input[name="j_password"]'),
     );
   await passwordField.first().fill(password, { timeout: 5_000 });
-  await ss("03-credentials-filled");
+  await ss(page, "03-credentials-filled");
 
+  // SELECTOR: adjusted after live testing -- button text is uppercase "LOGIN"
   const loginButton = page.getByRole("button", { name: "LOGIN" });
   await loginButton.first().click({ timeout: 5_000 });
 
-  // Wait a moment for Duo or redirect
-  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
-  await ss("04-after-login-click");
+  // CRITICAL FIX: After clicking LOGIN, do NOT wait for networkidle.
+  // The previous code waited for networkidle and got redirected to
+  // blink.ucsd.edu "Two-Step Login" info page instead of the Duo challenge.
+  //
+  // The SSO form submission starts a redirect chain:
+  //   a5.ucsd.edu -> Duo challenge (iframe or Universal Prompt redirect)
+  //
+  // Wait specifically for:
+  // 1. A Duo-related URL (duosecurity.com for Universal Prompt)
+  // 2. The Duo iframe appearing on the SSO page
+  // 3. Direct redirect to act-crm.my.site.com (if Duo remembered)
 
-  // Wait for Duo MFA approval — after Duo, redirects to act-crm.my.site.com
+  log.step("Waiting for Duo challenge to appear...");
+
+  // Give the redirect chain a moment to start
+  // Then check what page we're on
+  try {
+    // Wait for the page to navigate away from the SSO login form
+    // Could be: Duo prompt page, Duo Universal Prompt redirect, or target app
+    await page.waitForURL(
+      (url) => {
+        const href = url.href;
+        return (
+          href.includes("duosecurity.com") ||
+          href.includes("duo.com") ||
+          href.includes("act-crm.my.site.com") ||
+          href.includes("crm.ucsd.edu") ||
+          // The SSO page may show Duo inline (URL stays on a5.ucsd.edu but Duo iframe loads)
+          // In that case URL doesn't change, so we also accept staying on a5.ucsd.edu
+          // as long as we moved past the login form
+          false
+        );
+      },
+      { timeout: 10_000 },
+    ).catch(() => {
+      // URL didn't change to a known Duo URL -- we might still be on a5.ucsd.edu
+      // with a Duo iframe, or we got redirected elsewhere
+    });
+  } catch {
+    // Ignore -- we'll check with screenshot below
+  }
+
+  await ss(page, "04-after-login-click");
+
+  // Check if we ended up on the blink.ucsd.edu help page (the known broken redirect)
+  const postLoginUrl = page.url();
+  if (postLoginUrl.includes("blink.ucsd.edu")) {
+    log.error("Login redirected to Two-Step Login help page instead of Duo challenge");
+    log.step("This usually means the SSO form submission was intercepted.");
+    log.step("The LOGIN button may have triggered a navigation link instead of form submit.");
+    log.step("Attempting alternative: submit the form directly...");
+
+    // Go back to SSO page and try form.submit() instead of button click
+    await page.goBack({ timeout: 10_000 }).catch(() => {});
+
+    // If going back didn't work, re-navigate
+    if (!page.url().includes("a5.ucsd.edu")) {
+      await page.goto("https://crm.ucsd.edu/hr", {
+        waitUntil: "domcontentloaded",
+        timeout: 15_000,
+      });
+      await page.waitForLoadState("networkidle", { timeout: 15_000 });
+
+      // Wait for SSO redirect
+      try {
+        await page.waitForURL(
+          (url) => url.hostname.includes("a5.ucsd.edu"),
+          { timeout: 10_000 },
+        );
+      } catch {
+        // Already on the page or different flow
+      }
+    }
+
+    // Re-fill credentials
+    await usernameField.first().fill(userId, { timeout: 5_000 }).catch(() => {
+      // Fields might have different locators after navigation
+    });
+    await passwordField.first().fill(password, { timeout: 5_000 }).catch(() => {});
+
+    // Try submitting the form directly via JS instead of clicking the button
+    // This avoids any click handler on the button that might redirect to help page
+    await page.evaluate(() => {
+      const form = document.querySelector("form");
+      if (form) form.submit();
+    });
+
+    await ss(page, "04b-after-form-submit");
+  }
+
+  // Now wait for Duo approval -- user approves on their phone
   log.waiting("Waiting for Duo approval (approve on your phone)...");
+
+  // After Duo approval, the page redirects to act-crm.my.site.com or crm.ucsd.edu
   let approved = await waitForDuoApproval(
     page,
     "**/*crm*/**",
@@ -182,7 +305,7 @@ export async function loginToACTCrm(page: Page): Promise<boolean> {
   );
 
   if (!approved) {
-    await ss("05-duo-timeout-1");
+    await ss(page, "05-duo-timeout-1");
     log.waiting("Still waiting for Duo approval...");
     approved = await waitForDuoApproval(
       page,
@@ -192,12 +315,20 @@ export async function loginToACTCrm(page: Page): Promise<boolean> {
   }
 
   if (!approved) {
-    await ss("06-duo-timeout-2");
+    // Also check if we already made it to the target
+    if (page.url().includes("act-crm.my.site.com") && !page.url().includes("login")) {
+      log.step("Already on ACT CRM -- Duo may have been auto-approved");
+      approved = true;
+    }
+  }
+
+  if (!approved) {
+    await ss(page, "06-duo-timeout-2");
     log.error("ACT CRM Duo approval timed out");
     return false;
   }
 
-  await ss("07-authenticated");
+  await ss(page, "07-authenticated");
   log.success("ACT CRM authenticated");
   return true;
 }
