@@ -8,7 +8,7 @@ export const EmployeeDataSchema = z.object({
   ssn: z.string().regex(
     /^\d{3}-\d{2}-\d{4}$/,
     "SSN must be in XXX-XX-XXXX format",
-  ),
+  ).optional(),
   address: z.string().min(1, "Address is required"),
   city: z.string().min(1, "City is required"),
   state: z.string().length(2, "State must be a 2-letter code (e.g., CA)"),
