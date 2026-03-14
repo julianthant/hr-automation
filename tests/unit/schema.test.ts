@@ -4,7 +4,7 @@ import { validateEmployeeData, EmployeeDataSchema } from "../../src/workflows/on
 import { ExtractionError } from "../../src/crm/types.js";
 
 const VALID_DATA: Record<string, string> = {
-  positionNumber: "000012345",
+  positionNumber: "40695231",
   firstName: "Jane",
   lastName: "Doe",
   ssn: "123-45-6789",
@@ -12,7 +12,7 @@ const VALID_DATA: Record<string, string> = {
   city: "La Jolla",
   state: "CA",
   postalCode: "92093",
-  wage: "25.00",
+  wage: "$17.75 per hour",
   effectiveDate: "01/15/2026",
 };
 
@@ -20,7 +20,7 @@ describe("EmployeeDataSchema", () => {
   it("accepts valid employee data with all 10 fields", () => {
     const result = validateEmployeeData(VALID_DATA);
 
-    assert.equal(result.positionNumber, "000012345");
+    assert.equal(result.positionNumber, "40695231");
     assert.equal(result.firstName, "Jane");
     assert.equal(result.lastName, "Doe");
     assert.equal(result.ssn, "123-45-6789");
@@ -28,7 +28,7 @@ describe("EmployeeDataSchema", () => {
     assert.equal(result.city, "La Jolla");
     assert.equal(result.state, "CA");
     assert.equal(result.postalCode, "92093");
-    assert.equal(result.wage, "25.00");
+    assert.equal(result.wage, "$17.75 per hour");
     assert.equal(result.effectiveDate, "01/15/2026");
   });
 
@@ -113,6 +113,45 @@ describe("EmployeeDataSchema", () => {
     assert.deepEqual(err.failedFields, ["field1", "field2"]);
     assert.ok(err instanceof Error);
     assert.equal(err.message, "test error");
+  });
+
+  it("rejects non-2-letter state code", () => {
+    const data = { ...VALID_DATA, state: "California" };
+
+    assert.throws(
+      () => validateEmployeeData(data),
+      (err: unknown) => {
+        assert.ok(err instanceof ExtractionError);
+        assert.ok(err.failedFields?.includes("state"));
+        return true;
+      },
+    );
+  });
+
+  it("rejects effectiveDate not in MM/DD/YYYY format", () => {
+    const data = { ...VALID_DATA, effectiveDate: "2026-03-14" };
+
+    assert.throws(
+      () => validateEmployeeData(data),
+      (err: unknown) => {
+        assert.ok(err instanceof ExtractionError);
+        assert.ok(err.failedFields?.includes("effectiveDate"));
+        return true;
+      },
+    );
+  });
+
+  it("rejects wage without dollar sign prefix", () => {
+    const data = { ...VALID_DATA, wage: "17.75 per hour" };
+
+    assert.throws(
+      () => validateEmployeeData(data),
+      (err: unknown) => {
+        assert.ok(err instanceof ExtractionError);
+        assert.ok(err.failedFields?.includes("wage"));
+        return true;
+      },
+    );
   });
 
   it("handles null values by treating them as missing fields", () => {
