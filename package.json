@@ -8,7 +8,8 @@
     "test-login:fresh": "tsx --env-file=.env src/cli.ts test-login --fresh",
     "extract": "tsx --env-file=.env src/cli.ts extract",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/**/*.test.ts"
+    "typecheck:all": "tsc --noEmit -p tsconfig.test.json",
+    "test": "tsx --test tests/**/*.test.ts"
   },
   "keywords": [],
   "author": "",
