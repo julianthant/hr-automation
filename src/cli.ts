@@ -8,11 +8,13 @@ import type { AuthResult } from "./auth/types.js";
 import {
   searchByEmail,
   selectLatestResult,
-  navigateToEntrySheet,
+  navigateToSection,
+  ExtractionError,
+} from "./crm/index.js";
+import {
   extractRawFields,
   validateEmployeeData,
-  ExtractionError,
-} from "./onboarding/index.js";
+} from "./workflows/onboarding/index.js";
 
 const program = new Command();
 
@@ -131,7 +133,7 @@ program
       await selectLatestResult(page);
 
       log.step("Navigating to UCPath Entry Sheet...");
-      await navigateToEntrySheet(page);
+      await navigateToSection(page, "UCPath Entry Sheet");
 
       log.step("Extracting employee data...");
       const rawData = await extractRawFields(page);
