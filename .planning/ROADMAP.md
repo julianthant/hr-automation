@@ -40,7 +40,7 @@ Plans:
 **Goal:** Reorganize the flat src/onboarding/ structure into shared src/crm/ and src/ucpath/ modules with workflow-specific src/workflows/onboarding/, and migrate co-located tests to a tests/ hierarchy -- establishing the multi-workflow architecture for future offboarding, pay change, and additional HR workflows
 **Requirements**: RESTRUCTURE-01, RESTRUCTURE-02, RESTRUCTURE-03, RESTRUCTURE-04
 **Depends on:** Phase 1
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 Plans:
 - [ ] 01.1-01-PLAN.md -- Create shared CRM module (search, navigate, extract, types) and onboarding workflow module (FIELD_MAP, schema, barrel)
@@ -97,7 +97,7 @@ Phases execute in numeric order: 1 -> 01.1 -> 2 -> 3 -> 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Authentication and Project Foundation | 2/2 | Complete   | 2026-03-13 |
-| 01.1. Modular Codebase Restructure | 0/2 | Not started | - |
+| 01.1. Modular Codebase Restructure | 1/2 | In Progress|  |
 | 2. Data Extraction from ACT CRM | 1/2 | In Progress | - |
 | 3. UCPath Transaction Entry | 0/0 | Not started | - |
 | 4. Batch Processing and CLI | 0/0 | Not started | - |
