@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import type { Page } from "playwright";
+import type { Browser, BrowserContext, Page } from "playwright";
 import { launchBrowser, saveSession, clearSession } from "./browser/launch.js";
 import { validateEnv } from "./utils/env.js";
 import { log } from "./utils/log.js";
@@ -23,57 +23,51 @@ program
   .version("0.1.0");
 
 /**
- * Authenticate to a single system with its own browser/session.
+ * Ensure authenticated to a system. Checks saved session first,
+ * logs in if expired. All in one browser — no separate auth step needed.
  */
-async function authSystem(
-  name: string,
+async function ensureAuth(
   sessionName: string,
   checkUrl: string,
   loginFn: (page: Page) => Promise<boolean>,
   fresh: boolean,
-): Promise<boolean> {
+): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
   if (fresh) {
     clearSession(sessionName);
   }
 
-  let { browser, context, page } = await launchBrowser(sessionName, fresh);
+  const { browser, context: initialCtx, page: initialPage } =
+    await launchBrowser(sessionName, fresh);
 
-  try {
-    // Check existing session
-    if (!fresh) {
-      const valid = await isSessionValid(page, checkUrl);
-      if (valid) {
-        log.success(`${name} session valid -- skipping login`);
-        await saveSession(context, sessionName);
-        await browser.close();
-        return true;
-      }
-      // Stale session — relaunch clean
-      log.step(`${name} session expired -- logging in`);
-      clearSession(sessionName);
-      await context.close();
-      context = await browser.newContext();
-      page = await context.newPage();
+  // Check existing session
+  if (!fresh) {
+    const valid = await isSessionValid(initialPage, checkUrl);
+    if (valid) {
+      log.success(`Session valid -- skipping login`);
+      return { browser, context: initialCtx, page: initialPage };
     }
-
-    const ok = await loginFn(page);
-    if (!ok) {
-      log.error(`${name} authentication failed`);
-      await browser.close();
-      return false;
-    }
-
-    await saveSession(context, sessionName);
-    await browser.close();
-    return true;
-  } catch (error) {
-    try { await browser.close(); } catch {}
-    throw error;
   }
+
+  // Session expired — relaunch clean and login
+  log.step("Session expired -- logging in...");
+  clearSession(sessionName);
+  await initialCtx.close();
+  const context = await browser.newContext();
+  const page = await context.newPage();
+
+  const ok = await loginFn(page);
+  if (!ok) {
+    await browser.close();
+    log.error("Authentication failed");
+    process.exit(1);
+  }
+
+  await saveSession(context, sessionName);
+  return { browser, context, page };
 }
 
 /**
- * Run the full authentication flow: UCPath SSO + ACT CRM (separate sessions).
+ * Run the full authentication flow: UCPath + ACT CRM (separate sessions, separate browsers).
  */
 async function runAuthFlow(
   options: LoginOptions,
@@ -84,32 +78,27 @@ async function runAuthFlow(
     sessionSaved: false,
   };
 
-  // --- UCPath Authentication (own browser/session) ---
-  result.ucpath = await authSystem(
-    "UCPath",
+  // --- UCPath Authentication ---
+  const ucpath = await ensureAuth(
     "ucpath",
     "https://ucphrprdpub.universityofcalifornia.edu/",
     loginToUCPath,
     options.fresh,
   );
-  if (!result.ucpath) {
-    process.exit(1);
-  }
+  await ucpath.browser.close();
+  result.ucpath = true;
 
-  // --- ACT CRM Authentication (own browser/session) ---
-  result.actCrm = await authSystem(
-    "ACT CRM",
-    "actcrm",
-    "https://act-crm.my.site.com",
+  // --- ACT CRM Authentication (separate session, Active Directory login) ---
+  const actCrm = await ensureAuth(
+    "onboarding",
+    "https://crm.ucsd.edu/hr",
     loginToACTCrm,
     options.fresh,
   );
-  if (!result.actCrm) {
-    process.exit(1);
-  }
+  await actCrm.browser.close();
+  result.actCrm = true;
 
   result.sessionSaved = true;
-  log.success("Session saved to .auth/");
   log.success("Authentication complete");
   log.step("UCPath: authenticated");
   log.step("ACT CRM: authenticated");
@@ -162,20 +151,15 @@ program
       process.exit(1);
     }
 
-    const { browser, page } = await launchBrowser("actcrm");
+    // Single browser: auth + extraction in one session
+    const { browser, context, page } = await ensureAuth(
+      "onboarding",
+      "https://crm.ucsd.edu/hr",
+      loginToACTCrm,
+      false,
+    );
 
     try {
-      // Verify ACT CRM session is valid
-      const valid = await isSessionValid(
-        page,
-        "https://act-crm.my.site.com",
-      );
-      if (!valid) {
-        log.error("ACT CRM session expired -- run test-login first");
-        await browser.close();
-        process.exit(1);
-      }
-
       log.step("Searching for employee...");
       await searchByEmail(page, email);
 
