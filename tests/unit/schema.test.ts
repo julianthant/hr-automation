@@ -154,6 +154,25 @@ describe("EmployeeDataSchema", () => {
     );
   });
 
+  it("accepts missing SSN (international students may not have one)", () => {
+    const data = { ...VALID_DATA };
+    delete (data as Record<string, string | undefined>).ssn;
+
+    const result = validateEmployeeData(data);
+    assert.equal(result.ssn, undefined);
+    assert.equal(result.firstName, "Jane");
+  });
+
+  it("accepts null SSN (extracted as null from page)", () => {
+    const data: Record<string, string | null> = {
+      ...VALID_DATA,
+      ssn: null,
+    };
+
+    const result = validateEmployeeData(data);
+    assert.equal(result.ssn, undefined);
+  });
+
   it("handles null values by treating them as missing fields", () => {
     const data: Record<string, string | null> = {
       ...VALID_DATA,
