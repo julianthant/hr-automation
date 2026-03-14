@@ -11,13 +11,19 @@ export const EmployeeDataSchema = z.object({
   ),
   address: z.string().min(1, "Address is required"),
   city: z.string().min(1, "City is required"),
-  state: z.string().min(1, "State is required"),
+  state: z.string().length(2, "State must be a 2-letter code (e.g., CA)"),
   postalCode: z.string().regex(
     /^\d{5}(-\d{4})?$/,
     "Postal code must be XXXXX or XXXXX-XXXX format",
   ),
-  wage: z.string().min(1, "Wage is required"),
-  effectiveDate: z.string().min(1, "Effective date is required"),
+  wage: z.string().regex(
+    /^\$/,
+    "Wage must start with $ (e.g., $17.75 per hour)",
+  ),
+  effectiveDate: z.string().regex(
+    /^\d{2}\/\d{2}\/\d{4}$/,
+    "Effective date must be in MM/DD/YYYY format",
+  ),
 });
 
 export type EmployeeData = z.infer<typeof EmployeeDataSchema>;
