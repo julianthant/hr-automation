@@ -27,7 +27,7 @@
 - [ ] **ENTR-02**: Automation selects template UC_FULL_HIRE in the template selector
 - [ ] **ENTR-03**: Automation enters the effective date from extracted data into the date field
 - [ ] **ENTR-04**: Automation clicks Create Transaction
-- [ ] **ENTR-05**: User can run in dry-run mode that shows extracted data and intended actions without submitting to UCPath
+- [x] **ENTR-05**: User can run in dry-run mode that shows extracted data and intended actions without submitting to UCPath
 
 ### Batch & CLI
 
@@ -83,7 +83,7 @@
 | ENTR-02 | Phase 3 | Pending |
 | ENTR-03 | Phase 3 | Pending |
 | ENTR-04 | Phase 3 | Pending |
-| ENTR-05 | Phase 3 | Pending |
+| ENTR-05 | Phase 3 | Complete |
 | BTCH-01 | Phase 4 | Pending |
 | BTCH-02 | Phase 4 | Pending |
 | BTCH-03 | Phase 4 | Pending |
