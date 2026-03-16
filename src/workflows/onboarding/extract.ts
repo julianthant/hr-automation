@@ -1,6 +1,7 @@
 import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
 import { extractField } from "../../crm/extract.js";
+import { parseDepartmentNumber } from "../../tracker/index.js";
 
 /**
  * Maps each EmployeeData field name to an array of possible label strings
@@ -21,6 +22,7 @@ const FIELD_MAP: Record<string, string[]> = {
   state: ["State"],
   postalCode: ["Postal Code", "Zip Code", "ZIP"],
   wage: ["Compensation rate", "Compensation Rate", "Wage", "Pay Rate"],
+  dob: ["Date of Birth", "DOB", "Birth Date"],
   effectiveDate: [
     "First Day of Service (Effective Date)",
     "First Day of Service",
@@ -53,4 +55,43 @@ export async function extractRawFields(
   }
 
   return raw;
+}
+
+/**
+ * Extract department number and recruitment number from the CRM record page
+ * (ONB_ViewOnboarding). MUST be called AFTER selectLatestResult() and BEFORE
+ * navigateToSection("UCPath Entry Sheet").
+ *
+ * Department number is parsed from parenthesized text in the department field
+ * (e.g., "Computer Science (000412)" -> "000412").
+ *
+ * IMPORTANT: Logs field names only -- NEVER logs extracted values (PII).
+ */
+export async function extractRecordPageFields(
+  page: Page,
+): Promise<{ departmentNumber: string | null; recruitmentNumber: string | null }> {
+  log.step("Extracting record page fields (dept#, recruitment#)...");
+
+  // SELECTOR: best-guess labels -- need live verification
+  const DEPT_LABELS = ["Department", "Department Name", "Dept"];
+  const RECRUIT_LABELS = ["Recruitment Number", "Recruitment #", "Recruitment No", "Req Number"];
+
+  let deptText: string | null = null;
+  for (const label of DEPT_LABELS) {
+    deptText = await extractField(page, label);
+    if (deptText) break;
+  }
+
+  let recruitmentNumber: string | null = null;
+  for (const label of RECRUIT_LABELS) {
+    recruitmentNumber = await extractField(page, label);
+    if (recruitmentNumber) break;
+  }
+
+  // Parse department number from parenthesized text
+  const departmentNumber = deptText ? parseDepartmentNumber(deptText) : null;
+
+  log.step(`Record page extraction complete (dept#: ${departmentNumber ? "found" : "not found"}, recruitment#: ${recruitmentNumber ? "found" : "not found"})`);
+
+  return { departmentNumber, recruitmentNumber };
 }
