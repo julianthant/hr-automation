@@ -188,4 +188,36 @@ describe("EmployeeDataSchema", () => {
       },
     );
   });
+
+  it("accepts data with departmentNumber and recruitmentNumber", () => {
+    const data = {
+      ...VALID_DATA,
+      departmentNumber: "000412",
+      recruitmentNumber: "REQ-12345",
+    };
+
+    const result = validateEmployeeData(data);
+    assert.equal(result.departmentNumber, "000412");
+    assert.equal(result.recruitmentNumber, "REQ-12345");
+  });
+
+  it("accepts data WITHOUT departmentNumber and recruitmentNumber (optional)", () => {
+    // VALID_DATA has no departmentNumber or recruitmentNumber
+    const result = validateEmployeeData(VALID_DATA);
+    assert.equal(result.departmentNumber, undefined);
+    assert.equal(result.recruitmentNumber, undefined);
+  });
+
+  it("rejects departmentNumber that is not 4-6 digits", () => {
+    const data = { ...VALID_DATA, departmentNumber: "abc" };
+
+    assert.throws(
+      () => validateEmployeeData(data),
+      (err: unknown) => {
+        assert.ok(err instanceof ExtractionError);
+        assert.ok(err.failedFields?.includes("departmentNumber"));
+        return true;
+      },
+    );
+  });
 });
