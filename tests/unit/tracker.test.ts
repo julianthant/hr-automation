@@ -6,7 +6,6 @@ import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import ExcelJS from "exceljs";
 import {
-  maskSsn,
   parseDepartmentNumber,
   updateTracker,
   TRACKER_COLUMNS,
@@ -15,16 +14,32 @@ import type { TrackerRow } from "../../src/tracker/index.js";
 
 const SAMPLE_ROW: TrackerRow = {
   firstName: "Jane",
+  middleName: "",
   lastName: "Doe",
-  ssnMasked: "XXX-XX-6789",
+  ssn: "123-45-6789",
   dob: "01/15/1990",
+  phone: "(858) 555-1234",
+  email: "jane@ucsd.edu",
+  address: "123 Main St",
+  city: "San Diego",
+  state: "CA",
+  postalCode: "92093",
   departmentNumber: "000412",
   recruitmentNumber: "REQ-12345",
-  rehire: "No",
+  positionNumber: "10026229",
+  wage: "$17.75 per hour",
   effectiveDate: "01/15/2026",
-  crmExtracted: "Done",
+  appointment: "5",
+  crmExtraction: "Done",
   personSearch: "Done",
-  transaction: "Pending",
+  rehire: "",
+  i9Record: "Done",
+  transaction: "Done",
+  pdfDownload: "Done",
+  i9ProfileId: "MOCK_I9",
+  status: "Done",
+  error: "",
+  timestamp: "2026-01-15T10:00:00.000Z",
 };
 
 describe("parseDepartmentNumber", () => {
@@ -48,20 +63,6 @@ describe("parseDepartmentNumber", () => {
   });
 });
 
-describe("maskSsn", () => {
-  it('masks "123-45-6789" to "XXX-XX-6789"', () => {
-    assert.equal(maskSsn("123-45-6789"), "XXX-XX-6789");
-  });
-
-  it('returns "N/A" for undefined', () => {
-    assert.equal(maskSsn(undefined), "N/A");
-  });
-
-  it('returns "N/A" for empty string', () => {
-    assert.equal(maskSsn(""), "N/A");
-  });
-});
-
 describe("updateTracker", () => {
   const tempFiles: string[] = [];
 
@@ -82,20 +83,20 @@ describe("updateTracker", () => {
     tempFiles.length = 0;
   });
 
-  it('creates new .xlsx with "Onboarding Tracker" sheet and 11 column headers when file does not exist', async () => {
+  it("creates new .xlsx with today's date as sheet name and correct column headers", async () => {
     const filePath = tempPath();
     await updateTracker(filePath, SAMPLE_ROW);
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(filePath);
 
-    const sheet = workbook.getWorksheet("Onboarding Tracker");
-    assert.ok(sheet, "Sheet 'Onboarding Tracker' should exist");
+    const today = new Date().toISOString().slice(0, 10);
+    const sheet = workbook.getWorksheet(today);
+    assert.ok(sheet, `Sheet '${today}' should exist`);
 
-    // Verify 11 column headers
     const headerRow = sheet.getRow(1);
     const headers = TRACKER_COLUMNS.map((col) => col.header);
-    assert.equal(headers.length, 11, "Should have 11 columns defined");
+    assert.equal(headers.length, 27, "Should have 27 columns defined");
 
     for (let i = 0; i < headers.length; i++) {
       assert.equal(
@@ -106,7 +107,7 @@ describe("updateTracker", () => {
     }
   });
 
-  it("appends row to existing .xlsx without losing previous rows", async () => {
+  it("appends row to existing daily sheet without losing previous rows", async () => {
     const filePath = tempPath();
 
     const row1: TrackerRow = { ...SAMPLE_ROW, firstName: "Alice" };
@@ -118,14 +119,25 @@ describe("updateTracker", () => {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(filePath);
 
-    const sheet = workbook.getWorksheet("Onboarding Tracker");
+    const today = new Date().toISOString().slice(0, 10);
+    const sheet = workbook.getWorksheet(today);
     assert.ok(sheet, "Sheet should exist");
 
-    // 1 header row + 2 data rows = 3 rows
     assert.equal(sheet.rowCount, 3, "Should have 3 rows (1 header + 2 data)");
-
-    // Verify both data rows present
     assert.equal(sheet.getRow(2).getCell(1).value, "Alice");
     assert.equal(sheet.getRow(3).getCell(1).value, "Bob");
+  });
+
+  it("stores full SSN without masking", async () => {
+    const filePath = tempPath();
+    await updateTracker(filePath, SAMPLE_ROW);
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(filePath);
+
+    const today = new Date().toISOString().slice(0, 10);
+    const sheet = workbook.getWorksheet(today)!;
+    // SSN is column 4
+    assert.equal(sheet.getRow(2).getCell(4).value, "123-45-6789");
   });
 });
