@@ -7,8 +7,8 @@
     "test-login": "tsx --env-file=.env src/cli.ts test-login",
     "test-login:fresh": "tsx --env-file=.env src/cli.ts test-login --fresh",
     "extract": "tsx --env-file=.env src/cli.ts extract",
-    "create-transaction": "tsx --env-file=.env src/cli.ts create-transaction",
-    "create-transaction:dry": "tsx --env-file=.env src/cli.ts create-transaction --dry-run",
+    "start-onboarding": "tsx --env-file=.env src/cli.ts start-onboarding",
+    "start-onboarding:dry": "tsx --env-file=.env src/cli.ts start-onboarding --dry-run",
     "typecheck": "tsc --noEmit",
     "typecheck:all": "tsc --noEmit -p tsconfig.test.json",
     "test": "tsx --test tests/**/*.test.ts"
@@ -18,6 +18,7 @@
   "license": "ISC",
   "dependencies": {
     "commander": "^14.0.3",
+    "exceljs": "^4.4.0",
     "picocolors": "^1.1.1",
     "playwright": "^1.58.2",
     "zod": "^4.3.6"
