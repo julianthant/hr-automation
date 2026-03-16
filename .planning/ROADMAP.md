@@ -16,8 +16,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 01.1: Modular Codebase Restructure** (INSERTED) - Extract shared CRM and UCPath modules, establish multi-workflow architecture, organize tests (completed 2026-03-14)
 - [x] **Phase 2: Data Extraction from ACT CRM** - Search, navigate, and extract validated employee data from the onboarding portal (completed 2026-03-14)
 - [x] **Phase 3: UCPath Person Search and Transaction Setup** - Navigate UCPath, perform person duplicate check, set up transaction creation with dry-run safety (completed 2026-03-15)
-- [ ] **Phase 3.1: CRM Additional Fields and Onboarding Tracker** (INSERTED) - Extract department number and recruitment number from CRM, create onboarding tracking spreadsheet
-- [ ] **Phase 3.2: I9 Tracker Workflow** (INSERTED) - Authenticate to I9 Complete, fill employee details, select worksite by department number
+- [x] **Phase 3.1: CRM Additional Fields and Onboarding Tracker** (INSERTED) - Extract department number and recruitment number from CRM, create onboarding tracking spreadsheet (completed 2026-03-16)
+- [x] **Phase 3.2: I9 Tracker Workflow** (INSERTED) - Authenticate to I9 Complete, fill employee details, select worksite by department number (completed 2026-03-16)
 - [ ] **Phase 4: UCPath Smart HR Transaction Creation** - Complete the UC_FULL_HIRE transaction flow in Smart HR Templates after person search passes
 - [ ] **Phase 5: Batch Processing and CLI** - Process multiple employees from file input with per-employee error isolation, progress reporting, and structured logging
 
@@ -142,7 +142,7 @@ Phases execute in numeric order: 1 → 01.1 → 2 → 3 → 3.1 → 3.2 → 4 �
 | 01.1. Modular Codebase Restructure | 2/2 | Complete | 2026-03-14 |
 | 2. Data Extraction from ACT CRM | 2/2 | Complete | 2026-03-14 |
 | 3. UCPath Person Search | 3/3 | Complete | 2026-03-15 |
-| 3.1. CRM Additional Fields + Tracker | 1/2 | In Progress | - |
-| 3.2. I9 Tracker Workflow | 0/0 | Not started | - |
+| 3.1. CRM Additional Fields + Tracker | 2/2 | Complete | 2026-03-16 |
+| 3.2. I9 Tracker Workflow | - | Complete | 2026-03-16 |
 | 4. UCPath Smart HR Transaction | 0/0 | Not started | - |
 | 5. Batch Processing and CLI | 0/0 | Not started | - |
