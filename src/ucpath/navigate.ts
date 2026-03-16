@@ -1,17 +1,18 @@
 import type { Page, FrameLocator } from "playwright";
 import { log } from "../utils/log.js";
 
-// SELECTOR: URL to be discovered during live testing -- this is a best-guess from PeopleSoft URL convention
+// SELECTOR: verified v1.2 -- must use ucphrprdpub domain (same as auth session), not ucpath domain
 const SMART_HR_URL =
-  "https://ucpath.universityofcalifornia.edu/psc/ucpathprd/EMPLOYEE/ERP/c/WORKFORCE_ADMIN.HR_TBH_EULIST.GBL";
+  "https://ucphrprdpub.universityofcalifornia.edu/psc/ucphrprd/EMPLOYEE/HRMS/c/NUI_FRAMEWORK.PT_AGSTARTPAGE_NUI.GBL?CONTEXTIDPARAMS=TEMPLATE_ID%3aPTPPNAVCOL&scname=ADMN_UC_ADMIN_LOC_HIRE_NAVCOLL&PanelCollapsible=Y&PTPPB_GROUPLET_ID=UC_HIRE_TASKS_TILE_FL&CRefName=UC_HIRE_TASKS_TILE_FL&AJAXTRANSFER=Y";
 
 /**
  * Returns the PeopleSoft content iframe FrameLocator.
- * PeopleSoft wraps all Classic/Classic Plus content in this iframe.
+ * UCPath wraps Classic content in #main_target_win0 (not #ptifrmtgtframe).
  * Every form interaction after initial navigation must go through this frame.
+ * SELECTOR: verified v1.3 -- iframe ID is main_target_win0
  */
 export function getContentFrame(page: Page): FrameLocator {
-  return page.frameLocator("#ptifrmtgtframe");
+  return page.frameLocator("#main_target_win0");
 }
 
 /**
@@ -43,6 +44,137 @@ export async function waitForPeopleSoftProcessing(
       .waitFor({ state: "hidden", timeout: timeoutMs });
   } catch {
     // Spinner did not appear or already disappeared -- that is fine
+  }
+}
+
+export interface PersonSearchResult {
+  found: boolean;
+  matches?: Array<{ emplId: string; firstName: string; lastName: string }>;
+}
+
+/**
+ * Search for a person in UCPath to check for duplicates before creating a transaction.
+ * Navigates to HR Tasks, fills the person search form, and returns whether a match was found.
+ *
+ * All selectors verified interactively v2.1 against live UCPath.
+ *
+ * @param page - Playwright page (already authenticated to UCPath)
+ * @param ssn - National ID (SSN without dashes, e.g. "123456789")
+ * @param firstName - Legal first name
+ * @param lastName - Legal last name
+ * @param dob - Date of birth in MM/DD/YYYY format
+ */
+export async function searchPerson(
+  page: Page,
+  ssn: string,
+  firstName: string,
+  lastName: string,
+  dob: string,
+): Promise<PersonSearchResult> {
+  log.step("Navigating to HR Tasks for person search...");
+  await page.goto(SMART_HR_URL, {
+    waitUntil: "domcontentloaded",
+    timeout: 30_000,
+  });
+  await page.waitForTimeout(5_000);
+  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+
+  const frame = getContentFrame(page);
+
+  // PAGE 1: Search Type = Person, Parameter = PERSON_SEARCH
+  // SELECTOR: verified v1.4
+  log.step("Setting search type to Person...");
+  await frame.locator("#HCR_SM_PARM_VW_SM_TYPE").selectOption("P", { timeout: 10_000 });
+  await page.waitForTimeout(5_000);
+  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+
+  await frame.locator("#HCR_SM_PARM_VW_SM_PARM_CD").fill("PERSON_SEARCH", { timeout: 10_000 });
+  await frame.locator("#PTS_CFG_CL_WRK_PTS_SRCH_BTN").click({ timeout: 10_000 });
+  await page.waitForTimeout(5_000);
+  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+  log.step("Person search form loaded");
+
+  // PAGE 2: Fill search criteria
+  // SELECTOR: all verified v1.7/v2.0 — use [id=""] attribute selectors for $ in IDs
+  await frame.locator('[id="DERIVED_HCR_SM_SM_RSLT_CD"]').fill("PERSON_RESULTS", { timeout: 10_000 });
+  await frame.locator('[id="DERIVED_HCR_SM_SM_CHAR_INPUT$0"]').fill(ssn, { timeout: 10_000 });
+  await frame.locator('[id="DERIVED_HCR_SM_SM_CHAR_INPUT$1"]').fill(firstName, { timeout: 10_000 });
+  await frame.locator('[id="DERIVED_HCR_SM_SM_CHAR_INPUT$2"]').fill(lastName, { timeout: 10_000 });
+  await frame.locator('[id="DERIVED_HCR_SM_SM_DATE_INPUT$3"]').fill(dob, { timeout: 10_000 });
+  log.step("Search criteria filled");
+
+  // Click National Id magnifying glass — triggers PeopleSoft validation
+  // SELECTOR: verified v2.2 — ID is $prompt$0 (not $0$prompt)
+  log.step("Clicking National Id lookup...");
+  await frame.locator('[id="DERIVED_HCR_SM_SM_CHAR_INPUT$prompt$0"]').click({ timeout: 10_000 });
+  await page.waitForTimeout(5_000);
+  await page.screenshot({ path: ".auth/debug-ps-after-magnify.png", fullPage: true });
+  log.step(`Screenshot: .auth/debug-ps-after-magnify.png (${page.url()})`);
+
+  // Helper: dismiss PeopleSoft modal dialog (#ICOK button) via JS.
+  // Playwright locator.click() cannot bypass PeopleSoft's modal mask overlay,
+  // so we use frame.evaluate() to call .click() directly on the #ICOK button.
+  // SELECTOR: verified v2.2 — button is <input id="#ICOK" onclick="closeMsg(this)">
+  const dismissDialog = async (): Promise<boolean> => {
+    for (const f of page.frames()) {
+      const clicked = await f.evaluate(() => {
+        const btn = document.getElementById("#ICOK");
+        if (btn) { btn.click(); return true; }
+        return false;
+      }).catch(() => false);
+      if (clicked) return true;
+    }
+    return false;
+  };
+
+  // Dismiss dialog if present after magnifying glass (just a step to get through)
+  // SELECTOR: verified v2.2
+  const magnifyDialogDismissed = await dismissDialog();
+  if (magnifyDialogDismissed) {
+    log.step("Dismissed National Id dialog");
+  }
+  await page.waitForTimeout(3_000);
+  await page.screenshot({ path: ".auth/debug-ps-after-magnify-ok.png", fullPage: true });
+  log.step(`Screenshot: .auth/debug-ps-after-magnify-ok.png (${page.url()})`);
+
+  // Click Search — SELECTOR: verified v2.2
+  log.step("Clicking Search...");
+  await frame.locator("#DERIVED_HCR_SM_SM_SEARCH_BTN").click({ timeout: 10_000 });
+  await page.waitForTimeout(5_000);
+  await page.screenshot({ path: ".auth/debug-ps-after-search.png", fullPage: true });
+  log.step(`Screenshot: .auth/debug-ps-after-search.png (${page.url()})`);
+
+  // Determination: dialog after Search = new hire, results table = rehire.
+  const searchDialogDismissed = await dismissDialog();
+  await page.waitForTimeout(3_000);
+  await page.screenshot({ path: ".auth/debug-ps-search-result.png", fullPage: true });
+  log.step(`Screenshot: .auth/debug-ps-search-result.png (${page.url()})`);
+
+  if (searchDialogDismissed) {
+    // Dialog appeared after Search → new hire
+    log.step("No duplicate found — person is a new hire");
+    return { found: false };
+  }
+
+  // No dialog after Search → results table appeared → rehire
+  log.step("Duplicate person found in UCPath!");
+  try {
+    const rows = await frame.locator('[id*="SEARCH_RESULT"] tr, .PSLEVEL1GRID tr').filter({ hasText: /\d{5,}/ }).evaluateAll((els) =>
+      els.map((row) => {
+        const cells = Array.from(row.querySelectorAll("td, th"));
+        const emplId = cells.find((c) => /^\d{5,}$/.test(c.textContent?.trim() ?? ""))?.textContent?.trim() ?? "";
+        const allText = cells.map((c) => c.textContent?.trim()).filter(Boolean);
+        return {
+          emplId,
+          firstName: allText[3] ?? "",
+          lastName: allText[5] ?? "",
+        };
+      }),
+    );
+    const validRows = rows.filter((r) => r.emplId);
+    return { found: true, matches: validRows.length > 0 ? validRows : undefined };
+  } catch {
+    return { found: true };
   }
 }
 

@@ -260,6 +260,7 @@ program
         crmExtracted: "Done",
         personSearch: "Dry Run",
         transaction: "Dry Run",
+        i9ProfileId: "Dry Run",
       };
 
       try {
@@ -296,30 +297,6 @@ program
         data.dob ?? "",
       );
 
-      // --- Update onboarding tracker ---
-      const trackerRow: TrackerRow = {
-        firstName: data.firstName,
-        lastName: data.lastName,
-        ssnMasked: maskSsn(data.ssn),
-        dob: data.dob ?? "N/A",
-        departmentNumber: data.departmentNumber ?? "N/A",
-        recruitmentNumber: data.recruitmentNumber ?? "N/A",
-        rehire: searchResult.found ? "X" : "",
-        effectiveDate: data.effectiveDate,
-        crmExtracted: "Done",
-        personSearch: searchResult.found ? "Rehire" : "Done",
-        transaction: "Pending",
-      };
-
-      try {
-        await updateTracker(TRACKER_PATH, trackerRow);
-        log.success(`Tracker updated: ${TRACKER_PATH}`);
-      } catch (trackerErr) {
-        // Tracker failure should NOT abort the workflow
-        const msg = trackerErr instanceof Error ? trackerErr.message : String(trackerErr);
-        log.error(`Tracker update failed (non-fatal): ${msg}`);
-      }
-
       if (searchResult.found) {
         log.error("Person already exists in UCPath -- cannot create new hire");
         if (searchResult.matches) {
@@ -329,19 +306,105 @@ program
           }
         }
         log.step("This may be a rehire. Stopping.");
+
+        // Log rehire to tracker (no I9, no transaction)
+        try {
+          await updateTracker(TRACKER_PATH, {
+            firstName: data.firstName,
+            lastName: data.lastName,
+            ssnMasked: maskSsn(data.ssn),
+            dob: data.dob ?? "N/A",
+            departmentNumber: data.departmentNumber ?? "N/A",
+            recruitmentNumber: data.recruitmentNumber ?? "N/A",
+            rehire: "X",
+            effectiveDate: data.effectiveDate,
+            crmExtracted: "Done",
+            personSearch: "Rehire",
+            transaction: "N/A",
+            i9ProfileId: "N/A",
+          });
+          log.success(`Tracker updated: ${TRACKER_PATH}`);
+        } catch (trackerErr) {
+          const msg = trackerErr instanceof Error ? trackerErr.message : String(trackerErr);
+          log.error(`Tracker update failed (non-fatal): ${msg}`);
+        }
+
         // Leave browser open for manual review
         process.exit(1);
       }
 
-      log.success("No duplicate found -- proceeding with transaction");
+      log.success("No duplicate found -- proceeding with I-9");
 
-      // Step 3b: Create transaction
+      // --- Step 4: I9 Complete -- create employee record ---
+      let i9ProfileId = "N/A";
+      const i9Browser = await launchBrowser();
+      try {
+        log.step("Authenticating to I9 Complete...");
+        const i9Ok = await loginToI9(i9Browser.page);
+        if (!i9Ok) {
+          log.error("I9 Complete authentication failed");
+          process.exit(1);
+        }
+
+        const ssnForI9 = data.ssn?.replace(/-/g, "") ?? "";
+        const i9Result = await createI9Employee(i9Browser.page, {
+          firstName: data.firstName,
+          middleName: undefined,
+          lastName: data.lastName,
+          ssn: ssnForI9,
+          dob: data.dob ?? "",
+          email,
+          departmentNumber: data.departmentNumber ?? "000412",
+          startDate: data.effectiveDate,
+        });
+
+        if (i9Result.success && i9Result.profileId) {
+          i9ProfileId = i9Result.profileId;
+          log.success(`I-9 created -- Profile ID: ${i9ProfileId}`);
+        } else {
+          log.error(`I-9 creation failed: ${i9Result.error}`);
+          i9ProfileId = `FAILED: ${i9Result.error ?? "unknown"}`;
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        log.error(`I-9 workflow failed: ${msg}`);
+        i9ProfileId = `FAILED: ${msg}`;
+      }
+      // Leave I9 browser open for reuse
+
+      // --- Step 5: Create UCPath transaction ---
+      log.success("Proceeding with transaction");
+
+      // Step 5: Create transaction
       const plan = buildTransactionPlan(data, ucpathBrowser.page);
       log.step("Executing transaction plan...");
       await plan.execute();
 
       log.success("Transaction created successfully in UCPath");
-      // Do NOT close UCPath browser -- leave it open per user preference
+
+      // --- Update onboarding tracker ---
+      try {
+        await updateTracker(TRACKER_PATH, {
+          firstName: data.firstName,
+          lastName: data.lastName,
+          ssnMasked: maskSsn(data.ssn),
+          dob: data.dob ?? "N/A",
+          departmentNumber: data.departmentNumber ?? "N/A",
+          recruitmentNumber: data.recruitmentNumber ?? "N/A",
+          rehire: "",
+          effectiveDate: data.effectiveDate,
+          crmExtracted: "Done",
+          personSearch: "Done",
+          transaction: "Done",
+          i9ProfileId,
+        });
+        log.success(`Tracker updated: ${TRACKER_PATH}`);
+      } catch (trackerErr) {
+        const msg = trackerErr instanceof Error ? trackerErr.message : String(trackerErr);
+        log.error(`Tracker update failed (non-fatal): ${msg}`);
+      }
+
+      // Do NOT close browsers -- leave open per user preference
     } catch (error) {
       if (error instanceof TransactionError) {
         log.error(`Transaction failed at step: ${error.step ?? "unknown"}`);
@@ -352,89 +415,6 @@ program
         log.error(`Transaction failed: ${msg}`);
       }
       // Leave browser open for debugging even on failure
-      process.exit(1);
-    }
-  });
-
-program
-  .command("create-i9")
-  .description("Create I-9 employee record in I9 Complete")
-  .argument("<email>", "Employee email to extract data for")
-  .action(async (email: string) => {
-    try {
-      validateEnv();
-    } catch {
-      process.exit(1);
-    }
-
-    let data;
-
-    // --- Step 1: Extract data from ACT CRM ---
-    const crmBrowser = await launchBrowser();
-    try {
-      log.step("Authenticating to ACT CRM...");
-      const authOk = await loginToACTCrm(crmBrowser.page);
-      if (!authOk) {
-        log.error("ACT CRM authentication failed");
-        process.exit(1);
-      }
-
-      log.step("Searching for employee...");
-      await searchByEmail(crmBrowser.page, email);
-
-      log.step("Selecting latest result...");
-      await selectLatestResult(crmBrowser.page);
-
-      log.step("Navigating to UCPath Entry Sheet...");
-      await navigateToSection(crmBrowser.page, "UCPath Entry Sheet");
-
-      log.step("Extracting employee data...");
-      const rawData = await extractRawFields(crmBrowser.page);
-
-      log.step("Validating extracted data...");
-      data = validateEmployeeData(rawData);
-
-      log.success("Employee data extracted and validated");
-    } catch (error) {
-      if (error instanceof ExtractionError) {
-        log.error(error.message);
-      } else {
-        const msg = error instanceof Error ? error.message : String(error);
-        log.error(`Extraction failed: ${msg}`);
-      }
-      process.exit(1);
-    }
-
-    // --- Step 2: Create I-9 record ---
-    const i9Browser = await launchBrowser();
-    try {
-      log.step("Authenticating to I9 Complete...");
-      const i9Ok = await loginToI9(i9Browser.page);
-      if (!i9Ok) {
-        log.error("I9 Complete authentication failed");
-        process.exit(1);
-      }
-
-      const ssnDigits = data.ssn?.replace(/-/g, "") ?? "";
-      const result = await createI9Employee(i9Browser.page, {
-        firstName: data.firstName,
-        lastName: data.lastName,
-        ssn: ssnDigits,
-        dob: data.dob ?? "",
-        email,
-        departmentNumber: "000412", // TODO: Phase 3.1 will extract this from CRM
-        startDate: data.effectiveDate,
-      });
-
-      if (!result.success) {
-        log.error(`I-9 creation failed: ${result.error}`);
-        process.exit(1);
-      }
-
-      log.success(`I-9 created — Profile ID: ${result.profileId}`);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      log.error(`I-9 workflow failed: ${msg}`);
       process.exit(1);
     }
   });

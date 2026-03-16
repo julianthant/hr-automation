@@ -21,12 +21,19 @@ async function ss(page: Page, name: string): Promise<void> {
  * @returns true if authentication succeeded, false otherwise
  */
 export async function loginToUCPath(page: Page): Promise<boolean> {
+  // Track every navigation for debugging the redirect chain
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) {
+      log.step(`[NAV] ${frame.url()}`);
+    }
+  });
+
   log.step("Navigating to UCPath...");
   await page.goto("https://ucpath.ucsd.edu", {
     waitUntil: "domcontentloaded",
     timeout: 15_000,
   });
-  log.step("Login page loaded");
+  log.step(`Login page loaded | URL: ${page.url()}`);
 
   // Click the "Log in to UCPath" button in the main banner
   // SELECTOR: adjusted after live testing -- button OR link
@@ -35,6 +42,7 @@ export async function loginToUCPath(page: Page): Promise<boolean> {
       page.getByRole("link", { name: /log in to ucpath/i }),
     );
   await loginButton.first().click({ timeout: 10_000 });
+  log.step(`After "Log in" click | URL: ${page.url()}`);
 
   // UC-wide identity provider discovery page -- select UCSD campus
   log.step("Selecting UC San Diego...");
@@ -42,13 +50,14 @@ export async function loginToUCPath(page: Page): Promise<boolean> {
     name: "University of California, San Diego",
   });
   await campusLink.click({ timeout: 10_000 });
+  log.step(`After campus select | URL: ${page.url()}`);
 
   // Wait for UCSD SSO login page (a5.ucsd.edu/tritON)
   await page.waitForURL(
     (url) => url.hostname.includes("a5.ucsd.edu"),
     { timeout: 15_000 },
   );
-  log.step("SSO login page loaded");
+  log.step(`SSO login page loaded | URL: ${page.url()}`);
 
   // Get credentials from validated env
   const { userId, password } = validateEnv();
@@ -79,12 +88,9 @@ export async function loginToUCPath(page: Page): Promise<boolean> {
   // which also has role="button" and contains "Login" in its text)
   // SELECTOR: adjusted after live testing -- target by name attribute to avoid nav link match
   await page.locator('button[name="_eventId_proceed"]').click({ timeout: 5_000 });
+  log.step(`After login click | URL: ${page.url()}`);
 
-  // After clicking LOGIN, the SSO may:
-  //   a) Show a Duo iframe on the same page
-  //   b) Redirect to duosecurity.com (Duo Universal Prompt)
-  //   c) Redirect directly to the app if Duo is remembered
-  // Wait for either Duo challenge or the target app URL
+  // Wait for Duo approval
   log.waiting("Waiting for Duo approval (approve on your phone)...");
   let approved = await waitForDuoApproval(
     page,
@@ -106,6 +112,33 @@ export async function loginToUCPath(page: Page): Promise<boolean> {
     return false;
   }
 
+  log.step(`Duo approved | URL: ${page.url()}`);
+
+  // After Duo, wait for redirects to settle.
+  log.step("Waiting for post-Duo redirects to settle...");
+  await page.waitForTimeout(5_000);
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  log.step(`Post-Duo URL: ${page.url()}`);
+
+  // If redirected back to the campus discovery page, re-select UCSD.
+  // Check by URL (not by link text -- the main page also has UC San Diego links).
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (page.url().includes("ucpathdiscovery/disco")) {
+      log.step(`Campus discovery page detected (attempt ${attempt + 1}) -- re-selecting UC San Diego...`);
+      const campusLinkRetry = page.getByRole("link", {
+        name: "University of California, San Diego",
+      });
+      await campusLinkRetry.click({ timeout: 10_000 });
+      log.step(`After re-selection click | URL: ${page.url()}`);
+      await page.waitForTimeout(5_000);
+      await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+      log.step(`After re-selection settle | URL: ${page.url()}`);
+    } else {
+      break;
+    }
+  }
+
+  log.step(`Final auth URL: ${page.url()}`);
   log.success("UCPath authenticated");
   return true;
 }
@@ -207,33 +240,47 @@ export async function loginToACTCrm(page: Page): Promise<boolean> {
   // Now wait for Duo approval -- user approves on their phone
   log.waiting("Waiting for Duo approval (approve on your phone)...");
 
-  // After Duo approval, the page redirects to act-crm.my.site.com or crm.ucsd.edu
-  let approved = await waitForDuoApproval(
-    page,
-    "**/*crm*/**",
-    60_000,
-  );
+  // After Duo approval, the page redirects to act-crm.my.site.com or crm.ucsd.edu.
+  // Poll in 15s intervals so we can detect the "Yes, this is my device" button
+  // quickly instead of waiting the full timeout.
+  let approved = false;
+  const MAX_ATTEMPTS = 4; // 4 × 15s = 60s total
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    approved = await waitForDuoApproval(page, "**/*crm*/**", 15_000);
+    if (approved) break;
 
-  if (!approved) {
-    await ss(page, "05-duo-timeout-1");
-    log.waiting("Still waiting for Duo approval...");
-    approved = await waitForDuoApproval(
-      page,
-      "**/*crm*/**",
-      60_000,
-    );
-  }
+    // Check if "Yes, this is my device" appeared (Duo approved but not yet redirected)
+    try {
+      const yesBtn = page.getByRole("button", { name: /yes/i })
+        .or(page.locator('button:has-text("Yes")'))
+        .or(page.locator('input[value="Yes"]'));
+      const yesVisible = await yesBtn.first().isVisible({ timeout: 2_000 });
+      if (yesVisible) {
+        log.step("Clicking 'Yes, this is my device'...");
+        await yesBtn.first().click({ timeout: 5_000 });
+        await page.waitForTimeout(2_000);
+        // After clicking, wait for CRM redirect
+        approved = await waitForDuoApproval(page, "**/*crm*/**", 15_000);
+        if (approved) break;
+      }
+    } catch {
+      // No device confirmation screen
+    }
 
-  if (!approved) {
-    // Also check if we already made it to the target
+    // Check if we already made it to CRM
     if (page.url().includes("act-crm.my.site.com") && !page.url().includes("login")) {
       log.step("Already on ACT CRM -- Duo may have been auto-approved");
       approved = true;
+      break;
+    }
+
+    if (attempt < MAX_ATTEMPTS) {
+      log.waiting(`Still waiting for Duo approval (attempt ${attempt}/${MAX_ATTEMPTS})...`);
     }
   }
 
   if (!approved) {
-    await ss(page, "06-duo-timeout-2");
+    await ss(page, "06-duo-timeout");
     log.error("ACT CRM Duo approval timed out");
     return false;
   }
