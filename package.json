@@ -9,6 +9,7 @@
     "extract": "tsx --env-file=.env src/cli.ts extract",
     "start-onboarding": "tsx --env-file=.env src/cli.ts start-onboarding",
     "start-onboarding:dry": "tsx --env-file=.env src/cli.ts start-onboarding --dry-run",
+    "start-onboarding:batch": "tsx --env-file=.env src/cli.ts start-onboarding --parallel",
     "typecheck": "tsc --noEmit",
     "typecheck:all": "tsc --noEmit -p tsconfig.test.json",
     "test": "tsx --test tests/**/*.test.ts"
