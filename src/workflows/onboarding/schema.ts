@@ -20,6 +20,15 @@ export const EmployeeDataSchema = z.object({
     /^\$/,
     "Wage must start with $ (e.g., $17.75 per hour)",
   ),
+  dob: z.string().regex(
+    /^\d{2}\/\d{2}\/\d{4}$/,
+    "Date of birth must be in MM/DD/YYYY format",
+  ).optional(),
+  departmentNumber: z.string().regex(
+    /^\d{4,6}$/,
+    "Department number must be 4-6 digits",
+  ).optional(),
+  recruitmentNumber: z.string().min(1).optional(),
   effectiveDate: z.string().regex(
     /^\d{2}\/\d{2}\/\d{4}$/,
     "Effective date must be in MM/DD/YYYY format",
