@@ -5,10 +5,11 @@ export const EmployeeDataSchema = z.object({
   positionNumber: z.string().min(1, "Position number is required"),
   firstName: z.string().min(1, "First name is required"),
   lastName: z.string().min(1, "Last name is required"),
+  middleName: z.string().optional(),
   ssn: z.string().regex(
     /^\d{3}-\d{2}-\d{4}$/,
     "SSN must be in XXX-XX-XXXX format",
-  ).optional(),
+  ).optional().or(z.literal("")),
   address: z.string().min(1, "Address is required"),
   city: z.string().min(1, "City is required"),
   state: z.string().length(2, "State must be a 2-letter code (e.g., CA)"),
@@ -24,11 +25,14 @@ export const EmployeeDataSchema = z.object({
     /^\d{2}\/\d{2}\/\d{4}$/,
     "Date of birth must be in MM/DD/YYYY format",
   ).optional(),
+  phone: z.string().min(1).optional(),
+  email: z.string().email().optional(),
   departmentNumber: z.string().regex(
     /^\d{4,6}$/,
     "Department number must be 4-6 digits",
   ).optional(),
   recruitmentNumber: z.string().min(1).optional(),
+  appointment: z.string().min(1).optional(),
   effectiveDate: z.string().regex(
     /^\d{2}\/\d{2}\/\d{4}$/,
     "Effective date must be in MM/DD/YYYY format",

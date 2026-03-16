@@ -1,53 +1,185 @@
 import type { Page } from "playwright";
 import { ActionPlan } from "../../ucpath/action-plan.js";
 import {
+  TEMPLATE_ID,
+  REASON_CODE,
+  COMP_RATE_CODE,
+  JOB_END_DATE,
+} from "./config.js";
+import {
   navigateToSmartHR,
   getContentFrame,
-} from "../../ucpath/navigate.js";
-import {
+  clickSmartHRTransactions,
   selectTemplate,
   enterEffectiveDate,
   clickCreateTransaction,
-} from "../../ucpath/transaction.js";
+  selectReasonCode,
+  fillPersonalData,
+  clickJobDataTab,
+  fillJobData,
+  clickEarnsDistTab,
+  clickEmployeeExperienceTab,
+  clickSaveAndSubmit,
+  parsePayRate,
+  buildCommentsText,
+} from "../../ucpath/index.js";
+import type { PersonalDataInput, JobDataInput } from "../../ucpath/index.js";
 import type { EmployeeData } from "./schema.js";
 
 /**
- * Build an ActionPlan for creating a UC_FULL_HIRE transaction in UCPath.
+ * Build an ActionPlan for the full UC_FULL_HIRE Smart HR Transaction.
  *
- * Composes navigation, template selection, date entry, and transaction creation
- * into a reviewable, executable plan.
- *
- * @param data - Validated employee data from ACT CRM extraction
- * @param page - Playwright page instance (authenticated to UCPath)
- * @returns ActionPlan ready for preview() or execute()
+ * Steps:
+ *  1.  Navigate to HR Tasks sidebar
+ *  2.  Click Smart HR Templates → Smart HR Transactions
+ *  3.  Select UC_FULL_HIRE template
+ *  4.  Enter effective date
+ *  5.  Click Create Transaction
+ *  6.  Select reason code: Hire - No Prior UC Affiliation
+ *  7.  Fill personal data (name, DOB, SSN, address, phone, email, profile ID)
+ *  8.  Fill comments + initiator comments (persists across all tabs)
+ *  9.  Click Job Data tab
+ *  10. Fill job data (position, classification, comp rate, end date)
+ *  11. Click Earns Dist tab
+ *  12. Click Employee Experience tab
+ *  13. Save and Submit
  */
 export function buildTransactionPlan(
   data: EmployeeData,
   page: Page,
+  i9ProfileId?: string,
 ): ActionPlan {
   const plan = new ActionPlan();
 
+  // Step 1: Navigate to HR Tasks
   plan.add(
-    "Navigate to Smart HR Transactions",
+    "Navigate to Smart HR page",
     () => navigateToSmartHR(page),
   );
 
+  // Step 2: Sidebar → Smart HR Templates → Smart HR Transactions
   plan.add(
-    "Select template UC_FULL_HIRE",
-    () => selectTemplate(getContentFrame(page), "UC_FULL_HIRE"),
+    "Click Smart HR Templates → Smart HR Transactions",
+    () => clickSmartHRTransactions(page),
   );
 
+  // Step 3: Select template
+  plan.add(
+    `Select template ${TEMPLATE_ID}`,
+    () => selectTemplate(getContentFrame(page), TEMPLATE_ID),
+  );
+
+  // Step 4: Enter effective date
   plan.add(
     `Enter effective date: ${data.effectiveDate}`,
     () => enterEffectiveDate(getContentFrame(page), data.effectiveDate),
   );
 
+  // Step 5: Create Transaction
   plan.add(
     "Click Create Transaction",
     async () => {
-      const result = await clickCreateTransaction(getContentFrame(page));
+      const result = await clickCreateTransaction(page, getContentFrame(page));
       if (!result.success) {
         throw new Error(result.error ?? "Transaction creation failed");
+      }
+    },
+  );
+
+  // Step 6: Reason code
+  plan.add(
+    `Select reason: ${REASON_CODE}`,
+    () => selectReasonCode(page, getContentFrame(page), REASON_CODE),
+  );
+
+  // Step 7: Fill personal data
+  // data.ssn may be undefined or "" (both mean no SSN provided)
+  const ssnDigits = data.ssn ? data.ssn.replace(/-/g, "") : undefined;
+  const personalData: PersonalDataInput = {
+    firstName: data.firstName,
+    lastName: data.lastName,
+    middleName: data.middleName,
+    dob: data.dob ?? "",
+    ssn: ssnDigits,
+    address: data.address,
+    city: data.city,
+    state: data.state,
+    postalCode: data.postalCode,
+    phone: data.phone,
+    email: data.email,
+    i9ProfileId,
+  };
+
+  plan.add(
+    "Fill personal data (name, DOB, SSN, address, phone, email, profile ID)",
+    () => fillPersonalData(page, getContentFrame(page), personalData),
+  );
+
+  // Step 8: Comments on Personal Data page
+  // data.ssn may be undefined or "" (both mean no SSN provided)
+  const hasSsn = Boolean(data.ssn);
+  const commentsText = buildCommentsText(
+    data.effectiveDate,
+    data.recruitmentNumber ?? "N/A",
+    hasSsn,
+  );
+
+  plan.add(
+    "Fill comments",
+    async () => {
+      const frame = getContentFrame(page);
+      await frame.locator("#HR_TBH_WRK_DESCRLONG_NOTES").fill(commentsText, { timeout: 10_000 });
+    },
+  );
+
+  // Step 9: Job Data tab
+  plan.add(
+    "Click Job Data tab",
+    () => clickJobDataTab(page, getContentFrame(page)),
+  );
+
+  // Step 10: Fill job data
+  const jobData: JobDataInput = {
+    positionNumber: data.positionNumber,
+    employeeClassification: data.appointment ?? "5",
+    compRateCode: COMP_RATE_CODE,
+    compensationRate: parsePayRate(data.wage),
+    expectedJobEndDate: JOB_END_DATE,
+  };
+
+  plan.add(
+    "Fill job data (position, classification, comp rate, end date)",
+    () => fillJobData(page, getContentFrame(page), jobData),
+  );
+
+  // Step 11: Earns Dist tab
+  plan.add(
+    "Click Earns Dist tab",
+    () => clickEarnsDistTab(page, getContentFrame(page)),
+  );
+
+  // Step 12: Employee Experience tab
+  plan.add(
+    "Click Employee Experience tab",
+    () => clickEmployeeExperienceTab(page, getContentFrame(page)),
+  );
+
+  // Step 13: Initiator comments (fill on last tab before submit)
+  plan.add(
+    "Fill initiator comments",
+    async () => {
+      const frame = getContentFrame(page);
+      await frame.locator("#UC_SS_TRANSACT_COMMENTS").fill(commentsText, { timeout: 10_000 });
+    },
+  );
+
+  // Step 14: Save and Submit
+  plan.add(
+    "Save and Submit transaction",
+    async () => {
+      const result = await clickSaveAndSubmit(page, getContentFrame(page));
+      if (!result.success) {
+        throw new Error(result.error ?? "Save and Submit failed");
       }
     },
   );
