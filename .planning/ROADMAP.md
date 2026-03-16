@@ -93,7 +93,7 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 03.1-01-PLAN.md -- Install ExcelJS, extend EmployeeData schema with dept# and recruitment#, create tracker module with unit tests
+- [x] 03.1-01-PLAN.md -- Install ExcelJS, extend EmployeeData schema with dept# and recruitment#, create tracker module with unit tests
 - [ ] 03.1-02-PLAN.md -- CRM record page extraction, tracker CLI integration, and live selector discovery
 
 ### Phase 3.2: I9 Tracker Workflow (INSERTED)
@@ -142,7 +142,7 @@ Phases execute in numeric order: 1 → 01.1 → 2 → 3 → 3.1 → 3.2 → 4 �
 | 01.1. Modular Codebase Restructure | 2/2 | Complete | 2026-03-14 |
 | 2. Data Extraction from ACT CRM | 2/2 | Complete | 2026-03-14 |
 | 3. UCPath Person Search | 3/3 | Complete | 2026-03-15 |
-| 3.1. CRM Additional Fields + Tracker | 0/2 | Planned | - |
+| 3.1. CRM Additional Fields + Tracker | 1/2 | In Progress | - |
 | 3.2. I9 Tracker Workflow | 0/0 | Not started | - |
 | 4. UCPath Smart HR Transaction | 0/0 | Not started | - |
 | 5. Batch Processing and CLI | 0/0 | Not started | - |

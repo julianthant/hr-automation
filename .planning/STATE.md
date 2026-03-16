@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-02-PLAN.md
-last_updated: "2026-03-14T21:04:59.103Z"
-last_activity: 2026-03-14 -- Plan 03-02 executed (UCPath navigation, transaction entry, CLI command)
+stopped_at: null
+last_updated: "2026-03-16T02:04:13.000Z"
+last_activity: 2026-03-16 -- Phase 3.1 Plan 01 complete (schema extension + tracker module)
 progress:
-  total_phases: 5
-  completed_phases: 3
-  total_plans: 8
-  completed_plans: 8
-  percent: 100
+  total_phases: 8
+  completed_phases: 4
+  total_plans: 10
+  completed_plans: 9
+  percent: 55
 ---
 
 # Project State
@@ -20,78 +20,57 @@ progress:
 
 See: .planning/PROJECT.md (updated 2026-03-13)
 
-**Core value:** Reliably transfer employee onboarding data from ACT CRM portal into UCPath's UC_FULL_HIRE template without manual copy-pasting
-**Current focus:** Phase 03 in progress -- UCPath navigation, transaction entry pipeline, and CLI command complete
+**Core value:** Automate the full employee onboarding pipeline — CRM extraction, UCPath person search, I9 tracking, transaction creation — without manual copy-pasting
+**Current focus:** Phase 3.1 in progress. Plan 01 complete (schema + tracker module). Plan 02 next (CRM extraction + CLI integration).
 
 ## Current Position
 
-Phase: 03 of 5 (UCPath Transaction Entry)
-Plan: 2 of 3 in current phase (2 complete)
-Status: In Progress
-Last activity: 2026-03-14 -- Plan 03-02 executed (UCPath navigation, transaction entry, CLI command)
+Phase: 3.1 of 8 (CRM Additional Fields + Tracker)
+Plan: 1 of 2 complete
+Status: Executing
+Last activity: 2026-03-16 -- Phase 3.1 Plan 01 complete (schema extension, tracker module, ExcelJS)
 
-Progress: [██████████] 100%
+Progress: [███████████░░░░░░░░░] 55%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5
-- Average duration: 13min
-- Total execution time: 1.0 hours
+- Total plans completed: 9
+- Average duration: ~9min
+- Total execution time: ~1.4 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-auth | 2/2 | 50min | 25min |
-| 02-extraction | 1/2 | 3min | 3min |
-
-**Recent Trend:**
-- Last 5 plans: 02-01 (3min), 01.1-01 (2min), 01.1-02 (3min), 03-01 (2min), 03-02 (3min)
-- Trend: Phase 03 executing rapidly
-
-*Updated after each plan completion*
-| Phase 01.1 P01 | 2min | 2 tasks | 8 files |
-| Phase 01.1 P02 | 3min | 3 tasks | 6 files |
-| Phase 03 P01 | 2min | 2 tasks | 5 files |
-| Phase 03 P02 | 3min | 2 tasks | 7 files |
+| 01.1-restructure | 2/2 | 5min | 2.5min |
+| 02-extraction | 2/2 | ~15min | ~7min |
+| 03-ucpath-search | 3/3 | ~15min | ~5min |
+| 03.1-tracker | 1/2 | 6min | 6min |
 
 ## Accumulated Context
 
 ### Decisions
 
-Decisions are logged in PROJECT.md Key Decisions table.
-Recent decisions affecting current work:
-
-- [Roadmap]: 4 phases derived from requirement categories following the pipeline dependency chain (auth -> extract -> enter -> batch)
-- [Roadmap]: Dry-run mode assigned to Phase 3 (alongside entry) per research recommendation -- UCPath transactions have no undo
-- [01-01]: validateEnv throws EnvValidationError instead of process.exit(1) for testability
-- [01-01]: Fixed plan typo ucpiath -> ucpath in AuthResult interface
-- [01-01]: Added !.env.example gitignore negation to prevent exclusion by .env.* glob
-- [01-02]: Separate browser contexts for UCPath and ACT CRM -- UCPath cookies conflict with ACT CRM SSO flow
-- [01-02]: Duo timeout increased to 60s from planned 15s -- real-world approval takes longer
-- [01-02]: Session validator detects a5.ucsd.edu (actual UCSD SSO hostname) not login.ucsd.edu
-- [01-02]: UCPath session check must use actual app URL, not root domain, for reliable redirect detection
-- [02-01]: Zod 4 imported via 'zod/v4' subpath for correct ESM + TypeScript integration
-- [02-01]: effectiveDate uses min(1) not date regex -- format will be tightened after live discovery in Plan 02-02
-- [02-01]: FIELD_MAP pattern with label variants for flexible Salesforce DOM extraction
-- [Phase 01.1]: ExtractionError is single source of truth in crm/types.ts, imported by both crm/ and workflows/
-- [Phase 01.1]: navigateToSection uses RegExp for case-insensitive section name matching
-- [Phase 01.1]: Tests live in tests/unit/ outside src/ with relative imports back to src/
-- [Phase 01.1]: tsconfig.test.json extends base tsconfig with rootDir . for combined src + tests type checking
-- [Phase 01.1]: Dual typecheck scripts -- typecheck (src only) and typecheck:all (src + tests)
-- [03-01]: TransactionError follows ExtractionError pattern from crm/types.ts for consistency
-- [03-01]: ActionPlan uses log.step() for all output for uniform picocolors formatting
-- [03-01]: PlannedAction stores step number at add-time (incrementing counter)
-- [03-02]: navigateToSmartHR uses URL-first strategy per user feedback_url_params.md, with menu fallback
-- [03-02]: PeopleSoft processing wait catches errors silently since spinner may not appear
-- [03-02]: selectTemplate tries native <select> first then PeopleSoft lookup dialog
-- [03-02]: Dry-run uses null-cast page since preview() never calls execute callbacks
-- [03-02]: ACT CRM browser closed after extraction, UCPath browser left open per user preference
+- [Phase 3.1]: ExcelJS loses column key mapping after readFile -- must re-apply keys before addRow(object) to avoid silent data loss
+- [Phase 3.1]: parseDepartmentNumber uses last-match strategy for parenthesized 4-6 digit numbers to handle edge cases
+- [Phase 3]: SMART_HR_URL must use ucphrprdpub.universityofcalifornia.edu domain (same as auth session), NOT ucpath.universityofcalifornia.edu (triggers new SSO)
+- [Phase 3]: PeopleSoft iframe is #main_target_win0 (NOT #ptifrmtgtframe as documented)
+- [Phase 3]: Person search fields use generic IDs: DERIVED_HCR_SM_SM_CHAR_INPUT$0 (NationalId), $1 (FirstName), $2 (LastName), DERIVED_HCR_SM_SM_DATE_INPUT$3 (DOB)
+- [Phase 3]: PeopleSoft modals must be dismissed via page.frames().evaluate(#ICOK.click()) — Playwright locator.click() cannot bypass modal mask
+- [Phase 3]: Viewport must be 1920x1080 to prevent PeopleSoft sidebar from covering buttons
+- [Phase 3]: "Yes, this is my device" Duo confirmation appears after CRM Duo (not UCPath) — must click between waitForDuoApproval attempts
+- [Phase 3]: Browsers must stay open for reuse across multiple employees (no close after extraction or search)
+- [Phase 3]: DOB added to EmployeeData schema (optional, MM/DD/YYYY)
 
 ### Roadmap Evolution
 
-- Phase 01.1 inserted after Phase 1: Modular codebase restructure with shared CRM and UCPath modules and test organization (URGENT)
+- Phase 01.1 inserted after Phase 1: Modular codebase restructure
+- Phase 3 scope narrowed to person search only (Smart HR Templates moved to Phase 4)
+- Phase 3.1 inserted: CRM additional fields (dept #, recruitment #) + onboarding tracker spreadsheet
+- Phase 3.2 inserted: I9 Tracker workflow (stse.i9complete.com)
+- Original Phase 4 (batch) renumbered to Phase 5
 
 ### Pending Todos
 
@@ -99,11 +78,11 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 1]: RESOLVED -- Cross-domain SSO requires separate Duo prompts per system (UCPath and ACT CRM each trigger their own Duo push)
-- [Phase 2]: ACT CRM portal DOM structure and UCPath field IDs cannot be determined without live authenticated sessions -- selector discovery required during planning
+- [Phase 3.1]: Need to discover CRM selectors for department text and recruitment number fields
+- [Phase 3.2]: I9 Complete auth credentials not yet in .env — separate email/password (not SSO)
 
 ## Session Continuity
 
-Last session: 2026-03-14T21:04:59.103Z
-Stopped at: Completed 03-02-PLAN.md
+Last session: 2026-03-16
+Stopped at: Completed 03.1-01-PLAN.md (schema + tracker module)
 Resume file: None
