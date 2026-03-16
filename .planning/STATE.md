@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: null
-last_updated: "2026-03-16T02:04:13.000Z"
-last_activity: 2026-03-16 -- Phase 3.1 Plan 01 complete (schema extension + tracker module)
+stopped_at: Phases 3.1 and 3.2 complete. Next up: Phase 4 (UCPath Smart HR Transaction)
+last_updated: "2026-03-16"
+last_activity: 2026-03-16 -- Phases 3.1 and 3.2 complete (CRM fields, tracker, I9, person search fix)
 progress:
   total_phases: 8
-  completed_phases: 4
-  total_plans: 10
-  completed_plans: 9
-  percent: 55
+  completed_phases: 6
+  total_plans: 12
+  completed_plans: 12
+  percent: 75
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-13)
 
 **Core value:** Automate the full employee onboarding pipeline — CRM extraction, UCPath person search, I9 tracking, transaction creation — without manual copy-pasting
-**Current focus:** Phase 3.1 in progress. Plan 01 complete (schema + tracker module). Plan 02 next (CRM extraction + CLI integration).
+**Current focus:** Phases 3.1 and 3.2 complete. Next: Phase 4 (UCPath Smart HR Transaction Creation).
 
 ## Current Position
 
-Phase: 3.1 of 8 (CRM Additional Fields + Tracker)
-Plan: 1 of 2 complete
-Status: Executing
-Last activity: 2026-03-16 -- Phase 3.1 Plan 01 complete (schema extension, tracker module, ExcelJS)
+Phase: 4 of 8 (UCPath Smart HR Transaction Creation)
+Plan: 0 — not yet planned
+Status: Ready to plan
+Last activity: 2026-03-16 -- Phases 3.1 and 3.2 complete
 
-Progress: [███████████░░░░░░░░░] 55%
+Progress: [███████████████░░░░░] 75%
 
 ## Performance Metrics
 
@@ -47,7 +47,8 @@ Progress: [███████████░░░░░░░░░] 55%
 | 01.1-restructure | 2/2 | 5min | 2.5min |
 | 02-extraction | 2/2 | ~15min | ~7min |
 | 03-ucpath-search | 3/3 | ~15min | ~5min |
-| 03.1-tracker | 1/2 | 6min | 6min |
+| 03.1-tracker | 2/2 | ~15min | ~7min |
+| 03.2-i9 | - | - | - |
 
 ## Accumulated Context
 
@@ -78,11 +79,12 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 3.1]: Need to discover CRM selectors for department text and recruitment number fields
-- [Phase 3.2]: I9 Complete auth credentials not yet in .env — separate email/password (not SSO)
+- [Phase 3.1]: RESOLVED — CRM selectors verified live (dept# and recruitment# extract correctly)
+- [Phase 3.1]: Person search determination: dialog after Search = new hire, results table = rehire
+- [Phase 3.1]: Duo polling changed to 15s intervals for faster "Yes, this is my device" detection
 
 ## Session Continuity
 
 Last session: 2026-03-16
-Stopped at: Completed 03.1-01-PLAN.md (schema + tracker module)
+Stopped at: Phases 3.1 and 3.2 complete. Next: Phase 4
 Resume file: None
