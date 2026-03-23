@@ -7,8 +7,8 @@ import { Mutex } from "async-mutex";
 import { launchBrowser } from "../../browser/launch.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
-import { updateTracker } from "../../tracker/index.js";
-import type { TrackerRow } from "../../tracker/index.js";
+import { updateOnboardingTracker as updateTracker } from "./tracker.js";
+import type { OnboardingTrackerRow as TrackerRow } from "./tracker.js";
 import { runOnboarding } from "./workflow.js";
 import type { OnboardingOptions } from "./workflow.js";
 

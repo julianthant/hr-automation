@@ -1,9 +1,10 @@
 import type { Page, FrameLocator } from "playwright";
 import { log } from "../utils/log.js";
+import { UCPATH_SMART_HR_URL } from "../config.js";
+import { errorMessage } from "../utils/errors.js";
 
 // SELECTOR: verified v1.2 -- must use ucphrprdpub domain (same as auth session), not ucpath domain
-const SMART_HR_URL =
-  "https://ucphrprdpub.universityofcalifornia.edu/psc/ucphrprd/EMPLOYEE/HRMS/c/NUI_FRAMEWORK.PT_AGSTARTPAGE_NUI.GBL?CONTEXTIDPARAMS=TEMPLATE_ID%3aPTPPNAVCOL&scname=ADMN_UC_ADMIN_LOC_HIRE_NAVCOLL&PanelCollapsible=Y&PTPPB_GROUPLET_ID=UC_HIRE_TASKS_TILE_FL&CRefName=UC_HIRE_TASKS_TILE_FL&AJAXTRANSFER=Y";
+const SMART_HR_URL = UCPATH_SMART_HR_URL;
 
 /**
  * Returns the PeopleSoft content iframe FrameLocator.
@@ -200,8 +201,7 @@ export async function navigateToSmartHR(page: Page): Promise<void> {
     log.success("Smart HR Transactions page loaded via direct URL");
     return;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log.step(`Direct URL navigation failed: ${msg}`);
+    log.step(`Direct URL navigation failed: ${errorMessage(err)}`);
     log.step("Falling back to menu navigation...");
   }
 

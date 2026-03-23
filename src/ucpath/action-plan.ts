@@ -1,4 +1,5 @@
 import { log } from "../utils/log.js";
+import { errorMessage } from "../utils/errors.js";
 import type { PlannedAction } from "./types.js";
 import { TransactionError } from "./types.js";
 
@@ -26,8 +27,7 @@ export class ActionPlan {
       try {
         await action.execute();
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        throw new TransactionError(message, action.description);
+        throw new TransactionError(errorMessage(err), action.description);
       }
     }
   }

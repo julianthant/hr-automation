@@ -1,13 +1,14 @@
 import type { Page } from "playwright";
 import { log } from "../utils/log.js";
 import { ExtractionError } from "./types.js";
+import { CRM_SEARCH_URL } from "../config.js";
 
 /**
  * Search results page -- accepts email as query param.
  * Discovered from live testing: navigating directly via URL params
  * is faster and more reliable than clicking the search toggle UI.
  */
-const SEARCH_URL = "https://act-crm.my.site.com/hr/ONB_SearchOnboardings";
+const SEARCH_URL = CRM_SEARCH_URL;
 
 /**
  * Search for an employee by email on the ACT CRM onboarding portal.

@@ -2,7 +2,6 @@ import type { Page } from "playwright";
 import { launchBrowser } from "../../browser/launch.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
-import { TRACKER_PATH } from "../../config.js";
 import { loginToUCPath, loginToACTCrm } from "../../auth/login.js";
 import {
   searchByEmail,
@@ -13,10 +12,11 @@ import {
 import { TransactionError } from "../../ucpath/types.js";
 import { searchPerson } from "../../ucpath/navigate.js";
 import {
-  updateTracker as defaultUpdateTracker,
+  updateOnboardingTracker as defaultUpdateTracker,
   buildTrackerRow,
-} from "../../tracker/index.js";
-import type { TrackerRow } from "../../tracker/index.js";
+  TRACKER_PATH,
+} from "./tracker.js";
+import type { OnboardingTrackerRow as TrackerRow } from "./tracker.js";
 import {
   extractRawFields,
   extractRecordPageFields,

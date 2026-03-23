@@ -1,14 +1,13 @@
 import type { Page } from "playwright";
 import { log } from "../utils/log.js";
+import { CRM_SECTION_URLS } from "../config.js";
 
 /**
  * SELECTOR: adjusted from live testing -- known section URL mappings.
  * The onboarding record ID from the ViewOnboarding URL can be reused
  * to navigate directly via URL params instead of clicking UI buttons.
  */
-const SECTION_URLS: Record<string, string> = {
-  "UCPath Entry Sheet": "https://act-crm.my.site.com/hr/ONB_PPSEntrySheet",
-};
+const SECTION_URLS = CRM_SECTION_URLS;
 
 /**
  * Navigate from an employee record page to a named section.

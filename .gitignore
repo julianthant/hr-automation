@@ -23,6 +23,15 @@ node_modules/
 # Auth session state
 .auth/
 
+# Claude Code
+.claude/
+
+# Playwright CLI
+.playwright-cli/
+
+# Excel tracking files
+*.xlsx
+
 # OS
 .DS_Store
 Thumbs.db
