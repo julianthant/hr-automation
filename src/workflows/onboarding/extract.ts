@@ -16,6 +16,7 @@ const FIELD_MAP: Record<string, string[]> = {
   positionNumber: ["Position Number", "Position #", "Position No"],
   firstName: ["First Name", "Legal First Name"],
   lastName: ["Last Name", "Legal Last Name"],
+  middleName: ["Middle Name", "Middle Initial"],
   ssn: ["SSN (National ID)", "SSN", "Social Security Number"],
   address: ["Address Line 1", "Address", "Street Address"],
   city: ["City"],
@@ -23,6 +24,9 @@ const FIELD_MAP: Record<string, string[]> = {
   postalCode: ["Postal Code", "Zip Code", "ZIP"],
   wage: ["Compensation rate", "Compensation Rate", "Wage", "Pay Rate"],
   dob: ["Date of Birth", "DOB", "Birth Date"],
+  phone: ["Cell Phone", "Mobile Phone", "Phone", "Phone Number"],
+  email: ["Email", "Email Address", "Personal Email"],
+  appointment: ["Appointment", "Appointment Number", "Appt"],
   effectiveDate: [
     "First Day of Service (Effective Date)",
     "First Day of Service",
@@ -49,6 +53,12 @@ export async function extractRawFields(
     for (const label of labels) {
       value = await extractField(page, label);
       if (value) break;
+    }
+
+    // Appointment: extract just the number (e.g. "Casual/Restricted 5" → "5")
+    if (field === "appointment" && value) {
+      const numMatch = value.match(/(\d+)/);
+      value = numMatch?.[1] ?? value;
     }
 
     raw[field] = value;

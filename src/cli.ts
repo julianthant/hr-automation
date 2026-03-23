@@ -6,6 +6,7 @@ import { launchBrowser } from "./browser/launch.js";
 import { loginToUCPath, loginToACTCrm } from "./auth/login.js";
 import type { AuthResult } from "./auth/types.js";
 import { runOnboarding, runParallel } from "./workflows/onboarding/index.js";
+import { runWorkStudy, WorkStudyInputSchema } from "./workflows/work-study/index.js";
 
 const program = new Command();
 
@@ -108,6 +109,30 @@ program
     } else {
       await runOnboarding(email!, { dryRun: options.dryRun });
     }
+  });
+
+// ─── work-study ───
+
+program
+  .command("work-study")
+  .description("Work study: update position pool via PayPath Actions")
+  .argument("<emplId>", "Employee ID (e.g. 10862930)")
+  .argument("<effectiveDate>", "Effective date in MM/DD/YYYY format")
+  .option("--dry-run", "Preview actions without submitting")
+  .action(async (emplId: string, effectiveDate: string, options: { dryRun?: boolean }) => {
+    try {
+      validateEnv();
+    } catch {
+      process.exit(1);
+    }
+
+    const parsed = WorkStudyInputSchema.safeParse({ emplId, effectiveDate });
+    if (!parsed.success) {
+      log.error(`Invalid input: ${parsed.error.issues.map((i) => i.message).join(", ")}`);
+      process.exit(1);
+    }
+
+    await runWorkStudy(parsed.data, { dryRun: options.dryRun });
   });
 
 program.parse();

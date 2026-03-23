@@ -5,14 +5,14 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import ExcelJS from "exceljs";
+import { parseDepartmentNumber } from "../../src/tracker/index.js";
 import {
-  parseDepartmentNumber,
-  updateTracker,
-  TRACKER_COLUMNS,
-} from "../../src/tracker/index.js";
-import type { TrackerRow } from "../../src/tracker/index.js";
+  updateOnboardingTracker,
+  ONBOARDING_TRACKER_COLUMNS,
+} from "../../src/workflows/onboarding/tracker.js";
+import type { OnboardingTrackerRow } from "../../src/workflows/onboarding/tracker.js";
 
-const SAMPLE_ROW: TrackerRow = {
+const SAMPLE_ROW: OnboardingTrackerRow = {
   firstName: "Jane",
   middleName: "",
   lastName: "Doe",
@@ -63,7 +63,7 @@ describe("parseDepartmentNumber", () => {
   });
 });
 
-describe("updateTracker", () => {
+describe("updateOnboardingTracker", () => {
   const tempFiles: string[] = [];
 
   function tempPath(): string {
@@ -85,7 +85,7 @@ describe("updateTracker", () => {
 
   it("creates new .xlsx with today's date as sheet name and correct column headers", async () => {
     const filePath = tempPath();
-    await updateTracker(filePath, SAMPLE_ROW);
+    await updateOnboardingTracker(filePath, SAMPLE_ROW);
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(filePath);
@@ -95,7 +95,7 @@ describe("updateTracker", () => {
     assert.ok(sheet, `Sheet '${today}' should exist`);
 
     const headerRow = sheet.getRow(1);
-    const headers = TRACKER_COLUMNS.map((col) => col.header);
+    const headers = ONBOARDING_TRACKER_COLUMNS.map((col) => col.header);
     assert.equal(headers.length, 27, "Should have 27 columns defined");
 
     for (let i = 0; i < headers.length; i++) {
@@ -110,11 +110,11 @@ describe("updateTracker", () => {
   it("appends row to existing daily sheet without losing previous rows", async () => {
     const filePath = tempPath();
 
-    const row1: TrackerRow = { ...SAMPLE_ROW, firstName: "Alice" };
-    const row2: TrackerRow = { ...SAMPLE_ROW, firstName: "Bob" };
+    const row1: OnboardingTrackerRow = { ...SAMPLE_ROW, firstName: "Alice" };
+    const row2: OnboardingTrackerRow = { ...SAMPLE_ROW, firstName: "Bob" };
 
-    await updateTracker(filePath, row1);
-    await updateTracker(filePath, row2);
+    await updateOnboardingTracker(filePath, row1);
+    await updateOnboardingTracker(filePath, row2);
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(filePath);
@@ -130,7 +130,7 @@ describe("updateTracker", () => {
 
   it("stores full SSN without masking", async () => {
     const filePath = tempPath();
-    await updateTracker(filePath, SAMPLE_ROW);
+    await updateOnboardingTracker(filePath, SAMPLE_ROW);
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(filePath);

@@ -21,8 +21,3 @@ export const UCPATH_SMART_HR_URL =
 
 /** I9 Complete login URL. */
 export const I9_URL = "https://stse.i9complete.com";
-
-// --- Tracker ---
-
-/** Default path for the onboarding tracker spreadsheet. */
-export const TRACKER_PATH = "./src/workflows/onboarding/onboarding-tracker.xlsx";

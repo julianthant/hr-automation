@@ -10,6 +10,8 @@
     "start-onboarding": "tsx --env-file=.env src/cli.ts start-onboarding",
     "start-onboarding:dry": "tsx --env-file=.env src/cli.ts start-onboarding --dry-run",
     "start-onboarding:batch": "tsx --env-file=.env src/cli.ts start-onboarding --parallel",
+    "work-study": "tsx --env-file=.env src/cli.ts work-study",
+    "work-study:dry": "tsx --env-file=.env src/cli.ts work-study --dry-run",
     "typecheck": "tsc --noEmit",
     "typecheck:all": "tsc --noEmit -p tsconfig.test.json",
     "test": "tsx --test tests/**/*.test.ts"
