@@ -1,0 +1,538 @@
+import type { Page, Frame } from "playwright";
+import { join } from "path";
+import { readdir } from "fs/promises";
+import { log } from "../utils/log.js";
+import { ukgScreenshot } from "./navigate.js";
+
+/**
+ * Try multiple selectors across multiple frames. Returns true if one was clicked.
+ */
+async function clickInFrames(
+  page: Page,
+  selectors: string[],
+  frames?: Frame[],
+): Promise<boolean> {
+  const framesToSearch = frames ?? page.frames();
+  for (const sel of selectors) {
+    for (const f of framesToSearch) {
+      try {
+        const loc = f.locator(sel);
+        if (await loc.count() > 0) {
+          await loc.first().click();
+          log.step(`Clicked '${sel}' in '${f.name()}'`);
+          return true;
+        }
+      } catch {
+        // Frame detached or selector invalid
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * JS fallback: click any element matching exact text in any frame.
+ */
+async function jsClickText(
+  page: Page,
+  text: string,
+  frames?: Frame[],
+): Promise<boolean> {
+  const framesToSearch = frames ?? page.frames();
+  for (const f of framesToSearch) {
+    try {
+      const clicked = await f.evaluate((searchText: string) => {
+        for (const el of document.querySelectorAll("input, button, a, td, span, div, img")) {
+          const t = (
+            (el as HTMLInputElement).value ||
+            el.textContent ||
+            (el as HTMLImageElement).alt ||
+            (el as HTMLElement).title ||
+            ""
+          ).trim();
+          if (t === searchText) {
+            (el as HTMLElement).click();
+            return true;
+          }
+        }
+        return false;
+      }, text);
+      if (clicked) {
+        log.step(`JS clicked '${text}' in '${f.name()}'`);
+        return true;
+      }
+    } catch {
+      // Frame detached
+    }
+  }
+  return false;
+}
+
+/**
+ * Find and click the Run Report button using multiple strategies.
+ */
+async function clickRunReport(page: Page): Promise<boolean> {
+  const contentFrame = page.frame({ name: "khtmlReportingContentIframe" });
+
+  const selectors = [
+    "input[value='Run Report']",
+    "button:has-text('Run Report')",
+    "a:has-text('Run Report')",
+    "td:has-text('Run Report')",
+    "input[type='submit'][value*='Run']",
+    "input[type='button'][value*='Run']",
+  ];
+
+  const framesToSearch = [
+    ...(contentFrame ? [contentFrame] : []),
+    ...page.frames(),
+  ];
+
+  for (const sel of selectors) {
+    for (const f of framesToSearch) {
+      try {
+        const loc = f.locator(sel);
+        if (await loc.count() > 0) {
+          await loc.first().click();
+          log.step(`Clicked Run Report via '${sel}' in '${f.name()}'`);
+          return true;
+        }
+      } catch {
+        // Continue
+      }
+    }
+  }
+
+  // JS fallback across all frames
+  for (const f of framesToSearch) {
+    try {
+      const clicked = await f.evaluate(() => {
+        const tags = ["input", "button", "a", "td", "div", "span", "img"];
+        for (const tag of tags) {
+          for (const el of document.querySelectorAll(tag)) {
+            const text = (
+              (el as HTMLInputElement).value ||
+              el.textContent ||
+              (el as HTMLImageElement).alt ||
+              (el as HTMLElement).title ||
+              ""
+            ).trim();
+            if (text === "Run Report") {
+              (el as HTMLElement).click();
+              return `clicked ${tag}`;
+            }
+          }
+        }
+        return null;
+      });
+      if (clicked) {
+        log.step(`${clicked} (frame: ${f.name()})`);
+        return true;
+      }
+    } catch {
+      // Continue
+    }
+  }
+
+  log.error("Run Report NOT FOUND");
+  return false;
+}
+
+/**
+ * After Run Report: switch to Check Report Status tab,
+ * poll for completion via two-phase row tracking, then download.
+ */
+export async function waitForReportAndDownload(
+  page: Page,
+  employeeId: string,
+  employeeName: string | null,
+  reportsDir: string,
+): Promise<boolean> {
+  log.step(`[${employeeId}] Waiting for report to complete...`);
+
+  // Switch to CHECK REPORT STATUS tab
+  await clickInFrames(page, [
+    "text=CHECK REPORT STATUS",
+    "a:has-text('Check Report Status')",
+    "td:has-text('Check Report Status')",
+  ]) || await jsClickText(page, "CHECK REPORT STATUS");
+  await page.waitForTimeout(3_000);
+
+  // Phase 1: Refresh until we find a Running/Waiting row
+  let myRowId: string | null = null;
+  let statusFrame: Frame | null = null;
+
+  for (let attempt = 0; attempt < 15; attempt++) {
+    await clickInFrames(page, ["text=Refresh Status"]) ||
+      await jsClickText(page, "Refresh Status");
+    await page.waitForTimeout(3_000);
+
+    for (const f of page.frames()) {
+      try {
+        const result = await f.evaluate(() => {
+          const spans = document.querySelectorAll('span[id^="statusValue"]');
+          if (spans.length === 0) return null;
+          const span = spans[0];
+          const text = span.textContent?.trim() ?? "";
+          const tr = span.closest("tr");
+          const trId = tr ? tr.id : null;
+          return { status: text, trId };
+        });
+
+        if (result) {
+          const status = (result.status ?? "").toLowerCase();
+          log.step(
+            `[${employeeId}] Phase 1 attempt ${attempt + 1}: status='${result.status}' tr_id=${result.trId}`,
+          );
+
+          if (status === "running" || status === "waiting") {
+            myRowId = result.trId;
+            statusFrame = f;
+            log.step(`[${employeeId}] Row ${myRowId} appeared as Running/Waiting`);
+            break;
+          } else if (status === "complete" && attempt === 0) {
+            // First attempt and already complete — likely a stale report from
+            // a previous run. Keep refreshing to find our actual Running row.
+            break;
+          }
+          break;
+        }
+      } catch {
+        // Frame detached
+      }
+    }
+
+    if (myRowId) break;
+  }
+
+  // If we never saw Running, check if first row is Complete (fast report)
+  if (!myRowId) {
+    log.step(`[${employeeId}] Never saw Running row. Checking if first row is complete...`);
+    for (const f of page.frames()) {
+      try {
+        const result = await f.evaluate(() => {
+          const spans = document.querySelectorAll('span[id^="statusValue"]');
+          if (spans.length === 0) return null;
+          const span = spans[0];
+          const text = span.textContent?.trim() ?? "";
+          const tr = span.closest("tr");
+          return { status: text, trId: tr ? tr.id : null };
+        });
+        if (result && result.status.toLowerCase() === "complete") {
+          myRowId = result.trId;
+          statusFrame = f;
+          log.step(`[${employeeId}] Assuming first Complete row ${myRowId} is ours`);
+          break;
+        }
+      } catch {
+        // Continue
+      }
+    }
+  }
+
+  if (!myRowId) {
+    log.error(`[${employeeId}] Could not identify report row after Phase 1`);
+    return false;
+  }
+
+  // Phase 2: Poll our specific row by ID until Complete
+  for (let attempt = 0; attempt < 2; attempt++) {
+    for (const f of page.frames()) {
+      try {
+        const result = await f.evaluate((rowId: string) => {
+          const span = document.getElementById("statusValue" + rowId);
+          if (!span) return null;
+          return span.textContent?.trim() ?? "";
+        }, myRowId);
+
+        if (result) {
+          log.step(`[${employeeId}] Phase 2 attempt ${attempt + 1}: row ${myRowId} status='${result}'`);
+
+          if (result.toLowerCase() === "complete") {
+            log.step(`[${employeeId}] Row ${myRowId} COMPLETE!`);
+            return await downloadReportRow(page, f, myRowId, employeeId, employeeName, reportsDir);
+          }
+          break;
+        }
+      } catch {
+        // Continue
+      }
+    }
+
+    await clickInFrames(page, ["text=Refresh Status"]) ||
+      await jsClickText(page, "Refresh Status");
+    await page.waitForTimeout(3_000);
+  }
+
+  // Extra wait + final check
+  await page.waitForTimeout(12_000);
+  for (const f of page.frames()) {
+    try {
+      const result = await f.evaluate((rowId: string) => {
+        const span = document.getElementById("statusValue" + rowId);
+        if (!span) return null;
+        return span.textContent?.trim() ?? "";
+      }, myRowId);
+
+      if (result) {
+        log.step(`[${employeeId}] Final check: row ${myRowId} status='${result}'`);
+        if (result.toLowerCase() === "complete") {
+          log.step(`[${employeeId}] Row ${myRowId} COMPLETE!`);
+          return await downloadReportRow(page, f, myRowId, employeeId, employeeName, reportsDir);
+        }
+        break;
+      }
+    } catch {
+      // Continue
+    }
+  }
+
+  log.error(`[${employeeId}] Row ${myRowId} did not complete after Phase 2 timeout`);
+  return false;
+}
+
+/**
+ * Click a specific report row by TR id, then View Report and download.
+ */
+async function downloadReportRow(
+  page: Page,
+  statusFrame: Frame,
+  rowId: string,
+  employeeId: string,
+  employeeName: string | null,
+  reportsDir: string,
+): Promise<boolean> {
+  const filename = employeeName
+    ? `Time Detail_${employeeName} (${employeeId}).pdf`
+    : `Time Detail_${employeeId}.pdf`;
+  const dest = join(reportsDir, filename);
+
+  // Click our specific row to select it
+  const rowHandle = await statusFrame.evaluateHandle((rid: string) => {
+    const tr = document.getElementById(rid);
+    return tr ? tr.querySelector("td") ?? tr : null;
+  }, rowId);
+
+  const el = rowHandle.asElement();
+  if (!el) {
+    log.error(`[${employeeId}] Could not get row element for tr#${rowId}`);
+    return false;
+  }
+
+  await el.click({ force: true });
+  await page.waitForTimeout(2_000);
+  log.step(`[${employeeId}] Row ${rowId} selected. Clicking View Report...`);
+
+  // Set up download capture
+  let downloadCaptured = false;
+
+  const downloadHandler = async (dl: { suggestedFilename: () => string; saveAs: (path: string) => Promise<void> }) => {
+    log.step(`[${employeeId}] Download event! ${dl.suggestedFilename()}`);
+    await dl.saveAs(dest);
+    log.step(`[${employeeId}] SAVED: ${dest}`);
+    downloadCaptured = true;
+  };
+
+  const newPageHandler = (newPage: Page) => {
+    log.step(`[${employeeId}] New tab detected`);
+    newPage.on("download", downloadHandler);
+  };
+
+  page.on("download", downloadHandler);
+  page.context().on("page", newPageHandler);
+
+  // Capture filesystem snapshot BEFORE clicking View Report (for fallback diff)
+  const downloadsDir = "C:\\Users\\juzaw\\Downloads";
+  const filesBefore = new Map<string, Set<string>>();
+  for (const dir of [downloadsDir, reportsDir]) {
+    try {
+      filesBefore.set(dir, new Set(await readdir(dir)));
+    } catch {
+      filesBefore.set(dir, new Set());
+    }
+  }
+
+  // Click View Report
+  await clickInFrames(page, [
+    "input[value='View Report']",
+    "button:has-text('View Report')",
+    "text=View Report",
+  ]) || await jsClickText(page, "View Report");
+
+  // Wait for download
+  for (let i = 0; i < 30; i++) {
+    if (downloadCaptured) break;
+    await page.waitForTimeout(1_000);
+  }
+
+  // Clean up listeners
+  try {
+    page.removeListener("download", downloadHandler);
+    page.context().removeListener("page", newPageHandler);
+  } catch {
+    // Listeners may already be removed
+  }
+
+  if (downloadCaptured) {
+    log.success(`[${employeeId}] Download captured!`);
+    // Close extra tabs
+    while (page.context().pages().length > 1) {
+      try {
+        await page.context().pages().at(-1)?.close();
+      } catch {
+        break;
+      }
+    }
+    return true;
+  }
+
+  // Filesystem fallback: diff snapshots to find new PDFs
+  log.step(`[${employeeId}] Download event not captured. Checking filesystem...`);
+  await page.waitForTimeout(3_000);
+
+  const { rename, unlink } = await import("fs/promises");
+  const { existsSync } = await import("fs");
+
+  for (const checkDir of [downloadsDir, reportsDir]) {
+    try {
+      const filesAfter = new Set(await readdir(checkDir));
+      const before = filesBefore.get(checkDir) ?? new Set();
+      // Find new files by set difference (matches Python approach)
+      const newFiles = [...filesAfter].filter((f) => !before.has(f));
+      const newPdfs = newFiles.filter(
+        (f) => f.endsWith(".pdf") && !f.endsWith(".crdownload") && !f.endsWith(".tmp"),
+      );
+      if (newPdfs.length > 0) {
+        const src = join(checkDir, newPdfs[0]);
+        if (src !== dest) {
+          if (existsSync(dest)) await unlink(dest);
+          await rename(src, dest);
+        }
+        log.step(`[${employeeId}] Found file in ${checkDir}: ${newPdfs[0]}`);
+        log.success(`[${employeeId}] SAVED: ${dest}`);
+        return true;
+      }
+    } catch {
+      // Directory may not exist
+    }
+  }
+
+  log.error(`[${employeeId}] Could not find downloaded file`);
+  return false;
+}
+
+/**
+ * Handle the full reports page flow for a single employee:
+ * expand Timecard → click Time Detail → set dropdowns → run report → download.
+ */
+export async function handleReportsPage(
+  page: Page,
+  employeeId: string,
+  employeeName: string | null,
+  reportsDir: string,
+): Promise<boolean> {
+  log.step("On Reports page...");
+  await page.waitForTimeout(8_000);
+  await ukgScreenshot(page, `reports-01-loaded-${employeeId}`);
+
+  log.step("All frames:");
+  for (const f of page.frames()) {
+    log.step(`  ${f.name()} -> ${f.url().slice(0, 100)}`);
+  }
+
+  const listFrame = page.frame({ name: "khtmlReportList" });
+  const workspaceFrame = page.frame({ name: "khtmlReportWorkspace" });
+
+  // Step 1: Expand Timecard in nav tree
+  log.step("Expanding 'Timecard' in nav tree...");
+  if (!listFrame) {
+    log.error("khtmlReportList not found");
+    return false;
+  }
+
+  const timecardLoc = listFrame.locator("a:text-is('Timecard'), span:text-is('Timecard')");
+  if (await timecardLoc.count() > 0) {
+    await timecardLoc.first().click();
+    await page.waitForTimeout(3_000);
+  } else {
+    log.error("'Timecard' not found in nav tree");
+    return false;
+  }
+
+  // Step 2: Click Time Detail (JS click for reliability)
+  log.step("Clicking 'Time Detail'...");
+  const tdClicked = await listFrame.evaluate(() => {
+    const links = document.querySelectorAll("a");
+    for (const a of links) {
+      if (a.title === "Time Detail" || a.textContent?.trim() === "Time Detail") {
+        a.scrollIntoView();
+        const evt = new MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+        });
+        a.dispatchEvent(evt);
+        return true;
+      }
+    }
+    return false;
+  });
+
+  if (!tdClicked) {
+    log.error("'Time Detail' not found");
+    return false;
+  }
+  log.step("Selected 'Time Detail'");
+  await page.waitForTimeout(5_000);
+
+  // Step 3: Set Actual/Adjusted dropdown
+  log.step("Setting Actual/Adjusted dropdown...");
+  const wsFrame = page.frame({ name: "khtmlReportWorkspace" });
+  if (wsFrame) {
+    const selects = wsFrame.locator("select");
+    const selectCount = await selects.count();
+    for (let i = 0; i < selectCount; i++) {
+      const labelText: string = await selects.nth(i).evaluate((el) => {
+        const row = el.closest("tr") ?? el.closest("div") ?? el.parentElement;
+        return row ? (row as HTMLElement).innerText.substring(0, 200) : "";
+      });
+      if (labelText.toLowerCase().includes("actual") || labelText.toLowerCase().includes("adjusted")) {
+        await selects.nth(i).selectOption({ index: 1 });
+        log.step("Actual/Adjusted set");
+        break;
+      }
+    }
+  }
+
+  // Step 4: Set Output Format to PDF
+  log.step("Setting Output Format to PDF...");
+  if (wsFrame) {
+    const selects = wsFrame.locator("select");
+    const selectCount = await selects.count();
+    for (let i = 0; i < selectCount; i++) {
+      const options = selects.nth(i).locator("option");
+      const optCount = await options.count();
+      for (let j = 0; j < optCount; j++) {
+        const txt = await options.nth(j).innerText();
+        if (txt.toLowerCase().includes("pdf") || txt.toLowerCase().includes("acrobat")) {
+          await selects.nth(i).selectOption({ index: j });
+          log.step(`Output format: ${txt}`);
+          break;
+        }
+      }
+    }
+  }
+
+  await page.waitForTimeout(2_000);
+
+  // Step 5: Click Run Report
+  log.step(`[${employeeId}] Clicking Run Report...`);
+  if (!await clickRunReport(page)) {
+    log.error(`[${employeeId}] Could not click Run Report`);
+    return false;
+  }
+  await page.waitForTimeout(3_000);
+
+  // Step 6: Wait for report and download
+  return await waitForReportAndDownload(page, employeeId, employeeName, reportsDir);
+}

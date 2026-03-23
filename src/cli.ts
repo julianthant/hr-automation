@@ -7,6 +7,7 @@ import { loginToUCPath, loginToACTCrm } from "./auth/login.js";
 import type { AuthResult } from "./auth/types.js";
 import { runOnboarding, runParallel } from "./workflows/onboarding/index.js";
 import { runWorkStudy, WorkStudyInputSchema } from "./workflows/work-study/index.js";
+import { runParallelKronos, DEFAULT_WORKERS } from "./workflows/kronos/index.js";
 
 const program = new Command();
 
@@ -26,12 +27,12 @@ async function runAuthFlow(): Promise<AuthResult> {
     const ok = await loginToUCPath(ucpath.page);
     if (!ok) {
       log.error("UCPath authentication failed");
-      await ucpath.browser.close();
+      await ucpath.browser?.close();
       process.exit(1);
     }
     result.ucpath = true;
   } finally {
-    await ucpath.browser.close();
+    await ucpath.browser?.close();
   }
 
   log.step("Starting ACT CRM authentication...");
@@ -40,12 +41,12 @@ async function runAuthFlow(): Promise<AuthResult> {
     const ok = await loginToACTCrm(actCrm.page);
     if (!ok) {
       log.error("ACT CRM authentication failed");
-      await actCrm.browser.close();
+      await actCrm.browser?.close();
       process.exit(1);
     }
     result.actCrm = true;
   } finally {
-    await actCrm.browser.close();
+    await actCrm.browser?.close();
   }
 
   log.success("Authentication complete");
@@ -133,6 +134,45 @@ program
     }
 
     await runWorkStudy(parsed.data, { dryRun: options.dryRun });
+  });
+
+// ─── kronos ───
+
+program
+  .command("kronos")
+  .description("Download Time Detail PDF reports from UKG for employees in batch.yaml")
+  .option("--workers <N>", "Number of parallel workers", parseInt)
+  .option("--dry-run", "Preview employee list without downloading")
+  .option("--start-date <date>", "Start date (M/DD/YYYY)")
+  .option("--end-date <date>", "End date (M/DD/YYYY)")
+  .action(async (options: {
+    workers?: number;
+    dryRun?: boolean;
+    startDate?: string;
+    endDate?: string;
+  }) => {
+    try {
+      validateEnv();
+    } catch {
+      process.exit(1);
+    }
+
+    const workers = options.workers ?? DEFAULT_WORKERS;
+    if (workers < 1 || !Number.isFinite(workers)) {
+      log.error("--workers must be a positive integer.");
+      process.exit(1);
+    }
+
+    try {
+      await runParallelKronos(workers, {
+        dryRun: options.dryRun,
+        startDate: options.startDate,
+        endDate: options.endDate,
+      });
+    } catch (error) {
+      log.error(`Kronos workflow failed: ${errorMessage(error)}`);
+      process.exit(1);
+    }
   });
 
 program.parse();
