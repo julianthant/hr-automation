@@ -1,6 +1,6 @@
 # HR Automation
 
-UCPath HR automation tool for UCSD — automates onboarding data entry via Playwright browser automation. Designed for multiple HR workflows (onboarding, offboarding, pay changes) built on shared modules.
+UCPath HR automation tool for UCSD — automates onboarding data entry and UKG report downloads via Playwright browser automation. Designed for multiple HR workflows (onboarding, offboarding, pay changes, kronos reports) built on shared modules.
 
 ## Commands
 
@@ -8,6 +8,9 @@ UCPath HR automation tool for UCSD — automates onboarding data entry via Playw
 npm run start-onboarding <email>      # Run full onboarding workflow for employee
 npm run start-onboarding:dry <email>  # Dry-run onboarding (preview actions, no UCPath changes)
 npm run start-onboarding:batch -- <N>  # Batch onboarding with N parallel workers
+npm run kronos                        # Download Time Detail PDFs from UKG (4 workers)
+npm run kronos:dry                    # Dry-run kronos (preview employee list)
+npm run kronos -- --workers 8         # Kronos with custom worker count
 npm run extract <email>               # Extract employee data from CRM only
 npm run test-login                    # Test UCPath + CRM auth flow
 npm run typecheck                     # TypeScript type checking
@@ -20,16 +23,18 @@ All runtime scripts use `tsx --env-file=.env` — never run source files directl
 
 ```
 src/
-  auth/           # Login flows (UCPath SSO, ACT CRM, I9 — separate sessions each)
-  browser/        # Playwright browser launch (always headed mode)
+  auth/           # Login flows (UCPath SSO, ACT CRM, I9, UKG — separate sessions each)
+  browser/        # Playwright browser launch (headed mode, optional persistent sessions)
   config.ts       # Centralized URLs, constants, field maps
   crm/            # ACT CRM navigation, search, and data extraction
   i9/             # I9 Complete employee record creation
   tracker/        # Excel tracking with daily worksheets (YYYY-MM-DD tabs)
   ucpath/         # UCPath PeopleSoft navigation, person search, Smart HR transactions
+  ukg/            # UKG (Kronos) navigation, iframe access, report generation
   utils/          # Env validation, logging, error helpers
   workflows/      # Multi-step workflow orchestration
     onboarding/   # Schema, CRM extraction, UCPath transaction, parallel processing
+    kronos/       # UKG Time Detail report downloads, parallel workers, PDF validation
   cli.ts          # Commander CLI entry point
 ```
 
@@ -58,8 +63,9 @@ Copy `.env.example` to `.env` and fill in:
 
 ## Key Patterns
 
-- **Separate auth flows**: UCPath, CRM, and I9 each use different auth — never share browser sessions between them
-- **No session persistence**: Always login fresh, leave browser open for user to observe
+- **Separate auth flows**: UCPath, CRM, I9, and UKG each use different auth — never share browser sessions between them
+- **No session persistence** (UCPath/CRM): Always login fresh, leave browser open for user to observe
+- **Persistent sessions** (UKG/Kronos): Uses `launchBrowser({ sessionDir })` to reuse login state across runs
 - **Headed browser**: Always use headed mode so user can see automation and approve Duo MFA
 - **URL params over clicking**: Prefer URL manipulation over UI navigation where possible
 - **Use playwright-cli**: Always use the playwright-cli skill for live selector discovery — do not guess selectors
@@ -76,6 +82,18 @@ Copy `.env.example` to `.env` and fill in:
 - PeopleSoft `selectOption()` on dropdowns triggers page refreshes — always `waitForTimeout()` after dropdown changes before filling next field
 - Comp Rate Code is `UCHRLY` (not HCHRLY)
 - Expected Job End Date for dining hires is constant `06/30/2026`
+
+## UKG (Kronos) Gotchas
+
+- UKG main content is inside iframe `widgetFrame804` (or any `widgetFrame*`) — use `getGeniesIframe(page)`
+- Reports page uses three nested frames: `khtmlReportList` (nav tree), `khtmlReportWorkspace` (options), `khtmlReportingContentIframe` (content)
+- UKG modals pop up unexpectedly — `dismissModal()` must be called before most interactions
+- Date inputs require digit-by-digit typing (triple-click to select, Delete, Home, then type each digit with 100ms delays)
+- Report status polling uses two phases: Phase 1 finds the Running/Waiting row, Phase 2 polls that specific row by TR ID until Complete
+- First attempt in Phase 1 may show a stale Complete row from a previous run — must skip it and keep refreshing
+- Download capture uses Playwright's download event + filesystem fallback (diff snapshots before/after clicking View Report)
+- Report navigation (Go To → Reports → run → download → back) is serialized via `reportLock` mutex to avoid UKG server-side session conflicts
+- Session directories are per-worker (`ukg_session_worker1`, etc.) and cleaned up after all workers finish
 
 ## UCPath Smart HR Transaction Flow (14 Steps)
 

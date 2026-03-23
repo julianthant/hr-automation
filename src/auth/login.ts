@@ -2,6 +2,7 @@ import type { Page } from "playwright";
 import { log } from "../utils/log.js";
 import { waitForDuoApproval } from "./duo-wait.js";
 import { validateEnv } from "../utils/env.js";
+import { UKG_URL } from "../config.js";
 
 /**
  * Take a debug screenshot and log the path + current URL.
@@ -288,4 +289,66 @@ export async function loginToACTCrm(page: Page): Promise<boolean> {
   await ss(page, "07-authenticated");
   log.success("ACT CRM authenticated");
   return true;
+}
+
+/**
+ * Authenticate to UKG (Kronos) via UCSD SSO.
+ *
+ * Flow: Navigate to UKG → SSO login page (if not already logged in) →
+ *       Enter credentials → Wait for Duo MFA → Dashboard loads
+ *
+ * Uses persistent browser context, so subsequent runs may skip login entirely.
+ *
+ * @param page - Playwright page instance (from persistent context)
+ * @returns true if authenticated (or already was), false on failure
+ */
+export async function loginToUKG(page: Page): Promise<boolean> {
+  log.step("Navigating to UKG...");
+  await page.goto(UKG_URL, {
+    waitUntil: "domcontentloaded",
+    timeout: 60_000,
+  });
+  await page.waitForTimeout(5_000);
+
+  // Check if already logged in (persistent session)
+  if (await page.locator("text=Manage My Department").count() > 0) {
+    log.success("UKG already authenticated (persistent session)");
+    return true;
+  }
+
+  log.step("Logging in via UCSD SSO...");
+  const { userId, password } = validateEnv();
+
+  // UKG SSO uses #ssousername / #ssopassword (direct Shibboleth, no campus picker)
+  const usernameField = page.locator("#ssousername");
+  const passwordField = page.locator("#ssopassword");
+
+  try {
+    await usernameField.fill(userId, { timeout: 10_000 });
+    await passwordField.fill(password, { timeout: 5_000 });
+  } catch {
+    log.error("Could not find UKG SSO login fields");
+    return false;
+  }
+
+  await page.locator('button[name="_eventId_proceed"]').click({ timeout: 5_000 });
+  log.step("Credentials submitted — waiting for Duo MFA...");
+
+  // Poll for dashboard (Duo requires manual phone approval)
+  log.waiting("Waiting for Duo approval (approve on your phone)...");
+  const maxWaitSeconds = 180;
+  for (let elapsed = 0; elapsed < maxWaitSeconds; elapsed += 2) {
+    try {
+      if (await page.locator("text=Manage My Department").count() > 0) {
+        log.success("UKG authenticated — dashboard loaded");
+        return true;
+      }
+    } catch {
+      // Page may be navigating
+    }
+    await page.waitForTimeout(2_000);
+  }
+
+  log.error("UKG authentication timed out waiting for dashboard");
+  return false;
 }

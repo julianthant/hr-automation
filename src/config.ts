@@ -21,3 +21,9 @@ export const UCPATH_SMART_HR_URL =
 
 /** I9 Complete login URL. */
 export const I9_URL = "https://stse.i9complete.com";
+
+// --- UKG (Kronos) ---
+
+/** UKG workforce management dashboard URL. */
+export const UKG_URL =
+  "https://ucsd.kronos.net/wfcstatic/applications/navigator/html5/dist/container/index.html?version=8.1.18.502#/";
