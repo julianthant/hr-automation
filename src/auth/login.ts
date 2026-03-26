@@ -91,25 +91,32 @@ export async function loginToUCPath(page: Page): Promise<boolean> {
   await page.locator('button[name="_eventId_proceed"]').click({ timeout: 5_000 });
   log.step(`After login click | URL: ${page.url()}`);
 
-  // Wait for Duo approval
+  // Wait for Duo approval — poll for URL change or "Yes, this is my device" button
   log.waiting("Waiting for Duo approval (approve on your phone)...");
-  let approved = await waitForDuoApproval(
-    page,
-    "**/*universityofcalifornia.edu/**",
-    60_000,
-  );
+  let approved = false;
+  const maxWaitSecondsUcpath = 180;
+  for (let elapsed = 0; elapsed < maxWaitSecondsUcpath; elapsed += 2) {
+    try {
+      // Check if "Yes, this is my device" button appeared
+      const trustButton = page.getByText("Yes, this is my device");
+      if ((await trustButton.count()) > 0) {
+        log.step('Clicking "Yes, this is my device"...');
+        await trustButton.click({ timeout: 5_000 });
+      }
 
-  if (!approved) {
-    log.waiting("Still waiting for Duo approval...");
-    approved = await waitForDuoApproval(
-      page,
-      "**/*universityofcalifornia.edu/**",
-      60_000,
-    );
+      // Check if we made it past Duo
+      if (page.url().includes("universityofcalifornia.edu") && !page.url().includes("duosecurity")) {
+        approved = true;
+        break;
+      }
+    } catch {
+      // Page may be navigating
+    }
+    await page.waitForTimeout(2_000);
   }
 
   if (!approved) {
-    log.error("Duo approval timed out after two attempts");
+    log.error("Duo approval timed out");
     return false;
   }
 
@@ -339,6 +346,13 @@ export async function loginToUKG(page: Page): Promise<boolean> {
   const maxWaitSeconds = 180;
   for (let elapsed = 0; elapsed < maxWaitSeconds; elapsed += 2) {
     try {
+      // Check if "Yes, this is my device" button appeared
+      const trustButton = page.getByText("Yes, this is my device");
+      if ((await trustButton.count()) > 0) {
+        log.step('Clicking "Yes, this is my device"...');
+        await trustButton.click({ timeout: 5_000 });
+      }
+
       if (await page.locator("text=Manage My Department").count() > 0) {
         log.success("UKG authenticated — dashboard loaded");
         return true;
@@ -350,5 +364,176 @@ export async function loginToUKG(page: Page): Promise<boolean> {
   }
 
   log.error("UKG authentication timed out waiting for dashboard");
+  return false;
+}
+
+/**
+ * Authenticate to Kuali Build through UCSD Shibboleth SSO with Duo MFA.
+ *
+ * Flow: Navigate to Kuali URL -> If already on kualibuild, done ->
+ *       Enter credentials on SSO page -> Wait for Duo approval ->
+ *       Handle SAML error retry -> Return
+ *
+ * @param page - Playwright page instance
+ * @param url - Kuali Build URL to navigate to
+ * @returns true if authentication succeeded, false otherwise
+ */
+export async function loginToKuali(page: Page, url: string): Promise<boolean> {
+  log.step("Navigating to Kuali Build...");
+  await page.goto(url, {
+    waitUntil: "domcontentloaded",
+    timeout: 60_000,
+  });
+  await page.waitForTimeout(3_000);
+
+  // Check if already logged in
+  if (page.url().includes("kualibuild")) {
+    log.success("Kuali Build already authenticated");
+    return true;
+  }
+
+  log.step("Logging in via UCSD SSO...");
+  const { userId, password } = validateEnv();
+
+  const usernameField = page
+    .getByLabel("User name (or email address)")
+    .or(page.getByLabel("Username"))
+    .or(page.locator('input[name="j_username"]'));
+  const passwordField = page
+    .getByLabel("Password:")
+    .or(page.getByLabel("Password"))
+    .or(page.locator('input[name="j_password"]'));
+
+  try {
+    await usernameField.fill(userId, { timeout: 10_000 });
+    await passwordField.fill(password, { timeout: 5_000 });
+  } catch {
+    log.error("Could not find Kuali SSO login fields");
+    return false;
+  }
+
+  await page.locator('button[name="_eventId_proceed"]').click({ timeout: 5_000 });
+  log.step("Credentials submitted — waiting for Duo MFA...");
+
+  // Poll for Duo approval or URL change
+  log.waiting("Waiting for Duo approval (approve on your phone)...");
+  const maxWaitSeconds = 180;
+  for (let elapsed = 0; elapsed < maxWaitSeconds; elapsed += 2) {
+    try {
+      // Check if "Yes, this is my device" button appeared
+      const trustButton = page.getByText("Yes, this is my device");
+      if ((await trustButton.count()) > 0) {
+        log.step('Clicking "Yes, this is my device"...');
+        await trustButton.click({ timeout: 5_000 });
+      }
+
+      // Check if we landed on Kuali
+      if (page.url().includes("kualibuild")) {
+        log.success("Kuali Build authenticated");
+        return true;
+      }
+
+      // Handle SAML error page — retry navigation
+      if (page.url().includes("SAML") || (await page.content()).includes("SAML")) {
+        log.step("SAML error detected — retrying navigation to Kuali...");
+        await page.goto(url, {
+          waitUntil: "domcontentloaded",
+          timeout: 60_000,
+        });
+        await page.waitForTimeout(3_000);
+      }
+    } catch {
+      // Page may be navigating
+    }
+    await page.waitForTimeout(2_000);
+  }
+
+  log.error("Kuali Build authentication timed out");
+  return false;
+}
+
+/**
+ * Authenticate to new Kronos (WFD) through UCSD Shibboleth SSO with Duo MFA.
+ *
+ * Flow: Navigate to WFD home -> If already on mykronos, done ->
+ *       Enter credentials on SSO page -> Wait for Duo approval ->
+ *       Handle session timeout retry -> Return
+ *
+ * @param page - Playwright page instance
+ * @returns true if authentication succeeded, false otherwise
+ */
+export async function loginToNewKronos(page: Page): Promise<boolean> {
+  const wfdUrl = "https://ucsd-sso.prd.mykronos.com/wfd/home";
+
+  log.step("Navigating to new Kronos (WFD)...");
+  await page.goto(wfdUrl, {
+    waitUntil: "domcontentloaded",
+    timeout: 60_000,
+  });
+  await page.waitForTimeout(5_000);
+
+  // Check if already logged in
+  if (page.url().includes("mykronos.com/wfd")) {
+    log.success("New Kronos (WFD) already authenticated");
+    return true;
+  }
+
+  log.step("Logging in via UCSD SSO...");
+  const { userId, password } = validateEnv();
+
+  const usernameField = page
+    .getByLabel("User name (or email address)")
+    .or(page.getByLabel("Username"))
+    .or(page.locator('input[name="j_username"]'));
+  const passwordField = page
+    .getByLabel("Password:")
+    .or(page.getByLabel("Password"))
+    .or(page.locator('input[name="j_password"]'));
+
+  try {
+    await usernameField.fill(userId, { timeout: 10_000 });
+    await passwordField.fill(password, { timeout: 5_000 });
+  } catch {
+    log.error("Could not find new Kronos SSO login fields");
+    return false;
+  }
+
+  await page.locator('button[name="_eventId_proceed"]').click({ timeout: 5_000 });
+  log.step("Credentials submitted — waiting for Duo MFA...");
+
+  // Poll for Duo approval or URL change
+  log.waiting("Waiting for Duo approval (approve on your phone)...");
+  const maxWaitSecondsWfd = 180;
+  for (let elapsed = 0; elapsed < maxWaitSecondsWfd; elapsed += 2) {
+    try {
+      // Check if "Yes, this is my device" button appeared
+      const trustButton = page.getByText("Yes, this is my device");
+      if ((await trustButton.count()) > 0) {
+        log.step('Clicking "Yes, this is my device"...');
+        await trustButton.click({ timeout: 5_000 });
+      }
+
+      // Check if we landed on WFD
+      if (page.url().includes("mykronos.com/wfd")) {
+        log.success("New Kronos (WFD) authenticated");
+        return true;
+      }
+
+      // Handle session timeout page
+      if (page.url().includes("#failedLogin")) {
+        log.step("Session timeout detected — retrying navigation...");
+        await page.goto(wfdUrl, {
+          waitUntil: "domcontentloaded",
+          timeout: 60_000,
+        });
+        await page.waitForTimeout(3_000);
+      }
+    } catch {
+      // Page may be navigating
+    }
+    await page.waitForTimeout(2_000);
+  }
+
+  log.error("New Kronos (WFD) authentication timed out");
   return false;
 }

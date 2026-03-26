@@ -14,6 +14,8 @@
     "work-study:dry": "tsx --env-file=.env src/cli.ts work-study --dry-run",
     "kronos": "tsx --env-file=.env src/cli.ts kronos",
     "kronos:dry": "tsx --env-file=.env src/cli.ts kronos --dry-run",
+    "separation": "tsx --env-file=.env src/cli.ts separation",
+    "separation:dry": "tsx --env-file=.env src/cli.ts separation --dry-run",
     "typecheck": "tsc --noEmit",
     "typecheck:all": "tsc --noEmit -p tsconfig.test.json",
     "test": "tsx --test tests/**/*.test.ts"

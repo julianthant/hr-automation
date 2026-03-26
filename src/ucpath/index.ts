@@ -25,3 +25,11 @@ export {
   buildCommentsText,
 } from "./transaction.js";
 export type { PersonalDataInput, JobDataInput } from "./transaction.js";
+export {
+  navigateToWorkforceJobSummary,
+  searchJobSummary,
+  extractWorkLocation,
+  extractJobInfo,
+  getJobSummaryData,
+} from "./job-summary.js";
+export type { JobSummaryData } from "./job-summary.js";

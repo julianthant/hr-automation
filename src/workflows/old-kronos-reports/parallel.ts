@@ -9,7 +9,7 @@ import { loginToUKG } from "../../auth/login.js";
 import {
   getGeniesIframe,
   setDateRange,
-} from "../../ukg/index.js";
+} from "../../old-kronos/index.js";
 import { runKronosForEmployee } from "./workflow.js";
 import type { KronosTrackerRow } from "./tracker.js";
 import { updateKronosTracker as updateTracker } from "./tracker.js";

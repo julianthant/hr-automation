@@ -7,7 +7,9 @@ import { loginToUCPath, loginToACTCrm } from "./auth/login.js";
 import type { AuthResult } from "./auth/types.js";
 import { runOnboarding, runParallel } from "./workflows/onboarding/index.js";
 import { runWorkStudy, WorkStudyInputSchema } from "./workflows/work-study/index.js";
-import { runParallelKronos, DEFAULT_WORKERS } from "./workflows/kronos/index.js";
+import { runParallelKronos, DEFAULT_WORKERS } from "./workflows/old-kronos-reports/index.js";
+import { runSeparation } from "./workflows/separations/index.js";
+import { lookupSingle, lookupParallel } from "./workflows/eid-lookup/index.js";
 
 const program = new Command();
 
@@ -172,6 +174,63 @@ program
     } catch (error) {
       log.error(`Kronos workflow failed: ${errorMessage(error)}`);
       process.exit(1);
+    }
+  });
+
+// ─── separation ───
+
+program
+  .command("separation")
+  .description("Process employee separation: Kuali → Kronos → UCPath")
+  .argument("<docId>", "Kuali document number (e.g. 3508)")
+  .option("--dry-run", "Extract data only, don't fill forms")
+  .action(async (docId: string, options: { dryRun?: boolean }) => {
+    try {
+      validateEnv();
+    } catch {
+      process.exit(1);
+    }
+
+    try {
+      const result = await runSeparation(docId, { dryRun: options.dryRun });
+      log.success(`Separation complete for ${result.employeeName} (EID: ${result.eid})`);
+    } catch (error) {
+      log.error(`Separation workflow failed: ${errorMessage(error)}`);
+      process.exit(1);
+    }
+  });
+
+// ─── eid-lookup ───
+
+program
+  .command("eid-lookup")
+  .description("Look up Employee IDs by name via Person Organizational Summary")
+  .argument("<names...>", 'One or more names in "Last, First Middle" format')
+  .option("--workers <N>", "Number of parallel browser tabs", parseInt)
+  .action(async (names: string[], options: { workers?: number }) => {
+    try {
+      validateEnv();
+    } catch {
+      process.exit(1);
+    }
+
+    if (names.length === 1 && !options.workers) {
+      // Single lookup
+      const result = await lookupSingle(names[0]);
+      if (!result.found) process.exit(1);
+    } else {
+      // Parallel lookup
+      const workers = options.workers ?? Math.min(names.length, 4);
+      if (workers < 1 || !Number.isFinite(workers)) {
+        log.error("--workers must be a positive integer.");
+        process.exit(1);
+      }
+      const results = await lookupParallel(names, workers);
+      const failed = results.filter((r) => !r.found);
+      if (failed.length > 0) {
+        log.error(`${failed.length} of ${names.length} lookups failed`);
+        process.exit(1);
+      }
     }
   });
 

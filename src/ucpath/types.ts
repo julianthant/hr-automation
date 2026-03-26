@@ -2,6 +2,7 @@ export interface TransactionResult {
   success: boolean;
   error?: string;
   transactionId?: string;
+  transactionNumber?: string;
 }
 
 export class TransactionError extends Error {
