@@ -71,6 +71,7 @@ Copy `.env.example` to `.env` and fill in:
 - **Use playwright-cli**: Always use the playwright-cli skill for live selector discovery — do not guess selectors
 - **Log every interaction**: Log every browser action (click, fill, navigate, wait) to console for traceability
 - **ActionPlan pattern**: All UCPath transactions are built as ActionPlan steps — supports dry-run preview and step-by-step execution with error isolation
+- **Tracker Excel files**: Always place tracker .xlsx files inside the workflow folder (e.g. `src/workflows/eid-lookup/eid-lookup-tracker.xlsx`), never in the project root
 
 ## Gotchas
 
