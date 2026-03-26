@@ -13,8 +13,8 @@ import {
   goBackToMain,
   setDateRange,
   dismissModal,
-} from "../../ukg/index.js";
-import { handleReportsPage } from "../../ukg/reports.js";
+} from "../../old-kronos/index.js";
+import { handleReportsPage } from "../../old-kronos/reports.js";
 import { validateAndClean } from "./validate.js";
 import {
   updateKronosTracker as defaultUpdateTracker,

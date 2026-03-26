@@ -539,7 +539,23 @@ export async function clickSaveAndSubmit(
   }
 
   log.success("Transaction saved and submitted");
-  return { success: true };
+
+  // Try to extract transaction number from confirmation message
+  let transactionNumber = "";
+  try {
+    // PeopleSoft shows transaction number in confirmation text or message area
+    const pageText = await frame.locator("body").innerText({ timeout: 5_000 });
+    const txnMatch = pageText.match(/(?:Transaction|Trans(?:action)?\s*(?:#|No|Number|ID))\s*[:=]?\s*(\d+)/i)
+      ?? pageText.match(/\b(\d{7,})\b/); // fallback: any 7+ digit number
+    if (txnMatch) {
+      transactionNumber = txnMatch[1];
+      log.step(`Transaction number: ${transactionNumber}`);
+    }
+  } catch {
+    // Non-fatal — transaction number extraction is best-effort
+  }
+
+  return { success: true, transactionNumber };
 }
 
 // ─── Helpers ───
