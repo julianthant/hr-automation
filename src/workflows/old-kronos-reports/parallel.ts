@@ -5,7 +5,7 @@ import { Mutex } from "async-mutex";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { launchBrowser } from "../../browser/launch.js";
-import { loginToUKG } from "../../auth/login.js";
+import { ukgNavigateAndFill, ukgSubmitAndWaitForDuo } from "../../auth/login.js";
 import {
   getGeniesIframe,
   setDateRange,
@@ -98,19 +98,77 @@ export async function runParallelKronos(
   const reportMutex = new Mutex();
   const lockedTracker = createLockedTracker(trackerMutex);
 
+  // Phase 1a: Launch all browsers and fill credentials (5s gap between each)
   const sessionDirs: string[] = [];
-  const workers = Array.from({ length: actualWorkers }, (_, i) => {
-    sessionDirs.push(`${SESSION_DIR}_worker${i + 1}`);
-    return runWorker(
-      i + 1,
-      actualWorkers,
-      queue,
-      lockedTracker,
-      reportMutex,
-      options.startDate ?? DEFAULT_START_DATE,
-      options.endDate ?? DEFAULT_END_DATE,
-    );
-  });
+  const launched: { context: Awaited<ReturnType<typeof launchBrowser>>["context"]; page: Awaited<ReturnType<typeof launchBrowser>>["page"]; alreadyLoggedIn: boolean }[] = [];
+
+  const cols = Math.ceil(Math.sqrt(actualWorkers));
+  const rows = Math.ceil(actualWorkers / cols);
+  const winW = Math.floor(SCREEN_WIDTH / cols);
+  const winH = Math.floor(SCREEN_HEIGHT / rows);
+
+  for (let i = 0; i < actualWorkers; i++) {
+    const workerId = i + 1;
+    const prefix = `[W${workerId}]`;
+    const sessionDir = `${SESSION_DIR}_worker${workerId}`;
+    sessionDirs.push(sessionDir);
+
+    const col = i % cols;
+    const rowIdx = Math.floor(i / cols);
+    const x = col * winW;
+    const y = rowIdx * winH;
+
+    log.step(`${prefix} Window: ${winW}x${winH} at (${x},${y})`);
+
+    const { context, page } = await launchBrowser({
+      sessionDir,
+      viewport: { width: winW, height: winH },
+      args: [`--window-position=${x},${y}`, `--window-size=${winW},${winH}`],
+      acceptDownloads: true,
+    });
+
+    const fillResult = await ukgNavigateAndFill(page);
+    if (fillResult === false) {
+      log.error(`${prefix} Could not fill credentials`);
+      await context.close();
+      continue;
+    }
+
+    launched.push({ context, page, alreadyLoggedIn: fillResult === "already_logged_in" });
+
+    // 5s gap before opening next window
+    if (i < actualWorkers - 1) {
+      await page.waitForTimeout(5_000);
+    }
+  }
+
+  // Phase 1b: Submit login on each window sequentially (Duo MFA one at a time)
+  const workerContexts: { context: typeof launched[0]["context"]; page: typeof launched[0]["page"] }[] = [];
+
+  for (let i = 0; i < launched.length; i++) {
+    const { context, page, alreadyLoggedIn } = launched[i];
+    const prefix = `[W${i + 1}]`;
+
+    if (!alreadyLoggedIn) {
+      const authOk = await ukgSubmitAndWaitForDuo(page);
+      if (!authOk) {
+        log.error(`${prefix} UKG authentication failed`);
+        await context.close();
+        continue;
+      }
+    }
+
+    const iframe = await getGeniesIframe(page);
+    log.step(`${prefix} Dashboard ready`);
+    await setDateRange(page, iframe, options.startDate ?? DEFAULT_START_DATE, options.endDate ?? DEFAULT_END_DATE);
+
+    workerContexts.push({ context, page });
+  }
+
+  // Phase 2: All workers process employees in parallel
+  const workers = workerContexts.map((wc, i) =>
+    runWorker(i + 1, queue, wc.context, wc.page, lockedTracker, reportMutex),
+  );
 
   await Promise.all(workers);
 
@@ -130,69 +188,54 @@ export async function runParallelKronos(
 
 /**
  * A single worker that processes employee IDs from the shared queue.
- * Launches its own persistent browser session and reuses it across employees.
+ * Receives a pre-authenticated browser page (login done sequentially in Phase 1).
  */
 async function runWorker(
   workerId: number,
-  totalWorkers: number,
   queue: string[],
+  context: Awaited<ReturnType<typeof launchBrowser>>["context"],
+  page: Awaited<ReturnType<typeof launchBrowser>>["page"],
   lockedTracker: (filePath: string, data: KronosTrackerRow) => Promise<void>,
   reportMutex: Mutex,
-  startDate: string,
-  endDate: string,
 ): Promise<void> {
   const prefix = `[W${workerId}]`;
-  const sessionDir = `${SESSION_DIR}_worker${workerId}`;
-
-  // Calculate tiled window position
-  const cols = Math.ceil(Math.sqrt(totalWorkers));
-  const rows = Math.ceil(totalWorkers / cols);
-  const winW = Math.floor(SCREEN_WIDTH / cols);
-  const winH = Math.floor(SCREEN_HEIGHT / rows);
-  const col = (workerId - 1) % cols;
-  const rowIdx = Math.floor((workerId - 1) / cols);
-  const x = col * winW;
-  const y = rowIdx * winH;
-
-  log.step(`${prefix} Window: ${winW}x${winH} at (${x},${y})`);
-
-  // Launch persistent browser
-  const { context, page } = await launchBrowser({
-    sessionDir,
-    viewport: { width: winW, height: winH },
-    args: [`--window-position=${x},${y}`, `--window-size=${winW},${winH}`],
-    acceptDownloads: true,
-  });
 
   try {
-    // Login
-    const authOk = await loginToUKG(page);
-    if (!authOk) {
-      log.error(`${prefix} UKG authentication failed`);
-      return;
-    }
+    let consecutiveErrors = 0;
 
-    // Get iframe and set date range
-    const iframe = await getGeniesIframe(page);
-    log.step(`${prefix} Dashboard ready`);
-    await setDateRange(page, iframe, startDate, endDate);
-
-    // Process employees from queue
     while (queue.length > 0) {
       const employeeId = queue.shift();
       if (!employeeId) break;
+
+      // Check if browser is still alive before processing
+      try {
+        await page.evaluate(() => true);
+      } catch {
+        log.error(`${prefix} Browser session dead — stopping worker (${queue.length} employees remaining in queue)`);
+        break;
+      }
 
       log.step(`${prefix} ${"=".repeat(50)}`);
       log.step(`${prefix} PROCESSING: ${employeeId}`);
       log.step(`${prefix} ${"=".repeat(50)}`);
 
-      await runKronosForEmployee(employeeId, {
-        page,
-        dateRangeSet: true,
-        updateTrackerFn: lockedTracker,
-        reportLock: reportMutex,
-        logPrefix: prefix,
-      });
+      try {
+        await runKronosForEmployee(employeeId, {
+          page,
+          dateRangeSet: true,
+          updateTrackerFn: lockedTracker,
+          reportLock: reportMutex,
+          logPrefix: prefix,
+        });
+        consecutiveErrors = 0;
+      } catch (err) {
+        consecutiveErrors++;
+        log.error(`${prefix} ${employeeId} threw: ${errorMessage(err).slice(0, 80)}`);
+        if (consecutiveErrors >= 3) {
+          log.error(`${prefix} 3 consecutive errors — stopping worker (${queue.length} remaining)`);
+          break;
+        }
+      }
     }
 
     log.success(`${prefix} Worker finished`);

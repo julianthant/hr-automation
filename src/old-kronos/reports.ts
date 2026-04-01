@@ -140,7 +140,7 @@ async function clickRunReport(page: Page): Promise<boolean> {
 
 /**
  * After Run Report: switch to Check Report Status tab,
- * poll for completion via two-phase row tracking, then download.
+ * poll for a NEW row (not in existingRowIds), wait for completion, then download.
  */
 export async function waitForReportAndDownload(
   page: Page,
@@ -156,13 +156,15 @@ export async function waitForReportAndDownload(
     "a:has-text('Check Report Status')",
     "td:has-text('Check Report Status')",
   ]) || await jsClickText(page, "CHECK REPORT STATUS");
-  await page.waitForTimeout(3_000);
 
-  // Phase 1: Refresh until we find a Running/Waiting row
+  // Wait 12 seconds for the report to generate
+  await page.waitForTimeout(12_000);
+
+  // Refresh and find the first Complete row
   let myRowId: string | null = null;
   let statusFrame: Frame | null = null;
 
-  for (let attempt = 0; attempt < 15; attempt++) {
+  for (let attempt = 0; attempt < 10; attempt++) {
     await clickInFrames(page, ["text=Refresh Status"]) ||
       await jsClickText(page, "Refresh Status");
     await page.waitForTimeout(3_000);
@@ -182,19 +184,16 @@ export async function waitForReportAndDownload(
         if (result) {
           const status = (result.status ?? "").toLowerCase();
           log.step(
-            `[${employeeId}] Phase 1 attempt ${attempt + 1}: status='${result.status}' tr_id=${result.trId}`,
+            `[${employeeId}] Attempt ${attempt + 1}: status='${result.status}' tr_id=${result.trId}`,
           );
 
-          if (status === "running" || status === "waiting") {
+          if (status === "complete") {
             myRowId = result.trId;
             statusFrame = f;
-            log.step(`[${employeeId}] Row ${myRowId} appeared as Running/Waiting`);
-            break;
-          } else if (status === "complete" && attempt === 0) {
-            // First attempt and already complete — likely a stale report from
-            // a previous run. Keep refreshing to find our actual Running row.
+            log.step(`[${employeeId}] Row ${myRowId} COMPLETE!`);
             break;
           }
+          // Still running/waiting — keep polling
           break;
         }
       } catch {
@@ -205,90 +204,12 @@ export async function waitForReportAndDownload(
     if (myRowId) break;
   }
 
-  // If we never saw Running, check if first row is Complete (fast report)
   if (!myRowId) {
-    log.step(`[${employeeId}] Never saw Running row. Checking if first row is complete...`);
-    for (const f of page.frames()) {
-      try {
-        const result = await f.evaluate(() => {
-          const spans = document.querySelectorAll('span[id^="statusValue"]');
-          if (spans.length === 0) return null;
-          const span = spans[0];
-          const text = span.textContent?.trim() ?? "";
-          const tr = span.closest("tr");
-          return { status: text, trId: tr ? tr.id : null };
-        });
-        if (result && result.status.toLowerCase() === "complete") {
-          myRowId = result.trId;
-          statusFrame = f;
-          log.step(`[${employeeId}] Assuming first Complete row ${myRowId} is ours`);
-          break;
-        }
-      } catch {
-        // Continue
-      }
-    }
-  }
-
-  if (!myRowId) {
-    log.error(`[${employeeId}] Could not identify report row after Phase 1`);
+    log.error(`[${employeeId}] Report did not complete after polling`);
     return false;
   }
 
-  // Phase 2: Poll our specific row by ID until Complete
-  for (let attempt = 0; attempt < 2; attempt++) {
-    for (const f of page.frames()) {
-      try {
-        const result = await f.evaluate((rowId: string) => {
-          const span = document.getElementById("statusValue" + rowId);
-          if (!span) return null;
-          return span.textContent?.trim() ?? "";
-        }, myRowId);
-
-        if (result) {
-          log.step(`[${employeeId}] Phase 2 attempt ${attempt + 1}: row ${myRowId} status='${result}'`);
-
-          if (result.toLowerCase() === "complete") {
-            log.step(`[${employeeId}] Row ${myRowId} COMPLETE!`);
-            return await downloadReportRow(page, f, myRowId, employeeId, employeeName, reportsDir);
-          }
-          break;
-        }
-      } catch {
-        // Continue
-      }
-    }
-
-    await clickInFrames(page, ["text=Refresh Status"]) ||
-      await jsClickText(page, "Refresh Status");
-    await page.waitForTimeout(3_000);
-  }
-
-  // Extra wait + final check
-  await page.waitForTimeout(12_000);
-  for (const f of page.frames()) {
-    try {
-      const result = await f.evaluate((rowId: string) => {
-        const span = document.getElementById("statusValue" + rowId);
-        if (!span) return null;
-        return span.textContent?.trim() ?? "";
-      }, myRowId);
-
-      if (result) {
-        log.step(`[${employeeId}] Final check: row ${myRowId} status='${result}'`);
-        if (result.toLowerCase() === "complete") {
-          log.step(`[${employeeId}] Row ${myRowId} COMPLETE!`);
-          return await downloadReportRow(page, f, myRowId, employeeId, employeeName, reportsDir);
-        }
-        break;
-      }
-    } catch {
-      // Continue
-    }
-  }
-
-  log.error(`[${employeeId}] Row ${myRowId} did not complete after Phase 2 timeout`);
-  return false;
+  return await downloadReportRow(page, statusFrame!, myRowId, employeeId, employeeName, reportsDir);
 }
 
 /**
@@ -431,17 +352,25 @@ export async function handleReportsPage(
   employeeName: string | null,
   reportsDir: string,
 ): Promise<boolean> {
-  log.step("On Reports page...");
-  await page.waitForTimeout(8_000);
+  log.step("On Reports page — waiting for report frames to load...");
+
+  // Poll for khtmlReportList frame (up to 20s)
+  let listFrame: Frame | null = null;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    await page.waitForTimeout(2_000);
+    listFrame = page.frame({ name: "khtmlReportList" });
+    if (listFrame) break;
+    if (attempt === 0) {
+      log.step("Waiting for khtmlReportList frame...");
+    }
+  }
+
   await ukgScreenshot(page, `reports-01-loaded-${employeeId}`);
 
   log.step("All frames:");
   for (const f of page.frames()) {
     log.step(`  ${f.name()} -> ${f.url().slice(0, 100)}`);
   }
-
-  const listFrame = page.frame({ name: "khtmlReportList" });
-  const workspaceFrame = page.frame({ name: "khtmlReportWorkspace" });
 
   // Step 1: Expand Timecard in nav tree
   log.step("Expanding 'Timecard' in nav tree...");

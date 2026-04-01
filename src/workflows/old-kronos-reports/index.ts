@@ -13,7 +13,7 @@ export {
 } from "./tracker.js";
 export type { KronosTrackerRow } from "./tracker.js";
 
-export { validatePdf, getPdfName, validateAndClean } from "./validate.js";
+export { validatePdf, validateAndClean, extractPdfIdentity, verifyPdfMatch } from "./validate.js";
 
 export {
   REPORTS_DIR,
