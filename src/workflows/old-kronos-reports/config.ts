@@ -12,8 +12,8 @@ export const REPORTS_DIR = "C:\\Users\\juzaw\\Downloads\\reports";
 export const SESSION_DIR = "C:\\Users\\juzaw\\ukg_session";
 
 /** Default date range for Time Detail reports. */
-export const DEFAULT_START_DATE = "1/01/2017";
-export const DEFAULT_END_DATE = "1/31/2026";
+export const DEFAULT_START_DATE = "1/1/2017";
+export const DEFAULT_END_DATE = "2/1/2026";
 
 /** Default number of parallel workers. */
 export const DEFAULT_WORKERS = 4;

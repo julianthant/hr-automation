@@ -128,10 +128,14 @@ export async function setDateRange(
     return;
   }
 
-  // Fill start and end dates by typing digits
+  // Fill start and end dates by typing digits (MMDDYYYY format, zero-padded)
+  const toDigits = (dateStr: string): string => {
+    const [m, d, y] = dateStr.split("/");
+    return m.padStart(2, "0") + d.padStart(2, "0") + y;
+  };
   const dates = [
-    { index: 0, digits: startDate.replace(/\//g, "") },
-    { index: 1, digits: endDate.replace(/\//g, "") },
+    { index: 0, digits: toDigits(startDate) },
+    { index: 1, digits: toDigits(endDate) },
   ];
 
   for (const { index, digits } of dates) {

@@ -15,7 +15,7 @@ import {
   dismissModal,
 } from "../../old-kronos/index.js";
 import { handleReportsPage } from "../../old-kronos/reports.js";
-import { validateAndClean } from "./validate.js";
+import { validateAndClean, verifyPdfMatch } from "./validate.js";
 import {
   updateKronosTracker as defaultUpdateTracker,
   buildTrackerRow,
@@ -74,10 +74,12 @@ export async function runKronosForEmployee(
 
     // Step 3: Check if employee was found
     const firstRow = iframe.locator("#row0genieGrid");
-    if (await firstRow.count() === 0) {
-      log.step(prefixed(p, `${employeeId} -> No matches found`));
+    const rowExists = await firstRow.count() > 0;
+    const rowText = rowExists ? (await firstRow.innerText()).trim() : "";
+    if (!rowExists || !rowText || !rowText.includes(employeeId)) {
+      log.step(prefixed(p, `${employeeId} -> No matches were found on Kronos`));
       await writeTracker(TRACKER_PATH, buildTrackerRow(
-        employeeId, "", "Done", "No matches were found.",
+        employeeId, "", "Done", "No matches were found on Kronos",
       ));
       return;
     }
@@ -100,18 +102,32 @@ export async function runKronosForEmployee(
     let success = false;
 
     const doReportFlow = async () => {
-      if (!await clickGoToReports(page, iframe)) {
-        log.step(prefixed(p, `${employeeId} -> Could not navigate to Reports`));
-        await writeTracker(TRACKER_PATH, buildTrackerRow(
-          employeeId, employeeName, "Failed", "Could not navigate to Reports",
-        ));
-        await goBackToMain(page);
-        return;
-      }
+      // Try up to 2 times — if report frames don't load, go back and retry
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        if (!await clickGoToReports(page, iframe)) {
+          log.step(prefixed(p, `${employeeId} -> Could not navigate to Reports`));
+          await writeTracker(TRACKER_PATH, buildTrackerRow(
+            employeeId, employeeName, "Failed", "Could not navigate to Reports",
+          ));
+          await goBackToMain(page);
+          return;
+        }
 
-      await page.waitForTimeout(5_000);
-      success = await handleReportsPage(page, employeeId, employeeName || null, reportsDir);
-      await goBackToMain(page);
+        await page.waitForTimeout(5_000);
+        success = await handleReportsPage(page, employeeId, employeeName || null, reportsDir);
+
+        if (success) {
+          await goBackToMain(page);
+          return;
+        }
+
+        // Failed — go back and retry if we have attempts left
+        await goBackToMain(page);
+        if (attempt < 2) {
+          log.step(prefixed(p, `${employeeId} -> Retrying Reports navigation (attempt ${attempt + 1})...`));
+          await page.waitForTimeout(3_000);
+        }
+      }
     };
 
     if (reportLock) {
@@ -133,18 +149,28 @@ export async function runKronosForEmployee(
       const dest = join(reportsDir, filename);
 
       if (existsSync(dest)) {
-        const { valid, pdfName } = await validateAndClean(dest, employeeId);
+        const { valid } = await validateAndClean(dest, employeeId);
         if (valid) {
           const fileStat = await stat(dest);
           const sizeKb = Math.floor(fileStat.size / 1024);
-          log.success(prefixed(p, `${employeeId} -> OK (${sizeKb} KB) name='${employeeName}' pdf='${pdfName}'`));
-          await writeTracker(TRACKER_PATH, buildTrackerRow(
-            employeeId, employeeName, "Done", "", pdfName,
-          ));
+          const verified = await verifyPdfMatch(dest, employeeName, employeeId);
+          if (verified === "x") {
+            log.success(prefixed(p, `${employeeId} -> OK (${sizeKb} KB) name='${employeeName}' [verified]`));
+            await writeTracker(TRACKER_PATH, buildTrackerRow(
+              employeeId, employeeName, "Done", "", true, verified,
+            ));
+          } else {
+            // Mismatch — wrong PDF downloaded. Delete it and mark as failed.
+            log.error(prefixed(p, `${employeeId} -> MISMATCH: ${verified} — deleting wrong PDF`));
+            try { await (await import("fs/promises")).unlink(dest); } catch { /* ignore */ }
+            await writeTracker(TRACKER_PATH, buildTrackerRow(
+              employeeId, employeeName, "Failed", `Mismatch: ${verified}`,
+            ));
+          }
         } else {
           log.step(prefixed(p, `${employeeId} -> No Data Returned (deleted)`));
           await writeTracker(TRACKER_PATH, buildTrackerRow(
-            employeeId, employeeName, "Done", "No Data Returned", "",
+            employeeId, employeeName, "Done", "No Data Returned",
           ));
         }
       } else {

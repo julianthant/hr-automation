@@ -310,43 +310,72 @@ export async function loginToACTCrm(page: Page): Promise<boolean> {
  * @returns true if authenticated (or already was), false on failure
  */
 export async function loginToUKG(page: Page): Promise<boolean> {
+  const filled = await ukgNavigateAndFill(page);
+  if (filled === "already_logged_in") return true;
+  if (!filled) return false;
+  return await ukgSubmitAndWaitForDuo(page);
+}
+
+/**
+ * Navigate to UKG and fill SSO credentials without clicking login.
+ * Returns "already_logged_in" if session is still active, true if credentials filled, false on error.
+ */
+export async function ukgNavigateAndFill(page: Page): Promise<boolean | "already_logged_in"> {
   log.step("Navigating to UKG...");
-  await page.goto(UKG_URL, {
-    waitUntil: "domcontentloaded",
-    timeout: 60_000,
-  });
+
+  // Retry navigation on transient network errors (ERR_NETWORK_CHANGED, etc.)
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await page.goto(UKG_URL, {
+        waitUntil: "domcontentloaded",
+        timeout: 60_000,
+      });
+      break;
+    } catch (err) {
+      const msg = String(err);
+      if (attempt < 3 && (msg.includes("ERR_NETWORK") || msg.includes("ERR_CONNECTION") || msg.includes("ERR_NAME"))) {
+        log.step(`Navigation failed (attempt ${attempt}/3): ${msg.slice(0, 80)}. Retrying in 5s...`);
+        await page.waitForTimeout(5_000);
+        continue;
+      }
+      throw err;
+    }
+  }
   await page.waitForTimeout(5_000);
 
   // Check if already logged in (persistent session)
   if (await page.locator("text=Manage My Department").count() > 0) {
     log.success("UKG already authenticated (persistent session)");
-    return true;
+    return "already_logged_in";
   }
 
-  log.step("Logging in via UCSD SSO...");
+  log.step("Filling SSO credentials...");
   const { userId, password } = validateEnv();
 
-  // UKG SSO uses #ssousername / #ssopassword (direct Shibboleth, no campus picker)
-  const usernameField = page.locator("#ssousername");
-  const passwordField = page.locator("#ssopassword");
-
   try {
-    await usernameField.fill(userId, { timeout: 10_000 });
-    await passwordField.fill(password, { timeout: 5_000 });
+    await page.locator("#ssousername").fill(userId, { timeout: 10_000 });
+    await page.locator("#ssopassword").fill(password, { timeout: 5_000 });
   } catch {
     log.error("Could not find UKG SSO login fields");
     return false;
   }
 
+  log.step("Credentials filled (not submitted yet)");
+  return true;
+}
+
+/**
+ * Click the login button and wait for Duo MFA approval.
+ * Call after ukgNavigateAndFill() has filled credentials.
+ */
+export async function ukgSubmitAndWaitForDuo(page: Page): Promise<boolean> {
   await page.locator('button[name="_eventId_proceed"]').click({ timeout: 5_000 });
   log.step("Credentials submitted — waiting for Duo MFA...");
 
-  // Poll for dashboard (Duo requires manual phone approval)
   log.waiting("Waiting for Duo approval (approve on your phone)...");
   const maxWaitSeconds = 180;
   for (let elapsed = 0; elapsed < maxWaitSeconds; elapsed += 2) {
     try {
-      // Check if "Yes, this is my device" button appeared
       const trustButton = page.getByText("Yes, this is my device");
       if ((await trustButton.count()) > 0) {
         log.step('Clicking "Yes, this is my device"...');

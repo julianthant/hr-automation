@@ -5,8 +5,9 @@ import { TRACKER_PATH } from "./config.js";
 const COLUMNS: ColumnDef[] = [
   { header: "Employee ID", key: "employeeId", width: 15 },
   { header: "Employee Name", key: "employeeName", width: 25 },
-  { header: "PDF Name", key: "pdfName", width: 25 },
   { header: "Status", key: "status", width: 12 },
+  { header: "Saved", key: "saved", width: 8 },
+  { header: "Verified", key: "verified", width: 30 },
   { header: "Notes", key: "notes", width: 40 },
   { header: "Timestamp", key: "timestamp", width: 22 },
 ];
@@ -14,8 +15,9 @@ const COLUMNS: ColumnDef[] = [
 export interface KronosTrackerRow {
   employeeId: string;
   employeeName: string;
-  pdfName: string;
   status: string;
+  saved: string;
+  verified: string;
   notes: string;
   timestamp: string;
 }
@@ -25,14 +27,16 @@ export function buildTrackerRow(
   employeeName: string,
   status: string,
   notes: string = "",
-  pdfName: string = "",
+  downloaded: boolean = false,
+  verified: string = "",
 ): KronosTrackerRow {
   return {
     employeeId,
     employeeName,
-    pdfName,
     status,
-    notes,
+    saved: downloaded ? "x" : "",
+    verified,
+    notes: downloaded ? "" : notes,
     timestamp: new Date().toISOString(),
   };
 }
