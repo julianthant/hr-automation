@@ -46,18 +46,34 @@ export async function loginToUCPath(page: Page): Promise<boolean> {
   log.step(`After "Log in" click | URL: ${page.url()}`);
 
   // UC-wide identity provider discovery page -- select UCSD campus
-  log.step("Selecting UC San Diego...");
-  const campusLink = page.getByRole("link", {
-    name: "University of California, San Diego",
-  });
-  await campusLink.click({ timeout: 10_000 });
-  log.step(`After campus select | URL: ${page.url()}`);
+  // Retry up to 3 times if the redirect fails (chrome-error / network glitch)
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    log.step(`Selecting UC San Diego... (attempt ${attempt})`);
+    const campusLink = page.getByRole("link", {
+      name: "University of California, San Diego",
+    });
+    await campusLink.click({ timeout: 10_000 });
+    log.step(`After campus select | URL: ${page.url()}`);
 
-  // Wait for UCSD SSO login page (a5.ucsd.edu/tritON)
-  await page.waitForURL(
-    (url) => url.hostname.includes("a5.ucsd.edu"),
-    { timeout: 15_000 },
-  );
+    try {
+      await page.waitForURL(
+        (url) => url.hostname.includes("a5.ucsd.edu"),
+        { timeout: 15_000 },
+      );
+      break; // success
+    } catch {
+      if (page.url().includes("chrome-error") && attempt < 3) {
+        log.step(`SSO redirect failed (chrome-error) — retrying navigation...`);
+        await page.goto("https://ucpath.ucsd.edu", {
+          waitUntil: "domcontentloaded",
+          timeout: 15_000,
+        });
+        await loginButton.first().click({ timeout: 10_000 });
+        continue;
+      }
+      throw new Error(`SSO redirect failed after ${attempt} attempts (URL: ${page.url()})`);
+    }
+  }
   log.step(`SSO login page loaded | URL: ${page.url()}`);
 
   // Get credentials from validated env
@@ -413,9 +429,10 @@ export async function loginToKuali(page: Page, url: string): Promise<boolean> {
     waitUntil: "domcontentloaded",
     timeout: 60_000,
   });
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   await page.waitForTimeout(3_000);
 
-  // Check if already logged in
+  // Check if already logged in (must still be on kualibuild after redirects settle)
   if (page.url().includes("kualibuild")) {
     log.success("Kuali Build already authenticated");
     return true;
@@ -436,13 +453,20 @@ export async function loginToKuali(page: Page, url: string): Promise<boolean> {
   try {
     await usernameField.fill(userId, { timeout: 10_000 });
     await passwordField.fill(password, { timeout: 5_000 });
+    await page.locator('button[name="_eventId_proceed"]').click({ timeout: 5_000 });
+    log.step("Credentials submitted — waiting for Duo MFA...");
   } catch {
-    log.error("Could not find Kuali SSO login fields");
-    return false;
+    // SSO may have auto-forwarded to Duo (credentials remembered) — check before bailing
+    if (page.url().includes("duosecurity.com")) {
+      log.step("SSO auto-forwarded to Duo — waiting for approval...");
+    } else if (page.url().includes("kualibuild")) {
+      log.success("Kuali Build authenticated (SSO auto-login)");
+      return true;
+    } else {
+      log.error(`Could not find Kuali SSO login fields (URL: ${page.url()})`);
+      return false;
+    }
   }
-
-  await page.locator('button[name="_eventId_proceed"]').click({ timeout: 5_000 });
-  log.step("Credentials submitted — waiting for Duo MFA...");
 
   // Poll for Duo approval or URL change
   log.waiting("Waiting for Duo approval (approve on your phone)...");

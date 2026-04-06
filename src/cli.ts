@@ -192,8 +192,8 @@ program
     }
 
     try {
-      const result = await runSeparation(docId, { dryRun: options.dryRun });
-      log.success(`Separation complete for ${result.employeeName} (EID: ${result.eid})`);
+      const { data } = await runSeparation(docId, { dryRun: options.dryRun });
+      log.success(`Separation complete for ${data.employeeName} (EID: ${data.eid})`);
     } catch (error) {
       log.error(`Separation workflow failed: ${errorMessage(error)}`);
       process.exit(1);

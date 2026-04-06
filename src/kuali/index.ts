@@ -8,6 +8,9 @@ export {
   fillFinalTransactions,
   fillTransactionResults,
   fillTimekeeperComments,
+  updateLastDayWorked,
+  updateSeparationDate,
+  clickSave,
 } from "./navigate.js";
 
 export type { KualiSeparationData } from "./navigate.js";

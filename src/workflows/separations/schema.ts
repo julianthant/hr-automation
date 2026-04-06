@@ -120,6 +120,95 @@ export function getInitials(fullName: string): string {
 }
 
 /**
+ * Parse MM/DD/YYYY to Date.
+ */
+function parseDate(dateStr: string): Date {
+  const [m, d, y] = dateStr.split("/").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+/**
+ * Compare Kronos timecard dates and Kuali dates to determine the correct
+ * Last Day Worked and Separation Date.
+ *
+ * Logic:
+ * - If either Kronos has time entries, pick the latest Kronos date
+ * - If the Kronos date is later than Kuali's dates, update them
+ * - If neither Kronos has time, keep Kuali's original dates
+ *
+ * Returns { lastDayWorked, separationDate, changed: boolean }
+ */
+export function resolveKronosDates(
+  kualiLastDay: string,
+  kualiSepDate: string,
+  oldKronosDate: string | null,
+  newKronosDate: string | null,
+): { lastDayWorked: string; separationDate: string; changed: boolean } {
+  // No Kronos data — keep originals
+  if (!oldKronosDate && !newKronosDate) {
+    return { lastDayWorked: kualiLastDay, separationDate: kualiSepDate, changed: false };
+  }
+
+  // Pick the latest Kronos date
+  let kronosDate: string;
+  if (oldKronosDate && newKronosDate) {
+    kronosDate = parseDate(oldKronosDate) >= parseDate(newKronosDate) ? oldKronosDate : newKronosDate;
+  } else {
+    kronosDate = (oldKronosDate ?? newKronosDate)!;
+  }
+
+  const kronosParsed = parseDate(kronosDate);
+  const kualiLastParsed = parseDate(kualiLastDay);
+  const kualiSepParsed = parseDate(kualiSepDate);
+
+  // Only update if Kronos date is different from both Kuali dates
+  const lastDayDiffers = kronosParsed.getTime() !== kualiLastParsed.getTime();
+  const sepDateDiffers = kronosParsed.getTime() !== kualiSepParsed.getTime();
+
+  if (!lastDayDiffers && !sepDateDiffers) {
+    return { lastDayWorked: kualiLastDay, separationDate: kualiSepDate, changed: false };
+  }
+
+  // Use Kronos date for both if it's later, otherwise keep original
+  return {
+    lastDayWorked: kronosParsed > kualiLastParsed ? kronosDate : kualiLastDay,
+    separationDate: kronosParsed > kualiSepParsed ? kronosDate : kualiSepDate,
+    changed: true,
+  };
+}
+
+/**
+ * Compute the Kronos date range for timecard search.
+ * Start = min(lastDayWorked, separationDate) - 2 weeks
+ * End   = max(lastDayWorked, separationDate) + 2 weeks
+ * Returns dates in M/D/YYYY format (for setDateRange digit typing).
+ */
+export function computeKronosDateRange(
+  lastDayWorked: string,
+  separationDate: string,
+): { startDate: string; endDate: string } {
+  const ldw = parseDate(lastDayWorked);
+  const sep = parseDate(separationDate);
+
+  const earlier = ldw <= sep ? ldw : sep;
+  const later = ldw >= sep ? ldw : sep;
+
+  const start = new Date(earlier);
+  start.setDate(start.getDate() - 14);
+
+  const end = new Date(later);
+  end.setDate(end.getDate() + 14);
+
+  const fmt = (d: Date) => {
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${mm}/${dd}/${d.getFullYear()}`;
+  };
+
+  return { startDate: fmt(start), endDate: fmt(end) };
+}
+
+/**
  * Build date change comments for the Timekeeper/Approver Comments field.
  * Only generates text if dates were actually changed.
  */

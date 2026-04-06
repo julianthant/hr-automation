@@ -1,5 +1,5 @@
-export { runSeparation, launchAllWindows, closeAllWindows } from "./workflow.js";
-export type { SeparationOptions, AuthenticatedWindows } from "./workflow.js";
+export { runSeparation } from "./workflow.js";
+export type { SeparationOptions, SeparationResult, SessionWindows } from "./workflow.js";
 export type { SeparationData } from "./schema.js";
 export {
   computeTerminationEffDate,
