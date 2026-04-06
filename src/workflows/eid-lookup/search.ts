@@ -380,9 +380,6 @@ async function clearSearch(page: Page, frame: FrameLocator): Promise<FrameLocato
   }
 }
 
-/** Department keywords to match for Housing/Dining/Hospitality */
-const HDH_KEYWORDS = ["housing", "dining", "hospitality", "hdh"];
-
 /** Details extracted from the drill-in detail page. */
 interface DrillInDetails {
   department: string;
@@ -492,14 +489,14 @@ async function returnToSearch(page: Page, frame: FrameLocator, needsViewAll: boo
 }
 
 /**
- * For each SDCMP result, drill in and check if department matches Housing/Dining/Hospitality.
+ * For each SDCMP result, drill in and populate department details.
+ * Returns all results with departments populated (not just HDH).
  */
-async function checkDepartments(
+async function populateDepartments(
   page: Page,
   frame: FrameLocator,
   sdcmpResults: EidResult[],
-): Promise<EidResult[]> {
-  const hdhResults: EidResult[] = [];
+): Promise<void> {
   // If any row index >= 10, we'll need View All after returning
   const maxRowIndex = Math.max(...sdcmpResults.map((r) => r.rowIndex ?? 0));
   const needsViewAll = maxRowIndex >= 10;
@@ -509,14 +506,7 @@ async function checkDepartments(
 
     // Single-result detail pages already have department populated — skip drill-in
     if (result.department) {
-      const deptLower = result.department.toLowerCase();
-      const isHDH = HDH_KEYWORDS.some((kw) => deptLower.includes(kw));
-      if (isHDH) {
-        log.success(`  ✓ HDH match: EID ${result.emplId} — ${result.department}`);
-        hdhResults.push(result);
-      } else {
-        log.step(`  ✗ Not HDH: EID ${result.emplId} — ${result.department}`);
-      }
+      log.step(`  EID ${result.emplId} — ${result.department} (${result.expectedEndDate || "Active"})`);
       continue;
     }
 
@@ -532,14 +522,7 @@ async function checkDepartments(
       result.fte = details.fte;
       result.emplClass = details.emplClass;
 
-      const deptLower = details.department.toLowerCase();
-      const isHDH = HDH_KEYWORDS.some((kw) => deptLower.includes(kw));
-      if (isHDH) {
-        log.success(`  ✓ HDH match: EID ${result.emplId} — ${details.department}`);
-        hdhResults.push(result);
-      } else {
-        log.step(`  ✗ Not HDH: EID ${result.emplId} — ${details.department}`);
-      }
+      log.step(`  EID ${result.emplId} — ${details.department} (${details.endDate || "Active"})`);
     }
 
     // Only return to search if there are more results to check
@@ -547,8 +530,6 @@ async function checkDepartments(
       await returnToSearch(page, frame, needsViewAll);
     }
   }
-
-  return hdhResults;
 }
 
 /**
@@ -599,7 +580,6 @@ export async function searchByName(
 ): Promise<{
   found: boolean;
   sdcmpResults: EidResult[];
-  hdhResults: EidResult[];
   allAttempts: EidSearchResult[];
 }> {
   const { lastName, first, middle } = parseNameInput(nameInput);
@@ -639,17 +619,15 @@ export async function searchByName(
     }
   }
 
-  // If we found SDCMP results, drill into each to check department
-  let hdhResults: EidResult[] = [];
+  // If we found SDCMP results, drill into each to populate department details
   if (sdcmpResults.length > 0) {
-    log.step(`Checking ${sdcmpResults.length} SDCMP result(s) for Housing/Dining/Hospitality...`);
-    hdhResults = await checkDepartments(page, frame, sdcmpResults);
+    log.step(`Drilling into ${sdcmpResults.length} SDCMP result(s) for department details...`);
+    await populateDepartments(page, frame, sdcmpResults);
   }
 
   return {
     found: sdcmpResults.length > 0,
     sdcmpResults,
-    hdhResults,
     allAttempts,
   };
 }

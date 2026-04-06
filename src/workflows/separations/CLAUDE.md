@@ -46,3 +46,9 @@ Screen: 2560x1440, windows positioned via Chromium `--window-position` and `--wi
 - Comments auto-generated with termination eff date, last day worked, and Kuali form #
 - `Promise.allSettled` used so one system failure doesn't block others
 - `explore-kronos.ts` is a dev tool, not a production workflow
+
+## TODO (Known Bugs)
+
+- **Batch mode: Old/New Kronos not reused after first doc** — When processing multiple docs via `existingWindows`, Kronos browsers are still on the previous employee's timecard page. Need to navigate back to main dashboard (old kronos: `goBackToMain`, new kronos: navigate home) before searching the next employee's EID.
+- **Batch mode: Kuali form not saved on last doc** — The last document in the batch doesn't get saved after filling the transaction number and other fields.
+- **Batch mode: Transaction number only captured for last doc** — Only the final doc in the batch gets the transaction number filled into Kuali. Earlier docs don't capture/fill the transaction number. Likely related to UCPath browser state not being reset between docs — the transaction confirmation page from the previous doc may interfere.

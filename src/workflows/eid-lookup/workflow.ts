@@ -17,7 +17,6 @@ export interface LookupResult {
   name: string;
   found: boolean;
   sdcmpResults: EidResult[];
-  hdhResults: EidResult[];
   error?: string;
 }
 
@@ -32,23 +31,17 @@ export async function lookupSingle(nameInput: string): Promise<LookupResult> {
 
     const loggedIn = await loginToUCPath(page);
     if (!loggedIn) {
-      return { name: nameInput, found: false, sdcmpResults: [], hdhResults: [], error: "UCPath login failed" };
+      return { name: nameInput, found: false, sdcmpResults: [], error: "UCPath login failed" };
     }
 
     const result = await searchByName(page, nameInput);
 
-    if (result.hdhResults.length > 0) {
-      log.success(`HDH match for "${nameInput}":`);
-      for (const r of result.hdhResults) {
-        log.success(`  EID: ${r.emplId} | ${r.department} | ${r.jobCodeDescription} | ${r.name}`);
+    if (result.sdcmpResults.length > 0) {
+      log.success(`Found ${result.sdcmpResults.length} SDCMP result(s) for "${nameInput}":`);
+      for (const r of result.sdcmpResults) {
+        log.success(`  EID: ${r.emplId} | ${r.department ?? "?"} | ${r.jobCodeDescription} | ${r.name} | ${r.expectedEndDate || "Active"}`);
         await updateEidTracker(nameInput, r);
       }
-    } else if (result.found) {
-      log.step(`SDCMP results for "${nameInput}" but none in Housing/Dining/Hospitality:`);
-      for (const r of result.sdcmpResults) {
-        log.step(`  EID: ${r.emplId} | ${r.department ?? "?"} | ${r.jobCodeDescription} | ${r.name}`);
-      }
-      await updateEidTrackerNotFound(nameInput);
     } else {
       log.error(`No SDCMP results for "${nameInput}"`);
       await updateEidTrackerNotFound(nameInput);
@@ -58,12 +51,11 @@ export async function lookupSingle(nameInput: string): Promise<LookupResult> {
       name: nameInput,
       found: result.found,
       sdcmpResults: result.sdcmpResults,
-      hdhResults: result.hdhResults,
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     log.error(`Lookup failed for "${nameInput}": ${msg}`);
-    return { name: nameInput, found: false, sdcmpResults: [], hdhResults: [], error: msg };
+    return { name: nameInput, found: false, sdcmpResults: [], error: msg };
   }
 }
 
@@ -87,7 +79,7 @@ export async function lookupParallel(
     const loggedIn = await loginToUCPath(authPage);
     if (!loggedIn) {
       log.error("UCPath login failed");
-      return names.map((n) => ({ name: n, found: false, sdcmpResults: [], hdhResults: [], error: "Login failed" }));
+      return names.map((n) => ({ name: n, found: false, sdcmpResults: [], error: "Login failed" }));
     }
     log.success("Authenticated — opening parallel tabs...");
 
@@ -114,15 +106,12 @@ export async function lookupParallel(
         try {
           const result = await searchByName(workerPage, nameInput);
 
-          if (result.hdhResults.length > 0) {
-            log.success(`[Worker ${workerId}] HDH match for "${nameInput}":`);
-            for (const r of result.hdhResults) {
-              log.success(`  EID: ${r.emplId} | ${r.department} | ${r.jobCodeDescription} | ${r.name}`);
+          if (result.sdcmpResults.length > 0) {
+            log.success(`[Worker ${workerId}] Found ${result.sdcmpResults.length} result(s) for "${nameInput}":`);
+            for (const r of result.sdcmpResults) {
+              log.success(`  EID: ${r.emplId} | ${r.department ?? "?"} | ${r.jobCodeDescription} | ${r.name} | ${r.expectedEndDate || "Active"}`);
               await updateEidTracker(nameInput, r);
             }
-          } else if (result.found) {
-            log.step(`[Worker ${workerId}] SDCMP but no HDH for "${nameInput}"`);
-            await updateEidTrackerNotFound(nameInput);
           } else {
             log.step(`[Worker ${workerId}] No SDCMP results for "${nameInput}"`);
             await updateEidTrackerNotFound(nameInput);
@@ -132,12 +121,11 @@ export async function lookupParallel(
             name: nameInput,
             found: result.found,
             sdcmpResults: result.sdcmpResults,
-            hdhResults: result.hdhResults,
           });
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
           log.error(`[Worker ${workerId}] Failed for "${nameInput}": ${msg}`);
-          results.push({ name: nameInput, found: false, sdcmpResults: [], hdhResults: [], error: msg });
+          results.push({ name: nameInput, found: false, sdcmpResults: [], error: msg });
         }
       }
     };
@@ -148,12 +136,9 @@ export async function lookupParallel(
     // Print summary
     log.step("\n=== EID Lookup Summary ===");
     for (const r of results) {
-      if (r.hdhResults.length > 0) {
-        const eids = r.hdhResults.map((s) => `${s.emplId} (${s.department})`).join(", ");
-        log.success(`${r.name} → HDH: ${eids}`);
-      } else if (r.found) {
-        const eids = r.sdcmpResults.map((s) => `${s.emplId} (${s.department ?? "?"})`).join(", ");
-        log.step(`${r.name} → SDCMP but not HDH: ${eids}`);
+      if (r.sdcmpResults.length > 0) {
+        const eids = r.sdcmpResults.map((s) => `${s.emplId} (${s.department ?? "?"} | ${s.expectedEndDate || "Active"})`).join(", ");
+        log.success(`${r.name} → ${eids}`);
       } else {
         log.error(`${r.name} → ${r.error ?? "No SDCMP results"}`);
       }
@@ -188,7 +173,7 @@ export async function lookupWithCrm(nameInput: string): Promise<LookupResult> {
     log.step("Authenticating to UCPath...");
     const ucpathOk = await loginToUCPath(ucpath.page);
     if (!ucpathOk) {
-      return { name: nameInput, found: false, sdcmpResults: [], hdhResults: [], error: "UCPath login failed" };
+      return { name: nameInput, found: false, sdcmpResults: [], error: "UCPath login failed" };
     }
 
     // Step 2: Authenticate CRM (separate browser, separate Duo)
@@ -253,18 +238,12 @@ export async function lookupWithCrm(nameInput: string): Promise<LookupResult> {
     }
 
     // Print UCPath summary
-    if (ucpathResult.hdhResults.length > 0) {
-      log.step("\nUCPath HDH Matches:");
-      for (const r of ucpathResult.hdhResults) {
-        log.success(`  EID: ${r.emplId} | ${r.department} | Start: ${r.effectiveDate} | End: ${r.expectedEndDate}`);
+    if (allSdcmp.length > 0) {
+      log.step("\nUCPath SDCMP Results:");
+      for (const r of allSdcmp) {
+        log.success(`  EID: ${r.emplId} | ${r.department ?? "?"} | Start: ${r.effectiveDate} | End: ${r.expectedEndDate || "Active"}`);
         await updateEidTracker(nameInput, r);
       }
-    } else if (allSdcmp.length > 0) {
-      log.step("\nUCPath SDCMP (non-HDH):");
-      for (const r of allSdcmp) {
-        log.step(`  EID: ${r.emplId} | ${r.department ?? "?"} | Start: ${r.effectiveDate} | End: ${r.expectedEndDate}`);
-      }
-      await updateEidTrackerNotFound(nameInput);
     } else {
       log.error("UCPath: No SDCMP results");
       await updateEidTrackerNotFound(nameInput);
@@ -274,11 +253,10 @@ export async function lookupWithCrm(nameInput: string): Promise<LookupResult> {
       name: nameInput,
       found: ucpathResult.found,
       sdcmpResults: ucpathResult.sdcmpResults,
-      hdhResults: ucpathResult.hdhResults,
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     log.error(`Lookup with CRM failed for "${nameInput}": ${msg}`);
-    return { name: nameInput, found: false, sdcmpResults: [], hdhResults: [], error: msg };
+    return { name: nameInput, found: false, sdcmpResults: [], error: msg };
   }
 }

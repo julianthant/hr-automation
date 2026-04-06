@@ -133,3 +133,71 @@ Same EID can have multiple employment records (rec 0, rec 1, etc.) with differen
 ### 6. Multiple People Same Name
 Common names like "Hernandez, Jeanette" return multiple different people. SDCMP filter and department keywords (HDH) help narrow to the correct person.
 
+## Complete Results (All 33 Names)
+
+| # | Name | EID | Term Date | Dept | Job Title | BU | Notes |
+|---|------|-----|-----------|------|-----------|-----|-------|
+| 1 | Mendoza, Daniela | 10402221 | 12/08/2022 | TEACHING & LEARNING COMMONS (000441) | STDT 3 | SDCMP | Student, not HDH |
+| 2 | Mendoza, Rocio | N/A | N/A | — | — | — | Not in UCPath |
+| 3 | Miller, Terri | 10403694 | rec0: 01/17/2023 (Transfer) | HOUSING/DINING/HOSPITALITY (000412) | BLANK AST 3 → EVENTS SPEC 2 | SDCMP | Rec1 Active at RADY SCHOOL OF MANAGEMENT |
+| 4 | Miranda, Estela Evelia | 10407325 | 06/29/2022 (Retirement) | HOUSING/DINING/HOSPITALITY (000412) | CUSTODIAN SR | SDCMP | Single result → detail |
+| 5 | Mondragon, Juan Carlos | 10401537 | rec0: 09/19/2021 (Auto Term) | VCSA CAMPUS RECREATION (000228) | STDT 2 | SDCMP | Rec1 Active under LACMP, On Campus Housing (317000) |
+| 6 | Manrique, Dan GeraErick | 10420567 | Active | HOUSING/DINING/HOSPITALITY (000412) | MAINT MECH | SDCMP | Single result → detail |
+| 7 | Morfin, Heriverto | 10367561 | Active | ENROLLMENT MANAGEMENT (000130) | ADMISSIONS RECRMT SPEC 4 SV | SDCMP | UCPath name is "Eddie Morfin" — name mismatch |
+| 8 | Nguyen, Sandra Tuyet-Nhung | 10535568 | 09/18/2022 (Auto Term) | School of Public Health (000383) | STDT 4 | SDCMP | Student, not HDH |
+| 9 | Neubarth, Anita Trevino | 10411766 | 12/15/2020 (Retirement) | HOUSING/DINING/HOSPITALITY (000412) | MARKETING SPEC 2 | SDCMP | Single result → detail |
+| 10 | Padilla, Evangelina | 10409489 | 09/27/2022 (Medical Sep) | HOUSING/DINING/HOSPITALITY (000412) | CUSTODIAN SR | SDCMP | Single result → detail |
+| 11 | Padilla, Jorge | 10413523 | 06/29/2022 (Retirement) | HOUSING/DINING/HOSPITALITY (000412) | CUSTODIAN SR | SDCMP | Single result → detail |
+| 12 | Hernandez, Jeanette | 10482236 | 09/08/2022 (Resign) | HOUSING/DINING/HOSPITALITY (000412) | FOOD SVC WORKER | SDCMP | 4 results, 1 SDCMP |
+| 13 | Hernandez, Jesus | 10403226 | 03/29/2021 (Auto Term) | CELLULAR & MOLECULAR MEDICINE (000326) | STDT 4 | SDCMP | Student, not HDH. 24 results total |
+| 14 | Hodges, Patricia M. | 10425783 | 04/14/2022 (Retirement) | HOUSING/DINING/HOSPITALITY (000412) | FOOD SVC WORKER PRN | SDCMP | Single result → detail |
+| 15 | Melycher, Kristine R. | 10375001 | 11/08/2022 (Retirement) | HOUSING/DINING/HOSPITALITY (000412) | FOOD SVC SUPV | SDCMP | Single result → detail |
+| 16 | Reece, Albert Allan | 10431049 | 06/28/2018 (Union Dues) | UNIVERSITY UC San Diego | CONV | SDCMP | Conversion shell record |
+| 17 | Ramos, Rosa Elisa | 10430912 | 06/28/2018 (Union Dues) | UNIVERSITY UC San Diego | CONV | SDCMP | Conversion shell record |
+| 18 | Waddell, Jeffrey | 10364422 | 03/31/2023 (Retirement) | HOUSING/DINING/HOSPITALITY (000412) | FAC MGR 1 | SDCMP | Single result → detail |
+| 19 | Wilson, Robert | N/A | N/A | — | — | — | 18 results, no SDCMP |
+| 20 | Sta Teresa, Carlos Gabriel | 10416089 | 09/26/2020 (Resign) | HOUSING/DINING/HOSPITALITY (000412) | STDT 3 | SDCMP | Student, multi-word last name |
+| 21 | Santoyo, Christina | 10428115 | 11/07/2019 (Union Dues) | UNIVERSITY UC San Diego | CONV | SDCMP | Conversion shell record |
+| 22 | Salazar, Michelle | 10402198 | Inactive | Various (student roles) | STDT 3, STDT ACTIVITIES, ELECTED OFCR | SDCMP | 7 student records |
+| 23 | Sandoval, Aaron | N/A | N/A | — | — | — | 2 results, no SDCMP (LACMP, RVCMP) |
+| 24 | Solis, Kelli | 10406012 | 02/17/2023 (Medical Sep) | HOUSING/DINING/HOSPITALITY (000412) | FOOD SVC WORKER LD | SDCMP | Single result → detail |
+| 25 | Stoelo, Sanchez Maria S | N/A | N/A | — | — | — | Not in UCPath |
+| 26 | Sholan, Andrea E | 10413372 | 09/27/2020 (Resign) | HOUSING/DINING/HOSPITALITY (000412) | FOOD SVC WORKER LD | SDCMP | Single result → detail |
+| 27 | Stacy, Joseph | N/A | N/A | — | — | — | Not in UCPath |
+| 28 | Skyo, Rachel | N/A | N/A | — | — | — | Not in UCPath |
+| 29 | Tellez, Elizabeth | 10417729 | 03/11/2022 (Resign) | HOUSING/DINING/HOSPITALITY (000412) | BLANK AST 3 | SDCMP | Single result → detail |
+| 30 | Todd, Rauk | N/A | N/A | — | — | — | Not in UCPath |
+| 31 | Thorne, Herman F | 10411375 | 03/31/2021 (Retirement) | HOUSING/DINING/HOSPITALITY (000412) | MAINT MECH | SDCMP | Single result → detail |
+| 32 | Thorp, Nichole | 10429198 | 04/13/2019 (Union Dues) | UNIVERSITY UC San Diego | CONV | SDCMP | Name is "Nicole" not "Nichole". 2 CONV records |
+| 33 | Tinderholt, Jeffrey | 10405733 | 02/06/2022 (Dismissal) | HOUSING/DINING/HOSPITALITY (000412) | COOK SR | SDCMP | Single result → detail |
+
+## Department Names Observed
+
+### Accepted Departments (employees in user's list with known EIDs)
+- **HOUSING/DINING/HOSPITALITY** (Dept ID: 000412) — most common, SDCMP
+- **On Campus Housing** (Dept ID: 317000) — under LACMP business unit
+- **RADY SCHOOL OF MANAGEMENT** (Dept ID: 000195) — Miller transferred here (rec1 active)
+- **ENROLLMENT MANAGEMENT** (Dept ID: 000130) — Morfin "Eddie" (but name mismatch, may not be intentional match)
+- **UNIVERSITY UC San Diego** — conversion shell records (CONV), no real dept
+- **VCSA CAMPUS RECREATION** (Dept ID: 000228) — Mondragon student rec
+- **TEACHING & LEARNING COMMONS** (Dept ID: 000441) — Mendoza Daniela student
+- **School of Public Health** (Dept ID: 000383) — Nguyen Sandra student
+- **CELLULAR & MOLECULAR MEDICINE** (Dept ID: 000326) — Hernandez Jesus student
+
+### Termination Reason Types Observed
+- Retirement
+- Resign - No Reason Given
+- Resign - Personal Reasons
+- Medical Separation
+- Dismissal - Attendance
+- Union Dues Retention (CONV records)
+- Job Record End Date - Auto Term (student records)
+- Transfer - Intra Location (between departments)
+
+### Business Units Observed
+- **SDCMP** — UC San Diego Main Campus (primary filter)
+- **LACMP** — LA Campus (Mondragon active record)
+- **MECMP**, **IRCMP**, **RVCMP**, **SCCMP**, **SBCMP** — other UC campuses
+- **LAMED**, **IRMED**, **SDMED**, **DVMED** — medical centers
+- **UCANR**, **DVCMP** — other UC entities
+
