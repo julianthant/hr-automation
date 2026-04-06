@@ -1,5 +1,6 @@
 import type { Page } from "playwright";
 import { log } from "../utils/log.js";
+import { gotoWithRetry } from "../browser/launch.js";
 
 const KUALI_SPACE_URL = "https://ucsd.kualibuild.com/build/space/5e47518b90adda9474c14adb";
 
@@ -8,11 +9,15 @@ const KUALI_SPACE_URL = "https://ucsd.kualibuild.com/build/space/5e47518b90adda9
  */
 export async function openActionList(page: Page): Promise<void> {
   log.step("Navigating to Kuali Build...");
-  await page.goto(KUALI_SPACE_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await gotoWithRetry(
+    page,
+    KUALI_SPACE_URL,
+    page.getByRole("menuitem", { name: "Action List" }),
+  );
   await page.waitForTimeout(3_000);
 
   log.step("Clicking Action List...");
-  await page.getByRole("menuitem", { name: "Action List" }).click({ timeout: 10_000 });
+  await page.getByRole("menuitem", { name: "Action List" }).click({ timeout: 15_000 });
   await page.waitForTimeout(3_000);
   log.success("Action List loaded");
 }
@@ -207,9 +212,13 @@ export async function fillTransactionResults(
   }
   log.step("  Submitted Termination Template checked");
 
-  // Fill Transaction Number
-  log.step(`  Transaction Number: ${transactionNumber}`);
-  await page.getByRole("textbox", { name: "Transaction Number:*" }).fill(transactionNumber, { timeout: 5_000 });
+  // Fill Transaction Number (skip if empty — user will fill manually)
+  if (transactionNumber) {
+    log.step(`  Transaction Number: ${transactionNumber}`);
+    await page.getByRole("textbox", { name: "Transaction Number:*" }).fill(transactionNumber, { timeout: 5_000 });
+  } else {
+    log.step("  Transaction Number: (empty — fill manually)");
+  }
 
   // Select "Does not need Final Pay (student employee)" radio
   log.step("  Selecting Final Pay: Does not need Final Pay (student employee)...");
@@ -229,4 +238,42 @@ export async function fillTimekeeperComments(
   log.step(`Filling Timekeeper/Approver Comments: ${comments}`);
   await page.getByRole("textbox", { name: "Timekeeper/Approver Comments:" }).fill(comments, { timeout: 5_000 });
   log.success("Timekeeper comments filled");
+}
+
+/**
+ * Update the Last Day Worked field in the Kuali form.
+ */
+export async function updateLastDayWorked(
+  page: Page,
+  newDate: string,
+): Promise<void> {
+  log.step(`Updating Last Day Worked to: ${newDate}`);
+  const field = page.getByRole("textbox", { name: "Last Day Worked*" });
+  await field.clear({ timeout: 5_000 });
+  await field.fill(newDate, { timeout: 5_000 });
+}
+
+/**
+ * Update the Separation Date field in the Kuali form.
+ */
+export async function updateSeparationDate(
+  page: Page,
+  newDate: string,
+): Promise<void> {
+  log.step(`Updating Separation Date to: ${newDate}`);
+  const field = page.getByRole("textbox", { name: /Separation Date/ });
+  await field.clear({ timeout: 5_000 });
+  await field.fill(newDate, { timeout: 5_000 });
+}
+
+/**
+ * Click the Save button in the Kuali form top navbar.
+ */
+export async function clickSave(page: Page): Promise<void> {
+  log.step("Clicking Save on Kuali form...");
+  const saveBtn = page.getByRole("button", { name: "Save", exact: true })
+    .or(page.locator("button:has-text('Save')").first());
+  await saveBtn.first().click({ timeout: 10_000 });
+  await page.waitForTimeout(3_000);
+  log.success("Kuali form saved");
 }

@@ -513,14 +513,20 @@ export async function clickEmployeeExperienceTab(
  *
  * SELECTOR: verified v1.0 — button "Save and Submit"
  */
+/**
+ * @param employeeName - Full name (e.g. "Ivette Lima Montes") used to find the
+ *   transaction in the Transactions in Progress list after submit.
+ */
 export async function clickSaveAndSubmit(
   page: Page,
   frame: FrameLocator,
+  employeeName?: string,
 ): Promise<TransactionResult> {
   log.step("Clicking Save and Submit...");
 
   await frame
     .getByRole("button", { name: "Save and Submit" })
+    .first()
     .click({ timeout: 10_000 });
   await page.waitForTimeout(5_000);
   await waitForPeopleSoftProcessing(frame, 30_000);
@@ -540,19 +546,68 @@ export async function clickSaveAndSubmit(
 
   log.success("Transaction saved and submitted");
 
-  // Try to extract transaction number from confirmation message
+  // Mapped via playwright-cli 2026-04-01:
+  // Flow to extract transaction number:
+  //   1. Confirmation page appears → click OK
+  //   2. Back on Smart HR Transactions list → click employee name link
+  //   3. Enter Transaction Details → click Continue
+  //   4. Enter Transaction Information → "Transaction ID:" shows actual number (e.g. T002114817)
   let transactionNumber = "";
   try {
-    // PeopleSoft shows transaction number in confirmation text or message area
-    const pageText = await frame.locator("body").innerText({ timeout: 5_000 });
-    const txnMatch = pageText.match(/(?:Transaction|Trans(?:action)?\s*(?:#|No|Number|ID))\s*[:=]?\s*(\d+)/i)
-      ?? pageText.match(/\b(\d{7,})\b/); // fallback: any 7+ digit number
-    if (txnMatch) {
-      transactionNumber = txnMatch[1];
-      log.step(`Transaction number: ${transactionNumber}`);
+    // Step 1: Click OK on confirmation page
+    const okButton = frame.getByRole("button", { name: "OK" });
+    await okButton.waitFor({ state: "visible", timeout: 15_000 }).catch(() => {});
+    await page.waitForTimeout(2_000);
+
+    if ((await okButton.count()) > 0) {
+      log.step("Clicking OK on confirmation page...");
+      await okButton.click({ timeout: 5_000 });
+      await page.waitForTimeout(8_000);
+
+      // Step 2: Click employee name in Transactions in Progress list
+      if (employeeName) {
+        // Search for exact name link (e.g. "Ivette Lima Montes")
+        // PeopleSoft shows first name + last name as a link
+        const nameLink = frame.getByRole("link", { name: employeeName });
+        if ((await nameLink.count()) > 0) {
+          log.step(`Clicking employee: ${employeeName}`);
+          await nameLink.first().click({ timeout: 5_000 });
+        } else {
+          // Try partial match — last name only
+          const lastName = employeeName.split(",")[0]?.trim() ?? employeeName.split(" ").pop() ?? "";
+          const partialLink = frame.getByRole("link", { name: new RegExp(lastName, "i") });
+          if ((await partialLink.count()) > 0) {
+            log.step(`Clicking employee (partial match): ${lastName}`);
+            await partialLink.last().click({ timeout: 5_000 });
+          } else {
+            log.step(`Employee link not found: ${employeeName}`);
+          }
+        }
+        await page.waitForTimeout(5_000);
+
+        // Step 3: Click Continue on transaction details page
+        const continueBtn = frame.getByRole("button", { name: "Continue" });
+        if ((await continueBtn.count()) > 0) {
+          await continueBtn.click({ timeout: 5_000 });
+          await page.waitForTimeout(8_000);
+
+          // Step 4: Extract "Transaction ID: T002XXXXXX" from the re-opened form
+          const bodyText = await frame.locator("body").innerText({ timeout: 5_000 }).catch(() => "");
+          const tMatch = bodyText.match(/Transaction ID:\s*(T\d+)/)
+            ?? bodyText.match(/Transaction:\s*(T\d+)/i);
+          if (tMatch) {
+            transactionNumber = tMatch[1];
+            log.step(`Transaction number: ${transactionNumber}`);
+          }
+        }
+      }
     }
-  } catch {
-    // Non-fatal — transaction number extraction is best-effort
+
+    if (!transactionNumber) {
+      log.step("Transaction number not found — will need manual entry");
+    }
+  } catch (e) {
+    log.step(`Transaction number extraction failed: ${e instanceof Error ? e.message : e}`);
   }
 
   return { success: true, transactionNumber };

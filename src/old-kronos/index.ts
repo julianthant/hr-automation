@@ -7,6 +7,10 @@ export {
   getEmployeeName,
   clickEmployeeRow,
   clickGoToReports,
+  clickGoToTimecard,
+  switchToPreviousPayPeriod,
+  getTimecardLastDate,
+  checkTimecardDates,
   goBackToMain,
 } from "./navigate.js";
 

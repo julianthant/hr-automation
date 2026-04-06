@@ -136,8 +136,134 @@ async function executeSearch(
 }
 
 /**
+ * Check if PeopleSoft navigated directly to the detail page (single-result case).
+ * When search returns exactly 1 match, PeopleSoft skips the results grid and
+ * shows the detail page immediately. Detected by the presence of the person ID
+ * field and Employment Instances section.
+ *
+ * SELECTOR IDs (verified via playwright-cli v1.2):
+ * - Person ID: text content near "Person ID" label (generic element after it)
+ * - Person name: generic element containing the full name
+ * - Termination Date: #PER_INST_EMP_VW_TERMINATION_DT$0
+ * - Last Hire Date: #PER_INST_EMP_VW_LAST_HIRE_DT$0
+ * - Assignments table: same structure as drill-in detail page
+ * - Return to Search button: role button "Return to Search"
+ */
+async function extractSingleResultDetail(
+  frame: FrameLocator,
+): Promise<EidResult | null> {
+  // Check if the detail page is showing (person ID field is present)
+  const personIdLocator = frame.locator("#PER_INST_EMP_VW_OPRID\\$0").or(
+    frame.locator("#PER_INST_EMP_VW_EMPLID\\$0"),
+  );
+  const hasDetail = await personIdLocator.count().catch(() => 0);
+  if (hasDetail === 0) return null;
+
+  // Extract the EID from the page — look for 8-digit number near "Person ID" or "Person Organizational Summary"
+  const emplId = await frame.locator("body").evaluate((body) => {
+    // Look for a standalone 8-digit number in a span/div (the Person ID value)
+    const allElements = body.querySelectorAll("span, div");
+    for (const el of Array.from(allElements)) {
+      const text = el.textContent?.trim() ?? "";
+      if (/^10\d{6}$/.test(text) && el.children.length === 0) {
+        return text;
+      }
+    }
+    return null;
+  }).catch(() => null);
+
+  if (!emplId) return null;
+
+  log.success(`Single-result detail page detected — EID: ${emplId}`);
+
+  // Extract dates from ORG Instance section
+  const startDate = await frame.locator("#PER_INST_EMP_VW_LAST_HIRE_DT\\$0")
+    .textContent({ timeout: 5_000 }).then((t) => t?.trim() ?? "").catch(() => "");
+  const termDate = await frame.locator("#PER_INST_EMP_VW_TERMINATION_DT\\$0")
+    .textContent({ timeout: 5_000 }).then((t) => t?.trim() ?? "").catch(() => "");
+
+  // Extract name from the page
+  const fullName = await frame.locator("body").evaluate((body) => {
+    // The name appears as a text node near the Person ID, often in a generic/span element
+    const allElements = body.querySelectorAll("span, div");
+    for (const el of Array.from(allElements)) {
+      const text = el.textContent?.trim() ?? "";
+      // Name pattern: "First Last" (2+ words, letters only, no digits)
+      if (/^[A-Za-z]+\s+[A-Za-z]+/.test(text) && text.length < 60 && !/\d/.test(text) && el.children.length === 0) {
+        // Skip common UI labels
+        if (!["Search Criteria", "Recent Searches", "Saved Searches", "Employment Instances",
+              "Person Organizational Summary", "Return to Search", "Show fewer options",
+              "Navigation Area", "Julian Zaw"].some((label) => text.includes(label))) {
+          return text;
+        }
+      }
+    }
+    return null;
+  }).catch(() => null);
+
+  // Extract assignment details (same logic as drillInAndGetDetails)
+  const assignment = await frame.locator("body").evaluate((body) => {
+    const tables = body.querySelectorAll("table");
+    for (const table of Array.from(tables)) {
+      for (const row of Array.from(table.rows)) {
+        const cells = Array.from(row.cells);
+        if (cells.length >= 12) {
+          const buCell = cells[3]?.textContent?.trim() ?? "";
+          const deptCell = cells[6]?.textContent?.trim() ?? "";
+          if (/^[A-Z]{4,5}\d?$/.test(buCell) && deptCell && deptCell !== "Department Description") {
+            return {
+              emplRecord: cells[0]?.textContent?.trim() ?? "",
+              hrStatus: cells[2]?.textContent?.trim() ?? "",
+              businessUnit: buCell,
+              positionNumber: cells[4]?.textContent?.trim() ?? "",
+              deptId: cells[5]?.textContent?.trim() ?? "",
+              department: deptCell,
+              jobCode: cells[7]?.textContent?.trim() ?? "",
+              jobCodeDescription: cells[8]?.textContent?.trim() ?? "",
+              fte: cells[10]?.textContent?.trim() ?? "",
+              emplClass: cells[11]?.textContent?.trim() ?? "",
+            };
+          }
+        }
+      }
+    }
+    return null;
+  }).catch(() => null);
+
+  const endDate = termDate || "Active";
+  const nameParts = fullName?.split(" ") ?? [];
+  const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : "";
+
+  log.step(`  Name: ${fullName} | Start: ${startDate} | End: ${endDate}`);
+  if (assignment) {
+    log.step(`  Dept: ${assignment.department} | BU: ${assignment.businessUnit} | Job: ${assignment.jobCodeDescription}`);
+  }
+
+  return {
+    emplId,
+    emplRecord: assignment?.emplRecord ?? "0",
+    hrStatus: assignment?.hrStatus ?? (termDate ? "Inactive" : "Active"),
+    businessUnit: assignment?.businessUnit ?? "SDCMP",
+    jobCode: assignment?.jobCode ?? "",
+    jobCodeDescription: assignment?.jobCodeDescription ?? "",
+    lastName,
+    name: fullName ?? "",
+    department: assignment?.department,
+    deptId: assignment?.deptId,
+    positionNumber: assignment?.positionNumber,
+    effectiveDate: startDate,
+    expectedEndDate: endDate,
+    fte: assignment?.fte,
+    emplClass: assignment?.emplClass,
+  };
+}
+
+/**
  * Extract results from the PeopleSoft search results grid.
  * Clicks "View All" if available to load all rows at once.
+ *
+ * IMPORTANT: Also checks for the single-result case where PeopleSoft skips the
+ * grid and goes directly to the detail page (verified via playwright-cli v1.2).
  */
 async function extractResults(page: Page, frame: FrameLocator): Promise<EidResult[]> {
   // Check if there are any results (look for "Nothing yet" or result count)
@@ -152,6 +278,12 @@ async function extractResults(page: Page, frame: FrameLocator): Promise<EidResul
   if (noResults > 0) {
     log.step("No matching values found");
     return [];
+  }
+
+  // Check for single-result detail page (PeopleSoft skips grid when exactly 1 match)
+  const singleResult = await extractSingleResultDetail(frame);
+  if (singleResult) {
+    return [singleResult];
   }
 
   // Click "View All" if present to load all rows
@@ -224,17 +356,27 @@ async function extractResults(page: Page, frame: FrameLocator): Promise<EidResul
 
 /**
  * Clear the search form for a new search.
+ * If the form is unresponsive (PeopleSoft stale after failed searches),
+ * re-navigates to Person Org Summary and returns the fresh frame.
  */
-async function clearSearch(page: Page, frame: FrameLocator): Promise<void> {
+async function clearSearch(page: Page, frame: FrameLocator): Promise<FrameLocator> {
   // Click Clear button
   try {
     await frame.getByRole("button", { name: "Clear", exact: true }).click({ timeout: 5_000 });
     await page.waitForTimeout(2_000);
     await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+    return frame;
   } catch {
-    // Clear button may not be available; fill empty values instead
-    await frame.getByRole("textbox", { name: "Last Name" }).fill("", { timeout: 5_000 });
-    await frame.getByRole("textbox", { name: "Name", exact: true }).fill("", { timeout: 5_000 });
+    // Clear button may not be available; try filling empty values
+    try {
+      await frame.getByRole("textbox", { name: "Last Name" }).fill("", { timeout: 5_000 });
+      await frame.getByRole("textbox", { name: "Name", exact: true }).fill("", { timeout: 5_000 });
+      return frame;
+    } catch {
+      // Form is stale — re-navigate to get a fresh page
+      log.step("Form unresponsive, re-navigating to Person Org Summary...");
+      return navigateToPersonOrgSummary(page);
+    }
   }
 }
 
@@ -364,6 +506,20 @@ async function checkDepartments(
 
   for (let i = 0; i < sdcmpResults.length; i++) {
     const result = sdcmpResults[i];
+
+    // Single-result detail pages already have department populated — skip drill-in
+    if (result.department) {
+      const deptLower = result.department.toLowerCase();
+      const isHDH = HDH_KEYWORDS.some((kw) => deptLower.includes(kw));
+      if (isHDH) {
+        log.success(`  ✓ HDH match: EID ${result.emplId} — ${result.department}`);
+        hdhResults.push(result);
+      } else {
+        log.step(`  ✗ Not HDH: EID ${result.emplId} — ${result.department}`);
+      }
+      continue;
+    }
+
     if (result.rowIndex === undefined) continue;
 
     const details = await drillInAndGetDetails(page, frame, result.rowIndex);
@@ -451,7 +607,7 @@ export async function searchByName(
   let sdcmpResults: EidResult[] = [];
 
   // Navigate to Person Org Summary
-  const frame = await navigateToPersonOrgSummary(page);
+  let frame = await navigateToPersonOrgSummary(page);
 
   // Strategy 1: Full name — "First Middle"
   const fullName = middle ? `${first} ${middle}` : first;
@@ -464,7 +620,8 @@ export async function searchByName(
 
   // Strategy 2: First name only (drop middle) — only if we had a middle and no SDCMP yet
   if (middle && sdcmpResults.length === 0) {
-    await clearSearch(page, frame);
+    // Always re-navigate fresh — PeopleSoft forms break after "No matching values" popups
+    frame = await navigateToPersonOrgSummary(page);
     const attempt2 = await searchOnce(page, frame, lastName, first);
     allAttempts.push(attempt2);
 
@@ -472,7 +629,7 @@ export async function searchByName(
       sdcmpResults = attempt2.sdcmpResults;
     } else {
       // Strategy 3: Middle name as first name
-      await clearSearch(page, frame);
+      frame = await navigateToPersonOrgSummary(page);
       const attempt3 = await searchOnce(page, frame, lastName, middle);
       allAttempts.push(attempt3);
 

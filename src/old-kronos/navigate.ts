@@ -56,7 +56,17 @@ export async function getGeniesIframe(page: Page): Promise<Frame> {
   for (let attempt = 0; attempt < 15; attempt++) {
     // Try exact name first
     const iframe = page.frame({ name: "widgetFrame804" });
-    if (iframe) return iframe;
+    if (iframe) {
+      // Check for "network change detected" error inside iframe — reload if found
+      const hasNetworkError = await iframe.locator("text=network change was detected").count().catch(() => 0);
+      if (hasNetworkError > 0) {
+        log.step("Network change detected in iframe — reloading page...");
+        await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 });
+        await page.waitForTimeout(10_000);
+        continue;
+      }
+      return iframe;
+    }
 
     // Fallback: any genies frame
     for (const f of page.frames()) {
@@ -66,6 +76,14 @@ export async function getGeniesIframe(page: Page): Promise<Frame> {
     // Fallback: any widgetFrame
     for (const f of page.frames()) {
       if (f.name().startsWith("widgetFrame")) {
+        // Also check this frame for network error
+        const hasNetworkError = await f.locator("text=network change was detected").count().catch(() => 0);
+        if (hasNetworkError > 0) {
+          log.step("Network change detected in widget frame — reloading page...");
+          await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 });
+          await page.waitForTimeout(10_000);
+          break; // restart the loop
+        }
         log.step(`Found widget frame: ${f.name()} -> ${f.url().slice(0, 80)}`);
         return f;
       }
@@ -73,16 +91,12 @@ export async function getGeniesIframe(page: Page): Promise<Frame> {
 
     if (attempt === 0) {
       log.step("Waiting for Genies iframe to load...");
-      log.step(`Current frames (${page.frames().length}):`);
-      for (const f of page.frames()) {
-        log.step(`  ${f.name()} -> ${f.url().slice(0, 100)}`);
-      }
     }
     await page.waitForTimeout(2_000);
   }
 
   // Last resort: reload and retry
-  log.step("Reloading page and retrying...");
+  log.step("Reloading page and retrying (final attempt)...");
   await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 });
   await page.waitForTimeout(15_000);
 
@@ -311,6 +325,163 @@ export async function clickGoToReports(
 
   log.error("Could not find Go To -> Reports");
   return false;
+}
+
+/**
+ * Click Go To dropdown and select Timecard.
+ */
+export async function clickGoToTimecard(
+  page: Page,
+  iframe: Frame,
+): Promise<boolean> {
+  log.step("[Old Kronos] Clicking Go To → Timecards...");
+
+  const gotoEl = iframe.locator("text=Go To").first();
+  if (await gotoEl.count() > 0) {
+    await gotoEl.click();
+    await page.waitForTimeout(3_000);
+
+    // Menu item is "Timecards" (plural) — must use exact match to avoid "Approve Timecards"
+    const timecardItem = iframe.locator("a, li, span").filter({ hasText: /^Timecards$/ }).first();
+    if (await timecardItem.count() > 0) {
+      await timecardItem.click();
+      await page.waitForTimeout(5_000);
+      log.success("[Old Kronos] Navigated to Timecards");
+      return true;
+    }
+  }
+
+  log.error("[Old Kronos] Could not find Go To → Timecards");
+  return false;
+}
+
+/**
+ * Switch the pay period dropdown to previous pay period.
+ * Returns true if switched, false if already on the last option or dropdown not found.
+ */
+export async function switchToPreviousPayPeriod(
+  page: Page,
+  iframe: Frame,
+): Promise<boolean> {
+  log.step("[Old Kronos] Switching to previous pay period...");
+
+  // Mapped via playwright-cli 2026-04-01:
+  // The timecard frame (widgetFrame808 or similar) has a readonly input
+  // id="timeframe-selector-input" that opens a dropdown when clicked.
+  // Playwright's actionability checks block normal clicks on readonly inputs,
+  // so we use JS click directly. Then click the "Previous Pay Period" link.
+  for (const f of page.frames()) {
+    // Use JS to find and click the timeframe selector — bypasses readonly checks
+    const clicked = await f.evaluate(() => {
+      const input = document.getElementById("timeframe-selector-input");
+      if (!input) return false;
+      (input as HTMLElement).click();
+      return true;
+    }).catch(() => false);
+
+    if (!clicked) continue;
+
+    log.step(`[Old Kronos] Opened period dropdown in frame: ${f.name()}`);
+    await page.waitForTimeout(2_000);
+
+    const prevLink = f.getByRole("link", { name: "Previous Pay Period" });
+    if (await prevLink.count() > 0) {
+      await prevLink.click({ timeout: 5_000 });
+      await page.waitForTimeout(5_000);
+      log.step("[Old Kronos] Switched to Previous Pay Period");
+      return true;
+    }
+  }
+
+  log.error("[Old Kronos] Could not find period dropdown");
+  return false;
+}
+
+/**
+ * Check if the current timecard view has any time entries (non-zero hours).
+ * Returns the latest date with time, or null if no time found.
+ * Date format: MM/DD/YYYY
+ */
+export async function getTimecardLastDate(
+  page: Page,
+  iframe: Frame,
+): Promise<string | null> {
+  log.step("[Old Kronos] Checking timecard for time entries...");
+
+  // Old Kronos timecard: each row has 12+ gridcells in one row
+  // cells[2]=Date ("Mon 3/16"), cells[4]=In, cells[5]=Out
+  // Find the last date that has a non-empty In or Out value
+  for (const f of page.frames()) {
+    const result = await f.evaluate(() => {
+      let lastDate: string | null = null;
+      const year = new Date().getFullYear();
+      const rows = document.querySelectorAll("[role='row']");
+
+      for (const row of rows) {
+        const cells = row.querySelectorAll("[role='gridcell']");
+        if (cells.length < 10) continue;
+
+        const dateText = (cells[2]?.textContent ?? "").trim();
+        if (!/^[A-Z][a-z]{2}\s+\d+\/\d+$/.test(dateText)) continue;
+
+        const inVal = (cells[4]?.textContent ?? "").trim();
+        const outVal = (cells[5]?.textContent ?? "").trim();
+
+        if (inVal || outVal) {
+          // Extract M/D and format as MM/DD/YYYY
+          const match = dateText.match(/(\d+)\/(\d+)/);
+          if (match) {
+            const mm = match[1].padStart(2, "0");
+            const dd = match[2].padStart(2, "0");
+            lastDate = `${mm}/${dd}/${year}`;
+          }
+        }
+      }
+
+      return lastDate;
+    }).catch(() => null);
+
+    if (result) {
+      log.step(`[Old Kronos] Latest timecard date with In/Out: ${result} (frame: ${f.name()})`);
+      return result;
+    }
+  }
+
+  log.step("[Old Kronos] No In/Out entries found in current pay period");
+  return null;
+}
+
+/**
+ * Full timecard check: Go To → Timecard, check current period, if empty check previous.
+ * Returns the latest date with time entries, or null if nothing found.
+ */
+export async function checkTimecardDates(
+  page: Page,
+  iframe: Frame,
+): Promise<string | null> {
+  const ok = await clickGoToTimecard(page, iframe);
+  if (!ok) return null;
+
+  await page.waitForTimeout(3_000);
+  await dismissModal(page, iframe);
+  await ukgScreenshot(page, "timecard-01-current");
+
+  // Check current pay period
+  let lastDate = await getTimecardLastDate(page, iframe);
+  if (lastDate) {
+    log.step("[Old Kronos] Found entries in current period — no need to check previous");
+    return lastDate;
+  }
+
+  // No entries in current — try previous pay period
+  const switched = await switchToPreviousPayPeriod(page, iframe);
+  if (switched) {
+    await dismissModal(page, iframe);
+    await ukgScreenshot(page, "timecard-02-previous");
+    lastDate = await getTimecardLastDate(page, iframe);
+  }
+
+  return lastDate;
 }
 
 /**
