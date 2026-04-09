@@ -28,6 +28,12 @@ export interface DuoPollOptions {
    * Runs before pollDuoApproval returns true.
    */
   postApproval?: (page: Page) => Promise<void>;
+
+  /**
+   * Optional recovery callback — runs each poll iteration to handle mid-auth errors
+   * (e.g., SAML redirects in Kuali, #failedLogin in New Kronos).
+   */
+  recovery?: (page: Page) => Promise<void>;
 }
 
 /**
@@ -54,7 +60,7 @@ export async function pollDuoApproval(
   page: Page,
   options: DuoPollOptions,
 ): Promise<boolean> {
-  const { timeoutSeconds = 180, successUrlMatch, successCheck, postApproval } = options;
+  const { timeoutSeconds = 180, successUrlMatch, successCheck, postApproval, recovery } = options;
 
   const urlMatches = (url: string): boolean => {
     if (typeof successUrlMatch === "string") {
@@ -67,6 +73,11 @@ export async function pollDuoApproval(
 
   for (let elapsed = 0; elapsed < timeoutSeconds; elapsed += 2) {
     try {
+      // Run optional recovery callback to handle mid-auth errors (e.g., SAML redirects)
+      if (recovery) {
+        await recovery(page).catch(() => {});
+      }
+
       // Check for "Yes, this is my device" trust button and click it
       const trustButton = page.getByText("Yes, this is my device");
       if ((await trustButton.count()) > 0) {

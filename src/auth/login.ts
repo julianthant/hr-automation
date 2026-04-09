@@ -290,8 +290,9 @@ export async function ukgSubmitAndWaitForDuo(page: Page): Promise<boolean> {
   log.step("Credentials submitted — waiting for Duo MFA...");
 
   const approved = await pollDuoApproval(page, {
-    successUrlMatch: "kronos.net",
-    successCheck: async (p) => (await p.locator("text=Manage My Department").count()) > 0,
+    successUrlMatch: () => true,
+    successCheck: async (p) =>
+      (await p.locator("text=Manage My Department").count()) > 0,
   });
 
   if (!approved) {
@@ -351,6 +352,14 @@ export async function loginToKuali(page: Page, url: string): Promise<boolean> {
   // Poll for Duo approval or URL change
   const approved = await pollDuoApproval(page, {
     successUrlMatch: "kualibuild",
+    recovery: async (p) => {
+      const currentUrl = p.url();
+      if (currentUrl.includes("SAML") || currentUrl.includes("saml")) {
+        log.step("SAML error detected — re-navigating to Kuali...");
+        await p.goto(url, { waitUntil: "domcontentloaded", timeout: 10_000 }).catch(() => {});
+        await p.waitForTimeout(3_000);
+      }
+    },
   });
 
   if (!approved) {
@@ -403,6 +412,13 @@ export async function loginToNewKronos(page: Page): Promise<boolean> {
   // Poll for Duo approval or URL change
   const approved = await pollDuoApproval(page, {
     successUrlMatch: "mykronos.com/wfd",
+    recovery: async (p) => {
+      if (p.url().includes("#failedLogin")) {
+        log.step("Session timeout detected — re-navigating...");
+        await p.goto(wfdUrl, { waitUntil: "domcontentloaded", timeout: 10_000 }).catch(() => {});
+        await p.waitForTimeout(3_000);
+      }
+    },
   });
 
   if (!approved) {
