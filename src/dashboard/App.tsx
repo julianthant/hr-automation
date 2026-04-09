@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import FilterBar from "./components/FilterBar";
 import StatsRow from "./components/StatsRow";
-import ProgressBarSection from "./components/ProgressBar";
+// ProgressBar removed per user request
 import DataTable from "./components/DataTable";
 import { useClock } from "./components/hooks";
 import {
@@ -20,6 +20,7 @@ export default function App() {
   );
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
   const clock = useClock();
 
@@ -87,21 +88,44 @@ export default function App() {
     document.title = cfg.label + " \u2014 HR Automation";
   }, [activeWf]);
 
-  // Clear search when switching workflows
+  // Clear search and status filter when switching workflows
   const handleWorkflowChange = useCallback((wf: string) => {
     setActiveWf(wf);
     setSearchQuery("");
+    setStatusFilter(null);
   }, []);
 
-  // Filter rows by search query
+  // Filter rows by search query and status
   const cfg = getConfig(activeWf);
   const filteredRows = useMemo(() => {
-    if (!searchQuery) return rows;
-    const q = searchQuery.toLowerCase();
-    return rows.filter((r) => {
-      const name = (cfg.getName(r) || "").toLowerCase();
-      return r.id.toLowerCase().includes(q) || name.includes(q);
-    });
+    let filtered = rows;
+    if (statusFilter) {
+      filtered = filtered.filter((r) => r.status === statusFilter);
+    }
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      filtered = filtered.filter((r) => {
+        const name = (cfg.getName(r) || "").toLowerCase();
+        return r.id.toLowerCase().includes(q) || name.includes(q);
+      });
+    }
+    return filtered;
+  }, [rows, searchQuery, statusFilter, cfg]);
+
+  // Status counts (before search filter, so chips show true counts)
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    const base = searchQuery
+      ? rows.filter((r) => {
+          const q = searchQuery.toLowerCase();
+          const name = (cfg.getName(r) || "").toLowerCase();
+          return r.id.toLowerCase().includes(q) || name.includes(q);
+        })
+      : rows;
+    for (const r of base) {
+      counts[r.status] = (counts[r.status] || 0) + 1;
+    }
+    return counts;
   }, [rows, searchQuery, cfg]);
 
   return (
@@ -125,6 +149,9 @@ export default function App() {
         </div>
       </header>
 
+      {/* Stats first */}
+      <StatsRow rows={filteredRows} />
+
       {/* Filter Bar */}
       <FilterBar
         activeWf={activeWf}
@@ -135,11 +162,12 @@ export default function App() {
         selectedDate={selectedDate}
         setSelectedDate={setSelectedDate}
         availableDates={availableDates}
+        statusFilter={statusFilter}
+        setStatusFilter={setStatusFilter}
+        statusCounts={statusCounts}
       />
 
-      {/* Stats, Progress, Table */}
-      <StatsRow rows={filteredRows} />
-      <ProgressBarSection rows={filteredRows} />
+      {/* Table */}
       <DataTable
         rows={filteredRows}
         activeWf={activeWf}

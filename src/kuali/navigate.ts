@@ -98,11 +98,19 @@ export async function extractSeparationData(page: Page): Promise<KualiSeparation
 }
 
 /**
+ * Involuntary termination types from Kuali.
+ * Everything NOT in this list is considered voluntary.
+ */
+const INVOLUNTARY_TYPES = [
+  "Never Started Employment",
+  "Graduated/No longer a Student",
+];
+
+/**
  * Determine if the termination type is voluntary or involuntary.
- * Everything except "Never Started Employment" is voluntary.
  */
 export function isVoluntaryTermination(terminationType: string): boolean {
-  return terminationType !== "Never Started Employment";
+  return !INVOLUNTARY_TYPES.includes(terminationType);
 }
 
 /**
@@ -272,12 +280,15 @@ export async function updateSeparationDate(
 
 /**
  * Click the Save button in the Kuali form top navbar.
+ * Waits for network idle to ensure the AJAX save request completes
+ * (critical for batch mode where the process may exit after the last doc).
  */
 export async function clickSave(page: Page): Promise<void> {
   log.step("Clicking Save on Kuali form...");
   const saveBtn = page.getByRole("button", { name: "Save", exact: true })
     .or(page.locator("button:has-text('Save')").first());
   await saveBtn.first().click({ timeout: 10_000 });
-  await page.waitForTimeout(3_000);
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  await page.waitForTimeout(2_000);
   log.success("Kuali form saved");
 }

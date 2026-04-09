@@ -68,8 +68,23 @@ export function buildTerminationComments(
  *   Resign - Quit Without Notice, Resign - Self Employment,
  *   Resign -Failed to Ret fr Leave, Transfer - Intra Location,
  *   Voluntary Separation Program
+ *
+ * UCPath INVOL_TERM reason codes (verified via playwright-cli 2026-04-09):
+ *   Acad- Incompetent Performance, Acad- Presumptive Resignation,
+ *   Acad- Terminal Appointment, Appointment Expired, Death,
+ *   Dismissal - Attendance, Dismissal - Falsified App,
+ *   Dismissal - Misconduct, Dismissal - No Longer Cert/Lic,
+ *   Dismissal -Lack of Performance, Do Not Protest (Settlement),
+ *   Do Not Rehire (Settlement), Elimination of Position,
+ *   Grant/Contract expired, Involuntary Termination -Other,
+ *   Layoff - Accept Health Care, Layoff- Rehire/Recall Rights,
+ *   Layoff- Severance, Layoff-Reduced Sev, Reh/Recall,
+ *   Medical Separation, Never Started Employment, No Longer Student,
+ *   Per Diem Release, Release fr Trial Emplmnt-Invol,
+ *   Released During Probation, Visa/Work Permit Expired
  */
 const REASON_CODE_MAP: Record<string, string> = {
+  // ─── Voluntary (UC_VOL_TERM) ───
   "Accepted Another Job": "Resign - Accept Another Job",
   "Attend School": "Resign - Attend School",
   "Dissatisfied w/Job": "Resign - Dissatisfied w/ Job",
@@ -81,10 +96,11 @@ const REASON_CODE_MAP: Record<string, string> = {
   "Quit without Notice": "Resign - Quit Without Notice",
   "Self-Employment": "Resign - Self Employment",
   "Retirement": "Voluntary Separation Program",
-  "Graduated/No longer a Student": "Resign - Attend School",
   "Appointment Expired": "Resign - No Reason Given",
   "Transferring to a different UCSD department (outside of RRSS)": "Transfer - Intra Location",
   "Transferring to another UC Campus (outside of UCSD)": "Interlocation (BU) Transfer",
+  // ─── Involuntary (UC_INVOL_TERM) ───
+  "Graduated/No longer a Student": "No Longer Student",
 };
 
 /**

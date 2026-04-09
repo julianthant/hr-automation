@@ -38,9 +38,28 @@ export default function LogPanel({
   useEffect(() => {
     if (!itemId) return;
     setLogs([]);
-    setLoading(true);
     prevLenRef.current = 0;
 
+    // Instant fetch first — no loading delay
+    let apiUrl =
+      "/api/logs?workflow=" +
+      encodeURIComponent(workflow) +
+      "&id=" +
+      encodeURIComponent(itemId);
+    if (selectedDate) apiUrl += "&date=" + encodeURIComponent(selectedDate);
+
+    fetch(apiUrl)
+      .then((r) => r.json())
+      .then((entries: LogEntry[]) => {
+        if (Array.isArray(entries) && entries.length > 0) {
+          setLogs(entries);
+          prevLenRef.current = entries.length;
+        }
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+
+    // Then SSE for live updates
     let sseUrl =
       "/events/logs?workflow=" +
       encodeURIComponent(workflow) +
@@ -53,18 +72,15 @@ export default function LogPanel({
     es.onmessage = (e) => {
       try {
         const newEntries: LogEntry[] = JSON.parse(e.data);
-        if (Array.isArray(newEntries)) {
+        if (Array.isArray(newEntries) && newEntries.length > 0) {
           setLogs((prev) => [...prev, ...newEntries]);
-          setLoading(false);
         }
       } catch {
         // ignore
       }
     };
 
-    es.onerror = () => {
-      setLoading(false);
-    };
+    es.onerror = () => {};
 
     return () => es.close();
   }, [workflow, itemId, selectedDate]);

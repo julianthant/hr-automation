@@ -34,7 +34,7 @@ export default function StatsRow({ rows }: StatsRowProps) {
   };
 
   return (
-    <div className="grid grid-cols-5 gap-3 mb-3">
+    <div className="grid grid-cols-5 gap-3 mb-6">
       {stats.map((s) => (
         <Card
           key={s.key}
