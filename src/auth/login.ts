@@ -1,6 +1,6 @@
 import type { Page } from "playwright";
 import { log } from "../utils/log.js";
-import { waitForDuoApproval } from "./duo-wait.js";
+import { pollDuoApproval } from "./duo-poll.js";
 import { validateEnv } from "../utils/env.js";
 import { UKG_URL } from "../config.js";
 import { fillSsoCredentials, clickSsoSubmit } from "./sso-fields.js";
@@ -83,35 +83,14 @@ export async function loginToUCPath(page: Page): Promise<boolean> {
   log.step(`After login click | URL: ${page.url()}`);
 
   // Wait for Duo approval — poll for URL change or "Yes, this is my device" button
-  log.waiting("Waiting for Duo approval (approve on your phone)...");
-  let approved = false;
-  const maxWaitSecondsUcpath = 180;
-  for (let elapsed = 0; elapsed < maxWaitSecondsUcpath; elapsed += 2) {
-    try {
-      // Check if "Yes, this is my device" button appeared
-      const trustButton = page.getByText("Yes, this is my device");
-      if ((await trustButton.count()) > 0) {
-        log.step('Clicking "Yes, this is my device"...');
-        await trustButton.click({ timeout: 5_000 });
-      }
-
-      // Check if we made it past Duo
-      if (page.url().includes("universityofcalifornia.edu") && !page.url().includes("duosecurity")) {
-        approved = true;
-        break;
-      }
-    } catch {
-      // Page may be navigating
-    }
-    await page.waitForTimeout(2_000);
-  }
+  const approved = await pollDuoApproval(page, {
+    successUrlMatch: (url) =>
+      url.includes("universityofcalifornia.edu") && !url.includes("duosecurity"),
+  });
 
   if (!approved) {
-    log.error("Duo approval timed out");
     return false;
   }
-
-  log.step(`Duo approved | URL: ${page.url()}`);
 
   // After Duo, wait for redirects to settle.
   log.step("Waiting for post-Duo redirects to settle...");
@@ -218,46 +197,12 @@ export async function loginToACTCrm(page: Page): Promise<boolean> {
   await ss(page, "04-after-login-click");
 
   // Now wait for Duo approval -- user approves on their phone
-  log.waiting("Waiting for Duo approval (approve on your phone)...");
-
-  // After Duo approval, the page redirects to act-crm.my.site.com or crm.ucsd.edu.
-  // Poll in 15s intervals so we can detect the "Yes, this is my device" button
-  // quickly instead of waiting the full timeout.
-  let approved = false;
-  const MAX_ATTEMPTS = 4; // 4 × 15s = 60s total
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    approved = await waitForDuoApproval(page, "**/*crm*/**", 15_000);
-    if (approved) break;
-
-    // Check if "Yes, this is my device" appeared (Duo approved but not yet redirected)
-    try {
-      const yesBtn = page.getByRole("button", { name: /yes/i })
-        .or(page.locator('button:has-text("Yes")'))
-        .or(page.locator('input[value="Yes"]'));
-      const yesVisible = await yesBtn.first().isVisible({ timeout: 2_000 });
-      if (yesVisible) {
-        log.step("Clicking 'Yes, this is my device'...");
-        await yesBtn.first().click({ timeout: 5_000 });
-        await page.waitForTimeout(2_000);
-        // After clicking, wait for CRM redirect
-        approved = await waitForDuoApproval(page, "**/*crm*/**", 15_000);
-        if (approved) break;
-      }
-    } catch {
-      // No device confirmation screen
-    }
-
-    // Check if we already made it to CRM
-    if (page.url().includes("act-crm.my.site.com") && !page.url().includes("login")) {
-      log.step("Already on ACT CRM -- Duo may have been auto-approved");
-      approved = true;
-      break;
-    }
-
-    if (attempt < MAX_ATTEMPTS) {
-      log.waiting(`Still waiting for Duo approval (attempt ${attempt}/${MAX_ATTEMPTS})...`);
-    }
-  }
+  const approved = await pollDuoApproval(page, {
+    timeoutSeconds: 60,
+    successUrlMatch: (url) =>
+      (url.includes("act-crm.my.site.com") || url.includes("crm.ucsd.edu")) &&
+      !url.includes("login"),
+  });
 
   if (!approved) {
     await ss(page, "06-duo-timeout");
@@ -344,28 +289,18 @@ export async function ukgSubmitAndWaitForDuo(page: Page): Promise<boolean> {
   await page.locator('button[name="_eventId_proceed"]').click({ timeout: 5_000 });
   log.step("Credentials submitted — waiting for Duo MFA...");
 
-  log.waiting("Waiting for Duo approval (approve on your phone)...");
-  const maxWaitSeconds = 180;
-  for (let elapsed = 0; elapsed < maxWaitSeconds; elapsed += 2) {
-    try {
-      const trustButton = page.getByText("Yes, this is my device");
-      if ((await trustButton.count()) > 0) {
-        log.step('Clicking "Yes, this is my device"...');
-        await trustButton.click({ timeout: 5_000 });
-      }
+  const approved = await pollDuoApproval(page, {
+    successUrlMatch: "kronos.net",
+    successCheck: async (p) => (await p.locator("text=Manage My Department").count()) > 0,
+  });
 
-      if (await page.locator("text=Manage My Department").count() > 0) {
-        log.success("UKG authenticated — dashboard loaded");
-        return true;
-      }
-    } catch {
-      // Page may be navigating
-    }
-    await page.waitForTimeout(2_000);
+  if (!approved) {
+    log.error("UKG authentication timed out waiting for dashboard");
+    return false;
   }
 
-  log.error("UKG authentication timed out waiting for dashboard");
-  return false;
+  log.success("UKG authenticated — dashboard loaded");
+  return true;
 }
 
 /**
@@ -414,40 +349,17 @@ export async function loginToKuali(page: Page, url: string): Promise<boolean> {
   }
 
   // Poll for Duo approval or URL change
-  log.waiting("Waiting for Duo approval (approve on your phone)...");
-  const maxWaitSeconds = 180;
-  for (let elapsed = 0; elapsed < maxWaitSeconds; elapsed += 2) {
-    try {
-      // Check if "Yes, this is my device" button appeared
-      const trustButton = page.getByText("Yes, this is my device");
-      if ((await trustButton.count()) > 0) {
-        log.step('Clicking "Yes, this is my device"...');
-        await trustButton.click({ timeout: 5_000 });
-      }
+  const approved = await pollDuoApproval(page, {
+    successUrlMatch: "kualibuild",
+  });
 
-      // Check if we landed on Kuali
-      if (page.url().includes("kualibuild")) {
-        log.success("Kuali Build authenticated");
-        return true;
-      }
-
-      // Handle SAML error page — retry navigation
-      if (page.url().includes("SAML") || (await page.content()).includes("SAML")) {
-        log.step("SAML error detected — retrying navigation to Kuali...");
-        await page.goto(url, {
-          waitUntil: "domcontentloaded",
-          timeout: 60_000,
-        });
-        await page.waitForTimeout(3_000);
-      }
-    } catch {
-      // Page may be navigating
-    }
-    await page.waitForTimeout(2_000);
+  if (!approved) {
+    log.error("Kuali Build authentication timed out");
+    return false;
   }
 
-  log.error("Kuali Build authentication timed out");
-  return false;
+  log.success("Kuali Build authenticated");
+  return true;
 }
 
 /**
@@ -489,38 +401,15 @@ export async function loginToNewKronos(page: Page): Promise<boolean> {
   log.step("Credentials submitted — waiting for Duo MFA...");
 
   // Poll for Duo approval or URL change
-  log.waiting("Waiting for Duo approval (approve on your phone)...");
-  const maxWaitSecondsWfd = 180;
-  for (let elapsed = 0; elapsed < maxWaitSecondsWfd; elapsed += 2) {
-    try {
-      // Check if "Yes, this is my device" button appeared
-      const trustButton = page.getByText("Yes, this is my device");
-      if ((await trustButton.count()) > 0) {
-        log.step('Clicking "Yes, this is my device"...');
-        await trustButton.click({ timeout: 5_000 });
-      }
+  const approved = await pollDuoApproval(page, {
+    successUrlMatch: "mykronos.com/wfd",
+  });
 
-      // Check if we landed on WFD
-      if (page.url().includes("mykronos.com/wfd")) {
-        log.success("New Kronos (WFD) authenticated");
-        return true;
-      }
-
-      // Handle session timeout page
-      if (page.url().includes("#failedLogin")) {
-        log.step("Session timeout detected — retrying navigation...");
-        await page.goto(wfdUrl, {
-          waitUntil: "domcontentloaded",
-          timeout: 60_000,
-        });
-        await page.waitForTimeout(3_000);
-      }
-    } catch {
-      // Page may be navigating
-    }
-    await page.waitForTimeout(2_000);
+  if (!approved) {
+    log.error("New Kronos (WFD) authentication timed out");
+    return false;
   }
 
-  log.error("New Kronos (WFD) authentication timed out");
-  return false;
+  log.success("New Kronos (WFD) authenticated");
+  return true;
 }
