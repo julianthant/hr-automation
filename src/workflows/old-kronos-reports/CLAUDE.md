@@ -7,9 +7,9 @@ Downloads Time Detail PDF reports from Old Kronos (UKG) for multiple employees i
 - `schema.ts` — Input schema: array of 5+ digit employee IDs, date range (default 1/01/2017–1/31/2026), worker count
 - `config.ts` — Constants: `REPORTS_DIR` (`C:\Users\juzaw\Downloads\reports`), session dirs, default dates, screen dimensions for tiling
 - `validate.ts` — PDF validation: checks file size > 0, searches for "No Data Returned" text, extracts name/ID from first page (regex: `/^(.+?)\s+ID:\s*(\d+)/`), verifies match against expected employee
-- `tracker.ts` — Writes to `kronos-tracker.xlsx` with columns for employee ID, name, status, saved, verified, notes, timestamp
-- `workflow.ts` — Worker execution: launches N tiled browsers, fills credentials sequentially (5s gap), submits login with Duo one at a time, sets date range, processes employee queue
-- `parallel.ts` — Orchestration: loads `batch.yaml`, phases 1a–1b for launch/auth, phase 2 distributes employees across workers with queue-based work stealing, 3-strike error recovery, mutex-locked tracker/report navigation
+- `tracker.ts` — Writes to `kronos-tracker.xlsx` (Excel-only, no `trackEvent` — JSONL events handled by `withTrackedWorkflow` in parallel.ts)
+- `workflow.ts` — Worker execution: accepts `onStep`/`onData` callbacks from `withTrackedWorkflow` for dashboard progress. Launches N tiled browsers, fills credentials sequentially (5s gap), submits login with Duo one at a time, sets date range, processes employee queue. Steps: searching → extracting → downloading
+- `parallel.ts` — Orchestration: loads `batch.yaml`, phases 1a–1b for launch/auth, phase 2 distributes employees across workers with queue-based work stealing, 3-strike error recovery, mutex-locked tracker/report navigation. Each employee wrapped in `withTrackedWorkflow` for dashboard tracking
 - `index.ts` — Barrel exports
 
 ## Data Flow

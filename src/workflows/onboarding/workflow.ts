@@ -11,6 +11,7 @@ import {
 } from "../../crm/index.js";
 import { TransactionError } from "../../ucpath/types.js";
 import { searchPerson } from "../../ucpath/navigate.js";
+import { withTrackedWorkflow } from "../../tracker/jsonl.js";
 import {
   updateOnboardingTracker as defaultUpdateTracker,
   buildTrackerRow,
@@ -55,6 +56,7 @@ export async function runOnboarding(
   const isParallel = Boolean(options.crmPage);
 
   return withLogContext("onboarding", email, async () => {
+  return withTrackedWorkflow("onboarding", email, {}, async (setStep, updateData) => {
   const writeTracker = options.updateTrackerFn ?? defaultUpdateTracker;
 
   let data: EmployeeData;
@@ -67,6 +69,7 @@ export async function runOnboarding(
   }
 
   // --- Step 1: Extract data from ACT CRM ---
+  setStep("crm-auth");
   const crmPage = options.crmPage ?? (await launchBrowser()).page;
   let recordFields: { departmentNumber: string | null; recruitmentNumber: string | null } = {
     departmentNumber: null,
@@ -92,6 +95,7 @@ export async function runOnboarding(
     log.step(prefixed(p, "Navigating to UCPath Entry Sheet..."));
     await navigateToSection(crmPage, "UCPath Entry Sheet");
 
+    setStep("extraction");
     log.step(prefixed(p, "Extracting employee data..."));
     const rawData = await extractRawFields(crmPage);
 
@@ -105,6 +109,7 @@ export async function runOnboarding(
       data = { ...data, recruitmentNumber: recordFields.recruitmentNumber };
     }
 
+    updateData({ firstName: data.firstName, lastName: data.lastName });
     log.success(prefixed(p, "Employee data extracted and validated"));
   } catch (error) {
     const errMsg = error instanceof ExtractionError
@@ -161,6 +166,7 @@ export async function runOnboarding(
   }
 
   // --- Step 3: UCPath -- person search + transaction ---
+  setStep("ucpath-auth");
   const ucpathPage = options.ucpathPage ?? (await launchBrowser()).page;
   try {
     log.step(prefixed(p, "Authenticating to UCPath..."));
@@ -168,6 +174,7 @@ export async function runOnboarding(
     if (!ucpathOk) fail("UCPath authentication failed");
 
     const ssnDigits = data.ssn?.replace(/-/g, "") ?? "";
+    setStep("person-search");
     log.step(prefixed(p, "Checking for existing person in UCPath..."));
     const searchResult = await searchPerson(
       ucpathPage,
@@ -210,6 +217,7 @@ export async function runOnboarding(
     const i9ProfileId = "MOCK_I9";
     log.step(prefixed(p, "I9 skipped (mock mode) -- Profile ID: MOCK_I9"));
 
+    setStep("transaction");
     const plan = buildTransactionPlan(data, ucpathPage, i9ProfileId);
     log.step(prefixed(p, "Executing transaction plan..."));
     await plan.execute();
@@ -267,5 +275,6 @@ export async function runOnboarding(
     }
     process.exit(1);
   }
+  }); // end withTrackedWorkflow
   }); // end withLogContext
 }

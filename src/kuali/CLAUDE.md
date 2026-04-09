@@ -14,6 +14,7 @@ Kuali Build separation form automation: extraction and form filling for employee
   - `fillFinalTransactions(page, opts)` — fills termination date, department (combobox best-match), payroll title code/title
   - `fillTransactionResults(page, transactionNumber)` — checks submitted checkbox, fills txn number, selects "Does not need Final Pay" radio
   - `fillTimekeeperComments(page, comments)` — fills comments textbox
+  - `clickSave(page)` — scrolls to top, targets navbar save button (action-bar or nav selector), waits for network idle, checks for error indicators
 - `index.ts` — Barrel exports
 
 ## Gotchas
@@ -25,3 +26,5 @@ Kuali Build separation form automation: extraction and form filling for employee
 - Location field is optional — 3s timeout, silent failure
 - "Does not need Final Pay (student employee)" is hardcoded — assumes all separations are students
 - Throws generic `Error` for missing documents (not custom error class)
+- **`clickSave` targets navbar**: Scrolls to top first, then targets `[class*="action-bar"] button:has-text("Save")` or `nav button:has-text("Save")` before falling back to generic `button[name="Save"]` — avoids clicking wrong save button in modals or other form sections
+- `fillTransactionResults` fills fields only — does NOT save. Must call `clickSave()` separately after all form sections are filled

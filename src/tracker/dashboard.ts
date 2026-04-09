@@ -114,9 +114,9 @@ export function startDashboard(workflow: string, port: number = 3838): void {
       return;
     }
 
-    // Serve HTML dashboard
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    res.end(getDashboardHtml());
+    // No HTML served — use Vite dev server (port 5173) for the UI
+    res.writeHead(404);
+    res.end();
   });
 
   server.on("error", (err: NodeJS.ErrnoException) => {

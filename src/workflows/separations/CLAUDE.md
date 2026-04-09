@@ -6,7 +6,7 @@ Multi-system employee termination: extracts data from Kuali Build, searches both
 
 - `config.ts` — URLs (Kuali, Kronos), template IDs (`UC_VOL_TERM`, `UC_INVOL_TERM`), screen dimensions for tiling 5 windows (2560x1440)
 - `schema.ts` — `SeparationData` Zod schema; helpers: `computeTerminationEffDate` (+1 day), `buildTerminationComments`, `mapReasonCode` (Kuali → UCPath), `getInitials`, `buildDateChangeComments`
-- `workflow.ts` — Main orchestration: launches 5 tiled browsers, staggered Duo auth, parallel extraction/search with `Promise.allSettled`, fills UCPath + Kuali forms
+- `workflow.ts` — Main orchestration: uses `withTrackedWorkflow` for dashboard tracking (steps: launching → authenticating → kuali-extraction → kronos-search → ucpath-job-summary → ucpath-transaction → kuali-finalization), launches 4 tiled browsers, staggered Duo auth, parallel extraction/search with `Promise.allSettled`, fills UCPath + Kuali forms
 - `run.ts` — CLI entry point: `runSeparation(docId, { keepOpen: true })`
 - `explore-kronos.ts` — Interactive exploration script for selector discovery (launches Kronos browsers, pauses for Playwright Inspector)
 - `index.ts` — Barrel exports

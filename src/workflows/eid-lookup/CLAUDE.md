@@ -6,8 +6,8 @@ Searches UCPath Person Organizational Summary for employees by name, filters for
 
 - `search.ts` — Multi-strategy name search: parses "Last, First Middle" input, tries full name → first only → middle only, drills into SDCMP results to extract department/job details, filters for HDH keywords
 - `crm-search.ts` — CRM cross-verification: searches by last then first name, extracts PPS ID/UCPath EID/hire date/dept, date-matching helper (±7 days)
-- `tracker.ts` — Writes to `eid-lookup-tracker.xlsx` with columns for name, EID, HR status, department, position, start/end dates, FTE, empl class
-- `workflow.ts` — Three modes: `lookupSingle` (1 browser), `lookupParallel` (N workers sharing auth), `lookupWithCrm` (parallel UCPath + CRM with Duo sequencing)
+- `tracker.ts` — Writes to `eid-lookup-tracker.xlsx` (Excel-only, no `trackEvent` — JSONL events handled by `withTrackedWorkflow` in workflow.ts)
+- `workflow.ts` — Three modes: `lookupSingle` (1 browser), `lookupParallel` (N workers sharing auth), `lookupWithCrm` (parallel UCPath + CRM with Duo sequencing). All modes use `withTrackedWorkflow` for dashboard tracking (steps: ucpath-auth → searching, + crm-auth → cross-verification for CRM mode)
 - `index.ts` — Barrel exports
 
 ## Data Flow

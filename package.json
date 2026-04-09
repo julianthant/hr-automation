@@ -17,6 +17,7 @@
     "separation": "tsx --env-file=.env src/cli.ts separation",
     "separation:dry": "tsx --env-file=.env src/cli.ts separation --dry-run",
     "dashboard": "tsx --env-file=.env src/cli.ts dashboard",
+    "dashboard:prod": "tsx --env-file=.env src/cli.ts dashboard --prod",
     "build:dashboard": "vite build --config vite.dashboard.config.ts",
     "dev:dashboard": "vite --config vite.dashboard.config.ts",
     "typecheck": "tsc --noEmit",

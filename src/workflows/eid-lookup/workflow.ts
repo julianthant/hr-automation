@@ -8,6 +8,7 @@
 import { launchBrowser } from "../../browser/launch.js";
 import { loginToUCPath, loginToACTCrm } from "../../auth/login.js";
 import { log, withLogContext } from "../../utils/log.js";
+import { withTrackedWorkflow } from "../../tracker/jsonl.js";
 import { searchByName, parseNameInput, type EidResult } from "./search.js";
 import { searchCrmByName, datesWithinDays, type CrmRecord } from "./crm-search.js";
 import { updateEidTracker, updateEidTrackerNotFound } from "./tracker.js";
@@ -29,16 +30,21 @@ export async function lookupSingle(nameInput: string): Promise<LookupResult> {
 
   try {
     return await withLogContext("eid-lookup", nameInput, async () => {
+      return withTrackedWorkflow("eid-lookup", nameInput, {}, async (setStep, updateData) => {
       log.step(`Looking up: "${nameInput}"`);
 
+      setStep("ucpath-auth");
       const loggedIn = await loginToUCPath(page);
       if (!loggedIn) {
         return { name: nameInput, found: false, sdcmpResults: [], error: "UCPath login failed" };
       }
 
+      setStep("searching");
       const result = await searchByName(page, nameInput);
 
       if (result.sdcmpResults.length > 0) {
+        const first = result.sdcmpResults[0];
+        updateData({ emplId: first.emplId ?? "", name: first.name ?? "" });
         log.success(`Found ${result.sdcmpResults.length} SDCMP result(s) for "${nameInput}":`);
         for (const r of result.sdcmpResults) {
           log.success(`  EID: ${r.emplId} | ${r.department ?? "?"} | ${r.jobCodeDescription} | ${r.name} | ${r.expectedEndDate || "Active"}`);
@@ -54,6 +60,7 @@ export async function lookupSingle(nameInput: string): Promise<LookupResult> {
         found: result.found,
         sdcmpResults: result.sdcmpResults,
       };
+      }); // end withTrackedWorkflow
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -118,10 +125,14 @@ export async function lookupParallel(
         log.step(`[Worker ${workerId}] Searching: "${nameInput}"`);
 
         const workerResult = await withLogContext("eid-lookup", nameInput, async () => {
+          return withTrackedWorkflow("eid-lookup", nameInput, {}, async (setStep, updateData) => {
           try {
+            setStep("searching");
             const result = await searchByName(workerPage, nameInput);
 
             if (result.sdcmpResults.length > 0) {
+              const first = result.sdcmpResults[0];
+              updateData({ emplId: first.emplId ?? "", name: first.name ?? "" });
               log.success(`[Worker ${workerId}] Found ${result.sdcmpResults.length} result(s) for "${nameInput}":`);
               for (const r of result.sdcmpResults) {
                 log.success(`  EID: ${r.emplId} | ${r.department ?? "?"} | ${r.jobCodeDescription} | ${r.name} | ${r.expectedEndDate || "Active"}`);
@@ -142,6 +153,7 @@ export async function lookupParallel(
             log.error(`[Worker ${workerId}] Failed for "${nameInput}": ${msg}`);
             return { name: nameInput, found: false, sdcmpResults: [], error: msg } as LookupResult;
           }
+          }); // end withTrackedWorkflow
         });
         results.push(workerResult);
       }
@@ -187,7 +199,9 @@ export async function lookupWithCrm(nameInput: string): Promise<LookupResult> {
 
   try {
     return await withLogContext("eid-lookup", nameInput, async () => {
+      return withTrackedWorkflow("eid-lookup", nameInput, {}, async (setStep, updateData) => {
       // Step 1: Authenticate UCPath
+      setStep("ucpath-auth");
       log.step("Authenticating to UCPath...");
       const ucpathOk = await loginToUCPath(ucpath.page);
       if (!ucpathOk) {
@@ -195,6 +209,7 @@ export async function lookupWithCrm(nameInput: string): Promise<LookupResult> {
       }
 
       // Step 2: Authenticate CRM (separate browser, separate Duo)
+      setStep("crm-auth");
       log.step("Launching CRM browser...");
       const crm = await launchBrowser();
       log.step("Authenticating to CRM...");
@@ -204,6 +219,7 @@ export async function lookupWithCrm(nameInput: string): Promise<LookupResult> {
       }
 
       // Step 3: Run both searches
+      setStep("searching");
       // UCPath search
       log.step("\n--- UCPath Search ---");
       const ucpathResult = await searchByName(ucpath.page, nameInput);
@@ -216,6 +232,7 @@ export async function lookupWithCrm(nameInput: string): Promise<LookupResult> {
       }
 
       // Step 4: Cross-verify
+      setStep("cross-verification");
       log.step("\n--- Cross-Verification ---");
 
       // If CRM has a UCPath Employee ID, check if it matches any SDCMP result
@@ -257,6 +274,8 @@ export async function lookupWithCrm(nameInput: string): Promise<LookupResult> {
 
       // Print UCPath summary
       if (allSdcmp.length > 0) {
+        const first = allSdcmp[0];
+        updateData({ emplId: first.emplId ?? "", name: first.name ?? "" });
         log.step("\nUCPath SDCMP Results:");
         for (const r of allSdcmp) {
           log.success(`  EID: ${r.emplId} | ${r.department ?? "?"} | Start: ${r.effectiveDate} | End: ${r.expectedEndDate || "Active"}`);
@@ -272,6 +291,7 @@ export async function lookupWithCrm(nameInput: string): Promise<LookupResult> {
         found: ucpathResult.found,
         sdcmpResults: ucpathResult.sdcmpResults,
       };
+      }); // end withTrackedWorkflow
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);

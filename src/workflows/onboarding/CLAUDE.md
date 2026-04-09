@@ -8,10 +8,10 @@ Automates full UC employee hiring: extracts data from ACT CRM, validates with Zo
 - `extract.ts` — CRM field extraction from UCPath Entry Sheet using `FIELD_MAP` label mapping; also extracts dept/recruitment numbers from record page
 - `enter.ts` — Builds `ActionPlan` for the 14-step Smart HR transaction (personal data, job data, comments, save/submit)
 - `config.ts` — Constants: `UC_FULL_HIRE` template, `UCHRLY` comp rate code, `06/30/2026` end date
-- `tracker.ts` — Writes to `onboarding-tracker.xlsx` with status checkpoint columns (CRM, person search, rehire, I9, transaction, PDF)
+- `tracker.ts` — Writes to `onboarding-tracker.xlsx` with status checkpoint columns (Excel-only, no `trackEvent` — JSONL events handled by `withTrackedWorkflow` in workflow.ts)
 - `download.ts` — Stub for CRM document PDF downloads (TODO — needs selector discovery via playwright-cli)
 - `parallel.ts` — Batch mode: loads `batch.yaml` email list, launches N workers with separate CRM/UCPath browsers, mutex-locked tracker writes
-- `workflow.ts` — Main orchestration: auth CRM + UCPath, extract, validate, duplicate check, execute transaction, update tracker
+- `workflow.ts` — Main orchestration: uses `withTrackedWorkflow` for dashboard tracking (steps: crm-auth → extraction → ucpath-auth → person-search → transaction), auth CRM + UCPath, extract, validate, duplicate check, execute transaction, update tracker
 - `index.ts` — Barrel exports
 
 ## Data Flow

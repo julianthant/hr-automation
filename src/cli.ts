@@ -240,13 +240,29 @@ program
 program
   .command("dashboard")
   .description("Start the live monitoring dashboard (run in a separate terminal)")
-  .option("-p, --port <port>", "Port number", parseInt)
-  .action(async (opts: { port?: number }) => {
+  .option("-p, --port <port>", "SSE server port", parseInt)
+  .option("--prod", "Serve built dashboard instead of Vite dev server")
+  .action(async (opts: { port?: number; prod?: boolean }) => {
     const { startDashboard } = await import("./tracker/dashboard.js");
     const port = opts.port ?? 3838;
     startDashboard("all", port);
-    log.success(`Dashboard running at http://localhost:${port}`);
-    log.step("Press Ctrl+C to stop.");
+
+    if (opts.prod) {
+      // Production mode: serve built HTML from SSE server only
+      log.success(`Dashboard running at http://localhost:${port}`);
+      log.step("Press Ctrl+C to stop.");
+    } else {
+      // Dev mode: start Vite dev server with proxy to SSE backend
+      const { createServer } = await import("vite");
+      const vite = await createServer({
+        configFile: "vite.dashboard.config.ts",
+        server: { open: true },
+      });
+      await vite.listen();
+      vite.printUrls();
+      log.step(`SSE backend on port ${port}`);
+    }
+
     // Keep process alive
     await new Promise(() => {});
   });

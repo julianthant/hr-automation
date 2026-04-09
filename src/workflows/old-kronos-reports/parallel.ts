@@ -4,6 +4,7 @@ import { parse } from "yaml";
 import { Mutex } from "async-mutex";
 import { log, withLogContext } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
+import { withTrackedWorkflow } from "../../tracker/jsonl.js";
 import { launchBrowser } from "../../browser/launch.js";
 import { ukgNavigateAndFill, ukgSubmitAndWaitForDuo } from "../../auth/login.js";
 import {
@@ -196,13 +197,20 @@ async function runWorker(
       log.step(`${prefix} ${"=".repeat(50)}`);
 
       try {
-        await withLogContext("kronos-reports", employeeId, () => runKronosForEmployee(employeeId, {
-          page,
-          dateRangeSet: true,
-          updateTrackerFn: lockedTracker,
-          reportLock: reportMutex,
-          logPrefix: prefix,
-        }));
+        await withLogContext("kronos-reports", employeeId, () =>
+          withTrackedWorkflow("kronos-reports", employeeId, {}, async (setStep, updateData) => {
+            setStep("searching");
+            await runKronosForEmployee(employeeId, {
+              page,
+              dateRangeSet: true,
+              updateTrackerFn: lockedTracker,
+              reportLock: reportMutex,
+              logPrefix: prefix,
+              onStep: setStep,
+              onData: updateData,
+            });
+          }),
+        );
         consecutiveErrors = 0;
       } catch (err) {
         consecutiveErrors++;

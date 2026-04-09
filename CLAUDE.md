@@ -28,6 +28,12 @@ npm run work-study:dry <emplId> <date> # Dry-run work study
 tsx --env-file=.env src/cli.ts eid-lookup "Last, First Middle"
 tsx --env-file=.env src/cli.ts eid-lookup --workers 4 "Name1" "Name2" "Name3"
 
+# Dashboard (run in a separate terminal — auto-updates when workflows run)
+npm run dashboard                      # Start SSE backend + Vite dev server (http://localhost:5173)
+npm run dashboard:prod                 # Serve pre-built dashboard from SSE server only
+npm run dashboard -- -p 4000           # Custom SSE backend port
+dashboard.bat                          # Windows shortcut (bypasses npm group policy block)
+
 # Export
 tsx --env-file=.env src/cli.ts export <workflow>     # Export JSONL tracker to Excel
 tsx --env-file=.env src/cli.ts export onboarding -o out.xlsx  # Custom output path
@@ -38,7 +44,7 @@ npm run typecheck                      # TypeScript type checking
 npm run test                           # Run unit tests
 ```
 
-All runtime scripts use `tsx --env-file=.env` — never run source files directly.
+All runtime scripts use `tsx --env-file=.env` — never run source files directly. If `npm` is blocked by group policy, run tsx directly: `.\node_modules\.bin\tsx --env-file=.env src/cli.ts <command>`
 
 ## Architecture
 
@@ -59,11 +65,12 @@ src/
   new-kronos/       # New Kronos (WFD/Dayforce) employee search and timecard checking
   old-kronos/       # Old Kronos (UKG) employee search, timecard, reports, iframe handling
   tracker/
-    jsonl.ts         # JSONL append-only tracker (no file locks)
-    dashboard.ts     # Live SSE dashboard at localhost:3838
+    jsonl.ts         # JSONL append-only tracker + withTrackedWorkflow lifecycle wrapper
+    dashboard.ts     # SSE API server (port 3838) — API-only, no HTML serving
     export-excel.ts  # On-demand Excel export from JSONL
     locked.ts        # Generic mutex-locked write wrapper
     spreadsheet.ts   # Excel tracking with daily worksheets (YYYY-MM-DD tabs)
+  dashboard/          # React SPA (Vite + HeroUI v3 + Tailwind) — served via Vite dev server on port 5173
   ucpath/           # UCPath PeopleSoft navigation, person search, Smart HR transactions
   utils/
     screenshot.ts    # Unified debug screenshot helper
@@ -146,15 +153,36 @@ Copy `.env.example` to `.env` and fill in:
 - **Tracker Excel files**: Always place tracker .xlsx files inside the workflow folder (e.g. `src/workflows/eid-lookup/eid-lookup-tracker.xlsx`), never in the project root
 - **Promise.allSettled for parallel systems**: Use `Promise.allSettled` (not `Promise.all`) when querying multiple systems in parallel — one system's failure shouldn't block others
 - Use `fillSsoCredentials()` and `pollDuoApproval()` — never write inline SSO/Duo loops
-- Use `trackEvent()` for progress tracking — JSONL is append-safe, no file locks
+- **`withTrackedWorkflow()` for lifecycle tracking**: Wraps workflow execution — auto-emits `pending` on start, `done` on success, `failed` on error. Provides `setStep(step)` for granular progress and `updateData(d)` to enrich entries with discovered info (names, IDs). All 5 workflows use this.
+- **Tracker functions are Excel-only**: `updateOnboardingTracker`, `updateEidTracker`, `updateKronosTracker`, `updateWorkStudyTracker` write to `.xlsx` files only — they no longer call `trackEvent()` directly. The `withTrackedWorkflow` wrapper handles all JSONL event emissions.
 - Use `WorkflowSession.create()` for new workflows — shares auth across all windows
 - Use `computeTileLayout()` for multi-browser window positioning
 - Use `runWorkerPool()` for parallel processing — handles queue, errors, teardown
-- Live dashboard starts automatically at http://localhost:3838 during workflow runs
 
-## Live Monitoring
+## Live Monitoring Dashboard
 
-All workflows automatically start a live dashboard at `http://localhost:3838` during execution. Open in a browser to see real-time progress. Data is stored in `.tracker/` as JSONL files (one per workflow per day). Export to Excel: `tsx --env-file=.env src/cli.ts export <workflow>`
+Run `npm run dashboard` in a separate terminal. This starts:
+- **SSE API server** on port 3838 (reads `.tracker/` JSONL files, streams via Server-Sent Events)
+- **Vite dev server** on port 5173 (React SPA with hot reload, proxies `/api` and `/events` to 3838)
+
+Open **http://localhost:5173** to see real-time progress. The dashboard auto-updates when any workflow runs.
+
+### How It Works
+1. Workflows use `withTrackedWorkflow()` which emits events to `.tracker/{workflow}-{YYYY-MM-DD}.jsonl`
+2. Log calls via `withLogContext()` emit to `.tracker/{workflow}-{YYYY-MM-DD}-logs.jsonl`
+3. SSE server polls these files (1s for entries, 500ms for logs) and streams to the React frontend
+4. Dashboard dedupes entries by ID (keeps latest), sorts: running → pending → failed → done
+
+### Step Tracking Per Workflow
+| Workflow | Steps |
+|----------|-------|
+| Onboarding | crm-auth → extraction → ucpath-auth → person-search → transaction |
+| Separations | launching → authenticating → kuali-extraction → kronos-search → ucpath-job-summary → ucpath-transaction → kuali-finalization |
+| EID Lookup | ucpath-auth → searching (+ crm-auth → cross-verification for CRM mode) |
+| Kronos Reports | searching → extracting → downloading |
+| Work Study | ucpath-auth → transaction |
+
+Export to Excel: `tsx --env-file=.env src/cli.ts export <workflow>`
 
 ## Gotchas
 

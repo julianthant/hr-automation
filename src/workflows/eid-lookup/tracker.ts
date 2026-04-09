@@ -1,5 +1,4 @@
 import { appendRow, type ColumnDef } from "../../tracker/spreadsheet.js";
-import { trackEvent } from "../../tracker/jsonl.js";
 import { log } from "../../utils/log.js";
 import type { EidResult } from "./search.js";
 
@@ -45,13 +44,6 @@ export async function updateEidTracker(
       searchName,
       timestamp: new Date().toISOString(),
     });
-    trackEvent({
-      workflow: "eid-lookup",
-      timestamp: new Date().toISOString(),
-      id: searchName,
-      status: "done",
-      data: { emplId: result.emplId ?? "Not Found", name: result.name ?? "" },
-    });
     log.step(`Tracker updated for EID ${result.emplId}`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -77,13 +69,6 @@ export async function updateEidTrackerNotFound(searchName: string): Promise<void
       emplClass: "",
       searchName,
       timestamp: new Date().toISOString(),
-    });
-    trackEvent({
-      workflow: "eid-lookup",
-      timestamp: new Date().toISOString(),
-      id: searchName,
-      status: "failed",
-      data: { emplId: "Not Found", name: searchName },
     });
     log.step(`Tracker updated: Not Found for "${searchName}"`);
   } catch (err) {

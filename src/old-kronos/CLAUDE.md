@@ -20,11 +20,13 @@ UKG uses deeply nested iframes:
 
 ## `getGeniesIframe` Strategy
 
-1. Try `widgetFrame804` by exact name
-2. Fallback: any frame with "genies" in URL
-3. Fallback: any frame starting with `widgetFrame`
-4. Retry: 15 attempts with 2s waits
-5. Last resort: full page reload and retry
+1. **SSO re-auth check**: Detects `#ssousername` or `input[name="j_username"]` on page — if found, calls `loginToUKG(page)` to re-authenticate (handles session expiry after page refresh)
+2. Try `widgetFrame804` by exact name
+3. Check for "network change detected" error in iframe — reloads page if found
+4. Fallback: any frame with "genies" in URL
+5. Fallback: any frame starting with `widgetFrame`
+6. Retry: 15 attempts with 2s waits
+7. Last resort: full page reload and retry
 
 ## Download Strategy (Dual-Track)
 
@@ -42,3 +44,4 @@ UKG uses deeply nested iframes:
 - JS evaluation (`clickInFrames`, `jsClickText`) used extensively because Playwright selectors are unreliable in nested frames
 - Hardcoded download path: `C:\Users\juzaw\Downloads` for filesystem fallback
 - `mkdirSync(".auth/")` called at module level for screenshot directory
+- **Session expiry on refresh**: If a page refresh causes redirect to SSO login, `getGeniesIframe` detects this and calls `loginToUKG()` to re-authenticate automatically (requires Duo MFA approval)

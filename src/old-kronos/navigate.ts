@@ -2,6 +2,7 @@ import type { Page, Frame } from "playwright";
 import { log } from "../utils/log.js";
 import { UKGError } from "./types.js";
 import { debugScreenshot } from "../utils/screenshot.js";
+import { loginToUKG } from "../auth/login.js";
 
 /**
  * Dismiss any OK/Close modal dialog in the iframe.
@@ -43,6 +44,17 @@ export async function dismissModal(page: Page, iframe: Frame): Promise<void> {
  */
 export async function getGeniesIframe(page: Page): Promise<Frame> {
   for (let attempt = 0; attempt < 15; attempt++) {
+    // Check if page redirected to SSO login (session expired after refresh)
+    const ssoField = await page.locator('#ssousername, input[name="j_username"]').count().catch(() => 0);
+    if (ssoField > 0) {
+      log.step("SSO login page detected — re-authenticating to UKG...");
+      const reAuthOk = await loginToUKG(page);
+      if (!reAuthOk) throw new UKGError("Re-authentication to UKG failed", "getGeniesIframe");
+      log.success("UKG re-authenticated after session expiry");
+      await page.waitForTimeout(5_000);
+      continue;
+    }
+
     // Try exact name first
     const iframe = page.frame({ name: "widgetFrame804" });
     if (iframe) {
