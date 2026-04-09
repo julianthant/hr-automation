@@ -73,6 +73,7 @@ import {
   SCREEN_WIDTH,
   SCREEN_HEIGHT,
 } from "./config.js";
+import { PATHS } from "../../config.js";
 
 export interface SeparationOptions {
   dryRun?: boolean;
@@ -176,7 +177,7 @@ export async function runSeparation(
 
     const wins = await Promise.all([
       launchBrowser(getTileArgs(0)),
-      launchBrowser({ ...getTileArgs(1), sessionDir: "C:\\Users\\juzaw\\ukg_session_sep" }),
+      launchBrowser({ ...getTileArgs(1), sessionDir: PATHS.ukgSessionSep }),
       launchBrowser(getTileArgs(2)),
       launchBrowser(getTileArgs(3)),
     ]);

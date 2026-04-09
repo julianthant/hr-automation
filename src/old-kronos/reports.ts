@@ -3,6 +3,7 @@ import { join } from "path";
 import { readdir } from "fs/promises";
 import { log } from "../utils/log.js";
 import { debugScreenshot } from "../utils/screenshot.js";
+import { PATHS } from "../config.js";
 
 /**
  * Try multiple selectors across multiple frames. Returns true if one was clicked.
@@ -263,7 +264,7 @@ async function downloadReportRow(
   page.context().on("page", newPageHandler);
 
   // Capture filesystem snapshot BEFORE clicking View Report (for fallback diff)
-  const downloadsDir = "C:\\Users\\juzaw\\Downloads";
+  const downloadsDir = PATHS.downloadsDir;
   const filesBefore = new Map<string, Set<string>>();
   for (const dir of [downloadsDir, reportsDir]) {
     try {

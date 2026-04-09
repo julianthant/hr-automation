@@ -1,20 +1,24 @@
 import { join } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
+import { KUALI_SPACE_URL as _KUALI_SPACE_URL, NEW_KRONOS_URL as _NEW_KRONOS_URL, SCREEN } from "../../config.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// ─── Re-exported from central config ────────────────────────
+
 /** Kuali Build space URL for RRSS separation forms. */
-export const KUALI_SPACE_URL =
-  "https://ucsd.kualibuild.com/build/space/5e47518b90adda9474c14adb";
+export const KUALI_SPACE_URL = _KUALI_SPACE_URL;
 
 /** New Kronos (WFD) home URL. */
-export const NEW_KRONOS_URL = "https://ucsd-sso.prd.mykronos.com/wfd/home";
+export const NEW_KRONOS_URL = _NEW_KRONOS_URL;
 
 /** Screen dimensions for tiling worker windows. */
-export const SCREEN_WIDTH = 2560;
-export const SCREEN_HEIGHT = 1440;
+export const SCREEN_WIDTH = SCREEN.width;
+export const SCREEN_HEIGHT = SCREEN.height;
+
+// ─── Workflow-specific values ────────────────────────────────
 
 /** Batch file containing Kuali document numbers. */
 export const BATCH_FILE = join(__dirname, "batch.yaml");

@@ -6,6 +6,7 @@
  */
 import { launchBrowser } from "../browser/launch.js";
 import { loginToUKG, loginToNewKronos } from "../auth/login.js";
+import { PATHS } from "../config.js";
 import {
   getGeniesIframe,
   searchEmployee as searchOldKronos,
@@ -25,7 +26,7 @@ const eid = process.argv[2] ?? "10598634";
 
 log.step("Launching Old Kronos + New Kronos...");
 const [oldWin, newWin] = await Promise.all([
-  launchBrowser({ sessionDir: "C:\\Users\\juzaw\\ukg_session_map" }),
+  launchBrowser({ sessionDir: PATHS.ukgSessionBase + "_map" }),
   launchBrowser(),
 ]);
 
