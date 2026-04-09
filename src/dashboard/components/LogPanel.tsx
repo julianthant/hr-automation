@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Card, Button, Skeleton } from "@heroui/react";
+import { Card, Skeleton } from "@heroui/react";
 import { motion, AnimatePresence } from "framer-motion";
 import { getLogAction, type LogEntry } from "./types";
 
@@ -86,18 +86,17 @@ export default function LogPanel({
         transition={{ duration: 0.2, ease: "easeOut" }}
       >
         <Card className="bg-content1 border border-divider rounded-lg mt-2 overflow-hidden">
-          <Card.Header className="flex items-center justify-between px-4 py-2 border-b border-divider">
+          <Card.Header className="flex flex-row items-center justify-between px-4 py-2.5 border-b border-divider">
             <span className="font-mono text-xs font-semibold text-foreground-500 uppercase tracking-wider">
               Logs: {itemId}
             </span>
-            <Button
-              size="sm"
-              variant="tertiary"
-              onPress={onClose}
+            <button
+              onClick={onClose}
+              className="text-foreground-500 hover:text-foreground transition-colors text-sm px-2 py-1 rounded hover:bg-content2"
               aria-label="Close logs"
             >
               {"\u2715"}
-            </Button>
+            </button>
           </Card.Header>
           <Card.Content className="p-0">
             <div
