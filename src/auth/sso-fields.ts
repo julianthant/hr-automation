@@ -29,24 +29,6 @@ export function getSsoFieldSelectors(): {
 }
 
 /**
- * Returns selector configuration for UKG (Old Kronos) SSO login form.
- *
- * UKG uses different field IDs (#ssousername, #ssopassword) compared to
- * the standard UCSD Shibboleth SSO form.
- */
-export function getUkgFieldSelectors(): {
-  usernameSelector: string;
-  passwordSelector: string;
-  submitSelector: string;
-} {
-  return {
-    usernameSelector: "#ssousername",
-    passwordSelector: "#ssopassword",
-    submitSelector: 'button[name="_eventId_proceed"]',
-  };
-}
-
-/**
  * Fill UCSD Shibboleth SSO credentials (username + password) on the current page.
  *
  * Builds 3-level .or() fallback chains for both fields, then calls validateEnv()
@@ -75,6 +57,8 @@ export async function fillSsoCredentials(page: Page): Promise<void> {
   await passwordField.first().fill(password, { timeout: 5_000 });
 }
 
+const SSO_SUBMIT_SELECTOR = 'button[name="_eventId_proceed"]';
+
 /**
  * Click the SSO form submit button.
  *
@@ -84,6 +68,6 @@ export async function fillSsoCredentials(page: Page): Promise<void> {
  * @param page - Playwright page instance
  */
 export async function clickSsoSubmit(page: Page): Promise<void> {
-  const { submitSelector } = getSsoFieldSelectors();
-  await page.locator(submitSelector).click({ timeout: 5_000 });
+  await page.locator(SSO_SUBMIT_SELECTOR).click({ timeout: 5_000 });
+  log.step("SSO submit clicked");
 }
