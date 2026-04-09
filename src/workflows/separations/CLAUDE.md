@@ -39,16 +39,14 @@ Screen: 2560x1440, windows positioned via Chromium `--window-position` and `--wi
 - **5 separate Duo authentications** — must be done one at a time (sequential), not parallel
 - Persistent UKG session dir: `C:\Users\juzaw\ukg_session_sep`
 - Termination effective date = separation date + 1 day (computed, not from form)
-- Voluntary vs Involuntary: determined by `terminationType` against `INVOLUNTARY_TYPES` list
-- Reason code mapping: exact match → fuzzy match → fallback `"Resign - No Reason Given"`
+- Voluntary vs Involuntary: determined by `isVoluntaryTermination()` — "Never Started Employment" and "Graduated/No longer a Student" are involuntary, everything else voluntary
+- Reason code mapping: exact match → fuzzy match → fallback. VOL_TERM uses "Resign - ..." codes; INVOL_TERM uses "No Longer Student" etc.
 - Template selection: `UC_VOL_TERM` (voluntary) or `UC_INVOL_TERM` (involuntary)
 - Kuali drill-in selector: `PTS_CFG_CL_RSLT_PTS_DRILLIN$40$$IMG${rowIndex}`
 - Comments auto-generated with termination eff date, last day worked, and Kuali form #
 - `Promise.allSettled` used so one system failure doesn't block others
 - `explore-kronos.ts` is a dev tool, not a production workflow
 
-## TODO (Known Bugs)
+## Verified Selectors
 
-- **Batch mode: Old/New Kronos not reused after first doc** — When processing multiple docs via `existingWindows`, Kronos browsers are still on the previous employee's timecard page. Need to navigate back to main dashboard (old kronos: `goBackToMain`, new kronos: navigate home) before searching the next employee's EID.
-- **Batch mode: Kuali form not saved on last doc** — The last document in the batch doesn't get saved after filling the transaction number and other fields.
-- **Batch mode: Transaction number only captured for last doc** — Only the final doc in the batch gets the transaction number filled into Kuali. Earlier docs don't capture/fill the transaction number. Likely related to UCPath browser state not being reset between docs — the transaction confirmation page from the previous doc may interfere.
+- **INVOL_TERM reason codes** — verified via playwright-cli 2026-04-09. Full list documented in `schema.ts` REASON_CODE_MAP comment. "No Longer Student" confirmed for "Graduated/No longer a Student".

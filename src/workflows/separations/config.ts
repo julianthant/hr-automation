@@ -31,4 +31,7 @@ export const UC_INVOL_TERM_TEMPLATE = "UC_INVOL_TERM";
  * Involuntary termination types from Kuali.
  * Everything NOT in this list is considered voluntary.
  */
-export const INVOLUNTARY_TYPES = ["Never Started Employment"];
+export const INVOLUNTARY_TYPES = [
+  "Never Started Employment",
+  "Graduated/No longer a Student",
+];

@@ -8,7 +8,7 @@ Kuali Build separation form automation: extraction and form filling for employee
   - `openActionList(page)` — navigates to Kuali space, clicks Action List
   - `clickDocument(page, docNumber)` — finds and clicks document link
   - `extractSeparationData(page)` → `KualiSeparationData` (name, EID, dates, termination type, location)
-  - `isVoluntaryTermination(type)` — returns `true` unless "Never Started Employment"
+  - `isVoluntaryTermination(type)` — returns `false` for "Never Started Employment" and "Graduated/No longer a Student" (involuntary), `true` for all others
   - `mapTerminationToUCPathReason(type)` — maps Kuali types to UCPath codes (e.g., "Graduated/No longer a Student" → "No Longer Student")
   - `fillTimekeeperTasks(page, name)` — checks acknowledgment, fills timekeeper name
   - `fillFinalTransactions(page, opts)` — fills termination date, department (combobox best-match), payroll title code/title

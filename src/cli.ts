@@ -235,6 +235,22 @@ program
     }
   });
 
+// ─── dashboard ───
+
+program
+  .command("dashboard")
+  .description("Start the live monitoring dashboard (run in a separate terminal)")
+  .option("-p, --port <port>", "Port number", parseInt)
+  .action(async (opts: { port?: number }) => {
+    const { startDashboard } = await import("./tracker/dashboard.js");
+    const port = opts.port ?? 3838;
+    startDashboard("all", port);
+    log.success(`Dashboard running at http://localhost:${port}`);
+    log.step("Press Ctrl+C to stop.");
+    // Keep process alive
+    await new Promise(() => {});
+  });
+
 // ─── export ───
 
 program

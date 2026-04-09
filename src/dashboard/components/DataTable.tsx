@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, Fragment } from "react";
+import React, { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import { Chip, Skeleton } from "@heroui/react";
 import LogPanel from "./LogPanel";
 import {
@@ -15,6 +15,7 @@ interface DataTableProps {
   loading: boolean;
 }
 
+type SortDir = "asc" | "desc" | null;
 type ChipColor = "success" | "danger" | "accent" | "warning" | "default";
 
 const statusColorMap: Record<string, ChipColor> = {
@@ -25,6 +26,28 @@ const statusColorMap: Record<string, ChipColor> = {
   skipped: "default",
 };
 
+/* ── Sort indicator arrows ──────────────────────── */
+function SortIcon({ dir }: { dir: SortDir }) {
+  if (!dir) {
+    return (
+      <svg width="10" height="14" viewBox="0 0 10 14" className="opacity-25 ml-1.5 inline-block">
+        <path d="M5 0L9.33 5H0.67L5 0Z" fill="currentColor" />
+        <path d="M5 14L0.67 9H9.33L5 14Z" fill="currentColor" />
+      </svg>
+    );
+  }
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" className="ml-1.5 inline-block text-foreground">
+      {dir === "asc" ? (
+        <path d="M5 0L9.33 7H0.67L5 0Z" fill="currentColor" />
+      ) : (
+        <path d="M5 10L0.67 3H9.33L5 10Z" fill="currentColor" />
+      )}
+    </svg>
+  );
+}
+
+/* ── Cell renderer ──────────────────────────────── */
 function CellContent({
   colKey,
   row,
@@ -43,9 +66,7 @@ function CellContent({
       );
     case "_name":
       return (
-        <span className="font-medium">
-          {cfg.getName(row) || "\u2014"}
-        </span>
+        <span className="font-medium">{cfg.getName(row) || "\u2014"}</span>
       );
     case "_emplId":
       return (
@@ -101,7 +122,33 @@ function CellContent({
       );
     }
     default:
-      return <span>{(row as unknown as Record<string, unknown>)[colKey]?.toString() || ""}</span>;
+      return (
+        <span>
+          {(row as unknown as Record<string, unknown>)[colKey]?.toString() || ""}
+        </span>
+      );
+  }
+}
+
+/* ── Get sortable value from a row/column ────────── */
+function getSortValue(row: TrackerEntry, colKey: string, cfg: WorkflowConfig): string {
+  switch (colKey) {
+    case "id":
+      return row.id;
+    case "_name":
+      return cfg.getName(row) || "";
+    case "_emplId":
+      return cfg.getExtra?.(row)?.emplId || "";
+    case "status":
+      return row.status;
+    case "step":
+      return row.step || "";
+    case "error":
+      return row.error || "";
+    case "timestamp":
+      return row.timestamp || "";
+    default:
+      return (row as unknown as Record<string, unknown>)[colKey]?.toString() || "";
   }
 }
 
@@ -112,21 +159,58 @@ export default function DataTable({
   loading,
 }: DataTableProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [sortCol, setSortCol] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>(null);
+
   const cfg = getConfig(activeWf);
   const columns = parseColumns(cfg.columns);
 
-  // Reset expanded row when workflow changes
+  // Reset expanded row and sort when workflow changes
   useEffect(() => {
     setExpandedId(null);
+    setSortCol(null);
+    setSortDir(null);
   }, [activeWf]);
 
   const handleRowClick = useCallback((id: string) => {
     setExpandedId((prev) => (prev === id ? null : id));
   }, []);
 
+  const handleHeaderClick = useCallback((key: string) => {
+    setSortCol((prevCol) => {
+      if (prevCol !== key) {
+        setSortDir("asc");
+        return key;
+      }
+      setSortDir((prevDir) => {
+        if (prevDir === "asc") return "desc";
+        if (prevDir === "desc") {
+          // Reset sort
+          setSortCol(null);
+          return null;
+        }
+        return "asc";
+      });
+      return key;
+    });
+  }, []);
+
+  // Sort rows
+  const sortedRows = useMemo(() => {
+    if (!sortCol || !sortDir) return rows;
+    const sorted = [...rows].sort((a, b) => {
+      const aVal = getSortValue(a, sortCol, cfg).toLowerCase();
+      const bVal = getSortValue(b, sortCol, cfg).toLowerCase();
+      if (aVal < bVal) return sortDir === "asc" ? -1 : 1;
+      if (aVal > bVal) return sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+    return sorted;
+  }, [rows, sortCol, sortDir, cfg]);
+
   if (loading) {
     return (
-      <div className="bg-content1 border border-divider rounded-xl overflow-hidden" role="table" aria-label="Loading workflow entries">
+      <div className="bg-content1 border border-divider rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full border-collapse">
             <thead>
@@ -148,9 +232,7 @@ export default function DataTable({
                     <td key={c.key} className="px-4 py-3">
                       <Skeleton
                         className="h-3.5 rounded"
-                        style={{
-                          width: `${50 + (((i + j) * 13) % 80)}px`,
-                        }}
+                        style={{ width: `${50 + (((i + j) * 13) % 80)}px` }}
                       />
                     </td>
                   ))}
@@ -179,26 +261,32 @@ export default function DataTable({
 
   return (
     <div className="bg-content1 border border-divider rounded-xl overflow-hidden">
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto overflow-y-hidden">
         <table className="w-full border-collapse" aria-label="Workflow entries">
           <thead>
             <tr>
               {columns.map((c) => (
                 <th
                   key={c.key}
-                  className="font-mono text-[0.67rem] font-semibold uppercase tracking-widest text-foreground-500 px-4 py-3.5 text-left bg-content2 border-b border-divider sticky top-0 z-[2] whitespace-nowrap"
+                  onClick={() => handleHeaderClick(c.key)}
+                  className="font-mono text-[0.67rem] font-semibold uppercase tracking-widest text-foreground-500 px-4 py-3.5 text-left bg-content2 border-b border-divider sticky top-0 z-[2] whitespace-nowrap cursor-pointer select-none hover:text-foreground-300 transition-colors"
                 >
                   {c.label}
+                  <SortIcon dir={sortCol === c.key ? sortDir : null} />
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {sortedRows.map((r, idx) => (
               <Fragment key={r.id}>
                 <tr
-                  className={`border-b border-divider last:border-b-0 cursor-pointer transition-colors hover:bg-content2/50 ${
-                    expandedId === r.id ? "bg-content2" : ""
+                  className={`border-b border-divider last:border-b-0 cursor-pointer transition-colors hover:bg-content2/70 ${
+                    expandedId === r.id
+                      ? "bg-content2"
+                      : idx % 2 === 1
+                        ? "bg-content2/30"
+                        : ""
                   }`}
                   onClick={() => handleRowClick(r.id)}
                 >

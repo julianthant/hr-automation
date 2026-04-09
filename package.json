@@ -16,6 +16,7 @@
     "kronos:dry": "tsx --env-file=.env src/cli.ts kronos --dry-run",
     "separation": "tsx --env-file=.env src/cli.ts separation",
     "separation:dry": "tsx --env-file=.env src/cli.ts separation --dry-run",
+    "dashboard": "tsx --env-file=.env src/cli.ts dashboard",
     "build:dashboard": "vite build --config vite.dashboard.config.ts",
     "dev:dashboard": "vite --config vite.dashboard.config.ts",
     "typecheck": "tsc --noEmit",
@@ -27,6 +28,7 @@
   "license": "ISC",
   "dependencies": {
     "@heroui/react": "^3.0.2",
+    "@heroui/styles": "^3.0.2",
     "async-mutex": "^0.5.0",
     "commander": "^14.0.3",
     "exceljs": "^4.4.0",

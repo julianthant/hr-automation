@@ -119,6 +119,13 @@ export function startDashboard(workflow: string, port: number = 3838): void {
     res.end(getDashboardHtml());
   });
 
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      log.step(`Dashboard port ${port} in use — skipping (another instance may be running)`);
+      server = null;
+    }
+  });
+
   server.listen(port, () => {
     log.step(`Live dashboard: http://localhost:${port}`);
   });
