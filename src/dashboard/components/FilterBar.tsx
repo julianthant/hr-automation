@@ -1,14 +1,12 @@
 import React, { useMemo } from "react";
 import {
   Select,
-  SelectValue,
   ListBox,
-  ListBoxItem,
-  SearchField,
-  SearchFieldInput,
-  SearchFieldClearButton,
-  SearchFieldSearchIcon,
+  Label,
   DatePicker,
+  DateField,
+  Calendar,
+  SearchField,
 } from "@heroui/react";
 import { parseDate, today, getLocalTimeZone, type CalendarDate } from "@internationalized/date";
 import { TAB_ORDER, getConfig } from "./types";
@@ -68,14 +66,20 @@ export default function FilterBar({
         }}
         className="min-w-[180px]"
       >
-        <SelectValue />
-        <ListBox>
-          {allWfs.map((wf) => (
-            <ListBoxItem key={wf} id={wf}>
-              {getConfig(wf).label}
-            </ListBoxItem>
-          ))}
-        </ListBox>
+        <Label>Workflow</Label>
+        <Select.Trigger>
+          <Select.Value />
+          <Select.Indicator />
+        </Select.Trigger>
+        <Select.Popover>
+          <ListBox>
+            {allWfs.map((wf) => (
+              <ListBox.Item key={wf} id={wf} textValue={getConfig(wf).label}>
+                {getConfig(wf).label}
+              </ListBox.Item>
+            ))}
+          </ListBox>
+        </Select.Popover>
       </Select>
 
       <SearchField
@@ -84,9 +88,9 @@ export default function FilterBar({
         onChange={setSearchQuery}
         className="flex-1"
       >
-        <SearchFieldSearchIcon />
-        <SearchFieldInput placeholder="Search by ID or name..." />
-        <SearchFieldClearButton />
+        <SearchField.SearchIcon />
+        <SearchField.Input placeholder="Search by ID or name..." />
+        <SearchField.ClearButton />
       </SearchField>
 
       <DatePicker
@@ -94,7 +98,35 @@ export default function FilterBar({
         value={dateValue}
         onChange={handleDateChange}
         className="min-w-[180px]"
-      />
+      >
+        <Label>Date</Label>
+        <DateField.Group>
+          <DateField.Input>
+            {(segment) => <DateField.Segment segment={segment} />}
+          </DateField.Input>
+          <DateField.Suffix>
+            <DatePicker.Trigger>
+              <DatePicker.TriggerIndicator />
+            </DatePicker.Trigger>
+          </DateField.Suffix>
+        </DateField.Group>
+        <DatePicker.Popover>
+          <Calendar>
+            <Calendar.Header>
+              <Calendar.NavButton slot="previous" />
+              <Calendar.NavButton slot="next" />
+            </Calendar.Header>
+            <Calendar.Grid>
+              <Calendar.GridHeader>
+                {(day) => <Calendar.HeaderCell>{day}</Calendar.HeaderCell>}
+              </Calendar.GridHeader>
+              <Calendar.GridBody>
+                {(date) => <Calendar.Cell date={date} />}
+              </Calendar.GridBody>
+            </Calendar.Grid>
+          </Calendar>
+        </DatePicker.Popover>
+      </DatePicker>
     </div>
   );
 }

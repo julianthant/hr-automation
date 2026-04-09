@@ -1,5 +1,5 @@
 import React from "react";
-import { Card, CardContent } from "@heroui/react";
+import { Card } from "@heroui/react";
 import type { TrackerEntry } from "./types";
 
 interface StatsRowProps {
@@ -40,14 +40,14 @@ export default function StatsRow({ rows }: StatsRowProps) {
           key={s.key}
           className={`border-t-2 ${s.borderColor}`}
         >
-          <CardContent className="px-5 py-4">
+          <Card.Content className="px-5 py-4">
             <div className={`text-3xl font-bold tracking-tight ${textColorMap[s.key]}`}>
               {counts[s.key]}
             </div>
             <div className="text-foreground-500 text-xs font-mono uppercase tracking-widest mt-1">
               {s.label}
             </div>
-          </CardContent>
+          </Card.Content>
         </Card>
       ))}
     </div>
