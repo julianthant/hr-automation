@@ -10,6 +10,7 @@ import { runWorkStudy, WorkStudyInputSchema } from "./workflows/work-study/index
 import { runParallelKronos, DEFAULT_WORKERS } from "./workflows/old-kronos-reports/index.js";
 import { runSeparation } from "./workflows/separations/index.js";
 import { lookupSingle, lookupParallel } from "./workflows/eid-lookup/index.js";
+import { exportToExcel } from "./tracker/export-excel.js";
 
 const program = new Command();
 
@@ -232,6 +233,16 @@ program
         process.exit(1);
       }
     }
+  });
+
+// ─── export ───
+
+program
+  .command("export <workflow>")
+  .description("Export JSONL tracker data to Excel")
+  .option("-o, --output <path>", "Output file path")
+  .action(async (workflow: string, opts: { output?: string }) => {
+    await exportToExcel(workflow, opts.output);
   });
 
 program.parse();
