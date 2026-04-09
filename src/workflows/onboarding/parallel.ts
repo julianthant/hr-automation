@@ -10,26 +10,11 @@ import { errorMessage } from "../../utils/errors.js";
 import { updateOnboardingTracker as updateTracker } from "./tracker.js";
 import type { OnboardingTrackerRow as TrackerRow } from "./tracker.js";
 import { runOnboarding } from "./workflow.js";
-import type { OnboardingOptions } from "./workflow.js";
+import { createLockedTracker } from "../../tracker/locked.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const BATCH_FILE = join(__dirname, "batch.yaml");
-
-/**
- * Create a mutex-wrapped version of updateTracker.
- * Ensures only one worker writes to the Excel file at a time.
- */
-function createLockedTracker(mutex: Mutex) {
-  return async (filePath: string, data: TrackerRow): Promise<void> => {
-    const release = await mutex.acquire();
-    try {
-      await updateTracker(filePath, data);
-    } finally {
-      release();
-    }
-  };
-}
 
 /**
  * Load and validate the batch file.
@@ -74,7 +59,7 @@ export async function runParallel(
 
   const queue = [...emails];
   const mutex = new Mutex();
-  const lockedTracker = createLockedTracker(mutex);
+  const lockedTracker = createLockedTracker<TrackerRow>(mutex, updateTracker);
 
   const workerCount = Math.min(parallelCount, emails.length);
   const workers = Array.from({ length: workerCount }, (_, i) =>
