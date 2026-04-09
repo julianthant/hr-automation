@@ -11,6 +11,7 @@ import { log } from "../../utils/log.js";
 import { searchByName, parseNameInput, type EidResult } from "./search.js";
 import { searchCrmByName, datesWithinDays, type CrmRecord } from "./crm-search.js";
 import { updateEidTracker, updateEidTrackerNotFound } from "./tracker.js";
+import { startDashboard, stopDashboard } from "../../tracker/dashboard.js";
 import type { Page, Browser, BrowserContext } from "playwright";
 
 export interface LookupResult {
@@ -24,6 +25,7 @@ export interface LookupResult {
  * Run EID lookup for a single name.
  */
 export async function lookupSingle(nameInput: string): Promise<LookupResult> {
+  startDashboard("eid-lookup");
   const { browser, page } = await launchBrowser();
 
   try {
@@ -56,6 +58,8 @@ export async function lookupSingle(nameInput: string): Promise<LookupResult> {
     const msg = error instanceof Error ? error.message : String(error);
     log.error(`Lookup failed for "${nameInput}": ${msg}`);
     return { name: nameInput, found: false, sdcmpResults: [], error: msg };
+  } finally {
+    stopDashboard();
   }
 }
 
@@ -69,6 +73,7 @@ export async function lookupParallel(
   names: string[],
   workers: number,
 ): Promise<LookupResult[]> {
+  startDashboard("eid-lookup");
   log.step(`Looking up ${names.length} name(s) with ${workers} parallel worker(s)...`);
 
   // Launch one browser, authenticate once
@@ -146,6 +151,7 @@ export async function lookupParallel(
 
     return results;
   } finally {
+    stopDashboard();
     // Keep browser open so user can inspect
     log.step("Browser stays open for inspection.");
   }
@@ -162,6 +168,7 @@ export async function lookupParallel(
  * Duo MFA is done sequentially (UCPath first, then CRM).
  */
 export async function lookupWithCrm(nameInput: string): Promise<LookupResult> {
+  startDashboard("eid-lookup");
   const { lastName, first: firstName } = parseNameInput(nameInput);
 
   // Launch UCPath browser
@@ -258,5 +265,7 @@ export async function lookupWithCrm(nameInput: string): Promise<LookupResult> {
     const msg = error instanceof Error ? error.message : String(error);
     log.error(`Lookup with CRM failed for "${nameInput}": ${msg}`);
     return { name: nameInput, found: false, sdcmpResults: [], error: msg };
+  } finally {
+    stopDashboard();
   }
 }

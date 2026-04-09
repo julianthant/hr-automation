@@ -1,5 +1,6 @@
 import { appendRow } from "../../tracker/index.js";
 import type { ColumnDef } from "../../tracker/index.js";
+import { trackEvent } from "../../tracker/jsonl.js";
 import type { EmployeeData } from "./schema.js";
 
 const TRACKER_PATH = "./src/workflows/onboarding/onboarding-tracker.xlsx";
@@ -124,4 +125,13 @@ export { COLUMNS as ONBOARDING_TRACKER_COLUMNS };
  */
 export async function updateOnboardingTracker(filePath: string, data: OnboardingTrackerRow): Promise<void> {
   await appendRow(filePath, COLUMNS, data as unknown as Record<string, string>);
+  trackEvent({
+    workflow: "onboarding",
+    timestamp: data.timestamp || new Date().toISOString(),
+    id: data.email || `${data.lastName}, ${data.firstName}`,
+    status: data.status === "Done" ? "done" : data.status === "Failed" ? "failed" : "running",
+    step: data.crmExtraction === "Done" ? "transaction" : "extraction",
+    data: { firstName: data.firstName ?? "", lastName: data.lastName ?? "" },
+    error: data.error || undefined,
+  });
 }
