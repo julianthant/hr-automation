@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Card, CardHeader, CardContent, Button, Skeleton } from "@heroui/react";
+import { Card, Button, Skeleton } from "@heroui/react";
 import { motion, AnimatePresence } from "framer-motion";
 import { getLogAction, type LogEntry } from "./types";
 
@@ -86,7 +86,7 @@ export default function LogPanel({
         transition={{ duration: 0.2, ease: "easeOut" }}
       >
         <Card className="bg-content1 border border-divider rounded-lg mt-2 overflow-hidden">
-          <CardHeader className="flex items-center justify-between px-4 py-2 border-b border-divider">
+          <Card.Header className="flex items-center justify-between px-4 py-2 border-b border-divider">
             <span className="font-mono text-xs font-semibold text-foreground-500 uppercase tracking-wider">
               Logs: {itemId}
             </span>
@@ -98,8 +98,8 @@ export default function LogPanel({
             >
               {"\u2715"}
             </Button>
-          </CardHeader>
-          <CardContent className="p-0">
+          </Card.Header>
+          <Card.Content className="p-0">
             <div
               ref={bodyRef}
               className="overflow-y-auto max-h-[370px] py-2"
@@ -148,7 +148,7 @@ export default function LogPanel({
                 })
               )}
             </div>
-          </CardContent>
+          </Card.Content>
         </Card>
       </motion.div>
     </AnimatePresence>

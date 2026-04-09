@@ -1,5 +1,5 @@
 import React from "react";
-import { ProgressBar as HeroProgressBar, ProgressBarTrack, ProgressBarFill } from "@heroui/react";
+import { ProgressBar as HeroProgressBar } from "@heroui/react";
 import type { TrackerEntry } from "./types";
 
 interface ProgressBarProps {
@@ -19,9 +19,9 @@ export default function ProgressBarSection({ rows }: ProgressBarProps) {
         className="flex-1"
         aria-label="Completion progress"
       >
-        <ProgressBarTrack>
-          <ProgressBarFill />
-        </ProgressBarTrack>
+        <HeroProgressBar.Track>
+          <HeroProgressBar.Fill />
+        </HeroProgressBar.Track>
       </HeroProgressBar>
       <span className="font-mono text-sm text-foreground-500 min-w-[48px] text-right">
         {pct}%
