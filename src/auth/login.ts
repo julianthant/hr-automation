@@ -3,6 +3,7 @@ import { log } from "../utils/log.js";
 import { waitForDuoApproval } from "./duo-wait.js";
 import { validateEnv } from "../utils/env.js";
 import { UKG_URL } from "../config.js";
+import { fillSsoCredentials, clickSsoSubmit } from "./sso-fields.js";
 
 /**
  * Take a debug screenshot and log the path + current URL.
@@ -76,35 +77,9 @@ export async function loginToUCPath(page: Page): Promise<boolean> {
   }
   log.step(`SSO login page loaded | URL: ${page.url()}`);
 
-  // Get credentials from validated env
-  const { userId, password } = validateEnv();
-
-  log.step("Entering credentials...");
-
-  // Fill username field
-  // SELECTOR: adjusted after live testing -- "User name (or email address)" label
-  const usernameField =
-    page.getByLabel("User name (or email address)").or(
-      page.getByLabel("Username"),
-    ).or(
-      page.locator('input[name="j_username"]'),
-    );
-  await usernameField.first().fill(userId, { timeout: 5_000 });
-
-  // Fill password field
-  // SELECTOR: adjusted after live testing -- "Password:" label with colon
-  const passwordField =
-    page.getByLabel("Password:").or(
-      page.getByLabel("Password"),
-    ).or(
-      page.locator('input[name="j_password"]'),
-    );
-  await passwordField.first().fill(password, { timeout: 5_000 });
-
-  // Click the actual form submit button (not the "Enroll in Two-Step Login" nav link
-  // which also has role="button" and contains "Login" in its text)
-  // SELECTOR: adjusted after live testing -- target by name attribute to avoid nav link match
-  await page.locator('button[name="_eventId_proceed"]').click({ timeout: 5_000 });
+  // Fill SSO credentials and submit
+  await fillSsoCredentials(page);
+  await clickSsoSubmit(page);
   log.step(`After login click | URL: ${page.url()}`);
 
   // Wait for Duo approval — poll for URL change or "Yes, this is my device" button
@@ -235,29 +210,10 @@ export async function loginToACTCrm(page: Page): Promise<boolean> {
   }
   await ss(page, "02-sso-page");
 
-  const { userId, password } = validateEnv();
-
-  log.step("Entering credentials...");
-  // SELECTOR: adjusted after live testing -- matches debug-03 screenshot
-  // Label text is "User name (or email address)"
-  const usernameField =
-    page.getByLabel("User name (or email address)").or(
-      page.locator('input[name="j_username"]'),
-    );
-  await usernameField.first().fill(userId, { timeout: 5_000 });
-
-  // SELECTOR: adjusted after live testing -- label is "Password:" with colon
-  const passwordField =
-    page.getByLabel("Password:").or(
-      page.locator('input[name="j_password"]'),
-    );
-  await passwordField.first().fill(password, { timeout: 5_000 });
+  // Fill SSO credentials and submit
+  await fillSsoCredentials(page);
   await ss(page, "03-credentials-filled");
-
-  // Click the actual form submit button (not the "Enroll in Two-Step Login" nav link
-  // which also has role="button" and contains "Login" in its text)
-  // SELECTOR: adjusted after live testing -- target by name attribute to avoid nav link match
-  await page.locator('button[name="_eventId_proceed"]').click({ timeout: 5_000 });
+  await clickSsoSubmit(page);
 
   await ss(page, "04-after-login-click");
 
@@ -439,21 +395,10 @@ export async function loginToKuali(page: Page, url: string): Promise<boolean> {
   }
 
   log.step("Logging in via UCSD SSO...");
-  const { userId, password } = validateEnv();
-
-  const usernameField = page
-    .getByLabel("User name (or email address)")
-    .or(page.getByLabel("Username"))
-    .or(page.locator('input[name="j_username"]'));
-  const passwordField = page
-    .getByLabel("Password:")
-    .or(page.getByLabel("Password"))
-    .or(page.locator('input[name="j_password"]'));
 
   try {
-    await usernameField.fill(userId, { timeout: 10_000 });
-    await passwordField.fill(password, { timeout: 5_000 });
-    await page.locator('button[name="_eventId_proceed"]').click({ timeout: 5_000 });
+    await fillSsoCredentials(page);
+    await clickSsoSubmit(page);
     log.step("Credentials submitted — waiting for Duo MFA...");
   } catch {
     // SSO may have auto-forwarded to Duo (credentials remembered) — check before bailing
@@ -532,26 +477,15 @@ export async function loginToNewKronos(page: Page): Promise<boolean> {
   }
 
   log.step("Logging in via UCSD SSO...");
-  const { userId, password } = validateEnv();
-
-  const usernameField = page
-    .getByLabel("User name (or email address)")
-    .or(page.getByLabel("Username"))
-    .or(page.locator('input[name="j_username"]'));
-  const passwordField = page
-    .getByLabel("Password:")
-    .or(page.getByLabel("Password"))
-    .or(page.locator('input[name="j_password"]'));
 
   try {
-    await usernameField.fill(userId, { timeout: 10_000 });
-    await passwordField.fill(password, { timeout: 5_000 });
+    await fillSsoCredentials(page);
   } catch {
     log.error("Could not find new Kronos SSO login fields");
     return false;
   }
 
-  await page.locator('button[name="_eventId_proceed"]').click({ timeout: 5_000 });
+  await clickSsoSubmit(page);
   log.step("Credentials submitted — waiting for Duo MFA...");
 
   // Poll for Duo approval or URL change
