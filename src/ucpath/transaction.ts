@@ -64,6 +64,7 @@ export async function selectTemplate(
     .fill(templateId, { timeout: 10_000 });
   log.step(`Template input filled: ${templateId}`);
 
+  log.step(`Template: "${templateId}" selected for this transaction`);
   log.success(`Template "${templateId}" selected`);
 }
 
@@ -155,6 +156,7 @@ export async function selectReasonCode(
   await frame
     .getByLabel("Reason Code")
     .selectOption(reasonLabel, { timeout: 10_000 });
+  log.step(`Reason: "${reasonLabel}" selected`);
   log.step("Reason code selected");
 
   await page.waitForTimeout(2_000);
@@ -428,6 +430,7 @@ export async function fillJobData(
   // Position number fill triggers PeopleSoft refresh — wait for it
   await page.waitForTimeout(5_000);
   await waitForPeopleSoftProcessing(frame, 15_000);
+  log.step("Position number filled — page refreshed, grid indices may have changed");
   log.step("Position number filled");
 
   // SELECTOR: verified v1.0 — textbox "Employee Classification"
@@ -448,6 +451,7 @@ export async function fillJobData(
     .or(frame.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_EDIT1$11"]'));
   await compRateInput.first().fill(data.compRateCode, { timeout: 10_000 });
   await page.waitForTimeout(1_000);
+  log.step(`Comp Rate Code: filled "${data.compRateCode}" using grid selector index (SH_EDIT1$0 → SH_PROMPT1$11 → SH_PROMPT1$0 → SH_EDIT1$11 fallback chain)`);
   log.step("Comp rate code filled");
 
   // SELECTOR: verified v1.0 — Compensation Rate (grid input, dynamic index)
@@ -460,6 +464,7 @@ export async function fillJobData(
     .or(frame.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_EDIT2$11"]'));
   await compRateValue.first().fill(data.compensationRate, { timeout: 10_000 });
   await page.waitForTimeout(1_000);
+  log.step(`Compensation Rate: $${data.compensationRate} filled`);
   log.step("Compensation rate filled");
 
   // SELECTOR: verified v1.0 — textbox "Expected Job End Date"

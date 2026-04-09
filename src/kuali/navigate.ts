@@ -111,8 +111,11 @@ export function isVoluntaryTermination(terminationType: string): boolean {
  */
 export function mapTerminationToUCPathReason(terminationType: string): string {
   if (terminationType.toLowerCase().includes("graduated")) {
-    return "No Longer Student";
+    const result = "No Longer Student";
+    log.step(`Reason code: Kuali type "${terminationType}" → UCPath reason "${result}"`);
+    return result;
   }
+  log.step(`Reason code: Kuali type "${terminationType}" → UCPath reason "${terminationType}" (no mapping)`);
   return terminationType;
 }
 
@@ -169,6 +172,7 @@ export async function fillFinalTransactions(
     const bestMatch = allOptions.find((opt) =>
       opt.toLowerCase().includes(opts.department!.toLowerCase()),
     );
+    log.step(`Department: searching for "${opts.department}" — best match: "${bestMatch || "NONE"}"`);
     if (bestMatch && bestMatch !== "- - -") {
       await deptCombo.selectOption({ label: bestMatch }, { timeout: 5_000 });
       log.step(`  Selected department: ${bestMatch}`);

@@ -283,6 +283,7 @@ async function extractResults(page: Page, frame: FrameLocator): Promise<EidResul
   // Check for single-result detail page (PeopleSoft skips grid when exactly 1 match)
   const singleResult = await extractSingleResultDetail(frame);
   if (singleResult) {
+    log.step("Single result detected — PeopleSoft redirected directly to detail page");
     return [singleResult];
   }
 
@@ -545,6 +546,8 @@ async function searchOnce(
   const results = await extractResults(page, frame);
   const sdcmpResults = results.filter((r) => r.businessUnit === "SDCMP");
 
+  log.step(`Search: "${lastName}, ${name}" returned ${results.length} total → ${sdcmpResults.length} after SDCMP/HDH filter`);
+
   if (sdcmpResults.length > 0) {
     log.success(`Found ${sdcmpResults.length} SDCMP result(s) for "${lastName}, ${name}"`);
   } else if (results.length > 0) {
@@ -600,6 +603,7 @@ export async function searchByName(
 
   // Strategy 2: First name only (drop middle) — only if we had a middle and no SDCMP yet
   if (middle && sdcmpResults.length === 0) {
+    log.step(`Search fallback: full name returned 0 — trying "${first}"`);
     // Always re-navigate fresh — PeopleSoft forms break after "No matching values" popups
     frame = await navigateToPersonOrgSummary(page);
     const attempt2 = await searchOnce(page, frame, lastName, first);
@@ -609,6 +613,7 @@ export async function searchByName(
       sdcmpResults = attempt2.sdcmpResults;
     } else {
       // Strategy 3: Middle name as first name
+      log.step(`Search fallback: first-only returned 0 — trying "${middle}"`);
       frame = await navigateToPersonOrgSummary(page);
       const attempt3 = await searchOnce(page, frame, lastName, middle);
       allAttempts.push(attempt3);
