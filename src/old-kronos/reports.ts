@@ -187,6 +187,7 @@ export async function waitForReportAndDownload(
           log.step(
             `[${employeeId}] Attempt ${attempt + 1}: status='${result.status}' tr_id=${result.trId}`,
           );
+          log.step(`Report: status "${result.status}" (attempt ${attempt + 1})`);
 
           if (status === "complete") {
             myRowId = result.trId;
@@ -296,6 +297,8 @@ async function downloadReportRow(
   }
 
   if (downloadCaptured) {
+    log.step(`Download: captured via Playwright download event`);
+    log.step(`PDF: saved as "${filename}" via download event`);
     log.success(`[${employeeId}] Download captured!`);
     // Close extra tabs
     while (page.context().pages().length > 1) {
@@ -326,6 +329,9 @@ async function downloadReportRow(
       );
       if (newPdfs.length > 0) {
         const src = join(checkDir, newPdfs[0]);
+        const nameMatch = newPdfs[0] === filename;
+        log.step(`PDF: name "${newPdfs[0]}" ${nameMatch ? "matches" : "MISMATCHES"} expected "${filename}"`);
+        log.step(`Download: captured via filesystem fallback (diff in ${checkDir})`);
         if (src !== dest) {
           if (existsSync(dest)) await unlink(dest);
           await rename(src, dest);

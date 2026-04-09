@@ -215,6 +215,10 @@ export async function runSeparation(
   const template = isVol ? UC_VOL_TERM_TEMPLATE : UC_INVOL_TERM_TEMPLATE;
   const timekeeperName = process.env.NAME ?? "";
 
+  log.step(`Kuali extraction: Employee="${kualiData.employeeName}", EID="${kualiData.eid}", SepDate="${kualiData.separationDate}", Type="${kualiData.terminationType}"`);
+  log.step(`Template: "${template}" — ${isVol ? "voluntary termination" : "involuntary termination"}`);
+  log.step(`Reason code: Kuali type "${kualiData.terminationType}" → UCPath reason "${ucpathReason}"`);
+  log.step(`Termination effective date: ${termEffDate} (separation date ${kualiData.separationDate} + 1 day)`);
   log.step(`Employee: ${kualiData.employeeName} | EID: ${kualiData.eid}`);
   log.step(`Type: ${kualiData.terminationType} (${isVol ? "VOL" : "INVOL"}) | Eff: ${termEffDate}`);
 
@@ -296,6 +300,13 @@ export async function runSeparation(
     oldKronosDate, newKronosDate,
   );
 
+  const chosenDateSource = resolved.changed
+    ? (oldKronosDate && newKronosDate
+        ? (oldKronosDate >= newKronosDate ? "Old Kronos" : "New Kronos")
+        : (oldKronosDate ? "Old Kronos" : "New Kronos"))
+    : "Kuali (no change)";
+  log.step(`Kronos dates: Old="${oldKronosDate || "none"}", New="${newKronosDate || "none"}" — using ${chosenDateSource}`);
+
   if (resolved.changed) {
     log.step("[Dates] Kronos dates differ — updating Kuali:");
     if (resolved.lastDayWorked !== kualiData.lastDayWorked) {
@@ -313,6 +324,9 @@ export async function runSeparation(
   const finalTermEffDate = resolved.separationDate !== kualiData.separationDate
     ? computeTerminationEffDate(resolved.separationDate)
     : termEffDate;
+  if (resolved.separationDate !== kualiData.separationDate) {
+    log.step(`Termination effective date: ${finalTermEffDate} (updated separation date ${resolved.separationDate} + 1 day)`);
+  }
   const finalComments = buildTerminationComments(finalTermEffDate, resolved.lastDayWorked, docId);
 
   // ═══════════════════════════════════════════

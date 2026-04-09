@@ -49,16 +49,25 @@ export async function extractRawFields(
   for (const [field, labels] of Object.entries(FIELD_MAP)) {
     log.step(`Extracting ${field}...`);
     let value: string | null = null;
+    let matchedLabel: string | null = null;
 
     for (const label of labels) {
       value = await extractField(page, label);
-      if (value) break;
+      if (value) {
+        matchedLabel = label;
+        break;
+      }
     }
 
     // Appointment: extract just the number (e.g. "Casual/Restricted 5" → "5")
     if (field === "appointment" && value) {
       const numMatch = value.match(/(\d+)/);
       value = numMatch?.[1] ?? value;
+    }
+
+    if (value && matchedLabel) {
+      const displayVal = field === "ssn" ? "***-**-" + value.slice(-4) : value.slice(0, 50);
+      log.step(`CRM field "${field}": matched label "${matchedLabel}" → value "${displayVal}"`);
     }
 
     raw[field] = value;

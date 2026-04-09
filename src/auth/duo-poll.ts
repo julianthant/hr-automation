@@ -75,6 +75,7 @@ export async function pollDuoApproval(
     try {
       // Run optional recovery callback to handle mid-auth errors (e.g., SAML redirects)
       if (recovery) {
+        log.step("Duo: running mid-auth recovery check...");
         await recovery(page).catch(() => {});
       }
 
@@ -83,6 +84,7 @@ export async function pollDuoApproval(
       if ((await trustButton.count()) > 0) {
         log.step('Clicking "Yes, this is my device"...');
         await trustButton.click({ timeout: 5_000 });
+        log.step('Duo: clicked "Yes, this is my device" trust button');
       }
 
       // Check if the URL indicates successful auth
