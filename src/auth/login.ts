@@ -4,6 +4,7 @@ import { pollDuoApproval } from "./duo-poll.js";
 import { validateEnv } from "../utils/env.js";
 import { UKG_URL } from "../config.js";
 import { fillSsoCredentials, clickSsoSubmit } from "./sso-fields.js";
+import { gotoWithRetry } from "../browser/launch.js";
 
 /**
  * Take a debug screenshot and log the path + current URL.
@@ -240,24 +241,8 @@ export async function loginToUKG(page: Page): Promise<boolean> {
 export async function ukgNavigateAndFill(page: Page): Promise<boolean | "already_logged_in"> {
   log.step("Navigating to UKG...");
 
-  // Retry navigation on transient network errors (ERR_NETWORK_CHANGED, etc.)
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      await page.goto(UKG_URL, {
-        waitUntil: "domcontentloaded",
-        timeout: 60_000,
-      });
-      break;
-    } catch (err) {
-      const msg = String(err);
-      if (attempt < 3 && (msg.includes("ERR_NETWORK") || msg.includes("ERR_CONNECTION") || msg.includes("ERR_NAME"))) {
-        log.step(`Navigation failed (attempt ${attempt}/3): ${msg.slice(0, 80)}. Retrying in 5s...`);
-        await page.waitForTimeout(5_000);
-        continue;
-      }
-      throw err;
-    }
-  }
+  // Retry navigation on transient network errors via gotoWithRetry
+  await gotoWithRetry(page, UKG_URL, undefined, 3, 60_000);
   await page.waitForTimeout(5_000);
 
   // Check if already logged in (persistent session)
