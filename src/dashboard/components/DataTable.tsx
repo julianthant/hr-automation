@@ -126,37 +126,39 @@ export default function DataTable({
 
   if (loading) {
     return (
-      <div className="bg-content1 border border-divider rounded-xl overflow-hidden">
-        <table className="w-full border-collapse">
-          <thead>
-            <tr>
-              {columns.map((c) => (
-                <th
-                  key={c.key}
-                  className="font-mono text-[0.67rem] font-semibold uppercase tracking-widest text-foreground-500 px-4 py-3.5 text-left bg-content2 border-b border-divider"
-                >
-                  {c.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {Array.from({ length: 6 }).map((_, i) => (
-              <tr key={i} className="border-b border-divider last:border-b-0">
-                {columns.map((c, j) => (
-                  <td key={c.key} className="px-4 py-3">
-                    <Skeleton
-                      className="h-3.5 rounded"
-                      style={{
-                        width: `${50 + (((i + j) * 13) % 80)}px`,
-                      }}
-                    />
-                  </td>
+      <div className="bg-content1 border border-divider rounded-xl overflow-hidden" role="table" aria-label="Loading workflow entries">
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr>
+                {columns.map((c) => (
+                  <th
+                    key={c.key}
+                    className="font-mono text-[0.67rem] font-semibold uppercase tracking-widest text-foreground-500 px-4 py-3.5 text-left bg-content2 border-b border-divider"
+                  >
+                    {c.label}
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <tr key={i} className="border-b border-divider last:border-b-0">
+                  {columns.map((c, j) => (
+                    <td key={c.key} className="px-4 py-3">
+                      <Skeleton
+                        className="h-3.5 rounded"
+                        style={{
+                          width: `${50 + (((i + j) * 13) % 80)}px`,
+                        }}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     );
   }
@@ -177,50 +179,52 @@ export default function DataTable({
 
   return (
     <div className="bg-content1 border border-divider rounded-xl overflow-hidden">
-      <table className="w-full border-collapse">
-        <thead>
-          <tr>
-            {columns.map((c) => (
-              <th
-                key={c.key}
-                className="font-mono text-[0.67rem] font-semibold uppercase tracking-widest text-foreground-500 px-4 py-3.5 text-left bg-content2 border-b border-divider sticky top-0 z-[2] whitespace-nowrap"
-              >
-                {c.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <Fragment key={r.id}>
-              <tr
-                className={`border-b border-divider last:border-b-0 cursor-pointer transition-colors hover:bg-content2/50 ${
-                  expandedId === r.id ? "bg-content2" : ""
-                }`}
-                onClick={() => handleRowClick(r.id)}
-              >
-                {columns.map((c) => (
-                  <td key={c.key} className="px-4 py-3 text-sm align-middle">
-                    <CellContent colKey={c.key} row={r} cfg={cfg} />
-                  </td>
-                ))}
-              </tr>
-              {expandedId === r.id && (
-                <tr>
-                  <td colSpan={columns.length} className="p-0 px-2 pb-2">
-                    <LogPanel
-                      workflow={activeWf}
-                      itemId={r.id}
-                      selectedDate={selectedDate}
-                      onClose={() => setExpandedId(null)}
-                    />
-                  </td>
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse" aria-label="Workflow entries">
+          <thead>
+            <tr>
+              {columns.map((c) => (
+                <th
+                  key={c.key}
+                  className="font-mono text-[0.67rem] font-semibold uppercase tracking-widest text-foreground-500 px-4 py-3.5 text-left bg-content2 border-b border-divider sticky top-0 z-[2] whitespace-nowrap"
+                >
+                  {c.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <Fragment key={r.id}>
+                <tr
+                  className={`border-b border-divider last:border-b-0 cursor-pointer transition-colors hover:bg-content2/50 ${
+                    expandedId === r.id ? "bg-content2" : ""
+                  }`}
+                  onClick={() => handleRowClick(r.id)}
+                >
+                  {columns.map((c) => (
+                    <td key={c.key} className="px-4 py-3 text-sm align-middle">
+                      <CellContent colKey={c.key} row={r} cfg={cfg} />
+                    </td>
+                  ))}
                 </tr>
-              )}
-            </Fragment>
-          ))}
-        </tbody>
-      </table>
+                {expandedId === r.id && (
+                  <tr>
+                    <td colSpan={columns.length} className="p-0 px-2 pb-2">
+                      <LogPanel
+                        workflow={activeWf}
+                        itemId={r.id}
+                        selectedDate={selectedDate}
+                        onClose={() => setExpandedId(null)}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

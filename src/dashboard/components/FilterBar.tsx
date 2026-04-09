@@ -2,7 +2,6 @@ import React, { useMemo } from "react";
 import {
   Select,
   ListBox,
-  Label,
   DatePicker,
   DateField,
   Calendar,
@@ -57,16 +56,16 @@ export default function FilterBar({
   };
 
   return (
-    <div className="flex items-center gap-3 bg-content1/80 backdrop-blur-xl border border-divider rounded-xl shadow-lg p-3 mb-6">
+    <div className="flex items-center gap-3 mb-7">
+      {/* Workflow dropdown */}
       <Select
         aria-label="Workflow"
         selectedKey={activeWf}
         onSelectionChange={(key) => {
           if (key) onSwitch(String(key));
         }}
-        className="min-w-[180px]"
+        className="w-[200px] shrink-0"
       >
-        <Label>Workflow</Label>
         <Select.Trigger>
           <Select.Value />
           <Select.Indicator />
@@ -82,24 +81,25 @@ export default function FilterBar({
         </Select.Popover>
       </Select>
 
+      {/* Search */}
       <SearchField
         aria-label="Search"
         value={searchQuery}
         onChange={setSearchQuery}
-        className="flex-1"
+        className="flex-1 max-w-md"
       >
         <SearchField.SearchIcon />
         <SearchField.Input placeholder="Search by ID or name..." />
         <SearchField.ClearButton />
       </SearchField>
 
+      {/* Date picker */}
       <DatePicker
         aria-label="Date"
         value={dateValue}
         onChange={handleDateChange}
-        className="min-w-[180px]"
+        className="w-[200px] shrink-0"
       >
-        <Label>Date</Label>
         <DateField.Group>
           <DateField.Input>
             {(segment) => <DateField.Segment segment={segment} />}
@@ -110,13 +110,13 @@ export default function FilterBar({
             </DatePicker.Trigger>
           </DateField.Suffix>
         </DateField.Group>
-        <DatePicker.Popover>
+        <DatePicker.Popover className="p-4">
           <Calendar>
             <Calendar.Header>
               <Calendar.NavButton slot="previous" />
               <Calendar.NavButton slot="next" />
             </Calendar.Header>
-            <Calendar.Grid>
+            <Calendar.Grid className="mt-2">
               <Calendar.GridHeader>
                 {(day) => <Calendar.HeaderCell>{day}</Calendar.HeaderCell>}
               </Calendar.GridHeader>
