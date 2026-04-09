@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import { dirname } from "path";
 import { Mutex } from "async-mutex";
 import { launchBrowser } from "../../browser/launch.js";
-import { log } from "../../utils/log.js";
+import { log, withLogContext } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { updateOnboardingTracker as updateTracker } from "./tracker.js";
 import type { OnboardingTrackerRow as TrackerRow } from "./tracker.js";
@@ -105,13 +105,13 @@ async function runWorker(
     log.step(`${prefix} Processing ${email} (${queue.length} remaining in queue)`);
 
     try {
-      await runOnboarding(email, {
+      await withLogContext("onboarding", email, () => runOnboarding(email, {
         dryRun: options.dryRun,
         crmPage: crmBrowser.page,
         ucpathPage,
         updateTrackerFn: lockedTracker,
         logPrefix: prefix,
-      });
+      }));
       log.success(`${prefix} Completed ${email}`);
     } catch (error) {
       log.error(`${prefix} Failed ${email}: ${errorMessage(error)}`);

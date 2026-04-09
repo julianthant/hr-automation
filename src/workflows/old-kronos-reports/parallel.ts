@@ -2,7 +2,7 @@ import { readFile } from "fs/promises";
 import { mkdirSync, existsSync } from "fs";
 import { parse } from "yaml";
 import { Mutex } from "async-mutex";
-import { log } from "../../utils/log.js";
+import { log, withLogContext } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { launchBrowser } from "../../browser/launch.js";
 import { ukgNavigateAndFill, ukgSubmitAndWaitForDuo } from "../../auth/login.js";
@@ -202,13 +202,13 @@ async function runWorker(
       log.step(`${prefix} ${"=".repeat(50)}`);
 
       try {
-        await runKronosForEmployee(employeeId, {
+        await withLogContext("kronos-reports", employeeId, () => runKronosForEmployee(employeeId, {
           page,
           dateRangeSet: true,
           updateTrackerFn: lockedTracker,
           reportLock: reportMutex,
           logPrefix: prefix,
-        });
+        }));
         consecutiveErrors = 0;
       } catch (err) {
         consecutiveErrors++;

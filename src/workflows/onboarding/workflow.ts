@@ -1,6 +1,6 @@
 import type { Page } from "playwright";
 import { launchBrowser } from "../../browser/launch.js";
-import { log } from "../../utils/log.js";
+import { log, withLogContext } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath, loginToACTCrm } from "../../auth/login.js";
 import { startDashboard, stopDashboard } from "../../tracker/dashboard.js";
@@ -53,8 +53,10 @@ export async function runOnboarding(
   options: OnboardingOptions = {},
 ): Promise<void> {
   const p = options.logPrefix;
-  const writeTracker = options.updateTrackerFn ?? defaultUpdateTracker;
   const isParallel = Boolean(options.crmPage);
+
+  return withLogContext("onboarding", email, async () => {
+  const writeTracker = options.updateTrackerFn ?? defaultUpdateTracker;
 
   // Start live dashboard only in single (non-parallel) mode
   if (!isParallel) startDashboard("onboarding");
@@ -271,4 +273,5 @@ export async function runOnboarding(
     }
     process.exit(1);
   }
+  }); // end withLogContext
 }
