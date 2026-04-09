@@ -16,6 +16,8 @@
     "kronos:dry": "tsx --env-file=.env src/cli.ts kronos --dry-run",
     "separation": "tsx --env-file=.env src/cli.ts separation",
     "separation:dry": "tsx --env-file=.env src/cli.ts separation --dry-run",
+    "build:dashboard": "vite build --config vite.dashboard.config.ts",
+    "dev:dashboard": "vite --config vite.dashboard.config.ts",
     "typecheck": "tsc --noEmit",
     "typecheck:all": "tsc --noEmit -p tsconfig.test.json",
     "test": "tsx --test tests/**/*.test.ts"
@@ -24,18 +26,29 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@heroui/react": "^3.0.2",
     "async-mutex": "^0.5.0",
     "commander": "^14.0.3",
     "exceljs": "^4.4.0",
+    "framer-motion": "^12.38.0",
     "pdf-parse": "^2.4.5",
     "picocolors": "^1.1.1",
     "playwright": "^1.58.2",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
     "yaml": "^2.8.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.2.2",
     "@types/node": "^25.5.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "tailwindcss": "^4.2.2",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vite": "^8.0.8",
+    "vite-plugin-singlefile": "^2.3.2"
   }
 }
