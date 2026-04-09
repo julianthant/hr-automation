@@ -67,12 +67,57 @@ export function readEntries(workflow: string, dir: string = DEFAULT_DIR): Tracke
     .map((line) => JSON.parse(line) as TrackerEntry);
 }
 
-/** List all workflows that have tracker data (scans dir for *.jsonl files). */
+/** List all workflows that have tracker data (scans dir for *.jsonl files, excludes log files). */
 export function listWorkflows(dir: string = DEFAULT_DIR): string[] {
   if (!existsSync(dir)) return [];
-  const today = new Date().toISOString().slice(0, 10);
   return readdirSync(dir)
-    .filter((f) => f.endsWith(".jsonl"))
-    .map((f) => f.replace(`-${today}.jsonl`, "").replace(/\.jsonl$/, ""))
+    .filter((f) => f.endsWith(".jsonl") && !f.includes("-logs.jsonl"))
+    .map((f) => f.replace(/-\d{4}-\d{2}-\d{2}\.jsonl$/, ""))
     .filter((v, i, a) => a.indexOf(v) === i);
+}
+
+/** List all dates that have tracker data for a given workflow. */
+export function listDatesForWorkflow(workflow: string, dir: string = DEFAULT_DIR): string[] {
+  if (!existsSync(dir)) return [];
+  const prefix = `${workflow}-`;
+  return readdirSync(dir)
+    .filter((f) => f.startsWith(prefix) && f.endsWith(".jsonl") && !f.includes("-logs.jsonl"))
+    .map((f) => {
+      const match = f.match(/(\d{4}-\d{2}-\d{2})\.jsonl$/);
+      return match ? match[1] : "";
+    })
+    .filter(Boolean)
+    .sort()
+    .reverse();
+}
+
+/** Read entries for a specific date (not just today). */
+export function readEntriesForDate(
+  workflow: string,
+  date: string,
+  dir: string = DEFAULT_DIR,
+): TrackerEntry[] {
+  const logPath = join(dir, `${workflow}-${date}.jsonl`);
+  if (!existsSync(logPath)) return [];
+  return readFileSync(logPath, "utf-8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as TrackerEntry);
+}
+
+/** Read log entries for a specific date (not just today). */
+export function readLogEntriesForDate(
+  workflow: string,
+  itemId: string | undefined,
+  date: string,
+  dir: string = DEFAULT_DIR,
+): LogEntry[] {
+  const logPath = join(dir, `${workflow}-${date}-logs.jsonl`);
+  if (!existsSync(logPath)) return [];
+  const all = readFileSync(logPath, "utf-8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as LogEntry);
+  if (itemId) return all.filter((e) => e.itemId === itemId);
+  return all;
 }
