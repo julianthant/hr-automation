@@ -5,7 +5,7 @@ Five independent login flows for UCSD systems. Each system uses different SSO/au
 ## Files
 
 - `login.ts` — All login flows: `loginToUCPath`, `loginToACTCrm`, `loginToUKG` (split into `ukgNavigateAndFill` + `ukgSubmitAndWaitForDuo`), `loginToKuali`, `loginToNewKronos`
-- `duo-wait.ts` — `waitForDuoApproval(page, successUrlPattern, timeoutMs?)` — polls `page.waitForURL()` with 15s default timeout
+- `duo-poll.ts` — `pollDuoApproval(page, options)` — unified Duo polling loop with URL match, successCheck, postApproval, and recovery callbacks
 - `session.ts` — `isOnAuthenticatedPage(page)` — URL-based check for ACT CRM auth state (not session persistence)
 - `types.ts` — `LoginOptions` (fresh flag), `AuthResult` (ucpath/actCrm booleans)
 
