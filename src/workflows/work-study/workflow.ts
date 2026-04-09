@@ -1,5 +1,5 @@
 import { launchBrowser } from "../../browser/launch.js";
-import { log } from "../../utils/log.js";
+import { log, withLogContext } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath } from "../../auth/login.js";
 import { TransactionError } from "../../ucpath/types.js";
@@ -26,6 +26,7 @@ export async function runWorkStudy(
 ): Promise<void> {
   startDashboard("work-study");
   try {
+  await withLogContext("work-study", input.emplId, async () => {
   if (options.dryRun) {
     const ctx: WorkStudyContext = { employeeName: "" };
     const plan = buildWorkStudyPlan(input, null as never, ctx);
@@ -93,6 +94,7 @@ export async function runWorkStudy(
     }
     process.exit(1);
   }
+  }); // end withLogContext
   } finally {
     stopDashboard();
   }

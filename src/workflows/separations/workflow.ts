@@ -1,5 +1,5 @@
 import type { Page, BrowserContext, Browser } from "playwright";
-import { log } from "../../utils/log.js";
+import { log, withLogContext } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { launchBrowser } from "../../browser/launch.js";
 import { loginToKuali, loginToUKG, loginToUCPath, loginToNewKronos } from "../../auth/login.js";
@@ -130,6 +130,7 @@ export async function runSeparation(
   docId: string,
   options: SeparationOptions = {},
 ): Promise<SeparationResult> {
+  return withLogContext("separations", docId, async () => {
   const { dryRun = false, keepOpen = false, existingWindows } = options;
   const extraWindows: BrowserWindow[] = []; // UCPath windows we launch and close
 
@@ -423,4 +424,5 @@ export async function runSeparation(
 
   log.success(`=== Separation complete for doc #${docId} ===`);
   return { data: separationData, windows: makeSessionWindows() };
+  }); // end withLogContext
 }

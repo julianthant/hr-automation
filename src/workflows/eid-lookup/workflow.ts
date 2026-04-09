@@ -7,7 +7,7 @@
 
 import { launchBrowser } from "../../browser/launch.js";
 import { loginToUCPath, loginToACTCrm } from "../../auth/login.js";
-import { log } from "../../utils/log.js";
+import { log, withLogContext } from "../../utils/log.js";
 import { searchByName, parseNameInput, type EidResult } from "./search.js";
 import { searchCrmByName, datesWithinDays, type CrmRecord } from "./crm-search.js";
 import { updateEidTracker, updateEidTrackerNotFound } from "./tracker.js";
@@ -30,31 +30,33 @@ export async function lookupSingle(nameInput: string): Promise<LookupResult> {
   const { browser, page } = await launchBrowser();
 
   try {
-    log.step(`Looking up: "${nameInput}"`);
+    return await withLogContext("eid-lookup", nameInput, async () => {
+      log.step(`Looking up: "${nameInput}"`);
 
-    const loggedIn = await loginToUCPath(page);
-    if (!loggedIn) {
-      return { name: nameInput, found: false, sdcmpResults: [], error: "UCPath login failed" };
-    }
-
-    const result = await searchByName(page, nameInput);
-
-    if (result.sdcmpResults.length > 0) {
-      log.success(`Found ${result.sdcmpResults.length} SDCMP result(s) for "${nameInput}":`);
-      for (const r of result.sdcmpResults) {
-        log.success(`  EID: ${r.emplId} | ${r.department ?? "?"} | ${r.jobCodeDescription} | ${r.name} | ${r.expectedEndDate || "Active"}`);
-        await updateEidTracker(nameInput, r);
+      const loggedIn = await loginToUCPath(page);
+      if (!loggedIn) {
+        return { name: nameInput, found: false, sdcmpResults: [], error: "UCPath login failed" };
       }
-    } else {
-      log.error(`No SDCMP results for "${nameInput}"`);
-      await updateEidTrackerNotFound(nameInput);
-    }
 
-    return {
-      name: nameInput,
-      found: result.found,
-      sdcmpResults: result.sdcmpResults,
-    };
+      const result = await searchByName(page, nameInput);
+
+      if (result.sdcmpResults.length > 0) {
+        log.success(`Found ${result.sdcmpResults.length} SDCMP result(s) for "${nameInput}":`);
+        for (const r of result.sdcmpResults) {
+          log.success(`  EID: ${r.emplId} | ${r.department ?? "?"} | ${r.jobCodeDescription} | ${r.name} | ${r.expectedEndDate || "Active"}`);
+          await updateEidTracker(nameInput, r);
+        }
+      } else {
+        log.error(`No SDCMP results for "${nameInput}"`);
+        await updateEidTrackerNotFound(nameInput);
+      }
+
+      return {
+        name: nameInput,
+        found: result.found,
+        sdcmpResults: result.sdcmpResults,
+      };
+    });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     log.error(`Lookup failed for "${nameInput}": ${msg}`);
@@ -120,30 +122,33 @@ export async function lookupParallel(
         const nameInput = queue.shift()!;
         log.step(`[Worker ${workerId}] Searching: "${nameInput}"`);
 
-        try {
-          const result = await searchByName(workerPage, nameInput);
+        const workerResult = await withLogContext("eid-lookup", nameInput, async () => {
+          try {
+            const result = await searchByName(workerPage, nameInput);
 
-          if (result.sdcmpResults.length > 0) {
-            log.success(`[Worker ${workerId}] Found ${result.sdcmpResults.length} result(s) for "${nameInput}":`);
-            for (const r of result.sdcmpResults) {
-              log.success(`  EID: ${r.emplId} | ${r.department ?? "?"} | ${r.jobCodeDescription} | ${r.name} | ${r.expectedEndDate || "Active"}`);
-              await lockedUpdateEidTracker(nameInput, r);
+            if (result.sdcmpResults.length > 0) {
+              log.success(`[Worker ${workerId}] Found ${result.sdcmpResults.length} result(s) for "${nameInput}":`);
+              for (const r of result.sdcmpResults) {
+                log.success(`  EID: ${r.emplId} | ${r.department ?? "?"} | ${r.jobCodeDescription} | ${r.name} | ${r.expectedEndDate || "Active"}`);
+                await lockedUpdateEidTracker(nameInput, r);
+              }
+            } else {
+              log.step(`[Worker ${workerId}] No SDCMP results for "${nameInput}"`);
+              await lockedUpdateEidTrackerNotFound(nameInput);
             }
-          } else {
-            log.step(`[Worker ${workerId}] No SDCMP results for "${nameInput}"`);
-            await lockedUpdateEidTrackerNotFound(nameInput);
-          }
 
-          results.push({
-            name: nameInput,
-            found: result.found,
-            sdcmpResults: result.sdcmpResults,
-          });
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
-          log.error(`[Worker ${workerId}] Failed for "${nameInput}": ${msg}`);
-          results.push({ name: nameInput, found: false, sdcmpResults: [], error: msg });
-        }
+            return {
+              name: nameInput,
+              found: result.found,
+              sdcmpResults: result.sdcmpResults,
+            } as LookupResult;
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            log.error(`[Worker ${workerId}] Failed for "${nameInput}": ${msg}`);
+            return { name: nameInput, found: false, sdcmpResults: [], error: msg } as LookupResult;
+          }
+        });
+        results.push(workerResult);
       }
     };
 
@@ -188,91 +193,93 @@ export async function lookupWithCrm(nameInput: string): Promise<LookupResult> {
   const ucpath = await launchBrowser();
 
   try {
-    // Step 1: Authenticate UCPath
-    log.step("Authenticating to UCPath...");
-    const ucpathOk = await loginToUCPath(ucpath.page);
-    if (!ucpathOk) {
-      return { name: nameInput, found: false, sdcmpResults: [], error: "UCPath login failed" };
-    }
+    return await withLogContext("eid-lookup", nameInput, async () => {
+      // Step 1: Authenticate UCPath
+      log.step("Authenticating to UCPath...");
+      const ucpathOk = await loginToUCPath(ucpath.page);
+      if (!ucpathOk) {
+        return { name: nameInput, found: false, sdcmpResults: [], error: "UCPath login failed" };
+      }
 
-    // Step 2: Authenticate CRM (separate browser, separate Duo)
-    log.step("Launching CRM browser...");
-    const crm = await launchBrowser();
-    log.step("Authenticating to CRM...");
-    const crmOk = await loginToACTCrm(crm.page);
-    if (!crmOk) {
-      log.error("CRM login failed — continuing with UCPath only");
-    }
+      // Step 2: Authenticate CRM (separate browser, separate Duo)
+      log.step("Launching CRM browser...");
+      const crm = await launchBrowser();
+      log.step("Authenticating to CRM...");
+      const crmOk = await loginToACTCrm(crm.page);
+      if (!crmOk) {
+        log.error("CRM login failed — continuing with UCPath only");
+      }
 
-    // Step 3: Run both searches
-    // UCPath search
-    log.step("\n--- UCPath Search ---");
-    const ucpathResult = await searchByName(ucpath.page, nameInput);
+      // Step 3: Run both searches
+      // UCPath search
+      log.step("\n--- UCPath Search ---");
+      const ucpathResult = await searchByName(ucpath.page, nameInput);
 
-    // CRM search (if auth succeeded)
-    let crmRecords: CrmRecord[] = [];
-    if (crmOk) {
-      log.step("\n--- CRM Search ---");
-      crmRecords = await searchCrmByName(crm.page, lastName, firstName);
-    }
+      // CRM search (if auth succeeded)
+      let crmRecords: CrmRecord[] = [];
+      if (crmOk) {
+        log.step("\n--- CRM Search ---");
+        crmRecords = await searchCrmByName(crm.page, lastName, firstName);
+      }
 
-    // Step 4: Cross-verify
-    log.step("\n--- Cross-Verification ---");
+      // Step 4: Cross-verify
+      log.step("\n--- Cross-Verification ---");
 
-    // If CRM has a UCPath Employee ID, check if it matches any SDCMP result
-    for (const crec of crmRecords) {
-      if (crec.ucpathEmployeeId) {
-        log.step(`CRM has UCPath EID: ${crec.ucpathEmployeeId}`);
-        const match = ucpathResult.sdcmpResults.find((r) => r.emplId === crec.ucpathEmployeeId);
-        if (match) {
-          log.success(`Direct EID match: ${match.emplId} — ${match.department}`);
+      // If CRM has a UCPath Employee ID, check if it matches any SDCMP result
+      for (const crec of crmRecords) {
+        if (crec.ucpathEmployeeId) {
+          log.step(`CRM has UCPath EID: ${crec.ucpathEmployeeId}`);
+          const match = ucpathResult.sdcmpResults.find((r) => r.emplId === crec.ucpathEmployeeId);
+          if (match) {
+            log.success(`Direct EID match: ${match.emplId} — ${match.department}`);
+          }
         }
       }
-    }
 
-    // Match by hire date: CRM "First Day of Service" ≈ UCPath "Last Hire Date" (±7 days)
-    const allSdcmp = ucpathResult.sdcmpResults;
-    for (const crec of crmRecords) {
-      const crmDate = crec.firstDayOfService;
-      if (!crmDate) continue;
+      // Match by hire date: CRM "First Day of Service" ≈ UCPath "Last Hire Date" (±7 days)
+      const allSdcmp = ucpathResult.sdcmpResults;
+      for (const crec of crmRecords) {
+        const crmDate = crec.firstDayOfService;
+        if (!crmDate) continue;
 
-      for (const ucRec of allSdcmp) {
-        const ucDate = ucRec.effectiveDate; // Last Hire Date from drill-in
-        if (!ucDate) continue;
+        for (const ucRec of allSdcmp) {
+          const ucDate = ucRec.effectiveDate; // Last Hire Date from drill-in
+          if (!ucDate) continue;
 
-        if (datesWithinDays(crmDate, ucDate, 7)) {
-          log.success(`Date match: CRM "${crmDate}" ≈ UCPath "${ucDate}" → EID ${ucRec.emplId} | ${ucRec.department}`);
+          if (datesWithinDays(crmDate, ucDate, 7)) {
+            log.success(`Date match: CRM "${crmDate}" ≈ UCPath "${ucDate}" → EID ${ucRec.emplId} | ${ucRec.department}`);
+          }
         }
       }
-    }
 
-    // Print CRM summary
-    if (crmRecords.length > 0) {
-      log.step("\nCRM Records:");
-      for (const c of crmRecords) {
-        log.step(`  ${c.name} | PPS: ${c.ppsId} | Hire: ${c.firstDayOfService} | Dept: ${c.department}`);
+      // Print CRM summary
+      if (crmRecords.length > 0) {
+        log.step("\nCRM Records:");
+        for (const c of crmRecords) {
+          log.step(`  ${c.name} | PPS: ${c.ppsId} | Hire: ${c.firstDayOfService} | Dept: ${c.department}`);
+        }
+      } else {
+        log.step("CRM: No records found");
       }
-    } else {
-      log.step("CRM: No records found");
-    }
 
-    // Print UCPath summary
-    if (allSdcmp.length > 0) {
-      log.step("\nUCPath SDCMP Results:");
-      for (const r of allSdcmp) {
-        log.success(`  EID: ${r.emplId} | ${r.department ?? "?"} | Start: ${r.effectiveDate} | End: ${r.expectedEndDate || "Active"}`);
-        await updateEidTracker(nameInput, r);
+      // Print UCPath summary
+      if (allSdcmp.length > 0) {
+        log.step("\nUCPath SDCMP Results:");
+        for (const r of allSdcmp) {
+          log.success(`  EID: ${r.emplId} | ${r.department ?? "?"} | Start: ${r.effectiveDate} | End: ${r.expectedEndDate || "Active"}`);
+          await updateEidTracker(nameInput, r);
+        }
+      } else {
+        log.error("UCPath: No SDCMP results");
+        await updateEidTrackerNotFound(nameInput);
       }
-    } else {
-      log.error("UCPath: No SDCMP results");
-      await updateEidTrackerNotFound(nameInput);
-    }
 
-    return {
-      name: nameInput,
-      found: ucpathResult.found,
-      sdcmpResults: ucpathResult.sdcmpResults,
-    };
+      return {
+        name: nameInput,
+        found: ucpathResult.found,
+        sdcmpResults: ucpathResult.sdcmpResults,
+      };
+    });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     log.error(`Lookup with CRM failed for "${nameInput}": ${msg}`);
