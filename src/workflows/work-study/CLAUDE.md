@@ -6,8 +6,8 @@ Updates employee position pool and compensation data for work-study awards in UC
 
 - `schema.ts` — Zod `WorkStudyInput` schema (emplId: 5+ digits, effectiveDate: MM/DD/YYYY)
 - `enter.ts` — Builds `ActionPlan` for PayPath transaction: navigate to PayPath Actions, collapse sidebar, search by Empl ID, fill position data (reason "JRL", pool "F"), fill Job Data/Additional Pay comments, save/submit
-- `tracker.ts` — Writes to `work-study-tracker.xlsx` with columns for Empl ID, name, effective date, position pool, status, error
-- `workflow.ts` — Main orchestration: launch browser, authenticate UCPath, dry-run preview or execute plan, update tracker
+- `tracker.ts` — Writes to `work-study-tracker.xlsx` (Excel-only, no `trackEvent` — JSONL events handled by `withTrackedWorkflow` in workflow.ts)
+- `workflow.ts` — Main orchestration: uses `withTrackedWorkflow` for dashboard tracking (steps: ucpath-auth → transaction). Launch browser, authenticate UCPath, dry-run preview or execute plan, update tracker
 - `index.ts` — Barrel exports
 
 ## Data Flow

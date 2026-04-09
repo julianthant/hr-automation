@@ -282,13 +282,33 @@ export async function updateSeparationDate(
  * Click the Save button in the Kuali form top navbar.
  * Waits for network idle to ensure the AJAX save request completes
  * (critical for batch mode where the process may exit after the last doc).
+ *
+ * Targets the navbar save button specifically — scrolls to top first to ensure
+ * the navbar is visible and no other element intercepts the click.
  */
 export async function clickSave(page: Page): Promise<void> {
   log.step("Clicking Save on Kuali form...");
-  const saveBtn = page.getByRole("button", { name: "Save", exact: true })
-    .or(page.locator("button:has-text('Save')").first());
+
+  // Scroll to top so the navbar save button is visible and not obscured
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(500);
+
+  // Target the navbar save button: look for the save button inside the top action bar,
+  // then fall back to a visible role-based match
+  const saveBtn = page.locator('[class*="action-bar"] button:has-text("Save")')
+    .or(page.locator('nav button:has-text("Save")'))
+    .or(page.getByRole("button", { name: "Save", exact: true }));
   await saveBtn.first().click({ timeout: 10_000 });
+
+  // Wait for the save request to complete
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   await page.waitForTimeout(2_000);
-  log.success("Kuali form saved");
+
+  // Verify save succeeded by checking for a success toast or no error
+  const errorToast = await page.locator('[class*="error"], [class*="alert-danger"]').count().catch(() => 0);
+  if (errorToast > 0) {
+    log.error("Kuali save may have failed — error indicator detected");
+  } else {
+    log.success("Kuali form saved");
+  }
 }

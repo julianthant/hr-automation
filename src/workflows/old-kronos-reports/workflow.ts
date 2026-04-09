@@ -38,6 +38,10 @@ export interface KronosOptions {
   reportLock?: Mutex;
   /** Log prefix for worker identification. */
   logPrefix?: string;
+  /** Dashboard step callback from withTrackedWorkflow. */
+  onStep?: (step: string) => void;
+  /** Dashboard data callback from withTrackedWorkflow. */
+  onData?: (data: Record<string, string>) => void;
 }
 
 function prefixed(prefix: string | undefined, msg: string): string {
@@ -85,6 +89,7 @@ export async function runKronosForEmployee(
     }
 
     // Step 4: Click employee row
+    options.onStep?.("extracting");
     const empName = await clickEmployeeRow(page, iframe, employeeId);
     if (empName === false) {
       log.step(prefixed(p, `${employeeId} -> Could not find row`));
@@ -94,10 +99,12 @@ export async function runKronosForEmployee(
       return;
     }
     const employeeName = empName ?? "";
+    options.onData?.({ name: employeeName });
     log.step(prefixed(p, `Employee name: ${employeeName}`));
 
     // Step 5-7: Navigate to Reports → run → download → back
     // Serialized with reportLock to avoid UKG server-side session conflicts
+    options.onStep?.("downloading");
     const reportLock = options.reportLock;
     let success = false;
 

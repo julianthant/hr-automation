@@ -1,6 +1,5 @@
 import { appendRow } from "../../tracker/index.js";
 import type { ColumnDef } from "../../tracker/index.js";
-import { trackEvent } from "../../tracker/jsonl.js";
 
 const TRACKER_PATH = "./src/workflows/work-study/work-study-tracker.xlsx";
 
@@ -30,12 +29,4 @@ export interface WorkStudyTrackerRow {
  */
 export async function updateWorkStudyTracker(data: WorkStudyTrackerRow): Promise<void> {
   await appendRow(TRACKER_PATH, COLUMNS, data as unknown as Record<string, string>);
-  trackEvent({
-    workflow: "work-study",
-    timestamp: data.timestamp || new Date().toISOString(),
-    id: data.emplId,
-    status: data.status === "Done" ? "done" : "failed",
-    data: { name: data.employeeName ?? "" },
-    error: data.error || undefined,
-  });
 }

@@ -3,6 +3,7 @@ import { log, withLogContext } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath } from "../../auth/login.js";
 import { TransactionError } from "../../ucpath/types.js";
+import { withTrackedWorkflow } from "../../tracker/jsonl.js";
 import { buildWorkStudyPlan } from "./enter.js";
 import type { WorkStudyContext } from "./enter.js";
 import type { WorkStudyInput } from "./schema.js";
@@ -24,6 +25,7 @@ export async function runWorkStudy(
   options: WorkStudyOptions = {},
 ): Promise<void> {
   await withLogContext("work-study", input.emplId, async () => {
+  await withTrackedWorkflow("work-study", input.emplId, {}, async (setStep, updateData) => {
   if (options.dryRun) {
     const ctx: WorkStudyContext = { employeeName: "" };
     const plan = buildWorkStudyPlan(input, null as never, ctx);
@@ -33,6 +35,7 @@ export async function runWorkStudy(
     return;
   }
 
+  setStep("ucpath-auth");
   const { browser, page } = await launchBrowser();
   const ctx: WorkStudyContext = { employeeName: "" };
 
@@ -44,10 +47,12 @@ export async function runWorkStudy(
       process.exit(1);
     }
 
+    setStep("transaction");
     const plan = buildWorkStudyPlan(input, page, ctx);
     log.step("Executing work study transaction plan...");
     await plan.execute();
 
+    updateData({ name: ctx.employeeName });
     log.success("Work study transaction completed successfully");
 
     try {
@@ -91,5 +96,6 @@ export async function runWorkStudy(
     }
     process.exit(1);
   }
+  }); // end withTrackedWorkflow
   }); // end withLogContext
 }

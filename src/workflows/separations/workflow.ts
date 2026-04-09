@@ -1,6 +1,7 @@
 import type { Page, BrowserContext, Browser } from "playwright";
 import { log, withLogContext } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
+import { withTrackedWorkflow } from "../../tracker/jsonl.js";
 import { launchBrowser } from "../../browser/launch.js";
 import { loginToKuali, loginToUKG, loginToUCPath, loginToNewKronos } from "../../auth/login.js";
 
@@ -132,6 +133,7 @@ export async function runSeparation(
   options: SeparationOptions = {},
 ): Promise<SeparationResult> {
   return withLogContext("separations", docId, async () => {
+  return withTrackedWorkflow("separations", docId, {}, async (setStep, updateData) => {
   const { dryRun = false, keepOpen = false, existingWindows } = options;
   const extraWindows: BrowserWindow[] = []; // UCPath windows we launch and close
 
@@ -142,6 +144,7 @@ export async function runSeparation(
 
   let ucpathWin: BrowserWindow;
 
+  setStep("launching");
   if (existingWindows) {
     log.step("=== Reusing existing browser windows ===");
     kualiWin = existingWindows.kuali;
@@ -171,6 +174,7 @@ export async function runSeparation(
     ucpathWin = wins[3];
 
     // ─── Auth Kuali (Duo #1) ───
+    setStep("authenticating");
     log.step("=== Auth Kuali (Duo #1) ===");
     const kualiAuth = await loginToKuali(kualiWin.page, KUALI_SPACE_URL);
     if (!kualiAuth) throw new Error("Kuali authentication failed");
@@ -212,6 +216,7 @@ export async function runSeparation(
   });
 
   // ─── Extract Kuali data ───
+  setStep("kuali-extraction");
   const kualiData = await extractSeparationData(kualiWin.page);
 
   const isVol = isVoluntaryTermination(kualiData.terminationType);
@@ -224,6 +229,7 @@ export async function runSeparation(
   log.step(`Template: "${template}" — ${isVol ? "voluntary termination" : "involuntary termination"}`);
   log.step(`Reason code: Kuali type "${kualiData.terminationType}" → UCPath reason "${ucpathReason}"`);
   log.step(`Termination effective date: ${termEffDate} (separation date ${kualiData.separationDate} + 1 day)`);
+  updateData({ name: kualiData.employeeName, eid: kualiData.eid });
   log.step(`Employee: ${kualiData.employeeName} | EID: ${kualiData.eid}`);
   log.step(`Type: ${kualiData.terminationType} (${isVol ? "VOL" : "INVOL"}) | Eff: ${termEffDate}`);
 
@@ -237,6 +243,7 @@ export async function runSeparation(
   // ═══════════════════════════════════════════
   // PHASE 1: Kronos timecards (both in parallel)
   // ═══════════════════════════════════════════
+  setStep("kronos-search");
   log.step("=== PHASE 1: Kronos timecards ===");
 
   // Reset Kronos browsers when reusing windows (batch mode) —
@@ -347,6 +354,7 @@ export async function runSeparation(
   // ═══════════════════════════════════════════
   // PHASE 2: UCPath (Job Summary → Transaction)
   // ═══════════════════════════════════════════
+  setStep("ucpath-job-summary");
   log.step("=== PHASE 2: UCPath Job Summary ===");
 
   let jobSummary: JobSummaryData | undefined;
@@ -376,7 +384,8 @@ export async function runSeparation(
     log.success("[Kuali] Department + payroll filled");
   }
 
-  // ─── UCPath Smart HR Transaction ───
+  // ���── UCPath Smart HR Transaction ───
+  setStep("ucpath-transaction");
   log.step("=== UCPath Smart HR Transaction ===");
 
   // Navigate UCPath to Smart HR (reuse same browser)
@@ -425,6 +434,7 @@ export async function runSeparation(
   // ═══════════════════════════════════════════
   // PHASE 3: Kuali finalization + save
   // ═══════════════════════════════════════════
+  setStep("kuali-finalization");
   log.step("=== PHASE 3: Kuali finalization ===");
 
   // Always fill checkbox + radio; fill txn number if we have it
@@ -462,5 +472,6 @@ export async function runSeparation(
 
   log.success(`=== Separation complete for doc #${docId} ===`);
   return { data: separationData, windows: makeSessionWindows() };
+  }); // end withTrackedWorkflow
   }); // end withLogContext
 }

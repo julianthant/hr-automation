@@ -58,6 +58,42 @@ export function trackEvent(entry: TrackerEntry, dir: string = DEFAULT_DIR): void
   appendFileSync(logPath, JSON.stringify(entry) + "\n");
 }
 
+/**
+ * Wrap a workflow function with automatic lifecycle tracking.
+ *
+ * Emits: pending (on start) → running/step (via setStep) → done (on success) | failed (on throw).
+ * Call `updateData()` to enrich the entry with data discovered during execution (e.g. employee name).
+ */
+export async function withTrackedWorkflow<T>(
+  workflow: string,
+  id: string,
+  initialData: Record<string, string>,
+  fn: (
+    setStep: (step: string) => void,
+    updateData: (d: Record<string, string>) => void,
+  ) => Promise<T>,
+): Promise<T> {
+  const data = { ...initialData };
+  const ts = () => new Date().toISOString();
+  const emit = (status: TrackerEntry["status"], extra?: { step?: string; error?: string }) => {
+    trackEvent({ workflow, timestamp: ts(), id, status, data, ...extra });
+  };
+
+  emit("pending");
+  try {
+    const result = await fn(
+      (step) => emit("running", { step }),
+      (d) => Object.assign(data, d),
+    );
+    emit("done");
+    return result;
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    emit("failed", { error });
+    throw e;
+  }
+}
+
 export function readEntries(workflow: string, dir: string = DEFAULT_DIR): TrackerEntry[] {
   const logPath = getLogPath(workflow, dir);
   if (!existsSync(logPath)) return [];
