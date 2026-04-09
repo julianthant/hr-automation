@@ -486,6 +486,13 @@ td {
 .log-icon.success { color: var(--success); }
 .log-icon.error { color: var(--danger); }
 .log-icon.waiting { color: var(--warning); }
+.log-icon.fill { color: #22d3ee; }
+.log-icon.navigate { color: #94a3b8; }
+.log-icon.extract { color: #e8b341; }
+.log-icon.search { color: #58a6ff; }
+.log-icon.select { color: #2dd4bf; }
+.log-icon.auth { color: #c084fc; }
+.log-icon.download { color: #3fb950; }
 .log-msg {
   font-family: var(--font-mono); font-size: 0.76rem;
   color: var(--text-2); word-break: break-word;
@@ -499,6 +506,28 @@ td {
 @media (max-width: 600px) {
   .stats { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* Search clear button */
+.search-clear {
+  background: none; border: none; color: var(--text-3); cursor: pointer;
+  padding: 4px 12px; font-size: 0.9rem; transition: color 0.15s;
+}
+.search-clear:hover { color: var(--text-1); }
+
+/* Skeleton loaders */
+.skeleton {
+  background: linear-gradient(90deg, var(--bg-elevated) 25%, var(--bg-hover) 50%, var(--bg-elevated) 75%);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.5s ease-in-out infinite;
+  border-radius: 4px;
+}
+@keyframes skeletonShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton-text { height: 14px; display: inline-block; }
+.skeleton-number { height: 28px; width: 48px; margin-bottom: 8px; }
+.skeleton-label { height: 10px; width: 64px; }
 </style>
 </head>
 <body>
@@ -572,6 +601,73 @@ const LOG_ICONS = {
   waiting: { cls: 'waiting', icon: '\\u23F3' },
 };
 
+function getLogAction(level, message) {
+  if (level === 'success') return { icon: '\\u2713', cls: 'success' };
+  if (level === 'error') return { icon: '\\u2717', cls: 'error' };
+  if (level === 'waiting') return { icon: '\\u23F3', cls: 'waiting' };
+  const msg = (message || '').toLowerCase();
+  if (msg.includes('fill') || msg.includes('comp rate') || msg.includes('compensation'))
+    return { icon: '\\u270E', cls: 'fill' };
+  if (msg.includes('click') || msg.includes('navigat'))
+    return { icon: '\\u25CE', cls: 'navigate' };
+  if (msg.includes('crm field') || msg.includes('extract') || msg.includes('matched label'))
+    return { icon: '\\u21E3', cls: 'extract' };
+  if (msg.includes('search') || msg.includes('found') || msg.includes('result') || msg.includes('person search'))
+    return { icon: '\\u2315', cls: 'search' };
+  if (msg.includes('select') || msg.includes('dropdown') || msg.includes('template') || msg.includes('reason'))
+    return { icon: '\\u2630', cls: 'select' };
+  if (msg.includes('sso') || msg.includes('duo') || msg.includes('auth') || msg.includes('credential') || msg.includes('login'))
+    return { icon: '\\u26BF', cls: 'auth' };
+  if (msg.includes('download') || msg.includes('pdf') || msg.includes('report'))
+    return { icon: '\\u2913', cls: 'download' };
+  return { icon: '\\u2192', cls: 'step' };
+}
+
+// ── Skeleton Components ──
+function StatsSkeleton() {
+  return html\`
+    <div className="stats">
+      \${Array(5).fill(0).map((_, i) => html\`
+        <div key=\${i} className="stat-card">
+          <div className="skeleton skeleton-number" style=\${{ animationDelay: i * 0.08 + 's' }} />
+          <div className="skeleton skeleton-label" style=\${{ animationDelay: i * 0.08 + 's' }} />
+        </div>
+      \`)}
+    </div>
+  \`;
+}
+
+function TableSkeleton() {
+  return html\`
+    <div className="table-wrap">
+      <table>
+        <thead><tr>\${Array(5).fill(0).map((_, i) => html\`<th key=\${i}><div className="skeleton skeleton-text" style=\${{ width: (60 + i * 15) + 'px' }} /></th>\`)}</tr></thead>
+        <tbody>
+          \${Array(6).fill(0).map((_, i) => html\`
+            <tr key=\${i}>
+              \${Array(5).fill(0).map((_, j) => html\`
+                <td key=\${j}><div className="skeleton skeleton-text" style=\${{ width: (50 + ((i + j) * 13) % 80) + 'px', animationDelay: (i * 0.05 + j * 0.02) + 's' }} /></td>
+              \`)}
+            </tr>
+          \`)}
+        </tbody>
+      </table>
+    </div>
+  \`;
+}
+
+function LogSkeleton() {
+  return html\`
+    \${Array(4).fill(0).map((_, i) => html\`
+      <div key=\${i} className="log-line">
+        <div className="skeleton skeleton-text" style=\${{ width: '60px', animationDelay: i * 0.1 + 's' }} />
+        <div className="skeleton skeleton-text" style=\${{ width: '14px', animationDelay: i * 0.1 + 's' }} />
+        <div className="skeleton skeleton-text" style=\${{ width: (120 + i * 40) + 'px', animationDelay: i * 0.1 + 's' }} />
+      </div>
+    \`)}
+  \`;
+}
+
 // ── Clock Hook ──
 function useClock() {
   const [time, setTime] = useState(() => new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
@@ -631,7 +727,14 @@ function FilterBar({ activeWf, workflows, onSwitch, searchQuery, setSearchQuery,
     return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
 
+  function formatDateDropdown(d) {
+    const parts = d.split('-');
+    const dt = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    return dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
   const searchIcon = html\`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>\`;
+  const calendarIcon = html\`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>\`;
 
   return html\`
     <div className="filter-bar" ref=\${barRef}>
@@ -656,9 +759,10 @@ function FilterBar({ activeWf, workflows, onSwitch, searchQuery, setSearchQuery,
           value=\${searchQuery}
           onInput=\${(e) => setSearchQuery(e.target.value)}
           onClick=\${(e) => e.stopPropagation()} />
+        \${searchQuery ? html\`<button className="search-clear" onClick=\${(e) => { e.stopPropagation(); setSearchQuery(''); }}>\\u2715</button>\` : null}
       </div>
       <div className="filter-section date" onClick=\${() => { setDateOpen(!dateOpen); setWfOpen(false); }}>
-        <span className="filter-icon" style=\${{ fontSize: '0.9rem' }}>\u{1F4C5}</span>
+        <span className="filter-icon">\${calendarIcon}</span>
         <span className="filter-date-label">\${formatDateLabel(selectedDate)}</span>
         <span className="filter-chevron">\${dateOpen ? '\\u25B4' : '\\u25BE'}</span>
         \${dateOpen ? html\`
@@ -669,7 +773,7 @@ function FilterBar({ activeWf, workflows, onSwitch, searchQuery, setSearchQuery,
               <div key=\${d}
                 className=\${'filter-dropdown-item' + (d === selectedDate ? ' active' : '')}
                 onClick=\${() => { setSelectedDate(d); setDateOpen(false); }}>
-                <span>\${formatDateLabel(d)}</span>
+                <span>\${formatDateDropdown(d)}</span>
                 \${d === today ? html\`<span className="today-badge">Today</span>\` : null}
               </div>
             \`)}
@@ -760,17 +864,14 @@ function LogPanel({ workflow, itemId, selectedDate, onClose }) {
             <button className="log-close" onClick=\${onClose}>\\u2715</button>
           </div>
           <div className="log-body" ref=\${bodyRef}>
-            \${logs.length === 0 ? html\`
-              <div className="log-line">
-                <span className="log-msg" style=\${{ color: 'var(--text-3)' }}>No log entries yet</span>
-              </div>
-            \` : logs.map((entry, i) => {
-              const iconCfg = LOG_ICONS[entry.level] || LOG_ICONS.step;
+            \${logs.length === 0 ? html\`<\${LogSkeleton} />\`
+            : logs.map((entry, i) => {
+              const action = getLogAction(entry.level, entry.message);
               const ts = entry.ts ? new Date(entry.ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
               return html\`
                 <div key=\${i} className="log-line">
                   <span className="log-ts">\${ts}</span>
-                  <span className=\${'log-icon ' + iconCfg.cls}>\${iconCfg.icon}</span>
+                  <span className=\${'log-icon ' + action.cls}>\${action.icon}</span>
                   <span className="log-msg">\${entry.message}</span>
                 </div>
               \`;
@@ -873,6 +974,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [availableDates, setAvailableDates] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   // Fetch available dates when workflow changes
   useEffect(() => {
@@ -880,17 +982,18 @@ function App() {
       .then(r => r.json())
       .then(dates => {
         setAvailableDates(dates);
-        if (dates.length > 0 && !dates.includes(selectedDate)) {
-          setSelectedDate(dates[0]);
-        }
+        const today = new Date().toISOString().slice(0, 10);
+        if (!dates.includes(selectedDate)) setSelectedDate(dates[0] || today);
       })
       .catch(() => {});
   }, [activeWf]);
 
   // SSE connection includes date
   useEffect(() => {
+    setLoading(true);
+    const today = new Date().toISOString().slice(0, 10);
     let sseUrl = '/events?workflow=' + encodeURIComponent(activeWf);
-    if (selectedDate) sseUrl += '&date=' + encodeURIComponent(selectedDate);
+    if (selectedDate && selectedDate !== today) sseUrl += '&date=' + encodeURIComponent(selectedDate);
     const es = new EventSource(sseUrl);
     es.onmessage = (e) => {
       const { entries, workflows: wfs } = JSON.parse(e.data);
@@ -902,6 +1005,7 @@ function App() {
       deduped.sort((a, b) => (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9));
       setRows(deduped);
       setWorkflows(wfs || []);
+      setLoading(false);
     };
     es.onerror = () => {};
     return () => es.close();
@@ -913,7 +1017,10 @@ function App() {
   }, [activeWf]);
 
   // Clear search when switching workflows
-  useEffect(() => { setSearchQuery(''); }, [activeWf]);
+  const handleWorkflowChange = useCallback((wf) => {
+    setActiveWf(wf);
+    setSearchQuery('');
+  }, []);
 
   // Filter rows by search query
   const cfg = getConfig(activeWf);
@@ -931,15 +1038,21 @@ function App() {
       <\${FilterBar}
         activeWf=\${activeWf}
         workflows=\${workflows}
-        onSwitch=\${setActiveWf}
+        onSwitch=\${handleWorkflowChange}
         searchQuery=\${searchQuery}
         setSearchQuery=\${setSearchQuery}
         selectedDate=\${selectedDate}
         setSelectedDate=\${setSelectedDate}
         availableDates=\${availableDates} />
-      <\${StatsRow} rows=\${filteredRows} />
-      <\${ProgressBar} rows=\${filteredRows} />
-      <\${DataTable} rows=\${filteredRows} activeWf=\${activeWf} selectedDate=\${selectedDate} />
+      \${loading ? html\`
+        <\${StatsSkeleton} />
+        <div className="progress-wrap"><div className="progress-track"><div className="progress-fill" style=\${{ width: '0%' }} /></div><div className="progress-pct">0%</div></div>
+        <\${TableSkeleton} />
+      \` : html\`
+        <\${StatsRow} rows=\${filteredRows} />
+        <\${ProgressBar} rows=\${filteredRows} />
+        <\${DataTable} rows=\${filteredRows} activeWf=\${activeWf} selectedDate=\${selectedDate} />
+      \`}
     </div>
   \`;
 }
