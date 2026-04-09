@@ -13,6 +13,7 @@ import {
 import { runKronosForEmployee } from "./workflow.js";
 import type { KronosTrackerRow } from "./tracker.js";
 import { updateKronosTracker as updateTracker } from "./tracker.js";
+import { createLockedTracker } from "../../tracker/locked.js";
 import {
   BATCH_FILE,
   SESSION_DIR,
@@ -22,21 +23,6 @@ import {
   SCREEN_WIDTH,
   SCREEN_HEIGHT,
 } from "./config.js";
-
-/**
- * Create a mutex-wrapped version of updateTracker.
- * Ensures only one worker writes to the Excel file at a time.
- */
-function createLockedTracker(mutex: Mutex) {
-  return async (filePath: string, data: KronosTrackerRow): Promise<void> => {
-    const release = await mutex.acquire();
-    try {
-      await updateTracker(filePath, data);
-    } finally {
-      release();
-    }
-  };
-}
 
 /**
  * Load employee IDs from the batch YAML file.
@@ -96,7 +82,7 @@ export async function runParallelKronos(
   const queue = [...employeeIds];
   const trackerMutex = new Mutex();
   const reportMutex = new Mutex();
-  const lockedTracker = createLockedTracker(trackerMutex);
+  const lockedTracker = createLockedTracker<KronosTrackerRow>(trackerMutex, updateTracker);
 
   // Phase 1a: Launch all browsers and fill credentials (5s gap between each)
   const sessionDirs: string[] = [];
