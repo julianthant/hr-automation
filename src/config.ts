@@ -1,6 +1,56 @@
 // ─── Global configuration ───
 // Shared URLs and constants used across all workflows.
 
+import { homedir } from "os";
+import { join } from "path";
+
+const HOME = homedir();
+
+// ─── Paths (user-agnostic via homedir()) ─────────────────────
+
+export const PATHS = {
+  reportsDir: join(HOME, "Downloads", "reports"),
+  downloadsDir: join(HOME, "Downloads"),
+  ukgSessionBase: join(HOME, "ukg_session"),
+  ukgSessionSep: join(HOME, "ukg_session_sep"),
+  screenshotDir: ".auth",
+  trackerDir: ".tracker",
+} as const;
+
+// ─── Timeouts (ms) ──────────────────────────────────────────
+
+export const TIMEOUTS = {
+  fast: 5_000,
+  normal: 10_000,
+  navigation: 15_000,
+  longNavigation: 30_000,
+  ukgNavigation: 60_000,
+  duoApproval: 180,      // seconds (used by duo-poll.ts)
+  duoApprovalCrm: 60,    // seconds
+  retryDelay: 5_000,
+} as const;
+
+// ─── Screen layout ──────────────────────────────────────────
+
+export const SCREEN = {
+  width: 2560,
+  height: 1440,
+} as const;
+
+// ─── Annual dates (UPDATE EACH FISCAL YEAR) ─────────────────
+
+export const ANNUAL_DATES = {
+  jobEndDate: "06/30/2026",
+  kronosDefaultEndDate: "2/1/2026",
+  kronosDefaultStartDate: "1/1/2017",
+} as const;
+
+// ─── URLs not yet centralized ───────────────────────────────
+
+export const KUALI_SPACE_URL = "https://ucsd.kualibuild.com/build/space/5e47518b90adda9474c14adb";
+export const NEW_KRONOS_URL = "https://ucsd-sso.prd.mykronos.com/wfd/home";
+export const CRM_ENTRY_URL = "https://crm.ucsd.edu/hr";
+
 // --- CRM ---
 
 /** ACT CRM onboarding search page (accepts ?q= email param). */

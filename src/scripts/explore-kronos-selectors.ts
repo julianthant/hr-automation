@@ -6,6 +6,7 @@
  */
 import { launchBrowser } from "../browser/launch.js";
 import { loginToUKG, loginToNewKronos } from "../auth/login.js";
+import { PATHS } from "../config.js";
 import {
   getGeniesIframe,
   searchEmployee as searchOldKronos,
@@ -24,7 +25,7 @@ const eid = process.argv[2] ?? "10598634";
 // ─── Old Kronos ───
 log.step("=== Old Kronos ===");
 const oldWin = await launchBrowser({
-  sessionDir: "C:\\Users\\juzaw\\ukg_session_explore",
+  sessionDir: PATHS.ukgSessionBase + "_explore",
   viewport: { width: 1200, height: 900 },
 });
 
