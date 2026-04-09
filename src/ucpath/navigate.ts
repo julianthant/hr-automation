@@ -2,6 +2,7 @@ import type { Page, FrameLocator } from "playwright";
 import { log } from "../utils/log.js";
 import { UCPATH_SMART_HR_URL } from "../config.js";
 import { errorMessage } from "../utils/errors.js";
+import { debugScreenshot } from "../utils/screenshot.js";
 
 // SELECTOR: verified v1.2 -- must use ucphrprdpub domain (same as auth session), not ucpath domain
 const SMART_HR_URL = UCPATH_SMART_HR_URL;
@@ -109,8 +110,7 @@ export async function searchPerson(
   log.step("Clicking National Id lookup...");
   await frame.locator('[id="DERIVED_HCR_SM_SM_CHAR_INPUT$prompt$0"]').click({ timeout: 10_000 });
   await page.waitForTimeout(5_000);
-  await page.screenshot({ path: ".auth/debug-ps-after-magnify.png", fullPage: true });
-  log.step(`Screenshot: .auth/debug-ps-after-magnify.png (${page.url()})`);
+  await debugScreenshot(page, "debug-ps-after-magnify", { fullPage: true });
 
   // Helper: dismiss PeopleSoft modal dialog (#ICOK button) via JS.
   // Playwright locator.click() cannot bypass PeopleSoft's modal mask overlay,
@@ -135,21 +135,18 @@ export async function searchPerson(
     log.step("Dismissed National Id dialog");
   }
   await page.waitForTimeout(3_000);
-  await page.screenshot({ path: ".auth/debug-ps-after-magnify-ok.png", fullPage: true });
-  log.step(`Screenshot: .auth/debug-ps-after-magnify-ok.png (${page.url()})`);
+  await debugScreenshot(page, "debug-ps-after-magnify-ok", { fullPage: true });
 
   // Click Search — SELECTOR: verified v2.2
   log.step("Clicking Search...");
   await frame.locator("#DERIVED_HCR_SM_SM_SEARCH_BTN").click({ timeout: 10_000 });
   await page.waitForTimeout(5_000);
-  await page.screenshot({ path: ".auth/debug-ps-after-search.png", fullPage: true });
-  log.step(`Screenshot: .auth/debug-ps-after-search.png (${page.url()})`);
+  await debugScreenshot(page, "debug-ps-after-search", { fullPage: true });
 
   // Determination: dialog after Search = new hire, results table = rehire.
   const searchDialogDismissed = await dismissDialog();
   await page.waitForTimeout(3_000);
-  await page.screenshot({ path: ".auth/debug-ps-search-result.png", fullPage: true });
-  log.step(`Screenshot: .auth/debug-ps-search-result.png (${page.url()})`);
+  await debugScreenshot(page, "debug-ps-search-result", { fullPage: true });
 
   if (searchDialogDismissed) {
     // Dialog appeared after Search → new hire

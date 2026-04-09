@@ -1,18 +1,7 @@
 import type { Page, Frame } from "playwright";
-import { mkdirSync } from "fs";
 import { log } from "../utils/log.js";
 import { UKGError } from "./types.js";
-
-// Ensure screenshot directory exists
-mkdirSync(".auth", { recursive: true });
-
-/**
- * Take a debug screenshot for UKG automation.
- */
-export async function ukgScreenshot(page: Page, name: string): Promise<void> {
-  await page.screenshot({ path: `.auth/ukg-${name}.png`, fullPage: false });
-  log.step(`Screenshot: .auth/ukg-${name}.png`);
-}
+import { debugScreenshot } from "../utils/screenshot.js";
 
 /**
  * Dismiss any OK/Close modal dialog in the iframe.
@@ -129,7 +118,7 @@ export async function setDateRange(
   }
   await calBtn.first().click();
   await page.waitForTimeout(3_000);
-  await ukgScreenshot(page, "date-01-popup");
+  await debugScreenshot(page, "ukg-date-01-popup");
 
   // Date inputs in the timeframeSelection dialog
   const dateInputs = iframe.locator("div.timeframeSelection input.jqx-input-content");
@@ -138,7 +127,7 @@ export async function setDateRange(
 
   if (count < 2) {
     log.error("Could not find date input fields");
-    await ukgScreenshot(page, "date-ERROR");
+    await debugScreenshot(page, "ukg-date-ERROR");
     return;
   }
 
@@ -464,7 +453,7 @@ export async function checkTimecardDates(
 
   await page.waitForTimeout(3_000);
   await dismissModal(page, iframe);
-  await ukgScreenshot(page, "timecard-01-current");
+  await debugScreenshot(page, "ukg-timecard-01-current");
 
   // Check current pay period
   let lastDate = await getTimecardLastDate(page, iframe);
@@ -477,7 +466,7 @@ export async function checkTimecardDates(
   const switched = await switchToPreviousPayPeriod(page, iframe);
   if (switched) {
     await dismissModal(page, iframe);
-    await ukgScreenshot(page, "timecard-02-previous");
+    await debugScreenshot(page, "ukg-timecard-02-previous");
     lastDate = await getTimecardLastDate(page, iframe);
   }
 

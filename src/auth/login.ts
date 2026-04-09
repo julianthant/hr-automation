@@ -5,14 +5,7 @@ import { validateEnv } from "../utils/env.js";
 import { UKG_URL } from "../config.js";
 import { fillSsoCredentials, clickSsoSubmit } from "./sso-fields.js";
 import { gotoWithRetry } from "../browser/launch.js";
-
-/**
- * Take a debug screenshot and log the path + current URL.
- */
-async function ss(page: Page, name: string): Promise<void> {
-  await page.screenshot({ path: `.auth/debug-${name}.png`, fullPage: true });
-  log.step(`Screenshot: .auth/debug-${name}.png (${page.url()})`);
-}
+import { debugScreenshot } from "../utils/screenshot.js";
 
 /**
  * Authenticate to UCPath through UCSD Shibboleth SSO with Duo MFA.
@@ -142,7 +135,7 @@ export async function loginToACTCrm(page: Page): Promise<boolean> {
     timeout: 15_000,
   });
   await page.waitForLoadState("networkidle", { timeout: 15_000 });
-  await ss(page, "01-after-navigate");
+  await debugScreenshot(page, "debug-01-after-navigate", { fullPage: true });
 
   const currentUrl = page.url();
   if (currentUrl.includes("act-crm.my.site.com") && !currentUrl.includes("login")) {
@@ -188,14 +181,14 @@ export async function loginToACTCrm(page: Page): Promise<boolean> {
       log.step(`Current page: ${page.url()} -- attempting login`);
     }
   }
-  await ss(page, "02-sso-page");
+  await debugScreenshot(page, "debug-02-sso-page", { fullPage: true });
 
   // Fill SSO credentials and submit
   await fillSsoCredentials(page);
-  await ss(page, "03-credentials-filled");
+  await debugScreenshot(page, "debug-03-credentials-filled", { fullPage: true });
   await clickSsoSubmit(page);
 
-  await ss(page, "04-after-login-click");
+  await debugScreenshot(page, "debug-04-after-login-click", { fullPage: true });
 
   // Now wait for Duo approval -- user approves on their phone
   const approved = await pollDuoApproval(page, {
@@ -206,12 +199,12 @@ export async function loginToACTCrm(page: Page): Promise<boolean> {
   });
 
   if (!approved) {
-    await ss(page, "06-duo-timeout");
+    await debugScreenshot(page, "debug-06-duo-timeout", { fullPage: true });
     log.error("ACT CRM Duo approval timed out");
     return false;
   }
 
-  await ss(page, "07-authenticated");
+  await debugScreenshot(page, "debug-07-authenticated", { fullPage: true });
   log.success("ACT CRM authenticated");
   return true;
 }

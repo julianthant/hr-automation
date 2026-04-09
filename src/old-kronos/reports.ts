@@ -2,7 +2,7 @@ import type { Page, Frame } from "playwright";
 import { join } from "path";
 import { readdir } from "fs/promises";
 import { log } from "../utils/log.js";
-import { ukgScreenshot } from "./navigate.js";
+import { debugScreenshot } from "../utils/screenshot.js";
 
 /**
  * Try multiple selectors across multiple frames. Returns true if one was clicked.
@@ -365,7 +365,7 @@ export async function handleReportsPage(
     }
   }
 
-  await ukgScreenshot(page, `reports-01-loaded-${employeeId}`);
+  await debugScreenshot(page, `ukg-reports-01-loaded-${employeeId}`);
 
   log.step("All frames:");
   for (const f of page.frames()) {

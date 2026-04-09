@@ -1,5 +1,6 @@
 import type { Page } from "playwright";
 import { log } from "../utils/log.js";
+import { debugScreenshot } from "../utils/screenshot.js";
 
 export const NEW_KRONOS_URL = "https://ucsd-sso.prd.mykronos.com/wfd/home";
 
@@ -233,8 +234,7 @@ export async function checkTimecardDates(page: Page): Promise<string | null> {
   if (!ok) return null;
 
   await page.waitForTimeout(3_000);
-  await page.screenshot({ path: ".auth/new-kronos-timecard-01-current.png" });
-  log.step("[New Kronos] Screenshot: new-kronos-timecard-01-current.png");
+  await debugScreenshot(page, "new-kronos-timecard-01-current");
 
   // Check current pay period
   let lastDate = await getTimecardLastDate(page);
@@ -247,8 +247,7 @@ export async function checkTimecardDates(page: Page): Promise<string | null> {
   const switched = await switchToPreviousPayPeriod(page);
   if (switched) {
     await page.waitForTimeout(3_000);
-    await page.screenshot({ path: ".auth/new-kronos-timecard-02-previous.png" });
-    log.step("[New Kronos] Screenshot: new-kronos-timecard-02-previous.png");
+    await debugScreenshot(page, "new-kronos-timecard-02-previous");
     lastDate = await getTimecardLastDate(page);
   }
 
