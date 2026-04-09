@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { getSsoFieldSelectors, getUkgFieldSelectors } from "../../src/auth/sso-fields.js";
+import { getSsoFieldSelectors } from "../../src/auth/sso-fields.js";
 
 describe("getSsoFieldSelectors", () => {
   it("returns username labels array with 3 elements", () => {
@@ -31,23 +31,6 @@ describe("getSsoFieldSelectors", () => {
 
   it("returns the correct submit button selector", () => {
     const selectors = getSsoFieldSelectors();
-    assert.equal(selectors.submitSelector, 'button[name="_eventId_proceed"]');
-  });
-});
-
-describe("getUkgFieldSelectors", () => {
-  it("returns the correct UKG username selector", () => {
-    const selectors = getUkgFieldSelectors();
-    assert.equal(selectors.usernameSelector, "#ssousername");
-  });
-
-  it("returns the correct UKG password selector", () => {
-    const selectors = getUkgFieldSelectors();
-    assert.equal(selectors.passwordSelector, "#ssopassword");
-  });
-
-  it("returns the correct UKG submit selector", () => {
-    const selectors = getUkgFieldSelectors();
     assert.equal(selectors.submitSelector, 'button[name="_eventId_proceed"]');
   });
 });
