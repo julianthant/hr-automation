@@ -11,7 +11,6 @@ import { updateOnboardingTracker as updateTracker } from "./tracker.js";
 import type { OnboardingTrackerRow as TrackerRow } from "./tracker.js";
 import { runOnboarding } from "./workflow.js";
 import { createLockedTracker } from "../../tracker/locked.js";
-import { startDashboard, stopDashboard } from "../../tracker/dashboard.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -54,9 +53,7 @@ export async function runParallel(
   parallelCount: number,
   options: { dryRun?: boolean } = {},
 ): Promise<void> {
-  startDashboard("onboarding");
-  try {
-    const emails = await loadBatchFile();
+  const emails = await loadBatchFile();
     log.step(`Loaded ${emails.length} email(s) from batch file`);
     log.step(`Starting ${parallelCount} parallel worker(s)`);
 
@@ -71,9 +68,6 @@ export async function runParallel(
 
     await Promise.all(workers);
     log.success(`All ${emails.length} employee(s) processed`);
-  } finally {
-    stopDashboard();
-  }
 }
 
 /**

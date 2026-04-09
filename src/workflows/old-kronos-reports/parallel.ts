@@ -6,7 +6,6 @@ import { log, withLogContext } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { launchBrowser } from "../../browser/launch.js";
 import { ukgNavigateAndFill, ukgSubmitAndWaitForDuo } from "../../auth/login.js";
-import { startDashboard, stopDashboard } from "../../tracker/dashboard.js";
 import {
   getGeniesIframe,
   setDateRange,
@@ -59,8 +58,6 @@ export async function runParallelKronos(
   workerCount: number,
   options: { dryRun?: boolean; startDate?: string; endDate?: string } = {},
 ): Promise<void> {
-  startDashboard("kronos-reports");
-  try {
   const employeeIds = await loadBatchFile();
   log.step(`Loaded ${employeeIds.length} employee ID(s) from batch file`);
 
@@ -163,9 +160,6 @@ export async function runParallelKronos(
   }
 
   log.success(`All ${employeeIds.length} employee(s) processed`);
-  } finally {
-    stopDashboard();
-  }
 }
 
 /**

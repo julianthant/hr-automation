@@ -29,6 +29,7 @@ import {
   setDateRange as setOldKronosDateRange,
   clickGoToTimecard as clickOldKronosGoToTimecard,
   getTimecardLastDate as getOldKronosTimecardLastDate,
+  goBackToMain as goBackToOldKronosMain,
 } from "../../old-kronos/index.js";
 
 // New Kronos module
@@ -148,6 +149,10 @@ export async function runSeparation(
     newKronosWin = existingWindows.newKronos;
     ucpathWin = existingWindows.ucpath;
 
+    // Auto-dismiss PeopleSoft dialogs that may appear when navigating
+    // away from a previous transaction (batch mode state cleanup)
+    ucpathWin.page.on("dialog", (d) => d.accept().catch(() => {}));
+
     await openActionList(kualiWin.page);
     await clickDocument(kualiWin.page, docId);
   } else {
@@ -233,6 +238,16 @@ export async function runSeparation(
   // PHASE 1: Kronos timecards (both in parallel)
   // ═══════════════════════════════════════════
   log.step("=== PHASE 1: Kronos timecards ===");
+
+  // Reset Kronos browsers when reusing windows (batch mode) —
+  // previous doc leaves them on the old employee's timecard page
+  if (existingWindows) {
+    log.step("[Batch] Resetting Kronos browsers for new employee...");
+    await Promise.allSettled([
+      goBackToOldKronosMain(oldKronosWin.page),
+      newKronosWin.page.goto(NEW_KRONOS_URL, { waitUntil: "domcontentloaded", timeout: 30_000 }),
+    ]);
+  }
 
   const { startDate: kronosStart, endDate: kronosEnd } = computeKronosDateRange(
     kualiData.lastDayWorked, kualiData.separationDate,
@@ -396,6 +411,15 @@ export async function runSeparation(
     }
   } catch (e) {
     log.error(`[UCPath Txn] Failed: ${errorMessage(e)}`);
+  }
+
+  // Navigate UCPath back to Smart HR base URL to reset PeopleSoft session state.
+  // Critical for batch mode: leaving the browser on a transaction info page causes
+  // session conflicts when creating the next doc's transaction.
+  try {
+    await navigateToSmartHR(ucpathWin.page);
+  } catch {
+    // Non-fatal — next doc's navigateToSmartHR will retry
   }
 
   // ═══════════════════════════════════════════
