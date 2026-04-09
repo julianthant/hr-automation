@@ -11,6 +11,7 @@ import { updateOnboardingTracker as updateTracker } from "./tracker.js";
 import type { OnboardingTrackerRow as TrackerRow } from "./tracker.js";
 import { runOnboarding } from "./workflow.js";
 import { createLockedTracker } from "../../tracker/locked.js";
+import { startDashboard, stopDashboard } from "../../tracker/dashboard.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -53,21 +54,26 @@ export async function runParallel(
   parallelCount: number,
   options: { dryRun?: boolean } = {},
 ): Promise<void> {
-  const emails = await loadBatchFile();
-  log.step(`Loaded ${emails.length} email(s) from batch file`);
-  log.step(`Starting ${parallelCount} parallel worker(s)`);
+  startDashboard("onboarding");
+  try {
+    const emails = await loadBatchFile();
+    log.step(`Loaded ${emails.length} email(s) from batch file`);
+    log.step(`Starting ${parallelCount} parallel worker(s)`);
 
-  const queue = [...emails];
-  const mutex = new Mutex();
-  const lockedTracker = createLockedTracker<TrackerRow>(mutex, updateTracker);
+    const queue = [...emails];
+    const mutex = new Mutex();
+    const lockedTracker = createLockedTracker<TrackerRow>(mutex, updateTracker);
 
-  const workerCount = Math.min(parallelCount, emails.length);
-  const workers = Array.from({ length: workerCount }, (_, i) =>
-    runWorker(i + 1, queue, lockedTracker, options),
-  );
+    const workerCount = Math.min(parallelCount, emails.length);
+    const workers = Array.from({ length: workerCount }, (_, i) =>
+      runWorker(i + 1, queue, lockedTracker, options),
+    );
 
-  await Promise.all(workers);
-  log.success(`All ${emails.length} employee(s) processed`);
+    await Promise.all(workers);
+    log.success(`All ${emails.length} employee(s) processed`);
+  } finally {
+    stopDashboard();
+  }
 }
 
 /**

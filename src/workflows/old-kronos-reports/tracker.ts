@@ -1,5 +1,6 @@
 import { appendRow } from "../../tracker/index.js";
 import type { ColumnDef } from "../../tracker/index.js";
+import { trackEvent } from "../../tracker/jsonl.js";
 import { TRACKER_PATH } from "./config.js";
 
 const COLUMNS: ColumnDef[] = [
@@ -46,6 +47,14 @@ export async function updateKronosTracker(
   data: KronosTrackerRow,
 ): Promise<void> {
   await appendRow(filePath, COLUMNS, data as unknown as Record<string, string>);
+  trackEvent({
+    workflow: "kronos-reports",
+    timestamp: data.timestamp || new Date().toISOString(),
+    id: data.employeeId,
+    status: data.status === "Done" ? "done" : "failed",
+    data: { name: data.employeeName ?? "", saved: data.saved ?? "" },
+    error: data.notes || undefined,
+  });
 }
 
 export { TRACKER_PATH };

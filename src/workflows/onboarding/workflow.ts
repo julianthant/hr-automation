@@ -3,6 +3,7 @@ import { launchBrowser } from "../../browser/launch.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath, loginToACTCrm } from "../../auth/login.js";
+import { startDashboard, stopDashboard } from "../../tracker/dashboard.js";
 import {
   searchByEmail,
   selectLatestResult,
@@ -54,6 +55,9 @@ export async function runOnboarding(
   const p = options.logPrefix;
   const writeTracker = options.updateTrackerFn ?? defaultUpdateTracker;
   const isParallel = Boolean(options.crmPage);
+
+  // Start live dashboard only in single (non-parallel) mode
+  if (!isParallel) startDashboard("onboarding");
   let data: EmployeeData;
 
   // Helper: exit in single mode, throw in parallel mode
@@ -154,6 +158,7 @@ export async function runOnboarding(
     }
 
     log.success(prefixed(p, "Dry run complete -- no changes made to UCPath"));
+    if (!isParallel) stopDashboard();
     return;
   }
 
@@ -199,6 +204,7 @@ export async function runOnboarding(
         log.error(prefixed(p, `Tracker update failed (non-fatal): ${errorMessage(trackerErr)}`));
       }
 
+      if (!isParallel) stopDashboard();
       return;
     }
 
@@ -229,6 +235,7 @@ export async function runOnboarding(
     } catch (trackerErr) {
       log.error(prefixed(p, `Tracker update failed (non-fatal): ${errorMessage(trackerErr)}`));
     }
+    if (!isParallel) stopDashboard();
   } catch (error) {
     // In parallel mode, update tracker with error then re-throw
     if (isParallel) {

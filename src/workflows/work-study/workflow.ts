@@ -7,6 +7,7 @@ import { buildWorkStudyPlan } from "./enter.js";
 import type { WorkStudyContext } from "./enter.js";
 import type { WorkStudyInput } from "./schema.js";
 import { updateWorkStudyTracker } from "./tracker.js";
+import { startDashboard, stopDashboard } from "../../tracker/dashboard.js";
 
 export interface WorkStudyOptions {
   dryRun?: boolean;
@@ -23,6 +24,8 @@ export async function runWorkStudy(
   input: WorkStudyInput,
   options: WorkStudyOptions = {},
 ): Promise<void> {
+  startDashboard("work-study");
+  try {
   if (options.dryRun) {
     const ctx: WorkStudyContext = { employeeName: "" };
     const plan = buildWorkStudyPlan(input, null as never, ctx);
@@ -89,5 +92,8 @@ export async function runWorkStudy(
       log.error(`Transaction failed: ${errorMessage(error)}`);
     }
     process.exit(1);
+  }
+  } finally {
+    stopDashboard();
   }
 }
