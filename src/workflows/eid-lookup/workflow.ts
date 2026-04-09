@@ -12,6 +12,7 @@ import { searchByName, parseNameInput, type EidResult } from "./search.js";
 import { searchCrmByName, datesWithinDays, type CrmRecord } from "./crm-search.js";
 import { updateEidTracker, updateEidTrackerNotFound } from "./tracker.js";
 import { startDashboard, stopDashboard } from "../../tracker/dashboard.js";
+import { Mutex } from "async-mutex";
 import type { Page, Browser, BrowserContext } from "playwright";
 
 export interface LookupResult {
@@ -76,6 +77,17 @@ export async function lookupParallel(
   startDashboard("eid-lookup");
   log.step(`Looking up ${names.length} name(s) with ${workers} parallel worker(s)...`);
 
+  // Mutex to serialize concurrent Excel writes from parallel workers
+  const trackerMutex = new Mutex();
+  const lockedUpdateEidTracker = async (name: string, r: EidResult): Promise<void> => {
+    const release = await trackerMutex.acquire();
+    try { await updateEidTracker(name, r); } finally { release(); }
+  };
+  const lockedUpdateEidTrackerNotFound = async (name: string): Promise<void> => {
+    const release = await trackerMutex.acquire();
+    try { await updateEidTrackerNotFound(name); } finally { release(); }
+  };
+
   // Launch one browser, authenticate once
   const { browser, context, page: authPage } = await launchBrowser();
 
@@ -115,11 +127,11 @@ export async function lookupParallel(
             log.success(`[Worker ${workerId}] Found ${result.sdcmpResults.length} result(s) for "${nameInput}":`);
             for (const r of result.sdcmpResults) {
               log.success(`  EID: ${r.emplId} | ${r.department ?? "?"} | ${r.jobCodeDescription} | ${r.name} | ${r.expectedEndDate || "Active"}`);
-              await updateEidTracker(nameInput, r);
+              await lockedUpdateEidTracker(nameInput, r);
             }
           } else {
             log.step(`[Worker ${workerId}] No SDCMP results for "${nameInput}"`);
-            await updateEidTrackerNotFound(nameInput);
+            await lockedUpdateEidTrackerNotFound(nameInput);
           }
 
           results.push({
