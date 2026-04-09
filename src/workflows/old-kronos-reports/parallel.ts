@@ -20,9 +20,8 @@ import {
   REPORTS_DIR,
   DEFAULT_START_DATE,
   DEFAULT_END_DATE,
-  SCREEN_WIDTH,
-  SCREEN_HEIGHT,
 } from "./config.js";
+import { computeTileLayout } from "../../browser/tiling.js";
 
 /**
  * Load employee IDs from the batch YAML file.
@@ -88,28 +87,19 @@ export async function runParallelKronos(
   const sessionDirs: string[] = [];
   const launched: { context: Awaited<ReturnType<typeof launchBrowser>>["context"]; page: Awaited<ReturnType<typeof launchBrowser>>["page"]; alreadyLoggedIn: boolean }[] = [];
 
-  const cols = Math.ceil(Math.sqrt(actualWorkers));
-  const rows = Math.ceil(actualWorkers / cols);
-  const winW = Math.floor(SCREEN_WIDTH / cols);
-  const winH = Math.floor(SCREEN_HEIGHT / rows);
-
   for (let i = 0; i < actualWorkers; i++) {
     const workerId = i + 1;
     const prefix = `[W${workerId}]`;
     const sessionDir = `${SESSION_DIR}_worker${workerId}`;
     sessionDirs.push(sessionDir);
 
-    const col = i % cols;
-    const rowIdx = Math.floor(i / cols);
-    const x = col * winW;
-    const y = rowIdx * winH;
-
-    log.step(`${prefix} Window: ${winW}x${winH} at (${x},${y})`);
+    const tile = computeTileLayout(i, actualWorkers);
+    log.step(`${prefix} Window: ${tile.size.width}x${tile.size.height} at (${tile.position.x},${tile.position.y})`);
 
     const { context, page } = await launchBrowser({
       sessionDir,
-      viewport: { width: winW, height: winH },
-      args: [`--window-position=${x},${y}`, `--window-size=${winW},${winH}`],
+      viewport: tile.viewport,
+      args: tile.args,
       acceptDownloads: true,
     });
 

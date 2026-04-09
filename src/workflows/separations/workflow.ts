@@ -70,10 +70,9 @@ import {
   KUALI_SPACE_URL,
   UC_VOL_TERM_TEMPLATE,
   UC_INVOL_TERM_TEMPLATE,
-  SCREEN_WIDTH,
-  SCREEN_HEIGHT,
 } from "./config.js";
 import { PATHS } from "../../config.js";
+import { computeTileLayout } from "../../browser/tiling.js";
 
 export interface SeparationOptions {
   dryRun?: boolean;
@@ -92,28 +91,6 @@ interface BrowserWindow {
   browser: Browser | null;
   context: BrowserContext;
   page: Page;
-}
-
-// ─── Window tiling (4 browsers: equal quadrants) ───
-
-function getTileArgs(index: number) {
-  const W = SCREEN_WIDTH;
-  const H = SCREEN_HEIGHT;
-  const halfW = Math.floor(W / 2);
-  const halfH = Math.floor(H / 2);
-
-  const positions = [
-    { x: 0, y: 0, w: halfW, h: halfH },           // 0: Kuali (top-left)
-    { x: halfW, y: 0, w: halfW, h: halfH },        // 1: Old Kronos (top-right)
-    { x: 0, y: halfH, w: halfW, h: halfH },        // 2: New Kronos (bottom-left)
-    { x: halfW, y: halfH, w: halfW, h: halfH },    // 3: UCPath (bottom-right)
-  ];
-
-  const p = positions[index];
-  return {
-    viewport: { width: p.w - 20, height: p.h - 80 },
-    args: [`--window-position=${p.x},${p.y}`, `--window-size=${p.w},${p.h}`],
-  };
 }
 
 // ─── Helpers ───
@@ -176,10 +153,10 @@ export async function runSeparation(
     log.step("=== Step 1: Launch 4 browsers ===");
 
     const wins = await Promise.all([
-      launchBrowser(getTileArgs(0)),
-      launchBrowser({ ...getTileArgs(1), sessionDir: PATHS.ukgSessionSep }),
-      launchBrowser(getTileArgs(2)),
-      launchBrowser(getTileArgs(3)),
+      launchBrowser(computeTileLayout(0, 4)),
+      launchBrowser({ ...computeTileLayout(1, 4), sessionDir: PATHS.ukgSessionSep }),
+      launchBrowser(computeTileLayout(2, 4)),
+      launchBrowser(computeTileLayout(3, 4)),
     ]);
 
     kualiWin = wins[0];
