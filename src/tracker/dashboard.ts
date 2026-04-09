@@ -1,5 +1,12 @@
 import { createServer, type Server } from "http";
-import { readEntries, readLogEntries, listWorkflows } from "./jsonl.js";
+import {
+  readEntries,
+  readLogEntries,
+  listWorkflows,
+  listDatesForWorkflow,
+  readEntriesForDate,
+  readLogEntriesForDate,
+} from "./jsonl.js";
 import { log } from "../utils/log.js";
 
 let server: Server | null = null;
@@ -14,6 +21,13 @@ export function startDashboard(workflow: string, port: number = 3838): void {
     if (url.pathname === "/api/workflows") {
       res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
       res.end(JSON.stringify(listWorkflows()));
+      return;
+    }
+
+    if (url.pathname === "/api/dates") {
+      const wf = url.searchParams.get("workflow") ?? workflow;
+      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify(listDatesForWorkflow(wf)));
       return;
     }
 
@@ -35,6 +49,8 @@ export function startDashboard(workflow: string, port: number = 3838): void {
     if (url.pathname === "/events/logs") {
       const wf = url.searchParams.get("workflow") ?? workflow;
       const id = url.searchParams.get("id") ?? "";
+      const date = url.searchParams.get("date") ?? "";
+      const today = new Date().toISOString().slice(0, 10);
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
@@ -43,7 +59,9 @@ export function startDashboard(workflow: string, port: number = 3838): void {
       });
       let lastCount = 0;
       const send = () => {
-        const entries = readLogEntries(wf, id || undefined);
+        const entries = (date && date !== today)
+          ? readLogEntriesForDate(wf, id || undefined, date)
+          : readLogEntries(wf, id || undefined);
         if (entries.length > lastCount) {
           res.write(`data: ${JSON.stringify(entries.slice(lastCount))}\n\n`);
           lastCount = entries.length;
@@ -57,6 +75,8 @@ export function startDashboard(workflow: string, port: number = 3838): void {
 
     if (url.pathname === "/events") {
       const wf = url.searchParams.get("workflow") ?? workflow;
+      const date = url.searchParams.get("date") ?? "";
+      const today = new Date().toISOString().slice(0, 10);
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
@@ -64,7 +84,9 @@ export function startDashboard(workflow: string, port: number = 3838): void {
         "Access-Control-Allow-Origin": "*",
       });
       const send = () => {
-        const entries = readEntries(wf);
+        const entries = (date && date !== today)
+          ? readEntriesForDate(wf, date)
+          : readEntries(wf);
         const workflows = listWorkflows();
         res.write(`data: ${JSON.stringify({ entries, workflows })}\n\n`);
       };
@@ -182,25 +204,95 @@ header {
   color: var(--text-3); letter-spacing: 0.04em;
 }
 
-/* Tabs */
-.tabs-row {
-  display: flex; align-items: center; gap: 6px;
-  margin-bottom: 28px; position: relative;
-  overflow-x: auto; scrollbar-width: none;
+/* Filter Bar */
+.filter-bar {
+  display: flex; align-items: stretch;
+  background: rgba(13, 17, 23, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 28px;
+  position: relative;
 }
-.tabs-row::-webkit-scrollbar { display: none; }
-.tab {
-  font-family: var(--font-body); font-weight: 500; font-size: 0.87rem;
-  padding: 8px 18px; border-radius: 99px;
-  background: transparent; border: 1px solid transparent;
+.filter-section {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0;
+  position: relative;
+}
+.filter-section + .filter-section {
+  border-left: 1px solid var(--border);
+}
+.filter-section.workflow {
+  min-width: 180px; cursor: pointer;
+  padding: 12px 20px;
+  transition: background 0.15s;
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+.filter-section.workflow:hover { background: var(--bg-hover); }
+.filter-section.search {
+  flex: 1;
+}
+.filter-section.search input {
+  width: 100%; background: transparent; border: none; outline: none;
+  font-family: var(--font-body); font-size: 0.87rem;
+  color: var(--text-1); padding: 12px 16px;
+}
+.filter-section.search input::placeholder { color: var(--text-3); }
+.filter-section.date {
+  min-width: 160px; cursor: pointer;
+  padding: 12px 20px;
+  transition: background 0.15s;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.filter-section.date:hover { background: var(--bg-hover); }
+
+.filter-label {
+  font-family: var(--font-body); font-size: 0.87rem; font-weight: 600;
+  color: var(--text-1);
+}
+.filter-chevron {
+  color: var(--text-3); font-size: 0.7rem; margin-left: auto;
+}
+.filter-date-label {
+  font-family: var(--font-mono); font-size: 0.8rem; font-weight: 500;
+  color: var(--text-2);
+}
+.filter-icon {
+  color: var(--text-3); flex-shrink: 0;
+  display: flex; align-items: center;
+}
+.filter-section.search .filter-icon { padding-left: 16px; }
+
+/* Dropdown menus */
+.filter-dropdown {
+  position: absolute; top: 100%; left: -1px; right: -1px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-accent);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  max-height: 300px; overflow-y: auto;
+  z-index: 100;
+  margin-top: -1px;
+}
+.filter-dropdown-item {
+  padding: 10px 20px;
+  font-family: var(--font-body); font-size: 0.85rem;
   color: var(--text-2); cursor: pointer;
-  transition: all 0.2s var(--ease);
-  white-space: nowrap;
+  transition: background 0.1s, color 0.1s;
+  display: flex; align-items: center; justify-content: space-between;
 }
-.tab:hover { color: var(--text-1); background: var(--bg-elevated); }
-.tab.active {
-  color: var(--accent); background: var(--accent-dim);
-  border-color: rgba(232, 179, 65, 0.2);
+.filter-dropdown-item:hover {
+  background: var(--bg-hover); color: var(--text-1);
+}
+.filter-dropdown-item.active {
+  color: var(--accent);
+}
+.filter-dropdown-item .today-badge {
+  font-family: var(--font-mono); font-size: 0.65rem;
+  color: var(--success); background: rgba(63,185,80,0.1);
+  padding: 2px 6px; border-radius: 4px;
+  text-transform: uppercase; letter-spacing: 0.05em;
 }
 
 /* Stats */
@@ -508,21 +600,82 @@ function Header() {
   \`;
 }
 
-// ── TabBar ──
-function TabBar({ activeWf, workflows, onSwitch }) {
+// ── FilterBar ──
+function FilterBar({ activeWf, workflows, onSwitch, searchQuery, setSearchQuery, selectedDate, setSelectedDate, availableDates }) {
+  const [wfOpen, setWfOpen] = useState(false);
+  const [dateOpen, setDateOpen] = useState(false);
+  const barRef = useRef(null);
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (barRef.current && !barRef.current.contains(e.target)) {
+        setWfOpen(false);
+        setDateOpen(false);
+      }
+    };
+    document.addEventListener('click', handler, true);
+    return () => document.removeEventListener('click', handler, true);
+  }, []);
+
   const allWfs = TAB_ORDER.filter(wf => wf === activeWf || workflows.includes(wf));
-  // Add any workflows not in TAB_ORDER
   workflows.forEach(wf => { if (!allWfs.includes(wf)) allWfs.push(wf); });
-  // Ensure the active one is always shown
   if (!allWfs.includes(activeWf)) allWfs.unshift(activeWf);
 
+  const cfg = getConfig(activeWf);
+  const today = new Date().toISOString().slice(0, 10);
+
+  function formatDateLabel(d) {
+    const parts = d.split('-');
+    const dt = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  const searchIcon = html\`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>\`;
+
   return html\`
-    <div className="tabs-row">
-      \${allWfs.map(wf => {
-        const cfg = getConfig(wf);
-        return html\`<button key=\${wf} className=\${'tab' + (wf === activeWf ? ' active' : '')}
-          onClick=\${() => onSwitch(wf)}>\${cfg.label}</button>\`;
-      })}
+    <div className="filter-bar" ref=\${barRef}>
+      <div className="filter-section workflow" onClick=\${() => { setWfOpen(!wfOpen); setDateOpen(false); }}>
+        <span className="filter-label">\${cfg.label}</span>
+        <span className="filter-chevron">\${wfOpen ? '\\u25B4' : '\\u25BE'}</span>
+        \${wfOpen ? html\`
+          <div className="filter-dropdown" onClick=\${(e) => e.stopPropagation()}>
+            \${allWfs.map(wf => html\`
+              <div key=\${wf}
+                className=\${'filter-dropdown-item' + (wf === activeWf ? ' active' : '')}
+                onClick=\${() => { onSwitch(wf); setWfOpen(false); }}>
+                \${getConfig(wf).label}
+              </div>
+            \`)}
+          </div>
+        \` : null}
+      </div>
+      <div className="filter-section search">
+        <span className="filter-icon">\${searchIcon}</span>
+        <input type="text" placeholder="Search by ID or name..."
+          value=\${searchQuery}
+          onInput=\${(e) => setSearchQuery(e.target.value)}
+          onClick=\${(e) => e.stopPropagation()} />
+      </div>
+      <div className="filter-section date" onClick=\${() => { setDateOpen(!dateOpen); setWfOpen(false); }}>
+        <span className="filter-icon" style=\${{ fontSize: '0.9rem' }}>\u{1F4C5}</span>
+        <span className="filter-date-label">\${formatDateLabel(selectedDate)}</span>
+        <span className="filter-chevron">\${dateOpen ? '\\u25B4' : '\\u25BE'}</span>
+        \${dateOpen ? html\`
+          <div className="filter-dropdown" onClick=\${(e) => e.stopPropagation()}>
+            \${availableDates.length === 0 ? html\`
+              <div className="filter-dropdown-item" style=\${{ color: 'var(--text-3)', cursor: 'default' }}>No dates available</div>
+            \` : availableDates.map(d => html\`
+              <div key=\${d}
+                className=\${'filter-dropdown-item' + (d === selectedDate ? ' active' : '')}
+                onClick=\${() => { setSelectedDate(d); setDateOpen(false); }}>
+                <span>\${formatDateLabel(d)}</span>
+                \${d === today ? html\`<span className="today-badge">Today</span>\` : null}
+              </div>
+            \`)}
+          </div>
+        \` : null}
+      </div>
     </div>
   \`;
 }
@@ -569,7 +722,7 @@ function ProgressBar({ rows }) {
 }
 
 // ── LogPanel ──
-function LogPanel({ workflow, itemId, onClose }) {
+function LogPanel({ workflow, itemId, selectedDate, onClose }) {
   const [logs, setLogs] = useState([]);
   const bodyRef = useRef(null);
   const prevLenRef = useRef(0);
@@ -578,14 +731,16 @@ function LogPanel({ workflow, itemId, onClose }) {
     if (!itemId) return;
     setLogs([]);
     prevLenRef.current = 0;
-    const es = new EventSource('/events/logs?workflow=' + encodeURIComponent(workflow) + '&id=' + encodeURIComponent(itemId));
+    let sseUrl = '/events/logs?workflow=' + encodeURIComponent(workflow) + '&id=' + encodeURIComponent(itemId);
+    if (selectedDate) sseUrl += '&date=' + encodeURIComponent(selectedDate);
+    const es = new EventSource(sseUrl);
     es.onmessage = (e) => {
       const newEntries = JSON.parse(e.data);
       setLogs(prev => [...prev, ...newEntries]);
     };
     es.onerror = () => {};
     return () => es.close();
-  }, [workflow, itemId]);
+  }, [workflow, itemId, selectedDate]);
 
   useEffect(() => {
     if (bodyRef.current && logs.length > prevLenRef.current) {
@@ -658,7 +813,7 @@ function Cell({ colKey, row, cfg }) {
 }
 
 // ── DataTable ──
-function DataTable({ rows, activeWf }) {
+function DataTable({ rows, activeWf, selectedDate }) {
   const [expandedId, setExpandedId] = useState(null);
   const cfg = getConfig(activeWf);
   const columns = parseColumns(cfg.columns);
@@ -700,7 +855,7 @@ function DataTable({ rows, activeWf }) {
                 \${columns.map(c => html\`<\${Cell} key=\${c.key} colKey=\${c.key} row=\${r} cfg=\${cfg} />\`)}
               </tr>
               \${expandedId === r.id ? html\`
-                <\${LogPanel} workflow=\${activeWf} itemId=\${r.id} onClose=\${(e) => { e && e.stopPropagation && e.stopPropagation(); setExpandedId(null); }} />
+                <\${LogPanel} workflow=\${activeWf} itemId=\${r.id} selectedDate=\${selectedDate} onClose=\${(e) => { e && e.stopPropagation && e.stopPropagation(); setExpandedId(null); }} />
               \` : null}
             </\${React.Fragment}>
           \`)}
@@ -715,9 +870,28 @@ function App() {
   const [activeWf, setActiveWf] = useState(DEFAULT_WF);
   const [rows, setRows] = useState([]);
   const [workflows, setWorkflows] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [availableDates, setAvailableDates] = useState([]);
 
+  // Fetch available dates when workflow changes
   useEffect(() => {
-    const es = new EventSource('/events?workflow=' + encodeURIComponent(activeWf));
+    fetch('/api/dates?workflow=' + encodeURIComponent(activeWf))
+      .then(r => r.json())
+      .then(dates => {
+        setAvailableDates(dates);
+        if (dates.length > 0 && !dates.includes(selectedDate)) {
+          setSelectedDate(dates[0]);
+        }
+      })
+      .catch(() => {});
+  }, [activeWf]);
+
+  // SSE connection includes date
+  useEffect(() => {
+    let sseUrl = '/events?workflow=' + encodeURIComponent(activeWf);
+    if (selectedDate) sseUrl += '&date=' + encodeURIComponent(selectedDate);
+    const es = new EventSource(sseUrl);
     es.onmessage = (e) => {
       const { entries, workflows: wfs } = JSON.parse(e.data);
       // Dedupe by ID, keep latest
@@ -729,24 +903,43 @@ function App() {
       setRows(deduped);
       setWorkflows(wfs || []);
     };
-    es.onerror = () => {
-      // Reconnect handled by browser EventSource
-    };
+    es.onerror = () => {};
     return () => es.close();
-  }, [activeWf]);
+  }, [activeWf, selectedDate]);
 
   useEffect(() => {
     const cfg = getConfig(activeWf);
     document.title = cfg.label + ' \\u2014 HR Automation';
   }, [activeWf]);
 
+  // Clear search when switching workflows
+  useEffect(() => { setSearchQuery(''); }, [activeWf]);
+
+  // Filter rows by search query
+  const cfg = getConfig(activeWf);
+  const filteredRows = searchQuery
+    ? rows.filter(r => {
+        const q = searchQuery.toLowerCase();
+        const name = (cfg.getName(r) || '').toLowerCase();
+        return r.id.toLowerCase().includes(q) || name.includes(q);
+      })
+    : rows;
+
   return html\`
     <div className="shell">
       <\${Header} />
-      <\${TabBar} activeWf=\${activeWf} workflows=\${workflows} onSwitch=\${setActiveWf} />
-      <\${StatsRow} rows=\${rows} />
-      <\${ProgressBar} rows=\${rows} />
-      <\${DataTable} rows=\${rows} activeWf=\${activeWf} />
+      <\${FilterBar}
+        activeWf=\${activeWf}
+        workflows=\${workflows}
+        onSwitch=\${setActiveWf}
+        searchQuery=\${searchQuery}
+        setSearchQuery=\${setSearchQuery}
+        selectedDate=\${selectedDate}
+        setSelectedDate=\${setSelectedDate}
+        availableDates=\${availableDates} />
+      <\${StatsRow} rows=\${filteredRows} />
+      <\${ProgressBar} rows=\${filteredRows} />
+      <\${DataTable} rows=\${filteredRows} activeWf=\${activeWf} selectedDate=\${selectedDate} />
     </div>
   \`;
 }
