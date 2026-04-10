@@ -152,3 +152,38 @@ export function getLogCategory(level: string, message: string): LogCategory {
   if (msg.includes("download") || msg.includes("pdf") || msg.includes("report")) return "download";
   return "step";
 }
+
+// ── Session Panel Types ────────────────────────────────
+
+export type AuthState = "idle" | "authenticating" | "authed" | "duo_waiting" | "failed";
+
+export interface BrowserState {
+  browserId: string;
+  system: string;
+  authState: AuthState;
+}
+
+export interface SessionInfo {
+  sessionId: string;
+  browsers: BrowserState[];
+}
+
+export interface WorkflowInstanceState {
+  instance: string;
+  active: boolean;
+  currentItemId: string | null;
+  sessions: SessionInfo[];
+}
+
+export interface DuoQueueEntry {
+  position: number;
+  requestId: string;
+  system: string;
+  instance: string;
+  state: "waiting" | "active";
+}
+
+export interface SessionState {
+  workflows: WorkflowInstanceState[];
+  duoQueue: DuoQueueEntry[];
+}

@@ -209,3 +209,12 @@
 .dark .calendar__header-cell {
   color: hsl(22.5 7% 55%);
 }
+
+@keyframes duo-glow {
+  0%, 100% { box-shadow: 0 0 4px rgba(251, 191, 36, 0.2); }
+  50% { box-shadow: 0 0 10px rgba(251, 191, 36, 0.5); }
+}
+
+.animate-duo-glow {
+  animation: duo-glow 2s ease-in-out infinite;
+}
