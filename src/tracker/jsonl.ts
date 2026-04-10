@@ -1,11 +1,15 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from "fs";
 import { join } from "path";
+import { Mutex } from "async-mutex";
+
+const writeMutex = new Mutex();
 
 const DEFAULT_DIR = ".tracker";
 
 export interface LogEntry {
   workflow: string;
   itemId: string;
+  runId?: string;
   level: "step" | "success" | "error" | "waiting";
   message: string;
   ts: string;
@@ -17,9 +21,11 @@ function getLogFilePath(workflow: string, dir: string): string {
 }
 
 export function appendLogEntry(entry: LogEntry, dir: string = DEFAULT_DIR): void {
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const logPath = getLogFilePath(entry.workflow, dir);
-  appendFileSync(logPath, JSON.stringify(entry) + "\n");
+  writeMutex.runExclusive(() => {
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const logPath = getLogFilePath(entry.workflow, dir);
+    appendFileSync(logPath, JSON.stringify(entry) + "\n");
+  });
 }
 
 export function readLogEntries(
@@ -41,6 +47,7 @@ export interface TrackerEntry {
   workflow: string;
   timestamp: string;
   id: string;
+  runId?: string;
   status: "pending" | "running" | "done" | "failed" | "skipped";
   step?: string;
   data?: Record<string, string>;
@@ -53,9 +60,11 @@ function getLogPath(workflow: string, dir: string): string {
 }
 
 export function trackEvent(entry: TrackerEntry, dir: string = DEFAULT_DIR): void {
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const logPath = getLogPath(entry.workflow, dir);
-  appendFileSync(logPath, JSON.stringify(entry) + "\n");
+  writeMutex.runExclusive(() => {
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const logPath = getLogPath(entry.workflow, dir);
+    appendFileSync(logPath, JSON.stringify(entry) + "\n");
+  });
 }
 
 /**
@@ -75,8 +84,17 @@ export async function withTrackedWorkflow<T>(
 ): Promise<T> {
   const data = { ...initialData };
   const ts = () => new Date().toISOString();
+
+  // Compute run number: count existing entries with same id, then +1
+  const existing = readEntries(workflow);
+  const priorRuns = new Set(
+    existing.filter((e) => e.id === id).map((e) => e.runId)
+  );
+  const runNumber = priorRuns.size + 1;
+  const runId = `${id}#${runNumber}`;
+
   const emit = (status: TrackerEntry["status"], extra?: { step?: string; error?: string }) => {
-    trackEvent({ workflow, timestamp: ts(), id, status, data, ...extra });
+    trackEvent({ workflow, timestamp: ts(), id, runId, status, data, ...extra });
   };
 
   emit("pending");
@@ -156,4 +174,40 @@ export function readLogEntriesForDate(
     .map((line) => JSON.parse(line) as LogEntry);
   if (itemId) return all.filter((e) => e.itemId === itemId);
   return all;
+}
+
+/** Delete JSONL files older than maxAgeDays. Returns count of deleted files. */
+export function cleanOldTrackerFiles(maxAgeDays: number = 7, dir: string = DEFAULT_DIR): number {
+  if (!existsSync(dir)) return 0;
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - maxAgeDays);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+  let deleted = 0;
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith(".jsonl")) continue;
+    const match = f.match(/(\d{4}-\d{2}-\d{2})/);
+    if (match && match[1] < cutoffStr) {
+      unlinkSync(join(dir, f));
+      deleted++;
+    }
+  }
+  return deleted;
+}
+
+/** List distinct runs for a given ID, with their latest status and timestamp. */
+export function readRunsForId(
+  workflow: string,
+  id: string,
+  dir: string = DEFAULT_DIR,
+): { runId: string; status: string; timestamp: string }[] {
+  const entries = readEntries(workflow, dir).filter((e) => e.id === id);
+  const runMap = new Map<string, TrackerEntry>();
+  for (const e of entries) {
+    const rid = e.runId || `${e.id}#1`;
+    runMap.set(rid, e); // keeps latest
+  }
+  return [...runMap.values()]
+    .map((e) => ({ runId: e.runId || `${e.id}#1`, status: e.status, timestamp: e.timestamp }))
+    .sort((a, b) => a.runId.localeCompare(b.runId));
 }
