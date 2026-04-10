@@ -1,3 +1,5 @@
+"use client";
+
 import { Calendar as HeroCalendar } from "@heroui/react";
 import { parseDate, type CalendarDate } from "@internationalized/date";
 
@@ -26,6 +28,7 @@ export function Calendar({ selected, onSelect }: CalendarProps) {
       aria-label="Select date"
     >
       <HeroCalendar.Header>
+        <HeroCalendar.Heading />
         <HeroCalendar.NavButton slot="previous" />
         <HeroCalendar.NavButton slot="next" />
       </HeroCalendar.Header>
