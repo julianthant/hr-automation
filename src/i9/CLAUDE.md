@@ -25,3 +25,11 @@ Automates I9 Complete (Tracker I-9 by Mitratech) for employment verification: lo
 - Grid parsing: last `.getByRole("grid")` in dialog is results, earlier grids are headers
 - Search button uses direct selector `#divSearchOptions` (not accessible role)
 - Returns `I9Result` error object on validation failure (doesn't throw)
+
+## Verified Selectors
+
+*(Add selectors here after each playwright-cli mapping session — include date and system)*
+
+## Lessons Learned
+
+*(Add entries here when I9 bugs are fixed — document root cause and fix so the same error never recurs)*

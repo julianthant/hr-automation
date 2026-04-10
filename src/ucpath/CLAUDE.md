@@ -43,3 +43,11 @@ Position number fill in `fillJobData` triggers a page refresh that **changes gri
 - Phone/email grid indices hardcoded: `$6` for phone type, `$7` for email type
 - SSN is optional (international students), address is required
 - Transaction number extraction: regex for 7+ digit number in confirmation text
+
+## Verified Selectors
+
+*(Add selectors here after each playwright-cli mapping session — include date, page, and exact selector)*
+
+## Lessons Learned
+
+*(Add entries here when UCPath bugs are fixed — document root cause and fix so the same error never recurs)*

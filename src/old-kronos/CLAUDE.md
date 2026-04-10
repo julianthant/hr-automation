@@ -45,3 +45,11 @@ UKG uses deeply nested iframes:
 - Hardcoded download path: `C:\Users\juzaw\Downloads` for filesystem fallback
 - `mkdirSync(".auth/")` called at module level for screenshot directory
 - **Session expiry on refresh**: If a page refresh causes redirect to SSO login, `getGeniesIframe` detects this and calls `loginToUKG()` to re-authenticate automatically (requires Duo MFA approval)
+
+## Verified Selectors
+
+*(Add selectors here after each playwright-cli mapping session — include date and system)*
+
+## Lessons Learned
+
+*(Add entries here when Old Kronos/UKG bugs are fixed — document root cause and fix so the same error never recurs)*

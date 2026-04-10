@@ -38,3 +38,11 @@ Submit button: always `button[name="_eventId_proceed"]` (avoids collision with "
 - ACTCrm may land on `act-crm.my.site.com` OR `crm.ucsd.edu` after Duo — both are checked
 - Debug screenshots saved to `.auth/debug-*.png` (ACTCrm flow only)
 - "Enroll in Two-Step Login" nav link has `role="button"` containing "Login" — causes selector collisions if not using `button[name=...]`
+
+## Verified Selectors
+
+*(Add selectors here after each playwright-cli mapping session — include date and system)*
+
+## Lessons Learned
+
+*(Add entries here when auth bugs are fixed — document root cause and fix so the same error never recurs)*

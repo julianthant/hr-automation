@@ -13,3 +13,7 @@ Environment validation, error helpers, and colored logging.
   - `log.error(msg)` — red `✗` prefix (writes to stderr)
 
 Uses `picocolors` for colorization. Only `log.error()` uses `console.error` (stderr); all others use `console.log` (stdout).
+
+## Lessons Learned
+
+*(Add entries here when utility bugs are fixed — document root cause and fix)*

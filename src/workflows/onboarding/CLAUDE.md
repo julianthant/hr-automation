@@ -38,3 +38,11 @@ batch.yaml / CLI email
 - Job end date hardcoded to `06/30/2026` in config
 - Dual browser setup: CRM page + UCPath page (each with separate auth)
 - Parallel mode uses mutex for tracker writes to prevent Excel file corruption
+
+## Verified Selectors
+
+*(Add selectors here after each playwright-cli mapping session — include date and page)*
+
+## Lessons Learned
+
+*(Add entries here when onboarding bugs are fixed — document root cause and fix so the same error never recurs)*

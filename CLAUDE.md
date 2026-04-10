@@ -32,7 +32,7 @@ tsx --env-file=.env src/cli.ts eid-lookup --workers 4 "Name1" "Name2" "Name3"
 npm run dashboard                      # Start SSE backend + Vite dev server (http://localhost:5173)
 npm run dashboard:prod                 # Serve pre-built dashboard from SSE server only
 npm run dashboard -- -p 4000           # Custom SSE backend port
-dashboard.bat                          # Windows shortcut (bypasses npm group policy block)
+# dashboard.bat removed — use npm run dashboard or tsx directly
 
 # Export
 tsx --env-file=.env src/cli.ts export <workflow>     # Export JSONL tracker to Excel
@@ -138,6 +138,40 @@ Copy `.env.example` to `.env` and fill in:
 
 `src/config.ts` centralizes: URLs, PATHS (user-agnostic via homedir()), TIMEOUTS, SCREEN dimensions, ANNUAL_DATES (update each fiscal year). Workflow-specific configs in `src/workflows/*/config.ts` re-export from central config.
 
+## Continuous Improvement Protocol
+
+These rules are **mandatory** — follow them on every task, not just when asked.
+
+### After Every Error Fix
+- Update the relevant module/workflow `CLAUDE.md` with what went wrong and why
+- Add the root cause under a `## Lessons Learned` section so the same error never happens again
+- If the error was a selector issue, add the correct selector to the `## Verified Selectors` section
+
+### After Every New Workflow
+- Update the dashboard to support it: add to `WF_CONFIG` in `src/dashboard/components/types.ts`, add step definitions, detail fields, and name source
+- Update `src/tracker/dashboard.ts` if new SSE endpoints or data formats are needed
+- Add the workflow's step tracking to the root CLAUDE.md "Step Tracking Per Workflow" table
+- Create a `CLAUDE.md` inside the new workflow directory following the existing pattern (Files, Data Flow, Gotchas)
+
+### After Every Selector Mapping (playwright-cli)
+- Add discovered selectors to the relevant module's `CLAUDE.md` under `## Verified Selectors`
+- Include the date verified, the system/page, and the exact selector string
+- If a selector changed from a previous mapping, note the old → new change
+- Use these documented selectors when writing code — never guess
+
+### When Using playwright-cli
+- Always run `playwright-cli --help` first if unsure about commands
+- Install/update before use: `npm install -g @playwright/cli@latest`
+- Use `snapshot` before writing ANY selector — never guess from documentation or memory
+- After mapping, immediately document selectors in the relevant CLAUDE.md
+- Use lessons from past selector failures to inform new mappings (check `## Lessons Learned` sections)
+
+### After Every Fix or Update
+- Update the corresponding module/workflow CLAUDE.md to reflect the change
+- If a gotcha was discovered, add it to the Gotchas section
+- If a pattern was established, document it for future sessions
+- Keep CLAUDE.md files as living documentation — they are the memory across sessions
+
 ## Key Patterns
 
 - **Separate auth flows**: UCPath, CRM, I9, UKG, Kuali, and New Kronos each use different auth — never share browser sessions between them
@@ -227,9 +261,11 @@ Export to Excel: `tsx --env-file=.env src/cli.ts export <workflow>`
 
 ## playwright-cli — Selector Discovery Tool
 
-**Install**: `npm install -g @playwright/cli@latest`
+**Install/Update**: `npm install -g @playwright/cli@latest` (run before every playwright session)
 
-playwright-cli lets you open headed browsers, interact with pages, and snapshot the full accessibility tree to discover exact selectors. **Always use this before writing new automation selectors.** Never guess selectors — map them first.
+**First step**: Always run `playwright-cli --help` if unsure about commands or after updating.
+
+playwright-cli lets you open headed browsers, interact with pages, and snapshot the full accessibility tree to discover exact selectors. **Always use this before writing new automation selectors.** Never guess selectors — map them first. After mapping, immediately document selectors in the relevant module's `CLAUDE.md` under `## Verified Selectors`.
 
 ### Core Workflow
 

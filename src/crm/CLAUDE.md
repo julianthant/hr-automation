@@ -20,3 +20,11 @@ ACT CRM (Salesforce) automation: employee search, navigation, and field extracti
 - `navigateToSection` regex doesn't escape special chars in section names
 - `CRM_SECTION_URLS` currently only has "UCPath Entry Sheet" — missing sections fall back to slower click navigation
 - Always waits for `networkidle` after navigation (conservative but slower)
+
+## Verified Selectors
+
+*(Add selectors here after each playwright-cli mapping session — include date and system)*
+
+## Lessons Learned
+
+*(Add entries here when CRM bugs are fixed — document root cause and fix so the same error never recurs)*

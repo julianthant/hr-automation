@@ -47,3 +47,11 @@ batch.yaml (employee IDs)
 - Empty downloads (0 KB) fail validation and are deleted
 - `mkdirSync(REPORTS_DIR, { recursive: true })` — reports dir created if missing
 - Phase 1 report status polling: first attempt may show stale "Complete" row from previous run — must skip it
+
+## Verified Selectors
+
+*(Add selectors here after each playwright-cli mapping session — include date and page)*
+
+## Lessons Learned
+
+*(Add entries here when Kronos report bugs are fixed — document root cause and fix so the same error never recurs)*
