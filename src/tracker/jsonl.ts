@@ -4,6 +4,19 @@ import { execSync } from "child_process";
 import { Mutex } from "async-mutex";
 import { log, setLogRunId } from "../utils/log.js";
 import { classifyError } from "../utils/errors.js";
+import {
+  generateInstanceName,
+  emitWorkflowStart,
+  emitWorkflowEnd,
+  emitSessionCreate,
+  emitBrowserLaunch,
+  emitBrowserClose,
+  emitAuthStart,
+  emitAuthComplete,
+  emitAuthFailed,
+  emitItemStart,
+  emitItemComplete,
+} from "./session-events.js";
 
 const writeMutex = new Mutex();
 
@@ -70,6 +83,18 @@ export function trackEvent(entry: TrackerEntry, dir: string = DEFAULT_DIR): void
   });
 }
 
+/** Session context passed to workflow callbacks for registering sessions/browsers. */
+export interface SessionContext {
+  /** Auto-generated instance name, e.g. "Separation 1" */
+  instance: string;
+  registerSession(sessionId: string): void;
+  registerBrowser(sessionId: string, browserId: string, system: string): void;
+  closeBrowser(browserId: string, system: string): void;
+  setAuthState(browserId: string, system: string, state: "start" | "complete" | "failed"): void;
+  setCurrentItem(itemId: string): void;
+  completeItem(itemId: string): void;
+}
+
 /**
  * Wrap a workflow function with automatic lifecycle tracking.
  *
@@ -85,6 +110,7 @@ export async function withTrackedWorkflow<T>(
     updateData: (d: Record<string, string>) => void,
     /** Register a sync cleanup function (e.g. kill browsers) that runs on SIGINT before exit. */
     onCleanup: (cb: () => void) => void,
+    session: SessionContext,
   ) => Promise<T>,
   /** Pre-assigned runId (batch mode) — skips run computation and initial pending emit. */
   preAssignedRunId?: string,
@@ -110,6 +136,26 @@ export async function withTrackedWorkflow<T>(
 
   if (!preAssignedRunId) emit("pending");
 
+  // Session tracking context
+  const instanceName = generateInstanceName(workflow);
+  emitWorkflowStart(instanceName);
+  // Store instance name in tracker data so EntryItem can show it
+  data.instance = instanceName;
+
+  const session: SessionContext = {
+    instance: instanceName,
+    registerSession: (sessionId) => emitSessionCreate(instanceName, sessionId),
+    registerBrowser: (sessionId, browserId, system) => emitBrowserLaunch(instanceName, sessionId, browserId, system),
+    closeBrowser: (browserId, system) => emitBrowserClose(instanceName, browserId, system),
+    setAuthState: (browserId, system, state) => {
+      if (state === "start") emitAuthStart(instanceName, browserId, system);
+      else if (state === "complete") emitAuthComplete(instanceName, browserId, system);
+      else emitAuthFailed(instanceName, browserId, system);
+    },
+    setCurrentItem: (itemId) => emitItemStart(instanceName, itemId),
+    completeItem: (itemId) => emitItemComplete(instanceName, itemId),
+  };
+
   // Cleanup callbacks registered by the workflow (e.g. kill browsers)
   const cleanupFns: (() => void)[] = [];
 
@@ -123,6 +169,7 @@ export async function withTrackedWorkflow<T>(
       execSync('wmic process where "name=\'chrome.exe\' and CommandLine like \'%--enable-automation%\'" call terminate', { stdio: "ignore" });
     } catch { /* best-effort */ }
     for (const cb of cleanupFns) { try { cb(); } catch { /* best-effort */ } }
+    emitWorkflowEnd(instanceName);
     const error = `Process terminated (${signal})`;
     const now = ts();
     const date = now.slice(0, 10);
@@ -140,13 +187,16 @@ export async function withTrackedWorkflow<T>(
       (step) => emit("running", { step }),
       (d) => Object.assign(data, d),
       (cb) => cleanupFns.push(cb),
+      session,
     );
     emit("done");
+    emitWorkflowEnd(instanceName);
     return result;
   } catch (e) {
     const error = classifyError(e);
     log.error(error);
     emit("failed", { error });
+    emitWorkflowEnd(instanceName);
     throw e;
   } finally {
     process.removeAllListeners("SIGINT");
