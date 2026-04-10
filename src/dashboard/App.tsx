@@ -7,18 +7,44 @@ import { useEntries } from "./components/hooks/useEntries";
 import { usePreflight } from "./components/hooks/usePreflight";
 import { getConfig } from "./components/types";
 
+/** Read initial state from URL search params so refresh preserves selection */
+function readUrlState() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    workflow: params.get("wf") || "onboarding",
+    selectedId: params.get("id") || null,
+    date: params.get("date") || new Date().toISOString().slice(0, 10),
+  };
+}
+
+/** Sync state to URL without triggering a page reload */
+function syncUrlState(workflow: string, selectedId: string | null, date: string) {
+  const params = new URLSearchParams();
+  params.set("wf", workflow);
+  if (selectedId) params.set("id", selectedId);
+  params.set("date", date);
+  const url = `${window.location.pathname}?${params.toString()}`;
+  window.history.replaceState(null, "", url);
+}
+
 export default function App() {
-  const [workflow, setWorkflow] = useState("onboarding");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const initial = useMemo(readUrlState, []);
+  const [workflow, setWorkflow] = useState(initial.workflow);
+  const [selectedId, setSelectedId] = useState<string | null>(initial.selectedId);
+  const [date, setDate] = useState(initial.date);
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const prevStatusRef = useMemo(() => new Map<string, string>(), []);
 
   // Pre-flight check on mount
   usePreflight();
 
+  // Sync state to URL so refresh preserves selection
+  useEffect(() => {
+    syncUrlState(workflow, selectedId, date);
+  }, [workflow, selectedId, date]);
+
   // SSE entries
-  const { entries, workflows, connected, loading } = useEntries(workflow, date);
+  const { entries, workflows, wfCounts, connected, loading } = useEntries(workflow, date);
 
   // Fetch available dates when workflow changes
   useEffect(() => {
@@ -67,13 +93,8 @@ export default function App() {
     setSelectedId(null);
   }, []);
 
-  // Entry counts per workflow for dropdown badges
-  const entryCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const wf of workflows) counts[wf] = 0;
-    counts[workflow] = entries.length;
-    return counts;
-  }, [workflows, workflow, entries.length]);
+  // Entry counts per workflow from backend SSE (accurate across all workflows)
+  const entryCounts = wfCounts;
 
   const selectedEntry = entries.find((e) => e.id === selectedId) || null;
 
@@ -83,9 +104,9 @@ export default function App() {
         position="bottom-right"
         toastOptions={{
           style: {
-            background: "hsl(var(--card))",
-            border: "1px solid hsl(var(--border))",
-            color: "hsl(var(--foreground))",
+            background: "var(--card)",
+            border: "1px solid var(--border)",
+            color: "var(--foreground)",
           },
         }}
       />

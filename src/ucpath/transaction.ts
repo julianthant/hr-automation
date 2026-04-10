@@ -1,6 +1,6 @@
 import type { Page, FrameLocator } from "playwright";
 import type { TransactionResult } from "./types.js";
-import { getContentFrame, waitForPeopleSoftProcessing } from "./navigate.js";
+import { getContentFrame, waitForPeopleSoftProcessing, navigateToSmartHR } from "./navigate.js";
 import { log } from "../utils/log.js";
 
 // ─── STEP 1: Navigate sidebar → Smart HR Templates → Smart HR Transactions ───
@@ -567,20 +567,26 @@ export async function clickSaveAndSubmit(
     if ((await okButton.count()) > 0) {
       log.step("Clicking OK on confirmation page...");
       await okButton.click({ timeout: 5_000 });
-      await page.waitForTimeout(8_000);
+      await page.waitForTimeout(3_000);
 
-      // Step 2: Click employee name in Transactions in Progress list
+      // Step 2: Re-navigate same way as initial: URL to HR Tasks, then sidebar click
+      log.step("Re-navigating to Smart HR Transactions...");
+      await navigateToSmartHR(page);
+      await clickSmartHRTransactions(page);
+      await page.waitForTimeout(3_000);
+      const txnFrame = getContentFrame(page);
+
       if (employeeName) {
         // Search for exact name link (e.g. "Ivette Lima Montes")
         // PeopleSoft shows first name + last name as a link
-        const nameLink = frame.getByRole("link", { name: employeeName });
+        const nameLink = txnFrame.getByRole("link", { name: employeeName });
         if ((await nameLink.count()) > 0) {
           log.step(`Clicking employee: ${employeeName}`);
           await nameLink.first().click({ timeout: 5_000 });
         } else {
           // Try partial match — last name only
           const lastName = employeeName.split(",")[0]?.trim() ?? employeeName.split(" ").pop() ?? "";
-          const partialLink = frame.getByRole("link", { name: new RegExp(lastName, "i") });
+          const partialLink = txnFrame.getByRole("link", { name: new RegExp(lastName, "i") });
           if ((await partialLink.count()) > 0) {
             log.step(`Clicking employee (partial match): ${lastName}`);
             await partialLink.last().click({ timeout: 5_000 });
@@ -591,13 +597,13 @@ export async function clickSaveAndSubmit(
         await page.waitForTimeout(5_000);
 
         // Step 3: Click Continue on transaction details page
-        const continueBtn = frame.getByRole("button", { name: "Continue" });
+        const continueBtn = txnFrame.getByRole("button", { name: "Continue" });
         if ((await continueBtn.count()) > 0) {
           await continueBtn.click({ timeout: 5_000 });
           await page.waitForTimeout(8_000);
 
           // Step 4: Extract "Transaction ID: T002XXXXXX" from the re-opened form
-          const bodyText = await frame.locator("body").innerText({ timeout: 5_000 }).catch(() => "");
+          const bodyText = await txnFrame.locator("body").innerText({ timeout: 5_000 }).catch(() => "");
           const tMatch = bodyText.match(/Transaction ID:\s*(T\d+)/)
             ?? bodyText.match(/Transaction:\s*(T\d+)/i);
           if (tMatch) {

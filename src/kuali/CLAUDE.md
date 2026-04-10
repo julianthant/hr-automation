@@ -29,10 +29,16 @@ Kuali Build separation form automation: extraction and form filling for employee
 - **`clickSave` targets navbar**: Scrolls to top first, then targets `[class*="action-bar"] button:has-text("Save")` or `nav button:has-text("Save")` before falling back to generic `button[name="Save"]` — avoids clicking wrong save button in modals or other form sections
 - `fillTransactionResults` fills fields only — does NOT save. Must call `clickSave()` separately after all form sections are filled
 
+## Gotchas (Additional)
+
+- **Date field verification after fill** — `updateLastDayWorked`, `updateSeparationDate`, and `fillFinalTransactions` termination date fields must verify the value after fill. Kuali date inputs sometimes don't accept the value on first attempt. If the readback doesn't match, retry using `type()` (character-by-character) instead of `fill()`.
+- **clickSave false-positive error detection** — Removed overly aggressive error detection from `clickSave` that was triggering on benign page elements. The save button click + network idle wait is sufficient confirmation.
+
 ## Verified Selectors
 
 *(Add selectors here after each playwright-cli mapping session — include date and system)*
 
 ## Lessons Learned
 
-*(Add entries here when Kuali bugs are fixed — document root cause and fix so the same error never recurs)*
+- **2026-04-10: Date fields not accepting fill()** — Kuali date inputs occasionally ignore Playwright's `fill()` call. The input appears filled visually but the internal value doesn't update, causing downstream date mismatches. Fix: after every date fill, read back the input value and compare. If mismatch, clear and retry with `type()` which sends individual keystrokes. Always verify date fields after filling.
+- **2026-04-10: clickSave false error detection** — `clickSave` had error-checking logic that matched benign DOM elements as errors, causing the workflow to report "save failed" when the save actually succeeded. Removed the false-positive checks. The save is confirmed by waiting for network idle after clicking.

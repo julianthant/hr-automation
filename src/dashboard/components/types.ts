@@ -7,6 +7,14 @@ export interface TrackerEntry {
   step?: string;
   data?: Record<string, string>;
   error?: string;
+  /** First-seen timestamp for this entry (computed by useEntries, not from backend). */
+  startTimestamp?: string;
+  /** First log timestamp (enriched by backend SSE). */
+  firstLogTs?: string;
+  /** Last log timestamp (enriched by backend SSE). */
+  lastLogTs?: string;
+  /** Last log message (enriched by backend SSE, for queue display). */
+  lastLogMessage?: string;
 }
 
 export interface LogEntry {
@@ -21,6 +29,7 @@ export interface LogEntry {
 export interface RunInfo {
   runId: string;
   status: string;
+  step?: string;
   timestamp: string;
 }
 
@@ -112,10 +121,19 @@ export function getConfig(wf: string): WorkflowConfig {
   };
 }
 
+const STEP_ABBREVIATIONS: Record<string, string> = {
+  ucpath: "UCPath",
+  kuali: "Kuali",
+  kronos: "Kronos",
+  crm: "CRM",
+  sso: "SSO",
+  ukg: "UKG",
+};
+
 export function formatStepName(step: string): string {
   return step
     .replace(/-/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+    .replace(/\b\w+/g, (w) => STEP_ABBREVIATIONS[w.toLowerCase()] || w.charAt(0).toUpperCase() + w.slice(1));
 }
 
 export type LogCategory = "fill" | "navigate" | "extract" | "search" | "select" | "auth" | "download" | "success" | "error" | "waiting" | "step";

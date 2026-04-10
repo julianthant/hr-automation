@@ -46,11 +46,12 @@ Add the command to `src/cli.ts` using Commander pattern. Add both normal and `:d
 | Workflow | CLI | Systems | Parallel? |
 |----------|-----|---------|-----------|
 | onboarding | `npm run start-onboarding` | CRM, UCPath, I9 | Yes (batch mode) |
-| separations | `npm run separation` | Kuali, Old Kronos, New Kronos, UCPath (x2) | Yes (5 browsers) |
+| separations | `npm run separation` | Kuali, Old Kronos, New Kronos, UCPath (x2) | Yes (5 browsers, batch sequential) |
 | eid-lookup | `tsx src/cli.ts eid-lookup` | UCPath, CRM (optional) | Yes (shared auth) |
 | old-kronos-reports | `npm run kronos` | UKG | Yes (N workers) |
 | work-study | `npm run work-study` | UCPath | No |
 
 ## Lessons Learned
 
-*(Add entries here when workflow-level patterns or bugs are discovered — document what went wrong and the fix)*
+- **2026-04-10: Batch mode pattern for sequential processing** — For workflows that reuse browser sessions across multiple items (e.g. separations), the pattern is: (1) pre-emit `pending` for all items with pre-assigned `runId`s, (2) launch/auth browsers once, (3) process each item sequentially passing `preAssignedRunId` to `withTrackedWorkflow`. Use `onCleanup` callback for browser teardown after the last item.
+- **2026-04-10: ensurePageHealthy() before each phase** — SAML errors and session expiry can happen silently between phases. Each major phase (extraction, transaction, finalization) should call `ensurePageHealthy()` to check for error pages before proceeding. Without this, the workflow fails with cryptic selector errors instead of a clear "session expired" message.

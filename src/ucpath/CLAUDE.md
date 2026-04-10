@@ -50,4 +50,5 @@ Position number fill in `fillJobData` triggers a page refresh that **changes gri
 
 ## Lessons Learned
 
-*(Add entries here when UCPath bugs are fixed — document root cause and fix so the same error never recurs)*
+- **2026-04-10: Transaction number extraction after confirmation OK** — After clicking OK on the UCPath confirmation dialog, the transaction page navigates away and the transaction number is no longer visible. Fix: after clicking OK, renavigate to Smart HR via `navigateToSmartHR()` + `clickSmartHRTransactions()` to reach the transactions list, then extract the most recent transaction number from there.
+- **2026-04-10: framenavigated listener cleanup** — The `[NAV]` `framenavigated` listener registered during UCPath auth (to detect successful login) must be removed after auth completes. If left active, it fires on every subsequent PeopleSoft page navigation, creating noisy log entries and potential interference with navigation detection logic.

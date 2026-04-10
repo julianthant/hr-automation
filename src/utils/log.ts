@@ -5,6 +5,7 @@ import { appendLogEntry, type LogEntry } from "../tracker/jsonl.js";
 interface LogContext {
   workflow: string;
   itemId: string;
+  runId?: string;
   dir?: string;
 }
 
@@ -28,6 +29,7 @@ function emit(
       {
         workflow: ctx.workflow,
         itemId: ctx.itemId,
+        ...(ctx.runId ? { runId: ctx.runId } : {}),
         level,
         message: msg,
         ts: new Date().toISOString(),
@@ -43,6 +45,12 @@ export const log = {
   waiting: (msg: string): void => emit("waiting", pc.yellow("\u231B"), msg),
   error: (msg: string): void => emit("error", pc.red("\u2717"), msg, true),
 };
+
+/** Update the current log context with a runId (called from withTrackedWorkflow). */
+export function setLogRunId(runId: string): void {
+  const ctx = logStore.getStore();
+  if (ctx) ctx.runId = runId;
+}
 
 export function withLogContext<T>(
   workflow: string,

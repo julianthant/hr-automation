@@ -79,6 +79,17 @@ export async function pollDuoApproval(
         await recovery(page).catch(() => {});
       }
 
+      // Check for Duo push timeout — click "Try Again" to resend
+      const tryAgainBtn = page.getByRole("button", { name: /try again/i })
+        .or(page.locator('button:has-text("Try Again")'));
+      if ((await tryAgainBtn.count()) > 0) {
+        log.step("Duo push timed out — clicking Try Again...");
+        await tryAgainBtn.first().click({ timeout: 5_000 });
+        log.waiting("Duo push resent — approve on your phone...");
+        await page.waitForTimeout(2_000);
+        continue;
+      }
+
       // Check for "Yes, this is my device" trust button and click it
       const trustButton = page.getByText("Yes, this is my device");
       if ((await trustButton.count()) > 0) {

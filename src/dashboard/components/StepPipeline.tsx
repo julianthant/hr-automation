@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { Check, Play } from "lucide-react";
+import { Check, Play, X } from "lucide-react";
 import { formatStepName } from "./types";
 
 interface StepPipelineProps {
@@ -20,14 +20,15 @@ export function StepPipeline({ steps, currentStep, status }: StepPipelineProps) 
       {steps.map((step, i) => {
         const isComplete = isDone || i < currentIdx;
         const isActive = !isDone && !isFailed && i === currentIdx;
-        const isPending = !isComplete && !isActive;
+        const isFailedStep = isFailed && i === currentIdx;
+        const isPending = !isComplete && !isActive && !isFailedStep;
 
         return (
           <div key={step} className="flex items-center">
             {i > 0 && (
               <div className={cn(
                 "w-8 h-0.5 mx-1.5 rounded-sm flex-shrink-0",
-                isComplete ? "bg-[#4ade80]/30" : "bg-border",
+                isComplete ? "bg-[#4ade80]/30" : isFailedStep ? "bg-destructive/30" : "bg-border",
               )} />
             )}
             <div className="flex items-center whitespace-nowrap">
@@ -35,15 +36,17 @@ export function StepPipeline({ steps, currentStep, status }: StepPipelineProps) 
                 "w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-semibold flex-shrink-0",
                 isComplete && "bg-[#4ade80]/15 text-[#4ade80]",
                 isActive && "bg-primary/20 text-primary animate-pulse",
+                isFailedStep && "bg-destructive/15 text-destructive",
                 isPending && "bg-secondary text-muted-foreground",
               )}>
-                {isComplete ? <Check className="w-3 h-3" /> : isActive ? <Play className="w-3 h-3" /> : ""}
+                {isComplete ? <Check className="w-3 h-3" /> : isActive ? <Play className="w-3 h-3" /> : isFailedStep ? <X className="w-3 h-3" /> : ""}
               </div>
               <div className="ml-1.5">
                 <span className={cn(
                   "text-xs font-medium block",
                   isComplete && "text-[#4ade80]",
                   isActive && "text-primary font-semibold",
+                  isFailedStep && "text-destructive font-semibold",
                   isPending && "text-muted-foreground",
                 )}>
                   {formatStepName(step)}

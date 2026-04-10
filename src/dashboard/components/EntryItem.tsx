@@ -1,7 +1,8 @@
 import { cn } from "@/lib/utils";
+import { X } from "lucide-react";
 import type { TrackerEntry } from "./types";
 import { getConfig } from "./types";
-import { useElapsed } from "./hooks/useElapsed";
+import { useElapsed, formatDuration } from "./hooks/useElapsed";
 
 interface EntryItemProps {
   entry: TrackerEntry;
@@ -24,66 +25,68 @@ export function EntryItem({ entry, workflow, selected, onClick }: EntryItemProps
   const isRunning = entry.status === "running";
   const isFailed = entry.status === "failed";
   const isDone = entry.status === "done";
-  const elapsed = useElapsed(isRunning ? entry.timestamp : null);
+  const isPending = entry.status === "pending";
+  const firstTs = entry.firstLogTs || entry.startTimestamp || entry.timestamp;
+  const lastTs = entry.lastLogTs || entry.timestamp;
+  const elapsed = useElapsed(isRunning ? firstTs : null);
+  const duration = (isDone || isFailed) && firstTs !== lastTs
+    ? formatDuration(firstTs, lastTs)
+    : null;
 
-  const runNumber = entry.runId?.split("#")[1];
-  const showRun = runNumber && parseInt(runNumber) > 1;
-
-  const time = entry.timestamp
-    ? new Date(entry.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+  const runNumber = entry.runId?.split("#")[1] || "1";
+  const time = entry.firstLogTs || entry.timestamp
+    ? new Date(entry.firstLogTs || entry.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
     : "";
 
   return (
     <div
       onClick={onClick}
       className={cn(
-        "px-5 py-3.5 border-b border-border cursor-pointer transition-colors",
+        "px-5 py-3 border-b border-border cursor-pointer transition-colors",
         "hover:bg-secondary",
         selected && "bg-accent border-l-[3px] border-l-primary pl-[17px]",
       )}
     >
-      <div className="flex items-center justify-between mb-1">
-        <span className="font-semibold text-[15px]">{name || entry.id}</span>
-        <span className={cn("text-[11px] font-semibold px-2.5 py-0.5 rounded-xl uppercase tracking-wide font-mono", badgeStyles[entry.status])}>
+      {/* Row 1: Name + status badge */}
+      <div className="flex items-center justify-between">
+        <span className="font-semibold text-[15px] truncate">{name || entry.id}</span>
+        <span className={cn("text-[10px] font-semibold px-2.5 py-0.5 rounded-xl uppercase tracking-wide font-mono flex-shrink-0 ml-2", badgeStyles[entry.status])}>
           {entry.status}
         </span>
       </div>
 
+      {/* Row 2: Doc ID (only if name is shown, otherwise row 1 already shows ID) */}
       {name && (
         <div className="font-mono text-[13px] text-muted-foreground mt-0.5">{entry.id}</div>
       )}
 
+      {/* Row 3: Running = latest log, Failed = error, Pending/Done = nothing */}
+      {isRunning && entry.lastLogMessage && (
+        <div className="font-mono text-xs text-muted-foreground mt-1.5 truncate">
+          {entry.lastLogMessage}
+        </div>
+      )}
       {isFailed && entry.error && (
-        <div className="font-mono text-xs text-destructive mt-1.5 truncate">
-          ✗ {entry.error}
+        <div className="flex items-center gap-1.5 font-mono text-xs text-destructive mt-1.5">
+          <X className="w-3 h-3 flex-shrink-0" />
+          <span className="truncate">{entry.error}</span>
         </div>
       )}
 
-      <div className="flex items-center gap-2.5 mt-2">
-        {isRunning && entry.step && (
-          <span className="font-mono text-xs text-accent-foreground">
-            ▶ {entry.step.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
-          </span>
-        )}
-        {!isRunning && !isFailed && (
-          <span className="font-mono text-xs text-muted-foreground">{time}</span>
-        )}
-        {showRun && (
-          <span className="font-mono text-[11px] text-muted-foreground bg-secondary px-2 py-0.5 rounded font-medium">
-            Run #{runNumber}
-          </span>
-        )}
-        <span className="flex-1" />
-        {isRunning && elapsed && (
-          <span className="font-mono text-xs text-primary">{elapsed}</span>
-        )}
-        {isDone && (
-          <span className="font-mono text-xs text-muted-foreground">{time}</span>
-        )}
-        {isFailed && (
-          <span className="font-mono text-xs text-muted-foreground">{time}</span>
-        )}
-      </div>
+      {/* Row 4: Date, run number, elapsed */}
+      {!isPending && (
+        <div className="flex items-center gap-2 mt-1.5 text-xs font-mono text-muted-foreground">
+          <span>{time}</span>
+          <span className="bg-secondary px-1.5 py-px rounded font-medium">#{runNumber}</span>
+          <span className="flex-1" />
+          {isRunning && elapsed && (
+            <span className="text-primary">{elapsed}</span>
+          )}
+          {(isDone || isFailed) && (
+            <span>{duration || ""}</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

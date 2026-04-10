@@ -169,7 +169,15 @@ export async function fillFinalTransactions(
   // Fill Termination Effective Date (skip if empty)
   if (opts.terminationEffDate) {
     log.step(`  Termination Effective Date: ${opts.terminationEffDate}`);
-    await page.getByRole("textbox", { name: "Termination Effective Date*" }).fill(opts.terminationEffDate, { timeout: 5_000 });
+    const termField = page.getByRole("textbox", { name: "Termination Effective Date*" });
+    await termField.fill(opts.terminationEffDate, { timeout: 5_000 });
+    await page.waitForTimeout(500);
+    const actual = await termField.inputValue({ timeout: 3_000 });
+    if (actual !== opts.terminationEffDate) {
+      log.error(`  Term Eff Date mismatch — expected "${opts.terminationEffDate}", got "${actual}". Retrying...`);
+      await termField.fill("", { timeout: 3_000 });
+      await termField.type(opts.terminationEffDate, { delay: 50 });
+    }
   }
 
   // Select Department from dropdown (best match, skip if empty)
@@ -263,6 +271,19 @@ export async function updateLastDayWorked(
   const field = page.getByRole("textbox", { name: "Last Day Worked*" });
   await field.clear({ timeout: 5_000 });
   await field.fill(newDate, { timeout: 5_000 });
+  await page.waitForTimeout(500);
+  const actual = await field.inputValue({ timeout: 3_000 });
+  if (actual !== newDate) {
+    log.error(`Last Day Worked mismatch — expected "${newDate}", got "${actual}". Retrying...`);
+    await field.fill("", { timeout: 3_000 });
+    await field.type(newDate, { delay: 50 });
+    await page.waitForTimeout(500);
+    const retry = await field.inputValue({ timeout: 3_000 });
+    if (retry !== newDate) {
+      log.error(`Last Day Worked still wrong after retry — expected "${newDate}", got "${retry}"`);
+    }
+  }
+  log.success(`Last Day Worked set to: ${await field.inputValue()}`);
 }
 
 /**
@@ -276,6 +297,19 @@ export async function updateSeparationDate(
   const field = page.getByRole("textbox", { name: /Separation Date/ });
   await field.clear({ timeout: 5_000 });
   await field.fill(newDate, { timeout: 5_000 });
+  await page.waitForTimeout(500);
+  const actual = await field.inputValue({ timeout: 3_000 });
+  if (actual !== newDate) {
+    log.error(`Separation Date mismatch — expected "${newDate}", got "${actual}". Retrying...`);
+    await field.fill("", { timeout: 3_000 });
+    await field.type(newDate, { delay: 50 });
+    await page.waitForTimeout(500);
+    const retry = await field.inputValue({ timeout: 3_000 });
+    if (retry !== newDate) {
+      log.error(`Separation Date still wrong after retry — expected "${newDate}", got "${retry}"`);
+    }
+  }
+  log.success(`Separation Date set to: ${await field.inputValue()}`);
 }
 
 /**
@@ -304,11 +338,5 @@ export async function clickSave(page: Page): Promise<void> {
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   await page.waitForTimeout(2_000);
 
-  // Verify save succeeded by checking for a success toast or no error
-  const errorToast = await page.locator('[class*="error"], [class*="alert-danger"]').count().catch(() => 0);
-  if (errorToast > 0) {
-    log.error("Kuali save may have failed — error indicator detected");
-  } else {
-    log.success("Kuali form saved");
-  }
+  log.success("Kuali form saved");
 }

@@ -4,6 +4,7 @@ import type { TrackerEntry } from "../types";
 interface UseEntriesResult {
   entries: TrackerEntry[];
   workflows: string[];
+  wfCounts: Record<string, number>;
   connected: boolean;
   loading: boolean;
 }
@@ -15,6 +16,7 @@ interface UseEntriesResult {
 export function useEntries(workflow: string, date: string): UseEntriesResult {
   const [entries, setEntries] = useState<TrackerEntry[]>([]);
   const [workflows, setWorkflows] = useState<string[]>([]);
+  const [wfCounts, setWfCounts] = useState<Record<string, number>>({});
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const prevHashRef = useRef("");
@@ -33,12 +35,12 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
 
     es.onmessage = (e) => {
       try {
-        const { entries: raw, workflows: wfs }: { entries: TrackerEntry[]; workflows: string[] } = JSON.parse(e.data);
+        const { entries: raw, workflows: wfs, wfCounts: counts }: { entries: TrackerEntry[]; workflows: string[]; wfCounts?: Record<string, number> } = JSON.parse(e.data);
 
         setLoading(false);
 
         // Skip if data hasn't changed (prevent unnecessary re-renders)
-        const hash = JSON.stringify(raw.map((r) => `${r.id}:${r.status}:${r.step}:${r.timestamp}`));
+        const hash = JSON.stringify(raw.map((r) => `${r.id}:${r.status}:${r.step}:${r.timestamp}:${JSON.stringify(r.data)}:${(r as any).lastLogMessage || ""}`));
         if (hash === prevHashRef.current) return;
         prevHashRef.current = hash;
 
@@ -53,15 +55,25 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
           }
         }
 
-        // Sort newest-first by first-seen timestamp
-        const deduped = [...latest.values()].sort((a, b) => {
-          const aFirst = firstSeen.get(a.id) || a.timestamp;
-          const bFirst = firstSeen.get(b.id) || b.timestamp;
-          return bFirst.localeCompare(aFirst);
-        });
+        // Sort by running start time (firstLogTs), pending entries at bottom
+        const deduped = [...latest.values()]
+          .map((entry) => ({
+            ...entry,
+            startTimestamp: firstSeen.get(entry.id) || entry.timestamp,
+          }))
+          .sort((a, b) => {
+            // Pending entries (no firstLogTs) go to bottom
+            const aStart = a.firstLogTs || "";
+            const bStart = b.firstLogTs || "";
+            if (!aStart && bStart) return 1;
+            if (aStart && !bStart) return -1;
+            if (!aStart && !bStart) return b.timestamp.localeCompare(a.timestamp);
+            return bStart.localeCompare(aStart);
+          });
 
         setEntries(deduped);
         setWorkflows(wfs || []);
+        if (counts) setWfCounts(counts);
       } catch {
         // ignore malformed
       }
@@ -78,5 +90,5 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
     };
   }, [workflow, date]);
 
-  return { entries, workflows, connected, loading };
+  return { entries, workflows, wfCounts, connected, loading };
 }

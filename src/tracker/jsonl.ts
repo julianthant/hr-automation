@@ -1,6 +1,9 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from "fs";
 import { join } from "path";
+import { execSync } from "child_process";
 import { Mutex } from "async-mutex";
+import { log, setLogRunId } from "../utils/log.js";
+import { classifyError } from "../utils/errors.js";
 
 const writeMutex = new Mutex();
 
@@ -80,35 +83,74 @@ export async function withTrackedWorkflow<T>(
   fn: (
     setStep: (step: string) => void,
     updateData: (d: Record<string, string>) => void,
+    /** Register a sync cleanup function (e.g. kill browsers) that runs on SIGINT before exit. */
+    onCleanup: (cb: () => void) => void,
   ) => Promise<T>,
+  /** Pre-assigned runId (batch mode) — skips run computation and initial pending emit. */
+  preAssignedRunId?: string,
 ): Promise<T> {
   const data = { ...initialData };
   const ts = () => new Date().toISOString();
 
-  // Compute run number: count existing entries with same id, then +1
-  const existing = readEntries(workflow);
-  const priorRuns = new Set(
-    existing.filter((e) => e.id === id).map((e) => e.runId)
-  );
-  const runNumber = priorRuns.size + 1;
-  const runId = `${id}#${runNumber}`;
+  let runId: string;
+  if (preAssignedRunId) {
+    runId = preAssignedRunId;
+  } else {
+    const existing = readEntries(workflow);
+    const priorRuns = new Set(
+      existing.filter((e) => e.id === id).map((e) => e.runId)
+    );
+    runId = `${id}#${priorRuns.size + 1}`;
+  }
+  setLogRunId(runId);
 
   const emit = (status: TrackerEntry["status"], extra?: { step?: string; error?: string }) => {
     trackEvent({ workflow, timestamp: ts(), id, runId, status, data, ...extra });
   };
 
-  emit("pending");
+  if (!preAssignedRunId) emit("pending");
+
+  // Cleanup callbacks registered by the workflow (e.g. kill browsers)
+  const cleanupFns: (() => void)[] = [];
+
+  // Catch Ctrl+C / kill — write synchronously (bypass async mutex) since process.exit follows
+  let cleaned = false;
+  const onSignal = (signal: string) => {
+    if (cleaned) return;
+    cleaned = true;
+    // Kill all Playwright-launched Chrome processes (Windows-safe)
+    try {
+      execSync('wmic process where "name=\'chrome.exe\' and CommandLine like \'%--enable-automation%\'" call terminate', { stdio: "ignore" });
+    } catch { /* best-effort */ }
+    for (const cb of cleanupFns) { try { cb(); } catch { /* best-effort */ } }
+    const error = `Process terminated (${signal})`;
+    const now = ts();
+    const date = now.slice(0, 10);
+    if (!existsSync(DEFAULT_DIR)) mkdirSync(DEFAULT_DIR, { recursive: true });
+    const logEntry: LogEntry = { workflow, itemId: id, runId, level: "error", message: error, ts: now };
+    const trackEntry: TrackerEntry = { workflow, timestamp: now, id, runId, status: "failed", data, error };
+    appendFileSync(join(DEFAULT_DIR, `${workflow}-${date}-logs.jsonl`), JSON.stringify(logEntry) + "\n");
+    appendFileSync(join(DEFAULT_DIR, `${workflow}-${date}.jsonl`), JSON.stringify(trackEntry) + "\n");
+  };
+  process.on("SIGINT", () => { onSignal("SIGINT"); process.exit(130); });
+  process.on("SIGTERM", () => { onSignal("SIGTERM"); process.exit(143); });
+
   try {
     const result = await fn(
       (step) => emit("running", { step }),
       (d) => Object.assign(data, d),
+      (cb) => cleanupFns.push(cb),
     );
     emit("done");
     return result;
   } catch (e) {
-    const error = e instanceof Error ? e.message : String(e);
+    const error = classifyError(e);
+    log.error(error);
     emit("failed", { error });
     throw e;
+  } finally {
+    process.removeAllListeners("SIGINT");
+    process.removeAllListeners("SIGTERM");
   }
 }
 
@@ -195,19 +237,25 @@ export function cleanOldTrackerFiles(maxAgeDays: number = 7, dir: string = DEFAU
   return deleted;
 }
 
-/** List distinct runs for a given ID, with their latest status and timestamp. */
+/** List distinct runs for a given ID, with their latest status, step, and timestamp. */
 export function readRunsForId(
   workflow: string,
   id: string,
   dir: string = DEFAULT_DIR,
-): { runId: string; status: string; timestamp: string }[] {
+): { runId: string; status: string; step?: string; timestamp: string }[] {
   const entries = readEntries(workflow, dir).filter((e) => e.id === id);
   const runMap = new Map<string, TrackerEntry>();
+  // Track the last known step per run (the "failed"/"done" event may have no step)
+  const lastStep = new Map<string, string>();
   for (const e of entries) {
     const rid = e.runId || `${e.id}#1`;
-    runMap.set(rid, e); // keeps latest
+    runMap.set(rid, e);
+    if (e.step) lastStep.set(rid, e.step);
   }
   return [...runMap.values()]
-    .map((e) => ({ runId: e.runId || `${e.id}#1`, status: e.status, timestamp: e.timestamp }))
+    .map((e) => {
+      const rid = e.runId || `${e.id}#1`;
+      return { runId: rid, status: e.status, step: lastStep.get(rid), timestamp: e.timestamp };
+    })
     .sort((a, b) => a.runId.localeCompare(b.runId));
 }

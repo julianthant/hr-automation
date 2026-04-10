@@ -37,14 +37,14 @@ export function LogLine({ entry, isCurrent, onCopy }: LogLineProps) {
   return (
     <div
       className={cn(
-        "group flex items-baseline gap-3.5 px-6 py-[3px] font-mono text-[13px] leading-relaxed cursor-pointer relative",
+        "group flex items-center gap-3.5 px-6 py-[3px] font-mono text-[13px] leading-relaxed cursor-pointer relative",
         "transition-colors hover:bg-foreground/[0.02]",
         isCurrent && "bg-primary/[0.05]",
       )}
       onClick={() => onCopy(`${ts} ${entry.message}`)}
     >
       <span className="text-muted-foreground text-xs whitespace-nowrap min-w-[72px]">{ts}</span>
-      <Icon className={cn("w-[14px] h-[14px] flex-shrink-0 translate-y-[1px]", color)} />
+      <Icon className={cn("w-[14px] h-[14px] flex-shrink-0", color)} />
       <span className={cn(
         "flex-1 break-words",
         category === "success" && "text-[#4ade80]",
