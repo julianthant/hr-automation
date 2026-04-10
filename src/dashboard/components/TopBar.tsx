@@ -112,7 +112,7 @@ export function TopBar({
                 {dateDisplay}
               </button>
             </PopoverTrigger>
-            <PopoverContent align="center">
+            <PopoverContent align="center" className="p-4">
               <Calendar
                 selected={date}
                 onSelect={handleCalendarSelect}
