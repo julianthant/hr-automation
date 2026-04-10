@@ -1,6 +1,7 @@
 import type { Page } from "playwright";
 import { log } from "../utils/log.js";
 import { pollDuoApproval } from "./duo-poll.js";
+import { requestDuoApproval } from "../tracker/duo-queue.js";
 import { validateEnv } from "../utils/env.js";
 import { UKG_URL } from "../config.js";
 import { fillSsoCredentials, clickSsoSubmit } from "./sso-fields.js";
@@ -16,7 +17,7 @@ import { debugScreenshot } from "../utils/screenshot.js";
  * @param page - Playwright page instance
  * @returns true if authentication succeeded, false otherwise
  */
-export async function loginToUCPath(page: Page): Promise<boolean> {
+export async function loginToUCPath(page: Page, instance?: string): Promise<boolean> {
   // Track every navigation for debugging the redirect chain — removed after login
   const navListener = (frame: import("playwright").Frame) => {
     if (frame === page.mainFrame()) {
@@ -78,10 +79,13 @@ export async function loginToUCPath(page: Page): Promise<boolean> {
   log.step(`After login click | URL: ${page.url()}`);
 
   // Wait for Duo approval — poll for URL change or "Yes, this is my device" button
-  const approved = await pollDuoApproval(page, {
-    successUrlMatch: (url) =>
+  const duoOptions = {
+    successUrlMatch: (url: string) =>
       url.includes("universityofcalifornia.edu") && !url.includes("duosecurity"),
-  });
+  };
+  const approved = instance
+    ? await requestDuoApproval(page, { ...duoOptions, system: "UCPath", instance })
+    : await pollDuoApproval(page, duoOptions);
 
   page.off("framenavigated", navListener);
 
@@ -131,7 +135,7 @@ export async function loginToUCPath(page: Page): Promise<boolean> {
  * "Login" in its text, causing getByRole("button", { name: "LOGIN" }) to match it
  * instead of the actual form submit button. Fix: target button[name="_eventId_proceed"].
  */
-export async function loginToACTCrm(page: Page): Promise<boolean> {
+export async function loginToACTCrm(page: Page, instance?: string): Promise<boolean> {
   log.step("Navigating to ACT CRM onboarding portal...");
   await page.goto("https://crm.ucsd.edu/hr", {
     waitUntil: "domcontentloaded",
@@ -194,12 +198,15 @@ export async function loginToACTCrm(page: Page): Promise<boolean> {
   await debugScreenshot(page, "debug-04-after-login-click", { fullPage: true });
 
   // Now wait for Duo approval -- user approves on their phone
-  const approved = await pollDuoApproval(page, {
+  const duoOptions = {
     timeoutSeconds: 60,
-    successUrlMatch: (url) =>
+    successUrlMatch: (url: string) =>
       (url.includes("act-crm.my.site.com") || url.includes("crm.ucsd.edu")) &&
       !url.includes("login"),
-  });
+  };
+  const approved = instance
+    ? await requestDuoApproval(page, { ...duoOptions, system: "CRM", instance })
+    : await pollDuoApproval(page, duoOptions);
 
   if (!approved) {
     await debugScreenshot(page, "debug-06-duo-timeout", { fullPage: true });
@@ -266,15 +273,18 @@ export async function ukgNavigateAndFill(page: Page): Promise<boolean | "already
  * Click the login button and wait for Duo MFA approval.
  * Call after ukgNavigateAndFill() has filled credentials.
  */
-export async function ukgSubmitAndWaitForDuo(page: Page): Promise<boolean> {
+export async function ukgSubmitAndWaitForDuo(page: Page, instance?: string): Promise<boolean> {
   await page.locator('button[name="_eventId_proceed"]').click({ timeout: 5_000 });
   log.step("Credentials submitted — waiting for Duo MFA...");
 
-  const approved = await pollDuoApproval(page, {
+  const duoOptions = {
     successUrlMatch: () => true,
-    successCheck: async (p) =>
+    successCheck: async (p: Page) =>
       (await p.locator("text=Manage My Department").count()) > 0,
-  });
+  };
+  const approved = instance
+    ? await requestDuoApproval(page, { ...duoOptions, system: "OldKronos", instance })
+    : await pollDuoApproval(page, duoOptions);
 
   if (!approved) {
     log.error("UKG authentication timed out waiting for dashboard");
@@ -296,7 +306,7 @@ export async function ukgSubmitAndWaitForDuo(page: Page): Promise<boolean> {
  * @param url - Kuali Build URL to navigate to
  * @returns true if authentication succeeded, false otherwise
  */
-export async function loginToKuali(page: Page, url: string): Promise<boolean> {
+export async function loginToKuali(page: Page, url: string, instance?: string): Promise<boolean> {
   log.step("Navigating to Kuali Build...");
   await page.goto(url, {
     waitUntil: "domcontentloaded",
@@ -331,9 +341,9 @@ export async function loginToKuali(page: Page, url: string): Promise<boolean> {
   }
 
   // Poll for Duo approval or URL change
-  const approved = await pollDuoApproval(page, {
-    successUrlMatch: "kualibuild",
-    recovery: async (p) => {
+  const duoOptions = {
+    successUrlMatch: "kualibuild" as const,
+    recovery: async (p: Page) => {
       const currentUrl = p.url();
       if (currentUrl.includes("SAML") || currentUrl.includes("saml")) {
         log.step("SAML error detected — re-navigating to Kuali...");
@@ -341,7 +351,10 @@ export async function loginToKuali(page: Page, url: string): Promise<boolean> {
         await p.waitForTimeout(3_000);
       }
     },
-  });
+  };
+  const approved = instance
+    ? await requestDuoApproval(page, { ...duoOptions, system: "Kuali", instance })
+    : await pollDuoApproval(page, duoOptions);
 
   if (!approved) {
     log.error("Kuali Build authentication timed out");
@@ -362,7 +375,7 @@ export async function loginToKuali(page: Page, url: string): Promise<boolean> {
  * @param page - Playwright page instance
  * @returns true if authentication succeeded, false otherwise
  */
-export async function loginToNewKronos(page: Page): Promise<boolean> {
+export async function loginToNewKronos(page: Page, instance?: string): Promise<boolean> {
   const wfdUrl = "https://ucsd-sso.prd.mykronos.com/wfd/home";
 
   log.step("Navigating to new Kronos (WFD)...");
@@ -391,16 +404,19 @@ export async function loginToNewKronos(page: Page): Promise<boolean> {
   log.step("Credentials submitted — waiting for Duo MFA...");
 
   // Poll for Duo approval or URL change
-  const approved = await pollDuoApproval(page, {
-    successUrlMatch: "mykronos.com/wfd",
-    recovery: async (p) => {
+  const duoOptions = {
+    successUrlMatch: "mykronos.com/wfd" as const,
+    recovery: async (p: Page) => {
       if (p.url().includes("#failedLogin")) {
         log.step("Session timeout detected — re-navigating...");
         await p.goto(wfdUrl, { waitUntil: "domcontentloaded", timeout: 10_000 }).catch(() => {});
         await p.waitForTimeout(3_000);
       }
     },
-  });
+  };
+  const approved = instance
+    ? await requestDuoApproval(page, { ...duoOptions, system: "NewKronos", instance })
+    : await pollDuoApproval(page, duoOptions);
 
   if (!approved) {
     log.error("New Kronos (WFD) authentication timed out");
