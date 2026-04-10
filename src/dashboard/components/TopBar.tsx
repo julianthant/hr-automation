@@ -9,6 +9,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "./ui/dropdown-menu";
+import { Popover, PopoverTrigger, PopoverContent } from "./ui/popover";
+import { Calendar } from "./ui/calendar";
 
 interface TopBarProps {
   workflow: string;
@@ -37,19 +39,27 @@ export function TopBar({
     return ordered;
   }, [workflows]);
 
+  const dateObj = new Date(date + "T00:00:00");
+
   const dateDisplay = (() => {
     try {
-      const d = new Date(date + "T00:00:00");
-      return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+      return dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
     } catch {
       return date;
     }
   })();
 
-  const navigate = (dir: -1 | 1) => {
-    const idx = availableDates.indexOf(date);
-    const next = availableDates[idx - dir]; // dates are desc, so -dir
-    if (next) onDateChange(next);
+  // Chevrons navigate by day (not limited to available dates)
+  const navigateDay = (dir: -1 | 1) => {
+    const d = new Date(dateObj);
+    d.setDate(d.getDate() + dir);
+    onDateChange(d.toISOString().slice(0, 10));
+  };
+
+  const handleCalendarSelect = (day: Date | undefined) => {
+    if (day) {
+      onDateChange(day.toISOString().slice(0, 10));
+    }
   };
 
   return (
@@ -91,13 +101,33 @@ export function TopBar({
       <div className="flex items-center gap-4">
         {/* Date nav */}
         <div className="flex items-center gap-1">
-          <button onClick={() => navigate(-1)} className="w-8 h-8 rounded-md border border-border bg-secondary flex items-center justify-center text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground transition-colors">
+          <button
+            onClick={() => navigateDay(-1)}
+            className="w-8 h-8 rounded-md border border-border bg-secondary flex items-center justify-center text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground transition-colors"
+          >
             <ChevronLeft className="w-4 h-4" />
           </button>
-          <div className="px-4 py-1.5 rounded-md border border-border bg-secondary font-mono text-[13px] font-medium min-w-[120px] text-center cursor-pointer hover:bg-accent transition-colors">
-            {dateDisplay}
-          </div>
-          <button onClick={() => navigate(1)} className="w-8 h-8 rounded-md border border-border bg-secondary flex items-center justify-center text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground transition-colors">
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <button className="px-4 py-1.5 rounded-md border border-border bg-secondary font-mono text-[13px] font-medium min-w-[130px] text-center cursor-pointer hover:bg-accent transition-colors outline-none data-[state=open]:border-primary">
+                {dateDisplay}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="center">
+              <Calendar
+                mode="single"
+                selected={dateObj}
+                onSelect={handleCalendarSelect}
+                defaultMonth={dateObj}
+              />
+            </PopoverContent>
+          </Popover>
+
+          <button
+            onClick={() => navigateDay(1)}
+            className="w-8 h-8 rounded-md border border-border bg-secondary flex items-center justify-center text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground transition-colors"
+          >
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
