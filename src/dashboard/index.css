@@ -75,6 +75,22 @@
   --accent-foreground: hsl(30.6250 52.7473% 64.3137%);
   --destructive: hsl(0 84.2365% 60.1961%);
   --destructive-foreground: hsl(0 85.7143% 97.2549%);
+
+  /* HeroUI component overrides (Calendar, etc.) */
+  --surface: hsl(15 11.1111% 7.0588%);
+  --surface-foreground: hsl(24.0000 21.1268% 86.0784%);
+  --overlay: hsl(15 14.2857% 5.4902%);
+  --overlay-foreground: hsl(24.0000 21.1268% 86.0784%);
+  --default: hsl(15 16.6667% 9.4118%);
+  --default-foreground: hsl(24.0000 21.1268% 86.0784%);
+  --danger: hsl(0 84.2365% 60.1961%);
+  --danger-foreground: hsl(0 85.7143% 97.2549%);
+  --success: hsl(142 71% 45%);
+  --success-foreground: hsl(0 0% 100%);
+  --warning: hsl(45 93% 47%);
+  --warning-foreground: hsl(0 0% 0%);
+  --focus: hsl(29.3182 41.9048% 58.8235%);
+  --separator: hsl(25.0000 17.6471% 13.3333%);
   --border: hsl(25.0000 17.6471% 13.3333%);
   --input: hsl(27.6923 18.3099% 13.9216%);
   --ring: hsl(29.3182 41.9048% 58.8235%);
