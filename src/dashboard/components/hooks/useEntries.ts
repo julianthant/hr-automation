@@ -35,6 +35,8 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
       try {
         const { entries: raw, workflows: wfs }: { entries: TrackerEntry[]; workflows: string[] } = JSON.parse(e.data);
 
+        setLoading(false);
+
         // Skip if data hasn't changed (prevent unnecessary re-renders)
         const hash = JSON.stringify(raw.map((r) => `${r.id}:${r.status}:${r.step}:${r.timestamp}`));
         if (hash === prevHashRef.current) return;
@@ -60,13 +62,15 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
 
         setEntries(deduped);
         setWorkflows(wfs || []);
-        setLoading(false);
       } catch {
         // ignore malformed
       }
     };
 
-    es.onerror = () => setConnected(false);
+    es.onerror = () => {
+      setConnected(false);
+      setLoading(false);
+    };
 
     return () => {
       es.close();
