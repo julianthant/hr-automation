@@ -7,7 +7,7 @@ import { classifyError } from "../utils/errors.js";
 
 const writeMutex = new Mutex();
 
-const DEFAULT_DIR = ".tracker";
+export const DEFAULT_DIR = ".tracker";
 
 export interface LogEntry {
   workflow: string;
