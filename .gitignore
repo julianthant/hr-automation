@@ -26,8 +26,17 @@ node_modules/
 # Claude Code
 .claude/
 
+# Superpowers brainstorm mockups
+.superpowers/
+
+# Dashboard log
+.dashboard.log
+
 # Playwright CLI
 .playwright-cli/
+
+# Tracker data (local runtime)
+.tracker/
 
 # Excel tracking files
 *.xlsx
