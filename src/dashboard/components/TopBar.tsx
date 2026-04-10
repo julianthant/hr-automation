@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useMemo, useState, useRef, useEffect } from "react";
+import { ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
 import { useClock } from "./hooks/useClock";
 import { cn } from "@/lib/utils";
 import { TAB_ORDER, getConfig } from "./types";
@@ -21,15 +21,29 @@ export function TopBar({
   connected, entryCounts,
 }: TopBarProps) {
   const clock = useClock();
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // Always show all workflows from TAB_ORDER, plus any extras from SSE
   const allWfs = useMemo(() => {
-    const ordered = TAB_ORDER.filter((wf) => wf === workflow || workflows.includes(wf));
+    const ordered = [...TAB_ORDER];
     workflows.forEach((wf) => {
       if (!ordered.includes(wf)) ordered.push(wf);
     });
-    if (!ordered.includes(workflow)) ordered.unshift(workflow);
     return ordered;
-  }, [workflow, workflows]);
+  }, [workflows]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [dropdownOpen]);
 
   const dateDisplay = (() => {
     try {
@@ -53,30 +67,38 @@ export function TopBar({
         <div className="w-px h-6 bg-border" />
 
         {/* Workflow dropdown */}
-        <div className="relative group">
-          <button className="flex items-center gap-2.5 px-3.5 py-2 rounded-lg border border-border bg-secondary cursor-pointer w-[220px] transition-colors hover:border-primary">
+        <div className="relative" ref={dropdownRef}>
+          <button
+            onClick={() => setDropdownOpen((v) => !v)}
+            className={cn(
+              "flex items-center gap-2.5 px-3.5 py-2 rounded-lg border bg-secondary cursor-pointer w-[220px] transition-colors",
+              dropdownOpen ? "border-primary" : "border-border hover:border-primary",
+            )}
+          >
             <span className="flex-1 text-left font-semibold text-sm">{getConfig(workflow).label}</span>
             <span className="text-xs text-muted-foreground font-mono font-medium">{entryCounts[workflow] || 0}</span>
-            <span className="text-muted-foreground text-[10px]">&#9662;</span>
+            <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform", dropdownOpen && "rotate-180")} />
           </button>
-          <div className="absolute top-[calc(100%+6px)] left-0 w-[220px] bg-card border border-border rounded-xl shadow-xl z-50 p-1 hidden group-focus-within:block">
-            {allWfs.map((wf) => (
-              <button
-                key={wf}
-                onClick={() => onWorkflowChange(wf)}
-                className={cn(
-                  "flex items-center justify-between w-full px-3 py-2.5 rounded-md text-[13px] cursor-pointer transition-colors",
-                  "hover:bg-accent",
-                  wf === workflow && "bg-accent",
-                )}
-              >
-                <span className={cn("font-medium", wf === workflow && "font-semibold text-primary")}>{getConfig(wf).label}</span>
-                <span className={cn("font-mono text-[11px]", (entryCounts[wf] || 0) > 0 ? "text-primary font-semibold" : "text-muted-foreground")}>
-                  {entryCounts[wf] || 0}
-                </span>
-              </button>
-            ))}
-          </div>
+          {dropdownOpen && (
+            <div className="absolute top-[calc(100%+6px)] left-0 w-[220px] bg-card border border-border rounded-xl shadow-xl z-50 p-1">
+              {allWfs.map((wf) => (
+                <button
+                  key={wf}
+                  onClick={() => { onWorkflowChange(wf); setDropdownOpen(false); }}
+                  className={cn(
+                    "flex items-center justify-between w-full px-3 py-2.5 rounded-md text-[13px] cursor-pointer transition-colors",
+                    "hover:bg-accent",
+                    wf === workflow && "bg-accent",
+                  )}
+                >
+                  <span className={cn("font-medium", wf === workflow && "font-semibold text-primary")}>{getConfig(wf).label}</span>
+                  <span className={cn("font-mono text-[11px]", (entryCounts[wf] || 0) > 0 ? "text-primary font-semibold" : "text-muted-foreground")}>
+                    {entryCounts[wf] || 0}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
