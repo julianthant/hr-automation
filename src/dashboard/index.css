@@ -190,20 +190,22 @@
   }
 }
 
-/* HeroUI Calendar dark mode fixes */
+/* HeroUI Calendar dark mode fixes
+   HeroUI uses --accent for interactive (today, selected) and --muted for subdued text.
+   Our shadcn theme uses these differently, so we scope overrides to the calendar. */
+.dark .calendar {
+  --accent: hsl(29.3 41.9% 58.8%);
+  --accent-foreground: hsl(27.3 73.3% 5.9%);
+  --muted: hsl(22.5 7% 44.7%);
+  --default: hsl(25 17.6% 18%);
+  --default-foreground: hsl(24 21.1% 86.1%);
+}
 .dark .calendar__nav-button {
   color: hsl(24 21.1% 86.1%);
 }
 .dark .calendar__nav-button:hover {
-  background: hsl(27.3 35.5% 12.2%);
+  background: hsl(25 17.6% 18%);
 }
 .dark .calendar__header-cell {
-  color: hsl(22.5 7% 44.7%);
-}
-.dark .calendar__cell--outside-month {
-  color: hsl(22.5 7% 30%);
-}
-.dark .calendar__cell-button--selected {
-  background: hsl(29.3 41.9% 58.8%);
-  color: hsl(27.3 73.3% 5.9%);
+  color: hsl(22.5 7% 55%);
 }
