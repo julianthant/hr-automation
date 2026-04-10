@@ -7,7 +7,7 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
-  DropdownMenuCheckboxItem,
+  DropdownMenuItem,
 } from "./ui/dropdown-menu";
 
 interface TopBarProps {
@@ -69,10 +69,9 @@ export function TopBar({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-[220px]">
             {allWfs.map((wf) => (
-              <DropdownMenuCheckboxItem
+              <DropdownMenuItem
                 key={wf}
-                checked={wf === workflow}
-                onCheckedChange={() => onWorkflowChange(wf)}
+                onClick={() => onWorkflowChange(wf)}
                 className={cn(wf === workflow && "bg-accent")}
               >
                 <span className="flex items-center justify-between w-full">
@@ -83,7 +82,7 @@ export function TopBar({
                     {entryCounts[wf] || 0}
                   </span>
                 </span>
-              </DropdownMenuCheckboxItem>
+              </DropdownMenuItem>
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
