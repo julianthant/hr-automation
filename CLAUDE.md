@@ -13,6 +13,7 @@ npm run extract <email>                # Extract employee data from CRM only
 
 # Separations
 npm run separation <docId>             # Process separation: Kuali → Kronos → UCPath
+npm run separation <id1> <id2> <id3>   # Batch separations (sequential, shared browsers)
 npm run separation:dry <docId>         # Dry-run separation (extract data only)
 
 # Kronos Reports
@@ -187,7 +188,9 @@ These rules are **mandatory** — follow them on every task, not just when asked
 - **Tracker Excel files**: Always place tracker .xlsx files inside the workflow folder (e.g. `src/workflows/eid-lookup/eid-lookup-tracker.xlsx`), never in the project root
 - **Promise.allSettled for parallel systems**: Use `Promise.allSettled` (not `Promise.all`) when querying multiple systems in parallel — one system's failure shouldn't block others
 - Use `fillSsoCredentials()` and `pollDuoApproval()` — never write inline SSO/Duo loops
-- **`withTrackedWorkflow()` for lifecycle tracking**: Wraps workflow execution — auto-emits `pending` on start, `done` on success, `failed` on error. Provides `setStep(step)` for granular progress and `updateData(d)` to enrich entries with discovered info (names, IDs). All 5 workflows use this.
+- **`withTrackedWorkflow()` for lifecycle tracking**: Wraps workflow execution — auto-emits `pending` on start, `done` on success, `failed` on error. Provides `setStep(step)` for granular progress and `updateData(d)` to enrich entries with discovered info (names, IDs). All 5 workflows use this. Accepts `onCleanup` callback for resource teardown and optional `preAssignedRunId` for batch mode.
+- **SIGINT handling**: `withTrackedWorkflow` registers a SIGINT handler that writes a `failed` tracker entry and a log entry synchronously (bypassing async mutex) before calling `process.exit`. Also kills all Playwright Chrome processes via `wmic` on Windows.
+- **Error classification**: `classifyError()` in `utils/errors.ts` maps raw Playwright errors to concise user-facing messages (e.g. "Browser closed unexpectedly"). Use this in catch blocks before emitting error events.
 - **Tracker functions are Excel-only**: `updateOnboardingTracker`, `updateEidTracker`, `updateKronosTracker`, `updateWorkStudyTracker` write to `.xlsx` files only — they no longer call `trackEvent()` directly. The `withTrackedWorkflow` wrapper handles all JSONL event emissions.
 - Use `WorkflowSession.create()` for new workflows — shares auth across all windows
 - Use `computeTileLayout()` for multi-browser window positioning
@@ -205,7 +208,9 @@ Open **http://localhost:5173** to see real-time progress. The dashboard auto-upd
 1. Workflows use `withTrackedWorkflow()` which emits events to `.tracker/{workflow}-{YYYY-MM-DD}.jsonl`
 2. Log calls via `withLogContext()` emit to `.tracker/{workflow}-{YYYY-MM-DD}-logs.jsonl`
 3. SSE server polls these files (1s for entries, 500ms for logs) and streams to the React frontend
-4. Dashboard dedupes entries by ID (keeps latest), sorts: running → pending → failed → done
+4. SSE server enriches entries with `firstLogTs`, `lastLogTs`, `lastLogMessage` per (itemId, runId)
+5. Dashboard dedupes entries by ID (keeps latest), sorts by running start time (firstLogTs), pending at bottom
+6. Workflow dropdown counts come from backend (`wfCounts`) for cross-workflow accuracy
 
 ### Step Tracking Per Workflow
 | Workflow | Steps |
@@ -360,7 +365,7 @@ playwright-cli -s=ukg screenshot                  # visual verification
 1. Launch 5 tiled browsers (Kuali, Old Kronos, New Kronos, UCPath Txn, UCPath Job Summary)
 2. Authenticate all 5 with staggered Duo MFA (one at a time)
 3. **Phase 1 (parallel)**: Extract Kuali separation data + search both Kronos systems for timesheets
-4. Resolve Kronos dates: compare Old/New Kronos last timecard dates with Kuali separation date, update if needed
+4. Resolve Kronos dates: Kronos dates always override Kuali dates when they differ (Kronos is ground truth)
 5. **Phase 2**: Fetch UCPath job summary, create termination Smart HR transaction
 6. Termination effective date = separation date + 1 day
 7. Reason code: exact match → fuzzy match → fallback mapping from Kuali termination type

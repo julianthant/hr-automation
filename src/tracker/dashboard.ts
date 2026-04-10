@@ -64,7 +64,8 @@ export function startDashboard(workflow: string, port: number = 3838): void {
       const runId = url.searchParams.get("runId") ?? "";
       res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
       let logs = readLogEntries(wf, id || undefined);
-      if (runId) logs = logs.filter((l) => l.runId === runId);
+      // Logs without runId belong to run #1 only
+      if (runId) logs = logs.filter((l) => l.runId ? l.runId === runId : runId.endsWith("#1"));
       res.end(JSON.stringify(logs));
       return;
     }
@@ -81,15 +82,26 @@ export function startDashboard(workflow: string, port: number = 3838): void {
         Connection: "keep-alive",
         "Access-Control-Allow-Origin": "*",
       });
-      let lastCount = 0;
+      let sentCount = 0;
+      let firstTick = true;
       const send = () => {
         let entries = (date && date !== today)
           ? readLogEntriesForDate(wf, id || undefined, date)
           : readLogEntries(wf, id || undefined);
-        if (runId) entries = entries.filter((l) => l.runId === runId);
-        if (entries.length > lastCount) {
-          res.write(`data: ${JSON.stringify(entries.slice(lastCount))}\n\n`);
-          lastCount = entries.length;
+        // Logs without runId belong to run #1 only
+        if (runId) entries = entries.filter((l) => l.runId ? l.runId === runId : runId.endsWith("#1"));
+
+        if (firstTick) {
+          // First tick: send ALL existing logs so frontend has full history
+          if (entries.length > 0) {
+            res.write(`data: ${JSON.stringify(entries)}\n\n`);
+          }
+          sentCount = entries.length;
+          firstTick = false;
+        } else if (entries.length > sentCount) {
+          // Subsequent ticks: send only new logs
+          res.write(`data: ${JSON.stringify(entries.slice(sentCount))}\n\n`);
+          sentCount = entries.length;
         }
       };
       send();
@@ -109,11 +121,40 @@ export function startDashboard(workflow: string, port: number = 3838): void {
         "Access-Control-Allow-Origin": "*",
       });
       const send = () => {
-        const entries = (date && date !== today)
+        const raw = (date && date !== today)
           ? readEntriesForDate(wf, date)
           : readEntries(wf);
+        const entries = raw;
+
+        // Enrich entries with per-run log-derived timestamps for accurate elapsed
+        const logs = (date && date !== today)
+          ? readLogEntriesForDate(wf, undefined, date)
+          : readLogEntries(wf);
+        // Key: "itemId::runId" — logs without runId are assigned to run #1
+        const logFirst = new Map<string, string>();
+        const logLast = new Map<string, string>();
+        const logLastMsg = new Map<string, string>();
+        for (const l of logs) {
+          const rid = l.runId || `${l.itemId}#1`;
+          const key = `${l.itemId}::${rid}`;
+          if (!logFirst.has(key)) logFirst.set(key, l.ts);
+          logLast.set(key, l.ts);
+          logLastMsg.set(key, l.message);
+        }
+        const enriched = entries.map((e) => {
+          const key = `${e.id}::${e.runId || `${e.id}#1`}`;
+          return { ...e, firstLogTs: logFirst.get(key), lastLogTs: logLast.get(key), lastLogMessage: logLastMsg.get(key) };
+        });
+
         const workflows = listWorkflows();
-        res.write(`data: ${JSON.stringify({ entries, workflows })}\n\n`);
+        // Count deduped entries per workflow for dropdown badges
+        const wfCounts: Record<string, number> = {};
+        for (const w of workflows) {
+          const all = readEntries(w);
+          const ids = new Set(all.map((e) => e.id));
+          wfCounts[w] = ids.size;
+        }
+        res.write(`data: ${JSON.stringify({ entries: enriched, workflows, wfCounts })}\n\n`);
       };
       send();
       const interval = setInterval(send, 1_000);

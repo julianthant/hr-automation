@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LogLine } from "./LogLine";
 import type { CollapsedLogEntry } from "./hooks/useLogs";
 import type { LogCategory } from "./types";
@@ -35,6 +35,13 @@ export function LogStream({ logs, loading }: LogStreamProps) {
 
   const collapsedCount = logs.reduce((acc, l) => acc + (l.count > 1 ? l.count - 1 : 0), 0);
 
+  // Snap to bottom before paint when logs first appear (no visible scroll)
+  useLayoutEffect(() => {
+    if (scrollRef.current && filtered.length > 0 && prevLenRef.current === 0) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [filtered.length]);
+
   // Auto-scroll on new entries
   useEffect(() => {
     if (autoScroll && scrollRef.current && filtered.length > prevLenRef.current) {
@@ -70,14 +77,18 @@ export function LogStream({ logs, loading }: LogStreamProps) {
       {/* Log lines */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto py-3">
         {loading && filtered.length === 0 ? (
-          <div className="space-y-2 px-6 py-3">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3.5">
-                <div className="h-3 w-16 rounded bg-muted animate-pulse" />
-                <div className="h-3 w-3.5 rounded bg-muted animate-pulse" />
-                <div className="h-3 rounded bg-muted animate-pulse" style={{ width: `${120 + i * 40}px` }} />
+          <div className="space-y-[6px] px-6 py-3">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3.5 py-[3px]">
+                <div className="h-3 w-[72px] rounded bg-muted animate-pulse" />
+                <div className="h-3.5 w-3.5 rounded bg-muted animate-pulse" />
+                <div className="h-3 rounded bg-muted animate-pulse" style={{ width: `${100 + (i % 5) * 60}px` }} />
               </div>
             ))}
+          </div>
+        ) : filtered.length === 0 && !loading ? (
+          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+            No logs yet
           </div>
         ) : (
           filtered.map((entry, i) => (

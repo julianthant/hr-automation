@@ -45,4 +45,4 @@ Submit button: always `button[name="_eventId_proceed"]` (avoids collision with "
 
 ## Lessons Learned
 
-*(Add entries here when auth bugs are fixed — document root cause and fix so the same error never recurs)*
+- **2026-04-10: Duo pollDuoApproval auto-retry on timeout** — Duo MFA can time out if the user doesn't approve in time (e.g. phone not nearby). `pollDuoApproval` now auto-retries on timeout by clicking the "Try Again" button in the Duo iframe. This avoids the entire workflow failing because of a single missed Duo prompt.

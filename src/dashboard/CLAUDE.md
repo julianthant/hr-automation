@@ -206,7 +206,21 @@ When a new workflow is created, the dashboard must be updated:
 
 ## Lessons Learned
 
-*(Add entries here when dashboard bugs are fixed — document what went wrong and the fix)*
+- **2026-04-10: Logs flash and disappear** — Race condition between initial `/api/logs` fetch and SSE `/events/logs` stream. Both return overlapping data, and when SSE reconnects or runId changes, `setRawLogs([])` clears state before new data arrives. Fix: make SSE the sole data source — backend sends full history on first tick, frontend replaces state on first message and appends on subsequent ones. No separate initial fetch needed.
+- **2026-04-10: SSE lastCount mismatch** — Backend `/events/logs` tracked `lastCount` across all logs but filtered by `runId` after counting, causing the count to not match filtered array length. Fix: renamed to `sentCount`, send ALL filtered logs on first tick, then only incremental slices after.
+- **2026-04-10: RunSelector hidden for single runs** — `runs.length <= 1` returned `null`, so first-run entries never showed "Run #1". Fix: changed to `runs.length === 0` — now always shows run indicator when at least one run exists.
+- **2026-04-10: Page refresh loses selection** — Workflow, selected entry, and date were only in React state. Fix: sync to URL search params (`?wf=...&id=...&date=...`) via `history.replaceState` on every state change, read from URL on mount.
+- **2026-04-10: Logs empty despite JSONL file having data** — Log entries emitted by `withLogContext` don't have `runId` field, but the dashboard filtered `logs.filter(l => l.runId === runId)` which excluded all logs without `runId`. Fix: changed filter to `!l.runId || l.runId === runId` — logs without `runId` belong to all runs.
+- **2026-04-10: Stale "running" entries after process kill** — When user Ctrl+C's a workflow, `withTrackedWorkflow` catch block never runs, so the entry stays "running" forever. Original fix (`markStaleRunningEntries`) was removed because it produced false positives. Proper fix: SIGINT handler in `withTrackedWorkflow` writes `failed` entry synchronously before exit.
+- **2026-04-10: Toast notifications transparent** — CSS vars `--card`, `--border`, `--foreground` already contain full `hsl(...)` values, so wrapping in `hsl(var(...))` produces invalid CSS like `hsl(hsl(...))`. Browser falls back to transparent. Fix: use `var(--card)` directly, not `hsl(var(--card))`.
+- **2026-04-10: StepPipeline failed step display** — StepPipeline now shows a red X icon on the step where the workflow failed, making it visually clear which phase had the error.
+- **2026-04-10: RunSelector redesigned** — Replaced tab-style RunSelector with pill-based design for better density.
+- **2026-04-10: EntryItem redesigned** — 4-row layout: name+badge, doc ID, running log or error message, time+run+elapsed. Sorted by running start time (`firstLogTs`), pending entries at bottom.
+- **2026-04-10: LogPanel derives step/status from active run** — LogPanel now derives the current step and status from the active run's data, not the global deduped entry. This prevents stale data when switching between runs.
+- **2026-04-10: Skeleton loaders** — Added skeleton loaders to LogPanel header, detail grid, step pipeline, and log stream for better loading UX.
+- **2026-04-10: LogStream scroll snap** — `useLayoutEffect` snaps scroll to bottom before paint, preventing visual flicker when new logs arrive.
+- **2026-04-10: Elapsed time** — Live stopwatch while running, static duration when done/failed. Both EntryItem and LogPanel use the same `firstLogTs`/`lastLogTs` source for consistency.
+- **2026-04-10: formatStepName abbreviations** — `formatStepName` handles common abbreviations (UCPath, Kuali, Kronos, CRM, SSO, UKG) to display properly cased step names in the pipeline.
 
 ## Files to Create (Frontend)
 

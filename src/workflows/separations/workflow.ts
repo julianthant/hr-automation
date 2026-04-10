@@ -4,6 +4,7 @@ import { errorMessage } from "../../utils/errors.js";
 import { withTrackedWorkflow } from "../../tracker/jsonl.js";
 import { launchBrowser } from "../../browser/launch.js";
 import { loginToKuali, loginToUKG, loginToUCPath, loginToNewKronos } from "../../auth/login.js";
+import { ensurePageHealthy } from "../../utils/page-health.js";
 
 // Kuali module
 import {
@@ -80,6 +81,8 @@ export interface SeparationOptions {
   dryRun?: boolean;
   keepOpen?: boolean;
   existingWindows?: SessionWindows;
+  /** Pre-assigned runId from batch mode — skips pending emit in withTrackedWorkflow. */
+  runId?: string;
 }
 
 export interface SessionWindows {
@@ -133,9 +136,10 @@ export async function runSeparation(
   options: SeparationOptions = {},
 ): Promise<SeparationResult> {
   return withLogContext("separations", docId, async () => {
-  return withTrackedWorkflow("separations", docId, {}, async (setStep, updateData) => {
+  return withTrackedWorkflow("separations", docId, {}, async (setStep, updateData, onCleanup) => {
   const { dryRun = false, keepOpen = false, existingWindows } = options;
   const extraWindows: BrowserWindow[] = []; // UCPath windows we launch and close
+  const allWindows: BrowserWindow[] = []; // tracked for batch reuse
 
   // ─── Step 1: Launch + auth (or reuse existing) ───
   let kualiWin: BrowserWindow;
@@ -151,6 +155,7 @@ export async function runSeparation(
     oldKronosWin = existingWindows.oldKronos;
     newKronosWin = existingWindows.newKronos;
     ucpathWin = existingWindows.ucpath;
+    allWindows.push(kualiWin, oldKronosWin, newKronosWin, ucpathWin);
 
     // Auto-dismiss PeopleSoft dialogs that may appear when navigating
     // away from a previous transaction (batch mode state cleanup)
@@ -172,6 +177,7 @@ export async function runSeparation(
     oldKronosWin = wins[1];
     newKronosWin = wins[2];
     ucpathWin = wins[3];
+    allWindows.push(...wins);
 
     // ─── Auth Kuali (Duo #1) ───
     setStep("authenticating");
@@ -217,6 +223,7 @@ export async function runSeparation(
 
   // ─── Extract Kuali data ───
   setStep("kuali-extraction");
+  await ensurePageHealthy(kualiWin.page, undefined, "[Kuali]");
   const kualiData = await extractSeparationData(kualiWin.page);
 
   const isVol = isVoluntaryTermination(kualiData.terminationType);
@@ -244,12 +251,16 @@ export async function runSeparation(
   // PHASE 1: Kronos timecards (both in parallel)
   // ═══════════════════════════════════════════
   setStep("kronos-search");
-  log.step("=== PHASE 1: Kronos timecards ===");
+  log.step("=== PHASE 1: Old Kronos + New Kronos timecards ===");
+  await Promise.allSettled([
+    ensurePageHealthy(oldKronosWin.page, undefined, "[Old Kronos]"),
+    ensurePageHealthy(newKronosWin.page, NEW_KRONOS_URL, "[New Kronos]"),
+  ]);
 
   // Reset Kronos browsers when reusing windows (batch mode) —
   // previous doc leaves them on the old employee's timecard page
   if (existingWindows) {
-    log.step("[Batch] Resetting Kronos browsers for new employee...");
+    log.step("[Batch] Resetting Old Kronos + New Kronos browsers for new employee...");
     await Promise.allSettled([
       goBackToOldKronosMain(oldKronosWin.page),
       newKronosWin.page.goto(NEW_KRONOS_URL, { waitUntil: "domcontentloaded", timeout: 30_000 }),
@@ -259,7 +270,7 @@ export async function runSeparation(
   const { startDate: kronosStart, endDate: kronosEnd } = computeKronosDateRange(
     kualiData.lastDayWorked, kualiData.separationDate,
   );
-  log.step(`[Kronos] Date range: ${kronosStart} – ${kronosEnd}`);
+  log.step(`[Old Kronos / New Kronos] Date range: ${kronosStart} – ${kronosEnd}`);
 
   let oldKronosDate: string | null = null;
   let newKronosDate: string | null = null;
@@ -314,7 +325,8 @@ export async function runSeparation(
     log.error(`[New Kronos] Error: ${errorMessage(newResult.reason)}`);
   }
 
-  log.step(`Kronos results — Old: ${oldKronosFound} (${oldKronosDate ?? "no time"}), New: ${newKronosFound} (${newKronosDate ?? "no time"})`);
+  log.step(`[Old Kronos] ${oldKronosFound ? "Found" : "Not found"} (${oldKronosDate ?? "no time"})`);
+  log.step(`[New Kronos] ${newKronosFound ? "Found" : "Not found"} (${newKronosDate ?? "no time"})`);
 
   // ─── Resolve dates ───
   const resolved = resolveKronosDates(
@@ -327,10 +339,10 @@ export async function runSeparation(
         ? (oldKronosDate >= newKronosDate ? "Old Kronos" : "New Kronos")
         : (oldKronosDate ? "Old Kronos" : "New Kronos"))
     : "Kuali (no change)";
-  log.step(`Kronos dates: Old="${oldKronosDate || "none"}", New="${newKronosDate || "none"}" — using ${chosenDateSource}`);
+  log.step(`[Old Kronos / New Kronos] Resolved dates — using ${chosenDateSource}`);
 
   if (resolved.changed) {
-    log.step("[Dates] Kronos dates differ — updating Kuali:");
+    log.step("[Old Kronos / New Kronos] Dates differ from Kuali — updating:");
     if (resolved.lastDayWorked !== kualiData.lastDayWorked) {
       log.step(`  Last Day Worked: ${kualiData.lastDayWorked} → ${resolved.lastDayWorked}`);
       await updateLastDayWorked(kualiWin.page, resolved.lastDayWorked);
@@ -356,6 +368,7 @@ export async function runSeparation(
   // ═══════════════════════════════════════════
   setStep("ucpath-job-summary");
   log.step("=== PHASE 2: UCPath Job Summary ===");
+  await ensurePageHealthy(ucpathWin.page, undefined, "[UCPath]");
 
   let jobSummary: JobSummaryData | undefined;
   {
@@ -387,6 +400,7 @@ export async function runSeparation(
   // ���── UCPath Smart HR Transaction ───
   setStep("ucpath-transaction");
   log.step("=== UCPath Smart HR Transaction ===");
+  await ensurePageHealthy(ucpathWin.page, undefined, "[UCPath]");
 
   // Navigate UCPath to Smart HR (reuse same browser)
   let transactionNumber = "";
@@ -436,6 +450,7 @@ export async function runSeparation(
   // ═══════════════════════════════════════════
   setStep("kuali-finalization");
   log.step("=== PHASE 3: Kuali finalization ===");
+  await ensurePageHealthy(kualiWin.page, undefined, "[Kuali]");
 
   // Always fill checkbox + radio; fill txn number if we have it
   await fillTransactionResults(kualiWin.page, transactionNumber);
@@ -472,6 +487,6 @@ export async function runSeparation(
 
   log.success(`=== Separation complete for doc #${docId} ===`);
   return { data: separationData, windows: makeSessionWindows() };
-  }); // end withTrackedWorkflow
+  }, options.runId); // end withTrackedWorkflow
   }); // end withLogContext
 }

@@ -5,7 +5,7 @@ import { LogStream } from "./LogStream";
 import { RunSelector } from "./RunSelector";
 import { EmptyState } from "./EmptyState";
 import { useLogs } from "./hooks/useLogs";
-import { useElapsed } from "./hooks/useElapsed";
+import { useElapsed, formatDuration } from "./hooks/useElapsed";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry, RunInfo } from "./types";
 import { getConfig } from "./types";
@@ -26,27 +26,64 @@ const badgeStyles: Record<string, string> = {
 
 export function LogPanel({ entry, workflow, date }: LogPanelProps) {
   const [runs, setRuns] = useState<RunInfo[]>([]);
-  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [activeRunId, setActiveRunId] = useState<string | null>(entry?.runId || null);
   const cfg = getConfig(workflow);
 
-  // Fetch runs when entry changes
+  // Fetch runs when entry changes or a new run appears
   useEffect(() => {
     if (!entry) {
       setRuns([]);
       setActiveRunId(null);
       return;
     }
-    fetch(`/api/runs?workflow=${encodeURIComponent(workflow)}&id=${encodeURIComponent(entry.id)}`)
-      .then((r) => r.json())
-      .then((data: RunInfo[]) => {
-        setRuns(data);
-        setActiveRunId(data.length > 0 ? data[data.length - 1].runId : entry.runId || null);
-      })
-      .catch(() => setRuns([]));
-  }, [entry?.id, workflow]);
+    // Set runId from entry immediately so useLogs doesn't fire with null first
+    setActiveRunId((prev) => prev || entry.runId || null);
+
+    const fetchRuns = () => {
+      fetch(`/api/runs?workflow=${encodeURIComponent(workflow)}&id=${encodeURIComponent(entry.id)}`)
+        .then((r) => r.json())
+        .then((data: RunInfo[]) => {
+          setRuns((prev) => {
+            // Only update if runs actually changed
+            if (JSON.stringify(prev) === JSON.stringify(data)) return prev;
+            return data;
+          });
+          // Switch to latest run when a NEW run appears
+          setActiveRunId((prev) => {
+            if (!prev) return data.length > 0 ? data[data.length - 1].runId : entry.runId || null;
+            // If a new run appeared that wasn't there before, switch to it
+            const latestRunId = data.length > 0 ? data[data.length - 1].runId : null;
+            if (latestRunId && latestRunId !== prev && !data.slice(0, -1).some((r) => r.runId === latestRunId)) {
+              return latestRunId;
+            }
+            if (data.some((r) => r.runId === prev)) return prev;
+            return data.length > 0 ? data[data.length - 1].runId : entry.runId || null;
+          });
+        })
+        .catch(() => {});
+    };
+
+    fetchRuns();
+    // Poll for new runs while entry is running/pending
+    const isLive = entry.status === "running" || entry.status === "pending";
+    const interval = isLive ? setInterval(fetchRuns, 2_000) : undefined;
+    return () => { if (interval) clearInterval(interval); };
+  }, [entry?.id, entry?.runId, entry?.status, workflow]);
 
   const { logs, loading: logsLoading } = useLogs(workflow, entry?.id || null, activeRunId, date);
-  const elapsed = useElapsed(entry?.status === "running" ? entry.timestamp : null);
+
+  // Derive step/status from active run (not the globally deduped entry)
+  const activeRun = runs.find((r) => r.runId === activeRunId);
+  const runStatus = activeRun?.status || entry?.status || "pending";
+  const runStep = activeRun?.step || null;
+
+  // Same timestamp source as queue panel (backend enrichment) for consistency
+  const firstTs = entry?.firstLogTs || entry?.startTimestamp || entry?.timestamp || null;
+  const lastTs = entry?.lastLogTs || entry?.timestamp || null;
+  const elapsed = useElapsed(runStatus === "running" ? firstTs : null);
+  const duration = runStatus !== "running" && firstTs && lastTs && firstTs !== lastTs
+    ? formatDuration(firstTs, lastTs)
+    : null;
 
   if (!entry) {
     return (
@@ -61,20 +98,37 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
   }
 
   const name = cfg.getName(entry);
-  const startTime = entry.timestamp
-    ? new Date(entry.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" })
+  const displayTs = firstTs || entry.timestamp;
+  const startTime = displayTs
+    ? new Date(displayTs).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" })
     : "";
+
+  const Skeleton = ({ className }: { className?: string }) => (
+    <div className={cn("rounded bg-muted animate-pulse", className)} />
+  );
+
+  // Show skeleton while logs are loading and we have no data yet
+  const showSkeleton = logsLoading && logs.length === 0;
 
   return (
     <div className="flex-1 flex flex-col bg-card min-w-0">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0">
         <div className="flex items-center gap-3.5">
-          <span className="font-bold text-lg">{name || entry.id}</span>
-          <span className={cn("text-[10px] font-semibold px-2.5 py-0.5 rounded-xl uppercase tracking-wide font-mono", badgeStyles[entry.status])}>
-            {entry.status}
-          </span>
-          {name && <span className="font-mono text-[13px] text-muted-foreground">{entry.id}</span>}
+          {showSkeleton ? (
+            <>
+              <Skeleton className="h-6 w-40" />
+              <Skeleton className="h-5 w-16 rounded-xl" />
+            </>
+          ) : (
+            <>
+              <span className="font-bold text-lg">{name || entry.id}</span>
+              <span className={cn("text-[10px] font-semibold px-2.5 py-0.5 rounded-xl uppercase tracking-wide font-mono", badgeStyles[runStatus])}>
+                {runStatus}
+              </span>
+              {name && <span className="font-mono text-[13px] text-muted-foreground">{entry.id}</span>}
+            </>
+          )}
         </div>
         <RunSelector runs={runs} activeRunId={activeRunId} onSelect={setActiveRunId} />
       </div>
@@ -85,34 +139,47 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1">
             {cfg.detailFields[0]?.label || "ID"}
           </div>
-          <div className="text-sm font-medium">{name || entry.id}</div>
+          {showSkeleton ? <Skeleton className="h-4 w-28 mt-1" /> : <div className="text-sm font-medium">{name || entry.id}</div>}
         </div>
         <div className="px-6 py-3.5 border-r border-border">
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1">
             {cfg.detailFields[1]?.label || "ID"}
           </div>
-          <div className="text-sm font-mono">{entry.id}</div>
+          {showSkeleton ? <Skeleton className="h-4 w-16 mt-1" /> : <div className="text-sm font-mono">{entry.id}</div>}
         </div>
         <div className="px-6 py-3.5 border-r border-border">
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1">Started</div>
-          <div className="text-sm font-mono">{startTime}</div>
+          {showSkeleton ? <Skeleton className="h-4 w-20 mt-1" /> : <div className="text-sm font-mono">{startTime}</div>}
         </div>
         <div className="px-6 py-3.5">
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1">Elapsed</div>
-          <div className={cn("text-sm font-mono", entry.status === "running" && "text-primary")}>
-            {elapsed || "\u2014"}
-          </div>
+          {showSkeleton ? <Skeleton className="h-4 w-16 mt-1" /> : (
+            <div className={cn("text-sm font-mono", runStatus === "running" && "text-primary")}>
+              {elapsed || duration || "\u2014"}
+            </div>
+          )}
         </div>
       </div>
 
       {/* Step pipeline */}
-      <StepPipeline
-        steps={cfg.steps}
-        currentStep={entry.step || null}
-        status={entry.status}
-      />
+      {showSkeleton ? (
+        <div className="flex items-center gap-3 px-6 py-4 border-b border-border">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="flex items-center">
+              {i > 0 && <Skeleton className="w-8 h-0.5 mx-1.5" />}
+              <Skeleton className="w-6 h-6 rounded-full" />
+              <Skeleton className="h-3 w-16 ml-1.5" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <StepPipeline
+          steps={cfg.steps}
+          currentStep={runStep}
+          status={runStatus}
+        />
+      )}
 
-      {/* Log stream + filters + footer */}
       <LogStream logs={logs} loading={logsLoading} />
     </div>
   );

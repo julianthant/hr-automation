@@ -185,18 +185,18 @@ export function resolveKronosDates(
     return { lastDayWorked: kualiLastDay, separationDate: kualiSepDate, changed: false };
   }
 
-  // Use Kronos date for both if it's later, otherwise keep original
+  // Kronos timecard data is ground truth — always use it when available
   return {
-    lastDayWorked: kronosParsed > kualiLastParsed ? kronosDate : kualiLastDay,
-    separationDate: kronosParsed > kualiSepParsed ? kronosDate : kualiSepDate,
+    lastDayWorked: lastDayDiffers ? kronosDate : kualiLastDay,
+    separationDate: sepDateDiffers ? kronosDate : kualiSepDate,
     changed: true,
   };
 }
 
 /**
  * Compute the Kronos date range for timecard search.
- * Start = min(lastDayWorked, separationDate) - 2 weeks
- * End   = max(lastDayWorked, separationDate) + 2 weeks
+ * Start = min(lastDayWorked, separationDate) - 1 month
+ * End   = max(lastDayWorked, separationDate) + 1 month
  * Returns dates in M/D/YYYY format (for setDateRange digit typing).
  */
 export function computeKronosDateRange(
@@ -210,10 +210,10 @@ export function computeKronosDateRange(
   const later = ldw >= sep ? ldw : sep;
 
   const start = new Date(earlier);
-  start.setDate(start.getDate() - 14);
+  start.setMonth(start.getMonth() - 1);
 
   const end = new Date(later);
-  end.setDate(end.getDate() + 14);
+  end.setMonth(end.getMonth() + 1);
 
   const fmt = (d: Date) => {
     const mm = String(d.getMonth() + 1).padStart(2, "0");

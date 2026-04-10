@@ -17,12 +17,13 @@ import { debugScreenshot } from "../utils/screenshot.js";
  * @returns true if authentication succeeded, false otherwise
  */
 export async function loginToUCPath(page: Page): Promise<boolean> {
-  // Track every navigation for debugging the redirect chain
-  page.on("framenavigated", (frame) => {
+  // Track every navigation for debugging the redirect chain — removed after login
+  const navListener = (frame: import("playwright").Frame) => {
     if (frame === page.mainFrame()) {
       log.step(`[NAV] ${frame.url()}`);
     }
-  });
+  };
+  page.on("framenavigated", navListener);
 
   log.step("Navigating to UCPath...");
   await page.goto("https://ucpath.ucsd.edu", {
@@ -81,6 +82,8 @@ export async function loginToUCPath(page: Page): Promise<boolean> {
     successUrlMatch: (url) =>
       url.includes("universityofcalifornia.edu") && !url.includes("duosecurity"),
   });
+
+  page.off("framenavigated", navListener);
 
   if (!approved) {
     return false;
