@@ -136,7 +136,7 @@ export async function runSeparation(
   options: SeparationOptions = {},
 ): Promise<SeparationResult> {
   return withLogContext("separations", docId, async () => {
-  return withTrackedWorkflow("separations", docId, {}, async (setStep, updateData, onCleanup) => {
+  return withTrackedWorkflow("separations", docId, {}, async (setStep, updateData, onCleanup, session) => {
   const { dryRun = false, keepOpen = false, existingWindows } = options;
   const extraWindows: BrowserWindow[] = []; // UCPath windows we launch and close
   const allWindows: BrowserWindow[] = []; // tracked for batch reuse
@@ -145,8 +145,15 @@ export async function runSeparation(
   let kualiWin: BrowserWindow;
   let oldKronosWin: BrowserWindow;
   let newKronosWin: BrowserWindow;
-
   let ucpathWin: BrowserWindow;
+
+  // Auth-ready promises — each resolves when its browser is ready for work.
+  // Batch mode: all resolve immediately (browsers already authed).
+  // Fresh mode: each resolves after its Duo MFA completes, allowing work tasks
+  // to start as soon as their individual auth clears (not waiting for all 4).
+  let oldKronosReady: Promise<void> = Promise.resolve();
+  let newKronosReady: Promise<void> = Promise.resolve();
+  let ucpathReady: Promise<void> = Promise.resolve();
 
   setStep("launching");
   if (existingWindows) {
@@ -163,6 +170,7 @@ export async function runSeparation(
 
     await openActionList(kualiWin.page);
     await clickDocument(kualiWin.page, docId);
+    // Ready promises stay as Promise.resolve() — browsers already authed
   } else {
     log.step("=== Step 1: Launch 4 browsers ===");
 
@@ -179,42 +187,53 @@ export async function runSeparation(
     ucpathWin = wins[3];
     allWindows.push(...wins);
 
-    // ─── Auth Kuali (Duo #1) ───
+    // ─── Auth Kuali (Duo #1) — must complete before anything else ───
     setStep("authenticating");
     log.step("=== Auth Kuali (Duo #1) ===");
     const kualiAuth = await loginToKuali(kualiWin.page, KUALI_SPACE_URL);
     if (!kualiAuth) throw new Error("Kuali authentication failed");
     log.success("[Kuali] Authenticated");
 
-    // ─── Extract Kuali ‖ Auth Old Kronos (Duo #2) ───
-    log.step("=== Extract Kuali ‖ Auth Old Kronos (Duo #2) ===");
-    {
-      const [, kronosResult] = await Promise.allSettled([
-        (async () => {
-          await openActionList(kualiWin.page);
-          await clickDocument(kualiWin.page, docId);
-        })(),
-        (async () => {
-          log.waiting("[Old Kronos] Auth (Duo #2)...");
-          await loginToUKG(oldKronosWin.page);
-          log.success("[Old Kronos] Authenticated");
-        })(),
-      ]);
-      if (kronosResult.status === "rejected") {
-        log.error(`[Old Kronos] Auth failed: ${errorMessage(kronosResult.reason)}`);
-      }
-    }
+    // ─── Kuali nav ‖ Auth Old Kronos (Duo #2) ───
+    // Both run in parallel. Old Kronos auth becomes a ready promise.
+    log.step("=== Kuali nav ‖ Auth Old Kronos (Duo #2) ===");
+    oldKronosReady = (async () => {
+      log.waiting("[Old Kronos] Auth (Duo #2)...");
+      await loginToUKG(oldKronosWin.page);
+      log.success("[Old Kronos] Authenticated");
+    })();
 
-    // ─── Auth New Kronos (Duo #3) ───
-    log.step("=== Auth New Kronos (Duo #3) ===");
-    await newKronosWin.page.goto(NEW_KRONOS_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
-    await loginToNewKronos(newKronosWin.page);
-    log.success("[New Kronos] Authenticated");
+    await Promise.allSettled([
+      (async () => {
+        await openActionList(kualiWin.page);
+        await clickDocument(kualiWin.page, docId);
+      })(),
+      oldKronosReady,
+    ]);
 
-    // ─── Auth UCPath (Duo #4) ───
-    log.step("=== Auth UCPath (Duo #4) ===");
-    await loginToUCPath(ucpathWin.page);
-    log.success("[UCPath] Authenticated");
+    // ─── Auth chain continues in background ───
+    // Each browser starts its work immediately after its own Duo clears.
+    // Don't await — extraction proceeds while user approves remaining Duos.
+    // .catch() on each step prevents one auth failure from blocking the chain.
+    newKronosReady = oldKronosReady
+      .catch(() => {})
+      .then(async () => {
+        log.step("=== Auth New Kronos (Duo #3) ===");
+        await newKronosWin.page.goto(NEW_KRONOS_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
+        await loginToNewKronos(newKronosWin.page);
+        log.success("[New Kronos] Authenticated");
+      });
+
+    ucpathReady = newKronosReady
+      .catch(() => {})
+      .then(async () => {
+        log.step("=== Auth UCPath (Duo #4) ===");
+        await loginToUCPath(ucpathWin.page);
+        log.success("[UCPath] Authenticated");
+      });
+
+    // Prevent unhandled rejection if workflow exits before Phase 1 consumes these
+    ucpathReady.catch(() => {});
   }
 
   const makeSessionWindows = (): SessionWindows => ({
@@ -248,18 +267,22 @@ export async function runSeparation(
   }
 
   // ═══════════════════════════════════════════
-  // PHASE 1: Kronos timecards (both in parallel)
+  // PHASE 1: Kronos + Job Summary + Kuali fill (parallel)
+  // All 4 tasks use separate browser windows — no conflicts.
+  // Job Summary only needs EID (from Kuali extraction).
+  // Kuali timekeeper fill touches different form fields than date updates.
   // ═══════════════════════════════════════════
   setStep("kronos-search");
-  log.step("=== PHASE 1: Old Kronos + New Kronos timecards ===");
-  await Promise.allSettled([
-    ensurePageHealthy(oldKronosWin.page, undefined, "[Old Kronos]"),
-    ensurePageHealthy(newKronosWin.page, NEW_KRONOS_URL, "[New Kronos]"),
-  ]);
+  log.step("=== PHASE 1: Kronos + Job Summary + Kuali fill (parallel) ===");
 
-  // Reset Kronos browsers when reusing windows (batch mode) —
-  // previous doc leaves them on the old employee's timecard page
+  // Batch mode: health check + reset (browsers already authed, may have stale state).
+  // Fresh mode: skip — browsers are being authed in background via ready promises.
   if (existingWindows) {
+    await Promise.allSettled([
+      ensurePageHealthy(oldKronosWin.page, undefined, "[Old Kronos]"),
+      ensurePageHealthy(newKronosWin.page, NEW_KRONOS_URL, "[New Kronos]"),
+      ensurePageHealthy(ucpathWin.page, undefined, "[UCPath]"),
+    ]);
     log.step("[Batch] Resetting Old Kronos + New Kronos browsers for new employee...");
     await Promise.allSettled([
       goBackToOldKronosMain(oldKronosWin.page),
@@ -276,9 +299,14 @@ export async function runSeparation(
   let newKronosDate: string | null = null;
   let oldKronosFound = false;
   let newKronosFound = false;
+  let jobSummary: JobSummaryData | undefined;
 
-  const [oldResult, newResult] = await Promise.allSettled([
-    (async () => {
+  // Each work task awaits its own auth-ready promise before starting.
+  // Batch mode: promises already resolved → work starts immediately.
+  // Fresh mode: each task starts as soon as its Duo MFA clears — Old Kronos
+  // work begins while user is still approving New Kronos/UCPath on their phone.
+  const [oldResult, newResult, jobSummaryResult] = await Promise.allSettled([
+    oldKronosReady.then(async () => {
       // Old Kronos: set date range FIRST, then search by ID
       const iframe = await getGeniesIframe(oldKronosWin.page);
       await dismissModal(oldKronosWin.page, iframe);
@@ -296,8 +324,8 @@ export async function runSeparation(
       await dismissModal(oldKronosWin.page, iframe);
       const date = await getOldKronosTimecardLastDate(oldKronosWin.page, iframe);
       return { found: true, date };
-    })(),
-    (async () => {
+    }),
+    newKronosReady.then(async () => {
       // New Kronos: search by ID first, then go to timecard, then set date range
       const found = await searchNewKronos(newKronosWin.page, kualiData.eid);
       log.step(`[New Kronos] EID ${kualiData.eid}: ${found ? "FOUND" : "NOT FOUND"}`);
@@ -309,9 +337,21 @@ export async function runSeparation(
       await setNewKronosDateRange(newKronosWin.page, kronosStart, kronosEnd);
       const date = await getNewKronosTimecardLastDate(newKronosWin.page);
       return { found: true, date };
+    }),
+    ucpathReady.then(async () => {
+      // UCPath Job Summary — only needs EID, no dependency on Kronos results
+      log.step("[UCPath] Starting Job Summary lookup...");
+      return getJobSummaryData(ucpathWin.page, kualiData.eid);
+    }),
+    (async () => {
+      // Kuali timekeeper name fill — already authed, starts immediately
+      log.step("[Kuali] Filling timekeeper name...");
+      await fillTimekeeperTasks(kualiWin.page, timekeeperName);
+      log.success("[Kuali] Timekeeper name filled");
     })(),
   ]);
 
+  // ─── Process Kronos results ───
   if (oldResult.status === "fulfilled") {
     oldKronosFound = oldResult.value.found;
     oldKronosDate = oldResult.value.date;
@@ -328,7 +368,14 @@ export async function runSeparation(
   log.step(`[Old Kronos] ${oldKronosFound ? "Found" : "Not found"} (${oldKronosDate ?? "no time"})`);
   log.step(`[New Kronos] ${newKronosFound ? "Found" : "Not found"} (${newKronosDate ?? "no time"})`);
 
-  // ─── Resolve dates ───
+  // ─── Process Job Summary result ───
+  if (jobSummaryResult.status === "fulfilled") {
+    jobSummary = jobSummaryResult.value;
+  } else {
+    log.error(`[UCPath Job Summary] Failed: ${errorMessage(jobSummaryResult.reason)}`);
+  }
+
+  // ─── Resolve Kronos dates ───
   const resolved = resolveKronosDates(
     kualiData.lastDayWorked, kualiData.separationDate,
     oldKronosDate, newKronosDate,
@@ -363,30 +410,12 @@ export async function runSeparation(
   }
   const finalComments = buildTerminationComments(finalTermEffDate, resolved.lastDayWorked, docId);
 
-  // ═══════════════════════════════════════════
-  // PHASE 2: UCPath (Job Summary → Transaction)
-  // ═══════════════════════════════════════════
+  // ─── Fill remaining Kuali fields (term date + department/payroll) ───
+  // Term date depends on Kronos date resolution; department depends on Job Summary.
+  // Both are now available after the parallel block above.
   setStep("ucpath-job-summary");
-  log.step("=== PHASE 2: UCPath Job Summary ===");
-  await ensurePageHealthy(ucpathWin.page, undefined, "[UCPath]");
-
-  let jobSummary: JobSummaryData | undefined;
-  {
-    const results = await Promise.allSettled([
-      getJobSummaryData(ucpathWin.page, kualiData.eid),
-      (async () => {
-        log.step("[Kuali] Filling timekeeper + term date...");
-        await fillTimekeeperTasks(kualiWin.page, timekeeperName);
-        await kualiWin.page.getByRole("textbox", { name: "Termination Effective Date*" }).fill(finalTermEffDate, { timeout: 5_000 });
-        log.success("[Kuali] Partial fill done");
-      })(),
-    ]);
-    if (results[0].status === "fulfilled") {
-      jobSummary = results[0].value;
-    } else {
-      log.error(`[UCPath Job Summary] Failed: ${errorMessage(results[0].reason)}`);
-    }
-  }
+  log.step("[Kuali] Filling termination effective date + department/payroll...");
+  await kualiWin.page.getByRole("textbox", { name: "Termination Effective Date*" }).fill(finalTermEffDate, { timeout: 5_000 });
 
   if (jobSummary && (jobSummary.departmentDescription || jobSummary.jobCode)) {
     await fillFinalTransactions(kualiWin.page, {
@@ -437,12 +466,14 @@ export async function runSeparation(
   }
 
   // Navigate UCPath back to Smart HR base URL to reset PeopleSoft session state.
-  // Critical for batch mode: leaving the browser on a transaction info page causes
+  // Only needed in batch mode: leaving the browser on a transaction info page causes
   // session conflicts when creating the next doc's transaction.
-  try {
-    await navigateToSmartHR(ucpathWin.page);
-  } catch {
-    // Non-fatal — next doc's navigateToSmartHR will retry
+  if (existingWindows) {
+    try {
+      await navigateToSmartHR(ucpathWin.page);
+    } catch {
+      // Non-fatal — next doc's navigateToSmartHR will retry
+    }
   }
 
   // ═══════════════════════════════════════════

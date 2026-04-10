@@ -30,7 +30,7 @@ export async function lookupSingle(nameInput: string): Promise<LookupResult> {
 
   try {
     return await withLogContext("eid-lookup", nameInput, async () => {
-      return withTrackedWorkflow("eid-lookup", nameInput, {}, async (setStep, updateData) => {
+      return withTrackedWorkflow("eid-lookup", nameInput, {}, async (setStep, updateData, _onCleanup, session) => {
       log.step(`Looking up: "${nameInput}"`);
 
       setStep("ucpath-auth");
@@ -125,7 +125,7 @@ export async function lookupParallel(
         log.step(`[Worker ${workerId}] Searching: "${nameInput}"`);
 
         const workerResult = await withLogContext("eid-lookup", nameInput, async () => {
-          return withTrackedWorkflow("eid-lookup", nameInput, {}, async (setStep, updateData) => {
+          return withTrackedWorkflow("eid-lookup", nameInput, {}, async (setStep, updateData, _onCleanup, session) => {
           try {
             setStep("searching");
             const result = await searchByName(workerPage, nameInput);
@@ -199,7 +199,7 @@ export async function lookupWithCrm(nameInput: string): Promise<LookupResult> {
 
   try {
     return await withLogContext("eid-lookup", nameInput, async () => {
-      return withTrackedWorkflow("eid-lookup", nameInput, {}, async (setStep, updateData) => {
+      return withTrackedWorkflow("eid-lookup", nameInput, {}, async (setStep, updateData, _onCleanup, session) => {
       // Step 1: Authenticate UCPath
       setStep("ucpath-auth");
       log.step("Authenticating to UCPath...");

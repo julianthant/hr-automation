@@ -25,7 +25,7 @@ export async function runWorkStudy(
   options: WorkStudyOptions = {},
 ): Promise<void> {
   await withLogContext("work-study", input.emplId, async () => {
-  await withTrackedWorkflow("work-study", input.emplId, {}, async (setStep, updateData) => {
+  await withTrackedWorkflow("work-study", input.emplId, {}, async (setStep, updateData, _onCleanup, session) => {
   if (options.dryRun) {
     const ctx: WorkStudyContext = { employeeName: "" };
     const plan = buildWorkStudyPlan(input, null as never, ctx);
