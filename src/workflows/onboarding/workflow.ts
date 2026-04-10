@@ -56,7 +56,7 @@ export async function runOnboarding(
   const isParallel = Boolean(options.crmPage);
 
   return withLogContext("onboarding", email, async () => {
-  return withTrackedWorkflow("onboarding", email, {}, async (setStep, updateData) => {
+  return withTrackedWorkflow("onboarding", email, {}, async (setStep, updateData, _onCleanup, session) => {
   const writeTracker = options.updateTrackerFn ?? defaultUpdateTracker;
 
   let data: EmployeeData;

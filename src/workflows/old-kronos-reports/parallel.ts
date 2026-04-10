@@ -198,7 +198,7 @@ async function runWorker(
 
       try {
         await withLogContext("kronos-reports", employeeId, () =>
-          withTrackedWorkflow("kronos-reports", employeeId, {}, async (setStep, updateData) => {
+          withTrackedWorkflow("kronos-reports", employeeId, {}, async (setStep, updateData, _onCleanup, session) => {
             setStep("searching");
             await runKronosForEmployee(employeeId, {
               page,
