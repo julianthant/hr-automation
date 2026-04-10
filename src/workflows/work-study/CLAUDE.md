@@ -33,3 +33,11 @@ CLI: emplId + effectiveDate
 - 3-5 second waits required after PeopleSoft iframe reloads
 - PeopleSoft alerts (payroll-in-progress warnings) are auto-dismissed
 - Uses `getContentFrame()` for all iframe interactions — same pattern as onboarding
+
+## Verified Selectors
+
+*(Add selectors here after each playwright-cli mapping session — include date and page)*
+
+## Lessons Learned
+
+*(Add entries here when work-study bugs are fixed — document root cause and fix so the same error never recurs)*

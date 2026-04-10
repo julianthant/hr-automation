@@ -14,3 +14,11 @@ Employee search automation for New Kronos (Workforce Dayforce). Much simpler tha
 - Checks for "There are no items to display." message to detect no results
 - Less defensive than Old Kronos — fewer fallback strategies, lets errors propagate
 - No screenshot/debug logging
+
+## Verified Selectors
+
+*(Add selectors here after each playwright-cli mapping session — include date and system)*
+
+## Lessons Learned
+
+*(Add entries here when New Kronos bugs are fixed — document root cause and fix so the same error never recurs)*

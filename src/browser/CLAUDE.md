@@ -24,3 +24,7 @@ Returns `{ browser, context, page }`.
 - Existing pages from prior persistent sessions may have stale state
 - Multiple workers using same `sessionDir` will conflict — use unique per-worker dirs (e.g., `ukg_session_worker1`)
 - `acceptDownloads` must be explicitly `true` for kronos report downloads
+
+## Lessons Learned
+
+*(Add entries here when browser launch/session bugs are fixed — document root cause and fix)*

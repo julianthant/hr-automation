@@ -28,3 +28,11 @@ Kuali Build separation form automation: extraction and form filling for employee
 - Throws generic `Error` for missing documents (not custom error class)
 - **`clickSave` targets navbar**: Scrolls to top first, then targets `[class*="action-bar"] button:has-text("Save")` or `nav button:has-text("Save")` before falling back to generic `button[name="Save"]` — avoids clicking wrong save button in modals or other form sections
 - `fillTransactionResults` fills fields only — does NOT save. Must call `clickSave()` separately after all form sections are filled
+
+## Verified Selectors
+
+*(Add selectors here after each playwright-cli mapping session — include date and system)*
+
+## Lessons Learned
+
+*(Add entries here when Kuali bugs are fixed — document root cause and fix so the same error never recurs)*

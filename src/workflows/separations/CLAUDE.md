@@ -50,3 +50,9 @@ Screen: 2560x1440, windows positioned via Chromium `--window-position` and `--wi
 ## Verified Selectors
 
 - **INVOL_TERM reason codes** — verified via playwright-cli 2026-04-09. Full list documented in `schema.ts` REASON_CODE_MAP comment. "No Longer Student" confirmed for "Graduated/No longer a Student".
+
+*(Add more selectors here after each playwright-cli mapping session — include date and page)*
+
+## Lessons Learned
+
+*(Add entries here when separations bugs are fixed — document root cause and fix so the same error never recurs)*

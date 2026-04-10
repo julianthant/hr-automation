@@ -40,3 +40,11 @@ CLI: "Last, First Middle" name(s)
 - CRM date matching uses ±7 day tolerance for hire date comparison
 - Parallel mode: shared auth context (one Duo), multiple tabs, queue-based distribution
 - Browsers kept open for inspection (no automatic close)
+
+## Verified Selectors
+
+*(Add selectors here after each playwright-cli mapping session — include date and page)*
+
+## Lessons Learned
+
+*(Add entries here when EID lookup bugs are fixed — document root cause and fix so the same error never recurs)*

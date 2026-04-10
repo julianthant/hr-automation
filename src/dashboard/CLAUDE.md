@@ -191,6 +191,23 @@ npm run dashboard         # Starts SSE backend (:3838) + Vite dev (:5173)
 | `src/tracker/dashboard.ts` | Add `/api/runs`, `/api/preflight` endpoints, add `runId` filtering to `/api/logs` and `/events/logs` |
 | `src/dashboard/components/types.ts` | Update TrackerEntry/LogEntry types, update WF_CONFIG |
 
+## Adding a New Workflow to the Dashboard
+
+When a new workflow is created, the dashboard must be updated:
+
+1. **`src/dashboard/components/types.ts`** — Add entry to `WF_CONFIG`:
+   - `primaryId`: what identifies entries (email, doc ID, empl ID, name)
+   - `nameSource`: how to derive display name from `data` (e.g., `data.firstName + data.lastName`)
+   - `steps`: ordered array of step names (must match `setStep()` calls in the workflow)
+   - `detailFields`: 4-cell detail grid labels (e.g., Employee, Email, Started, Elapsed)
+2. **`src/tracker/dashboard.ts`** — No changes needed unless the workflow uses a non-standard JSONL format
+3. **Log icon mapping** — If the workflow introduces new log message patterns, add them to the icon mapping in `LogLine.tsx`
+4. **Test** — Run `npm run dashboard`, trigger the new workflow, verify entries appear and steps progress
+
+## Lessons Learned
+
+*(Add entries here when dashboard bugs are fixed — document what went wrong and the fix)*
+
 ## Files to Create (Frontend)
 
 All new components in `src/dashboard/components/`:

@@ -64,3 +64,15 @@ Appends a single row to an `.xlsx` file. Creates the file and/or worksheet if mi
 - Tracker `.xlsx` files belong inside their workflow folder, never in project root
 - Dashboard port 3838 conflict: logs and skips if port in use (another instance running)
 - `withTrackedWorkflow` does NOT call `withLogContext` — use both: `withLogContext` wraps `withTrackedWorkflow` to get both log streaming and entry tracking
+
+## Adding Tracking for a New Workflow
+
+1. In the workflow's `workflow.ts`, wrap execution in `withTrackedWorkflow(workflowName, id, data, fn)`
+2. Use `setStep(step)` at each major phase transition
+3. Use `updateData(d)` to add discovered data (e.g., employee name)
+4. Create a `tracker.ts` in the workflow folder for Excel tracking (Excel-only — no `trackEvent` calls)
+5. Update the dashboard to support the new workflow (see `src/dashboard/CLAUDE.md`)
+
+## Lessons Learned
+
+*(Add entries here when tracker/dashboard SSE bugs are fixed — document root cause and fix)*
