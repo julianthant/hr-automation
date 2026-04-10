@@ -8,6 +8,8 @@ import {
   listDatesForWorkflow,
   readEntriesForDate,
   readLogEntriesForDate,
+  readRunsForId,
+  cleanOldTrackerFiles,
 } from "./jsonl.js";
 import { log } from "../utils/log.js";
 
@@ -59,14 +61,18 @@ export function startDashboard(workflow: string, port: number = 3838): void {
     if (url.pathname === "/api/logs") {
       const wf = url.searchParams.get("workflow") ?? workflow;
       const id = url.searchParams.get("id") ?? "";
+      const runId = url.searchParams.get("runId") ?? "";
       res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-      res.end(JSON.stringify(readLogEntries(wf, id || undefined)));
+      let logs = readLogEntries(wf, id || undefined);
+      if (runId) logs = logs.filter((l) => l.runId === runId);
+      res.end(JSON.stringify(logs));
       return;
     }
 
     if (url.pathname === "/events/logs") {
       const wf = url.searchParams.get("workflow") ?? workflow;
       const id = url.searchParams.get("id") ?? "";
+      const runId = url.searchParams.get("runId") ?? "";
       const date = url.searchParams.get("date") ?? "";
       const today = new Date().toISOString().slice(0, 10);
       res.writeHead(200, {
@@ -77,9 +83,10 @@ export function startDashboard(workflow: string, port: number = 3838): void {
       });
       let lastCount = 0;
       const send = () => {
-        const entries = (date && date !== today)
+        let entries = (date && date !== today)
           ? readLogEntriesForDate(wf, id || undefined, date)
           : readLogEntries(wf, id || undefined);
+        if (runId) entries = entries.filter((l) => l.runId === runId);
         if (entries.length > lastCount) {
           res.write(`data: ${JSON.stringify(entries.slice(lastCount))}\n\n`);
           lastCount = entries.length;
@@ -111,6 +118,25 @@ export function startDashboard(workflow: string, port: number = 3838): void {
       send();
       const interval = setInterval(send, 1_000);
       req.on("close", () => clearInterval(interval));
+      return;
+    }
+
+    if (url.pathname === "/api/runs") {
+      const wf = url.searchParams.get("workflow") ?? workflow;
+      const id = url.searchParams.get("id") ?? "";
+      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify(readRunsForId(wf, id)));
+      return;
+    }
+
+    if (url.pathname === "/api/preflight") {
+      const deleted = cleanOldTrackerFiles(7);
+      const checks = [
+        { name: "Dashboard connected", passed: true, detail: "SSE server running" },
+        { name: "Old logs cleaned", passed: true, detail: `${deleted} file${deleted !== 1 ? "s" : ""} removed (> 7 days)` },
+      ];
+      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify({ checks }));
       return;
     }
 
