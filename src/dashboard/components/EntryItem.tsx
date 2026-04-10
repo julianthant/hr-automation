@@ -55,9 +55,16 @@ export function EntryItem({ entry, workflow, selected, onClick }: EntryItemProps
         </span>
       </div>
 
-      {/* Row 2: Doc ID (only if name is shown, otherwise row 1 already shows ID) */}
+      {/* Row 2: Doc ID + workflow instance tag */}
       {name && (
-        <div className="font-mono text-[13px] text-muted-foreground mt-0.5">{entry.id}</div>
+        <div className="flex items-center justify-between mt-0.5">
+          <span className="font-mono text-[13px] text-muted-foreground">{entry.id}</span>
+          {entry.data?.instance && (
+            <span className="text-[10px] px-1.5 py-px rounded bg-secondary text-muted-foreground font-medium flex-shrink-0 ml-2">
+              {entry.data.instance}
+            </span>
+          )}
+        </div>
       )}
 
       {/* Row 3: Running = latest log, Failed = error, Pending/Done = nothing */}
