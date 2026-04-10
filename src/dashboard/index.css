@@ -81,7 +81,7 @@
   --surface-foreground: hsl(24.0000 21.1268% 86.0784%);
   --overlay: hsl(15 14.2857% 5.4902%);
   --overlay-foreground: hsl(24.0000 21.1268% 86.0784%);
-  --default: hsl(15 16.6667% 9.4118%);
+  --default: hsl(25 17.6% 18%);
   --default-foreground: hsl(24.0000 21.1268% 86.0784%);
   --danger: hsl(0 84.2365% 60.1961%);
   --danger-foreground: hsl(0 85.7143% 97.2549%);
@@ -91,6 +91,7 @@
   --warning-foreground: hsl(0 0% 0%);
   --focus: hsl(29.3182 41.9048% 58.8235%);
   --separator: hsl(25.0000 17.6471% 13.3333%);
+  --scrollbar: hsl(22.5 7% 44.7%);
   --border: hsl(25.0000 17.6471% 13.3333%);
   --input: hsl(27.6923 18.3099% 13.9216%);
   --ring: hsl(29.3182 41.9048% 58.8235%);
@@ -187,4 +188,22 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* HeroUI Calendar dark mode fixes */
+.dark .calendar__nav-button {
+  color: hsl(24 21.1% 86.1%);
+}
+.dark .calendar__nav-button:hover {
+  background: hsl(27.3 35.5% 12.2%);
+}
+.dark .calendar__header-cell {
+  color: hsl(22.5 7% 44.7%);
+}
+.dark .calendar__cell--outside-month {
+  color: hsl(22.5 7% 30%);
+}
+.dark .calendar__cell-button--selected {
+  background: hsl(29.3 41.9% 58.8%);
+  color: hsl(27.3 73.3% 5.9%);
 }
