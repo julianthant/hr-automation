@@ -56,10 +56,8 @@ export function TopBar({
     onDateChange(d.toISOString().slice(0, 10));
   };
 
-  const handleCalendarSelect = (day: Date | undefined) => {
-    if (day) {
-      onDateChange(day.toISOString().slice(0, 10));
-    }
+  const handleCalendarSelect = (dateStr: string) => {
+    onDateChange(dateStr);
   };
 
   return (
@@ -116,10 +114,8 @@ export function TopBar({
             </PopoverTrigger>
             <PopoverContent align="center">
               <Calendar
-                mode="single"
-                selected={dateObj}
+                selected={date}
                 onSelect={handleCalendarSelect}
-                defaultMonth={dateObj}
               />
             </PopoverContent>
           </Popover>

@@ -28,6 +28,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@heroui/calendar": "^2.2.32",
+    "@heroui/react": "^3.0.2",
+    "@heroui/styles": "^3.0.2",
+    "@internationalized/date": "^3.12.0",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-popover": "^1.1.15",
     "async-mutex": "^0.5.0",
@@ -40,7 +44,6 @@
     "picocolors": "^1.1.1",
     "playwright": "^1.58.2",
     "react": "^19.2.5",
-    "react-day-picker": "^9.14.0",
     "react-dom": "^19.2.5",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0",

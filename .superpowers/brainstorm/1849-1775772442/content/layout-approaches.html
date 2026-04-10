@@ -1,0 +1,191 @@
+<h2>Dashboard Layout Direction</h2>
+<p class="subtitle">Three approaches for real-time workflow monitoring with live log streaming. Click the one that feels closest to what you want.</p>
+
+<div class="cards">
+  <!-- Approach A -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 16px; background: #1a1410;">
+      <div style="font-family: monospace; font-size: 11px; color: #c4a882;">
+        <!-- Stats bar -->
+        <div style="display:flex; gap:8px; margin-bottom:10px;">
+          <div style="flex:1; background:#221c14; border:1px solid #3a2e20; border-radius:6px; padding:8px; text-align:center;">
+            <div style="font-size:18px; font-weight:bold; color:#e8d5b8;">12</div>
+            <div style="font-size:9px; color:#8a7560;">TOTAL</div>
+          </div>
+          <div style="flex:1; background:#221c14; border:1px solid #3a2e20; border-radius:6px; padding:8px; text-align:center;">
+            <div style="font-size:18px; font-weight:bold; color:#4ade80;">8</div>
+            <div style="font-size:9px; color:#8a7560;">DONE</div>
+          </div>
+          <div style="flex:1; background:#221c14; border:1px solid #3a2e20; border-radius:6px; padding:8px; text-align:center;">
+            <div style="font-size:18px; font-weight:bold; color:#c49a5c;">2</div>
+            <div style="font-size:9px; color:#8a7560;">RUNNING</div>
+          </div>
+          <div style="flex:1; background:#221c14; border:1px solid #3a2e20; border-radius:6px; padding:8px; text-align:center;">
+            <div style="font-size:18px; font-weight:bold; color:#f87171;">1</div>
+            <div style="font-size:9px; color:#8a7560;">FAILED</div>
+          </div>
+        </div>
+        <!-- Table -->
+        <div style="background:#221c14; border:1px solid #3a2e20; border-radius:6px; overflow:hidden;">
+          <div style="display:flex; background:#2a2218; padding:6px 10px; font-size:9px; color:#8a7560; text-transform:uppercase; letter-spacing:1px; border-bottom:1px solid #3a2e20;">
+            <span style="flex:2;">Email</span><span style="flex:2;">Employee</span><span style="flex:1;">Status</span><span style="flex:1;">Time</span>
+          </div>
+          <div style="padding:5px 10px; border-bottom:1px solid #2a2218; display:flex; color:#c4a882;">
+            <span style="flex:2; font-size:10px;">john@ucsd.edu</span><span style="flex:2;">John Smith</span><span style="flex:1; color:#c49a5c;">running</span><span style="flex:1; font-size:10px;">2:34 PM</span>
+          </div>
+          <div style="padding:5px 10px; border-bottom:1px solid #2a2218; display:flex; color:#c4a882; background:#2a221855;">
+            <span style="flex:2; font-size:10px;">jane@ucsd.edu</span><span style="flex:2;">Jane Doe</span><span style="flex:1; color:#c49a5c;">running</span><span style="flex:1; font-size:10px;">2:33 PM</span>
+          </div>
+          <!-- Expanded log row -->
+          <div style="padding:8px 10px; background:#181210; border-left:2px solid #c49a5c;">
+            <div style="font-size:9px; color:#6b5b4a; margin-bottom:4px;">LOGS: jane@ucsd.edu</div>
+            <div style="font-size:10px; color:#4ade80;">&#10003; SSO login complete</div>
+            <div style="font-size:10px; color:#60a5fa;">&#8594; Navigating to Smart HR</div>
+            <div style="font-size:10px; color:#c4a882;">&#9998; Filling position number <span style="color:#6b5b4a; font-size:9px;">x3</span></div>
+          </div>
+          <div style="padding:5px 10px; display:flex; color:#c4a882;">
+            <span style="flex:2; font-size:10px;">bob@ucsd.edu</span><span style="flex:2;">Bob Lee</span><span style="flex:1; color:#4ade80;">done</span><span style="flex:1; font-size:10px;">2:30 PM</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A: Enhanced Table (evolve current)</h3>
+      <p>Keep the table layout, fix it with shadcn. Click rows to expand inline logs. Stats bar on top, filters below header. Familiar pattern, minimal learning curve.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Familiar — similar to current</li><li>Dense data display</li><li>Easy to scan many entries</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Logs compete with table for space</li><li>Can't watch logs and scan table simultaneously</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Approach B -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 16px; background: #1a1410;">
+      <div style="font-family: monospace; font-size: 11px; color: #c4a882; display:flex; gap:8px; height:200px;">
+        <!-- Left panel: entry list -->
+        <div style="flex:1; background:#221c14; border:1px solid #3a2e20; border-radius:6px; overflow:hidden; display:flex; flex-direction:column;">
+          <div style="padding:6px 10px; font-size:9px; color:#8a7560; text-transform:uppercase; letter-spacing:1px; border-bottom:1px solid #3a2e20; background:#2a2218;">
+            Entries &mdash; Onboarding
+          </div>
+          <div style="padding:6px 10px; border-bottom:1px solid #2a2218; border-left:2px solid #c49a5c; background:#2a221866;">
+            <div style="display:flex; justify-content:space-between;">
+              <span style="font-weight:bold;">Jane Doe</span>
+              <span style="color:#c49a5c; font-size:10px;">running</span>
+            </div>
+            <div style="font-size:9px; color:#6b5b4a;">jane@ucsd.edu &middot; 2:33 PM</div>
+          </div>
+          <div style="padding:6px 10px; border-bottom:1px solid #2a2218;">
+            <div style="display:flex; justify-content:space-between;">
+              <span>John Smith</span>
+              <span style="color:#c49a5c; font-size:10px;">running</span>
+            </div>
+            <div style="font-size:9px; color:#6b5b4a;">john@ucsd.edu &middot; 2:34 PM</div>
+          </div>
+          <div style="padding:6px 10px; border-bottom:1px solid #2a2218;">
+            <div style="display:flex; justify-content:space-between;">
+              <span>Bob Lee</span>
+              <span style="color:#4ade80; font-size:10px;">done</span>
+            </div>
+            <div style="font-size:9px; color:#6b5b4a;">bob@ucsd.edu &middot; 2:30 PM</div>
+          </div>
+          <div style="padding:6px 10px;">
+            <div style="display:flex; justify-content:space-between;">
+              <span>Alice Wang</span>
+              <span style="color:#f87171; font-size:10px;">failed</span>
+            </div>
+            <div style="font-size:9px; color:#6b5b4a;">alice@ucsd.edu &middot; 2:28 PM</div>
+          </div>
+        </div>
+        <!-- Right panel: log stream -->
+        <div style="flex:1.2; background:#221c14; border:1px solid #3a2e20; border-radius:6px; overflow:hidden; display:flex; flex-direction:column;">
+          <div style="padding:6px 10px; font-size:9px; color:#8a7560; text-transform:uppercase; letter-spacing:1px; border-bottom:1px solid #3a2e20; background:#2a2218; display:flex; justify-content:space-between;">
+            <span>Live Logs &mdash; Jane Doe</span>
+            <span style="color:#c49a5c;">Run #2</span>
+          </div>
+          <div style="flex:1; padding:6px 10px; font-size:10px; line-height:1.6;">
+            <div><span style="color:#6b5b4a;">2:33:01</span> <span style="color:#a78bfa;">&#9903;</span> SSO credentials filled</div>
+            <div><span style="color:#6b5b4a;">2:33:04</span> <span style="color:#a78bfa;">&#9903;</span> Duo MFA approved</div>
+            <div><span style="color:#6b5b4a;">2:33:12</span> <span style="color:#4ade80;">&#10003;</span> Auth complete</div>
+            <div><span style="color:#6b5b4a;">2:33:15</span> <span style="color:#94a3b8;">&#9678;</span> Navigate to Smart HR</div>
+            <div><span style="color:#6b5b4a;">2:33:18</span> <span style="color:#22d3ee;">&#9998;</span> Fill template: UC_FULL_HIRE</div>
+            <div><span style="color:#6b5b4a;">2:33:20</span> <span style="color:#22d3ee;">&#9998;</span> Fill effective date <span style="background:#3a2e20; color:#8a7560; padding:1px 5px; border-radius:3px; font-size:9px; margin-left:4px;">x2</span></div>
+            <div><span style="color:#6b5b4a;">2:33:22</span> <span style="color:#60a5fa;">&#8594;</span> <span style="color:#c49a5c;">Filling position number...</span></div>
+            <div style="margin-top:6px; border-top:1px dashed #3a2e20; padding-top:6px; color:#6b5b4a; font-size:9px;">
+              &#9632; streaming &middot; 7 entries &middot; 2 collapsed
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B: Split Panel (master-detail)</h3>
+      <p>Left: scrollable entry list with status. Right: live log stream for the selected entry. Both panels update in real-time. Click an entry to watch its logs. Shows run number to distinguish re-runs.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Watch logs while scanning entries</li><li>Natural for monitoring workflows</li><li>Run isolation is visible (Run #1, #2)</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Less column data visible per entry</li><li>Needs enough screen width</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Approach C -->
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 16px; background: #1a1410;">
+      <div style="font-family: monospace; font-size: 11px; color: #c4a882;">
+        <!-- Cards grid -->
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:8px;">
+          <div style="background:#221c14; border:1px solid #c49a5c; border-radius:6px; padding:10px;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+              <span style="font-weight:bold;">Jane Doe</span>
+              <span style="color:#c49a5c; font-size:10px; background:#c49a5c22; padding:1px 6px; border-radius:3px;">running</span>
+            </div>
+            <div style="font-size:9px; color:#6b5b4a;">jane@ucsd.edu</div>
+            <div style="font-size:9px; color:#6b5b4a; margin-top:4px;">Step: Filling position &middot; Run #2</div>
+            <div style="margin-top:6px; height:3px; background:#3a2e20; border-radius:2px; overflow:hidden;">
+              <div style="width:65%; height:100%; background:#c49a5c; border-radius:2px;"></div>
+            </div>
+          </div>
+          <div style="background:#221c14; border:1px solid #c49a5c; border-radius:6px; padding:10px;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+              <span style="font-weight:bold;">John Smith</span>
+              <span style="color:#c49a5c; font-size:10px; background:#c49a5c22; padding:1px 6px; border-radius:3px;">running</span>
+            </div>
+            <div style="font-size:9px; color:#6b5b4a;">john@ucsd.edu</div>
+            <div style="font-size:9px; color:#6b5b4a; margin-top:4px;">Step: SSO Login &middot; Run #1</div>
+            <div style="margin-top:6px; height:3px; background:#3a2e20; border-radius:2px; overflow:hidden;">
+              <div style="width:25%; height:100%; background:#c49a5c; border-radius:2px;"></div>
+            </div>
+          </div>
+          <div style="background:#221c14; border:1px solid #4ade80; border-radius:6px; padding:10px;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+              <span style="font-weight:bold;">Bob Lee</span>
+              <span style="color:#4ade80; font-size:10px; background:#4ade8022; padding:1px 6px; border-radius:3px;">done</span>
+            </div>
+            <div style="font-size:9px; color:#6b5b4a;">bob@ucsd.edu</div>
+            <div style="font-size:9px; color:#6b5b4a; margin-top:4px;">Completed &middot; Run #1 &middot; 4m 12s</div>
+          </div>
+          <div style="background:#221c14; border:1px solid #f87171; border-radius:6px; padding:10px;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+              <span style="font-weight:bold;">Alice Wang</span>
+              <span style="color:#f87171; font-size:10px; background:#f8717122; padding:1px 6px; border-radius:3px;">failed</span>
+            </div>
+            <div style="font-size:9px; color:#6b5b4a;">alice@ucsd.edu</div>
+            <div style="font-size:9px; color:#f87171; margin-top:4px;">Error: Timeout on position fill</div>
+          </div>
+        </div>
+        <!-- Drawer hint -->
+        <div style="background:#221c14; border:1px solid #3a2e20; border-radius:6px; padding:8px 10px; text-align:center; font-size:9px; color:#6b5b4a;">
+          &#8593; Click any card to open log drawer &#8593;
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C: Card Grid + Slide-out Drawer</h3>
+      <p>Each entry is a card with status, current step, and progress bar. Click a card to open a full-height slide-out drawer with the log stream. More visual and glanceable than a table.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Most visual — status at a glance</li><li>Progress bars show completion</li><li>Cards feel modern and polished</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Less data density than table</li><li>Drawer covers content when open</li><li>Scales poorly with 50+ entries</li></ul></div>
+      </div>
+    </div>
+  </div>
+</div>
