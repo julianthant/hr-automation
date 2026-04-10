@@ -1,171 +1,119 @@
-import React, { useEffect, useRef, useState } from "react";
-import { Card, Skeleton } from "@heroui/react";
-import { motion, AnimatePresence } from "framer-motion";
-import { getLogAction, type LogEntry } from "./types";
+import { useState, useEffect } from "react";
+import { TerminalSquare } from "lucide-react";
+import { StepPipeline } from "./StepPipeline";
+import { LogStream } from "./LogStream";
+import { RunSelector } from "./RunSelector";
+import { EmptyState } from "./EmptyState";
+import { useLogs } from "./hooks/useLogs";
+import { useElapsed } from "./hooks/useElapsed";
+import { cn } from "@/lib/utils";
+import type { TrackerEntry, RunInfo } from "./types";
+import { getConfig } from "./types";
 
 interface LogPanelProps {
+  entry: TrackerEntry | null;
   workflow: string;
-  itemId: string;
-  selectedDate: string;
-  onClose: () => void;
+  date: string;
 }
 
-const iconColorMap: Record<string, string> = {
-  fill: "text-cyan-400",
-  navigate: "text-slate-400",
-  extract: "text-amber-400",
-  search: "text-blue-400",
-  select: "text-teal-400",
-  auth: "text-purple-400",
-  download: "text-green-400",
-  step: "text-blue-400",
-  success: "text-success",
-  error: "text-danger",
-  waiting: "text-warning",
+const badgeStyles: Record<string, string> = {
+  running: "bg-primary/15 text-primary",
+  done: "bg-[#4ade80]/12 text-[#4ade80]",
+  failed: "bg-destructive/12 text-destructive",
+  pending: "bg-[#fbbf24]/12 text-[#fbbf24]",
+  skipped: "bg-secondary text-muted-foreground",
 };
 
-export default function LogPanel({
-  workflow,
-  itemId,
-  selectedDate,
-  onClose,
-}: LogPanelProps) {
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const prevLenRef = useRef(0);
+export function LogPanel({ entry, workflow, date }: LogPanelProps) {
+  const [runs, setRuns] = useState<RunInfo[]>([]);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const cfg = getConfig(workflow);
 
+  // Fetch runs when entry changes
   useEffect(() => {
-    if (!itemId) return;
-    setLogs([]);
-    prevLenRef.current = 0;
-
-    // Instant fetch first — no loading delay
-    let apiUrl =
-      "/api/logs?workflow=" +
-      encodeURIComponent(workflow) +
-      "&id=" +
-      encodeURIComponent(itemId);
-    if (selectedDate) apiUrl += "&date=" + encodeURIComponent(selectedDate);
-
-    fetch(apiUrl)
-      .then((r) => r.json())
-      .then((entries: LogEntry[]) => {
-        if (Array.isArray(entries) && entries.length > 0) {
-          setLogs(entries);
-          prevLenRef.current = entries.length;
-        }
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-
-    // Then SSE for live updates
-    let sseUrl =
-      "/events/logs?workflow=" +
-      encodeURIComponent(workflow) +
-      "&id=" +
-      encodeURIComponent(itemId);
-    if (selectedDate) sseUrl += "&date=" + encodeURIComponent(selectedDate);
-
-    const es = new EventSource(sseUrl);
-
-    es.onmessage = (e) => {
-      try {
-        const newEntries: LogEntry[] = JSON.parse(e.data);
-        if (Array.isArray(newEntries) && newEntries.length > 0) {
-          setLogs((prev) => [...prev, ...newEntries]);
-        }
-      } catch {
-        // ignore
-      }
-    };
-
-    es.onerror = () => {};
-
-    return () => es.close();
-  }, [workflow, itemId, selectedDate]);
-
-  // Auto-scroll to bottom on new entries
-  useEffect(() => {
-    if (bodyRef.current && logs.length > prevLenRef.current) {
-      bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+    if (!entry) {
+      setRuns([]);
+      setActiveRunId(null);
+      return;
     }
-    prevLenRef.current = logs.length;
-  }, [logs]);
+    fetch(`/api/runs?workflow=${encodeURIComponent(workflow)}&id=${encodeURIComponent(entry.id)}`)
+      .then((r) => r.json())
+      .then((data: RunInfo[]) => {
+        setRuns(data);
+        setActiveRunId(data.length > 0 ? data[data.length - 1].runId : entry.runId || null);
+      })
+      .catch(() => setRuns([]));
+  }, [entry?.id, workflow]);
+
+  const { logs, loading: logsLoading } = useLogs(workflow, entry?.id || null, activeRunId, date);
+  const elapsed = useElapsed(entry?.status === "running" ? entry.timestamp : null);
+
+  if (!entry) {
+    return (
+      <div className="flex-1 flex flex-col bg-card">
+        <EmptyState
+          icon={TerminalSquare}
+          title="Select an entry"
+          description="Click an entry in the queue to view its logs"
+        />
+      </div>
+    );
+  }
+
+  const name = cfg.getName(entry);
+  const startTime = entry.timestamp
+    ? new Date(entry.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" })
+    : "";
 
   return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0, height: 0 }}
-        animate={{ opacity: 1, height: "auto" }}
-        exit={{ opacity: 0, height: 0 }}
-        transition={{ duration: 0.2, ease: "easeOut" }}
-      >
-        <Card className="bg-content1 border border-divider rounded-lg mt-2 overflow-hidden">
-          <Card.Header className="flex flex-row items-center justify-between px-4 py-2.5 border-b border-divider">
-            <span className="font-mono text-xs font-semibold text-foreground-500 uppercase tracking-wider">
-              Logs: {itemId}
-            </span>
-            <button
-              onClick={onClose}
-              className="text-foreground-500 hover:text-foreground transition-colors text-sm px-2 py-1 rounded hover:bg-content2"
-              aria-label="Close logs"
-            >
-              {"\u2715"}
-            </button>
-          </Card.Header>
-          <Card.Content className="p-0">
-            <div
-              ref={bodyRef}
-              className="overflow-y-auto max-h-[370px] py-2"
-            >
-              {loading && logs.length === 0 ? (
-                <div className="space-y-2 px-4 py-2">
-                  {Array.from({ length: 4 }).map((_, i) => (
-                    <div key={i} className="flex items-center gap-3">
-                      <Skeleton className="h-3 w-[60px] rounded" />
-                      <Skeleton className="h-3 w-[14px] rounded" />
-                      <Skeleton
-                        className="h-3 rounded"
-                        style={{ width: `${120 + i * 40}px` }}
-                      />
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                logs.map((entry, i) => {
-                  const action = getLogAction(entry.level, entry.message);
-                  const ts = entry.ts
-                    ? new Date(entry.ts).toLocaleTimeString("en-US", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        second: "2-digit",
-                      })
-                    : "";
-                  return (
-                    <div
-                      key={i}
-                      className="flex items-start gap-3 px-4 py-0.5 text-sm hover:bg-foreground-50/5"
-                    >
-                      <span className="font-mono text-xs text-foreground-500 whitespace-nowrap min-w-[72px] pt-0.5">
-                        {ts}
-                      </span>
-                      <span
-                        className={`shrink-0 w-4 text-center pt-0.5 ${iconColorMap[action.cls] || "text-foreground-500"}`}
-                      >
-                        {action.icon}
-                      </span>
-                      <span className="font-mono text-xs text-foreground-400 break-words">
-                        {entry.message}
-                      </span>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </Card.Content>
-        </Card>
-      </motion.div>
-    </AnimatePresence>
+    <div className="flex-1 flex flex-col bg-card min-w-0">
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0">
+        <div className="flex items-center gap-3.5">
+          <span className="font-bold text-lg">{name || entry.id}</span>
+          <span className={cn("text-[10px] font-semibold px-2.5 py-0.5 rounded-xl uppercase tracking-wide font-mono", badgeStyles[entry.status])}>
+            {entry.status}
+          </span>
+          {name && <span className="font-mono text-[13px] text-muted-foreground">{entry.id}</span>}
+        </div>
+        <RunSelector runs={runs} activeRunId={activeRunId} onSelect={setActiveRunId} />
+      </div>
+
+      {/* Detail grid */}
+      <div className="grid grid-cols-4 border-b border-border flex-shrink-0">
+        <div className="px-6 py-3.5 border-r border-border">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1">
+            {cfg.detailFields[0]?.label || "ID"}
+          </div>
+          <div className="text-sm font-medium">{name || entry.id}</div>
+        </div>
+        <div className="px-6 py-3.5 border-r border-border">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1">
+            {cfg.detailFields[1]?.label || "ID"}
+          </div>
+          <div className="text-sm font-mono">{entry.id}</div>
+        </div>
+        <div className="px-6 py-3.5 border-r border-border">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1">Started</div>
+          <div className="text-sm font-mono">{startTime}</div>
+        </div>
+        <div className="px-6 py-3.5">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1">Elapsed</div>
+          <div className={cn("text-sm font-mono", entry.status === "running" && "text-primary")}>
+            {elapsed || "\u2014"}
+          </div>
+        </div>
+      </div>
+
+      {/* Step pipeline */}
+      <StepPipeline
+        steps={cfg.steps}
+        currentStep={entry.step || null}
+        status={entry.status}
+      />
+
+      {/* Log stream + filters + footer */}
+      <LogStream logs={logs} loading={logsLoading} />
+    </div>
   );
 }

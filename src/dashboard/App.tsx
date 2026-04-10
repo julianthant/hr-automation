@@ -1,179 +1,118 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
-import FilterBar from "./components/FilterBar";
-import StatsRow from "./components/StatsRow";
-// ProgressBar removed per user request
-import DataTable from "./components/DataTable";
-import { useClock } from "./components/hooks";
-import {
-  getConfig,
-  STATUS_ORDER,
-  type TrackerEntry,
-} from "./components/types";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Toaster, toast } from "sonner";
+import { TopBar } from "./components/TopBar";
+import { QueuePanel } from "./components/QueuePanel";
+import { LogPanel } from "./components/LogPanel";
+import { useEntries } from "./components/hooks/useEntries";
+import { usePreflight } from "./components/hooks/usePreflight";
+import { getConfig } from "./components/types";
 
 export default function App() {
-  const [activeWf, setActiveWf] = useState("onboarding");
-  const [rows, setRows] = useState<TrackerEntry[]>([]);
-  const [workflows, setWorkflows] = useState<string[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedDate, setSelectedDate] = useState(
-    () => new Date().toISOString().slice(0, 10)
-  );
+  const [workflow, setWorkflow] = useState("onboarding");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [availableDates, setAvailableDates] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const prevStatusRef = useMemo(() => new Map<string, string>(), []);
 
-  const clock = useClock();
+  // Pre-flight check on mount
+  usePreflight();
+
+  // SSE entries
+  const { entries, workflows, connected, loading } = useEntries(workflow, date);
 
   // Fetch available dates when workflow changes
   useEffect(() => {
-    fetch("/api/dates?workflow=" + encodeURIComponent(activeWf))
+    fetch("/api/dates?workflow=" + encodeURIComponent(workflow))
       .then((r) => r.json())
       .then((dates: string[]) => {
         setAvailableDates(dates);
         const today = new Date().toISOString().slice(0, 10);
-        if (!dates.includes(selectedDate)) {
-          setSelectedDate(dates[0] || today);
-        }
+        if (!dates.includes(date)) setDate(dates[0] || today);
       })
       .catch(() => {});
-  }, [activeWf]);
+  }, [workflow]);
 
-  // SSE connection includes date
+  // Toast on completion/failure
   useEffect(() => {
-    setLoading(true);
-    const today = new Date().toISOString().slice(0, 10);
-    let sseUrl = "/events?workflow=" + encodeURIComponent(activeWf);
-    if (selectedDate && selectedDate !== today) {
-      sseUrl += "&date=" + encodeURIComponent(selectedDate);
-    }
-
-    const es = new EventSource(sseUrl);
-
-    es.onmessage = (e) => {
-      try {
-        const {
-          entries,
-          workflows: wfs,
-        }: { entries: TrackerEntry[]; workflows: string[] } = JSON.parse(
-          e.data
-        );
-
-        // Dedupe by ID, keep latest
-        const latest = new Map<string, TrackerEntry>();
-        entries.forEach((en) => latest.set(en.id, en));
-        const deduped = [...latest.values()];
-
-        // Sort: running first, then pending, then failed, then done
-        deduped.sort(
-          (a, b) =>
-            (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9)
-        );
-
-        setRows(deduped);
-        setWorkflows(wfs || []);
-        setLoading(false);
-      } catch {
-        // ignore
+    for (const entry of entries) {
+      const prevStatus = prevStatusRef.get(entry.id);
+      if (prevStatus && prevStatus !== entry.status) {
+        const cfg = getConfig(workflow);
+        const name = cfg.getName(entry) || entry.id;
+        if (entry.status === "done") {
+          toast.success(`${name} completed`, {
+            description: `${cfg.label} finished`,
+            duration: 5000,
+          });
+        } else if (entry.status === "failed") {
+          toast.error(`${name} failed`, {
+            description: entry.error || "Unknown error",
+            duration: 8000,
+          });
+        }
       }
-    };
-
-    es.onerror = () => {};
-
-    return () => es.close();
-  }, [activeWf, selectedDate]);
+      prevStatusRef.set(entry.id, entry.status);
+    }
+  }, [entries, workflow, prevStatusRef]);
 
   // Update document title
   useEffect(() => {
-    const cfg = getConfig(activeWf);
-    document.title = cfg.label + " \u2014 HR Automation";
-  }, [activeWf]);
+    const running = entries.filter((e) => e.status === "running").length;
+    document.title = running > 0 ? `${running} running \u2014 HR Dashboard` : "HR Dashboard";
+  }, [entries]);
 
-  // Clear search and status filter when switching workflows
+  // Clear selection when switching workflows
   const handleWorkflowChange = useCallback((wf: string) => {
-    setActiveWf(wf);
-    setSearchQuery("");
-    setStatusFilter(null);
+    setWorkflow(wf);
+    setSelectedId(null);
   }, []);
 
-  // Filter rows by search query and status
-  const cfg = getConfig(activeWf);
-  const filteredRows = useMemo(() => {
-    let filtered = rows;
-    if (statusFilter) {
-      filtered = filtered.filter((r) => r.status === statusFilter);
-    }
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      filtered = filtered.filter((r) => {
-        const name = (cfg.getName(r) || "").toLowerCase();
-        return r.id.toLowerCase().includes(q) || name.includes(q);
-      });
-    }
-    return filtered;
-  }, [rows, searchQuery, statusFilter, cfg]);
-
-  // Status counts (before search filter, so chips show true counts)
-  const statusCounts = useMemo(() => {
+  // Entry counts per workflow for dropdown badges
+  const entryCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    const base = searchQuery
-      ? rows.filter((r) => {
-          const q = searchQuery.toLowerCase();
-          const name = (cfg.getName(r) || "").toLowerCase();
-          return r.id.toLowerCase().includes(q) || name.includes(q);
-        })
-      : rows;
-    for (const r of base) {
-      counts[r.status] = (counts[r.status] || 0) + 1;
-    }
+    for (const wf of workflows) counts[wf] = 0;
+    counts[workflow] = entries.length;
     return counts;
-  }, [rows, searchQuery, cfg]);
+  }, [workflows, workflow, entries.length]);
+
+  const selectedEntry = entries.find((e) => e.id === selectedId) || null;
 
   return (
-    <div className="max-w-[1400px] mx-auto px-8 py-7">
-      {/* Header */}
-      <header className="flex items-center justify-between pb-6 border-b border-divider mb-6">
-        <div className="flex items-center gap-3">
-          <span className="text-xl font-bold tracking-tight">
-            HR Automation
-          </span>
-          <span className="text-foreground-500 font-normal">Control</span>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-success">
-            <span className="w-2 h-2 rounded-full bg-success animate-pulse shadow-[0_0_8px_rgba(63,185,80,0.5)]" />
-            <span>Live</span>
-          </div>
-          <span className="font-mono text-xs text-foreground-500 tracking-wide">
-            {clock}
-          </span>
-        </div>
-      </header>
-
-      {/* Stats first */}
-      <StatsRow rows={filteredRows} />
-
-      {/* Filter Bar */}
-      <FilterBar
-        activeWf={activeWf}
+    <div className="flex flex-col h-screen">
+      <Toaster
+        position="bottom-right"
+        toastOptions={{
+          style: {
+            background: "hsl(var(--card))",
+            border: "1px solid hsl(var(--border))",
+            color: "hsl(var(--foreground))",
+          },
+        }}
+      />
+      <TopBar
+        workflow={workflow}
         workflows={workflows}
-        onSwitch={handleWorkflowChange}
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
-        selectedDate={selectedDate}
-        setSelectedDate={setSelectedDate}
+        onWorkflowChange={handleWorkflowChange}
+        date={date}
+        onDateChange={setDate}
         availableDates={availableDates}
-        statusFilter={statusFilter}
-        setStatusFilter={setStatusFilter}
-        statusCounts={statusCounts}
+        connected={connected}
+        entryCounts={entryCounts}
       />
-
-      {/* Table */}
-      <DataTable
-        rows={filteredRows}
-        activeWf={activeWf}
-        selectedDate={selectedDate}
-        loading={loading}
-      />
+      <div className="flex flex-1 overflow-hidden">
+        <QueuePanel
+          entries={entries}
+          workflow={workflow}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          loading={loading}
+        />
+        <LogPanel
+          entry={selectedEntry}
+          workflow={workflow}
+          date={date}
+        />
+      </div>
     </div>
   );
 }
