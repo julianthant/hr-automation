@@ -4,6 +4,7 @@ import { TopBar } from "./components/TopBar";
 import { QueuePanel } from "./components/QueuePanel";
 import { LogPanel } from "./components/LogPanel";
 import { SessionPanel } from "./components/SessionPanel";
+import { DuoPanel } from "./components/DuoPanel";
 import { useEntries } from "./components/hooks/useEntries";
 import { usePreflight } from "./components/hooks/usePreflight";
 import { getConfig } from "./components/types";
@@ -137,6 +138,7 @@ export default function App() {
           />
           <SessionPanel />
         </div>
+        <DuoPanel />
       </div>
     </div>
   );
