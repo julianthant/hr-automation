@@ -12,14 +12,14 @@ export function SessionPanel() {
   }
 
   return (
-    <div className="h-[110px] flex-shrink-0 border-t border-border bg-card flex overflow-hidden">
+    <div className="h-[140px] xl:h-[125px] 2xl:h-[115px] flex-shrink-0 border-t border-border bg-card flex overflow-hidden">
       {/* Session main area — horizontal scroll */}
-      <div className="flex-1 p-2 overflow-x-auto overflow-y-hidden min-w-0">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5 flex items-center gap-1">
+      <div className="flex-1 p-1.5 xl:p-2 overflow-x-auto overflow-y-hidden min-w-0">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1 xl:mb-1.5 flex items-center gap-1">
           <Monitor className="w-3 h-3 text-[#4ade80]" />
           Sessions
         </div>
-        <div className="flex gap-2 items-start">
+        <div className="flex gap-1.5 xl:gap-2 items-start">
           {state.workflows.map((wf) => (
             <WorkflowBox key={wf.instance} workflow={wf} />
           ))}
