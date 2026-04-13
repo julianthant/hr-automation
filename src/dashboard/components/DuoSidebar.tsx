@@ -12,7 +12,7 @@ export function DuoSidebar({ queue }: DuoSidebarProps) {
   return (
     <div
       className={cn(
-        "w-[150px] flex-shrink-0 border-l border-border p-2 overflow-y-auto",
+        "w-[95px] xl:w-[115px] 2xl:w-[140px] flex-shrink-0 border-l border-border p-1.5 xl:p-2 overflow-y-auto",
         isEmpty ? "bg-card" : "bg-[#12121a]",
       )}
     >
