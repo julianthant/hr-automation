@@ -37,7 +37,7 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
   }, [entries, statusFilter, search, cfg]);
 
   return (
-    <div className="w-[480px] min-w-[380px] border-r border-border flex flex-col bg-background">
+    <div className="w-[320px] xl:w-[400px] 2xl:w-[480px] flex-shrink-0 border-r border-border flex flex-col bg-background">
       {/* Search */}
       <div className="p-4 px-5 border-b border-border">
         <div className="flex items-center gap-2.5 bg-input border border-border rounded-lg px-3.5 py-2.5 focus-within:border-primary transition-colors">
