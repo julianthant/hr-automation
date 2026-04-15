@@ -9,6 +9,7 @@ import { useElapsed, formatDuration } from "./hooks/useElapsed";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry, RunInfo } from "./types";
 import { getConfig } from "./types";
+import { useWorkflow } from "../workflows-context";
 
 interface LogPanelProps {
   entry: TrackerEntry | null;
@@ -28,6 +29,8 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
   const [runs, setRuns] = useState<RunInfo[]>([]);
   const [activeRunId, setActiveRunId] = useState<string | null>(entry?.runId || null);
   const cfg = getConfig(workflow);
+  const registered = useWorkflow(workflow);
+  const steps = registered?.steps ?? cfg.steps;
 
   // Fetch runs when entry changes or a new run appears
   useEffect(() => {
@@ -190,7 +193,7 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
         </div>
       ) : (
         <StepPipeline
-          steps={cfg.steps}
+          steps={steps}
           currentStep={runStep}
           status={runStatus}
         />
