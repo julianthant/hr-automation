@@ -24,7 +24,7 @@ src/workflows/{name}/
 - Use `updateData(d)` to enrich entries with discovered data
 - Use `withLogContext()` wrapping `withTrackedWorkflow` for log streaming
 - Use shared auth modules (`fillSsoCredentials`, `pollDuoApproval`) — never inline auth
-- Use `WorkflowSession.create()` for multi-browser workflows
+- Use `Session.launch()` from `src/core/` for multi-browser workflows (via `defineWorkflow` handler)
 - Use `Promise.allSettled` for parallel system queries
 
 ### 3. Dashboard Integration (MANDATORY)
