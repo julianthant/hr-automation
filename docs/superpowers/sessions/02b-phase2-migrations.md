@@ -8,10 +8,11 @@ I'm continuing a multi-session architectural refactor of this hr-automation code
 
 ## Context (read first, in order)
 
-1. `docs/superpowers/specs/2026-04-15-workflow-kernel-design.md` — the authoritative architecture spec. Read in full.
-2. `docs/superpowers/plans/2026-04-15-workflow-kernel-build-plan.md` — the 23-task Phase 1 plan that just completed. Read to understand what's in `src/core/`.
-3. `src/core/` — the kernel itself. Read `index.ts`, `types.ts`, `workflow.ts`, `session.ts`, `stepper.ts`, `pool.ts`, `registry.ts`. These are your primitives.
-4. Memory: `MEMORY.md` + referenced files, especially `project_architecture_refactor_arc.md` and `feedback_delegation_style.md`.
+1. **`docs/superpowers/sessions/02-kernel-execution-checkpoint.md`** — Session 2's own Phase 1 closeout. Lists exactly what shipped, deviations from the plan (with rationale), known gotchas, and commit hashes. This is the freshest truth about the current state; read it before the spec.
+2. `docs/superpowers/specs/2026-04-15-workflow-kernel-design.md` — authoritative architecture spec. Read in full.
+3. `docs/superpowers/plans/2026-04-15-workflow-kernel-build-plan.md` — 23-task Phase 1 plan. Useful for understanding intent where the checkpoint says "deviated from plan."
+4. `src/core/` — the kernel itself. Read `index.ts`, `types.ts`, `workflow.ts`, `session.ts`, `stepper.ts`, `pool.ts`, `registry.ts`. These are your primitives.
+5. Memory: `MEMORY.md` + referenced files, especially `project_architecture_refactor_arc.md` and `feedback_delegation_style.md`.
 
 The overall refactor has 4 subsystem-sessions; you're in the middle of subsystem B+E. After Phase 2, the next session handles Subsystem A (selector registry).
 
