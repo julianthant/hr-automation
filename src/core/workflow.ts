@@ -6,6 +6,7 @@ import { Stepper } from './stepper.js'
 import { withTrackedWorkflow } from '../tracker/jsonl.js'
 import { withLogContext, log } from '../utils/log.js'
 import { classifyError } from '../utils/errors.js'
+import { runWorkflowPool } from './pool.js'
 
 export function defineWorkflow<TData, TSteps extends readonly string[]>(
   config: WorkflowConfig<TData, TSteps>,
@@ -130,8 +131,7 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
 ): Promise<BatchResult> {
   const batch = wf.config.batch
   if (batch?.mode === 'pool') {
-    // pool.ts not yet implemented (Task 15)
-    throw new Error('pool mode not yet implemented (Task 15)')
+    return runWorkflowPool(wf, items, opts)
   }
 
   // Sequential mode: validate all items upfront.
