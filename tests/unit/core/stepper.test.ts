@@ -49,3 +49,23 @@ test('stepper.updateData: merges into pending data and emits', async () => {
   assert.deepEqual(events[0].data, { name: 'Alice' })
   assert.deepEqual(events[1].data, { name: 'Alice', emplId: '123' })
 })
+
+test('stepper.parallel: returns PromiseSettledResult per key', async () => {
+  const { stepper } = mkStepper()
+  const result = await stepper.parallel({
+    a: async () => 1,
+    b: async () => { throw new Error('b failed') },
+    c: async () => 3,
+  })
+  assert.equal(result.a.status, 'fulfilled')
+  assert.equal(result.b.status, 'rejected')
+  assert.equal(result.c.status, 'fulfilled')
+  assert.equal((result.a as PromiseFulfilledResult<number>).value, 1)
+  assert.equal((result.c as PromiseFulfilledResult<number>).value, 3)
+})
+
+test('stepper.parallel: empty object returns empty object', async () => {
+  const { stepper } = mkStepper()
+  const result = await stepper.parallel({})
+  assert.deepEqual(result, {})
+})
