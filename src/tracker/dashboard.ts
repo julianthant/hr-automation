@@ -17,6 +17,8 @@ import {
   getSessionsFilePath,
   type SessionEvent,
 } from "./session-events.js";
+import { getAll as getAllRegisteredWorkflows } from "../core/registry.js";
+import type { WorkflowMetadata } from "../core/types.js";
 
 // Resolve path to built dashboard HTML (vite-plugin-singlefile output)
 const DASHBOARD_HTML_PATH = join(
@@ -226,6 +228,11 @@ function findBrowser(
 
 let server: Server | null = null;
 
+/** Returns a handler that serves the registered workflow metadata as JSON. */
+export function buildWorkflowsHandler(): () => WorkflowMetadata[] {
+  return () => getAllRegisteredWorkflows();
+}
+
 /** Start the live monitoring dashboard. Call once at workflow start. */
 export function startDashboard(workflow: string, port: number = 3838): void {
   if (server) return;
@@ -236,6 +243,12 @@ export function startDashboard(workflow: string, port: number = 3838): void {
     if (url.pathname === "/api/workflows") {
       res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
       res.end(JSON.stringify(listWorkflows()));
+      return;
+    }
+
+    if (url.pathname === "/api/workflow-definitions") {
+      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify(buildWorkflowsHandler()()));
       return;
     }
 
