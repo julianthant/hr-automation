@@ -1,5 +1,5 @@
 import type { Page } from "playwright";
-import { log } from "./log.js";
+import { log } from "../utils/log.js";
 
 /** Known error patterns that indicate the page needs a refresh/re-navigate. */
 const ERROR_PATTERNS = [
