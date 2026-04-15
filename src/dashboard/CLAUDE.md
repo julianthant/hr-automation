@@ -119,7 +119,9 @@ When re-running the same ID (e.g. a failed separation re-run):
 
 ## Workflow-Specific Configuration
 
-Defined in `types.ts` as `WF_CONFIG`:
+Defined in `types.ts` as `WF_CONFIG`. A `WorkflowsProvider` + `useWorkflow()` hook (in `workflows-context.tsx`) fetches registry-backed metadata from `/api/workflow-definitions`. Currently only `steps` are sourced from the backend (with `WF_CONFIG.steps` as fallback). Full WF_CONFIG elimination (label, getName, getId, labeled detailFields) is deferred to Session 4 (dashboard richness leveling) once `defineWorkflow` gains declarative UI metadata.
+
+Current consumption:
 
 | Workflow | Primary ID | Name Source | Steps | Detail Fields |
 |----------|-----------|-------------|-------|---------------|
