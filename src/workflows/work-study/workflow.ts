@@ -22,7 +22,13 @@ const workStudySteps = ["ucpath-auth", "transaction"] as const;
 export const workStudyWorkflow = defineWorkflow({
   name: "work-study",
   systems: [
-    { id: "ucpath", login: async (page, instance) => { await loginToUCPath(page, instance); } },
+    {
+      id: "ucpath",
+      login: async (page, instance) => {
+        const ok = await loginToUCPath(page, instance);
+        if (!ok) throw new Error("UCPath authentication failed");
+      },
+    },
   ],
   steps: workStudySteps,
   schema: WorkStudyInputSchema,
