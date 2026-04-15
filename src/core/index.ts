@@ -1,3 +1,6 @@
 export type * from './types.js'
 export { register, getAll, getByName, clear } from './registry.js'
-export { defineWorkflow } from './workflow.js'
+export { defineWorkflow, runWorkflow, runWorkflowBatch } from './workflow.js'
+export { runWorkflowPool } from './pool.js'
+export { Session } from './session.js'
+export { Stepper } from './stepper.js'
