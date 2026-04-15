@@ -12,7 +12,7 @@ import {
 import { TransactionError } from "../../systems/ucpath/types.js";
 import { searchPerson } from "../../systems/ucpath/navigate.js";
 import { withTrackedWorkflow } from "../../tracker/jsonl.js";
-import { loginToI9, createI9Employee } from "../../i9/index.js";
+import { loginToI9, createI9Employee } from "../../systems/i9/index.js";
 import {
   extractRawFields,
   extractRecordPageFields,

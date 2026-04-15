@@ -1,7 +1,7 @@
 import type { Page } from "playwright";
-import { log } from "../utils/log.js";
-import { validateEnv } from "../utils/env.js";
-import { I9_URL } from "../config.js";
+import { log } from "../../utils/log.js";
+import { validateEnv } from "../../utils/env.js";
+import { I9_URL } from "../../config.js";
 
 /**
  * Authenticate to I9 Complete (Tracker I-9 by Mitratech).
