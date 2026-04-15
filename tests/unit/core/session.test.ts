@@ -47,3 +47,29 @@ test('session.page: unknown id throws', async () => {
   const s = Session.forTesting({ systems: [], browsers: new Map(), readyPromises: new Map() })
   await assert.rejects(() => s.page('nope'), /unknown system/i)
 })
+
+test('session.launch (sequential): awaits each login in order', async () => {
+  const order: string[] = []
+  const makeSys = (id: string): SystemConfig => ({
+    id,
+    login: async () => {
+      await new Promise((r) => setTimeout(r, 10))
+      order.push(id)
+    },
+  })
+
+  const s = await Session.launch(
+    [makeSys('a'), makeSys('b'), makeSys('c')],
+    { authChain: 'sequential', launchFn: fakeLaunch },
+  )
+  assert.deepEqual(order, ['a', 'b', 'c'])
+  await s.close()
+})
+
+// Fake launch helper used in tests — returns a stub Page/Browser/Context.
+function fakeLaunch() {
+  const page = { close: async () => {} } as unknown as import('playwright').Page
+  const context = { close: async () => {} } as unknown as import('playwright').BrowserContext
+  const browser = { close: async () => {} } as unknown as import('playwright').Browser
+  return Promise.resolve({ page, context, browser })
+}
