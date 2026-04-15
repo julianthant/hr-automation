@@ -2,7 +2,7 @@ import { launchBrowser } from "../../browser/launch.js";
 import { log, withLogContext } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath } from "../../auth/login.js";
-import { TransactionError } from "../../ucpath/types.js";
+import { TransactionError } from "../../systems/ucpath/types.js";
 import { withTrackedWorkflow } from "../../tracker/jsonl.js";
 import { buildWorkStudyPlan } from "./enter.js";
 import type { WorkStudyContext } from "./enter.js";

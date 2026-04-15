@@ -80,7 +80,8 @@ src/
     locked.ts        # Generic mutex-locked write wrapper
     spreadsheet.ts   # Excel tracking with daily worksheets (YYYY-MM-DD tabs)
   dashboard/          # React SPA (Vite + HeroUI v3 + Tailwind) — served via Vite dev server on port 5173
-  ucpath/           # UCPath PeopleSoft navigation, person search, Smart HR transactions
+  systems/
+    ucpath/           # UCPath PeopleSoft navigation, person search, Smart HR transactions (moved from src/ucpath/ in Phase 2)
   utils/
     screenshot.ts    # Unified debug screenshot helper
     worker-pool.ts   # Generic parallel worker pool with queue

@@ -56,8 +56,8 @@ import {
   fillComments,
   clickSaveAndSubmit,
   getJobSummaryData,
-} from "../../ucpath/index.js";
-import type { JobSummaryData } from "../../ucpath/index.js";
+} from "../../systems/ucpath/index.js";
+import type { JobSummaryData } from "../../systems/ucpath/index.js";
 
 import {
   computeTerminationEffDate,

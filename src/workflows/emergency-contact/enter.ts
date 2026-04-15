@@ -1,10 +1,10 @@
 import type { Page } from "playwright";
-import { ActionPlan } from "../../ucpath/action-plan.js";
+import { ActionPlan } from "../../systems/ucpath/action-plan.js";
 import { log } from "../../utils/log.js";
 import {
   hidePeopleSoftModalMask,
   readExistingContactNames,
-} from "../../ucpath/personal-data.js";
+} from "../../systems/ucpath/personal-data.js";
 import { mapRelationship } from "./config.js";
 import type { EmergencyContactRecord } from "./schema.js";
 
