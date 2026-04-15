@@ -66,6 +66,48 @@ test('session.launch (sequential): awaits each login in order', async () => {
   await s.close()
 })
 
+test('session.launch (interleaved): first login blocks; subsequent logins resolve as chain progresses', async () => {
+  const logins: Array<{ id: string; at: number }> = []
+  let t = 0
+  const mkSys = (id: string): SystemConfig => ({
+    id,
+    login: async () => {
+      await new Promise((r) => setTimeout(r, 5))
+      logins.push({ id, at: ++t })
+    },
+  })
+
+  const systems = [mkSys('a'), mkSys('b'), mkSys('c')]
+  const s = await Session.launch(systems, { authChain: 'interleaved', launchFn: fakeLaunch })
+
+  // First system must be fully authed when launch returns.
+  const pageA = await s.page('a')
+  assert.ok(pageA)
+  // b and c may or may not be done yet — await them.
+  await Promise.all([s.page('b'), s.page('c')])
+  // Order of completion: a first, then b, then c.
+  assert.equal(logins[0].id, 'a')
+  assert.deepEqual(logins.map((l) => l.id), ['a', 'b', 'c'])
+  await s.close()
+})
+
+test('session.launch (interleaved): failed auth on system N does not block system N+1', async () => {
+  const completed: string[] = []
+  const systems: SystemConfig[] = [
+    { id: 'a', login: async () => { completed.push('a') } },
+    { id: 'b', login: async () => { throw new Error('b login failed') } },
+    { id: 'c', login: async () => { completed.push('c') } },
+  ]
+  const s = await Session.launch(systems, { authChain: 'interleaved', launchFn: fakeLaunch })
+
+  await assert.rejects(() => s.page('b'), /b login failed/)
+  // c should still resolve.
+  const pageC = await s.page('c')
+  assert.ok(pageC)
+  assert.deepEqual(completed, ['a', 'c'])
+  await s.close()
+})
+
 // Fake launch helper used in tests — returns a stub Page/Browser/Context.
 function fakeLaunch() {
   const page = { close: async () => {} } as unknown as import('playwright').Page

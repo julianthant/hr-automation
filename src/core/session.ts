@@ -59,8 +59,22 @@ export class Session {
       }
       systems.forEach((s) => readyPromises.set(s.id, Promise.resolve()))
     } else {
-      // Interleaved: implemented in Task 6.
-      throw new Error('interleaved auth not yet implemented')
+      // Interleaved: auth system[0] blocking; chain the rest in background.
+      const firstSlot = browsers.get(systems[0].id)!
+      await systems[0].login(firstSlot.page)
+      readyPromises.set(systems[0].id, Promise.resolve())
+
+      let prev: Promise<void> = Promise.resolve()
+      for (let i = 1; i < systems.length; i++) {
+        const sys = systems[i]
+        const slot = browsers.get(sys.id)!
+        // Each chain step ignores predecessor failure so one bad auth doesn't block the next.
+        const p = prev.catch(() => {}).then(() => sys.login(slot.page))
+        // Prevent unhandled rejection warnings if nobody consumes this promise.
+        p.catch(() => {})
+        readyPromises.set(sys.id, p)
+        prev = p
+      }
     }
 
     return new Session({ systems, browsers, readyPromises })
