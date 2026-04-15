@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import type { WorkflowConfig, RegisteredWorkflow, WorkflowMetadata, Ctx, RunOpts } from './types.js'
+import type { WorkflowConfig, RegisteredWorkflow, WorkflowMetadata, Ctx, RunOpts, BatchResult } from './types.js'
 import { register } from './registry.js'
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
 import { withTrackedWorkflow } from '../tracker/jsonl.js'
 import { withLogContext, log } from '../utils/log.js'
+import { classifyError } from '../utils/errors.js'
 
 export function defineWorkflow<TData, TSteps extends readonly string[]>(
   config: WorkflowConfig<TData, TSteps>,
@@ -120,4 +121,87 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
       opts.preAssignedRunId,                            // 5th positional
     )
   })
+}
+
+export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
+  wf: RegisteredWorkflow<TData, TSteps>,
+  items: TData[],
+  opts: RunOpts & { dryRun?: boolean } = {},
+): Promise<BatchResult> {
+  const batch = wf.config.batch
+  if (batch?.mode === 'pool') {
+    // pool.ts not yet implemented (Task 15)
+    throw new Error('pool mode not yet implemented (Task 15)')
+  }
+
+  // Sequential mode: validate all items upfront.
+  items.forEach((item) => {
+    try {
+      wf.config.schema.parse(item)
+    } catch (err) {
+      throw new Error(`validation error: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  })
+
+  const session = await Session.launch(wf.config.systems, {
+    authChain: wf.config.authChain,
+    tiling: wf.config.tiling,
+    launchFn: opts.launchFn,
+  })
+
+  const result: BatchResult = { total: items.length, succeeded: 0, failed: 0, errors: [] }
+
+  try {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      const itemId = randomUUID()
+      const runId = randomUUID()
+      const stepper = new Stepper({
+        workflow: wf.config.name,
+        itemId,
+        runId,
+        emitStep: () => {},
+        emitData: () => {},
+        emitFailed: () => {},
+      })
+      const ctx: Ctx<TSteps, TData> = {
+        page: (id) => session.page(id),
+        step: (name, fn) => stepper.step(name as string, fn),
+        parallel: (tasks) => stepper.parallel(tasks),
+        updateData: (patch) => stepper.updateData(patch as Record<string, unknown>),
+        session: {
+          page: (id) => session.page(id),
+          newWindow: async () => { throw new Error('newWindow not yet implemented') },
+          closeWindow: async () => { throw new Error('closeWindow not yet implemented') },
+        },
+        log,
+        isBatch: true,
+        runId,
+      }
+      try {
+        // Between-items hooks — skipped on the first item (fresh auth state).
+        if (i > 0 && batch?.betweenItems) {
+          for (const hook of batch.betweenItems) {
+            if (hook === 'reset-browsers' || hook === 'navigate-home') {
+              for (const s of wf.config.systems) await session.reset(s.id)
+            } else if (hook === 'health-check') {
+              for (const s of wf.config.systems) {
+                if (!(await session.healthCheck(s.id))) {
+                  throw new Error(`health-check failed for ${s.id}`)
+                }
+              }
+            }
+          }
+        }
+        await wf.config.handler(ctx, item)
+        result.succeeded++
+      } catch (err) {
+        result.failed++
+        result.errors.push({ item, error: classifyError(err) })
+      }
+    }
+  } finally {
+    await session.close()
+  }
+  return result
 }
