@@ -22,17 +22,43 @@ Relevant memory entries: `project_architecture_refactor_arc.md` (the arc + curre
 
 ## Your deliverables in this session
 
-1. **Write the implementation plan.** Use the `superpowers:writing-plans` skill. Save to `docs/superpowers/plans/2026-04-15-workflow-kernel-plan.md`. Cover both phases:
-   - **Phase 1 — Kernel build:** scaffold `src/core/` with `workflow.ts`, `session.ts`, `stepper.ts`, `batch.ts`, `pool.ts`, `registry.ts`, `page-health.ts` (moved from utils), `types.ts`. Add unit tests. Add the ESLint rules for `no-floating-promises` + `await-thenable`. Add `GET /api/workflows` to the SSE server. Add `WorkflowsProvider` + `useWorkflows()` to the dashboard. Delete `src/browser/session.ts` (unused `WorkflowSession` class). Kernel build alone is ~5 working days of task detail.
-   - **Phase 2 — Migrations, 6 workflows, in this order:** work-study → emergency-contact → eid-lookup → kronos-reports → onboarding → separations. Per-system dir renames (`src/ucpath` → `src/systems/ucpath`, etc.) happen WITH the first workflow migration that uses that system (see spec migration plan section for the exact mapping). Workflow-specific utils (`roster-verify`, `sharepoint-download`) move into their workflow's dir during the emergency-contact migration.
+### Phase 1 — Kernel build (plan already written)
 
-   Each workflow migration is ~1-2 days of task detail. Total plan ~15-17 working days of tasks.
+The Session 1 implementation plan is at `docs/superpowers/plans/2026-04-15-workflow-kernel-build-plan.md`. It covers 23 tasks that build `src/core/` end-to-end: types, registry, Session (with interleaved auth), Stepper, defineWorkflow, runWorkflow, sequential batch with betweenItems hooks, worker-per-browser pool, page-health relocation, `GET /api/workflows` endpoint, dashboard `WorkflowsProvider`, and `WorkflowSession` deletion. Scope ends with a mock-workflow integration test passing and a `kernel-build-complete` git tag.
 
-2. **Execute the plan.** Use `superpowers:subagent-driven-development` — dispatch a fresh subagent per task, you review the diff, then dispatch the next. You stay in manager mode: reading diffs, catching issues, maintaining architectural coherence. Do not do implementation yourself — you are there to judge, not type.
+**Your job for Phase 1:** execute the existing plan using `superpowers:subagent-driven-development`. Dispatch a fresh subagent per task, review the diff, then dispatch the next. You stay in manager mode. Do not re-plan the kernel — the spec + plan are locked.
 
-3. **Handle multi-conversation span.** This session's scope is ~15-17 working days of execution. That does NOT fit in one literal conversation. When context starts feeling strained (or the user stops for the day), write a mid-session checkpoint to `docs/superpowers/sessions/02-kernel-execution-checkpoint-<date>.md` summarizing what's done + what's next + any gotchas discovered. The user will paste that checkpoint at the start of the next chat to resume. The plan file with its checkboxes is the primary progress record; checkpoints add nuance.
+Phase 1 is roughly 5 working days of task detail. It likely fits in one literal conversation if the user stays present, but may span 2–3 if interrupted.
 
-4. **At the end — write Session 3's handoff prompt.** When all 6 workflows are migrated, validation criteria from the spec are met, and the kernel is in production, write `docs/superpowers/sessions/03-selector-registry.md` following the same pattern as this file. Session 3's job will be: fresh brainstorm → spec → plan → execute for Subsystem A (the selector registry). The A spec needs `src/systems/` to exist, which your work produces. Include in Session 3's prompt: (a) context on what Session 2 built, (b) the user's priorities from Session 1 (`A > D > C` remaining), (c) instructions to brainstorm fresh rather than re-use the Session 1 spec's rough sketch of A.
+### Phase 2 — Workflow migrations (plans written incrementally)
+
+After Phase 1 completes (`kernel-build-complete` tag exists), migrate workflows one at a time in this order:
+
+1. **work-study** (simplest — proves the kernel for trivial case)
+2. **emergency-contact** (sequential batch, `preEmitPending`; also moves `roster-verify.ts` and `sharepoint-download.ts` out of `src/utils/` into `src/workflows/emergency-contact/`)
+3. **eid-lookup** (page-per-worker pattern via existing `runWorkerPool` helper)
+4. **kronos-reports** (worker-per-browser pool, persistent `sessionDir`)
+5. **onboarding** (3 systems sequential, PDF download side effect, retries)
+6. **separations** (4 systems, interleaved auth, phase parallelism — final boss)
+
+Per-system directory renames happen WITH the first migration that uses that system (mapping in the spec's Migration plan section). Use `git mv` to preserve history. Tag each successful migration: `git tag kernel-migration-<workflow>`.
+
+**Your job for Phase 2:** for each workflow, write a short migration plan (`docs/superpowers/plans/2026-XX-XX-migrate-<workflow>-plan.md`) using `superpowers:writing-plans`, then execute it via `superpowers:subagent-driven-development`. The plan is written incrementally — one at a time — because we want to learn from each migration before committing to the next. If the kernel needs a small API tweak discovered during a migration, do it in the kernel and note it.
+
+A migration is "done" only after: all workflow tests pass, `npm run typecheck` is clean, the old implementation file is deleted, and one real run succeeds (user watching, dashboard verified).
+
+### Multi-conversation span
+
+Total execution is ~15-17 working days. That does NOT fit in one literal conversation. When context starts feeling strained, write `docs/superpowers/sessions/02-kernel-execution-checkpoint-<date>.md` summarizing what's done, what's next, and any gotchas. The user pastes that checkpoint at the start of the next chat to resume. The plan file checkboxes + git tags are the primary progress record.
+
+### End of session — write Session 3's handoff
+
+When all 6 migrations land and every success criterion in the spec is met (see "Success criteria" section of the spec), write `docs/superpowers/sessions/03-selector-registry.md` following the same pattern as this file. Session 3's job: fresh brainstorm → spec → plan → execute for Subsystem A (selector registry). Include in Session 3's prompt:
+- Context on what Session 2 shipped (kernel + 6 migrations + new `src/systems/` layout)
+- User's remaining priorities: `A > D > C`
+- Instruction to brainstorm fresh — do NOT reuse the rough sketch in the kernel spec's "Follow-up specs" section; that was preliminary
+- The reminder that `src/systems/<system>/` is now the natural home for selectors
+- The reminder that `.or()` fallback chains are currently used in only 2 files across the entire codebase despite PeopleSoft grid ID mutation (see Session 1 survey evidence)
 
 ## Constraints and conventions
 
@@ -47,10 +73,11 @@ Relevant memory entries: `project_architecture_refactor_arc.md` (the arc + curre
 ## How to start
 
 1. Read `docs/superpowers/specs/2026-04-15-workflow-kernel-design.md` in full.
-2. Read the root `CLAUDE.md` (auto-loaded) and skim per-module CLAUDE.md files relevant to Phase 1 (`src/browser/`, `src/utils/`, `src/tracker/`, `src/dashboard/`).
-3. Check memory (`MEMORY.md` + referenced files) for user preferences.
-4. Invoke `superpowers:writing-plans` to produce the plan.
-5. When the user approves the plan, invoke `superpowers:subagent-driven-development` to begin execution.
+2. Read `docs/superpowers/plans/2026-04-15-workflow-kernel-build-plan.md` in full — this is what you'll execute first.
+3. Read the root `CLAUDE.md` (auto-loaded) and skim per-module CLAUDE.md files relevant to Phase 1 (`src/browser/`, `src/utils/`, `src/tracker/`, `src/dashboard/`).
+4. Check memory (`MEMORY.md` + referenced files) for user preferences.
+5. Invoke `superpowers:subagent-driven-development` to execute the kernel plan task-by-task. Do not re-plan.
+6. When Phase 1 completes (`kernel-build-complete` tag), pause and confirm with the user before starting Phase 2 migrations.
 
 ## Out of scope for this session
 
