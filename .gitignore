@@ -37,6 +37,7 @@ node_modules/
 
 # Tracker data (local runtime)
 .tracker/
+.tracker-log-test/
 
 # Excel tracking files
 *.xlsx
