@@ -1,7 +1,7 @@
 import type { Page } from "playwright";
-import { log } from "../utils/log.js";
+import { log } from "../../utils/log.js";
 import { ExtractionError } from "./types.js";
-import { CRM_SEARCH_URL } from "../config.js";
+import { CRM_SEARCH_URL } from "../../config.js";
 
 /**
  * Search results page -- accepts email as query param.

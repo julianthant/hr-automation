@@ -1,6 +1,6 @@
 import type { Page } from "playwright";
-import { log } from "../utils/log.js";
-import { CRM_SECTION_URLS } from "../config.js";
+import { log } from "../../utils/log.js";
+import { CRM_SECTION_URLS } from "../../config.js";
 
 /**
  * SELECTOR: adjusted from live testing -- known section URL mappings.

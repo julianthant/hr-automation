@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { ExtractionError } from "../../crm/types.js";
+import { ExtractionError } from "../../systems/crm/types.js";
 
 export const EmployeeDataSchema = z.object({
   positionNumber: z.string().min(1, "Position number is required"),

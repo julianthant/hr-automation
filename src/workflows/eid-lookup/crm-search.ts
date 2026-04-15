@@ -9,7 +9,7 @@
 
 import type { Page } from "playwright";
 import { CRM_SEARCH_URL } from "../../config.js";
-import { extractField } from "../../crm/extract.js";
+import { extractField } from "../../systems/crm/extract.js";
 import { log } from "../../utils/log.js";
 
 export interface CrmRecord {

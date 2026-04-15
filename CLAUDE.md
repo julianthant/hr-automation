@@ -68,7 +68,6 @@ src/
     tiling.ts        # Window tiling computation for multi-browser layouts
     (launch.ts: headed mode, ephemeral or persistent sessions)
   config.ts         # Centralized URLs, PATHS, TIMEOUTS, SCREEN, ANNUAL_DATES constants
-  crm/              # ACT CRM (Salesforce) navigation, search, and data extraction
   i9/               # I9 Complete employee record creation
   kuali/            # Kuali Build separation form automation (fill, extract, save)
   new-kronos/       # New Kronos (WFD/Dayforce) employee search and timecard checking
@@ -81,6 +80,7 @@ src/
     spreadsheet.ts   # Excel tracking with daily worksheets (YYYY-MM-DD tabs)
   dashboard/          # React SPA (Vite + HeroUI v3 + Tailwind) — served via Vite dev server on port 5173
   systems/
+    crm/              # ACT CRM (Salesforce) navigation, search, and data extraction (moved from src/crm/ in Phase 2)
     ucpath/           # UCPath PeopleSoft navigation, person search, Smart HR transactions (moved from src/ucpath/ in Phase 2)
   utils/
     screenshot.ts    # Unified debug screenshot helper
