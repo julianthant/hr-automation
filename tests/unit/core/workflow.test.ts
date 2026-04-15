@@ -72,3 +72,27 @@ test('runWorkflow: invokes handler with ctx.step typed to step names', async () 
   })
   assert.deepEqual(emitted, ['one-ran'])
 })
+
+test('runWorkflow: installs SIGINT handler during handler execution', async () => {
+  let observed: number | null = null
+  const wf = defineWorkflow({
+    name: 'sigint-observe',
+    systems: [],
+    steps: ['s1'] as const,
+    schema: z.object({}),
+    handler: async () => {
+      observed = process.listeners('SIGINT').length
+    },
+  })
+  const before = process.listeners('SIGINT').length
+  await runWorkflow(wf, {}, {
+    launchFn: () => Promise.resolve({
+      page: {} as import('playwright').Page,
+      context: { close: async () => {} } as never,
+      browser: { close: async () => {} } as never,
+    }),
+    trackerStub: true,
+  })
+  assert.equal(observed, before + 1, 'handler should see a new SIGINT listener installed')
+  assert.equal(process.listeners('SIGINT').length, before, 'listener should be removed after')
+})

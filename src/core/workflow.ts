@@ -82,9 +82,21 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
       runId,
     }
 
+    const sigintHandler = () => {
+      try {
+        const step = stepper.getCurrentStep() ?? 'sigint'
+        setStep(`${step}:failed:interrupted`)
+      } catch { /* best-effort */ }
+      // Fire-and-forget kill — we're exiting regardless.
+      session.killChrome().catch(() => {})
+      process.exit(1)
+    }
+    process.on('SIGINT', sigintHandler)
+
     try {
       await wf.config.handler(ctx, data)
     } finally {
+      process.off('SIGINT', sigintHandler)
       await session.close()
     }
   }
