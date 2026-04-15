@@ -99,6 +99,32 @@ export class Session {
       if (slot.browser) await slot.browser.close()
     }
   }
+
+  async reset(id: string): Promise<void> {
+    const sys = this.state.systems.find((s) => s.id === id)
+    if (!sys?.resetUrl) return
+    const slot = this.state.browsers.get(id)
+    if (!slot) return
+    await slot.page.goto(sys.resetUrl)
+  }
+
+  async healthCheck(id: string): Promise<boolean> {
+    const slot = this.state.browsers.get(id)
+    if (!slot) return false
+    try {
+      if (slot.page.isClosed()) return false
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  async killChrome(): Promise<void> {
+    // SIGINT teardown — force-close all browsers without awaiting graceful shutdown.
+    for (const slot of this.state.browsers.values()) {
+      try { await slot.browser?.close() } catch { /* ignore */ }
+    }
+  }
 }
 
 async function defaultLaunchOne(opts: LaunchOneOpts): Promise<SystemSlot> {
