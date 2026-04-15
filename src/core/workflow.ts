@@ -143,6 +143,13 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
     }
   })
 
+  // Emit pending for all items upfront if requested.
+  if (batch?.preEmitPending && opts.onPreEmitPending) {
+    for (const item of items) {
+      opts.onPreEmitPending(item)
+    }
+  }
+
   const session = await Session.launch(wf.config.systems, {
     authChain: wf.config.authChain,
     tiling: wf.config.tiling,

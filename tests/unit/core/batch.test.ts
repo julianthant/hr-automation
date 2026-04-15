@@ -63,3 +63,25 @@ test('runWorkflowBatch (sequential): continues after one item fails', async () =
   assert.equal(result.failed, 1)
   assert.equal(result.errors[0].error, 'deliberate')
 })
+
+test('runWorkflowBatch (preEmitPending): emits pending for all items before handler starts', async () => {
+  const pendingEmissions: string[] = []
+  const wf = defineWorkflow({
+    name: 'batch-pre',
+    systems: [],
+    steps: ['s1'] as const,
+    schema: z.object({ id: z.string() }),
+    batch: { mode: 'sequential', preEmitPending: true },
+    handler: async () => {},
+  })
+  await runWorkflowBatch(
+    wf,
+    [{ id: '1' }, { id: '2' }, { id: '3' }],
+    {
+      launchFn: () => Promise.resolve(fakeSlot()),
+      trackerStub: true,
+      onPreEmitPending: (item) => pendingEmissions.push((item as { id: string }).id),
+    },
+  )
+  assert.deepEqual(pendingEmissions, ['1', '2', '3'])
+})
