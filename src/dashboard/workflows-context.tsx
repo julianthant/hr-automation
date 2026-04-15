@@ -1,0 +1,39 @@
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
+
+export interface WorkflowMetadata {
+  name: string
+  steps: string[]
+  systems: string[]
+  detailFields: string[]
+}
+
+const WorkflowsContext = createContext<WorkflowMetadata[] | null>(null)
+
+export function WorkflowsProvider({ children }: { children: ReactNode }) {
+  const [workflows, setWorkflows] = useState<WorkflowMetadata[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetch("/api/workflow-definitions")
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
+      .then(setWorkflows)
+      .catch((e: Error) => setError(e.message))
+  }, [])
+
+  if (error) return <div>Failed to load workflow config: {error}</div>
+  if (!workflows) return <div>Loading…</div>
+  return <WorkflowsContext.Provider value={workflows}>{children}</WorkflowsContext.Provider>
+}
+
+export function useWorkflows(): WorkflowMetadata[] {
+  const ctx = useContext(WorkflowsContext)
+  if (!ctx) throw new Error("useWorkflows must be used inside WorkflowsProvider")
+  return ctx
+}
+
+export function useWorkflow(name: string): WorkflowMetadata | undefined {
+  return useWorkflows().find((w) => w.name === name)
+}
