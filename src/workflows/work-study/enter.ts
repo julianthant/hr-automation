@@ -1,6 +1,6 @@
 import type { Page, FrameLocator } from "playwright";
-import { ActionPlan } from "../../ucpath/action-plan.js";
-import { getContentFrame } from "../../ucpath/navigate.js";
+import { ActionPlan } from "../../systems/ucpath/action-plan.js";
+import { getContentFrame } from "../../systems/ucpath/navigate.js";
 import { log } from "../../utils/log.js";
 import { UCPATH_SMART_HR_URL } from "../../config.js";
 import type { WorkStudyInput } from "./schema.js";

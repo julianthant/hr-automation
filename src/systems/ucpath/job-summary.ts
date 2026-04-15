@@ -1,5 +1,5 @@
 import type { Page, Locator } from "playwright";
-import { log } from "../utils/log.js";
+import { log } from "../../utils/log.js";
 
 /** Direct URL — skips sidebar, no iframe wrapper. */
 const JOB_SUMMARY_URL =

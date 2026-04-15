@@ -1,7 +1,7 @@
 import type { Page, FrameLocator } from "playwright";
 import type { TransactionResult } from "./types.js";
 import { getContentFrame, waitForPeopleSoftProcessing, navigateToSmartHR } from "./navigate.js";
-import { log } from "../utils/log.js";
+import { log } from "../../utils/log.js";
 
 // ─── STEP 1: Navigate sidebar → Smart HR Templates → Smart HR Transactions ───
 

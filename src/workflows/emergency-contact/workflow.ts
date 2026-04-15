@@ -16,8 +16,8 @@ import {
   emitAuthFailed,
   generateInstanceName,
 } from "../../tracker/session-events.js";
-import { TransactionError } from "../../ucpath/types.js";
-import { navigateToEmergencyContact } from "../../ucpath/personal-data.js";
+import { TransactionError } from "../../systems/ucpath/types.js";
+import { navigateToEmergencyContact } from "../../systems/ucpath/personal-data.js";
 import { downloadSharePointFile } from "../../utils/sharepoint-download.js";
 import { verifyBatchAgainstRoster } from "../../utils/roster-verify.js";
 import { buildEmergencyContactPlan, extractEmployeeName, findExistingContactDuplicate } from "./enter.js";

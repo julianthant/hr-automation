@@ -1,7 +1,7 @@
 import { describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
-import { ActionPlan } from "../../../src/ucpath/action-plan.js";
-import { TransactionError } from "../../../src/ucpath/types.js";
+import { ActionPlan } from "../../../../src/systems/ucpath/action-plan.js";
+import { TransactionError } from "../../../../src/systems/ucpath/types.js";
 
 describe("ActionPlan", () => {
   describe("preview()", () => {

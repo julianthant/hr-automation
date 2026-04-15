@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { TransactionError } from "../../../src/ucpath/types.js";
+import { TransactionError } from "../../../../src/systems/ucpath/types.js";
 
 describe("TransactionError", () => {
   it("has name 'TransactionError'", () => {

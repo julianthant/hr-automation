@@ -13,7 +13,7 @@
  */
 
 import type { Page, FrameLocator } from "playwright";
-import { getContentFrame, waitForPeopleSoftProcessing } from "../../ucpath/navigate.js";
+import { getContentFrame, waitForPeopleSoftProcessing } from "../../systems/ucpath/navigate.js";
 import { log } from "../../utils/log.js";
 
 /** Direct URL to Person Org Summary — opens in the HR Tasks iframe. */

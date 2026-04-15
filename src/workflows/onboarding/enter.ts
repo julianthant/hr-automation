@@ -1,5 +1,5 @@
 import type { Page } from "playwright";
-import { ActionPlan } from "../../ucpath/action-plan.js";
+import { ActionPlan } from "../../systems/ucpath/action-plan.js";
 import {
   TEMPLATE_ID,
   REASON_CODE,
@@ -22,8 +22,8 @@ import {
   clickSaveAndSubmit,
   parsePayRate,
   buildCommentsText,
-} from "../../ucpath/index.js";
-import type { PersonalDataInput, JobDataInput } from "../../ucpath/index.js";
+} from "../../systems/ucpath/index.js";
+import type { PersonalDataInput, JobDataInput } from "../../systems/ucpath/index.js";
 import type { EmployeeData } from "./schema.js";
 
 /**

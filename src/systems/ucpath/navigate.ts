@@ -1,8 +1,8 @@
 import type { Page, FrameLocator } from "playwright";
-import { log } from "../utils/log.js";
-import { UCPATH_SMART_HR_URL } from "../config.js";
-import { errorMessage } from "../utils/errors.js";
-import { debugScreenshot } from "../utils/screenshot.js";
+import { log } from "../../utils/log.js";
+import { UCPATH_SMART_HR_URL } from "../../config.js";
+import { errorMessage } from "../../utils/errors.js";
+import { debugScreenshot } from "../../utils/screenshot.js";
 
 // SELECTOR: verified v1.2 -- must use ucphrprdpub domain (same as auth session), not ucpath domain
 const SMART_HR_URL = UCPATH_SMART_HR_URL;

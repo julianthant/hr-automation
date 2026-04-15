@@ -9,8 +9,8 @@ import {
   navigateToSection,
   ExtractionError,
 } from "../../crm/index.js";
-import { TransactionError } from "../../ucpath/types.js";
-import { searchPerson } from "../../ucpath/navigate.js";
+import { TransactionError } from "../../systems/ucpath/types.js";
+import { searchPerson } from "../../systems/ucpath/navigate.js";
 import { withTrackedWorkflow } from "../../tracker/jsonl.js";
 import { loginToI9, createI9Employee } from "../../i9/index.js";
 import {
