@@ -1,7 +1,7 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, rmSync } from "fs";
-import { trackEvent, readEntries, type TrackerEntry } from "../../src/tracker/jsonl.js";
+import { trackEvent, readEntries, type TrackerEntry } from "../../../src/tracker/jsonl.js";
 
 const TEST_DIR = ".tracker-test";
 

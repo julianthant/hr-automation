@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { validateEnv, EnvValidationError } from "../../src/utils/env.js";
+import { validateEnv, EnvValidationError } from "../../../src/utils/env.js";
 
 // Store original env values for restoration
 let originalUserId: string | undefined;

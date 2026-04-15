@@ -25,6 +25,14 @@ npm run kronos -- --workers 8          # Kronos with custom worker count
 npm run work-study <emplId> <date>     # Update position pool via PayPath Actions
 npm run work-study:dry <emplId> <date> # Dry-run work study
 
+# Emergency Contact
+npm run emergency-contact <batchYaml>  # Fill Emergency Contact in UCPath for every record in a batch YAML
+npm run emergency-contact:dry <batchYaml>  # Preview records without touching UCPath
+# Optional flags:
+#   --roster-url "<sharepoint-url>"       Download + verify against latest roster
+#   --roster-path <localXlsx>             Use a local roster for pre-flight verification
+#   --ignore-roster-mismatch              Proceed despite roster mismatches
+
 # EID Lookup (no npm script — use CLI directly)
 tsx --env-file=.env src/cli.ts eid-lookup "Last, First Middle"
 tsx --env-file=.env src/cli.ts eid-lookup --workers 4 "Name1" "Name2" "Name3"
@@ -84,6 +92,7 @@ src/
     eid-lookup/     # Person Org Summary name search, CRM cross-verification, Excel output
     old-kronos-reports/  # Batch Time Detail PDF downloads from Old Kronos, parallel workers
     work-study/     # UCPath PayPath position pool/compensation updates
+    emergency-contact/ # UCPath HR Tasks → Personal Data → Emergency Contact, batch-driven via YAML
   cli.ts            # Commander CLI entry point
 ```
 
@@ -91,17 +100,22 @@ src/
 
 **Onboarding:**
 ```
-CRM (extract) → EmployeeData (schema) → Person Search (UCPath)
-                                       → I9 Record (I9 Complete)
-                                       → Smart HR Transaction (UCPath)
-                                       → Tracker (Excel spreadsheet)
+CRM (search + record-page extract)
+  → UCPath Entry Sheet extract → EmployeeData (schema)
+  → CRM PDF download (Doc 1 + Doc 3 via direct iDocs fetch)
+  → UCPath Person Search (rehire short-circuit if matched)
+  → I-9 Complete: create employee profile → profileId
+  → UCPath Smart HR Transaction (UC_FULL_HIRE, using real profileId)
+  → Dashboard JSONL (no Excel tracker)
 ```
 
 **Separations:**
 ```
-Kuali (extract) → SeparationData (schema) → Old Kronos (timecard check)
-                                           → New Kronos (timecard check)
-                                           → UCPath Job Summary (verify)
+Kuali (extract) → SeparationData (schema) → ┌ Old Kronos (timecard check)  ┐
+                                             │ New Kronos (timecard check)  │ parallel
+                                             │ UCPath Job Summary (verify)  │
+                                             └ Kuali (timekeeper name fill) ┘
+                                           → Resolve dates + fill Kuali fields
                                            → UCPath Termination Transaction
                                            → Kuali (write back transaction ID)
 ```
@@ -179,8 +193,8 @@ These rules are **mandatory** — follow them on every task, not just when asked
 - **No session persistence** (UCPath/CRM/Kuali): Always login fresh, leave browser open for user to observe
 - **Persistent sessions** (UKG/Kronos): Uses `launchBrowser({ sessionDir })` to reuse login state across runs
 - **Headed browser**: Always use headed mode so user can see automation and approve Duo MFA
-- **Sequential Duo MFA**: When multiple browsers need auth, stagger Duo prompts one at a time — simultaneous prompts cause errors
-- **Multi-browser tiling**: Separations workflow launches 5 browsers tiled on screen (Kuali, Old Kronos, New Kronos, UCPath Txn, UCPath Job Summary)
+- **Sequential Duo MFA**: When multiple browsers need auth, stagger Duo prompts one at a time — simultaneous prompts cause errors. Use auth-ready promises to interleave auth with work (see "Multi-Browser Parallel Execution" section below)
+- **Multi-browser tiling**: Separations workflow launches 4 browsers tiled on screen (Kuali, Old Kronos, New Kronos, UCPath)
 - **URL params over clicking**: Prefer URL manipulation over UI navigation where possible
 - **Use playwright-cli for selector discovery**: Never guess selectors — always use `playwright-cli` to map them live. See the playwright-cli section below for usage
 - **Log every interaction**: Log every browser action (click, fill, navigate, wait) to console for traceability
@@ -195,6 +209,149 @@ These rules are **mandatory** — follow them on every task, not just when asked
 - Use `WorkflowSession.create()` for new workflows — shares auth across all windows
 - Use `computeTileLayout()` for multi-browser window positioning
 - Use `runWorkerPool()` for parallel processing — handles queue, errors, teardown
+
+## Multi-Browser Parallel Execution
+
+When a workflow uses multiple browser windows (e.g., separations uses 4), maximize parallelism at every stage: during authentication, during work, and during form fills. The key insight is that each browser is an independent execution context — once authenticated, it can start work immediately without waiting for other browsers.
+
+### Pattern 1: Auth-Ready Promises (Interleaved Auth + Work)
+
+**Problem**: Duo MFA must be sequential (one at a time), but the old approach was: auth ALL browsers → THEN start work. With 4 browsers at ~15s each, that's 60s of auth before any work begins.
+
+**Solution**: Each browser's auth creates a "ready" promise. Work tasks chain off their own ready promise via `.then()`. As soon as one browser's Duo clears, its work starts — while the user is still approving remaining Duos on their phone.
+
+```typescript
+// Declare ready promises — default to resolved for batch mode (already authed)
+let browserAReady: Promise<void> = Promise.resolve();
+let browserBReady: Promise<void> = Promise.resolve();
+
+if (existingWindows) {
+  // Batch mode: browsers already authed, promises stay resolved
+} else {
+  // Fresh mode: auth chain runs in background
+  // Auth #1 (blocking — everything depends on primary system)
+  await loginToPrimary(primaryWin.page);
+
+  // Auth #2 starts, becomes a ready promise
+  browserAReady = (async () => {
+    await loginToSystemA(browserA.page);
+  })();
+
+  // Wait for primary nav + Auth #2 to complete
+  await Promise.allSettled([primaryNavigation(), browserAReady]);
+
+  // Auth chain continues in background — DON'T await
+  browserBReady = browserAReady
+    .catch(() => {})  // don't block chain if Auth #2 failed
+    .then(async () => {
+      await loginToSystemB(browserB.page);
+    });
+
+  // Prevent unhandled rejection if workflow exits early
+  browserBReady.catch(() => {});
+}
+
+// Work tasks chain off ready promises — start as soon as their auth clears
+const [resultA, resultB] = await Promise.allSettled([
+  browserAReady.then(async () => { /* System A work */ }),
+  browserBReady.then(async () => { /* System B work */ }),
+  (async () => { /* Primary system work — already authed, starts immediately */ })(),
+]);
+```
+
+**Key rules**:
+- `.catch(() => {})` between chain steps prevents one auth failure from blocking subsequent auths
+- Add `browserBReady.catch(() => {})` at the end to prevent unhandled rejection if workflow exits before `Promise.allSettled` consumes the promise
+- In batch mode (reusing browsers), ready promises are `Promise.resolve()` → `.then()` fires immediately
+- Health checks (`ensurePageHealthy`) must be batch-only — in fresh mode, browsers may not be authed yet when Phase 1 starts
+
+### Pattern 2: Phase Parallelization (Independent Tasks in Parallel)
+
+**Problem**: Workflows often have phases that run sequentially even though they have no data dependency on each other.
+
+**Solution**: Identify which tasks actually depend on each other vs. which just happen to use different browser windows. Run independent tasks in the same `Promise.allSettled` block.
+
+**How to identify parallelizable tasks**: For each task, ask: "What data does this need that isn't available yet?" If the answer is only data from the extraction phase (already complete), it can run in parallel with other such tasks.
+
+```
+Before: Extract → Phase 1 (System A + B) → Phase 2 (System C + form fill) → Transaction
+After:  Extract → [System A + System B + System C + form fill] → Transaction
+                   (all in parallel — different browser windows, no data conflicts)
+```
+
+**Separations example** — tasks after Kuali extraction:
+| Task | Needs | Browser | Can parallelize? |
+|------|-------|---------|-----------------|
+| Old Kronos search | EID | oldKronosWin | Yes |
+| New Kronos search | EID | newKronosWin | Yes |
+| UCPath Job Summary | EID | ucpathWin | Yes |
+| Kuali timekeeper fill | Timekeeper name | kualiWin | Yes (different form fields) |
+| Kuali term date fill | Kronos dates | kualiWin | No — depends on Kronos results |
+| UCPath Transaction | Final term date | ucpathWin | No — depends on Kronos + Job Summary |
+
+Result: 4 tasks run in parallel, 2 must wait. The bottleneck (Old Kronos, ~60s) hides the others (~15-30s each).
+
+### Pattern 3: Batch-Only Guards
+
+Operations that reset state between items (health checks, browser resets, UCPath session resets) are only needed in batch mode. In fresh mode, browsers were just launched and authenticated — skip the overhead.
+
+```typescript
+// Health checks + reset: batch mode only
+if (existingWindows) {
+  await Promise.allSettled([
+    ensurePageHealthy(browserA.page, ...),
+    ensurePageHealthy(browserB.page, ...),
+  ]);
+  // Reset browsers to starting state for next item
+  await Promise.allSettled([resetBrowserA(), resetBrowserB()]);
+}
+
+// Post-transaction cleanup: batch mode only
+if (existingWindows) {
+  await navigateToStartPage(browser.page);
+}
+```
+
+### Pattern 4: Same-Page Parallel Form Fills
+
+When filling a long form, independent sections can be filled in parallel IF:
+1. They use different form fields (no DOM conflicts)
+2. Neither triggers a page navigation or refresh
+3. They happen on the same already-loaded page
+
+**Safe**: Filling "Timekeeper Name" while Kronos searches run (different page section, different browser)
+**Unsafe**: Filling a PeopleSoft dropdown while another field is being filled (dropdown triggers page refresh)
+
+### Applying to New Workflows
+
+When building a multi-browser workflow:
+
+1. **Map data dependencies**: Draw which tasks need which data. Only tasks that need data from a prior task must be sequential.
+2. **Assign browser windows**: Each parallel task should use its own browser window. Never share a browser between parallel tasks.
+3. **Use auth-ready promises**: If the workflow needs multiple Duo auths, use the interleaved pattern so work starts as each browser authenticates.
+4. **Use Promise.allSettled**: Never `Promise.all` — one system's failure shouldn't crash the workflow. Handle each result independently.
+5. **Batch-only guards**: If the workflow supports batch mode (sequential items, reused browsers), guard health checks and resets behind `if (existingWindows)`.
+
+### Timing Reference (Separations Workflow)
+
+Fresh launch (first document):
+```
+Auth Kuali (#1)              ████  15s
+[Kuali nav ‖ Old Kronos #2]  ��███  15s
+Extract (1s) — auth chain continues in background:
+  Old Kronos work starts     ████████████████████████████  60s
+  Auth New Kronos (#3, 15s)  → New Kronos work  ████████████████  33s
+  Auth UCPath (#4, 15s)                         → Job Summary  ██████  15s
+Grand total: ~91s (was ~120s without interleaving)
+```
+
+Batch mode (2nd+ documents, browsers already authed):
+```
+Kuali nav + extract          ████████  24s
+[Old Kronos ‖ New Kronos ‖ Job Summary ‖ Kuali fill]  ████████████████████████████  60s
+(Job Summary + Kronos run in parallel — was sequential before)
+Grand total: ~90s per doc (was ~120s without phase parallelization)
+```
 
 ## Live Monitoring Dashboard
 
@@ -215,11 +372,12 @@ Open **http://localhost:5173** to see real-time progress. The dashboard auto-upd
 ### Step Tracking Per Workflow
 | Workflow | Steps |
 |----------|-------|
-| Onboarding | crm-auth → extraction → ucpath-auth → person-search → transaction |
+| Onboarding | crm-auth → extraction → pdf-download → ucpath-auth → person-search → i9-creation → transaction |
 | Separations | launching → authenticating → kuali-extraction → kronos-search → ucpath-job-summary → ucpath-transaction → kuali-finalization |
 | EID Lookup | ucpath-auth → searching (+ crm-auth → cross-verification for CRM mode) |
 | Kronos Reports | searching → extracting → downloading |
 | Work Study | ucpath-auth → transaction |
+| Emergency Contact | navigation → fill-form → save (per record) |
 
 Export to Excel: `tsx --env-file=.env src/cli.ts export <workflow>`
 
@@ -362,14 +520,20 @@ playwright-cli -s=ukg screenshot                  # visual verification
 
 ## Separations Workflow Flow
 
-1. Launch 5 tiled browsers (Kuali, Old Kronos, New Kronos, UCPath Txn, UCPath Job Summary)
-2. Authenticate all 5 with staggered Duo MFA (one at a time)
-3. **Phase 1 (parallel)**: Extract Kuali separation data + search both Kronos systems for timesheets
-4. Resolve Kronos dates: Kronos dates always override Kuali dates when they differ (Kronos is ground truth)
-5. **Phase 2**: Fetch UCPath job summary, create termination Smart HR transaction
-6. Termination effective date = separation date + 1 day
-7. Reason code: exact match → fuzzy match → fallback mapping from Kuali termination type
-8. **Phase 3**: Write UCPath transaction ID back to Kuali form, save
+1. Launch 4 tiled browsers (Kuali, Old Kronos, New Kronos, UCPath)
+2. Auth Kuali (Duo #1), then Kuali nav + Old Kronos auth (Duo #2) in parallel
+3. Auth chain continues in background (New Kronos #3, UCPath #4) — extraction proceeds immediately
+4. Extract Kuali separation data, compute termination effective date (separation date + 1 day)
+5. **Phase 1 (4-way parallel)**: Each task starts as soon as its auth clears:
+   - Old Kronos timecard search (starts immediately — auth already done)
+   - New Kronos timecard search (starts when Duo #3 approved)
+   - UCPath Job Summary lookup (starts when Duo #4 approved)
+   - Kuali timekeeper name fill (starts immediately — already authed)
+6. Resolve Kronos dates: Kronos dates always override Kuali dates when they differ (ground truth)
+7. Fill remaining Kuali fields (term effective date, department, payroll code)
+8. **UCPath Transaction**: Create termination Smart HR transaction
+9. Reason code: exact match → fuzzy match → fallback mapping from Kuali termination type
+10. **Kuali Finalization**: Write UCPath transaction ID back to Kuali form, save
 
 ## UCPath Smart HR Transaction Flow (14 Steps)
 

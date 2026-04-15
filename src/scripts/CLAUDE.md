@@ -4,7 +4,6 @@ Development and debugging scripts. These are NOT production workflows — they'r
 
 ## Files
 
-- `demo-dashboard.ts` — Simulates workflow events to test dashboard SSE streaming without running real workflows
 - `eid-manual-lookup.sh` — Shell script for quick manual EID lookups
 - `explore-kronos-selectors.ts` — Opens Kronos browsers and pauses for Playwright Inspector to map selectors
 - `kronos-map.ts` — Maps Kronos employee data for batch processing
@@ -21,7 +20,7 @@ tsx --env-file=.env src/scripts/<script>.ts
 ## When to Use
 
 - **Selector discovery**: Use `explore-kronos-selectors.ts` to launch headed browsers, then switch to `playwright-cli` for snapshot/mapping
-- **Dashboard testing**: Use `demo-dashboard.ts` to verify dashboard changes without triggering real HR system automation
+- **Dashboard testing**: Write fake JSONL lines directly into `.tracker/{workflow}-{YYYY-MM-DD}.jsonl`, `-logs.jsonl`, and `.tracker/sessions.jsonl` — the dashboard reads these files, no script needed
 - **Debugging**: Use individual test scripts to isolate a specific system interaction
 
 ## Lessons Learned

@@ -23,7 +23,15 @@ ACT CRM (Salesforce) automation: employee search, navigation, and field extracti
 
 ## Verified Selectors
 
-*(Add selectors here after each playwright-cli mapping session — include date and system)*
+### Record page (`/hr/ONB_ViewOnboarding?id=<recordId>`) — 2026-04-14
+Visualforce table — `<th class="labelCol">` label, `<td class="data2Col">` value. Known labels:
+`Process Stage`, `Employee First/Middle/Last Name`, `Personal Email Address`, `Address Line 1/2`, `City`, `State`, `Postal Code`, `Hiring Supervisor First/Last Name`, `First Day of Service (Effective Date)`, `Appointment (Expected Job) End Date`, `Department` (parse parens → `"DEPT NAME (000412)"`), `Hire Type`, `Appointment Type`, `Recruitment Number`, `Title Code/Payroll Title`, `Position Number`, `Working Title`, `FLSA Exemption Status`, `Union Representation`, `Pay Cycle`, `Pay Rate`, `Benefits Eligibility`, `Department HR Rep Name`, `HR Contact Phone Number`, `Offer Letter Acceptance Deadline`, `Date Signed`.
+
+### iDocs PDF viewer (inside record page) — 2026-04-14
+- Host: `crickportal-ext.bfs.ucsd.edu` (separate from `act-crm.my.site.com`, but cookies ride along from the Canvas iframe load)
+- Viewer iframe URL pattern: `https://crickportal-ext.bfs.ucsd.edu/iDocsForSalesforce/Content/pdfjs/web/PDFjsViewer.aspx?h=<hash>&c=<totalCount>` — find via `page.frames().find(f => f.url().includes("crickportal-ext.bfs.ucsd.edu") && f.url().includes("/pdfjs/web/PDFjsViewer"))`
+- **Direct PDF fetch** (preferred): `https://crickportal-ext.bfs.ucsd.edu/iDocsForSalesforce/iDocsForSalesforceDocumentServer?i=<0-based-idx>&h=<hash>` via `page.context().request.get(url)` — returns `application/pdf` with `Content-Disposition: inline; filename=iDocs-....pdf`
+- PDF.js UI controls (only relevant for manual exploration): `#docNum` (current doc #, 1-based), `#nextDoc`/`#previousDoc`, `#secondaryToolbarToggle` (Tools menu — no download entry, so direct fetch is required)
 
 ## Lessons Learned
 

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { validateEmployeeData, EmployeeDataSchema } from "../../src/workflows/onboarding/schema.js";
-import { ExtractionError } from "../../src/crm/types.js";
+import { validateEmployeeData, EmployeeDataSchema } from "../../../../src/workflows/onboarding/schema.js";
+import { ExtractionError } from "../../../../src/crm/types.js";
 
 const VALID_DATA: Record<string, string> = {
   positionNumber: "40695231",
@@ -47,13 +47,13 @@ describe("EmployeeDataSchema", () => {
   });
 
   it("rejects empty string field via min(1) constraint", () => {
-    const data = { ...VALID_DATA, ssn: "" };
+    const data = { ...VALID_DATA, address: "" };
 
     assert.throws(
       () => validateEmployeeData(data),
       (err: unknown) => {
         assert.ok(err instanceof ExtractionError);
-        assert.ok(err.failedFields?.includes("ssn"));
+        assert.ok(err.failedFields?.includes("address"));
         return true;
       },
     );

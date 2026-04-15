@@ -12,6 +12,8 @@
     "start-onboarding:batch": "node --import tsx/esm --env-file=.env src/cli.ts start-onboarding --parallel",
     "work-study": "node --import tsx/esm --env-file=.env src/cli.ts work-study",
     "work-study:dry": "node --import tsx/esm --env-file=.env src/cli.ts work-study --dry-run",
+    "emergency-contact": "node --import tsx/esm --env-file=.env src/cli.ts emergency-contact",
+    "emergency-contact:dry": "node --import tsx/esm --env-file=.env src/cli.ts emergency-contact --dry-run",
     "kronos": "node --import tsx/esm --env-file=.env src/cli.ts kronos",
     "kronos:dry": "node --import tsx/esm --env-file=.env src/cli.ts kronos --dry-run",
     "separation": "node --import tsx/esm --env-file=.env src/cli.ts separation",

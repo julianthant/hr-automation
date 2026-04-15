@@ -40,7 +40,7 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
     setActiveRunId((prev) => prev || entry.runId || null);
 
     const fetchRuns = () => {
-      fetch(`/api/runs?workflow=${encodeURIComponent(workflow)}&id=${encodeURIComponent(entry.id)}`)
+      fetch(`/api/runs?workflow=${encodeURIComponent(workflow)}&id=${encodeURIComponent(entry.id)}&date=${encodeURIComponent(date)}`)
         .then((r) => r.json())
         .then((data: RunInfo[]) => {
           setRuns((prev) => {
@@ -68,7 +68,7 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
     const isLive = entry.status === "running" || entry.status === "pending";
     const interval = isLive ? setInterval(fetchRuns, 2_000) : undefined;
     return () => { if (interval) clearInterval(interval); };
-  }, [entry?.id, entry?.runId, entry?.status, workflow]);
+  }, [entry?.id, entry?.runId, entry?.status, workflow, date]);
 
   const { logs, loading: logsLoading } = useLogs(workflow, entry?.id || null, activeRunId, date);
 
@@ -111,9 +111,9 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
   const showSkeleton = logsLoading && logs.length === 0;
 
   return (
-    <div className="flex-1 flex flex-col bg-card min-w-0">
-      {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0">
+    <div className="flex-1 flex flex-col bg-card min-w-0 min-h-0 overflow-hidden">
+      {/* Header — height matches QueuePanel search + DuoPanel title */}
+      <div className="h-[60px] flex items-center justify-between px-6 border-b border-border flex-shrink-0">
         <div className="flex items-center gap-3.5">
           {showSkeleton ? (
             <>
@@ -133,32 +133,48 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
         <RunSelector runs={runs} activeRunId={activeRunId} onSelect={setActiveRunId} />
       </div>
 
-      {/* Detail grid */}
+      {/* Detail grid — renders cfg.detailFields dynamically; wraps to rows of 4 */}
       <div className="grid grid-cols-4 border-b border-border flex-shrink-0">
-        <div className="px-6 py-3.5 border-r border-border">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1">
-            {cfg.detailFields[0]?.label || "ID"}
-          </div>
-          {showSkeleton ? <Skeleton className="h-4 w-28 mt-1" /> : <div className="text-sm font-medium">{name || entry.id}</div>}
-        </div>
-        <div className="px-6 py-3.5 border-r border-border">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1">
-            {cfg.detailFields[1]?.label || "ID"}
-          </div>
-          {showSkeleton ? <Skeleton className="h-4 w-16 mt-1" /> : <div className="text-sm font-mono">{entry.id}</div>}
-        </div>
-        <div className="px-6 py-3.5 border-r border-border">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1">Started</div>
-          {showSkeleton ? <Skeleton className="h-4 w-20 mt-1" /> : <div className="text-sm font-mono">{startTime}</div>}
-        </div>
-        <div className="px-6 py-3.5">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1">Elapsed</div>
-          {showSkeleton ? <Skeleton className="h-4 w-16 mt-1" /> : (
-            <div className={cn("text-sm font-mono", runStatus === "running" && "text-primary")}>
-              {elapsed || duration || "\u2014"}
+        {cfg.detailFields.map((f, i) => {
+          const isLastInRow = (i + 1) % 4 === 0;
+          const isLastField = i === cfg.detailFields.length - 1;
+          const isNewRow = i >= 4 && i % 4 === 0;
+          let value: string = "";
+          let mono = true;
+          if (f.key === "employee") { value = name || entry.id; mono = false; }
+          else if (f.key === "started") { value = startTime; }
+          else if (f.key === "elapsed") { value = elapsed || duration || "\u2014"; }
+          else if (f.key === "email") { value = entry.data?.email || entry.id; }
+          else { value = entry.data?.[f.key] || "\u2014"; }
+          const isRunningElapsed = f.key === "elapsed" && runStatus === "running";
+          const hasBottomBorder = i < cfg.detailFields.length - 4 ? "border-b border-border" : "";
+          return (
+            <div
+              key={f.key}
+              className={cn(
+                "px-6 py-3.5",
+                !isLastInRow && !isLastField && "border-r border-border",
+                hasBottomBorder,
+                isNewRow && "border-t border-border/40",
+              )}
+            >
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1">
+                {f.label}
+              </div>
+              {showSkeleton ? (
+                <Skeleton className="h-4 w-20 mt-1" />
+              ) : (
+                <div className={cn(
+                  "text-sm truncate",
+                  mono ? "font-mono" : "font-medium",
+                  isRunningElapsed && "text-primary",
+                )} title={value}>
+                  {value}
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          );
+        })}
       </div>
 
       {/* Step pipeline */}

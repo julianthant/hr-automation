@@ -4,7 +4,6 @@ import { TopBar } from "./components/TopBar";
 import { QueuePanel } from "./components/QueuePanel";
 import { LogPanel } from "./components/LogPanel";
 import { SessionPanel } from "./components/SessionPanel";
-import { DuoPanel } from "./components/DuoPanel";
 import { useEntries } from "./components/hooks/useEntries";
 import { usePreflight } from "./components/hooks/usePreflight";
 import { getConfig } from "./components/types";
@@ -130,15 +129,12 @@ export default function App() {
           onSelect={setSelectedId}
           loading={loading}
         />
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-          <LogPanel
-            entry={selectedEntry}
-            workflow={workflow}
-            date={date}
-          />
-          <SessionPanel />
-        </div>
-        <DuoPanel />
+        <LogPanel
+          entry={selectedEntry}
+          workflow={workflow}
+          date={date}
+        />
+        <SessionPanel />
       </div>
     </div>
   );

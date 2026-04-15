@@ -36,7 +36,7 @@ await withTrackedWorkflow("separations", docId, {}, async (setStep, updateData) 
 - `opts.onCleanup` — callback for resource teardown (e.g. closing browsers) on both success and failure
 - `opts.preAssignedRunId` — pre-assigned runId for batch mode (caller pre-emits pending for all items, then processes sequentially)
 - Calls `setLogRunId(runId)` to inject `runId` into the `AsyncLocalStorage` log context so log entries include it
-- **SIGINT handler**: Registers a `process.on("SIGINT")` handler that writes a `failed` tracker entry and log entry synchronously (bypasses async mutex via `fs.appendFileSync`) before calling `process.exit`. Also kills Playwright Chrome via `wmic` on Windows.
+- **SIGINT handler**: Registers a `process.on("SIGINT")` handler that writes a `failed` tracker entry and log entry synchronously via `fs.appendFileSync` before calling `process.exit`. Also kills Playwright Chrome via `wmic` on Windows.
 
 ## Dashboard SSE Server
 
@@ -69,7 +69,8 @@ Appends a single row to an `.xlsx` file. Creates the file and/or worksheet if mi
 - Dashboard port 3838 conflict: logs and skips if port in use (another instance running)
 - `withTrackedWorkflow` does NOT call `withLogContext` — use both: `withLogContext` wraps `withTrackedWorkflow` to get both log streaming and entry tracking
 - **Do NOT use `markStaleRunningEntries`** — was removed because it falsely marked running entries as "failed" with fake "Process interrupted — no heartbeat" messages. Use SIGINT handler in `withTrackedWorkflow` instead for proper cleanup on Ctrl+C.
-- **SIGINT writes must be synchronous** — `process.on("SIGINT")` handler cannot await async functions (process exits before they complete). Use `fs.appendFileSync` to bypass the async mutex when writing final tracker/log entries.
+- **SIGINT writes must be synchronous** — `process.on("SIGINT")` handler cannot await async functions (process exits before they complete). Use `fs.appendFileSync` directly when writing final tracker/log entries.
+- **`trackEvent` / `appendLogEntry` are synchronous** — do NOT wrap `appendFileSync` in a mutex. POSIX `write(2)` with `O_APPEND` is atomic at the OS level, and Node is single-threaded within a process. An `async-mutex` wrapper makes the call fire-and-forget (returns a `Promise` but signature is `void`), causing reads-after-write to miss data.
 
 ## Adding Tracking for a New Workflow
 
@@ -85,3 +86,6 @@ Appends a single row to an `.xlsx` file. Creates the file and/or worksheet if mi
 - **2026-04-10: markStaleRunningEntries caused false failures** — `markStaleRunningEntries` was marking running entries as "failed" with a fake "Process interrupted — no heartbeat" message after 30s with no update. This was wrong: entries can legitimately be running for minutes while waiting for Duo MFA or long Kronos searches. Removed entirely. Replaced with SIGINT handler in `withTrackedWorkflow` that writes a proper `failed` entry synchronously on Ctrl+C.
 - **2026-04-10: SSE entry enrichment** — Backend now enriches tracker entries with `firstLogTs`, `lastLogTs`, and `lastLogMessage` per (itemId, runId) pair. This lets the frontend show accurate start times, elapsed durations, and the latest log line without fetching full log streams.
 - **2026-04-10: Workflow counts from backend** — Moved workflow dropdown counts to backend (`wfCounts` field in SSE payload) so they accurately reflect all workflows, not just the currently selected one.
+- **2026-04-14: `readRunsForId` missed past-date runs** — was calling `readEntries(workflow)` which only reads today's JSONL. When viewing a past date in the dashboard, `/api/runs` returned an empty list and the RunSelector showed only the latest run. Fix: added optional `date` param; backend (`/api/runs`) and frontend (`LogPanel`) now forward the selected date so runs from that day's JSONL are returned.
+- **2026-04-14: Preflight deleted fresh `sessions.jsonl` on every refresh** — `/api/preflight` checked if any `workflow_start` PID was alive and deleted the entire file if none were, wiping fake/mock demo data on refresh. Replaced with age-gated deletion (only if file untouched >24h) + dead-PID enrichment in `rebuildSessionState` (crashed workflows are marked `active: false` at read time — no file mutation). Preserves recent activity AND provides immediate crash-recovery UX.
+- **2026-04-14: Async mutex broke sync reads-after-writes** — `trackEvent` and `appendLogEntry` wrapped their `appendFileSync` calls in `writeMutex.runExclusive(() => …)` and returned `void` without awaiting. The write became fire-and-forget, so tests (and any caller reading back immediately) saw no data. Removed the mutex entirely — `appendFileSync` is already atomic. Restored true synchronous semantics.

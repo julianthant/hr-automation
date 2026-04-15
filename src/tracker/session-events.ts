@@ -10,7 +10,8 @@ export type SessionEventType =
   | "browser_launch" | "browser_close"
   | "auth_start" | "auth_complete" | "auth_failed"
   | "duo_request" | "duo_start" | "duo_complete" | "duo_timeout"
-  | "item_start" | "item_complete";
+  | "item_start" | "item_complete"
+  | "step_change";
 
 export interface SessionEvent {
   type: SessionEventType;
@@ -21,6 +22,8 @@ export interface SessionEvent {
   browserId?: string;
   system?: string;
   currentItemId?: string;
+  currentStep?: string;
+  finalStatus?: "done" | "failed";
   duoRequestId?: string;
   data?: Record<string, string>;
 }
@@ -63,8 +66,12 @@ export function emitWorkflowStart(instance: string): void {
   emitSessionEvent({ type: "workflow_start", workflowInstance: instance });
 }
 
-export function emitWorkflowEnd(instance: string): void {
-  emitSessionEvent({ type: "workflow_end", workflowInstance: instance });
+export function emitWorkflowEnd(instance: string, finalStatus?: "done" | "failed"): void {
+  emitSessionEvent({ type: "workflow_end", workflowInstance: instance, finalStatus });
+}
+
+export function emitStepChange(instance: string, step: string): void {
+  emitSessionEvent({ type: "step_change", workflowInstance: instance, currentStep: step });
 }
 
 export function emitSessionCreate(instance: string, sessionId: string): void {
@@ -115,6 +122,7 @@ export function generateInstanceName(workflowType: string): string {
     "eid-lookup": "EID Lookup",
     "kronos-reports": "Kronos",
     "work-study": "Work Study",
+    "emergency-contact": "Emergency Contact",
   };
   const label = labels[workflowType] || workflowType;
 

@@ -187,7 +187,7 @@ npm run dashboard         # Starts SSE backend (:3838) + Vite dev (:5173)
 
 | File | Change |
 |------|--------|
-| `src/tracker/jsonl.ts` | Add `runId` to TrackerEntry + LogEntry, add `cleanOldTrackerFiles()`, add mutex locking to `trackEvent`/`appendLogEntry` |
+| `src/tracker/jsonl.ts` | Add `runId` to TrackerEntry + LogEntry, add `cleanOldTrackerFiles()`, keep `trackEvent`/`appendLogEntry` synchronous (no mutex — `appendFileSync` is atomic) |
 | `src/tracker/dashboard.ts` | Add `/api/runs`, `/api/preflight` endpoints, add `runId` filtering to `/api/logs` and `/events/logs` |
 | `src/dashboard/components/types.ts` | Update TrackerEntry/LogEntry types, update WF_CONFIG |
 
@@ -221,6 +221,11 @@ When a new workflow is created, the dashboard must be updated:
 - **2026-04-10: LogStream scroll snap** — `useLayoutEffect` snaps scroll to bottom before paint, preventing visual flicker when new logs arrive.
 - **2026-04-10: Elapsed time** — Live stopwatch while running, static duration when done/failed. Both EntryItem and LogPanel use the same `firstLogTs`/`lastLogTs` source for consistency.
 - **2026-04-10: formatStepName abbreviations** — `formatStepName` handles common abbreviations (UCPath, Kuali, Kronos, CRM, SSO, UKG) to display properly cased step names in the pipeline.
+- **2026-04-14: QUEUE stat pill clipped at 1366px** — Base StatPills padding (`px-5 gap-1.5`) left ~51px per pill at 320px queue panel width, too narrow for "QUEUE" with tracking-wider. Fix: tightened base tier to `px-3 gap-1` + `text-[10px]` labels + `min-w-0` on pills; restored wider values at `min-[1440px]`. Also narrowed QueuePanel search padding to match.
+- **2026-04-14: RunSelector only showed latest runs** — `readRunsForId` called `readEntries(workflow)` which only reads today's JSONL. Viewing a past date returned no runs. Fix: added optional `date` param and thread it through `/api/runs` + `LogPanel` fetch. See tracker CLAUDE.md for details.
+- **2026-04-14: SessionPanel + DuoPanel hidden when empty** — Both panels previously `return null` when their state was empty, causing layout to jump as panels appeared/disappeared. Fix: always render; show "No active workflows" / "No pending auth" placeholders when empty. User preference is stable layout over auto-collapse for both the bottom SessionPanel and the right-side DuoPanel.
+- **2026-04-14: Preflight wiped mock/demo `sessions.jsonl` on refresh** — `/api/preflight` ran on every page mount and deleted `sessions.jsonl` if no `workflow_start` PIDs were alive. Fake/demo data written manually always had dead PIDs → vaporized on refresh. Fix: age-gated deletion (>24h only) + `rebuildSessionState` now marks dead-PID workflows as `active: false` at read time (no file mutation). Crashed workflows still dim immediately without needing to delete the file.
+- **2026-04-14: Session + Duo unit tests** — Added `tests/unit/session-events.test.ts` covering `emitSessionEvent`/`readSessionEvents` roundtrip, all `rebuildSessionState` state transitions (workflow_start/end, session_create, browser_launch/close, auth_start/complete, item_start/complete, dead-PID inactive enrichment), and the full duo queue lifecycle (waiting→active→resolved, positions, `duo_waiting` browser overlay). To test new session/duo behavior, extend this file — `rebuildSessionState` is exported with an optional `dir` param for temp-dir isolation.
 
 ## Files to Create (Frontend)
 

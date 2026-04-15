@@ -22,7 +22,7 @@ export function StatPills({ entries, activeFilter, onFilter }: StatPillsProps) {
   }
 
   return (
-    <div className="flex gap-1.5 p-3.5 px-5 border-b border-border">
+    <div className="flex gap-1 p-3.5 px-3 min-[1440px]:gap-1.5 min-[1440px]:px-5 border-b border-border">
       {STATS.map((s) => {
         const count = s.key ? (counts[s.key] || 0) : entries.length;
         const isActive = activeFilter === s.key;
@@ -31,7 +31,7 @@ export function StatPills({ entries, activeFilter, onFilter }: StatPillsProps) {
             key={s.key ?? "total"}
             onClick={() => onFilter(isActive ? null : s.key)}
             className={cn(
-              "flex-1 text-center py-2.5 px-2 rounded-lg transition-all",
+              "flex-1 min-w-0 text-center py-2.5 px-1 min-[1440px]:px-2 rounded-lg transition-all",
               "bg-secondary border border-transparent cursor-pointer",
               "hover:border-border",
               isActive && "bg-accent border-primary",
@@ -40,7 +40,7 @@ export function StatPills({ entries, activeFilter, onFilter }: StatPillsProps) {
             <div className={cn("text-xl font-bold font-mono leading-tight", s.color)}>
               {count}
             </div>
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground mt-0.5 font-medium">
+            <div className="text-[10px] min-[1440px]:text-[11px] uppercase tracking-wider text-muted-foreground mt-0.5 font-medium">
               {s.label}
             </div>
           </button>

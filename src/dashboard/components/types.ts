@@ -44,11 +44,15 @@ export interface WorkflowConfig {
 export const WF_CONFIG: Record<string, WorkflowConfig> = {
   onboarding: {
     label: "Onboarding",
-    steps: ["crm-auth", "extraction", "ucpath-auth", "person-search", "transaction"],
+    steps: ["crm-auth", "extraction", "pdf-download", "ucpath-auth", "person-search", "i9-creation", "transaction"],
     detailFields: [
       { key: "employee", label: "Employee" },
       { key: "email", label: "Email" },
-      { key: "started", label: "Started" },
+      { key: "departmentNumber", label: "Dept #" },
+      { key: "positionNumber", label: "Position #" },
+      { key: "wage", label: "Wage" },
+      { key: "effectiveDate", label: "Eff Date" },
+      { key: "i9ProfileId", label: "I9 Profile" },
       { key: "elapsed", label: "Elapsed" },
     ],
     getName: (r) => [r.data?.firstName, r.data?.lastName].filter(Boolean).join(" "),
@@ -102,9 +106,21 @@ export const WF_CONFIG: Record<string, WorkflowConfig> = {
     getName: (r) => r.data?.name || "",
     getId: (r) => r.id,
   },
+  "emergency-contact": {
+    label: "Emergency Contact",
+    steps: ["navigation", "fill-form", "save"],
+    detailFields: [
+      { key: "employeeName", label: "Employee" },
+      { key: "emplId", label: "Empl ID" },
+      { key: "contactName", label: "Contact" },
+      { key: "relationship", label: "Relationship" },
+    ],
+    getName: (r) => r.data?.employeeName || "",
+    getId: (r) => r.id,
+  },
 };
 
-export const TAB_ORDER = ["onboarding", "separations", "kronos-reports", "eid-lookup", "work-study"];
+export const TAB_ORDER = ["onboarding", "separations", "kronos-reports", "eid-lookup", "work-study", "emergency-contact"];
 
 export function getConfig(wf: string): WorkflowConfig {
   if (WF_CONFIG[wf]) return WF_CONFIG[wf];
@@ -128,6 +144,8 @@ const STEP_ABBREVIATIONS: Record<string, string> = {
   crm: "CRM",
   sso: "SSO",
   ukg: "UKG",
+  pdf: "PDF",
+  i9: "I-9",
 };
 
 export function formatStepName(step: string): string {
@@ -171,7 +189,11 @@ export interface SessionInfo {
 export interface WorkflowInstanceState {
   instance: string;
   active: boolean;
+  /** True while the spawning Node process (and therefore its Playwright browsers) is still alive. */
+  pidAlive: boolean;
   currentItemId: string | null;
+  currentStep: string | null;
+  finalStatus: "done" | "failed" | null;
   sessions: SessionInfo[];
 }
 

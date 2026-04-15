@@ -38,9 +38,9 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
 
   return (
     <div className="w-[320px] min-[1440px]:w-[400px] 2xl:w-[480px] flex-shrink-0 border-r border-border flex flex-col bg-background">
-      {/* Search */}
-      <div className="p-4 px-5 border-b border-border">
-        <div className="flex items-center gap-2.5 bg-input border border-border rounded-lg px-3.5 py-2.5 focus-within:border-primary transition-colors">
+      {/* Search — height locked to match LogPanel header (py-4 + text-lg ≈ 60px) */}
+      <div className="h-[60px] flex items-center px-3 min-[1440px]:px-5 border-b border-border flex-shrink-0">
+        <div className="flex items-center gap-2.5 bg-input border border-border rounded-lg px-3.5 py-2 w-full focus-within:border-primary transition-colors">
           <Search className="w-4 h-4 text-muted-foreground flex-shrink-0" />
           <input
             type="text"

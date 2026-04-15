@@ -1,13 +1,23 @@
-import type { Page } from "playwright";
-import { mkdir } from "fs/promises";
+import type { Page, Frame } from "playwright";
+import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { homedir } from "os";
 import { log } from "../../utils/log.js";
 
-/**
- * Build the employee download folder path.
- * Format: {Downloads}/onboarding/{Last Name, First Name Middle Name EID}/
- */
+const IDOCS_VIEWER_HOST = "crickportal-ext.bfs.ucsd.edu";
+const IDOCS_VIEWER_PATH = "/iDocsForSalesforce/Content/pdfjs/web/PDFjsViewer.aspx";
+const IDOCS_DOC_PATH = "/iDocsForSalesforce/iDocsForSalesforceDocumentServer";
+
+/** Documents we download by default: index 0 = Doc 1 (offer letter), index 2 = Doc 3. */
+export const DEFAULT_DOC_INDICES = [0, 2];
+
+export interface DownloadedDoc {
+  index: number;
+  filename: string;
+  path: string;
+  bytes: number;
+}
+
 export function buildDownloadPath(firstName: string, lastName: string, middleName?: string): string {
   const downloads = join(homedir(), "Downloads");
   const middle = middleName ? ` ${middleName}` : "";
@@ -15,76 +25,90 @@ export function buildDownloadPath(firstName: string, lastName: string, middleNam
   return join(downloads, "onboarding", folderName);
 }
 
-/**
- * Ensure the employee download folder exists (creates recursively if needed).
- */
 export async function ensureDownloadFolder(folderPath: string): Promise<void> {
   await mkdir(folderPath, { recursive: true });
   log.step(`Download folder ready: ${folderPath}`);
 }
 
-/**
- * Download CRM documents 1 and 3 from the record page PDF viewer.
- *
- * Must be called while on the main CRM record page, BEFORE navigating
- * to UCPath Entry Sheet.
- *
- * SELECTOR: TODO — requires playwright-cli discovery to identify:
- *   - Document selector control
- *   - PDF viewer element
- *   - Scroll mechanism
- *   - Download trigger
- *
- * @param page - CRM browser page (on record page)
- * @param folderPath - Destination folder for downloaded PDFs
- * @param prefix - Optional log prefix for worker identification
- */
+interface ViewerInfo {
+  hash: string;
+  totalDocs: number;
+}
+
+async function findViewerInfo(page: Page, timeoutMs = 30_000): Promise<ViewerInfo> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const frame = page.frames().find((f) => {
+      const url = f.url();
+      return url.includes(IDOCS_VIEWER_HOST) && url.includes(IDOCS_VIEWER_PATH);
+    });
+    if (frame) {
+      const url = new URL(frame.url());
+      const hash = url.searchParams.get("h");
+      const count = Number(url.searchParams.get("c") ?? "0");
+      if (hash) return { hash, totalDocs: count };
+    }
+    await page.waitForTimeout(500);
+  }
+  throw new Error(`iDocs PDF.js viewer did not load within ${timeoutMs}ms`);
+}
+
+function parseFilenameFromHeader(header: string | null, fallback: string): string {
+  if (!header) return fallback;
+  const match = header.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+  if (!match) return fallback;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
 export async function downloadCrmDocuments(
   page: Page,
   folderPath: string,
-  prefix?: string,
-): Promise<void> {
-  const p = prefix;
+  options: { docIndices?: number[]; logPrefix?: string } = {},
+): Promise<DownloadedDoc[]> {
+  const p = options.logPrefix;
   const msg = (s: string) => (p ? `${p} ${s}` : s);
+  const indices = options.docIndices ?? DEFAULT_DOC_INDICES;
 
   await ensureDownloadFolder(folderPath);
 
-  // Download Document 1
-  log.step(msg("Downloading CRM Document 1..."));
-  await downloadDocument(page, 1, folderPath);
-  log.step(msg("Document 1 downloaded"));
+  log.step(msg("Locating iDocs PDF viewer for document hash..."));
+  const { hash, totalDocs } = await findViewerInfo(page);
+  log.step(msg(`iDocs viewer ready: hash=${hash}, totalDocs=${totalDocs}`));
 
-  // Download Document 3
-  log.step(msg("Downloading CRM Document 3..."));
-  await downloadDocument(page, 3, folderPath);
-  log.step(msg("Document 3 downloaded"));
+  const saved: DownloadedDoc[] = [];
+  for (const idx of indices) {
+    if (totalDocs > 0 && idx >= totalDocs) {
+      log.error(msg(`Document ${idx + 1} not present (only ${totalDocs} docs on record) — skipping`));
+      continue;
+    }
+    const url = `https://${IDOCS_VIEWER_HOST}${IDOCS_DOC_PATH}?i=${idx}&h=${hash}`;
+    log.step(msg(`Fetching Document ${idx + 1} (i=${idx})...`));
+    const response = await page.context().request.get(url);
+    if (!response.ok()) {
+      throw new Error(`Document ${idx + 1} fetch failed: HTTP ${response.status()}`);
+    }
+    const body = await response.body();
+    const fallback = `document-${idx + 1}.pdf`;
+    const filename = parseFilenameFromHeader(response.headers()["content-disposition"] ?? null, fallback);
+    const savedName = `Doc${idx + 1}-${filename}`;
+    const savedPath = join(folderPath, savedName);
+    await writeFile(savedPath, body);
+    log.step(msg(`Document ${idx + 1} saved: ${savedPath} (${body.length} bytes)`));
+    saved.push({ index: idx, filename: savedName, path: savedPath, bytes: body.length });
+  }
 
-  log.success(msg("CRM document download complete"));
+  log.success(msg(`CRM document download complete: ${saved.length} file(s)`));
+  return saved;
 }
 
-/**
- * Download a single document by number from the CRM document viewer.
- *
- * SELECTOR: TODO — all selectors in this function require playwright-cli
- * investigation. The implementation below is a structural placeholder.
- */
-async function downloadDocument(
-  page: Page,
-  documentNumber: number,
+export async function downloadCrmDocumentsFromFrame(
+  frame: Frame,
   folderPath: string,
-): Promise<void> {
-  // SELECTOR: TODO — select document from dropdown/list
-  // Example (placeholder): await page.selectOption('#documentSelector', `${documentNumber}`);
-  // await page.waitForTimeout(2_000);
-
-  // SELECTOR: TODO — scroll PDF viewer to end to ensure all pages load
-  // Example (placeholder): await page.evaluate(() => { pdfViewer.scrollTo(0, pdfViewer.scrollHeight) });
-  // await page.waitForTimeout(2_000);
-
-  // SELECTOR: TODO — trigger download
-  // Likely approach: intercept PDF URL from network, or click download button
-  // const download = await page.waitForEvent('download');
-  // await download.saveAs(join(folderPath, `document-${documentNumber}.pdf`));
-
-  log.step(`Document ${documentNumber} download: TODO — awaiting playwright-cli selector discovery`);
+  options: { docIndices?: number[]; logPrefix?: string } = {},
+): Promise<DownloadedDoc[]> {
+  return downloadCrmDocuments(frame.page(), folderPath, options);
 }
