@@ -4,7 +4,7 @@ import { errorMessage } from "../../utils/errors.js";
 import { withTrackedWorkflow } from "../../tracker/jsonl.js";
 import { launchBrowser } from "../../browser/launch.js";
 import { loginToKuali, loginToUKG, loginToUCPath, loginToNewKronos } from "../../auth/login.js";
-import { ensurePageHealthy } from "../../utils/page-health.js";
+import { ensurePageHealthy } from "../../core/page-health.js";
 
 // Kuali module
 import {
