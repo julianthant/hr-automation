@@ -24,4 +24,13 @@ export class Session {
   systemIds(): string[] {
     return this.state.systems.map((s) => s.id)
   }
+
+  async page(id: string): Promise<Page> {
+    const ready = this.state.readyPromises.get(id)
+    if (!ready) throw new Error(`unknown system: ${id}`)
+    await ready
+    const slot = this.state.browsers.get(id)
+    if (!slot) throw new Error(`no browser for system: ${id}`)
+    return slot.page
+  }
 }
