@@ -108,6 +108,41 @@ test('session.launch (interleaved): failed auth on system N does not block syste
   await s.close()
 })
 
+test('session.reset: navigates to resetUrl when configured', async () => {
+  const urls: string[] = []
+  const fakePage = {
+    goto: async (url: string) => { urls.push(url) },
+    close: async () => {},
+  } as unknown as import('playwright').Page
+
+  const s = Session.forTesting({
+    systems: [{ id: 'ucpath', login: async () => {}, resetUrl: 'https://ucpath/home' }],
+    browsers: new Map([['ucpath', { page: fakePage, browser: null as never, context: null as never }]]),
+    readyPromises: new Map([['ucpath', Promise.resolve()]]),
+  })
+  await s.reset('ucpath')
+  assert.deepEqual(urls, ['https://ucpath/home'])
+})
+
+test('session.reset: no-op when resetUrl missing', async () => {
+  const s = Session.forTesting({
+    systems: [{ id: 'a', login: async () => {} }],
+    browsers: new Map([['a', { page: {} as import('playwright').Page, browser: null as never, context: null as never }]]),
+    readyPromises: new Map([['a', Promise.resolve()]]),
+  })
+  await assert.doesNotReject(() => s.reset('a'))
+})
+
+test('session.healthCheck: returns false if page is closed', async () => {
+  const fakePage = { isClosed: () => true } as unknown as import('playwright').Page
+  const s = Session.forTesting({
+    systems: [{ id: 'a', login: async () => {} }],
+    browsers: new Map([['a', { page: fakePage, browser: null as never, context: null as never }]]),
+    readyPromises: new Map([['a', Promise.resolve()]]),
+  })
+  assert.equal(await s.healthCheck('a'), false)
+})
+
 // Fake launch helper used in tests — returns a stub Page/Browser/Context.
 function fakeLaunch() {
   const page = { close: async () => {} } as unknown as import('playwright').Page
