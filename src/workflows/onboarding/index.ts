@@ -5,5 +5,6 @@ export { buildTransactionPlan } from "./enter.js";
 export { runOnboarding } from "./workflow.js";
 export type { OnboardingOptions } from "./workflow.js";
 export { runParallel, loadBatchFile } from "./parallel.js";
-export { updateOnboardingTracker, buildTrackerRow, TRACKER_PATH } from "./tracker.js";
-export type { OnboardingTrackerRow, TrackerStatus } from "./tracker.js";
+export { buildDownloadPath, downloadCrmDocuments } from "./download.js";
+export type { DownloadedDoc } from "./download.js";
+export { retryStep, RetryStepError } from "./retry.js";

@@ -33,7 +33,7 @@ describe("log", () => {
     process.env.UCPATH_USER_ID = "SENTINEL_USER_XYZ";
     process.env.UCPATH_PASSWORD = "SENTINEL_PASS_ABC";
 
-    const { log } = await import("../../src/utils/log.js");
+    const { log } = await import("../../../src/utils/log.js");
     log.step("Entering credentials...");
 
     const allOutput = logOutput.join("\n");
@@ -54,7 +54,7 @@ describe("log", () => {
   });
 
   it("log.success, log.error, log.waiting produce output", async () => {
-    const { log } = await import("../../src/utils/log.js");
+    const { log } = await import("../../../src/utils/log.js");
 
     log.success("Operation completed");
     assert.ok(logOutput.length > 0, "log.success should produce output");

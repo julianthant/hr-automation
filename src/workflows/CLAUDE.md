@@ -11,11 +11,12 @@ Follow this checklist exactly:
 src/workflows/{name}/
   schema.ts     — Zod input validation schema
   workflow.ts   — Main orchestration with withTrackedWorkflow
-  tracker.ts    — Excel tracking (Excel-only, no trackEvent calls)
   config.ts     — Workflow-specific constants
   index.ts      — Barrel exports
   CLAUDE.md     — Module documentation (Files, Data Flow, Gotchas, Verified Selectors, Lessons Learned)
 ```
+
+**Do NOT create `tracker.ts` Excel writers for new workflows.** The dashboard JSONL (emitted automatically by `withTrackedWorkflow` + `updateData`) is the only observability the user wants. Skip `appendRow` / `ColumnDef` / `.xlsx` files. Existing workflows (onboarding, work-study, eid-lookup, kronos, separations) still have `tracker.ts` — leave them alone, but do not add new ones.
 
 ### 2. Required Patterns
 - Wrap execution in `withTrackedWorkflow(workflowName, id, data, fn)`

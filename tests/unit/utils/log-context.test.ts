@@ -1,7 +1,7 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, rmSync, readFileSync, readdirSync } from "fs";
-import { withLogContext, log } from "../../src/utils/log.js";
+import { withLogContext, log } from "../../../src/utils/log.js";
 
 const TEST_DIR = ".tracker-log-test";
 

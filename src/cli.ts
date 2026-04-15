@@ -7,6 +7,7 @@ import { loginToUCPath, loginToACTCrm } from "./auth/login.js";
 import type { AuthResult } from "./auth/types.js";
 import { runOnboarding, runParallel } from "./workflows/onboarding/index.js";
 import { runWorkStudy, WorkStudyInputSchema } from "./workflows/work-study/index.js";
+import { runEmergencyContactBatch } from "./workflows/emergency-contact/index.js";
 import { runParallelKronos, DEFAULT_WORKERS } from "./workflows/old-kronos-reports/index.js";
 import { runSeparation } from "./workflows/separations/index.js";
 import { trackEvent, readEntries } from "./tracker/jsonl.js";
@@ -138,6 +139,41 @@ program
     }
 
     await runWorkStudy(parsed.data, { dryRun: options.dryRun });
+  });
+
+// ─── emergency-contact ───
+
+program
+  .command("emergency-contact")
+  .description("Fill Emergency Contact in UCPath for every record in a batch YAML")
+  .argument("<batchYaml>", "Path to batch YAML (e.g. .tracker/emergency-contact/batch-YYYY-MM-DD.yml)")
+  .option("--dry-run", "Preview records without touching UCPath")
+  .option("--roster-url <url>", "SharePoint URL of roster xlsx — downloaded + used for pre-flight verification")
+  .option("--roster-path <path>", "Local roster xlsx for pre-flight verification (skip download)")
+  .option("--ignore-roster-mismatch", "Continue even if roster verification reports mismatches")
+  .action(async (batchYaml: string, options: {
+    dryRun?: boolean;
+    rosterUrl?: string;
+    rosterPath?: string;
+    ignoreRosterMismatch?: boolean;
+  }) => {
+    try {
+      validateEnv();
+    } catch {
+      process.exit(1);
+    }
+
+    try {
+      await runEmergencyContactBatch(batchYaml, {
+        dryRun: options.dryRun,
+        rosterUrl: options.rosterUrl,
+        rosterPath: options.rosterPath,
+        ignoreRosterMismatch: options.ignoreRosterMismatch,
+      });
+    } catch (err) {
+      log.error(`Emergency Contact batch failed: ${errorMessage(err)}`);
+      process.exit(1);
+    }
   });
 
 // ─── kronos ───

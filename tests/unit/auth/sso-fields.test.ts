@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { getSsoFieldSelectors } from "../../src/auth/sso-fields.js";
+import { getSsoFieldSelectors } from "../../../src/auth/sso-fields.js";
 
 describe("getSsoFieldSelectors", () => {
   it("returns username labels array with 3 elements", () => {

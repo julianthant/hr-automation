@@ -1,5 +1,5 @@
 import { createServer, type Server } from "http";
-import { readFileSync, existsSync, unlinkSync } from "fs";
+import { readFileSync, existsSync, unlinkSync, statSync } from "fs";
 import { join } from "path";
 import {
   readEntries,
@@ -50,7 +50,11 @@ export interface SessionInfo {
 export interface WorkflowInstanceState {
   instance: string;
   active: boolean;
+  /** True while the spawning Node process (and therefore its Playwright browsers) is still alive. */
+  pidAlive: boolean;
   currentItemId: string | null;
+  currentStep: string | null;
+  finalStatus: "done" | "failed" | null;
   sessions: SessionInfo[];
 }
 
@@ -67,8 +71,8 @@ export interface SessionState {
   duoQueue: DuoQueueEntry[];
 }
 
-function rebuildSessionState(): SessionState {
-  const events = readSessionEvents();
+export function rebuildSessionState(dir?: string): SessionState {
+  const events = dir ? readSessionEvents(dir) : readSessionEvents();
 
   // Build workflow states
   const wfMap = new Map<string, WorkflowInstanceState>();
@@ -77,11 +81,26 @@ function rebuildSessionState(): SessionState {
     if (!inst) continue;
 
     if (e.type === "workflow_start") {
-      wfMap.set(inst, { instance: inst, active: true, currentItemId: null, sessions: [] });
+      wfMap.set(inst, {
+        instance: inst,
+        active: true,
+        pidAlive: true,
+        currentItemId: null,
+        currentStep: null,
+        finalStatus: null,
+        sessions: [],
+      });
     }
     if (e.type === "workflow_end") {
       const wf = wfMap.get(inst);
-      if (wf) wf.active = false;
+      if (wf) {
+        wf.active = false;
+        wf.finalStatus = e.finalStatus ?? null;
+      }
+    }
+    if (e.type === "step_change" && e.currentStep) {
+      const wf = wfMap.get(inst);
+      if (wf) wf.currentStep = e.currentStep!;
     }
     if (e.type === "session_create" && e.sessionId) {
       const wf = wfMap.get(inst);
@@ -128,10 +147,9 @@ function rebuildSessionState(): SessionState {
       const wf = wfMap.get(inst);
       if (wf) wf.currentItemId = e.currentItemId!;
     }
-    if (e.type === "item_complete") {
-      const wf = wfMap.get(inst);
-      if (wf) wf.currentItemId = null;
-    }
+    // Intentionally do NOT clear currentItemId on item_complete — the dashboard
+    // keeps the last item visible after the workflow ends so users can see which
+    // employee/record the session was for, even after it's done.
   }
 
   // Build Duo queue (unresolved requests only)
@@ -172,6 +190,21 @@ function rebuildSessionState(): SessionState {
         }
       }
     }
+  }
+
+  // Check liveness of each workflow's spawning process. We split this from `active`:
+  //   - `active`  = the workflow_start/end lifecycle (emitted by withTrackedWorkflow)
+  //   - `pidAlive`= whether the Node process is still running (and therefore its browsers)
+  // SessionPanel uses `pidAlive` to remove a workflow once its session is closed,
+  // while `active` stays authoritative for the DONE/FAILED pill in the brief window
+  // between workflow_end firing and the Node process exiting.
+  for (const wf of workflows) {
+    const startEv = events.find(
+      (e) => e.type === "workflow_start" && e.workflowInstance === wf.instance,
+    );
+    if (!startEv) { wf.pidAlive = false; continue; }
+    try { process.kill(startEv.pid, 0); wf.pidAlive = true; }
+    catch { wf.pidAlive = false; }
   }
 
   return { workflows, duoQueue };
@@ -344,28 +377,23 @@ export function startDashboard(workflow: string, port: number = 3838): void {
     if (url.pathname === "/api/runs") {
       const wf = url.searchParams.get("workflow") ?? workflow;
       const id = url.searchParams.get("id") ?? "";
+      const date = url.searchParams.get("date") ?? undefined;
       res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-      res.end(JSON.stringify(readRunsForId(wf, id)));
+      res.end(JSON.stringify(readRunsForId(wf, id, date)));
       return;
     }
 
     if (url.pathname === "/api/preflight") {
       const deleted = cleanOldTrackerFiles(7);
 
-      // Clean stale sessions.jsonl if no active workflow processes
+      // Only delete sessions.jsonl if it hasn't been touched for >24h (truly stale).
+      // Stale workflows from crashed processes are handled by rebuildSessionState
+      // which marks dead-PID workflows as inactive at read time — no file mutation needed.
       let sessionsCleaned = false;
       const sessPath = getSessionsFilePath();
       if (existsSync(sessPath)) {
-        const events = readSessionEvents();
-        const activePids = new Set<number>();
-        for (const e of events) {
-          if (e.type === "workflow_start") activePids.add(e.pid);
-          if (e.type === "workflow_end") activePids.delete(e.pid);
-        }
-        const anyAlive = [...activePids].some((pid) => {
-          try { process.kill(pid, 0); return true; } catch { return false; }
-        });
-        if (!anyAlive) {
+        const ageMs = Date.now() - statSync(sessPath).mtimeMs;
+        if (ageMs > 24 * 60 * 60 * 1000) {
           unlinkSync(sessPath);
           sessionsCleaned = true;
         }

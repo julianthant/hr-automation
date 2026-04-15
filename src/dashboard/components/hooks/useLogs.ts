@@ -49,21 +49,7 @@ export function useLogs(
     if (date) params.set("date", date);
 
     let gotSseData = false;
-    let cancelled = false;
 
-    // 1. Always do an initial fetch for immediate data
-    fetch("/api/logs?" + params.toString())
-      .then((r) => r.json())
-      .then((entries: LogEntry[]) => {
-        if (cancelled) return;
-        if (Array.isArray(entries) && entries.length > 0) {
-          setRawLogs(entries);
-        }
-        setLoading(false);
-      })
-      .catch(() => { if (!cancelled) setLoading(false); });
-
-    // 2. SSE for live updates — append new logs as they arrive
     const es = new EventSource("/events/logs?" + params.toString());
     es.onmessage = (e) => {
       try {
@@ -71,19 +57,17 @@ export function useLogs(
         if (!Array.isArray(newEntries) || newEntries.length === 0) return;
 
         if (!gotSseData) {
-          // First SSE message: replace with full set (backend sends all on first tick)
           setRawLogs(newEntries);
           setLoading(false);
           gotSseData = true;
         } else {
-          // Subsequent: append only new
           setRawLogs((prev) => [...prev, ...newEntries]);
         }
       } catch {}
     };
+    es.onerror = () => setLoading(false);
 
     return () => {
-      cancelled = true;
       es.close();
     };
   }, [workflow, itemId, runId, date]);

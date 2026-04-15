@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { runWorkerPool } from "../../src/utils/worker-pool.js";
+import { runWorkerPool } from "../../../src/utils/worker-pool.js";
 
 describe("runWorkerPool", () => {
   it("processes all items across workers", async () => {

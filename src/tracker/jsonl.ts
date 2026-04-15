@@ -1,7 +1,6 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from "fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from "fs";
 import { join } from "path";
 import { execSync } from "child_process";
-import { Mutex } from "async-mutex";
 import { log, setLogRunId } from "../utils/log.js";
 import { classifyError } from "../utils/errors.js";
 import {
@@ -16,9 +15,8 @@ import {
   emitAuthFailed,
   emitItemStart,
   emitItemComplete,
+  emitStepChange,
 } from "./session-events.js";
-
-const writeMutex = new Mutex();
 
 export const DEFAULT_DIR = ".tracker";
 
@@ -37,11 +35,28 @@ function getLogFilePath(workflow: string, dir: string): string {
 }
 
 export function appendLogEntry(entry: LogEntry, dir: string = DEFAULT_DIR): void {
-  writeMutex.runExclusive(() => {
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    const logPath = getLogFilePath(entry.workflow, dir);
-    appendFileSync(logPath, JSON.stringify(entry) + "\n");
-  });
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const logPath = getLogFilePath(entry.workflow, dir);
+  appendFileSync(logPath, JSON.stringify(entry) + "\n");
+}
+
+// Cache parsed JSONL by file path — avoids re-parsing on every SSE tick.
+// Invalidated when mtime or size changes (covers new appends and file rotation).
+const parseCache = new Map<string, { mtimeMs: number; size: number; entries: unknown[] }>();
+
+function readJsonlCached<T>(path: string): T[] {
+  if (!existsSync(path)) return [];
+  const stat = statSync(path);
+  const cached = parseCache.get(path);
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    return cached.entries as T[];
+  }
+  const entries = readFileSync(path, "utf-8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  parseCache.set(path, { mtimeMs: stat.mtimeMs, size: stat.size, entries });
+  return entries as T[];
 }
 
 export function readLogEntries(
@@ -49,12 +64,7 @@ export function readLogEntries(
   itemId?: string,
   dir: string = DEFAULT_DIR,
 ): LogEntry[] {
-  const logPath = getLogFilePath(workflow, dir);
-  if (!existsSync(logPath)) return [];
-  const all = readFileSync(logPath, "utf-8")
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as LogEntry);
+  const all = readJsonlCached<LogEntry>(getLogFilePath(workflow, dir));
   if (itemId) return all.filter((e) => e.itemId === itemId);
   return all;
 }
@@ -76,11 +86,9 @@ function getLogPath(workflow: string, dir: string): string {
 }
 
 export function trackEvent(entry: TrackerEntry, dir: string = DEFAULT_DIR): void {
-  writeMutex.runExclusive(() => {
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    const logPath = getLogPath(entry.workflow, dir);
-    appendFileSync(logPath, JSON.stringify(entry) + "\n");
-  });
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const logPath = getLogPath(entry.workflow, dir);
+  appendFileSync(logPath, JSON.stringify(entry) + "\n");
 }
 
 /** Session context passed to workflow callbacks for registering sessions/browsers. */
@@ -169,7 +177,7 @@ export async function withTrackedWorkflow<T>(
       execSync('wmic process where "name=\'chrome.exe\' and CommandLine like \'%--enable-automation%\'" call terminate', { stdio: "ignore" });
     } catch { /* best-effort */ }
     for (const cb of cleanupFns) { try { cb(); } catch { /* best-effort */ } }
-    emitWorkflowEnd(instanceName);
+    emitWorkflowEnd(instanceName, "failed");
     const error = `Process terminated (${signal})`;
     const now = ts();
     const date = now.slice(0, 10);
@@ -184,19 +192,19 @@ export async function withTrackedWorkflow<T>(
 
   try {
     const result = await fn(
-      (step) => emit("running", { step }),
+      (step) => { emit("running", { step }); emitStepChange(instanceName, step); },
       (d) => Object.assign(data, d),
       (cb) => cleanupFns.push(cb),
       session,
     );
     emit("done");
-    emitWorkflowEnd(instanceName);
+    emitWorkflowEnd(instanceName, "done");
     return result;
   } catch (e) {
     const error = classifyError(e);
     log.error(error);
     emit("failed", { error });
-    emitWorkflowEnd(instanceName);
+    emitWorkflowEnd(instanceName, "failed");
     throw e;
   } finally {
     process.removeAllListeners("SIGINT");
@@ -205,12 +213,7 @@ export async function withTrackedWorkflow<T>(
 }
 
 export function readEntries(workflow: string, dir: string = DEFAULT_DIR): TrackerEntry[] {
-  const logPath = getLogPath(workflow, dir);
-  if (!existsSync(logPath)) return [];
-  return readFileSync(logPath, "utf-8")
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as TrackerEntry);
+  return readJsonlCached<TrackerEntry>(getLogPath(workflow, dir));
 }
 
 /** List all workflows that have tracker data (scans dir for *.jsonl files, excludes log files). */
@@ -243,12 +246,7 @@ export function readEntriesForDate(
   date: string,
   dir: string = DEFAULT_DIR,
 ): TrackerEntry[] {
-  const logPath = join(dir, `${workflow}-${date}.jsonl`);
-  if (!existsSync(logPath)) return [];
-  return readFileSync(logPath, "utf-8")
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as TrackerEntry);
+  return readJsonlCached<TrackerEntry>(join(dir, `${workflow}-${date}.jsonl`));
 }
 
 /** Read log entries for a specific date (not just today). */
@@ -258,12 +256,7 @@ export function readLogEntriesForDate(
   date: string,
   dir: string = DEFAULT_DIR,
 ): LogEntry[] {
-  const logPath = join(dir, `${workflow}-${date}-logs.jsonl`);
-  if (!existsSync(logPath)) return [];
-  const all = readFileSync(logPath, "utf-8")
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as LogEntry);
+  const all = readJsonlCached<LogEntry>(join(dir, `${workflow}-${date}-logs.jsonl`));
   if (itemId) return all.filter((e) => e.itemId === itemId);
   return all;
 }
@@ -291,9 +284,11 @@ export function cleanOldTrackerFiles(maxAgeDays: number = 7, dir: string = DEFAU
 export function readRunsForId(
   workflow: string,
   id: string,
+  date?: string,
   dir: string = DEFAULT_DIR,
 ): { runId: string; status: string; step?: string; timestamp: string }[] {
-  const entries = readEntries(workflow, dir).filter((e) => e.id === id);
+  const all = date ? readEntriesForDate(workflow, date, dir) : readEntries(workflow, dir);
+  const entries = all.filter((e) => e.id === id);
   const runMap = new Map<string, TrackerEntry>();
   // Track the last known step per run (the "failed"/"done" event may have no step)
   const lastStep = new Map<string, string>();

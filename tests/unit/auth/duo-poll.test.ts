@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import type { DuoPollOptions } from "../../src/auth/duo-poll.js";
+import type { DuoPollOptions } from "../../../src/auth/duo-poll.js";
 
 describe("DuoPollOptions interface", () => {
   it("accepts string successUrlMatch", () => {

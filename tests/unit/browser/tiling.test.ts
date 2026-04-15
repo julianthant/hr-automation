@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { computeTileLayout } from "../../src/browser/tiling.js";
+import { computeTileLayout } from "../../../src/browser/tiling.js";
 
 describe("computeTileLayout", () => {
   it("tiles 4 windows in 2x2 grid", () => {
