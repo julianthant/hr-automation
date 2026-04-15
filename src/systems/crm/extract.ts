@@ -1,5 +1,5 @@
 import type { Page } from "playwright";
-import { log } from "../utils/log.js";
+import { log } from "../../utils/log.js";
 
 /**
  * Try to extract a single field value from the page using multiple strategies.

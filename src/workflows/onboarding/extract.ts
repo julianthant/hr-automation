@@ -1,6 +1,6 @@
 import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
-import { extractField } from "../../crm/extract.js";
+import { extractField } from "../../systems/crm/extract.js";
 import { parseDepartmentNumber } from "../../tracker/index.js";
 
 /**

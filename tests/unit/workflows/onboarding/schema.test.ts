@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { validateEmployeeData, EmployeeDataSchema } from "../../../../src/workflows/onboarding/schema.js";
-import { ExtractionError } from "../../../../src/crm/types.js";
+import { ExtractionError } from "../../../../src/systems/crm/types.js";
 
 const VALID_DATA: Record<string, string> = {
   positionNumber: "40695231",

@@ -8,7 +8,7 @@ import {
   selectLatestResult,
   navigateToSection,
   ExtractionError,
-} from "../../crm/index.js";
+} from "../../systems/crm/index.js";
 import { TransactionError } from "../../systems/ucpath/types.js";
 import { searchPerson } from "../../systems/ucpath/navigate.js";
 import { withTrackedWorkflow } from "../../tracker/jsonl.js";
