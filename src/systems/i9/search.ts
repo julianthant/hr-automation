@@ -1,5 +1,5 @@
 import type { Page } from "playwright";
-import { log } from "../utils/log.js";
+import { log } from "../../utils/log.js";
 import type { I9SearchCriteria, I9SearchResult } from "./types.js";
 
 /**

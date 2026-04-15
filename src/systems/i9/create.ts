@@ -1,6 +1,6 @@
 import type { Page } from "playwright";
-import { log } from "../utils/log.js";
-import { errorMessage } from "../utils/errors.js";
+import { log } from "../../utils/log.js";
+import { errorMessage } from "../../utils/errors.js";
 import type { I9EmployeeInput, I9Result } from "./types.js";
 
 /**

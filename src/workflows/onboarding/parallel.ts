@@ -6,7 +6,7 @@ import { dirname } from "path";
 import { launchBrowser } from "../../browser/launch.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
-import { loginToI9 } from "../../i9/index.js";
+import { loginToI9 } from "../../systems/i9/index.js";
 import { runOnboarding } from "./workflow.js";
 
 const __filename = fileURLToPath(import.meta.url);
