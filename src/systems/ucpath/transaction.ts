@@ -216,21 +216,33 @@ export async function fillPersonalData(
   log.step("Filling personal data...");
 
   // --- Legal Name ---
-  // SELECTOR: verified v1.0 — textbox "Legal First Name"
   log.step("Filling legal first name...");
   await frame.getByRole("textbox", { name: "Legal First Name" }).fill(data.firstName, { timeout: 10_000 });
-  log.step("First name filled");
+  log.step("Legal first name filled");
 
-  // SELECTOR: verified v1.0 — textbox "Legal Last Name"
   log.step("Filling legal last name...");
   await frame.getByRole("textbox", { name: "Legal Last Name" }).fill(data.lastName, { timeout: 10_000 });
-  log.step("Last name filled");
+  log.step("Legal last name filled");
 
   if (data.middleName) {
-    // SELECTOR: verified v1.0 — textbox "Legal Middle Name"
-    log.step("Filling middle name...");
+    log.step("Filling legal middle name...");
     await frame.getByRole("textbox", { name: "Legal Middle Name" }).fill(data.middleName, { timeout: 10_000 });
-    log.step("Middle name filled");
+    log.step("Legal middle name filled");
+  }
+
+  // --- Preferred / Lived Name (mirror legal names when no lived name available) ---
+  log.step("Filling preferred first name...");
+  await frame.getByRole("textbox", { name: "First Name", exact: true }).fill(data.firstName, { timeout: 10_000 });
+  log.step("Preferred first name filled");
+
+  log.step("Filling preferred last name...");
+  await frame.getByRole("textbox", { name: "Last Name", exact: true }).fill(data.lastName, { timeout: 10_000 });
+  log.step("Preferred last name filled");
+
+  if (data.middleName) {
+    log.step("Filling preferred middle name...");
+    await frame.getByRole("textbox", { name: "Middle Name", exact: true }).fill(data.middleName, { timeout: 10_000 });
+    log.step("Preferred middle name filled");
   }
 
   // --- Date of Birth ---
