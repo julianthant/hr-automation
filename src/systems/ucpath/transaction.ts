@@ -442,18 +442,20 @@ export async function fillJobData(
   await page.waitForTimeout(2_000);
   log.step("Employee classification filled");
 
-  // SELECTOR: verified v1.0 — Comp Rate Code (grid input, dynamic index after position refresh)
-  // PeopleSoft IDs vary: SH_EDIT1$0, SH_PROMPT1$11, etc. Must target input not div.
+  // SELECTOR: verified v1.0 — Comp Rate Code via accessible name (resilient to grid index shifts)
   log.step("Filling comp rate code: UCHRLY...");
   const compRateInput = frame
-    .locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_EDIT1$0"]')
+    .getByRole("textbox", { name: "Comp Rate Code" })
+    .or(frame.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_EDIT1$0"]'))
     .or(frame.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_PROMPT1$11"]'))
     .or(frame.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_PROMPT1$0"]'))
     .or(frame.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_EDIT1$11"]'));
   await compRateInput.first().fill(data.compRateCode, { timeout: 10_000 });
   await page.waitForTimeout(1_000);
-  log.step(`Comp Rate Code: filled "${data.compRateCode}" using grid selector index (SH_EDIT1$0 → SH_PROMPT1$11 → SH_PROMPT1$0 → SH_EDIT1$11 fallback chain)`);
-  log.step("Comp rate code filled");
+  // Blur to trigger PeopleSoft validation
+  await page.keyboard.press("Tab");
+  await page.waitForTimeout(2_000);
+  log.step(`Comp Rate Code: filled "${data.compRateCode}"`);
 
   // SELECTOR: verified v1.0 — Compensation Rate (grid input, dynamic index)
   // PeopleSoft IDs vary: SH_EDIT2$0, SH_NUM2$11, etc. Must target input not div.
@@ -536,7 +538,7 @@ export async function clickSaveAndSubmit(
   await frame
     .getByRole("button", { name: "Save and Submit" })
     .first()
-    .click({ timeout: 10_000, force: true });
+    .click({ timeout: 10_000 });
   await page.waitForTimeout(5_000);
   await waitForPeopleSoftProcessing(frame, 30_000);
 
