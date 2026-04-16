@@ -1,7 +1,8 @@
 import type { Page } from "playwright";
 import { launchBrowser } from "../../browser/launch.js";
-import { log, withLogContext } from "../../utils/log.js";
+import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
+import { defineWorkflow, runWorkflow } from "../../core/index.js";
 import { loginToUCPath, loginToACTCrm } from "../../auth/login.js";
 import {
   searchByEmail,
@@ -11,34 +12,35 @@ import {
 } from "../../systems/crm/index.js";
 import { TransactionError } from "../../systems/ucpath/types.js";
 import { searchPerson } from "../../systems/ucpath/navigate.js";
-import { withTrackedWorkflow } from "../../tracker/jsonl.js";
 import { loginToI9, createI9Employee } from "../../systems/i9/index.js";
-import {
-  extractRawFields,
-  extractRecordPageFields,
-  validateEmployeeData,
-  buildTransactionPlan,
-} from "./index.js";
-import type { EmployeeData } from "./index.js";
+import { extractRawFields, extractRecordPageFields } from "./extract.js";
+import { validateEmployeeData } from "./schema.js";
+import type { EmployeeData } from "./schema.js";
+import { buildTransactionPlan } from "./enter.js";
 import { buildDownloadPath, downloadCrmDocuments } from "./download.js";
 import { retryStep, RetryStepError } from "./retry.js";
+import { runOnboardingLegacy } from "./workflow-legacy.js";
+import { z } from "zod/v4";
 
 export interface OnboardingOptions {
   dryRun?: boolean;
-  /** Pre-launched CRM page (for parallel worker reuse). If omitted, launches a new browser. */
+  /** Pre-launched CRM page (for parallel worker reuse). If supplied, routes to legacy. */
   crmPage?: Page;
-  /** Pre-launched UCPath page (for parallel worker reuse). If omitted, launches a new browser. */
+  /** Pre-launched UCPath page (for parallel worker reuse). If supplied, routes to legacy. */
   ucpathPage?: Page;
-  /** Pre-launched I9 page (for parallel worker reuse). If omitted, launches a new browser. */
+  /** Pre-launched I9 page (for parallel worker reuse). If supplied, routes to legacy. */
   i9Page?: Page;
   /** Log prefix for worker identification, e.g. "[Worker 1]". */
   logPrefix?: string;
 }
 
-function prefixed(prefix: string | undefined, msg: string): string {
-  return prefix ? `${prefix} ${msg}` : msg;
-}
+/** Input schema for the onboarding kernel workflow. `email` is the only CLI-supplied field. */
+const OnboardingInputSchema = z.object({
+  email: z.string().email(),
+});
+type OnboardingInput = z.infer<typeof OnboardingInputSchema>;
 
+/** Mask SSN for dashboard display. */
 function maskSsn(ssn: string | undefined | null): string {
   if (!ssn) return "";
   const digits = ssn.replace(/-/g, "");
@@ -46,285 +48,327 @@ function maskSsn(ssn: string | undefined | null): string {
   return `***-**-${digits.slice(-4)}`;
 }
 
+const onboardingSteps = [
+  "crm-auth",
+  "extraction",
+  "pdf-download",
+  "ucpath-auth",
+  "person-search",
+  "i9-creation",
+  "transaction",
+] as const;
+
+/**
+ * Kernel definition for single-mode onboarding.
+ *
+ * Exports a RegisteredWorkflow. Run it via `runWorkflow(onboardingWorkflow, { email })`
+ * or the CLI adapter `runOnboarding` (which handles dry-run and routes to legacy when
+ * pre-supplied pages are passed by parallel.ts).
+ */
+export const onboardingWorkflow = defineWorkflow({
+  name: "onboarding",
+  systems: [
+    {
+      id: "crm",
+      login: async (page, instance) => {
+        const ok = await loginToACTCrm(page, instance);
+        if (!ok) throw new Error("ACT CRM authentication failed");
+      },
+    },
+    {
+      id: "ucpath",
+      login: async (page, instance) => {
+        const ok = await loginToUCPath(page, instance);
+        if (!ok) throw new Error("UCPath authentication failed");
+      },
+    },
+    {
+      id: "i9",
+      login: async (page) => {
+        const ok = await loginToI9(page);
+        if (!ok) throw new Error("I-9 Complete authentication failed");
+      },
+    },
+  ],
+  steps: onboardingSteps,
+  schema: OnboardingInputSchema,
+  authChain: "sequential",
+  detailFields: ["email"],
+  handler: async (ctx, input) => {
+    const email = input.email;
+    let data: EmployeeData | null = null;
+
+    // --- Phase 1: CRM auth + record lookup + extraction ---
+
+    await ctx.step("crm-auth", async () => {
+      await ctx.page("crm");
+    });
+
+    const crmPage = await ctx.page("crm");
+
+    await retryStep(
+      "CRM search",
+      async () => {
+        log.step(`Searching for ${email}...`);
+        await searchByEmail(crmPage, email);
+      },
+      { attempts: 3 },
+    );
+
+    await retryStep(
+      "CRM select latest result",
+      () => selectLatestResult(crmPage),
+      { attempts: 3 },
+    );
+
+    const recordFields = await retryStep(
+      "CRM record-page extraction",
+      () => extractRecordPageFields(crmPage),
+      { attempts: 2 },
+    );
+    if (recordFields.departmentNumber) ctx.updateData({ departmentNumber: recordFields.departmentNumber });
+    if (recordFields.recruitmentNumber) ctx.updateData({ recruitmentNumber: recordFields.recruitmentNumber });
+
+    await retryStep(
+      "Navigate to UCPath Entry Sheet",
+      () => navigateToSection(crmPage, "UCPath Entry Sheet"),
+      { attempts: 2 },
+    );
+
+    await ctx.step("extraction", async () => {
+      const rawData = await retryStep(
+        "Extract employee data",
+        () => extractRawFields(crmPage),
+        { attempts: 2 },
+      );
+      try {
+        data = validateEmployeeData(rawData);
+      } catch (e) {
+        throw new ExtractionError(`Schema validation failed: ${errorMessage(e)}`);
+      }
+      if (recordFields.departmentNumber) data = { ...data, departmentNumber: recordFields.departmentNumber };
+      if (recordFields.recruitmentNumber) data = { ...data, recruitmentNumber: recordFields.recruitmentNumber };
+
+      ctx.updateData({
+        firstName: data.firstName,
+        lastName: data.lastName,
+        middleName: data.middleName ?? "",
+        email: data.email ?? email,
+        phone: data.phone ?? "",
+        dob: data.dob ?? "",
+        ssn: maskSsn(data.ssn),
+        address: data.address,
+        city: data.city,
+        state: data.state,
+        postalCode: data.postalCode,
+        departmentNumber: data.departmentNumber ?? "",
+        recruitmentNumber: data.recruitmentNumber ?? "",
+        positionNumber: data.positionNumber,
+        wage: data.wage,
+        effectiveDate: data.effectiveDate,
+        appointment: data.appointment ?? "",
+      });
+      log.success("Employee data extracted and validated");
+    });
+
+    // --- Phase 2: PDF download (non-fatal) ---
+
+    await ctx.step("pdf-download", async () => {
+      if (!data) throw new Error("extraction did not produce data");
+      const folderPath = buildDownloadPath(data.firstName, data.lastName, data.middleName);
+      try {
+        await retryStep(
+          "Navigate to CRM record page for PDF viewer",
+          async () => {
+            await crmPage.goBack({ waitUntil: "domcontentloaded", timeout: 15_000 });
+          },
+          { attempts: 2 },
+        );
+        const saved = await retryStep(
+          "Download CRM PDFs",
+          () => downloadCrmDocuments(crmPage, folderPath, {}),
+          { attempts: 2, backoffMs: 2_000 },
+        );
+        ctx.updateData({
+          pdfDownload: `${saved.length} file(s)`,
+          pdfFolder: folderPath,
+        });
+      } catch (err) {
+        const msg = errorMessage(err);
+        log.error(`PDF download failed (continuing without PDFs): ${msg}`);
+        ctx.updateData({ pdfDownload: `Failed: ${msg.slice(0, 80)}` });
+      }
+    });
+
+    // --- Phase 3: UCPath auth + person search (rehire short-circuit) ---
+
+    await ctx.step("ucpath-auth", async () => {
+      await ctx.page("ucpath");
+    });
+
+    const ucpathPage = await ctx.page("ucpath");
+
+    const searchResult = await ctx.step("person-search", async () => {
+      if (!data) throw new Error("extraction did not produce data");
+      const ssnDigits = data.ssn?.replace(/-/g, "") ?? "";
+      return retryStep(
+        "UCPath person search",
+        () => searchPerson(ucpathPage, ssnDigits, data!.firstName, data!.lastName, data!.dob ?? ""),
+        { attempts: 2 },
+      );
+    });
+
+    if (searchResult.found) {
+      log.error("Person already exists in UCPath — marking as rehire");
+      if (searchResult.matches) {
+        for (const m of searchResult.matches) {
+          log.step(`  Empl ID: ${m.emplId}, Name: ${m.firstName} ${m.lastName}`);
+        }
+      }
+      const emplIds = searchResult.matches?.map((m) => m.emplId).join(", ") ?? "";
+      ctx.updateData({
+        rehire: "Yes",
+        existingEmplIds: emplIds,
+        i9ProfileId: "N/A",
+        status: "Rehire",
+      });
+      // Early return — rehire short-circuits before I-9 creation and transaction.
+      return;
+    }
+
+    log.success("No duplicate found — proceeding with I-9 creation");
+    ctx.updateData({ rehire: "No" });
+
+    // --- Phase 4: I-9 creation ---
+
+    const i9ProfileId = await ctx.step("i9-creation", async () => {
+      if (!data) throw new Error("extraction did not produce data");
+      if (!data.ssn) throw new Error("Cannot create I-9 without SSN");
+      if (!data.dob) throw new Error("Cannot create I-9 without DOB");
+      if (!data.departmentNumber) throw new Error("Cannot create I-9 without department number");
+
+      const i9Page = await ctx.page("i9");
+      const i9Result = await retryStep(
+        "I-9 record creation",
+        async () => {
+          const result = await createI9Employee(i9Page, {
+            firstName: data!.firstName,
+            middleName: data!.middleName,
+            lastName: data!.lastName,
+            ssn: data!.ssn!,
+            dob: data!.dob!,
+            email: data!.email ?? email,
+            departmentNumber: data!.departmentNumber!,
+            startDate: data!.effectiveDate,
+          });
+          if (!result.success || !result.profileId) {
+            throw new Error(result.error ?? "I-9 creation returned no profile ID");
+          }
+          return result;
+        },
+        { attempts: 2, backoffMs: 3_000 },
+      );
+      const pid = i9Result.profileId!;
+      log.success(`I-9 profile created: ${pid}`);
+      ctx.updateData({ i9ProfileId: pid });
+      return pid;
+    });
+
+    // --- Phase 5: UCPath Smart HR Transaction ---
+
+    await ctx.step("transaction", async () => {
+      if (!data) throw new Error("extraction did not produce data");
+      try {
+        const plan = buildTransactionPlan(data, ucpathPage, i9ProfileId);
+        log.step("Executing Smart HR transaction plan...");
+        await plan.execute();
+        log.success("Transaction created successfully in UCPath");
+        ctx.updateData({ status: "Done" });
+      } catch (error) {
+        const errMsg = error instanceof TransactionError
+          ? `Transaction failed at step "${error.step ?? "unknown"}": ${error.message}`
+          : error instanceof RetryStepError
+            ? error.message
+            : `Transaction failed: ${errorMessage(error)}`;
+        ctx.updateData({ status: "Failed", transactionError: errMsg });
+        throw new Error(errMsg);
+      }
+    });
+  },
+});
+
+/**
+ * CLI adapter for `npm run start-onboarding <email>`.
+ *
+ * Routing:
+ * - If pre-supplied pages are present (parallel worker context) → legacy path (workflow-legacy.ts).
+ * - If `dryRun` → imperative CRM-only preview (see runOnboardingDryRun below).
+ * - Otherwise → kernel via `runWorkflow(onboardingWorkflow, { email })`.
+ */
 export async function runOnboarding(
   email: string,
   options: OnboardingOptions = {},
 ): Promise<void> {
-  const p = options.logPrefix;
-  const isParallel = Boolean(options.crmPage);
+  // Parallel workers supply pre-launched pages — route to legacy until parallel migrates.
+  if (options.crmPage || options.ucpathPage || options.i9Page) {
+    return runOnboardingLegacy(email, options);
+  }
 
-  return withLogContext("onboarding", email, async () => {
-  return withTrackedWorkflow("onboarding", email, { email }, async (setStep, updateData, _onCleanup, session) => {
+  if (options.dryRun) {
+    return runOnboardingDryRun(email);
+  }
 
-  let data: EmployeeData | null = null;
+  await runWorkflow(onboardingWorkflow, { email });
+  log.success("Onboarding transaction completed successfully");
+}
 
-  const sessionId = `onboarding-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  session.registerSession(sessionId);
-  session.setCurrentItem(email);
-  const crmBrowserId = `${sessionId}-crm`;
-  const ucpathBrowserId = `${sessionId}-ucpath`;
-  const i9BrowserId = `${sessionId}-i9`;
-
-  // --- Phase 1: CRM auth + extraction + PDF download ---
-  setStep("crm-auth");
-  const crmPage = options.crmPage ?? (await launchBrowser()).page;
-  session.registerBrowser(sessionId, crmBrowserId, "CRM");
-
-  log.step(prefixed(p, "Authenticating to ACT CRM..."));
-  session.setAuthState(crmBrowserId, "CRM", "start");
+/**
+ * Single-browser imperative dry-run: CRM auth + extraction + plan preview, no UCPath/I9.
+ *
+ * Mirrors the old dryRun short-circuit semantics without launching unnecessary browsers.
+ */
+async function runOnboardingDryRun(email: string): Promise<void> {
+  log.step("=== DRY RUN MODE ===");
+  const { page: crmPage } = await launchBrowser();
   try {
     await retryStep(
       "CRM authentication",
       async () => {
-        const ok = await loginToACTCrm(crmPage, session.instance);
+        const ok = await loginToACTCrm(crmPage);
         if (!ok) throw new Error("loginToACTCrm returned false");
-        return true;
       },
-      { attempts: 2, logPrefix: p, backoffMs: 3_000 },
+      { attempts: 2, backoffMs: 3_000 },
     );
-    session.setAuthState(crmBrowserId, "CRM", "complete");
-  } catch (err) {
-    session.setAuthState(crmBrowserId, "CRM", "failed");
-    throw err;
-  }
 
-  await retryStep(
-    "CRM search",
-    async () => {
-      log.step(prefixed(p, `Searching for ${email}...`));
-      await searchByEmail(crmPage, email);
-    },
-    { attempts: 3, logPrefix: p },
-  );
-
-  await retryStep(
-    "CRM select latest result",
-    () => selectLatestResult(crmPage),
-    { attempts: 3, logPrefix: p },
-  );
-
-  const recordFields = await retryStep(
-    "CRM record-page extraction",
-    () => extractRecordPageFields(crmPage),
-    { attempts: 2, logPrefix: p },
-  );
-
-  if (recordFields.departmentNumber) updateData({ departmentNumber: recordFields.departmentNumber });
-  if (recordFields.recruitmentNumber) updateData({ recruitmentNumber: recordFields.recruitmentNumber });
-
-  // Extract UCPath Entry Sheet fields — needed for name before we can build the download folder
-  await retryStep(
-    "Navigate to UCPath Entry Sheet",
-    () => navigateToSection(crmPage, "UCPath Entry Sheet"),
-    { attempts: 2, logPrefix: p },
-  );
-
-  setStep("extraction");
-  const rawData = await retryStep(
-    "Extract employee data",
-    () => extractRawFields(crmPage),
-    { attempts: 2, logPrefix: p },
-  );
-
-  try {
-    data = validateEmployeeData(rawData);
-  } catch (e) {
-    throw new ExtractionError(`Schema validation failed: ${errorMessage(e)}`);
-  }
-  if (recordFields.departmentNumber) {
-    data = { ...data, departmentNumber: recordFields.departmentNumber };
-  }
-  if (recordFields.recruitmentNumber) {
-    data = { ...data, recruitmentNumber: recordFields.recruitmentNumber };
-  }
-
-  updateData({
-    firstName: data.firstName,
-    lastName: data.lastName,
-    middleName: data.middleName ?? "",
-    email: data.email ?? email,
-    phone: data.phone ?? "",
-    dob: data.dob ?? "",
-    ssn: maskSsn(data.ssn),
-    address: data.address,
-    city: data.city,
-    state: data.state,
-    postalCode: data.postalCode,
-    departmentNumber: data.departmentNumber ?? "",
-    recruitmentNumber: data.recruitmentNumber ?? "",
-    positionNumber: data.positionNumber,
-    wage: data.wage,
-    effectiveDate: data.effectiveDate,
-    appointment: data.appointment ?? "",
-  });
-  log.success(prefixed(p, "Employee data extracted and validated"));
-
-  // --- Phase 2: PDF download (non-fatal — we log and continue on failure) ---
-  setStep("pdf-download");
-  const folderPath = buildDownloadPath(data.firstName, data.lastName, data.middleName);
-  try {
-    // Navigate back to the record page so the PDF viewer iframe is present.
     await retryStep(
-      "Navigate to CRM record page for PDF viewer",
+      "CRM search",
       async () => {
-        await crmPage.goBack({ waitUntil: "domcontentloaded", timeout: 15_000 });
+        log.step(`Searching for ${email}...`);
+        await searchByEmail(crmPage, email);
       },
-      { attempts: 2, logPrefix: p },
+      { attempts: 3 },
     );
-    const saved = await retryStep(
-      "Download CRM PDFs",
-      () => downloadCrmDocuments(crmPage, folderPath, { logPrefix: p }),
-      { attempts: 2, logPrefix: p, backoffMs: 2_000 },
-    );
-    updateData({
-      pdfDownload: `${saved.length} file(s)`,
-      pdfFolder: folderPath,
-    });
-  } catch (err) {
-    // Non-fatal: PDF download failure shouldn't block the transaction
-    const msg = errorMessage(err);
-    log.error(prefixed(p, `PDF download failed (continuing without PDFs): ${msg}`));
-    updateData({ pdfDownload: `Failed: ${msg.slice(0, 80)}` });
-  }
+    await retryStep("CRM select latest result", () => selectLatestResult(crmPage), { attempts: 3 });
+    const recordFields = await retryStep("CRM record-page extraction", () => extractRecordPageFields(crmPage), { attempts: 2 });
+    await retryStep("Navigate to UCPath Entry Sheet", () => navigateToSection(crmPage, "UCPath Entry Sheet"), { attempts: 2 });
 
-  // --- Dry-run short-circuit ---
-  if (options.dryRun) {
-    const plan = buildTransactionPlan(data, null as unknown as Page, "DRY_RUN");
-    log.step(prefixed(p, "=== DRY RUN MODE ==="));
-    plan.preview();
-    updateData({ i9ProfileId: "Dry Run", status: "Dry Run" });
-    log.success(prefixed(p, "Dry run complete — no changes made to UCPath or I9"));
-    session.completeItem(email);
-    return;
-  }
-
-  // --- Phase 3: UCPath auth + person search ---
-  setStep("ucpath-auth");
-  const ucpathPage = options.ucpathPage ?? (await launchBrowser()).page;
-  session.registerBrowser(sessionId, ucpathBrowserId, "UCPath");
-
-  session.setAuthState(ucpathBrowserId, "UCPath", "start");
-  try {
-    await retryStep(
-      "UCPath authentication",
-      async () => {
-        const ok = await loginToUCPath(ucpathPage, session.instance);
-        if (!ok) throw new Error("loginToUCPath returned false");
-        return true;
-      },
-      { attempts: 2, logPrefix: p, backoffMs: 3_000 },
-    );
-    session.setAuthState(ucpathBrowserId, "UCPath", "complete");
-  } catch (err) {
-    session.setAuthState(ucpathBrowserId, "UCPath", "failed");
-    throw err;
-  }
-
-  setStep("person-search");
-  const ssnDigits = data.ssn?.replace(/-/g, "") ?? "";
-  const searchResult = await retryStep(
-    "UCPath person search",
-    () => searchPerson(ucpathPage, ssnDigits, data!.firstName, data!.lastName, data!.dob ?? ""),
-    { attempts: 2, logPrefix: p },
-  );
-
-  if (searchResult.found) {
-    log.error(prefixed(p, "Person already exists in UCPath — marking as rehire"));
-    if (searchResult.matches) {
-      for (const m of searchResult.matches) {
-        log.step(prefixed(p, `  Empl ID: ${m.emplId}, Name: ${m.firstName} ${m.lastName}`));
-      }
-    }
-    const emplIds = searchResult.matches?.map((m) => m.emplId).join(", ") ?? "";
-    updateData({
-      rehire: "Yes",
-      existingEmplIds: emplIds,
-      i9ProfileId: "N/A",
-      status: "Rehire",
-    });
-    session.completeItem(email);
-    return;
-  }
-
-  log.success(prefixed(p, "No duplicate found — proceeding with I-9 creation"));
-  updateData({ rehire: "No" });
-
-  // --- Phase 4: I-9 creation ---
-  setStep("i9-creation");
-  const i9Page = options.i9Page ?? (await launchBrowser()).page;
-  session.registerBrowser(sessionId, i9BrowserId, "I9");
-
-  if (!options.i9Page) {
-    session.setAuthState(i9BrowserId, "I9", "start");
+    const rawData = await retryStep("Extract employee data", () => extractRawFields(crmPage), { attempts: 2 });
+    let data: EmployeeData;
     try {
-      await retryStep(
-        "I-9 login",
-        async () => {
-          const ok = await loginToI9(i9Page);
-          if (!ok) throw new Error("loginToI9 returned false");
-          return true;
-        },
-        { attempts: 2, logPrefix: p, backoffMs: 3_000 },
-      );
-      session.setAuthState(i9BrowserId, "I9", "complete");
-    } catch (err) {
-      session.setAuthState(i9BrowserId, "I9", "failed");
-      throw err;
+      data = validateEmployeeData(rawData);
+    } catch (e) {
+      throw new ExtractionError(`Schema validation failed: ${errorMessage(e)}`);
     }
-  } else {
-    // Page reused from parallel worker — pre-authenticated at worker startup
-    session.setAuthState(i9BrowserId, "I9", "complete");
+    if (recordFields.departmentNumber) data = { ...data, departmentNumber: recordFields.departmentNumber };
+    if (recordFields.recruitmentNumber) data = { ...data, recruitmentNumber: recordFields.recruitmentNumber };
+
+    const plan = buildTransactionPlan(data, null as unknown as Page, "DRY_RUN");
+    plan.preview();
+    log.success("Dry run complete — no changes made to UCPath or I9");
+  } catch (err) {
+    log.error(`Dry run failed: ${errorMessage(err)}`);
+    throw err;
   }
-
-  if (!data.ssn) throw new Error("Cannot create I-9 without SSN");
-  if (!data.dob) throw new Error("Cannot create I-9 without DOB");
-  if (!data.departmentNumber) throw new Error("Cannot create I-9 without department number");
-
-  const i9Result = await retryStep(
-    "I-9 record creation",
-    async () => {
-      const result = await createI9Employee(i9Page, {
-        firstName: data!.firstName,
-        middleName: data!.middleName,
-        lastName: data!.lastName,
-        ssn: data!.ssn!,
-        dob: data!.dob!,
-        email: data!.email ?? email,
-        departmentNumber: data!.departmentNumber!,
-        startDate: data!.effectiveDate,
-      });
-      if (!result.success || !result.profileId) {
-        throw new Error(result.error ?? "I-9 creation returned no profile ID");
-      }
-      return result;
-    },
-    { attempts: 2, logPrefix: p, backoffMs: 3_000 },
-  );
-
-  const i9ProfileId = i9Result.profileId!;
-  log.success(prefixed(p, `I-9 profile created: ${i9ProfileId}`));
-  updateData({ i9ProfileId });
-
-  // --- Phase 5: UCPath Smart HR Transaction ---
-  setStep("transaction");
-  try {
-    const plan = buildTransactionPlan(data, ucpathPage, i9ProfileId);
-    log.step(prefixed(p, "Executing Smart HR transaction plan..."));
-    await plan.execute();
-    log.success(prefixed(p, "Transaction created successfully in UCPath"));
-    updateData({ status: "Done" });
-    session.completeItem(email);
-  } catch (error) {
-    const errMsg = error instanceof TransactionError
-      ? `Transaction failed at step "${error.step ?? "unknown"}": ${error.message}`
-      : error instanceof RetryStepError
-        ? error.message
-        : `Transaction failed: ${errorMessage(error)}`;
-    updateData({ status: "Failed", transactionError: errMsg });
-    throw new Error(errMsg);
-  }
-
-  void isParallel; // retained for future branching; no-op today
-  }); // end withTrackedWorkflow
-  }); // end withLogContext
 }
+
+export { runOnboardingLegacy };
