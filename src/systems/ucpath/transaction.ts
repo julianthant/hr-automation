@@ -1,6 +1,6 @@
 import type { Page, FrameLocator } from "playwright";
 import type { TransactionResult } from "./types.js";
-import { getContentFrame, waitForPeopleSoftProcessing, navigateToSmartHR } from "./navigate.js";
+import { getContentFrame, waitForPeopleSoftProcessing, navigateToSmartHR, dismissModalMask } from "./navigate.js";
 import { log } from "../../utils/log.js";
 
 // ─── STEP 1: Navigate sidebar → Smart HR Templates → Smart HR Transactions ───
@@ -385,6 +385,7 @@ export async function clickJobDataTab(
   frame: FrameLocator,
 ): Promise<void> {
   log.step("Clicking Job Data tab...");
+  await dismissModalMask(page);
 
   // SELECTOR: verified v1.0 — tab "Job Data"
   await frame
@@ -487,6 +488,7 @@ export async function clickEarnsDistTab(
   frame: FrameLocator,
 ): Promise<void> {
   log.step("Clicking Earns Dist tab...");
+  await dismissModalMask(page);
   await frame
     .getByRole("tab", { name: "Earns Dist" })
     .click({ timeout: 10_000 });
@@ -503,6 +505,7 @@ export async function clickEmployeeExperienceTab(
   frame: FrameLocator,
 ): Promise<void> {
   log.step("Clicking Employee Experience tab...");
+  await dismissModalMask(page);
   await frame
     .getByRole("tab", { name: "Employee Experience" })
     .click({ timeout: 10_000 });
