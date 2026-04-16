@@ -51,6 +51,12 @@ export class Session {
     const browsers = new Map<string, SystemSlot>()
     systems.forEach((s, i) => browsers.set(s.id, slots[i]))
 
+    // Tile windows using actual screen dimensions (detected from first browser via CDP).
+    // Skip when a custom launchFn is provided (test injection — no real browsers to tile).
+    if (tiling !== 'single' && systems.length > 1 && !opts.launchFn) {
+      await tileWindows(systems, browsers)
+    }
+
     const readyPromises = new Map<string, Promise<void>>()
 
     if (authChain === 'sequential') {
@@ -131,13 +137,41 @@ export class Session {
 }
 
 async function defaultLaunchOne(opts: LaunchOneOpts): Promise<SystemSlot> {
-  const tile = opts.tiling !== 'single'
-    ? computeTileLayout(opts.tileIndex, opts.tileCount)
-    : undefined
   const { browser, context, page } = await launchBrowser({
     sessionDir: opts.system.sessionDir,
-    viewport: tile?.viewport,
-    args: tile?.args,
   })
   return { page, context, browser }
+}
+
+async function tileWindows(
+  systems: SystemConfig[],
+  browsers: Map<string, SystemSlot>,
+): Promise<void> {
+  const firstSlot = browsers.get(systems[0].id)!
+  const screen = await firstSlot.page.evaluate(() => ({
+    width: window.screen.availWidth,
+    height: window.screen.availHeight,
+  }))
+
+  for (let i = 0; i < systems.length; i++) {
+    const slot = browsers.get(systems[i].id)!
+    const tile = computeTileLayout(i, systems.length, screen)
+    try {
+      const client = await slot.context.newCDPSession(slot.page)
+      const { windowId } = await client.send('Browser.getWindowForTarget') as { windowId: number }
+      await client.send('Browser.setWindowBounds', {
+        windowId,
+        bounds: {
+          left: tile.position.x,
+          top: tile.position.y,
+          width: tile.size.width,
+          height: tile.size.height,
+          windowState: 'normal',
+        },
+      })
+      await client.detach()
+    } catch {
+      // CDP tiling is best-effort — fall through if unsupported
+    }
+  }
 }
