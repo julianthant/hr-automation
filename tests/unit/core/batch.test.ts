@@ -5,7 +5,7 @@ import { defineWorkflow, runWorkflowBatch } from '../../../src/core/workflow.js'
 
 function fakeSlot() {
   return {
-    page: { goto: async () => {}, isClosed: () => false } as unknown as import('playwright').Page,
+    page: { goto: async () => {}, isClosed: () => false, bringToFront: async () => {} } as unknown as import('playwright').Page,
     context: { close: async () => {} } as never,
     browser: { close: async () => {} } as never,
   }

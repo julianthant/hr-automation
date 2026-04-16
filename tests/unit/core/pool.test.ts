@@ -6,7 +6,7 @@ import { runWorkflowPool } from '../../../src/core/pool.js'
 
 function fakeSlot() {
   return {
-    page: {} as import('playwright').Page,
+    page: { bringToFront: async () => {} } as unknown as import('playwright').Page,
     context: { close: async () => {} } as never,
     browser: { close: async () => {} } as never,
   }

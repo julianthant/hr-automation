@@ -64,7 +64,7 @@ test('runWorkflow: invokes handler with ctx.step typed to step names', async () 
   })
   await runWorkflow(wf, {}, {
     launchFn: () => Promise.resolve({
-      page: {} as import('playwright').Page,
+      page: { bringToFront: async () => {} } as unknown as import('playwright').Page,
       context: { close: async () => {} } as never,
       browser: { close: async () => {} } as never,
     }),
@@ -87,7 +87,7 @@ test('runWorkflow: installs SIGINT handler during handler execution', async () =
   const before = process.listeners('SIGINT').length
   await runWorkflow(wf, {}, {
     launchFn: () => Promise.resolve({
-      page: {} as import('playwright').Page,
+      page: { bringToFront: async () => {} } as unknown as import('playwright').Page,
       context: { close: async () => {} } as never,
       browser: { close: async () => {} } as never,
     }),

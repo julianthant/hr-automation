@@ -29,7 +29,7 @@ test('integration: mock workflow with 2 systems runs end-to-end', async () => {
   })
 
   const fakeSlot = () => ({
-    page: { isClosed: () => false, close: async () => {} } as unknown as import('playwright').Page,
+    page: { isClosed: () => false, close: async () => {}, bringToFront: async () => {} } as unknown as import('playwright').Page,
     context: { close: async () => {} } as never,
     browser: { close: async () => {} } as never,
   })

@@ -1,6 +1,7 @@
 import type { Page, Browser, BrowserContext } from 'playwright'
 import type { SystemConfig } from './types.js'
 import { launchBrowser } from '../browser/launch.js'
+import { computeTileLayout } from '../browser/tiling.js'
 
 interface SystemSlot {
   page: Page
@@ -55,12 +56,14 @@ export class Session {
     if (authChain === 'sequential') {
       for (const s of systems) {
         const slot = browsers.get(s.id)!
+        await slot.page.bringToFront()
         await s.login(slot.page)
       }
       systems.forEach((s) => readyPromises.set(s.id, Promise.resolve()))
     } else {
       // Interleaved: auth system[0] blocking; chain the rest in background.
       const firstSlot = browsers.get(systems[0].id)!
+      await firstSlot.page.bringToFront()
       await systems[0].login(firstSlot.page)
       readyPromises.set(systems[0].id, Promise.resolve())
 
@@ -69,7 +72,7 @@ export class Session {
         const sys = systems[i]
         const slot = browsers.get(sys.id)!
         // Each chain step ignores predecessor failure so one bad auth doesn't block the next.
-        const p = prev.catch(() => {}).then(() => sys.login(slot.page))
+        const p = prev.catch(() => {}).then(() => slot.page.bringToFront()).then(() => sys.login(slot.page))
         // Prevent unhandled rejection warnings if nobody consumes this promise.
         p.catch(() => {})
         readyPromises.set(sys.id, p)
@@ -128,6 +131,13 @@ export class Session {
 }
 
 async function defaultLaunchOne(opts: LaunchOneOpts): Promise<SystemSlot> {
-  const { browser, context, page } = await launchBrowser({ sessionDir: opts.system.sessionDir })
+  const tile = opts.tiling !== 'single'
+    ? computeTileLayout(opts.tileIndex, opts.tileCount)
+    : undefined
+  const { browser, context, page } = await launchBrowser({
+    sessionDir: opts.system.sessionDir,
+    viewport: tile?.viewport,
+    args: tile?.args,
+  })
   return { page, context, browser }
 }
