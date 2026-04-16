@@ -2,6 +2,7 @@ import type { Page, Browser, BrowserContext } from 'playwright'
 import type { SystemConfig } from './types.js'
 import { launchBrowser } from '../browser/launch.js'
 import { computeTileLayout } from '../browser/tiling.js'
+import { log } from '../utils/log.js'
 
 interface SystemSlot {
   page: Page
@@ -63,14 +64,14 @@ export class Session {
       for (const s of systems) {
         const slot = browsers.get(s.id)!
         await slot.page.bringToFront()
-        await s.login(slot.page)
+        await loginWithRetry(s, slot.page)
       }
       systems.forEach((s) => readyPromises.set(s.id, Promise.resolve()))
     } else {
       // Interleaved: auth system[0] blocking; chain the rest in background.
       const firstSlot = browsers.get(systems[0].id)!
       await firstSlot.page.bringToFront()
-      await systems[0].login(firstSlot.page)
+      await loginWithRetry(systems[0], firstSlot.page)
       readyPromises.set(systems[0].id, Promise.resolve())
 
       let prev: Promise<void> = Promise.resolve()
@@ -78,7 +79,7 @@ export class Session {
         const sys = systems[i]
         const slot = browsers.get(sys.id)!
         // Each chain step ignores predecessor failure so one bad auth doesn't block the next.
-        const p = prev.catch(() => {}).then(() => slot.page.bringToFront()).then(() => sys.login(slot.page))
+        const p = prev.catch(() => {}).then(() => slot.page.bringToFront()).then(() => loginWithRetry(sys, slot.page))
         // Prevent unhandled rejection warnings if nobody consumes this promise.
         p.catch(() => {})
         readyPromises.set(sys.id, p)
@@ -141,6 +142,25 @@ async function defaultLaunchOne(opts: LaunchOneOpts): Promise<SystemSlot> {
     sessionDir: opts.system.sessionDir,
   })
   return { page, context, browser }
+}
+
+const AUTH_MAX_ATTEMPTS = 3;
+
+async function loginWithRetry(system: SystemConfig, page: Page): Promise<void> {
+  for (let attempt = 1; attempt <= AUTH_MAX_ATTEMPTS; attempt++) {
+    try {
+      await system.login(page)
+      return
+    } catch (err) {
+      if (attempt < AUTH_MAX_ATTEMPTS) {
+        log.step(`Auth failed for ${system.id} (attempt ${attempt}/${AUTH_MAX_ATTEMPTS}) — refreshing and retrying...`)
+        await page.goto('about:blank').catch(() => {})
+        await page.waitForTimeout(1_000)
+      } else {
+        throw err
+      }
+    }
+  }
 }
 
 async function tileWindows(
