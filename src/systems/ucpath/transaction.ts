@@ -479,8 +479,24 @@ export async function fillJobData(
     .or(frame.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_EDIT2$11"]'));
   await compRateValue.first().fill(data.compensationRate, { timeout: 10_000 });
   await page.waitForTimeout(1_000);
+  // Blur to trigger PeopleSoft validation + auto-fill Compensation Frequency
+  await page.keyboard.press("Tab");
+  await page.waitForTimeout(2_000);
   log.step(`Compensation Rate: $${data.compensationRate} filled`);
-  log.step("Compensation rate filled");
+
+  // Fill Compensation Frequency ("H" for Hourly) — required field, sometimes not auto-populated
+  log.step("Filling compensation frequency: H (Hourly)...");
+  const compFreq = frame.getByRole("textbox", { name: "Compensation Frequency" });
+  const freqValue = await compFreq.inputValue().catch(() => "");
+  if (!freqValue || freqValue.trim() === "") {
+    await compFreq.fill("H", { timeout: 10_000 });
+    await page.waitForTimeout(1_000);
+    await page.keyboard.press("Tab");
+    await page.waitForTimeout(2_000);
+    log.step("Compensation Frequency filled: H");
+  } else {
+    log.step(`Compensation Frequency already set: ${freqValue}`);
+  }
 
   // SELECTOR: verified v1.0 — textbox "Expected Job End Date"
   log.step("Filling expected job end date...");
