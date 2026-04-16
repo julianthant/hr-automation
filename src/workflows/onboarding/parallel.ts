@@ -7,7 +7,7 @@ import { launchBrowser } from "../../browser/launch.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { loginToI9 } from "../../systems/i9/index.js";
-import { runOnboarding } from "./workflow.js";
+import { runOnboardingLegacy } from "./workflow.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -89,7 +89,7 @@ async function runWorker(
     log.step(`${prefix} Processing ${email} (${queue.length} remaining in queue)`);
 
     try {
-      await runOnboarding(email, {
+      await runOnboardingLegacy(email, {
         dryRun: options.dryRun,
         crmPage: crmBrowser.page,
         ucpathPage,
