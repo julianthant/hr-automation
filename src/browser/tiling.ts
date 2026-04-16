@@ -7,6 +7,8 @@ export interface TileLayout {
   args: string[];
 }
 
+const CASCADE_OFFSET = 40;
+
 export function computeTileLayout(
   index: number,
   total: number,
@@ -14,14 +16,12 @@ export function computeTileLayout(
 ): TileLayout {
   const W = screen?.width ?? SCREEN.width;
   const H = screen?.height ?? SCREEN.height;
-  const cols = Math.ceil(Math.sqrt(total));
-  const rows = Math.ceil(total / cols);
-  const winW = Math.floor(W / cols);
-  const winH = Math.floor(H / rows);
-  const col = index % cols;
-  const row = Math.floor(index / cols);
-  const x = col * winW;
-  const y = row * winH;
+
+  const margin = CASCADE_OFFSET * (total - 1);
+  const winW = W - margin;
+  const winH = H - margin;
+  const x = CASCADE_OFFSET * index;
+  const y = CASCADE_OFFSET * index;
 
   return {
     position: { x, y },
