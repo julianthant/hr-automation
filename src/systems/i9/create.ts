@@ -47,6 +47,8 @@ export async function createI9Employee(
 
     // Confirm save dialog
     await page.getByRole("button", { name: "OK" }).click({ timeout: 5_000 });
+    await page.waitForURL("**/employee/profile/*", { timeout: 10_000 }).catch(() => {});
+    await page.waitForTimeout(1_000);
     log.step("Profile saved");
 
     // Step 4: Grab profile ID from URL
