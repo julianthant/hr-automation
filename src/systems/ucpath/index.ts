@@ -5,6 +5,7 @@ export {
   navigateToSmartHR,
   getContentFrame,
   waitForPeopleSoftProcessing,
+  dismissModalMask,
   searchPerson,
 } from "./navigate.js";
 export type { PersonSearchResult } from "./navigate.js";
