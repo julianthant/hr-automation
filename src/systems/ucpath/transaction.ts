@@ -469,11 +469,11 @@ export async function fillJobData(
   await page.waitForTimeout(2_000);
   log.step(`Comp Rate Code: filled "${data.compRateCode}"`);
 
-  // SELECTOR: verified v1.0 — Compensation Rate (grid input, dynamic index)
-  // PeopleSoft IDs vary: SH_EDIT2$0, SH_NUM2$11, etc. Must target input not div.
+  // SELECTOR: Compensation Rate via accessible name (resilient to grid-index shifts)
   log.step("Filling compensation rate...");
   const compRateValue = frame
-    .locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_EDIT2$0"]')
+    .getByRole("textbox", { name: "Compensation Rate" })
+    .or(frame.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_EDIT2$0"]'))
     .or(frame.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_NUM2$11"]'))
     .or(frame.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_NUM2$0"]'))
     .or(frame.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_EDIT2$11"]'));
