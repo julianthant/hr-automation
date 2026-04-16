@@ -103,8 +103,15 @@ async function fillEmployeeProfile(page: Page, input: I9EmployeeInput): Promise<
   await page.getByRole("textbox", { name: "Date of Birth" }).fill(input.dob, { timeout: 5_000 });
   log.step(`DOB: filled`);
 
+  // Dismiss the jQuery datepicker that opens after DOB fill — it overlays the Worksite dropdown.
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+
   await page.getByRole("textbox", { name: "Employee's Email Address" }).fill(input.email, { timeout: 5_000 });
   log.step(`Email: filled`);
+
+  // Wait for loading overlay to clear before interacting with the dropdown.
+  await page.locator(".mobile-responsive-loader").waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
 
   // Select worksite by department number (format: "6-{deptNum} DESCRIPTION")
   await selectWorksite(page, input.departmentNumber);
