@@ -55,6 +55,7 @@ export async function fillSsoCredentials(page: Page): Promise<void> {
       .or(page.getByLabel(passwordLabels[1]))
       .or(page.locator(passwordLabels[2]));
   await passwordField.first().fill(password, { timeout: 5_000 });
+  await page.waitForTimeout(500);
   log.step("SSO: credentials filled via 3-level fallback chain");
 }
 
