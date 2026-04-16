@@ -145,7 +145,7 @@ test('session.healthCheck: returns false if page is closed', async () => {
 
 // Fake launch helper used in tests — returns a stub Page/Browser/Context.
 function fakeLaunch() {
-  const page = { close: async () => {} } as unknown as import('playwright').Page
+  const page = { close: async () => {}, bringToFront: async () => {} } as unknown as import('playwright').Page
   const context = { close: async () => {} } as unknown as import('playwright').BrowserContext
   const browser = { close: async () => {} } as unknown as import('playwright').Browser
   return Promise.resolve({ page, context, browser })
