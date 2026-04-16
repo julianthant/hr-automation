@@ -7,26 +7,18 @@ export interface TileLayout {
   args: string[];
 }
 
-const CASCADE_OFFSET = 40;
-
 export function computeTileLayout(
-  index: number,
-  total: number,
+  _index: number,
+  _total: number,
   screen?: { width: number; height: number },
 ): TileLayout {
   const W = screen?.width ?? SCREEN.width;
   const H = screen?.height ?? SCREEN.height;
 
-  const margin = CASCADE_OFFSET * (total - 1);
-  const winW = W - margin;
-  const winH = H - margin;
-  const x = CASCADE_OFFSET * index;
-  const y = CASCADE_OFFSET * index;
-
   return {
-    position: { x, y },
-    size: { width: winW, height: winH },
-    viewport: { width: winW - 20, height: winH - 80 },
-    args: [`--window-position=${x},${y}`, `--window-size=${winW},${winH}`],
+    position: { x: 0, y: 0 },
+    size: { width: W, height: H },
+    viewport: { width: W - 20, height: H - 80 },
+    args: [`--window-position=0,0`, `--window-size=${W},${H}`],
   };
 }
