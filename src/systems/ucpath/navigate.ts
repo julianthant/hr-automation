@@ -49,6 +49,17 @@ export async function waitForPeopleSoftProcessing(
   }
 }
 
+/**
+ * Dismiss the PeopleSoft page-level modal mask that can linger after tab switches.
+ * The mask sits on the main page (not inside the iframe) and intercepts pointer events.
+ */
+export async function dismissModalMask(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const mask = document.getElementById("pt_modalMask");
+    if (mask) mask.style.display = "none";
+  });
+}
+
 export interface PersonSearchResult {
   found: boolean;
   matches?: Array<{ emplId: string; firstName: string; lastName: string }>;
