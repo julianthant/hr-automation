@@ -12,7 +12,7 @@ import {
 } from "../../systems/crm/index.js";
 import { TransactionError } from "../../systems/ucpath/types.js";
 import { searchPerson } from "../../systems/ucpath/navigate.js";
-import { loginToI9, createI9Employee } from "../../systems/i9/index.js";
+import { loginToI9, createI9Employee, searchI9Employee } from "../../systems/i9/index.js";
 import { extractRawFields, extractRecordPageFields } from "./extract.js";
 import { validateEmployeeData } from "./schema.js";
 import type { EmployeeData } from "./schema.js";
@@ -239,7 +239,7 @@ export const onboardingWorkflow = defineWorkflow({
     log.success("No duplicate found — proceeding with I-9 creation");
     ctx.updateData({ rehire: "No" });
 
-    // --- Phase 4: I-9 creation ---
+    // --- Phase 4: I-9 search (existing) or creation (new) ---
 
     const i9ProfileId = await ctx.step("i9-creation", async () => {
       if (!data) throw new Error("extraction did not produce data");
@@ -248,6 +248,29 @@ export const onboardingWorkflow = defineWorkflow({
       if (!data.departmentNumber) throw new Error("Cannot create I-9 without department number");
 
       const i9Page = await ctx.page("i9");
+
+      // Search for existing profile first — avoids duplicate creation on re-runs.
+      const ssnWithDashes = data.ssn!.replace(/(\d{3})(\d{2})(\d{4})/, "$1-$2-$3");
+      const searchResults = await retryStep(
+        "I-9 profile search",
+        () => searchI9Employee(i9Page, { ssn: ssnWithDashes }),
+        { attempts: 2 },
+      );
+
+      if (searchResults.length > 0 && searchResults[0].profileId) {
+        const pid = searchResults[0].profileId;
+        log.success(`Existing I-9 profile found: ${pid} — skipping creation`);
+        ctx.updateData({ i9ProfileId: pid, i9SearchOnly: "true" });
+        // Close search dialog
+        await i9Page.keyboard.press("Escape");
+        return pid;
+      }
+
+      log.step("No existing I-9 profile — creating new one");
+      // Close search dialog before navigating to create flow
+      await i9Page.keyboard.press("Escape");
+      await i9Page.waitForTimeout(500);
+
       const i9Result = await retryStep(
         "I-9 record creation",
         async () => {
