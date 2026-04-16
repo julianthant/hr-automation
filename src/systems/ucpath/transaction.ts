@@ -531,11 +531,12 @@ export async function clickSaveAndSubmit(
   employeeName?: string,
 ): Promise<TransactionResult> {
   log.step("Clicking Save and Submit...");
+  await dismissModalMask(page);
 
   await frame
     .getByRole("button", { name: "Save and Submit" })
     .first()
-    .click({ timeout: 10_000 });
+    .click({ timeout: 10_000, force: true });
   await page.waitForTimeout(5_000);
   await waitForPeopleSoftProcessing(frame, 30_000);
 
