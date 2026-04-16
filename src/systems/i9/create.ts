@@ -33,30 +33,58 @@ export async function createI9Employee(
     // Step 2: Fill employee information
     await fillEmployeeProfile(page, input);
 
-    // Step 3: Save profile
+    // Step 3: Save profile and handle post-save dialog
     log.step("Clicking Save & Continue...");
     await page.getByRole("button", { name: "Save & Continue" }).click({ timeout: 10_000 });
 
+    await page.locator(".mobile-responsive-loader").waitFor({ state: "hidden", timeout: 15_000 }).catch(() => {});
+    await page.waitForTimeout(1_000);
+
     // Handle validation errors
     const errorSummary = page.getByRole("heading", { name: "Error Summary:" });
-    const hasError = await errorSummary.isVisible({ timeout: 2_000 }).catch(() => false);
+    const hasError = await errorSummary.isVisible({ timeout: 3_000 }).catch(() => false);
     if (hasError) {
       const errorText = await errorSummary.locator("..").locator("div").textContent().catch(() => "Unknown validation error");
       return { success: false, profileId: null, error: `Validation error: ${errorText}` };
     }
 
-    // Confirm save dialog
-    await page.getByRole("button", { name: "OK" }).click({ timeout: 5_000 });
-    await page.waitForURL("**/employee/profile/*", { timeout: 10_000 }).catch(() => {});
-    await page.waitForTimeout(1_000);
-    log.step("Profile saved");
+    // Two possible post-save flows:
+    // Path 1 (new employee): OK confirmation dialog → URL becomes /employee/profile/{id}?saveAndContinue=true
+    // Path 2 (duplicate found): Duplicate Employee Record dialog → select existing row → View/Edit Selected Record
+    const okBtn = page.getByRole("button", { name: "OK" }).first();
+    const duplicateDialog = page.getByRole("dialog", { name: "Duplicate Employee Record" });
 
-    // Step 4: Grab profile ID from URL
-    const profileId = extractProfileId(page.url());
-    if (!profileId) {
-      return { success: false, profileId: null, error: "Could not extract profile ID from URL" };
+    const isOk = await okBtn.isVisible({ timeout: 5_000 }).catch(() => false);
+    const isDuplicate = await duplicateDialog.isVisible({ timeout: 2_000 }).catch(() => false);
+
+    let profileId: string | null = null;
+
+    if (isDuplicate) {
+      log.step("Duplicate employee found — selecting existing record...");
+      const firstRow = page.getByRole("grid").last().getByRole("row").first();
+      await firstRow.click({ timeout: 5_000 });
+      await page.getByRole("button", { name: "View/Edit Selected Record" }).click({ timeout: 5_000 });
+      await page.waitForURL("**/employee/profile/*", { timeout: 10_000 });
+      profileId = extractProfileId(page.url());
+      if (!profileId) {
+        return { success: false, profileId: null, error: "Could not extract profile ID after duplicate selection" };
+      }
+      // Navigate with saveAndContinue param to reveal the Create I-9 radio section
+      await page.goto(`https://wwwe.i9complete.com/employee/profile/${profileId}?saveAndContinue=true`, { timeout: 10_000 });
+      await page.waitForTimeout(1_000);
+      log.step(`Using existing profile: ${profileId}`);
+    } else if (isOk) {
+      await okBtn.click({ timeout: 5_000 });
+      await page.waitForURL("**/employee/profile/*", { timeout: 15_000 }).catch(() => {});
+      await page.waitForTimeout(1_000);
+      profileId = extractProfileId(page.url());
+      if (!profileId) {
+        return { success: false, profileId: null, error: "Could not extract profile ID from URL" };
+      }
+      log.step(`Profile saved: ${profileId}`);
+    } else {
+      return { success: false, profileId: null, error: "No confirmation dialog found after Save & Continue" };
     }
-    log.step(`Profile ID: ${profileId}`);
 
     // Step 5: Select Remote - Section 1 Only
     log.step("Selecting 'Remote - Section 1 Only'...");
@@ -105,15 +133,15 @@ async function fillEmployeeProfile(page: Page, input: I9EmployeeInput): Promise<
   await page.getByRole("textbox", { name: "Date of Birth" }).fill(input.dob, { timeout: 5_000 });
   log.step(`DOB: filled`);
 
-  // Dismiss the jQuery datepicker that opens after DOB fill — it overlays the Worksite dropdown.
-  await page.keyboard.press("Escape");
-  await page.waitForTimeout(300);
+  // Hide the jQuery datepicker that opens after DOB fill — Escape doesn't dismiss it,
+  // so we force-hide via JS. Without this, the datepicker overlay intercepts Worksite clicks.
+  await page.evaluate(() => {
+    const dp = document.getElementById("ui-datepicker-div");
+    if (dp) dp.style.display = "none";
+  });
 
   await page.getByRole("textbox", { name: "Employee's Email Address" }).fill(input.email, { timeout: 5_000 });
   log.step(`Email: filled`);
-
-  // Wait for loading overlay to clear before interacting with the dropdown.
-  await page.locator(".mobile-responsive-loader").waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
 
   // Select worksite by department number (format: "6-{deptNum} DESCRIPTION")
   await selectWorksite(page, input.departmentNumber);
