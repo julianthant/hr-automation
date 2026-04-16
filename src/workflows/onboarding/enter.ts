@@ -1,4 +1,5 @@
 import type { Page } from "playwright";
+import { log } from "../../utils/log.js";
 import { ActionPlan } from "../../systems/ucpath/action-plan.js";
 import {
   TEMPLATE_ID,
@@ -22,6 +23,8 @@ import {
   clickSaveAndSubmit,
   parsePayRate,
   buildCommentsText,
+  waitForPeopleSoftProcessing,
+  dismissModalMask,
 } from "../../systems/ucpath/index.js";
 import type { PersonalDataInput, JobDataInput } from "../../systems/ucpath/index.js";
 import type { EmployeeData } from "./schema.js";
@@ -173,7 +176,20 @@ export function buildTransactionPlan(
     },
   );
 
-  // Step 14: Save and Submit
+  // Step 14: Click back to Personal Data tab (PeopleSoft requires all tabs visited to enable Save)
+  plan.add(
+    "Click Personal Data tab",
+    async () => {
+      const frame = getContentFrame(page);
+      await dismissModalMask(page);
+      await frame.getByRole("tab", { name: "Personal Data" }).click({ timeout: 10_000 });
+      await page.waitForTimeout(3_000);
+      await waitForPeopleSoftProcessing(frame, 10_000);
+      log.success("Personal Data tab loaded (all tabs visited)");
+    },
+  );
+
+  // Step 15: Save and Submit
   plan.add(
     "Save and Submit transaction",
     async () => {
