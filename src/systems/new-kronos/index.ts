@@ -9,3 +9,5 @@ export {
   checkTimecardDates,
   NEW_KRONOS_URL,
 } from "./navigate.js";
+
+export { newKronosSelectors } from "./selectors.js";
