@@ -17,7 +17,7 @@ import {
   searchEmployee as searchNewKronos,
   selectEmployeeResult,
   NEW_KRONOS_URL,
-} from "../new-kronos/index.js";
+} from "../systems/new-kronos/index.js";
 import { log } from "../utils/log.js";
 
 const eid = process.argv[2] ?? "10598634";
