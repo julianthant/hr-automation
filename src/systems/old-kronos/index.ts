@@ -16,3 +16,5 @@ export {
 export { handleReportsPage, waitForReportAndDownload } from "./reports.js";
 
 export { UKGError } from "./types.js";
+
+export { oldKronosSelectors } from "./selectors.js";

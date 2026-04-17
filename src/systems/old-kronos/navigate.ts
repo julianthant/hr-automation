@@ -3,6 +3,15 @@ import { log } from "../../utils/log.js";
 import { UKGError } from "./types.js";
 import { debugScreenshot } from "../../utils/screenshot.js";
 import { loginToUKG } from "../../auth/login.js";
+import {
+  ssoProbe,
+  employeeGrid,
+  modalDismiss,
+  dateRange,
+  goToMenu,
+  timecard,
+  workspace,
+} from "./selectors.js";
 
 /**
  * Dismiss any OK/Close modal dialog in the iframe.
@@ -12,7 +21,7 @@ export async function dismissModal(page: Page, iframe: Frame): Promise<void> {
   await page.waitForTimeout(1_000);
 
   // Try OK button
-  const okBtn = iframe.locator("button:has-text('OK')");
+  const okBtn = modalDismiss.okButton(iframe);
   if (await okBtn.count() > 0) {
     try {
       await okBtn.first().click({ timeout: 3_000 });
@@ -24,9 +33,7 @@ export async function dismissModal(page: Page, iframe: Frame): Promise<void> {
   }
 
   // Try Close button
-  const closeBtn = iframe.locator(
-    "button.close-handler, button:has-text('Close'), .jqx-window-close-button",
-  );
+  const closeBtn = modalDismiss.closeButton(iframe);
   if (await closeBtn.count() > 0) {
     try {
       await closeBtn.first().click({ timeout: 3_000 });
@@ -45,7 +52,7 @@ export async function dismissModal(page: Page, iframe: Frame): Promise<void> {
 export async function getGeniesIframe(page: Page): Promise<Frame> {
   for (let attempt = 0; attempt < 15; attempt++) {
     // Check if page redirected to SSO login (session expired after refresh)
-    const ssoField = await page.locator('#ssousername, input[name="j_username"]').count().catch(() => 0);
+    const ssoField = await ssoProbe.ssoField(page).count().catch(() => 0);
     if (ssoField > 0) {
       log.step("SSO login page detected — re-authenticating to UKG...");
       const reAuthOk = await loginToUKG(page);
@@ -59,7 +66,7 @@ export async function getGeniesIframe(page: Page): Promise<Frame> {
     const iframe = page.frame({ name: "widgetFrame804" });
     if (iframe) {
       // Check for "network change detected" error inside iframe — reload if found
-      const hasNetworkError = await iframe.locator("text=network change was detected").count().catch(() => 0);
+      const hasNetworkError = await employeeGrid.networkChangeError(iframe).count().catch(() => 0);
       if (hasNetworkError > 0) {
         log.step("Network change detected in iframe — reloading page...");
         await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 });
@@ -78,7 +85,7 @@ export async function getGeniesIframe(page: Page): Promise<Frame> {
     for (const f of page.frames()) {
       if (f.name().startsWith("widgetFrame")) {
         // Also check this frame for network error
-        const hasNetworkError = await f.locator("text=network change was detected").count().catch(() => 0);
+        const hasNetworkError = await employeeGrid.networkChangeError(f).count().catch(() => 0);
         if (hasNetworkError > 0) {
           log.step("Network change detected in widget frame — reloading page...");
           await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 });
@@ -123,17 +130,14 @@ export async function setDateRange(
 ): Promise<void> {
   log.step("Setting date range...");
 
-  // Click calendar icon
-  let calBtn = iframe.locator("button:has(i.icon-k-calendar)");
-  if (await calBtn.count() === 0) {
-    calBtn = iframe.locator("button.btn.i.dropdown-toggle[title='Select Dates']");
-  }
+  // Click calendar icon (2-way .or() fallback)
+  const calBtn = dateRange.calendarButton(iframe);
   await calBtn.first().click();
   await page.waitForTimeout(3_000);
   await debugScreenshot(page, "ukg-date-01-popup");
 
   // Date inputs in the timeframeSelection dialog
-  const dateInputs = iframe.locator("div.timeframeSelection input.jqx-input-content");
+  const dateInputs = dateRange.dateInputs(iframe);
   const count = await dateInputs.count();
   log.step(`Found ${count} date inputs in dialog`);
 
@@ -172,12 +176,8 @@ export async function setDateRange(
   const endVal = await dateInputs.nth(1).inputValue();
   log.step(`Start: ${startVal}, End: ${endVal}`);
 
-  // Click Apply
-  let applyBtn = iframe.locator("div.timeframeSelection button[title='Apply']");
-  if (await applyBtn.count() === 0) {
-    applyBtn = iframe.locator("div.timeframeSelection button:has-text('Apply')");
-  }
-  await applyBtn.first().click();
+  // Click Apply (2-way .or() fallback)
+  await dateRange.applyButton(iframe).first().click();
   await page.waitForTimeout(5_000);
   log.step("Date range applied");
   await dismissModal(page, iframe);
@@ -194,11 +194,11 @@ export async function searchEmployee(
   log.step(`Searching for employee ${employeeId}...`);
   await dismissModal(page, iframe);
 
-  const searchInput = iframe.locator("#searchQuery");
+  const searchInput = employeeGrid.quickFindInput(iframe);
   await searchInput.click();
   await searchInput.fill(employeeId);
   await page.waitForTimeout(1_000);
-  await iframe.locator("#quickfindsearch_btn").click();
+  await employeeGrid.quickFindSubmitButton(iframe).click();
   await page.waitForTimeout(5_000);
   await dismissModal(page, iframe);
 }
@@ -210,7 +210,7 @@ export async function getEmployeeName(
   iframe: Frame,
   employeeId: string,
 ): Promise<string | null> {
-  const firstRow = iframe.locator("#row0genieGrid");
+  const firstRow = employeeGrid.firstRow(iframe);
   if (await firstRow.count() > 0) {
     const rowText = (await firstRow.innerText()).trim();
     log.step(`Row text: ${rowText}`);
@@ -240,7 +240,7 @@ export async function clickEmployeeRow(
   log.step("Clicking on employee row...");
 
   // Strategy 1: #row0genieGrid
-  const firstRow = iframe.locator("#row0genieGrid");
+  const firstRow = employeeGrid.firstRow(iframe);
   if (await firstRow.count() > 0) {
     const empName = await getEmployeeName(iframe, employeeId);
     await firstRow.click();
@@ -250,7 +250,7 @@ export async function clickEmployeeRow(
   }
 
   // Strategy 2: Search by role=row containing employee ID
-  const gridRows = iframe.locator("div[role='row']");
+  const gridRows = employeeGrid.allRowsByRole(iframe);
   const rowCount = await gridRows.count();
   for (let i = 0; i < rowCount; i++) {
     const text = (await gridRows.nth(i).innerText()).trim();
@@ -262,7 +262,7 @@ export async function clickEmployeeRow(
   }
 
   // Strategy 3: gridcell containing employee ID
-  const cell = iframe.locator(`div[role='gridcell']:has-text('${employeeId}')`).first();
+  const cell = employeeGrid.cellByEmployeeId(iframe, employeeId);
   if (await cell.count() > 0) {
     await cell.click();
     await page.waitForTimeout(2_000);
@@ -283,11 +283,11 @@ export async function clickGoToReports(
   log.step("Clicking Go To...");
 
   // Strategy 1: Direct text match
-  const gotoEl = iframe.locator("text=Go To").first();
+  const gotoEl = goToMenu.goToTrigger(iframe);
   if (await gotoEl.count() > 0) {
     await gotoEl.click();
     await page.waitForTimeout(3_000);
-    const reportsItem = iframe.locator("text=Reports").first();
+    const reportsItem = goToMenu.reportsItem(iframe);
     if (await reportsItem.count() > 0) {
       await reportsItem.click();
       await page.waitForTimeout(5_000);
@@ -297,7 +297,7 @@ export async function clickGoToReports(
   }
 
   // Strategy 2: Dropdown toggle
-  const dropdowns = iframe.locator(".dropdown-toggle");
+  const dropdowns = goToMenu.dropdownToggles(iframe);
   const dropdownCount = await dropdowns.count();
   for (let i = 0; i < dropdownCount; i++) {
     try {
@@ -307,7 +307,7 @@ export async function clickGoToReports(
       if (parentText.toLowerCase().includes("go to")) {
         await dropdowns.nth(i).click();
         await page.waitForTimeout(3_000);
-        await iframe.locator("text=Reports").first().click();
+        await goToMenu.reportsItem(iframe).click();
         await page.waitForTimeout(5_000);
         return true;
       }
@@ -317,7 +317,7 @@ export async function clickGoToReports(
   }
 
   // Strategy 3: Sidebar Reports link
-  const sidebarReports = page.locator("div[title='Reports']");
+  const sidebarReports = goToMenu.sidebarReports(page);
   if (await sidebarReports.count() > 0) {
     await sidebarReports.first().click();
     await page.waitForTimeout(5_000);
@@ -337,13 +337,13 @@ export async function clickGoToTimecard(
 ): Promise<boolean> {
   log.step("[Old Kronos] Clicking Go To → Timecards...");
 
-  const gotoEl = iframe.locator("text=Go To").first();
+  const gotoEl = goToMenu.goToTrigger(iframe);
   if (await gotoEl.count() > 0) {
     await gotoEl.click();
     await page.waitForTimeout(3_000);
 
     // Menu item is "Timecards" (plural) — must use exact match to avoid "Approve Timecards"
-    const timecardItem = iframe.locator("a, li, span").filter({ hasText: /^Timecards$/ }).first();
+    const timecardItem = goToMenu.timecardsItem(iframe);
     if (await timecardItem.count() > 0) {
       await timecardItem.click();
       await page.waitForTimeout(5_000);
@@ -385,7 +385,7 @@ export async function switchToPreviousPayPeriod(
     log.step(`[Old Kronos] Opened period dropdown in frame: ${f.name()}`);
     await page.waitForTimeout(2_000);
 
-    const prevLink = f.getByRole("link", { name: "Previous Pay Period" });
+    const prevLink = timecard.previousPayPeriodLink(f);
     if (await prevLink.count() > 0) {
       await prevLink.click({ timeout: 5_000 });
       await page.waitForTimeout(5_000);
@@ -492,7 +492,7 @@ export async function goBackToMain(page: Page): Promise<void> {
   log.step("Going back to Manage My Department...");
 
   // Try tab first
-  const tab = page.locator("span.krn-workspace-tabs__tab-title:has-text('Manage My Department')");
+  const tab = workspace.manageDeptTab(page);
   if (await tab.count() > 0) {
     await tab.first().click();
     await page.waitForTimeout(3_000);
@@ -500,7 +500,7 @@ export async function goBackToMain(page: Page): Promise<void> {
   }
 
   // Fallback: li tab
-  const liTab = page.locator("li[title='Manage My Department']");
+  const liTab = workspace.manageDeptLi(page);
   if (await liTab.count() > 0) {
     await liTab.first().click();
     await page.waitForTimeout(3_000);
