@@ -3,7 +3,7 @@ import type { RegisteredWorkflow, BatchResult, RunOpts } from './types.js'
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
 import { makeCtx } from './ctx.js'
-import { deriveItemId } from './workflow.js'
+import { deriveItemId, buildTrackerOpts } from './workflow.js'
 import { trackEvent, withTrackedWorkflow } from '../tracker/jsonl.js'
 import { withLogContext } from '../utils/log.js'
 import { classifyError } from '../utils/errors.js'
@@ -124,6 +124,7 @@ export async function runWorkflowPool<TData, TSteps extends readonly string[]>(
               },
               runId,
               opts.trackerDir,
+              buildTrackerOpts(wf),
             )
           }, opts.trackerDir)
           result.succeeded++
