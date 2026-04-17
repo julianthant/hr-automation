@@ -321,6 +321,20 @@ program
   .option("-p, --port <port>", "SSE server port", parseInt)
   .option("--prod", "Serve built dashboard instead of Vite dev server")
   .action(async (opts: { port?: number; prod?: boolean }) => {
+    // Trigger workflow metadata registration for every workflow — the dashboard's
+    // /api/workflow-definitions endpoint reads from the registry, and that
+    // registry is populated at module load via defineWorkflow (kernel) /
+    // defineDashboardMetadata (legacy). Without these side-effect imports the
+    // dashboard would only know about whichever workflow the user just ran.
+    await Promise.all([
+      import("./workflows/onboarding/index.js"),
+      import("./workflows/separations/index.js"),
+      import("./workflows/work-study/index.js"),
+      import("./workflows/eid-lookup/index.js"),
+      import("./workflows/emergency-contact/index.js"),
+      import("./workflows/old-kronos-reports/index.js"),
+    ]);
+
     const { startDashboard } = await import("./tracker/dashboard.js");
     const port = opts.port ?? 3838;
     startDashboard("all", port);
