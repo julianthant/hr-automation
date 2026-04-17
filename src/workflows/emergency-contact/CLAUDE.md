@@ -92,7 +92,7 @@ Optional but recommended. `--roster-url` downloads the latest roster from ShareP
 
 - Workflow name: `emergency-contact`
 - Steps (in order): `navigation` → `fill-form` → `save`
-- Detail fields (rendered by `WF_CONFIG["emergency-contact"].detailFields`): Employee, Empl ID, Contact, Relationship
+- Detail fields (declared via `defineWorkflow({ detailFields })` → dashboard registry): Employee, Empl ID, Contact, Relationship
 - `onPreEmitPending` data keys: `batchName, sourcePage, emplId, employeeName, contactName, relationship`
 - Handler `updateData` extensions: `skipped` + `skipReason` for duplicate-guard early return
 
