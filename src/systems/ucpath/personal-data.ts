@@ -1,6 +1,7 @@
 import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
 import { dismissPeopleSoftModalMask as hidePeopleSoftModalMask } from "../common/modal.js";
+import { emergencyContact } from "./selectors.js";
 
 /**
  * UCPath standalone Emergency Contact component.
@@ -37,29 +38,25 @@ export async function navigateToEmergencyContact(
   await hidePeopleSoftModalMask(page);
 
   log.step(`Filling Empl ID ${emplId} and searching...`);
-  await page
-    .getByRole("textbox", { name: "Empl ID" })
-    .first()
+  await emergencyContact
+    .emplIdInput(page)
     .fill(emplId, { timeout: 10_000 });
 
   await hidePeopleSoftModalMask(page);
-  await page
-    .getByRole("button", { name: "Search", exact: true })
-    .first()
-    .click({ timeout: 10_000 });
+  await emergencyContact.searchButton(page).click({ timeout: 10_000 });
 
   await page.waitForTimeout(3_000);
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 
   // If the employee has no emergency contact AND no record at all,
   // PeopleSoft shows "No matching values were found."
-  const noMatch = page.getByText("No matching values were found.");
+  const noMatch = emergencyContact.noMatchMessage(page);
   if ((await noMatch.count().catch(() => 0)) > 0) {
     throw new NoExistingContactError(emplId);
   }
 
   // Multi-result grid may show a "Drill in" link per row; follow it.
-  const drillIn = page.getByRole("link", { name: /drill in/i });
+  const drillIn = emergencyContact.drillInLink(page);
   if ((await drillIn.count().catch(() => 0)) > 0) {
     log.step("Clicking Drill in...");
     await drillIn.first().click({ timeout: 10_000 });
@@ -81,9 +78,7 @@ export { hidePeopleSoftModalMask };
  */
 export async function readExistingContactNames(page: Page): Promise<string[]> {
   try {
-    const names = await page
-      .getByRole("textbox", { name: "Contact Name" })
-      .all();
+    const names = await emergencyContact.contactNameInputs(page).all();
     const out: string[] = [];
     for (const n of names) {
       const v = await n.inputValue({ timeout: 2_000 }).catch(() => "");
