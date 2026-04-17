@@ -119,7 +119,7 @@ When re-running the same ID (e.g. a failed separation re-run):
 
 ## Workflow-Specific Configuration
 
-Defined in `types.ts` as `WF_CONFIG`. A `WorkflowsProvider` + `useWorkflow()` hook (in `workflows-context.tsx`) fetches registry-backed metadata from `/api/workflow-definitions`. Currently only `steps` are sourced from the backend (with `WF_CONFIG.steps` as fallback). Full WF_CONFIG elimination (label, getName, getId, labeled detailFields) is deferred to Session 4 (dashboard richness leveling) once `defineWorkflow` gains declarative UI metadata.
+All dashboard UI metadata lives on the server-side `WorkflowMetadata` registry (populated by `defineWorkflow` for kernel workflows, `defineDashboardMetadata` for legacy ones). Frontend consumes via the `WorkflowsProvider` + `useWorkflow(name)` hook (`src/dashboard/workflows-context.tsx`) backed by `/api/workflow-definitions`. The former `WF_CONFIG` constant was deleted in subsystem D — there is no frontend-side hardcoding of labels, name/id resolvers, or detailField arrays anywhere.
 
 Current consumption:
 
@@ -191,20 +191,16 @@ npm run dashboard         # Starts SSE backend (:3838) + Vite dev (:5173)
 |------|--------|
 | `src/tracker/jsonl.ts` | Add `runId` to TrackerEntry + LogEntry, add `cleanOldTrackerFiles()`, keep `trackEvent`/`appendLogEntry` synchronous (no mutex — `appendFileSync` is atomic) |
 | `src/tracker/dashboard.ts` | Add `/api/runs`, `/api/preflight` endpoints, add `runId` filtering to `/api/logs` and `/events/logs` |
-| `src/dashboard/components/types.ts` | Update TrackerEntry/LogEntry types, update WF_CONFIG |
+| `src/dashboard/components/types.ts` | Update TrackerEntry/LogEntry types (add typedData if new shape) |
 
 ## Adding a New Workflow to the Dashboard
 
-When a new workflow is created, the dashboard must be updated:
+The dashboard now auto-adapts — no frontend changes needed. When a new workflow lands:
 
-1. **`src/dashboard/components/types.ts`** — Add entry to `WF_CONFIG`:
-   - `primaryId`: what identifies entries (email, doc ID, empl ID, name)
-   - `nameSource`: how to derive display name from `data` (e.g., `data.firstName + data.lastName`)
-   - `steps`: ordered array of step names (must match `setStep()` calls in the workflow)
-   - `detailFields`: 4-cell detail grid labels (e.g., Employee, Email, Started, Elapsed)
-2. **`src/tracker/dashboard.ts`** — No changes needed unless the workflow uses a non-standard JSONL format
-3. **Log icon mapping** — If the workflow introduces new log message patterns, add them to the icon mapping in `LogLine.tsx`
-4. **Test** — Run `npm run dashboard`, trigger the new workflow, verify entries appear and steps progress
+1. **Kernel-based workflow** — declare `label`, `getName`, `getId`, and labeled `detailFields` inside the `defineWorkflow(...)` config. The registry + `/api/workflow-definitions` picks them up automatically; the detail grid renders whatever is declared.
+2. **Legacy (non-kernel) workflow** — call `defineDashboardMetadata({ name, label, steps, systems, detailFields })` at module load in the workflow's `index.ts`. Same registry, same auto-rendering.
+3. **Log icon mapping** — if the workflow introduces new log message patterns, add them to the icon mapping in `LogLine.tsx`.
+4. **Test** — run `npm run dashboard`, trigger the workflow, verify entries appear and steps progress. The detail panel should populate from your declared `detailFields` via `updateData` calls in the handler.
 
 ## Lessons Learned
 

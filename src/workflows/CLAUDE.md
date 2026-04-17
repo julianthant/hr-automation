@@ -28,11 +28,11 @@ src/workflows/{name}/
 - Use `Promise.allSettled` for parallel system queries
 
 ### 3. Dashboard Integration (MANDATORY)
-After creating the workflow, update the dashboard:
-1. Add to `WF_CONFIG` in `src/dashboard/components/types.ts`
-2. Add step definitions matching your `setStep()` calls
-3. Add to the "Step Tracking Per Workflow" table in root `CLAUDE.md`
-4. Test: run `npm run dashboard`, trigger the workflow, verify entries appear
+The dashboard now reads all UI metadata from the server-side registry — no `WF_CONFIG` edit needed. After creating the workflow:
+1. Kernel workflows: add `label`, `getName`, `getId`, and labeled `detailFields` inside `defineWorkflow({ ... })`. Every key in `detailFields` should be populated by at least one `ctx.updateData({ [key]: ... })` call before the workflow returns (a runtime `log.warn` fires if not).
+2. Legacy (non-kernel) workflows: call `defineDashboardMetadata({ name, label, steps, systems, detailFields })` at module load in the workflow's `index.ts`.
+3. Add to the "Step Tracking Per Workflow" table in root `CLAUDE.md`.
+4. Test: run `npm run dashboard`, trigger the workflow, verify entries appear.
 
 ### 4. CLI Integration
 Add the command to `src/cli.ts` using Commander pattern. Add both normal and `:dry` variants.
