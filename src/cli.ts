@@ -11,7 +11,7 @@ import { runEmergencyContact } from "./workflows/emergency-contact/index.js";
 import { runParallelKronos, DEFAULT_WORKERS } from "./workflows/old-kronos-reports/index.js";
 import { runSeparation } from "./workflows/separations/index.js";
 import { trackEvent, readEntries } from "./tracker/jsonl.js";
-import { lookupSingle, lookupParallel } from "./workflows/eid-lookup/index.js";
+import { runEidLookup } from "./workflows/eid-lookup/index.js";
 import { exportToExcel } from "./tracker/export-excel.js";
 
 const program = new Command();
@@ -289,34 +289,28 @@ program
 
 program
   .command("eid-lookup")
-  .description("Look up Employee IDs by name via Person Organizational Summary")
+  .description("Look up Employee IDs by name via Person Organizational Summary (UCPath, optional CRM cross-verify)")
   .argument("<names...>", 'One or more names in "Last, First Middle" format')
-  .option("--workers <N>", "Number of parallel browser tabs", parseInt)
-  .action(async (names: string[], options: { workers?: number }) => {
+  .option("--workers <N>", "Number of parallel browser tabs (default: min(names.length, 4))", parseInt)
+  .option("--no-crm", "Skip CRM cross-verification (UCPath only)")
+  .option("-d, --dry-run", "Preview the planned name list without launching a browser")
+  .action(async (names: string[], options: { workers?: number; crm?: boolean; dryRun?: boolean }) => {
     try {
       validateEnv();
     } catch {
       process.exit(1);
     }
-
-    if (names.length === 1 && !options.workers) {
-      // Single lookup
-      const result = await lookupSingle(names[0]);
-      if (!result.found) process.exit(1);
-    } else {
-      // Parallel lookup
-      const workers = options.workers ?? Math.min(names.length, 4);
-      if (workers < 1 || !Number.isFinite(workers)) {
-        log.error("--workers must be a positive integer.");
-        process.exit(1);
-      }
-      const results = await lookupParallel(names, workers);
-      const failed = results.filter((r) => !r.found);
-      if (failed.length > 0) {
-        log.error(`${failed.length} of ${names.length} lookups failed`);
-        process.exit(1);
-      }
+    if (options.workers !== undefined && (options.workers < 1 || !Number.isFinite(options.workers))) {
+      log.error("--workers must be a positive integer.");
+      process.exit(1);
     }
+    // Commander's --no-crm flag surfaces as `options.crm === false`; default true.
+    const useCrm = options.crm !== false;
+    await runEidLookup(names, {
+      workers: options.workers,
+      useCrm,
+      dryRun: options.dryRun,
+    });
   });
 
 // ─── dashboard ───
