@@ -4,10 +4,11 @@ Core automation for Old UKG Kronos: employee search, navigation, modal handling,
 
 ## Files
 
-- `navigate.ts` — Employee grid interaction: `getGeniesIframe` (multi-strategy frame finder), `dismissModal`, `searchEmployee`, `clickEmployeeRow`, `getEmployeeName`, `setDateRange` (digit-by-digit date typing), `clickGoToReports`, `goBackToMain`
+- `navigate.ts` — Employee grid interaction: `getGeniesIframe` (multi-strategy frame finder), `dismissModal` (clicks OK/Close inside iframe modals — distinct from UCPath's CSS-mask hide helper), `searchEmployee`, `clickEmployeeRow`, `getEmployeeName`, `setDateRange` (digit-by-digit date typing), `clickGoToReports`, `goBackToMain`
 - `reports.ts` — Report generation and download: `handleReportsPage` (runs report in nested frames), `waitForReportAndDownload` (status polling + dual-track download), helpers: `clickInFrames`, `jsClickText`, `clickRunReport`
+- `selectors.ts` — **Selector registry** (Subsystem A). Grouped: `ssoProbe`, `employeeGrid`, `modalDismiss`, `dateRange`, `goToMenu`, `timecard`, `workspace`, `reportsPage`. Includes string selector arrays (`runReportSelectors`, `viewReportSelectors`, `checkStatusSelectors`, `refreshStatusSelectors`) passed to multi-anchor click helpers.
 - `types.ts` — `UKGError` custom error class with optional `step` property
-- `index.ts` — Barrel exports
+- `index.ts` — Barrel exports (includes `oldKronosSelectors` registry barrel)
 
 ## Frame Hierarchy
 
@@ -48,7 +49,19 @@ UKG uses deeply nested iframes:
 
 ## Verified Selectors
 
-*(Add selectors here after each playwright-cli mapping session — include date and system)*
+All Playwright selectors for this system live in [`selectors.ts`](./selectors.ts),
+grouped by area. Selectors that target UKG's multiple alternate UI variants
+(Calendar button, Apply button in the date range dialog) use 2-deep `.or()`
+fallback chains. The `reportsPage.*Selectors` arrays are CSS-string arrays
+passed to the multi-frame click helpers in `reports.ts` — they carry their
+verification date on the `as const` declaration.
+
+**Do not add inline selectors outside `selectors.ts`.** The
+[`tests/unit/systems/inline-selectors.test.ts`](../../../tests/unit/systems/inline-selectors.test.ts)
+guard will reject PRs that do. The `reports.ts` "enumerate unlabeled
+`<select>` dropdowns and filter by surrounding row text" pattern is
+whitelisted via end-of-line `// allow-inline-selector` comments — no clean
+factory captures it.
 
 ## Lessons Learned
 

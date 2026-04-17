@@ -188,6 +188,68 @@ These rules are **mandatory** — follow them on every task, not just when asked
 - If a pattern was established, document it for future sessions
 - Keep CLAUDE.md files as living documentation — they are the memory across sessions
 
+## Selector Registry
+
+Every Playwright selector used by automation lives in a per-system
+`selectors.ts` file under `src/systems/<system>/`:
+
+- `src/systems/ucpath/selectors.ts`
+- `src/systems/crm/selectors.ts`
+- `src/systems/i9/selectors.ts`
+- `src/systems/old-kronos/selectors.ts`
+- `src/systems/kuali/selectors.ts`
+- `src/systems/new-kronos/selectors.ts`
+
+Shared cross-system helpers (modal dismiss, instrumented `safeClick` /
+`safeFill` wrappers) live in [`src/systems/common/`](./src/systems/common/).
+
+### Pattern
+
+Selectors are **functions returning Playwright Locators/FrameLocators**:
+
+```typescript
+// src/systems/ucpath/selectors.ts
+export const personalData = {
+  legalFirstName: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Legal First Name" }),
+  // ...
+};
+
+// Caller:
+import { personalData } from "./selectors.js";
+await personalData.legalFirstName(frame).fill(data.firstName);
+```
+
+Each selector carries a `// verified YYYY-MM-DD` comment. Fallback chains
+(`.or()`) up to 6-deep are used where PeopleSoft grid IDs mutate or similar
+brittle anchors need hardening. When the underlying `.click()` / `.fill()`
+throws (primary and fallbacks all exhausted), wrap the call with
+[`safeClick` / `safeFill`](./src/systems/common/safe.ts) to emit a
+`log.warn("selector fallback triggered: <label>")` event to the dashboard.
+
+### Adding selectors
+
+1. Map the live page with `playwright-cli snapshot` (see playwright-cli
+   section below).
+2. Add the new selector to the relevant system's `selectors.ts` with
+   today's `// verified` date.
+3. Import and call it from the caller. Never inline `page.locator("...")`
+   calls in system `.ts` files — the
+   [`tests/unit/systems/inline-selectors.test.ts`](./tests/unit/systems/inline-selectors.test.ts)
+   guard will reject the PR.
+4. For PeopleSoft grid inputs or any anchor that has failed in the past,
+   add a 2-3 deep `.or()` fallback chain and wrap invocations with
+   `safeClick` / `safeFill` from `src/systems/common/` so a fallback
+   match is logged.
+
+### Verification
+
+This subsystem (A, 2026-04-17) was a **re-homing pass** — selectors
+moved verbatim from their prior inline locations with existing
+verified-dates preserved. When you next touch a selector in production
+(e.g. because automation failed and playwright-cli shows the anchor
+moved), bump the `// verified` date to the day you re-mapped it.
+
 ## Key Patterns
 
 - **Separate auth flows**: UCPath, CRM, I9, UKG, Kuali, and New Kronos each use different auth — never share browser sessions between them
