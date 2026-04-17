@@ -22,10 +22,10 @@ Automates full UC employee hiring: extracts data from ACT CRM, validates with Zo
 | Field | Value | Why |
 |-------|-------|-----|
 | `systems` | `[crm, ucpath, i9]` — each wraps its login fn to throw on false | 3 independent auth systems |
-| `steps` | `["crm-auth", "extraction", "pdf-download", "ucpath-auth", "person-search", "i9-creation", "transaction"] as const` | Matches dashboard `WF_CONFIG.onboarding.steps` |
+| `steps` | `["crm-auth", "extraction", "pdf-download", "ucpath-auth", "person-search", "i9-creation", "transaction"] as const` | Registered to the dashboard registry at `defineWorkflow` time |
 | `authChain` | `"sequential"` | CRM work happens before UCPath auth; sequential avoids wasting Duo prompts on systems we might not reach (rehire case) |
 | `tiling` | `"auto"` (kernel picks for multi-system) | 3 browsers tiled then fullscreened; bringToFront per system during auth |
-| `detailFields` | `["email"]` | Only schema-keyed field. Dashboard reads richer fields (firstName, lastName, dept #, etc.) via `WF_CONFIG.onboarding` from runtime `updateData` |
+| `detailFields` | labeled (Employee, Email, Dept #, Position #, Wage, Eff Date, I9 Profile) + `getName`/`getId` resolvers | Rich detail panel populated via `ctx.updateData(...)` across the 5 phases |
 
 ## Data Flow
 
@@ -95,8 +95,8 @@ Visualforce table layout — `<tr>` with `<th class="labelCol">` label followed 
 
 - **2026-04-14: iDocs PDFs fetch faster than they render** — Driving the PDF.js viewer UI (click Next Doc, scroll, trigger download) is brittle across Salesforce Canvas + nested iframes + PDF.js state. The viewer loads each PDF from `/iDocsForSalesforceDocumentServer?i=<idx>&h=<hash>` using context cookies — `page.context().request.get(url)` returns the raw PDF directly. One HTTP round-trip replaces ~5 UI steps and ~3s/doc of wait time. Extract `h` from the PDF.js iframe URL in `page.frames()` after the record page loads.
 - **2026-04-14: I-9 creation is no longer mocked** — The `MOCK_I9` hardcode was removed. Real `createI9Employee()` runs between `person-search` and `transaction`; the returned `profileId` flows into `buildTransactionPlan()` so the UCPath Comments/Personal Data steps reference the actual I-9. I-9 login has no Duo — pre-authenticate once per worker in parallel mode, fall back to per-run login in single mode.
-- **2026-04-14: Every phase is retry-wrapped** — `retryStep(name, fn, { attempts, backoffMs, logPrefix, onRetry })` retries transient failures and emits per-attempt error logs to the dashboard. When a step exhausts attempts, it throws `RetryStepError` which propagates to `withTrackedWorkflow`'s catch and marks the entry `failed` with a meaningful step name in the error.
-- **2026-04-14: Dashboard is the source of truth** — `onboarding-tracker.xlsx` and `tracker.ts` were deleted. All fields the tracker used to show (dept #, position #, wage, I-9 profile, etc.) are now pushed into `updateData()` so the dashboard's detail grid shows them. Dashboard `WF_CONFIG.onboarding.detailFields` has 8 cells in a 2-row grid: Employee, Email, Dept #, Position #, Wage, Eff Date, I9 Profile, Elapsed.
+- **2026-04-14: Every phase is retry-wrapped** — `retryStep(name, fn, { attempts, backoffMs, logPrefix, onRetry })` retries transient failures and emits per-attempt error logs to the dashboard. When a step exhausts attempts, it throws `RetryStepError` which propagates out of the handler; the kernel's step wrapper marks the entry `failed` with a meaningful step name. (With the kernel in place, `ctx.retry(fn, { attempts, backoffMs })` is a lighter alternative for simple cases.)
+- **2026-04-14: Dashboard is the source of truth** — `onboarding-tracker.xlsx` and `tracker.ts` were deleted. All fields the tracker used to show (dept #, position #, wage, I-9 profile, etc.) are now pushed into `ctx.updateData(...)` so the dashboard's detail grid shows them. Detail fields declared on `defineWorkflow` (7 labeled entries) plus `getName`/`getId` resolvers drive the dashboard detail panel.
 - **2026-04-15: Migrated single-mode to kernel.** `runOnboarding` is a CLI adapter over `runWorkflow(onboardingWorkflow, { email })`. Parallel mode stays on `workflow-legacy.ts` until a followup migrates it. Don't reintroduce raw `launchBrowser` / `withTrackedWorkflow` in the single-mode handler.
 - **2026-04-16: I9 — search before creating.** The create path blows up if a matching SSN already has a profile; always search I9 by SSN first and short-circuit to the existing profileId if found.
 - **2026-04-16: I9 — dismiss the datepicker overlay before clicking Worksite dropdown.** `Escape` key does nothing; force-hide the overlay via inline style.

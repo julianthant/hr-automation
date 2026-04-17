@@ -73,8 +73,8 @@ Restoring per-name rows requires `runWorkflowBatch` with a `mode: "pool"` varian
 ## Dashboard integration
 
 - Workflow name: `eid-lookup`
-- Step config (matches `WF_CONFIG["eid-lookup"]`): `["ucpath-auth", "searching", "crm-auth", "cross-verification"]` — no-CRM mode only fires the first two; CRM mode fires all four.
-- Detail fields (renderer): `searchName`, `emplId`, `started`, `elapsed`. (`name` for the dashboard's `getName` resolver comes from `ctx.updateData` indirectly — currently empty after migration since per-name updates went away. Acceptable for this migration; the row's ID is the kernel-derived UUID + the rolled-up summary stats.)
+- Step config (declared on `defineWorkflow({ steps })`): `["ucpath-auth", "searching", "crm-auth", "cross-verification"]` — no-CRM mode only fires the first two; CRM mode fires all four.
+- Detail fields (declared on `defineWorkflow({ detailFields })`): `searchName`, `emplId`, `started`, `elapsed`. (`name` for the dashboard's `getName` resolver comes from `ctx.updateData` indirectly — currently empty after migration since per-name updates went away. Acceptable for this migration; the row's ID is the kernel-derived UUID + the rolled-up summary stats.)
 
 ## Name Search Strategy
 
