@@ -14,8 +14,9 @@ Kuali Build separation form automation: extraction and form filling for employee
   - `fillFinalTransactions(page, opts)` — fills termination date, department (combobox best-match), payroll title code/title
   - `fillTransactionResults(page, transactionNumber)` — checks submitted checkbox, fills txn number, selects "Does not need Final Pay" radio
   - `fillTimekeeperComments(page, comments)` — fills comments textbox
-  - `clickSave(page)` — scrolls to top, targets navbar save button (action-bar or nav selector), waits for network idle, checks for error indicators
-- `index.ts` — Barrel exports
+  - `clickSave(page)` — scrolls to top, targets navbar save button (3-deep `.or()` chain from the registry), waits for network idle
+- `selectors.ts` — **Selector registry** (Subsystem A). Grouped: `actionList`, `separationForm`, `timekeeperTasks`, `finalTransactions`, `transactionResults`, `save`.
+- `index.ts` — Barrel exports (includes `kualiSelectors` registry barrel)
 
 ## Gotchas
 
@@ -36,7 +37,16 @@ Kuali Build separation form automation: extraction and form filling for employee
 
 ## Verified Selectors
 
-*(Add selectors here after each playwright-cli mapping session — include date and system)*
+All Playwright selectors for this system live in [`selectors.ts`](./selectors.ts),
+grouped by form section. The `save.navbarSaveButton` entry uses a 3-deep
+`.or()` fallback chain (action-bar → nav → role-based) — preserved verbatim
+from the prior inline implementation.
+
+**Do not add inline selectors outside `selectors.ts`.** The
+[`tests/unit/systems/inline-selectors.test.ts`](../../../tests/unit/systems/inline-selectors.test.ts)
+guard will reject PRs that do. The `deptCombo.locator("option")` enumeration
+inside `fillFinalTransactions` (for best-match department selection) is
+whitelisted via end-of-line `// allow-inline-selector`.
 
 ## Lessons Learned
 

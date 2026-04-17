@@ -7,8 +7,9 @@ Automates I9 Complete (Tracker I-9 by Mitratech) for employment verification: lo
 - `login.ts` — `loginToI9(page)`: email/password auth (no Duo MFA), auto-appends `@ucsd.edu` if needed, dismisses training notification popup after login
 - `create.ts` — `createI9Employee(page, input)`: fills profile form, saves, selects "Remote - Section 1 Only", fills start date, creates I-9 record. Returns `I9Result` with `profileId` extracted from URL
 - `search.ts` — `searchI9Employee(page, criteria)`: flexible search by lastName/firstName/ssn/profileId/employeeId, parses grid results (9 columns)
+- `selectors.ts` — **Selector registry** (Subsystem A). Grouped: `login`, `dashboard`, `profile`, `remoteI9`, `search`.
 - `types.ts` — `I9EmployeeInput`, `I9Result`, `I9SearchCriteria`, `I9SearchResult`
-- `index.ts` — Barrel exports
+- `index.ts` — Barrel exports (includes `i9Selectors` registry barrel)
 
 ## SSN Format Inconsistency
 
@@ -28,7 +29,16 @@ Automates I9 Complete (Tracker I-9 by Mitratech) for employment verification: lo
 
 ## Verified Selectors
 
-*(Add selectors here after each playwright-cli mapping session — include date and system)*
+All Playwright selectors for this system live in [`selectors.ts`](./selectors.ts),
+grouped by flow (`login`, `dashboard`, `profile`, `remoteI9`, `search`). Each
+selector carries a `// verified YYYY-MM-DD` inline comment.
+
+**Do not add inline selectors outside `selectors.ts`.** The
+[`tests/unit/systems/inline-selectors.test.ts`](../../../tests/unit/systems/inline-selectors.test.ts)
+guard will reject PRs that do. The few row-scoped `.getByRole("gridcell")`
+and `.getByRole("link")` lookups inside `search.ts` are whitelisted via
+end-of-line `// allow-inline-selector` comments (compound paths rooted in
+registry row locators).
 
 ## Lessons Learned
 
