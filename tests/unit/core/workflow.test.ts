@@ -21,7 +21,8 @@ test('defineWorkflow: registers metadata on construction', () => {
   assert.ok(meta)
   assert.deepEqual(meta.steps, ['a', 'b', 'c'])
   assert.deepEqual(meta.systems, ['ucpath'])
-  assert.deepEqual(meta.detailFields, ['x'])
+  // Legacy string-array detailFields are normalized to labeled shape.
+  assert.deepEqual(meta.detailFields, [{ key: 'x', label: 'X' }])
   assert.equal(wf.metadata.name, 'test-wf')
 })
 
