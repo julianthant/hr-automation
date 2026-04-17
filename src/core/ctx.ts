@@ -47,6 +47,7 @@ export function makeCtx<TSteps extends readonly string[], TData>(
   return {
     page: (id) => session.page(id),
     step: (name, fn) => stepper.step(name as string, fn),
+    markStep: (name) => stepper.markStep(name as string),
     parallel: (tasks) => stepper.parallel(tasks),
     parallelAll: (tasks) => stepper.parallelAll(tasks),
     retry,
