@@ -44,6 +44,9 @@ export interface Ctx<TSteps extends readonly string[], TData> {
   parallel<T extends Record<string, () => Promise<unknown>>>(
     tasks: T,
   ): Promise<{ [K in keyof T]: PromiseSettledResult<Awaited<ReturnType<T[K]>>> }>
+  parallelAll<T extends Record<string, () => Promise<unknown>>>(
+    tasks: T,
+  ): Promise<{ [K in keyof T]: Awaited<ReturnType<T[K]>> }>
   retry<R>(fn: () => Promise<R>, opts?: RetryOpts): Promise<R>
   updateData(patch: Partial<TData & Record<string, unknown>>): void
   session: SessionHandle

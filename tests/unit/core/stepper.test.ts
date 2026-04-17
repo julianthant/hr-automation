@@ -69,3 +69,31 @@ test('stepper.parallel: empty object returns empty object', async () => {
   const result = await stepper.parallel({})
   assert.deepEqual(result, {})
 })
+
+test('stepper.parallelAll: returns fulfilled values in a record', async () => {
+  const { stepper } = mkStepper()
+  const result = await stepper.parallelAll({
+    a: async () => 1,
+    b: async () => 'two',
+  })
+  assert.deepEqual(result, { a: 1, b: 'two' })
+})
+
+test('stepper.parallelAll: rejects on first failure', async () => {
+  const { stepper } = mkStepper()
+  await assert.rejects(
+    stepper.parallelAll({
+      a: async () => {
+        throw new Error('x')
+      },
+      b: async () => 1,
+    }),
+    /x/,
+  )
+})
+
+test('stepper.parallelAll: empty object returns empty object', async () => {
+  const { stepper } = mkStepper()
+  const result = await stepper.parallelAll({})
+  assert.deepEqual(result, {})
+})
