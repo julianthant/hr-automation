@@ -35,6 +35,12 @@ node_modules/
 # Playwright CLI
 .playwright-cli/
 
+# Playwright MCP (snapshots, console logs)
+.playwright-mcp/
+
+# Superpowers plans / review-request scratch docs
+docs/superpowers/
+
 # Tracker data (local runtime)
 .tracker/
 .tracker-log-test/

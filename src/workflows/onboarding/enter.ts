@@ -115,11 +115,7 @@ export function buildTransactionPlan(
 
   plan.add(
     "Fill personal data (name, DOB, SSN, address, phone, email, profile ID)",
-    async () => {
-      await fillPersonalData(page, getContentFrame(page), personalData);
-      await page.screenshot({ path: `.screenshots/tab-01-personal-data-filled.png`, fullPage: true });
-      log.step("Screenshot: .screenshots/tab-01-personal-data-filled.png");
-    },
+    () => fillPersonalData(page, getContentFrame(page), personalData),
   );
 
   // Step 8: Comments on Personal Data page
@@ -156,31 +152,19 @@ export function buildTransactionPlan(
 
   plan.add(
     "Fill job data (position, classification, comp rate, end date)",
-    async () => {
-      await fillJobData(page, getContentFrame(page), jobData);
-      await page.screenshot({ path: `.screenshots/tab-02-job-data-filled.png`, fullPage: true });
-      log.step("Screenshot: .screenshots/tab-02-job-data-filled.png");
-    },
+    () => fillJobData(page, getContentFrame(page), jobData),
   );
 
   // Step 11: Earns Dist tab
   plan.add(
     "Click Earns Dist tab",
-    async () => {
-      await clickEarnsDistTab(page, getContentFrame(page));
-      await page.screenshot({ path: `.screenshots/tab-03-earns-dist.png`, fullPage: true });
-      log.step("Screenshot: .screenshots/tab-03-earns-dist.png");
-    },
+    () => clickEarnsDistTab(page, getContentFrame(page)),
   );
 
   // Step 12: Employee Experience tab
   plan.add(
     "Click Employee Experience tab",
-    async () => {
-      await clickEmployeeExperienceTab(page, getContentFrame(page));
-      await page.screenshot({ path: `.screenshots/tab-04-employee-experience.png`, fullPage: true });
-      log.step("Screenshot: .screenshots/tab-04-employee-experience.png");
-    },
+    () => clickEmployeeExperienceTab(page, getContentFrame(page)),
   );
 
   // Step 13: Initiator comments (fill on last tab before submit)
@@ -202,8 +186,6 @@ export function buildTransactionPlan(
       await page.waitForTimeout(3_000);
       await waitForPeopleSoftProcessing(frame, 10_000);
       log.success("Personal Data tab loaded (all tabs visited)");
-      await page.screenshot({ path: `.screenshots/tab-05-final-before-submit.png`, fullPage: true });
-      log.step("Screenshot: .screenshots/tab-05-final-before-submit.png");
     },
   );
 
