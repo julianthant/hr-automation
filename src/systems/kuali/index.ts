@@ -14,3 +14,5 @@ export {
 } from "./navigate.js";
 
 export type { KualiSeparationData } from "./navigate.js";
+
+export { kualiSelectors } from "./selectors.js";

@@ -1,6 +1,14 @@
 import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
 import { gotoWithRetry } from "../../browser/launch.js";
+import {
+  actionList,
+  separationForm,
+  timekeeperTasks,
+  finalTransactions,
+  transactionResults,
+  save,
+} from "./selectors.js";
 
 const KUALI_SPACE_URL = "https://ucsd.kualibuild.com/build/space/5e47518b90adda9474c14adb";
 
@@ -12,12 +20,12 @@ export async function openActionList(page: Page): Promise<void> {
   await gotoWithRetry(
     page,
     KUALI_SPACE_URL,
-    page.getByRole("menuitem", { name: "Action List" }),
+    actionList.menuItem(page),
   );
   await page.waitForTimeout(3_000);
 
   log.step("Clicking Action List...");
-  await page.getByRole("menuitem", { name: "Action List" }).click({ timeout: 15_000 });
+  await actionList.menuItem(page).click({ timeout: 15_000 });
   await page.waitForTimeout(3_000);
   log.success("Action List loaded");
 }
@@ -30,7 +38,7 @@ export async function clickDocument(page: Page, docNumber: string): Promise<stri
   log.step(`Searching for document #${docNumber}...`);
 
   // Find link containing the doc number in the action list table
-  const docLink = page.getByRole("link", { name: new RegExp(`${docNumber}`) });
+  const docLink = actionList.docLink(page, docNumber);
   const count = await docLink.count();
 
   if (count === 0) {
@@ -65,20 +73,20 @@ export interface KualiSeparationData {
 export async function extractSeparationData(page: Page): Promise<KualiSeparationData> {
   log.step("Extracting separation data from Kuali form...");
 
-  const employeeName = await page.getByRole("textbox", { name: "Employee Last Name, First Name*" }).inputValue({ timeout: 5_000 });
+  const employeeName = await separationForm.employeeName(page).inputValue({ timeout: 5_000 });
   log.step(`  Employee Name: ${employeeName}`);
 
-  const eid = await page.getByRole("textbox", { name: "EID*" }).inputValue({ timeout: 5_000 });
+  const eid = await separationForm.eid(page).inputValue({ timeout: 5_000 });
   log.step(`  EID: ${eid}`);
 
-  const lastDayWorked = await page.getByRole("textbox", { name: "Last Day Worked*" }).inputValue({ timeout: 5_000 });
+  const lastDayWorked = await separationForm.lastDayWorked(page).inputValue({ timeout: 5_000 });
   log.step(`  Last Day Worked: ${lastDayWorked}`);
 
-  const separationDate = await page.getByRole("textbox", { name: /Separation Date/ }).inputValue({ timeout: 5_000 });
+  const separationDate = await separationForm.separationDate(page).inputValue({ timeout: 5_000 });
   log.step(`  Separation Date: ${separationDate}`);
 
   // Get the selected option's visible text (not the internal value)
-  const termCombo = page.getByRole("combobox", { name: "Type of Termination*" });
+  const termCombo = separationForm.terminationType(page);
   const terminationType = await termCombo.evaluate((el) => {
     const select = el as HTMLSelectElement;
     return select.options[select.selectedIndex]?.text ?? select.value;
@@ -87,7 +95,7 @@ export async function extractSeparationData(page: Page): Promise<KualiSeparation
 
   let location = "";
   try {
-    location = await page.getByRole("textbox", { name: "Location *" }).inputValue({ timeout: 3_000 });
+    location = await separationForm.location(page).inputValue({ timeout: 3_000 });
     log.step(`  Location: ${location}`);
   } catch {
     log.step("  Location: (not found)");
@@ -138,7 +146,7 @@ export async function fillTimekeeperTasks(
 
   // Check the Request Acknowledged checkbox
   log.step("  Checking Request Acknowledged...");
-  const checkbox = page.getByRole("checkbox", { name: "Request Acknowledged - In Progress" });
+  const checkbox = timekeeperTasks.requestAcknowledgedCheckbox(page);
   if (!(await checkbox.isChecked())) {
     await checkbox.check({ timeout: 5_000 });
   }
@@ -146,7 +154,7 @@ export async function fillTimekeeperTasks(
 
   // Fill Timekeeper Name
   log.step(`  Filling Timekeeper Name: ${timekeeperName}`);
-  await page.getByRole("textbox", { name: "Timekeeper Name:*" }).fill(timekeeperName, { timeout: 5_000 });
+  await timekeeperTasks.timekeeperName(page).fill(timekeeperName, { timeout: 5_000 });
 
   log.success("Timekeeper Tasks filled");
 }
@@ -169,7 +177,7 @@ export async function fillFinalTransactions(
   // Fill Termination Effective Date (skip if empty)
   if (opts.terminationEffDate) {
     log.step(`  Termination Effective Date: ${opts.terminationEffDate}`);
-    const termField = page.getByRole("textbox", { name: "Termination Effective Date*" });
+    const termField = finalTransactions.terminationEffDate(page);
     await termField.fill(opts.terminationEffDate, { timeout: 5_000 });
     await page.waitForTimeout(500);
     const actual = await termField.inputValue({ timeout: 3_000 });
@@ -183,8 +191,8 @@ export async function fillFinalTransactions(
   // Select Department from dropdown (best match, skip if empty)
   if (opts.department) {
     log.step(`  Department: ${opts.department}`);
-    const deptCombo = page.getByRole("combobox", { name: "Department*" });
-    const allOptions = await deptCombo.locator("option").allTextContents();
+    const deptCombo = finalTransactions.department(page);
+    const allOptions = await deptCombo.locator("option").allTextContents(); // allow-inline-selector -- enumerating option elements of a combobox
     const bestMatch = allOptions.find((opt) =>
       opt.toLowerCase().includes(opts.department!.toLowerCase()),
     );
@@ -200,13 +208,13 @@ export async function fillFinalTransactions(
   // Fill Payroll Title Code (skip if empty)
   if (opts.payrollTitleCode) {
     log.step(`  Payroll Title Code: ${opts.payrollTitleCode}`);
-    await page.getByRole("textbox", { name: "Payroll Title Code*" }).fill(opts.payrollTitleCode, { timeout: 5_000 });
+    await finalTransactions.payrollTitleCode(page).fill(opts.payrollTitleCode, { timeout: 5_000 });
   }
 
   // Fill Payroll Title (skip if empty)
   if (opts.payrollTitle) {
     log.step(`  Payroll Title: ${opts.payrollTitle}`);
-    await page.getByRole("textbox", { name: "Payroll Title*" }).fill(opts.payrollTitle, { timeout: 5_000 });
+    await finalTransactions.payrollTitle(page).fill(opts.payrollTitle, { timeout: 5_000 });
   }
 
   log.success("Final Transactions filled");
@@ -226,7 +234,7 @@ export async function fillTransactionResults(
 
   // Check "Submitted Termination Template" checkbox
   log.step("  Checking Submitted Termination Template...");
-  const checkbox = page.getByRole("checkbox", { name: "Submitted Termination Template" });
+  const checkbox = transactionResults.submittedTemplateCheckbox(page);
   if (!(await checkbox.isChecked())) {
     await checkbox.check({ timeout: 5_000 });
   }
@@ -235,14 +243,14 @@ export async function fillTransactionResults(
   // Fill Transaction Number (skip if empty — user will fill manually)
   if (transactionNumber) {
     log.step(`  Transaction Number: ${transactionNumber}`);
-    await page.getByRole("textbox", { name: "Transaction Number:*" }).fill(transactionNumber, { timeout: 5_000 });
+    await transactionResults.transactionNumber(page).fill(transactionNumber, { timeout: 5_000 });
   } else {
     log.step("  Transaction Number: (empty — fill manually)");
   }
 
   // Select "Does not need Final Pay (student employee)" radio
   log.step("  Selecting Final Pay: Does not need Final Pay (student employee)...");
-  await page.getByRole("radio", { name: "Does not need Final Pay (student employee)" }).check({ timeout: 5_000 });
+  await transactionResults.doesNotNeedFinalPayRadio(page).check({ timeout: 5_000 });
 
   log.success("Transaction results filled in Kuali");
 }
@@ -256,7 +264,7 @@ export async function fillTimekeeperComments(
 ): Promise<void> {
   if (!comments) return;
   log.step(`Filling Timekeeper/Approver Comments: ${comments}`);
-  await page.getByRole("textbox", { name: "Timekeeper/Approver Comments:" }).fill(comments, { timeout: 5_000 });
+  await timekeeperTasks.timekeeperComments(page).fill(comments, { timeout: 5_000 });
   log.success("Timekeeper comments filled");
 }
 
@@ -268,7 +276,7 @@ export async function updateLastDayWorked(
   newDate: string,
 ): Promise<void> {
   log.step(`Updating Last Day Worked to: ${newDate}`);
-  const field = page.getByRole("textbox", { name: "Last Day Worked*" });
+  const field = separationForm.lastDayWorked(page);
   await field.clear({ timeout: 5_000 });
   await field.fill(newDate, { timeout: 5_000 });
   await page.waitForTimeout(500);
@@ -294,7 +302,7 @@ export async function updateSeparationDate(
   newDate: string,
 ): Promise<void> {
   log.step(`Updating Separation Date to: ${newDate}`);
-  const field = page.getByRole("textbox", { name: /Separation Date/ });
+  const field = separationForm.separationDate(page);
   await field.clear({ timeout: 5_000 });
   await field.fill(newDate, { timeout: 5_000 });
   await page.waitForTimeout(500);
@@ -327,12 +335,8 @@ export async function clickSave(page: Page): Promise<void> {
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(500);
 
-  // Target the navbar save button: look for the save button inside the top action bar,
-  // then fall back to a visible role-based match
-  const saveBtn = page.locator('[class*="action-bar"] button:has-text("Save")')
-    .or(page.locator('nav button:has-text("Save")'))
-    .or(page.getByRole("button", { name: "Save", exact: true }));
-  await saveBtn.first().click({ timeout: 10_000 });
+  // Target the navbar save button — registry carries the 3-deep .or() fallback.
+  await save.navbarSaveButton(page).first().click({ timeout: 10_000 });
 
   // Wait for the save request to complete
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
