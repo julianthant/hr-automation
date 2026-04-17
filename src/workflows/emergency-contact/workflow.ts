@@ -167,6 +167,12 @@ export async function runEmergencyContact(
 
   const now = new Date().toISOString();
   const result = await runWorkflowBatch(emergencyContactWorkflow, batch.records, {
+    // Per-record itemId shape `p{NN}-{emplId}` — the kernel's built-in
+    // deriveItemId only looks at top-level emplId/docId/email, not
+    // `employee.employeeId`, so without this the kernel would hand
+    // withTrackedWorkflow a random UUID that doesn't match the pending row
+    // written by onPreEmitPending below.
+    deriveItemId: (item) => recordItemId(item as EmergencyContactRecord),
     onPreEmitPending: (item, runId) => {
       const record = item as EmergencyContactRecord;
       trackEvent({
