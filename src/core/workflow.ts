@@ -4,7 +4,7 @@ import { register } from './registry.js'
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
 import { makeCtx } from './ctx.js'
-import { withTrackedWorkflow } from '../tracker/jsonl.js'
+import { trackEvent, withTrackedWorkflow } from '../tracker/jsonl.js'
 import { withLogContext } from '../utils/log.js'
 import { classifyError } from '../utils/errors.js'
 import { runWorkflowPool } from './pool.js'
@@ -22,6 +22,23 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
   return { config, metadata }
 }
 
+/**
+ * Derive a stable itemId from common identifier fields on the input data.
+ * Falls back to the caller-provided `fallback` (typically a UUID) if no known
+ * field is present.
+ *
+ * Recognized fields (in priority order): `emplId`, `docId`, `email`.
+ */
+export function deriveItemId<TData>(data: TData, fallback: string): string {
+  const d = data as unknown as Record<string, unknown>
+  return (
+    (typeof d?.emplId === 'string' ? d.emplId : undefined) ??
+    (typeof d?.docId === 'string' ? d.docId : undefined) ??
+    (typeof d?.email === 'string' ? d.email : undefined) ??
+    fallback
+  )
+}
+
 export async function runWorkflow<TData, TSteps extends readonly string[]>(
   wf: RegisteredWorkflow<TData, TSteps>,
   data: TData,
@@ -35,13 +52,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
   }
 
   // 2. Derive itemId from common id fields, fall back to UUID.
-  const d = data as unknown as Record<string, unknown>
-  const itemId =
-    opts.itemId ??
-    (typeof d?.emplId === 'string' ? d.emplId : undefined) ??
-    (typeof d?.docId === 'string' ? d.docId : undefined) ??
-    (typeof d?.email === 'string' ? d.email : undefined) ??
-    randomUUID()
+  const itemId = opts.itemId ?? deriveItemId(data, randomUUID())
 
   const run = async (
     setStep: (s: string) => void,
@@ -102,8 +113,9 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
         await run(setStep, updateData)
       },
       opts.preAssignedRunId,                            // 5th positional
+      opts.trackerDir,                                  // 6th positional (test isolation)
     )
-  })
+  }, opts.trackerDir)
 }
 
 export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
@@ -125,10 +137,23 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
     }
   })
 
-  // Emit pending for all items upfront if requested.
-  if (batch?.preEmitPending && opts.onPreEmitPending) {
-    for (const item of items) {
-      opts.onPreEmitPending(item)
+  // Pre-generate one itemId + runId per item so pre-emit callbacks receive the same
+  // runId that withTrackedWorkflow will later use. This lets callers emit the initial
+  // `pending` row now and have withTrackedWorkflow skip its duplicate pending emit.
+  const perItem = items.map((item) => ({
+    item,
+    itemId: deriveItemId(item, randomUUID()),
+    runId: randomUUID(),
+  }))
+
+  // Emit pending for all items upfront if requested — runIds are paired so the
+  // caller writes the same runId that the handler's withTrackedWorkflow will use.
+  // If the workflow doesn't opt into preEmitPending, we emit a minimal pending
+  // row per item right before that item runs (below, inside the loop).
+  const callerPreEmits = Boolean(batch?.preEmitPending && opts.onPreEmitPending)
+  if (callerPreEmits) {
+    for (const { item, runId } of perItem) {
+      opts.onPreEmitPending!(item, runId)
     }
   }
 
@@ -140,36 +165,97 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
 
   const result: BatchResult = { total: items.length, succeeded: 0, failed: 0, errors: [] }
 
-  try {
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i]
-      const itemId = randomUUID()
-      const runId = randomUUID()
-      const stepper = new Stepper({
-        workflow: wf.config.name,
-        itemId,
-        runId,
-        emitStep: () => {},
-        emitData: () => {},
-        emitFailed: () => {},
-      })
-      const ctx = makeCtx<TSteps, TData>({ session, stepper, isBatch: true, runId })
-      try {
-        // Between-items hooks — skipped on the first item (fresh auth state).
-        if (i > 0 && batch?.betweenItems) {
-          for (const hook of batch.betweenItems) {
-            if (hook === 'reset-browsers' || hook === 'navigate-home') {
-              for (const s of wf.config.systems) await session.reset(s.id)
-            } else if (hook === 'health-check') {
-              for (const s of wf.config.systems) {
-                if (!(await session.healthCheck(s.id))) {
-                  throw new Error(`health-check failed for ${s.id}`)
-                }
-              }
+  // Shared — used by both the trackerStub and real-tracker branches. Does the
+  // between-items hook + handler call + result accounting. Error is rethrown
+  // so the real-tracker branch can let withTrackedWorkflow record `failed`;
+  // the outer .catch absorbs it so the batch continues.
+  const runOneHandler = async (
+    item: TData,
+    i: number,
+    stepper: Stepper,
+    runId: string,
+  ): Promise<void> => {
+    const ctx = makeCtx<TSteps, TData>({ session, stepper, isBatch: true, runId })
+    // Between-items hooks — skipped on the first item (fresh auth state).
+    if (i > 0 && batch?.betweenItems) {
+      for (const hook of batch.betweenItems) {
+        if (hook === 'reset-browsers' || hook === 'navigate-home') {
+          for (const s of wf.config.systems) await session.reset(s.id)
+        } else if (hook === 'health-check') {
+          for (const s of wf.config.systems) {
+            if (!(await session.healthCheck(s.id))) {
+              throw new Error(`health-check failed for ${s.id}`)
             }
           }
         }
-        await wf.config.handler(ctx, item)
+      }
+    }
+    await wf.config.handler(ctx, item)
+  }
+
+  try {
+    for (let i = 0; i < perItem.length; i++) {
+      const { item, itemId, runId } = perItem[i]
+
+      if (opts.trackerStub) {
+        // Fast-path for tests: no-op emitters, no tracker/log context wrapping.
+        const stepper = new Stepper({
+          workflow: wf.config.name,
+          itemId,
+          runId,
+          emitStep: () => {},
+          emitData: () => {},
+          emitFailed: () => {},
+        })
+        try {
+          await runOneHandler(item, i, stepper, runId)
+          result.succeeded++
+        } catch (err) {
+          result.failed++
+          result.errors.push({ item, error: classifyError(err) })
+        }
+        continue
+      }
+
+      // Real-tracker path: wrap each item in withLogContext + withTrackedWorkflow
+      // so dashboard gets pending → running → done/failed rows per item, and logs
+      // carry workflow/itemId/runId context. We emit the initial `pending` row
+      // here (unless the caller opted into preEmitPending above) so the dashboard
+      // can show the row before the first step runs — withTrackedWorkflow skips
+      // its own pending emit when preAssignedRunId is provided.
+      if (!callerPreEmits) {
+        trackEvent(
+          {
+            workflow: wf.config.name,
+            timestamp: new Date().toISOString(),
+            id: itemId,
+            runId,
+            status: 'pending',
+          },
+          opts.trackerDir,
+        )
+      }
+      try {
+        await withLogContext(wf.config.name, itemId, async () => {
+          await withTrackedWorkflow(
+            wf.config.name,
+            itemId,
+            {},
+            async (setStep, updateData) => {
+              const stepper = new Stepper({
+                workflow: wf.config.name,
+                itemId,
+                runId,
+                emitStep: setStep,
+                emitData: updateData,
+                emitFailed: (step, error) => setStep(`${step}:failed:${error}`),
+              })
+              await runOneHandler(item, i, stepper, runId)
+            },
+            runId,                 // preAssignedRunId — reuse across pre-emit + run
+            opts.trackerDir,       // dir — default `.tracker` unless test overrides
+          )
+        }, opts.trackerDir)
         result.succeeded++
       } catch (err) {
         result.failed++
