@@ -32,7 +32,7 @@ import {
   clickGoToTimecard as clickOldKronosGoToTimecard,
   getTimecardLastDate as getOldKronosTimecardLastDate,
   goBackToMain as goBackToOldKronosMain,
-} from "../../old-kronos/index.js";
+} from "../../systems/old-kronos/index.js";
 
 // New Kronos module
 import {

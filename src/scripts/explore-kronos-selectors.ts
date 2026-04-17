@@ -12,7 +12,7 @@ import {
   searchEmployee as searchOldKronos,
   clickEmployeeRow,
   dismissModal,
-} from "../old-kronos/index.js";
+} from "../systems/old-kronos/index.js";
 import {
   searchEmployee as searchNewKronos,
   selectEmployeeResult,

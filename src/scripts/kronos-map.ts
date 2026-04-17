@@ -13,7 +13,7 @@ import {
   clickEmployeeRow,
   dismissModal,
   clickGoToTimecard,
-} from "../old-kronos/index.js";
+} from "../systems/old-kronos/index.js";
 import {
   searchEmployee as searchNewKronos,
   selectEmployeeResult,
