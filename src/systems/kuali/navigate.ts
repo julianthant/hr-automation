@@ -1,6 +1,6 @@
 import type { Page } from "playwright";
-import { log } from "../utils/log.js";
-import { gotoWithRetry } from "../browser/launch.js";
+import { log } from "../../utils/log.js";
+import { gotoWithRetry } from "../../browser/launch.js";
 
 const KUALI_SPACE_URL = "https://ucsd.kualibuild.com/build/space/5e47518b90adda9474c14adb";
 

@@ -19,8 +19,8 @@ import {
   updateLastDayWorked,
   updateSeparationDate,
   clickSave,
-} from "../../kuali/index.js";
-import type { KualiSeparationData } from "../../kuali/index.js";
+} from "../../systems/kuali/index.js";
+import type { KualiSeparationData } from "../../systems/kuali/index.js";
 
 // Old Kronos module
 import {
