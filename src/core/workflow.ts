@@ -158,9 +158,13 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
   // Pre-generate one itemId + runId per item so pre-emit callbacks receive the same
   // runId that withTrackedWorkflow will later use. This lets callers emit the initial
   // `pending` row now and have withTrackedWorkflow skip its duplicate pending emit.
+  // If the caller provides `deriveItemId`, use it — lets workflows like
+  // emergency-contact produce `p{NN}-{emplId}`-shaped ids that `onPreEmitPending`
+  // and the handler's withTrackedWorkflow both use.
+  const itemIdFn = opts.deriveItemId ?? ((item) => deriveItemId(item, randomUUID()))
   const perItem = items.map((item) => ({
     item,
-    itemId: deriveItemId(item, randomUUID()),
+    itemId: itemIdFn(item),
     runId: randomUUID(),
   }))
 

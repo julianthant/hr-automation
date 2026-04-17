@@ -31,10 +31,13 @@ export async function runWorkflowPool<TData, TSteps extends readonly string[]>(
   })
 
   // Pre-generate one itemId + runId per item so pre-emit callbacks receive the same
-  // runId that withTrackedWorkflow will later use inside the worker.
+  // runId that withTrackedWorkflow will later use inside the worker. Callers can
+  // supply `opts.deriveItemId` to shape itemIds that `deriveItemId`'s built-in
+  // field list (`emplId`, `docId`, `email`) can't produce.
+  const itemIdFn = opts.deriveItemId ?? ((item: unknown) => deriveItemId(item, randomUUID()))
   const perItem: PoolItem<TData>[] = items.map((item) => ({
     item,
-    itemId: deriveItemId(item, randomUUID()),
+    itemId: itemIdFn(item),
     runId: randomUUID(),
   }))
 

@@ -99,6 +99,13 @@ export interface RunOpts {
    * will then skip its own pending emit (see `preAssignedRunId` branch).
    */
   onPreEmitPending?: (item: unknown, runId: string) => void
+  /**
+   * Per-item itemId deriver — used by batch/pool modes when the built-in `deriveItemId`
+   * (which looks at top-level `emplId`/`docId`/`email`) isn't expressive enough. Called
+   * once per item before the pending emit. Must return the same string the caller's
+   * `onPreEmitPending` uses, or the dashboard will show two rows per record.
+   */
+  deriveItemId?: (item: unknown) => string
   /** Override tracker directory — defaults to `.tracker`. Mainly for test isolation. */
   trackerDir?: string
 }
