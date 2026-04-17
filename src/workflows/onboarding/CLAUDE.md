@@ -47,7 +47,7 @@ CLI: npm run start-onboarding <email>
 
 ## Parallel Mode (Legacy)
 
-`parallel.ts` is unchanged from pre-kernel. It launches its own browsers, pre-auths I9, and calls `runOnboardingLegacy` per item. The kernel is not in the loop. A followup plan (when the `runWorkflowPool` per-item `withTrackedWorkflow` wrapping is fixed) migrates parallel fully.
+`parallel.ts` is unchanged from pre-kernel. It launches its own browsers, pre-auths I9, and calls `runOnboardingLegacy` per item. The kernel is not in the loop. A followup plan migrates parallel onto `runWorkflowPool` — note that the kernel's current pool mode launches one Session (with its own auth chain) per worker, which for onboarding means N×3 Duo prompts upfront; onboarding parallel is the motivating use case for a "shared-auth, per-worker-tab" pool mode that doesn't yet exist.
 
 ## Gotchas
 
