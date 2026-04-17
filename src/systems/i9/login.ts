@@ -2,6 +2,7 @@ import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
 import { validateEnv } from "../../utils/env.js";
 import { I9_URL } from "../../config.js";
+import { login as loginSelectors } from "./selectors.js";
 
 /**
  * Authenticate to I9 Complete (Tracker I-9 by Mitratech).
@@ -22,13 +23,13 @@ export async function loginToI9(page: Page): Promise<boolean> {
   log.step(`Login page loaded | URL: ${page.url()}`);
 
   // Step 1: Fill email and click Next
-  await page.getByRole("textbox", { name: "Username or Email*" }).fill(email, { timeout: 5_000 });
-  await page.getByRole("button", { name: "Next" }).click({ timeout: 5_000 });
+  await loginSelectors.usernameInput(page).fill(email, { timeout: 5_000 });
+  await loginSelectors.nextButton(page).click({ timeout: 5_000 });
   log.step("Email entered, clicked Next");
 
   // Step 2: Fill password and click Log in
-  await page.getByRole("textbox", { name: "Password*" }).fill(password, { timeout: 5_000 });
-  await page.getByRole("button", { name: "Log in" }).click({ timeout: 10_000 });
+  await loginSelectors.passwordInput(page).fill(password, { timeout: 5_000 });
+  await loginSelectors.loginButton(page).click({ timeout: 10_000 });
   log.step("Password entered, clicking Log in...");
 
   // Wait for post-login navigation (domain changes to wwwe.i9complete.com)
@@ -48,13 +49,12 @@ export async function loginToI9(page: Page): Promise<boolean> {
  */
 async function dismissTrainingNotification(page: Page): Promise<void> {
   try {
-    const dismissBtn = page.getByRole("button", { name: "Dismiss the Notification" });
+    const dismissBtn = loginSelectors.dismissNotificationButton(page);
     await dismissBtn.click({ timeout: 5_000 });
     log.step("Dismissing training notification...");
 
     // Confirm the dismiss dialog
-    const yesBtn = page.getByRole("button", { name: "Yes" });
-    await yesBtn.click({ timeout: 5_000 });
+    await loginSelectors.confirmYesButton(page).click({ timeout: 5_000 });
     log.step("Training notification dismissed");
 
     // Wait for dashboard to load

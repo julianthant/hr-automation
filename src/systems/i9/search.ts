@@ -1,6 +1,7 @@
 import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
 import type { I9SearchCriteria, I9SearchResult } from "./types.js";
+import { dashboard, search as searchSelectors } from "./selectors.js";
 
 /**
  * Search for an existing employee in I9 Complete.
@@ -28,43 +29,43 @@ export async function searchI9Employee(
 ): Promise<I9SearchResult[]> {
   // Open search dialog by clicking "Search Options"
   log.step("Opening I9 search dialog...");
-  await page.locator("#divSearchOptions").click({ timeout: 5_000 });
+  await dashboard.searchOptionsButton(page).click({ timeout: 5_000 });
 
   // Wait for dialog to appear
-  const dialog = page.getByRole("dialog", { name: "Search for Existing Employee" });
+  const dialog = searchSelectors.dialog(page);
   await dialog.waitFor({ state: "visible", timeout: 5_000 });
 
   // Clear any previous search
-  await page.getByRole("link", { name: "Clear Search Filters & Results" }).click({ timeout: 3_000 });
+  await searchSelectors.clearFiltersLink(page).click({ timeout: 3_000 });
 
   // Fill whichever fields are provided
   if (criteria.lastName) {
-    await dialog.getByRole("textbox", { name: "Last Name" }).fill(criteria.lastName);
+    await searchSelectors.lastNameInput(page).fill(criteria.lastName);
     log.step(`Search: Last Name = ${criteria.lastName}`);
   }
 
   if (criteria.firstName) {
-    await dialog.getByRole("textbox", { name: /First Name/ }).fill(criteria.firstName);
+    await searchSelectors.firstNameInput(page).fill(criteria.firstName);
     log.step(`Search: First Name = ${criteria.firstName}`);
   }
 
   if (criteria.ssn) {
-    await dialog.getByRole("textbox", { name: "Social Security Number" }).fill(criteria.ssn);
+    await searchSelectors.ssnInput(page).fill(criteria.ssn);
     log.step("Search: SSN = ***");
   }
 
   if (criteria.profileId) {
-    await dialog.getByRole("textbox", { name: "Profile ID" }).fill(criteria.profileId);
+    await searchSelectors.profileIdInput(page).fill(criteria.profileId);
     log.step(`Search: Profile ID = ${criteria.profileId}`);
   }
 
   if (criteria.employeeId) {
-    await dialog.getByRole("textbox", { name: "Employee ID" }).fill(criteria.employeeId);
+    await searchSelectors.employeeIdInput(page).fill(criteria.employeeId);
     log.step(`Search: Employee ID = ${criteria.employeeId}`);
   }
 
   // Click Search
-  await page.getByRole("button", { name: "Search" }).click({ timeout: 5_000 });
+  await searchSelectors.submitButton(page).click({ timeout: 5_000 });
   log.step("Search submitted");
 
   // Wait for results to load
@@ -83,10 +84,7 @@ export async function searchI9Employee(
 async function parseSearchResults(page: Page): Promise<I9SearchResult[]> {
   const results: I9SearchResult[] = [];
 
-  // The results grid is the second grid in the search dialog (first is column headers)
-  const rows = page.getByRole("dialog", { name: "Search for Existing Employee" })
-    .getByRole("grid").last()
-    .getByRole("row");
+  const rows = searchSelectors.resultRows(page);
 
   const rowCount = await rows.count();
   if (rowCount === 0) {
@@ -96,7 +94,7 @@ async function parseSearchResults(page: Page): Promise<I9SearchResult[]> {
 
   for (let i = 0; i < rowCount; i++) {
     const row = rows.nth(i);
-    const cells = row.getByRole("gridcell");
+    const cells = row.getByRole("gridcell"); // allow-inline-selector -- row-scoped cell readback, rooted in registry row
     const cellCount = await cells.count();
 
     if (cellCount < 5) continue; // Skip malformed rows
@@ -111,7 +109,7 @@ async function parseSearchResults(page: Page): Promise<I9SearchResult[]> {
     const startDate = await cells.nth(7).textContent() ?? "";
 
     // Extract nav URL from the link in the row
-    const link = row.getByRole("link");
+    const link = row.getByRole("link"); // allow-inline-selector -- row-scoped link readback
     const navUrl = await link.first().getAttribute("href").catch(() => "") ?? "";
 
     results.push({

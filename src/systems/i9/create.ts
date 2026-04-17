@@ -2,6 +2,7 @@ import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import type { I9EmployeeInput, I9Result } from "./types.js";
+import { profile, remoteI9, dashboard } from "./selectors.js";
 
 /**
  * Create a new I-9 employee record in I9 Complete.
@@ -26,7 +27,7 @@ export async function createI9Employee(
   try {
     // Step 1: Navigate to new employee profile
     log.step("Clicking 'Create New I-9 : New Employee'...");
-    await page.getByRole("link", { name: "create new I9: new employee" }).click({ timeout: 10_000 });
+    await dashboard.createNewI9Link(page).click({ timeout: 10_000 });
     await page.waitForURL("**/employee/profile", { timeout: 10_000 });
     log.step("Employee Profile form loaded");
 
@@ -35,24 +36,27 @@ export async function createI9Employee(
 
     // Step 3: Save profile and handle post-save dialog
     log.step("Clicking Save & Continue...");
-    await page.getByRole("button", { name: "Save & Continue" }).click({ timeout: 10_000 });
+    await profile.saveContinueButton(page).click({ timeout: 10_000 });
 
-    await page.locator(".mobile-responsive-loader").waitFor({ state: "hidden", timeout: 15_000 }).catch(() => {});
+    await profile
+      .loaderOverlay(page)
+      .waitFor({ state: "hidden", timeout: 15_000 })
+      .catch(() => {});
     await page.waitForTimeout(1_000);
 
     // Handle validation errors
-    const errorSummary = page.getByRole("heading", { name: "Error Summary:" });
+    const errorSummary = profile.errorSummary(page);
     const hasError = await errorSummary.isVisible({ timeout: 3_000 }).catch(() => false);
     if (hasError) {
-      const errorText = await errorSummary.locator("..").locator("div").textContent().catch(() => "Unknown validation error");
+      const errorText = await errorSummary.locator("..").locator("div").textContent().catch(() => "Unknown validation error"); // allow-inline-selector -- DOM traversal for error readback
       return { success: false, profileId: null, error: `Validation error: ${errorText}` };
     }
 
     // Two possible post-save flows:
     // Path 1 (new employee): OK confirmation dialog → URL becomes /employee/profile/{id}?saveAndContinue=true
     // Path 2 (duplicate found): Duplicate Employee Record dialog → select existing row → View/Edit Selected Record
-    const okBtn = page.getByRole("button", { name: "OK" }).first();
-    const duplicateDialog = page.getByRole("dialog", { name: "Duplicate Employee Record" });
+    const okBtn = profile.okButtonFirst(page);
+    const duplicateDialog = profile.duplicateDialog(page);
 
     const isOk = await okBtn.isVisible({ timeout: 5_000 }).catch(() => false);
     const isDuplicate = await duplicateDialog.isVisible({ timeout: 2_000 }).catch(() => false);
@@ -61,9 +65,8 @@ export async function createI9Employee(
 
     if (isDuplicate) {
       log.step("Duplicate employee found — selecting existing record...");
-      const firstRow = page.getByRole("grid").last().getByRole("row").first();
-      await firstRow.click({ timeout: 5_000 });
-      await page.getByRole("button", { name: "View/Edit Selected Record" }).click({ timeout: 5_000 });
+      await profile.duplicateFirstRow(page).click({ timeout: 5_000 });
+      await profile.viewEditSelectedButton(page).click({ timeout: 5_000 });
       await page.waitForURL("**/employee/profile/*", { timeout: 10_000 });
       profileId = extractProfileId(page.url());
       if (!profileId) {
@@ -88,18 +91,18 @@ export async function createI9Employee(
 
     // Step 5: Select Remote - Section 1 Only
     log.step("Selecting 'Remote - Section 1 Only'...");
-    await page.getByRole("radio", { name: "Remote - Section 1 Only" }).click({ timeout: 5_000 });
+    await remoteI9.remoteSection1OnlyRadio(page).click({ timeout: 5_000 });
 
     // Step 6: Fill start date (email is pre-filled from profile)
     log.step("Filling start date...");
-    await page.getByRole("textbox", { name: "Start Date*" }).fill(input.startDate, { timeout: 5_000 });
+    await remoteI9.startDateInput(page).fill(input.startDate, { timeout: 5_000 });
 
     // Step 7: Create I-9
     log.step("Clicking Create I-9...");
-    await page.getByRole("button", { name: "Create I-9" }).click({ timeout: 10_000 });
+    await remoteI9.createI9Button(page).click({ timeout: 10_000 });
 
     // Confirm creation dialog
-    await page.getByRole("button", { name: "OK" }).click({ timeout: 10_000 });
+    await remoteI9.createI9OkButton(page).click({ timeout: 10_000 });
     log.success(`I-9 created for profile ${profileId}`);
 
     return { success: true, profileId };
@@ -114,23 +117,23 @@ export async function createI9Employee(
  * Fill the Employee Profile form fields.
  */
 async function fillEmployeeProfile(page: Page, input: I9EmployeeInput): Promise<void> {
-  await page.getByRole("textbox", { name: "First Name (Given Name)*" }).fill(input.firstName, { timeout: 5_000 });
+  await profile.firstName(page).fill(input.firstName, { timeout: 5_000 });
   log.step(`First Name: filled`);
 
   if (input.middleName) {
-    await page.getByRole("textbox", { name: "Middle Name" }).fill(input.middleName, { timeout: 5_000 });
+    await profile.middleName(page).fill(input.middleName, { timeout: 5_000 });
     log.step(`Middle Name: filled`);
   }
 
-  await page.getByRole("textbox", { name: "Last Name (Family Name)*" }).fill(input.lastName, { timeout: 5_000 });
+  await profile.lastName(page).fill(input.lastName, { timeout: 5_000 });
   log.step(`Last Name: filled`);
 
   // SSN: 9 digits, no dashes
   const ssnDigits = input.ssn.replace(/-/g, "");
-  await page.getByRole("textbox", { name: "U.S. Social Security Number" }).fill(ssnDigits, { timeout: 5_000 });
+  await profile.ssn(page).fill(ssnDigits, { timeout: 5_000 });
   log.step(`SSN: filled`);
 
-  await page.getByRole("textbox", { name: "Date of Birth" }).fill(input.dob, { timeout: 5_000 });
+  await profile.dob(page).fill(input.dob, { timeout: 5_000 });
   log.step(`DOB: filled`);
 
   // Hide the jQuery datepicker that opens after DOB fill — Escape doesn't dismiss it,
@@ -140,7 +143,7 @@ async function fillEmployeeProfile(page: Page, input: I9EmployeeInput): Promise<
     if (dp) dp.style.display = "none";
   });
 
-  await page.getByRole("textbox", { name: "Employee's Email Address" }).fill(input.email, { timeout: 5_000 });
+  await profile.email(page).fill(input.email, { timeout: 5_000 });
   log.step(`Email: filled`);
 
   // Select worksite by department number (format: "6-{deptNum} DESCRIPTION")
@@ -152,12 +155,12 @@ async function fillEmployeeProfile(page: Page, input: I9EmployeeInput): Promise<
  * Worksite options are formatted as "6-{deptNum} DESCRIPTION".
  */
 async function selectWorksite(page: Page, departmentNumber: string): Promise<void> {
-  const worksiteDropdown = page.getByRole("listbox", { name: "Worksite *" });
+  const worksiteDropdown = profile.worksiteListbox(page);
   await worksiteDropdown.click({ timeout: 5_000 });
 
   // Find and click the option matching the department number prefix
   const optionPattern = new RegExp(`6-${departmentNumber}`);
-  const option = page.getByRole("option", { name: optionPattern });
+  const option = profile.worksiteOption(page, optionPattern);
 
   const optionCount = await option.count();
   if (optionCount === 0) {
