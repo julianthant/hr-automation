@@ -121,3 +121,37 @@ test('updateData preserves primitives (number/boolean) as strings', async (t) =>
   })
   assert.ok(withAll, `expected tracker entry with primitives, got: ${JSON.stringify(entries)}`)
 })
+
+test('updateData co-emits typedData alongside string data', async (t) => {
+  const wfName = `updatedata-typed-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  t.after(() => cleanup(wfName))
+
+  const when = new Date('2026-04-17T12:34:56.000Z')
+  const wf = defineWorkflow({
+    name: wfName,
+    systems: [{ id: 'x', login: async () => {} }],
+    steps: ['only'] as const,
+    schema: z.object({ k: z.string() }),
+    handler: async (ctx) => {
+      ctx.updateData({ wage: 12.5, active: true, start: when, label: 'Full Time' })
+      await ctx.step('only', async () => {})
+    },
+  })
+
+  await runWorkflow(wf, { k: 'a' }, {
+    itemId: 'item-1',
+    launchFn: () => Promise.resolve(fakeSlot()),
+  })
+
+  const entries = readTrackerEntries(wfName)
+  const withTyped = entries.find((e) => {
+    const td = e.typedData as Record<string, { type: string; value: string }> | undefined
+    return td && td.wage?.type === 'number'
+  })
+  assert.ok(withTyped, `expected an entry with typedData, got: ${JSON.stringify(entries)}`)
+  const td = withTyped.typedData as Record<string, { type: string; value: string }>
+  assert.deepEqual(td.wage, { type: 'number', value: '12.5' })
+  assert.deepEqual(td.active, { type: 'boolean', value: 'true' })
+  assert.deepEqual(td.start, { type: 'date', value: when.toISOString() })
+  assert.deepEqual(td.label, { type: 'string', value: 'Full Time' })
+})

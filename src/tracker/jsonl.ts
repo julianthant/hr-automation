@@ -69,6 +69,44 @@ export function readLogEntries(
   return all;
 }
 
+/**
+ * Rich-typed value carried alongside the string-at-rest `data` record. Each
+ * slot preserves the original primitive's shape so the frontend can render
+ * dates, numbers, and booleans correctly. Values are string-encoded on the
+ * wire so the JSONL-on-disk format stays grep-friendly and numbers can't
+ * lose precision across the SSE boundary.
+ */
+export type TypedValue =
+  | { type: "string"; value: string }
+  | { type: "number"; value: string }
+  | { type: "boolean"; value: string }
+  | { type: "date"; value: string }
+  | { type: "null"; value: "" };
+
+/**
+ * Derive a `TypedValue` from a raw tracker value for co-emission with
+ * `data`. Frontend consumers read `typedData?.[k]` when present for
+ * type-aware formatting, falling back to `data[k]` otherwise.
+ *
+ * Objects/arrays are collapsed to a JSON string ("string" type) — they don't
+ * cleanly fit the primitive taxonomy and the dashboard never rendered them
+ * specially before.
+ */
+export function toTypedValue(v: unknown): TypedValue {
+  if (v === null || v === undefined) return { type: "null", value: "" };
+  if (v instanceof Date) return { type: "date", value: v.toISOString() };
+  if (typeof v === "number") return { type: "number", value: String(v) };
+  if (typeof v === "boolean") return { type: "boolean", value: String(v) };
+  if (typeof v === "string") return { type: "string", value: v };
+  // fallback for objects/bigint/etc — serialize as string so the frontend
+  // shows *something* rather than "[object Object]".
+  try {
+    return { type: "string", value: JSON.stringify(v) };
+  } catch {
+    return { type: "string", value: String(v) };
+  }
+}
+
 export interface TrackerEntry {
   workflow: string;
   timestamp: string;
@@ -77,6 +115,11 @@ export interface TrackerEntry {
   status: "pending" | "running" | "done" | "failed" | "skipped";
   step?: string;
   data?: Record<string, string>;
+  /**
+   * Rich-typed mirror of `data`. Absent on older JSONL records — the frontend
+   * falls back to `data` when a key is missing from `typedData`.
+   */
+  typedData?: Record<string, TypedValue>;
   error?: string;
 }
 
@@ -135,6 +178,28 @@ export interface SessionContext {
  * boundary via `serializeValue` (Date → ISO, object → JSON). The on-disk `TrackerEntry.data`
  * remains `Record<string, string>`.
  */
+/**
+ * Optional richness hooks passed by the kernel. Legacy callers omit these —
+ * in that case the runtime warning never fires and `getName`/`getId` aren't
+ * computed, preserving pre-subsystem-D behavior exactly.
+ */
+export interface WithTrackedWorkflowOpts {
+  /**
+   * Declared detailFields keys from `defineWorkflow`. If provided, the wrapper
+   * logs `log.warn` for any key never populated via `updateData` before the
+   * `done` emit. Non-fatal — only a warning.
+   */
+  declaredDetailFields?: readonly string[];
+  /**
+   * Server-side name computation. Result is stored as `data.__name`.
+   */
+  nameFn?: (data: Record<string, string>) => string;
+  /**
+   * Server-side id computation. Result is stored as `data.__id`.
+   */
+  idFn?: (data: Record<string, string>) => string;
+}
+
 export async function withTrackedWorkflow<T>(
   workflow: string,
   id: string,
@@ -150,8 +215,11 @@ export async function withTrackedWorkflow<T>(
   preAssignedRunId?: string,
   /** Override tracker directory — defaults to DEFAULT_DIR (`.tracker`). Mainly for test isolation. */
   dir: string = DEFAULT_DIR,
+  /** Optional richness hooks — see WithTrackedWorkflowOpts. */
+  opts: WithTrackedWorkflowOpts = {},
 ): Promise<T> {
   const data = { ...initialData };
+  const typedData: Record<string, TypedValue> = {};
   const ts = () => new Date().toISOString();
 
   let runId: string;
@@ -167,7 +235,25 @@ export async function withTrackedWorkflow<T>(
   setLogRunId(runId);
 
   const emit = (status: TrackerEntry["status"], extra?: { step?: string; error?: string }) => {
-    trackEvent({ workflow, timestamp: ts(), id, runId, status, data, ...extra }, dir);
+    // Apply server-side getName/getId before each emit so the dashboard sees
+    // the freshest computed display values. Functions receive the current
+    // stringified data snapshot and mutate __name / __id back into it.
+    if (opts.nameFn) {
+      try { data.__name = opts.nameFn(data); } catch { /* non-fatal */ }
+    }
+    if (opts.idFn) {
+      try { data.__id = opts.idFn(data); } catch { /* non-fatal */ }
+    }
+    trackEvent({
+      workflow,
+      timestamp: ts(),
+      id,
+      runId,
+      status,
+      data,
+      ...(Object.keys(typedData).length > 0 ? { typedData } : {}),
+      ...extra,
+    }, dir);
   };
 
   if (!preAssignedRunId) emit("pending");
@@ -224,11 +310,29 @@ export async function withTrackedWorkflow<T>(
       (d) => {
         // Stringify rich values at the write boundary — data stays Record<string, string>
         // on disk, but callers can pass Date/object/etc. without losing fidelity.
-        for (const [k, v] of Object.entries(d)) data[k] = serializeValue(v);
+        // Also populate the typedData mirror so the dashboard can render
+        // dates/numbers/booleans with type-aware formatting.
+        for (const [k, v] of Object.entries(d)) {
+          data[k] = serializeValue(v);
+          typedData[k] = toTypedValue(v);
+        }
       },
       (cb) => cleanupFns.push(cb),
       session,
     );
+
+    // Runtime warning (Option A) — any declared detailField key that the
+    // workflow never populated is surfaced as a log.warn so drift is audible
+    // without being fatal. Only runs on the success path; failed runs often
+    // short-circuit before populating everything.
+    if (opts.declaredDetailFields) {
+      for (const key of opts.declaredDetailFields) {
+        if (!(key in data)) {
+          log.warn(`dashboard: detailField '${key}' was declared but never populated`);
+        }
+      }
+    }
+
     emit("done");
     emitWorkflowEnd(instanceName, "done");
     return result;

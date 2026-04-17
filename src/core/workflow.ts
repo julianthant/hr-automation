@@ -4,10 +4,28 @@ import { register, autoLabel, normalizeDetailField } from './registry.js'
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
 import { makeCtx } from './ctx.js'
-import { trackEvent, withTrackedWorkflow } from '../tracker/jsonl.js'
+import { trackEvent, withTrackedWorkflow, type WithTrackedWorkflowOpts } from '../tracker/jsonl.js'
 import { withLogContext } from '../utils/log.js'
 import { classifyError } from '../utils/errors.js'
 import { runWorkflowPool } from './pool.js'
+
+/**
+ * Build the richness-hook bundle for `withTrackedWorkflow` from a workflow
+ * config. Extracted so all three modes (runWorkflow, runWorkflowBatch,
+ * runWorkflowPool) pass the identical shape — keeps the runtime warning,
+ * getName, and getId in lockstep across modes.
+ */
+export function buildTrackerOpts<TData, TSteps extends readonly string[]>(
+  wf: RegisteredWorkflow<TData, TSteps>,
+): WithTrackedWorkflowOpts {
+  return {
+    declaredDetailFields: (wf.config.detailFields ?? [])
+      .map(normalizeDetailField)
+      .map((f) => f.key),
+    nameFn: wf.config.getName,
+    idFn: wf.config.getId,
+  }
+}
 
 export function defineWorkflow<TData, TSteps extends readonly string[]>(
   config: WorkflowConfig<TData, TSteps>,
@@ -133,6 +151,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
       },
       opts.preAssignedRunId,                            // 5th positional
       opts.trackerDir,                                  // 6th positional (test isolation)
+      buildTrackerOpts(wf),                             // 7th positional (richness hooks)
     )
   }, opts.trackerDir)
 }
@@ -283,6 +302,7 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
             },
             runId,                 // preAssignedRunId — reuse across pre-emit + run
             opts.trackerDir,       // dir — default `.tracker` unless test overrides
+            buildTrackerOpts(wf),  // richness hooks
           )
         }, opts.trackerDir)
         result.succeeded++
