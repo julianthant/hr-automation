@@ -2,25 +2,37 @@
 
 Updates employee position pool and compensation data for work-study awards in UCPath PayPath Actions.
 
+**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflow`. The kernel owns browser launch, UCPath auth, tracker emission, SIGINT cleanup. The handler is a two-step pipeline (`ucpath-auth` → `transaction`) over a single UCPath browser.
+
 ## Files
 
 - `schema.ts` — Zod `WorkStudyInput` schema (emplId: 5+ digits, effectiveDate: MM/DD/YYYY)
-- `enter.ts` — Builds `ActionPlan` for PayPath transaction: navigate to PayPath Actions, collapse sidebar, search by Empl ID, fill position data (reason "JRL", pool "F"), fill Job Data/Additional Pay comments, save/submit
-- `tracker.ts` — Writes to `work-study-tracker.xlsx` (Excel-only, no `trackEvent` — JSONL events handled by `withTrackedWorkflow` in workflow.ts)
-- `workflow.ts` — Main orchestration: uses `withTrackedWorkflow` for dashboard tracking (steps: ucpath-auth → transaction). Launch browser, authenticate UCPath, dry-run preview or execute plan, update tracker
+- `enter.ts` — Builds `ActionPlan` for the PayPath transaction: navigate → collapse sidebar → search by Empl ID → fill position data (reason "JRL", pool "F") → fill Job Data/Additional Pay comments → save/submit
+- `tracker.ts` — Writes to `work-study-tracker.xlsx` (Excel-only). JSONL events are emitted by the kernel — do not call `trackEvent` here
+- `workflow.ts` — Kernel definition (`workStudyWorkflow`) + CLI adapter (`runWorkStudy`). Dry-run branch bypasses the kernel (no browser launch; previews the ActionPlan directly)
 - `index.ts` — Barrel exports
+
+## Kernel Config
+
+| Field | Value |
+|-------|-------|
+| `systems` | `[{ id: "ucpath", login: loginToUCPath-wrapped }]` |
+| `steps` | `["ucpath-auth", "transaction"] as const` |
+| `authChain` | `"sequential"` |
+| `tiling` | `"single"` |
+| `detailFields` | `["emplId", "effectiveDate"]` |
 
 ## Data Flow
 
 ```
-CLI: emplId + effectiveDate
-  → Authenticate UCPath
-  → Navigate to PayPath Actions (sidebar → iframe load)
-  → Search employee by Empl ID
-  → Fill position data form (pool "F", reason "JRL")
-  → Navigate Job Data → Additional Pay tabs
-  → Save and Submit
-  → Update tracker
+CLI: npm run work-study <emplId> <effectiveDate>
+  → runWorkStudy (CLI adapter)
+    → if --dry-run: plan.preview() (no browser)
+    → else: runWorkflow(workStudyWorkflow, input)
+      → Kernel Session.launch: 1 browser, UCPath auth (Duo)
+      → Handler step "ucpath-auth" (marker — auth already resolved by Session)
+      → Handler step "transaction" → executes PayPath ActionPlan → updateData({ name })
+      → Excel tracker row written (non-fatal on failure)
 ```
 
 ## Gotchas
@@ -40,4 +52,4 @@ CLI: emplId + effectiveDate
 
 ## Lessons Learned
 
-*(Add entries here when work-study bugs are fixed — document root cause and fix so the same error never recurs)*
+- **2026-04-15: Migrated to kernel.** `runWorkStudy` is now a CLI adapter over `runWorkflow(workStudyWorkflow, input)`. Do not reintroduce raw `launchBrowser` / `withTrackedWorkflow` calls in the handler — those live in `src/core/`. Dry-run continues to bypass the kernel (no browser launched) and preview the plan directly.

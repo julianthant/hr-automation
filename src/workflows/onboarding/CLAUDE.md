@@ -1,6 +1,8 @@
 # Onboarding Workflow
 
-Automates full UC employee hiring: extracts data from ACT CRM, validates with Zod, searches UCPath for duplicates, creates Smart HR transactions, and tracks status in Excel.
+Automates full UC employee hiring: extracts data from ACT CRM, validates with Zod, searches UCPath for duplicates, searches I9 before creating a profile, creates Smart HR transactions.
+
+**Kernel-based (single-mode).** Single-mode onboarding is declared via `defineWorkflow` in `workflow.ts` and executed by `src/core/runWorkflow`. The kernel owns browser launch, auth, tracker emission, error handling. **Parallel mode (`--parallel N`) still uses the pre-migration implementation** preserved in `workflow-legacy.ts`. A followup plan migrates parallel once the kernel's pool mode is debt-fixed.
 
 ## Files
 
@@ -8,26 +10,44 @@ Automates full UC employee hiring: extracts data from ACT CRM, validates with Zo
 - `extract.ts` — CRM field extraction from UCPath Entry Sheet using `FIELD_MAP` label mapping; also extracts dept/recruitment numbers from record page
 - `enter.ts` — Builds `ActionPlan` for the 14-step Smart HR transaction (personal data, job data, comments, save/submit)
 - `config.ts` — Constants: `UC_FULL_HIRE` template, `UCHRLY` comp rate code, `06/30/2026` end date
-- `download.ts` — Fetches CRM record PDFs (Doc 1 + Doc 3) directly from the iDocs document server URL — no UI driving. Saves to `~/Downloads/onboarding/{Last, First Middle} EID/`
-- `retry.ts` — `retryStep(name, fn, opts)` helper: retries with linear backoff, emits per-attempt error logs, throws `RetryStepError` after exhausting attempts
-- `parallel.ts` — Batch mode: loads `batch.yaml` email list, launches N workers with 3 browsers each (CRM, UCPath, I-9). Pre-authenticates I-9 once per worker (no Duo)
-- `workflow.ts` — Main orchestration: `withTrackedWorkflow` dashboard tracking with steps `crm-auth → extraction → pdf-download → ucpath-auth → person-search → i9-creation → transaction`. Enriches `updateData()` with employee fields so the dashboard detail grid shows Dept/Position/Wage/Eff Date/I-9 Profile. No Excel writes — dashboard JSONL is the only tracker.
+- `download.ts` — Fetches CRM record PDFs (Doc 1 + Doc 3) directly from iDocs document server URL. Saves to `~/Downloads/onboarding/{Last, First Middle} EID/`
+- `retry.ts` — `retryStep(name, fn, opts)` helper: linear backoff, per-attempt error logs, throws `RetryStepError` after exhausting attempts. Used inside both the kernel handler and the legacy workflow
+- `workflow.ts` — Kernel definition (`onboardingWorkflow`) + CLI adapter (`runOnboarding`). Handler runs 5 phases across CRM / UCPath / I9 with `ctx.step` wrapping. Dry-run branch bypasses kernel (CRM only). Parallel calls route to `runOnboardingLegacy`
+- `workflow-legacy.ts` — Pre-migration workflow, used by `parallel.ts` only. Verbatim copy of the old `workflow.ts`. Deleted when parallel migrates
+- `parallel.ts` — Batch mode: loads `batch.yaml` email list, launches N workers with 3 browsers each (CRM, UCPath, I-9). Pre-authenticates I-9 once per worker (no Duo). Calls `runOnboardingLegacy` — **NOT migrated to the kernel**
 - `index.ts` — Barrel exports
+
+## Kernel Config (single-mode)
+
+| Field | Value | Why |
+|-------|-------|-----|
+| `systems` | `[crm, ucpath, i9]` — each wraps its login fn to throw on false | 3 independent auth systems |
+| `steps` | `["crm-auth", "extraction", "pdf-download", "ucpath-auth", "person-search", "i9-creation", "transaction"] as const` | Matches dashboard `WF_CONFIG.onboarding.steps` |
+| `authChain` | `"sequential"` | CRM work happens before UCPath auth; sequential avoids wasting Duo prompts on systems we might not reach (rehire case) |
+| `tiling` | `"auto"` (kernel picks for multi-system) | 3 browsers tiled then fullscreened; bringToFront per system during auth |
+| `detailFields` | `["email"]` | Only schema-keyed field. Dashboard reads richer fields (firstName, lastName, dept #, etc.) via `WF_CONFIG.onboarding` from runtime `updateData` |
 
 ## Data Flow
 
 ```
-batch.yaml / CLI email
-  → CRM search (by email) → select latest "Offer Sent On"
-  → Extract dept # and recruitment # from record page
-  → Navigate to UCPath Entry Sheet, extract FIELD_MAP
-  → Validate against EmployeeData Zod schema
-  → Download Doc 1 + Doc 3 from iDocs viewer (direct PDF fetch)
-  → UCPath Person Search (duplicate/rehire check → stop if found)
-  → I-9 Complete: create employee profile, grab profileId
-  → ActionPlan: Smart HR Transaction (UC_FULL_HIRE) with real I-9 profileId
-  → Dashboard JSONL entries (.tracker/onboarding-*.jsonl)
+CLI: npm run start-onboarding <email>
+  → runOnboarding (CLI adapter)
+    → if crmPage/ucpathPage/i9Page present (parallel call): route to runOnboardingLegacy
+    → if --dry-run: runOnboardingDryRun (CRM only, imperative)
+    → else: runWorkflow(onboardingWorkflow, { email })
+      → Kernel Session.launch: 3 browsers, sequential auth chain (Duo x3)
+      → Handler phase 1 "crm-auth" + CRM search + "extraction" + updateData
+      → Handler phase 2 "pdf-download" (non-fatal)
+      → Handler phase 3 "ucpath-auth" + "person-search"
+        → rehire? return early with status: "Rehire"
+      → Handler phase 4 "i9-creation"
+        → search I9 by SSN first; create only if not found
+      → Handler phase 5 "transaction" → executes ActionPlan → status: "Done"
 ```
+
+## Parallel Mode (Legacy)
+
+`parallel.ts` is unchanged from pre-kernel. It launches its own browsers, pre-auths I9, and calls `runOnboardingLegacy` per item. The kernel is not in the loop. A followup plan (when the `runWorkflowPool` per-item `withTrackedWorkflow` wrapping is fixed) migrates parallel fully.
 
 ## Gotchas
 
@@ -56,9 +76,36 @@ Visualforce table layout — `<tr>` with `<th class="labelCol">` label followed 
 - Use `page.context().request.get(url)` — shares session cookies set when the PDF.js iframe originally loaded
 - For UI-based download (unused now): `#secondaryToolbarToggle` → Tools menu; no built-in download button, so direct fetch is the only clean path
 
+### I9 Complete — 2026-04-16
+- Datepicker overlay dismiss: `document.querySelector('.datepicker-overlay')?.style.setProperty('display', 'none', 'important')` (Escape key does not work)
+- Duplicate Employee dialog: select first row radio, click "View/Edit", then navigate to `<profileUrl>?saveAndContinue=true` to reveal the radio section
+- Post-save URL wait: wait for `/employee/profile/{id}` before extracting profileId
+- Search-first: look up existing profile by SSN before creating; skip creation entirely if found
+
+### UCPath Smart HR Transaction — 2026-04-16
+- `pt_modalMask` intercepts tab clicks — dismiss via `document.querySelectorAll('.ptModalMask').forEach(el => el.style.display = 'none')` before each tab click
+- Comp Rate Code: `getByRole("textbox", { name: "Comp Rate Code" })` + press Tab to blur and trigger validation
+- Compensation Rate: `getByRole("textbox", { name: "Compensation Rate" })` + press Tab (this was the actual Elena fix — value must trigger validation to enable Save)
+- Compensation Frequency: explicitly fill `"H"` (Hourly) if empty
+- Preferred name fields: always fill (mirror legal names when no lived name)
+- Tab order before Save & Submit: must visit Personal Data → Job Data → Earns Dist → Employee Experience; after filling Initiator Comments re-click Personal Data before Save
+- Save & Submit often arrives disabled — force-click via `{ force: true }` to bypass the disabled state
+
 ## Lessons Learned
 
 - **2026-04-14: iDocs PDFs fetch faster than they render** — Driving the PDF.js viewer UI (click Next Doc, scroll, trigger download) is brittle across Salesforce Canvas + nested iframes + PDF.js state. The viewer loads each PDF from `/iDocsForSalesforceDocumentServer?i=<idx>&h=<hash>` using context cookies — `page.context().request.get(url)` returns the raw PDF directly. One HTTP round-trip replaces ~5 UI steps and ~3s/doc of wait time. Extract `h` from the PDF.js iframe URL in `page.frames()` after the record page loads.
 - **2026-04-14: I-9 creation is no longer mocked** — The `MOCK_I9` hardcode was removed. Real `createI9Employee()` runs between `person-search` and `transaction`; the returned `profileId` flows into `buildTransactionPlan()` so the UCPath Comments/Personal Data steps reference the actual I-9. I-9 login has no Duo — pre-authenticate once per worker in parallel mode, fall back to per-run login in single mode.
 - **2026-04-14: Every phase is retry-wrapped** — `retryStep(name, fn, { attempts, backoffMs, logPrefix, onRetry })` retries transient failures and emits per-attempt error logs to the dashboard. When a step exhausts attempts, it throws `RetryStepError` which propagates to `withTrackedWorkflow`'s catch and marks the entry `failed` with a meaningful step name in the error.
 - **2026-04-14: Dashboard is the source of truth** — `onboarding-tracker.xlsx` and `tracker.ts` were deleted. All fields the tracker used to show (dept #, position #, wage, I-9 profile, etc.) are now pushed into `updateData()` so the dashboard's detail grid shows them. Dashboard `WF_CONFIG.onboarding.detailFields` has 8 cells in a 2-row grid: Employee, Email, Dept #, Position #, Wage, Eff Date, I9 Profile, Elapsed.
+- **2026-04-15: Migrated single-mode to kernel.** `runOnboarding` is a CLI adapter over `runWorkflow(onboardingWorkflow, { email })`. Parallel mode stays on `workflow-legacy.ts` until a followup migrates it. Don't reintroduce raw `launchBrowser` / `withTrackedWorkflow` in the single-mode handler.
+- **2026-04-16: I9 — search before creating.** The create path blows up if a matching SSN already has a profile; always search I9 by SSN first and short-circuit to the existing profileId if found.
+- **2026-04-16: I9 — dismiss the datepicker overlay before clicking Worksite dropdown.** `Escape` key does nothing; force-hide the overlay via inline style.
+- **2026-04-16: I9 — handle Duplicate Employee dialog.** Select the first row radio, click "View/Edit", then navigate to `?saveAndContinue=true` on the profile URL to reveal the radio section.
+- **2026-04-16: I9 — wait for `/employee/profile/{id}` URL before extracting profileId.** Prior code grepped the DOM before redirect completed.
+- **2026-04-16: UCPath — `pt_modalMask` intercepts tab clicks.** Dismiss the modal mask explicitly before each tab navigation.
+- **2026-04-16: UCPath — visit all 4 tabs before Save & Submit.** The Save button stays disabled until Personal Data → Job Data → Earns Dist → Employee Experience have all been visited. After filling Initiator Comments on the final tab, re-click Personal Data before saving.
+- **2026-04-16: UCPath — Comp Rate Code + Compensation Rate via accessible-name selectors.** Use `getByRole("textbox", { name: ... })`. After filling, press Tab to blur and trigger validation. Compensation Frequency must be explicitly filled `"H"` (Hourly) if empty.
+- **2026-04-16: UCPath — fill preferred name fields even when only legal name exists.** Mirror legal names into preferred-name fields when no lived name is supplied.
+- **2026-04-16: Auth — 500ms settle delay after SSO credential fill.** Submit fires before the form JS registers values otherwise.
+- **2026-04-16: Kernel — auth retry on Duo timeout.** `Session.launch` refreshes the page and retries login up to 3 attempts on auth failure.
+- **2026-04-16: Kernel — `bringToFront()` before each system's login.** Multi-browser tiling hides background tabs; the active one must surface before the user approves Duo.
