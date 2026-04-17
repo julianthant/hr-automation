@@ -7,7 +7,7 @@ import { loginToUCPath, loginToACTCrm } from "./auth/login.js";
 import type { AuthResult } from "./auth/types.js";
 import { runOnboarding, runParallel } from "./workflows/onboarding/index.js";
 import { runWorkStudy, WorkStudyInputSchema } from "./workflows/work-study/index.js";
-import { runEmergencyContactBatch } from "./workflows/emergency-contact/index.js";
+import { runEmergencyContact } from "./workflows/emergency-contact/index.js";
 import { runParallelKronos, DEFAULT_WORKERS } from "./workflows/old-kronos-reports/index.js";
 import { runSeparation } from "./workflows/separations/index.js";
 import { trackEvent, readEntries } from "./tracker/jsonl.js";
@@ -164,7 +164,7 @@ program
     }
 
     try {
-      await runEmergencyContactBatch(batchYaml, {
+      await runEmergencyContact(batchYaml, {
         dryRun: options.dryRun,
         rosterUrl: options.rosterUrl,
         rosterPath: options.rosterPath,
