@@ -1,616 +1,301 @@
 # HR Automation
 
-UCPath HR automation tool for UCSD — automates onboarding, separations, EID lookups, work-study updates, and UKG report downloads via Playwright browser automation. Designed for multiple HR workflows built on shared modules (auth, browser, UCPath, Kuali, Old/New Kronos).
+UCPath HR automation for UCSD. Playwright-driven onboarding, separations, EID lookups, work-study updates, UKG report downloads, and emergency contact fills — composed from per-system drivers and a small workflow kernel.
 
 ## Commands
 
 ```bash
 # Onboarding
-npm run start-onboarding <email>       # Run full onboarding workflow for employee
-npm run start-onboarding:dry <email>   # Dry-run onboarding (preview actions, no UCPath changes)
-npm run start-onboarding:batch -- <N>  # Batch onboarding with N parallel workers
+npm run start-onboarding <email>       # Full onboarding for one employee
+npm run start-onboarding:dry <email>   # Dry-run onboarding (CRM extract only, no UCPath)
+npm run start-onboarding:batch -- <N>  # Batch onboarding with N parallel workers (legacy path)
 npm run extract <email>                # Extract employee data from CRM only
 
-# Separations
-npm run separation <docId>             # Process separation: Kuali → Kronos → UCPath
-npm run separation <id1> <id2> <id3>   # Batch separations (sequential, shared browsers)
-npm run separation:dry <docId>         # Dry-run separation (extract data only)
+# Separations (legacy — NOT kernel-migrated)
+npm run separation <docId> [docId ...] # Single doc or batch; shared browsers across docs
+npm run separation:dry <docId>         # Dry-run (extract + log only)
 
-# Kronos Reports
-npm run kronos                         # Download Time Detail PDFs from UKG (4 workers)
-npm run kronos:dry                     # Dry-run kronos (preview employee list)
-npm run kronos -- --workers 8          # Kronos with custom worker count
+# Kronos Reports (legacy — NOT kernel-migrated)
+npm run kronos                         # Download Time Detail PDFs (4 workers)
+npm run kronos:dry                     # Dry-run (preview employee list)
+npm run kronos -- --workers 8          # Custom worker count
 
 # Work Study
-npm run work-study <emplId> <date>     # Update position pool via PayPath Actions
-npm run work-study:dry <emplId> <date> # Dry-run work study
+npm run work-study <emplId> <date>     # PayPath position pool update
+npm run work-study:dry <emplId> <date> # Dry-run (preview ActionPlan only)
 
 # Emergency Contact
-npm run emergency-contact <batchYaml>  # Fill Emergency Contact in UCPath for every record in a batch YAML
-npm run emergency-contact:dry <batchYaml>  # Preview records without touching UCPath
-# Optional flags:
-#   --roster-url "<sharepoint-url>"       Download + verify against latest roster
-#   --roster-path <localXlsx>             Use a local roster for pre-flight verification
-#   --ignore-roster-mismatch              Proceed despite roster mismatches
+npm run emergency-contact <batchYaml>      # Fill Emergency Contact for every record
+npm run emergency-contact:dry <batchYaml>  # Preview records (no browser)
+# Flags: --roster-url "<sp-url>" | --roster-path <xlsx> | --ignore-roster-mismatch
 
-# EID Lookup (no npm script — use CLI directly)
+# EID Lookup (no npm script — CLI directly)
 tsx --env-file=.env src/cli.ts eid-lookup "Last, First Middle"
-tsx --env-file=.env src/cli.ts eid-lookup --workers 4 "Name1" "Name2" "Name3"
+tsx --env-file=.env src/cli.ts eid-lookup --workers 4 "Name1" "Name2"
+tsx --env-file=.env src/cli.ts eid-lookup --dry-run --no-crm "Name"
 
-# Dashboard (run in a separate terminal — auto-updates when workflows run)
-npm run dashboard                      # Start SSE backend + Vite dev server (http://localhost:5173)
-npm run dashboard:prod                 # Serve pre-built dashboard from SSE server only
-npm run dashboard -- -p 4000           # Custom SSE backend port
-# dashboard.bat removed — use npm run dashboard or tsx directly
+# Dashboard (separate terminal — auto-updates as workflows run)
+npm run dashboard            # SSE backend (:3838) + Vite dev (:5173) — open http://localhost:5173
+npm run dashboard:prod       # Serve pre-built dashboard from SSE only
 
-# Export
-tsx --env-file=.env src/cli.ts export <workflow>     # Export JSONL tracker to Excel
-tsx --env-file=.env src/cli.ts export onboarding -o out.xlsx  # Custom output path
-
-# Utilities
-npm run test-login                     # Test UCPath + CRM auth flow
-npm run typecheck                      # TypeScript type checking
-npm run test                           # Run unit tests
+# Export / Utilities
+tsx --env-file=.env src/cli.ts export <workflow>   # Dump JSONL tracker to xlsx
+npm run test-login                                 # Smoke test UCPath + CRM auth
+npm run typecheck                                  # Type-check src/
+npm run typecheck:all                              # Type-check src/ + tests
+npm run test                                       # Unit tests
+npm run build:dashboard                            # Single-file dashboard build
 ```
 
-All runtime scripts use `tsx --env-file=.env` — never run source files directly. If `npm` is blocked by group policy, run tsx directly: `.\node_modules\.bin\tsx --env-file=.env src/cli.ts <command>`
+All runtime scripts use `tsx --env-file=.env`. If `npm` is blocked by group policy, invoke tsx directly: `./node_modules/.bin/tsx --env-file=.env src/cli.ts <command>`.
 
 ## Architecture
 
+The repo is split three ways: per-system drivers (`src/systems/`), a small workflow kernel (`src/core/`), and composed workflows (`src/workflows/`). Auth, tracker, dashboard, and utils are cross-cutting support.
+
 ```
 src/
-  auth/
-    sso-fields.ts   # Shared SSO credential filling (.or() chains)
-    duo-poll.ts      # Unified Duo MFA polling with recovery callbacks
-    (other login flows: UCPath SSO, ACT CRM, I9, UKG, Kuali, New Kronos — separate sessions)
-  browser/
-    session.ts       # WorkflowSession class (shared context per workflow)
-    tiling.ts        # Window tiling computation for multi-browser layouts
-    (launch.ts: headed mode, ephemeral or persistent sessions)
-  config.ts         # Centralized URLs, PATHS, TIMEOUTS, SCREEN, ANNUAL_DATES constants
-  kuali/            # Kuali Build separation form automation (fill, extract, save)
-  new-kronos/       # New Kronos (WFD/Dayforce) employee search and timecard checking
-  old-kronos/       # Old Kronos (UKG) employee search, timecard, reports, iframe handling
-  tracker/
-    jsonl.ts         # JSONL append-only tracker + withTrackedWorkflow lifecycle wrapper
-    dashboard.ts     # SSE API server (port 3838) — API-only, no HTML serving
-    export-excel.ts  # On-demand Excel export from JSONL
-    locked.ts        # Generic mutex-locked write wrapper
-    spreadsheet.ts   # Excel tracking with daily worksheets (YYYY-MM-DD tabs)
-  dashboard/          # React SPA (Vite + HeroUI v3 + Tailwind) — served via Vite dev server on port 5173
-  systems/
-    crm/              # ACT CRM (Salesforce) navigation, search, and data extraction (moved from src/crm/ in Phase 2)
-    i9/               # I9 Complete employee record creation (moved from src/i9/ in Phase 2)
-    ucpath/           # UCPath PeopleSoft navigation, person search, Smart HR transactions (moved from src/ucpath/ in Phase 2)
-  utils/
-    screenshot.ts    # Unified debug screenshot helper
-    worker-pool.ts   # Generic parallel worker pool with queue
-    (env.ts, log.ts, errors.ts: env validation, logging, error helpers)
-  scripts/          # Dev tools: selector exploration, batch testing, kronos mapping
-  workflows/        # Multi-step workflow orchestration
-    onboarding/     # CRM extraction → UCPath hire transaction, parallel processing
-    separations/    # Kuali → Old/New Kronos → UCPath termination (5 tiled browsers)
-    eid-lookup/     # Person Org Summary name search, CRM cross-verification, Excel output
-    old-kronos-reports/  # Batch Time Detail PDF downloads from Old Kronos, parallel workers
-    work-study/     # UCPath PayPath position pool/compensation updates
-    emergency-contact/ # UCPath HR Tasks → Personal Data → Emergency Contact, batch-driven via YAML
-  cli.ts            # Commander CLI entry point
+  core/                # Workflow kernel — defineWorkflow, runWorkflow(Batch|Pool), Session, Stepper, Ctx
+    types.ts           # WorkflowConfig, Ctx, SystemConfig, RunOpts, WorkflowMetadata
+    workflow.ts        # defineWorkflow + runWorkflow + runWorkflowBatch (sequential)
+    pool.ts            # runWorkflowPool (N workers each with own Session)
+    session.ts         # Session.launch: launch + tile + auth (sequential or interleaved)
+    stepper.ts         # ctx.step/markStep/parallel/updateData plumbing
+    registry.ts        # WorkflowMetadata registry; defineDashboardMetadata for legacy
+    ctx.ts             # makeCtx — builds Ctx from Session + Stepper
+  systems/             # Playwright drivers, one per external system
+    common/            # safeClick / safeFill / dismissPeopleSoftModalMask (cross-system)
+    crm/               # ACT CRM (Salesforce) search + record-page extract
+    i9/                # I9 Complete employee profile + record creation
+    ucpath/            # PeopleSoft Smart HR, person search, PayPath, emergency contact, ActionPlan
+    kuali/             # Kuali Build separation form extract + fill
+    new-kronos/        # WFD/Dayforce employee search + timecard
+    old-kronos/        # UKG Kronos search + Time Detail report download
+  workflows/           # Composed workflows — each is defineWorkflow(...) + CLI adapter
+    work-study/        # Kernel. UCPath PayPath work-study update.
+    emergency-contact/ # Kernel (batch, preEmitPending). UCPath Emergency Contact fill.
+    eid-lookup/        # Kernel. Person Org Summary lookup + optional CRM cross-verify.
+    onboarding/        # Kernel (single-mode). CRM → UCPath + I9. Parallel mode is legacy.
+    separations/       # Legacy — withTrackedWorkflow + launchBrowser directly.
+    old-kronos-reports/# Legacy — withTrackedWorkflow + parallel.ts worker pool.
+  auth/                # Per-system login flows + duo-poll + sso-fields (shared).
+  browser/             # launchBrowser, tiling math. Kernel-internal.
+  tracker/             # JSONL append + SSE dashboard server + Excel export.
+  dashboard/           # React SPA (Vite + shadcn/ui). Reads SSE, renders queue + logs.
+  utils/               # env / errors / log (with AsyncLocalStorage runId context).
+  scripts/             # Dev tools: selector exploration, batch testing.
+  cli.ts               # Commander entry point.
+  config.ts            # URLs, PATHS (via homedir), TIMEOUTS, SCREEN, ANNUAL_DATES.
 ```
 
-### Data Flows
+### Data flows
 
-**Onboarding:**
+**Onboarding (kernel, single mode)**
 ```
-CRM (search + record-page extract)
-  → UCPath Entry Sheet extract → EmployeeData (schema)
-  → CRM PDF download (Doc 1 + Doc 3 via direct iDocs fetch)
-  → UCPath Person Search (rehire short-circuit if matched)
-  → I-9 Complete: create employee profile → profileId
-  → UCPath Smart HR Transaction (UC_FULL_HIRE, using real profileId)
-  → Dashboard JSONL (no Excel tracker)
+CRM (search + extract) → EmployeeData
+  → CRM PDFs (direct iDocs fetch)
+  → UCPath Person Search (rehire → short-circuit)
+  → I9 search by SSN (reuse existing) | I9 create (profile + Section 1)
+  → UCPath Smart HR Transaction (UC_FULL_HIRE, real profileId)
 ```
 
-**Separations:**
+**Separations (legacy)**
 ```
-Kuali (extract) → SeparationData (schema) → ┌ Old Kronos (timecard check)  ┐
-                                             │ New Kronos (timecard check)  │ parallel
-                                             │ UCPath Job Summary (verify)  │
-                                             └ Kuali (timekeeper name fill) ┘
-                                           → Resolve dates + fill Kuali fields
-                                           → UCPath Termination Transaction
-                                           → Kuali (write back transaction ID)
+Kuali extract → SeparationData → 4-way parallel:
+  [Old Kronos timecard | New Kronos timecard | UCPath Job Summary | Kuali timekeeper fill]
+  → Kronos dates override Kuali → fill remaining Kuali → UCPath termination → Kuali finalize
 ```
 
-**EID Lookup:**
+**EID lookup (kernel)**
 ```
-Names (input) → Person Org Summary (UCPath) → SDCMP/HDH filter
-                                             → CRM cross-verification (optional)
-                                             → Tracker (Excel spreadsheet)
+Names → Person Org Summary (UCPath, N tabs) → SDCMP/HDH filter
+  → Excel tracker | optional CRM cross-verify
 ```
 
-### Workflow Patterns
+Observability for every workflow: `.tracker/{workflow}-{YYYY-MM-DD}.jsonl` + `*-logs.jsonl`, streamed to the dashboard. Some workflows also write xlsx trackers (see per-workflow docs).
 
-Workflows share common structures but vary by complexity:
+## Writing a new workflow
 
-**Onboarding pattern** (`src/workflows/onboarding/`):
-1. `schema.ts` — Zod schema for validated employee data
-2. `extract.ts` — CRM field extraction with label-based FIELD_MAP
-3. `enter.ts` — ActionPlan builder composing UCPath transaction steps
-4. `index.ts` — Barrel exports
+Declare it with `defineWorkflow`. The kernel handles browser launch, auth (Duo-aware, sequential or interleaved), tracker emissions, SIGINT cleanup, screenshotting on step failure, per-item `withTrackedWorkflow` wrapping in batch/pool modes, and the dashboard registry. Your handler just drives Playwright.
 
-**Separations pattern** (`src/workflows/separations/`):
-1. `schema.ts` — Zod schema + data transformation helpers (date computation, reason code mapping)
-2. `workflow.ts` — Multi-system orchestration (5 tiled browsers, parallel phases)
-3. `config.ts` — URLs, template IDs, screen dimensions
-4. `index.ts` — Barrel exports
+Minimal example:
+
+```ts
+import { defineWorkflow, runWorkflow } from "../../core/index.js";
+import { loginToUCPath } from "../../auth/login.js";
+import { MyInputSchema, type MyInput } from "./schema.js";
+
+const steps = ["ucpath-auth", "transaction"] as const;
+
+export const myWorkflow = defineWorkflow({
+  name: "my-workflow",
+  label: "My Workflow",
+  systems: [{
+    id: "ucpath",
+    login: async (page) => {
+      const ok = await loginToUCPath(page);
+      if (!ok) throw new Error("UCPath authentication failed");
+    },
+  }],
+  steps,
+  schema: MyInputSchema,
+  tiling: "single",
+  authChain: "sequential",
+  detailFields: [{ key: "emplId", label: "Empl ID" }, { key: "name", label: "Employee" }],
+  getName: (d) => d.name ?? "",
+  getId: (d) => d.emplId ?? "",
+  handler: async (ctx, input: MyInput) => {
+    ctx.updateData({ emplId: input.emplId });
+    ctx.markStep("ucpath-auth");
+    const page = await ctx.page("ucpath");
+    await ctx.step("transaction", async () => {
+      // ... Playwright work ...
+      ctx.updateData({ name: "Jane Doe" });
+    });
+  },
+});
+
+export async function runMyWorkflow(input: MyInput) {
+  await runWorkflow(myWorkflow, input);
+}
+```
+
+Add a Commander subcommand in `src/cli.ts`, add npm scripts to `package.json`, create `src/workflows/my-workflow/CLAUDE.md` following the workflow template, and that's the whole story — no dashboard registry edits needed.
+
+See `src/workflows/work-study/` for a clean one-system example, `src/workflows/emergency-contact/` for batch-mode with `preEmitPending`, `src/workflows/onboarding/` for multi-system sequential auth + legacy-parallel coexistence, and `src/workflows/eid-lookup/` for the in-handler `runWorkerPool` pattern (shared-context fan-out from a single Duo auth).
+
+Legacy workflows (`separations`, `old-kronos-reports`) register dashboard metadata manually via `defineDashboardMetadata(...)` in their `index.ts` because they call `withTrackedWorkflow` + `launchBrowser` directly rather than going through the kernel. Follow the kernel path for anything new; use the legacy shape only when you need a capability the kernel doesn't offer (cross-system parallel worker pools with shared browser contexts, and similar specialized wiring).
+
+## Kernel primer
+
+`defineWorkflow<TData, TSteps>` takes a config and returns a `RegisteredWorkflow`. The config shape:
+
+- `name` / `label` — kebab-case id + human label (auto-titled if `label` omitted).
+- `systems: SystemConfig[]` — one per external system. `{ id, login, sessionDir?, resetUrl? }`. `login` must throw on failure.
+- `steps: readonly string[] as const` — declared step names. `ctx.step`/`markStep` are type-narrowed against this tuple.
+- `schema: ZodType<TData>` — validated before the handler runs.
+- `authChain: "sequential" | "interleaved"` — sequential waits for each Duo before the next; interleaved auths #1 blocking then chains #2+ in background while the handler starts. Default: interleaved for >1 system, sequential for 1.
+- `tiling: "auto" | "single" | "side-by-side"` — CDP-based window tiling.
+- `batch?: { mode: "sequential" | "pool", poolSize?, betweenItems?, preEmitPending? }` — plumbed by `runWorkflowBatch`. `pool` mode uses `runWorkflowPool` (each worker gets its own Session — one Duo per worker).
+- `detailFields: Array<{ key, label } | string>` — dashboard detail panel. Keys must be populated by `ctx.updateData(...)` before the handler returns, or a `log.warn` fires.
+- `getName(data) / getId(data)` — optional resolvers for the dashboard's row label + id.
+
+The `ctx` object passed to your handler:
+
+- `page(id)` — returns the Playwright Page for system `id`, awaiting that system's auth-ready promise first.
+- `step(name, fn)` — emits `running`, runs `fn`, catches errors (screenshots every page, emits `failed`, rethrows).
+- `markStep(name)` — announce-only; no body, no error handling.
+- `parallel({ a: () => ..., b: () => ... })` — `Promise.allSettled` shape (each key gets a `PromiseSettledResult`).
+- `parallelAll(...)` — `Promise.all` shape (fail-fast, unwrapped values).
+- `retry(fn, { attempts, backoffMs })` — linear-backoff retry (default 3 attempts).
+- `updateData(patch)` — merges into the tracker entry's `data` field.
+- `session`, `log`, `isBatch`, `runId` — escape hatches.
+
+Run modes: `runWorkflow(wf, data)` for a single item; `runWorkflowBatch(wf, items)` for sequential batch (with optional `onPreEmitPending` for dashboard pre-emit); `runWorkflowPool(wf, items)` for N-worker pool (N Sessions, each with its own Duo). Each per-item path is wrapped in `withLogContext` + `withTrackedWorkflow`, so you never call those directly from a handler.
+
+Escape hatches: `ctx.session.page(id)` / `ctx.session.newWindow(id)` expose the underlying Session. Use them only when the kernel's declarative shape doesn't express what you need (e.g. `runWorkerPool` in eid-lookup).
 
 ## Environment
 
-Copy `.env.example` to `.env` and fill in:
+Copy `.env.example` → `.env` and set:
 - `UCPATH_USER_ID` — UCSD SSO username
 - `UCPATH_PASSWORD` — UCSD SSO password
 
+Duo MFA is manual — the automation pauses and polls until you approve on your phone.
+
 ## Configuration
 
-`src/config.ts` centralizes: URLs, PATHS (user-agnostic via homedir()), TIMEOUTS, SCREEN dimensions, ANNUAL_DATES (update each fiscal year). Workflow-specific configs in `src/workflows/*/config.ts` re-export from central config.
-
-## Continuous Improvement Protocol
-
-These rules are **mandatory** — follow them on every task, not just when asked.
-
-### After Every Error Fix
-- Update the relevant module/workflow `CLAUDE.md` with what went wrong and why
-- Add the root cause under a `## Lessons Learned` section so the same error never happens again
-- If the error was a selector issue, add the correct selector to the `## Verified Selectors` section
-
-### After Every New Workflow
-- Update the dashboard to support it: add to `WF_CONFIG` in `src/dashboard/components/types.ts`, add step definitions, detail fields, and name source
-- Update `src/tracker/dashboard.ts` if new SSE endpoints or data formats are needed
-- Add the workflow's step tracking to the root CLAUDE.md "Step Tracking Per Workflow" table
-- Create a `CLAUDE.md` inside the new workflow directory following the existing pattern (Files, Data Flow, Gotchas)
-
-### After Every Selector Mapping (playwright-cli)
-- Add discovered selectors to the relevant module's `CLAUDE.md` under `## Verified Selectors`
-- Include the date verified, the system/page, and the exact selector string
-- If a selector changed from a previous mapping, note the old → new change
-- Use these documented selectors when writing code — never guess
-
-### When Using playwright-cli
-- Always run `playwright-cli --help` first if unsure about commands
-- Install/update before use: `npm install -g @playwright/cli@latest`
-- Use `snapshot` before writing ANY selector — never guess from documentation or memory
-- After mapping, immediately document selectors in the relevant CLAUDE.md
-- Use lessons from past selector failures to inform new mappings (check `## Lessons Learned` sections)
-
-### After Every Fix or Update
-- Update the corresponding module/workflow CLAUDE.md to reflect the change
-- If a gotcha was discovered, add it to the Gotchas section
-- If a pattern was established, document it for future sessions
-- Keep CLAUDE.md files as living documentation — they are the memory across sessions
-
-## Selector Registry
-
-Every Playwright selector used by automation lives in a per-system
-`selectors.ts` file under `src/systems/<system>/`:
-
-- `src/systems/ucpath/selectors.ts`
-- `src/systems/crm/selectors.ts`
-- `src/systems/i9/selectors.ts`
-- `src/systems/old-kronos/selectors.ts`
-- `src/systems/kuali/selectors.ts`
-- `src/systems/new-kronos/selectors.ts`
-
-Shared cross-system helpers (modal dismiss, instrumented `safeClick` /
-`safeFill` wrappers) live in [`src/systems/common/`](./src/systems/common/).
-
-### Pattern
-
-Selectors are **functions returning Playwright Locators/FrameLocators**:
-
-```typescript
-// src/systems/ucpath/selectors.ts
-export const personalData = {
-  legalFirstName: (f: FrameLocator): Locator =>
-    f.getByRole("textbox", { name: "Legal First Name" }),
-  // ...
-};
-
-// Caller:
-import { personalData } from "./selectors.js";
-await personalData.legalFirstName(frame).fill(data.firstName);
-```
-
-Each selector carries a `// verified YYYY-MM-DD` comment. Fallback chains
-(`.or()`) up to 6-deep are used where PeopleSoft grid IDs mutate or similar
-brittle anchors need hardening. When the underlying `.click()` / `.fill()`
-throws (primary and fallbacks all exhausted), wrap the call with
-[`safeClick` / `safeFill`](./src/systems/common/safe.ts) to emit a
-`log.warn("selector fallback triggered: <label>")` event to the dashboard.
-
-### Adding selectors
-
-1. Map the live page with `playwright-cli snapshot` (see playwright-cli
-   section below).
-2. Add the new selector to the relevant system's `selectors.ts` with
-   today's `// verified` date.
-3. Import and call it from the caller. Never inline `page.locator("...")`
-   calls in system `.ts` files — the
-   [`tests/unit/systems/inline-selectors.test.ts`](./tests/unit/systems/inline-selectors.test.ts)
-   guard will reject the PR.
-4. For PeopleSoft grid inputs or any anchor that has failed in the past,
-   add a 2-3 deep `.or()` fallback chain and wrap invocations with
-   `safeClick` / `safeFill` from `src/systems/common/` so a fallback
-   match is logged.
-
-### Verification
-
-This subsystem (A, 2026-04-17) was a **re-homing pass** — selectors
-moved verbatim from their prior inline locations with existing
-verified-dates preserved. When you next touch a selector in production
-(e.g. because automation failed and playwright-cli shows the anchor
-moved), bump the `// verified` date to the day you re-mapped it.
-
-## Key Patterns
-
-- **Separate auth flows**: UCPath, CRM, I9, UKG, Kuali, and New Kronos each use different auth — never share browser sessions between them
-- **No session persistence** (UCPath/CRM/Kuali): Always login fresh, leave browser open for user to observe
-- **Persistent sessions** (UKG/Kronos): Uses `launchBrowser({ sessionDir })` to reuse login state across runs
-- **Headed browser**: Always use headed mode so user can see automation and approve Duo MFA
-- **Sequential Duo MFA**: When multiple browsers need auth, stagger Duo prompts one at a time — simultaneous prompts cause errors. Use auth-ready promises to interleave auth with work (see "Multi-Browser Parallel Execution" section below)
-- **Multi-browser tiling**: Separations workflow launches 4 browsers tiled on screen (Kuali, Old Kronos, New Kronos, UCPath)
-- **URL params over clicking**: Prefer URL manipulation over UI navigation where possible
-- **Use playwright-cli for selector discovery**: Never guess selectors — always use `playwright-cli` to map them live. See the playwright-cli section below for usage
-- **Log every interaction**: Log every browser action (click, fill, navigate, wait) to console for traceability
-- **ActionPlan pattern**: All UCPath transactions are built as ActionPlan steps — supports dry-run preview and step-by-step execution with error isolation
-- **Tracker Excel files**: Always place tracker .xlsx files inside the workflow folder (e.g. `src/workflows/eid-lookup/eid-lookup-tracker.xlsx`), never in the project root
-- **Promise.allSettled for parallel systems**: Use `Promise.allSettled` (not `Promise.all`) when querying multiple systems in parallel — one system's failure shouldn't block others
-- Use `fillSsoCredentials()` and `pollDuoApproval()` — never write inline SSO/Duo loops
-- **`withTrackedWorkflow()` for lifecycle tracking**: Wraps workflow execution — auto-emits `pending` on start, `done` on success, `failed` on error. Provides `setStep(step)` for granular progress and `updateData(d)` to enrich entries with discovered info (names, IDs). All 5 workflows use this. Accepts `onCleanup` callback for resource teardown and optional `preAssignedRunId` for batch mode.
-- **SIGINT handling**: `withTrackedWorkflow` registers a SIGINT handler that writes a `failed` tracker entry and a log entry synchronously (bypassing async mutex) before calling `process.exit`. Also kills all Playwright Chrome processes via `wmic` on Windows.
-- **Error classification**: `classifyError()` in `utils/errors.ts` maps raw Playwright errors to concise user-facing messages (e.g. "Browser closed unexpectedly"). Use this in catch blocks before emitting error events.
-- **Tracker functions are Excel-only**: `updateOnboardingTracker`, `updateEidTracker`, `updateKronosTracker`, `updateWorkStudyTracker` write to `.xlsx` files only — they no longer call `trackEvent()` directly. The `withTrackedWorkflow` wrapper handles all JSONL event emissions.
-- Use `WorkflowSession.create()` for new workflows — shares auth across all windows
-- Use `computeTileLayout()` for multi-browser window positioning
-- Use `runWorkerPool()` for parallel processing — handles queue, errors, teardown
-
-## Multi-Browser Parallel Execution
-
-When a workflow uses multiple browser windows (e.g., separations uses 4), maximize parallelism at every stage: during authentication, during work, and during form fills. The key insight is that each browser is an independent execution context — once authenticated, it can start work immediately without waiting for other browsers.
-
-### Pattern 1: Auth-Ready Promises (Interleaved Auth + Work)
-
-**Problem**: Duo MFA must be sequential (one at a time), but the old approach was: auth ALL browsers → THEN start work. With 4 browsers at ~15s each, that's 60s of auth before any work begins.
-
-**Solution**: Each browser's auth creates a "ready" promise. Work tasks chain off their own ready promise via `.then()`. As soon as one browser's Duo clears, its work starts — while the user is still approving remaining Duos on their phone.
-
-```typescript
-// Declare ready promises — default to resolved for batch mode (already authed)
-let browserAReady: Promise<void> = Promise.resolve();
-let browserBReady: Promise<void> = Promise.resolve();
-
-if (existingWindows) {
-  // Batch mode: browsers already authed, promises stay resolved
-} else {
-  // Fresh mode: auth chain runs in background
-  // Auth #1 (blocking — everything depends on primary system)
-  await loginToPrimary(primaryWin.page);
-
-  // Auth #2 starts, becomes a ready promise
-  browserAReady = (async () => {
-    await loginToSystemA(browserA.page);
-  })();
-
-  // Wait for primary nav + Auth #2 to complete
-  await Promise.allSettled([primaryNavigation(), browserAReady]);
-
-  // Auth chain continues in background — DON'T await
-  browserBReady = browserAReady
-    .catch(() => {})  // don't block chain if Auth #2 failed
-    .then(async () => {
-      await loginToSystemB(browserB.page);
-    });
-
-  // Prevent unhandled rejection if workflow exits early
-  browserBReady.catch(() => {});
-}
-
-// Work tasks chain off ready promises — start as soon as their auth clears
-const [resultA, resultB] = await Promise.allSettled([
-  browserAReady.then(async () => { /* System A work */ }),
-  browserBReady.then(async () => { /* System B work */ }),
-  (async () => { /* Primary system work — already authed, starts immediately */ })(),
-]);
-```
-
-**Key rules**:
-- `.catch(() => {})` between chain steps prevents one auth failure from blocking subsequent auths
-- Add `browserBReady.catch(() => {})` at the end to prevent unhandled rejection if workflow exits before `Promise.allSettled` consumes the promise
-- In batch mode (reusing browsers), ready promises are `Promise.resolve()` → `.then()` fires immediately
-- Health checks (`ensurePageHealthy`) must be batch-only — in fresh mode, browsers may not be authed yet when Phase 1 starts
-
-### Pattern 2: Phase Parallelization (Independent Tasks in Parallel)
-
-**Problem**: Workflows often have phases that run sequentially even though they have no data dependency on each other.
-
-**Solution**: Identify which tasks actually depend on each other vs. which just happen to use different browser windows. Run independent tasks in the same `Promise.allSettled` block.
-
-**How to identify parallelizable tasks**: For each task, ask: "What data does this need that isn't available yet?" If the answer is only data from the extraction phase (already complete), it can run in parallel with other such tasks.
-
-```
-Before: Extract → Phase 1 (System A + B) → Phase 2 (System C + form fill) → Transaction
-After:  Extract → [System A + System B + System C + form fill] → Transaction
-                   (all in parallel — different browser windows, no data conflicts)
-```
-
-**Separations example** — tasks after Kuali extraction:
-| Task | Needs | Browser | Can parallelize? |
-|------|-------|---------|-----------------|
-| Old Kronos search | EID | oldKronosWin | Yes |
-| New Kronos search | EID | newKronosWin | Yes |
-| UCPath Job Summary | EID | ucpathWin | Yes |
-| Kuali timekeeper fill | Timekeeper name | kualiWin | Yes (different form fields) |
-| Kuali term date fill | Kronos dates | kualiWin | No — depends on Kronos results |
-| UCPath Transaction | Final term date | ucpathWin | No — depends on Kronos + Job Summary |
-
-Result: 4 tasks run in parallel, 2 must wait. The bottleneck (Old Kronos, ~60s) hides the others (~15-30s each).
-
-### Pattern 3: Batch-Only Guards
-
-Operations that reset state between items (health checks, browser resets, UCPath session resets) are only needed in batch mode. In fresh mode, browsers were just launched and authenticated — skip the overhead.
-
-```typescript
-// Health checks + reset: batch mode only
-if (existingWindows) {
-  await Promise.allSettled([
-    ensurePageHealthy(browserA.page, ...),
-    ensurePageHealthy(browserB.page, ...),
-  ]);
-  // Reset browsers to starting state for next item
-  await Promise.allSettled([resetBrowserA(), resetBrowserB()]);
-}
-
-// Post-transaction cleanup: batch mode only
-if (existingWindows) {
-  await navigateToStartPage(browser.page);
-}
-```
-
-### Pattern 4: Same-Page Parallel Form Fills
-
-When filling a long form, independent sections can be filled in parallel IF:
-1. They use different form fields (no DOM conflicts)
-2. Neither triggers a page navigation or refresh
-3. They happen on the same already-loaded page
-
-**Safe**: Filling "Timekeeper Name" while Kronos searches run (different page section, different browser)
-**Unsafe**: Filling a PeopleSoft dropdown while another field is being filled (dropdown triggers page refresh)
-
-### Applying to New Workflows
-
-When building a multi-browser workflow:
-
-1. **Map data dependencies**: Draw which tasks need which data. Only tasks that need data from a prior task must be sequential.
-2. **Assign browser windows**: Each parallel task should use its own browser window. Never share a browser between parallel tasks.
-3. **Use auth-ready promises**: If the workflow needs multiple Duo auths, use the interleaved pattern so work starts as each browser authenticates.
-4. **Use Promise.allSettled**: Never `Promise.all` — one system's failure shouldn't crash the workflow. Handle each result independently.
-5. **Batch-only guards**: If the workflow supports batch mode (sequential items, reused browsers), guard health checks and resets behind `if (existingWindows)`.
-
-### Timing Reference (Separations Workflow)
-
-Fresh launch (first document):
-```
-Auth Kuali (#1)              ████  15s
-[Kuali nav ‖ Old Kronos #2]  ��███  15s
-Extract (1s) — auth chain continues in background:
-  Old Kronos work starts     ████████████████████████████  60s
-  Auth New Kronos (#3, 15s)  → New Kronos work  ████████████████  33s
-  Auth UCPath (#4, 15s)                         → Job Summary  ██████  15s
-Grand total: ~91s (was ~120s without interleaving)
-```
-
-Batch mode (2nd+ documents, browsers already authed):
-```
-Kuali nav + extract          ████████  24s
-[Old Kronos ‖ New Kronos ‖ Job Summary ‖ Kuali fill]  ████████████████████████████  60s
-(Job Summary + Kronos run in parallel — was sequential before)
-Grand total: ~90s per doc (was ~120s without phase parallelization)
-```
-
-## Live Monitoring Dashboard
-
-Run `npm run dashboard` in a separate terminal. This starts:
-- **SSE API server** on port 3838 (reads `.tracker/` JSONL files, streams via Server-Sent Events)
-- **Vite dev server** on port 5173 (React SPA with hot reload, proxies `/api` and `/events` to 3838)
-
-Open **http://localhost:5173** to see real-time progress. The dashboard auto-updates when any workflow runs.
-
-### How It Works
-1. Workflows use `withTrackedWorkflow()` which emits events to `.tracker/{workflow}-{YYYY-MM-DD}.jsonl`
-2. Log calls via `withLogContext()` emit to `.tracker/{workflow}-{YYYY-MM-DD}-logs.jsonl`
-3. SSE server polls these files (1s for entries, 500ms for logs) and streams to the React frontend
-4. SSE server enriches entries with `firstLogTs`, `lastLogTs`, `lastLogMessage` per (itemId, runId)
-5. Dashboard dedupes entries by ID (keeps latest), sorts by running start time (firstLogTs), pending at bottom
-6. Workflow dropdown counts come from backend (`wfCounts`) for cross-workflow accuracy
-
-### Step Tracking Per Workflow
-| Workflow | Steps |
-|----------|-------|
-| Onboarding | crm-auth → extraction → pdf-download → ucpath-auth → person-search → i9-creation → transaction |
-| Separations | launching → authenticating → kuali-extraction → kronos-search → ucpath-job-summary → ucpath-transaction → kuali-finalization |
-| EID Lookup | ucpath-auth → searching (+ crm-auth → cross-verification for CRM mode) |
-| Kronos Reports | searching → extracting → downloading |
-| Work Study | ucpath-auth → transaction |
-| Emergency Contact | navigation → fill-form → save (per record) |
-
-Export to Excel: `tsx --env-file=.env src/cli.ts export <workflow>`
+`src/config.ts` centralizes URLs, PATHS (user-agnostic via `homedir()`), TIMEOUTS, SCREEN dimensions, and ANNUAL_DATES (update each fiscal year). Workflow-specific configs in `src/workflows/*/config.ts` re-export or narrow.
 
 ## Gotchas
 
-- UCPath content is inside iframe `#main_target_win0` (not `#ptifrmtgtframe`) — all selectors must target the iframe via `getContentFrame(page)`
-- UCPath Smart HR URL must use `ucphrprdpub.universityofcalifornia.edu` subdomain (not `ucpath.`) to avoid re-triggering SSO
-- Duo MFA requires manual user approval on phone — automation must pause and wait
-- **PeopleSoft dynamic grid IDs**: Grid inputs (phone, email, comp rate) use indexed IDs like `HR_TBH_G_SCR_WK_TBH_G_SH_EDIT1$0`. The index changes after page refreshes (e.g. position number fill). Always use `input[id="..."]` (not just `[id="..."]`) to avoid matching wrapper `<div>` elements, and provide multiple `.or()` fallback selectors
-- **Sidebar overlay**: The HR Tasks sidebar panel intercepts clicks on iframe buttons. Must collapse sidebar (`Navigation Area` button) before interacting with transaction forms
-- PeopleSoft `selectOption()` on dropdowns triggers page refreshes — always `waitForTimeout()` after dropdown changes before filling next field
-- Comp Rate Code is `UCHRLY` (not HCHRLY)
-- Expected Job End Date for dining hires is constant `06/30/2026`
-- **Person Org Summary single-result redirect**: When search returns exactly 1 match, PeopleSoft skips the grid and goes directly to the detail page — automation must detect this and handle both paths
-- **Name search fallbacks**: "Last, First Middle" may not match — try full name → first-only → middle-only strategies, and watch for spelling variants and legal vs preferred names
+PeopleSoft and UKG quirks bite every session. Keep these in mind:
 
-## Kuali Gotchas
+- **UCPath iframe** — all content lives in iframe `#main_target_win0` (not `#ptifrmtgtframe`). Access via `getContentFrame(page)` in `src/systems/ucpath/navigate.ts`.
+- **UCPath Smart HR subdomain** — use `ucphrprdpub.universityofcalifornia.edu`, not `ucpath.` — the `ucpath.` subdomain re-triggers SSO.
+- **PeopleSoft modal mask** (`#pt_modalMask`) — a transparent overlay that intercepts every click. Dismiss via `dismissPeopleSoftModalMask(page)` (in `src/systems/common/`) before each click, especially between tab switches.
+- **PeopleSoft grid index mutation** — grid inputs (phone, email, comp rate) use IDs like `HR_TBH_G_SCR_WK_TBH_G_SH_EDIT1$0`. The `$N` suffix changes after page refreshes (e.g. position-number fill reshuffles indices). Always use `input[id="..."]` (not just `[id="..."]`), and register selectors with 5-deep `.or()` fallback chains in `src/systems/<system>/selectors.ts`.
+- **HR Tasks sidebar overlay** intercepts clicks on iframe buttons. Collapse it via the "Navigation Area" button before interacting with transaction forms.
+- **PeopleSoft dropdowns trigger page refreshes** — always `waitForTimeout()` after `selectOption()` before filling the next field.
+- **Comp Rate Code / Compensation Rate** — select by accessible name (`getByRole("textbox", { name: "Comp Rate Code" })`) then press Tab to blur and trigger validation. Compensation Frequency must be explicitly filled `"H"` if empty. (Comp Rate Code is `UCHRLY`, not `HCHRLY`.)
+- **Visit all 4 UCPath Smart HR tabs before Save** — Save stays disabled until Personal Data → Job Data → Earns Dist → Employee Experience have all been visited. After filling Initiator Comments on the last tab, re-click Personal Data before Save.
+- **Expected Job End Date for dining hires** — constant `06/30/2026`. Update annually in `src/workflows/onboarding/config.ts`.
+- **Person Org Summary single-result redirect** — when search returns exactly 1 match, PeopleSoft skips the grid and jumps straight to the detail page. Automation must detect both paths.
+- **Name search fallbacks** — `"Last, First Middle"` may not match. Try full → first-only → middle-only. Watch for spelling variants and legal vs preferred names.
+- **Duo MFA sequencing** — simultaneous Duo prompts error. The kernel serializes per-system auth via `authChain`; don't roll your own.
+- **UKG widgetFrame id drifts** — use `getGeniesIframe(page)` with its 4-level frame fallback (direct ID → query selector → `page.frames()` scan → full page reload, up to 15 retries).
+- **Kuali date inputs sometimes ignore `fill()`** — read back and retry with `type()` (character-by-character) if mismatch. See `src/systems/kuali/navigate.ts`.
 
-- Kuali Build uses `getByRole()` selectors extensively — these are brittle if form layout changes
-- Department combobox uses best-match case-insensitive selection (type then pick closest)
-- Location field is optional — only filled if present in the form data
-- All separations are assumed to be student employees (Final Pay = "Does not need Final Pay")
-- Hardcoded space ID for the separation form
+Per-system gotchas live in `src/systems/<system>/CLAUDE.md`. Per-workflow gotchas live in `src/workflows/<name>/CLAUDE.md`.
 
-## New Kronos (WFD) Gotchas
+## Selector registry
 
-- Uses modern `getByRole()` API — simpler than Old Kronos but different selector patterns
-- Main content is inside a dynamic `portal-frame-*` iframe (ID changes per session)
-- "No items to display" message indicates empty search results
-- Timecard grid uses split DOM: dates in a pinned container, data in a viewport container — match by row index
+Every Playwright selector used by automation lives in a per-system `selectors.ts`:
 
-## UKG (Old Kronos) Gotchas
+```
+src/systems/ucpath/selectors.ts
+src/systems/crm/selectors.ts
+src/systems/i9/selectors.ts
+src/systems/old-kronos/selectors.ts
+src/systems/kuali/selectors.ts
+src/systems/new-kronos/selectors.ts
+```
 
-- **4-level frame fallback strategy**: Direct ID → query selector → `page.frames()` scan → full page reload, up to 15 retries
-- UKG main content is inside iframe `widgetFrame804` (or any `widgetFrame*`) — use `getGeniesIframe(page)`
-- Reports page uses three nested frames: `khtmlReportList` (nav tree), `khtmlReportWorkspace` (options), `khtmlReportingContentIframe` (content)
-- UKG modals pop up unexpectedly — `dismissModal()` must be called before most interactions
-- Date inputs require digit-by-digit typing (triple-click to select, Delete, Home, then type each digit with 100ms delays)
-- Report status polling uses two phases: Phase 1 finds the Running/Waiting row, Phase 2 polls that specific row by TR ID until Complete
-- First attempt in Phase 1 may show a stale Complete row from a previous run — must skip it and keep refreshing
-- Download capture uses Playwright's download event + filesystem fallback (diff snapshots before/after clicking View Report)
-- Report navigation (Go To → Reports → run → download → back) is serialized via `reportLock` mutex to avoid UKG server-side session conflicts
-- Session directories are per-worker (`ukg_session_worker1`, etc.) and cleaned up after all workers finish
+Selectors are functions returning `Locator` / `FrameLocator`, each carrying a `// verified YYYY-MM-DD` comment. Fallback chains (`.or()`) up to 6-deep are used where PeopleSoft grid IDs mutate or similar brittle anchors need hardening. Wrap invocations with `safeClick` / `safeFill` from `src/systems/common/` to log `log.warn("selector fallback triggered: <label>")` when the primary + fallbacks all miss.
 
-## playwright-cli — Selector Discovery Tool
+Do **not** inline `page.locator("...")` in system `.ts` files — the [`tests/unit/systems/inline-selectors.test.ts`](./tests/unit/systems/inline-selectors.test.ts) guard rejects PRs that do. Compound paths rooted in registry locators (`row.locator("td").nth(1)`) are whitelisted via end-of-line `// allow-inline-selector` comments.
 
-**Install/Update**: `npm install -g @playwright/cli@latest` (run before every playwright session)
+When you verify a selector via `playwright-cli snapshot`, bump its `// verified` date in `selectors.ts`. Never guess selectors — map the live page first.
 
-**First step**: Always run `playwright-cli --help` if unsure about commands or after updating.
+## Dashboard
 
-playwright-cli lets you open headed browsers, interact with pages, and snapshot the full accessibility tree to discover exact selectors. **Always use this before writing new automation selectors.** Never guess selectors — map them first. After mapping, immediately document selectors in the relevant module's `CLAUDE.md` under `## Verified Selectors`.
+`npm run dashboard` starts the SSE backend (`:3838`) + Vite dev server (`:5173`). Open http://localhost:5173.
 
-### Core Workflow
+Workflows emit JSONL entries via the kernel's `withTrackedWorkflow` wrapping; the SSE server reads `.tracker/{workflow}-{YYYY-MM-DD}.jsonl` + `*-logs.jsonl`, enriches entries with `firstLogTs`/`lastLogTs`/`lastLogMessage`, and streams to the React SPA. The dashboard reads all UI metadata (label, steps, systems, detailFields) from the server-side registry populated by `defineWorkflow` / `defineDashboardMetadata` — no frontend edits needed when you add a workflow.
+
+Current step tracking per workflow:
+
+| Workflow | Steps |
+|---|---|
+| onboarding | crm-auth → extraction → pdf-download → ucpath-auth → person-search → i9-creation → transaction |
+| separations | launching → authenticating → kuali-extraction → kronos-search → ucpath-job-summary → ucpath-transaction → kuali-finalization |
+| eid-lookup | ucpath-auth → searching (+ crm-auth → cross-verification in CRM mode) |
+| kronos-reports | searching → extracting → downloading |
+| work-study | ucpath-auth → transaction |
+| emergency-contact | navigation → fill-form → save |
+
+Implementation details live in `src/dashboard/CLAUDE.md` (frontend) and `src/tracker/CLAUDE.md` (backend).
+
+## Continuous improvement
+
+After every error fix, selector re-map, or new pattern: update the relevant CLAUDE.md. These files are the only memory between sessions — keep them accurate. Add notes to `## Lessons Learned` in the module/workflow you touched; bump `// verified` dates in `selectors.ts` when you re-map a selector; keep gotchas current.
+
+## Playwright-cli — selector discovery
+
+`playwright-cli` (install/update: `npm install -g @playwright/cli@latest`) opens headed browsers and dumps accessibility snapshots with ref IDs for every element. Use it before writing any new selector. Core loop:
 
 ```bash
-# 1. Open a browser session (named, headed)
 playwright-cli -s=mysession open --headed "https://example.com"
-
-# 2. Snapshot the page — returns full accessibility tree with ref IDs
-playwright-cli -s=mysession snapshot
-
-# 3. Interact using ref IDs from snapshot
-playwright-cli -s=mysession fill e34 'some text'      # fill a textbox
-playwright-cli -s=mysession click e40                   # click a button
-playwright-cli -s=mysession check f4e58                 # check a checkbox
-
-# 4. Take screenshot to visually verify
+playwright-cli -s=mysession snapshot                 # accessibility tree with refs
+playwright-cli -s=mysession fill e34 'value'         # by ref ID
+playwright-cli -s=mysession click e40
 playwright-cli -s=mysession screenshot
-
-# 5. Run JS inside the page (for iframes or complex DOM queries)
-playwright-cli -s=mysession eval "(()=>{ return document.title })()"
-
-# 6. Run JS inside an iframe (use ref from snapshot)
-playwright-cli -s=mysession eval "(()=>{ return 'hello' })()" f2e1
-
-# 7. Close when done
-playwright-cli -s=mysession close
-playwright-cli close-all          # close all sessions
-playwright-cli kill-all           # force kill zombies
+playwright-cli -s=mysession close                    # or close-all / kill-all
 ```
 
-### Key Commands
+Snapshot refs: `e40` = main page, `f2e1` = element inside iframe #2. For hidden-but-present elements, use `eval` with JS `.click()` instead. `playwright-cli --help` for the full list.
 
-| Command | What it does |
-|---------|-------------|
-| `open --headed <url>` | Open browser (visible) at URL |
-| `snapshot` | Dump accessibility tree with `ref=` IDs for every element |
-| `click <ref>` | Click element by ref ID |
-| `fill <ref> <text>` | Fill text into input by ref |
-| `check <ref>` | Check a checkbox |
-| `select <ref> <value>` | Select dropdown option |
-| `screenshot` | Take screenshot of current viewport |
-| `eval <code>` | Run JS on page |
-| `eval <code> <ref>` | Run JS scoped to element/iframe |
-| `tab-list` | List all open tabs |
-| `list` | List all browser sessions |
+After mapping, add the selector to the relevant `src/systems/<system>/selectors.ts` with today's `// verified` date.
 
-### Reading Snapshots
+## Obsolete patterns (institutional memory)
 
-Snapshots return YAML-like accessibility trees:
-```yaml
-- button "Login" [ref=e40] [cursor=pointer]
-- textbox "Username" [ref=e34]
-- iframe [ref=e125]:
-  - generic [ref=f2e1]:         # f-prefix = inside iframe
-    - gridcell "Mon 3/16" [ref=f2e237]
-```
+These patterns existed pre-kernel and are intentionally removed. Do not reintroduce them:
 
-- `ref=eNN` — element on the main page
-- `ref=fNeNN` — element inside iframe N (e.g., `f2e1` = iframe 2, element 1)
-- `[active]` — currently focused
-- `[expanded]` — dropdown is open
-- `[disabled]` — not clickable
-- `[cursor=pointer]` — clickable
-
-### Tips
-
-- **Sessions are named** (`-s=mysession`) — you can have multiple browsers open at once
-- **Iframes**: snapshot shows iframe content inline with `f`-prefixed refs. You can click/fill them directly.
-- **Hidden elements**: If `click` says "element is not visible", the element is in DOM but hidden. Use `eval` with JS `.click()` instead.
-- **Auth flows**: Fill SSO credentials via `fill` + `click`, then wait for Duo manually, then `snapshot` again.
-- **Dropdown menus**: After clicking a dropdown trigger, `snapshot` again to see the newly visible options.
-- **Split grids** (like New Kronos): Dates and data may be in separate DOM containers. Use `eval` with JS to query both and correlate by index.
-
-### Example: Mapping a New Page
-
-```bash
-# Open and auth
-playwright-cli -s=ukg open --headed "https://ucsd.kronos.net/wfc/navigator/logon"
-playwright-cli -s=ukg snapshot                    # see SSO form
-playwright-cli -s=ukg fill e34 'username'
-playwright-cli -s=ukg fill e37 'password'
-playwright-cli -s=ukg click e40                    # Login button
-# ... approve Duo on phone ...
-playwright-cli -s=ukg snapshot                    # see dashboard
-playwright-cli -s=ukg click e74                   # click Timecards sidebar
-playwright-cli -s=ukg snapshot                    # see timecard grid
-playwright-cli -s=ukg screenshot                  # visual verification
-```
-
-## Separations Workflow Flow
-
-1. Launch 4 tiled browsers (Kuali, Old Kronos, New Kronos, UCPath)
-2. Auth Kuali (Duo #1), then Kuali nav + Old Kronos auth (Duo #2) in parallel
-3. Auth chain continues in background (New Kronos #3, UCPath #4) — extraction proceeds immediately
-4. Extract Kuali separation data, compute termination effective date (separation date + 1 day)
-5. **Phase 1 (4-way parallel)**: Each task starts as soon as its auth clears:
-   - Old Kronos timecard search (starts immediately — auth already done)
-   - New Kronos timecard search (starts when Duo #3 approved)
-   - UCPath Job Summary lookup (starts when Duo #4 approved)
-   - Kuali timekeeper name fill (starts immediately — already authed)
-6. Resolve Kronos dates: Kronos dates always override Kuali dates when they differ (ground truth)
-7. Fill remaining Kuali fields (term effective date, department, payroll code)
-8. **UCPath Transaction**: Create termination Smart HR transaction
-9. Reason code: exact match → fuzzy match → fallback mapping from Kuali termination type
-10. **Kuali Finalization**: Write UCPath transaction ID back to Kuali form, save
-
-## UCPath Smart HR Transaction Flow (14 Steps)
-
-1. Navigate to HR Tasks page
-2. Sidebar: Smart HR Templates → Smart HR Transactions (collapse sidebar after)
-3. Fill template: `UC_FULL_HIRE`
-4. Fill effective date
-5. Click Create Transaction
-6. Select reason: `Hire - No Prior UC Affiliation`, click Continue
-7. Personal Data tab: legal name, DOB, SSN, address, phone (Mobile-Personal + preferred), email (Home), tracker profile ID
-8. Fill Comments textarea
-9. Job Data tab
-10. Fill position number, employee classification, comp rate (UCHRLY), compensation rate, expected end date
-11. Earns Dist tab (visit only)
-12. Employee Experience tab (visit only)
-13. Fill Initiator Comments (last tab, before submit)
-14. Save and Submit
+- **`WorkflowSession.create()`** — pre-kernel shared-auth abstraction. Replaced by `Session.launch()` inside `src/core/`. Workflows access it only as an escape hatch via `ctx.session`.
+- **Inline `withTrackedWorkflow` / `withLogContext`** — handlers now wrap nothing; the kernel wraps each item automatically. Only legacy workflows (`separations`, `old-kronos-reports`) still call these directly.
+- **Inline `launchBrowser` from handlers** — kernel owns browser lifecycle. Use `ctx.page(id)`.
+- **Hand-rolled auth-ready promises** — `authChain: "interleaved"` in the kernel does this. Older docs showed ~140 lines of promise-chain recipes; they are obsolete.
+- **`WF_CONFIG` in the frontend** — deleted in subsystem D. Dashboard UI metadata is now server-side in the kernel registry.
+- **`markStaleRunningEntries`** — removed; caused false "Process interrupted" failures. Replaced by a SIGINT handler in `withTrackedWorkflow`.
+- **Per-workflow Excel tracker as primary observability** — dashboard JSONL is the source of truth. Existing xlsx writers (`updateEidTracker`, `updateWorkStudyTracker`, etc.) are retained for historical use and are Excel-only (they no longer emit tracker events).
+- **Raw `page.locator("...")` calls in system `.ts` files** — all selectors go through `src/systems/<system>/selectors.ts`. The inline-selectors test guard enforces this.
