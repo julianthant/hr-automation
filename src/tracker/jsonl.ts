@@ -91,6 +91,28 @@ export function trackEvent(entry: TrackerEntry, dir: string = DEFAULT_DIR): void
   appendFileSync(logPath, JSON.stringify(entry) + "\n");
 }
 
+/**
+ * Serialize an arbitrary value for storage in `TrackerEntry.data` (which is
+ * `Record<string, string>` at rest). Preserves fidelity for common rich types:
+ *   - Date → ISO string
+ *   - null/undefined → ""
+ *   - primitive (string/number/boolean/bigint) → String(v)
+ *   - object/array → JSON.stringify(v) (falls back to String(v) if circular)
+ */
+export function serializeValue(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (v instanceof Date) return v.toISOString();
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean" || typeof v === "bigint") {
+    return String(v);
+  }
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
+
 /** Session context passed to workflow callbacks for registering sessions/browsers. */
 export interface SessionContext {
   /** Auto-generated instance name, e.g. "Separation 1" */
@@ -108,6 +130,10 @@ export interface SessionContext {
  *
  * Emits: pending (on start) → running/step (via setStep) → done (on success) | failed (on throw).
  * Call `updateData()` to enrich the entry with data discovered during execution (e.g. employee name).
+ *
+ * `updateData` accepts `Record<string, unknown>`; each value is stringified at the write
+ * boundary via `serializeValue` (Date → ISO, object → JSON). The on-disk `TrackerEntry.data`
+ * remains `Record<string, string>`.
  */
 export async function withTrackedWorkflow<T>(
   workflow: string,
@@ -115,13 +141,15 @@ export async function withTrackedWorkflow<T>(
   initialData: Record<string, string>,
   fn: (
     setStep: (step: string) => void,
-    updateData: (d: Record<string, string>) => void,
+    updateData: (d: Record<string, unknown>) => void,
     /** Register a sync cleanup function (e.g. kill browsers) that runs on SIGINT before exit. */
     onCleanup: (cb: () => void) => void,
     session: SessionContext,
   ) => Promise<T>,
   /** Pre-assigned runId (batch mode) — skips run computation and initial pending emit. */
   preAssignedRunId?: string,
+  /** Override tracker directory — defaults to DEFAULT_DIR (`.tracker`). Mainly for test isolation. */
+  dir: string = DEFAULT_DIR,
 ): Promise<T> {
   const data = { ...initialData };
   const ts = () => new Date().toISOString();
@@ -130,7 +158,7 @@ export async function withTrackedWorkflow<T>(
   if (preAssignedRunId) {
     runId = preAssignedRunId;
   } else {
-    const existing = readEntries(workflow);
+    const existing = readEntries(workflow, dir);
     const priorRuns = new Set(
       existing.filter((e) => e.id === id).map((e) => e.runId)
     );
@@ -139,7 +167,7 @@ export async function withTrackedWorkflow<T>(
   setLogRunId(runId);
 
   const emit = (status: TrackerEntry["status"], extra?: { step?: string; error?: string }) => {
-    trackEvent({ workflow, timestamp: ts(), id, runId, status, data, ...extra });
+    trackEvent({ workflow, timestamp: ts(), id, runId, status, data, ...extra }, dir);
   };
 
   if (!preAssignedRunId) emit("pending");
@@ -181,11 +209,11 @@ export async function withTrackedWorkflow<T>(
     const error = `Process terminated (${signal})`;
     const now = ts();
     const date = now.slice(0, 10);
-    if (!existsSync(DEFAULT_DIR)) mkdirSync(DEFAULT_DIR, { recursive: true });
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const logEntry: LogEntry = { workflow, itemId: id, runId, level: "error", message: error, ts: now };
     const trackEntry: TrackerEntry = { workflow, timestamp: now, id, runId, status: "failed", data, error };
-    appendFileSync(join(DEFAULT_DIR, `${workflow}-${date}-logs.jsonl`), JSON.stringify(logEntry) + "\n");
-    appendFileSync(join(DEFAULT_DIR, `${workflow}-${date}.jsonl`), JSON.stringify(trackEntry) + "\n");
+    appendFileSync(join(dir, `${workflow}-${date}-logs.jsonl`), JSON.stringify(logEntry) + "\n");
+    appendFileSync(join(dir, `${workflow}-${date}.jsonl`), JSON.stringify(trackEntry) + "\n");
   };
   process.on("SIGINT", () => { onSignal("SIGINT"); process.exit(130); });
   process.on("SIGTERM", () => { onSignal("SIGTERM"); process.exit(143); });
@@ -193,7 +221,11 @@ export async function withTrackedWorkflow<T>(
   try {
     const result = await fn(
       (step) => { emit("running", { step }); emitStepChange(instanceName, step); },
-      (d) => Object.assign(data, d),
+      (d) => {
+        // Stringify rich values at the write boundary — data stays Record<string, string>
+        // on disk, but callers can pass Date/object/etc. without losing fidelity.
+        for (const [k, v] of Object.entries(d)) data[k] = serializeValue(v);
+      },
       (cb) => cleanupFns.push(cb),
       session,
     );
