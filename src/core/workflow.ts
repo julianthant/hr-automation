@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { WorkflowConfig, RegisteredWorkflow, WorkflowMetadata, RunOpts, BatchResult } from './types.js'
-import { register } from './registry.js'
+import { register, autoLabel, normalizeDetailField } from './registry.js'
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
 import { makeCtx } from './ctx.js'
@@ -14,9 +14,10 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
 ): RegisteredWorkflow<TData, TSteps> {
   const metadata: WorkflowMetadata = {
     name: config.name,
+    label: config.label ?? autoLabel(config.name),
     steps: config.steps,
     systems: config.systems.map((s) => s.id),
-    detailFields: (config.detailFields ?? []) as string[],
+    detailFields: (config.detailFields ?? []).map(normalizeDetailField),
   }
   register(metadata)
   return { config, metadata }

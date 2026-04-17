@@ -16,16 +16,44 @@ export interface BatchConfig {
   preEmitPending?: boolean
 }
 
+/**
+ * Labeled or legacy `detailFields` entry. The registry normalizes both shapes
+ * into `{ key, label }` for the dashboard — workflows can continue to declare
+ * plain `string[]` (auto-title-cased label) or upgrade to the explicit shape.
+ */
+export type DetailField<TData> =
+  | (keyof TData & string)
+  | { key: string; label: string }
+
 export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   name: string
   version?: string
+  /** Human-readable workflow label for the dashboard (e.g. "Onboarding"). */
+  label?: string
   systems: SystemConfig[]
   steps: TSteps
   schema: ZodType<TData>
   tiling?: 'auto' | 'single' | 'side-by-side'
   authChain?: 'sequential' | 'interleaved'
   batch?: BatchConfig
-  detailFields?: Array<keyof TData & string>
+  /**
+   * Dashboard detail-panel fields — either plain keys (legacy) or labeled
+   * entries (preferred). Legacy keys get auto-title-cased labels in the
+   * registry (`emplId` → `Empl Id`). Only labeled entries are enforced by
+   * the runtime warning for missing `updateData` populations.
+   */
+  detailFields?: Array<DetailField<TData>>
+  /**
+   * Derive a display name from accumulated tracker data (already stringified
+   * `Record<string, string>`). Called server-side on each emit; result lands
+   * in `data.__name` for the dashboard to read.
+   */
+  getName?: (data: Record<string, string>) => string
+  /**
+   * Derive a display id from accumulated tracker data. Falls back to the
+   * tracker `TrackerEntry.id` on the dashboard if this returns an empty string.
+   */
+  getId?: (data: Record<string, string>) => string
   handler: (ctx: Ctx<TSteps, TData>, data: TData) => Promise<void>
 }
 
@@ -64,9 +92,12 @@ export interface SessionHandle {
 
 export interface WorkflowMetadata {
   name: string
+  /** Human-readable workflow label for the dashboard (auto-derived from `name` when absent). */
+  label: string
   steps: readonly string[]
   systems: string[]
-  detailFields: string[]
+  /** Normalized labeled detailFields — always `{ key, label }` on the wire. */
+  detailFields: Array<{ key: string; label: string }>
 }
 
 export interface RegisteredWorkflow<TData, TSteps extends readonly string[]> {
