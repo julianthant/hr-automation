@@ -19,7 +19,7 @@ import {
 import { TransactionError } from "../../systems/ucpath/types.js";
 import { navigateToEmergencyContact } from "../../systems/ucpath/personal-data.js";
 import { downloadSharePointFile } from "../../utils/sharepoint-download.js";
-import { verifyBatchAgainstRoster } from "../../utils/roster-verify.js";
+import { verifyBatchAgainstRoster } from "./roster-verify.js";
 import { buildEmergencyContactPlan, extractEmployeeName, findExistingContactDuplicate } from "./enter.js";
 import type { EmergencyContactContext } from "./enter.js";
 import { loadBatch } from "./schema.js";
