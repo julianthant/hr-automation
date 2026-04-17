@@ -97,3 +97,19 @@ test('stepper.parallelAll: empty object returns empty object', async () => {
   const result = await stepper.parallelAll({})
   assert.deepEqual(result, {})
 })
+
+test('stepper.markStep: emits step name without wrapping a body', () => {
+  const { stepper, events } = mkStepper()
+  assert.equal(stepper.getCurrentStep(), null)
+  stepper.markStep('ucpath-auth')
+  assert.equal(stepper.getCurrentStep(), 'ucpath-auth')
+  // Exactly one step event fired, no failed event — markStep has no catch path.
+  assert.deepEqual(events, [{ kind: 'step', step: 'ucpath-auth' }])
+})
+
+test('stepper.markStep: does not throw even if emitStep is a no-op', () => {
+  const { stepper } = mkStepper()
+  // Intentionally nothing to assert beyond "no throw" — markStep has no
+  // failure path, so this call must simply succeed.
+  assert.doesNotThrow(() => stepper.markStep('any-name'))
+})

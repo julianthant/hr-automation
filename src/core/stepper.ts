@@ -27,6 +27,17 @@ export class Stepper {
     }
   }
 
+  /**
+   * Announce a step transition without wrapping a body. No try/catch, no
+   * throw propagation — just updates `currentStep` and fires `emitStep`.
+   * Useful for phases whose work is already managed elsewhere (e.g. auth
+   * resolved by Session.launch before the first `ctx.page()` call).
+   */
+  markStep(name: string): void {
+    this.currentStep = name
+    this.opts.emitStep(name)
+  }
+
   updateData(patch: Record<string, unknown>): void {
     this.data = { ...this.data, ...patch }
     this.opts.emitData({ ...this.data })

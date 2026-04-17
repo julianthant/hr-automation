@@ -41,12 +41,12 @@ export const workStudyWorkflow = defineWorkflow({
     // Surface input data to the dashboard before the first step fires.
     ctx.updateData({ emplId: input.emplId, effectiveDate: input.effectiveDate });
 
-    // Step 1: auth — Session already kicked off loginToUCPath; the first
-    // ctx.page() call blocks until that promise resolves, so wrapping it in
-    // a step gives the dashboard a clean "ucpath-auth" phase.
-    await ctx.step("ucpath-auth", async () => {
-      await ctx.page("ucpath");
-    });
+    // Step 1: auth — Session already kicked off loginToUCPath; we just
+    // announce the phase for the dashboard, then let the first ctx.page()
+    // call below block until that auth promise resolves. markStep is the
+    // announce-only variant of step — no body to wrap.
+    ctx.markStep("ucpath-auth");
+    await ctx.page("ucpath");
 
     // Step 2: execute the PayPath transaction plan.
     await ctx.step("transaction", async () => {

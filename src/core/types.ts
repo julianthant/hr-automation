@@ -41,6 +41,7 @@ export interface RetryOpts {
 export interface Ctx<TSteps extends readonly string[], TData> {
   page(id: string): Promise<Page>
   step<R>(name: TSteps[number], fn: () => Promise<R>): Promise<R>
+  markStep(name: TSteps[number]): void
   parallel<T extends Record<string, () => Promise<unknown>>>(
     tasks: T,
   ): Promise<{ [K in keyof T]: PromiseSettledResult<Awaited<ReturnType<T[K]>>> }>
