@@ -4,6 +4,7 @@ import { readdir } from "fs/promises";
 import { log } from "../../utils/log.js";
 import { debugScreenshot } from "../../utils/screenshot.js";
 import { PATHS } from "../../config.js";
+import { reportsPage } from "./selectors.js";
 
 /**
  * Try multiple selectors across multiple frames. Returns true if one was clicked.
@@ -75,14 +76,7 @@ async function jsClickText(
 async function clickRunReport(page: Page): Promise<boolean> {
   const contentFrame = page.frame({ name: "khtmlReportingContentIframe" });
 
-  const selectors = [
-    "input[value='Run Report']",
-    "button:has-text('Run Report')",
-    "a:has-text('Run Report')",
-    "td:has-text('Run Report')",
-    "input[type='submit'][value*='Run']",
-    "input[type='button'][value*='Run']",
-  ];
+  const selectors = reportsPage.runReportSelectors;
 
   const framesToSearch = [
     ...(contentFrame ? [contentFrame] : []),
@@ -152,11 +146,8 @@ export async function waitForReportAndDownload(
   log.step(`[${employeeId}] Waiting for report to complete...`);
 
   // Switch to CHECK REPORT STATUS tab
-  await clickInFrames(page, [
-    "text=CHECK REPORT STATUS",
-    "a:has-text('Check Report Status')",
-    "td:has-text('Check Report Status')",
-  ]) || await jsClickText(page, "CHECK REPORT STATUS");
+  await clickInFrames(page, [...reportsPage.checkStatusSelectors]) ||
+    await jsClickText(page, "CHECK REPORT STATUS");
 
   // Wait 12 seconds for the report to generate
   await page.waitForTimeout(12_000);
@@ -166,7 +157,7 @@ export async function waitForReportAndDownload(
   let statusFrame: Frame | null = null;
 
   for (let attempt = 0; attempt < 10; attempt++) {
-    await clickInFrames(page, ["text=Refresh Status"]) ||
+    await clickInFrames(page, [...reportsPage.refreshStatusSelectors]) ||
       await jsClickText(page, "Refresh Status");
     await page.waitForTimeout(3_000);
 
@@ -276,11 +267,8 @@ async function downloadReportRow(
   }
 
   // Click View Report
-  await clickInFrames(page, [
-    "input[value='View Report']",
-    "button:has-text('View Report')",
-    "text=View Report",
-  ]) || await jsClickText(page, "View Report");
+  await clickInFrames(page, [...reportsPage.viewReportSelectors]) ||
+    await jsClickText(page, "View Report");
 
   // Wait for download
   for (let i = 0; i < 30; i++) {
@@ -386,7 +374,7 @@ export async function handleReportsPage(
     return false;
   }
 
-  const timecardLoc = listFrame.locator("a:text-is('Timecard'), span:text-is('Timecard')");
+  const timecardLoc = reportsPage.timecardNavTreeEntry(listFrame);
   if (await timecardLoc.count() > 0) {
     await timecardLoc.first().click();
     await page.waitForTimeout(3_000);
