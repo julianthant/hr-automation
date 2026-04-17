@@ -1,6 +1,13 @@
 import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
 import { debugScreenshot } from "../../utils/screenshot.js";
+import {
+  searchFrame,
+  navbar,
+  search as searchSelectors,
+  goToMenu,
+  timecard,
+} from "./selectors.js";
 
 export const NEW_KRONOS_URL = "https://ucsd-sso.prd.mykronos.com/wfd/home";
 
@@ -27,26 +34,23 @@ export async function searchEmployee(
 
   // Click the Employee Search button in the navbar
   log.step("[New Kronos] Opening Employee Search sidebar...");
-  await page.getByRole("button", { name: "Employee Search" }).first().click({ timeout: 10_000 });
+  await navbar.employeeSearchButton(page).click({ timeout: 10_000 });
   await page.waitForTimeout(2_000);
 
-  // The search sidebar opens inside an iframe named "portal-frame-*"
-  // Find the iframe dynamically since the number suffix varies
-  const searchFrame = page.frameLocator('iframe[name^="portal-frame-"]');
+  const frame = searchFrame(page);
 
   // Fill the search input
   log.step(`[New Kronos] Filling search: ${employeeId}`);
-  const searchInput = searchFrame.getByRole("textbox", { name: "Search by Employee Name or ID" });
-  await searchInput.fill(employeeId, { timeout: 5_000 });
+  await searchSelectors.searchInput(frame).fill(employeeId, { timeout: 5_000 });
   await page.waitForTimeout(500);
 
   // Click the Search button (inside the iframe)
   log.step("[New Kronos] Clicking Search...");
-  await searchFrame.getByRole("button", { name: "Search", exact: true }).click({ timeout: 5_000 });
+  await searchSelectors.searchSubmitButton(frame).click({ timeout: 5_000 });
   await page.waitForTimeout(3_000);
 
   // Check for "There are no items to display" — means not found
-  const noResults = searchFrame.getByText("There are no items to display.");
+  const noResults = searchSelectors.noResultsText(frame);
   const notFound = (await noResults.count()) > 0;
 
   if (notFound) {
@@ -63,10 +67,10 @@ export async function searchEmployee(
  */
 export async function selectEmployeeResult(page: Page): Promise<boolean> {
   log.step("[New Kronos] Selecting employee from search results...");
-  const searchFrame = page.frameLocator('iframe[name^="portal-frame-"]');
+  const frame = searchFrame(page);
 
   // Click the checkbox on the first result row
-  const checkbox = searchFrame.locator('input[type="checkbox"]').first();
+  const checkbox = searchSelectors.firstResultCheckbox(frame);
   if ((await checkbox.count()) > 0) {
     await checkbox.check({ timeout: 5_000 });
     await page.waitForTimeout(1_000);
@@ -75,7 +79,7 @@ export async function selectEmployeeResult(page: Page): Promise<boolean> {
   }
 
   // Fallback: click the employee name/row directly
-  const resultRow = searchFrame.locator('[role="row"]').first();
+  const resultRow = searchSelectors.firstResultRow(frame);
   if ((await resultRow.count()) > 0) {
     await resultRow.click({ timeout: 5_000 });
     await page.waitForTimeout(1_000);
@@ -94,13 +98,11 @@ export async function selectEmployeeResult(page: Page): Promise<boolean> {
 export async function clickGoToTimecard(page: Page): Promise<boolean> {
   log.step("[New Kronos] Clicking Go To → Timecard...");
 
-  const searchFrame = page.frameLocator('iframe[name^="portal-frame-"]');
+  const frame = searchFrame(page);
 
-  // Try Go To button in the search frame first
-  const gotoInFrame = searchFrame.getByRole("button", { name: /go to/i })
-    .or(searchFrame.locator("text=Go To"));
-  const gotoOnPage = page.getByRole("button", { name: /go to/i })
-    .or(page.locator("button:has-text('Go To')"));
+  // Try Go To button in the search frame first, fall back to top-level page
+  const gotoInFrame = goToMenu.goToButtonInFrame(frame);
+  const gotoOnPage = goToMenu.goToButtonOnPage(page);
 
   let clicked = false;
   if ((await gotoInFrame.count()) > 0) {
@@ -118,13 +120,8 @@ export async function clickGoToTimecard(page: Page): Promise<boolean> {
 
   await page.waitForTimeout(2_000);
 
-  // Click Timecard/Timecards in the dropdown menu
-  const timecardItem = searchFrame.getByRole("menuitem", { name: /timecard/i })
-    .or(searchFrame.locator("text=Timecards").first())
-    .or(searchFrame.locator("text=Timecard").first())
-    .or(page.getByRole("menuitem", { name: /timecard/i }))
-    .or(page.locator("text=Timecards").first())
-    .or(page.locator("text=Timecard").first());
+  // Click Timecard/Timecards in the dropdown menu (6-deep fallback)
+  const timecardItem = goToMenu.timecardItem(page);
 
   if ((await timecardItem.count()) > 0) {
     await timecardItem.first().click({ timeout: 5_000 });
@@ -145,12 +142,12 @@ export async function switchToPreviousPayPeriod(page: Page): Promise<boolean> {
 
   // Mapped via playwright-cli: click "Current Pay Period" button to open dropdown,
   // then click option "Previous Pay Period"
-  const periodBtn = page.getByRole("button", { name: "Current Pay Period" }).first();
+  const periodBtn = timecard.currentPayPeriodButton(page);
   if ((await periodBtn.count()) > 0) {
     await periodBtn.click({ timeout: 5_000 });
     await page.waitForTimeout(2_000);
 
-    const prevOption = page.getByRole("option", { name: "Previous Pay Period" });
+    const prevOption = timecard.previousPayPeriodOption(page);
     if ((await prevOption.count()) > 0) {
       await prevOption.click({ timeout: 5_000 });
       await page.waitForTimeout(5_000);
@@ -276,26 +273,23 @@ export async function setDateRange(
 
   // Step 1: Click the timeframe button to open the dropdown
   // The button text varies: "Current Pay Period", "Previous Pay Period", or a date range string
-  const periodBtn = page.getByRole("button", { name: /Pay Period|Schedule Period|^\d+\/\d+\/\d+/ }).first();
-  await periodBtn.click({ timeout: 10_000 });
+  await timecard.payPeriodTriggerButton(page).click({ timeout: 10_000 });
   await page.waitForTimeout(2_000);
 
   // Step 2: Click "Select range" to switch to custom date range mode
-  await page.getByRole("button", { name: "Select range" }).click({ timeout: 5_000 });
+  await timecard.selectRangeButton(page).click({ timeout: 5_000 });
   await page.waitForTimeout(1_000);
 
   // Step 3: Fill start date
-  const startInput = page.getByRole("textbox", { name: "Start date" });
-  await startInput.fill(startDate, { timeout: 5_000 });
+  await timecard.startDateInput(page).fill(startDate, { timeout: 5_000 });
   await page.waitForTimeout(500);
 
   // Step 4: Fill end date
-  const endInput = page.getByRole("textbox", { name: "End date" });
-  await endInput.fill(endDate, { timeout: 5_000 });
+  await timecard.endDateInput(page).fill(endDate, { timeout: 5_000 });
   await page.waitForTimeout(500);
 
   // Step 5: Click Apply
-  await page.getByRole("button", { name: "Apply" }).click({ timeout: 5_000 });
+  await timecard.applyButton(page).click({ timeout: 5_000 });
   await page.waitForTimeout(5_000);
   log.step("[New Kronos] Date range applied");
 }
@@ -305,8 +299,8 @@ export async function setDateRange(
  */
 export async function closeEmployeeSearch(page: Page): Promise<void> {
   try {
-    const searchFrame = page.frameLocator('iframe[name^="portal-frame-"]');
-    const closeBtn = searchFrame.getByRole("button", { name: "Employee Search Close" });
+    const frame = searchFrame(page);
+    const closeBtn = searchSelectors.closeButton(frame);
     if ((await closeBtn.count()) > 0) {
       await closeBtn.click({ timeout: 3_000 });
       log.step("[New Kronos] Search sidebar closed");
