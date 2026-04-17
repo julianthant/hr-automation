@@ -42,7 +42,7 @@ import {
   setDateRange as setNewKronosDateRange,
   getTimecardLastDate as getNewKronosTimecardLastDate,
   NEW_KRONOS_URL,
-} from "../../new-kronos/index.js";
+} from "../../systems/new-kronos/index.js";
 
 // UCPath modules
 import {

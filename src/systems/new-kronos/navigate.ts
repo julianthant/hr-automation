@@ -1,6 +1,6 @@
 import type { Page } from "playwright";
-import { log } from "../utils/log.js";
-import { debugScreenshot } from "../utils/screenshot.js";
+import { log } from "../../utils/log.js";
+import { debugScreenshot } from "../../utils/screenshot.js";
 
 export const NEW_KRONOS_URL = "https://ucsd-sso.prd.mykronos.com/wfd/home";
 
