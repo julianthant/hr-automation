@@ -76,6 +76,15 @@ export interface RunOpts {
     tileCount: number
     tiling: 'auto' | 'single' | 'side-by-side'
   }) => Promise<{ page: import('playwright').Page; context: import('playwright').BrowserContext; browser: import('playwright').Browser }>
+  /** Skip withLogContext + withTrackedWorkflow wrapping (tests — use no-op emitters). */
   trackerStub?: boolean
-  onPreEmitPending?: (item: unknown) => void
+  /**
+   * Called once per item before the loop starts — receives the item plus the pre-generated
+   * `runId` that will be used for that item's `withTrackedWorkflow` run. Allows callers to
+   * emit an initial `pending` tracker entry with the matching `runId`; `withTrackedWorkflow`
+   * will then skip its own pending emit (see `preAssignedRunId` branch).
+   */
+  onPreEmitPending?: (item: unknown, runId: string) => void
+  /** Override tracker directory — defaults to `.tracker`. Mainly for test isolation. */
+  trackerDir?: string
 }
