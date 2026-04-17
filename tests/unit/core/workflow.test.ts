@@ -1,5 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { z } from 'zod'
 import { defineWorkflow, runWorkflow } from '../../../src/core/workflow.js'
 import { getAll, getByName, clear } from '../../../src/core/registry.js'
@@ -94,5 +97,43 @@ test('runWorkflow: installs SIGINT handler during handler execution', async () =
     trackerStub: true,
   })
   assert.equal(observed, before + 1, 'handler should see a new SIGINT listener installed')
+  assert.equal(process.listeners('SIGINT').length, before, 'listener should be removed after')
+})
+
+test('runWorkflow: does NOT install SIGINT when trackerStub is false (tracker owns it)', async (t) => {
+  const tmp = mkdtempSync(join(tmpdir(), 'sigint-dedup-'))
+  t.after(() => {
+    try { rmSync(tmp, { recursive: true, force: true }) } catch { /* ignore */ }
+  })
+
+  const name = `sigint-dedup-${Date.now()}`
+  let observed: number | null = null
+  const wf = defineWorkflow({
+    name,
+    systems: [{ id: 'x', login: async () => {} }],
+    steps: ['s1'] as const,
+    schema: z.object({}),
+    handler: async () => {
+      observed = process.listeners('SIGINT').length
+    },
+  })
+  const before = process.listeners('SIGINT').length
+  await runWorkflow(wf, {}, {
+    launchFn: () => Promise.resolve({
+      page: { bringToFront: async () => {} } as unknown as import('playwright').Page,
+      context: { close: async () => {} } as never,
+      browser: { close: async () => {} } as never,
+    }),
+    // trackerStub omitted — real tracker path runs with temp dir for isolation
+    trackerDir: tmp,
+  })
+  // During handler execution, only withTrackedWorkflow's handler is installed
+  // (exactly +1). If the kernel still installed its own, we'd see +2.
+  assert.equal(
+    observed,
+    before + 1,
+    `expected exactly 1 new SIGINT listener during handler (was ${observed} vs baseline ${before})`,
+  )
+  // After the run, the tracker removes its handler — listener count returns to baseline.
   assert.equal(process.listeners('SIGINT').length, before, 'listener should be removed after')
 })

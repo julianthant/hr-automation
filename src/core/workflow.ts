@@ -57,6 +57,12 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
   const run = async (
     setStep: (s: string) => void,
     updateData: (d: Record<string, unknown>) => void,
+    /**
+     * Install a kernel-owned SIGINT handler. Only passed `true` in the
+     * `trackerStub` branch — in real runs, `withTrackedWorkflow` owns SIGINT
+     * and a second handler here would just duplicate cleanup.
+     */
+    installSigint: boolean,
   ): Promise<void> => {
     const session = await Session.launch(wf.config.systems, {
       authChain: wf.config.authChain,
@@ -80,40 +86,49 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
 
     const ctx = makeCtx<TSteps, TData>({ session, stepper, isBatch: false, runId })
 
-    const sigintHandler = () => {
-      try {
-        const step = stepper.getCurrentStep() ?? 'sigint'
-        setStep(`${step}:failed:interrupted`)
-      } catch { /* best-effort */ }
-      // Fire-and-forget kill — we're exiting regardless.
-      session.killChrome().catch(() => {})
-      process.exit(1)
+    let sigintHandler: (() => void) | null = null
+    if (installSigint) {
+      sigintHandler = () => {
+        try {
+          const step = stepper.getCurrentStep() ?? 'sigint'
+          setStep(`${step}:failed:interrupted`)
+        } catch { /* best-effort */ }
+        // Fire-and-forget kill — we're exiting regardless.
+        session.killChrome().catch(() => {})
+        process.exit(1)
+      }
+      process.on('SIGINT', sigintHandler)
     }
-    process.on('SIGINT', sigintHandler)
 
     try {
       await wf.config.handler(ctx, data)
     } finally {
-      process.off('SIGINT', sigintHandler)
+      if (sigintHandler) process.off('SIGINT', sigintHandler)
       await session.close()
     }
   }
 
   if (opts.trackerStub) {
+    // trackerStub mode is test-only injection: withTrackedWorkflow isn't
+    // running, so the kernel must own SIGINT here.
     await run(
       () => {},
       () => {},
+      true,
     )
     return
   }
 
+  // Real-run mode: withTrackedWorkflow installs its own SIGINT handler that
+  // writes a `failed` tracker entry + log entry before exiting. A kernel
+  // handler on top would just duplicate cleanup, so don't install one.
   await withLogContext(wf.config.name, String(itemId), async () => {
     await withTrackedWorkflow(
       wf.config.name,
       String(itemId),
       {},                                               // initialData
       async (setStep, updateData /*, _onCleanup, _session */) => {
-        await run(setStep, updateData)
+        await run(setStep, updateData, false)
       },
       opts.preAssignedRunId,                            // 5th positional
       opts.trackerDir,                                  // 6th positional (test isolation)
