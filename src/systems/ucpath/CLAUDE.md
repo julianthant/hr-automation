@@ -1,6 +1,6 @@
 # UCPath Module
 
-PeopleSoft HR automation: Smart HR transactions, person search, job summary extraction, and the ActionPlan execution pattern.
+PeopleSoft HR automation: Smart HR transactions, person search, job summary extraction, emergency contact forms, and the ActionPlan execution pattern. Used by onboarding, work-study, emergency-contact, eid-lookup, and separations workflows.
 
 ## Files
 

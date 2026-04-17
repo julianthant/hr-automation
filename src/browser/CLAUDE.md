@@ -1,6 +1,6 @@
 # Browser Module
 
-Single file providing Playwright Chromium browser launch with two modes.
+Single file providing Playwright Chromium browser launch with two modes. **Kernel-internal** — workflows should not call `launchBrowser` directly. The kernel's `Session.launch` (in `src/core/session.ts`) owns the launch → tile → auth chain. Use `ctx.page(id)` from handlers, or the escape hatch `ctx.session.page(id)` when you need the raw Page. Legacy workflows (`separations`, `old-kronos-reports`) still call this directly because they predate the kernel.
 
 ## `launchBrowser(options?)`
 
