@@ -1,6 +1,17 @@
 import type { Page, FrameLocator } from "playwright";
 import type { TransactionResult } from "./types.js";
-import { getContentFrame, waitForPeopleSoftProcessing, navigateToSmartHR, dismissModalMask } from "./navigate.js";
+import {
+  waitForPeopleSoftProcessing,
+  navigateToSmartHR,
+  dismissModalMask,
+} from "./navigate.js";
+import {
+  smartHR,
+  personalData as personalDataSelectors,
+  comments as commentsSelectors,
+  jobData as jobDataSelectors,
+  getContentFrame,
+} from "./selectors.js";
 import { log } from "../../utils/log.js";
 
 // ─── STEP 1: Navigate sidebar → Smart HR Templates → Smart HR Transactions ───
@@ -9,34 +20,24 @@ import { log } from "../../utils/log.js";
  * Click "Smart HR Templates" in the sidebar to expand it, then click
  * "Smart HR Transactions" child link. Loads the transaction form in the iframe.
  *
- * SELECTOR: verified v1.0 — sidebar link text matches exactly
- *
  * After clicking, must collapse navigation sidebar so it doesn't block
  * buttons in the iframe (PeopleSoft overlay issue).
  */
 export async function clickSmartHRTransactions(page: Page): Promise<void> {
   log.step("Clicking Smart HR Templates in sidebar...");
 
-  // SELECTOR: verified v1.0 — sidebar link with "(select to expand or collapse child steps)"
-  await page
-    .getByRole("link", { name: /Smart HR Templates/i })
-    .first()
-    .click({ timeout: 10_000 });
+  await smartHR.sidebarTemplatesLink(page).click({ timeout: 10_000 });
   await page.waitForTimeout(1_000);
 
-  // SELECTOR: verified v1.0 — exact text match child link
   log.step("Clicking Smart HR Transactions...");
-  await page
-    .getByRole("link", { name: "Smart HR Transactions", exact: true })
-    .click({ timeout: 10_000 });
+  await smartHR.sidebarTransactionsLink(page).click({ timeout: 10_000 });
   await page.waitForTimeout(5_000);
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 
   // Collapse the sidebar navigation to prevent overlay blocking iframe buttons
-  // SELECTOR: verified v1.0 — "Navigation Area" toggle button
   log.step("Collapsing sidebar navigation...");
   try {
-    await page.getByRole("button", { name: "Navigation Area" }).click({ timeout: 5_000 });
+    await smartHR.sidebarNavigationToggle(page).click({ timeout: 5_000 });
     await page.waitForTimeout(1_000);
   } catch {
     log.step("Sidebar collapse failed (non-fatal) — may already be collapsed");
@@ -48,9 +49,7 @@ export async function clickSmartHRTransactions(page: Page): Promise<void> {
 // ─── STEP 2: Select template + effective date + Create Transaction ───
 
 /**
- * Fill the template input with UC_FULL_HIRE.
- *
- * SELECTOR: verified v1.0 — textbox labeled "Select Template" in iframe
+ * Fill the template input with e.g. UC_FULL_HIRE.
  */
 export async function selectTemplate(
   frame: FrameLocator,
@@ -58,10 +57,7 @@ export async function selectTemplate(
 ): Promise<void> {
   log.step(`Selecting template: ${templateId}`);
 
-  // SELECTOR: verified v1.0 — textbox "Select Template" in the Smart HR Transactions form
-  await frame
-    .getByRole("textbox", { name: "Select Template" })
-    .fill(templateId, { timeout: 10_000 });
+  await smartHR.templateInput(frame).fill(templateId, { timeout: 10_000 });
   log.step(`Template input filled: ${templateId}`);
 
   log.step(`Template: "${templateId}" selected for this transaction`);
@@ -70,8 +66,6 @@ export async function selectTemplate(
 
 /**
  * Fill the effective date field.
- *
- * SELECTOR: verified v1.0 — textbox "Effective Date" in iframe
  *
  * @param frame - PeopleSoft content iframe FrameLocator
  * @param date - Date string in MM/DD/YYYY format
@@ -82,10 +76,7 @@ export async function enterEffectiveDate(
 ): Promise<void> {
   log.step(`Entering effective date: ${date}`);
 
-  // SELECTOR: verified v1.0 — textbox "Effective Date"
-  await frame
-    .getByRole("textbox", { name: "Effective Date" })
-    .fill(date, { timeout: 10_000 });
+  await smartHR.effectiveDateInput(frame).fill(date, { timeout: 10_000 });
   log.step("Effective date filled");
 
   log.success("Effective date entered");
@@ -93,8 +84,6 @@ export async function enterEffectiveDate(
 
 /**
  * Click the Create Transaction button and wait for the form to load.
- *
- * SELECTOR: verified v1.0 — button "Create Transaction" in iframe
  *
  * @param frame - PeopleSoft content iframe FrameLocator
  * @returns TransactionResult indicating success or failure
@@ -105,10 +94,7 @@ export async function clickCreateTransaction(
 ): Promise<TransactionResult> {
   log.step("Clicking Create Transaction...");
 
-  // SELECTOR: verified v1.0 — button "Create Transaction"
-  await frame
-    .getByRole("button", { name: "Create Transaction" })
-    .click({ timeout: 10_000 });
+  await smartHR.createTransactionButton(frame).click({ timeout: 10_000 });
 
   // Wait for PeopleSoft server round-trip
   log.step("Waiting for PeopleSoft to process transaction creation...");
@@ -116,7 +102,7 @@ export async function clickCreateTransaction(
   await waitForPeopleSoftProcessing(frame, 30_000);
 
   // Check for errors
-  const errorLocator = frame.locator(".PSERROR, #ALERTMSG, .ps_alert-error");
+  const errorLocator = smartHR.errorBanner(frame);
   try {
     const errorCount = await errorLocator.count();
     if (errorCount > 0) {
@@ -137,10 +123,6 @@ export async function clickCreateTransaction(
 /**
  * Select the reason code from the dropdown and click Continue.
  *
- * SELECTOR: verified v1.0
- * - Reason Code: combobox "Reason Code"
- * - Continue: button "Continue" (or JS submitAction with HR_TBH_WRK_TBH_NEXT)
- *
  * @param page - Playwright page (for dismissing dialogs)
  * @param frame - PeopleSoft content iframe FrameLocator
  * @param reasonLabel - Visible label text, e.g. "Hire - No Prior UC Affiliation"
@@ -152,9 +134,8 @@ export async function selectReasonCode(
 ): Promise<void> {
   log.step(`Selecting reason code: ${reasonLabel}`);
 
-  // SELECTOR: verified v1.0 — combobox "Reason Code"
-  await frame
-    .getByLabel("Reason Code")
+  await smartHR
+    .reasonCodeSelect(frame)
     .selectOption(reasonLabel, { timeout: 10_000 });
   log.step(`Reason: "${reasonLabel}" selected`);
   log.step("Reason code selected");
@@ -162,12 +143,9 @@ export async function selectReasonCode(
   await page.waitForTimeout(2_000);
 
   // Click Continue — may need force or JS due to sidebar overlay
-  // SELECTOR: verified v1.0 — button "Continue" (id: HR_TBH_WRK_TBH_NEXT)
   log.step("Clicking Continue...");
   try {
-    await frame
-      .getByRole("button", { name: "Continue" })
-      .click({ timeout: 5_000 });
+    await smartHR.continueButton(frame).click({ timeout: 5_000 });
   } catch {
     // Fallback: use PeopleSoft submitAction if sidebar overlay blocks click
     log.step("Regular click blocked — using JS submitAction...");
@@ -203,9 +181,8 @@ export interface PersonalDataInput {
 /**
  * Fill all personal data fields on the Smart HR Transaction form.
  *
- * All selectors verified v1.0 against live UCPath PeopleSoft.
- *
- * Fields: legal first/last/middle name, DOB, national ID (SSN),
+ * Fields: legal first/last/middle name, preferred first/last/middle name
+ * (mirrored from legal when no lived name supplied), DOB, national ID (SSN),
  * address, phone (Mobile - Personal), email (Home), tracker profile ID.
  */
 export async function fillPersonalData(
@@ -217,130 +194,135 @@ export async function fillPersonalData(
 
   // --- Legal Name ---
   log.step("Filling legal first name...");
-  await frame.getByRole("textbox", { name: "Legal First Name" }).fill(data.firstName, { timeout: 10_000 });
+  await personalDataSelectors
+    .legalFirstName(frame)
+    .fill(data.firstName, { timeout: 10_000 });
   log.step("Legal first name filled");
 
   log.step("Filling legal last name...");
-  await frame.getByRole("textbox", { name: "Legal Last Name" }).fill(data.lastName, { timeout: 10_000 });
+  await personalDataSelectors
+    .legalLastName(frame)
+    .fill(data.lastName, { timeout: 10_000 });
   log.step("Legal last name filled");
 
   if (data.middleName) {
     log.step("Filling legal middle name...");
-    await frame.getByRole("textbox", { name: "Legal Middle Name" }).fill(data.middleName, { timeout: 10_000 });
+    await personalDataSelectors
+      .legalMiddleName(frame)
+      .fill(data.middleName, { timeout: 10_000 });
     log.step("Legal middle name filled");
   }
 
   // --- Preferred / Lived Name (mirror legal names when no lived name available) ---
   log.step("Filling preferred first name...");
-  await frame.getByRole("textbox", { name: "First Name", exact: true }).fill(data.firstName, { timeout: 10_000 });
+  await personalDataSelectors
+    .preferredFirstName(frame)
+    .fill(data.firstName, { timeout: 10_000 });
   log.step("Preferred first name filled");
 
   log.step("Filling preferred last name...");
-  await frame.getByRole("textbox", { name: "Last Name", exact: true }).fill(data.lastName, { timeout: 10_000 });
+  await personalDataSelectors
+    .preferredLastName(frame)
+    .fill(data.lastName, { timeout: 10_000 });
   log.step("Preferred last name filled");
 
   if (data.middleName) {
     log.step("Filling preferred middle name...");
-    await frame.getByRole("textbox", { name: "Middle Name", exact: true }).fill(data.middleName, { timeout: 10_000 });
+    await personalDataSelectors
+      .preferredMiddleName(frame)
+      .fill(data.middleName, { timeout: 10_000 });
     log.step("Preferred middle name filled");
   }
 
   // --- Date of Birth ---
-  // SELECTOR: verified v1.0 — textbox "Date of Birth"
   log.step("Filling date of birth...");
-  await frame.getByRole("textbox", { name: "Date of Birth" }).fill(data.dob, { timeout: 10_000 });
+  await personalDataSelectors
+    .dateOfBirth(frame)
+    .fill(data.dob, { timeout: 10_000 });
   log.step("DOB filled");
 
   // --- National ID (SSN) ---
   if (data.ssn) {
-    // SELECTOR: verified v1.0 — textbox "National ID" (exact match to avoid National ID Type)
     log.step("Filling national ID...");
-    await frame.getByRole("textbox", { name: "National ID", exact: true }).fill(data.ssn, { timeout: 10_000 });
+    await personalDataSelectors
+      .nationalId(frame)
+      .fill(data.ssn, { timeout: 10_000 });
     log.step("National ID filled");
   } else {
     log.step("No SSN — skipping national ID field");
   }
 
   // --- Address ---
-  // SELECTOR: verified v1.0 — textbox "Address Line 1"
   log.step("Filling address...");
-  await frame.getByRole("textbox", { name: "Address Line 1" }).fill(data.address, { timeout: 10_000 });
+  await personalDataSelectors
+    .addressLine1(frame)
+    .fill(data.address, { timeout: 10_000 });
   log.step("Address filled");
 
   if (data.city) {
-    // SELECTOR: verified v1.0 — textbox "City"
-    await frame.getByRole("textbox", { name: "City" }).fill(data.city, { timeout: 10_000 });
+    await personalDataSelectors.city(frame).fill(data.city, { timeout: 10_000 });
     log.step("City filled");
   }
 
   if (data.state) {
-    // SELECTOR: verified v1.0 — textbox "State"
-    await frame.getByRole("textbox", { name: "State" }).fill(data.state, { timeout: 10_000 });
+    await personalDataSelectors
+      .state(frame)
+      .fill(data.state, { timeout: 10_000 });
     log.step("State filled");
   }
 
   if (data.postalCode) {
-    // SELECTOR: verified v1.0 — textbox "Postal Code"
-    await frame.getByRole("textbox", { name: "Postal Code" }).fill(data.postalCode, { timeout: 10_000 });
+    await personalDataSelectors
+      .postalCode(frame)
+      .fill(data.postalCode, { timeout: 10_000 });
     log.step("Postal code filled");
   }
 
   // --- Phone ---
   if (data.phone) {
-    // SELECTOR: verified v1.0 — Phone Type dropdown (grid combobox at index $6)
-    // PeopleSoft ID: HR_TBH_G_SCR_WK_TBH_G_LG_DD1$6
     log.step("Selecting phone type: Mobile - Personal...");
-    await frame
-      .locator('[id="HR_TBH_G_SCR_WK_TBH_G_LG_DD1$6"]')
+    await personalDataSelectors
+      .phoneTypeSelect(frame)
       .selectOption("Mobile - Personal", { timeout: 10_000 });
     await page.waitForTimeout(3_000);
     await waitForPeopleSoftProcessing(frame);
     log.step("Phone type selected");
 
-    // SELECTOR: verified v1.0 — Phone number textbox (grid input at index $6)
-    // PeopleSoft ID: HR_TBH_G_SCR_WK_TBH_G_SH_EDIT2$6
     log.step("Filling phone number...");
-    await frame
-      .locator('[id="HR_TBH_G_SCR_WK_TBH_G_SH_EDIT2$6"]')
+    await personalDataSelectors
+      .phoneNumberInput(frame)
       .fill(data.phone, { timeout: 10_000 });
     log.step("Phone number filled");
 
-    // SELECTOR: verified v1.0 — Preferred checkbox (grid checkbox at index $6)
-    // PeopleSoft ID: HR_TBH_G_SCR_WK_TBH_G_CHK3$6
     log.step("Checking Preferred checkbox...");
-    await frame
-      .locator('[id="HR_TBH_G_SCR_WK_TBH_G_CHK3$6"]')
+    await personalDataSelectors
+      .phonePreferredCheckbox(frame)
       .check({ timeout: 5_000 });
     log.step("Preferred checkbox checked");
   }
 
   // --- Email ---
   if (data.email) {
-    // SELECTOR: verified v1.0 — Email Type dropdown (grid combobox at index $7)
-    // PeopleSoft ID: HR_TBH_G_SCR_WK_TBH_G_LG_DD1$7
     log.step("Selecting email type: Home...");
-    await frame
-      .locator('[id="HR_TBH_G_SCR_WK_TBH_G_LG_DD1$7"]')
+    await personalDataSelectors
+      .emailTypeSelect(frame)
       .selectOption("Home", { timeout: 10_000 });
     await page.waitForTimeout(3_000);
     await waitForPeopleSoftProcessing(frame);
     log.step("Email type selected");
 
-    // SELECTOR: verified v1.0 — Email address textbox (grid input at index $7)
-    // PeopleSoft ID: HR_TBH_G_SCR_WK_TBH_G_LG_EDIT2$7
     log.step("Filling email address...");
-    await frame
-      .locator('[id="HR_TBH_G_SCR_WK_TBH_G_LG_EDIT2$7"]')
+    await personalDataSelectors
+      .emailAddressInput(frame)
       .fill(data.email, { timeout: 10_000 });
     log.step("Email address filled");
   }
 
   // --- Tracker Profile ID (I9) ---
   if (data.i9ProfileId) {
-    // SELECTOR: verified v1.0 — textbox "Tracker Profile ID"
     log.step("Filling tracker profile ID...");
-    await frame
-      .getByRole("textbox", { name: "Tracker Profile ID" })
+    await personalDataSelectors
+      .trackerProfileIdInput(frame)
       .fill(data.i9ProfileId, { timeout: 10_000 });
     log.step("Tracker profile ID filled");
   }
@@ -353,30 +335,24 @@ export async function fillPersonalData(
 /**
  * Fill the Comments and Initiator Comments fields.
  *
- * SELECTOR: verified v1.0
- * - Comments: textarea id="HR_TBH_WRK_DESCRLONG_NOTES"
- * - Initiator Comments: textarea id="UC_SS_TRANSACT_COMMENTS"
- *
  * @param frame - PeopleSoft content iframe FrameLocator
  * @param comments - Comment text (same for both fields)
  */
 export async function fillComments(
   frame: FrameLocator,
-  comments: string,
+  commentsText: string,
 ): Promise<void> {
   log.step("Filling comments...");
 
-  // SELECTOR: verified v1.0 — textarea "Comments" (exact ID)
-  await frame
-    .locator("#HR_TBH_WRK_DESCRLONG_NOTES")
-    .fill(comments, { timeout: 10_000 });
+  await commentsSelectors
+    .commentsTextarea(frame)
+    .fill(commentsText, { timeout: 10_000 });
   log.step("Comments filled");
 
-  // SELECTOR: verified v1.0 — textarea "Initiator Comments" (exact ID)
   log.step("Filling initiator comments...");
-  await frame
-    .locator("#UC_SS_TRANSACT_COMMENTS")
-    .fill(comments, { timeout: 10_000 });
+  await commentsSelectors
+    .initiatorCommentsTextarea(frame)
+    .fill(commentsText, { timeout: 10_000 });
   log.step("Initiator comments filled");
 
   log.success("Comments filled");
@@ -386,8 +362,6 @@ export async function fillComments(
 
 /**
  * Click the Job Data tab to proceed to the next section.
- *
- * SELECTOR: verified v1.0 — tab "Job Data"
  *
  * @param page - Playwright page
  * @param frame - PeopleSoft content iframe FrameLocator
@@ -399,10 +373,7 @@ export async function clickJobDataTab(
   log.step("Clicking Job Data tab...");
   await dismissModalMask(page);
 
-  // SELECTOR: verified v1.0 — tab "Job Data"
-  await frame
-    .getByRole("tab", { name: "Job Data" })
-    .click({ timeout: 10_000 });
+  await smartHR.tab.jobData(frame).click({ timeout: 10_000 });
   await page.waitForTimeout(5_000);
   await waitForPeopleSoftProcessing(frame, 15_000);
 
@@ -421,12 +392,11 @@ export interface JobDataInput {
 
 /**
  * Fill Job Data tab fields: position number, employee classification,
- * comp rate code, compensation rate, expected job end date, and initiator comments.
+ * comp rate code, compensation rate, expected job end date.
  *
  * NOTE: Position number fill triggers a PeopleSoft page refresh which changes
- * the grid input IDs from $11 to $0. All grid selectors use $0 indices.
- *
- * SELECTOR: all verified v1.0 against live UCPath PeopleSoft.
+ * the grid input IDs from $11 to $0. Selectors in the registry use fallback
+ * chains (`.or()`) that cover both states.
  */
 export async function fillJobData(
   page: Page,
@@ -435,10 +405,9 @@ export async function fillJobData(
 ): Promise<void> {
   log.step("Filling Job Data...");
 
-  // SELECTOR: verified v1.0 — textbox "Position Number" (exact to avoid "Reports To Position Number")
   log.step("Filling position number...");
-  await frame
-    .getByRole("textbox", { name: "Position Number", exact: true })
+  await jobDataSelectors
+    .positionNumberInput(frame)
     .fill(data.positionNumber, { timeout: 10_000 });
   // Position number fill triggers PeopleSoft refresh — wait for it
   await page.waitForTimeout(5_000);
@@ -446,38 +415,29 @@ export async function fillJobData(
   log.step("Position number filled — page refreshed, grid indices may have changed");
   log.step("Position number filled");
 
-  // SELECTOR: verified v1.0 — textbox "Employee Classification"
   log.step("Filling employee classification...");
-  await frame
-    .getByRole("textbox", { name: "Employee Classification" })
+  await jobDataSelectors
+    .employeeClassificationInput(frame)
     .fill(data.employeeClassification, { timeout: 10_000 });
   await page.waitForTimeout(2_000);
   log.step("Employee classification filled");
 
-  // SELECTOR: verified v1.0 — Comp Rate Code via accessible name (resilient to grid index shifts)
   log.step("Filling comp rate code: UCHRLY...");
-  const compRateInput = frame
-    .getByRole("textbox", { name: "Comp Rate Code" })
-    .or(frame.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_EDIT1$0"]'))
-    .or(frame.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_PROMPT1$11"]'))
-    .or(frame.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_PROMPT1$0"]'))
-    .or(frame.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_EDIT1$11"]'));
-  await compRateInput.first().fill(data.compRateCode, { timeout: 10_000 });
+  await jobDataSelectors
+    .compRateCodeInput(frame)
+    .first()
+    .fill(data.compRateCode, { timeout: 10_000 });
   await page.waitForTimeout(1_000);
   // Blur to trigger PeopleSoft validation
   await page.keyboard.press("Tab");
   await page.waitForTimeout(2_000);
   log.step(`Comp Rate Code: filled "${data.compRateCode}"`);
 
-  // SELECTOR: Compensation Rate via accessible name (resilient to grid-index shifts)
   log.step("Filling compensation rate...");
-  const compRateValue = frame
-    .getByRole("textbox", { name: "Compensation Rate" })
-    .or(frame.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_EDIT2$0"]'))
-    .or(frame.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_NUM2$11"]'))
-    .or(frame.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_NUM2$0"]'))
-    .or(frame.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_EDIT2$11"]'));
-  await compRateValue.first().fill(data.compensationRate, { timeout: 10_000 });
+  await jobDataSelectors
+    .compensationRateInput(frame)
+    .first()
+    .fill(data.compensationRate, { timeout: 10_000 });
   await page.waitForTimeout(1_000);
   // Blur to trigger PeopleSoft validation + auto-fill Compensation Frequency
   await page.keyboard.press("Tab");
@@ -486,7 +446,7 @@ export async function fillJobData(
 
   // Fill Compensation Frequency ("H" for Hourly) — required field, sometimes not auto-populated
   log.step("Filling compensation frequency: H (Hourly)...");
-  const compFreq = frame.getByRole("textbox", { name: "Compensation Frequency" });
+  const compFreq = jobDataSelectors.compensationFrequencyInput(frame);
   const freqValue = await compFreq.inputValue().catch(() => "");
   if (!freqValue || freqValue.trim() === "") {
     await compFreq.fill("H", { timeout: 10_000 });
@@ -498,10 +458,9 @@ export async function fillJobData(
     log.step(`Compensation Frequency already set: ${freqValue}`);
   }
 
-  // SELECTOR: verified v1.0 — textbox "Expected Job End Date"
   log.step("Filling expected job end date...");
-  await frame
-    .getByRole("textbox", { name: "Expected Job End Date" })
+  await jobDataSelectors
+    .expectedJobEndDateInput(frame)
     .fill(data.expectedJobEndDate, { timeout: 10_000 });
   log.step("Expected job end date filled");
 
@@ -519,9 +478,7 @@ export async function clickEarnsDistTab(
 ): Promise<void> {
   log.step("Clicking Earns Dist tab...");
   await dismissModalMask(page);
-  await frame
-    .getByRole("tab", { name: "Earns Dist" })
-    .click({ timeout: 10_000 });
+  await smartHR.tab.earnsDist(frame).click({ timeout: 10_000 });
   await page.waitForTimeout(3_000);
   await waitForPeopleSoftProcessing(frame, 10_000);
   log.success("Earns Dist tab loaded");
@@ -536,9 +493,7 @@ export async function clickEmployeeExperienceTab(
 ): Promise<void> {
   log.step("Clicking Employee Experience tab...");
   await dismissModalMask(page);
-  await frame
-    .getByRole("tab", { name: "Employee Experience" })
-    .click({ timeout: 10_000 });
+  await smartHR.tab.employeeExperience(frame).click({ timeout: 10_000 });
   await page.waitForTimeout(3_000);
   await waitForPeopleSoftProcessing(frame, 10_000);
   log.success("Employee Experience tab loaded");
@@ -546,11 +501,6 @@ export async function clickEmployeeExperienceTab(
 
 // ─── STEP 8: Save and Submit ───
 
-/**
- * Click Save and Submit to finalize the transaction.
- *
- * SELECTOR: verified v1.0 — button "Save and Submit"
- */
 /**
  * @param employeeName - Full name (e.g. "Ivette Lima Montes") used to find the
  *   transaction in the Transactions in Progress list after submit.
@@ -563,15 +513,12 @@ export async function clickSaveAndSubmit(
   log.step("Clicking Save and Submit...");
   await dismissModalMask(page);
 
-  await frame
-    .getByRole("button", { name: "Save and Submit" })
-    .first()
-    .click({ timeout: 10_000 });
+  await smartHR.saveAndSubmitButton(frame).click({ timeout: 10_000 });
   await page.waitForTimeout(5_000);
   await waitForPeopleSoftProcessing(frame, 30_000);
 
   // Check for errors
-  const errorLocator = frame.locator(".PSERROR, #ALERTMSG, .ps_alert-error");
+  const errorLocator = smartHR.errorBanner(frame);
   try {
     const errorCount = await errorLocator.count();
     if (errorCount > 0) {
@@ -594,7 +541,7 @@ export async function clickSaveAndSubmit(
   let transactionNumber = "";
   try {
     // Step 1: Click OK on confirmation page
-    const okButton = frame.getByRole("button", { name: "OK" });
+    const okButton = smartHR.confirmationOkButton(frame);
     await okButton.waitFor({ state: "visible", timeout: 15_000 }).catch(() => {});
     await page.waitForTimeout(2_000);
 
@@ -611,16 +558,16 @@ export async function clickSaveAndSubmit(
       const txnFrame = getContentFrame(page);
 
       if (employeeName) {
-        // Search for exact name link (e.g. "Ivette Lima Montes")
-        // PeopleSoft shows first name + last name as a link
-        const nameLink = txnFrame.getByRole("link", { name: employeeName });
+        // Search for exact name link (e.g. "Ivette Lima Montes"). PeopleSoft
+        // shows first name + last name as a link. Dynamic name → inline.
+        const nameLink = txnFrame.getByRole("link", { name: employeeName }); // allow-inline-selector
         if ((await nameLink.count()) > 0) {
           log.step(`Clicking employee: ${employeeName}`);
           await nameLink.first().click({ timeout: 5_000 });
         } else {
-          // Try partial match — last name only
+          // Try partial match — last name only. Dynamic regex → inline.
           const lastName = employeeName.split(",")[0]?.trim() ?? employeeName.split(" ").pop() ?? "";
-          const partialLink = txnFrame.getByRole("link", { name: new RegExp(lastName, "i") });
+          const partialLink = txnFrame.getByRole("link", { name: new RegExp(lastName, "i") }); // allow-inline-selector
           if ((await partialLink.count()) > 0) {
             log.step(`Clicking employee (partial match): ${lastName}`);
             await partialLink.last().click({ timeout: 5_000 });
@@ -631,7 +578,7 @@ export async function clickSaveAndSubmit(
         await page.waitForTimeout(5_000);
 
         // Step 3: Click Continue on transaction details page
-        const continueBtn = txnFrame.getByRole("button", { name: "Continue" });
+        const continueBtn = smartHR.continueButton(txnFrame);
         if ((await continueBtn.count()) > 0) {
           await continueBtn.click({ timeout: 5_000 });
           await page.waitForTimeout(8_000);

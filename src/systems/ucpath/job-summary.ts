@@ -1,5 +1,6 @@
 import type { Page, Locator } from "playwright";
 import { log } from "../../utils/log.js";
+import { jobSummary } from "./selectors.js";
 
 /** Direct URL — skips sidebar, no iframe wrapper. */
 const JOB_SUMMARY_URL =
@@ -19,13 +20,13 @@ export interface JobSummaryData {
  */
 async function getFormRoot(page: Page): Promise<Locator> {
   // Check if content is in an iframe
-  const iframe = page.locator("#main_target_win0");
+  const iframe = jobSummary.mainTargetIframeProbe(page);
   if ((await iframe.count()) > 0) {
     log.step("[Job Summary] Content is inside iframe");
-    return page.frameLocator("#main_target_win0").locator("body");
+    return page.frameLocator("#main_target_win0").locator("body"); // allow-inline-selector -- iframe root + body descent
   }
   // Direct URL — no iframe
-  return page.locator("body");
+  return page.locator("body"); // allow-inline-selector -- plain body root
 }
 
 /**
@@ -49,7 +50,7 @@ export async function navigateToWorkforceJobSummary(page: Page): Promise<void> {
   // Handle campus discovery redirect
   if (page.url().includes("ucpathdiscovery")) {
     log.step("[Job Summary] Campus discovery page — selecting UCSD...");
-    await page.getByRole("link", { name: "University of California, San Diego" }).click({ timeout: 10_000 });
+    await jobSummary.campusDiscoveryUcsdLink(page).click({ timeout: 10_000 });
     await page.waitForTimeout(5_000);
   }
 
@@ -64,8 +65,8 @@ export async function searchJobSummary(page: Page, emplId: string): Promise<void
   const root = await getFormRoot(page);
 
   log.step(`[Job Summary] Searching for Empl ID: ${emplId}`);
-  await root.getByRole("textbox", { name: "Empl ID" }).fill(emplId, { timeout: 10_000 });
-  await root.getByRole("button", { name: "Search", exact: true }).click({ timeout: 10_000 });
+  await jobSummary.emplIdInput(root).fill(emplId, { timeout: 10_000 });
+  await jobSummary.searchButton(root).click({ timeout: 10_000 });
 
   await page.waitForTimeout(5_000);
   log.success(`[Job Summary] Results loaded for ${emplId}`);
@@ -81,7 +82,7 @@ export async function extractWorkLocation(
   const root = await getFormRoot(page);
 
   log.step("[Job Summary] Clicking Work Location tab...");
-  await root.getByRole("tab", { name: "Work Location" }).click({ timeout: 10_000 });
+  await jobSummary.workLocationTab(root).click({ timeout: 10_000 });
   await page.waitForTimeout(3_000);
 
   // Extract first data row using PeopleSoft grid IDs
@@ -123,7 +124,7 @@ export async function extractJobInfo(
   const root = await getFormRoot(page);
 
   log.step("[Job Summary] Clicking Job Information tab...");
-  await root.getByRole("tab", { name: "Job Information" }).click({ timeout: 10_000 });
+  await jobSummary.jobInformationTab(root).click({ timeout: 10_000 });
   await page.waitForTimeout(3_000);
 
   // Job Information grid columns: Job Code(0), Description(1), Classified Ind(2),
