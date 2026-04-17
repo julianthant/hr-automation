@@ -8,8 +8,9 @@ import { useLogs } from "./hooks/useLogs";
 import { useElapsed, formatDuration } from "./hooks/useElapsed";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry, RunInfo } from "./types";
-import { getConfig } from "./types";
+import { formatTrackerValue, isMonospaceKey } from "./types";
 import { useWorkflow } from "../workflows-context";
+import { resolveEntryName } from "./entry-display";
 
 interface LogPanelProps {
   entry: TrackerEntry | null;
@@ -25,12 +26,17 @@ const badgeStyles: Record<string, string> = {
   skipped: "bg-secondary text-muted-foreground",
 };
 
+// Special virtual keys the generic detail renderer recognizes. These come
+// from the entry's timestamp metadata rather than tracker data, so the
+// type-aware formatter can't handle them — we branch on the key.
+const COMPUTED_KEYS = new Set(["__started", "__elapsed"]);
+
 export function LogPanel({ entry, workflow, date }: LogPanelProps) {
   const [runs, setRuns] = useState<RunInfo[]>([]);
   const [activeRunId, setActiveRunId] = useState<string | null>(entry?.runId || null);
-  const cfg = getConfig(workflow);
   const registered = useWorkflow(workflow);
-  const steps = registered?.steps ?? cfg.steps;
+  const steps = registered?.steps ?? [];
+  const detailFields = registered?.detailFields ?? [];
 
   // Fetch runs when entry changes or a new run appears
   useEffect(() => {
@@ -100,11 +106,26 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
     );
   }
 
-  const name = cfg.getName(entry);
+  const name = resolveEntryName(entry);
   const displayTs = firstTs || entry.timestamp;
   const startTime = displayTs
     ? new Date(displayTs).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" })
     : "";
+
+  // Compose the full detail-field list: registered workflow fields + the two
+  // synthesized (Started/Elapsed) cells. Always show Started + Elapsed so
+  // timing info is visible without requiring workflows to declare them.
+  const allDetailFields: Array<{ key: string; label: string }> = [
+    ...detailFields,
+    { key: "__started", label: "Started" },
+    { key: "__elapsed", label: "Elapsed" },
+  ];
+
+  const renderDetailValue = (key: string): string => {
+    if (key === "__started") return startTime;
+    if (key === "__elapsed") return elapsed || duration || "\u2014";
+    return formatTrackerValue(entry, key);
+  };
 
   const Skeleton = ({ className }: { className?: string }) => (
     <div className={cn("rounded bg-muted animate-pulse", className)} />
@@ -136,21 +157,21 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
         <RunSelector runs={runs} activeRunId={activeRunId} onSelect={setActiveRunId} />
       </div>
 
-      {/* Detail grid — renders cfg.detailFields dynamically; wraps to rows of 4 */}
+      {/* Detail grid — rendered from registry metadata via formatTrackerValue;
+          auto-adapts to any workflow's detailFields declaration. Wraps to
+          rows of 4. Special __started / __elapsed keys are synthesized from
+          entry timestamps. */}
       <div className="grid grid-cols-4 border-b border-border flex-shrink-0">
-        {cfg.detailFields.map((f, i) => {
+        {allDetailFields.map((f, i) => {
           const isLastInRow = (i + 1) % 4 === 0;
-          const isLastField = i === cfg.detailFields.length - 1;
+          const isLastField = i === allDetailFields.length - 1;
           const isNewRow = i >= 4 && i % 4 === 0;
-          let value: string = "";
-          let mono = true;
-          if (f.key === "employee") { value = name || entry.id; mono = false; }
-          else if (f.key === "started") { value = startTime; }
-          else if (f.key === "elapsed") { value = elapsed || duration || "\u2014"; }
-          else if (f.key === "email") { value = entry.data?.email || entry.id; }
-          else { value = entry.data?.[f.key] || "\u2014"; }
-          const isRunningElapsed = f.key === "elapsed" && runStatus === "running";
-          const hasBottomBorder = i < cfg.detailFields.length - 4 ? "border-b border-border" : "";
+          const value = renderDetailValue(f.key);
+          const isComputed = COMPUTED_KEYS.has(f.key);
+          // Monospace treatment for id-like fields + computed timestamps
+          const mono = isComputed || isMonospaceKey(f.key);
+          const isRunningElapsed = f.key === "__elapsed" && runStatus === "running";
+          const hasBottomBorder = i < allDetailFields.length - 4 ? "border-b border-border" : "";
           return (
             <div
               key={f.key}

@@ -1,12 +1,11 @@
 import { cn } from "@/lib/utils";
 import { X } from "lucide-react";
 import type { TrackerEntry } from "./types";
-import { getConfig } from "./types";
+import { resolveEntryName } from "./entry-display";
 import { useElapsed, formatDuration } from "./hooks/useElapsed";
 
 interface EntryItemProps {
   entry: TrackerEntry;
-  workflow: string;
   selected: boolean;
   onClick: () => void;
 }
@@ -19,9 +18,8 @@ const badgeStyles: Record<string, string> = {
   skipped: "bg-secondary text-muted-foreground",
 };
 
-export function EntryItem({ entry, workflow, selected, onClick }: EntryItemProps) {
-  const cfg = getConfig(workflow);
-  const name = cfg.getName(entry);
+export function EntryItem({ entry, selected, onClick }: EntryItemProps) {
+  const name = resolveEntryName(entry);
   const isRunning = entry.status === "running";
   const isFailed = entry.status === "failed";
   const isDone = entry.status === "done";
