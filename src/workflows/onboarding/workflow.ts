@@ -67,6 +67,7 @@ const onboardingSteps = [
  */
 export const onboardingWorkflow = defineWorkflow({
   name: "onboarding",
+  label: "Onboarding",
   systems: [
     {
       id: "crm",
@@ -93,7 +94,20 @@ export const onboardingWorkflow = defineWorkflow({
   steps: onboardingSteps,
   schema: OnboardingInputSchema,
   authChain: "sequential",
-  detailFields: ["email"],
+  // Matches pre-subsystem-D WF_CONFIG["onboarding"].detailFields. Dept/Position/
+  // Wage/I9-profile are populated after extraction; email is populated from the
+  // CLI input / schema. firstName+lastName drive getName so the dashboard shows
+  // "Jane Doe" instead of the raw email.
+  detailFields: [
+    { key: "email", label: "Email" },
+    { key: "departmentNumber", label: "Dept #" },
+    { key: "positionNumber", label: "Position #" },
+    { key: "wage", label: "Wage" },
+    { key: "effectiveDate", label: "Eff Date" },
+    { key: "i9ProfileId", label: "I9 Profile" },
+  ],
+  getName: (d) => [d.firstName, d.lastName].filter(Boolean).join(" "),
+  getId: (d) => d.email ?? "",
   handler: async (ctx, input) => {
     const email = input.email;
     let data: EmployeeData | null = null;

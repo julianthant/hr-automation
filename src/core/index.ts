@@ -1,6 +1,20 @@
 export type * from './types.js'
-export { register, getAll, getByName, clear } from './registry.js'
-export { defineWorkflow, runWorkflow, runWorkflowBatch } from './workflow.js'
+export {
+  register,
+  defineDashboardMetadata,
+  getAll,
+  getByName,
+  clear,
+  autoLabel,
+  normalizeDetailField,
+} from './registry.js'
+export {
+  defineWorkflow,
+  runWorkflow,
+  runWorkflowBatch,
+  buildTrackerOpts,
+  deriveItemId,
+} from './workflow.js'
 export { runWorkflowPool } from './pool.js'
 export { Session } from './session.js'
 export { Stepper } from './stepper.js'

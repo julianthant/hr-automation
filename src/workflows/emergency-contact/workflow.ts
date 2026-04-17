@@ -57,6 +57,7 @@ function recordItemId(r: EmergencyContactRecord): string {
  */
 export const emergencyContactWorkflow = defineWorkflow({
   name: WORKFLOW,
+  label: "Emergency Contact",
   systems: [
     {
       id: "ucpath",
@@ -75,7 +76,18 @@ export const emergencyContactWorkflow = defineWorkflow({
     preEmitPending: true,
     betweenItems: ["reset-browsers"],
   },
-  detailFields: [],
+  // The batch adapter's onPreEmitPending populates all four fields up front
+  // (see runEmergencyContact below) so the dashboard shows rich rows from
+  // the pending state onward. The handler only refreshes employeeName after
+  // the iframe extraction succeeds.
+  detailFields: [
+    { key: "employeeName", label: "Employee" },
+    { key: "emplId", label: "Empl ID" },
+    { key: "contactName", label: "Contact" },
+    { key: "relationship", label: "Relationship" },
+  ],
+  getName: (d) => d.employeeName ?? "",
+  getId: (d) => d.emplId ?? "",
   handler: async (ctx, record) => {
     const page = await ctx.page("ucpath");
 
