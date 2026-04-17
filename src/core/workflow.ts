@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import type { WorkflowConfig, RegisteredWorkflow, WorkflowMetadata, Ctx, RunOpts, BatchResult } from './types.js'
+import type { WorkflowConfig, RegisteredWorkflow, WorkflowMetadata, RunOpts, BatchResult } from './types.js'
 import { register } from './registry.js'
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
+import { makeCtx } from './ctx.js'
 import { withTrackedWorkflow } from '../tracker/jsonl.js'
-import { withLogContext, log } from '../utils/log.js'
+import { withLogContext } from '../utils/log.js'
 import { classifyError } from '../utils/errors.js'
 import { runWorkflowPool } from './pool.js'
 
@@ -69,20 +70,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
       emitFailed: (step, error) => setStep(`${step}:failed:${error}`),
     })
 
-    const ctx: Ctx<TSteps, TData> = {
-      page: (id) => session.page(id),
-      step: (name, fn) => stepper.step(name as string, fn),
-      parallel: (tasks) => stepper.parallel(tasks),
-      updateData: (patch) => stepper.updateData(patch as Record<string, unknown>),
-      session: {
-        page: (id) => session.page(id),
-        newWindow: async () => { throw new Error('newWindow not yet implemented') },
-        closeWindow: async () => { throw new Error('closeWindow not yet implemented') },
-      },
-      log,
-      isBatch: false,
-      runId,
-    }
+    const ctx = makeCtx<TSteps, TData>({ session, stepper, isBatch: false, runId })
 
     const sigintHandler = () => {
       try {
@@ -171,20 +159,7 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
         emitData: () => {},
         emitFailed: () => {},
       })
-      const ctx: Ctx<TSteps, TData> = {
-        page: (id) => session.page(id),
-        step: (name, fn) => stepper.step(name as string, fn),
-        parallel: (tasks) => stepper.parallel(tasks),
-        updateData: (patch) => stepper.updateData(patch as Record<string, unknown>),
-        session: {
-          page: (id) => session.page(id),
-          newWindow: async () => { throw new Error('newWindow not yet implemented') },
-          closeWindow: async () => { throw new Error('closeWindow not yet implemented') },
-        },
-        log,
-        isBatch: true,
-        runId,
-      }
+      const ctx = makeCtx<TSteps, TData>({ session, stepper, isBatch: true, runId })
       try {
         // Between-items hooks — skipped on the first item (fresh auth state).
         if (i > 0 && batch?.betweenItems) {

@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import type { RegisteredWorkflow, BatchResult, Ctx, RunOpts } from './types.js'
+import type { RegisteredWorkflow, BatchResult, RunOpts } from './types.js'
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
-import { log } from '../utils/log.js'
+import { makeCtx } from './ctx.js'
 import { classifyError } from '../utils/errors.js'
 
 export async function runWorkflowPool<TData, TSteps extends readonly string[]>(
@@ -48,20 +48,7 @@ export async function runWorkflowPool<TData, TSteps extends readonly string[]>(
           emitData: () => {},
           emitFailed: () => {},
         })
-        const ctx: Ctx<TSteps, TData> = {
-          page: (id) => session.page(id),
-          step: (name, fn) => stepper.step(name as string, fn),
-          parallel: (tasks) => stepper.parallel(tasks),
-          updateData: (patch) => stepper.updateData(patch as Record<string, unknown>),
-          session: {
-            page: (id) => session.page(id),
-            newWindow: async () => { throw new Error('newWindow not yet implemented') },
-            closeWindow: async () => { throw new Error('closeWindow not yet implemented') },
-          },
-          log,
-          isBatch: true,
-          runId,
-        }
+        const ctx = makeCtx<TSteps, TData>({ session, stepper, isBatch: true, runId })
         try {
           await wf.config.handler(ctx, item)
           result.succeeded++
