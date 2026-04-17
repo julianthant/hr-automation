@@ -200,6 +200,7 @@ async function crossVerifyOne(
  */
 export const eidLookupWorkflow = defineWorkflow({
   name: "eid-lookup",
+  label: "EID Lookup",
   systems: [
     {
       id: "ucpath",
@@ -213,7 +214,18 @@ export const eidLookupWorkflow = defineWorkflow({
   schema: EidLookupInputSchema,
   tiling: "single",
   authChain: "sequential",
-  detailFields: [],
+  // Per-name results stay in Excel (one CLI run = one workflow row — see
+  // CLAUDE.md "Acceptable regression"). `searchName` is populated once from
+  // the input list so the detail panel isn't empty; `totalNames`/`foundCount`/
+  // `missingCount` are stamped after search completes.
+  detailFields: [
+    { key: "searchName", label: "Search" },
+    { key: "totalNames", label: "Total Names" },
+    { key: "foundCount", label: "Found" },
+    { key: "missingCount", label: "Missing" },
+  ],
+  getName: (d) => d.searchName ?? "",
+  getId: (d) => d.searchName ?? "",
   handler: async (ctx: Ctx<typeof stepsNoCrm, EidLookupInput>, input) => {
     ctx.markStep("ucpath-auth");
     const ucpathPage = await ctx.page("ucpath");
@@ -239,6 +251,7 @@ export const eidLookupWorkflow = defineWorkflow({
  */
 export const eidLookupCrmWorkflow = defineWorkflow({
   name: "eid-lookup",
+  label: "EID Lookup",
   systems: [
     {
       id: "ucpath",
@@ -259,7 +272,14 @@ export const eidLookupCrmWorkflow = defineWorkflow({
   schema: EidLookupCrmInputSchema,
   tiling: "auto",
   authChain: "sequential",
-  detailFields: [],
+  detailFields: [
+    { key: "searchName", label: "Search" },
+    { key: "totalNames", label: "Total Names" },
+    { key: "foundCount", label: "Found" },
+    { key: "missingCount", label: "Missing" },
+  ],
+  getName: (d) => d.searchName ?? "",
+  getId: (d) => d.searchName ?? "",
   handler: async (ctx: Ctx<typeof stepsCrm, EidLookupCrmInput>, input) => {
     ctx.markStep("ucpath-auth");
     const ucpathPage = await ctx.page("ucpath");

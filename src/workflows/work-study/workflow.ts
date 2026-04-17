@@ -21,6 +21,7 @@ const workStudySteps = ["ucpath-auth", "transaction"] as const;
  */
 export const workStudyWorkflow = defineWorkflow({
   name: "work-study",
+  label: "Work Study",
   systems: [
     {
       id: "ucpath",
@@ -34,7 +35,17 @@ export const workStudyWorkflow = defineWorkflow({
   schema: WorkStudyInputSchema,
   tiling: "single",
   authChain: "sequential",
-  detailFields: ["emplId", "effectiveDate"],
+  // Matches pre-subsystem-D WF_CONFIG["work-study"].detailFields:
+  // Employee/EmplId are rendered by the dashboard from name + id; Started/Elapsed
+  // are synthesized from firstLogTs/lastLogTs. Only `emplId` is a raw data key
+  // here — `name` is populated at line 56 below once PayPath extracts it.
+  detailFields: [
+    { key: "name", label: "Employee" },
+    { key: "emplId", label: "Empl ID" },
+    { key: "effectiveDate", label: "Effective Date" },
+  ],
+  getName: (d) => d.name ?? "",
+  getId: (d) => d.emplId ?? "",
   handler: async (ctx, input) => {
     const wsCtx: WorkStudyContext = { employeeName: "" };
 
