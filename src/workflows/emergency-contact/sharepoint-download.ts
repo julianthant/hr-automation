@@ -10,11 +10,11 @@
 import path from "node:path";
 import fs from "node:fs";
 import type { Download, Page } from "playwright";
-import { launchBrowser } from "../browser/launch.js";
-import { fillSsoCredentials, clickSsoSubmit } from "../auth/sso-fields.js";
-import { pollDuoApproval } from "../auth/duo-poll.js";
-import { validateEnv } from "./env.js";
-import { log } from "./log.js";
+import { launchBrowser } from "../../browser/launch.js";
+import { fillSsoCredentials, clickSsoSubmit } from "../../auth/sso-fields.js";
+import { pollDuoApproval } from "../../auth/duo-poll.js";
+import { validateEnv } from "../../utils/env.js";
+import { log } from "../../utils/log.js";
 
 export interface DownloadSharePointOptions {
   /** URL of the SharePoint file to open (e.g. a shared Excel Online link) */

@@ -5,10 +5,10 @@
  *   tsx --env-file=.env src/scripts/download-sharepoint-roster.ts "<sharepoint-url>"
  *
  * Saves to .tracker/rosters/<timestamp>-<filename>.xlsx.
- * For workflow integration, import downloadSharePointFile from src/utils/sharepoint-download.ts directly.
+ * For workflow integration, import downloadSharePointFile from src/workflows/emergency-contact/sharepoint-download.ts directly.
  */
 import path from "node:path";
-import { downloadSharePointFile } from "../utils/sharepoint-download.js";
+import { downloadSharePointFile } from "../workflows/emergency-contact/sharepoint-download.js";
 import { validateEnv } from "../utils/env.js";
 import { log } from "../utils/log.js";
 
