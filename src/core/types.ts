@@ -29,12 +29,22 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   handler: (ctx: Ctx<TSteps, TData>, data: TData) => Promise<void>
 }
 
+export interface RetryOpts {
+  /** Max attempts including the first. Default 3. */
+  attempts?: number
+  /** Linear backoff base in ms. Attempt N waits `backoffMs * (N-1)` before retrying. Default 1000. */
+  backoffMs?: number
+  /** Callback fired after every thrown attempt (success branch does NOT fire it). */
+  onAttempt?: (attempt: number, err: unknown) => void
+}
+
 export interface Ctx<TSteps extends readonly string[], TData> {
   page(id: string): Promise<Page>
   step<R>(name: TSteps[number], fn: () => Promise<R>): Promise<R>
   parallel<T extends Record<string, () => Promise<unknown>>>(
     tasks: T,
   ): Promise<{ [K in keyof T]: PromiseSettledResult<Awaited<ReturnType<T[K]>>> }>
+  retry<R>(fn: () => Promise<R>, opts?: RetryOpts): Promise<R>
   updateData(patch: Partial<TData & Record<string, unknown>>): void
   session: SessionHandle
   log: typeof log
