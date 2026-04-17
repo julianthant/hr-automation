@@ -409,11 +409,13 @@ export async function handleReportsPage(
   log.step("Selected 'Time Detail'");
   await page.waitForTimeout(5_000);
 
-  // Step 3: Set Actual/Adjusted dropdown
+  // Step 3: Set Actual/Adjusted dropdown. The report workspace frame has
+  // multiple unlabeled `<select>` elements we enumerate by index and filter
+  // by the surrounding row text. No registry factory fits this pattern.
   log.step("Setting Actual/Adjusted dropdown...");
   const wsFrame = page.frame({ name: "khtmlReportWorkspace" });
   if (wsFrame) {
-    const selects = wsFrame.locator("select");
+    const selects = wsFrame.locator("select"); // allow-inline-selector -- unlabeled dropdown enumeration
     const selectCount = await selects.count();
     for (let i = 0; i < selectCount; i++) {
       const labelText: string = await selects.nth(i).evaluate((el) => {
@@ -428,13 +430,13 @@ export async function handleReportsPage(
     }
   }
 
-  // Step 4: Set Output Format to PDF
+  // Step 4: Set Output Format to PDF — same pattern as Step 3.
   log.step("Setting Output Format to PDF...");
   if (wsFrame) {
-    const selects = wsFrame.locator("select");
+    const selects = wsFrame.locator("select"); // allow-inline-selector -- unlabeled dropdown enumeration
     const selectCount = await selects.count();
     for (let i = 0; i < selectCount; i++) {
-      const options = selects.nth(i).locator("option");
+      const options = selects.nth(i).locator("option"); // allow-inline-selector -- enumerating option elements inside a dropdown
       const optCount = await options.count();
       for (let j = 0; j < optCount; j++) {
         const txt = await options.nth(j).innerText();
