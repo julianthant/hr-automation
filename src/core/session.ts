@@ -1,4 +1,6 @@
 import type { Page, Browser, BrowserContext } from 'playwright'
+import { promises as fs } from 'node:fs'
+import { join } from 'node:path'
 import type { SystemConfig } from './types.js'
 import { launchBrowser } from '../browser/launch.js'
 import { computeTileLayout } from '../browser/tiling.js'
@@ -134,6 +136,30 @@ export class Session {
     for (const slot of this.state.browsers.values()) {
       try { await slot.browser?.close() } catch { /* ignore */ }
     }
+  }
+
+  /**
+   * Take a screenshot of every open page in the Session and write PNGs to
+   * `.screenshots/<prefix>-<systemId>-<timestamp>.png`. Best-effort — a failure
+   * on one page (closed tab, I/O error) never skips the siblings. Returns the
+   * list of files successfully written.
+   */
+  async screenshotAll(prefix: string): Promise<string[]> {
+    const paths: string[] = []
+    try {
+      await fs.mkdir('.screenshots', { recursive: true })
+    } catch { /* best-effort */ }
+    for (const [id, slot] of this.state.browsers.entries()) {
+      try {
+        if (slot.page.isClosed()) continue
+      } catch { continue }
+      const path = join('.screenshots', `${prefix}-${id}-${Date.now()}.png`)
+      try {
+        await slot.page.screenshot({ path })
+        paths.push(path)
+      } catch { /* best-effort — one failed screenshot mustn't skip siblings */ }
+    }
+    return paths
   }
 }
 

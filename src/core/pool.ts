@@ -66,6 +66,9 @@ export async function runWorkflowPool<TData, TSteps extends readonly string[]>(
             emitStep: () => {},
             emitData: () => {},
             emitFailed: () => {},
+            screenshotFn: async (stepName) => {
+              await session.screenshotAll(`${wf.config.name}-${itemId}-${stepName}`)
+            },
           })
           const ctx = makeCtx<TSteps, TData>({ session, stepper, isBatch: true, runId })
           try {
@@ -109,6 +112,9 @@ export async function runWorkflowPool<TData, TSteps extends readonly string[]>(
                   emitStep: setStep,
                   emitData: updateData,
                   emitFailed: (step, error) => setStep(`${step}:failed:${error}`),
+                  screenshotFn: async (stepName) => {
+                    await session.screenshotAll(`${wf.config.name}-${itemId}-${stepName}`)
+                  },
                 })
                 const ctx = makeCtx<TSteps, TData>({ session, stepper, isBatch: true, runId })
                 await wf.config.handler(ctx, item)

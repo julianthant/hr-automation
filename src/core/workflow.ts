@@ -73,6 +73,9 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
       // Tracker's updateData now accepts unknown; it stringifies at the write boundary.
       emitData: updateData,
       emitFailed: (step, error) => setStep(`${step}:failed:${error}`),
+      screenshotFn: async (stepName) => {
+        await session.screenshotAll(`${wf.config.name}-${String(itemId)}-${stepName}`)
+      },
     })
 
     const ctx = makeCtx<TSteps, TData>({ session, stepper, isBatch: false, runId })
@@ -206,6 +209,9 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
           emitStep: () => {},
           emitData: () => {},
           emitFailed: () => {},
+          screenshotFn: async (stepName) => {
+            await session.screenshotAll(`${wf.config.name}-${itemId}-${stepName}`)
+          },
         })
         try {
           await runOneHandler(item, i, stepper, runId)
@@ -249,6 +255,9 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
                 emitStep: setStep,
                 emitData: updateData,
                 emitFailed: (step, error) => setStep(`${step}:failed:${error}`),
+                screenshotFn: async (stepName) => {
+                  await session.screenshotAll(`${wf.config.name}-${itemId}-${stepName}`)
+                },
               })
               await runOneHandler(item, i, stepper, runId)
             },
