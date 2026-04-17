@@ -45,7 +45,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
 
   const run = async (
     setStep: (s: string) => void,
-    updateData: (d: Record<string, string>) => void,
+    updateData: (d: Record<string, unknown>) => void,
   ): Promise<void> => {
     const session = await Session.launch(wf.config.systems, {
       authChain: wf.config.authChain,
@@ -59,14 +59,8 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
       itemId: String(itemId),
       runId,
       emitStep: setStep,
-      emitData: (patch) => {
-        // Stringify all values — tracker's updateData only accepts strings.
-        const stringified: Record<string, string> = {}
-        for (const [k, v] of Object.entries(patch)) {
-          stringified[k] = v === null || v === undefined ? '' : String(v)
-        }
-        updateData(stringified)
-      },
+      // Tracker's updateData now accepts unknown; it stringifies at the write boundary.
+      emitData: updateData,
       emitFailed: (step, error) => setStep(`${step}:failed:${error}`),
     })
 
