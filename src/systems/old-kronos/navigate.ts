@@ -1,8 +1,8 @@
 import type { Page, Frame } from "playwright";
-import { log } from "../utils/log.js";
+import { log } from "../../utils/log.js";
 import { UKGError } from "./types.js";
-import { debugScreenshot } from "../utils/screenshot.js";
-import { loginToUKG } from "../auth/login.js";
+import { debugScreenshot } from "../../utils/screenshot.js";
+import { loginToUKG } from "../../auth/login.js";
 
 /**
  * Dismiss any OK/Close modal dialog in the iframe.
@@ -508,7 +508,7 @@ export async function goBackToMain(page: Page): Promise<void> {
   }
 
   // Last resort: navigate directly
-  const { UKG_URL } = await import("../config.js");
+  const { UKG_URL } = await import("../../config.js");
   await page.goto(UKG_URL, { waitUntil: "domcontentloaded", timeout: 60_000 });
   await page.waitForTimeout(5_000);
 }

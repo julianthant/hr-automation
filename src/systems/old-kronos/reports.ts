@@ -1,9 +1,9 @@
 import type { Page, Frame } from "playwright";
 import { join } from "path";
 import { readdir } from "fs/promises";
-import { log } from "../utils/log.js";
-import { debugScreenshot } from "../utils/screenshot.js";
-import { PATHS } from "../config.js";
+import { log } from "../../utils/log.js";
+import { debugScreenshot } from "../../utils/screenshot.js";
+import { PATHS } from "../../config.js";
 
 /**
  * Try multiple selectors across multiple frames. Returns true if one was clicked.

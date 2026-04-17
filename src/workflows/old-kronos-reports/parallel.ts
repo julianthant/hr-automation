@@ -10,7 +10,7 @@ import { ukgNavigateAndFill, ukgSubmitAndWaitForDuo } from "../../auth/login.js"
 import {
   getGeniesIframe,
   setDateRange,
-} from "../../old-kronos/index.js";
+} from "../../systems/old-kronos/index.js";
 import { runKronosForEmployee } from "./workflow.js";
 import type { KronosTrackerRow } from "./tracker.js";
 import { updateKronosTracker as updateTracker } from "./tracker.js";

@@ -13,8 +13,8 @@ import {
   goBackToMain,
   setDateRange,
   dismissModal,
-} from "../../old-kronos/index.js";
-import { handleReportsPage } from "../../old-kronos/reports.js";
+} from "../../systems/old-kronos/index.js";
+import { handleReportsPage } from "../../systems/old-kronos/reports.js";
 import { validateAndClean, verifyPdfMatch } from "./validate.js";
 import {
   updateKronosTracker as defaultUpdateTracker,
