@@ -1,0 +1,36 @@
+pdfPath: src/workflows/emergency-contact/fixtures/fake.pdf
+batchName: test-batch-2026-04-17
+records:
+  - sourcePage: 1
+    employee:
+      name: Test Employee One
+      employeeId: "99991"
+    emergencyContact:
+      name: Test Contact One
+      relationship: Mom
+      primary: true
+      sameAddressAsEmployee: true
+      address: null
+      cellPhone: "(555) 555-0001"
+      homePhone: null
+      workPhone: null
+    notes: []
+  - sourcePage: 2
+    employee:
+      name: Test Employee Two
+      employeeId: "99992"
+    emergencyContact:
+      name: Test Contact Two
+      relationship: Sibling
+      primary: true
+      sameAddressAsEmployee: false
+      address:
+        street: "123 Fake St"
+        city: "San Diego"
+        state: "CA"
+        zip: "92122"
+      cellPhone: null
+      homePhone: "(555) 555-0002"
+      workPhone: null
+    notes:
+      - "Fixture — do not run against production."
