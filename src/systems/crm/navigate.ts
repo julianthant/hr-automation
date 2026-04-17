@@ -1,11 +1,12 @@
 import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
 import { CRM_SECTION_URLS } from "../../config.js";
+import { sectionNav } from "./selectors.js";
 
 /**
- * SELECTOR: adjusted from live testing -- known section URL mappings.
- * The onboarding record ID from the ViewOnboarding URL can be reused
- * to navigate directly via URL params instead of clicking UI buttons.
+ * Known section URL mappings. The onboarding record ID from the ViewOnboarding
+ * URL can be reused to navigate directly via URL params instead of clicking UI
+ * buttons.
  */
 const SECTION_URLS = CRM_SECTION_URLS;
 
@@ -34,13 +35,8 @@ export async function navigateToSection(
       timeout: 15_000,
     });
   } else {
-    // Fallback: click the section link/tab/button
-    const sectionLink = page
-      .getByRole("link", { name: new RegExp(sectionName, "i") })
-      .or(page.getByText(sectionName))
-      .or(page.getByRole("tab", { name: new RegExp(sectionName, "i") }));
-
-    await sectionLink.first().click({ timeout: 10_000 });
+    // Fallback: click the section link/tab/button (3-deep .or() chain)
+    await sectionNav.byName(page, sectionName).first().click({ timeout: 10_000 });
   }
 
   await page.waitForLoadState("networkidle", { timeout: 15_000 });
