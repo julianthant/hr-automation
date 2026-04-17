@@ -199,6 +199,10 @@ async function runWorker(
       try {
         await withLogContext("kronos-reports", employeeId, () =>
           withTrackedWorkflow("kronos-reports", employeeId, {}, async (setStep, updateData, _onCleanup, session) => {
+            // Stamp the employee id up front so the dashboard detail panel's
+            // "ID" cell populates immediately — name is filled later when
+            // the row is clicked and the employee header becomes readable.
+            updateData({ id: employeeId });
             setStep("searching");
             await runKronosForEmployee(employeeId, {
               page,

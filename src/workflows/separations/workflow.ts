@@ -141,6 +141,10 @@ export async function runSeparation(
   const extraWindows: BrowserWindow[] = []; // UCPath windows we launch and close
   const allWindows: BrowserWindow[] = []; // tracked for batch reuse
 
+  // Stamp the docId immediately so the dashboard detail panel shows the Doc ID
+  // field from the moment the entry appears, not only after Kuali extraction.
+  updateData({ docId });
+
   // ─── Step 1: Launch + auth (or reuse existing) ───
   let kualiWin: BrowserWindow;
   let oldKronosWin: BrowserWindow;

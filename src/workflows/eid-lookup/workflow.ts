@@ -227,6 +227,14 @@ export const eidLookupWorkflow = defineWorkflow({
   getName: (d) => d.searchName ?? "",
   getId: (d) => d.searchName ?? "",
   handler: async (ctx: Ctx<typeof stepsNoCrm, EidLookupInput>, input) => {
+    // Stamp the search name(s) immediately so the dashboard detail panel has
+    // something to show during auth + searching — the batched nature of this
+    // workflow means there's no per-name entry; one run covers N names.
+    ctx.updateData({
+      searchName: input.names.slice(0, 3).join(", ") + (input.names.length > 3 ? ", ..." : ""),
+      totalNames: input.names.length,
+    });
+
     ctx.markStep("ucpath-auth");
     const ucpathPage = await ctx.page("ucpath");
 
@@ -234,9 +242,8 @@ export const eidLookupWorkflow = defineWorkflow({
       const r = await runSearchingPhase(ucpathPage, input);
       const found = r.filter((x) => x.found).length;
       ctx.updateData({
-        totalNames: String(input.names.length),
-        foundCount: String(found),
-        missingCount: String(input.names.length - found),
+        foundCount: found,
+        missingCount: input.names.length - found,
       });
       return r;
     });
@@ -281,6 +288,14 @@ export const eidLookupCrmWorkflow = defineWorkflow({
   getName: (d) => d.searchName ?? "",
   getId: (d) => d.searchName ?? "",
   handler: async (ctx: Ctx<typeof stepsCrm, EidLookupCrmInput>, input) => {
+    // Stamp the search name(s) immediately so the dashboard detail panel has
+    // something to show during auth + searching — the batched nature of this
+    // workflow means there's no per-name entry; one run covers N names.
+    ctx.updateData({
+      searchName: input.names.slice(0, 3).join(", ") + (input.names.length > 3 ? ", ..." : ""),
+      totalNames: input.names.length,
+    });
+
     ctx.markStep("ucpath-auth");
     const ucpathPage = await ctx.page("ucpath");
 
@@ -291,9 +306,8 @@ export const eidLookupCrmWorkflow = defineWorkflow({
       const r = await runSearchingPhase(ucpathPage, input);
       const found = r.filter((x) => x.found).length;
       ctx.updateData({
-        totalNames: String(input.names.length),
-        foundCount: String(found),
-        missingCount: String(input.names.length - found),
+        foundCount: found,
+        missingCount: input.names.length - found,
       });
       return r;
     });
