@@ -2,6 +2,8 @@
 
 Two-tier tracking: JSONL for live dashboard streaming, Excel for persistent historical records.
 
+> **Kernel-internal.** `withTrackedWorkflow`, `appendLogEntry`, and the SIGINT handler are wrapped by `src/core/runWorkflow` / `runWorkflowBatch` / `runWorkflowPool` — kernel workflows never call them directly. Legacy workflows (`separations`, `old-kronos-reports`) still call `withTrackedWorkflow` manually because they predate the kernel. If you're writing a new workflow, use `ctx.step(...)` / `ctx.updateData(...)` in `src/core/` instead.
+
 ## Files
 
 - `jsonl.ts` — JSONL append-only tracker + `withTrackedWorkflow` lifecycle wrapper
@@ -74,11 +76,15 @@ Appends a single row to an `.xlsx` file. Creates the file and/or worksheet if mi
 
 ## Adding Tracking for a New Workflow
 
+Kernel workflows get tracking for free — `defineWorkflow({ ... })` registers dashboard metadata and `runWorkflow` wraps each run in `withTrackedWorkflow`. Do NOT call `withTrackedWorkflow`, `trackEvent`, or `setStep` from a handler; use `ctx.step(...)` / `ctx.markStep(...)` / `ctx.updateData(...)` instead.
+
+Legacy workflows (only `separations`, `old-kronos-reports` as of 2026-04-17) wrap execution manually:
+
 1. In the workflow's `workflow.ts`, wrap execution in `withTrackedWorkflow(workflowName, id, data, fn)`
 2. Use `setStep(step)` at each major phase transition
 3. Use `updateData(d)` to add discovered data (e.g., employee name)
-4. Create a `tracker.ts` in the workflow folder for Excel tracking (Excel-only — no `trackEvent` calls)
-5. Update the dashboard to support the new workflow (see `src/dashboard/CLAUDE.md`)
+4. Create a `tracker.ts` in the workflow folder for Excel tracking if the workflow needs persistent historical records (Excel-only — no `trackEvent` calls)
+5. Call `defineDashboardMetadata({ name, label, steps, systems, detailFields })` at module load in the workflow's `index.ts` so the dashboard registry has its UI metadata
 
 ## Lessons Learned
 

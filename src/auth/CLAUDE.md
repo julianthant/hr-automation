@@ -2,6 +2,20 @@
 
 Five independent login flows for UCSD systems. Each system uses different SSO/auth — never share browser sessions between them.
 
+Kernel workflows invoke these via `SystemConfig.login` in `defineWorkflow({ systems: [...] })`:
+
+```ts
+systems: [{
+  id: "ucpath",
+  login: async (page) => {
+    const ok = await loginToUCPath(page);
+    if (!ok) throw new Error("UCPath authentication failed");
+  },
+}],
+```
+
+`Session.launch` in `src/core/session.ts` calls each `login` in the configured `authChain` order (sequential or interleaved) with 3-attempt retry.
+
 ## Files
 
 - `login.ts` — All login flows: `loginToUCPath`, `loginToACTCrm`, `loginToUKG` (split into `ukgNavigateAndFill` + `ukgSubmitAndWaitForDuo`), `loginToKuali`, `loginToNewKronos`
