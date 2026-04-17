@@ -4,7 +4,7 @@ import { StatPills } from "./StatPills";
 import { EntryItem } from "./EntryItem";
 import { EmptyState } from "./EmptyState";
 import type { TrackerEntry } from "./types";
-import { getConfig } from "./types";
+import { resolveEntryName } from "./entry-display";
 
 interface QueuePanelProps {
   entries: TrackerEntry[];
@@ -17,7 +17,6 @@ interface QueuePanelProps {
 export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }: QueuePanelProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
-  const cfg = getConfig(workflow);
 
   const filtered = useMemo(() => {
     let result = entries;
@@ -29,12 +28,12 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
     if (search) {
       const q = search.toLowerCase();
       result = result.filter((e) => {
-        const name = (cfg.getName(e) || "").toLowerCase();
+        const name = resolveEntryName(e).toLowerCase();
         return e.id.toLowerCase().includes(q) || name.includes(q);
       });
     }
     return result;
-  }, [entries, statusFilter, search, cfg]);
+  }, [entries, statusFilter, search]);
 
   return (
     <div className="w-[320px] min-[1440px]:w-[400px] 2xl:w-[480px] flex-shrink-0 border-r border-border flex flex-col bg-background">
@@ -81,7 +80,6 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
             <EntryItem
               key={entry.id}
               entry={entry}
-              workflow={workflow}
               selected={selectedId === entry.id}
               onClick={() => onSelect(entry.id)}
             />

@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
 import { useClock } from "./hooks/useClock";
 import { cn } from "@/lib/utils";
-import { TAB_ORDER, getConfig } from "./types";
+import { useWorkflows, autoLabel } from "../workflows-context";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -11,6 +11,20 @@ import {
 } from "./ui/dropdown-menu";
 import { Popover, PopoverTrigger, PopoverContent } from "./ui/popover";
 import { Calendar } from "./ui/calendar";
+
+/**
+ * Preferred display order for the workflow dropdown. Workflows not in the list
+ * are appended in registration order (stable because the registry is a Map).
+ * Kept small and local because it's pure display preference.
+ */
+const PREFERRED_ORDER = [
+  "onboarding",
+  "separations",
+  "kronos-reports",
+  "eid-lookup",
+  "work-study",
+  "emergency-contact",
+];
 
 interface TopBarProps {
   workflow: string;
@@ -29,15 +43,22 @@ export function TopBar({
   connected, entryCounts,
 }: TopBarProps) {
   const clock = useClock();
+  const registered = useWorkflows();
+  const labelFor = (wf: string): string =>
+    registered.find((r) => r.name === wf)?.label ?? autoLabel(wf);
 
-  // Always show all workflows from TAB_ORDER, plus any extras from SSE
+  // Union: registry workflows + any extras seen via SSE (files on disk the
+  // backend registry doesn't know about). Preferred-order list wins, then
+  // anything else falls in behind in discovery order.
   const allWfs = useMemo(() => {
-    const ordered = [...TAB_ORDER];
-    workflows.forEach((wf) => {
-      if (!ordered.includes(wf)) ordered.push(wf);
-    });
+    const union = new Set<string>();
+    for (const name of PREFERRED_ORDER) union.add(name);
+    for (const r of registered) union.add(r.name);
+    for (const wf of workflows) union.add(wf);
+    const ordered = PREFERRED_ORDER.filter((n) => union.has(n));
+    for (const n of union) if (!ordered.includes(n)) ordered.push(n);
     return ordered;
-  }, [workflows]);
+  }, [registered, workflows]);
 
   const dateObj = new Date(date + "T00:00:00");
 
@@ -70,7 +91,7 @@ export function TopBar({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button className="flex items-center gap-2.5 px-3.5 py-2 rounded-lg border border-border bg-secondary cursor-pointer w-[220px] transition-colors hover:border-primary data-[state=open]:border-primary outline-none">
-              <span className="flex-1 text-left font-semibold text-sm">{getConfig(workflow).label}</span>
+              <span className="flex-1 text-left font-semibold text-sm">{labelFor(workflow)}</span>
               <span className="text-xs text-muted-foreground font-mono font-medium">{entryCounts[workflow] || 0}</span>
               <ChevronDown className="w-3.5 h-3.5 text-muted-foreground transition-transform data-[state=open]:rotate-180" />
             </button>
@@ -84,7 +105,7 @@ export function TopBar({
               >
                 <span className="flex items-center justify-between w-full">
                   <span className={cn("font-medium", wf === workflow && "font-semibold text-primary")}>
-                    {getConfig(wf).label}
+                    {labelFor(wf)}
                   </span>
                   <span className={cn("font-mono text-[11px]", (entryCounts[wf] || 0) > 0 ? "text-primary font-semibold" : "text-muted-foreground")}>
                     {entryCounts[wf] || 0}

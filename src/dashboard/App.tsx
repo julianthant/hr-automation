@@ -6,7 +6,8 @@ import { LogPanel } from "./components/LogPanel";
 import { SessionPanel } from "./components/SessionPanel";
 import { useEntries } from "./components/hooks/useEntries";
 import { usePreflight } from "./components/hooks/usePreflight";
-import { getConfig } from "./components/types";
+import { useWorkflow, autoLabel } from "./workflows-context";
+import { resolveEntryName } from "./components/entry-display";
 
 /** Read initial state from URL search params so refresh preserves selection */
 function readUrlState() {
@@ -59,16 +60,18 @@ export default function App() {
       .catch(() => {});
   }, [workflow]);
 
+  const meta = useWorkflow(workflow);
+  const wfLabel = meta?.label ?? autoLabel(workflow);
+
   // Toast on completion/failure
   useEffect(() => {
     for (const entry of entries) {
       const prevStatus = prevStatusRef.get(entry.id);
       if (prevStatus && prevStatus !== entry.status) {
-        const cfg = getConfig(workflow);
-        const name = cfg.getName(entry) || entry.id;
+        const name = resolveEntryName(entry);
         if (entry.status === "done") {
           toast.success(`${name} completed`, {
-            description: `${cfg.label} finished`,
+            description: `${wfLabel} finished`,
             duration: 5000,
           });
         } else if (entry.status === "failed") {
@@ -80,7 +83,7 @@ export default function App() {
       }
       prevStatusRef.set(entry.id, entry.status);
     }
-  }, [entries, workflow, prevStatusRef]);
+  }, [entries, wfLabel, prevStatusRef]);
 
   // Update document title
   useEffect(() => {

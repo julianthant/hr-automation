@@ -1,3 +1,10 @@
+export type TypedValue =
+  | { type: "string"; value: string }
+  | { type: "number"; value: string }
+  | { type: "boolean"; value: string }
+  | { type: "date"; value: string }
+  | { type: "null"; value: "" };
+
 export interface TrackerEntry {
   workflow: string;
   timestamp: string;
@@ -6,6 +13,8 @@ export interface TrackerEntry {
   status: "pending" | "running" | "done" | "failed" | "skipped";
   step?: string;
   data?: Record<string, string>;
+  /** Rich-typed mirror of `data` — absent on legacy pre-subsystem-D records. */
+  typedData?: Record<string, TypedValue>;
   error?: string;
   /** First-seen timestamp for this entry (computed by useEntries, not from backend). */
   startTimestamp?: string;
@@ -33,142 +42,50 @@ export interface RunInfo {
   timestamp: string;
 }
 
-export interface WorkflowConfig {
-  label: string;
-  steps: string[];
-  detailFields: { key: string; label: string }[];
-  getName: (r: TrackerEntry) => string;
-  getId: (r: TrackerEntry) => string;
+// ── Detail-value formatting ──────────────────────────────
+//
+// Generic, type-aware renderer that reads a TrackerEntry's data for a given
+// key. Prefers `typedData[key]` (new-shape records) and falls back to
+// `data[key]` (legacy records). Returns an em-dash for missing values so the
+// dashboard's detail grid never shows empty cells.
+
+const NUMBER_FMT = new Intl.NumberFormat();
+const DATE_FMT = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+export function formatTrackerValue(entry: TrackerEntry, key: string): string {
+  const typed = entry.typedData?.[key];
+  if (typed) {
+    switch (typed.type) {
+      case "string":
+        return typed.value || "\u2014";
+      case "number": {
+        const n = Number(typed.value);
+        return Number.isFinite(n) ? NUMBER_FMT.format(n) : typed.value;
+      }
+      case "boolean":
+        return typed.value === "true" ? "Yes" : "No";
+      case "date": {
+        const d = new Date(typed.value);
+        return isNaN(d.getTime()) ? typed.value : DATE_FMT.format(d);
+      }
+      case "null":
+        return "\u2014";
+    }
+  }
+  const fallback = entry.data?.[key];
+  if (fallback === undefined || fallback === "") return "\u2014";
+  return fallback;
 }
 
-export const WF_CONFIG: Record<string, WorkflowConfig> = {
-  onboarding: {
-    label: "Onboarding",
-    steps: ["crm-auth", "extraction", "pdf-download", "ucpath-auth", "person-search", "i9-creation", "transaction"],
-    detailFields: [
-      { key: "employee", label: "Employee" },
-      { key: "email", label: "Email" },
-      { key: "departmentNumber", label: "Dept #" },
-      { key: "positionNumber", label: "Position #" },
-      { key: "wage", label: "Wage" },
-      { key: "effectiveDate", label: "Eff Date" },
-      { key: "i9ProfileId", label: "I9 Profile" },
-      { key: "elapsed", label: "Elapsed" },
-    ],
-    getName: (r) => [r.data?.firstName, r.data?.lastName].filter(Boolean).join(" "),
-    getId: (r) => r.id,
-  },
-  separations: {
-    label: "Separations",
-    steps: ["launching", "authenticating", "kuali-extraction", "kronos-search", "ucpath-job-summary", "ucpath-transaction", "kuali-finalization"],
-    detailFields: [
-      { key: "employee", label: "Employee" },
-      { key: "docId", label: "Doc ID" },
-      { key: "started", label: "Started" },
-      { key: "elapsed", label: "Elapsed" },
-    ],
-    getName: (r) => r.data?.name || r.data?.employeeName || "",
-    getId: (r) => r.id,
-  },
-  "kronos-reports": {
-    label: "Kronos Reports",
-    steps: ["searching", "extracting", "downloading"],
-    detailFields: [
-      { key: "employee", label: "Employee" },
-      { key: "id", label: "ID" },
-      { key: "started", label: "Started" },
-      { key: "elapsed", label: "Elapsed" },
-    ],
-    getName: (r) => r.data?.name || "",
-    getId: (r) => r.id,
-  },
-  "eid-lookup": {
-    label: "EID Lookup",
-    steps: ["ucpath-auth", "searching", "crm-auth", "cross-verification"],
-    detailFields: [
-      { key: "searchName", label: "Search Name" },
-      { key: "emplId", label: "Empl ID" },
-      { key: "started", label: "Started" },
-      { key: "elapsed", label: "Elapsed" },
-    ],
-    getName: (r) => r.data?.name || "",
-    getId: (r) => r.id,
-  },
-  "work-study": {
-    label: "Work Study",
-    steps: ["ucpath-auth", "transaction"],
-    detailFields: [
-      { key: "employee", label: "Employee" },
-      { key: "emplId", label: "Empl ID" },
-      { key: "started", label: "Started" },
-      { key: "elapsed", label: "Elapsed" },
-    ],
-    getName: (r) => r.data?.name || "",
-    getId: (r) => r.id,
-  },
-  "emergency-contact": {
-    label: "Emergency Contact",
-    steps: ["navigation", "fill-form", "save"],
-    detailFields: [
-      { key: "employeeName", label: "Employee" },
-      { key: "emplId", label: "Empl ID" },
-      { key: "contactName", label: "Contact" },
-      { key: "relationship", label: "Relationship" },
-    ],
-    getName: (r) => r.data?.employeeName || "",
-    getId: (r) => r.id,
-  },
-};
-
-export const TAB_ORDER = ["onboarding", "separations", "kronos-reports", "eid-lookup", "work-study", "emergency-contact"];
-
-export function getConfig(wf: string): WorkflowConfig {
-  if (WF_CONFIG[wf]) return WF_CONFIG[wf];
-  return {
-    label: wf.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
-    steps: [],
-    detailFields: [
-      { key: "id", label: "ID" },
-      { key: "started", label: "Started" },
-      { key: "elapsed", label: "Elapsed" },
-    ],
-    getName: () => "",
-    getId: (r) => r.id,
-  };
-}
-
-const STEP_ABBREVIATIONS: Record<string, string> = {
-  ucpath: "UCPath",
-  kuali: "Kuali",
-  kronos: "Kronos",
-  crm: "CRM",
-  sso: "SSO",
-  ukg: "UKG",
-  pdf: "PDF",
-  i9: "I-9",
-};
-
-export function formatStepName(step: string): string {
-  return step
-    .replace(/-/g, " ")
-    .replace(/\b\w+/g, (w) => STEP_ABBREVIATIONS[w.toLowerCase()] || w.charAt(0).toUpperCase() + w.slice(1));
-}
-
-export type LogCategory = "fill" | "navigate" | "extract" | "search" | "select" | "auth" | "download" | "success" | "error" | "waiting" | "step";
-
-export function getLogCategory(level: string, message: string): LogCategory {
-  if (level === "success") return "success";
-  if (level === "error") return "error";
-  if (level === "waiting") return "waiting";
-  const msg = (message || "").toLowerCase();
-  if (msg.includes("fill") || msg.includes("comp rate") || msg.includes("compensation")) return "fill";
-  if (msg.includes("click") || msg.includes("navigat")) return "navigate";
-  if (msg.includes("crm field") || msg.includes("extract") || msg.includes("matched label")) return "extract";
-  if (msg.includes("search") || msg.includes("found") || msg.includes("result") || msg.includes("person search")) return "search";
-  if (msg.includes("select") || msg.includes("dropdown") || msg.includes("template") || msg.includes("reason")) return "select";
-  if (msg.includes("sso") || msg.includes("duo") || msg.includes("auth") || msg.includes("credential") || msg.includes("login")) return "auth";
-  if (msg.includes("download") || msg.includes("pdf") || msg.includes("report")) return "download";
-  return "step";
+/** Does this key carry a monospace/identifier feel (emplId, email, etc.)? */
+export function isMonospaceKey(key: string): boolean {
+  return /id$|number$|email|empl|wage|ssn|date|count$/i.test(key);
 }
 
 // ── Session Panel Types ────────────────────────────────
@@ -208,4 +125,40 @@ export interface DuoQueueEntry {
 export interface SessionState {
   workflows: WorkflowInstanceState[];
   duoQueue: DuoQueueEntry[];
+}
+
+// ── Step name formatting (stable — used by StepPipeline + WorkflowBox) ──
+
+const STEP_ABBREVIATIONS: Record<string, string> = {
+  ucpath: "UCPath",
+  kuali: "Kuali",
+  kronos: "Kronos",
+  crm: "CRM",
+  sso: "SSO",
+  ukg: "UKG",
+  pdf: "PDF",
+  i9: "I-9",
+};
+
+export function formatStepName(step: string): string {
+  return step
+    .replace(/-/g, " ")
+    .replace(/\b\w+/g, (w) => STEP_ABBREVIATIONS[w.toLowerCase()] || w.charAt(0).toUpperCase() + w.slice(1));
+}
+
+export type LogCategory = "fill" | "navigate" | "extract" | "search" | "select" | "auth" | "download" | "success" | "error" | "waiting" | "step";
+
+export function getLogCategory(level: string, message: string): LogCategory {
+  if (level === "success") return "success";
+  if (level === "error") return "error";
+  if (level === "waiting") return "waiting";
+  const msg = (message || "").toLowerCase();
+  if (msg.includes("fill") || msg.includes("comp rate") || msg.includes("compensation")) return "fill";
+  if (msg.includes("click") || msg.includes("navigat")) return "navigate";
+  if (msg.includes("crm field") || msg.includes("extract") || msg.includes("matched label")) return "extract";
+  if (msg.includes("search") || msg.includes("found") || msg.includes("result") || msg.includes("person search")) return "search";
+  if (msg.includes("select") || msg.includes("dropdown") || msg.includes("template") || msg.includes("reason")) return "select";
+  if (msg.includes("sso") || msg.includes("duo") || msg.includes("auth") || msg.includes("credential") || msg.includes("login")) return "auth";
+  if (msg.includes("download") || msg.includes("pdf") || msg.includes("report")) return "download";
+  return "step";
 }
