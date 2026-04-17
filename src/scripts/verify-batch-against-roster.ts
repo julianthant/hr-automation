@@ -14,7 +14,7 @@ import {
   loadRosterIndex,
   namesMatch,
   normalizeName,
-} from "../utils/roster-verify.js";
+} from "../workflows/emergency-contact/roster-verify.js";
 import { log } from "../utils/log.js";
 
 const [yamlPath, rosterPath] = process.argv.slice(2);

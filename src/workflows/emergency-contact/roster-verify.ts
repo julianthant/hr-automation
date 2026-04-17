@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import ExcelJS from "exceljs";
-import { log } from "./log.js";
-import type { EmergencyContactBatch } from "../workflows/emergency-contact/schema.js";
+import { log } from "../../utils/log.js";
+import type { EmergencyContactBatch } from "./schema.js";
 
 export interface RosterMismatch {
   emplId: string;
