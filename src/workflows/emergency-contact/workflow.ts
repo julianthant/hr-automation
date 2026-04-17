@@ -18,7 +18,7 @@ import {
 } from "../../tracker/session-events.js";
 import { TransactionError } from "../../systems/ucpath/types.js";
 import { navigateToEmergencyContact } from "../../systems/ucpath/personal-data.js";
-import { downloadSharePointFile } from "../../utils/sharepoint-download.js";
+import { downloadSharePointFile } from "./sharepoint-download.js";
 import { verifyBatchAgainstRoster } from "./roster-verify.js";
 import { buildEmergencyContactPlan, extractEmployeeName, findExistingContactDuplicate } from "./enter.js";
 import type { EmergencyContactContext } from "./enter.js";
