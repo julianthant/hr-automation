@@ -7,6 +7,13 @@ export interface StepperOpts {
   emitStep: (name: string) => void
   emitData: (data: Record<string, unknown>) => void
   emitFailed: (step: string, error: string) => void
+  /**
+   * Optional hook invoked inside `step`'s catch, BEFORE `emitFailed` runs.
+   * Used by the kernel to drop per-browser PNGs into `.screenshots/` when
+   * a step throws. Must be best-effort — any error the hook raises is
+   * swallowed so the original throw still propagates cleanly.
+   */
+  screenshotFn?: (stepName: string) => Promise<void>
 }
 
 export class Stepper {
@@ -21,6 +28,12 @@ export class Stepper {
     try {
       return await fn()
     } catch (err) {
+      // Best-effort screenshot BEFORE emitFailed so the filename correlates with
+      // the failed-step event. Errors inside screenshotFn are swallowed — the
+      // original throw must always win.
+      if (this.opts.screenshotFn) {
+        try { await this.opts.screenshotFn(name) } catch { /* best-effort */ }
+      }
       const classified = classifyError(err)
       this.opts.emitFailed(name, classified)
       throw err

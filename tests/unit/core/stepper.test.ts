@@ -113,3 +113,37 @@ test('stepper.markStep: does not throw even if emitStep is a no-op', () => {
   // failure path, so this call must simply succeed.
   assert.doesNotThrow(() => stepper.markStep('any-name'))
 })
+
+test('stepper calls screenshotFn on step failure', async () => {
+  const captured: string[] = []
+  const stepper = new Stepper({
+    workflow: 't',
+    itemId: '1',
+    runId: 'r',
+    emitStep: () => {},
+    emitData: () => {},
+    emitFailed: () => {},
+    screenshotFn: async (stepName) => { captured.push(stepName) },
+  })
+  await assert.rejects(
+    () => stepper.step('boom', async () => { throw new Error('x') }),
+    /x/,
+  )
+  assert.deepEqual(captured, ['boom'])
+})
+
+test('stepper does not call screenshotFn on success', async () => {
+  const captured: string[] = []
+  const stepper = new Stepper({
+    workflow: 't',
+    itemId: '1',
+    runId: 'r',
+    emitStep: () => {},
+    emitData: () => {},
+    emitFailed: () => {},
+    screenshotFn: async (stepName) => { captured.push(stepName) },
+  })
+  const result = await stepper.step('ok', async () => 42)
+  assert.equal(result, 42)
+  assert.deepEqual(captured, [])
+})

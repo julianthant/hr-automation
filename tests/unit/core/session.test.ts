@@ -143,6 +143,85 @@ test('session.healthCheck: returns false if page is closed', async () => {
   assert.equal(await s.healthCheck('a'), false)
 })
 
+test('session.screenshotAll: writes one PNG per open page, skips closed, returns paths', async () => {
+  const { existsSync, rmSync } = await import('node:fs')
+  const shotCalls: Array<{ id: string; path: string }> = []
+  const mkPage = (id: string, closed: boolean) => ({
+    isClosed: () => closed,
+    screenshot: async (opts: { path: string }) => { shotCalls.push({ id, path: opts.path }) },
+  }) as unknown as import('playwright').Page
+
+  const s = Session.forTesting({
+    systems: [
+      { id: 'ucpath', login: async () => {} },
+      { id: 'kuali', login: async () => {} },
+      { id: 'closed-one', login: async () => {} },
+    ],
+    browsers: new Map([
+      ['ucpath', { page: mkPage('ucpath', false), browser: null as never, context: null as never }],
+      ['kuali', { page: mkPage('kuali', false), browser: null as never, context: null as never }],
+      ['closed-one', { page: mkPage('closed-one', true), browser: null as never, context: null as never }],
+    ]),
+    readyPromises: new Map(),
+  })
+
+  // Pre-clean in case a previous run left the dir around.
+  const paths = await s.screenshotAll('test-prefix')
+  try {
+    assert.equal(paths.length, 2, 'only 2 open pages → 2 paths')
+    assert.ok(existsSync('.screenshots'), '.screenshots directory created')
+    // Each path matches `.screenshots/<prefix>-<systemId>-<timestamp>.png`
+    for (const p of paths) {
+      assert.match(p, /^\.screenshots[\\/]test-prefix-(ucpath|kuali)-\d+\.png$/)
+    }
+    // Screenshot calls correspond 1:1 to returned paths
+    assert.equal(shotCalls.length, 2)
+    const ids = shotCalls.map((c) => c.id).sort()
+    assert.deepEqual(ids, ['kuali', 'ucpath'])
+  } finally {
+    // Best-effort cleanup — directory is in .gitignore so leftover files are fine
+    // but we clean up to stay tidy across test runs.
+    try { rmSync('.screenshots', { recursive: true, force: true }) } catch { /* ignore */ }
+  }
+})
+
+test('session.screenshotAll: a failed screenshot does not skip siblings', async () => {
+  const { rmSync } = await import('node:fs')
+  const mkOk = (id: string) => ({
+    isClosed: () => false,
+    screenshot: async () => { /* ok */ void id },
+  }) as unknown as import('playwright').Page
+  const mkBad = () => ({
+    isClosed: () => false,
+    screenshot: async () => { throw new Error('disk full') },
+  }) as unknown as import('playwright').Page
+
+  const s = Session.forTesting({
+    systems: [
+      { id: 'a', login: async () => {} },
+      { id: 'b-bad', login: async () => {} },
+      { id: 'c', login: async () => {} },
+    ],
+    browsers: new Map([
+      ['a', { page: mkOk('a'), browser: null as never, context: null as never }],
+      ['b-bad', { page: mkBad(), browser: null as never, context: null as never }],
+      ['c', { page: mkOk('c'), browser: null as never, context: null as never }],
+    ]),
+    readyPromises: new Map(),
+  })
+
+  const paths = await s.screenshotAll('sibling-test')
+  try {
+    // `a` and `c` succeeded; `b-bad` threw and was skipped.
+    assert.equal(paths.length, 2)
+    assert.ok(paths.some((p) => p.includes('-a-')))
+    assert.ok(paths.some((p) => p.includes('-c-')))
+    assert.ok(!paths.some((p) => p.includes('-b-bad-')))
+  } finally {
+    try { rmSync('.screenshots', { recursive: true, force: true }) } catch { /* ignore */ }
+  }
+})
+
 // Fake launch helper used in tests — returns a stub Page/Browser/Context.
 function fakeLaunch() {
   const page = { close: async () => {}, bringToFront: async () => {}, goto: async () => {}, waitForTimeout: async () => {} } as unknown as import('playwright').Page
