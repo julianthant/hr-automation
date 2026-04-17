@@ -1,5 +1,6 @@
 import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
+import { dismissPeopleSoftModalMask as hidePeopleSoftModalMask } from "../common/modal.js";
 
 /**
  * UCPath standalone Emergency Contact component.
@@ -69,19 +70,9 @@ export async function navigateToEmergencyContact(
   log.success(`Emergency Contact editor loaded for Empl ID ${emplId}`);
 }
 
-/**
- * PeopleSoft leaves `#pt_modalMask` visible even when no modal is open,
- * intercepting pointer events and making every click retry forever.
- * Hide it via JS before any click.
- */
-export async function hidePeopleSoftModalMask(page: Page): Promise<void> {
-  await page
-    .evaluate(() => {
-      const mask = document.getElementById("pt_modalMask");
-      if (mask) mask.style.display = "none";
-    })
-    .catch(() => {});
-}
+// Re-export under the legacy name so existing callers still resolve.
+// Implementation lives in src/systems/common/modal.ts.
+export { hidePeopleSoftModalMask };
 
 /**
  * Read every existing Contact Name textbox on the currently loaded editor.
