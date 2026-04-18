@@ -4,6 +4,8 @@ import { TopBar } from "./components/TopBar";
 import { QueuePanel } from "./components/QueuePanel";
 import { LogPanel } from "./components/LogPanel";
 import { SessionPanel } from "./components/SessionPanel";
+import { RunnerDrawer } from "./components/RunnerDrawer";
+import { RunnerLauncher } from "./components/RunnerLauncher";
 import { useEntries } from "./components/hooks/useEntries";
 import { usePreflight } from "./components/hooks/usePreflight";
 import { useWorkflow, autoLabel } from "./workflows-context";
@@ -35,6 +37,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(initial.selectedId);
   const [date, setDate] = useState(initial.date);
   const [availableDates, setAvailableDates] = useState<string[]>([]);
+  const [runnerOpen, setRunnerOpen] = useState(false);
   const prevStatusRef = useMemo(() => new Map<string, string>(), []);
 
   // Pre-flight check on mount
@@ -123,6 +126,16 @@ export default function App() {
         availableDates={availableDates}
         connected={connected}
         entryCounts={entryCounts}
+        rightSlot={<RunnerLauncher onClick={() => setRunnerOpen(true)} />}
+      />
+      <RunnerDrawer
+        open={runnerOpen}
+        onClose={() => setRunnerOpen(false)}
+        onSpawned={(wf) => {
+          // Switch the dashboard to the workflow we just spawned so the
+          // operator sees its queue update in real time.
+          if (wf !== workflow) handleWorkflowChange(wf);
+        }}
       />
       <div className="flex flex-1 overflow-hidden">
         <QueuePanel
