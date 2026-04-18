@@ -78,7 +78,7 @@ src/
     emergency-contact/ # Kernel (batch, preEmitPending). UCPath Emergency Contact fill.
     eid-lookup/        # Kernel. Person Org Summary lookup + optional CRM cross-verify.
     onboarding/        # Kernel (single-mode). CRM → UCPath + I9. Parallel mode is legacy.
-    separations/       # Legacy — withTrackedWorkflow + launchBrowser directly.
+    separations/       # Kernel (4 systems, interleaved auth, sequential batch via runWorkflowBatch).
     old-kronos-reports/# Kernel (pool mode, N workers, per-worker sessionDir via opts.launchFn).
   auth/                # Per-system login flows + duo-poll + sso-fields (shared).
   browser/             # launchBrowser, tiling math. Kernel-internal.
@@ -166,7 +166,7 @@ Add a Commander subcommand in `src/cli.ts`, add npm scripts to `package.json`, c
 
 See `src/workflows/work-study/` for a clean one-system example, `src/workflows/emergency-contact/` for batch-mode with `preEmitPending`, `src/workflows/onboarding/` for multi-system sequential auth + legacy-parallel coexistence, and `src/workflows/eid-lookup/` for the in-handler `runWorkerPool` pattern (shared-context fan-out from a single Duo auth).
 
-Legacy workflows (`separations` only as of 2026-04-17) register dashboard metadata manually via `defineDashboardMetadata(...)` in their `index.ts` because they call `withTrackedWorkflow` + `launchBrowser` directly rather than going through the kernel. Follow the kernel path for anything new; use the legacy shape only when you need a capability the kernel doesn't offer (cross-system parallel worker pools with shared browser contexts, and similar specialized wiring).
+All production workflows are kernel-based as of 2026-04-17. The legacy `defineDashboardMetadata(...)` + inline `withTrackedWorkflow` + `launchBrowser` shape still exists (onboarding's parallel mode lives in `workflow-legacy.ts` pending a kernel-pool-with-shared-auth feature), but no new workflows should be added that way. Follow the kernel path; use the legacy shape only when you need a capability the kernel doesn't offer yet (N-worker shared-auth parallel pool, and similar specialized wiring).
 
 ## Kernel primer
 
@@ -294,7 +294,7 @@ After mapping, add the selector to the relevant `src/systems/<system>/selectors.
 These patterns existed pre-kernel and are intentionally removed. Do not reintroduce them:
 
 - **`WorkflowSession.create()`** — pre-kernel shared-auth abstraction. Replaced by `Session.launch()` inside `src/core/`. Workflows access it only as an escape hatch via `ctx.session`.
-- **Inline `withTrackedWorkflow` / `withLogContext`** — handlers now wrap nothing; the kernel wraps each item automatically. Only `separations` still calls these directly.
+- **Inline `withTrackedWorkflow` / `withLogContext`** — handlers now wrap nothing; the kernel wraps each item automatically. The only remaining in-repo caller is `onboarding/workflow-legacy.ts` (parallel mode) until the kernel grows shared-auth pool support.
 - **Inline `launchBrowser` from handlers** — kernel owns browser lifecycle. Use `ctx.page(id)`.
 - **Hand-rolled auth-ready promises** — `authChain: "interleaved"` in the kernel does this. Older docs showed ~140 lines of promise-chain recipes; they are obsolete.
 - **`WF_CONFIG` in the frontend** — deleted in subsystem D. Dashboard UI metadata is now server-side in the kernel registry.

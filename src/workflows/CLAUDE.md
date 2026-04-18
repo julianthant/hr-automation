@@ -16,13 +16,13 @@ src/workflows/{name}/
   CLAUDE.md      # This module's doc (template: what / data flow / kernel config / gotchas / lessons)
 ```
 
-Do **not** create `tracker.ts` for new workflows. The kernel's JSONL emissions + dashboard are the only observability. Pre-kernel workflows still have `tracker.ts` (onboarding, work-study, eid-lookup, kronos-reports, separations) — leave those alone for now, but don't add new ones.
+Do **not** create `tracker.ts` for new workflows. The kernel's JSONL emissions + dashboard are the only observability. Pre-kernel workflows that still have `tracker.ts` (onboarding, work-study, eid-lookup, kronos-reports) — leave those alone for now, but don't add new ones. Separations never had one.
 
 ## Dashboard Integration (kernel — automatic)
 
 Declare `label`, `getName`, `getId`, and labeled `detailFields` inside `defineWorkflow({ ... })`. Every key you list in `detailFields` should be populated by at least one `ctx.updateData({ [key]: ... })` call before the handler returns — a runtime `log.warn` fires if not. That's the entire dashboard wiring for kernel workflows.
 
-Legacy workflows call `defineDashboardMetadata({ name, label, steps, systems, detailFields })` at module load in `index.ts` (see `src/workflows/separations/index.ts` for an example).
+Legacy workflows call `defineDashboardMetadata({ name, label, steps, systems, detailFields })` at module load in `index.ts`. As of 2026-04-17, all workflow `index.ts` files are kernel-based; the only remaining legacy-shaped caller is `onboarding/workflow-legacy.ts` (parallel mode) which still uses `withTrackedWorkflow` directly pending a kernel shared-auth pool feature.
 
 Add the workflow's step list to the "Step Tracking Per Workflow" table in root `CLAUDE.md` for documentation. Frontend requires no edits — the dashboard reads everything from the server-side registry via `/api/workflow-definitions`.
 
@@ -35,7 +35,7 @@ Add a Commander subcommand to `src/cli.ts` invoking your workflow's CLI adapter.
 | Workflow | CLI | Systems | Kernel? | Parallelism |
 |---|---|---|---|---|
 | onboarding | `npm run start-onboarding` | CRM, UCPath, I9 | Yes (single) / Legacy (parallel) | Batch via legacy `parallel.ts` |
-| separations | `npm run separation` | Kuali, Old Kronos, New Kronos, UCPath | Legacy | 4 tiled browsers, batch sequential |
+| separations | `npm run separation` | Kuali, Old Kronos, New Kronos, UCPath | Yes (sequential batch via runWorkflowBatch) | 4 tiled browsers, interleaved auth, ctx.parallel for Phase-1 4-way fan-out |
 | eid-lookup | `tsx src/cli.ts eid-lookup` | UCPath + optional CRM | Yes | N tabs in one shared context (runWorkerPool in handler) |
 | old-kronos-reports | `npm run kronos` | UKG | Yes | Pool mode (N workers, kernel) |
 | work-study | `npm run work-study` | UCPath | Yes | Single |
