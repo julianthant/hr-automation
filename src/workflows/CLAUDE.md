@@ -37,7 +37,7 @@ Add a Commander subcommand to `src/cli.ts` invoking your workflow's CLI adapter.
 | onboarding | `npm run start-onboarding` | CRM, UCPath, I9 | Yes (single) / Legacy (parallel) | Batch via legacy `parallel.ts` |
 | separations | `npm run separation` | Kuali, Old Kronos, New Kronos, UCPath | Legacy | 4 tiled browsers, batch sequential |
 | eid-lookup | `tsx src/cli.ts eid-lookup` | UCPath + optional CRM | Yes | N tabs in one shared context (runWorkerPool in handler) |
-| old-kronos-reports | `npm run kronos` | UKG | Legacy | N workers (parallel.ts) |
+| old-kronos-reports | `npm run kronos` | UKG | Yes | Pool mode (N workers, kernel) |
 | work-study | `npm run work-study` | UCPath | Yes | Single |
 | emergency-contact | `npm run emergency-contact` | UCPath | Yes (batch, `preEmitPending`) | Single browser, one record at a time |
 
