@@ -38,11 +38,16 @@ export const SCREEN = {
 } as const;
 
 // ─── Annual dates (UPDATE EACH FISCAL YEAR) ─────────────────
+// Each value is overrideable via env var — see .env.example:
+//   ANNUAL_DATES_END         → jobEndDate            (e.g. 06/30/2027)
+//   KRONOS_DEFAULT_END_DATE  → kronosDefaultEndDate  (e.g. 2/1/2027)
+//   KRONOS_DEFAULT_START_DATE → kronosDefaultStartDate (e.g. 1/1/2017)
+// Env values override at module-load time; unset → fall back to hardcoded default.
 
 export const ANNUAL_DATES = {
-  jobEndDate: "06/30/2026",
-  kronosDefaultEndDate: "2/1/2026",
-  kronosDefaultStartDate: "1/1/2017",
+  jobEndDate: process.env.ANNUAL_DATES_END ?? "06/30/2026",
+  kronosDefaultEndDate: process.env.KRONOS_DEFAULT_END_DATE ?? "2/1/2026",
+  kronosDefaultStartDate: process.env.KRONOS_DEFAULT_START_DATE ?? "1/1/2017",
 } as const;
 
 // ─── URLs not yet centralized ───────────────────────────────

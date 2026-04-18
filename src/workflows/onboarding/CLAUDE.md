@@ -9,7 +9,7 @@ Automates full UC employee hiring: extracts data from ACT CRM, validates with Zo
 - `schema.ts` — Zod `EmployeeData` schema (names, SSN, address, wage, appointment, dates)
 - `extract.ts` — CRM field extraction from UCPath Entry Sheet using `FIELD_MAP` label mapping; also extracts dept/recruitment numbers from record page
 - `enter.ts` — Builds `ActionPlan` for the 14-step Smart HR transaction (personal data, job data, comments, save/submit)
-- `config.ts` — Constants: `UC_FULL_HIRE` template, `UCHRLY` comp rate code, `06/30/2026` end date
+- `config.ts` — Constants: `UC_FULL_HIRE` template, `UCHRLY` comp rate code, `JOB_END_DATE` sourced from `ANNUAL_DATES.jobEndDate` (override via `ANNUAL_DATES_END` env var)
 - `download.ts` — Fetches CRM record PDFs (Doc 1 + Doc 3) directly from iDocs document server URL. Saves to `~/Downloads/onboarding/{Last, First Middle} EID/`
 - `retry.ts` — `retryStep(name, fn, opts)` helper: linear backoff, per-attempt error logs, throws `RetryStepError` after exhausting attempts. Used inside both the kernel handler and the legacy workflow
 - `workflow.ts` — Kernel definition (`onboardingWorkflow`) + CLI adapter (`runOnboarding`). Handler runs 5 phases across CRM / UCPath / I9 with `ctx.step` wrapping. Dry-run branch bypasses kernel (CRM only). Parallel calls route to `runOnboardingLegacy`
@@ -56,7 +56,7 @@ CLI: npm run start-onboarding <email>
 - Department number parsed from parenthesized text: `"Computer Science (000412)"` → `"000412"`
 - PDF download failures are non-fatal — the workflow logs and continues (the transaction still needs to run even if PDFs are missing)
 - I-9 creation requires SSN, DOB, and departmentNumber — the workflow throws a clear error if any is missing for non-rehires
-- Job end date hardcoded to `06/30/2026` in config — update annually in `config.ts`
+- Job end date defaults to `06/30/2026` in `src/config.ts` (`ANNUAL_DATES.jobEndDate`) — override via `ANNUAL_DATES_END` env var when the fiscal year rolls; onboarding `config.ts` re-exports it as `JOB_END_DATE`
 - Rehire short-circuit: if `searchPerson` returns a match, the workflow records `rehire: "Yes"` + existing EIDs and exits before I-9/transaction
 - Triple-browser setup (single mode): CRM page, UCPath page, I-9 page. CRM and UCPath need Duo; I-9 uses the same UCSD creds without Duo
 - No Excel tracker — all observability flows through the dashboard JSONL. Run `npm run dashboard` in a separate terminal to watch
