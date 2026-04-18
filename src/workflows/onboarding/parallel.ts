@@ -3,16 +3,17 @@ import { parse } from "yaml";
 import { join } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
-import { launchBrowser } from "../../browser/launch.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
-import { loginToI9 } from "../../systems/i9/index.js";
-import { runOnboardingLegacy } from "./workflow.js";
+import { runWorkflowBatch } from "../../core/index.js";
+import { trackEvent } from "../../tracker/jsonl.js";
+import { onboardingWorkflow } from "./workflow.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const BATCH_FILE = join(__dirname, "batch.yaml");
 
+/** Load + validate the email list from `batch.yaml`. */
 export async function loadBatchFile(): Promise<string[]> {
   let content: string;
   try {
@@ -36,72 +37,69 @@ export async function loadBatchFile(): Promise<string[]> {
   return emails as string[];
 }
 
+/**
+ * CLI adapter for `npm run start-onboarding:batch -- <N>`. Thin shim over
+ * `runWorkflowBatch` (pool mode). Owns only pre-kernel concerns:
+ *
+ *   1. Load + validate `batch.yaml`.
+ *   2. Warn if `--dry-run` is combined with `--parallel` (dry-run stays
+ *      single-mode-only; see single-mode `runOnboardingDryRun`).
+ *   3. Build `items: { email }[]` for the kernel schema and delegate to
+ *      `runWorkflowBatch(onboardingWorkflow, items, { poolSize, deriveItemId,
+ *      onPreEmitPending })`.
+ *
+ * The kernel owns: per-worker Session launch (CRM + UCPath + I9), sequential
+ * auth chain (CRM Duo → UCPath Duo → I9 SSO-no-Duo), queue fan-out,
+ * per-item `withTrackedWorkflow` wrapping, SIGINT cleanup, screenshot on
+ * failure. `deriveItemId: (i) => i.email` pairs with `onPreEmitPending` so
+ * the dashboard shows one row per email (keyed on the email) before any
+ * worker authenticates.
+ */
 export async function runParallel(
   parallelCount: number,
   options: { dryRun?: boolean } = {},
 ): Promise<void> {
   const emails = await loadBatchFile();
   log.step(`Loaded ${emails.length} email(s) from batch file`);
-  log.step(`Starting ${parallelCount} parallel worker(s)`);
+  log.step(`Starting ${parallelCount} worker(s)`);
 
-  const queue = [...emails];
-  const workerCount = Math.min(parallelCount, emails.length);
-  const workers = Array.from({ length: workerCount }, (_, i) =>
-    runWorker(i + 1, queue, options),
-  );
-
-  await Promise.all(workers);
-  log.success(`All ${emails.length} employee(s) processed`);
-}
-
-async function runWorker(
-  workerId: number,
-  queue: string[],
-  options: { dryRun?: boolean },
-): Promise<void> {
-  const prefix = `[Worker ${workerId}]`;
-
-  log.step(`${prefix} Launching CRM browser...`);
-  const crmBrowser = await launchBrowser();
-
-  let ucpathPage: import("playwright").Page | undefined;
-  let i9Page: import("playwright").Page | undefined;
-
-  if (!options.dryRun) {
-    log.step(`${prefix} Launching UCPath browser...`);
-    ucpathPage = (await launchBrowser()).page;
-
-    log.step(`${prefix} Launching I-9 browser...`);
-    i9Page = (await launchBrowser()).page;
-    try {
-      const ok = await loginToI9(i9Page);
-      if (!ok) throw new Error("loginToI9 returned false");
-      log.success(`${prefix} I-9 pre-auth complete`);
-    } catch (err) {
-      log.error(`${prefix} I-9 pre-auth failed: ${errorMessage(err)}`);
-      i9Page = undefined;
-    }
+  if (options.dryRun) {
+    log.warn("Dry-run not supported in parallel/batch mode — run single-mode `npm run start-onboarding:dry <email>` instead.");
+    return;
   }
 
-  while (queue.length > 0) {
-    const email = queue.shift();
-    if (!email) break;
-    log.step(`${prefix} Processing ${email} (${queue.length} remaining in queue)`);
+  const items = emails.map((email) => ({ email }));
+  const now = new Date().toISOString();
 
-    try {
-      await runOnboardingLegacy(email, {
-        dryRun: options.dryRun,
-        crmPage: crmBrowser.page,
-        ucpathPage,
-        i9Page,
-        logPrefix: prefix,
-      });
-      log.success(`${prefix} Completed ${email}`);
-    } catch (error) {
-      log.error(`${prefix} Failed ${email}: ${errorMessage(error)}`);
-      // Worker continues to next email — error already captured in dashboard
+  try {
+    const result = await runWorkflowBatch(onboardingWorkflow, items, {
+      poolSize: parallelCount,
+      deriveItemId: (item) => (item as { email: string }).email,
+      onPreEmitPending: (item, runId) => {
+        const { email } = item as { email: string };
+        trackEvent({
+          workflow: "onboarding",
+          timestamp: now,
+          id: email,
+          runId,
+          status: "pending",
+          data: { email },
+        });
+      },
+    });
+
+    log.success(
+      `Onboarding batch complete — ${result.succeeded}/${result.total} succeeded, ${result.failed} failed`,
+    );
+    if (result.failed > 0) {
+      const summary = result.errors
+        .slice(0, 3)
+        .map((e) => `  - ${errorMessage(e.error)}`)
+        .join("\n");
+      log.error(`Failures (first 3):\n${summary}`);
     }
+  } catch (error) {
+    log.error(`Onboarding batch failed: ${errorMessage(error)}`);
+    throw error;
   }
-
-  log.success(`${prefix} Worker finished — browsers left open`);
 }
