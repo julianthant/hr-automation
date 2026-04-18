@@ -9,7 +9,10 @@ import {
   readdirSync,
 } from "fs";
 import { join } from "path";
-import { cleanOldTrackerFiles } from "../../../src/tracker/jsonl.js";
+import {
+  cleanOldTrackerFiles,
+  cleanOldScreenshots,
+} from "../../../src/tracker/jsonl.js";
 
 // Dedicated tmp dir to keep the real .tracker/ untouched.
 const TEST_DIR = ".tracker-clean-test";
@@ -88,5 +91,90 @@ describe("cleanOldTrackerFiles (clean-tracker script)", () => {
     const deleted = cleanOldTrackerFiles(1, TEST_DIR);
     assert.equal(deleted, 2);
     assert.equal(readdirSync(TEST_DIR).length, 0);
+  });
+});
+
+// Screenshots encode their timestamp as ms-since-epoch in the trailing segment
+// of the filename: `<workflow>-<itemId>-<step>-<systemId>-<ts>.png`.
+// The cleaner parses that integer and compares to `Date.now() - maxAgeDays`.
+
+const SCREENSHOTS_TEST_DIR = ".screenshots-clean-test";
+
+function tsFromDaysAgo(daysAgo: number): number {
+  return Date.now() - daysAgo * 24 * 60 * 60 * 1000;
+}
+
+function writeScreenshotFixture(filename: string): string {
+  const fullPath = join(SCREENSHOTS_TEST_DIR, filename);
+  // 1x1 transparent PNG — content doesn't matter for mtime-based tests, but we
+  // keep it short & on-disk so unlinkSync has something to delete.
+  writeFileSync(fullPath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  return fullPath;
+}
+
+describe("cleanOldScreenshots (clean-tracker screenshots support)", () => {
+  beforeEach(() => {
+    if (existsSync(SCREENSHOTS_TEST_DIR)) rmSync(SCREENSHOTS_TEST_DIR, { recursive: true });
+    mkdirSync(SCREENSHOTS_TEST_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    if (existsSync(SCREENSHOTS_TEST_DIR)) rmSync(SCREENSHOTS_TEST_DIR, { recursive: true });
+  });
+
+  it("deletes only screenshots whose filename-embedded ts is older than maxAgeDays (7 days)", () => {
+    writeScreenshotFixture(`onboarding-a@x.edu-extraction-crm-${tsFromDaysAgo(0)}.png`);
+    writeScreenshotFixture(`onboarding-b@x.edu-extraction-crm-${tsFromDaysAgo(5)}.png`);
+    writeScreenshotFixture(`onboarding-c@x.edu-extraction-crm-${tsFromDaysAgo(30)}.png`);
+
+    const deleted = cleanOldScreenshots(7, SCREENSHOTS_TEST_DIR);
+
+    assert.equal(deleted, 1, "should delete 1 file (the 30-day-old one)");
+    const remaining = readdirSync(SCREENSHOTS_TEST_DIR).sort();
+    assert.equal(remaining.length, 2);
+    assert.ok(
+      remaining.some((f) => f.includes("a@x.edu")),
+      "today's screenshot kept"
+    );
+    assert.ok(
+      remaining.some((f) => f.includes("b@x.edu")),
+      "5-day-old screenshot kept"
+    );
+    assert.ok(
+      !remaining.some((f) => f.includes("c@x.edu")),
+      "30-day-old screenshot deleted"
+    );
+  });
+
+  it("returns 0 when directory does not exist", () => {
+    const missing = ".screenshots-missing-" + Date.now();
+    assert.equal(cleanOldScreenshots(7, missing), 0);
+  });
+
+  it("ignores non-png files", () => {
+    writeScreenshotFixture(`sep-01-extract-kuali-${tsFromDaysAgo(30)}.txt`);
+    writeScreenshotFixture(`sep-02-extract-kuali-${tsFromDaysAgo(30)}.png`);
+    const deleted = cleanOldScreenshots(7, SCREENSHOTS_TEST_DIR);
+    assert.equal(deleted, 1);
+    const remaining = readdirSync(SCREENSHOTS_TEST_DIR);
+    assert.ok(remaining.some((f) => f.endsWith(".txt")));
+  });
+
+  it("skips files whose trailing segment is not numeric (malformed names)", () => {
+    writeScreenshotFixture("no-timestamp-here.png");
+    writeScreenshotFixture(`good-file-extract-sys-${tsFromDaysAgo(30)}.png`);
+    const deleted = cleanOldScreenshots(7, SCREENSHOTS_TEST_DIR);
+    assert.equal(deleted, 1, "only the well-formed 30-day-old file is deleted");
+    const remaining = readdirSync(SCREENSHOTS_TEST_DIR);
+    assert.ok(remaining.some((f) => f === "no-timestamp-here.png"));
+  });
+
+  it("respects custom maxAgeDays", () => {
+    writeScreenshotFixture(`wf-01-step-sys-${tsFromDaysAgo(3)}.png`);
+    writeScreenshotFixture(`wf-02-step-sys-${tsFromDaysAgo(10)}.png`);
+    // With --days 1, both should be deleted (their ts is >= 1 day old).
+    const deleted = cleanOldScreenshots(1, SCREENSHOTS_TEST_DIR);
+    assert.equal(deleted, 2);
+    assert.equal(readdirSync(SCREENSHOTS_TEST_DIR).length, 0);
   });
 });

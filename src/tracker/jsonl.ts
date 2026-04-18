@@ -441,6 +441,45 @@ export function cleanOldTrackerFiles(maxAgeDays: number = 7, dir: string = DEFAU
   return deleted;
 }
 
+/**
+ * Delete failure-screenshot PNGs older than `maxAgeDays`. Returns the count of
+ * deleted files.
+ *
+ * Unlike tracker JSONL files (whose filename carries the date), screenshot
+ * filenames encode the timestamp as a ms-since-epoch integer in their tail:
+ *   `<workflow>-<itemId>-<step>-<systemId>-<ts>.png`
+ * We parse the trailing numeric segment and compare to the cutoff. Files that
+ * don't match the shape (or have a non-numeric trailing segment) are skipped —
+ * never accidentally deleted.
+ */
+export function cleanOldScreenshots(
+  maxAgeDays: number = 30,
+  dir: string = ".screenshots",
+): number {
+  if (!existsSync(dir)) return 0;
+  const cutoffMs = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+
+  let deleted = 0;
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith(".png")) continue;
+    // Extract the trailing `<ts>.png` segment. File shape:
+    //   <workflow>-<itemId>-<step>-<systemId>-<ts>.png
+    // We can't split blindly (step names may contain dashes); instead take the
+    // last hyphen-separated segment before `.png` and require it to be numeric.
+    const stripped = f.slice(0, -".png".length);
+    const lastDash = stripped.lastIndexOf("-");
+    if (lastDash === -1) continue;
+    const tsStr = stripped.slice(lastDash + 1);
+    const tsNum = Number(tsStr);
+    if (!Number.isFinite(tsNum) || tsNum <= 0) continue;
+    if (tsNum < cutoffMs) {
+      unlinkSync(join(dir, f));
+      deleted++;
+    }
+  }
+  return deleted;
+}
+
 /** List distinct runs for a given ID, with their latest status, step, and timestamp. */
 export function readRunsForId(
   workflow: string,
