@@ -11,7 +11,13 @@ Two-tier tracking: JSONL for live dashboard streaming, Excel for persistent hist
 - `export-excel.ts` — On-demand Excel export from JSONL data
 - `locked.ts` — Generic mutex-locked write wrapper for parallel Excel access
 - `spreadsheet.ts` — `appendRow(filePath, columns, data)` and `parseDepartmentNumber(deptText)`
+- `failure-detector.ts` — `detectFailurePattern(entries, opts)` — pure function that groups failed tracker entries by (workflow, error), returns patterns that cross `thresholdN` inside `windowMs`. Caller-owned `cooldownState: Map<string, number>` suppresses re-alerts for `cooldownMs`. Defaults: 3 / 10min / 1h.
+- `notify.ts` — `notify(title, body)` — best-effort macOS desktop notification via `osascript display notification`. No native deps. On non-darwin or osascript failure, logs a warn and returns without throwing.
 - `index.ts` — Barrel re-exports
+
+## Failure-Pattern Alerts
+
+After each `/events` SSE poll cycle, `scanFailurePatterns()` runs today's tracker entries across all workflows through `detectFailurePattern`. Any pattern that crosses threshold (and isn't in cooldown) fires a macOS desktop notification + `log.warn`. The cooldown map is module-level so it persists for the lifetime of the dashboard process. Tests can call `__resetFailureAlertCooldown()` to clear it. Scan errors are swallowed — a notification glitch must never derail the SSE loop.
 
 ## Cleaning Old Tracker Files
 
