@@ -198,6 +198,8 @@ The `ctx` object passed to your handler:
 - `updateData(patch)` — merges into the tracker entry's `data` field.
 - `session`, `log`, `isBatch`, `runId` — escape hatches.
 
+Side-effect-free work can be memoized via `stepCacheGet`/`stepCacheSet` (from `src/core/step-cache.ts`, pattern-twin of `idempotency.ts`). Handlers call these inline at step start/end; default 2h TTL; 7-day disk prune. Storage at `.tracker/step-cache/{workflow}-{itemId}/{stepName}.json`. Onboarding's `extraction` step is the canonical caller.
+
 Run modes: `runWorkflow(wf, data)` for a single item; `runWorkflowBatch(wf, items)` for sequential batch (with optional `onPreEmitPending` for dashboard pre-emit); `runWorkflowPool(wf, items)` for N-worker pool (N Sessions, each with its own Duo). Each per-item path is wrapped in `withLogContext` + `withTrackedWorkflow`, so you never call those directly from a handler.
 
 Escape hatches: `ctx.session.page(id)` / `ctx.session.newWindow(id)` expose the underlying Session. Use them only when the kernel's declarative shape doesn't express what you need (e.g. `runWorkerPool` in eid-lookup).
@@ -308,7 +310,7 @@ These items appear in plans/improvements docs but were not shipped in 2026-04-18
 - **Replacement workflow launcher.** Out of scope for this pass; user will wire something else where ⚡ RUN used to be. The `TopBar`'s `rightSlot` prop is preserved for that future mount.
 - **Bundle size code-split** (handoff §1.8). Bundle is 906.74 KB after runner removal (down from 940.65 KB).
 - **ESLint rule for selectors** (handoff §8.3). The `tests/unit/systems/inline-selectors.test.ts` guard still enforces "no inline selectors outside `selectors.ts`" — promotion to ESLint is editor-time-feedback only.
-- **Replay-from-last-successful-step** (improvements §3.5). Kernel feature; persist `{ runId, lastSuccessfulStep, data }` per run; add `npm run resume <runId>`.
+- **Step-cache shipped 2026-04-18; kernel-level resume deferred indefinitely.** `src/core/step-cache.ts` is the primitive; onboarding's `extraction` + `pdf-download` opt in. Saves ~2–3 min on onboarding retry-after-failure. A full kernel `Ctx.step(name, fn, { resumable: true })` opt-in + `npm run resume <runId>` CLI was explicitly scoped out because onboarding's handler holds state in local closures (`let data: EmployeeData | null`) — kernel-level step-skip would require a ~100-line handler restructure for no additional user-visible savings. Design doc: `docs/superpowers/specs/2026-04-18-step-cache-design.md`.
 - **Audit log** (improvements §7.1). Append-only hash-chained log of every run + transaction.
 - **Quarterly selector verified-date lint** (improvements §6.1). All current dates are within 33 days; this is preventative, not urgent.
 - **Migration of `cleanTrackerMain` / `schedulerCliMain` exports → internal.** Audit flagged these as exported but unused outside their own modules; left alone (low impact).
