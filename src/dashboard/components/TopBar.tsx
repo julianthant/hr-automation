@@ -11,6 +11,8 @@ import {
 } from "./ui/dropdown-menu";
 import { Popover, PopoverTrigger, PopoverContent } from "./ui/popover";
 import { Calendar } from "./ui/calendar";
+import { SearchBar } from "./SearchBar";
+import type { SearchResultRow } from "./types";
 
 /**
  * Preferred display order for the workflow dropdown. Workflows not in the list
@@ -42,6 +44,11 @@ interface TopBarProps {
    * navigation and the runner stays self-contained.
    */
   rightSlot?: React.ReactNode;
+  /**
+   * Fired when a historical search result is picked. Parent is responsible
+   * for switching workflow/date/selectedId accordingly.
+   */
+  onSearchSelect?: (row: SearchResultRow) => void;
 }
 
 export function TopBar({
@@ -49,6 +56,7 @@ export function TopBar({
   date, onDateChange, availableDates,
   connected, entryCounts,
   rightSlot,
+  onSearchSelect,
 }: TopBarProps) {
   const clock = useClock();
   const registered = useWorkflows();
@@ -123,6 +131,13 @@ export function TopBar({
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {onSearchSelect && (
+          <>
+            <div className="w-px h-6 bg-border" />
+            <SearchBar onSelect={onSearchSelect} />
+          </>
+        )}
       </div>
 
       <div className="flex items-center gap-4">
