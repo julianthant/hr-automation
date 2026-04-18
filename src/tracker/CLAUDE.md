@@ -6,8 +6,10 @@ Two-tier tracking: JSONL for live dashboard streaming, Excel for persistent hist
 
 ## Files
 
-- `jsonl.ts` — JSONL append-only tracker + `withTrackedWorkflow` lifecycle wrapper
-- `dashboard.ts` — SSE API server (port 3838) — serves `/api/*` and `/events/*` endpoints only (no HTML)
+- `jsonl.ts` — JSONL append-only tracker + `withTrackedWorkflow` lifecycle wrapper, `cleanOldTrackerFiles`/`cleanOldScreenshots`, PII-aware `serializeValue` + `toTypedValue`
+- `dashboard.ts` — SSE API server (port 3838) — serves `/api/*` and `/events/*` endpoints only (no HTML). Owns session-state rebuild, screenshots endpoint, search endpoint, selector-warnings endpoint, and the (currently uncommitted) `/api/stats` + `/api/diff` scaffolding
+- `session-events.ts` — `emitWorkflowStart` / `emitWorkflowEnd` / `emitSessionCreate` / `emitBrowserLaunch` / `emitAuthStart` / `emitAuthComplete` / `emitItemStart` / etc. Append `SessionEvent` lines to `.tracker/sessions.jsonl`. `rebuildSessionState` (in `dashboard.ts`) reduces them into a live `SessionState`
+- `duo-queue.ts` — `requestDuoApproval(page, options)` — wraps `pollDuoApproval` with queue semantics (emit `duo_waiting` browser overlay, register in the global Duo queue, swap to `duo_active` when this request becomes head-of-line). Used by every login flow in `src/auth/login.ts`
 - `export-excel.ts` — On-demand Excel export from JSONL data
 - `locked.ts` — Generic mutex-locked write wrapper for parallel Excel access
 - `spreadsheet.ts` — `appendRow(filePath, columns, data)` and `parseDepartmentNumber(deptText)`
@@ -55,14 +57,24 @@ await withTrackedWorkflow("separations", docId, {}, async (setStep, updateData) 
 
 ## Dashboard SSE Server
 
-`startDashboard(workflow, port)` starts an HTTP server with:
+`startDashboard(opts?)` starts an HTTP server (default port 3838 — see `StartDashboardOptions`). Endpoints:
+
 - `GET /api/workflows` — list all workflows with JSONL data
+- `GET /api/workflow-definitions` — kernel registry payload (label, steps, detailFields, getName/getId)
 - `GET /api/dates?workflow=X` — list available dates for a workflow
 - `GET /api/entries?workflow=X` — return all tracker entries (JSON)
-- `GET /api/logs?workflow=X&id=Y` — return log entries (JSON)
+- `GET /api/logs?workflow=X&id=Y[&runId=Z]` — return log entries (JSON)
+- `GET /api/runs?workflow=X&id=Y[&date=D]` — past runs for an itemId
+- `GET /api/screenshots?workflow=X&itemId=Y` — list `.screenshots/<workflow>-<itemId>-...png` for a failed entry
+- `GET /screenshots/<filename>` — stream a PNG with path-traversal guard (`resolveScreenshotPath`)
+- `GET /api/search?q=Q[&days=N]` — cross-workflow tracker entry search (`buildSearchHandler`)
 - `GET /api/selector-warnings?days=N` — aggregated selector-fallback warns across N days (default 7)
-- `SSE /events?workflow=X&date=Y` — stream entries (enriched with `firstLogTs`, `lastLogTs`, `lastLogMessage`) + `wfCounts` every 1s
-- `SSE /events/logs?workflow=X&id=Y&date=Z` — stream log entries every 500ms
+- `GET /api/preflight` — startup checks + cleanedFiles count
+- `GET /api/stats?workflow=X[&days=N]` — per-workflow/step aggregates (uncommitted scaffolding; no frontend caller yet)
+- `GET /api/diff?workflow=X&id=Y&runA=A&runB=B` — side-by-side run comparison (uncommitted scaffolding; no frontend caller yet)
+- `SSE /events?workflow=X&date=Y` — stream entries (enriched with `firstLogTs`, `lastLogTs`, `lastLogMessage`, `stepDurations`) + `wfCounts` every 1s
+- `SSE /events/logs?workflow=X&id=Y&date=Z[&runId=R]` — stream log entries every 500ms
+- `SSE /events/sessions` — stream `SessionState` (workflow instances + browsers + duo queue) for `SessionPanel`
 
 API-only: does not serve HTML. The React dashboard is served by Vite dev server (port 5173) which proxies API calls to 3838.
 

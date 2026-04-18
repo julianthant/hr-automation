@@ -17,6 +17,7 @@ App.tsx
 ├── TopBar.tsx
 │   ├── Workflow dropdown (shadcn Select → popover with name + count)
 │   ├── Date navigation (arrow buttons + shadcn Popover + Calendar)
+│   ├── SearchBar.tsx (cross-workflow tracker entry search → SearchResults.tsx)
 │   ├── Live indicator (green dot pill)
 │   └── Clock (useClock hook)
 ├── QueuePanel.tsx
@@ -24,14 +25,17 @@ App.tsx
 │   ├── StatPills.tsx (5 clickable cards, doubles as status filter)
 │   └── Entry list (shadcn ScrollArea)
 │       └── EntryItem.tsx × N (name, badge, step, time, error)
-└── LogPanel.tsx
-    ├── Header (name, badge, email, RunSelector.tsx)
-    ├── Detail grid (4 cells, varies per workflow)
-    ├── StepPipeline.tsx (horizontal dots + connectors + timing)
-    ├── Log filter tabs (All | Errors | Auth | Fill | Navigate | Extract)
-    ├── LogStream.tsx (shadcn ScrollArea)
-    │   └── LogLine.tsx × N (timestamp, icon, message, dup badge, copy)
-    └── Footer (streaming indicator, count, auto-scroll toggle)
+├── LogPanel.tsx
+│   ├── Header (name, badge, email, RunSelector.tsx)
+│   ├── Detail grid (4 cells, varies per workflow)
+│   ├── StepPipeline.tsx (horizontal dots + connectors + timing)
+│   ├── FailureDrillDown.tsx (failed entries: classified error, log preview, screenshot strip)
+│   ├── LogStream.tsx (shadcn ScrollArea)
+│   │   └── LogLine.tsx × N (timestamp, icon, message, dup badge, copy)
+│   └── Footer (streaming indicator, count, auto-scroll toggle)
+└── SessionPanel.tsx (right rail, 240–320 px)
+    ├── WorkflowBox.tsx × N (active workflow instances + BrowserChip.tsx per browser)
+    └── SelectorWarningsPanel.tsx (selector-fallback warns, polled every 30 s)
 ```
 
 ## Backend Wiring (SSE API on port 3838)
@@ -43,14 +47,21 @@ The backend is `src/tracker/dashboard.ts` — a plain Node HTTP server. The Vite
 | Endpoint | Method | Returns | Frontend Consumer |
 |----------|--------|---------|-------------------|
 | `/api/workflows` | GET | `string[]` — workflow names with JSONL data | `TopBar.tsx` dropdown options |
+| `/api/workflow-definitions` | GET | `WorkflowMetadata[]` — registry payload (label, steps, detailFields, getName/getId hints) | `WorkflowsProvider` / `useWorkflow(name)` |
 | `/api/dates?workflow=X` | GET | `string[]` — dates (desc) with entries | `TopBar.tsx` date navigator |
 | `/api/entries?workflow=X` | GET | `TrackerEntry[]` — all entries for today | Initial load in `useEntries` |
 | `/api/logs?workflow=X&id=Y&runId=Z` | GET | `LogEntry[]` — logs for an entry/run | Initial load in `useLogs` |
-| `/api/runs?workflow=X&id=Y` | GET | `{runId, status, timestamp}[]` | `RunSelector.tsx` tabs |
-| `/api/preflight` | GET | `{checks: [{name, passed, detail}]}` | `usePreflight` → sonner toast |
+| `/api/runs?workflow=X&id=Y[&date=D]` | GET | `RunInfo[]` — `{runId, status, timestamp}` per run | `RunSelector.tsx` pills |
+| `/api/screenshots?workflow=X&itemId=Y` | GET | `ScreenshotListEntry[]` matching `<workflow>-<itemId>-` prefix | `FailureDrillDown` strip |
+| `/screenshots/<filename>` | GET | PNG bytes, path-traversal guarded via `resolveScreenshotPath` | `FailureDrillDown` `<img>` |
+| `/api/search?q=Q[&days=N]` | GET | `SearchResultRow[]` — cross-workflow tracker entry hits | `SearchBar` / `SearchResults` |
+| `/api/preflight` | GET | `{checks: [{name, passed, detail}], cleanedFiles?: number}` | `usePreflight` → sonner toast |
 | `/api/selector-warnings?days=N` | GET | `SelectorWarningRow[]` grouped by label | `SelectorWarningsPanel` (right rail) |
-| `/events?workflow=X&date=Y` | SSE | `{entries: TrackerEntry[], workflows: string[]}` every 1s | `useEntries` hook |
+| `/api/stats?workflow=X[&days=N]` | GET | `StatsResponse` — per-workflow/step aggregates (uncommitted scaffolding — no frontend caller yet) | _none_ |
+| `/api/diff?workflow=X&id=Y&runA=A&runB=B` | GET | `DiffResponse` — side-by-side run comparison (uncommitted scaffolding — no frontend caller yet) | _none_ |
+| `/events?workflow=X&date=Y` | SSE | `{entries, workflows, wfCounts}` enriched + `stepDurations` every 1s | `useEntries` hook |
 | `/events/logs?workflow=X&id=Y&runId=Z&date=D` | SSE | `LogEntry[]` (new only) every 500ms | `useLogs` hook |
+| `/events/sessions` | SSE | `SessionState` (workflow instances + browsers + duo queue) | `useSessions` → `SessionPanel` |
 
 ### Data Types (shared between backend and frontend)
 
@@ -127,11 +138,12 @@ Current consumption:
 
 | Workflow | Primary ID | Name Source | Steps | Detail Fields |
 |----------|-----------|-------------|-------|---------------|
-| `onboarding` | email | `data.firstName + data.lastName` | crm-auth → extraction → ucpath-auth → person-search → transaction | Employee, Email, Started, Elapsed |
-| `separations` | doc ID | `data.name \|\| data.employeeName` | launching → authenticating → kuali-extraction → kronos-search → ucpath-job-summary → ucpath-transaction → kuali-finalization | Employee, Doc ID, Started, Elapsed |
-| `eid-lookup` | search name | `data.name` | ucpath-auth → searching (→ crm-auth → cross-verification) | Search Name, Empl ID, Started, Elapsed |
-| `kronos-reports` | employee ID | `data.name` | searching → extracting → downloading | Employee, ID, Started, Elapsed |
-| `work-study` | empl ID | `data.name` | ucpath-auth → transaction | Employee, Empl ID, Started, Elapsed |
+| `onboarding` | email | `data.firstName + data.lastName` | crm-auth → extraction → pdf-download → ucpath-auth → person-search → i9-creation → transaction | Employee, Email, Dept #, Position #, Wage, Eff Date, I9 Profile |
+| `separations` | doc ID | `data.name \|\| data.employeeName` | launching → authenticating → kuali-extraction → kronos-search → ucpath-job-summary → ucpath-transaction → kuali-finalization | Employee, EID, Doc ID |
+| `eid-lookup` | search name | `data.name` | ucpath-auth → searching (→ crm-auth → cross-verification) | (no declared detailFields — see workflow CLAUDE.md) |
+| `kronos-reports` | employee ID | `data.name` | searching → extracting → downloading | Employee, ID |
+| `work-study` | empl ID | `data.name` | ucpath-auth → transaction | Empl ID, Effective Date |
+| `emergency-contact` | `p{NN}-{emplId}` | `data.employeeName` | navigation → fill-form → save | Employee, Empl ID, Contact, Relationship |
 
 ## Hook → Component Mapping
 
@@ -187,14 +199,6 @@ npm run build:dashboard   # Single-file HTML to dist/dashboard/index.html
 npm run dashboard         # Starts SSE backend (:3838) + Vite dev (:5173)
 ```
 
-## Files to Modify (Backend)
-
-| File | Change |
-|------|--------|
-| `src/tracker/jsonl.ts` | Add `runId` to TrackerEntry + LogEntry, add `cleanOldTrackerFiles()`, keep `trackEvent`/`appendLogEntry` synchronous (no mutex — `appendFileSync` is atomic) |
-| `src/tracker/dashboard.ts` | Add `/api/runs`, `/api/preflight` endpoints, add `runId` filtering to `/api/logs` and `/events/logs` |
-| `src/dashboard/components/types.ts` | Update TrackerEntry/LogEntry types (add typedData if new shape) |
-
 ## Adding a New Workflow to the Dashboard
 
 The dashboard now auto-adapts — no frontend changes needed. When a new workflow lands:
@@ -231,12 +235,27 @@ The dashboard now auto-adapts — no frontend changes needed. When a new workflo
 - **2026-04-18: Selector health panel.** Backend: `/api/selector-warnings?days=N` (default 7) scans `*-logs.jsonl` files, filters `level === "warn"` entries whose message matches `/selector fallback triggered: (.+)/`, and returns an aggregated `[{ label, count, firstTs, lastTs, workflows[] }]` sorted count-desc. Factored as `buildSelectorWarningsHandler(dir)` for unit-test isolation. Frontend: `SelectorWarningsPanel` collapses under the Sessions column on the right rail. Badge shows count when > 0 (amber). Polls every 30s. Empty state reads "No selector fallback warnings in the last N days. Primary selectors are stable." The panel is purely a surface — `safeClick`/`safeFill` already emit these warns.
 - **2026-04-18: Removed dashboard runner.** The "⚡ RUN" drawer + `RunnerLauncher` button + `SchemaForm` + `runner-recents` localStorage helper + `schema-form-utils` parser were deleted. The backend `src/tracker/runner.ts` (child-process registry) and its `buildSpawnHandler` / `buildCancelHandler` / `buildActiveRunsHandler` / `buildWorkflowSchemaHandler` factories in `src/tracker/dashboard.ts` are gone, along with the `/api/workflows/:name/run`, `/api/workflows/:name/schema`, `/api/runs/:runId/cancel`, and `/api/runs/active` route registrations. Workflows are launched only via the npm scripts in `package.json` (or whatever replacement launcher lands later). Session monitoring (the bottom `SessionPanel` showing live workflows + their current step + auth state) still populates from kernel-emitted `emitWorkflowStart` / `emitSessionCreate` / `emitBrowserLaunch` / `emitAuthStart` calls in `src/tracker/jsonl.ts` (called by `withTrackedWorkflow`) — verified during this removal, no runner dependency.
 
-## Files to Create (Frontend)
+## Frontend Files
 
-All new components in `src/dashboard/components/`:
-- `TopBar.tsx`, `QueuePanel.tsx`, `EntryItem.tsx`, `LogPanel.tsx`
-- `StepPipeline.tsx`, `LogStream.tsx`, `LogLine.tsx`, `StatPills.tsx`
-- `RunSelector.tsx`, `EmptyState.tsx`
-- `hooks/useSSE.ts`, `hooks/useClock.ts`, `hooks/useEntries.ts`
-- `hooks/useLogs.ts`, `hooks/useElapsed.ts`, `hooks/usePreflight.ts`
-- `ui/` — shadcn components (installed via `npx shadcn@latest add`)
+```
+src/dashboard/
+  App.tsx                    # Top-level layout (TopBar + QueuePanel + LogPanel + SessionPanel)
+  main.tsx                   # React root + WorkflowsProvider
+  workflows-context.tsx      # /api/workflow-definitions consumer; useWorkflow(name)
+  index.css                  # CSS variables, @import "@heroui/styles", Tailwind setup
+  index.html                 # Vite entry
+  components/
+    TopBar.tsx, QueuePanel.tsx, EntryItem.tsx, LogPanel.tsx
+    StepPipeline.tsx, LogStream.tsx, LogLine.tsx, StatPills.tsx
+    RunSelector.tsx, EmptyState.tsx, FailureDrillDown.tsx
+    SearchBar.tsx, SearchResults.tsx
+    SessionPanel.tsx, WorkflowBox.tsx, BrowserChip.tsx, SelectorWarningsPanel.tsx
+    entry-display.ts (resolveEntryName / resolveEntryId)
+    types.ts (TrackerEntry, LogEntry, RunInfo, AuthState, BrowserState, etc.)
+    hooks/
+      useClock.ts, useEntries.ts, useLogs.ts, useElapsed.ts
+      usePreflight.ts, useSessions.ts
+    ui/  # local shadcn-style primitives + HeroUI Calendar wrapper
+      calendar.tsx, dropdown-menu.tsx, popover.tsx
+  lib/utils.ts               # cn() — class merge helper
+```
