@@ -54,6 +54,9 @@ docs/superpowers/
 # Screenshots (dev debugging)
 .screenshots/
 
+# Generated JSON Schemas (re-generated via `npm run schemas:export`)
+schemas/*.schema.json
+
 # OS
 .DS_Store
 Thumbs.db
