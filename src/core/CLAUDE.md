@@ -13,7 +13,6 @@ See root `CLAUDE.md` for a user-facing kernel primer + minimal example. This doc
 - `stepper.ts` — `Stepper` class. Owns `currentStep`, `data`, `step` (wraps `fn` with emit-start + catch-screenshot-emit-fail + rethrow), `markStep`, `parallel`/`parallelAll`, `updateData`. Consumes `emitStep` / `emitData` / `emitFailed` callbacks from the tracker wrapping.
 - `ctx.ts` — `makeCtx({ session, stepper, isBatch, runId })` — the only constructor for `Ctx`. Shared by `runWorkflow`, `runWorkflowBatch`, and `runWorkflowPool` to guarantee identical surface across modes. Also owns the `retry` implementation (linear backoff).
 - `registry.ts` — In-memory `WorkflowMetadata` map. `defineWorkflow` registers; `defineDashboardMetadata` registers with intent-signaling semantics ("not opted-in to the Option-A runtime warning"). `autoLabel` + `normalizeDetailField` for dashboard-shape normalization.
-- `page-health.ts` — `ensurePageHealthy(page, url)` helper. Used by legacy workflows; kernel handles auth failures via `Session.launch`'s retry loop.
 - `idempotency.ts` — `hashKey(record)` + `hasRecentlySucceeded(key, { withinDays, dir })` + `recordSuccess(key, transactionId, workflow, dir)` + `findRecentTransactionId(key, ...)` + `pruneOld(withinDays, dir)`. Storage: `.tracker/idempotency.jsonl`, one success record per line. Used by onboarding + work-study to skip duplicate Smart HR transactions when a workflow is re-run post-crash. Default lookback window: 14 days.
 - `index.ts` — Public barrel.
 
