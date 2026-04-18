@@ -23,12 +23,6 @@ import { getAll as getAllRegisteredWorkflows } from "../core/registry.js";
 import type { WorkflowMetadata } from "../core/types.js";
 import { detectFailurePattern } from "./failure-detector.js";
 import { notify } from "./notify.js";
-import {
-  ARGV_MAP,
-  RunnerError,
-  getRunnerRegistry,
-  type SpawnArgs,
-} from "./runner.js";
 
 // Resolve path to built dashboard HTML (vite-plugin-singlefile output)
 const DASHBOARD_HTML_PATH = join(
@@ -287,83 +281,6 @@ export async function scanFailurePatterns(): Promise<void> {
 /** Returns a handler that serves the registered workflow metadata as JSON. */
 export function buildWorkflowsHandler(): () => WorkflowMetadata[] {
   return () => getAllRegisteredWorkflows();
-}
-
-// ── Runner endpoints (Phase 1) ────────────────────────────
-//
-// These factories mirror the buildXxxHandler pattern used by screenshots
-// and selector-warnings — pure functions that accept their dependencies so
-// tests can drive them without booting the SSE server.
-
-/**
- * Schema-loading handler. Reads `<schemasDir>/<workflow>.schema.json` and
- * returns the parsed JSON or `null` (404) when the file doesn't exist.
- *
- * The frontend calls this when the operator picks a workflow in the runner
- * drawer; the JSON Schema drives the schema-driven form.
- */
-export function buildWorkflowSchemaHandler(
-  schemasDir: string = "schemas",
-): (workflow: string) => Record<string, unknown> | null {
-  return (workflow: string) => {
-    // Reject any traversal in the workflow name — it's used as a filename.
-    if (!workflow || /[^a-zA-Z0-9_-]/.test(workflow)) return null;
-    const path = join(schemasDir, `${workflow}.schema.json`);
-    if (!existsSync(path)) return null;
-    try {
-      return JSON.parse(readFileSync(path, "utf-8"));
-    } catch {
-      return null;
-    }
-  };
-}
-
-/**
- * Runner-spawn handler factory. Returns a function that:
- *   1. Looks up the workflow's argv mapper.
- *   2. Throws RunnerError(404) for unknown workflows.
- *   3. Throws RunnerError(400) when the mapper rejects the input.
- *   4. Throws RunnerError(429) when the concurrency cap is hit.
- *
- * Returns `{ runId, pid }` on success.
- */
-export function buildSpawnHandler(
-  registry = getRunnerRegistry(),
-): (workflow: string, input: Record<string, unknown>, opts?: { dryRun?: boolean }) => { runId: string; pid: number } {
-  return (workflow, input, opts) => {
-    const mapper = ARGV_MAP[workflow];
-    if (!mapper) {
-      throw new RunnerError(
-        404,
-        `No launcher registered for workflow '${workflow}'. CLI-only.`,
-      );
-    }
-    let spawnArgs: SpawnArgs;
-    try {
-      spawnArgs = mapper(input, opts);
-    } catch (err) {
-      throw new RunnerError(
-        400,
-        err instanceof Error ? err.message : String(err),
-      );
-    }
-    const result = registry.spawn(workflow, spawnArgs);
-    return { runId: result.runId, pid: result.pid };
-  };
-}
-
-/** Cancel handler — returns `{ cancelled: boolean }`. */
-export function buildCancelHandler(
-  registry = getRunnerRegistry(),
-): (runId: string) => { cancelled: boolean } {
-  return (runId) => ({ cancelled: registry.cancel(runId) });
-}
-
-/** Active-runs handler. */
-export function buildActiveRunsHandler(
-  registry = getRunnerRegistry(),
-): () => ReturnType<typeof registry.list> {
-  return () => registry.list();
 }
 
 /** Default root dir for kernel failure screenshots. Matches `screenshotAll`. */
@@ -823,32 +740,6 @@ export function startDashboard(
     }
   }
 
-  // Cached handler instances so the runner registry singleton is shared
-  // across requests. Tests construct their own handlers directly.
-  const spawnHandler = buildSpawnHandler();
-  const cancelHandler = buildCancelHandler();
-  const activeRunsHandler = buildActiveRunsHandler();
-  const schemaHandler = buildWorkflowSchemaHandler();
-
-  /** JSON-body POST helper. Returns `{}` if the body is empty/malformed. */
-  const readJsonBody = (req: import("http").IncomingMessage): Promise<Record<string, unknown>> => {
-    return new Promise((resolve) => {
-      const chunks: Buffer[] = [];
-      req.on("data", (c) => chunks.push(c as Buffer));
-      req.on("end", () => {
-        const raw = Buffer.concat(chunks).toString("utf-8");
-        if (!raw.trim()) return resolve({});
-        try {
-          const parsed = JSON.parse(raw);
-          resolve(typeof parsed === "object" && parsed !== null ? parsed : {});
-        } catch {
-          resolve({});
-        }
-      });
-      req.on("error", () => resolve({}));
-    });
-  };
-
   /** Standard JSON response helper. */
   const sendJson = (res: import("http").ServerResponse, status: number, body: unknown): void => {
     res.writeHead(status, {
@@ -863,7 +754,7 @@ export function startDashboard(
   server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 
-    // CORS preflight for the POST endpoints.
+    // CORS preflight — kept for any future POST endpoints.
     if (req.method === "OPTIONS") {
       res.writeHead(204, {
         "Access-Control-Allow-Origin": "*",
@@ -871,58 +762,6 @@ export function startDashboard(
         "Access-Control-Allow-Headers": "Content-Type",
       });
       res.end();
-      return;
-    }
-
-    // ── Runner endpoints ──
-    // POST /api/workflows/:name/run    — spawn a workflow child
-    // GET  /api/workflows/:name/schema — fetch the JSON Schema
-    // POST /api/runs/:runId/cancel     — kill a spawned child
-    // GET  /api/runs/active            — list in-flight runs
-
-    const runMatch = url.pathname.match(/^\/api\/workflows\/([^/]+)\/run$/);
-    if (runMatch && req.method === "POST") {
-      const workflow = decodeURIComponent(runMatch[1]);
-      const body = await readJsonBody(req);
-      // Body shape: { input?: object, dryRun?: boolean }
-      const input = (body.input && typeof body.input === "object" ? body.input : {}) as Record<string, unknown>;
-      const dryRun = body.dryRun === true;
-      try {
-        const result = spawnHandler(workflow, input, { dryRun });
-        sendJson(res, 202, result);
-      } catch (err) {
-        if (err instanceof RunnerError) {
-          sendJson(res, err.status, { error: err.message });
-        } else {
-          sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
-        }
-      }
-      return;
-    }
-
-    const schemaMatch = url.pathname.match(/^\/api\/workflows\/([^/]+)\/schema$/);
-    if (schemaMatch && (req.method === "GET" || req.method === undefined)) {
-      const workflow = decodeURIComponent(schemaMatch[1]);
-      const schema = schemaHandler(workflow);
-      if (!schema) {
-        sendJson(res, 404, {
-          error: `No schema for workflow '${workflow}'. Run \`npm run schemas:export\` to regenerate.`,
-        });
-        return;
-      }
-      sendJson(res, 200, schema);
-      return;
-    }
-
-    const cancelMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/cancel$/);
-    if (cancelMatch && req.method === "POST") {
-      const runId = decodeURIComponent(cancelMatch[1]);
-      sendJson(res, 200, cancelHandler(runId));
-      return;
-    }
-
-    if (url.pathname === "/api/runs/active" && (req.method === "GET" || req.method === undefined)) {
-      sendJson(res, 200, activeRunsHandler());
       return;
     }
 
@@ -1264,12 +1103,5 @@ export function stopDashboard(): void {
   if (server) {
     server.close();
     server = null;
-  }
-  // Kill any in-flight runner children so they don't outlive the dashboard.
-  // Best-effort — if no registry was created yet, this is a no-op.
-  try {
-    getRunnerRegistry().cleanup();
-  } catch {
-    /* best-effort */
   }
 }

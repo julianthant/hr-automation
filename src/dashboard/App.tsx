@@ -4,8 +4,6 @@ import { TopBar } from "./components/TopBar";
 import { QueuePanel } from "./components/QueuePanel";
 import { LogPanel } from "./components/LogPanel";
 import { SessionPanel } from "./components/SessionPanel";
-import { RunnerDrawer } from "./components/RunnerDrawer";
-import { RunnerLauncher } from "./components/RunnerLauncher";
 import { useEntries } from "./components/hooks/useEntries";
 import { usePreflight } from "./components/hooks/usePreflight";
 import { useWorkflow, autoLabel } from "./workflows-context";
@@ -38,31 +36,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(initial.selectedId);
   const [date, setDate] = useState(initial.date);
   const [availableDates, setAvailableDates] = useState<string[]>([]);
-  const [runnerOpen, setRunnerOpen] = useState(false);
-  const [activeRunCount, setActiveRunCount] = useState(0);
   const prevStatusRef = useMemo(() => new Map<string, string>(), []);
-
-  // Poll /api/runs/active so the launcher can pulse when any run is in flight.
-  // 3s interval — cheap (just the count), and not visible chrome so jitter is fine.
-  useEffect(() => {
-    let alive = true;
-    const tick = async () => {
-      try {
-        const r = await fetch("/api/runs/active");
-        if (!r.ok) return;
-        const list = (await r.json()) as Array<unknown>;
-        if (alive) setActiveRunCount(Array.isArray(list) ? list.length : 0);
-      } catch {
-        /* dashboard backend may be momentarily unreachable — silent */
-      }
-    };
-    tick();
-    const interval = setInterval(tick, 3000);
-    return () => {
-      alive = false;
-      clearInterval(interval);
-    };
-  }, []);
 
   // Pre-flight check on mount
   usePreflight();
@@ -162,21 +136,6 @@ export default function App() {
         connected={connected}
         entryCounts={entryCounts}
         onSearchSelect={handleSearchSelect}
-        rightSlot={
-          <RunnerLauncher
-            onClick={() => setRunnerOpen(true)}
-            active={activeRunCount > 0}
-          />
-        }
-      />
-      <RunnerDrawer
-        open={runnerOpen}
-        onClose={() => setRunnerOpen(false)}
-        onSpawned={(wf) => {
-          // Switch the dashboard to the workflow we just spawned so the
-          // operator sees its queue update in real time.
-          if (wf !== workflow) handleWorkflowChange(wf);
-        }}
       />
       <div className="flex flex-1 overflow-hidden">
         <QueuePanel
