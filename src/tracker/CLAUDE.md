@@ -25,8 +25,9 @@ After each `/events` SSE poll cycle, `scanFailurePatterns()` runs today's tracke
 
 - `cleanOldTrackerFiles(maxAgeDays, dir)` — deletes JSONL files whose filename date (YYYY-MM-DD) is older than `maxAgeDays`. Returns count deleted.
 - `cleanOldScreenshots(maxAgeDays, dir)` — deletes PNGs in `.screenshots/` whose filename-embedded ms timestamp (trailing segment before `.png`) is older than `maxAgeDays`. Returns count deleted. Malformed names (no numeric trailing segment) are skipped — never accidentally deleted.
-- `npm run clean:tracker` — CLI wrapper in `src/scripts/clean-tracker.ts`. By default cleans both tracker JSONL and screenshots. Accepts `--days N` (default 7), `--dir PATH` (default `.tracker`), `--screenshots-dir PATH` (default `.screenshots`), `--no-screenshots` (tracker only), `--screenshots-only` (screenshots only).
-- `startDashboard()` runs a one-time startup prune at 30 days for BOTH tracker JSONL and screenshots (conservative — per-request `/api/preflight` still handles the 7-day ongoing prune for tracker files). Pass `{ noClean: true }` or `--no-clean` CLI flag to skip.
+- `pruneOldStepCache(maxAgeHours, dir)` — deletes step-cache JSON files under `.tracker/step-cache/{workflow}-{itemId}/{stepName}.json` whose mtime is older than `maxAgeHours`. Empty item directories are removed. Returns count deleted. Lives in `src/core/step-cache.ts` but participates in the same cleanup cadence.
+- `npm run clean:tracker` — CLI wrapper in `src/scripts/clean-tracker.ts`. By default cleans tracker JSONL + screenshots + step-cache. Accepts `--days N` (default 7), `--dir PATH`, `--screenshots-dir PATH`, `--step-cache-dir PATH`, `--no-screenshots`, `--no-step-cache`, `--screenshots-only`, `--step-cache-only`.
+- `startDashboard()` runs a one-time startup prune at 30 days for tracker JSONL, screenshots, AND step-cache (conservative — per-request `/api/preflight` still handles the 7-day ongoing prune for tracker files; preflight does NOT touch step-cache because walking the step-cache tree on every request is unnecessary). Pass `{ noClean: true }` or `--no-clean` CLI flag to skip.
 
 ## `withTrackedWorkflow(workflow, id, data, fn)`
 

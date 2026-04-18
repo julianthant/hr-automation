@@ -23,6 +23,7 @@ import { getAll as getAllRegisteredWorkflows } from "../core/registry.js";
 import type { WorkflowMetadata } from "../core/types.js";
 import { detectFailurePattern } from "./failure-detector.js";
 import { notify } from "./notify.js";
+import { pruneOldStepCache } from "../core/index.js";
 
 // Resolve path to built dashboard HTML (vite-plugin-singlefile output)
 const DASHBOARD_HTML_PATH = join(
@@ -737,6 +738,15 @@ export function startDashboard(
       }
     } catch (err) {
       log.step(`Screenshot startup prune skipped: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
+      const maxAge = opts.cleanMaxAgeDays ?? 30;
+      const deletedCache = pruneOldStepCache(maxAge * 24);
+      if (deletedCache > 0) {
+        log.step(`Pruned ${deletedCache} step-cache file${deletedCache === 1 ? "" : "s"} older than ${maxAge} days`);
+      }
+    } catch (err) {
+      log.step(`Step-cache startup prune skipped: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
