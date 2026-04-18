@@ -50,17 +50,21 @@ export interface StepCacheSetOpts {
 const UNSAFE_ITEM_ID_RE = /[/\\\0\x00-\x1f]/;
 const PARENT_DIR_SEGMENT = /(^|\/)\.\.(\/|$)/;
 
-function assertSafeItemId(itemId: string): void {
-  if (typeof itemId !== "string" || itemId.length === 0) {
-    throw new Error(`step-cache: itemId must be a non-empty string`);
+/** Reject any string that would compromise filesystem paths: empty, path
+ *  separators, NUL, ASCII control chars, `.`, `..`, or any `..` path segment.
+ *  Called on each of workflow / itemId / stepName before they're interpolated
+ *  into a path.join() call. */
+function assertSafePathSegment(value: string, label: string): void {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`step-cache: ${label} must be a non-empty string`);
   }
-  if (UNSAFE_ITEM_ID_RE.test(itemId)) {
+  if (UNSAFE_ITEM_ID_RE.test(value)) {
     throw new Error(
-      `step-cache: itemId contains unsafe character (path separator, NUL, or ASCII control char): ${JSON.stringify(itemId)}`,
+      `step-cache: ${label} contains unsafe character (path separator, NUL, or ASCII control char): ${JSON.stringify(value)}`,
     );
   }
-  if (itemId === "." || itemId === ".." || PARENT_DIR_SEGMENT.test(itemId)) {
-    throw new Error(`step-cache: itemId may not be '.' or contain '..': ${JSON.stringify(itemId)}`);
+  if (value === "." || value === ".." || PARENT_DIR_SEGMENT.test(value)) {
+    throw new Error(`step-cache: ${label} may not be '.' or contain '..': ${JSON.stringify(value)}`);
   }
 }
 
@@ -157,7 +161,9 @@ export function stepCacheSet<T>(
   value: T,
   opts: StepCacheSetOpts = {},
 ): void {
-  assertSafeItemId(itemId);
+  assertSafePathSegment(workflow, "workflow");
+  assertSafePathSegment(itemId, "itemId");
+  assertSafePathSegment(stepName, "stepName");
   const dir = opts.dir ?? DEFAULT_STEP_CACHE_DIR;
   const item = itemDir(dir, workflow, itemId);
   if (!existsSync(item)) mkdirSync(item, { recursive: true });
@@ -183,6 +189,11 @@ export function stepCacheClear(
   stepName?: string,
   dir: string = DEFAULT_STEP_CACHE_DIR,
 ): void {
+  assertSafePathSegment(workflow, "workflow");
+  assertSafePathSegment(itemId, "itemId");
+  if (stepName !== undefined) {
+    assertSafePathSegment(stepName, "stepName");
+  }
   if (stepName !== undefined) {
     const path = stepFile(dir, workflow, itemId, stepName);
     if (existsSync(path)) unlinkSync(path);
