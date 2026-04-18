@@ -1,5 +1,6 @@
 import type { Page, Frame } from "playwright";
 import { writeFile, mkdir } from "fs/promises";
+import { existsSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { log } from "../../utils/log.js";
@@ -72,6 +73,31 @@ export async function downloadCrmDocuments(
   const p = options.logPrefix;
   const msg = (s: string) => (p ? `${p} ${s}` : s);
   const indices = options.docIndices ?? DEFAULT_DOC_INDICES;
+
+  // Skip-if-already-downloaded: reconstruct DownloadedDoc[] from on-disk files
+  // only if ALL expected docs are present. Files land as `Doc{N}-<filename>.pdf`.
+  // A partial prior run (Doc1 present, Doc3 missing) falls through to the full
+  // download branch — strict check is conservative in the right direction.
+  if (existsSync(folderPath)) {
+    const entries = readdirSync(folderPath);
+    const found: DownloadedDoc[] = [];
+    for (const idx of indices) {
+      const pattern = new RegExp(`^Doc${idx + 1}-.+\\.pdf$`);
+      const match = entries.find((f) => pattern.test(f));
+      if (!match) break;
+      const filePath = join(folderPath, match);
+      found.push({
+        index: idx,
+        filename: match,
+        path: filePath,
+        bytes: statSync(filePath).size,
+      });
+    }
+    if (found.length === indices.length) {
+      log.warn(msg(`All ${indices.length} PDFs already on disk — skipping re-download`));
+      return found;
+    }
+  }
 
   await ensureDownloadFolder(folderPath);
 
