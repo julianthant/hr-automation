@@ -26,19 +26,10 @@ import type { EmployeeData } from "./schema.js";
 import { buildTransactionPlan } from "./enter.js";
 import { buildDownloadPath, downloadCrmDocuments } from "./download.js";
 import { retryStep } from "./retry.js";
-import { runOnboardingLegacy } from "./workflow-legacy.js";
 import { z } from "zod/v4";
 
 export interface OnboardingOptions {
   dryRun?: boolean;
-  /** Pre-launched CRM page (for parallel worker reuse). If supplied, routes to legacy. */
-  crmPage?: Page;
-  /** Pre-launched UCPath page (for parallel worker reuse). If supplied, routes to legacy. */
-  ucpathPage?: Page;
-  /** Pre-launched I9 page (for parallel worker reuse). If supplied, routes to legacy. */
-  i9Page?: Page;
-  /** Log prefix for worker identification, e.g. "[Worker 1]". */
-  logPrefix?: string;
 }
 
 /** Input schema for the onboarding kernel workflow. `email` is the only CLI-supplied field. */
@@ -370,19 +361,17 @@ export const onboardingWorkflow = defineWorkflow({
  * CLI adapter for `npm run start-onboarding <email>`.
  *
  * Routing:
- * - If pre-supplied pages are present (parallel worker context) → legacy path (workflow-legacy.ts).
- * - If `dryRun` → imperative CRM-only preview (see runOnboardingDryRun below).
+ * - If `dryRun` → imperative CRM-only preview (see `runOnboardingDryRun` below).
  * - Otherwise → kernel via `runWorkflow(onboardingWorkflow, { email })`.
+ *
+ * Parallel mode lives in `./parallel.ts` (`runParallel`), which delegates
+ * straight to `runWorkflowBatch(onboardingWorkflow, ...)` — no adapter
+ * indirection through this function.
  */
 export async function runOnboarding(
   email: string,
   options: OnboardingOptions = {},
 ): Promise<void> {
-  // Parallel workers supply pre-launched pages — route to legacy until parallel migrates.
-  if (options.crmPage || options.ucpathPage || options.i9Page) {
-    return runOnboardingLegacy(email, options);
-  }
-
   if (options.dryRun) {
     return runOnboardingDryRun(email);
   }
@@ -439,5 +428,3 @@ async function runOnboardingDryRun(email: string): Promise<void> {
     throw err;
   }
 }
-
-export { runOnboardingLegacy };
