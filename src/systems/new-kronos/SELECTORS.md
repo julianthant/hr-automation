@@ -72,7 +72,7 @@ Close the sidebar.
 
 ## `goToMenu.goToButtonOnPage()` — verified 2026-04-06
 
-Go To button (outside the search frame). Two-deep fallback for the
+Go To button (outside the search frame). Two-deep fallback for the regex + literal variants.
 
 **Tags:** go-to, button, page, navigation, new-kronos
 
@@ -88,7 +88,7 @@ Go To button inside the search frame.
 
 ## `goToMenu.timecardItem()` — verified 2026-04-06
 
-Timecard menu item — 6-deep fallback chain covering both frame
+Timecard menu item — 6-deep fallback chain covering both frame (searchFrame) and page-level renderings, plus "Timecards" plural / "Timecard" singular variants.
 
 **Tags:** timecard, menu, item, fallback, navigation, new-kronos
 
@@ -104,7 +104,7 @@ Current Pay Period button (first).
 
 ## `timecard.payPeriodTriggerButton()` — verified 2026-04-06
 
-Pay-period trigger button — text varies ("Current Pay Period",
+Pay-period trigger button — text varies ("Current Pay Period", "Previous Pay Period", or a date range). Match all three.
 
 **Tags:** pay, period, trigger, button, timecard, new-kronos
 
