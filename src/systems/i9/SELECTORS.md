@@ -288,7 +288,7 @@ Search submit button (page-scoped — there's only one).
 
 ## `search.resultRows()` — verified 2026-03-16
 
-Results grid rows. The last grid in the dialog is the results grid
+Results grid rows. The last grid in the dialog is the results grid (earlier grid contains headers).
 
 **Tags:** results, grid, rows, search, i9
 

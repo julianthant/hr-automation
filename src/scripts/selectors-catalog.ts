@@ -53,12 +53,24 @@ function extractSummaryTagsVerified(jsdoc: ts.JSDoc | undefined): {
     typeof jsdoc.comment === "string"
       ? jsdoc.comment
       : (jsdoc.comment ?? []).map((c) => c.text).join("");
-  // Strip "verified YYYY-MM-DD" from the summary line so it doesn't appear twice.
+  // Strip "verified YYYY-MM-DD" from the summary so it doesn't appear twice
+  // (the verified date is rendered as a separate column in the catalog).
   const verifiedMatch = commentText.match(/verified\s+(\d{4}-\d{2}-\d{2})/);
   const verifiedDate = verifiedMatch ? verifiedMatch[1] : null;
-  const summary = commentText
-    .split("\n")[0]
-    .replace(/verified\s+\d{4}-\d{2}-\d{2}.*$/, "")
+  // Multi-line JSDoc summaries (where the first sentence wraps) were being
+  // truncated when we took only `split("\n")[0]`. Take all lines until the
+  // first blank line or @-tag line and collapse whitespace into a single
+  // sentence so the catalog shows the full summary.
+  const summaryLines: string[] = [];
+  for (const line of commentText.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "" || trimmed.startsWith("@")) break;
+    summaryLines.push(trimmed);
+  }
+  const summary = summaryLines
+    .join(" ")
+    .replace(/\s*verified\s+\d{4}-\d{2}-\d{2}.*$/, "")
+    .replace(/\s+/g, " ")
     .trim();
 
   const tags: string[] = [];
@@ -189,7 +201,15 @@ function main(): void {
   console.log(`\nTotal: ${totalSelectors} selectors across ${systems.length} systems.`);
 }
 
-// Only run main when invoked directly. Importable for tests.
-if (process.argv[1]?.endsWith("selectors-catalog.ts")) {
+// Only run main when invoked directly. Importable for tests. Three-way guard
+// matches the established convention in clean-tracker.ts so the script behaves
+// the same when run via tsx (.ts), via the compiled output (.js), or via a
+// path that happens to match `import.meta.url`.
+const isMainModule =
+  import.meta.url === `file://${process.argv[1]}` ||
+  process.argv[1]?.endsWith("selectors-catalog.ts") ||
+  process.argv[1]?.endsWith("selectors-catalog.js");
+
+if (isMainModule) {
   main();
 }

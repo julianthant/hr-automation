@@ -76,6 +76,14 @@ function main(): void {
   }
 }
 
-if (process.argv[1]?.endsWith("selector-search.ts")) {
+// Three-way guard matches clean-tracker.ts convention so the CLI fires
+// whether invoked via tsx (.ts), compiled output (.js), or a path that
+// matches `import.meta.url`.
+const isMainModule =
+  import.meta.url === `file://${process.argv[1]}` ||
+  process.argv[1]?.endsWith("selector-search.ts") ||
+  process.argv[1]?.endsWith("selector-search.js");
+
+if (isMainModule) {
   main();
 }

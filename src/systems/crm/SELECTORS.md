@@ -16,7 +16,7 @@ All result rows in the search-results table.
 
 ## `search.nthResultRow()` — verified 2026-04-14
 
-Nth result row. Use: `search.nthResultRow(page, i).locator("td").nth(1)`
+Nth result row. Use: `search.nthResultRow(page, i).locator("td").nth(1)` for the "Offer Sent On" column (index 1).
 
 **Tags:** search, result, row, nth, table, crm
 
@@ -24,7 +24,7 @@ Nth result row. Use: `search.nthResultRow(page, i).locator("td").nth(1)`
 
 ## `record.thLabelFollowingTd()` — verified 2026-04-14
 
-Visualforce label → value locator strategy 1: label in <th>, value in
+Visualforce label → value locator strategy 1: label in <th>, value in the next sibling <td>.
 
 **Tags:** visualforce, label, value, th, extract, record, crm
 
@@ -32,7 +32,7 @@ Visualforce label → value locator strategy 1: label in <th>, value in
 
 ## `record.tdLabelFollowingTd()` — verified 2026-04-14
 
-Visualforce label → value locator strategy 2 (fallback): label in <td>,
+Visualforce label → value locator strategy 2 (fallback): label in <td>, value in the next sibling <td>.
 
 **Tags:** visualforce, label, value, td, extract, record, fallback, crm
 
@@ -40,7 +40,7 @@ Visualforce label → value locator strategy 2 (fallback): label in <td>,
 
 ## `sectionNav.byName()` — verified 2026-04-14
 
-Fallback chain for "click a section by name" when direct URL mapping
+Fallback chain for "click a section by name" when direct URL mapping isn't available in CRM_SECTION_URLS. Tries link, then text, then tab.
 
 **Tags:** section, navigation, name, fallback, link, tab, crm
 
