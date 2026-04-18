@@ -29,3 +29,10 @@ export {
   IDEMPOTENCY_FILENAME,
 } from './idempotency.js'
 export type { IdempotencyRecord, CheckOpts as IdempotencyCheckOpts } from './idempotency.js'
+export {
+  stepCacheGet,
+  stepCacheSet,
+  stepCacheClear,
+  pruneOldStepCache,
+  DEFAULT_STEP_CACHE_DIR,
+} from './step-cache.js'
