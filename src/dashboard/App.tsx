@@ -10,6 +10,7 @@ import { useEntries } from "./components/hooks/useEntries";
 import { usePreflight } from "./components/hooks/usePreflight";
 import { useWorkflow, autoLabel } from "./workflows-context";
 import { resolveEntryName } from "./components/entry-display";
+import type { SearchResultRow } from "./components/types";
 
 /** Read initial state from URL search params so refresh preserves selection */
 function readUrlState() {
@@ -123,6 +124,17 @@ export default function App() {
     setSelectedId(null);
   }, []);
 
+  // Cross-date search → deep-link to the matching (workflow, date, id).
+  // Each setter triggers the URL-sync effect; useEntries re-subscribes when
+  // workflow/date change, and LogPanel picks up the new selectedId. No extra
+  // fetch logic needed here — the existing SSE stream for that workflow/date
+  // will surface the entry once entries for that bucket arrive.
+  const handleSearchSelect = useCallback((row: SearchResultRow) => {
+    if (row.workflow !== workflow) setWorkflow(row.workflow);
+    if (row.date !== date) setDate(row.date);
+    setSelectedId(row.id);
+  }, [workflow, date]);
+
   // Entry counts per workflow from backend SSE (accurate across all workflows)
   const entryCounts = wfCounts;
 
@@ -149,6 +161,7 @@ export default function App() {
         availableDates={availableDates}
         connected={connected}
         entryCounts={entryCounts}
+        onSearchSelect={handleSearchSelect}
         rightSlot={
           <RunnerLauncher
             onClick={() => setRunnerOpen(true)}

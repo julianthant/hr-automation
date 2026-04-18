@@ -48,6 +48,23 @@ export interface ScreenshotListEntry {
 }
 
 /**
+ * One search hit returned by `/api/search`. Thin shape — the dropdown only
+ * needs enough to render a result row and deep-link into the tracker view.
+ */
+export interface SearchResultRow {
+  workflow: string;
+  id: string;
+  runId: string;
+  status: "pending" | "running" | "done" | "failed" | "skipped";
+  /** Latest timestamp for this (workflow, id, runId). */
+  lastTs: string;
+  /** YYYY-MM-DD the match lives in — used by the UI to navigate. */
+  date: string;
+  /** Compact one-line summary (name / doc id / email). Never empty. */
+  summary: string;
+}
+
+/**
  * Format a millisecond count as a short, dashboard-friendly label.
  * `<1s` when under a second, `Ns` under a minute, `Nm Ss` under an hour, else `Nh Mm`.
  */
