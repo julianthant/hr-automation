@@ -9,6 +9,8 @@ import {
   hasRecentlySucceeded,
   recordSuccess,
   findRecentTransactionId,
+  stepCacheGet,
+  stepCacheSet,
 } from "../../core/index.js";
 import { loginToUCPath, loginToACTCrm } from "../../auth/login.js";
 import {
@@ -149,7 +151,47 @@ export const onboardingWorkflow = defineWorkflow({
       { attempts: 2 },
     );
 
+    const buildDetailFieldsPayload = (d: EmployeeData) => ({
+      firstName: d.firstName,
+      lastName: d.lastName,
+      middleName: d.middleName ?? "",
+      email: d.email ?? email,
+      phone: d.phone ?? "",
+      dob: d.dob ?? "",
+      ssn: maskSsn(d.ssn),
+      address: d.address,
+      city: d.city,
+      state: d.state,
+      postalCode: d.postalCode,
+      departmentNumber: d.departmentNumber ?? "",
+      recruitmentNumber: d.recruitmentNumber ?? "",
+      positionNumber: d.positionNumber,
+      wage: d.wage,
+      effectiveDate: d.effectiveDate,
+      appointment: d.appointment ?? "",
+    });
+
     await ctx.step("extraction", async () => {
+      // Cache-hit branch — skip CRM re-scrape if a recent extraction exists
+      // for this email. Pre-step nav (searchByEmail, selectLatestResult,
+      // extractRecordPageFields, navigateToSection) has still run, so we
+      // re-apply recordFields's dept + recruitment numbers on top of cache.
+      const cached = stepCacheGet<EmployeeData>(
+        "onboarding",
+        email,
+        "extraction",
+        { withinHours: 2 },
+      );
+      if (cached) {
+        log.warn("Using cached extraction data (≤2 h old) — skipping CRM re-scrape");
+        data = cached;
+        if (recordFields.departmentNumber) data = { ...data, departmentNumber: recordFields.departmentNumber };
+        if (recordFields.recruitmentNumber) data = { ...data, recruitmentNumber: recordFields.recruitmentNumber };
+        ctx.updateData(buildDetailFieldsPayload(data));
+        return;
+      }
+
+      // Cache-miss branch — normal extraction from CRM.
       const rawData = await ctx.retry(
         () => extractRawFields(crmPage),
         { attempts: 2 },
@@ -162,25 +204,17 @@ export const onboardingWorkflow = defineWorkflow({
       if (recordFields.departmentNumber) data = { ...data, departmentNumber: recordFields.departmentNumber };
       if (recordFields.recruitmentNumber) data = { ...data, recruitmentNumber: recordFields.recruitmentNumber };
 
-      ctx.updateData({
-        firstName: data.firstName,
-        lastName: data.lastName,
-        middleName: data.middleName ?? "",
-        email: data.email ?? email,
-        phone: data.phone ?? "",
-        dob: data.dob ?? "",
-        ssn: maskSsn(data.ssn),
-        address: data.address,
-        city: data.city,
-        state: data.state,
-        postalCode: data.postalCode,
-        departmentNumber: data.departmentNumber ?? "",
-        recruitmentNumber: data.recruitmentNumber ?? "",
-        positionNumber: data.positionNumber,
-        wage: data.wage,
-        effectiveDate: data.effectiveDate,
-        appointment: data.appointment ?? "",
-      });
+      ctx.updateData(buildDetailFieldsPayload(data));
+
+      // Cache write is best-effort: a disk-full / permission error must NOT
+      // fail the step — the underlying extraction already succeeded. Log-warn
+      // and move on; next rerun will re-scrape, which is correct behavior.
+      try {
+        stepCacheSet("onboarding", email, "extraction", data);
+      } catch (e) {
+        log.warn(`Step cache write failed (continuing): ${errorMessage(e)}`);
+      }
+
       log.success("Employee data extracted and validated");
     });
 
