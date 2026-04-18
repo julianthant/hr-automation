@@ -38,10 +38,9 @@ interface TopBarProps {
   connected: boolean;
   entryCounts: Record<string, number>;
   /**
-   * Optional slot rendered between the live indicator and the clock —
-   * used by App.tsx to mount the runner launcher button. Kept as a slot
-   * (rather than hard-coding the launcher) so the topbar stays focused on
-   * navigation and the runner stays self-contained.
+   * Optional slot rendered between the live indicator and the clock.
+   * Reserved for a future workflow launcher; the topbar stays focused on
+   * navigation regardless of what mounts here.
    */
   rightSlot?: React.ReactNode;
   /**
