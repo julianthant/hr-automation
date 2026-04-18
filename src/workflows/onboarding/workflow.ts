@@ -2,7 +2,14 @@ import type { Page } from "playwright";
 import { launchBrowser } from "../../browser/launch.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
-import { defineWorkflow, runWorkflow } from "../../core/index.js";
+import {
+  defineWorkflow,
+  runWorkflow,
+  hashKey,
+  hasRecentlySucceeded,
+  recordSuccess,
+  findRecentTransactionId,
+} from "../../core/index.js";
 import { loginToUCPath, loginToACTCrm } from "../../auth/login.js";
 import {
   searchByEmail,
@@ -305,11 +312,38 @@ export const onboardingWorkflow = defineWorkflow({
 
     await ctx.step("transaction", async () => {
       if (!data) throw new Error("extraction did not produce data");
+
+      // Idempotency: key on (workflow, emplId-or-NEW, ssn, effectiveDate). For
+      // a fresh hire, emplId doesn't exist yet so we use "NEW"; the SSN +
+      // effectiveDate combination still uniquely identifies the intended txn.
+      const idempKey = hashKey({
+        workflow: "onboarding",
+        emplId: searchResult.matches?.[0]?.emplId ?? "NEW",
+        ssn: data.ssn ?? "",
+        effectiveDate: data.effectiveDate,
+      });
+      if (hasRecentlySucceeded(idempKey)) {
+        const existingTxId = findRecentTransactionId(idempKey);
+        const note = existingTxId
+          ? `transaction already submitted recently (txId ${existingTxId}) — skipping (idempotency)`
+          : "transaction already submitted recently — skipping (idempotency)";
+        log.warn(note);
+        ctx.updateData({
+          status: "Skipped (Duplicate)",
+          idempotencySkip: "true",
+          ...(existingTxId ? { transactionId: existingTxId } : {}),
+        });
+        return;
+      }
+
       try {
         const plan = buildTransactionPlan(data, ucpathPage, i9ProfileId);
         log.step("Executing Smart HR transaction plan...");
         await plan.execute();
         log.success("Transaction created successfully in UCPath");
+        // transactionId isn't surfaced by ActionPlan today — record empty string;
+        // the key match is what prevents duplicates on re-run.
+        recordSuccess(idempKey, "", "onboarding");
         ctx.updateData({ status: "Done" });
       } catch (error) {
         // `ctx.retry` rethrows the underlying error verbatim on exhaustion, so the
