@@ -36,3 +36,8 @@ export {
   pruneOldStepCache,
   DEFAULT_STEP_CACHE_DIR,
 } from './step-cache.js'
+export type {
+  StepCacheRecord,
+  StepCacheGetOpts,
+  StepCacheSetOpts,
+} from './step-cache.js'
