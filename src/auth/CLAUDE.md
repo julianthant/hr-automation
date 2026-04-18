@@ -19,7 +19,8 @@ systems: [{
 ## Files
 
 - `login.ts` — All login flows: `loginToUCPath`, `loginToACTCrm`, `loginToUKG` (split into `ukgNavigateAndFill` + `ukgSubmitAndWaitForDuo`), `loginToKuali`, `loginToNewKronos`
-- `duo-poll.ts` — `pollDuoApproval(page, options)` — unified Duo polling loop with URL match, successCheck, postApproval, and recovery callbacks
+- `duo-poll.ts` — `pollDuoApproval(page, options)` — unified Duo polling loop with URL match, successCheck, postApproval, recovery callbacks, and optional `systemLabel` for the voice-cue hook
+- `voice-cue.ts` — `cueDuo(systemId)` — best-effort macOS voice cue ("Duo for UCPath") spoken via `say` when `HR_AUTOMATION_VOICE_CUES=1`. No-op on non-darwin or when the env var is unset. Per-systemId 30s cooldown prevents rapid duplicates across auth retries. Never throws. `pollDuoApproval` calls this once per auth attempt before the polling loop starts
 - `session.ts` — `isOnAuthenticatedPage(page)` — URL-based check for ACT CRM auth state (not session persistence)
 - `types.ts` — `LoginOptions` (fresh flag), `AuthResult` (ucpath/actCrm booleans)
 

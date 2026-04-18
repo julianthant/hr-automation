@@ -34,7 +34,11 @@ export async function requestDuoApproval(
   });
 
   try {
-    return await pollDuoApproval(page, options);
+    // Pass the queue's system label through so duo-poll.ts's voice-cue hook
+    // (HR_AUTOMATION_VOICE_CUES=1) says "Duo for <system>" when polling starts.
+    // Plain `pollDuoApproval` falls back to "system" when unset — direct
+    // callers (non-queued) keep working without change.
+    return await pollDuoApproval(page, { ...options, systemLabel: options.system });
   } finally {
     log.step(`[Duo Queue] Complete: ${options.system} for ${options.instance}`);
     emitSessionEvent({

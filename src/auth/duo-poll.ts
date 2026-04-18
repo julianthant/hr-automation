@@ -1,5 +1,6 @@
 import type { Page } from "playwright";
 import { log } from "../utils/log.js";
+import { cueDuo } from "./voice-cue.js";
 
 /**
  * Options for polling Duo MFA approval.
@@ -34,6 +35,14 @@ export interface DuoPollOptions {
    * (e.g., SAML redirects in Kuali, #failedLogin in New Kronos).
    */
   recovery?: (page: Page) => Promise<void>;
+
+  /**
+   * Optional human-readable label for the system being authenticated (e.g.
+   * "UCPath", "Kuali"). Currently used only by the opt-in macOS voice cue
+   * (`HR_AUTOMATION_VOICE_CUES=1`) to say "Duo for <systemLabel>" when the
+   * polling loop starts. Silently ignored when unset or on non-darwin.
+   */
+  systemLabel?: string;
 }
 
 /**
@@ -60,7 +69,7 @@ export async function pollDuoApproval(
   page: Page,
   options: DuoPollOptions,
 ): Promise<boolean> {
-  const { timeoutSeconds = 180, successUrlMatch, successCheck, postApproval, recovery } = options;
+  const { timeoutSeconds = 180, successUrlMatch, successCheck, postApproval, recovery, systemLabel } = options;
 
   const urlMatches = (url: string): boolean => {
     if (typeof successUrlMatch === "string") {
@@ -68,6 +77,11 @@ export async function pollDuoApproval(
     }
     return successUrlMatch(url);
   };
+
+  // Best-effort voice cue — opt-in via HR_AUTOMATION_VOICE_CUES=1 + macOS.
+  // Fires once before the polling loop begins so the operator hears a cue if
+  // they're not looking at the terminal. Never blocks; never throws.
+  await cueDuo(systemLabel ?? "system").catch(() => {});
 
   log.waiting("Waiting for Duo approval (approve on your phone)...");
 
