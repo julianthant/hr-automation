@@ -1,0 +1,32 @@
+# Scheduler configuration — copy to `schedule.yaml` and edit.
+#
+# Each entry runs `npm run <workflow>` on the declared cadence. Times are local
+# (not UTC). See `npm run schedule -- --help` for the full schedule syntax.
+#
+# Fields:
+#   name      Human label for logs.
+#   workflow  Matches a script name in package.json (e.g. `kronos`, `emergency-contact`).
+#   args      Optional — appended after `--` so they reach the underlying script
+#             rather than being swallowed by npm.
+#   schedule  One of:
+#               daily HH:MM
+#               weekly <dow[,dow...]> HH:MM      (dow: mon,tue,wed,thu,fri,sat,sun)
+#               interval <N>m  or  interval <N>h
+#   enabled   Optional, default true. Set to false to skip without deleting.
+
+- name: kronos-weekly
+  workflow: kronos
+  args: ["--workers", "4"]
+  schedule: "weekly mon 08:00"
+  enabled: true
+
+- name: emergency-contact-daily
+  workflow: emergency-contact
+  args: ["batches/today.yaml"]
+  schedule: "daily 09:30"
+  enabled: false
+
+- name: onboarding-burst-check
+  workflow: dashboard
+  schedule: "interval 1h"
+  enabled: false
