@@ -8,6 +8,18 @@ Searches UCPath Person Organizational Summary for employees by name, filters for
 
 Both share one searching/cross-verify body. Inside `ctx.step("searching", ...)` the handler calls `runWorkerPool` from `src/utils/worker-pool.ts` to fan out the name list across N tabs in a single shared `BrowserContext` (page-per-worker pattern — one Duo auth, multiple parallel searches). Per-name Excel tracker writes go through an async-mutex; per-name JSONL rows are NOT emitted (one workflow run per CLI invocation — see "Acceptable regression" below).
 
+## Selector intelligence
+
+This workflow touches two systems: **ucpath**, **crm** (CRM only in `--crm` mode).
+
+- Before mapping or remapping any selector, run `npm run selector:search "<intent>"` (e.g. `"person org summary"`, `"crm name search"`, `"sdcmp filter"`).
+- Per-system lessons (read before re-mapping):
+  - [`src/systems/ucpath/LESSONS.md`](../../systems/ucpath/LESSONS.md)
+  - [`src/systems/crm/LESSONS.md`](../../systems/crm/LESSONS.md)
+- Per-system catalogs (auto-generated):
+  - [`src/systems/ucpath/SELECTORS.md`](../../systems/ucpath/SELECTORS.md)
+  - [`src/systems/crm/SELECTORS.md`](../../systems/crm/SELECTORS.md)
+
 ## Files
 
 - `schema.ts` — Zod `EidLookupInputSchema` (`{ names: string[], workers: number }`); CRM-on alias `EidLookupCrmInputSchema` is the same shape.

@@ -4,6 +4,20 @@ Automates full UC employee hiring: extracts data from ACT CRM, validates with Zo
 
 **Kernel-based (single + pool).** Both single-mode (`npm run start-onboarding <email>`) and parallel-batch mode (`npm run start-onboarding:batch -- <N>`) are declared via `defineWorkflow` in `workflow.ts`. Single-mode runs through `src/core/runWorkflow`; batch mode delegates to `runWorkflowBatch` → `runWorkflowPool` (N workers, each with its own Session = 3 browsers: CRM + UCPath + I9, 2 Duos per worker since I9 has no 2FA). The kernel owns browser launch, auth chain, queue fan-out, per-item `withTrackedWorkflow` wrapping, SIGINT cleanup, screenshot on failure.
 
+## Selector intelligence
+
+This workflow touches three systems: **crm**, **ucpath**, **i9**.
+
+- Before mapping or remapping any selector, run `npm run selector:search "<intent>"` (e.g. `"crm extract field"`, `"ucpath person search"`, `"i9 section 1"`).
+- Per-system lessons (read before re-mapping):
+  - [`src/systems/crm/LESSONS.md`](../../systems/crm/LESSONS.md)
+  - [`src/systems/ucpath/LESSONS.md`](../../systems/ucpath/LESSONS.md)
+  - [`src/systems/i9/LESSONS.md`](../../systems/i9/LESSONS.md)
+- Per-system catalogs (auto-generated):
+  - [`src/systems/crm/SELECTORS.md`](../../systems/crm/SELECTORS.md)
+  - [`src/systems/ucpath/SELECTORS.md`](../../systems/ucpath/SELECTORS.md)
+  - [`src/systems/i9/SELECTORS.md`](../../systems/i9/SELECTORS.md)
+
 ## Files
 
 - `schema.ts` — Zod `EmployeeData` schema (names, SSN, address, wage, appointment, dates)

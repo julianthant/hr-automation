@@ -1,6 +1,6 @@
 # Workflows — Orchestration Layer
 
-Each subdirectory is one composed workflow. Kernel workflows declare their shape via `defineWorkflow` in `workflow.ts` and are run by `runWorkflow` / `runWorkflowBatch` / `runWorkflowPool` in `src/core/`. Legacy workflows call `withTrackedWorkflow` + `launchBrowser` directly; they register dashboard metadata via `defineDashboardMetadata(...)` in their `index.ts`.
+Each subdirectory is one composed workflow. As of 2026-04-17, every workflow is kernel-based: it declares its shape via `defineWorkflow` in `workflow.ts` and is run by `runWorkflow` / `runWorkflowBatch` / `runWorkflowPool` in `src/core/`. The legacy `defineDashboardMetadata` / inline `withTrackedWorkflow` shape is retained in `src/core/` only as a registration affordance for any future non-kernel workflow that lands — no caller in `src/workflows/*` uses it today.
 
 See the root `CLAUDE.md` "Writing a new workflow" section for the minimal `defineWorkflow` example. This file lists what's specific to this directory.
 
@@ -22,7 +22,7 @@ Do **not** create `tracker.ts` for new workflows. The kernel's JSONL emissions +
 
 Declare `label`, `getName`, `getId`, and labeled `detailFields` inside `defineWorkflow({ ... })`. Every key you list in `detailFields` should be populated by at least one `ctx.updateData({ [key]: ... })` call before the handler returns — a runtime `log.warn` fires if not. That's the entire dashboard wiring for kernel workflows.
 
-Legacy workflows call `defineDashboardMetadata({ name, label, steps, systems, detailFields })` at module load in `index.ts`. As of 2026-04-17, all workflows (including onboarding's parallel mode, migrated to kernel pool mode) are kernel-based — no `defineDashboardMetadata` callers remain in `src/workflows/*`. New workflows should follow the kernel path exclusively.
+Legacy workflows would call `defineDashboardMetadata({ name, label, steps, systems, detailFields })` at module load in `index.ts`, but as of 2026-04-17, all workflows (including onboarding's parallel mode, migrated to kernel pool mode) are kernel-based — no `defineDashboardMetadata` callers remain in `src/workflows/*`. New workflows must follow the kernel path exclusively.
 
 Add the workflow's step list to the "Step Tracking Per Workflow" table in root `CLAUDE.md` for documentation. Frontend requires no edits — the dashboard reads everything from the server-side registry via `/api/workflow-definitions`.
 
@@ -44,4 +44,4 @@ Add a Commander subcommand to `src/cli.ts` invoking your workflow's CLI adapter.
 ## Lessons Learned
 
 - **2026-04-10: Batch mode pattern for sequential processing** — For workflows that reuse browser sessions across multiple items (e.g. separations, emergency-contact), the pattern is: (1) pre-emit `pending` for all items with pre-assigned `runId`s (kernel: `preEmitPending: true` + `onPreEmitPending` callback), (2) auth once, (3) process each item sequentially. The kernel's `runWorkflowBatch` does this declaratively; legacy workflows wire `preAssignedRunId` into `withTrackedWorkflow` manually.
-- **2026-04-10: ensurePageHealthy() before each phase (legacy workflows)** — SAML errors and session expiry can happen silently between phases. Each major phase should verify the page isn't on an error URL before proceeding. The kernel's `Session.launch` retries failed auth up to 3x; legacy workflows still call `ensurePageHealthy()` manually.
+- **2026-04-10: ensurePageHealthy() before each phase (historical, legacy workflows)** — SAML errors and session expiry can happen silently between phases. Pre-kernel workflows wrapped each major phase with `ensurePageHealthy()` from `src/core/page-health.ts`. Removed 2026-04-18 — every workflow is now kernel-based, and the kernel's `Session.launch` retries failed auth up to 3 attempts. Don't reach for `ensurePageHealthy` — use `ctx.session.healthCheck(id)` if you need an explicit mid-handler probe.

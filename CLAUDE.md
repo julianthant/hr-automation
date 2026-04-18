@@ -11,12 +11,12 @@ npm run start-onboarding:dry <email>   # Dry-run onboarding (CRM extract only, n
 npm run start-onboarding:batch -- <N>  # Batch onboarding with N parallel workers (kernel pool mode)
 npm run extract <email>                # Extract employee data from CRM only
 
-# Separations (legacy — NOT kernel-migrated)
+# Separations
 npm run separation <docId> [docId ...] # Single doc or batch; shared browsers across docs
 npm run separation:dry <docId>         # Dry-run (extract + log only)
 
-# Kronos Reports (legacy — NOT kernel-migrated)
-npm run kronos                         # Download Time Detail PDFs (4 workers)
+# Kronos Reports
+npm run kronos                         # Download Time Detail PDFs (4 workers, kernel pool mode)
 npm run kronos:dry                     # Dry-run (preview employee list)
 npm run kronos -- --workers 8          # Custom worker count
 
@@ -43,6 +43,11 @@ tsx --env-file=.env src/cli.ts export <workflow>   # Dump JSONL tracker to xlsx
 npm run clean:tracker                              # Prune .tracker/*.jsonl older than 7 days
 npm run clean:tracker -- --days 30 --dir .tracker  # Custom age + dir
 npm run test-login                                 # Smoke test UCPath + CRM auth
+npm run setup                                      # First-use environment validation wizard
+npm run schemas:export                             # Write each workflow's Zod input schema as JSON Schema
+npm run new:workflow -- <name> [--systems a,b]     # Scaffold a new kernel workflow
+npm run selectors:catalog                          # Regenerate per-system SELECTORS.md from selectors.ts
+npm run selector:search "<intent>"                 # Fuzzy search across SELECTORS.md + LESSONS.md
 npm run typecheck                                  # Type-check src/
 npm run typecheck:all                              # Type-check src/ + tests
 npm run test                                       # Unit tests
@@ -162,7 +167,7 @@ export async function runMyWorkflow(input: MyInput) {
 }
 ```
 
-Add a Commander subcommand in `src/cli.ts`, add npm scripts to `package.json`, create `src/workflows/my-workflow/CLAUDE.md` following the workflow template, and that's the whole story — no dashboard registry edits needed.
+Run `npm run new:workflow -- my-workflow --systems ucpath,crm` to scaffold the five canonical files. The generated `CLAUDE.md` links the per-system `LESSONS.md` + `SELECTORS.md` for each declared system and embeds the "Before mapping a new selector" boilerplate so the loop is self-bootstrapping. Then add a Commander subcommand in `src/cli.ts`, add npm scripts to `package.json`, fill in the schema + handler, and that's the whole story — no dashboard registry edits needed.
 
 See `src/workflows/work-study/` for a clean one-system example, `src/workflows/emergency-contact/` for batch-mode with `preEmitPending`, `src/workflows/onboarding/` for multi-system sequential auth + pool-mode parallel, `src/workflows/old-kronos-reports/` for pool-mode with per-worker sessionDir injection, and `src/workflows/eid-lookup/` for the in-handler `runWorkerPool` pattern (shared-context fan-out from a single Duo auth).
 
@@ -249,6 +254,31 @@ Do **not** inline `page.locator("...")` in system `.ts` files — the [`tests/un
 
 When you verify a selector via `playwright-cli snapshot`, bump its `// verified` date in `selectors.ts`. Never guess selectors — map the live page first.
 
+## Selector Intelligence
+
+Three artifacts per system support adding new workflows without re-mapping selectors or repeating past mistakes:
+
+- **`src/systems/<sys>/SELECTORS.md`** — auto-generated catalog of every selector this system exports. Each entry has the FQN (e.g. `smartHR.tab.personalData`), one-line summary from JSDoc, `@tags`, and a clickable line ref into `selectors.ts`. Regenerate after any selectors.ts change with `npm run selectors:catalog`. Committed so future Claude sessions see the catalog without running anything. A unit test (`tests/unit/scripts/selectors-catalog.test.ts`) gates drift — PRs that change selectors without regenerating fail there.
+- **`src/systems/<sys>/LESSONS.md`** — append-only structured lessons. Required subsections per H2: `**Tried:**`, `**Failed because:**`, `**Fix:**`, `**Tags:**` (plus optional `**Selector:**` and `**References:**`). `tests/unit/scripts/lessons-format.test.ts` enforces the shape. When you discover a non-obvious selector failure, append a lesson here so the next session doesn't relearn it.
+- **`src/systems/<sys>/common-intents.txt`** — hand-curated 5-10 typical intents per system. The `npm run new:workflow --systems X` scaffolder reads these and seeds the generated workflow's CLAUDE.md with example `selector:search` invocations.
+
+The fuzzy search:
+
+```bash
+npm run selector:search "comp rate"
+# → top hit: ucpath/jobData.compRateCodeInput (selector)
+# → also: relevant lessons that touch the same intent
+```
+
+Workflow when adding or finding a selector:
+1. `npm run selector:search "<your intent>"` — does a matching selector exist?
+2. If yes, USE IT. Don't remap.
+3. If no, check the per-system `LESSONS.md` for related failure modes.
+4. Map a new selector via `playwright-cli`, add JSDoc + `@tags` + `// verified <date>` in `selectors.ts`, run `npm run selectors:catalog`.
+5. If you hit a non-obvious failure on the way, append a lesson to `LESSONS.md`.
+
+Each per-system `CLAUDE.md` links to its `LESSONS.md` + `SELECTORS.md` and embeds this loop verbatim.
+
 ## Dashboard
 
 `npm run dashboard` starts the SSE backend (`:3838`) + Vite dev server (`:5173`). Open http://localhost:5173.
@@ -266,7 +296,24 @@ Current step tracking per workflow:
 | work-study | ucpath-auth → transaction |
 | emergency-contact | navigation → fill-form → save |
 
+As of 2026-04-18, the dashboard is **observation-only**. The previous "⚡ RUN" drawer + `RunnerLauncher` button + `SchemaForm` + `runner-recents` localStorage helper + the backend `buildSpawnHandler`/`buildCancelHandler`/`buildActiveRunsHandler`/`buildWorkflowSchemaHandler` factories + the child-process registry were all removed. Workflows are launched via the npm scripts above (or whatever replacement launcher the user wires up later — out of scope for this pass). Live session monitoring (`SessionPanel`), selector-warning aggregation (`SelectorWarningsPanel`), failure drill-down (`FailureDrillDown`), step-timing chips (`StepPipeline`), and cross-workflow search (`SearchBar`) all keep working — they read kernel-emitted events from `src/tracker/jsonl.ts`, independent of any launcher.
+
 Implementation details live in `src/dashboard/CLAUDE.md` (frontend) and `src/tracker/CLAUDE.md` (backend).
+
+## Pending follow-ups (deferred)
+
+These items appear in plans/improvements docs but were not shipped in 2026-04-18's selector-intelligence + runner-removal pass. They'll be picked up in a later session.
+
+- **Stats panel + run-diff frontend.** ~357 lines of backend handler scaffolding (`buildStatsHandler`, `buildDiffHandler`, types) sit uncommitted in `src/tracker/dashboard.ts`. No tests, no frontend, no route registration. Decide: commit + open frontend tickets, or `git checkout -- src/tracker/dashboard.ts` to discard. Note that `computeStepDurations` is committed and powers the StepPipeline timing chips already — discarding the scaffolding would NOT regress those.
+- **Replacement workflow launcher.** Out of scope for this pass; user will wire something else where ⚡ RUN used to be. The `TopBar`'s `rightSlot` prop is preserved for that future mount.
+- **Bundle size code-split** (handoff §1.8). Bundle is 906.74 KB after runner removal (down from 940.65 KB).
+- **ESLint rule for selectors** (handoff §8.3). The `tests/unit/systems/inline-selectors.test.ts` guard still enforces "no inline selectors outside `selectors.ts`" — promotion to ESLint is editor-time-feedback only.
+- **Replay-from-last-successful-step** (improvements §3.5). Kernel feature; persist `{ runId, lastSuccessfulStep, data }` per run; add `npm run resume <runId>`.
+- **Audit log** (improvements §7.1). Append-only hash-chained log of every run + transaction.
+- **Quarterly selector verified-date lint** (improvements §6.1). All current dates are within 33 days; this is preventative, not urgent.
+- **Migration of `cleanTrackerMain` / `schedulerCliMain` exports → internal.** Audit flagged these as exported but unused outside their own modules; left alone (low impact).
+
+See `docs/handoff-2026-04-18.md` (uncommitted; in working tree) for the full pre-existing pending-task list with priority ratings.
 
 ## Continuous improvement
 
