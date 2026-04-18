@@ -234,8 +234,35 @@ export function buildWorkflowsHandler(): () => WorkflowMetadata[] {
 }
 
 /** Start the live monitoring dashboard. Call once at workflow start. */
-export function startDashboard(workflow: string, port: number = 3838): void {
+export interface StartDashboardOptions {
+  /** Skip the one-time startup prune of old tracker files. */
+  noClean?: boolean;
+  /** Max age (days) for the startup prune. Defaults to 30 — conservative. */
+  cleanMaxAgeDays?: number;
+}
+
+export function startDashboard(
+  workflow: string,
+  port: number = 3838,
+  opts: StartDashboardOptions = {}
+): void {
   if (server) return;
+
+  // One-time startup prune — long retention by default (30 days) so the
+  // dashboard boots with a clean working set without surprising the user.
+  // Per-request /api/preflight still runs a 7-day prune for ongoing cleanup.
+  if (!opts.noClean) {
+    try {
+      const maxAge = opts.cleanMaxAgeDays ?? 30;
+      const deleted = cleanOldTrackerFiles(maxAge);
+      if (deleted > 0) {
+        log.step(`Pruned ${deleted} tracker file${deleted === 1 ? "" : "s"} older than ${maxAge} days`);
+      }
+    } catch (err) {
+      // Don't fail startup if the tracker dir is missing or unreadable
+      log.step(`Tracker startup prune skipped: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", `http://localhost:${port}`);

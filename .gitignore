@@ -41,9 +41,9 @@ node_modules/
 # Superpowers plans / review-request scratch docs
 docs/superpowers/
 
-# Tracker data (local runtime)
+# Tracker data (local runtime) + ephemeral test/idempotency dirs
 .tracker/
-.tracker-log-test/
+.tracker-*/
 
 # Excel tracking files
 *.xlsx
