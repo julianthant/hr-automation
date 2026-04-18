@@ -10,6 +10,7 @@ import {
   readLogEntriesForDate,
   readRunsForId,
   cleanOldTrackerFiles,
+  cleanOldScreenshots,
 } from "./jsonl.js";
 import { log } from "../utils/log.js";
 import {
@@ -412,6 +413,15 @@ export function startDashboard(
     } catch (err) {
       // Don't fail startup if the tracker dir is missing or unreadable
       log.step(`Tracker startup prune skipped: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
+      const maxAge = opts.cleanMaxAgeDays ?? 30;
+      const deletedShots = cleanOldScreenshots(maxAge);
+      if (deletedShots > 0) {
+        log.step(`Pruned ${deletedShots} screenshot${deletedShots === 1 ? "" : "s"} older than ${maxAge} days`);
+      }
+    } catch (err) {
+      log.step(`Screenshot startup prune skipped: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

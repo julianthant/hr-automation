@@ -9,6 +9,7 @@ Development and debugging scripts. These are NOT production workflows — they'r
 - `kronos-map.ts` — Maps Kronos employee data for batch processing
 - `sep-batch.ts` — Batch separations testing tool
 - `test-kronos-timecard.ts` — Tests Kronos timecard extraction in isolation
+- `clean-tracker.ts` — Prunes `.tracker/*.jsonl` AND `.screenshots/*.png` files older than N days. Flags: `--days N`, `--dir`, `--screenshots-dir`, `--no-screenshots`, `--screenshots-only`. Default behavior cleans both.
 
 ## Usage
 
