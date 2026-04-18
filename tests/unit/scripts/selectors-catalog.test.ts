@@ -1,6 +1,8 @@
 // tests/unit/scripts/selectors-catalog.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { extractSelectors, renderCatalog } from "../../../src/scripts/selectors-catalog.js";
 
 test("extractSelectors handles top-level exported functions", () => {
@@ -89,4 +91,59 @@ test("renderCatalog produces stable markdown", () => {
   assert.match(md, /## `smartHR\.tab\.personalData\(\)` — verified 2026-03-16/);
   assert.match(md, /\*\*Tags:\*\* tab, personal/);
   assert.match(md, /\*\*Source:\*\* \[`src\/systems\/xyz\/selectors\.ts:42`\]/);
+});
+
+// ── Drift gate (spec D1) ────────────────────────────────────────────────
+//
+// Asserts every committed `src/systems/<sys>/SELECTORS.md` matches what
+// `extractSelectors` + `renderCatalog` would produce from the live
+// `selectors.ts`. If a contributor adds/changes/removes a selector without
+// running `npm run selectors:catalog`, this test fails so the stale catalog
+// can't reach main. The "regenerated YYYY-MM-DD" line is normalized in both
+// sides because it embeds the wall-clock date.
+
+test("committed SELECTORS.md matches regenerated catalog (drift gate)", () => {
+  const SYSTEMS_DIR = "src/systems";
+  const normalizeDate = (md: string): string =>
+    md.replace(/regenerated \d{4}-\d{2}-\d{2}/g, "regenerated <date>");
+
+  const systemsWithSelectors = readdirSync(SYSTEMS_DIR).filter((sys) => {
+    try {
+      return statSync(join(SYSTEMS_DIR, sys, "selectors.ts")).isFile();
+    } catch {
+      return false;
+    }
+  });
+
+  // Sanity: confirm the catalog covers the systems we expect. Guards against
+  // a future selectors.ts being added but never wired into the catalog walk.
+  assert.ok(
+    systemsWithSelectors.length >= 6,
+    `expected at least 6 systems with selectors.ts, found ${systemsWithSelectors.length}`,
+  );
+
+  for (const sys of systemsWithSelectors) {
+    const selectorsPath = join(SYSTEMS_DIR, sys, "selectors.ts");
+    const catalogPath = join(SYSTEMS_DIR, sys, "SELECTORS.md");
+
+    const source = readFileSync(selectorsPath, "utf8");
+    const records = extractSelectors(selectorsPath, source);
+    const expected = normalizeDate(renderCatalog(sys, records));
+
+    let actual: string;
+    try {
+      actual = normalizeDate(readFileSync(catalogPath, "utf8"));
+    } catch {
+      assert.fail(
+        `SELECTORS.md missing for ${sys} — run \`npm run selectors:catalog\` and commit.`,
+      );
+      return;
+    }
+
+    assert.equal(
+      actual,
+      expected,
+      `SELECTORS.md drift detected for ${sys} — run \`npm run selectors:catalog\` and commit the result.`,
+    );
+  }
 });
