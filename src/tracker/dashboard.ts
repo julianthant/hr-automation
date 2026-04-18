@@ -20,6 +20,8 @@ import {
 } from "./session-events.js";
 import { getAll as getAllRegisteredWorkflows } from "../core/registry.js";
 import type { WorkflowMetadata } from "../core/types.js";
+import { detectFailurePattern } from "./failure-detector.js";
+import { notify } from "./notify.js";
 
 // Resolve path to built dashboard HTML (vite-plugin-singlefile output)
 const DASHBOARD_HTML_PATH = join(
@@ -228,6 +230,52 @@ function findBrowser(
 }
 
 let server: Server | null = null;
+
+/**
+ * Cooldown map for failure-pattern alerts. Module-level so it survives the
+ * lifetime of the dashboard process — keyed by `${workflow}:${error}`, value
+ * is the last-alerted ms timestamp. Exposed via `__resetFailureAlertCooldown`
+ * for test isolation.
+ */
+const failureAlertCooldown = new Map<string, number>();
+
+/**
+ * Test helper — clears the cooldown map so tests can re-run scans without
+ * state bleed. Not part of the public API.
+ */
+export function __resetFailureAlertCooldown(): void {
+  failureAlertCooldown.clear();
+}
+
+/**
+ * Scan the current day's tracker entries across all known workflows for
+ * repeated-failure patterns. Fires macOS notifications + log.warn for any
+ * pattern that crosses the threshold and isn't in cooldown. Best-effort —
+ * a notification failure never stalls the SSE poll cycle.
+ *
+ * Pulled out of the `/events` handler so it can be smoke-tested in isolation.
+ */
+export async function scanFailurePatterns(): Promise<void> {
+  try {
+    const workflows = listWorkflows();
+    // Read today's entries for every workflow — concat and scan in one go.
+    // The detector groups by (workflow, error) so cross-workflow mixing is fine.
+    const all = workflows.flatMap((w) => readEntries(w));
+    const patterns = detectFailurePattern(all, {
+      cooldownState: failureAlertCooldown,
+    });
+    for (const p of patterns) {
+      const windowMin = Math.round((Date.parse(p.lastTs) - Date.parse(p.firstTs)) / 60_000) || 1;
+      const msg = `${p.workflow}: ${p.count}x ${p.error} in ${windowMin}m`;
+      log.warn(`failure pattern detected — ${msg}`);
+      // Don't block the poll cycle waiting for osascript — fire-and-forget.
+      void notify("HR automation: failures", msg);
+    }
+  } catch (err) {
+    // Best-effort — never crash the poll cycle.
+    log.warn(`scanFailurePatterns skipped: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
 
 /** Returns a handler that serves the registered workflow metadata as JSON. */
 export function buildWorkflowsHandler(): () => WorkflowMetadata[] {
@@ -617,6 +665,12 @@ export function startDashboard(
           wfCounts[w] = ids.size;
         }
         res.write(`data: ${JSON.stringify({ entries: enriched, workflows, wfCounts })}\n\n`);
+
+        // After each poll, scan for repeated-failure patterns. Fire-and-forget
+        // — the SSE response doesn't wait on it, and scanFailurePatterns
+        // swallows its own errors so a notification glitch can't derail the
+        // cycle.
+        void scanFailurePatterns();
       };
       send();
       const interval = setInterval(send, 1_000);
