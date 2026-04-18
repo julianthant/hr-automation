@@ -35,12 +35,20 @@ interface TopBarProps {
   availableDates: string[];
   connected: boolean;
   entryCounts: Record<string, number>;
+  /**
+   * Optional slot rendered between the live indicator and the clock —
+   * used by App.tsx to mount the runner launcher button. Kept as a slot
+   * (rather than hard-coding the launcher) so the topbar stays focused on
+   * navigation and the runner stays self-contained.
+   */
+  rightSlot?: React.ReactNode;
 }
 
 export function TopBar({
   workflow, workflows, onWorkflowChange,
   date, onDateChange, availableDates,
   connected, entryCounts,
+  rightSlot,
 }: TopBarProps) {
   const clock = useClock();
   const registered = useWorkflows();
@@ -161,6 +169,8 @@ export function TopBar({
           <div className={cn("w-[7px] h-[7px] rounded-full", connected ? "bg-[#4ade80] animate-pulse" : "bg-destructive")} />
           {connected ? "Live" : "Disconnected"}
         </div>
+
+        {rightSlot}
 
         <span className="font-mono text-[13px] text-muted-foreground font-medium">{clock}</span>
       </div>
