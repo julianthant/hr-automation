@@ -1,14 +1,16 @@
 import { cn } from "@/lib/utils";
 import { Check, Play, X } from "lucide-react";
-import { formatStepName } from "./types";
+import { formatStepName, formatStepDuration } from "./types";
 
 interface StepPipelineProps {
   steps: string[];
   currentStep: string | null;
   status: string;
+  /** Per-step durations in ms (from backend enrichment). */
+  stepDurations?: Record<string, number>;
 }
 
-export function StepPipeline({ steps, currentStep, status }: StepPipelineProps) {
+export function StepPipeline({ steps, currentStep, status, stepDurations }: StepPipelineProps) {
   if (steps.length === 0) return null;
 
   const currentIdx = currentStep ? steps.indexOf(currentStep) : -1;
@@ -22,6 +24,8 @@ export function StepPipeline({ steps, currentStep, status }: StepPipelineProps) 
         const isActive = !isDone && !isFailed && i === currentIdx;
         const isFailedStep = isFailed && i === currentIdx;
         const isPending = !isComplete && !isActive && !isFailedStep;
+        const durationMs = stepDurations?.[step];
+        const durationLabel = typeof durationMs === "number" ? formatStepDuration(durationMs) : "";
 
         return (
           <div key={step} className="flex items-center">
@@ -41,7 +45,7 @@ export function StepPipeline({ steps, currentStep, status }: StepPipelineProps) 
               )}>
                 {isComplete ? <Check className="w-3 h-3" /> : isActive ? <Play className="w-3 h-3" /> : isFailedStep ? <X className="w-3 h-3" /> : ""}
               </div>
-              <div className="ml-1.5">
+              <div className="ml-1.5 flex flex-col leading-tight">
                 <span className={cn(
                   "text-xs font-medium block",
                   isComplete && "text-[#4ade80]",
@@ -51,6 +55,14 @@ export function StepPipeline({ steps, currentStep, status }: StepPipelineProps) 
                 )}>
                   {formatStepName(step)}
                 </span>
+                {durationLabel && (
+                  <span
+                    className="text-[10px] text-muted-foreground/80 font-mono"
+                    title={`${durationMs} ms`}
+                  >
+                    {durationLabel}
+                  </span>
+                )}
               </div>
             </div>
           </div>

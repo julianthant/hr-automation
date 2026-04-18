@@ -217,6 +217,7 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
           steps={steps}
           currentStep={runStep}
           status={runStatus}
+          stepDurations={entry?.stepDurations}
         />
       )}
 

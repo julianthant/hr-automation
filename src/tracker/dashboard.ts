@@ -233,6 +233,70 @@ export function buildWorkflowsHandler(): () => WorkflowMetadata[] {
   return () => getAllRegisteredWorkflows();
 }
 
+/**
+ * Minimal TrackerEntry shape needed for step-duration computation. Kept
+ * narrow (timestamp + status + step) so the function works against both
+ * today's JSONL records and any shimmed test fixtures.
+ */
+interface StepDurationEntry {
+  timestamp: string;
+  status: "pending" | "running" | "done" | "failed" | "skipped";
+  step?: string;
+}
+
+/**
+ * Compute per-step durations (ms) for a single (itemId, runId) pair.
+ *
+ * Input: entries for one run, in any order. Sorted internally by timestamp.
+ * Output: `{ [stepName]: durationMs }`. Only steps with a computed duration
+ * are included. The last step is closed out by a subsequent `done` / `failed`
+ * event; a still-running final step yields no duration for that step (yet).
+ *
+ * Why pull this out of `/events`? It's pure data-over-data — easily unit
+ * testable, easily reusable if we later want to expose durations through
+ * another endpoint.
+ */
+export function computeStepDurations(
+  entries: StepDurationEntry[],
+): Record<string, number> {
+  if (entries.length === 0) return {};
+
+  // Defensive copy + sort by timestamp; input arrays are usually already in
+  // order (JSONL is append-only) but test fixtures may not be.
+  const sorted = [...entries].sort((a, b) =>
+    a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0,
+  );
+
+  const durations: Record<string, number> = {};
+  let currentStep: string | null = null;
+  let currentStepStartMs: number | null = null;
+
+  for (const e of sorted) {
+    const tsMs = Date.parse(e.timestamp);
+    if (Number.isNaN(tsMs)) continue;
+
+    const isTerminal = e.status === "done" || e.status === "failed" || e.status === "skipped";
+    const nextStep = isTerminal ? null : e.step ?? null;
+
+    // When the active step changes (or we reach a terminal event), close out
+    // the previous step's duration.
+    if (currentStep && currentStep !== nextStep && currentStepStartMs !== null) {
+      const delta = tsMs - currentStepStartMs;
+      if (delta >= 0) {
+        // Sum durations if a step re-appears (it won't normally, but be tolerant)
+        durations[currentStep] = (durations[currentStep] ?? 0) + delta;
+      }
+    }
+
+    if (nextStep !== currentStep) {
+      currentStep = nextStep;
+      currentStepStartMs = nextStep ? tsMs : null;
+    }
+  }
+
+  return durations;
+}
+
 /** Start the live monitoring dashboard. Call once at workflow start. */
 export interface StartDashboardOptions {
   /** Skip the one-time startup prune of old tracker files. */
@@ -373,6 +437,10 @@ export function startDashboard(
         "Access-Control-Allow-Origin": "*",
       });
       const send = () => {
+        // `raw` holds every JSONL record for this workflow/date, including the
+        // pending/running/done/failed chain per (itemId, runId). We need the
+        // full chain for stepDurations; useEntries dedupes to the latest per id
+        // on the frontend.
         const raw = (date && date !== today)
           ? readEntriesForDate(wf, date)
           : readEntries(wf);
@@ -393,9 +461,34 @@ export function startDashboard(
           logLast.set(key, l.ts);
           logLastMsg.set(key, l.message);
         }
+
+        // Compute step durations per (itemId, runId) from the full JSONL
+        // history, not the deduped view. Each entry in `entries` inherits
+        // the durations for its own run.
+        const runHistory = new Map<string, StepDurationEntry[]>();
+        for (const e of entries) {
+          const rid = e.runId || `${e.id}#1`;
+          const key = `${e.id}::${rid}`;
+          const bucket = runHistory.get(key);
+          const slim: StepDurationEntry = { timestamp: e.timestamp, status: e.status, step: e.step };
+          if (bucket) bucket.push(slim);
+          else runHistory.set(key, [slim]);
+        }
+        const stepDurationsByRun = new Map<string, Record<string, number>>();
+        for (const [key, rows] of runHistory) {
+          stepDurationsByRun.set(key, computeStepDurations(rows));
+        }
+
         const enriched = entries.map((e) => {
-          const key = `${e.id}::${e.runId || `${e.id}#1`}`;
-          return { ...e, firstLogTs: logFirst.get(key), lastLogTs: logLast.get(key), lastLogMessage: logLastMsg.get(key) };
+          const rid = e.runId || `${e.id}#1`;
+          const key = `${e.id}::${rid}`;
+          return {
+            ...e,
+            firstLogTs: logFirst.get(key),
+            lastLogTs: logLast.get(key),
+            lastLogMessage: logLastMsg.get(key),
+            stepDurations: stepDurationsByRun.get(key) ?? {},
+          };
         });
 
         const workflows = listWorkflows();

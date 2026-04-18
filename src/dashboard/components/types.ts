@@ -24,6 +24,33 @@ export interface TrackerEntry {
   lastLogTs?: string;
   /** Last log message (enriched by backend SSE, for queue display). */
   lastLogMessage?: string;
+  /**
+   * Per-step durations in milliseconds (enriched by backend SSE).
+   * Key: step name declared by the workflow. Value: ms between that step's
+   * first appearance and the next step (or the run's terminal status).
+   * Only steps with a completed duration are present — a step that is
+   * currently running has no entry yet.
+   */
+  stepDurations?: Record<string, number>;
+}
+
+/**
+ * Format a millisecond count as a short, dashboard-friendly label.
+ * `<1s` when under a second, `Ns` under a minute, `Nm Ss` under an hour, else `Nh Mm`.
+ */
+export function formatStepDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  if (ms < 1000) return "<1s";
+  const totalSec = Math.round(ms / 1000);
+  if (totalSec < 60) return `${totalSec}s`;
+  if (totalSec < 3600) {
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return s ? `${m}m ${s}s` : `${m}m`;
+  }
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  return m ? `${h}h ${m}m` : `${h}h`;
 }
 
 export interface LogEntry {
