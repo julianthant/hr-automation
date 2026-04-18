@@ -13,6 +13,8 @@ import {
   cleanOldTrackerFiles,
   cleanOldScreenshots,
 } from "../../../src/tracker/jsonl.js";
+import { pruneOldStepCache } from "../../../src/core/index.js";
+import { cleanTrackerMain } from "../../../src/scripts/clean-tracker.js";
 
 // Dedicated tmp dir to keep the real .tracker/ untouched.
 const TEST_DIR = ".tracker-clean-test";
@@ -176,5 +178,115 @@ describe("cleanOldScreenshots (clean-tracker screenshots support)", () => {
     const deleted = cleanOldScreenshots(1, SCREENSHOTS_TEST_DIR);
     assert.equal(deleted, 2);
     assert.equal(readdirSync(SCREENSHOTS_TEST_DIR).length, 0);
+  });
+});
+
+// Step-cache fixtures: seed records under a test dir, backdate via utimes.
+const STEP_CACHE_TEST_DIR = ".tracker-step-cache-clean-test";
+
+function seedStepCache(
+  workflow: string,
+  itemId: string,
+  stepName: string,
+  ageDays: number,
+): string {
+  const itemDir = join(STEP_CACHE_TEST_DIR, `${workflow}-${itemId}`);
+  mkdirSync(itemDir, { recursive: true });
+  const path = join(itemDir, `${stepName}.json`);
+  writeFileSync(
+    path,
+    JSON.stringify({ workflow, itemId, stepName, ts: new Date().toISOString(), value: { v: 1 } }),
+  );
+  const t = (Date.now() - ageDays * 24 * 60 * 60 * 1000) / 1000;
+  utimesSync(path, t, t);
+  return path;
+}
+
+describe("pruneOldStepCache (clean-tracker step-cache support)", () => {
+  beforeEach(() => {
+    if (existsSync(STEP_CACHE_TEST_DIR)) rmSync(STEP_CACHE_TEST_DIR, { recursive: true });
+    mkdirSync(STEP_CACHE_TEST_DIR, { recursive: true });
+  });
+  afterEach(() => {
+    if (existsSync(STEP_CACHE_TEST_DIR)) rmSync(STEP_CACHE_TEST_DIR, { recursive: true });
+  });
+
+  it("deletes only cache files older than maxAgeHours", () => {
+    seedStepCache("onboarding", "fresh@x.edu", "extraction", 1);
+    seedStepCache("onboarding", "stale@x.edu", "extraction", 10);
+
+    const deleted = pruneOldStepCache(168 /* 7d */, STEP_CACHE_TEST_DIR);
+    assert.equal(deleted, 1);
+
+    const remaining = readdirSync(STEP_CACHE_TEST_DIR).sort();
+    assert.ok(remaining.some((d) => d.includes("fresh@x.edu")), "fresh item dir kept");
+    assert.ok(!remaining.some((d) => d.includes("stale@x.edu")), "stale item dir removed");
+  });
+
+  it("returns 0 when the dir does not exist", () => {
+    const missing = ".tracker-step-cache-missing-" + Date.now();
+    assert.equal(pruneOldStepCache(168, missing), 0);
+  });
+});
+
+describe("cleanTrackerMain — integrates step-cache prune by default", () => {
+  beforeEach(() => {
+    if (existsSync(STEP_CACHE_TEST_DIR)) rmSync(STEP_CACHE_TEST_DIR, { recursive: true });
+    mkdirSync(STEP_CACHE_TEST_DIR, { recursive: true });
+  });
+  afterEach(() => {
+    if (existsSync(STEP_CACHE_TEST_DIR)) rmSync(STEP_CACHE_TEST_DIR, { recursive: true });
+  });
+
+  it("prunes step-cache by default (--days N applies to step-cache too)", () => {
+    seedStepCache("onboarding", "stale@x.edu", "extraction", 10);
+
+    const result = cleanTrackerMain([
+      "--dir",
+      ".tracker-missing-for-this-test",
+      "--screenshots-dir",
+      ".screenshots-missing-for-this-test",
+      "--step-cache-dir",
+      STEP_CACHE_TEST_DIR,
+      "--days",
+      "7",
+      "--no-screenshots",
+    ]);
+    assert.equal(result.stepCacheDeleted, 1);
+    assert.ok(!existsSync(join(STEP_CACHE_TEST_DIR, "onboarding-stale@x.edu")));
+  });
+
+  it("--no-step-cache skips the step-cache prune", () => {
+    seedStepCache("onboarding", "stale@x.edu", "extraction", 10);
+
+    const result = cleanTrackerMain([
+      "--dir",
+      ".tracker-missing-for-this-test",
+      "--screenshots-dir",
+      ".screenshots-missing-for-this-test",
+      "--step-cache-dir",
+      STEP_CACHE_TEST_DIR,
+      "--days",
+      "7",
+      "--no-screenshots",
+      "--no-step-cache",
+    ]);
+    assert.equal(result.stepCacheDeleted, 0);
+    assert.ok(existsSync(join(STEP_CACHE_TEST_DIR, "onboarding-stale@x.edu")));
+  });
+
+  it("--step-cache-only skips tracker + screenshots", () => {
+    seedStepCache("onboarding", "stale@x.edu", "extraction", 10);
+
+    const result = cleanTrackerMain([
+      "--step-cache-dir",
+      STEP_CACHE_TEST_DIR,
+      "--days",
+      "7",
+      "--step-cache-only",
+    ]);
+    assert.equal(result.trackerDeleted, 0);
+    assert.equal(result.screenshotsDeleted, 0);
+    assert.equal(result.stepCacheDeleted, 1);
   });
 });
