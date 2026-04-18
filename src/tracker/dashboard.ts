@@ -1,6 +1,6 @@
 import { createServer, type Server } from "http";
-import { readFileSync, existsSync, unlinkSync, statSync } from "fs";
-import { join } from "path";
+import { readFileSync, existsSync, unlinkSync, statSync, readdirSync, createReadStream } from "fs";
+import { join, resolve, sep } from "path";
 import {
   readEntries,
   readLogEntries,
@@ -231,6 +231,93 @@ let server: Server | null = null;
 /** Returns a handler that serves the registered workflow metadata as JSON. */
 export function buildWorkflowsHandler(): () => WorkflowMetadata[] {
   return () => getAllRegisteredWorkflows();
+}
+
+/** Default root dir for kernel failure screenshots. Matches `screenshotAll`. */
+export const SCREENSHOTS_DIR = ".screenshots";
+
+export interface ScreenshotListEntry {
+  filename: string;
+  ts: string; // ISO-8601
+  sizeBytes: number;
+  step: string;
+}
+
+/**
+ * Build a handler that lists PNGs in `.screenshots/` whose filename matches
+ * `<workflow>-<itemId>-*`. Injectable root dir so tests can point at a
+ * temp fixture dir. Returns `[]` when the dir doesn't exist or the prefix
+ * matches nothing. Filenames produced by `Session.screenshotAll` have shape
+ * `<workflow>-<itemId>-<step>-<systemId>-<timestamp>.png`; we parse `step` +
+ * `ts` heuristically so the UI can show useful captions.
+ */
+export function buildScreenshotsHandler(
+  rootDir: string = SCREENSHOTS_DIR,
+): (workflow: string, itemId: string) => ScreenshotListEntry[] {
+  return (workflow: string, itemId: string) => {
+    if (!existsSync(rootDir)) return [];
+    const prefix = `${workflow}-${itemId}-`;
+    const out: ScreenshotListEntry[] = [];
+    for (const f of readdirSync(rootDir)) {
+      if (!f.endsWith(".png")) continue;
+      if (!f.startsWith(prefix)) continue;
+      const full = join(rootDir, f);
+      let sizeBytes = 0;
+      try {
+        sizeBytes = statSync(full).size;
+      } catch {
+        continue;
+      }
+      // Parse step + ts from the tail. Filename shape:
+      //   <workflow>-<itemId>-<step>-<systemId>-<ts>.png
+      // We can't split blindly because step names themselves can contain
+      // dashes (e.g. "crm-auth"). Strategy: strip prefix, strip `.png`, split
+      // by "-", take the trailing two segments as systemId + ts, the rest is
+      // step. If the remainder is empty (malformed), leave step="".
+      const stripped = f.slice(prefix.length, -".png".length);
+      const segs = stripped.split("-");
+      let step = "";
+      let tsRaw = "";
+      if (segs.length >= 3) {
+        tsRaw = segs[segs.length - 1];
+        // segs[segs.length - 2] is systemId — discarded in the UI caption
+        step = segs.slice(0, segs.length - 2).join("-");
+      } else if (segs.length === 2) {
+        // Legacy: no step in the filename. Keep step empty.
+        tsRaw = segs[1];
+      }
+      const tsNum = Number(tsRaw);
+      const iso = Number.isFinite(tsNum) && tsNum > 0 ? new Date(tsNum).toISOString() : "";
+      out.push({ filename: f, ts: iso, sizeBytes, step });
+    }
+    // Newest first — the UI scrolls horizontally, so latest on the left.
+    out.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
+    return out;
+  };
+}
+
+/**
+ * Path-traversal-safe resolver. Accepts a screenshot filename (no path
+ * separators) and returns the absolute path inside `rootDir`, or null if the
+ * filename is malicious or the file doesn't exist inside the root.
+ */
+export function resolveScreenshotPath(
+  filename: string,
+  rootDir: string = SCREENSHOTS_DIR,
+): string | null {
+  // Cheap guard — no separators allowed, no "..".
+  if (!filename || filename.includes("/") || filename.includes("\\") || filename.includes("..")) {
+    return null;
+  }
+  const rootAbs = resolve(rootDir);
+  const fileAbs = resolve(rootDir, filename);
+  // Defense in depth — ensure the resolved path is inside rootDir.
+  const normalized = fileAbs + (fileAbs.endsWith(sep) ? "" : "");
+  if (!normalized.startsWith(rootAbs + sep) && normalized !== rootAbs) {
+    return null;
+  }
+  if (!existsSync(fileAbs)) return null;
+  return fileAbs;
 }
 
 /**
@@ -479,15 +566,35 @@ export function startDashboard(
           stepDurationsByRun.set(key, computeStepDurations(rows));
         }
 
+        // Screenshot count for failed entries — counted once per (wf, itemId)
+        // pair so repeat lookups in the loop don't hit the FS N times.
+        const screenshotCountByItem = new Map<string, number>();
+        const screenshotsHandler = buildScreenshotsHandler();
+
         const enriched = entries.map((e) => {
           const rid = e.runId || `${e.id}#1`;
           const key = `${e.id}::${rid}`;
+          let screenshotCount: number | undefined;
+          if (e.status === "failed") {
+            const sKey = `${e.workflow}::${e.id}`;
+            let c = screenshotCountByItem.get(sKey);
+            if (c === undefined) {
+              try {
+                c = screenshotsHandler(e.workflow, e.id).length;
+              } catch {
+                c = 0;
+              }
+              screenshotCountByItem.set(sKey, c);
+            }
+            screenshotCount = c;
+          }
           return {
             ...e,
             firstLogTs: logFirst.get(key),
             lastLogTs: logLast.get(key),
             lastLogMessage: logLastMsg.get(key),
             stepDurations: stepDurationsByRun.get(key) ?? {},
+            ...(screenshotCount !== undefined ? { screenshotCount } : {}),
           };
         });
 
@@ -513,6 +620,47 @@ export function startDashboard(
       const date = url.searchParams.get("date") ?? undefined;
       res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
       res.end(JSON.stringify(readRunsForId(wf, id, date)));
+      return;
+    }
+
+    if (url.pathname === "/api/screenshots") {
+      const wf = url.searchParams.get("workflow") ?? workflow;
+      const id = url.searchParams.get("itemId") ?? url.searchParams.get("id") ?? "";
+      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      if (!wf || !id) {
+        res.end(JSON.stringify([]));
+        return;
+      }
+      try {
+        const list = buildScreenshotsHandler()(wf, id);
+        res.end(JSON.stringify(list));
+      } catch {
+        res.end(JSON.stringify([]));
+      }
+      return;
+    }
+
+    if (url.pathname.startsWith("/screenshots/")) {
+      const filename = decodeURIComponent(url.pathname.slice("/screenshots/".length));
+      const resolved = resolveScreenshotPath(filename);
+      if (!resolved) {
+        res.writeHead(404, { "Access-Control-Allow-Origin": "*" });
+        res.end("Not found");
+        return;
+      }
+      try {
+        const size = statSync(resolved).size;
+        res.writeHead(200, {
+          "Content-Type": "image/png",
+          "Content-Length": size,
+          "Cache-Control": "no-cache",
+          "Access-Control-Allow-Origin": "*",
+        });
+        createReadStream(resolved).pipe(res);
+      } catch {
+        res.writeHead(500, { "Access-Control-Allow-Origin": "*" });
+        res.end("Error reading file");
+      }
       return;
     }
 

@@ -32,6 +32,19 @@ export interface TrackerEntry {
    * currently running has no entry yet.
    */
   stepDurations?: Record<string, number>;
+  /**
+   * Count of screenshot PNGs saved for this failed entry (enriched by
+   * backend SSE). Always undefined unless `status === "failed"`.
+   */
+  screenshotCount?: number;
+}
+
+/** Metadata for a single failure screenshot, as returned by /api/screenshots. */
+export interface ScreenshotListEntry {
+  filename: string;
+  ts: string;
+  sizeBytes: number;
+  step: string;
 }
 
 /**
