@@ -25,6 +25,8 @@
     "schedule": "node --import tsx/esm --env-file=.env src/scripts/scheduler-cli.ts",
     "schemas:export": "node --import tsx/esm --env-file=.env src/scripts/export-schemas.ts",
     "new:workflow": "node --import tsx/esm src/scripts/new-workflow.ts",
+    "selectors:catalog": "node --import tsx/esm src/scripts/selectors-catalog.ts",
+    "selector:search": "node --import tsx/esm src/scripts/selector-search.ts",
     "build:dashboard": "node node_modules/vite/bin/vite.js build --config vite.dashboard.config.ts",
     "dev:dashboard": "node node_modules/vite/bin/vite.js --config vite.dashboard.config.ts",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",

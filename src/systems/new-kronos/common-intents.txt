@@ -1,0 +1,8 @@
+search employee by ID in Dayforce
+open employee search sidebar
+navigate to timecard via Go To menu
+switch to previous pay period
+set custom date range
+detect no results
+close employee search sidebar
+read timecard last date

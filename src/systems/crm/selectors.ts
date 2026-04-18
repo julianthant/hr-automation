@@ -11,12 +11,16 @@ import type { Page, Locator } from "playwright";
 // ─── Search results (/hr/ONB_OnboardingSearch results page) ───────────────
 
 export const search = {
-  /** All result rows in the search-results table. verified 2026-04-14 */
+  /**
+   * All result rows in the search-results table. verified 2026-04-14
+   * @tags search, results, rows, table, crm
+   */
   resultRows: (page: Page): Locator => page.locator("table tbody tr"),
 
   /**
    * Nth result row. Use: `search.nthResultRow(page, i).locator("td").nth(1)`
    * for the "Offer Sent On" column (index 1). verified 2026-04-14
+   * @tags search, result, row, nth, table, crm
    */
   nthResultRow: (page: Page, i: number): Locator =>
     page.locator("table tbody tr").nth(i),
@@ -28,6 +32,7 @@ export const record = {
   /**
    * Visualforce label → value locator strategy 1: label in <th>, value in
    * the next sibling <td>. verified 2026-04-14
+   * @tags visualforce, label, value, th, extract, record, crm
    */
   thLabelFollowingTd: (page: Page, label: string): Locator =>
     page
@@ -37,6 +42,7 @@ export const record = {
   /**
    * Visualforce label → value locator strategy 2 (fallback): label in <td>,
    * value in the next sibling <td>. verified 2026-04-14
+   * @tags visualforce, label, value, td, extract, record, fallback, crm
    */
   tdLabelFollowingTd: (page: Page, label: string): Locator =>
     page
@@ -51,6 +57,7 @@ export const sectionNav = {
    * Fallback chain for "click a section by name" when direct URL mapping
    * isn't available in CRM_SECTION_URLS. Tries link, then text, then tab.
    * verified 2026-04-14
+   * @tags section, navigation, name, fallback, link, tab, crm
    */
   byName: (page: Page, sectionName: string): Locator =>
     page
