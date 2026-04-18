@@ -126,3 +126,53 @@ test('runWorkflowPool preEmitPending pairs item with runId', async () => {
   const unique = new Set(pendingEmissions.map((e) => e.runId))
   assert.equal(unique.size, 3, 'runIds must be unique per item')
 })
+
+test('runWorkflowPool: opts.poolSize overrides wf.config.batch.poolSize', async () => {
+  let launchCalls = 0
+  const wf = defineWorkflow({
+    name: 'pool-override',
+    systems: [{ id: 'ukg', login: async () => {} }],
+    steps: ['s1'] as const,
+    schema: z.object({ n: z.number() }),
+    // Config default is 2 — runtime override below should bring this to 5.
+    batch: { mode: 'pool', poolSize: 2 },
+    handler: async (ctx) => {
+      await ctx.step('s1', async () => {
+        await new Promise((r) => setTimeout(r, 5))
+      })
+    },
+  })
+  const items = Array.from({ length: 10 }, (_, i) => ({ n: i }))
+  const result = await runWorkflowPool(wf, items, {
+    launchFn: () => { launchCalls++; return Promise.resolve(fakeSlot()) },
+    trackerStub: true,
+    poolSize: 5,
+  })
+  assert.equal(result.total, 10)
+  assert.equal(result.succeeded, 10)
+  assert.equal(launchCalls, 5, 'opts.poolSize (5) should win over wf.config.batch.poolSize (2)')
+})
+
+test('runWorkflowPool: falls back to wf.config.batch.poolSize when opts.poolSize is undefined', async () => {
+  let launchCalls = 0
+  const wf = defineWorkflow({
+    name: 'pool-config-default',
+    systems: [{ id: 'ukg', login: async () => {} }],
+    steps: ['s1'] as const,
+    schema: z.object({ n: z.number() }),
+    batch: { mode: 'pool', poolSize: 3 },
+    handler: async (ctx) => {
+      await ctx.step('s1', async () => {
+        await new Promise((r) => setTimeout(r, 5))
+      })
+    },
+  })
+  const items = Array.from({ length: 8 }, (_, i) => ({ n: i }))
+  const result = await runWorkflowPool(wf, items, {
+    launchFn: () => { launchCalls++; return Promise.resolve(fakeSlot()) },
+    trackerStub: true,
+    // poolSize intentionally omitted — should fall back to config (3)
+  })
+  assert.equal(result.succeeded, 8)
+  assert.equal(launchCalls, 3, 'should fall back to wf.config.batch.poolSize (3)')
+})

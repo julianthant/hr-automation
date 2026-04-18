@@ -19,7 +19,7 @@ export async function runWorkflowPool<TData, TSteps extends readonly string[]>(
   items: TData[],
   opts: RunOpts = {},
 ): Promise<BatchResult> {
-  const poolSize = wf.config.batch?.poolSize ?? 4
+  const poolSize = opts.poolSize ?? wf.config.batch?.poolSize ?? 4
 
   // Validate all items upfront.
   items.forEach((item) => {
