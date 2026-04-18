@@ -10,27 +10,45 @@ import type { Page, Locator } from "playwright";
 // ─── Login flow ────────────────────────────────────────────────────────────
 
 export const login = {
-  /** Email / username textbox. verified 2026-03-16 */
+  /**
+   * Email / username textbox. verified 2026-03-16
+   * @tags username, email, login, textbox, i9
+   */
   usernameInput: (page: Page): Locator =>
     page.getByRole("textbox", { name: "Username or Email*" }),
 
-  /** Next button (email-first login flow). verified 2026-03-16 */
+  /**
+   * Next button (email-first login flow). verified 2026-03-16
+   * @tags next, login, button, i9
+   */
   nextButton: (page: Page): Locator =>
     page.getByRole("button", { name: "Next" }),
 
-  /** Password textbox. verified 2026-03-16 */
+  /**
+   * Password textbox. verified 2026-03-16
+   * @tags password, login, textbox, i9
+   */
   passwordInput: (page: Page): Locator =>
     page.getByRole("textbox", { name: "Password*" }),
 
-  /** Log in button. verified 2026-03-16 */
+  /**
+   * Log in button. verified 2026-03-16
+   * @tags login, submit, button, i9
+   */
   loginButton: (page: Page): Locator =>
     page.getByRole("button", { name: "Log in" }),
 
-  /** Training-notification dismiss button. verified 2026-03-16 */
+  /**
+   * Training-notification dismiss button. verified 2026-03-16
+   * @tags training, notification, dismiss, button, i9
+   */
   dismissNotificationButton: (page: Page): Locator =>
     page.getByRole("button", { name: "Dismiss the Notification" }),
 
-  /** Training-notification confirm "Yes". verified 2026-03-16 */
+  /**
+   * Training-notification confirm "Yes". verified 2026-03-16
+   * @tags training, notification, confirm, yes, button, i9
+   */
   confirmYesButton: (page: Page): Locator =>
     page.getByRole("button", { name: "Yes" }),
 };
@@ -38,11 +56,17 @@ export const login = {
 // ─── Dashboard → Create new employee ──────────────────────────────────────
 
 export const dashboard = {
-  /** "Create New I-9 : New Employee" entry link. verified 2026-03-16 */
+  /**
+   * "Create New I-9 : New Employee" entry link. verified 2026-03-16
+   * @tags create, new, i9, employee, link, dashboard
+   */
   createNewI9Link: (page: Page): Locator =>
     page.getByRole("link", { name: "create new I9: new employee" }),
 
-  /** Search Options button (opens search dialog). verified 2026-03-16 (id-anchored) */
+  /**
+   * Search Options button (opens search dialog). verified 2026-03-16 (id-anchored)
+   * @tags search, options, button, dashboard, i9
+   */
   searchOptionsButton: (page: Page): Locator =>
     page.locator("#divSearchOptions"),
 };
@@ -50,55 +74,104 @@ export const dashboard = {
 // ─── New Employee Profile form ────────────────────────────────────────────
 
 export const profile = {
+  /**
+   * First (Given) Name textbox.
+   * @tags first-name, given-name, name, textbox, profile, i9
+   */
   firstName: (page: Page): Locator =>
     page.getByRole("textbox", { name: "First Name (Given Name)*" }),
+  /**
+   * Middle Name textbox.
+   * @tags middle-name, name, textbox, profile, i9
+   */
   middleName: (page: Page): Locator =>
     page.getByRole("textbox", { name: "Middle Name" }),
+  /**
+   * Last (Family) Name textbox.
+   * @tags last-name, family-name, name, textbox, profile, i9
+   */
   lastName: (page: Page): Locator =>
     page.getByRole("textbox", { name: "Last Name (Family Name)*" }),
+  /**
+   * U.S. Social Security Number textbox.
+   * @tags ssn, social-security, textbox, profile, i9
+   */
   ssn: (page: Page): Locator =>
     page.getByRole("textbox", { name: "U.S. Social Security Number" }),
+  /**
+   * Date of Birth textbox.
+   * @tags dob, date-of-birth, textbox, profile, i9
+   */
   dob: (page: Page): Locator =>
     page.getByRole("textbox", { name: "Date of Birth" }),
+  /**
+   * Employee's Email Address textbox.
+   * @tags email, address, textbox, profile, i9
+   */
   email: (page: Page): Locator =>
     page.getByRole("textbox", { name: "Employee's Email Address" }),
 
-  /** Worksite listbox. verified 2026-03-16 */
+  /**
+   * Worksite listbox. verified 2026-03-16
+   * @tags worksite, listbox, profile, i9
+   */
   worksiteListbox: (page: Page): Locator =>
     page.getByRole("listbox", { name: "Worksite *" }),
 
   /**
    * Worksite option by regex (matches `6-{deptNum}` prefix).
    * verified 2026-03-16
+   * @tags worksite, option, regex, profile, i9
    */
   worksiteOption: (page: Page, pattern: RegExp): Locator =>
     page.getByRole("option", { name: pattern }),
 
-  /** Save & Continue button. verified 2026-03-16 */
+  /**
+   * Save & Continue button. verified 2026-03-16
+   * @tags save, continue, button, profile, i9
+   */
   saveContinueButton: (page: Page): Locator =>
     page.getByRole("button", { name: "Save & Continue" }),
 
-  /** Error summary heading (validation errors). verified 2026-03-16 */
+  /**
+   * Error summary heading (validation errors). verified 2026-03-16
+   * @tags error, summary, heading, validation, profile, i9
+   */
   errorSummary: (page: Page): Locator =>
     page.getByRole("heading", { name: "Error Summary:" }),
 
-  /** Generic OK button (first) on confirmation dialogs. verified 2026-03-16 */
+  /**
+   * Generic OK button (first) on confirmation dialogs. verified 2026-03-16
+   * @tags ok, button, confirmation, dialog, profile, i9
+   */
   okButtonFirst: (page: Page): Locator =>
     page.getByRole("button", { name: "OK" }).first(),
 
-  /** Mobile loader overlay (wait for it to hide post-save). verified 2026-03-16 */
+  /**
+   * Mobile loader overlay (wait for it to hide post-save). verified 2026-03-16
+   * @tags loader, overlay, mobile, profile, i9
+   */
   loaderOverlay: (page: Page): Locator =>
     page.locator(".mobile-responsive-loader"),
 
-  /** Duplicate Employee Record dialog. verified 2026-04-16 */
+  /**
+   * Duplicate Employee Record dialog. verified 2026-04-16
+   * @tags duplicate, employee, dialog, profile, i9
+   */
   duplicateDialog: (page: Page): Locator =>
     page.getByRole("dialog", { name: "Duplicate Employee Record" }),
 
-  /** First row of the duplicate-dialog grid (select existing record). verified 2026-04-16 */
+  /**
+   * First row of the duplicate-dialog grid (select existing record). verified 2026-04-16
+   * @tags duplicate, row, grid, dialog, profile, i9
+   */
   duplicateFirstRow: (page: Page): Locator =>
     page.getByRole("grid").last().getByRole("row").first(),
 
-  /** View/Edit Selected Record button (inside duplicate dialog). verified 2026-04-16 */
+  /**
+   * View/Edit Selected Record button (inside duplicate dialog). verified 2026-04-16
+   * @tags view, edit, selected, record, button, duplicate, profile, i9
+   */
   viewEditSelectedButton: (page: Page): Locator =>
     page.getByRole("button", { name: "View/Edit Selected Record" }),
 };
@@ -106,19 +179,31 @@ export const profile = {
 // ─── Remote I-9 section (post-save) ───────────────────────────────────────
 
 export const remoteI9 = {
-  /** Remote - Section 1 Only radio. verified 2026-03-16 */
+  /**
+   * Remote - Section 1 Only radio. verified 2026-03-16
+   * @tags remote, section, radio, i9
+   */
   remoteSection1OnlyRadio: (page: Page): Locator =>
     page.getByRole("radio", { name: "Remote - Section 1 Only" }),
 
-  /** Start Date textbox. verified 2026-03-16 */
+  /**
+   * Start Date textbox. verified 2026-03-16
+   * @tags start, date, textbox, remote, i9
+   */
   startDateInput: (page: Page): Locator =>
     page.getByRole("textbox", { name: "Start Date*" }),
 
-  /** Create I-9 button. verified 2026-03-16 */
+  /**
+   * Create I-9 button. verified 2026-03-16
+   * @tags create, i9, button, remote
+   */
   createI9Button: (page: Page): Locator =>
     page.getByRole("button", { name: "Create I-9" }),
 
-  /** OK confirm after Create I-9 click. verified 2026-03-16 */
+  /**
+   * OK confirm after Create I-9 click. verified 2026-03-16
+   * @tags ok, confirm, button, i9, remote
+   */
   createI9OkButton: (page: Page): Locator =>
     page.getByRole("button", { name: "OK" }),
 };
@@ -128,51 +213,76 @@ export const remoteI9 = {
 const SEARCH_DIALOG_NAME = "Search for Existing Employee";
 
 export const search = {
-  /** The search dialog itself. verified 2026-03-16 */
+  /**
+   * The search dialog itself. verified 2026-03-16
+   * @tags search, dialog, i9
+   */
   dialog: (page: Page): Locator =>
     page.getByRole("dialog", { name: SEARCH_DIALOG_NAME }),
 
-  /** Clear Search Filters & Results link. verified 2026-03-16 */
+  /**
+   * Clear Search Filters & Results link. verified 2026-03-16
+   * @tags clear, filters, link, search, i9
+   */
   clearFiltersLink: (page: Page): Locator =>
     page.getByRole("link", { name: "Clear Search Filters & Results" }),
 
-  /** Last Name textbox (dialog-scoped). verified 2026-03-16 */
+  /**
+   * Last Name textbox (dialog-scoped). verified 2026-03-16
+   * @tags last-name, name, textbox, search, i9
+   */
   lastNameInput: (page: Page): Locator =>
     page
       .getByRole("dialog", { name: SEARCH_DIALOG_NAME })
       .getByRole("textbox", { name: "Last Name" }),
 
-  /** First Name textbox (dialog-scoped, regex for flexibility). verified 2026-03-16 */
+  /**
+   * First Name textbox (dialog-scoped, regex for flexibility). verified 2026-03-16
+   * @tags first-name, name, textbox, search, i9
+   */
   firstNameInput: (page: Page): Locator =>
     page
       .getByRole("dialog", { name: SEARCH_DIALOG_NAME })
       .getByRole("textbox", { name: /First Name/ }),
 
-  /** SSN textbox (dialog-scoped). verified 2026-03-16 */
+  /**
+   * SSN textbox (dialog-scoped). verified 2026-03-16
+   * @tags ssn, social-security, textbox, search, i9
+   */
   ssnInput: (page: Page): Locator =>
     page
       .getByRole("dialog", { name: SEARCH_DIALOG_NAME })
       .getByRole("textbox", { name: "Social Security Number" }),
 
-  /** Profile ID textbox (dialog-scoped). verified 2026-03-16 */
+  /**
+   * Profile ID textbox (dialog-scoped). verified 2026-03-16
+   * @tags profile, id, textbox, search, i9
+   */
   profileIdInput: (page: Page): Locator =>
     page
       .getByRole("dialog", { name: SEARCH_DIALOG_NAME })
       .getByRole("textbox", { name: "Profile ID" }),
 
-  /** Employee ID textbox (dialog-scoped). verified 2026-03-16 */
+  /**
+   * Employee ID textbox (dialog-scoped). verified 2026-03-16
+   * @tags employee, id, textbox, search, i9
+   */
   employeeIdInput: (page: Page): Locator =>
     page
       .getByRole("dialog", { name: SEARCH_DIALOG_NAME })
       .getByRole("textbox", { name: "Employee ID" }),
 
-  /** Search submit button (page-scoped — there's only one). verified 2026-03-16 */
+  /**
+   * Search submit button (page-scoped — there's only one). verified 2026-03-16
+   * @tags search, submit, button, i9
+   */
   submitButton: (page: Page): Locator =>
     page.getByRole("button", { name: "Search" }),
 
   /**
    * Results grid rows. The last grid in the dialog is the results grid
    * (earlier grid contains headers). verified 2026-03-16
+   * @tags results, grid, rows, search, i9
    */
   resultRows: (page: Page): Locator =>
     page

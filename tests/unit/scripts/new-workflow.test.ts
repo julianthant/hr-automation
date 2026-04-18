@@ -14,6 +14,7 @@ import {
   kebabToCamel,
   kebabToPascal,
   scaffold,
+  parseArgv,
 } from "../../../src/scripts/new-workflow.js";
 
 function mkTmp(): string {
@@ -131,5 +132,89 @@ describe("scaffold", () => {
       () => scaffold("", tmp),
       (err: unknown) => err instanceof InvalidWorkflowNameError,
     );
+  });
+
+  it("renders 'No systems declared' Selector Intelligence section when --systems omitted", () => {
+    const result = scaffold("wage-update", tmp);
+    const claude = readFileSync(join(result.dir, "CLAUDE.md"), "utf-8");
+    assert.match(claude, /## Selector Intelligence/);
+    assert.match(claude, /No systems declared/);
+    // Existing scaffolded sections still present.
+    assert.match(claude, /## Files/);
+    assert.match(claude, /## Data Flow/);
+    assert.match(claude, /## Gotchas/);
+    assert.match(claude, /## Lessons Learned/);
+  });
+
+  it("embeds per-system selector-intelligence links when --systems provided", () => {
+    const result = scaffold("wage-update", tmp, { systems: ["crm", "ucpath"] });
+    const claude = readFileSync(join(result.dir, "CLAUDE.md"), "utf-8");
+    assert.match(claude, /## Selector Intelligence/);
+    assert.match(claude, /This workflow touches: crm, ucpath/);
+    assert.match(claude, /\.\.\/\.\.\/systems\/crm\/LESSONS\.md/);
+    assert.match(claude, /\.\.\/\.\.\/systems\/crm\/SELECTORS\.md/);
+    assert.match(claude, /\.\.\/\.\.\/systems\/crm\/common-intents\.txt/);
+    assert.match(claude, /\.\.\/\.\.\/systems\/ucpath\/LESSONS\.md/);
+    assert.match(claude, /\.\.\/\.\.\/systems\/ucpath\/SELECTORS\.md/);
+    assert.match(claude, /\.\.\/\.\.\/systems\/ucpath\/common-intents\.txt/);
+    // Existing scaffolded sections still present.
+    assert.match(claude, /## Files/);
+    assert.match(claude, /## Data Flow/);
+    assert.match(claude, /## Gotchas/);
+    assert.match(claude, /## Lessons Learned/);
+  });
+});
+
+describe("parseArgv", () => {
+  it("parses bare workflow name with no flags", () => {
+    const parsed = parseArgv(["node", "new-workflow.ts", "wage-update"]);
+    assert.equal(parsed.name, "wage-update");
+    assert.deepEqual(parsed.systems, []);
+  });
+
+  it("parses --systems flag (space-separated value form)", () => {
+    const parsed = parseArgv([
+      "node",
+      "new-workflow.ts",
+      "wage-update",
+      "--systems",
+      "crm,ucpath",
+    ]);
+    assert.equal(parsed.name, "wage-update");
+    assert.deepEqual(parsed.systems, ["crm", "ucpath"]);
+  });
+
+  it("parses --systems=value form", () => {
+    const parsed = parseArgv([
+      "node",
+      "new-workflow.ts",
+      "wage-update",
+      "--systems=crm,ucpath,i9",
+    ]);
+    assert.equal(parsed.name, "wage-update");
+    assert.deepEqual(parsed.systems, ["crm", "ucpath", "i9"]);
+  });
+
+  it("trims whitespace and drops empty entries from --systems", () => {
+    const parsed = parseArgv([
+      "node",
+      "new-workflow.ts",
+      "wage-update",
+      "--systems",
+      " crm , , ucpath ",
+    ]);
+    assert.deepEqual(parsed.systems, ["crm", "ucpath"]);
+  });
+
+  it("accepts the --systems flag before the workflow name", () => {
+    const parsed = parseArgv([
+      "node",
+      "new-workflow.ts",
+      "--systems",
+      "crm",
+      "wage-update",
+    ]);
+    assert.equal(parsed.name, "wage-update");
+    assert.deepEqual(parsed.systems, ["crm"]);
   });
 });

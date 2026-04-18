@@ -1,0 +1,9 @@
+search employee in Genies grid
+open Manage My Department
+download time detail report
+set timeframe date range
+navigate to Reports page
+detect SSO bounce after refresh
+dismiss UKG modal dialogs
+poll report status until complete
+view report and capture download

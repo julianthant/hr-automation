@@ -66,16 +66,33 @@ export interface ScaffoldResult {
   files: string[];
 }
 
+export interface ScaffoldOptions {
+  /**
+   * Per-system slugs the new workflow will touch (e.g. `["crm", "ucpath"]`).
+   * Used to embed per-system LESSONS.md / SELECTORS.md / common-intents.txt
+   * links in the generated CLAUDE.md so the operator can scan existing
+   * selectors before mapping a new one. Empty array (or omitted) renders a
+   * placeholder section.
+   */
+  systems?: string[];
+}
+
 /**
  * Scaffold a new workflow directory with the 5 canonical files.
  *
  * @param name     Kebab-case workflow name (e.g. `wage-update`).
  * @param baseDir  Parent directory — `path.join(baseDir, name)` is created.
  *                 Defaults to `src/workflows/` under the current cwd.
+ * @param options  Optional scaffolding hints, including the list of per-system
+ *                 slugs the workflow will touch.
  * @throws {InvalidWorkflowNameError}    if `name` is not kebab-case.
  * @throws {WorkflowAlreadyExistsError}  if the target directory exists.
  */
-export function scaffold(name: string, baseDir?: string): ScaffoldResult {
+export function scaffold(
+  name: string,
+  baseDir?: string,
+  options: ScaffoldOptions = {},
+): ScaffoldResult {
   if (!KEBAB_RE.test(name)) throw new InvalidWorkflowNameError(name);
 
   const targetBase = baseDir ?? path.join(process.cwd(), "src", "workflows");
@@ -86,13 +103,14 @@ export function scaffold(name: string, baseDir?: string): ScaffoldResult {
 
   const pascalName = kebabToPascal(name);
   const camelName = kebabToCamel(name);
+  const systems = options.systems ?? [];
 
   const files: Array<{ fname: string; content: string }> = [
     { fname: "schema.ts", content: renderSchema(pascalName) },
     { fname: "workflow.ts", content: renderWorkflow(name, pascalName, camelName) },
     { fname: "config.ts", content: renderConfig(name) },
     { fname: "index.ts", content: renderIndex(pascalName, camelName) },
-    { fname: "CLAUDE.md", content: renderClaudeMd(name, pascalName) },
+    { fname: "CLAUDE.md", content: renderClaudeMd(name, pascalName, systems) },
   ];
 
   const written: string[] = [];
@@ -198,7 +216,40 @@ export type { ${pascalName}Options } from "./workflow.js";
 `;
 }
 
-function renderClaudeMd(name: string, pascalName: string): string {
+function renderSelectorIntelligence(systems: string[]): string {
+  if (systems.length === 0) {
+    return `## Selector Intelligence
+
+No systems declared — add them by editing this file. After listing the systems
+this workflow touches (e.g. \`ucpath\`, \`crm\`), insert per-system links:
+
+- \`src/systems/<sys>/LESSONS.md\`
+- \`src/systems/<sys>/SELECTORS.md\`
+- \`src/systems/<sys>/common-intents.txt\`
+
+Before mapping any new selector, run \`npm run selector:search "<intent>"\`
+and review the top matches.
+`;
+  }
+  const lines: string[] = ["## Selector Intelligence", ""];
+  lines.push(`This workflow touches: ${systems.join(", ")}.`, "");
+  lines.push("Before mapping a new selector, run `npm run selector:search \"<intent>\"`.", "");
+  lines.push("Per-system catalogs and lessons:", "");
+  for (const sys of systems) {
+    lines.push(`- **${sys}** —`);
+    lines.push(`  - [\`LESSONS.md\`](../../systems/${sys}/LESSONS.md)`);
+    lines.push(`  - [\`SELECTORS.md\`](../../systems/${sys}/SELECTORS.md)`);
+    lines.push(`  - [\`common-intents.txt\`](../../systems/${sys}/common-intents.txt)`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+function renderClaudeMd(
+  name: string,
+  pascalName: string,
+  systems: string[] = [],
+): string {
   return `# ${pascalName} Workflow
 
 One-line description of what this workflow does. Replace this line.
@@ -213,6 +264,7 @@ executed through \`src/core/runWorkflow\`.
 - \`config.ts\` — Workflow-specific constants
 - \`index.ts\` — Barrel exports
 
+${renderSelectorIntelligence(systems)}
 ## Data Flow
 
 \`\`\`
@@ -236,16 +288,56 @@ CLI: npm run ${name} <exampleId>
 
 // ─── CLI entry point ──────────────────────────────────────────────────────────
 
-function parseArgv(argv: string[]): string {
-  // Accept both `tsx new-workflow.ts foo` and `npm run new:workflow -- foo`.
+export interface ParsedArgv {
+  name: string;
+  systems: string[];
+}
+
+/**
+ * Parse argv into a `{ name, systems }` tuple. Accepts both `tsx
+ * new-workflow.ts <name> [--systems a,b]` and the npm passthrough form
+ * `npm run new:workflow -- <name> --systems a,b`.
+ *
+ * Pure — exported for testing.
+ */
+export function parseArgv(argv: string[]): ParsedArgv {
   const args = argv.slice(2);
   if (args.length === 0) {
     process.stderr.write(
-      "Usage: npm run new:workflow -- <name>   (kebab-case, e.g. wage-update)\n",
+      "Usage: npm run new:workflow -- <name> [--systems sys1,sys2]\n" +
+        "Example: npm run new:workflow -- wage-update --systems ucpath\n",
     );
     process.exit(1);
   }
-  return args[0];
+  let name: string | undefined;
+  let systems: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--systems") {
+      const value = args[i + 1];
+      if (typeof value !== "string") {
+        process.stderr.write("--systems requires a comma-separated value\n");
+        process.exit(1);
+      }
+      systems = value.split(",").map((s) => s.trim()).filter(Boolean);
+      i++;
+    } else if (arg.startsWith("--systems=")) {
+      systems = arg
+        .slice("--systems=".length)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    } else if (!arg.startsWith("--") && name === undefined) {
+      name = arg;
+    }
+  }
+  if (name === undefined) {
+    process.stderr.write(
+      "Missing workflow name (kebab-case, e.g. wage-update).\n",
+    );
+    process.exit(1);
+  }
+  return { name, systems };
 }
 
 const isMain =
@@ -253,9 +345,9 @@ const isMain =
   process.argv[1]?.endsWith("new-workflow.ts");
 
 if (isMain) {
-  const name = parseArgv(process.argv);
+  const { name, systems } = parseArgv(process.argv);
   try {
-    const result = scaffold(name);
+    const result = scaffold(name, undefined, { systems });
     process.stdout.write(`Created ${result.dir}\n`);
     for (const f of result.files) {
       process.stdout.write(`  ${path.relative(process.cwd(), f)}\n`);

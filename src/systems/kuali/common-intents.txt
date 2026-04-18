@@ -1,0 +1,10 @@
+open action list document
+extract separation data
+fill timekeeper name and comments
+fill termination effective date
+fill department combobox best match
+fill payroll title code
+fill transaction number from UCPath
+select does not need final pay radio
+click navbar save button
+verify date input after fill

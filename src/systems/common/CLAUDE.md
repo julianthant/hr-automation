@@ -48,6 +48,22 @@ system:
   buttons; different semantics from `dismissPeopleSoftModalMask` (which
   hides a CSS overlay). Lives in `src/systems/old-kronos/navigate.ts`.
 
+## Before mapping a new selector
+
+This module owns shared helpers (modal dismiss, `safeClick`/`safeFill`), not
+per-page selectors. New page-anchored selectors belong in the per-system
+registries:
+
+- [`src/systems/crm/SELECTORS.md`](../crm/SELECTORS.md) · [`LESSONS.md`](../crm/LESSONS.md)
+- [`src/systems/i9/SELECTORS.md`](../i9/SELECTORS.md) · [`LESSONS.md`](../i9/LESSONS.md)
+- [`src/systems/kuali/SELECTORS.md`](../kuali/SELECTORS.md) · [`LESSONS.md`](../kuali/LESSONS.md)
+- [`src/systems/new-kronos/SELECTORS.md`](../new-kronos/SELECTORS.md) · [`LESSONS.md`](../new-kronos/LESSONS.md)
+- [`src/systems/old-kronos/SELECTORS.md`](../old-kronos/SELECTORS.md) · [`LESSONS.md`](../old-kronos/LESSONS.md)
+- [`src/systems/ucpath/SELECTORS.md`](../ucpath/SELECTORS.md) · [`LESSONS.md`](../ucpath/LESSONS.md)
+
+Before mapping anything new, always run `npm run selector:search "<intent>"`
+to scan the existing catalogs. The CLI ranks both selectors and lessons.
+
 ## Lessons Learned
 
 *(empty — add entries as common helpers grow)*

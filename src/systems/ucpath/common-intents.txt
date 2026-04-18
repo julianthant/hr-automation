@@ -1,0 +1,10 @@
+search by SSN
+fill comp rate
+save smart HR transaction
+collapse sidebar
+fill emergency contact
+person org summary lookup
+job summary extract
+fill personal data
+select reason code
+visit all transaction tabs
