@@ -1,13 +1,14 @@
 /**
  * Batch separation runner — processes multiple docs sequentially,
- * reusing Kuali/Kronos browser windows between docs.
+ * reusing Kuali/Kronos browser windows between docs via the kernel's
+ * `runWorkflowBatch` sequential mode.
  *
  * Usage: node --env-file=.env --import tsx/esm src/scripts/sep-batch.ts 3835 3840 3842
  *
- * After each doc completes, waits for Kuali form submission before proceeding.
+ * Equivalent to `hr-auto separation <ids...>` in batch mode; kept as a dev
+ * script for direct invocation without Commander.
  */
-import { runSeparation } from "../workflows/separations/workflow.js";
-import type { SessionWindows } from "../workflows/separations/workflow.js";
+import { runSeparationBatch } from "../workflows/separations/workflow.js";
 import { validateEnv } from "../utils/env.js";
 import { log } from "../utils/log.js";
 import { errorMessage } from "../utils/errors.js";
@@ -20,39 +21,11 @@ if (docIds.length === 0) {
 
 validateEnv();
 
-async function waitBetweenDocs(): Promise<void> {
-  log.waiting("Waiting 5 seconds before next document...");
-  await new Promise((resolve) => setTimeout(resolve, 5_000));
-}
-
 async function main() {
-  let windows: SessionWindows | undefined;
-
-  for (let i = 0; i < docIds.length; i++) {
-    const docId = docIds[i];
-    log.step(`\n========== Doc ${i + 1}/${docIds.length}: #${docId} ==========\n`);
-
-    try {
-      const result = await runSeparation(docId, {
-        keepOpen: true,
-        existingWindows: windows,
-      });
-
-      windows = result.windows;
-      log.success(`Doc #${docId} complete: ${result.data.employeeName} (EID: ${result.data.eid})`);
-
-      // Brief pause before next doc
-      if (i < docIds.length - 1) {
-        await waitBetweenDocs();
-      }
-    } catch (error) {
-      log.error(`Doc #${docId} failed: ${errorMessage(error)}`);
-      if (!windows) break; // Can't continue without windows
-    }
-  }
-
-  log.success("\n========== All documents processed ==========");
-  log.step("Browsers left open for review. Close them manually when done.");
+  log.step(`\n========== Batch: ${docIds.length} docs — ${docIds.join(", ")} ==========\n`);
+  const result = await runSeparationBatch(docIds);
+  log.success(`\n========== Batch complete: ${result.succeeded}/${result.total} succeeded ==========`);
+  if (result.failed > 0) process.exit(1);
 }
 
 main().catch((e) => {
