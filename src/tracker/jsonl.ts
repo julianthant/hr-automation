@@ -3,6 +3,7 @@ import { join } from "path";
 import { execSync } from "child_process";
 import { log, setLogRunId } from "../utils/log.js";
 import { classifyError } from "../utils/errors.js";
+import { maskSsn, maskDob, redactPii } from "../utils/pii.js";
 import {
   generateInstanceName,
   emitWorkflowStart,
@@ -37,7 +38,11 @@ function getLogFilePath(workflow: string, dir: string): string {
 export function appendLogEntry(entry: LogEntry, dir: string = DEFAULT_DIR): void {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const logPath = getLogFilePath(entry.workflow, dir);
-  appendFileSync(logPath, JSON.stringify(entry) + "\n");
+  // Scrub free-form PII (SSN, DOB) from the message before it hits disk.
+  // Errors like `Error: SSN 123-45-6789 not found in I9` get normalized to
+  // `Error: SSN ***-**-**** not found in I9` automatically.
+  const scrubbed: LogEntry = { ...entry, message: redactPii(entry.message) };
+  appendFileSync(logPath, JSON.stringify(scrubbed) + "\n");
 }
 
 // Cache parsed JSONL by file path — avoids re-parsing on every SSE tick.
@@ -134,6 +139,11 @@ export function trackEvent(entry: TrackerEntry, dir: string = DEFAULT_DIR): void
   appendFileSync(logPath, JSON.stringify(entry) + "\n");
 }
 
+/** Keys whose values are always masked as SSN. */
+const SSN_KEYS: ReadonlySet<string> = new Set(["ssn"]);
+/** Keys whose values are always masked as DOB, preserving the year. */
+const DOB_KEYS: ReadonlySet<string> = new Set(["dob", "dateOfBirth", "birthdate"]);
+
 /**
  * Serialize an arbitrary value for storage in `TrackerEntry.data` (which is
  * `Record<string, string>` at rest). Preserves fidelity for common rich types:
@@ -141,9 +151,24 @@ export function trackEvent(entry: TrackerEntry, dir: string = DEFAULT_DIR): void
  *   - null/undefined → ""
  *   - primitive (string/number/boolean/bigint) → String(v)
  *   - object/array → JSON.stringify(v) (falls back to String(v) if circular)
+ *
+ * When `key` is provided, field-aware PII masks trigger:
+ *   - `ssn` → maskSsn(...)           e.g. "123-45-6789" becomes "x-x-6789" pattern
+ *   - `dob`/`dateOfBirth`/`birthdate` → maskDob(...)  year preserved, month+day masked
+ *
+ * Other fields pass through unchanged — we can't blanket-redact every value
+ * (would mangle `effectiveDate`, ISO timestamps, etc.).
  */
-export function serializeValue(v: unknown): string {
+export function serializeValue(v: unknown, key?: string): string {
   if (v === null || v === undefined) return "";
+  // Field-aware masking runs FIRST so Date instances passed as a DOB still get
+  // formatted via the mask path rather than leaking the ISO year-month-day.
+  if (key && SSN_KEYS.has(key)) {
+    return maskSsn(v instanceof Date ? v.toISOString() : String(v));
+  }
+  if (key && DOB_KEYS.has(key)) {
+    return maskDob(v instanceof Date ? v.toISOString().slice(0, 10) : String(v));
+  }
   if (v instanceof Date) return v.toISOString();
   if (typeof v === "string") return v;
   if (typeof v === "number" || typeof v === "boolean" || typeof v === "bigint") {
@@ -313,7 +338,7 @@ export async function withTrackedWorkflow<T>(
         // Also populate the typedData mirror so the dashboard can render
         // dates/numbers/booleans with type-aware formatting.
         for (const [k, v] of Object.entries(d)) {
-          data[k] = serializeValue(v);
+          data[k] = serializeValue(v, k);
           typedData[k] = toTypedValue(v);
         }
       },
