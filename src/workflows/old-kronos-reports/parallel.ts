@@ -1,20 +1,20 @@
 import { readFile } from "fs/promises";
-import { mkdirSync, existsSync } from "fs";
+import { mkdirSync, existsSync, rmSync } from "fs";
 import { parse } from "yaml";
 import { Mutex } from "async-mutex";
-import { log, withLogContext } from "../../utils/log.js";
+import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
-import { withTrackedWorkflow } from "../../tracker/jsonl.js";
+import { runWorkflowBatch } from "../../core/index.js";
+import { trackEvent } from "../../tracker/jsonl.js";
 import { launchBrowser } from "../../browser/launch.js";
-import { ukgNavigateAndFill, ukgSubmitAndWaitForDuo } from "../../auth/login.js";
-import {
-  getGeniesIframe,
-  setDateRange,
-} from "../../systems/old-kronos/index.js";
-import { runKronosForEmployee } from "./workflow.js";
-import type { KronosTrackerRow } from "./tracker.js";
-import { updateKronosTracker as updateTracker } from "./tracker.js";
+import { computeTileLayout } from "../../browser/tiling.js";
 import { createLockedTracker } from "../../tracker/locked.js";
+import {
+  kronosReportsWorkflow,
+  setKronosRuntime,
+  clearKronosRuntime,
+  type KronosItem,
+} from "./workflow.js";
 import {
   BATCH_FILE,
   SESSION_DIR,
@@ -22,7 +22,11 @@ import {
   DEFAULT_START_DATE,
   DEFAULT_END_DATE,
 } from "./config.js";
-import { computeTileLayout } from "../../browser/tiling.js";
+import {
+  updateKronosTracker as updateTracker,
+  TRACKER_PATH,
+  type KronosTrackerRow,
+} from "./tracker.js";
 
 /**
  * Load employee IDs from the batch YAML file.
@@ -41,7 +45,6 @@ export async function loadBatchFile(): Promise<string[]> {
     throw new Error(`Batch file is empty or invalid: ${BATCH_FILE}`);
   }
 
-  // Validate each entry is a numeric string
   for (const entry of ids) {
     const id = String(entry);
     if (!/^\d{5,}$/.test(id)) {
@@ -53,7 +56,21 @@ export async function loadBatchFile(): Promise<string[]> {
 }
 
 /**
- * Run kronos report downloads for all employees in batch.yaml with parallel workers.
+ * CLI adapter for `npm run kronos`. Thin shim over `runWorkflowBatch`
+ * (pool mode). Owns the pre-kernel phases:
+ *
+ *   1. Load + validate batch YAML.
+ *   2. Dry-run short-circuit: log planned employee list + workers + date range,
+ *      exit 0 without launching any browsers.
+ *   3. Ensure reports dir exists.
+ *   4. Initialize module-scoped runtime (tracker mutex, report-lock mutex,
+ *      date range, reports dir) so the kernel handler can read them.
+ *   5. Build a per-worker `launchFn` that picks a unique `ukg_session_workerN`
+ *      sessionDir per worker — UKG uses Playwright's persistent-context mode,
+ *      so two workers sharing one sessionDir would collide on the lock.
+ *   6. Delegate to `runWorkflowBatch(kronosReportsWorkflow, items, { poolSize,
+ *      launchFn, onPreEmitPending, deriveItemId })`.
+ *   7. Clean up per-worker session dirs after the batch resolves.
  */
 export async function runParallelKronos(
   workerCount: number,
@@ -62,10 +79,13 @@ export async function runParallelKronos(
   const employeeIds = await loadBatchFile();
   log.step(`Loaded ${employeeIds.length} employee ID(s) from batch file`);
 
+  const startDate = options.startDate ?? DEFAULT_START_DATE;
+  const endDate = options.endDate ?? DEFAULT_END_DATE;
+
   if (options.dryRun) {
     log.step("=== DRY RUN MODE ===");
     log.step(`Would process ${employeeIds.length} employees with ${workerCount} workers`);
-    log.step(`Date range: ${options.startDate ?? DEFAULT_START_DATE} - ${options.endDate ?? DEFAULT_END_DATE}`);
+    log.step(`Date range: ${startDate} - ${endDate}`);
     for (const id of employeeIds) {
       log.step(`  Employee: ${id}`);
     }
@@ -73,163 +93,108 @@ export async function runParallelKronos(
     return;
   }
 
-  // Ensure output directories exist
   if (!existsSync(REPORTS_DIR)) mkdirSync(REPORTS_DIR, { recursive: true });
 
+  const items: KronosItem[] = employeeIds.map((id) => ({ employeeId: id }));
   const actualWorkers = Math.min(workerCount, employeeIds.length);
   log.step(`Starting ${actualWorkers} parallel worker(s)`);
 
-  const queue = [...employeeIds];
+  // Initialize module-scoped runtime so the kernel handler can read mutexes,
+  // date range, and tracker writer. Cleared in the finally block so a later
+  // import can't read stale state.
   const trackerMutex = new Mutex();
   const reportMutex = new Mutex();
   const lockedTracker = createLockedTracker<KronosTrackerRow>(trackerMutex, updateTracker);
+  const writeTracker = (row: KronosTrackerRow): Promise<void> =>
+    lockedTracker(TRACKER_PATH, row);
 
-  // Phase 1a: Launch all browsers and fill credentials (5s gap between each)
+  setKronosRuntime({
+    trackerMutex,
+    reportMutex,
+    startDate,
+    endDate,
+    reportsDir: REPORTS_DIR,
+    writeTracker,
+  });
+
+  // Per-worker sessionDir assignment: the kernel's pool mode calls launchFn
+  // once per worker. We track a counter so the N-th invocation picks
+  // `${SESSION_DIR}_workerN`. Workers are launched in the order 1..N during
+  // Session.launch; in a pool-mode run there's exactly one system ("old-kronos")
+  // so each launchFn call corresponds to a distinct worker.
   const sessionDirs: string[] = [];
-  const launched: { context: Awaited<ReturnType<typeof launchBrowser>>["context"]; page: Awaited<ReturnType<typeof launchBrowser>>["page"]; alreadyLoggedIn: boolean }[] = [];
+  let workerCounter = 0;
+  const launchFn: NonNullable<Parameters<typeof runWorkflowBatch<KronosItem, typeof kronosReportsWorkflow.config.steps>>[2]>["launchFn"] =
+    async ({ system: _system, tileIndex: _tileIndex, tileCount: _tileCount, tiling: _tiling }) => {
+      workerCounter += 1;
+      const workerId = workerCounter;
+      const prefix = `[W${workerId}]`;
+      const sessionDir = `${SESSION_DIR}_worker${workerId}`;
+      sessionDirs.push(sessionDir);
 
-  for (let i = 0; i < actualWorkers; i++) {
-    const workerId = i + 1;
-    const prefix = `[W${workerId}]`;
-    const sessionDir = `${SESSION_DIR}_worker${workerId}`;
-    sessionDirs.push(sessionDir);
+      const tile = computeTileLayout(workerId - 1, actualWorkers);
+      log.step(`${prefix} Window: ${tile.size.width}x${tile.size.height} at (${tile.position.x},${tile.position.y})`);
 
-    const tile = computeTileLayout(i, actualWorkers);
-    log.step(`${prefix} Window: ${tile.size.width}x${tile.size.height} at (${tile.position.x},${tile.position.y})`);
+      const { browser, context, page } = await launchBrowser({
+        sessionDir,
+        viewport: tile.viewport,
+        args: tile.args,
+        acceptDownloads: true,
+      });
+      return { browser: browser as never, context, page };
+    };
 
-    const { context, page } = await launchBrowser({
-      sessionDir,
-      viewport: tile.viewport,
-      args: tile.args,
-      acceptDownloads: true,
-    });
-
-    const fillResult = await ukgNavigateAndFill(page);
-    if (fillResult === false) {
-      log.error(`${prefix} Could not fill credentials`);
-      await context.close();
-      continue;
-    }
-
-    launched.push({ context, page, alreadyLoggedIn: fillResult === "already_logged_in" });
-
-    // 5s gap before opening next window
-    if (i < actualWorkers - 1) {
-      await page.waitForTimeout(5_000);
-    }
-  }
-
-  // Phase 1b: Submit login on each window sequentially (Duo MFA one at a time)
-  const workerContexts: { context: typeof launched[0]["context"]; page: typeof launched[0]["page"] }[] = [];
-
-  for (let i = 0; i < launched.length; i++) {
-    const { context, page, alreadyLoggedIn } = launched[i];
-    const prefix = `[W${i + 1}]`;
-
-    if (!alreadyLoggedIn) {
-      const authOk = await ukgSubmitAndWaitForDuo(page);
-      if (!authOk) {
-        log.error(`${prefix} UKG authentication failed`);
-        await context.close();
-        continue;
-      }
-    }
-
-    const iframe = await getGeniesIframe(page);
-    log.step(`${prefix} Dashboard ready`);
-    await setDateRange(page, iframe, options.startDate ?? DEFAULT_START_DATE, options.endDate ?? DEFAULT_END_DATE);
-
-    workerContexts.push({ context, page });
-  }
-
-  // Phase 2: All workers process employees in parallel
-  const workers = workerContexts.map((wc, i) =>
-    runWorker(i + 1, queue, wc.context, wc.page, lockedTracker, reportMutex),
-  );
-
-  await Promise.all(workers);
-
-  // Cleanup session directories after all workers finish
-  const { rmSync } = await import("fs");
-  for (const dir of sessionDirs) {
-    try {
-      rmSync(dir, { recursive: true, force: true });
-      log.step(`Cleaned up session dir: ${dir}`);
-    } catch {
-      // Non-fatal
-    }
-  }
-
-  log.success(`All ${employeeIds.length} employee(s) processed`);
-}
-
-/**
- * A single worker that processes employee IDs from the shared queue.
- * Receives a pre-authenticated browser page (login done sequentially in Phase 1).
- */
-async function runWorker(
-  workerId: number,
-  queue: string[],
-  context: Awaited<ReturnType<typeof launchBrowser>>["context"],
-  page: Awaited<ReturnType<typeof launchBrowser>>["page"],
-  lockedTracker: (filePath: string, data: KronosTrackerRow) => Promise<void>,
-  reportMutex: Mutex,
-): Promise<void> {
-  const prefix = `[W${workerId}]`;
+  const now = new Date().toISOString();
 
   try {
-    let consecutiveErrors = 0;
+    const result = await runWorkflowBatch(
+      kronosReportsWorkflow,
+      items,
+      {
+        poolSize: actualWorkers,
+        launchFn,
+        // Each item's dashboard ID is the employeeId itself (not the default
+        // UUID). Without this override, onPreEmitPending's ID wouldn't match
+        // the kernel's derived itemId and the dashboard would show duplicate
+        // rows per employee.
+        deriveItemId: (item) => (item as KronosItem).employeeId,
+        onPreEmitPending: (item, runId) => {
+          const { employeeId } = item as KronosItem;
+          trackEvent({
+            workflow: "kronos-reports",
+            timestamp: now,
+            id: employeeId,
+            runId,
+            status: "pending",
+            data: { id: employeeId },
+          });
+        },
+      },
+    );
 
-    while (queue.length > 0) {
-      const employeeId = queue.shift();
-      if (!employeeId) break;
+    log.success(
+      `Kronos batch complete — ${result.succeeded}/${result.total} succeeded, ${result.failed} failed`,
+    );
+    if (result.failed > 0) {
+      const summary = result.errors
+        .slice(0, 3)
+        .map((e) => `  - ${errorMessage(e.error)}`)
+        .join("\n");
+      log.error(`Failures (first 3):\n${summary}`);
+    }
+  } finally {
+    clearKronosRuntime();
 
-      // Check if browser is still alive before processing
+    // Cleanup session directories after all workers finish. Best-effort —
+    // a running process elsewhere could lock a dir; the next run will
+    // reassign and Playwright handles stale contexts on launch.
+    for (const dir of sessionDirs) {
       try {
-        await page.evaluate(() => true);
-      } catch {
-        log.error(`${prefix} Browser session dead — stopping worker (${queue.length} employees remaining in queue)`);
-        break;
-      }
-
-      log.step(`${prefix} ${"=".repeat(50)}`);
-      log.step(`${prefix} PROCESSING: ${employeeId}`);
-      log.step(`${prefix} ${"=".repeat(50)}`);
-
-      try {
-        await withLogContext("kronos-reports", employeeId, () =>
-          withTrackedWorkflow("kronos-reports", employeeId, {}, async (setStep, updateData, _onCleanup, session) => {
-            // Stamp the employee id up front so the dashboard detail panel's
-            // "ID" cell populates immediately — name is filled later when
-            // the row is clicked and the employee header becomes readable.
-            updateData({ id: employeeId });
-            setStep("searching");
-            await runKronosForEmployee(employeeId, {
-              page,
-              dateRangeSet: true,
-              updateTrackerFn: lockedTracker,
-              reportLock: reportMutex,
-              logPrefix: prefix,
-              onStep: setStep,
-              onData: updateData,
-            });
-          }),
-        );
-        consecutiveErrors = 0;
-      } catch (err) {
-        consecutiveErrors++;
-        log.error(`${prefix} ${employeeId} threw: ${errorMessage(err).slice(0, 80)}`);
-        if (consecutiveErrors >= 3) {
-          log.error(`${prefix} 3 consecutive errors — stopping worker (${queue.length} remaining)`);
-          break;
-        }
-      }
+        rmSync(dir, { recursive: true, force: true });
+        log.step(`Cleaned up session dir: ${dir}`);
+      } catch { /* non-fatal */ }
     }
 
-    log.success(`${prefix} Worker finished`);
-  } catch (error) {
-    log.error(`${prefix} Worker error: ${errorMessage(error)}`);
-  } finally {
-    await context.close();
+    log.success(`All ${employeeIds.length} employee(s) processed`);
   }
 }
