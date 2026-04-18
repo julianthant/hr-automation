@@ -9,8 +9,7 @@ import { runOnboarding, runParallel } from "./workflows/onboarding/index.js";
 import { runWorkStudy, WorkStudyInputSchema } from "./workflows/work-study/index.js";
 import { runEmergencyContact } from "./workflows/emergency-contact/index.js";
 import { runParallelKronos, DEFAULT_WORKERS } from "./workflows/old-kronos-reports/index.js";
-import { runSeparation } from "./workflows/separations/index.js";
-import { trackEvent, readEntries } from "./tracker/jsonl.js";
+import { runSeparation, runSeparationBatch } from "./workflows/separations/index.js";
 import { runEidLookup } from "./workflows/eid-lookup/index.js";
 import { exportToExcel } from "./tracker/export-excel.js";
 
@@ -230,10 +229,9 @@ program
     }
 
     if (docIds.length === 1) {
-      // Single mode — original behavior
       try {
-        const { data } = await runSeparation(docIds[0], { dryRun: options.dryRun });
-        log.success(`Separation complete for ${data.employeeName} (EID: ${data.eid})`);
+        await runSeparation(docIds[0], { dryRun: options.dryRun });
+        log.success(`Separation complete for doc #${docIds[0]}`);
       } catch (error) {
         log.error(`Separation workflow failed: ${errorMessage(error)}`);
         process.exit(1);
@@ -241,48 +239,17 @@ program
       return;
     }
 
-    // Batch mode — pre-emit pending for all, then process sequentially
+    // Batch mode — runWorkflowBatch handles pending emits, auth, browser reuse,
+    // between-items reset, and per-doc failure isolation.
     log.step(`Batch mode: ${docIds.length} separations — ${docIds.join(", ")}`);
-
-    const runIds = new Map<string, string>();
-    const existing = readEntries("separations");
-    for (const docId of docIds) {
-      const priorRuns = new Set(existing.filter((e) => e.id === docId).map((e) => e.runId));
-      const runId = `${docId}#${priorRuns.size + 1}`;
-      runIds.set(docId, runId);
-      trackEvent({
-        workflow: "separations",
-        timestamp: new Date().toISOString(),
-        id: docId,
-        runId,
-        status: "pending",
-        data: {},
-      });
+    try {
+      const result = await runSeparationBatch(docIds, { dryRun: options.dryRun });
+      log.success(`Batch complete: ${result.succeeded}/${result.total} succeeded`);
+      if (result.failed > 0) process.exit(1);
+    } catch (error) {
+      log.error(`Separation batch failed: ${errorMessage(error)}`);
+      process.exit(1);
     }
-
-    let existingWindows: import("./workflows/separations/index.js").SessionWindows | undefined;
-    let failed = 0;
-
-    for (let i = 0; i < docIds.length; i++) {
-      const docId = docIds[i];
-      log.step(`\n=== Document ${i + 1}/${docIds.length}: #${docId} ===`);
-      try {
-        const result = await runSeparation(docId, {
-          dryRun: options.dryRun,
-          keepOpen: i < docIds.length - 1,
-          existingWindows,
-          runId: runIds.get(docId),
-        });
-        existingWindows = result.windows;
-        log.success(`Doc #${docId} complete: ${result.data.employeeName} (EID: ${result.data.eid})`);
-      } catch (error) {
-        log.error(`Doc #${docId} failed: ${errorMessage(error)}`);
-        failed++;
-      }
-    }
-
-    log.success(`\nBatch complete: ${docIds.length - failed}/${docIds.length} succeeded`);
-    if (failed > 0) process.exit(1);
   });
 
 // ─── eid-lookup ───
