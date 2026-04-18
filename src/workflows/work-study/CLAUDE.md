@@ -4,6 +4,14 @@ Updates employee position pool and compensation data for work-study awards in UC
 
 **Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflow`. The kernel owns browser launch, UCPath auth, tracker emission, SIGINT cleanup. The handler is a two-step pipeline (`ucpath-auth` → `transaction`) over a single UCPath browser.
 
+## Selector intelligence
+
+This workflow touches one system: **ucpath**.
+
+- Before mapping or remapping any selector, run `npm run selector:search "<intent>"` (e.g. `"paypath position pool"`, `"comp rate"`, `"action plan"`).
+- Per-system lessons (read before re-mapping): [`src/systems/ucpath/LESSONS.md`](../../systems/ucpath/LESSONS.md)
+- Per-system catalog (auto-generated): [`src/systems/ucpath/SELECTORS.md`](../../systems/ucpath/SELECTORS.md)
+
 ## Files
 
 - `schema.ts` — Zod `WorkStudyInput` schema (emplId: 5+ digits, effectiveDate: MM/DD/YYYY)

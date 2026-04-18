@@ -10,6 +10,22 @@ Given one or more Kuali document IDs, for each doc: launch 4 tiled browsers (Kua
 
 In batch mode (`runWorkflowBatch`), all Duo auths happen once upfront; the 4 browsers are then reused for every subsequent doc, with `session.reset(id)` run between docs to restore a clean starting state.
 
+## Selector intelligence
+
+This workflow touches four systems: **kuali**, **ucpath**, **old-kronos**, **new-kronos**.
+
+- Before mapping or remapping any selector, run `npm run selector:search "<intent>"` (e.g. `"kuali date input"`, `"kronos timecard"`, `"ucpath job summary"`).
+- Per-system lessons (read before re-mapping):
+  - [`src/systems/kuali/LESSONS.md`](../../systems/kuali/LESSONS.md)
+  - [`src/systems/ucpath/LESSONS.md`](../../systems/ucpath/LESSONS.md)
+  - [`src/systems/old-kronos/LESSONS.md`](../../systems/old-kronos/LESSONS.md)
+  - [`src/systems/new-kronos/LESSONS.md`](../../systems/new-kronos/LESSONS.md)
+- Per-system catalogs (auto-generated):
+  - [`src/systems/kuali/SELECTORS.md`](../../systems/kuali/SELECTORS.md)
+  - [`src/systems/ucpath/SELECTORS.md`](../../systems/ucpath/SELECTORS.md)
+  - [`src/systems/old-kronos/SELECTORS.md`](../../systems/old-kronos/SELECTORS.md)
+  - [`src/systems/new-kronos/SELECTORS.md`](../../systems/new-kronos/SELECTORS.md)
+
 ## Files
 
 - `schema.ts` — `SeparationData` Zod schema + helpers (`computeTerminationEffDate`, `buildTerminationComments`, `mapReasonCode`, `getInitials`, `buildDateChangeComments`, `resolveKronosDates`, `computeKronosDateRange`)

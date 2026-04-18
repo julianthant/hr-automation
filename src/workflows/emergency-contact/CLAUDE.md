@@ -4,6 +4,14 @@ Fills the Emergency Contact form in UCPath HR Tasks → Personal Data Related fo
 
 **Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflowBatch` (sequential mode, `preEmitPending: true`, `betweenItems: ["reset-browsers"]`). The kernel owns browser launch, UCPath auth, per-record tracker entries, SIGINT cleanup. The CLI adapter `runEmergencyContact` owns pre-kernel phases: YAML load, dry-run short-circuit, optional SharePoint roster download + verify. **Add-New contact flow (when the target employee has zero existing emergency contacts) is NOT YET IMPLEMENTED** — `navigateToEmergencyContact` throws `NoExistingContactError`, the kernel records the record as `failed`, batch continues.
 
+## Selector intelligence
+
+This workflow touches one system: **ucpath** (HR Tasks → Personal Data Related → Emergency Contact).
+
+- Before mapping or remapping any selector, run `npm run selector:search "<intent>"` (e.g. `"emergency contact"`, `"hr tasks navigation"`, `"relationship dropdown"`).
+- Per-system lessons (read before re-mapping): [`src/systems/ucpath/LESSONS.md`](../../systems/ucpath/LESSONS.md)
+- Per-system catalog (auto-generated): [`src/systems/ucpath/SELECTORS.md`](../../systems/ucpath/SELECTORS.md)
+
 ## Files
 
 - `schema.ts` — Zod schemas + YAML loader (`loadBatch`). Top-level `BatchSchema = { pdfPath, batchName, records[] }`; each record validates against `RecordSchema` (the kernel's `TData` for this workflow).

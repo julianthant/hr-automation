@@ -8,6 +8,14 @@ Downloads Time Detail PDF reports from Old Kronos (UKG) for multiple employees i
 
 Given a `batch.yaml` with employee IDs, the kernel launches N worker Sessions (default 4, overridable via `--workers N` → `RunOpts.poolSize`); each worker authenticates to UKG with its own Duo MFA, then the pool fans out employee IDs across workers, running queue-based Time Detail downloads with mutex-serialized Reports navigation and `ctx.retry`-wrapped flaky iframe loads. Each PDF is validated (size, no-data check, name/ID match) and a row is appended to the Excel tracker.
 
+## Selector intelligence
+
+This workflow touches one system: **old-kronos** (UKG, Genies iframe).
+
+- Before mapping or remapping any selector, run `npm run selector:search "<intent>"` (e.g. `"genies iframe"`, `"time detail report"`, `"date range picker"`).
+- Per-system lessons (read before re-mapping): [`src/systems/old-kronos/LESSONS.md`](../../systems/old-kronos/LESSONS.md)
+- Per-system catalog (auto-generated): [`src/systems/old-kronos/SELECTORS.md`](../../systems/old-kronos/SELECTORS.md)
+
 ## Files
 
 - `schema.ts` — Input schema: `EmployeeIdSchema` (5+ digit numeric string). `KronosItemSchema` wraps it as the kernel's per-item TData.
