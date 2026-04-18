@@ -60,6 +60,7 @@ await withTrackedWorkflow("separations", docId, {}, async (setStep, updateData) 
 - `GET /api/dates?workflow=X` — list available dates for a workflow
 - `GET /api/entries?workflow=X` — return all tracker entries (JSON)
 - `GET /api/logs?workflow=X&id=Y` — return log entries (JSON)
+- `GET /api/selector-warnings?days=N` — aggregated selector-fallback warns across N days (default 7)
 - `SSE /events?workflow=X&date=Y` — stream entries (enriched with `firstLogTs`, `lastLogTs`, `lastLogMessage`) + `wfCounts` every 1s
 - `SSE /events/logs?workflow=X&id=Y&date=Z` — stream log entries every 500ms
 

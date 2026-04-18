@@ -2,6 +2,7 @@ import { Monitor } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSessions } from "./hooks/useSessions";
 import { WorkflowBox } from "./WorkflowBox";
+import { SelectorWarningsPanel } from "./SelectorWarningsPanel";
 
 export function SessionPanel() {
   const { state } = useSessions();
@@ -35,6 +36,7 @@ export function SessionPanel() {
           </div>
         )}
       </div>
+      <SelectorWarningsPanel />
     </div>
   );
 }
