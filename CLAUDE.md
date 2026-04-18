@@ -221,7 +221,7 @@ PeopleSoft and UKG quirks bite every session. Keep these in mind:
 - **PeopleSoft dropdowns trigger page refreshes** — always `waitForTimeout()` after `selectOption()` before filling the next field.
 - **Comp Rate Code / Compensation Rate** — select by accessible name (`getByRole("textbox", { name: "Comp Rate Code" })`) then press Tab to blur and trigger validation. Compensation Frequency must be explicitly filled `"H"` if empty. (Comp Rate Code is `UCHRLY`, not `HCHRLY`.)
 - **Visit all 4 UCPath Smart HR tabs before Save** — Save stays disabled until Personal Data → Job Data → Earns Dist → Employee Experience have all been visited. After filling Initiator Comments on the last tab, re-click Personal Data before Save.
-- **Expected Job End Date for dining hires** — constant `06/30/2026`. Update annually in `src/workflows/onboarding/config.ts`.
+- **Expected Job End Date for dining hires** — constant `06/30/2026`. Update annually in `src/config.ts` (`ANNUAL_DATES.jobEndDate`) or override via `ANNUAL_DATES_END` env var. `src/workflows/onboarding/config.ts` re-exports it as `JOB_END_DATE`.
 - **Person Org Summary single-result redirect** — when search returns exactly 1 match, PeopleSoft skips the grid and jumps straight to the detail page. Automation must detect both paths.
 - **Name search fallbacks** — `"Last, First Middle"` may not match. Try full → first-only → middle-only. Watch for spelling variants and legal vs preferred names.
 - **Duo MFA sequencing** — simultaneous Duo prompts error. The kernel serializes per-system auth via `authChain`; don't roll your own.

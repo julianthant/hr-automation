@@ -10,9 +10,16 @@ Environment validation, error helpers, error classification, and colored logging
   - `log.step(msg)` — blue `->` prefix
   - `log.success(msg)` — green `✓` prefix
   - `log.waiting(msg)` — yellow `⏳` prefix
+  - `log.warn(msg)` — yellow `!` prefix (used by `safeClick`/`safeFill` for selector fallback warns)
   - `log.error(msg)` — red `✗` prefix (writes to stderr)
   - `setLogRunId(runId)` — inject `runId` into current `AsyncLocalStorage` log context (called by `withTrackedWorkflow`)
   - `withLogContext(workflow, itemId, fn, dir?)` — wraps `fn` in `AsyncLocalStorage` context so all `log.*()` calls emit to JSONL
+- `pii.ts` — PII masking helpers used by `serializeValue` in `src/tracker/jsonl.ts`:
+  - `maskSsn(value)` — `123-45-6789` → `***-**-6789`
+  - `maskDob(value)` — `01/15/1992` → `**/**/1992` (also handles ISO dates)
+  - `redactPii(text)` — bulk text scrub for log-message safety
+- `screenshot.ts` — `debugScreenshot(page, label, dir?)` — best-effort screenshot to `.screenshots/`; never throws (so a screenshot failure can't mask the original error). Used by `Stepper.step` on failure via `Session.screenshotAll`.
+- `worker-pool.ts` — `runWorkerPool({ items, workerCount, setup, process })` — generic queue-based fan-out helper. NOT a kernel mode (kernel pool launches one Session per worker; this helper shares one Session/Context across N tabs). Used by eid-lookup for the "1 Duo, N searches" pattern.
 
 Uses `picocolors` for colorization. Only `log.error()` uses `console.error` (stderr); all others use `console.log` (stdout).
 
