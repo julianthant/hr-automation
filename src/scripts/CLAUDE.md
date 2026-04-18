@@ -10,6 +10,7 @@ Development and debugging scripts. These are NOT production workflows — they'r
 - `sep-batch.ts` — Batch separations testing tool
 - `test-kronos-timecard.ts` — Tests Kronos timecard extraction in isolation
 - `clean-tracker.ts` — Prunes `.tracker/*.jsonl` AND `.screenshots/*.png` files older than N days. Flags: `--days N`, `--dir`, `--screenshots-dir`, `--no-screenshots`, `--screenshots-only`. Default behavior cleans both.
+- `setup-cli.ts` — First-use environment validation wizard. Runs fixed checks for `.env` keys (existence only, never values), Node ≥ 20, `tsx`, Playwright chromium cache, `.tracker/` + `.screenshots/` + `~/Downloads/onboarding/` writability, macOS notification capability (warn-only on non-darwin), and optional `jq`. Prints `[ok]` / `[warn]` / `[fail]` per check with a fix suggestion. Exits 0 if all pass or only warnings; exits 1 on any failure. Wired as `npm run setup`.
 
 ## Usage
 
