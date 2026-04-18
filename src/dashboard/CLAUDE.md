@@ -4,10 +4,11 @@ React SPA for real-time HR workflow monitoring. Split-panel layout: queue (left)
 
 ## Stack
 
-- React 19, Vite 8, Tailwind CSS v4, shadcn/ui, lucide-react, sonner (toasts)
+- React 19, Vite 8, Tailwind CSS v4, shadcn/ui primitives, lucide-react, sonner (toasts)
+- HeroUI (`@heroui/react`, `@heroui/calendar`, `@heroui/styles`) — used for the date Calendar in `components/ui/calendar.tsx` and its global stylesheet imported from `index.css`. Other shadcn-style primitives (button, dropdown, popover, etc.) are local files in `components/ui/`.
 - Theme: CSS variables from `theme.md` (root-level), pasted into `index.css`
 - Fonts: Inter (sans), JetBrains Mono (mono) — loaded via Google Fonts in `index.html`
-- No HeroUI, no framer-motion
+- No framer-motion
 
 ## Component Tree
 
@@ -228,6 +229,7 @@ The dashboard now auto-adapts — no frontend changes needed. When a new workflo
 - **2026-04-17: Per-step timing overlay.** Backend `/events` now enriches entries with `stepDurations: Record<string, number /*ms*/>`, computed from the same-run JSONL history (deltas between consecutive `running` events, capped by `done`/`failed`/`skipped`). The pure helper `computeStepDurations()` is exported from `src/tracker/dashboard.ts` for unit tests. Frontend: `StepPipeline` renders a small `font-mono` duration chip (e.g. `"12s"`, `"2m 15s"`) beneath each completed step name. Still-running final step shows no chip yet; repeated `markStep(X)` doesn't double-count X.
 - **2026-04-17: Failure drill-down.** Backend: `/api/screenshots?workflow=X&itemId=Y` lists PNGs in `.screenshots/` matching the `<workflow>-<itemId>-` prefix (parsed for step + ts from filename). `/screenshots/<filename>` streams the PNG with a path-traversal guard (`resolveScreenshotPath` rejects separators + `..`). Failed entries are enriched with `screenshotCount` so the frontend can skip the round-trip when there are none. Frontend: new `FailureDrillDown` component slots between `StepPipeline` + `LogStream` — renders classified error, collapsible last-20 log preview, and a horizontally scrollable screenshot strip with captions. Click a thumbnail → lightweight custom modal (no HeroUI import — matches the dashboard's "shadcn-ish primitives only" convention).
 - **2026-04-18: Selector health panel.** Backend: `/api/selector-warnings?days=N` (default 7) scans `*-logs.jsonl` files, filters `level === "warn"` entries whose message matches `/selector fallback triggered: (.+)/`, and returns an aggregated `[{ label, count, firstTs, lastTs, workflows[] }]` sorted count-desc. Factored as `buildSelectorWarningsHandler(dir)` for unit-test isolation. Frontend: `SelectorWarningsPanel` collapses under the Sessions column on the right rail. Badge shows count when > 0 (amber). Polls every 30s. Empty state reads "No selector fallback warnings in the last N days. Primary selectors are stable." The panel is purely a surface — `safeClick`/`safeFill` already emit these warns.
+- **2026-04-18: Removed dashboard runner.** The "⚡ RUN" drawer + `RunnerLauncher` button + `SchemaForm` + `runner-recents` localStorage helper + `schema-form-utils` parser were deleted. The backend `src/tracker/runner.ts` (child-process registry) and its `buildSpawnHandler` / `buildCancelHandler` / `buildActiveRunsHandler` / `buildWorkflowSchemaHandler` factories in `src/tracker/dashboard.ts` are gone, along with the `/api/workflows/:name/run`, `/api/workflows/:name/schema`, `/api/runs/:runId/cancel`, and `/api/runs/active` route registrations. Workflows are launched only via the npm scripts in `package.json` (or whatever replacement launcher lands later). Session monitoring (the bottom `SessionPanel` showing live workflows + their current step + auth state) still populates from kernel-emitted `emitWorkflowStart` / `emitSessionCreate` / `emitBrowserLaunch` / `emitAuthStart` calls in `src/tracker/jsonl.ts` (called by `withTrackedWorkflow`) — verified during this removal, no runner dependency.
 
 ## Files to Create (Frontend)
 
