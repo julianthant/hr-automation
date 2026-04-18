@@ -14,6 +14,7 @@ See root `CLAUDE.md` for a user-facing kernel primer + minimal example. This doc
 - `ctx.ts` — `makeCtx({ session, stepper, isBatch, runId })` — the only constructor for `Ctx`. Shared by `runWorkflow`, `runWorkflowBatch`, and `runWorkflowPool` to guarantee identical surface across modes. Also owns the `retry` implementation (linear backoff).
 - `registry.ts` — In-memory `WorkflowMetadata` map. `defineWorkflow` registers; `defineDashboardMetadata` registers with intent-signaling semantics ("not opted-in to the Option-A runtime warning"). `autoLabel` + `normalizeDetailField` for dashboard-shape normalization.
 - `page-health.ts` — `ensurePageHealthy(page, url)` helper. Used by legacy workflows; kernel handles auth failures via `Session.launch`'s retry loop.
+- `idempotency.ts` — `hashKey(record)` + `hasRecentlySucceeded(key, { withinDays, dir })` + `recordSuccess(key, transactionId, workflow, dir)` + `findRecentTransactionId(key, ...)` + `pruneOld(withinDays, dir)`. Storage: `.tracker/idempotency.jsonl`, one success record per line. Used by onboarding + work-study to skip duplicate Smart HR transactions when a workflow is re-run post-crash. Default lookback window: 14 days.
 - `index.ts` — Public barrel.
 
 ## Design invariants
@@ -48,3 +49,4 @@ When an escape hatch becomes a recurring pattern across workflows, promote it to
 - **2026-04-17 (subsystem D): `buildTrackerOpts` extracted.** All three modes pass identical richness-hook bundles to `withTrackedWorkflow` — the runtime warning, getName, and getId are consistent across single / batch / pool.
 - **2026-04-17 (subsystem D): Screenshot every active page on step failure.** `Stepper.step`'s catch invokes `screenshotFn(stepName)` via `Session.screenshotAll` before emitting `failed`. Best-effort — one failed screenshot mustn't skip siblings.
 - **2026-04-17 (kernel debt #1): Wrap each batch/pool item in `withTrackedWorkflow`.** Previously the batch runner emitted only aggregate events; individual items had no dashboard row. Fixed by per-item wrapping with `preAssignedRunId` threading.
+- **2026-04-17: Idempotency keys.** `idempotency.ts` gives workflows a way to skip duplicate Smart HR transactions after a crash mid-submit. Key is a SHA-256 of `{ workflow, emplId, ssn?, effectiveDate, ... }` — sorted-keys JSON so field order is irrelevant. Check via `hasRecentlySucceeded(key)`; on success call `recordSuccess(key, transactionId, workflow)`. Onboarding + work-study wire this into their transaction step. Storage lives alongside tracker JSONL and is gitignored.

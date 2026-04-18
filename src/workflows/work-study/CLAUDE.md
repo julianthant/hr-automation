@@ -53,3 +53,4 @@ CLI: npm run work-study <emplId> <effectiveDate>
 ## Lessons Learned
 
 - **2026-04-15: Migrated to kernel.** `runWorkStudy` is now a CLI adapter over `runWorkflow(workStudyWorkflow, input)`. Do not reintroduce raw `launchBrowser` / `withTrackedWorkflow` calls in the handler — those live in `src/core/`. Dry-run continues to bypass the kernel (no browser launched) and preview the plan directly.
+- **2026-04-17: Idempotency.** Transaction step now hashes `{ workflow, emplId, effectiveDate, positionPool: "F" }` and calls `hasRecentlySucceeded` before submitting. On a duplicate match the step logs a warn, updates tracker + dashboard with `status: "Skipped (Duplicate)"`, and returns early. On success, `recordSuccess` appends to `.tracker/idempotency.jsonl`. 14-day default lookback — prevents re-submit on a crashed-then-retried run.
