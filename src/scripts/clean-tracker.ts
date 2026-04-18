@@ -127,6 +127,10 @@ export function cleanTrackerMain(argv: string[] = process.argv.slice(2)): {
     cleanScreenshots,
     cleanStepCache,
   } = parseArgs(argv);
+  if (!cleanTracker && !cleanScreenshots && !cleanStepCache) {
+    log.error("No prune targets selected — all of --no-screenshots, --no-step-cache, and a tracker-skipping combo disabled every target. Nothing to do.");
+    process.exit(1);
+  }
   let trackerDeleted = 0;
   let screenshotsDeleted = 0;
   let stepCacheDeleted = 0;

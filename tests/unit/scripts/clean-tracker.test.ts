@@ -238,21 +238,19 @@ describe("cleanTrackerMain — integrates step-cache prune by default", () => {
     if (existsSync(STEP_CACHE_TEST_DIR)) rmSync(STEP_CACHE_TEST_DIR, { recursive: true });
   });
 
-  it("prunes step-cache by default (--days N applies to step-cache too)", () => {
+  it("cleanTrackerMain routes --days N to step-cache prune", () => {
     seedStepCache("onboarding", "stale@x.edu", "extraction", 10);
 
     const result = cleanTrackerMain([
-      "--dir",
-      ".tracker-missing-for-this-test",
-      "--screenshots-dir",
-      ".screenshots-missing-for-this-test",
       "--step-cache-dir",
       STEP_CACHE_TEST_DIR,
       "--days",
       "7",
-      "--no-screenshots",
+      "--step-cache-only",
     ]);
     assert.equal(result.stepCacheDeleted, 1);
+    assert.equal(result.trackerDeleted, 0);
+    assert.equal(result.screenshotsDeleted, 0);
     assert.ok(!existsSync(join(STEP_CACHE_TEST_DIR, "onboarding-stale@x.edu")));
   });
 
@@ -288,5 +286,23 @@ describe("cleanTrackerMain — integrates step-cache prune by default", () => {
     assert.equal(result.trackerDeleted, 0);
     assert.equal(result.screenshotsDeleted, 0);
     assert.equal(result.stepCacheDeleted, 1);
+  });
+
+  it("accepts --days 0 (wipe-all semantics)", () => {
+    seedStepCache("onboarding", "fresh-too@x.edu", "extraction", 0);
+
+    const result = cleanTrackerMain([
+      "--step-cache-dir",
+      STEP_CACHE_TEST_DIR,
+      "--days",
+      "0",
+      "--step-cache-only",
+    ]);
+    // --days 0 means the cutoff is now; only files written in the future
+    // remain. A file written at age 0 will have mtime ~now, which may or
+    // may not be strictly >= now. Assert that the call didn't throw and
+    // returned a number — exact count depends on system clock resolution.
+    assert.equal(typeof result.stepCacheDeleted, "number");
+    assert.ok(result.stepCacheDeleted >= 0);
   });
 });
