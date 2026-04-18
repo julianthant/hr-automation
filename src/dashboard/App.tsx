@@ -38,7 +38,30 @@ export default function App() {
   const [date, setDate] = useState(initial.date);
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [runnerOpen, setRunnerOpen] = useState(false);
+  const [activeRunCount, setActiveRunCount] = useState(0);
   const prevStatusRef = useMemo(() => new Map<string, string>(), []);
+
+  // Poll /api/runs/active so the launcher can pulse when any run is in flight.
+  // 3s interval — cheap (just the count), and not visible chrome so jitter is fine.
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const r = await fetch("/api/runs/active");
+        if (!r.ok) return;
+        const list = (await r.json()) as Array<unknown>;
+        if (alive) setActiveRunCount(Array.isArray(list) ? list.length : 0);
+      } catch {
+        /* dashboard backend may be momentarily unreachable — silent */
+      }
+    };
+    tick();
+    const interval = setInterval(tick, 3000);
+    return () => {
+      alive = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   // Pre-flight check on mount
   usePreflight();
@@ -126,7 +149,12 @@ export default function App() {
         availableDates={availableDates}
         connected={connected}
         entryCounts={entryCounts}
-        rightSlot={<RunnerLauncher onClick={() => setRunnerOpen(true)} />}
+        rightSlot={
+          <RunnerLauncher
+            onClick={() => setRunnerOpen(true)}
+            active={activeRunCount > 0}
+          />
+        }
       />
       <RunnerDrawer
         open={runnerOpen}
