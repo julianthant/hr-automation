@@ -18,7 +18,7 @@ import { validateEmployeeData } from "./schema.js";
 import type { EmployeeData } from "./schema.js";
 import { buildTransactionPlan } from "./enter.js";
 import { buildDownloadPath, downloadCrmDocuments } from "./download.js";
-import { retryStep, RetryStepError } from "./retry.js";
+import { retryStep } from "./retry.js";
 import { runOnboardingLegacy } from "./workflow-legacy.js";
 import { z } from "zod/v4";
 
@@ -120,8 +120,7 @@ export const onboardingWorkflow = defineWorkflow({
 
     const crmPage = await ctx.page("crm");
 
-    await retryStep(
-      "CRM search",
+    await ctx.retry(
       async () => {
         log.step(`Searching for ${email}...`);
         await searchByEmail(crmPage, email);
@@ -129,29 +128,25 @@ export const onboardingWorkflow = defineWorkflow({
       { attempts: 3 },
     );
 
-    await retryStep(
-      "CRM select latest result",
+    await ctx.retry(
       () => selectLatestResult(crmPage),
       { attempts: 3 },
     );
 
-    const recordFields = await retryStep(
-      "CRM record-page extraction",
+    const recordFields = await ctx.retry(
       () => extractRecordPageFields(crmPage),
       { attempts: 2 },
     );
     if (recordFields.departmentNumber) ctx.updateData({ departmentNumber: recordFields.departmentNumber });
     if (recordFields.recruitmentNumber) ctx.updateData({ recruitmentNumber: recordFields.recruitmentNumber });
 
-    await retryStep(
-      "Navigate to UCPath Entry Sheet",
+    await ctx.retry(
       () => navigateToSection(crmPage, "UCPath Entry Sheet"),
       { attempts: 2 },
     );
 
     await ctx.step("extraction", async () => {
-      const rawData = await retryStep(
-        "Extract employee data",
+      const rawData = await ctx.retry(
         () => extractRawFields(crmPage),
         { attempts: 2 },
       );
@@ -191,15 +186,13 @@ export const onboardingWorkflow = defineWorkflow({
       if (!data) throw new Error("extraction did not produce data");
       const folderPath = buildDownloadPath(data.firstName, data.lastName, data.middleName);
       try {
-        await retryStep(
-          "Navigate to CRM record page for PDF viewer",
+        await ctx.retry(
           async () => {
             await crmPage.goBack({ waitUntil: "domcontentloaded", timeout: 15_000 });
           },
           { attempts: 2 },
         );
-        const saved = await retryStep(
-          "Download CRM PDFs",
+        const saved = await ctx.retry(
           () => downloadCrmDocuments(crmPage, folderPath, {}),
           { attempts: 2, backoffMs: 2_000 },
         );
@@ -225,8 +218,7 @@ export const onboardingWorkflow = defineWorkflow({
     const searchResult = await ctx.step("person-search", async () => {
       if (!data) throw new Error("extraction did not produce data");
       const ssnDigits = data.ssn?.replace(/-/g, "") ?? "";
-      return retryStep(
-        "UCPath person search",
+      return ctx.retry(
         () => searchPerson(ucpathPage, ssnDigits, data!.firstName, data!.lastName, data!.dob ?? ""),
         { attempts: 2 },
       );
@@ -265,8 +257,7 @@ export const onboardingWorkflow = defineWorkflow({
 
       // Search for existing profile first — avoids duplicate creation on re-runs.
       const ssnWithDashes = data.ssn!.replace(/(\d{3})(\d{2})(\d{4})/, "$1-$2-$3");
-      const searchResults = await retryStep(
-        "I-9 profile search",
+      const searchResults = await ctx.retry(
         () => searchI9Employee(i9Page, { ssn: ssnWithDashes }),
         { attempts: 2 },
       );
@@ -285,8 +276,7 @@ export const onboardingWorkflow = defineWorkflow({
       await i9Page.keyboard.press("Escape");
       await i9Page.waitForTimeout(500);
 
-      const i9Result = await retryStep(
-        "I-9 record creation",
+      const i9Result = await ctx.retry(
         async () => {
           const result = await createI9Employee(i9Page, {
             firstName: data!.firstName,
@@ -322,11 +312,13 @@ export const onboardingWorkflow = defineWorkflow({
         log.success("Transaction created successfully in UCPath");
         ctx.updateData({ status: "Done" });
       } catch (error) {
+        // `ctx.retry` rethrows the underlying error verbatim on exhaustion, so the
+        // old `RetryStepError` branch no longer fires on kernel-handler callsites.
+        // TransactionError still carries a useful step name; everything else
+        // falls through to `errorMessage()`.
         const errMsg = error instanceof TransactionError
           ? `Transaction failed at step "${error.step ?? "unknown"}": ${error.message}`
-          : error instanceof RetryStepError
-            ? error.message
-            : `Transaction failed: ${errorMessage(error)}`;
+          : `Transaction failed: ${errorMessage(error)}`;
         ctx.updateData({ status: "Failed", transactionError: errMsg });
         throw new Error(errMsg);
       }
