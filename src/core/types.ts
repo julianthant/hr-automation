@@ -139,4 +139,11 @@ export interface RunOpts {
   deriveItemId?: (item: unknown) => string
   /** Override tracker directory — defaults to `.tracker`. Mainly for test isolation. */
   trackerDir?: string
+  /**
+   * Override the workflow's `batch.poolSize` config at runtime. Used by CLIs
+   * exposing `--workers N` flags — e.g. `npm run kronos -- --workers 2` calls
+   * `runWorkflowBatch(wf, items, { poolSize: 2 })` to override the default.
+   * Ignored outside of pool-mode batch runs.
+   */
+  poolSize?: number
 }
