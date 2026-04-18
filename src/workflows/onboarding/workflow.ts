@@ -101,6 +101,12 @@ export const onboardingWorkflow = defineWorkflow({
   steps: onboardingSteps,
   schema: OnboardingInputSchema,
   authChain: "sequential",
+  // Pool mode: each worker gets its own Session with 3 browsers (CRM + UCPath +
+  // I9), 2 Duos per worker (I9 SSO has no 2FA). Pool size 4 matches the legacy
+  // default; overridable at runtime via `RunOpts.poolSize` from the `--parallel N`
+  // CLI flag. `preEmitPending: true` lets `runParallel` emit the full email queue
+  // to the dashboard before any worker's auth finishes.
+  batch: { mode: "pool", poolSize: 4, preEmitPending: true },
   // Matches pre-subsystem-D WF_CONFIG["onboarding"].detailFields. Dept/Position/
   // Wage/I9-profile are populated after extraction; email is populated from the
   // CLI input / schema. firstName+lastName drive getName so the dashboard shows
