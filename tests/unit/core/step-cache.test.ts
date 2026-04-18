@@ -224,7 +224,7 @@ describe("stepCacheGet — resilience", () => {
   });
 });
 
-describe("stepCacheSet — itemId safety", () => {
+describe("stepCacheSet — path-segment safety", () => {
   beforeEach(() => {
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
     mkdirSync(TEST_DIR, { recursive: true });
@@ -248,6 +248,24 @@ describe("stepCacheSet — itemId safety", () => {
     it(`throws on unsafe itemId: ${label}`, () => {
       assert.throws(
         () => stepCacheSet("onboarding", itemId, "extraction", { v: 1 }, { dir: TEST_DIR }),
+        /step-cache/,
+      );
+    });
+  }
+
+  for (const [label, workflow] of unsafeItemIds) {
+    it(`throws on unsafe workflow: ${label}`, () => {
+      assert.throws(
+        () => stepCacheSet(workflow, "test@x.edu", "extraction", { v: 1 }, { dir: TEST_DIR }),
+        /step-cache/,
+      );
+    });
+  }
+
+  for (const [label, stepName] of unsafeItemIds) {
+    it(`throws on unsafe stepName: ${label}`, () => {
+      assert.throws(
+        () => stepCacheSet("onboarding", "test@x.edu", stepName, { v: 1 }, { dir: TEST_DIR }),
         /step-cache/,
       );
     });
@@ -336,6 +354,44 @@ describe("stepCacheClear", () => {
     assert.doesNotThrow(() =>
       stepCacheClear("onboarding", "nobody@x.edu", "extraction", TEST_DIR),
     );
+    assert.doesNotThrow(() =>
+      stepCacheClear("onboarding", "nobody@x.edu", undefined, TEST_DIR),
+    );
+  });
+});
+
+describe("stepCacheClear — path-segment safety", () => {
+  beforeEach(() => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+    mkdirSync(TEST_DIR, { recursive: true });
+  });
+  afterEach(() => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+  });
+
+  it("throws on unsafe workflow", () => {
+    assert.throws(
+      () => stepCacheClear("../../hack", "test@x.edu", "extraction", TEST_DIR),
+      /step-cache/,
+    );
+  });
+
+  it("throws on unsafe itemId", () => {
+    assert.throws(
+      () => stepCacheClear("onboarding", "foo/bar", "extraction", TEST_DIR),
+      /step-cache/,
+    );
+  });
+
+  it("throws on unsafe stepName (when provided)", () => {
+    assert.throws(
+      () => stepCacheClear("onboarding", "test@x.edu", "../../escape", TEST_DIR),
+      /step-cache/,
+    );
+  });
+
+  it("does NOT throw when stepName is omitted AND workflow+itemId are safe", () => {
+    // No throw, no-op on missing item dir.
     assert.doesNotThrow(() =>
       stepCacheClear("onboarding", "nobody@x.edu", undefined, TEST_DIR),
     );
