@@ -20,6 +20,7 @@
     "separation:dry": "node --import tsx/esm --env-file=.env src/cli.ts separation --dry-run",
     "dashboard": "node --import tsx/esm --env-file=.env src/cli.ts dashboard",
     "dashboard:prod": "node --import tsx/esm --env-file=.env src/cli.ts dashboard --prod",
+    "clean:tracker": "node --import tsx/esm src/scripts/clean-tracker.ts",
     "build:dashboard": "node node_modules/vite/bin/vite.js build --config vite.dashboard.config.ts",
     "dev:dashboard": "node node_modules/vite/bin/vite.js --config vite.dashboard.config.ts",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",

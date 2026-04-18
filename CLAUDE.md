@@ -40,6 +40,8 @@ npm run dashboard:prod       # Serve pre-built dashboard from SSE only
 
 # Export / Utilities
 tsx --env-file=.env src/cli.ts export <workflow>   # Dump JSONL tracker to xlsx
+npm run clean:tracker                              # Prune .tracker/*.jsonl older than 7 days
+npm run clean:tracker -- --days 30 --dir .tracker  # Custom age + dir
 npm run test-login                                 # Smoke test UCPath + CRM auth
 npm run typecheck                                  # Type-check src/
 npm run typecheck:all                              # Type-check src/ + tests

@@ -320,7 +320,8 @@ program
   .description("Start the live monitoring dashboard (run in a separate terminal)")
   .option("-p, --port <port>", "SSE server port", parseInt)
   .option("--prod", "Serve built dashboard instead of Vite dev server")
-  .action(async (opts: { port?: number; prod?: boolean }) => {
+  .option("--no-clean", "Skip the one-time startup prune of old tracker files")
+  .action(async (opts: { port?: number; prod?: boolean; clean?: boolean }) => {
     // Trigger workflow metadata registration for every workflow — the dashboard's
     // /api/workflow-definitions endpoint reads from the registry, and that
     // registry is populated at module load via defineWorkflow (kernel) /
@@ -337,7 +338,8 @@ program
 
     const { startDashboard } = await import("./tracker/dashboard.js");
     const port = opts.port ?? 3838;
-    startDashboard("all", port);
+    // Commander's --no-clean sets opts.clean === false; default is `undefined` → clean = true.
+    startDashboard("all", port, { noClean: opts.clean === false });
 
     if (opts.prod) {
       // Production mode: serve built HTML from SSE server only
