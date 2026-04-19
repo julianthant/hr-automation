@@ -75,7 +75,7 @@ export function LogStream({ logs, loading }: LogStreamProps) {
       </div>
 
       {/* Log lines */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto py-3">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto py-3 border-b border-border">
         {loading && filtered.length === 0 ? (
           <div className="space-y-[6px] px-6 py-3">
             {Array.from({ length: 12 }).map((_, i) => (
@@ -102,29 +102,38 @@ export function LogStream({ logs, loading }: LogStreamProps) {
         )}
       </div>
 
-      {/* Footer */}
-      <div className="flex items-center justify-between px-6 py-2.5 border-t border-border text-[13px] text-muted-foreground flex-shrink-0">
-        <div className="flex items-center gap-2.5">
-          <div className="w-[7px] h-[7px] rounded-full bg-primary animate-pulse" />
-          <span>Streaming</span>
-          <span className="opacity-40">&middot;</span>
-          <span>{filtered.length} entries</span>
+      {/* Footer — h-[41px] so its top border aligns with SelectorHealth
+          header on the right rail across the column gap. */}
+      <div className="h-[41px] flex items-center justify-between px-6 text-[12px] text-muted-foreground flex-shrink-0">
+        <div className="flex items-center gap-2 leading-none">
+          <span className="relative flex items-center justify-center w-[7px] h-[7px]">
+            <span className="absolute inset-0 rounded-full bg-primary/50 animate-ping" />
+            <span className="relative w-[7px] h-[7px] rounded-full bg-primary" />
+          </span>
+          <span className="font-medium">Streaming</span>
+          <span className="text-border">•</span>
+          <span className="font-mono tabular-nums">{filtered.length}</span>
+          <span>entries</span>
           {collapsedCount > 0 && (
             <>
-              <span className="opacity-40">&middot;</span>
-              <span>{collapsedCount} collapsed</span>
+              <span className="text-border">•</span>
+              <span className="font-mono tabular-nums">{collapsedCount}</span>
+              <span>collapsed</span>
             </>
           )}
         </div>
         <button
           onClick={() => setAutoScroll((v) => !v)}
+          aria-pressed={autoScroll}
           className={cn(
-            "text-xs px-3 py-1 rounded-md border border-border font-medium cursor-pointer transition-all",
-            "bg-secondary text-muted-foreground",
-            autoScroll && "bg-accent text-accent-foreground border-primary",
+            "h-6 text-[11px] px-2.5 rounded-md border font-medium cursor-pointer transition-colors leading-none flex items-center gap-1.5",
+            autoScroll
+              ? "bg-primary/10 text-primary border-primary/40 hover:bg-primary/15"
+              : "bg-secondary text-muted-foreground border-border hover:text-foreground hover:border-border/80",
           )}
         >
-          ↧ Auto-scroll
+          <span aria-hidden>↧</span>
+          Auto-scroll
         </button>
       </div>
     </>

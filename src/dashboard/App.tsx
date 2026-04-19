@@ -49,14 +49,16 @@ export default function App() {
   // SSE entries
   const { entries, workflows, wfCounts, connected, loading } = useEntries(workflow, date);
 
-  // Fetch available dates when workflow changes
+  // Fetch available dates when workflow changes. The selected date is
+  // preserved across workflow switches — operators want to stay on the date
+  // they were investigating, even if the new workflow has no data there
+  // (the queue will simply read empty for that date). The URL already
+  // persists `date` across reloads via syncUrlState below.
   useEffect(() => {
     fetch("/api/dates?workflow=" + encodeURIComponent(workflow))
       .then((r) => r.json())
       .then((dates: string[]) => {
         setAvailableDates(dates);
-        const today = new Date().toISOString().slice(0, 10);
-        if (!dates.includes(date)) setDate(dates[0] || today);
       })
       .catch(() => {});
   }, [workflow]);

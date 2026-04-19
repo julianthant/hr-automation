@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Search, Inbox } from "lucide-react";
+import { Search, Inbox, X } from "lucide-react";
 import { StatPills } from "./StatPills";
 import { EntryItem } from "./EntryItem";
 import { EmptyState } from "./EmptyState";
@@ -14,6 +14,18 @@ interface QueuePanelProps {
   loading: boolean;
 }
 
+/**
+ * QueuePanel
+ *  - Header card (one cohesive unit, no internal divider): search input on
+ *    top, status filter strip below.
+ *  - Entry-count divider row: "N entries" — visually matches the LogPanel's
+ *    StepPipeline row across the gap so horizontal dividers align.
+ *  - Scrollable entry list.
+ *
+ * Header height is sized to make its bottom border land at the same Y as the
+ * LogPanel's StepPipeline border on the right, so the two halves of the
+ * dashboard read as one continuous grid.
+ */
 export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }: QueuePanelProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -37,24 +49,40 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
 
   return (
     <div className="w-[320px] min-[1440px]:w-[400px] 2xl:w-[480px] flex-shrink-0 border-r border-border flex flex-col bg-background">
-      {/* Search — height locked to match LogPanel header (py-4 + text-lg ≈ 60px) */}
-      <div className="h-[60px] flex items-center px-3 min-[1440px]:px-5 border-b border-border flex-shrink-0">
-        <div className="flex items-center gap-2.5 bg-input border border-border rounded-lg px-3.5 py-2 w-full focus-within:border-primary transition-colors">
-          <Search className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+      {/* ── Search row — h-[60px] matches the LogPanel header height across
+            the gap so the first horizontal divider aligns. ── */}
+      <div className="h-[60px] flex items-center px-3 min-[1440px]:px-4 border-b border-border bg-card flex-shrink-0">
+        <div className="flex items-center gap-2 bg-secondary border border-border rounded-lg px-3 py-2 w-full focus-within:border-primary transition-colors">
+          <Search aria-hidden className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
           <input
             type="text"
-            placeholder="Search by name, email, or ID..."
+            placeholder="Search by name, email, or ID…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="flex-1 bg-transparent border-none outline-none text-foreground text-sm font-sans placeholder:text-muted-foreground"
+            aria-label="Search queue"
+            className="flex-1 bg-transparent border-none outline-none text-foreground text-sm font-sans placeholder:text-muted-foreground min-w-0"
           />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              aria-label="Clear search"
+              className="flex-shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Stats */}
-      <StatPills entries={entries} activeFilter={statusFilter} onFilter={setStatusFilter} />
+      {/* ── Status filter strip — h-[69.5px] makes the section's bottom
+            border land exactly at the LogPanel's email-row border across
+            the column gap (search 60 + pills 69.5 = panel-top + 129.5). ── */}
+      <div className="h-[69.5px] flex items-center px-3 min-[1440px]:px-4 py-2 border-b border-border bg-card/60 flex-shrink-0">
+        <StatPills entries={entries} activeFilter={statusFilter} onFilter={setStatusFilter} />
+      </div>
 
-      {/* Entry list */}
+      {/* ── Entry list ── */}
       <div className="flex-1 overflow-y-auto">
         {loading ? (
           <div className="space-y-0">

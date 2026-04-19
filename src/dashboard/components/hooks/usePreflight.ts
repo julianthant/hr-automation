@@ -7,7 +7,21 @@ interface PreflightCheck {
   detail: string;
 }
 
-/** Fetch /api/preflight on mount and show a toast with results. */
+/**
+ * Sonner-toast preflight result on dashboard mount.
+ *
+ * Quiet by design:
+ *  - **Pass** path is silent. The operator doesn't need a "things are
+ *    working" confirmation on every page reload — the live dot in the
+ *    TopBar already conveys that.
+ *  - **Fail** path fires a warning toast with the broken checks itemized,
+ *    suppressed for the rest of the tab's session via sessionStorage so a
+ *    reload doesn't re-toast the same problems. The signature combines
+ *    every failed check name into a stable key so a NEW failure (different
+ *    check) does fire even after a previous one was acknowledged.
+ */
+const SS_KEY = "preflight:lastFailureSig";
+
 export function usePreflight(): void {
   const ran = useRef(false);
 
@@ -18,13 +32,25 @@ export function usePreflight(): void {
     fetch("/api/preflight")
       .then((r) => r.json())
       .then(({ checks }: { checks: PreflightCheck[] }) => {
-        const allPassed = checks.every((c) => c.passed);
-        const desc = checks.map((c) => `${c.passed ? "\u2713" : "\u2717"} ${c.detail}`).join(" \u00b7 ");
-        if (allPassed) {
-          toast.info("Pre-flight checks passed", { description: desc, duration: 5000 });
-        } else {
-          toast.warning("Pre-flight issues", { description: desc, duration: 8000 });
+        const failed = checks.filter((c) => !c.passed);
+        if (failed.length === 0) return; // pass → silent
+
+        const sig = failed.map((c) => c.name).sort().join("|");
+        try {
+          if (sessionStorage.getItem(SS_KEY) === sig) return;
+          sessionStorage.setItem(SS_KEY, sig);
+        } catch {
+          // sessionStorage may be blocked (private mode) — fall through
+          // and just toast every reload in that case.
         }
+
+        toast.warning(
+          `Pre-flight: ${failed.length} issue${failed.length === 1 ? "" : "s"}`,
+          {
+            description: failed.map((c) => c.detail).join(" · "),
+            duration: 10_000,
+          },
+        );
       })
       .catch(() => {
         // Dashboard backend not running — ignore silently
