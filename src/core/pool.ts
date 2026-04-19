@@ -1,12 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { RegisteredWorkflow, BatchResult, RunOpts } from './types.js'
 import { Session } from './session.js'
-import { Stepper } from './stepper.js'
-import { makeCtx } from './ctx.js'
-import { deriveItemId, buildTrackerOpts } from './workflow.js'
-import { trackEvent, withTrackedWorkflow } from '../tracker/jsonl.js'
-import { withLogContext } from '../utils/log.js'
-import { classifyError } from '../utils/errors.js'
+import { deriveItemId, runOneItem } from './workflow.js'
 
 interface PoolItem<TData> {
   item: TData
@@ -60,78 +55,18 @@ export async function runWorkflowPool<TData, TSteps extends readonly string[]>(
         const next = queue.shift()
         if (next === undefined) break
         const { item, itemId, runId } = next
-
-        if (opts.trackerStub) {
-          const stepper = new Stepper({
-            workflow: wf.config.name,
-            itemId,
-            runId,
-            emitStep: () => {},
-            emitData: () => {},
-            emitFailed: () => {},
-            screenshotFn: async (stepName) => {
-              await session.screenshotAll(`${wf.config.name}-${itemId}-${stepName}`)
-            },
-          })
-          const ctx = makeCtx<TSteps, TData>({ session, stepper, isBatch: true, runId })
-          try {
-            await wf.config.handler(ctx, item)
-            result.succeeded++
-          } catch (err) {
-            result.failed++
-            result.errors.push({ item, error: classifyError(err) })
-          }
-          continue
-        }
-
-        // Real-tracker path: wrap each item in withLogContext + withTrackedWorkflow
-        // so each worker's items are reported live to the dashboard. Emit the
-        // initial `pending` row here (unless caller opted into preEmitPending)
-        // so the dashboard sees the row before the first step runs; withTrackedWorkflow
-        // skips its own pending emit when preAssignedRunId is provided.
-        if (!callerPreEmits) {
-          trackEvent(
-            {
-              workflow: wf.config.name,
-              timestamp: new Date().toISOString(),
-              id: itemId,
-              runId,
-              status: 'pending',
-            },
-            opts.trackerDir,
-          )
-        }
-        try {
-          await withLogContext(wf.config.name, itemId, async () => {
-            await withTrackedWorkflow(
-              wf.config.name,
-              itemId,
-              {},
-              async (setStep, updateData) => {
-                const stepper = new Stepper({
-                  workflow: wf.config.name,
-                  itemId,
-                  runId,
-                  emitStep: setStep,
-                  emitData: updateData,
-                  emitFailed: (step, error) => setStep(`${step}:failed:${error}`),
-                  screenshotFn: async (stepName) => {
-                    await session.screenshotAll(`${wf.config.name}-${itemId}-${stepName}`)
-                  },
-                })
-                const ctx = makeCtx<TSteps, TData>({ session, stepper, isBatch: true, runId })
-                await wf.config.handler(ctx, item)
-              },
-              runId,
-              opts.trackerDir,
-              buildTrackerOpts(wf),
-            )
-          }, opts.trackerDir)
-          result.succeeded++
-        } catch (err) {
-          result.failed++
-          result.errors.push({ item, error: classifyError(err) })
-        }
+        const r = await runOneItem({
+          wf,
+          session,
+          item,
+          itemId,
+          runId,
+          trackerStub: opts.trackerStub,
+          trackerDir: opts.trackerDir,
+          callerPreEmits,
+        })
+        if (r.ok) result.succeeded++
+        else { result.failed++; result.errors.push({ item, error: r.error }) }
       }
     } finally {
       await session.close()
