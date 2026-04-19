@@ -10,6 +10,19 @@ import { classifyError } from '../utils/errors.js'
 import { runWorkflowPool } from './pool.js'
 
 /**
+ * Coerce an arbitrary key → unknown map into the `Record<string, string>`
+ * shape that withTrackedWorkflow's `initialData` expects. Non-string values
+ * are stringified via String(); null/undefined become empty string.
+ */
+function stringifyMap(d: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(d)) {
+    out[k] = v == null ? '' : String(v)
+  }
+  return out
+}
+
+/**
  * Build the richness-hook bundle for `withTrackedWorkflow` from a workflow
  * config. Extracted so all three modes (runWorkflow, runWorkflowBatch,
  * runWorkflowPool) pass the identical shape — keeps the runtime warning,
@@ -248,6 +261,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
   // writes a `failed` tracker entry + log entry before exiting. A kernel
   // handler on top would just duplicate cleanup, so don't install one.
   await withLogContext(wf.config.name, String(itemId), async () => {
+    const seedData = wf.config.initialData?.(data) ?? {}
     await withTrackedWorkflow(
       wf.config.name,
       String(itemId),
@@ -258,6 +272,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
         ...buildTrackerOpts(wf),
         preAssignedRunId: opts.preAssignedRunId,
         dir: opts.trackerDir,
+        initialData: stringifyMap(seedData),
       },
     )
   }, opts.trackerDir)
