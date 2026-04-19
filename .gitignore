@@ -32,9 +32,6 @@ node_modules/
 # Dashboard log
 .dashboard.log
 
-# Scheduler user config (schedule.example.yaml is checked in; schedule.yaml is user-owned)
-schedule.yaml
-
 # Playwright CLI
 .playwright-cli/
 

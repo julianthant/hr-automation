@@ -15,8 +15,7 @@ src/scripts/
 │   └── export-schemas.ts — per-workflow Zod → JSON Schema export to schemas/
 ├── ops/              ← operational tooling
 │   ├── clean-tracker.ts  — prunes .tracker JSONL + .screenshots PNGs + step-cache
-│   ├── setup.ts          — first-use environment validation wizard
-│   └── scheduler.ts      — cron-style scheduler CLI for recurring workflow runs
+│   └── setup.ts          — first-use environment validation wizard
 └── debug/            ← manual one-off dev tools
     └── kronos.ts         — auth both Kronos systems + map/test/explore subcommands
 
@@ -42,7 +41,6 @@ src/workflows/emergency-contact/scripts/   ← workflow-specific dev tools
 
 - **`clean-tracker.ts`** — Prunes `.tracker/*.jsonl`, `.screenshots/*.png`, AND `.tracker/step-cache/**` files older than N days. Flags: `--days N`, `--dir`, `--screenshots-dir`, `--step-cache-dir`, `--no-screenshots`, `--no-step-cache`, `--screenshots-only`, `--step-cache-only`. Default cleans all three. Wired as `npm run clean:tracker`. Exports `cleanTrackerMain` for tests.
 - **`setup.ts`** — First-use environment validation wizard. Fixed checks for `.env` keys (existence only, never values), Node ≥ 20, `tsx`, Playwright chromium cache, `.tracker/` + `.screenshots/` + `~/Downloads/onboarding/` writability, macOS notification capability (warn-only on non-darwin), optional `jq`. Prints `[ok]` / `[warn]` / `[fail]` per check with a fix suggestion. Exits 0 if all pass or only warnings; exits 1 on any failure. Wired as `npm run setup`.
-- **`scheduler.ts`** — CRUD CLI for cron-style scheduled workflow runs (list/create/delete/run-now). Wired as `npm run schedule`. Exports `schedulerCliMain` for tests.
 
 ### `debug/`
 
@@ -70,7 +68,6 @@ Operational scripts have npm aliases (preferred):
 ```bash
 npm run setup
 npm run clean:tracker
-npm run schedule
 npm run schemas:export
 npm run new:workflow -- <name> [--systems sys1,sys2]
 npm run selectors:catalog
