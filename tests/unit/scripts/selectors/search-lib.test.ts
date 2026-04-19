@@ -131,3 +131,52 @@ test("parseLessonsMarkdown extracts H2 sections with tags", () => {
   assert.deepEqual(items[0].tags, ["comp", "rate", "dropdown", "peoplesoft"]);
   assert.equal(items[0].ref, "src/systems/ucpath/LESSONS.md");
 });
+
+test("parseLessonsMarkdown does NOT split on body `## Sub-heading` lines (only date-prefixed H2s)", () => {
+  // A single lesson body that contains an `## What worked` sub-heading. The
+  // old splitter (`/^## /m`) treated this as a second lesson and produced a
+  // malformed entry. The fixed splitter only fires on date-prefixed `^## YYYY-MM-DD`.
+  const md = `# kuali lessons
+
+## 2026-04-15 — Date input ignores fill() intermittently
+
+**Tried:** \`page.fill("#date-input", value)\`
+**Failed because:** Kuali clears the field after fill on slow connections.
+
+## What worked instead
+
+Type the value character-by-character and re-read after each keystroke.
+
+**Fix:** type() with re-read verification
+**Tags:** kuali, date, fill, type
+`;
+  const items = parseLessonsMarkdown("kuali", md);
+  assert.equal(items.length, 1, "body `## What worked` must NOT split the lesson");
+  assert.equal(items[0].title, "Date input ignores fill() intermittently");
+  assert.deepEqual(items[0].tags, ["kuali", "date", "fill", "type"]);
+  // The body should still contain the sub-heading text (still searchable).
+  assert.match(items[0].body, /What worked instead/);
+});
+
+test("parseLessonsMarkdown splits multiple date-prefixed lessons", () => {
+  const md = `# k lessons
+
+## 2026-04-10 — First lesson title
+**Tried:** A
+**Failed because:** B
+**Fix:** C
+**Tags:** alpha
+
+## 2026-04-12 — Second lesson title
+**Tried:** D
+**Failed because:** E
+**Fix:** F
+**Tags:** beta
+`;
+  const items = parseLessonsMarkdown("kuali", md);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].title, "First lesson title");
+  assert.equal(items[1].title, "Second lesson title");
+  assert.deepEqual(items[0].tags, ["alpha"]);
+  assert.deepEqual(items[1].tags, ["beta"]);
+});
