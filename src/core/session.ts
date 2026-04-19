@@ -1,7 +1,7 @@
 import type { Page, Browser, BrowserContext } from 'playwright'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
-import type { SystemConfig } from './types.js'
+import type { SystemConfig, SessionObserver } from './types.js'
 import { launchBrowser } from '../browser/launch.js'
 import { computeTileLayout } from '../browser/tiling.js'
 import { log } from '../utils/log.js'
@@ -23,6 +23,8 @@ export interface LaunchOpts {
   tiling?: 'auto' | 'single' | 'side-by-side'
   /** Injection point for tests. */
   launchFn?: (opts: LaunchOneOpts) => Promise<SystemSlot>
+  /** Observability bundle — see SessionObserver in types.ts. */
+  observer?: SessionObserver
 }
 
 interface LaunchOneOpts {
@@ -54,6 +56,12 @@ export class Session {
     const browsers = new Map<string, SystemSlot>()
     systems.forEach((s, i) => browsers.set(s.id, slots[i]))
 
+    // Fire onBrowserLaunch for each system. browserId === systemId today
+    // (one browser per system); if that changes later, mint UUIDs here.
+    for (const s of systems) {
+      opts.observer?.onBrowserLaunch?.(s.id, s.id)
+    }
+
     // Tile windows using actual screen dimensions (detected from first browser via CDP).
     // Skip when a custom launchFn is provided (test injection — no real browsers to tile).
     if (tiling !== 'single' && systems.length > 1 && !opts.launchFn) {
@@ -66,14 +74,24 @@ export class Session {
       for (const s of systems) {
         const slot = browsers.get(s.id)!
         await slot.page.bringToFront()
-        await loginWithRetry(s, slot.page)
+        opts.observer?.onAuthStart?.(s.id, s.id)
+        await loginWithRetry(
+          s, slot.page, opts.observer?.instance,
+          () => opts.observer?.onAuthFailed?.(s.id, s.id),
+        )
+        opts.observer?.onAuthComplete?.(s.id, s.id)
       }
       systems.forEach((s) => readyPromises.set(s.id, Promise.resolve()))
     } else {
       // Interleaved: auth system[0] blocking; chain the rest in background.
       const firstSlot = browsers.get(systems[0].id)!
       await firstSlot.page.bringToFront()
-      await loginWithRetry(systems[0], firstSlot.page)
+      opts.observer?.onAuthStart?.(systems[0].id, systems[0].id)
+      await loginWithRetry(
+        systems[0], firstSlot.page, opts.observer?.instance,
+        () => opts.observer?.onAuthFailed?.(systems[0].id, systems[0].id),
+      )
+      opts.observer?.onAuthComplete?.(systems[0].id, systems[0].id)
       readyPromises.set(systems[0].id, Promise.resolve())
 
       let prev: Promise<void> = Promise.resolve()
@@ -81,7 +99,15 @@ export class Session {
         const sys = systems[i]
         const slot = browsers.get(sys.id)!
         // Each chain step ignores predecessor failure so one bad auth doesn't block the next.
-        const p = prev.catch(() => {}).then(() => slot.page.bringToFront()).then(() => loginWithRetry(sys, slot.page))
+        const p = prev
+          .catch(() => {})
+          .then(() => slot.page.bringToFront())
+          .then(() => { opts.observer?.onAuthStart?.(sys.id, sys.id) })
+          .then(() => loginWithRetry(
+            sys, slot.page, opts.observer?.instance,
+            () => opts.observer?.onAuthFailed?.(sys.id, sys.id),
+          ))
+          .then(() => { opts.observer?.onAuthComplete?.(sys.id, sys.id) })
         // Prevent unhandled rejection warnings if nobody consumes this promise.
         p.catch(() => {})
         readyPromises.set(sys.id, p)
@@ -196,10 +222,15 @@ async function defaultLaunchOne(opts: LaunchOneOpts): Promise<SystemSlot> {
 
 const AUTH_MAX_ATTEMPTS = 3;
 
-async function loginWithRetry(system: SystemConfig, page: Page): Promise<void> {
+async function loginWithRetry(
+  system: SystemConfig,
+  page: Page,
+  instance?: string,
+  onFailed?: () => void,
+): Promise<void> {
   for (let attempt = 1; attempt <= AUTH_MAX_ATTEMPTS; attempt++) {
     try {
-      await system.login(page)
+      await system.login(page, instance)
       return
     } catch (err) {
       if (attempt < AUTH_MAX_ATTEMPTS) {
@@ -207,6 +238,7 @@ async function loginWithRetry(system: SystemConfig, page: Page): Promise<void> {
         await page.goto('about:blank').catch(() => {})
         await page.waitForTimeout(1_000)
       } else {
+        onFailed?.()
         throw err
       }
     }

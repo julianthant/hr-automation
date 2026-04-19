@@ -280,3 +280,64 @@ function fakeLaunch() {
   const browser = { close: async () => {} } as unknown as import('playwright').Browser
   return Promise.resolve({ page, context, browser })
 }
+
+test('session.launch: observer hooks fire in correct order (sequential, success)', async () => {
+  const events: string[] = []
+  const loginsReceived: Array<string | undefined> = []
+  const mkSys = (id: string): SystemConfig => ({
+    id,
+    login: async (_page, instance) => {
+      loginsReceived.push(instance)
+      events.push(`login:${id}`)
+    },
+  })
+
+  const observer = {
+    instance: 'Test 1',
+    onBrowserLaunch: (id: string, bid: string) => events.push(`browser:${id}:${bid}`),
+    onAuthStart: (id: string, bid: string) => events.push(`authStart:${id}:${bid}`),
+    onAuthComplete: (id: string, bid: string) => events.push(`authComplete:${id}:${bid}`),
+    onAuthFailed: (id: string, bid: string) => events.push(`authFailed:${id}:${bid}`),
+  }
+
+  const s = await Session.launch(
+    [mkSys('a'), mkSys('b')],
+    { authChain: 'sequential', launchFn: fakeLaunch, observer },
+  )
+
+  assert.deepEqual(events, [
+    'browser:a:a',
+    'browser:b:b',
+    'authStart:a:a',
+    'login:a',
+    'authComplete:a:a',
+    'authStart:b:b',
+    'login:b',
+    'authComplete:b:b',
+  ])
+  assert.deepEqual(loginsReceived, ['Test 1', 'Test 1'])
+  await s.close()
+})
+
+test('session.launch: observer onAuthFailed fires after all retries exhaust', async () => {
+  const events: string[] = []
+  const sys: SystemConfig = {
+    id: 'flaky',
+    login: async () => { throw new Error('duo timeout') },
+  }
+
+  const observer = {
+    onAuthStart: (id: string) => events.push(`start:${id}`),
+    onAuthFailed: (id: string) => events.push(`failed:${id}`),
+    onAuthComplete: (id: string) => events.push(`complete:${id}`),
+  }
+
+  await assert.rejects(
+    () => Session.launch([sys], { launchFn: fakeLaunch, observer }),
+    /duo timeout/,
+  )
+
+  // onAuthStart fires once (before retry loop), onAuthFailed fires once (after exhaustion),
+  // onAuthComplete never fires.
+  assert.deepEqual(events, ['start:flaky', 'failed:flaky'])
+})
