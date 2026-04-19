@@ -22,7 +22,6 @@
     "dashboard:prod": "node --import tsx/esm --env-file=.env src/cli.ts dashboard --prod",
     "clean:tracker": "node --import tsx/esm src/scripts/ops/clean-tracker.ts",
     "setup": "node --import tsx/esm --env-file=.env src/scripts/ops/setup.ts",
-    "schedule": "node --import tsx/esm --env-file=.env src/scripts/ops/scheduler.ts",
     "schemas:export": "node --import tsx/esm --env-file=.env src/scripts/codegen/export-schemas.ts",
     "new:workflow": "node --import tsx/esm src/scripts/codegen/new-workflow.ts",
     "selectors:catalog": "node --import tsx/esm src/scripts/selectors/catalog.ts",

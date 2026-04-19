@@ -313,7 +313,7 @@ These items appear in plans/improvements docs but were not shipped in 2026-04-18
 - **Step-cache shipped 2026-04-18; kernel-level resume deferred indefinitely.** `src/core/step-cache.ts` is the primitive; onboarding's `extraction` + `pdf-download` opt in. Saves ~2–3 min on onboarding retry-after-failure. A full kernel `Ctx.step(name, fn, { resumable: true })` opt-in + `npm run resume <runId>` CLI was explicitly scoped out because onboarding's handler holds state in local closures (`let data: EmployeeData | null`) — kernel-level step-skip would require a ~100-line handler restructure for no additional user-visible savings. Design doc: `docs/superpowers/specs/2026-04-18-step-cache-design.md`.
 - **Audit log** (improvements §7.1). Append-only hash-chained log of every run + transaction.
 - **Quarterly selector verified-date lint** (improvements §6.1). All current dates are within 33 days; this is preventative, not urgent.
-- **Migration of `cleanTrackerMain` / `schedulerCliMain` exports → internal.** Audit flagged these as exported but unused outside their own modules; left alone (low impact).
+- **Migration of `cleanTrackerMain` export → internal.** Audit flagged as exported but unused outside its own module; left alone (low impact).
 
 See `docs/handoff-2026-04-18.md` (uncommitted; in working tree) for the full pre-existing pending-task list with priority ratings.
 
