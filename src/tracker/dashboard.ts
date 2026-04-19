@@ -956,10 +956,16 @@ export function startDashboard(
         });
 
         const workflows = listWorkflows();
-        // Count deduped entries per workflow for dropdown badges
+        // Count unique items per workflow for dropdown badges, scoped to the
+        // selected date. Dedupe by `id` so multiple runs of the same item
+        // (retries) collapse into one — the operator wants "how many distinct
+        // subjects on this date," not "how many attempts." Using readEntries(w)
+        // — which only reads today's file — would show 0 when viewing a past
+        // date, even if that date had real activity.
         const wfCounts: Record<string, number> = {};
+        const targetDate = date || today;
         for (const w of workflows) {
-          const all = readEntries(w);
+          const all = readEntriesForDate(w, targetDate);
           const ids = new Set(all.map((e) => e.id));
           wfCounts[w] = ids.size;
         }
@@ -982,7 +988,43 @@ export function startDashboard(
       const id = url.searchParams.get("id") ?? "";
       const date = url.searchParams.get("date") ?? undefined;
       res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-      res.end(JSON.stringify(readRunsForId(wf, id, date)));
+
+      // Attach per-run step durations + first/last log timestamps so the
+      // frontend can render the correct timeline + Started/Elapsed for
+      // whichever run the operator picks in RunSelector. Without this, the
+      // deduped entry (latest run) bleeds its timings into every past run.
+      const runs = readRunsForId(wf, id, date);
+
+      const allForItem = date
+        ? readEntriesForDate(wf, date).filter((e) => e.id === id)
+        : readEntries(wf).filter((e) => e.id === id);
+      const historyByRun = new Map<string, StepDurationEntry[]>();
+      for (const e of allForItem) {
+        const rid = e.runId || `${e.id}#1`;
+        const bucket = historyByRun.get(rid);
+        const slim: StepDurationEntry = { timestamp: e.timestamp, status: e.status, step: e.step };
+        if (bucket) bucket.push(slim);
+        else historyByRun.set(rid, [slim]);
+      }
+
+      const allLogs = date
+        ? readLogEntriesForDate(wf, id, date)
+        : readLogEntries(wf, id);
+      const logFirst = new Map<string, string>();
+      const logLast = new Map<string, string>();
+      for (const l of allLogs) {
+        const rid = l.runId || `${l.itemId}#1`;
+        if (!logFirst.has(rid)) logFirst.set(rid, l.ts);
+        logLast.set(rid, l.ts);
+      }
+
+      const enrichedRuns = runs.map((r) => ({
+        ...r,
+        stepDurations: computeStepDurations(historyByRun.get(r.runId) ?? []),
+        firstLogTs: logFirst.get(r.runId),
+        lastLogTs: logLast.get(r.runId),
+      }));
+      res.end(JSON.stringify(enrichedRuns));
       return;
     }
 
@@ -1066,7 +1108,9 @@ export function startDashboard(
     }
 
     if (url.pathname === "/api/preflight") {
-      const deleted = cleanOldTrackerFiles(7);
+      // 30-day floor so the operator always has at least the last month
+      // of workflow history available for retro investigation.
+      const deleted = cleanOldTrackerFiles(30);
 
       // Only delete sessions.jsonl if it hasn't been touched for >24h (truly stale).
       // Stale workflows from crashed processes are handled by rebuildSessionState

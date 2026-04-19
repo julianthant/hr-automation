@@ -97,6 +97,18 @@ export interface RunInfo {
   status: string;
   step?: string;
   timestamp: string;
+  /** Per-step durations in ms for THIS run, computed server-side from the
+   *  run's own JSONL history. Use this (not the deduped entry's field) when
+   *  rendering the timeline, so that picking an older run via RunSelector
+   *  shows that run's actual timing instead of the latest run's. */
+  stepDurations?: Record<string, number>;
+  /** First log timestamp observed in THIS run. Used for the "Started" cell
+   *  and Elapsed base so the header timing switches with the run selector
+   *  instead of always reflecting the latest run. */
+  firstLogTs?: string;
+  /** Last log timestamp observed in THIS run. Used for Elapsed when the
+   *  run is no longer live (done/failed). */
+  lastLogTs?: string;
 }
 
 // ── Detail-value formatting ──────────────────────────────
