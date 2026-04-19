@@ -1,9 +1,20 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { DEFAULT_DIR } from "./jsonl.js";
+import { getLogRunId } from "../utils/log.js";
 
 // ── Types ──────────────────────────────────────────────
 
+/**
+ * Structured events emitted by the kernel during workflow execution.
+ *
+ * Originally scoped to session/browser/auth lifecycle. As of 2026-04-19 also
+ * carries step-execution annotations (e.g. `cache_hit`) that are no-ops for
+ * `rebuildSessionState` but appear in the dashboard's Events tab via the
+ * `/events/run-events` SSE.
+ *
+ * If a third non-lifecycle event lands, consider renaming to KernelEventType.
+ */
 export type SessionEventType =
   | "workflow_start" | "workflow_end"
   | "session_create" | "session_close"
@@ -11,7 +22,8 @@ export type SessionEventType =
   | "auth_start" | "auth_complete" | "auth_failed"
   | "duo_request" | "duo_start" | "duo_complete" | "duo_timeout"
   | "item_start" | "item_complete"
-  | "step_change";
+  | "step_change"
+  | "cache_hit";
 
 export interface SessionEvent {
   type: SessionEventType;
@@ -26,6 +38,10 @@ export interface SessionEvent {
   finalStatus?: "done" | "failed";
   duoRequestId?: string;
   data?: Record<string, string>;
+  /** Workflow item runId, written when emitted inside a withLogContext + setLogRunId scope. */
+  runId?: string;
+  /** Step name for step-scoped events like cache_hit. */
+  step?: string;
 }
 
 // ── File path ──────────────────────────────────────────
@@ -43,8 +59,10 @@ export function emitSessionEvent(
   dir: string = DEFAULT_DIR,
 ): void {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const runId = event.runId ?? getLogRunId();
   const full: SessionEvent = {
     ...event,
+    ...(runId ? { runId } : {}),
     timestamp: new Date().toISOString(),
     pid: process.pid,
   };
