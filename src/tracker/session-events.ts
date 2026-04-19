@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { DEFAULT_DIR } from "./jsonl.js";
 import { getLogRunId } from "../utils/log.js";
@@ -95,8 +95,62 @@ export function emitWorkflowEnd(instance: string, finalStatus?: "done" | "failed
   emitSessionEvent({ type: "workflow_end", workflowInstance: instance, finalStatus }, dir);
 }
 
+const STEP_LOG_DEDUPE_WINDOW_MS = 50;
+
+function recentStepLogExists(
+  workflow: string,
+  runId: string,
+  step: string,
+  dir: string,
+): boolean {
+  const date = new Date().toISOString().slice(0, 10);
+  const path = join(dir, `${workflow}-${date}-logs.jsonl`);
+  if (!existsSync(path)) return false;
+  let content: string;
+  try { content = readFileSync(path, "utf-8"); } catch { return false; }
+  const lines = content.split("\n");
+  // Walk last few lines (cheap; no need to read whole file for a 50ms window)
+  const tail = lines.slice(Math.max(0, lines.length - 8));
+  const cutoff = Date.now() - STEP_LOG_DEDUPE_WINDOW_MS;
+  for (const line of tail) {
+    if (!line) continue;
+    try {
+      const log = JSON.parse(line);
+      if (
+        log.runId === runId &&
+        log.level === "step" &&
+        typeof log.message === "string" &&
+        log.message.includes(step) &&
+        new Date(log.ts).getTime() >= cutoff
+      ) {
+        return true;
+      }
+    } catch { /* skip malformed line */ }
+  }
+  return false;
+}
+
 export function emitStepChange(instance: string, step: string, dir?: string): void {
-  emitSessionEvent({ type: "step_change", workflowInstance: instance, currentStep: step }, dir);
+  const resolvedDir = dir ?? DEFAULT_DIR;
+  const runId = getLogRunId();
+  if (runId) {
+    // Scan all today's *-logs.jsonl files in resolvedDir (since we don't have
+    // the workflow name here, only the instance label). Constant-cost: each
+    // scan reads the tail of one or two small JSONL files.
+    let workflowFiles: string[] = [];
+    try {
+      const dateSuffix = `-${new Date().toISOString().slice(0, 10)}-logs.jsonl`;
+      workflowFiles = readdirSync(resolvedDir).filter((f) => f.endsWith(dateSuffix));
+    } catch { /* dir might not exist yet */ }
+    for (const f of workflowFiles) {
+      const dateSuffix = `-${new Date().toISOString().slice(0, 10)}-logs.jsonl`;
+      const wf = f.slice(0, f.length - dateSuffix.length);
+      if (recentStepLogExists(wf, runId, step, resolvedDir)) {
+        return; // dedupe
+      }
+    }
+  }
+  emitSessionEvent({ type: "step_change", workflowInstance: instance, currentStep: step }, resolvedDir);
 }
 
 export function emitSessionCreate(instance: string, sessionId: string, dir?: string): void {
