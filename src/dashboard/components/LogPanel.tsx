@@ -6,6 +6,7 @@ import { RunSelector } from "./RunSelector";
 import { EmptyState } from "./EmptyState";
 import { FailureDrillDown } from "./FailureDrillDown";
 import { useLogs } from "./hooks/useLogs";
+import { useRunEvents } from "./hooks/useRunEvents";
 import { useElapsed, formatDuration } from "./hooks/useElapsed";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry, RunInfo } from "./types";
@@ -81,6 +82,7 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
   }, [entry?.id, entry?.runId, entry?.status, workflow, date]);
 
   const { logs, loading: logsLoading } = useLogs(workflow, entry?.id || null, activeRunId, date);
+  const { events } = useRunEvents(workflow, entry?.id || null, activeRunId, date);
 
   // Derive step/status from active run (not the globally deduped entry)
   const activeRun = runs.find((r) => r.runId === activeRunId);
@@ -221,6 +223,7 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
           currentStep={runStep}
           status={runStatus}
           stepDurations={activeRun?.stepDurations ?? entry?.stepDurations}
+          entry={entry ?? undefined}
         />
       )}
 
@@ -230,7 +233,7 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
         <FailureDrillDown entry={entry} workflow={workflow} logs={logs} />
       )}
 
-      <LogStream logs={logs} loading={logsLoading} />
+      <LogStream logs={logs} events={events} loading={logsLoading} />
     </div>
   );
 }
