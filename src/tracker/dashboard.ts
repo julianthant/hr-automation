@@ -207,9 +207,13 @@ export function rebuildSessionState(dir?: string): SessionState {
   // while `active` stays authoritative for the DONE/FAILED pill in the brief window
   // between workflow_end firing and the Node process exiting.
   for (const wf of workflows) {
-    const startEv = events.find(
-      (e) => e.type === "workflow_start" && e.workflowInstance === wf.instance,
+    // Pick the LATEST workflow_start for this instance — when a workflow is re-run
+    // under the same instance name, earlier starts reference dead pids. findLast
+    // would be cleaner but target is ES2022; slice+reverse works without a lib bump.
+    const starts = events.filter(
+      (e: SessionEvent) => e.type === "workflow_start" && e.workflowInstance === wf.instance,
     );
+    const startEv = starts[starts.length - 1];
     if (!startEv) { wf.pidAlive = false; continue; }
     try { process.kill(startEv.pid, 0); wf.pidAlive = true; }
     catch { wf.pidAlive = false; }
