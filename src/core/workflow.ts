@@ -106,7 +106,6 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       await withTrackedWorkflow(
         wf.config.name,
         itemId,
-        {},
         async (setStep, updateData) => {
           const stepper = new Stepper({
             workflow: wf.config.name,
@@ -121,9 +120,11 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
           if (args.preHandler) await args.preHandler()
           await wf.config.handler(ctx, item)
         },
-        runId,
-        trackerDir,
-        buildTrackerOpts(wf),
+        {
+          ...buildTrackerOpts(wf),
+          preAssignedRunId: runId,
+          dir: trackerDir,
+        },
       )
     }, trackerDir)
     return { ok: true }
@@ -250,13 +251,14 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
     await withTrackedWorkflow(
       wf.config.name,
       String(itemId),
-      {},                                               // initialData
       async (setStep, updateData /*, _onCleanup, _session */) => {
         await run(setStep, updateData, false)
       },
-      opts.preAssignedRunId,                            // 5th positional
-      opts.trackerDir,                                  // 6th positional (test isolation)
-      buildTrackerOpts(wf),                             // 7th positional (richness hooks)
+      {
+        ...buildTrackerOpts(wf),
+        preAssignedRunId: opts.preAssignedRunId,
+        dir: opts.trackerDir,
+      },
     )
   }, opts.trackerDir)
 }

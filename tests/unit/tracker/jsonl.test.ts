@@ -164,12 +164,10 @@ describe("withTrackedWorkflow masks PII via updateData", () => {
     await withTrackedWorkflow(
       "pii-flow",
       "emp-007",
-      {},
-      async (_setStep, updateData) => {
+      async (_setStep: (s: string) => void, updateData: (d: Record<string, unknown>) => void) => {
         updateData({ ssn: "123-45-6789", dob: "01/15/1992", name: "Jane" });
       },
-      undefined,
-      TEST_DIR
+      { dir: TEST_DIR }
     );
     const entries = readEntries("pii-flow", TEST_DIR);
     // last entry is the "done" emit with merged data
