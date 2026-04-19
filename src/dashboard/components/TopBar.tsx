@@ -38,9 +38,9 @@ interface TopBarProps {
   connected: boolean;
   entryCounts: Record<string, number>;
   /**
-   * Optional slot rendered between the live indicator and the clock.
-   * Reserved for a future workflow launcher; the topbar stays focused on
-   * navigation regardless of what mounts here.
+   * Optional slot rendered at the far end of the SESSION zone, to the right
+   * of the clock. Reserved for a future workflow launcher; the topbar stays
+   * focused on navigation regardless of what mounts here.
    */
   rightSlot?: React.ReactNode;
   /**
@@ -50,6 +50,16 @@ interface TopBarProps {
   onSearchSelect?: (row: SearchResultRow) => void;
 }
 
+/**
+ * Three-zone navbar that mirrors the panel split below it. Column widths
+ * match QueuePanel (left) and SessionPanel (right) exactly, so the vertical
+ * dividers in the navbar line up pixel-for-pixel with the panel column
+ * boundaries — making it visually obvious which control scopes which panel.
+ *
+ *   QUEUE zone   ↦ scopes QueuePanel    (brand · workflow chooser)
+ *   STREAM zone  ↦ scopes LogPanel       (date nav · cross-workflow search)
+ *   SESSION zone ↦ scopes SessionPanel   (live indicator · clock · rightSlot)
+ */
 export function TopBar({
   workflow, workflows, onWorkflowChange,
   date, onDateChange, availableDates,
@@ -97,21 +107,49 @@ export function TopBar({
   };
 
   return (
-    <div className="flex items-center justify-between px-6 py-3.5 border-b border-border bg-card flex-shrink-0">
-      <div className="flex items-center gap-5">
-        <span className="text-base font-bold tracking-tight whitespace-nowrap">HR Dashboard</span>
-        <div className="w-px h-6 bg-border" />
+    <div
+      className={cn(
+        // Grid widths match QueuePanel + SessionPanel below pixel-for-pixel
+        // so vertical dividers line up with panel column boundaries.
+        "grid border-b border-border bg-card flex-shrink-0",
+        "grid-cols-[320px_1fr_240px]",
+        "min-[1440px]:grid-cols-[400px_1fr_280px]",
+        "2xl:grid-cols-[480px_1fr_320px]",
+      )}
+    >
+      {/* ── QUEUE zone — scopes QueuePanel ──────────────────── */}
+      <div className="flex items-center gap-3 px-4 py-3 border-r border-border min-w-0">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div
+            aria-hidden
+            className={cn(
+              "w-1.5 h-1.5 rounded-full flex-shrink-0",
+              connected ? "bg-[#4ade80]" : "bg-muted-foreground",
+            )}
+          />
+          <span className="text-[13px] font-bold tracking-tight whitespace-nowrap">
+            HR Dashboard
+          </span>
+        </div>
+        <div className="w-px h-5 bg-border flex-shrink-0" />
 
-        {/* Workflow dropdown */}
+        {/* Workflow dropdown — primary scope control for the queue */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-2.5 px-3.5 py-2 rounded-lg border border-border bg-secondary cursor-pointer w-[220px] transition-colors hover:border-primary data-[state=open]:border-primary outline-none">
-              <span className="flex-1 text-left font-semibold text-sm">{labelFor(workflow)}</span>
-              <span className="text-xs text-muted-foreground font-mono font-medium">{entryCounts[workflow] || 0}</span>
-              <ChevronDown className="w-3.5 h-3.5 text-muted-foreground transition-transform data-[state=open]:rotate-180" />
+            <button
+              aria-label={`Workflow: ${labelFor(workflow)}`}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-border bg-secondary cursor-pointer flex-1 min-w-0 transition-colors hover:border-primary data-[state=open]:border-primary outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <span className="flex-1 text-left font-semibold text-[13px] truncate">
+                {labelFor(workflow)}
+              </span>
+              <span className="text-[11px] text-muted-foreground font-mono font-medium tabular-nums flex-shrink-0">
+                {entryCounts[workflow] || 0}
+              </span>
+              <ChevronDown className="w-3.5 h-3.5 text-muted-foreground transition-transform data-[state=open]:rotate-180 flex-shrink-0" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-[220px]">
+          <DropdownMenuContent align="start" className="w-[240px]">
             {allWfs.map((wf) => (
               <DropdownMenuItem
                 key={wf}
@@ -122,7 +160,7 @@ export function TopBar({
                   <span className={cn("font-medium", wf === workflow && "font-semibold text-primary")}>
                     {labelFor(wf)}
                   </span>
-                  <span className={cn("font-mono text-[11px]", (entryCounts[wf] || 0) > 0 ? "text-primary font-semibold" : "text-muted-foreground")}>
+                  <span className={cn("font-mono text-[11px] tabular-nums", (entryCounts[wf] || 0) > 0 ? "text-primary font-semibold" : "text-muted-foreground")}>
                     {entryCounts[wf] || 0}
                   </span>
                 </span>
@@ -130,63 +168,79 @@ export function TopBar({
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-
-        {onSearchSelect && (
-          <>
-            <div className="w-px h-6 bg-border" />
-            <SearchBar onSelect={onSearchSelect} />
-          </>
-        )}
       </div>
 
-      <div className="flex items-center gap-4">
-        {/* Date nav */}
-        <div className="flex items-center gap-1">
+      {/* ── STREAM zone — scopes LogPanel ───────────────────── */}
+      <div className="flex items-center justify-center gap-3 px-4 py-3 border-r border-border min-w-0">
+        {/* Date navigator — picks which day's entries the stream shows */}
+        <div className="flex items-center gap-1 flex-shrink-0">
           <button
             onClick={() => navigateDay(-1)}
-            className="w-8 h-8 rounded-md border border-border bg-secondary flex items-center justify-center text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground transition-colors"
+            aria-label="Previous day"
+            className="w-7 h-7 rounded-md border border-border bg-secondary flex items-center justify-center text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
-            <ChevronLeft className="w-4 h-4" />
+            <ChevronLeft className="w-3.5 h-3.5" />
           </button>
 
           <Popover>
             <PopoverTrigger asChild>
-              <button className="px-4 py-1.5 rounded-md border border-border bg-secondary font-mono text-[13px] font-medium min-w-[130px] text-center cursor-pointer hover:bg-accent transition-colors outline-none data-[state=open]:border-primary">
+              <button
+                aria-label={`Calendar — currently ${dateDisplay}`}
+                className="px-3 py-1 rounded-md border border-border bg-secondary font-mono text-[12px] font-medium tabular-nums min-w-[126px] text-center cursor-pointer hover:bg-accent transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary data-[state=open]:border-primary"
+              >
                 {dateDisplay}
               </button>
             </PopoverTrigger>
             <PopoverContent align="center" className="p-4">
-              <Calendar
-                selected={date}
-                onSelect={handleCalendarSelect}
-              />
+              <Calendar selected={date} onSelect={handleCalendarSelect} />
             </PopoverContent>
           </Popover>
 
           <button
             onClick={() => navigateDay(1)}
-            className="w-8 h-8 rounded-md border border-border bg-secondary flex items-center justify-center text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground transition-colors"
+            aria-label="Next day"
+            className="w-7 h-7 rounded-md border border-border bg-secondary flex items-center justify-center text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
-            <ChevronRight className="w-4 h-4" />
+            <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
 
-        <div className="w-px h-6 bg-border" />
+        {/* Search — cross-workflow / cross-date jump-to. Centred in the
+             stream zone because picking a result swaps the LogPanel below. */}
+        {onSearchSelect && (
+          <div className="flex-1 max-w-[420px] min-w-0">
+            <SearchBar onSelect={onSearchSelect} />
+          </div>
+        )}
+      </div>
 
-        {/* Live indicator */}
-        <div className={cn(
-          "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono font-medium",
-          connected
-            ? "bg-[#4ade80]/8 border border-[#4ade80]/20 text-[#4ade80]"
-            : "bg-destructive/8 border border-destructive/20 text-destructive",
-        )}>
-          <div className={cn("w-[7px] h-[7px] rounded-full", connected ? "bg-[#4ade80] animate-pulse" : "bg-destructive")} />
+      {/* ── SESSION zone — scopes SessionPanel ──────────────── */}
+      <div className="flex items-center justify-end gap-3 px-4 py-3 min-w-0">
+        <div
+          role="status"
+          aria-live="polite"
+          className={cn(
+            "flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium",
+            connected
+              ? "bg-[#4ade80]/8 border border-[#4ade80]/20 text-[#4ade80]"
+              : "bg-destructive/8 border border-destructive/20 text-destructive",
+          )}
+        >
+          <div
+            aria-hidden
+            className={cn(
+              "w-[6px] h-[6px] rounded-full",
+              connected ? "bg-[#4ade80] animate-pulse" : "bg-destructive",
+            )}
+          />
           {connected ? "Live" : "Disconnected"}
         </div>
 
-        {rightSlot}
+        <span className="font-mono text-[12px] text-muted-foreground font-medium tabular-nums hidden min-[1440px]:inline">
+          {clock}
+        </span>
 
-        <span className="font-mono text-[13px] text-muted-foreground font-medium">{clock}</span>
+        {rightSlot}
       </div>
     </div>
   );
