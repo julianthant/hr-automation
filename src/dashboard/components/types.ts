@@ -37,6 +37,10 @@ export interface TrackerEntry {
    * backend SSE). Always undefined unless `status === "failed"`.
    */
   screenshotCount?: number;
+  /** Step names whose result was reused from cache during this run. */
+  cacheHits?: string[];
+  /** Per-step historical avg duration (ms), keyed by step name in cacheHits. */
+  cacheStepAvgs?: Record<string, number>;
 }
 
 /** Metadata for a single failure screenshot, as returned by /api/screenshots. */
@@ -194,6 +198,33 @@ export interface DuoQueueEntry {
 export interface SessionState {
   workflows: WorkflowInstanceState[];
   duoQueue: DuoQueueEntry[];
+}
+
+// ── Run Event Types ────────────────────────────────────
+
+/** Mirror of backend SessionEventType for frontend consumption. */
+export type RunEventType =
+  | "workflow_start" | "workflow_end"
+  | "session_create" | "session_close"
+  | "browser_launch" | "browser_close"
+  | "auth_start" | "auth_complete" | "auth_failed"
+  | "duo_request" | "duo_start" | "duo_complete" | "duo_timeout"
+  | "item_start" | "item_complete"
+  | "step_change"
+  | "cache_hit";
+
+export interface RunEvent {
+  type: RunEventType;
+  timestamp: string;
+  pid: number;
+  workflowInstance: string;
+  runId?: string;
+  step?: string;
+  system?: string;
+  currentItemId?: string;
+  currentStep?: string;
+  finalStatus?: "done" | "failed";
+  data?: Record<string, string>;
 }
 
 // ── Step name formatting (stable — used by StepPipeline + WorkflowBox) ──
