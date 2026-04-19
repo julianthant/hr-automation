@@ -3,7 +3,7 @@ import {
   Pencil, MousePointer, ArrowDownToLine, Search, ListFilter,
   KeyRound, Download, Check, X, Hourglass, ArrowRight,
 } from "lucide-react";
-import type { LogCategory } from "./types";
+import type { LogCategory, RunEvent } from "./types";
 import { getLogCategory } from "./types";
 import type { CollapsedLogEntry } from "./hooks/useLogs";
 
@@ -21,13 +21,20 @@ const ICON_MAP: Record<LogCategory, { icon: typeof Check; color: string }> = {
   step: { icon: ArrowRight, color: "text-blue-400" },
 };
 
+type LogLineEntry =
+  | (CollapsedLogEntry & { kind?: "log" })
+  | (RunEvent & { kind: "event"; count?: number });
+
 interface LogLineProps {
-  entry: CollapsedLogEntry;
+  entry: LogLineEntry;
   isCurrent: boolean;
   onCopy: (text: string) => void;
 }
 
 export function LogLine({ entry, isCurrent, onCopy }: LogLineProps) {
+  if (entry.kind === "event") {
+    return <EventLine event={entry} />;
+  }
   const category = getLogCategory(entry.level, entry.message);
   const { icon: Icon, color } = ICON_MAP[category];
   const ts = entry.ts
@@ -62,6 +69,43 @@ export function LogLine({ entry, isCurrent, onCopy }: LogLineProps) {
       <span className="absolute right-6 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity">
         Copy
       </span>
+    </div>
+  );
+}
+
+const EVENT_VISUAL: Record<RunEvent["type"], { glyph: string; color: string }> = {
+  workflow_start:   { glyph: "▶", color: "#3b82f6" },
+  workflow_end:     { glyph: "■", color: "#6b7280" },
+  session_create:   { glyph: "◇", color: "#6b7280" },
+  session_close:    { glyph: "◆", color: "#6b7280" },
+  browser_launch:   { glyph: "⊞", color: "#8b5cf6" },
+  browser_close:    { glyph: "⊟", color: "#6b7280" },
+  auth_start:       { glyph: "⏵", color: "#f59e0b" },
+  auth_complete:    { glyph: "✓", color: "#10b981" },
+  auth_failed:      { glyph: "✗", color: "#ef4444" },
+  duo_request:      { glyph: "⏸", color: "#f59e0b" },
+  duo_start:        { glyph: "⏵", color: "#f59e0b" },
+  duo_complete:     { glyph: "✓", color: "#10b981" },
+  duo_timeout:      { glyph: "✗", color: "#ef4444" },
+  item_start:       { glyph: "▦", color: "#e5e5e5" },
+  item_complete:    { glyph: "▩", color: "#6b7280" },
+  step_change:      { glyph: "→", color: "#6b7280" },
+  cache_hit:        { glyph: "❄", color: "#3b82f6" },
+};
+
+function EventLine({ event }: { event: RunEvent }) {
+  const v = EVENT_VISUAL[event.type];
+  const time = new Date(event.timestamp).toISOString().slice(11, 19);
+  const detail = event.system ?? event.step ?? event.currentStep ?? event.currentItemId ?? "";
+  return (
+    <div className="grid grid-cols-[72px_22px_1fr_auto] items-center gap-2.5 px-3.5 py-1.5 font-mono text-[11px]">
+      <span className="text-muted-foreground">{time}</span>
+      <span style={{ color: v.color, fontSize: "14px", textAlign: "center" }}>{v.glyph}</span>
+      <span>
+        <span style={{ color: v.color }}>{event.type}</span>
+        {detail && <span className="text-muted-foreground"> {detail}</span>}
+      </span>
+      <span />
     </div>
   );
 }
