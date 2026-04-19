@@ -1,54 +1,78 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LogLine } from "./LogLine";
 import type { CollapsedLogEntry } from "./hooks/useLogs";
-import type { LogCategory } from "./types";
+import type { LogCategory, RunEvent } from "./types";
 import { getLogCategory } from "./types";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 interface LogStreamProps {
   logs: CollapsedLogEntry[];
+  events?: RunEvent[];
   loading: boolean;
 }
 
-const FILTER_TABS: { key: string; label: string; categories: LogCategory[] }[] = [
+const FILTER_TABS: {
+  key: string;
+  label: string;
+  categories: LogCategory[];
+  source?: "events";
+}[] = [
   { key: "all", label: "All", categories: [] },
   { key: "errors", label: "Errors", categories: ["error"] },
   { key: "auth", label: "Auth", categories: ["auth"] },
   { key: "fill", label: "Fill", categories: ["fill"] },
   { key: "navigate", label: "Navigate", categories: ["navigate"] },
   { key: "extract", label: "Extract", categories: ["extract"] },
+  { key: "events", label: "Events", categories: [], source: "events" },
 ];
 
-export function LogStream({ logs, loading }: LogStreamProps) {
+type DisplayItem =
+  | { kind: "log"; entry: CollapsedLogEntry }
+  | { kind: "event"; entry: RunEvent };
+
+export function LogStream({ logs, events = [], loading }: LogStreamProps) {
   const [filter, setFilter] = useState("all");
   const [autoScroll, setAutoScroll] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const prevLenRef = useRef(0);
 
-  const filtered = filter === "all"
-    ? logs
-    : logs.filter((l) => {
-        const tab = FILTER_TABS.find((t) => t.key === filter);
-        return tab?.categories.includes(getLogCategory(l.level, l.message));
-      });
+  const tab = FILTER_TABS.find((t) => t.key === filter);
+  let displayed: DisplayItem[];
+
+  if (tab?.source === "events") {
+    displayed = events.map((e) => ({ kind: "event" as const, entry: e }));
+  } else if (filter === "all") {
+    displayed = [
+      ...logs.map((l) => ({ kind: "log" as const, entry: l })),
+      ...events.map((e) => ({ kind: "event" as const, entry: e })),
+    ].sort((a, b) => {
+      const ta = a.kind === "log" ? a.entry.ts : a.entry.timestamp;
+      const tb = b.kind === "log" ? b.entry.ts : b.entry.timestamp;
+      return ta.localeCompare(tb);
+    });
+  } else {
+    displayed = logs
+      .filter((l) => tab?.categories.includes(getLogCategory(l.level, l.message)))
+      .map((l) => ({ kind: "log" as const, entry: l }));
+  }
 
   const collapsedCount = logs.reduce((acc, l) => acc + (l.count > 1 ? l.count - 1 : 0), 0);
 
   // Snap to bottom before paint when logs first appear (no visible scroll)
   useLayoutEffect(() => {
-    if (scrollRef.current && filtered.length > 0 && prevLenRef.current === 0) {
+    if (scrollRef.current && displayed.length > 0 && prevLenRef.current === 0) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [filtered.length]);
+  }, [displayed.length]);
 
   // Auto-scroll on new entries
   useEffect(() => {
-    if (autoScroll && scrollRef.current && filtered.length > prevLenRef.current) {
+    if (autoScroll && scrollRef.current && displayed.length > prevLenRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-    prevLenRef.current = filtered.length;
-  }, [filtered.length, autoScroll]);
+    prevLenRef.current = displayed.length;
+  }, [displayed.length, autoScroll]);
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -76,7 +100,7 @@ export function LogStream({ logs, loading }: LogStreamProps) {
 
       {/* Log lines */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto py-3 border-b border-border">
-        {loading && filtered.length === 0 ? (
+        {loading && displayed.length === 0 ? (
           <div className="space-y-[6px] px-6 py-3">
             {Array.from({ length: 12 }).map((_, i) => (
               <div key={i} className="flex items-center gap-3.5 py-[3px]">
@@ -86,19 +110,30 @@ export function LogStream({ logs, loading }: LogStreamProps) {
               </div>
             ))}
           </div>
-        ) : filtered.length === 0 && !loading ? (
+        ) : displayed.length === 0 && !loading ? (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
             No logs yet
           </div>
         ) : (
-          filtered.map((entry, i) => (
-            <LogLine
-              key={`${entry.ts}-${i}`}
-              entry={entry}
-              isCurrent={i === filtered.length - 1 && entry.level === "step"}
-              onCopy={handleCopy}
-            />
-          ))
+          displayed.map((item, i) =>
+            item.kind === "log" ? (
+              <LogLine
+                key={`log-${item.entry.ts}-${i}`}
+                entry={{ ...item.entry, kind: "log" }}
+                isCurrent={
+                  i === displayed.length - 1 && item.entry.level === "step"
+                }
+                onCopy={handleCopy}
+              />
+            ) : (
+              <LogLine
+                key={`evt-${item.entry.timestamp}-${i}`}
+                entry={{ ...item.entry, kind: "event" }}
+                isCurrent={false}
+                onCopy={handleCopy}
+              />
+            ),
+          )
         )}
       </div>
 
@@ -112,7 +147,7 @@ export function LogStream({ logs, loading }: LogStreamProps) {
           </span>
           <span className="font-medium">Streaming</span>
           <span className="text-border">•</span>
-          <span className="font-mono tabular-nums">{filtered.length}</span>
+          <span className="font-mono tabular-nums">{displayed.length}</span>
           <span>entries</span>
           {collapsedCount > 0 && (
             <>
