@@ -9,6 +9,33 @@ export interface SystemConfig {
   resetUrl?: string
 }
 
+/**
+ * Observability bundle passed to `Session.launch`. The kernel invokes these
+ * hooks around browser launch and `loginWithRetry`, giving the tracker
+ * (set via `runWorkflow`) a chance to emit `session_create / browser_launch /
+ * auth_start / auth_complete / auth_failed` events and flip the tracker entry
+ * to `running` before the handler body starts.
+ *
+ * `instance` is forwarded as the 2nd arg to `system.login(page, instance)` so
+ * login flows can use `requestDuoApproval` (event-emitting) instead of the
+ * silent `pollDuoApproval` fallback.
+ *
+ * All fields are optional. Callers that pass `{}` (or no observer at all) get
+ * today's behavior.
+ */
+export interface SessionObserver {
+  /** Workflow-instance name for Duo queue correlation. */
+  instance?: string
+  /** Fires once per system after its browser is ready. */
+  onBrowserLaunch?: (systemId: string, browserId: string) => void
+  /** Fires before the first auth attempt for a system. Retries do NOT re-fire. */
+  onAuthStart?: (systemId: string, browserId: string) => void
+  /** Fires after successful login (possibly after retries). */
+  onAuthComplete?: (systemId: string, browserId: string) => void
+  /** Fires once when all retry attempts have failed. */
+  onAuthFailed?: (systemId: string, browserId: string) => void
+}
+
 export interface BatchConfig {
   mode: 'sequential' | 'pool'
   poolSize?: number
@@ -54,6 +81,17 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
    * tracker `TrackerEntry.id` on the dashboard if this returns an empty string.
    */
   getId?: (data: Record<string, string>) => string
+  /**
+   * Seed the tracker `data` record from input BEFORE the initial `pending`
+   * entry is emitted. Use this to stamp display-name hints that are knowable
+   * from input alone (e.g. the searched names for eid-lookup), so the queue
+   * shows something meaningful during the auth window — handler-side
+   * `ctx.updateData(...)` doesn't run until auth completes.
+   *
+   * Result is merged into `data` before `pending` fires; subsequent
+   * `updateData` calls in the handler take precedence.
+   */
+  initialData?: (input: TData) => Record<string, unknown>
   handler: (ctx: Ctx<TSteps, TData>, data: TData) => Promise<void>
 }
 
