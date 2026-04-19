@@ -8,9 +8,9 @@
  * For workflow integration, import downloadSharePointFile from src/workflows/emergency-contact/sharepoint-download.ts directly.
  */
 import path from "node:path";
-import { downloadSharePointFile } from "../workflows/emergency-contact/sharepoint-download.js";
-import { validateEnv } from "../utils/env.js";
-import { log } from "../utils/log.js";
+import { downloadSharePointFile } from "../sharepoint-download.js";
+import { validateEnv } from "../../../utils/env.js";
+import { log } from "../../../utils/log.js";
 
 const url = process.argv[2];
 if (!url) {

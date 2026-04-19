@@ -342,7 +342,8 @@ export function parseArgv(argv: string[]): ParsedArgv {
 
 const isMain =
   import.meta.url === `file://${process.argv[1]}` ||
-  process.argv[1]?.endsWith("new-workflow.ts");
+  process.argv[1]?.endsWith("new-workflow.ts") ||
+  process.argv[1]?.endsWith("new-workflow.js");
 
 if (isMain) {
   const { name, systems } = parseArgv(process.argv);

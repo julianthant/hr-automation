@@ -1,4 +1,4 @@
-// src/scripts/selector-search-lib.ts
+// src/scripts/selectors/search-lib.ts
 //
 // Pure scoring + index logic for the selector-search CLI. No file I/O —
 // callers load text content and pass it in as `IndexedItem[]`. Keeping the

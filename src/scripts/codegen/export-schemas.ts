@@ -29,15 +29,15 @@ import path from "node:path";
 // Listed alphabetically; no need to actually use their exports here beyond the
 // schemas below — the side-effect is what we care about for any future
 // registry-based features.
-import * as eidLookup from "../workflows/eid-lookup/index.js";
-import * as emergencyContact from "../workflows/emergency-contact/index.js";
-import * as oldKronosReports from "../workflows/old-kronos-reports/index.js";
-import * as onboarding from "../workflows/onboarding/index.js";
-import * as separations from "../workflows/separations/index.js";
+import * as eidLookup from "../../workflows/eid-lookup/index.js";
+import * as emergencyContact from "../../workflows/emergency-contact/index.js";
+import * as oldKronosReports from "../../workflows/old-kronos-reports/index.js";
+import * as onboarding from "../../workflows/onboarding/index.js";
+import * as separations from "../../workflows/separations/index.js";
 // separations/index.ts only re-exports helpers, not the schema itself — pull
 // the schema from the underlying module directly.
-import { SeparationDataSchema } from "../workflows/separations/schema.js";
-import * as workStudy from "../workflows/work-study/index.js";
+import { SeparationDataSchema } from "../../workflows/separations/schema.js";
+import * as workStudy from "../../workflows/work-study/index.js";
 
 // Side-effect import kept for symmetry with other workflows (registers the
 // separations workflow via `defineWorkflow`).

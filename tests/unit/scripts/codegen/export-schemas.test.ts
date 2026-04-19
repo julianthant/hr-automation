@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import os from "node:os";
-import { exportSchemas } from "../../../src/scripts/export-schemas.js";
+import { exportSchemas } from "../../../../src/scripts/codegen/export-schemas.js";
 
 // One-shot tmp dir shared across the suite — exportSchemas is deterministic
 // and write-only; no need for a per-test reset.

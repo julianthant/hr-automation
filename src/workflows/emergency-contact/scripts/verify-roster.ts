@@ -8,14 +8,14 @@
  * Reports EIDs not found in the roster, name mismatches, and tries to
  * suggest the correct EID for missing/mismatched records by fuzzy name match.
  */
-import { loadBatch } from "../workflows/emergency-contact/schema.js";
+import { loadBatch } from "../schema.js";
 import {
   verifyBatchAgainstRoster,
   loadRosterIndex,
   namesMatch,
   normalizeName,
-} from "../workflows/emergency-contact/roster-verify.js";
-import { log } from "../utils/log.js";
+} from "../roster-verify.js";
+import { log } from "../../../utils/log.js";
 
 const [yamlPath, rosterPath] = process.argv.slice(2);
 if (!yamlPath || !rosterPath) {

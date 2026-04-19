@@ -14,7 +14,7 @@ import {
   parseLessonsMarkdown,
   rank,
   type IndexedItem,
-} from "./selector-search-lib.js";
+} from "./search-lib.js";
 
 const SYSTEMS_DIR = "src/systems";
 
@@ -81,8 +81,8 @@ function main(): void {
 // matches `import.meta.url`.
 const isMainModule =
   import.meta.url === `file://${process.argv[1]}` ||
-  process.argv[1]?.endsWith("selector-search.ts") ||
-  process.argv[1]?.endsWith("selector-search.js");
+  process.argv[1]?.endsWith("search.ts") ||
+  process.argv[1]?.endsWith("search.js");
 
 if (isMainModule) {
   main();

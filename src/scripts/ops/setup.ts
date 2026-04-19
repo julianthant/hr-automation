@@ -394,8 +394,8 @@ export function setupMain(): number {
 // Only run when invoked directly (not when imported by tests).
 const isMainModule =
   import.meta.url === `file://${process.argv[1]}` ||
-  process.argv[1]?.endsWith("setup-cli.ts") ||
-  process.argv[1]?.endsWith("setup-cli.js");
+  process.argv[1]?.endsWith("setup.ts") ||
+  process.argv[1]?.endsWith("setup.js");
 
 if (isMainModule) {
   process.exit(setupMain());

@@ -207,8 +207,8 @@ function main(): void {
 // path that happens to match `import.meta.url`.
 const isMainModule =
   import.meta.url === `file://${process.argv[1]}` ||
-  process.argv[1]?.endsWith("selectors-catalog.ts") ||
-  process.argv[1]?.endsWith("selectors-catalog.js");
+  process.argv[1]?.endsWith("catalog.ts") ||
+  process.argv[1]?.endsWith("catalog.js");
 
 if (isMainModule) {
   main();

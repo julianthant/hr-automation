@@ -2,7 +2,7 @@
  * Thin CLI wrapper around `src/scheduler.ts`.
  *
  * Usage:
- *   tsx src/scripts/scheduler-cli.ts [--config schedule.yaml] [--dry-run] [--help]
+ *   tsx src/scripts/ops/scheduler.ts [--config schedule.yaml] [--dry-run] [--help]
  *
  * `--help` prints supported schedule syntax and exits 0 without scheduling.
  * `--dry-run` loads + parses the config and prints each entry's computed
@@ -18,7 +18,7 @@ import {
   loadScheduleConfig,
   parseSchedule,
   runScheduler,
-} from "../scheduler.js";
+} from "../../scheduler.js";
 
 interface Args {
   config: string;
@@ -99,9 +99,9 @@ function runDryRun(configPath: string): number {
       const next = parsed.nextRunAfter(now);
       console.log(
         `  - ${entry.name} [${enabledFlag}]\n` +
-          `      workflow: npm run ${entry.workflow}${entry.args.length > 0 ? " -- " + entry.args.join(" ") : ""}\n` +
-          `      schedule: ${entry.schedule}\n` +
-          `      next run: ${next.toISOString()} (local: ${next.toLocaleString()})`
+        `      workflow: npm run ${entry.workflow}${entry.args.length > 0 ? " -- " + entry.args.join(" ") : ""}\n` +
+        `      schedule: ${entry.schedule}\n` +
+        `      next run: ${next.toISOString()} (local: ${next.toLocaleString()})`
       );
     } catch (err) {
       console.error(
@@ -138,8 +138,8 @@ export async function schedulerCliMain(
 // Only run when invoked directly (not when imported by tests).
 const isMainModule =
   import.meta.url === `file://${process.argv[1]}` ||
-  process.argv[1]?.endsWith("scheduler-cli.ts") ||
-  process.argv[1]?.endsWith("scheduler-cli.js");
+  process.argv[1]?.endsWith("scheduler.ts") ||
+  process.argv[1]?.endsWith("scheduler.js");
 
 if (isMainModule) {
   schedulerCliMain()
