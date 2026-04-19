@@ -110,12 +110,21 @@ export function parseSelectorsMarkdown(system: string, md: string): IndexedItem[
 }
 
 /**
- * Parse a `LESSONS.md` file into `IndexedItem[]`. Each H2 starts a lesson.
- * Title is the H2 line text (after the date prefix); tags come from the
- * required `**Tags:** ...` subsection.
+ * Parse a `LESSONS.md` file into `IndexedItem[]`. Each top-level lesson H2
+ * starts an entry. Title is the H2 line text (after the date prefix); tags
+ * come from the required `**Tags:** ...` subsection.
+ *
+ * Splits ONLY on date-prefixed `^## YYYY-MM-DD ` lines — the convention
+ * enforced by `tests/unit/scripts/lessons-format.test.ts`. This keeps body
+ * `## Sub-heading` lines (and `## ` inside code fences) from being mistaken
+ * for lesson boundaries. Without this guard, a single `## Worked when…`
+ * inside a lesson body would split the entry into two malformed records.
  */
 export function parseLessonsMarkdown(system: string, md: string): IndexedItem[] {
-  const sections = md.split(/^## /m).slice(1);
+  // Match a leading `## ` only when followed by an ISO date — the per-lesson
+  // header convention. Body `## Sub-heading` lines fall through and remain
+  // part of the previous entry's `body` text (still searchable).
+  const sections = md.split(/^## (?=\d{4}-\d{2}-\d{2}[\s—-])/m).slice(1);
   const out: IndexedItem[] = [];
   for (const section of sections) {
     const headerLine = section.split("\n")[0];
