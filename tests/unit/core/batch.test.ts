@@ -1,10 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { defineWorkflow, runWorkflowBatch } from '../../../src/core/workflow.js'
-import { DEFAULT_DIR } from '../../../src/tracker/jsonl.js'
 
 function fakeSlot() {
   return {
@@ -14,9 +14,9 @@ function fakeSlot() {
   }
 }
 
-function readTrackerEntries(workflow: string): Array<Record<string, unknown>> {
+function readTrackerEntries(dir: string, workflow: string): Array<Record<string, unknown>> {
   const today = new Date().toISOString().slice(0, 10)
-  const path = join(DEFAULT_DIR, `${workflow}-${today}.jsonl`)
+  const path = join(dir, `${workflow}-${today}.jsonl`)
   if (!existsSync(path)) return []
   return readFileSync(path, 'utf-8')
     .split('\n')
@@ -24,12 +24,8 @@ function readTrackerEntries(workflow: string): Array<Record<string, unknown>> {
     .map((l) => JSON.parse(l))
 }
 
-function cleanupWorkflow(workflow: string) {
-  const today = new Date().toISOString().slice(0, 10)
-  for (const suffix of [`.jsonl`, `-logs.jsonl`]) {
-    const path = join(DEFAULT_DIR, `${workflow}-${today}${suffix}`)
-    if (existsSync(path)) rmSync(path)
-  }
+function cleanupDir(dir: string) {
+  if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
 }
 
 test('runWorkflowBatch (sequential): processes items in order, browsers reused', async () => {
@@ -120,8 +116,9 @@ test('runWorkflowBatch (preEmitPending): emits pending for all items with a pre-
 })
 
 test('runWorkflowBatch sequential emits per-item tracker entries', async (t) => {
+  const tmp = mkdtempSync(join(tmpdir(), 'batch-tracker-'))
+  t.after(() => cleanupDir(tmp))
   const wfName = `batch-tracker-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  t.after(() => cleanupWorkflow(wfName))
 
   const wf = defineWorkflow({
     name: wfName,
@@ -137,12 +134,12 @@ test('runWorkflowBatch sequential emits per-item tracker entries', async (t) => 
   const result = await runWorkflowBatch(
     wf,
     [{ k: 'a' }, { k: 'b' }],
-    { launchFn: () => Promise.resolve(fakeSlot()) },
+    { launchFn: () => Promise.resolve(fakeSlot()), trackerDir: tmp },
   )
   assert.equal(result.succeeded, 2)
   assert.equal(result.failed, 0)
 
-  const entries = readTrackerEntries(wfName)
+  const entries = readTrackerEntries(tmp, wfName)
   // Each item gets pending, at least one running (step emit), and a done.
   // 2 items × (pending + running + done) = 6 minimum.
   assert.ok(entries.length >= 6, `expected ≥6 tracker entries, got ${entries.length}`)
@@ -165,8 +162,9 @@ test('runWorkflowBatch sequential emits per-item tracker entries', async (t) => 
 })
 
 test('runWorkflowBatch sequential emits per-item failed tracker entry and continues', async (t) => {
+  const tmp = mkdtempSync(join(tmpdir(), 'batch-tracker-fail-'))
+  t.after(() => cleanupDir(tmp))
   const wfName = `batch-tracker-fail-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  t.after(() => cleanupWorkflow(wfName))
 
   const wf = defineWorkflow({
     name: wfName,
@@ -184,12 +182,12 @@ test('runWorkflowBatch sequential emits per-item failed tracker entry and contin
   const result = await runWorkflowBatch(
     wf,
     [{ ok: true }, { ok: false }, { ok: true }],
-    { launchFn: () => Promise.resolve(fakeSlot()) },
+    { launchFn: () => Promise.resolve(fakeSlot()), trackerDir: tmp },
   )
   assert.equal(result.succeeded, 2)
   assert.equal(result.failed, 1)
 
-  const entries = readTrackerEntries(wfName)
+  const entries = readTrackerEntries(tmp, wfName)
   assert.ok(entries.some((e) => e.status === 'failed'), 'expected a failed entry')
   assert.ok(entries.some((e) => e.status === 'done'), 'expected a done entry (loop continued)')
 })

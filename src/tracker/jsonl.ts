@@ -292,24 +292,28 @@ export async function withTrackedWorkflow<T>(
 
   if (!preAssignedRunId) emit("pending");
 
-  // Session tracking context
+  // Session tracking context. All session-event emits route to the same `dir`
+  // as the tracker writes — without this, tests passing `trackerDir: TMP_DIR`
+  // for entry/log isolation would still leak workflow_start/step_change/etc.
+  // into the real `.tracker/sessions.jsonl` and clutter the operator's
+  // SessionPanel with dead test workflow instances.
   const instanceName = generateInstanceName(workflow);
-  emitWorkflowStart(instanceName);
+  emitWorkflowStart(instanceName, dir);
   // Store instance name in tracker data so EntryItem can show it
   data.instance = instanceName;
 
   const session: SessionContext = {
     instance: instanceName,
-    registerSession: (sessionId) => emitSessionCreate(instanceName, sessionId),
-    registerBrowser: (sessionId, browserId, system) => emitBrowserLaunch(instanceName, sessionId, browserId, system),
-    closeBrowser: (browserId, system) => emitBrowserClose(instanceName, browserId, system),
+    registerSession: (sessionId) => emitSessionCreate(instanceName, sessionId, dir),
+    registerBrowser: (sessionId, browserId, system) => emitBrowserLaunch(instanceName, sessionId, browserId, system, dir),
+    closeBrowser: (browserId, system) => emitBrowserClose(instanceName, browserId, system, dir),
     setAuthState: (browserId, system, state) => {
-      if (state === "start") emitAuthStart(instanceName, browserId, system);
-      else if (state === "complete") emitAuthComplete(instanceName, browserId, system);
-      else emitAuthFailed(instanceName, browserId, system);
+      if (state === "start") emitAuthStart(instanceName, browserId, system, dir);
+      else if (state === "complete") emitAuthComplete(instanceName, browserId, system, dir);
+      else emitAuthFailed(instanceName, browserId, system, dir);
     },
-    setCurrentItem: (itemId) => emitItemStart(instanceName, itemId),
-    completeItem: (itemId) => emitItemComplete(instanceName, itemId),
+    setCurrentItem: (itemId) => emitItemStart(instanceName, itemId, dir),
+    completeItem: (itemId) => emitItemComplete(instanceName, itemId, dir),
   };
 
   // Cleanup callbacks registered by the workflow (e.g. kill browsers)
@@ -340,7 +344,7 @@ export async function withTrackedWorkflow<T>(
 
   try {
     const result = await fn(
-      (step) => { emit("running", { step }); emitStepChange(instanceName, step); },
+      (step) => { emit("running", { step }); emitStepChange(instanceName, step, dir); },
       (d) => {
         // Stringify rich values at the write boundary — data stays Record<string, string>
         // on disk, but callers can pass Date/object/etc. without losing fidelity.
@@ -368,13 +372,13 @@ export async function withTrackedWorkflow<T>(
     }
 
     emit("done");
-    emitWorkflowEnd(instanceName, "done");
+    emitWorkflowEnd(instanceName, "done", dir);
     return result;
   } catch (e) {
     const error = classifyError(e);
     log.error(error);
     emit("failed", { error });
-    emitWorkflowEnd(instanceName, "failed");
+    emitWorkflowEnd(instanceName, "failed", dir);
     throw e;
   } finally {
     process.removeAllListeners("SIGINT");
