@@ -30,7 +30,7 @@ App.tsx
 │   ├── Detail grid (4 cells, varies per workflow)
 │   ├── StepPipeline.tsx (horizontal dots + connectors + timing)
 │   ├── FailureDrillDown.tsx (failed entries: classified error, log preview, screenshot strip)
-│   ├── LogStream.tsx (shadcn ScrollArea)
+│   ├── LogStream.tsx (shadcn ScrollArea; 7 filter tabs: All/Errors/Auth/Fill/Navigate/Extract/Events)
 │   │   └── LogLine.tsx × N (timestamp, icon, message, dup badge, copy)
 │   └── Footer (streaming indicator, count, auto-scroll toggle)
 └── SessionPanel.tsx (right rail, 240–320 px)
@@ -61,6 +61,7 @@ The backend is `src/tracker/dashboard.ts` — a plain Node HTTP server. The Vite
 | `/api/diff?workflow=X&id=Y&runA=A&runB=B` | GET | `DiffResponse` — side-by-side run comparison (uncommitted scaffolding — no frontend caller yet) | _none_ |
 | `/events?workflow=X&date=Y` | SSE | `{entries, workflows, wfCounts}` enriched + `stepDurations` every 1s | `useEntries` hook |
 | `/events/logs?workflow=X&id=Y&runId=Z&date=D` | SSE | `LogEntry[]` (new only) every 500ms | `useLogs` hook |
+| `/events/run-events?workflow=X&id=Y&runId=Z&date=D` | SSE | `RunEvent[]` (delta) every 500ms | `useRunEvents` hook |
 | `/events/sessions` | SSE | `SessionState` (workflow instances + browsers + duo queue) | `useSessions` → `SessionPanel` |
 
 ### Data Types (shared between backend and frontend)
@@ -151,6 +152,7 @@ Current consumption:
 |------|-----------|-------------|
 | `useEntries(workflow, date)` | `App.tsx` → `QueuePanel` | SSE to `/events`, dedupes, sorts newest-first |
 | `useLogs(workflow, id, runId, date)` | `LogPanel` → `LogStream` | Fetch + SSE, collapses duplicates |
+| `useRunEvents(workflow, id, runId, date)` | `LogPanel` → `LogStream` (Events tab) | SSE to `/events/run-events`, full history first tick + deltas |
 | `useClock()` | `TopBar` | Updates HH:MM:SS every second |
 | `useElapsed(startTime)` | `EntryItem`, `LogPanel` | Live "1m 22s" counter for running entries |
 | `usePreflight()` | `App.tsx` | Fetches `/api/preflight` on mount, fires sonner toast |
@@ -234,6 +236,9 @@ The dashboard now auto-adapts — no frontend changes needed. When a new workflo
 - **2026-04-17: Failure drill-down.** Backend: `/api/screenshots?workflow=X&itemId=Y` lists PNGs in `.screenshots/` matching the `<workflow>-<itemId>-` prefix (parsed for step + ts from filename). `/screenshots/<filename>` streams the PNG with a path-traversal guard (`resolveScreenshotPath` rejects separators + `..`). Failed entries are enriched with `screenshotCount` so the frontend can skip the round-trip when there are none. Frontend: new `FailureDrillDown` component slots between `StepPipeline` + `LogStream` — renders classified error, collapsible last-20 log preview, and a horizontally scrollable screenshot strip with captions. Click a thumbnail → lightweight custom modal (no HeroUI import — matches the dashboard's "shadcn-ish primitives only" convention).
 - **2026-04-18: Selector health panel.** Backend: `/api/selector-warnings?days=N` (default 7) scans `*-logs.jsonl` files, filters `level === "warn"` entries whose message matches `/selector fallback triggered: (.+)/`, and returns an aggregated `[{ label, count, firstTs, lastTs, workflows[] }]` sorted count-desc. Factored as `buildSelectorWarningsHandler(dir)` for unit-test isolation. Frontend: `SelectorWarningsPanel` collapses under the Sessions column on the right rail. Badge shows count when > 0 (amber). Polls every 30s. Empty state reads "No selector fallback warnings in the last N days. Primary selectors are stable." The panel is purely a surface — `safeClick`/`safeFill` already emit these warns.
 - **2026-04-18: Removed dashboard runner.** The "⚡ RUN" drawer + `RunnerLauncher` button + `SchemaForm` + `runner-recents` localStorage helper + `schema-form-utils` parser were deleted. The backend `src/tracker/runner.ts` (child-process registry) and its `buildSpawnHandler` / `buildCancelHandler` / `buildActiveRunsHandler` / `buildWorkflowSchemaHandler` factories in `src/tracker/dashboard.ts` are gone, along with the `/api/workflows/:name/run`, `/api/workflows/:name/schema`, `/api/runs/:runId/cancel`, and `/api/runs/active` route registrations. Workflows are launched only via the npm scripts in `package.json` (or whatever replacement launcher lands later). Session monitoring (the bottom `SessionPanel` showing live workflows + their current step + auth state) still populates from kernel-emitted `emitWorkflowStart` / `emitSessionCreate` / `emitBrowserLaunch` / `emitAuthStart` calls in `src/tracker/jsonl.ts` (called by `withTrackedWorkflow`) — verified during this removal, no runner dependency.
+- **2026-04-19: Events tab in LogStream.** New filter tab merges into the existing tab system. "All" tab merges logs + RunEvents by ts; "Events" tab shows events only; existing per-category tabs (Errors/Auth/Fill/Navigate/Extract) keep log-only behavior. Backed by the new `/events/run-events` SSE; consumed via `useRunEvents` hook (twin of `useLogs`).
+- **2026-04-19: Step-cache visualization in StepPipeline.** Cached step dots render blue (`#3b82f6`) with a `❄` glyph and a hover tooltip showing the step's historical avg duration. Footer reads "N of M steps reused from cache". Reads `entry.cacheHits` + `entry.cacheStepAvgs` (enriched by `/events` SSE).
+- **2026-04-19: Frontend test harness deferred.** Events-tab and StepPipeline cache tests in `tests/unit/dashboard/` were designed but not shipped — the project has no `@testing-library/react` / `jsdom` setup. Manual verification covered for v1; if frontend tests become a priority, adding those deps + a vitest-or-node-test JSDOM bootstrap would unlock the two designed tests.
 
 ## Frontend Files
 
