@@ -146,6 +146,47 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
   }
 }
 
+/**
+ * Build a SessionObserver that routes Session.launch lifecycle hooks into
+ * the tracker's SessionContext (for Events-tab events) and `setStep` (for
+ * the StepPipeline + entry-status flip to "running"). Undeclared step names
+ * (e.g. `{systemId}-auth` for a system whose id doesn't have a matching step
+ * declared in `wf.config.steps`) are guarded — the session event still fires,
+ * but setStep is skipped so we never emit a `running` row for an unregistered
+ * step name.
+ */
+export function buildSessionObserver<TData, TSteps extends readonly string[]>(
+  wf: RegisteredWorkflow<TData, TSteps>,
+  sessionCtx: import('../tracker/jsonl.js').SessionContext,
+  setStep: (step: string) => void,
+): import('./types.js').SessionObserver {
+  const sessionId = '1'
+  let registered = false
+  const declaredSteps = new Set<string>(wf.config.steps as readonly string[])
+
+  return {
+    instance: sessionCtx.instance,
+    onBrowserLaunch: (systemId, browserId) => {
+      if (!registered) {
+        sessionCtx.registerSession(sessionId)
+        registered = true
+      }
+      sessionCtx.registerBrowser(sessionId, browserId, systemId)
+    },
+    onAuthStart: (systemId, browserId) => {
+      const stepName = `${systemId}-auth`
+      if (declaredSteps.has(stepName)) setStep(stepName)
+      sessionCtx.setAuthState(browserId, systemId, 'start')
+    },
+    onAuthComplete: (systemId, browserId) => {
+      sessionCtx.setAuthState(browserId, systemId, 'complete')
+    },
+    onAuthFailed: (systemId, browserId) => {
+      sessionCtx.setAuthState(browserId, systemId, 'failed')
+    },
+  }
+}
+
 export function defineWorkflow<TData, TSteps extends readonly string[]>(
   config: WorkflowConfig<TData, TSteps>,
 ): RegisteredWorkflow<TData, TSteps> {
@@ -201,11 +242,17 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
      * and a second handler here would just duplicate cleanup.
      */
     installSigint: boolean,
+    /**
+     * Observer that bridges Session.launch lifecycle hooks into the tracker.
+     * Undefined in the trackerStub branch (nothing to bridge to).
+     */
+    observer?: import('./types.js').SessionObserver,
   ): Promise<void> => {
     const session = await Session.launch(wf.config.systems, {
       authChain: wf.config.authChain,
       tiling: wf.config.tiling,
       launchFn: opts.launchFn,
+      observer,
     })
 
     const runId = opts.preAssignedRunId ?? randomUUID()
@@ -248,11 +295,13 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
 
   if (opts.trackerStub) {
     // trackerStub mode is test-only injection: withTrackedWorkflow isn't
-    // running, so the kernel must own SIGINT here.
+    // running, so the kernel must own SIGINT here. No observer — there's
+    // no SessionContext to bridge hooks into.
     await run(
       () => {},
       () => {},
       true,
+      undefined,
     )
     return
   }
@@ -265,8 +314,9 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
     await withTrackedWorkflow(
       wf.config.name,
       String(itemId),
-      async (setStep, updateData /*, _onCleanup, _session */) => {
-        await run(setStep, updateData, false)
+      async (setStep, updateData, _onCleanup, sessionCtx) => {
+        const observer = buildSessionObserver(wf, sessionCtx, setStep)
+        await run(setStep, updateData, false, observer)
       },
       {
         ...buildTrackerOpts(wf),
