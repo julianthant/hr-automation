@@ -40,58 +40,41 @@ export function EntryItem({ entry, selected, onClick }: EntryItemProps) {
     <div
       onClick={onClick}
       className={cn(
-        "px-5 py-3 border-b border-border cursor-pointer transition-colors",
+        "h-[69.5px] px-5 py-2.5 border-b border-border cursor-pointer transition-colors flex flex-col justify-center gap-1 overflow-hidden",
         "hover:bg-secondary",
-        selected && "bg-accent border-l-[3px] border-l-primary pl-[17px]",
+        selected && "bg-accent border-r-[3px] border-r-primary pr-[17px]",
       )}
     >
       {/* Row 1: Name + status badge */}
-      <div className="flex items-center justify-between">
-        <span className="font-semibold text-[15px] truncate">{name || entry.id}</span>
+      <div className="flex items-center justify-between min-w-0">
+        <span className="font-semibold text-[14px] truncate">{name || entry.id}</span>
         <span className={cn("text-[10px] font-semibold px-2.5 py-0.5 rounded-xl uppercase tracking-wide font-mono flex-shrink-0 ml-2", badgeStyles[entry.status])}>
           {entry.status}
         </span>
       </div>
 
-      {/* Row 2: Doc ID + workflow instance tag */}
-      {name && (
-        <div className="flex items-center justify-between mt-0.5">
-          <span className="font-mono text-[13px] text-muted-foreground">{entry.id}</span>
-          {entry.data?.instance && (
-            <span className="text-[10px] px-1.5 py-px rounded bg-secondary text-muted-foreground font-medium flex-shrink-0 ml-2">
-              {entry.data.instance}
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Row 3: Running = latest log, Failed = error, Pending/Done = nothing */}
-      {isRunning && entry.lastLogMessage && (
-        <div className="font-mono text-xs text-muted-foreground mt-1.5 truncate">
-          {entry.lastLogMessage}
-        </div>
-      )}
-      {isFailed && entry.error && (
-        <div className="flex items-center gap-1.5 font-mono text-xs text-destructive mt-1.5">
-          <X className="w-3 h-3 flex-shrink-0" />
-          <span className="truncate">{entry.error}</span>
-        </div>
-      )}
-
-      {/* Row 4: Date, run number, elapsed */}
-      {!isPending && (
-        <div className="flex items-center gap-2 mt-1.5 text-xs font-mono text-muted-foreground">
-          <span>{time}</span>
-          <span className="bg-secondary px-1.5 py-px rounded font-medium">#{runNumber}</span>
-          <span className="flex-1" />
-          {isRunning && elapsed && (
-            <span className="text-primary">{elapsed}</span>
-          )}
-          {(isDone || isFailed) && (
-            <span>{duration || ""}</span>
-          )}
-        </div>
-      )}
+      {/* Row 2: time + run + elapsed/duration. Replaces the older 4-row
+          shape so the entry fits cleanly inside the 69.5px slot that lines
+          up with the LogPanel's detail-grid rows across the column gap. */}
+      <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground min-w-0">
+        <span className="flex-shrink-0">{time}</span>
+        <span className="bg-secondary px-1.5 py-px rounded font-medium flex-shrink-0">#{runNumber}</span>
+        {isFailed && entry.error ? (
+          <span className="flex items-center gap-1 text-destructive truncate min-w-0">
+            <X className="w-3 h-3 flex-shrink-0" />
+            <span className="truncate">{entry.error}</span>
+          </span>
+        ) : isRunning && entry.lastLogMessage ? (
+          <span className="truncate min-w-0">{entry.lastLogMessage}</span>
+        ) : null}
+        <span className="flex-1" />
+        {isRunning && elapsed && (
+          <span className="text-primary flex-shrink-0">{elapsed}</span>
+        )}
+        {(isDone || isFailed) && duration && (
+          <span className="flex-shrink-0">{duration}</span>
+        )}
+      </div>
     </div>
   );
 }

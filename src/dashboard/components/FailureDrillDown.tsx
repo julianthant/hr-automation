@@ -59,12 +59,10 @@ export function FailureDrillDown({ entry, workflow, logs }: FailureDrillDownProp
     return () => window.removeEventListener("keydown", handler);
   }, [lightbox]);
 
-  const last20 = logs.slice(-20);
-
   return (
     <>
-      <div className="border-b border-border flex-shrink-0">
-        {/* Error header */}
+      {/* Error header */}
+      <div className="flex-shrink-0">
         {entry.error && (
           <div className="flex items-start gap-2 px-6 py-3 bg-destructive/5 border-b border-destructive/20">
             <AlertCircle className="w-4 h-4 mt-0.5 text-destructive flex-shrink-0" />
@@ -77,31 +75,6 @@ export function FailureDrillDown({ entry, workflow, logs }: FailureDrillDownProp
               </div>
             </div>
           </div>
-        )}
-
-        {/* Last 20 log lines */}
-        {last20.length > 0 && (
-          <details className="px-6 py-2 bg-secondary/40 border-b border-border group" open>
-            <summary className="cursor-pointer select-none text-[11px] uppercase tracking-wider text-muted-foreground font-semibold flex items-center gap-1.5">
-              Last {last20.length} log line{last20.length === 1 ? "" : "s"}
-            </summary>
-            <ul className="mt-2 text-[11px] font-mono text-muted-foreground space-y-0.5 max-h-40 overflow-y-auto">
-              {last20.map((l, i) => (
-                <li
-                  key={`${l.ts}-${i}`}
-                  className={cn(
-                    "truncate",
-                    l.level === "error" && "text-destructive",
-                    l.level === "success" && "text-[#4ade80]",
-                    l.level === "warn" && "text-[#fbbf24]",
-                  )}
-                  title={l.message}
-                >
-                  {l.message}
-                </li>
-              ))}
-            </ul>
-          </details>
         )}
 
         {/* Screenshot strip */}
@@ -183,14 +156,14 @@ export function FailureDrillDown({ entry, workflow, logs }: FailureDrillDownProp
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="overflow-auto p-2">
+            <div className="overflow-auto p-2 border-b border-border">
               <img
                 src={`/screenshots/${encodeURIComponent(lightbox.filename)}`}
                 alt={lightbox.step || lightbox.filename}
                 className="max-w-full max-h-[85vh] rounded-md"
               />
             </div>
-            <div className="px-5 py-2 border-t border-border text-[11px] text-muted-foreground font-mono flex justify-between">
+            <div className="px-5 py-2 text-[11px] text-muted-foreground font-mono flex justify-between">
               <span>{lightbox.ts ? new Date(lightbox.ts).toLocaleString() : ""}</span>
               <span>{(lightbox.sizeBytes / 1024).toFixed(1)} KB</span>
             </div>

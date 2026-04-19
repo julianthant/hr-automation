@@ -54,7 +54,7 @@ export function SearchResults({ rows, query, onPick }: SearchResultsProps) {
 
   if (rows.length === 0) {
     return (
-      <div className="absolute top-full left-0 mt-1.5 w-[440px] bg-popover border border-border rounded-lg shadow-md z-50 overflow-hidden">
+      <div className="absolute top-full left-0 right-0 mt-1.5 min-w-[440px] bg-popover border border-border rounded-lg shadow-md z-50 overflow-hidden">
         <div className="px-4 py-6 text-center">
           <div className="text-sm text-foreground font-medium">No matches</div>
           <div className="text-xs text-muted-foreground mt-1">
@@ -67,9 +67,9 @@ export function SearchResults({ rows, query, onPick }: SearchResultsProps) {
   }
 
   return (
-    <div className="absolute top-full left-0 mt-1.5 w-[440px] bg-popover border border-border rounded-lg shadow-md z-50 overflow-hidden">
+    <div className="absolute top-full left-0 right-0 mt-1.5 min-w-[440px] bg-popover border border-border rounded-lg shadow-md z-50 overflow-hidden">
       <div className="max-h-[380px] overflow-y-auto">
-        {rows.map((row, i) => (
+        {rows.map((row) => (
           <button
             key={`${row.workflow}::${row.id}::${row.runId}`}
             type="button"
@@ -77,7 +77,6 @@ export function SearchResults({ rows, query, onPick }: SearchResultsProps) {
             className={cn(
               "w-full text-left px-3.5 py-2.5 cursor-pointer transition-colors border-b border-border last:border-b-0",
               "hover:bg-accent focus-visible:bg-accent outline-none",
-              i === 0 && "border-t-0",
             )}
           >
             {/* Row 1: workflow label + status pill */}

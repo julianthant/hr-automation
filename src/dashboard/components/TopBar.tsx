@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, Monitor } from "lucide-react";
 import { useClock } from "./hooks/useClock";
 import { cn } from "@/lib/utils";
 import { useWorkflows, autoLabel } from "../workflows-context";
@@ -119,18 +119,9 @@ export function TopBar({
     >
       {/* ── QUEUE zone — scopes QueuePanel ──────────────────── */}
       <div className="flex items-center gap-3 px-4 py-3 border-r border-border min-w-0">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div
-            aria-hidden
-            className={cn(
-              "w-1.5 h-1.5 rounded-full flex-shrink-0",
-              connected ? "bg-[#4ade80]" : "bg-muted-foreground",
-            )}
-          />
-          <span className="text-[13px] font-bold tracking-tight whitespace-nowrap">
-            HR Dashboard
-          </span>
-        </div>
+        <span className="text-[13px] font-bold tracking-tight whitespace-nowrap">
+          HR Dashboard
+        </span>
         <div className="w-px h-5 bg-border flex-shrink-0" />
 
         {/* Workflow dropdown — primary scope control for the queue */}
@@ -171,8 +162,17 @@ export function TopBar({
       </div>
 
       {/* ── STREAM zone — scopes LogPanel ───────────────────── */}
-      <div className="flex items-center justify-center gap-3 px-4 py-3 border-r border-border min-w-0">
-        {/* Date navigator — picks which day's entries the stream shows */}
+      <div className="flex items-center gap-3 px-6 py-3 border-r border-border min-w-0">
+        {/* Search — fills the full width of the stream zone up to the
+             date navigator. Picking a result swaps the LogPanel below. */}
+        {onSearchSelect && (
+          <div className="flex-1 min-w-0">
+            <SearchBar onSelect={onSearchSelect} />
+          </div>
+        )}
+
+        {/* Date navigator — right-aligned inside the stream zone. Picks
+             which day's entries the stream shows. */}
         <div className="flex items-center gap-1 flex-shrink-0">
           <button
             onClick={() => navigateDay(-1)}
@@ -204,43 +204,46 @@ export function TopBar({
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
-
-        {/* Search — cross-workflow / cross-date jump-to. Centred in the
-             stream zone because picking a result swaps the LogPanel below. */}
-        {onSearchSelect && (
-          <div className="flex-1 max-w-[420px] min-w-0">
-            <SearchBar onSelect={onSearchSelect} />
-          </div>
-        )}
       </div>
 
-      {/* ── SESSION zone — scopes SessionPanel ──────────────── */}
-      <div className="flex items-center justify-end gap-3 px-4 py-3 min-w-0">
-        <div
-          role="status"
-          aria-live="polite"
-          className={cn(
-            "flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium",
-            connected
-              ? "bg-[#4ade80]/8 border border-[#4ade80]/20 text-[#4ade80]"
-              : "bg-destructive/8 border border-destructive/20 text-destructive",
-          )}
-        >
-          <div
-            aria-hidden
-            className={cn(
-              "w-[6px] h-[6px] rounded-full",
-              connected ? "bg-[#4ade80] animate-pulse" : "bg-destructive",
-            )}
-          />
-          {connected ? "Live" : "Disconnected"}
+      {/* ── SESSION zone — scopes SessionPanel. Hosts the SESSIONS label
+            (formerly inside SessionPanel's own 60px header) so the panel
+            below can start directly with content + sit flush with the
+            QueuePanel + LogPanel content rows. Every child uses
+            `leading-none` so flex `items-center` aligns geometric centers
+            without line-height padding throwing baselines off. ── */}
+      <div className="flex items-center justify-between gap-2 px-4 py-3 min-w-0">
+        <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-semibold text-muted-foreground min-w-0 leading-none">
+          <Monitor aria-hidden className="w-3.5 h-3.5 flex-shrink-0" />
+          <span className="truncate leading-none">Sessions</span>
         </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <div
+            role="status"
+            aria-live="polite"
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium leading-none",
+              connected
+                ? "bg-[#4ade80]/8 border border-[#4ade80]/20 text-[#4ade80]"
+                : "bg-destructive/8 border border-destructive/20 text-destructive",
+            )}
+          >
+            <div
+              aria-hidden
+              className={cn(
+                "w-[6px] h-[6px] rounded-full",
+                connected ? "bg-[#4ade80] animate-pulse" : "bg-destructive",
+              )}
+            />
+            {connected ? "Live" : "Disconnected"}
+          </div>
 
-        <span className="font-mono text-[12px] text-muted-foreground font-medium tabular-nums hidden min-[1440px]:inline">
-          {clock}
-        </span>
+          <span className="font-mono text-[12px] text-muted-foreground font-medium tabular-nums leading-none hidden min-[1440px]:inline">
+            {clock}
+          </span>
 
-        {rightSlot}
+          {rightSlot}
+        </div>
       </div>
     </div>
   );
