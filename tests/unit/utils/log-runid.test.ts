@@ -1,21 +1,22 @@
-import { describe, it, expect } from "vitest";
-import { withLogContext, setLogRunId, getLogRunId } from "../../src/utils/log.js";
+import { describe, it } from "node:test";
+import { strict as assert } from "node:assert";
+import { withLogContext, setLogRunId, getLogRunId } from "../../../src/utils/log.js";
 
 describe("getLogRunId", () => {
   it("returns undefined outside a log context", () => {
-    expect(getLogRunId()).toBeUndefined();
+    assert.equal(getLogRunId(), undefined);
   });
 
   it("returns undefined inside a context with no runId set", async () => {
     await withLogContext("wf", "item-1", async () => {
-      expect(getLogRunId()).toBeUndefined();
+      assert.equal(getLogRunId(), undefined);
     });
   });
 
   it("returns the runId after setLogRunId is called", async () => {
     await withLogContext("wf", "item-1", async () => {
       setLogRunId("item-1#3");
-      expect(getLogRunId()).toBe("item-1#3");
+      assert.equal(getLogRunId(), "item-1#3");
     });
   });
 
@@ -33,8 +34,8 @@ describe("getLogRunId", () => {
         results.push(getLogRunId() ?? "missing");
       }),
     ]);
-    expect(results).toContain("item-A#1");
-    expect(results).toContain("item-B#1");
-    expect(results).not.toContain("missing");
+    assert.ok(results.includes("item-A#1"));
+    assert.ok(results.includes("item-B#1"));
+    assert.ok(!results.includes("missing"));
   });
 });
