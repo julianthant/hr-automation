@@ -53,6 +53,11 @@ export function setLogRunId(runId: string): void {
   if (ctx) ctx.runId = runId;
 }
 
+/** Read the runId from the current AsyncLocalStorage log context, if set. */
+export function getLogRunId(): string | undefined {
+  return logStore.getStore()?.runId;
+}
+
 export function withLogContext<T>(
   workflow: string,
   itemId: string,
