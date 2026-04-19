@@ -1,11 +1,17 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { defineWorkflow } from '../../../src/core/workflow.js'
 import { runWorkflowPool } from '../../../src/core/pool.js'
+
+const fakeLaunch = () => Promise.resolve({
+  page: { bringToFront: async () => {} } as unknown as import('playwright').Page,
+  context: { close: async () => {} } as never,
+  browser: { close: async () => {} } as never,
+})
 
 function fakeSlot() {
   return {
@@ -148,6 +154,36 @@ test('runWorkflowPool: opts.poolSize overrides wf.config.batch.poolSize', async 
   assert.equal(result.total, 10)
   assert.equal(result.succeeded, 10)
   assert.equal(launchCalls, 5, 'opts.poolSize (5) should win over wf.config.batch.poolSize (2)')
+})
+
+test('runWorkflowPool: initialData merges into each item pending entry', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hrauto-pool-init-'))
+
+  const wf = defineWorkflow({
+    name: 'test-pool-init',
+    systems: [{ id: 'sys', login: async () => {} }],
+    steps: ['go'] as const,
+    schema: z.object({ n: z.number() }),
+    tiling: 'single',
+    authChain: 'sequential',
+    batch: { mode: 'pool', poolSize: 2 },
+    getName: (d) => d.label ?? '',
+    getId: (d) => d.label ?? '',
+    initialData: (input) => ({ label: `item-${input.n}` }),
+    handler: async (ctx) => { ctx.markStep('go') },
+  })
+
+  await runWorkflowPool(wf, [{ n: 1 }, { n: 2 }], { launchFn: fakeLaunch, trackerDir: dir })
+
+  const entryFiles = readdirSync(dir).filter((f) =>
+    f.startsWith('test-pool-init-') && f.endsWith('.jsonl') && !f.endsWith('-logs.jsonl')
+  )
+  assert.ok(entryFiles.length > 0, 'tracker jsonl file exists')
+  const lines = readFileSync(join(dir, entryFiles[0]), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  const pendings = lines.filter((l: any) => l.status === 'pending')
+  assert.equal(pendings.length, 2, `expected 2 pending entries, got ${pendings.length}`)
+  const labels = pendings.map((p: any) => p.data.label).sort()
+  assert.deepEqual(labels, ['item-1', 'item-2'])
 })
 
 test('runWorkflowPool: falls back to wf.config.batch.poolSize when opts.poolSize is undefined', async () => {
