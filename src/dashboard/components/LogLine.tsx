@@ -95,17 +95,28 @@ const EVENT_VISUAL: Record<RunEvent["type"], { glyph: string; color: string }> =
 
 function EventLine({ event }: { event: RunEvent }) {
   const v = EVENT_VISUAL[event.type];
-  const time = new Date(event.timestamp).toISOString().slice(11, 19);
+  // Match LogLine's timestamp format + column geometry so Events + regular
+  // log lines line up vertically in the stream (same px-6, min-w-[72px],
+  // 14px icon, gap-3.5, font-mono text-[13px]).
+  const time = new Date(event.timestamp).toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
   const detail = event.system ?? event.step ?? event.currentStep ?? event.currentItemId ?? "";
   return (
-    <div className="grid grid-cols-[72px_22px_1fr_auto] items-center gap-2.5 px-3.5 py-1.5 font-mono text-[11px]">
-      <span className="text-muted-foreground">{time}</span>
-      <span style={{ color: v.color, fontSize: "14px", textAlign: "center" }}>{v.glyph}</span>
-      <span>
+    <div className="flex items-center gap-3.5 px-6 py-[3px] font-mono text-[13px] leading-relaxed">
+      <span className="text-muted-foreground text-xs whitespace-nowrap min-w-[72px]">{time}</span>
+      <span
+        className="flex-shrink-0 text-center"
+        style={{ color: v.color, width: 14, fontSize: 14 }}
+      >
+        {v.glyph}
+      </span>
+      <span className="flex-1 break-words text-secondary-foreground">
         <span style={{ color: v.color }}>{event.type}</span>
         {detail && <span className="text-muted-foreground"> {detail}</span>}
       </span>
-      <span />
     </div>
   );
 }
