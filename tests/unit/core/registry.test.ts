@@ -53,7 +53,10 @@ test('registry: defineDashboardMetadata stores the same as register', () => {
 test('registry: autoLabel handles camelCase + kebab-case', () => {
   assert.equal(autoLabel('employeeName'), 'Employee Name')
   assert.equal(autoLabel('emplId'), 'Empl Id')
-  assert.equal(autoLabel('pdf-download'), 'Pdf Download')
+  // Domain acronyms (EID, PDF, CRM, …) are preserved as all-caps.
+  assert.equal(autoLabel('pdf-download'), 'PDF Download')
+  assert.equal(autoLabel('eid-lookup'), 'EID Lookup')
+  assert.equal(autoLabel('crm-extract'), 'CRM Extract')
   assert.equal(autoLabel('snake_case_key'), 'Snake Case Key')
   assert.equal(autoLabel('simple'), 'Simple')
 })

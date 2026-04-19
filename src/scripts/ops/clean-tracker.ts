@@ -33,7 +33,7 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  let days = 7;
+  let days = 30;
   let dir = DEFAULT_DIR;
   let screenshotsDir = DEFAULT_SCREENSHOTS_DIR;
   let stepCacheDir = DEFAULT_STEP_CACHE_DIR;

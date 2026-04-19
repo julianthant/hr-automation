@@ -34,14 +34,34 @@ export function clear(): void {
 }
 
 /**
+ * Domain acronyms that should stay all-caps in auto-labels. Without this
+ * list, `eid-lookup` would render as `Eid Lookup` (the `\b\w` title-case
+ * fallback) instead of the desired `EID Lookup`. Workflow files set their
+ * own `label` explicitly, but the registry-not-loaded-yet first-paint
+ * falls through to autoLabel — so the fallback should look right too.
+ */
+const ACRONYMS: ReadonlySet<string> = new Set([
+  'EID', 'CRM', 'I9', 'HR', 'UCSD', 'UKG', 'SSO', 'API', 'CSV', 'PDF',
+  'UC', 'WFD', 'UCPATH', 'PII', 'URL', 'JSON', 'YAML',
+])
+
+/**
  * Title-case a camelCase or kebab-case string for auto-label fallback.
- * `employeeName` → `Employee Name`, `empl-id` → `Empl Id`.
+ * `employeeName` → `Employee Name`, `empl-id` → `Empl Id`,
+ * `eid-lookup` → `EID Lookup` (acronym preserved).
  */
 export function autoLabel(key: string): string {
   return key
     .replace(/[-_]+/g, ' ')
     .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .split(/\s+/)
+    .map((word) => {
+      if (!word) return word
+      const upper = word.toUpperCase()
+      if (ACRONYMS.has(upper)) return upper
+      return word.charAt(0).toUpperCase() + word.slice(1)
+    })
+    .join(' ')
     .trim()
 }
 
