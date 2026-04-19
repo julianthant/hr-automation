@@ -18,6 +18,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { emitCacheHit } from "../tracker/session-events.js";
 
 export const DEFAULT_STEP_CACHE_DIR = ".tracker/step-cache";
 
@@ -139,6 +140,12 @@ export function stepCacheGet<T>(
     if (Number.isNaN(ts)) return null;
     const cutoff = Date.now() - withinHours * 60 * 60 * 1000;
     if (ts < cutoff) return null;
+  }
+
+  try {
+    emitCacheHit(itemId, itemId, stepName, opts?.dir);
+  } catch {
+    // best-effort instrumentation; never let an emit failure mask a cache hit
   }
 
   return record.value;
