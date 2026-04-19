@@ -53,10 +53,16 @@ async function searchCrm(
   const results: Array<{ name: string; offerSentOn: string; processStage: string; recordUrl: string }> = [];
   for (let i = 0; i < count; i++) {
     const cells = rows.nth(i).locator("td");
+    // Read total cell count once so we can safely skip columns that don't
+    // exist on this row. The CRM search view occasionally renders rows with
+    // fewer than the expected 5 columns (e.g. condensed layout when the user
+    // has filters applied server-side); `cells.nth(4).textContent()` would
+    // otherwise block for the full 30s auto-wait before throwing.
+    const cellCount = await cells.count();
     const nameCell = cells.nth(0);
-    const name = (await nameCell.textContent())?.trim() ?? "";
-    const offerSentOn = (await cells.nth(1).textContent())?.trim() ?? "";
-    const processStage = (await cells.nth(4).textContent())?.trim() ?? "";
+    const name = cellCount > 0 ? ((await nameCell.textContent())?.trim() ?? "") : "";
+    const offerSentOn = cellCount > 1 ? ((await cells.nth(1).textContent())?.trim() ?? "") : "";
+    const processStage = cellCount > 4 ? ((await cells.nth(4).textContent())?.trim() ?? "") : "";
     const link = nameCell.locator("a");
     const href = (await link.count()) > 0 ? (await link.getAttribute("href")) ?? "" : "";
     const recordUrl = href.startsWith("http") ? href : href ? `https://act-crm.my.site.com${href}` : "";
