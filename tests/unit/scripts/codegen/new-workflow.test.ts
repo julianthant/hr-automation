@@ -15,7 +15,7 @@ import {
   kebabToPascal,
   scaffold,
   parseArgv,
-} from "../../../src/scripts/new-workflow.js";
+} from "../../../../src/scripts/codegen/new-workflow.js";
 
 function mkTmp(): string {
   const dir = join(

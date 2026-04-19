@@ -1,4 +1,4 @@
-// tests/unit/scripts/selector-search-lib.test.ts
+// tests/unit/scripts/selectors/search-lib.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -8,7 +8,7 @@ import {
   parseSelectorsMarkdown,
   parseLessonsMarkdown,
   type IndexedItem,
-} from "../../../src/scripts/selector-search-lib.js";
+} from "../../../../src/scripts/selectors/search-lib.js";
 
 test("tokenize lowercases and splits on non-word chars", () => {
   assert.deepEqual(tokenize("Comp Rate Code"), ["comp", "rate", "code"]);

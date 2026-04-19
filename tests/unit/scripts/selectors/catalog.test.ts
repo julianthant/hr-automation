@@ -1,9 +1,9 @@
-// tests/unit/scripts/selectors-catalog.test.ts
+// tests/unit/scripts/selectors/catalog.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { extractSelectors, renderCatalog } from "../../../src/scripts/selectors-catalog.js";
+import { extractSelectors, renderCatalog } from "../../../../src/scripts/selectors/catalog.js";
 
 test("extractSelectors handles top-level exported functions", () => {
   const src = `

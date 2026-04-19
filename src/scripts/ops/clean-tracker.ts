@@ -13,12 +13,12 @@ import {
   cleanOldTrackerFiles,
   cleanOldScreenshots,
   DEFAULT_DIR,
-} from "../tracker/jsonl.js";
+} from "../../tracker/jsonl.js";
 import {
   pruneOldStepCache,
   DEFAULT_STEP_CACHE_DIR,
-} from "../core/index.js";
-import { log } from "../utils/log.js";
+} from "../../core/index.js";
+import { log } from "../../utils/log.js";
 
 export const DEFAULT_SCREENSHOTS_DIR = ".screenshots";
 

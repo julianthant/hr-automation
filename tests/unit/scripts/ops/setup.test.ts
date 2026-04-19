@@ -15,7 +15,7 @@ import {
   checkPlaywrightBrowsers,
   checkDirWritable,
   renderResults,
-} from "../../../src/scripts/setup-cli.js";
+} from "../../../../src/scripts/ops/setup.js";
 
 // Use a dedicated tmp dir per test group so tests don't stomp on the real
 // repo root. Each test gets a fresh empty dir to build up a minimal fake

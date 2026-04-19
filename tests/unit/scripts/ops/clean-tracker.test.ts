@@ -12,9 +12,9 @@ import { join } from "path";
 import {
   cleanOldTrackerFiles,
   cleanOldScreenshots,
-} from "../../../src/tracker/jsonl.js";
-import { pruneOldStepCache } from "../../../src/core/index.js";
-import { cleanTrackerMain } from "../../../src/scripts/clean-tracker.js";
+} from "../../../../src/tracker/jsonl.js";
+import { pruneOldStepCache } from "../../../../src/core/index.js";
+import { cleanTrackerMain } from "../../../../src/scripts/ops/clean-tracker.js";
 
 // Dedicated tmp dir to keep the real .tracker/ untouched.
 const TEST_DIR = ".tracker-clean-test";
