@@ -321,6 +321,10 @@ See `docs/handoff-2026-04-18.md` (uncommitted; in working tree) for the full pre
 
 After every error fix, selector re-map, or new pattern: update the relevant CLAUDE.md. These files are the only memory between sessions — keep them accurate. Add notes to `## Lessons Learned` in the module/workflow you touched; bump `// verified` dates in `selectors.ts` when you re-map a selector; keep gotchas current.
 
+## claude-mem — reflexive memory search
+
+claude-mem is installed and auto-captures observations from every session, but it does NOT auto-query. Before any non-trivial task — planning, refactoring, implementing a new workflow/selector/system, debugging a recurring or non-obvious issue, or answering "have we seen this before" / "how did we handle X" / "what's the status of Y" — run `/mem-search "<task keywords>"` as one of the first actions to surface prior-session context. Skip only for trivial one-liners, reading a single known file, or unambiguous step-by-step instructions. If the search returns nothing useful, proceed normally — don't stall.
+
 ## Playwright-cli — selector discovery
 
 `playwright-cli` (install/update: `npm install -g @playwright/cli@latest`) opens headed browsers and dumps accessibility snapshots with ref IDs for every element. Use it before writing any new selector. Core loop:
