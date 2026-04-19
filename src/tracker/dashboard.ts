@@ -11,6 +11,7 @@ import {
   readRunsForId,
   cleanOldTrackerFiles,
   cleanOldScreenshots,
+  DEFAULT_DIR,
   type TrackerEntry,
 } from "./jsonl.js";
 import { log } from "../utils/log.js";
@@ -707,6 +708,21 @@ export interface StartDashboardOptions {
   noClean?: boolean;
   /** Max age (days) for the startup prune. Defaults to 30 — conservative. */
   cleanMaxAgeDays?: number;
+  /** Override tracker dir — mainly for test isolation. Defaults to DEFAULT_DIR. */
+  dir?: string;
+}
+
+/**
+ * Options for the lower-level `createDashboardServer` factory. Returns a live
+ * `http.Server` bound to the requested port (0 = random, useful in tests).
+ * Does NOT use the module-level singleton.
+ */
+export interface CreateDashboardServerOptions {
+  workflow?: string;
+  port?: number;
+  dir?: string;
+  noClean?: boolean;
+  cleanMaxAgeDays?: number;
 }
 
 export function startDashboard(
@@ -715,6 +731,28 @@ export function startDashboard(
   opts: StartDashboardOptions = {}
 ): void {
   if (server) return;
+  server = createDashboardServer({
+    workflow,
+    port,
+    dir: opts.dir,
+    noClean: opts.noClean,
+    cleanMaxAgeDays: opts.cleanMaxAgeDays,
+  });
+}
+
+/**
+ * Factory for an isolated dashboard `http.Server` instance. Unlike
+ * `startDashboard`, this bypasses the module-level singleton and returns the
+ * live `Server` object so tests can spin up per-test servers on random ports
+ * (port 0) with per-test tracker directories.
+ *
+ * Production callers should continue to use `startDashboard`, which
+ * preserves the singleton-guard + :3838 default binding behavior.
+ */
+export function createDashboardServer(opts: CreateDashboardServerOptions = {}): Server {
+  const workflow = opts.workflow ?? "onboarding";
+  const port = opts.port ?? 3838;
+  const dir = opts.dir ?? DEFAULT_DIR;
 
   // One-time startup prune — long retention by default (30 days) so the
   // dashboard boots with a clean working set without surprising the user.
@@ -761,7 +799,7 @@ export function startDashboard(
     res.end(JSON.stringify(body));
   };
 
-  server = createServer(async (req, res) => {
+  const localServer: Server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 
     // CORS preflight — kept for any future POST endpoints.
@@ -777,7 +815,7 @@ export function startDashboard(
 
     if (url.pathname === "/api/workflows") {
       res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-      res.end(JSON.stringify(listWorkflows()));
+      res.end(JSON.stringify(listWorkflows(dir)));
       return;
     }
 
@@ -790,14 +828,14 @@ export function startDashboard(
     if (url.pathname === "/api/dates") {
       const wf = url.searchParams.get("workflow") ?? workflow;
       res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-      res.end(JSON.stringify(listDatesForWorkflow(wf)));
+      res.end(JSON.stringify(listDatesForWorkflow(wf, dir)));
       return;
     }
 
     if (url.pathname === "/api/entries") {
       const wf = url.searchParams.get("workflow") ?? workflow;
       res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-      res.end(JSON.stringify(readEntries(wf)));
+      res.end(JSON.stringify(readEntries(wf, dir)));
       return;
     }
 
@@ -806,7 +844,7 @@ export function startDashboard(
       const id = url.searchParams.get("id") ?? "";
       const runId = url.searchParams.get("runId") ?? "";
       res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-      let logs = readLogEntries(wf, id || undefined);
+      let logs = readLogEntries(wf, id || undefined, dir);
       // Logs without runId belong to run #1 only
       if (runId) logs = logs.filter((l) => l.runId ? l.runId === runId : runId.endsWith("#1"));
       res.end(JSON.stringify(logs));
@@ -829,8 +867,8 @@ export function startDashboard(
       let firstTick = true;
       const send = () => {
         let entries = (date && date !== today)
-          ? readLogEntriesForDate(wf, id || undefined, date)
-          : readLogEntries(wf, id || undefined);
+          ? readLogEntriesForDate(wf, id || undefined, date, dir)
+          : readLogEntries(wf, id || undefined, dir);
         // Logs without runId belong to run #1 only
         if (runId) entries = entries.filter((l) => l.runId ? l.runId === runId : runId.endsWith("#1"));
 
@@ -853,6 +891,76 @@ export function startDashboard(
       return;
     }
 
+    if (url.pathname === "/events/run-events") {
+      const requestedRunId = url.searchParams.get("runId") ?? "";
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        "Access-Control-Allow-Origin": "*",
+      });
+
+      // TODO(2026-04-26): delete the fallback path once all events have runId.
+      const RUNID_FALLBACK_UNTIL = new Date("2026-04-26T00:00:00Z").getTime();
+      const fallbackEnabled = Date.now() < RUNID_FALLBACK_UNTIL;
+
+      let sentCount = 0;
+      let firstTick = true;
+
+      const send = () => {
+        // Read session events tolerantly — skip malformed lines instead of
+        // letting a bad JSON line break the whole poll cycle. `readSessionEvents`
+        // does a strict JSON.parse, so we inline a best-effort reader here.
+        const sessionsPath = getSessionsFilePath(dir);
+        const allEvents: SessionEvent[] = [];
+        try {
+          if (existsSync(sessionsPath)) {
+            const raw = readFileSync(sessionsPath, "utf-8");
+            for (const line of raw.split("\n")) {
+              if (!line) continue;
+              try {
+                allEvents.push(JSON.parse(line) as SessionEvent);
+              } catch {
+                // Skip unparseable JSONL lines without derailing the stream.
+              }
+            }
+          }
+        } catch {
+          // Any read failure → empty list; next tick may recover.
+        }
+
+        let filtered = allEvents.filter((e) => e.runId === requestedRunId);
+
+        if (fallbackEnabled) {
+          const anchor = allEvents.find(
+            (e) => e.type === "workflow_start" && e.runId === requestedRunId,
+          );
+          if (anchor) {
+            const pidMatched = allEvents.filter(
+              (e) => !e.runId && e.pid === anchor.pid,
+            );
+            filtered = [...filtered, ...pidMatched];
+          }
+        }
+
+        filtered.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+
+        if (firstTick) {
+          if (filtered.length > 0) res.write(`data: ${JSON.stringify(filtered)}\n\n`);
+          sentCount = filtered.length;
+          firstTick = false;
+        } else if (filtered.length > sentCount) {
+          res.write(`data: ${JSON.stringify(filtered.slice(sentCount))}\n\n`);
+          sentCount = filtered.length;
+        }
+      };
+
+      send();
+      const interval = setInterval(send, 500);
+      req.on("close", () => clearInterval(interval));
+      return;
+    }
+
     if (url.pathname === "/events/sessions") {
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
@@ -861,7 +969,7 @@ export function startDashboard(
         "Access-Control-Allow-Origin": "*",
       });
       const send = () => {
-        const state = rebuildSessionState();
+        const state = rebuildSessionState(dir);
         res.write(`data: ${JSON.stringify(state)}\n\n`);
       };
       send();
@@ -886,14 +994,14 @@ export function startDashboard(
         // full chain for stepDurations; useEntries dedupes to the latest per id
         // on the frontend.
         const raw = (date && date !== today)
-          ? readEntriesForDate(wf, date)
-          : readEntries(wf);
+          ? readEntriesForDate(wf, date, dir)
+          : readEntries(wf, dir);
         const entries = raw;
 
         // Enrich entries with per-run log-derived timestamps for accurate elapsed
         const logs = (date && date !== today)
-          ? readLogEntriesForDate(wf, undefined, date)
-          : readLogEntries(wf);
+          ? readLogEntriesForDate(wf, undefined, date, dir)
+          : readLogEntries(wf, undefined, dir);
         // Key: "itemId::runId" — logs without runId are assigned to run #1
         const logFirst = new Map<string, string>();
         const logLast = new Map<string, string>();
@@ -955,7 +1063,7 @@ export function startDashboard(
           };
         });
 
-        const workflows = listWorkflows();
+        const workflows = listWorkflows(dir);
         // Count unique items per workflow for dropdown badges, scoped to the
         // selected date. Dedupe by `id` so multiple runs of the same item
         // (retries) collapse into one — the operator wants "how many distinct
@@ -965,7 +1073,7 @@ export function startDashboard(
         const wfCounts: Record<string, number> = {};
         const targetDate = date || today;
         for (const w of workflows) {
-          const all = readEntriesForDate(w, targetDate);
+          const all = readEntriesForDate(w, targetDate, dir);
           const ids = new Set(all.map((e) => e.id));
           wfCounts[w] = ids.size;
         }
@@ -993,11 +1101,11 @@ export function startDashboard(
       // frontend can render the correct timeline + Started/Elapsed for
       // whichever run the operator picks in RunSelector. Without this, the
       // deduped entry (latest run) bleeds its timings into every past run.
-      const runs = readRunsForId(wf, id, date);
+      const runs = readRunsForId(wf, id, date, dir);
 
       const allForItem = date
-        ? readEntriesForDate(wf, date).filter((e) => e.id === id)
-        : readEntries(wf).filter((e) => e.id === id);
+        ? readEntriesForDate(wf, date, dir).filter((e) => e.id === id)
+        : readEntries(wf, dir).filter((e) => e.id === id);
       const historyByRun = new Map<string, StepDurationEntry[]>();
       for (const e of allForItem) {
         const rid = e.runId || `${e.id}#1`;
@@ -1008,8 +1116,8 @@ export function startDashboard(
       }
 
       const allLogs = date
-        ? readLogEntriesForDate(wf, id, date)
-        : readLogEntries(wf, id);
+        ? readLogEntriesForDate(wf, id, date, dir)
+        : readLogEntries(wf, id, dir);
       const logFirst = new Map<string, string>();
       const logLast = new Map<string, string>();
       for (const l of allLogs) {
@@ -1110,13 +1218,13 @@ export function startDashboard(
     if (url.pathname === "/api/preflight") {
       // 30-day floor so the operator always has at least the last month
       // of workflow history available for retro investigation.
-      const deleted = cleanOldTrackerFiles(30);
+      const deleted = cleanOldTrackerFiles(30, dir);
 
       // Only delete sessions.jsonl if it hasn't been touched for >24h (truly stale).
       // Stale workflows from crashed processes are handled by rebuildSessionState
       // which marks dead-PID workflows as inactive at read time — no file mutation needed.
       let sessionsCleaned = false;
-      const sessPath = getSessionsFilePath();
+      const sessPath = getSessionsFilePath(dir);
       if (existsSync(sessPath)) {
         const ageMs = Date.now() - statSync(sessPath).mtimeMs;
         if (ageMs > 24 * 60 * 60 * 1000) {
@@ -1140,16 +1248,24 @@ export function startDashboard(
     res.end();
   });
 
-  server.on("error", (err: NodeJS.ErrnoException) => {
+  localServer.on("error", (err: NodeJS.ErrnoException) => {
     if (err.code === "EADDRINUSE") {
       log.step(`Dashboard port ${port} in use — skipping (another instance may be running)`);
-      server = null;
+      // If this server was installed as the module-level singleton, clear it.
+      if (server === localServer) server = null;
     }
   });
 
-  server.listen(port, () => {
-    log.step(`Live dashboard: http://localhost:${port}`);
+  localServer.listen(port, () => {
+    const addr = localServer.address();
+    const boundPort = typeof addr === "object" && addr ? addr.port : port;
+    // Skip the startup log when port=0 (test fixture). Otherwise announce.
+    if (port !== 0) {
+      log.step(`Live dashboard: http://localhost:${boundPort}`);
+    }
   });
+
+  return localServer;
 }
 
 /** Stop the dashboard server. Call at workflow end. */
