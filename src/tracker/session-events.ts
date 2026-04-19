@@ -61,55 +61,62 @@ export function readSessionEvents(dir: string = DEFAULT_DIR): SessionEvent[] {
 }
 
 // ── Convenience helpers ────────────────────────────────
+//
+// All accept an optional `dir` so callers (chiefly `withTrackedWorkflow`) can
+// route session events to the same tracker dir they're using for entries +
+// logs. Without this, tests that pass `trackerDir: TMP_DIR` for their
+// per-workflow JSONL would still leak `workflow_start`/`step_change`/etc.
+// into the real `.tracker/sessions.jsonl` and pollute the dashboard's
+// SessionPanel with dead test instances.
 
-export function emitWorkflowStart(instance: string): void {
-  emitSessionEvent({ type: "workflow_start", workflowInstance: instance });
+export function emitWorkflowStart(instance: string, dir?: string): void {
+  emitSessionEvent({ type: "workflow_start", workflowInstance: instance }, dir);
 }
 
-export function emitWorkflowEnd(instance: string, finalStatus?: "done" | "failed"): void {
-  emitSessionEvent({ type: "workflow_end", workflowInstance: instance, finalStatus });
+export function emitWorkflowEnd(instance: string, finalStatus?: "done" | "failed", dir?: string): void {
+  emitSessionEvent({ type: "workflow_end", workflowInstance: instance, finalStatus }, dir);
 }
 
-export function emitStepChange(instance: string, step: string): void {
-  emitSessionEvent({ type: "step_change", workflowInstance: instance, currentStep: step });
+export function emitStepChange(instance: string, step: string, dir?: string): void {
+  emitSessionEvent({ type: "step_change", workflowInstance: instance, currentStep: step }, dir);
 }
 
-export function emitSessionCreate(instance: string, sessionId: string): void {
-  emitSessionEvent({ type: "session_create", workflowInstance: instance, sessionId });
+export function emitSessionCreate(instance: string, sessionId: string, dir?: string): void {
+  emitSessionEvent({ type: "session_create", workflowInstance: instance, sessionId }, dir);
 }
 
-export function emitSessionClose(instance: string, sessionId: string): void {
-  emitSessionEvent({ type: "session_close", workflowInstance: instance, sessionId });
+export function emitSessionClose(instance: string, sessionId: string, dir?: string): void {
+  emitSessionEvent({ type: "session_close", workflowInstance: instance, sessionId }, dir);
 }
 
 export function emitBrowserLaunch(
-  instance: string, sessionId: string, browserId: string, system: string,
+  instance: string, sessionId: string, browserId: string, system: string, dir?: string,
 ): void {
-  emitSessionEvent({ type: "browser_launch", workflowInstance: instance, sessionId, browserId, system });
+  emitSessionEvent({ type: "browser_launch", workflowInstance: instance, sessionId, browserId, system }, dir);
 }
 
-export function emitBrowserClose(instance: string, browserId: string, system: string): void {
-  emitSessionEvent({ type: "browser_close", workflowInstance: instance, browserId, system });
+export function emitBrowserClose(instance: string, browserId: string, system: string, dir?: string): void {
+  emitSessionEvent({ type: "browser_close", workflowInstance: instance, browserId, system }, dir);
 }
 
-export function emitAuthStart(instance: string, browserId: string, system: string): void {
-  emitSessionEvent({ type: "auth_start", workflowInstance: instance, browserId, system });
+export function emitAuthStart(instance: string, browserId: string, system: string, dir?: string): void {
+  emitSessionEvent({ type: "auth_start", workflowInstance: instance, browserId, system }, dir);
 }
 
-export function emitAuthComplete(instance: string, browserId: string, system: string): void {
-  emitSessionEvent({ type: "auth_complete", workflowInstance: instance, browserId, system });
+export function emitAuthComplete(instance: string, browserId: string, system: string, dir?: string): void {
+  emitSessionEvent({ type: "auth_complete", workflowInstance: instance, browserId, system }, dir);
 }
 
-export function emitAuthFailed(instance: string, browserId: string, system: string): void {
-  emitSessionEvent({ type: "auth_failed", workflowInstance: instance, browserId, system });
+export function emitAuthFailed(instance: string, browserId: string, system: string, dir?: string): void {
+  emitSessionEvent({ type: "auth_failed", workflowInstance: instance, browserId, system }, dir);
 }
 
-export function emitItemStart(instance: string, itemId: string): void {
-  emitSessionEvent({ type: "item_start", workflowInstance: instance, currentItemId: itemId });
+export function emitItemStart(instance: string, itemId: string, dir?: string): void {
+  emitSessionEvent({ type: "item_start", workflowInstance: instance, currentItemId: itemId }, dir);
 }
 
-export function emitItemComplete(instance: string, itemId: string): void {
-  emitSessionEvent({ type: "item_complete", workflowInstance: instance, currentItemId: itemId });
+export function emitItemComplete(instance: string, itemId: string, dir?: string): void {
+  emitSessionEvent({ type: "item_complete", workflowInstance: instance, currentItemId: itemId }, dir);
 }
 
 // ── Instance naming ────────────────────────────────────

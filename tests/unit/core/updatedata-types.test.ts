@@ -1,10 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, rmSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { defineWorkflow, runWorkflow } from '../../../src/core/workflow.js'
-import { DEFAULT_DIR } from '../../../src/tracker/jsonl.js'
 
 function fakeSlot() {
   return {
@@ -14,9 +14,9 @@ function fakeSlot() {
   }
 }
 
-function readTrackerEntries(workflow: string): Array<Record<string, unknown>> {
+function readTrackerEntries(dir: string, workflow: string): Array<Record<string, unknown>> {
   const today = new Date().toISOString().slice(0, 10)
-  const path = join(DEFAULT_DIR, `${workflow}-${today}.jsonl`)
+  const path = join(dir, `${workflow}-${today}.jsonl`)
   if (!existsSync(path)) return []
   return readFileSync(path, 'utf-8')
     .split('\n')
@@ -24,17 +24,14 @@ function readTrackerEntries(workflow: string): Array<Record<string, unknown>> {
     .map((l) => JSON.parse(l))
 }
 
-function cleanup(workflow: string) {
-  const today = new Date().toISOString().slice(0, 10)
-  for (const suffix of [`.jsonl`, `-logs.jsonl`]) {
-    const path = join(DEFAULT_DIR, `${workflow}-${today}${suffix}`)
-    if (existsSync(path)) rmSync(path)
-  }
+function cleanupDir(dir: string) {
+  if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
 }
 
 test('updateData preserves Date ISO string in tracker entry', async (t) => {
   const wfName = `updatedata-date-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  t.after(() => cleanup(wfName))
+  const tmp = mkdtempSync(join(tmpdir(), "updatedata-"))
+  t.after(() => cleanupDir(tmp))
 
   const when = new Date('2026-04-17T12:34:56.000Z')
   const wf = defineWorkflow({
@@ -50,10 +47,10 @@ test('updateData preserves Date ISO string in tracker entry', async (t) => {
 
   await runWorkflow(wf, { k: 'a' }, {
     itemId: 'item-1',
-    launchFn: () => Promise.resolve(fakeSlot()),
+    launchFn: () => Promise.resolve(fakeSlot()), trackerDir: tmp,
   })
 
-  const entries = readTrackerEntries(wfName)
+  const entries = readTrackerEntries(tmp, wfName)
   // Find a running or done entry that holds the merged data.
   const withWhen = entries.find((e) => {
     const d = e.data as Record<string, string> | undefined
@@ -66,7 +63,8 @@ test('updateData preserves Date ISO string in tracker entry', async (t) => {
 
 test('updateData stringifies objects via JSON.stringify', async (t) => {
   const wfName = `updatedata-obj-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  t.after(() => cleanup(wfName))
+  const tmp = mkdtempSync(join(tmpdir(), "updatedata-"))
+  t.after(() => cleanupDir(tmp))
 
   const wf = defineWorkflow({
     name: wfName,
@@ -81,10 +79,10 @@ test('updateData stringifies objects via JSON.stringify', async (t) => {
 
   await runWorkflow(wf, { k: 'b' }, {
     itemId: 'item-2',
-    launchFn: () => Promise.resolve(fakeSlot()),
+    launchFn: () => Promise.resolve(fakeSlot()), trackerDir: tmp,
   })
 
-  const entries = readTrackerEntries(wfName)
+  const entries = readTrackerEntries(tmp, wfName)
   const withObj = entries.find((e) => {
     const d = e.data as Record<string, string> | undefined
     return d && typeof d.obj === 'string' && d.obj.startsWith('{')
@@ -96,7 +94,8 @@ test('updateData stringifies objects via JSON.stringify', async (t) => {
 
 test('updateData preserves primitives (number/boolean) as strings', async (t) => {
   const wfName = `updatedata-prim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  t.after(() => cleanup(wfName))
+  const tmp = mkdtempSync(join(tmpdir(), "updatedata-"))
+  t.after(() => cleanupDir(tmp))
 
   const wf = defineWorkflow({
     name: wfName,
@@ -111,10 +110,10 @@ test('updateData preserves primitives (number/boolean) as strings', async (t) =>
 
   await runWorkflow(wf, { k: 'c' }, {
     itemId: 'item-3',
-    launchFn: () => Promise.resolve(fakeSlot()),
+    launchFn: () => Promise.resolve(fakeSlot()), trackerDir: tmp,
   })
 
-  const entries = readTrackerEntries(wfName)
+  const entries = readTrackerEntries(tmp, wfName)
   const withAll = entries.find((e) => {
     const d = e.data as Record<string, string> | undefined
     return d && d.n === '42' && d.b === 'true' && d.s === 'hello'
@@ -124,7 +123,8 @@ test('updateData preserves primitives (number/boolean) as strings', async (t) =>
 
 test('updateData co-emits typedData alongside string data', async (t) => {
   const wfName = `updatedata-typed-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  t.after(() => cleanup(wfName))
+  const tmp = mkdtempSync(join(tmpdir(), "updatedata-"))
+  t.after(() => cleanupDir(tmp))
 
   const when = new Date('2026-04-17T12:34:56.000Z')
   const wf = defineWorkflow({
@@ -140,10 +140,10 @@ test('updateData co-emits typedData alongside string data', async (t) => {
 
   await runWorkflow(wf, { k: 'a' }, {
     itemId: 'item-1',
-    launchFn: () => Promise.resolve(fakeSlot()),
+    launchFn: () => Promise.resolve(fakeSlot()), trackerDir: tmp,
   })
 
-  const entries = readTrackerEntries(wfName)
+  const entries = readTrackerEntries(tmp, wfName)
   const withTyped = entries.find((e) => {
     const td = e.typedData as Record<string, { type: string; value: string }> | undefined
     return td && td.wage?.type === 'number'
