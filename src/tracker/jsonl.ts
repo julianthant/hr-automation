@@ -204,9 +204,15 @@ export interface SessionContext {
  * remains `Record<string, string>`.
  */
 /**
- * Optional richness hooks passed by the kernel. Legacy callers omit these —
- * in that case the runtime warning never fires and `getName`/`getId` aren't
- * computed, preserving pre-subsystem-D behavior exactly.
+ * All non-required arguments to `withTrackedWorkflow`. Includes both the
+ * pre-existing richness hooks (declaredDetailFields, nameFn, idFn — the kernel
+ * passes these via `buildTrackerOpts`) AND the previously-positional batch /
+ * test-isolation knobs (initialData, preAssignedRunId, dir).
+ *
+ * Legacy callers omit any field they don't need — the runtime warning never
+ * fires when `declaredDetailFields` is absent, and `getName`/`getId` aren't
+ * computed when `nameFn`/`idFn` are absent, preserving pre-subsystem-D
+ * behavior exactly.
  */
 export interface WithTrackedWorkflowOpts {
   /**
@@ -223,12 +229,17 @@ export interface WithTrackedWorkflowOpts {
    * Server-side id computation. Result is stored as `data.__id`.
    */
   idFn?: (data: Record<string, string>) => string;
+  /** Seed data — merged into the entry before the first emit. Default `{}`. */
+  initialData?: Record<string, string>;
+  /** Pre-assigned runId (batch mode) — skips run computation and initial pending emit. */
+  preAssignedRunId?: string;
+  /** Override tracker directory — defaults to DEFAULT_DIR (`.tracker`). Mainly for test isolation. */
+  dir?: string;
 }
 
 export async function withTrackedWorkflow<T>(
   workflow: string,
   id: string,
-  initialData: Record<string, string>,
   fn: (
     setStep: (step: string) => void,
     updateData: (d: Record<string, unknown>) => void,
@@ -236,13 +247,11 @@ export async function withTrackedWorkflow<T>(
     onCleanup: (cb: () => void) => void,
     session: SessionContext,
   ) => Promise<T>,
-  /** Pre-assigned runId (batch mode) — skips run computation and initial pending emit. */
-  preAssignedRunId?: string,
-  /** Override tracker directory — defaults to DEFAULT_DIR (`.tracker`). Mainly for test isolation. */
-  dir: string = DEFAULT_DIR,
-  /** Optional richness hooks — see WithTrackedWorkflowOpts. */
   opts: WithTrackedWorkflowOpts = {},
 ): Promise<T> {
+  const initialData = opts.initialData ?? {};
+  const preAssignedRunId = opts.preAssignedRunId;
+  const dir = opts.dir ?? DEFAULT_DIR;
   const data = { ...initialData };
   const typedData: Record<string, TypedValue> = {};
   const ts = () => new Date().toISOString();
