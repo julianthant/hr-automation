@@ -230,11 +230,11 @@ export async function loginToACTCrm(page: Page, instance?: string): Promise<bool
  * @param page - Playwright page instance (from persistent context)
  * @returns true if authenticated (or already was), false on failure
  */
-export async function loginToUKG(page: Page): Promise<boolean> {
+export async function loginToUKG(page: Page, instance?: string): Promise<boolean> {
   const filled = await ukgNavigateAndFill(page);
   if (filled === "already_logged_in") return true;
   if (!filled) return false;
-  return await ukgSubmitAndWaitForDuo(page);
+  return await ukgSubmitAndWaitForDuo(page, instance);
 }
 
 /**
