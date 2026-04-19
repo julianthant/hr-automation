@@ -102,7 +102,17 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
   // (unless the caller opted into preEmitPending) so the dashboard shows the
   // row before the first step runs; withTrackedWorkflow skips its own pending
   // emit when preAssignedRunId is provided.
+  const seedData = wf.config.initialData?.(item) ?? {}
+  const stringifiedSeed = stringifyMap(seedData)
   if (!callerPreEmits) {
+    // Also compute __name / __id so the queue shows the friendly name from t=0.
+    const nameFn = wf.config.getName
+    const idFn = wf.config.getId
+    const enriched = {
+      ...stringifiedSeed,
+      __name: nameFn ? nameFn(stringifiedSeed) : '',
+      __id: idFn ? idFn(stringifiedSeed) : '',
+    }
     trackEvent(
       {
         workflow: wf.config.name,
@@ -110,6 +120,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
         id: itemId,
         runId,
         status: 'pending',
+        data: enriched,
       },
       trackerDir,
     )
@@ -137,6 +148,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
           ...buildTrackerOpts(wf),
           preAssignedRunId: runId,
           dir: trackerDir,
+          initialData: stringifiedSeed,
         },
       )
     }, trackerDir)
