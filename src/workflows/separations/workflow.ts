@@ -138,33 +138,33 @@ export const separationsWorkflow = defineWorkflow({
   systems: [
     {
       id: "kuali",
-      login: async (page) => {
-        const ok = await loginToKuali(page, KUALI_SPACE_URL);
+      login: async (page, instance) => {
+        const ok = await loginToKuali(page, KUALI_SPACE_URL, instance);
         if (!ok) throw new Error("Kuali authentication failed");
       },
       resetUrl: KUALI_SPACE_URL,
     },
     {
       id: "old-kronos",
-      login: async (page) => {
-        const ok = await loginToUKG(page);
+      login: async (page, instance) => {
+        const ok = await loginToUKG(page, instance);
         if (!ok) throw new Error("Old Kronos (UKG) authentication failed");
       },
       sessionDir: PATHS.ukgSessionSep,
     },
     {
       id: "new-kronos",
-      login: async (page) => {
+      login: async (page, instance) => {
         await page.goto(NEW_KRONOS_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
-        const ok = await loginToNewKronos(page);
+        const ok = await loginToNewKronos(page, instance);
         if (!ok) throw new Error("New Kronos authentication failed");
       },
       resetUrl: NEW_KRONOS_URL,
     },
     {
       id: "ucpath",
-      login: async (page) => {
-        const ok = await loginToUCPath(page);
+      login: async (page, instance) => {
+        const ok = await loginToUCPath(page, instance);
         if (!ok) throw new Error("UCPath authentication failed");
       },
       resetUrl: UCPATH_SMART_HR_URL,
