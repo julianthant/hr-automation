@@ -13,6 +13,7 @@ Environment validation, error helpers, error classification, and colored logging
   - `log.warn(msg)` — yellow `!` prefix (used by `safeClick`/`safeFill` for selector fallback warns)
   - `log.error(msg)` — red `✗` prefix (writes to stderr)
   - `setLogRunId(runId)` — inject `runId` into current `AsyncLocalStorage` log context (called by `withTrackedWorkflow`)
+  - `getLogRunId()` — read the runId from the current `AsyncLocalStorage` log context (used by `emitSessionEvent` so kernel events carry the runId of the running workflow item)
   - `withLogContext(workflow, itemId, fn, dir?)` — wraps `fn` in `AsyncLocalStorage` context so all `log.*()` calls emit to JSONL
 - `pii.ts` — PII masking helpers used by `serializeValue` in `src/tracker/jsonl.ts`:
   - `maskSsn(value)` — `123-45-6789` → `***-**-6789`
