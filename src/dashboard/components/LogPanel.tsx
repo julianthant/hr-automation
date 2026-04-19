@@ -87,9 +87,19 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
   const runStatus = activeRun?.status || entry?.status || "pending";
   const runStep = activeRun?.step || null;
 
-  // Same timestamp source as queue panel (backend enrichment) for consistency
-  const firstTs = entry?.firstLogTs || entry?.startTimestamp || entry?.timestamp || null;
-  const lastTs = entry?.lastLogTs || entry?.timestamp || null;
+  // Prefer the per-run timestamps on the selected RunInfo; fall back to the
+  // deduped entry's fields so the live (latest) run keeps working even
+  // before /api/runs has returned. Using the run-scoped values means
+  // "Started" + "Elapsed" actually switch when the operator picks an older
+  // run in the RunSelector, instead of always mirroring the latest run.
+  const firstTs =
+    activeRun?.firstLogTs ||
+    entry?.firstLogTs ||
+    entry?.startTimestamp ||
+    entry?.timestamp ||
+    null;
+  const lastTs =
+    activeRun?.lastLogTs || entry?.lastLogTs || entry?.timestamp || null;
   const elapsed = useElapsed(runStatus === "running" ? firstTs : null);
   const duration = runStatus !== "running" && firstTs && lastTs && firstTs !== lastTs
     ? formatDuration(firstTs, lastTs)
@@ -97,7 +107,7 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
 
   if (!entry) {
     return (
-      <div className="flex-1 flex flex-col bg-card">
+      <div className="flex-1 flex flex-col bg-card border-r border-border">
         <EmptyState
           icon={TerminalSquare}
           title="Select an entry"
@@ -136,7 +146,7 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
   const showSkeleton = logsLoading && logs.length === 0;
 
   return (
-    <div className="flex-1 flex flex-col bg-card min-w-0 min-h-0 overflow-hidden">
+    <div className="flex-1 flex flex-col bg-card min-w-0 min-h-0 overflow-hidden border-r border-border">
       {/* Header — height matches QueuePanel search + DuoPanel title */}
       <div className="h-[60px] flex items-center justify-between px-6 border-b border-border flex-shrink-0">
         <div className="flex items-center gap-3.5">
@@ -162,35 +172,27 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
           auto-adapts to any workflow's detailFields declaration. Wraps to
           rows of 4. Special __started / __elapsed keys are synthesized from
           entry timestamps. */}
-      <div className="grid grid-cols-4 border-b border-border flex-shrink-0">
-        {allDetailFields.map((f, i) => {
-          const isLastInRow = (i + 1) % 4 === 0;
-          const isLastField = i === allDetailFields.length - 1;
-          const isNewRow = i >= 4 && i % 4 === 0;
+      <div className="grid grid-cols-4 flex-shrink-0">
+        {allDetailFields.map((f) => {
           const value = renderDetailValue(f.key);
           const isComputed = COMPUTED_KEYS.has(f.key);
           // Monospace treatment for id-like fields + computed timestamps
           const mono = isComputed || isMonospaceKey(f.key);
           const isRunningElapsed = f.key === "__elapsed" && runStatus === "running";
-          const hasBottomBorder = i < allDetailFields.length - 4 ? "border-b border-border" : "";
           return (
             <div
               key={f.key}
-              className={cn(
-                "px-6 py-3.5",
-                !isLastInRow && !isLastField && "border-r border-border",
-                hasBottomBorder,
-                isNewRow && "border-t border-border/40",
-              )}
+              style={{ height: "69.5px" }}
+              className="px-6 flex flex-col justify-center gap-1 overflow-hidden border-b border-r border-border"
             >
-              <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1">
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium leading-none">
                 {f.label}
               </div>
               {showSkeleton ? (
-                <Skeleton className="h-4 w-20 mt-1" />
+                <Skeleton className="h-4 w-20" />
               ) : (
                 <div className={cn(
-                  "text-sm truncate",
+                  "text-sm truncate leading-tight",
                   mono ? "font-mono" : "font-medium",
                   isRunningElapsed && "text-primary",
                 )} title={value}>
@@ -218,7 +220,7 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
           steps={steps}
           currentStep={runStep}
           status={runStatus}
-          stepDurations={entry?.stepDurations}
+          stepDurations={activeRun?.stepDurations ?? entry?.stepDurations}
         />
       )}
 

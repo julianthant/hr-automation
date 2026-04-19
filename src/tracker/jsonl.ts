@@ -319,6 +319,12 @@ export async function withTrackedWorkflow<T>(
   // Cleanup callbacks registered by the workflow (e.g. kill browsers)
   const cleanupFns: (() => void)[] = [];
 
+  // Track the last `running` step so terminal `failed` emits (SIGINT, error
+  // rethrow) can preserve it. Without this the dashboard's RunSelector
+  // shows "interrupted" (or falls back to step 0) for any run killed mid-
+  // step, even though we knew exactly which step was in flight.
+  let lastStep: string | undefined;
+
   // Catch Ctrl+C / kill — write synchronously (bypass async mutex) since process.exit follows
   let cleaned = false;
   const onSignal = (signal: string) => {
@@ -335,7 +341,16 @@ export async function withTrackedWorkflow<T>(
     const date = now.slice(0, 10);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const logEntry: LogEntry = { workflow, itemId: id, runId, level: "error", message: error, ts: now };
-    const trackEntry: TrackerEntry = { workflow, timestamp: now, id, runId, status: "failed", data, error };
+    const trackEntry: TrackerEntry = {
+      workflow,
+      timestamp: now,
+      id,
+      runId,
+      status: "failed",
+      data,
+      error,
+      ...(lastStep ? { step: lastStep } : {}),
+    };
     appendFileSync(join(dir, `${workflow}-${date}-logs.jsonl`), JSON.stringify(logEntry) + "\n");
     appendFileSync(join(dir, `${workflow}-${date}.jsonl`), JSON.stringify(trackEntry) + "\n");
   };
@@ -344,7 +359,7 @@ export async function withTrackedWorkflow<T>(
 
   try {
     const result = await fn(
-      (step) => { emit("running", { step }); emitStepChange(instanceName, step, dir); },
+      (step) => { lastStep = step; emit("running", { step }); emitStepChange(instanceName, step, dir); },
       (d) => {
         // Stringify rich values at the write boundary — data stays Record<string, string>
         // on disk, but callers can pass Date/object/etc. without losing fidelity.
@@ -377,7 +392,7 @@ export async function withTrackedWorkflow<T>(
   } catch (e) {
     const error = classifyError(e);
     log.error(error);
-    emit("failed", { error });
+    emit("failed", { error, ...(lastStep ? { step: lastStep } : {}) });
     emitWorkflowEnd(instanceName, "failed", dir);
     throw e;
   } finally {
@@ -390,13 +405,23 @@ export function readEntries(workflow: string, dir: string = DEFAULT_DIR): Tracke
   return readJsonlCached<TrackerEntry>(getLogPath(workflow, dir));
 }
 
-/** List all workflows that have tracker data (scans dir for *.jsonl files, excludes log files). */
+/**
+ * List all workflows that have tracker data. Scans `dir` for files matching
+ * `<workflow>-YYYY-MM-DD.jsonl` and returns the workflow names.
+ *
+ * The positive regex match (instead of "ends in .jsonl, isn't logs") rejects
+ * meta files like `sessions.jsonl`, `idempotency.jsonl`, `step-cache/...`
+ * that share the directory but aren't workflow tracker files.
+ */
 export function listWorkflows(dir: string = DEFAULT_DIR): string[] {
   if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".jsonl") && !f.includes("-logs.jsonl"))
-    .map((f) => f.replace(/-\d{4}-\d{2}-\d{2}\.jsonl$/, ""))
-    .filter((v, i, a) => a.indexOf(v) === i);
+  const out = new Set<string>();
+  for (const f of readdirSync(dir)) {
+    if (f.endsWith("-logs.jsonl")) continue;
+    const m = f.match(/^(.+)-\d{4}-\d{2}-\d{2}\.jsonl$/);
+    if (m) out.add(m[1]);
+  }
+  return [...out];
 }
 
 /** List all dates that have tracker data for a given workflow. */
@@ -435,8 +460,14 @@ export function readLogEntriesForDate(
   return all;
 }
 
-/** Delete JSONL files older than maxAgeDays. Returns count of deleted files. */
-export function cleanOldTrackerFiles(maxAgeDays: number = 7, dir: string = DEFAULT_DIR): number {
+/**
+ * Delete JSONL files older than maxAgeDays. Returns count of deleted files.
+ *
+ * Default 30 days — workflow history below that floor is considered "recent
+ * enough to keep" for operator retro investigation. Callers that want a
+ * shorter window must pass it explicitly.
+ */
+export function cleanOldTrackerFiles(maxAgeDays: number = 30, dir: string = DEFAULT_DIR): number {
   if (!existsSync(dir)) return 0;
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - maxAgeDays);
@@ -493,7 +524,17 @@ export function cleanOldScreenshots(
   return deleted;
 }
 
-/** List distinct runs for a given ID, with their latest status, step, and timestamp. */
+/**
+ * List distinct runs for a given ID, with their latest status, step, and timestamp.
+ *
+ * Older runs left in `pending` or `running` are reclassified to `failed`
+ * (with step `"interrupted"`) when a newer run for the same ID has started
+ * after them. Such runs were killed before they could emit a terminal event
+ * (Ctrl+C, SIGKILL, process crash before the SIGINT handler could write
+ * synchronously) — leaving them as "pending" forever in the dropdown is
+ * misleading. Only the most recent run is allowed to retain a non-terminal
+ * status, since it may legitimately still be in-flight.
+ */
 export function readRunsForId(
   workflow: string,
   id: string,
@@ -510,10 +551,29 @@ export function readRunsForId(
     runMap.set(rid, e);
     if (e.step) lastStep.set(rid, e.step);
   }
-  return [...runMap.values()]
+  const raw = [...runMap.values()]
     .map((e) => {
       const rid = e.runId || `${e.id}#1`;
       return { runId: rid, status: e.status, step: lastStep.get(rid), timestamp: e.timestamp };
     })
-    .sort((a, b) => a.runId.localeCompare(b.runId));
+    // Numeric sort by trailing run number (`email#10` after `email#2`, not before).
+    .sort((a, b) => {
+      const an = Number.parseInt(a.runId.split("#")[1] ?? "", 10);
+      const bn = Number.parseInt(b.runId.split("#")[1] ?? "", 10);
+      if (Number.isFinite(an) && Number.isFinite(bn)) return an - bn;
+      return a.runId.localeCompare(b.runId);
+    });
+
+  if (raw.length <= 1) return raw;
+
+  // Reclassify abandoned non-terminal runs. The newest run (last after sort)
+  // keeps its real status — that may legitimately be running/pending.
+  const newestIdx = raw.length - 1;
+  return raw.map((r, i) => {
+    if (i === newestIdx) return r;
+    if (r.status === "pending" || r.status === "running") {
+      return { ...r, status: "failed", step: r.step ?? "interrupted" };
+    }
+    return r;
+  });
 }

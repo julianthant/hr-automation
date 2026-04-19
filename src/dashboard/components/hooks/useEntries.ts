@@ -23,6 +23,12 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
 
   useEffect(() => {
     setLoading(true);
+    // Reset the entry-hash memo on every (workflow, date) change so a new
+    // subscription always emits a fresh diff — otherwise the hash carried
+    // over from the previous date can short-circuit the first message on
+    // the new one, stranding `wfCounts` at its previous value.
+    prevHashRef.current = "";
+
     const today = new Date().toISOString().slice(0, 10);
     let sseUrl = "/events?workflow=" + encodeURIComponent(workflow);
     if (date && date !== today) {
@@ -38,6 +44,16 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
         const { entries: raw, workflows: wfs, wfCounts: counts }: { entries: TrackerEntry[]; workflows: string[]; wfCounts?: Record<string, number> } = JSON.parse(e.data);
 
         setLoading(false);
+
+        // Workflows + per-workflow counts update EVERY tick regardless of
+        // whether this workflow's entry list changed. They reflect a
+        // date-wide aggregate that can shift while the selected workflow's
+        // entries stay identical (e.g., other workflows running on the same
+        // day, or switching to a date where the current workflow has 0
+        // entries but others have activity). Gating them behind the entry
+        // hash was the bug that made date switches show "0 / 0 / 0".
+        setWorkflows(wfs || []);
+        if (counts) setWfCounts(counts);
 
         // Skip if data hasn't changed (prevent unnecessary re-renders)
         const hash = JSON.stringify(raw.map((r) => `${r.id}:${r.status}:${r.step}:${r.timestamp}:${JSON.stringify(r.data)}:${(r as any).lastLogMessage || ""}`));
