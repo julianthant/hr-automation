@@ -702,6 +702,71 @@ export function computeStepDurations(
   return durations;
 }
 
+/**
+ * Memoized per-step average durations (ms) keyed by `${workflow}::${dir}`.
+ * TTL'd at 60s to keep the /events poll cycle cheap even with dozens of
+ * entries carrying cacheHits. The dir component in the key is what lets
+ * parallel test servers in different temp dirs not cross-pollinate.
+ */
+const stepAvgsMemo = new Map<string, { ts: number; data: Record<string, number> }>();
+const STEP_AVGS_TTL_MS = 60_000;
+
+/**
+ * Compute per-step historical average durations for a workflow across the
+ * last 7 days, capped at 100 prior runs. Powers the `cacheStepAvgs` field
+ * in the `/events` SSE payload so the frontend can render "saved ~Ns" chips
+ * next to cached steps.
+ *
+ * Memoized 60s per (workflow, dir). Disk hits are proportional to the
+ * number of matching daily JSONL files, not entries.
+ */
+function computeCacheStepAvgs(workflow: string, dir: string): Record<string, number> {
+  const memoKey = `${workflow}::${dir}`;
+  const cached = stepAvgsMemo.get(memoKey);
+  if (cached && Date.now() - cached.ts < STEP_AVGS_TTL_MS) return cached.data;
+
+  const now = new Date();
+  const dates: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(now.getTime() - i * 86_400_000);
+    dates.push(d.toISOString().slice(0, 10));
+  }
+
+  const sumByStep: Record<string, { total: number; count: number }> = {};
+  let runsCounted = 0;
+  outer: for (const date of dates) {
+    let entries: TrackerEntry[];
+    try { entries = readEntriesForDate(workflow, date, dir); } catch { continue; }
+    const byRun = new Map<string, TrackerEntry[]>();
+    for (const e of entries) {
+      const rid = e.runId || `${e.id}#1`;
+      const arr = byRun.get(rid) ?? [];
+      arr.push(e);
+      byRun.set(rid, arr);
+    }
+    for (const [, runEntries] of byRun) {
+      if (runsCounted >= 100) break outer;
+      const slim: StepDurationEntry[] = runEntries.map((e) => ({
+        timestamp: e.timestamp, status: e.status, step: e.step,
+      }));
+      const durations = computeStepDurations(slim);
+      for (const [step, ms] of Object.entries(durations)) {
+        if (!sumByStep[step]) sumByStep[step] = { total: 0, count: 0 };
+        sumByStep[step].total += ms;
+        sumByStep[step].count += 1;
+      }
+      runsCounted += 1;
+    }
+  }
+
+  const avgs: Record<string, number> = {};
+  for (const [step, { total, count }] of Object.entries(sumByStep)) {
+    avgs[step] = Math.round(total / count);
+  }
+  stepAvgsMemo.set(memoKey, { ts: Date.now(), data: avgs });
+  return avgs;
+}
+
 /** Start the live monitoring dashboard. Call once at workflow start. */
 export interface StartDashboardOptions {
   /** Skip the one-time startup prune of old tracker files. */
@@ -1031,6 +1096,32 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
           stepDurationsByRun.set(key, computeStepDurations(rows));
         }
 
+        // ── Cache-hit enrichment ────────────────────────────────────────
+        // Read session events tolerantly and map cache_hit records to each
+        // runId. Tolerant JSON parse matches the pattern used in
+        // /events/run-events so a malformed line doesn't derail the cycle.
+        const sessionEventsForEnrichment: SessionEvent[] = [];
+        try {
+          const sessPath = getSessionsFilePath(dir);
+          if (existsSync(sessPath)) {
+            const content = readFileSync(sessPath, "utf-8");
+            for (const line of content.split("\n")) {
+              if (!line.trim()) continue;
+              try { sessionEventsForEnrichment.push(JSON.parse(line) as SessionEvent); } catch { /* skip malformed */ }
+            }
+          }
+        } catch { /* ignore */ }
+
+        const cacheHitsByRun = new Map<string, Set<string>>();
+        for (const ev of sessionEventsForEnrichment) {
+          if (ev.type !== "cache_hit" || !ev.runId || !ev.step) continue;
+          const set = cacheHitsByRun.get(ev.runId) ?? new Set<string>();
+          set.add(ev.step);
+          cacheHitsByRun.set(ev.runId, set);
+        }
+
+        const stepAvgs = computeCacheStepAvgs(wf, dir);
+
         // Screenshot count for failed entries — counted once per (wf, itemId)
         // pair so repeat lookups in the loop don't hit the FS N times.
         const screenshotCountByItem = new Map<string, number>();
@@ -1053,6 +1144,17 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
             }
             screenshotCount = c;
           }
+          const hits = cacheHitsByRun.get(rid);
+          let cacheHitsField: string[] | undefined;
+          let cacheStepAvgsField: Record<string, number> | undefined;
+          if (hits && hits.size > 0) {
+            cacheHitsField = Array.from(hits);
+            const avgs: Record<string, number> = {};
+            for (const step of hits) {
+              if (stepAvgs[step] != null && stepAvgs[step] > 0) avgs[step] = stepAvgs[step];
+            }
+            cacheStepAvgsField = avgs;
+          }
           return {
             ...e,
             firstLogTs: logFirst.get(key),
@@ -1060,6 +1162,8 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
             lastLogMessage: logLastMsg.get(key),
             stepDurations: stepDurationsByRun.get(key) ?? {},
             ...(screenshotCount !== undefined ? { screenshotCount } : {}),
+            ...(cacheHitsField !== undefined ? { cacheHits: cacheHitsField } : {}),
+            ...(cacheStepAvgsField !== undefined ? { cacheStepAvgs: cacheStepAvgsField } : {}),
           };
         });
 
