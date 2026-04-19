@@ -120,12 +120,36 @@ export class Session {
     await slot.page.goto(sys.resetUrl)
   }
 
+  /**
+   * Probe a system's page for liveness before reusing it (e.g. between
+   * batch items, or mid-handler when a long step is about to start).
+   * Catches three failure modes that `isClosed()` alone misses:
+   *   - Page object closed by Playwright             — `isClosed()`
+   *   - Execution context destroyed (SAML expiry,    — `evaluate(() => 1)`
+   *     navigation race, page-level crash)              with a 5s timeout
+   *   - Page never navigated past `about:blank`      — `url()` check
+   *
+   * Best-effort: every probe path is wrapped in try/catch and returns false
+   * on any error rather than propagating — callers treat this as a boolean
+   * gate, not a diagnostic.
+   */
   async healthCheck(id: string): Promise<boolean> {
     const slot = this.state.browsers.get(id)
     if (!slot) return false
     try {
       if (slot.page.isClosed()) return false
-      return true
+      // Stuck on about:blank means either un-navigated or a SAML redirect that
+      // never completed — both are reasons to abort the next item.
+      const url = slot.page.url()
+      if (!url || url === 'about:blank') return false
+      // A trivial JS roundtrip detects: hung renderer, destroyed execution
+      // context (the symptom of SAML session expiry mid-batch), and stale
+      // page handles whose underlying target is gone.
+      const probed = await Promise.race([
+        slot.page.evaluate(() => 1).then((v) => v === 1).catch(() => false),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5_000)),
+      ])
+      return probed
     } catch {
       return false
     }

@@ -143,6 +143,57 @@ test('session.healthCheck: returns false if page is closed', async () => {
   assert.equal(await s.healthCheck('a'), false)
 })
 
+test('session.healthCheck: returns false on about:blank', async () => {
+  const fakePage = {
+    isClosed: () => false,
+    url: () => 'about:blank',
+    evaluate: async () => 1,
+  } as unknown as import('playwright').Page
+  const s = Session.forTesting({
+    systems: [{ id: 'a', login: async () => {} }],
+    browsers: new Map([['a', { page: fakePage, browser: null as never, context: null as never }]]),
+    readyPromises: new Map([['a', Promise.resolve()]]),
+  })
+  assert.equal(await s.healthCheck('a'), false)
+})
+
+test('session.healthCheck: returns false when evaluate throws (destroyed context)', async () => {
+  const fakePage = {
+    isClosed: () => false,
+    url: () => 'https://ucpath.universityofcalifornia.edu/foo',
+    evaluate: async () => { throw new Error('Execution context was destroyed') },
+  } as unknown as import('playwright').Page
+  const s = Session.forTesting({
+    systems: [{ id: 'a', login: async () => {} }],
+    browsers: new Map([['a', { page: fakePage, browser: null as never, context: null as never }]]),
+    readyPromises: new Map([['a', Promise.resolve()]]),
+  })
+  assert.equal(await s.healthCheck('a'), false)
+})
+
+test('session.healthCheck: returns true when page open + url set + evaluate roundtrips', async () => {
+  const fakePage = {
+    isClosed: () => false,
+    url: () => 'https://ucpath.universityofcalifornia.edu/psp/UCPATHHM',
+    evaluate: async () => 1,
+  } as unknown as import('playwright').Page
+  const s = Session.forTesting({
+    systems: [{ id: 'a', login: async () => {} }],
+    browsers: new Map([['a', { page: fakePage, browser: null as never, context: null as never }]]),
+    readyPromises: new Map([['a', Promise.resolve()]]),
+  })
+  assert.equal(await s.healthCheck('a'), true)
+})
+
+test('session.healthCheck: returns false when missing system id', async () => {
+  const s = Session.forTesting({
+    systems: [],
+    browsers: new Map(),
+    readyPromises: new Map(),
+  })
+  assert.equal(await s.healthCheck('nope'), false)
+})
+
 test('session.screenshotAll: writes one PNG per open page, skips closed, returns paths', async () => {
   const { existsSync, rmSync } = await import('node:fs')
   const shotCalls: Array<{ id: string; path: string }> = []
