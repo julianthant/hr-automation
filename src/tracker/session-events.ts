@@ -137,6 +137,20 @@ export function emitItemComplete(instance: string, itemId: string, dir?: string)
   emitSessionEvent({ type: "item_complete", workflowInstance: instance, currentItemId: itemId }, dir);
 }
 
+export function emitCacheHit(
+  workflowInstance: string,
+  itemId: string,
+  step: string,
+  dir?: string,
+): void {
+  emitSessionEvent({
+    type: "cache_hit",
+    workflowInstance,
+    currentItemId: itemId,
+    step,
+  }, dir);
+}
+
 // ── Instance naming ────────────────────────────────────
 
 /** Generate a unique instance name like "Separation 1", "Separation 2", etc. */
