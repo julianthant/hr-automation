@@ -195,6 +195,16 @@ async function crossVerifyOne(
 }
 
 /**
+ * Format a short "Name1, Name2, Name3, ..." summary for the tracker `data`
+ * record so the dashboard queue row has something meaningful from the first
+ * `pending` emit (before auth completes and the handler runs).
+ */
+function summarizeNames(names: string[]): string {
+  const head = names.slice(0, 3).join(", ");
+  return head + (names.length > 3 ? ", ..." : "");
+}
+
+/**
  * No-CRM kernel definition. One UCPath system, two steps. Handler fans out
  * the name list across N worker tabs in a single shared BrowserContext.
  */
@@ -204,8 +214,8 @@ export const eidLookupWorkflow = defineWorkflow({
   systems: [
     {
       id: "ucpath",
-      login: async (page) => {
-        const ok = await loginToUCPath(page);
+      login: async (page, instance) => {
+        const ok = await loginToUCPath(page, instance);
         if (!ok) throw new Error("UCPath authentication failed");
       },
     },
@@ -226,6 +236,10 @@ export const eidLookupWorkflow = defineWorkflow({
   ],
   getName: (d) => d.searchName ?? "",
   getId: (d) => d.searchName ?? "",
+  initialData: (input) => ({
+    searchName: summarizeNames(input.names),
+    totalNames: input.names.length,
+  }),
   handler: async (ctx: Ctx<typeof stepsNoCrm, EidLookupInput>, input) => {
     // Stamp the search name(s) immediately so the dashboard detail panel has
     // something to show during auth + searching — the batched nature of this
@@ -262,15 +276,15 @@ export const eidLookupCrmWorkflow = defineWorkflow({
   systems: [
     {
       id: "ucpath",
-      login: async (page) => {
-        const ok = await loginToUCPath(page);
+      login: async (page, instance) => {
+        const ok = await loginToUCPath(page, instance);
         if (!ok) throw new Error("UCPath authentication failed");
       },
     },
     {
       id: "crm",
-      login: async (page) => {
-        const ok = await loginToACTCrm(page);
+      login: async (page, instance) => {
+        const ok = await loginToACTCrm(page, instance);
         if (!ok) throw new Error("CRM authentication failed");
       },
     },
@@ -287,6 +301,10 @@ export const eidLookupCrmWorkflow = defineWorkflow({
   ],
   getName: (d) => d.searchName ?? "",
   getId: (d) => d.searchName ?? "",
+  initialData: (input) => ({
+    searchName: summarizeNames(input.names),
+    totalNames: input.names.length,
+  }),
   handler: async (ctx: Ctx<typeof stepsCrm, EidLookupCrmInput>, input) => {
     // Stamp the search name(s) immediately so the dashboard detail panel has
     // something to show during auth + searching — the batched nature of this
