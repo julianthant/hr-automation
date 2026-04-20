@@ -205,6 +205,18 @@ function summarizeNames(names: string[]): string {
 }
 
 /**
+ * Collapse the search results into a single display string for the dashboard's
+ * EID cell: deduped, comma-joined EIDs if any were found; "Not found" if every
+ * name missed. One run can return multiple SDCMP hits per name (e.g. multiple
+ * appointments sharing the same EID) — dedupe by emplId so the cell doesn't
+ * show 10417041 twice for one employee.
+ */
+function summarizeEids(results: LookupResult[]): string {
+  const eids = [...new Set(results.flatMap((r) => r.sdcmpResults.map((s) => s.emplId)))];
+  return eids.length > 0 ? eids.join(", ") : "Not found";
+}
+
+/**
  * No-CRM kernel definition. One UCPath system, two steps. Handler fans out
  * the name list across N worker tabs in a single shared BrowserContext.
  */
@@ -225,40 +237,25 @@ export const eidLookupWorkflow = defineWorkflow({
   tiling: "single",
   authChain: "sequential",
   // Per-name results stay in Excel (one CLI run = one workflow row — see
-  // CLAUDE.md "Acceptable regression"). `searchName` is populated once from
-  // the input list so the detail panel isn't empty; `totalNames`/`foundCount`/
-  // `missingCount` are stamped after search completes.
+  // CLAUDE.md "Acceptable regression"). `searchName` is seeded from input;
+  // `emplId` is stamped after searching completes and collapses the outcome
+  // into a single cell: deduped EID list on success, "Not found" on miss.
   detailFields: [
     { key: "searchName", label: "Search" },
-    { key: "totalNames", label: "Total Names" },
-    { key: "foundCount", label: "Found" },
-    { key: "missingCount", label: "Missing" },
+    { key: "emplId", label: "EID" },
   ],
   getName: (d) => d.searchName ?? "",
   getId: (d) => d.searchName ?? "",
   initialData: (input) => ({
     searchName: summarizeNames(input.names),
-    totalNames: input.names.length,
   }),
   handler: async (ctx: Ctx<typeof stepsNoCrm, EidLookupInput>, input) => {
-    // Stamp the search name(s) immediately so the dashboard detail panel has
-    // something to show during auth + searching — the batched nature of this
-    // workflow means there's no per-name entry; one run covers N names.
-    ctx.updateData({
-      searchName: input.names.slice(0, 3).join(", ") + (input.names.length > 3 ? ", ..." : ""),
-      totalNames: input.names.length,
-    });
-
     ctx.markStep("ucpath-auth");
     const ucpathPage = await ctx.page("ucpath");
 
     const results = await ctx.step("searching", async () => {
       const r = await runSearchingPhase(ucpathPage, input);
-      const found = r.filter((x) => x.found).length;
-      ctx.updateData({
-        foundCount: found,
-        missingCount: input.names.length - found,
-      });
+      ctx.updateData({ emplId: summarizeEids(r) });
       return r;
     });
 
@@ -295,25 +292,14 @@ export const eidLookupCrmWorkflow = defineWorkflow({
   authChain: "sequential",
   detailFields: [
     { key: "searchName", label: "Search" },
-    { key: "totalNames", label: "Total Names" },
-    { key: "foundCount", label: "Found" },
-    { key: "missingCount", label: "Missing" },
+    { key: "emplId", label: "EID" },
   ],
   getName: (d) => d.searchName ?? "",
   getId: (d) => d.searchName ?? "",
   initialData: (input) => ({
     searchName: summarizeNames(input.names),
-    totalNames: input.names.length,
   }),
   handler: async (ctx: Ctx<typeof stepsCrm, EidLookupCrmInput>, input) => {
-    // Stamp the search name(s) immediately so the dashboard detail panel has
-    // something to show during auth + searching — the batched nature of this
-    // workflow means there's no per-name entry; one run covers N names.
-    ctx.updateData({
-      searchName: input.names.slice(0, 3).join(", ") + (input.names.length > 3 ? ", ..." : ""),
-      totalNames: input.names.length,
-    });
-
     ctx.markStep("ucpath-auth");
     const ucpathPage = await ctx.page("ucpath");
 
@@ -322,11 +308,7 @@ export const eidLookupCrmWorkflow = defineWorkflow({
 
     const results = await ctx.step("searching", async () => {
       const r = await runSearchingPhase(ucpathPage, input);
-      const found = r.filter((x) => x.found).length;
-      ctx.updateData({
-        foundCount: found,
-        missingCount: input.names.length - found,
-      });
+      ctx.updateData({ emplId: summarizeEids(r) });
       return r;
     });
 
