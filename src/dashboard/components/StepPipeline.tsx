@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { formatStepName, formatStepDuration, type TrackerEntry } from "./types";
 
@@ -13,6 +14,218 @@ interface StepPipelineProps {
    * Optional; absence simply means no cache decoration is drawn.
    */
   entry?: TrackerEntry;
+}
+
+// ── Auth-step grouping ────────────────────────────────────────────────────────
+
+type StepStatus = "pending" | "running" | "completed" | "failed" | "cached";
+
+interface StepView {
+  name: string;
+  status: StepStatus;
+  durationMs?: number;
+}
+
+interface AuthGroupNode {
+  kind: "auth-group";
+  children: StepView[];
+}
+
+type PipelineNode = StepView | AuthGroupNode;
+
+function isAuthGroup(node: PipelineNode): node is AuthGroupNode {
+  return "kind" in node && node.kind === "auth-group";
+}
+
+/**
+ * Group any run of consecutive steps whose names start with "auth:" into one
+ * super-chip node. Non-auth steps pass through unchanged.
+ */
+function groupAuthSteps(steps: StepView[]): PipelineNode[] {
+  const out: PipelineNode[] = [];
+  let buffer: StepView[] = [];
+  for (const s of steps) {
+    if (s.name.startsWith("auth:")) {
+      buffer.push(s);
+    } else {
+      if (buffer.length > 0) {
+        out.push({ kind: "auth-group", children: buffer });
+        buffer = [];
+      }
+      out.push(s);
+    }
+  }
+  if (buffer.length > 0) out.push({ kind: "auth-group", children: buffer });
+  return out;
+}
+
+/** Derive a collapsed status from the children of an auth-group super-chip. */
+function authGroupStatus(children: StepView[]): StepStatus {
+  if (children.some((c) => c.status === "failed")) return "failed";
+  if (children.every((c) => c.status === "completed" || c.status === "cached")) return "completed";
+  if (children.some((c) => c.status === "running")) return "running";
+  return "pending";
+}
+
+/**
+ * Strip a ":failed:<reason>" suffix from a step name, while preserving the
+ * "auth:<id>" prefix that is part of the canonical step name.
+ *
+ * The previous implementation used .split(":")[0] which incorrectly mapped
+ * "auth:kuali" → "auth", causing auth steps to never match in steps.indexOf().
+ *
+ * Examples:
+ *   "auth:kuali:failed:Timed out" → "auth:kuali"
+ *   "kuali-extraction:failed:Network error" → "kuali-extraction"
+ *   "auth:kuali" → "auth:kuali"
+ *   "ucpath-transaction" → "ucpath-transaction"
+ */
+function normalizeStepName(step: string): string {
+  const failedIdx = step.indexOf(":failed:");
+  if (failedIdx === -1) return step;
+  return step.slice(0, failedIdx);
+}
+
+/** Build a hover title string summarizing per-system auth status + timing. */
+function buildAuthGroupTitle(children: StepView[]): string {
+  return children
+    .map((child) => {
+      const systemId = child.name.startsWith("auth:") ? child.name.slice(5) : child.name;
+      const statusGlyph =
+        child.status === "completed" || child.status === "cached"
+          ? "✓"
+          : child.status === "failed"
+            ? "✗"
+            : child.status === "running"
+              ? "…"
+              : "–";
+      const timing =
+        child.durationMs !== undefined ? formatStepDuration(child.durationMs) : "–";
+      return `${statusGlyph} ${systemId}  ${timing}`;
+    })
+    .join("\n");
+}
+
+// ── Auth super-chip rail style helper ─────────────────────────────────────────
+
+function authRailStyle(status: StepStatus): React.CSSProperties {
+  switch (status) {
+    case "completed":
+      return { backgroundColor: "rgba(74, 222, 128, 0.8)" };
+    case "failed":
+      return {};  // uses className
+    case "running":
+      return {};  // uses className
+    case "cached":
+      return { backgroundColor: "#3b82f6" };
+    default:
+      return {};
+  }
+}
+
+// ── AuthSuperChip ─────────────────────────────────────────────────────────────
+
+interface AuthSuperChipProps {
+  children: StepView[];
+  expanded: boolean;
+  onToggle: () => void;
+}
+
+function AuthSuperChip({ children, expanded, onToggle }: AuthSuperChipProps) {
+  const groupStatus = authGroupStatus(children);
+
+  // Aggregate duration: sum of all known child durations (shown only if all have one)
+  const allHaveDuration = children.every((c) => c.durationMs !== undefined);
+  const totalDurationMs = allHaveDuration
+    ? children.reduce((sum, c) => sum + (c.durationMs ?? 0), 0)
+    : undefined;
+  const durationLabel = totalDurationMs !== undefined ? formatStepDuration(totalDurationMs) : "";
+
+  const isCached = groupStatus === "cached";
+  const isComplete = groupStatus === "completed";
+  const isActive = groupStatus === "running";
+  const isFailedStep = groupStatus === "failed";
+  const isPending = groupStatus === "pending";
+
+  const hoverTitle = buildAuthGroupTitle(children);
+
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      title={hoverTitle}
+      className="flex-1 min-w-[86px] flex flex-col justify-center items-start gap-1.5 cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      style={{ background: "none", border: "none", padding: 0, textAlign: "left" }}
+    >
+      {/* Label */}
+      <span
+        className={cn(
+          "text-[11.5px] tracking-tight leading-none truncate w-full transition-colors",
+          !isCached && isComplete && "text-[#4ade80] font-medium",
+          !isCached && isActive && "text-primary font-semibold",
+          !isCached && isFailedStep && "text-destructive font-semibold",
+          !isCached && isPending && "text-muted-foreground/50 font-medium",
+          isCached && "font-medium",
+        )}
+        style={isCached ? { color: "#3b82f6" } : undefined}
+      >
+        Authenticating ({children.length})
+        <span
+          aria-hidden
+          style={{ marginLeft: 4, fontSize: 9, opacity: 0.55, verticalAlign: "middle" }}
+        >
+          {expanded ? "▲" : "▼"}
+        </span>
+      </span>
+
+      {/* Rail */}
+      <div
+        className="relative w-full h-[3px] rounded-full"
+        style={isCached ? { backgroundColor: "#3b82f6", boxShadow: "0 0 0 3px rgba(59,130,246,0.15)" } : undefined}
+      >
+        {isPending ? (
+          <div
+            aria-hidden
+            className="absolute inset-0 rounded-full opacity-70 overflow-hidden"
+            style={{
+              backgroundImage:
+                "repeating-linear-gradient(to right, hsl(var(--border)) 0 4px, transparent 4px 8px)",
+            }}
+          />
+        ) : (
+          <div
+            className={cn(
+              "absolute inset-0 rounded-full overflow-hidden transition-colors",
+              isComplete && "bg-[#4ade80]/80",
+              isActive && "bg-primary/25",
+              isFailedStep && "bg-destructive/80",
+            )}
+            style={authRailStyle(groupStatus)}
+          />
+        )}
+        {isActive && (
+          <div
+            aria-hidden
+            className="absolute inset-y-0 left-0 w-1/2 rounded-full bg-primary animate-[pulse_1.6s_ease-in-out_infinite]"
+          />
+        )}
+      </div>
+
+      {/* Duration / state label */}
+      <span
+        className={cn(
+          "text-[10px] font-mono tabular-nums leading-none h-[10px] transition-colors",
+          !isCached && isComplete && (durationLabel ? "text-[#4ade80]/70" : "text-[#4ade80]/40"),
+          !isCached && isFailedStep && (durationLabel ? "text-destructive/70" : "text-destructive/40"),
+          !isCached && isActive && "text-primary/70",
+          !isCached && isPending && "text-muted-foreground/35",
+        )}
+        aria-hidden={!durationLabel && !isPending}
+      >
+        {durationLabel || (isPending ? "—" : isActive ? "…" : "—")}
+      </span>
+    </button>
+  );
 }
 
 /**
@@ -31,8 +244,14 @@ interface StepPipelineProps {
  *     step so the failure marker is always visible.
  *   • Pending steps use a dashed rail so "not yet run" reads visually
  *     distinct from "ran quickly" (solid green).
+ *   • Consecutive steps matching `auth:*` are collapsed into a single
+ *     "Authenticating (N)" super-chip. Hover for per-system detail;
+ *     click to expand each child as its own small chip below the pipeline.
  */
 export function StepPipeline({ steps, currentStep, status, stepDurations, entry }: StepPipelineProps) {
+  // Track expanded state for each auth-group by its first child step name
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
   if (steps.length === 0) return null;
 
   const isDone = status === "done";
@@ -40,39 +259,78 @@ export function StepPipeline({ steps, currentStep, status, stepDurations, entry 
   const cacheHits = entry?.cacheHits ?? [];
   const cacheStepAvgs = entry?.cacheStepAvgs ?? {};
   const cachedSet = new Set(cacheHits);
-  // Step names from failed runs sometimes carry a ":failed:<reason>" suffix
-  // (e.g. "i9-creation:failed:Timed out waiting for element"). Strip to the
-  // root before matching against the registry's declared step names, so
-  // failed runs highlight the correct step instead of falling back to 0.
-  const normalizedStep = currentStep ? currentStep.split(":")[0] : null;
+
+  // Strip ":failed:<reason>" suffix while preserving the "auth:<id>" prefix.
+  // The previous implementation used .split(":")[0] which incorrectly mapped
+  // "auth:kuali" → "auth", causing auth-step highlighting to always fall back
+  // to index 0.
+  const normalizedStep = currentStep ? normalizeStepName(currentStep) : null;
   const resolvedIdx = normalizedStep ? steps.indexOf(normalizedStep) : -1;
   // Failed workflow with no reported step (or an unrecognized one) → mark
   // the first step as failed so the user sees *something* is red, not a
   // row of indistinguishable pending.
   const currentIdx = isFailed && resolvedIdx < 0 ? 0 : resolvedIdx;
 
+  // Build StepView array for all steps
+  const stepViews: StepView[] = steps.map((step, i) => {
+    const isComplete = isDone || i < currentIdx;
+    const isActive = !isDone && !isFailed && i === currentIdx;
+    const isFailedStep = isFailed && i === currentIdx;
+    const isPending = !isComplete && !isActive && !isFailedStep;
+    const isCached = cachedSet.has(step);
+
+    let derivedStatus: StepStatus;
+    if (isCached) derivedStatus = "cached";
+    else if (isComplete) derivedStatus = "completed";
+    else if (isActive) derivedStatus = "running";
+    else if (isFailedStep) derivedStatus = "failed";
+    else derivedStatus = "pending";
+
+    const durationMs = isPending || isCached ? undefined : stepDurations?.[step];
+    return { name: step, status: derivedStatus, durationMs };
+  });
+
+  // Group auth steps into super-chips
+  const nodes = groupAuthSteps(stepViews);
+
+  function toggleGroup(groupKey: string) {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
+      return next;
+    });
+  }
+
   return (
     <div className="border-b border-border">
+      {/* Main pipeline rail */}
       <div
         className="flex items-stretch px-6 gap-3 overflow-x-auto"
         style={{ height: "69.5px" }}
       >
-        {steps.map((step, i) => {
-          const isComplete = isDone || i < currentIdx;
-          const isActive = !isDone && !isFailed && i === currentIdx;
-          const isFailedStep = isFailed && i === currentIdx;
-          const isPending = !isComplete && !isActive && !isFailedStep;
-          const isCached = cachedSet.has(step);
-          // A pending step (workflow failed before reaching it, or it simply
-          // hasn't run yet) must NEVER display a duration, even if stepDurations
-          // happens to carry a stale value for that step name from a previous
-          // run that did complete it. Only complete / active / the failed step
-          // itself may show a duration — where "failed" = "how long it ran
-          // before failing".
-          // Cached steps also omit the duration chip — the snowflake glyph
-          // carries the meaning, and the hover tooltip shows the historical
-          // avg instead.
-          const durationMs = isPending || isCached ? undefined : stepDurations?.[step];
+        {nodes.map((node) => {
+          if (isAuthGroup(node)) {
+            const groupKey = node.children[0]?.name ?? "auth-group";
+            const isExpanded = expandedGroups.has(groupKey);
+            return (
+              <AuthSuperChip
+                key={groupKey}
+                children={node.children}
+                expanded={isExpanded}
+                onToggle={() => toggleGroup(groupKey)}
+              />
+            );
+          }
+
+          // Normal chip — unchanged from original
+          const { name: step, status: stepStatus, durationMs } = node;
+          const isCached = stepStatus === "cached";
+          const isComplete = stepStatus === "completed";
+          const isActive = stepStatus === "running";
+          const isFailedStep = stepStatus === "failed";
+          const isPending = stepStatus === "pending";
+
           const durationLabel =
             typeof durationMs === "number" ? formatStepDuration(durationMs) : "";
           const cacheAvg = cacheStepAvgs[step];
@@ -188,6 +446,107 @@ export function StepPipeline({ steps, currentStep, status, stepDurations, entry 
           );
         })}
       </div>
+
+      {/* Expanded auth-group children — rendered below the main rail when toggled */}
+      {nodes
+        .filter(isAuthGroup)
+        .filter((node) => expandedGroups.has(node.children[0]?.name ?? ""))
+        .map((node) => {
+          const groupKey = node.children[0]?.name ?? "auth-group";
+          return (
+            <div
+              key={`expanded-${groupKey}`}
+              style={{
+                marginTop: 0,
+                marginLeft: 24,
+                marginRight: 24,
+                marginBottom: 10,
+                paddingLeft: 10,
+                borderLeft: "2px solid hsl(var(--border))",
+                display: "flex",
+                gap: 16,
+                flexWrap: "wrap",
+              }}
+            >
+              {node.children.map((child) => {
+                const systemId = child.name.startsWith("auth:")
+                  ? child.name.slice(5)
+                  : child.name;
+                const isCached = child.status === "cached";
+                const isComplete = child.status === "completed";
+                const isActive = child.status === "running";
+                const isFailedStep = child.status === "failed";
+                const isPending = child.status === "pending";
+                const durationLabel =
+                  child.durationMs !== undefined
+                    ? formatStepDuration(child.durationMs)
+                    : "";
+
+                const textColor = isCached
+                  ? "#3b82f6"
+                  : isComplete
+                    ? "#4ade80"
+                    : isActive
+                      ? "hsl(var(--primary))"
+                      : isFailedStep
+                        ? "hsl(var(--destructive))"
+                        : "hsl(var(--muted-foreground) / 0.5)";
+
+                return (
+                  <div
+                    key={child.name}
+                    style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 72 }}
+                  >
+                    {/* System id label */}
+                    <span
+                      style={{
+                        fontFamily: "JetBrains Mono, ui-monospace, monospace",
+                        fontSize: 10,
+                        fontWeight: 500,
+                        color: textColor,
+                      }}
+                    >
+                      {systemId}
+                    </span>
+                    {/* Mini rail */}
+                    <div className="relative rounded-full" style={{ height: 3, width: "100%" }}>
+                      {isPending ? (
+                        <div
+                          className="absolute inset-0 rounded-full opacity-70 overflow-hidden"
+                          style={{
+                            backgroundImage:
+                              "repeating-linear-gradient(to right, hsl(var(--border)) 0 4px, transparent 4px 8px)",
+                          }}
+                        />
+                      ) : (
+                        <div
+                          className={cn(
+                            "absolute inset-0 rounded-full",
+                            isComplete && "bg-[#4ade80]/80",
+                            isActive && "bg-primary/25",
+                            isFailedStep && "bg-destructive/80",
+                            isCached && "bg-blue-500",
+                          )}
+                        />
+                      )}
+                    </div>
+                    {/* Duration */}
+                    <span
+                      style={{
+                        fontFamily: "JetBrains Mono, ui-monospace, monospace",
+                        fontSize: 10,
+                        color: "hsl(var(--muted-foreground) / 0.6)",
+                      }}
+                    >
+                      {durationLabel || "—"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+
       {cacheHits.length > 0 && (
         <div
           style={{
