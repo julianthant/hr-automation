@@ -64,6 +64,13 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   authChain?: 'sequential' | 'interleaved'
   batch?: BatchConfig
   /**
+   * When true (default), the kernel auto-prepends `auth:<id>` step names to
+   * the declared `steps` tuple for each entry in `systems`. Set to `false`
+   * for workflows that already declare their own auth step names
+   * (e.g. onboarding's `crm-auth`, `ucpath-auth`) until they migrate.
+   */
+  authSteps?: boolean
+  /**
    * Dashboard detail-panel fields — either plain keys (legacy) or labeled
    * entries (preferred). Legacy keys get auto-title-cased labels in the
    * registry (`emplId` → `Empl Id`). Only labeled entries are enforced by
