@@ -5,6 +5,7 @@ import { Session } from './session.js'
 import { Stepper } from './stepper.js'
 import { makeCtx } from './ctx.js'
 import { trackEvent, withTrackedWorkflow, emitScreenshotEvent, type WithTrackedWorkflowOpts } from '../tracker/jsonl.js'
+import { makeScreenshotFn } from './screenshot.js'
 import { withLogContext } from '../utils/log.js'
 import { classifyError } from '../utils/errors.js'
 import { runWorkflowPool } from './pool.js'
@@ -136,14 +137,14 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       await withTrackedWorkflow(
         wf.config.name,
         itemId,
-        async (setStep, updateData) => {
+        async (setStep, updateData, _onCleanup, _sessionCtx, emitFailed) => {
           const stepper = new Stepper({
             workflow: wf.config.name,
             itemId,
             runId,
             emitStep: setStep,
             emitData: updateData,
-            emitFailed: (step, error) => setStep(`${step}:failed:${error}`),
+            emitFailed,
           })
           const ctx = makeCtx<TSteps, TData>({
             session,
@@ -188,6 +189,15 @@ export function buildSessionObserver<TData, TSteps extends readonly string[]>(
   sessionCtx: import('../tracker/jsonl.js').SessionContext,
   setStep: (step: string) => void,
   emitFailed: (step: string, error: string) => void = () => {},
+  /**
+   * Mutable screenshot holder (Strategy B). Starts as a no-op; onReady swaps
+   * in a real makeScreenshotFn once the Session reference is available.
+   * The observer calls `boundScreenshot.fn(...)` at invocation time so it
+   * always picks up the latest value — not the one captured at construction.
+   */
+  boundScreenshot: { fn: import('./types.js').ScreenshotFn } = {
+    fn: async () => ({ kind: 'error', label: '', step: null, ts: Date.now(), files: [] }),
+  },
 ): import('./types.js').SessionObserver {
   const sessionId = '1'
   let registered = false
@@ -195,7 +205,8 @@ export function buildSessionObserver<TData, TSteps extends readonly string[]>(
   // entries) so the guard reflects what the registry actually declared.
   const effectiveSteps = new Set<string>(wf.metadata.steps)
 
-  // Build the auth-step observer — placeholder screenshot no-op until Phase 2.
+  // Build the auth-step observer — screenshot is indirected through
+  // boundScreenshot.fn so onReady can swap in the real fn after construction.
   const authObs = makeAuthObserver({
     emitStep: (stepName) => {
       if (effectiveSteps.has(stepName)) setStep(stepName)
@@ -203,7 +214,7 @@ export function buildSessionObserver<TData, TSteps extends readonly string[]>(
     emitFailed: (stepName, error) => {
       if (effectiveSteps.has(stepName)) emitFailed(stepName, error)
     },
-    screenshot: async () => ({ kind: 'error', label: '', step: null, ts: Date.now(), files: [] }),
+    screenshot: (opts) => boundScreenshot.fn(opts),
   })
 
   return {
@@ -293,14 +304,14 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
      * Undefined in the trackerStub branch (nothing to bridge to).
      */
     observer?: import('./types.js').SessionObserver,
+    /**
+     * Called from Session.launch's onReady hook (synchronously after Session
+     * construction, before any browser launches). Gives the caller the live
+     * Session reference + pre-built Stepper so it can swap a real ScreenshotFn
+     * into a mutable holder before auth fires.
+     */
+    onSessionReady?: (session: Session, runId: string, stepper: Stepper, trackerDir: string | undefined) => void,
   ): Promise<void> => {
-    const session = await Session.launch(wf.config.systems, {
-      authChain: wf.config.authChain,
-      tiling: wf.config.tiling,
-      launchFn: opts.launchFn,
-      observer,
-    })
-
     const runId = opts.preAssignedRunId ?? randomUUID()
     const stepper = new Stepper({
       workflow: wf.config.name,
@@ -310,6 +321,14 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
       // Tracker's updateData now accepts unknown; it stringifies at the write boundary.
       emitData: updateData,
       emitFailed: (step, error) => setStep(`${step}:failed:${error}`),
+    })
+
+    const session = await Session.launch(wf.config.systems, {
+      authChain: wf.config.authChain,
+      tiling: wf.config.tiling,
+      launchFn: opts.launchFn,
+      observer,
+      onReady: (sess) => onSessionReady?.(sess, runId, stepper, opts.trackerDir),
     })
 
     const ctx = makeCtx<TSteps, TData>({
@@ -366,10 +385,23 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
     await withTrackedWorkflow(
       wf.config.name,
       String(itemId),
-      async (setStep, updateData, _onCleanup, sessionCtx) => {
-        const emitFailed = (step: string, error: string) => setStep(`${step}:failed:${error}`)
-        const observer = buildSessionObserver(wf, sessionCtx, setStep, emitFailed)
-        await run(setStep, updateData, false, observer)
+      async (setStep, updateData, _onCleanup, sessionCtx, emitFailed) => {
+        // Strategy B: mutable holder so onReady can swap in a real ScreenshotFn.
+        const boundScreenshot: { fn: import('./types.js').ScreenshotFn } = {
+          fn: async () => ({ kind: 'error', label: '', step: null, ts: Date.now(), files: [] }),
+        }
+        const observer = buildSessionObserver(wf, sessionCtx, setStep, emitFailed, boundScreenshot)
+        await run(setStep, updateData, false, observer, (session, runId, stepper, trackerDir) => {
+          // onReady: swap in the real ScreenshotFn now that we have a Session ref.
+          boundScreenshot.fn = makeScreenshotFn({
+            session,
+            runId,
+            workflow: wf.config.name,
+            itemId: String(itemId),
+            emit: (ev) => emitScreenshotEvent(ev, { dir: trackerDir }),
+            currentStep: () => stepper.getCurrentStep(),
+          })
+        })
       },
       {
         ...buildTrackerOpts(wf),

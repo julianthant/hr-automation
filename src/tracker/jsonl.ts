@@ -248,6 +248,13 @@ export async function withTrackedWorkflow<T>(
     /** Register a sync cleanup function (e.g. kill browsers) that runs on SIGINT before exit. */
     onCleanup: (cb: () => void) => void,
     session: SessionContext,
+    /**
+     * Emit a proper step-failed signal. Routes to the same underlying emission
+     * path as Stepper's emitFailed: writes a `running` entry whose step encodes
+     * the failure, then the outer `catch` block writes the terminal `failed`
+     * entry. Use this instead of encoding failure info into a mangled step name.
+     */
+    emitFailed: (step: string, error: string) => void,
   ) => Promise<T>,
   opts: WithTrackedWorkflowOpts = {},
 ): Promise<T> {
@@ -359,6 +366,18 @@ export async function withTrackedWorkflow<T>(
   process.on("SIGINT", () => { onSignal("SIGINT"); process.exit(130); });
   process.on("SIGTERM", () => { onSignal("SIGTERM"); process.exit(143); });
 
+  // Real emitFailed: sets lastStep (preserves step in terminal failed entry)
+  // then emits a running row with a `step:failed:<error>` step string that the
+  // StepPipeline uses to show the failed dot. The outer catch block then writes
+  // the terminal `failed` entry, so the sequence is:
+  //   running(step:failed:…) → [rethrow] → failed(step=lastStep)
+  const emitFailedFn = (step: string, error: string) => {
+    const encoded = `${step}:failed:${error}`
+    lastStep = step
+    emit("running", { step: encoded })
+    emitStepChange(instanceName, encoded, dir)
+  }
+
   try {
     const result = await fn(
       (step) => { lastStep = step; emit("running", { step }); emitStepChange(instanceName, step, dir); },
@@ -374,6 +393,7 @@ export async function withTrackedWorkflow<T>(
       },
       (cb) => cleanupFns.push(cb),
       session,
+      emitFailedFn,
     );
 
     // Runtime warning (Option A) — any declared detailField key that the
