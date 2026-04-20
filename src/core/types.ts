@@ -127,6 +127,12 @@ export interface Ctx<TSteps extends readonly string[], TData> {
   log: typeof log
   isBatch: boolean
   runId: string
+  /**
+   * Capture all open pages as PNGs, emit a `screenshot` tracker event, and
+   * return the capture record. See `makeCtx` for construction. TEMPORARILY
+   * optional until Task 11 wires it in `makeCtx`.
+   */
+  screenshot?: ScreenshotFn
 }
 
 export interface SessionHandle {
@@ -208,3 +214,14 @@ export interface ScreenshotCapture {
   files: Array<{ system: string; path: string }>
 }
 export type ScreenshotFn = (opts: ScreenshotOpts) => Promise<ScreenshotCapture>
+
+/** Inputs to Session.captureAll — Layer 1 filename producer. */
+export interface CaptureFileOpts {
+  workflow: string
+  itemId: string
+  kind: 'form' | 'error' | 'manual'
+  label: string
+  ts: number
+  systems?: string[]
+  pages?: Page[]
+}
