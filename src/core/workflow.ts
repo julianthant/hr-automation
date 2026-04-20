@@ -4,7 +4,7 @@ import { register, autoLabel, normalizeDetailField } from './registry.js'
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
 import { makeCtx } from './ctx.js'
-import { trackEvent, withTrackedWorkflow, type WithTrackedWorkflowOpts } from '../tracker/jsonl.js'
+import { trackEvent, withTrackedWorkflow, emitScreenshotEvent, type WithTrackedWorkflowOpts } from '../tracker/jsonl.js'
 import { withLogContext } from '../utils/log.js'
 import { classifyError } from '../utils/errors.js'
 import { runWorkflowPool } from './pool.js'
@@ -73,9 +73,6 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
   args: RunOneItemOpts<TData, TSteps>,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const { wf, session, item, itemId, runId, trackerDir, callerPreEmits } = args
-  const screenshotFn = async (stepName: string): Promise<void> => {
-    await session.screenshotAll(`${wf.config.name}-${itemId}-${stepName}`)
-  }
 
   if (args.trackerStub) {
     const stepper = new Stepper({
@@ -85,9 +82,17 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       emitStep: () => {},
       emitData: () => {},
       emitFailed: () => {},
-      screenshotFn,
     })
-    const ctx = makeCtx<TSteps, TData>({ session, stepper, isBatch: true, runId })
+    const ctx = makeCtx<TSteps, TData>({
+      session,
+      stepper,
+      isBatch: true,
+      runId,
+      workflow: wf.config.name,
+      itemId,
+      emitScreenshotEvent: () => {},
+    })
+    stepper.setScreenshotFn(ctx.screenshot)
     try {
       if (args.preHandler) await args.preHandler()
       await wf.config.handler(ctx, item)
@@ -139,9 +144,17 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
             emitStep: setStep,
             emitData: updateData,
             emitFailed: (step, error) => setStep(`${step}:failed:${error}`),
-            screenshotFn,
           })
-          const ctx = makeCtx<TSteps, TData>({ session, stepper, isBatch: true, runId })
+          const ctx = makeCtx<TSteps, TData>({
+            session,
+            stepper,
+            isBatch: true,
+            runId,
+            workflow: wf.config.name,
+            itemId,
+            emitScreenshotEvent: (ev) => emitScreenshotEvent(ev, { dir: trackerDir }),
+          })
+          stepper.setScreenshotFn(ctx.screenshot)
           if (args.preHandler) await args.preHandler()
           await wf.config.handler(ctx, item)
         },
@@ -297,12 +310,18 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
       // Tracker's updateData now accepts unknown; it stringifies at the write boundary.
       emitData: updateData,
       emitFailed: (step, error) => setStep(`${step}:failed:${error}`),
-      screenshotFn: async (stepName) => {
-        await session.screenshotAll(`${wf.config.name}-${String(itemId)}-${stepName}`)
-      },
     })
 
-    const ctx = makeCtx<TSteps, TData>({ session, stepper, isBatch: false, runId })
+    const ctx = makeCtx<TSteps, TData>({
+      session,
+      stepper,
+      isBatch: false,
+      runId,
+      workflow: wf.config.name,
+      itemId: String(itemId),
+      emitScreenshotEvent: (ev) => emitScreenshotEvent(ev, { dir: opts.trackerDir }),
+    })
+    stepper.setScreenshotFn(ctx.screenshot)
 
     let sigintHandler: (() => void) | null = null
     if (installSigint) {
