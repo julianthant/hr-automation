@@ -182,6 +182,7 @@ All production workflows are kernel-based as of 2026-04-17. No `defineDashboardM
 - `steps: readonly string[] as const` — declared step names. `ctx.step`/`markStep` are type-narrowed against this tuple.
 - `schema: ZodType<TData>` — validated before the handler runs.
 - `authChain: "sequential" | "interleaved"` — sequential waits for each Duo before the next; interleaved auths #1 blocking then chains #2+ in background while the handler starts. Default: interleaved for >1 system, sequential for 1.
+- `authSteps?: boolean` — default `true`. When `false`, the kernel does NOT auto-prepend `auth:<id>` step names from `systems`. Set to `false` for workflows that already declare their own auth step names (e.g. onboarding's `crm-auth`, `ucpath-auth`).
 - `tiling: "auto" | "single" | "side-by-side"` — CDP-based window tiling.
 - `batch?: { mode: "sequential" | "pool", poolSize?, betweenItems?, preEmitPending? }` — plumbed by `runWorkflowBatch`. `pool` mode uses `runWorkflowPool` (each worker gets its own Session — one Duo per worker).
 - `detailFields: Array<{ key, label } | string>` — dashboard detail panel. Keys must be populated by `ctx.updateData(...)` before the handler returns, or a `log.warn` fires.
@@ -196,6 +197,7 @@ The `ctx` object passed to your handler:
 - `parallelAll(...)` — `Promise.all` shape (fail-fast, unwrapped values).
 - `retry(fn, { attempts, backoffMs })` — linear-backoff retry (default 3 attempts).
 - `updateData(patch)` — merges into the tracker entry's `data` field.
+- `screenshot({ kind, label })` — capture all open browser pages, emit a `screenshot` tracker event, and return the capture record. `kind` is `"form"` | `"error"` | `"manual"`. Use for post-submit audit screenshots in handlers (`"form"`); `"error"` is reserved for the kernel's failure-catch path.
 - `session`, `log`, `isBatch`, `runId` — escape hatches.
 
 Side-effect-free work can be memoized via `stepCacheGet`/`stepCacheSet` (from `src/core/step-cache.ts`, pattern-twin of `idempotency.ts`). Handlers call these inline at step start/end; default 2h TTL; 7-day disk prune. Storage at `.tracker/step-cache/{workflow}-{itemId}/{stepName}.json`. Onboarding's `extraction` step is the canonical caller.
@@ -292,7 +294,7 @@ Current step tracking per workflow:
 | Workflow | Steps |
 |---|---|
 | onboarding | crm-auth → extraction → pdf-download → ucpath-auth → person-search → i9-creation → transaction |
-| separations | launching → authenticating → kuali-extraction → kronos-search → ucpath-job-summary → ucpath-transaction → kuali-finalization |
+| separations | auth:kuali → auth:old-kronos → auth:new-kronos → auth:ucpath → kuali-extraction → kronos-search → ucpath-job-summary → ucpath-transaction → kuali-finalization |
 | eid-lookup | ucpath-auth → searching (+ crm-auth → cross-verification in CRM mode) |
 | kronos-reports | searching → extracting → downloading |
 | work-study | ucpath-auth → transaction |

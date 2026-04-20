@@ -40,12 +40,12 @@ This workflow touches four systems: **kuali**, **ucpath**, **old-kronos**, **new
 | Field | Value | Why |
 |-------|-------|-----|
 | `systems` | `[kuali, old-kronos, new-kronos, ucpath]` — each wraps login fn to throw on failure | 4 independent auth systems, each with its own Duo prompt |
-| `steps` | `["launching", "authenticating", "kuali-extraction", "kronos-search", "ucpath-job-summary", "ucpath-transaction", "kuali-finalization"] as const` | Matches prior dashboard registration |
+| `steps` | `["kuali-extraction", "kronos-search", "ucpath-job-summary", "ucpath-transaction", "kuali-finalization"] as const` | Kernel auto-prepends `auth:kuali`, `auth:old-kronos`, `auth:new-kronos`, `auth:ucpath` (see root `CLAUDE.md` — `authSteps` config field) |
 | `schema` | `SeparationInputSchema = z.object({ docId })` — only docId from CLI | Kuali extraction fills in the rest via `ctx.updateData` |
 | `authChain` | `"interleaved"` | Kuali auth blocking, then Old Kronos / New Kronos / UCPath chained in background via `.catch(() => {}).then(...)`. Each `ctx.page(id)` call awaits that system's ready promise, so Phase-1 tasks start as soon as their own Duo clears |
 | `tiling` | `"auto"` | Kernel tiles 4 browsers via `computeTileLayout(i, 4)`. CDP sets window bounds after launch using actual screen dimensions |
 | `batch` | `{ mode: "sequential", betweenItems: ["reset-browsers"] }` | Multi-doc runs reuse the same 4 browsers; kernel calls `session.reset(id)` between docs (each system has a `resetUrl`) |
-| `detailFields` | `[{ name, Employee }, { eid, EID }, { docId, Doc ID }]` | Dashboard detail panel; populated via `ctx.updateData(...)` after Kuali extraction |
+| `detailFields` | `[{ name, Employee }, { eid, EID }, { docId, Doc ID }, { terminationType, Term Type }, { separationDate, Sep Date }, { transactionNumber, Txn # }]` | Dashboard detail panel; all 6 fields populated via `ctx.updateData(...)` during workflow execution |
 
 ## Data Flow
 
@@ -164,3 +164,4 @@ Selectors used inside this workflow live in the per-system registries: `src/syst
 - **2026-04-10: Batch mode design** — For processing multiple separations, launching + authenticating 4 browsers per doc ID was too slow. Fix: batch mode launches browsers once, authenticates once, processes each sequentially reusing the same browser sessions. The kernel's `runWorkflowBatch` sequential mode now does this declaratively via `batch: { mode: "sequential", betweenItems: ["reset-browsers"] }`.
 - **2026-04-10: Phase parallelization** — UCPath Job Summary and Kuali timekeeper fill were previously sequential (Phase 2), waiting for Kronos (Phase 1) to complete. Neither depends on Kronos results. Moved all four into the same parallel block (`ctx.parallel` post-migration). Saves ~30s per doc.
 - **2026-04-10: Interleaved auth + work via ready promises** — Previously all 4 Duo auths completed before any work started. Now each browser's work chains off an auth-ready promise so work starts immediately after its own Duo clears. The kernel's `authChain: "interleaved"` is the declarative equivalent; post-migration this is a one-line declaration on `defineWorkflow`.
+- **2026-04-20: Per-system auth steps + screenshot framework + txn # readback.** Kernel now auto-prepends `auth:<id>` step names and emits step events per system via `makeAuthObserver`. Umbrella `launching`/`authenticating` steps dropped from the declared tuple. Added form screenshots at UCPath-submit and Kuali-save sites via `ctx.screenshot({ kind: "form", label })`. `fillTransactionResults` now uses `fillWithVerify` (readback + `type()` retry) — run 2 silently dropped the transaction number because Kuali ignores `.fill()` on certain inputs the same way it does for date fields. Detail panel extended to 6 fields: Employee / EID / Doc ID / Term Type / Sep Date / Txn #.
