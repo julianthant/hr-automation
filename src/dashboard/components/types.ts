@@ -211,7 +211,8 @@ export type RunEventType =
   | "duo_request" | "duo_start" | "duo_complete" | "duo_timeout"
   | "item_start" | "item_complete"
   | "step_change"
-  | "cache_hit";
+  | "cache_hit"
+  | "screenshot";
 
 export interface RunEvent {
   type: RunEventType;
@@ -225,6 +226,10 @@ export interface RunEvent {
   currentStep?: string;
   finalStatus?: "done" | "failed";
   data?: Record<string, string>;
+  /** screenshot event fields (populated when type === "screenshot") */
+  screenshotKind?: "form" | "error" | "manual";
+  screenshotLabel?: string;
+  screenshotFileCount?: number;
 }
 
 // ── Step name formatting (stable — used by StepPipeline + WorkflowBox) ──
