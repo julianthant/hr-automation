@@ -192,3 +192,19 @@ export interface RunOpts {
    */
   poolSize?: number
 }
+
+// Placeholder types — fully defined in Phase 2 (Task 7). Keep in sync.
+export interface ScreenshotOpts {
+  kind: 'form' | 'error' | 'manual'
+  label: string
+  systems?: string[]
+  pages?: import('playwright').Page[]
+}
+export interface ScreenshotCapture {
+  kind: 'form' | 'error' | 'manual'
+  label: string
+  step: string | null
+  ts: number
+  files: Array<{ system: string; path: string }>
+}
+export type ScreenshotFn = (opts: ScreenshotOpts) => Promise<ScreenshotCapture>
