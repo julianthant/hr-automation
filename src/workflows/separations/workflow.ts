@@ -177,9 +177,12 @@ export const separationsWorkflow = defineWorkflow({
     betweenItems: ["reset-browsers"],
   },
   detailFields: [
-    { key: "name", label: "Employee" },
-    { key: "eid", label: "EID" },
-    { key: "docId", label: "Doc ID" },
+    { key: "name",              label: "Employee" },
+    { key: "eid",               label: "EID" },
+    { key: "docId",             label: "Doc ID" },
+    { key: "terminationType",   label: "Term Type" },
+    { key: "separationDate",    label: "Sep Date" },
+    { key: "transactionNumber", label: "Txn #" },
   ],
   getName: (d) => d.name ?? "",
   getId: (d) => d.docId ?? "",
@@ -316,6 +319,10 @@ export const separationsWorkflow = defineWorkflow({
       : "Kuali (no change)";
     log.step(`[Old Kronos / New Kronos] Resolved dates — using ${chosenDateSource}`);
 
+    // Early-populate separationDate so the dashboard shows it as soon as
+    // Kronos reconciliation completes (not only after the transaction submits).
+    ctx.updateData({ separationDate: resolved.separationDate, terminationType: isVol ? "Vol" : "Invol" });
+
     const kualiPage = await ctx.page("kuali");
     if (resolved.changed) {
       log.step("[Old Kronos / New Kronos] Dates differ from Kuali — updating:");
@@ -436,7 +443,8 @@ export const separationsWorkflow = defineWorkflow({
 
     // Final state snapshot for the dashboard detail panel / JSONL readers.
     ctx.updateData({
-      isVoluntary: String(isVol),
+      terminationType: isVol ? "Vol" : "Invol",
+      separationDate: resolved.separationDate,
       terminationEffDate: finalTermEffDate,
       deptId: jobSummaryData?.deptId ?? "",
       departmentDescription: jobSummaryData?.departmentDescription ?? "",

@@ -12,7 +12,7 @@ export const SeparationDataSchema = z.object({
   location: z.string().optional(),
 
   // Computed
-  isVoluntary: z.boolean(),
+  isVoluntary: z.boolean().optional(),
   terminationEffDate: z.string().regex(/^\d{2}\/\d{2}\/\d{4}$/, "Must be MM/DD/YYYY"),
 
   // From UCPath Workforce Job Summary
