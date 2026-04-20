@@ -303,6 +303,7 @@ export const kronosReportsWorkflow = defineWorkflow({
       // persistent context (workers sharing one dir would conflict on the lock).
     },
   ],
+  authSteps: false,
   steps: kronosSteps,
   schema: KronosItemSchema,
   tiling: "single",

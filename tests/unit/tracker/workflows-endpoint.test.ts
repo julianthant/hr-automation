@@ -10,6 +10,7 @@ test('GET /api/workflow-definitions returns registered metadata', () => {
   defineWorkflow({
     name: 'wf-a',
     systems: [{ id: 'ucpath', login: async () => {} }],
+    authSteps: false,
     steps: ['s1', 's2'] as const,
     schema: z.object({}),
     detailFields: [],
@@ -29,6 +30,7 @@ test('GET /api/workflow-definitions normalizes legacy detailFields (string[]) to
   defineWorkflow({
     name: 'wf-legacy-fields',
     systems: [{ id: 'ucpath', login: async () => {} }],
+    authSteps: false,
     steps: ['only'] as const,
     schema: z.object({ emplId: z.string() }),
     detailFields: ['emplId'],
@@ -47,6 +49,7 @@ test('GET /api/workflow-definitions passes through labeled detailFields verbatim
     name: 'wf-labeled-fields',
     label: 'Fancy Label',
     systems: [{ id: 'ucpath', login: async () => {} }],
+    authSteps: false,
     steps: ['only'] as const,
     schema: z.object({}),
     detailFields: [
