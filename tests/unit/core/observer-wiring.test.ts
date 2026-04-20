@@ -42,7 +42,8 @@ test('runWorkflow: observer bridges Session.launch hooks to sessionCtx + setStep
       id: 'ucpath',
       login: async (_page, instance) => { loginInstances.push(instance) },
     }],
-    steps: ['ucpath-auth', 'work'] as const,
+    // auth:ucpath is auto-prepended by the registry; 'work' is the only declared step.
+    steps: ['work'] as const,
     schema: z.object({}).passthrough(),
     tiling: 'single',
     authChain: 'sequential',
@@ -72,7 +73,8 @@ test('runWorkflow: observer bridges Session.launch hooks to sessionCtx + setStep
   const entryFiles = readdirSync(dir).filter((f) => f.startsWith('test-obs-') && f.endsWith('.jsonl') && !f.endsWith('-logs.jsonl'))
   const lines = readFileSync(join(dir, entryFiles[0]), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
   const runningSteps = lines.filter((l: any) => l.status === 'running').map((l: any) => l.step)
-  assert.ok(runningSteps.includes('ucpath-auth'), `running entries missing ucpath-auth: ${runningSteps.join(',')}`)
+  // auth:ucpath is auto-prepended by the registry and emitted via makeAuthObserver on onAuthStart.
+  assert.ok(runningSteps.includes('auth:ucpath'), `running entries missing auth:ucpath: ${runningSteps.join(',')}`)
 })
 
 test('runWorkflow: observer guards setStep against undeclared step names', async () => {

@@ -82,8 +82,6 @@ const SeparationInputSchema = z.object({
 type SeparationInput = z.infer<typeof SeparationInputSchema>;
 
 const separationsSteps = [
-  "launching",
-  "authenticating",
   "kuali-extraction",
   "kronos-search",
   "ucpath-job-summary",
@@ -191,13 +189,7 @@ export const separationsWorkflow = defineWorkflow({
     // Stamp docId immediately so the dashboard row shows it from step 1.
     ctx.updateData({ docId });
 
-    // ─── Step 1: launching (kernel handles browser creation before handler runs) ───
-    ctx.markStep("launching");
-
-    // ─── Step 2: authenticating (kernel handles Duo #1..#4 via interleaved chain) ───
-    ctx.markStep("authenticating");
-
-    // ─── Step 3: Extract Kuali data ───
+    // ─── Step 1: Extract Kuali data ───
     const kualiData = await ctx.step("kuali-extraction", async () => {
       const kualiPage = await ctx.page("kuali");
       // Auto-dismiss PeopleSoft dialogs on UCPath — important when a previous
