@@ -390,6 +390,7 @@ export const separationsWorkflow = defineWorkflow({
         }
         transactionNumber = submitResult.transactionNumber ?? "";
         log.success(`[UCPath Txn] Transaction submitted${transactionNumber ? ` (#${transactionNumber})` : ""}`);
+        await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-submitted' });
       } catch (e) {
         log.error(`[UCPath Txn] Failed: ${errorMessage(e)}`);
       }
@@ -430,6 +431,7 @@ export const separationsWorkflow = defineWorkflow({
       }
 
       await clickSave(kualiPage);
+      await ctx.screenshot({ kind: 'form', label: 'kuali-finalization-saved' });
     });
 
     // Final state snapshot for the dashboard detail panel / JSONL readers.
