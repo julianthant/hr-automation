@@ -93,6 +93,7 @@ export const onboardingWorkflow = defineWorkflow({
       },
     },
   ],
+  authSteps: false,
   steps: onboardingSteps,
   schema: OnboardingInputSchema,
   authChain: "sequential",

@@ -38,6 +38,7 @@ export const workStudyWorkflow = defineWorkflow({
       },
     },
   ],
+  authSteps: false,
   steps: workStudySteps,
   schema: WorkStudyInputSchema,
   tiling: "single",

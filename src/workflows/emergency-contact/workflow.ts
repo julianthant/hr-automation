@@ -67,6 +67,7 @@ export const emergencyContactWorkflow = defineWorkflow({
       },
     },
   ],
+  authSteps: false,
   steps: emergencyContactSteps,
   schema: RecordSchema,
   tiling: "single",
