@@ -91,6 +91,7 @@ const EVENT_VISUAL: Record<RunEvent["type"], { glyph: string; color: string }> =
   item_complete:    { glyph: "▩", color: "#6b7280" },
   step_change:      { glyph: "→", color: "#6b7280" },
   cache_hit:        { glyph: "❄", color: "#3b82f6" },
+  screenshot:       { glyph: "⬛", color: "#a78bfa" },
 };
 
 function EventLine({ event }: { event: RunEvent }) {
@@ -104,6 +105,15 @@ function EventLine({ event }: { event: RunEvent }) {
     second: "2-digit",
   });
   const detail = event.system ?? event.step ?? event.currentStep ?? event.currentItemId ?? "";
+  const label = event.type === "screenshot"
+    ? [
+        "screenshot",
+        event.screenshotKind,
+        event.screenshotLabel,
+        event.screenshotFileCount != null ? `${event.screenshotFileCount}p` : null,
+      ].filter(Boolean).join(" \u2014 ")
+    : event.type;
+  const suffix = event.type !== "screenshot" && detail ? ` ${detail}` : "";
   return (
     <div className="flex items-center gap-3.5 px-6 py-[3px] font-mono text-[13px] leading-relaxed">
       <span className="text-muted-foreground text-xs whitespace-nowrap min-w-[72px]">{time}</span>
@@ -114,8 +124,8 @@ function EventLine({ event }: { event: RunEvent }) {
         {v.glyph}
       </span>
       <span className="flex-1 break-words text-secondary-foreground">
-        <span style={{ color: v.color }}>{event.type}</span>
-        {detail && <span className="text-muted-foreground"> {detail}</span>}
+        <span style={{ color: v.color }}>{label}</span>
+        {suffix && <span className="text-muted-foreground">{suffix}</span>}
       </span>
     </div>
   );

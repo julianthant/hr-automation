@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { LogLine } from "./LogLine";
 import type { CollapsedLogEntry } from "./hooks/useLogs";
 import type { LogCategory, RunEvent } from "./types";
@@ -10,13 +11,15 @@ interface LogStreamProps {
   logs: CollapsedLogEntry[];
   events?: RunEvent[];
   loading: boolean;
+  /** Rendered in place of the log list when the Screenshots tab is active. */
+  screenshotsSlot?: ReactNode;
 }
 
 const FILTER_TABS: {
   key: string;
   label: string;
   categories: LogCategory[];
-  source?: "events";
+  source?: "events" | "screenshots";
 }[] = [
   { key: "all", label: "All", categories: [] },
   { key: "errors", label: "Errors", categories: ["error"] },
@@ -25,13 +28,14 @@ const FILTER_TABS: {
   { key: "navigate", label: "Navigate", categories: ["navigate"] },
   { key: "extract", label: "Extract", categories: ["extract"] },
   { key: "events", label: "Events", categories: [], source: "events" },
+  { key: "screenshots", label: "Screenshots", categories: [], source: "screenshots" },
 ];
 
 type DisplayItem =
   | { kind: "log"; entry: CollapsedLogEntry }
   | { kind: "event"; entry: RunEvent };
 
-export function LogStream({ logs, events = [], loading }: LogStreamProps) {
+export function LogStream({ logs, events = [], loading, screenshotsSlot }: LogStreamProps) {
   const [filter, setFilter] = useState("all");
   const [autoScroll, setAutoScroll] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -98,8 +102,19 @@ export function LogStream({ logs, events = [], loading }: LogStreamProps) {
         ))}
       </div>
 
-      {/* Log lines */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto py-3 border-b border-border">
+      {/* Screenshots slot — shown when Screenshots tab is active */}
+      {tab?.source === "screenshots" && (
+        <div className="flex-1 overflow-y-auto border-b border-border">
+          {screenshotsSlot ?? (
+            <div className="px-6 py-4 text-sm text-muted-foreground">
+              No screenshots captured for this run yet.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Log lines — hidden when Screenshots tab is active */}
+      <div ref={scrollRef} className={cn("flex-1 overflow-y-auto py-3 border-b border-border", tab?.source === "screenshots" && "hidden")}>
         {loading && displayed.length === 0 ? (
           <div className="space-y-[6px] px-6 py-3">
             {Array.from({ length: 12 }).map((_, i) => (

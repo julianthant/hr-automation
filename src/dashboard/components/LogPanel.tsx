@@ -5,6 +5,7 @@ import { LogStream } from "./LogStream";
 import { RunSelector } from "./RunSelector";
 import { EmptyState } from "./EmptyState";
 import { FailureDrillDown } from "./FailureDrillDown";
+import { ScreenshotsPanel } from "./ScreenshotsPanel";
 import { useLogs } from "./hooks/useLogs";
 import { useRunEvents } from "./hooks/useRunEvents";
 import { useElapsed, formatDuration } from "./hooks/useElapsed";
@@ -233,7 +234,19 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
         <FailureDrillDown entry={entry} workflow={workflow} logs={logs} />
       )}
 
-      <LogStream logs={logs} events={events} loading={logsLoading} />
+      <LogStream
+        logs={logs}
+        events={events}
+        loading={logsLoading}
+        screenshotsSlot={
+          <ScreenshotsPanel
+            workflow={workflow}
+            itemId={entry?.id ?? null}
+            runId={activeRunId}
+            date={date}
+          />
+        }
+      />
     </div>
   );
 }
