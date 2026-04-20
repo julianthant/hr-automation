@@ -114,8 +114,8 @@ test('stepper.markStep: does not throw even if emitStep is a no-op', () => {
   assert.doesNotThrow(() => stepper.markStep('any-name'))
 })
 
-test('stepper calls screenshotFn on step failure', async () => {
-  const captured: string[] = []
+test('stepper calls screenshotFn on step failure with { kind: "error", label: stepName }', async () => {
+  const captured: import('../../../src/core/types.js').ScreenshotOpts[] = []
   const stepper = new Stepper({
     workflow: 't',
     itemId: '1',
@@ -123,17 +123,22 @@ test('stepper calls screenshotFn on step failure', async () => {
     emitStep: () => {},
     emitData: () => {},
     emitFailed: () => {},
-    screenshotFn: async (stepName) => { captured.push(stepName) },
+    screenshotFn: async (opts) => {
+      captured.push(opts)
+      return { kind: opts.kind, label: opts.label, step: null, ts: Date.now(), files: [] }
+    },
   })
   await assert.rejects(
     () => stepper.step('boom', async () => { throw new Error('x') }),
     /x/,
   )
-  assert.deepEqual(captured, ['boom'])
+  assert.equal(captured.length, 1)
+  assert.equal(captured[0].kind, 'error')
+  assert.equal(captured[0].label, 'boom')
 })
 
 test('stepper does not call screenshotFn on success', async () => {
-  const captured: string[] = []
+  const captured: import('../../../src/core/types.js').ScreenshotOpts[] = []
   const stepper = new Stepper({
     workflow: 't',
     itemId: '1',
@@ -141,7 +146,10 @@ test('stepper does not call screenshotFn on success', async () => {
     emitStep: () => {},
     emitData: () => {},
     emitFailed: () => {},
-    screenshotFn: async (stepName) => { captured.push(stepName) },
+    screenshotFn: async (opts) => {
+      captured.push(opts)
+      return { kind: opts.kind, label: opts.label, step: null, ts: Date.now(), files: [] }
+    },
   })
   const result = await stepper.step('ok', async () => 42)
   assert.equal(result, 42)

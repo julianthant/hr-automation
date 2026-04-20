@@ -18,7 +18,15 @@ test('makeCtx returns a Ctx with page/step/parallel/updateData/session bound', (
     emitData: () => {},
     emitFailed: () => {},
   })
-  const ctx = makeCtx({ session, stepper, isBatch: true, runId: 'r1' })
+  const ctx = makeCtx({
+    session,
+    stepper,
+    isBatch: true,
+    runId: 'r1',
+    workflow: 'test',
+    itemId: 't1',
+    emitScreenshotEvent: () => {},
+  })
 
   assert.equal(typeof ctx.page, 'function')
   assert.equal(typeof ctx.step, 'function')
@@ -27,4 +35,5 @@ test('makeCtx returns a Ctx with page/step/parallel/updateData/session bound', (
   assert.equal(ctx.isBatch, true)
   assert.equal(ctx.runId, 'r1')
   assert.equal(typeof ctx.session.page, 'function')
+  assert.equal(typeof ctx.screenshot, 'function')
 })

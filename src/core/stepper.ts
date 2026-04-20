@@ -1,4 +1,5 @@
 import { classifyError } from '../utils/errors.js'
+import type { ScreenshotFn } from './types.js'
 
 export interface StepperOpts {
   workflow: string
@@ -8,12 +9,11 @@ export interface StepperOpts {
   emitData: (data: Record<string, unknown>) => void
   emitFailed: (step: string, error: string) => void
   /**
-   * Optional hook invoked inside `step`'s catch, BEFORE `emitFailed` runs.
-   * Used by the kernel to drop per-browser PNGs into `.screenshots/` when
-   * a step throws. Must be best-effort — any error the hook raises is
-   * swallowed so the original throw still propagates cleanly.
+   * Optional screenshot callable invoked inside `step`'s catch, BEFORE `emitFailed` runs.
+   * When present, the stepper calls it with { kind: "error", label: stepName }.
+   * Errors are swallowed; the original throw always wins.
    */
-  screenshotFn?: (stepName: string) => Promise<void>
+  screenshotFn?: ScreenshotFn
 }
 
 export class Stepper {
@@ -32,7 +32,7 @@ export class Stepper {
       // the failed-step event. Errors inside screenshotFn are swallowed — the
       // original throw must always win.
       if (this.opts.screenshotFn) {
-        try { await this.opts.screenshotFn(name) } catch { /* best-effort */ }
+        try { await this.opts.screenshotFn({ kind: 'error', label: name }) } catch { /* best-effort */ }
       }
       const classified = classifyError(err)
       this.opts.emitFailed(name, classified)
@@ -84,6 +84,12 @@ export class Stepper {
       ;(result as Record<string, unknown>)[key as string] = values[i]
     })
     return result
+  }
+
+  /** Back-patch the screenshot callable after construction. Used by makeCtx to
+   *  supply a ScreenshotFn that closes over the stepper itself (for currentStep). */
+  setScreenshotFn(fn: ScreenshotFn): void {
+    this.opts.screenshotFn = fn
   }
 
   getData(): Record<string, unknown> {

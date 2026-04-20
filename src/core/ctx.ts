@@ -2,12 +2,17 @@ import type { Ctx, RetryOpts } from './types.js'
 import type { Session } from './session.js'
 import type { Stepper } from './stepper.js'
 import { log } from '../utils/log.js'
+import { makeScreenshotFn } from './screenshot.js'
+import type { ScreenshotEvent } from './screenshot.js'
 
 export interface MakeCtxOpts {
   session: Session
   stepper: Stepper
   isBatch: boolean
   runId: string
+  workflow: string
+  itemId: string
+  emitScreenshotEvent: (event: ScreenshotEvent) => void
 }
 
 /**
@@ -43,7 +48,17 @@ async function retry<R>(fn: () => Promise<R>, opts: RetryOpts = {}): Promise<R> 
 export function makeCtx<TSteps extends readonly string[], TData>(
   opts: MakeCtxOpts,
 ): Ctx<TSteps, TData> {
-  const { session, stepper, isBatch, runId } = opts
+  const { session, stepper, isBatch, runId, workflow, itemId, emitScreenshotEvent } = opts
+
+  const screenshot = makeScreenshotFn({
+    session,
+    runId,
+    workflow,
+    itemId,
+    emit: emitScreenshotEvent,
+    currentStep: () => stepper.getCurrentStep(),
+  })
+
   return {
     page: (id) => session.page(id),
     step: (name, fn) => stepper.step(name as string, fn),
@@ -64,5 +79,6 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     log,
     isBatch,
     runId,
+    screenshot,
   }
 }

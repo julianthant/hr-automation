@@ -129,10 +129,9 @@ export interface Ctx<TSteps extends readonly string[], TData> {
   runId: string
   /**
    * Capture all open pages as PNGs, emit a `screenshot` tracker event, and
-   * return the capture record. See `makeCtx` for construction. TEMPORARILY
-   * optional until Task 11 wires it in `makeCtx`.
+   * return the capture record. Constructed by `makeCtx` via `makeScreenshotFn`.
    */
-  screenshot?: ScreenshotFn
+  screenshot: ScreenshotFn
 }
 
 export interface SessionHandle {
