@@ -17,6 +17,8 @@ import {
   emitItemStart,
   emitItemComplete,
   emitStepChange,
+  getSessionsFilePath,
+  type ScreenshotSessionEvent,
 } from "./session-events.js";
 
 export const DEFAULT_DIR = ".tracker";
@@ -576,4 +578,13 @@ export function readRunsForId(
     }
     return r;
   });
+}
+
+export function emitScreenshotEvent(
+  event: ScreenshotSessionEvent,
+  opts?: { dir?: string },
+): void {
+  const dir = opts?.dir ?? DEFAULT_DIR;
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  appendFileSync(getSessionsFilePath(dir), JSON.stringify(event) + "\n");
 }
