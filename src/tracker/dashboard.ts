@@ -300,17 +300,157 @@ export interface ScreenshotListEntry {
 }
 
 /**
+ * Grouped screenshot entry — one per screenshot tracker event (or one
+ * synthetic entry for all "legacy" files that have no matching event).
+ * Returned by the `{ dir, screenshotsDir }` overload of
+ * `buildScreenshotsHandler`.
+ */
+export interface ScreenshotGroupedEntry {
+  ts: number;
+  kind: "form" | "error" | "manual";
+  label: string;
+  step: string | null;
+  files: Array<{ system: string; path: string; url: string }>;
+}
+
+/**
  * Build a handler that lists PNGs in `.screenshots/` whose filename matches
  * `<workflow>-<itemId>-*`. Injectable root dir so tests can point at a
  * temp fixture dir. Returns `[]` when the dir doesn't exist or the prefix
  * matches nothing. Filenames produced by `Session.screenshotAll` have shape
  * `<workflow>-<itemId>-<step>-<systemId>-<timestamp>.png`; we parse `step` +
  * `ts` heuristically so the UI can show useful captions.
+ *
+ * Overloaded: when called with `{ dir, screenshotsDir }` it returns an async
+ * handler that reads `sessions.jsonl` and groups files by screenshot events,
+ * surfacing unmatched / legacy files under a synthetic `kind=error label=legacy`
+ * entry. When called with a string (or no args) it returns the legacy sync
+ * flat-list handler — this overload is retained for backward compat with the
+ * SSE enrichment loop.
  */
 export function buildScreenshotsHandler(
-  rootDir: string = SCREENSHOTS_DIR,
-): (workflow: string, itemId: string) => ScreenshotListEntry[] {
-  return (workflow: string, itemId: string) => {
+  rootDir?: string,
+): (workflow: string, itemId: string) => ScreenshotListEntry[];
+export function buildScreenshotsHandler(deps: {
+  dir: string;
+  screenshotsDir: string;
+}): (query: { workflow: string; itemId: string }) => Promise<ScreenshotGroupedEntry[]>;
+export function buildScreenshotsHandler(
+  arg: string | { dir: string; screenshotsDir: string } | undefined = SCREENSHOTS_DIR,
+): unknown {
+  // ── New grouped overload ────────────────────────────────────────────────────
+  if (arg !== null && typeof arg === "object") {
+    const { dir, screenshotsDir } = arg;
+    return async function groupedHandler(
+      query: { workflow: string; itemId: string },
+    ): Promise<ScreenshotGroupedEntry[]> {
+      const { workflow, itemId } = query;
+      const prefix = `${workflow}-${itemId}-`;
+
+      // 1. Read sessions.jsonl and collect screenshot events whose files
+      //    touch the requested workflow/itemId.
+      const sessPath = getSessionsFilePath(dir);
+      const events: import("./session-events.js").ScreenshotSessionEvent[] = [];
+      if (existsSync(sessPath)) {
+        const raw = readFileSync(sessPath, "utf-8");
+        for (const line of raw.split("\n")) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(trimmed);
+          } catch {
+            continue;
+          }
+          if (
+            parsed !== null &&
+            typeof parsed === "object" &&
+            "type" in parsed &&
+            (parsed as Record<string, unknown>)["type"] === "screenshot" &&
+            "files" in parsed
+          ) {
+            const ev = parsed as import("./session-events.js").ScreenshotSessionEvent;
+            // Include this event if ANY of its files belong to this workflow+itemId.
+            const matches = ev.files.some((f) => {
+              const base = f.path.split(/[/\\]/).pop() ?? "";
+              return base.startsWith(prefix);
+            });
+            if (matches) events.push(ev);
+          }
+        }
+      }
+
+      // 2. Build grouped entries from events. Track which file paths are covered.
+      const coveredPaths = new Set<string>();
+      const grouped: ScreenshotGroupedEntry[] = [];
+      for (const ev of events) {
+        const files = ev.files.map((f) => {
+          coveredPaths.add(f.path);
+          return {
+            system: f.system,
+            path: f.path,
+            url: `/screenshots/${encodeURIComponent(f.path.split(/[/\\]/).pop() ?? "")}`,
+          };
+        });
+        grouped.push({
+          ts: ev.ts,
+          kind: ev.kind,
+          label: ev.label,
+          step: ev.step,
+          files,
+        });
+      }
+
+      // 3. Enumerate files in screenshotsDir; any not already covered become
+      //    synthetic legacy entries (grouped all under one label="legacy").
+      const legacyFiles: ScreenshotGroupedEntry["files"] = [];
+      let legacyTs = 0;
+      if (existsSync(screenshotsDir)) {
+        for (const f of readdirSync(screenshotsDir)) {
+          if (!f.endsWith(".png")) continue;
+          if (!f.startsWith(prefix)) continue;
+          const fullPath = join(screenshotsDir, f);
+          if (coveredPaths.has(fullPath)) continue;
+
+          // Parse TS from trailing numeric segment before .png
+          const tsMatch = f.match(/-(\d+)\.png$/);
+          const fileTsNum = tsMatch ? Number(tsMatch[1]) : 0;
+
+          // Determine system: second-to-last dash-segment before the ts
+          const stripped = f.slice(prefix.length, -".png".length);
+          const segs = stripped.split("-");
+          let system = "unknown";
+          if (segs.length >= 2) {
+            system = segs[segs.length - 2];
+          }
+
+          if (fileTsNum > legacyTs) legacyTs = fileTsNum;
+          legacyFiles.push({
+            system,
+            path: fullPath,
+            url: `/screenshots/${encodeURIComponent(f)}`,
+          });
+        }
+      }
+      if (legacyFiles.length > 0) {
+        grouped.push({
+          ts: legacyTs,
+          kind: "error",
+          label: "legacy",
+          step: null,
+          files: legacyFiles,
+        });
+      }
+
+      // 4. Sort newest-first.
+      grouped.sort((a, b) => b.ts - a.ts);
+      return grouped;
+    };
+  }
+
+  // ── Legacy flat-list overload (backward compat) ─────────────────────────────
+  const rootDir: string = typeof arg === "string" ? arg : SCREENSHOTS_DIR;
+  return (workflow: string, itemId: string): ScreenshotListEntry[] => {
     if (!existsSync(rootDir)) return [];
     const prefix = `${workflow}-${itemId}-`;
     const out: ScreenshotListEntry[] = [];
@@ -1253,7 +1393,8 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         return;
       }
       try {
-        const list = buildScreenshotsHandler()(wf, id);
+        const groupedHandler = buildScreenshotsHandler({ dir, screenshotsDir: SCREENSHOTS_DIR });
+        const list = await groupedHandler({ workflow: wf, itemId: id });
         res.end(JSON.stringify(list));
       } catch {
         res.end(JSON.stringify([]));
