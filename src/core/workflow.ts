@@ -202,10 +202,13 @@ export function buildSessionObserver<TData, TSteps extends readonly string[]>(
 export function defineWorkflow<TData, TSteps extends readonly string[]>(
   config: WorkflowConfig<TData, TSteps>,
 ): RegisteredWorkflow<TData, TSteps> {
+  const authPrefix =
+    config.authSteps === false ? [] : config.systems.map((s) => `auth:${s.id}`)
+  const effectiveSteps: readonly string[] = [...authPrefix, ...config.steps]
   const metadata: WorkflowMetadata = {
     name: config.name,
     label: config.label ?? autoLabel(config.name),
-    steps: config.steps,
+    steps: effectiveSteps,
     systems: config.systems.map((s) => s.id),
     detailFields: (config.detailFields ?? []).map(normalizeDetailField),
   }
