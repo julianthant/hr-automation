@@ -8,6 +8,7 @@ import { trackEvent, withTrackedWorkflow, type WithTrackedWorkflowOpts } from '.
 import { withLogContext } from '../utils/log.js'
 import { classifyError } from '../utils/errors.js'
 import { runWorkflowPool } from './pool.js'
+import { makeAuthObserver } from '../tracker/auth-observer.js'
 
 /**
  * Coerce an arbitrary key → unknown map into the `Record<string, string>`
@@ -160,21 +161,37 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
 
 /**
  * Build a SessionObserver that routes Session.launch lifecycle hooks into
- * the tracker's SessionContext (for Events-tab events) and `setStep` (for
- * the StepPipeline + entry-status flip to "running"). Undeclared step names
- * (e.g. `{systemId}-auth` for a system whose id doesn't have a matching step
- * declared in `wf.config.steps`) are guarded — the session event still fires,
- * but setStep is skipped so we never emit a `running` row for an unregistered
- * step name.
+ * the tracker's SessionContext (for Events-tab events) and `setStep` /
+ * `emitFailed` (for the StepPipeline + entry-status flip to "running" /
+ * "failed"). Auth step names follow the `auth:<systemId>` convention that
+ * `defineWorkflow` auto-prepends to the effective step list.
+ *
+ * Guard: if `authSteps: false` is set (workflow already declares its own
+ * custom auth step names), the `setStep` / `emitFailed` calls are skipped so
+ * we never emit a `running` row for an unregistered step name.
  */
 export function buildSessionObserver<TData, TSteps extends readonly string[]>(
   wf: RegisteredWorkflow<TData, TSteps>,
   sessionCtx: import('../tracker/jsonl.js').SessionContext,
   setStep: (step: string) => void,
+  emitFailed: (step: string, error: string) => void = () => {},
 ): import('./types.js').SessionObserver {
   const sessionId = '1'
   let registered = false
-  const declaredSteps = new Set<string>(wf.config.steps as readonly string[])
+  // Use wf.metadata.steps (effective steps, including auto-prepended auth:<id>
+  // entries) so the guard reflects what the registry actually declared.
+  const effectiveSteps = new Set<string>(wf.metadata.steps)
+
+  // Build the auth-step observer — placeholder screenshot no-op until Phase 2.
+  const authObs = makeAuthObserver({
+    emitStep: (stepName) => {
+      if (effectiveSteps.has(stepName)) setStep(stepName)
+    },
+    emitFailed: (stepName, error) => {
+      if (effectiveSteps.has(stepName)) emitFailed(stepName, error)
+    },
+    screenshot: async () => ({ kind: 'error', label: '', step: null, ts: Date.now(), files: [] }),
+  })
 
   return {
     instance: sessionCtx.instance,
@@ -186,14 +203,15 @@ export function buildSessionObserver<TData, TSteps extends readonly string[]>(
       sessionCtx.registerBrowser(sessionId, browserId, systemId)
     },
     onAuthStart: (systemId, browserId) => {
-      const stepName = `${systemId}-auth`
-      if (declaredSteps.has(stepName)) setStep(stepName)
+      authObs.onAuthStart!(systemId, browserId)
       sessionCtx.setAuthState(browserId, systemId, 'start')
     },
     onAuthComplete: (systemId, browserId) => {
+      authObs.onAuthComplete!(systemId, browserId)
       sessionCtx.setAuthState(browserId, systemId, 'complete')
     },
     onAuthFailed: (systemId, browserId) => {
+      void authObs.onAuthFailed!(systemId, browserId)
       sessionCtx.setAuthState(browserId, systemId, 'failed')
     },
   }
@@ -330,7 +348,8 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
       wf.config.name,
       String(itemId),
       async (setStep, updateData, _onCleanup, sessionCtx) => {
-        const observer = buildSessionObserver(wf, sessionCtx, setStep)
+        const emitFailed = (step: string, error: string) => setStep(`${step}:failed:${error}`)
+        const observer = buildSessionObserver(wf, sessionCtx, setStep, emitFailed)
         await run(setStep, updateData, false, observer)
       },
       {
