@@ -1,4 +1,4 @@
-import type { Page } from "playwright";
+import type { Locator, Page } from "playwright";
 import { log } from "../../utils/log.js";
 import { gotoWithRetry } from "../../browser/launch.js";
 import {
@@ -11,6 +11,31 @@ import {
 } from "./selectors.js";
 
 const KUALI_SPACE_URL = "https://ucsd.kualibuild.com/build/space/5e47518b90adda9474c14adb";
+
+/**
+ * Fill a Kuali input field and verify the value was accepted.
+ * Some Kuali date and text inputs silently drop fill() on first attempt.
+ * If the readback does not match, retries with pressSequentially (character-by-character).
+ * Throws if both strategies fail.
+ */
+export async function fillWithVerify(
+  locator: Locator,
+  value: string,
+  label: string,
+): Promise<void> {
+  await locator.fill(value, { timeout: 5_000 })
+  const actual = await locator.inputValue()
+  if (actual === value) return
+  log.warn(`[Kuali] ${label} fill silently dropped — retrying with type()`)
+  await locator.clear()
+  await locator.pressSequentially(value, { delay: 30 })
+  const after = await locator.inputValue()
+  if (after !== value) {
+    throw new Error(
+      `[Kuali] ${label} fill failed after type() retry: expected="${value}" got="${after}"`,
+    )
+  }
+}
 
 /**
  * Navigate to the Kuali Build Action List page.
@@ -177,15 +202,11 @@ export async function fillFinalTransactions(
   // Fill Termination Effective Date (skip if empty)
   if (opts.terminationEffDate) {
     log.step(`  Termination Effective Date: ${opts.terminationEffDate}`);
-    const termField = finalTransactions.terminationEffDate(page);
-    await termField.fill(opts.terminationEffDate, { timeout: 5_000 });
-    await page.waitForTimeout(500);
-    const actual = await termField.inputValue({ timeout: 3_000 });
-    if (actual !== opts.terminationEffDate) {
-      log.error(`  Term Eff Date mismatch — expected "${opts.terminationEffDate}", got "${actual}". Retrying...`);
-      await termField.fill("", { timeout: 3_000 });
-      await termField.type(opts.terminationEffDate, { delay: 50 });
-    }
+    await fillWithVerify(
+      finalTransactions.terminationEffDate(page),
+      opts.terminationEffDate,
+      'terminationEffDate',
+    );
   }
 
   // Select Department from dropdown (best match, skip if empty)
@@ -243,7 +264,11 @@ export async function fillTransactionResults(
   // Fill Transaction Number (skip if empty — user will fill manually)
   if (transactionNumber) {
     log.step(`  Transaction Number: ${transactionNumber}`);
-    await transactionResults.transactionNumber(page).fill(transactionNumber, { timeout: 5_000 });
+    await fillWithVerify(
+      transactionResults.transactionNumber(page),
+      transactionNumber,
+      'transactionNumber',
+    );
   } else {
     log.step("  Transaction Number: (empty — fill manually)");
   }
@@ -278,20 +303,8 @@ export async function updateLastDayWorked(
   log.step(`Updating Last Day Worked to: ${newDate}`);
   const field = separationForm.lastDayWorked(page);
   await field.clear({ timeout: 5_000 });
-  await field.fill(newDate, { timeout: 5_000 });
-  await page.waitForTimeout(500);
-  const actual = await field.inputValue({ timeout: 3_000 });
-  if (actual !== newDate) {
-    log.error(`Last Day Worked mismatch — expected "${newDate}", got "${actual}". Retrying...`);
-    await field.fill("", { timeout: 3_000 });
-    await field.type(newDate, { delay: 50 });
-    await page.waitForTimeout(500);
-    const retry = await field.inputValue({ timeout: 3_000 });
-    if (retry !== newDate) {
-      log.error(`Last Day Worked still wrong after retry — expected "${newDate}", got "${retry}"`);
-    }
-  }
-  log.success(`Last Day Worked set to: ${await field.inputValue()}`);
+  await fillWithVerify(field, newDate, 'lastDayWorked');
+  log.success(`Last Day Worked set to: ${newDate}`);
 }
 
 /**
@@ -304,20 +317,8 @@ export async function updateSeparationDate(
   log.step(`Updating Separation Date to: ${newDate}`);
   const field = separationForm.separationDate(page);
   await field.clear({ timeout: 5_000 });
-  await field.fill(newDate, { timeout: 5_000 });
-  await page.waitForTimeout(500);
-  const actual = await field.inputValue({ timeout: 3_000 });
-  if (actual !== newDate) {
-    log.error(`Separation Date mismatch — expected "${newDate}", got "${actual}". Retrying...`);
-    await field.fill("", { timeout: 3_000 });
-    await field.type(newDate, { delay: 50 });
-    await page.waitForTimeout(500);
-    const retry = await field.inputValue({ timeout: 3_000 });
-    if (retry !== newDate) {
-      log.error(`Separation Date still wrong after retry — expected "${newDate}", got "${retry}"`);
-    }
-  }
-  log.success(`Separation Date set to: ${await field.inputValue()}`);
+  await fillWithVerify(field, newDate, 'separationDate');
+  log.success(`Separation Date set to: ${newDate}`);
 }
 
 /**
