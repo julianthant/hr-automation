@@ -36,6 +36,12 @@ export interface LaunchOpts {
   launchFn?: (opts: LaunchOneOpts) => Promise<SystemSlot>
   /** Observability bundle — see SessionObserver in types.ts. */
   observer?: SessionObserver
+  /**
+   * Fires synchronously after the Session instance is constructed but
+   * before any browser launches. Lets callers wire an observer that
+   * needs a Session reference (e.g. to build a real ScreenshotFn).
+   */
+  onReady?: (session: Session) => void
 }
 
 interface LaunchOneOpts {
@@ -58,13 +64,20 @@ export class Session {
     const tiling = opts.tiling ?? (systems.length > 1 ? 'auto' : 'single')
     const launchOne = opts.launchFn ?? defaultLaunchOne
 
+    // Construct the Session with empty maps first so onReady can wire observers
+    // that need a Session reference (e.g. to build a real ScreenshotFn) BEFORE
+    // any browser launches or auth begins. The maps are mutated in-place below.
+    const browsers = new Map<string, SystemSlot>()
+    const readyPromises = new Map<string, Promise<void>>()
+    const session = new Session({ systems, browsers, readyPromises })
+    opts.onReady?.(session)
+
     // Launch all browsers in parallel.
     const slots = await Promise.all(
       systems.map((s, i) =>
         launchOne({ system: s, tileIndex: i, tileCount: systems.length, tiling }),
       ),
     )
-    const browsers = new Map<string, SystemSlot>()
     systems.forEach((s, i) => browsers.set(s.id, slots[i]))
 
     // Fire onBrowserLaunch for each system. browserId === systemId today
@@ -78,8 +91,6 @@ export class Session {
     if (tiling !== 'single' && systems.length > 1 && !opts.launchFn) {
       await tileWindows(systems, browsers)
     }
-
-    const readyPromises = new Map<string, Promise<void>>()
 
     if (authChain === 'sequential') {
       for (const s of systems) {
@@ -126,7 +137,7 @@ export class Session {
       }
     }
 
-    return new Session({ systems, browsers, readyPromises })
+    return session
   }
 
   systemIds(): string[] {
