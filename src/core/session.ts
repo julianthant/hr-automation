@@ -1,10 +1,21 @@
 import type { Page, Browser, BrowserContext } from 'playwright'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
-import type { SystemConfig, SessionObserver } from './types.js'
+import type { SystemConfig, SessionObserver, CaptureFileOpts } from './types.js'
 import { launchBrowser } from '../browser/launch.js'
 import { computeTileLayout } from '../browser/tiling.js'
 import { log } from '../utils/log.js'
+
+export function formatCaptureFilename(args: {
+  workflow: string
+  itemId: string
+  kind: 'form' | 'error' | 'manual'
+  label: string
+  system: string
+  ts: number
+}): string {
+  return `${args.workflow}-${args.itemId}-${args.kind}-${args.label}-${args.system}-${args.ts}.png`
+}
 
 interface SystemSlot {
   page: Page
@@ -210,6 +221,49 @@ export class Session {
       } catch { /* best-effort — one failed screenshot mustn't skip siblings */ }
     }
     return paths
+  }
+
+  /**
+   * Capture all open pages as structured PNGs under `.screenshots/`, using the
+   * canonical `{workflow}-{itemId}-{kind}-{label}-{system}-{ts}.png` convention.
+   * Best-effort — a failure on one page never blocks siblings. Returns metadata
+   * for each file successfully written.
+   */
+  async captureAll(opts: CaptureFileOpts): Promise<Array<{ system: string; path: string; bytes: number }>> {
+    const outDir = '.screenshots'
+    try {
+      await fs.mkdir(outDir, { recursive: true })
+    } catch { /* best-effort */ }
+    const wanted = new Set(opts.systems ?? Array.from(this.state.browsers.keys()))
+    const results: Array<{ system: string; path: string; bytes: number }> = []
+    for (const [id, slot] of this.state.browsers.entries()) {
+      if (!wanted.has(id)) continue
+      try {
+        const filename = formatCaptureFilename({
+          workflow: opts.workflow, itemId: opts.itemId, kind: opts.kind,
+          label: opts.label, system: id, ts: opts.ts,
+        })
+        const p = join(outDir, filename)
+        const buf = await slot.page.screenshot({ path: p })
+        results.push({ system: id, path: p, bytes: buf.byteLength })
+      } catch {
+        // Best-effort — per-page failures don't block siblings
+      }
+    }
+    for (const pg of opts.pages ?? []) {
+      try {
+        const filename = formatCaptureFilename({
+          workflow: opts.workflow, itemId: opts.itemId, kind: opts.kind,
+          label: opts.label, system: 'ad-hoc', ts: opts.ts,
+        })
+        const p = join(outDir, filename)
+        const buf = await pg.screenshot({ path: p })
+        results.push({ system: 'ad-hoc', path: p, bytes: buf.byteLength })
+      } catch {
+        // Best-effort
+      }
+    }
+    return results
   }
 }
 
