@@ -119,36 +119,31 @@ export async function runWorkflowSharedContextPool<TData, TSteps extends readonl
 
 ### `Session.forWorker(parent, systemIds)`
 
-New public static factory on `Session`. Mirrors `Session.forTesting` in that it exposes the private constructor via a named factory. Implementation:
+New public static factory on `Session`. Mirrors `Session.forTesting` in that it exposes the private constructor via a named factory.
 
-1. For each `systemId` in the list, locate the parent's `SystemSlot` for that system.
-2. Open a NEW page on that system's existing `BrowserContext`: `const page = await slot.context.newPage()`.
-3. Build a per-worker `SystemSlot { page, context: slot.context, browser: null }`. `browser: null` is the explicit signal to `Session.close` that this slot does not own the browser lifetime.
-4. Construct a `SessionState { systems: parent.state.systems, browsers: <new map of per-worker slots>, readyPromises: <pre-resolved per system> }`.
-5. Return the new `Session`.
+**Lazy page allocation.** Pages are NOT pre-opened in `forWorker`. Instead, `Session.page(id)` gains a worker-aware branch: if `this.state.browsers` has no slot for `id` AND the session was built via `forWorker`, it looks up the parent's `SystemSlot` for `id`, calls `await parentSlot.context.newPage()`, and caches the resulting `SystemSlot { page, context: parentSlot.context, browser: null }` in the worker's own `browsers` map. `browser: null` is the explicit signal to `Session.close` that this slot does not own the browser lifetime (the existing `close` already guards with `if (slot.browser)`).
 
-Add a sibling method `Session.closeWorkerPages()` that iterates the per-worker slots and `page.close()`s each (no context close, no browser close). The existing `Session.close` already handles `browser: null` safely (`if (slot.browser) await slot.browser.close()`), so if a worker session is closed through `.close()` instead of `.closeWorkerPages()` nothing breaks; the new method just makes intent explicit.
+Benefits of lazy allocation:
+- Matches interleaved-auth semantics — a worker that only hits system A doesn't wait for system B's auth chain to finish.
+- Handlers that short-circuit (e.g. bad input → throw before any `ctx.page()` call) never pay the `context.newPage()` cost.
+- Works cleanly with the existing `await ready` gate in `Session.page` — the auth-ready promise is still awaited before the page opens.
+
+`Session.closeWorkerPages()`: iterate whatever slots the worker actually opened and `page.close()` each. No context close, no browser close. Called in the worker's `finally` block.
 
 Edge cases:
-- `parent.state.browsers` lookup returns undefined (system not launched yet in interleaved mode) → `await parent.state.readyPromises.get(id)` first. Safer: have `forWorker` not pre-open pages; let `session.page(id)` open the page lazily on first handler access. This matches interleaved auth semantics (worker doesn't block on unreached systems).
 - Concurrent `context.newPage()` from N workers — Playwright supports this natively.
+- Worker calls `ctx.page("crm")` before CRM auth completes (interleaved chain) — the existing `await ready` gate handles this; `context.newPage()` only runs after auth resolves.
+- `parent` reference: stashed on the worker Session as a private field at `forWorker` time, read only by the lazy branch of `page()`.
 
-Concretely the "lazy page-per-system-per-worker" shape:
+Implementation sketch:
 
 ```ts
-// src/core/session.ts (sketch — new method)
-static async forWorker(parent: Session, systemIds: string[]): Promise<Session> {
-  const browsers = new Map<string, SystemSlot>()
-  const readyPromises = new Map<string, Promise<void>>()
-  for (const id of systemIds) {
-    readyPromises.set(id, parent.state.readyPromises.get(id) ?? Promise.resolve())
-  }
-  // Use a Proxy-less approach: seed map with "lazy" slots that open page on first access.
-  // Simpler: override page() on the worker Session. But since we can't subclass without
-  // more invasive changes, go the explicit route: expose a `Session.forWorker` that
-  // returns a Session with a populated-on-first-call map.
+// src/core/session.ts
+static forWorker(parent: Session): Session {
+  const browsers = new Map<string, SystemSlot>()  // populated lazily
+  const readyPromises = new Map(parent.state.readyPromises)
   const session = new Session({ systems: parent.state.systems, browsers, readyPromises })
-  session.parent = parent  // stash parent ref for lazy page opens
+  session.parent = parent
   return session
 }
 
@@ -158,7 +153,6 @@ async page(id: string): Promise<Page> {
   await ready
   let slot = this.state.browsers.get(id)
   if (!slot && this.parent) {
-    // Lazy worker path: open a page on the parent's context for this system
     const parentSlot = this.parent.state.browsers.get(id)
     if (!parentSlot) throw new Error(`no parent browser for system: ${id}`)
     const page = await parentSlot.context.newPage()
@@ -168,9 +162,13 @@ async page(id: string): Promise<Page> {
   if (!slot) throw new Error(`no browser for system: ${id}`)
   return slot.page
 }
-```
 
-(Implementation will clean this up — the sketch above is for design clarity.)
+async closeWorkerPages(): Promise<void> {
+  for (const slot of this.state.browsers.values()) {
+    try { await slot.page.close() } catch { /* best-effort */ }
+  }
+}
+```
 
 ### Type plumbing
 
