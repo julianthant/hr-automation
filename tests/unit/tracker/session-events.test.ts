@@ -1,11 +1,12 @@
-import { describe, it, beforeEach } from "node:test";
+import { describe, it, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import {
   emitSessionEvent,
+  generateInstanceName,
   readSessionEvents,
   getSessionsFilePath,
 } from "../../../src/tracker/session-events.js";
@@ -378,4 +379,66 @@ describe("rebuildSessionState — screenshot scenario", () => {
     assert.equal(state.duoQueue[1].state, "waiting");
     assert.equal(state.duoQueue[1].position, 2);
   });
+});
+
+// ── generateInstanceName: dead-pid self-heal ─────────────────
+//
+// generateInstanceName walks sessions.jsonl counting start/end pairs to find
+// the next free slot. A `workflow_start` without a matching `workflow_end`
+// keeps its slot locked — which used to be the right call (protect in-flight
+// runs) but also meant a crashed process (kill -9, pre-fix pool runner that
+// never emitted `workflow_end`) would lock "EID Lookup 1" forever. The
+// dead-pid + 60s heal below treats orphan starts as ended so legitimate new
+// runs reclaim the slot, while still blocking it briefly after a recent
+// start in case another process is racing.
+
+const TMP = () => mkdtempSync(join(tmpdir(), "hrauto-gin-"));
+
+function writeSessionsRaw(dir: string, lines: object[]): void {
+  writeFileSync(
+    join(dir, "sessions.jsonl"),
+    lines.map((l) => JSON.stringify(l)).join("\n") + "\n",
+  );
+}
+
+test("generateInstanceName: ignores stale start whose pid is dead and >60s old", () => {
+  const dir = TMP();
+  const oldTs = new Date(Date.now() - 120_000).toISOString();
+  writeSessionsRaw(dir, [
+    // Pid 2 is practically never alive on Unix; using 0 raises EINVAL, 2 raises ESRCH.
+    { type: "workflow_start", workflowInstance: "EID Lookup 1", pid: 2, timestamp: oldTs, runId: "x" },
+  ]);
+  const name = generateInstanceName("eid-lookup", dir);
+  assert.equal(name, "EID Lookup 1", "dead-pid stale start treated as ended");
+});
+
+test("generateInstanceName: keeps fresh stale start (<60s) as active", () => {
+  const dir = TMP();
+  const freshTs = new Date(Date.now() - 5_000).toISOString();
+  writeSessionsRaw(dir, [
+    { type: "workflow_start", workflowInstance: "EID Lookup 1", pid: 2, timestamp: freshTs, runId: "x" },
+  ]);
+  const name = generateInstanceName("eid-lookup", dir);
+  assert.equal(name, "EID Lookup 2", "young stale start still blocks the number");
+});
+
+test("generateInstanceName: keeps alive-pid start as active even if old", () => {
+  const dir = TMP();
+  const oldTs = new Date(Date.now() - 120_000).toISOString();
+  writeSessionsRaw(dir, [
+    { type: "workflow_start", workflowInstance: "EID Lookup 1", pid: process.pid, timestamp: oldTs, runId: "x" },
+  ]);
+  const name = generateInstanceName("eid-lookup", dir);
+  assert.equal(name, "EID Lookup 2", "alive pid blocks the number regardless of age");
+});
+
+test("generateInstanceName: paired start+end frees the number", () => {
+  const dir = TMP();
+  const ts = new Date(Date.now() - 5_000).toISOString();
+  writeSessionsRaw(dir, [
+    { type: "workflow_start", workflowInstance: "EID Lookup 1", pid: process.pid, timestamp: ts, runId: "x" },
+    { type: "workflow_end", workflowInstance: "EID Lookup 1", finalStatus: "done", pid: process.pid, timestamp: ts, runId: "x" },
+  ]);
+  const name = generateInstanceName("eid-lookup", dir);
+  assert.equal(name, "EID Lookup 1", "paired start+end frees the slot");
 });
