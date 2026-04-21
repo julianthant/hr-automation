@@ -4,7 +4,7 @@
 
 **Goal:** Add targeted, structured logs at the failure points that ate time during today's runs (2026-04-20) so future breakages self-diagnose.
 
-**Architecture:** No new log aggregation or format — stay on the existing `src/utils/log.ts` API (`log.step`, `log.success`, `log.warn`, `log.error`, `log.debug`). Additions are at specific code sites where observability is missing. One new shared helper: `classifyPlaywrightError` in `src/utils/errors.ts`. Each task is one commit.
+**Architecture:** Stay on the existing `src/utils/log.ts` API (`log.step`, `log.success`, `log.waiting`, `log.warn`, `log.error`) — **extended with a new `log.debug`** (Phase 0). Additions are at specific code sites where observability is missing. One new shared helper: `classifyPlaywrightError` in `src/utils/errors.ts`. Each task is one commit.
 
 **Tech Stack:** TypeScript, existing `log` helper from `src/utils/log.ts`, AsyncLocalStorage-backed runId.
 
@@ -39,6 +39,10 @@ Rules of thumb applied:
 ## File Structure
 
 ### Modified
+- `src/utils/log.ts` — add `log.debug` (Phase 0)
+- `src/tracker/jsonl.ts` — extend `LogEntry["level"]` to include `"debug"` (Phase 0)
+- `src/dashboard/components/types.ts` — mirror the type extension (Phase 0)
+- `src/dashboard/components/LogLine.tsx` — render `"debug"` level with a dimmed prefix (Phase 0)
 - `src/utils/errors.ts` — add `classifyPlaywrightError` (Phase 1)
 - `src/systems/common/selector-helpers.ts` (or wherever `safeClick` / `safeFill` live) — log WHICH fallback matched (Phase 2)
 - `src/systems/i9/create.ts` + `src/systems/i9/search.ts` — modal inventory log (Phase 3)
@@ -50,8 +54,212 @@ Rules of thumb applied:
 - `src/core/step-cache.ts` — miss context (Phase 5)
 
 ### Created
+- `tests/unit/utils/log-debug.test.ts`
 - `tests/unit/utils/classify-playwright-error.test.ts`
 - `tests/unit/systems/common/selector-fallback-logging.test.ts`
+
+---
+
+## Phase 0 — Add `log.debug` + extend LogEntry level
+
+`log.debug` doesn't exist yet. The current `log` API is `step / success / waiting / warn / error` (see `src/utils/log.ts:42-48`). Add it as a quiet level that always writes to JSONL but only prints to console when the `DEBUG` env var is set. This keeps CI-style runs uncluttered while giving diagnostic logs to post-mortem analysis.
+
+### Task 0.1: Extend `LogEntry["level"]` to include `"debug"`
+
+**Files:**
+- Modify: `src/tracker/jsonl.ts` (LogEntry type)
+- Modify: `src/dashboard/components/types.ts` (frontend mirror of LogEntry)
+
+- [ ] **Step 1: Find the LogEntry type definition in tracker**
+
+Run: `grep -n "level:" src/tracker/jsonl.ts | head -10`
+
+Find the `LogEntry` interface. Its `level` field is currently a union of string literals: `"step" | "success" | "error" | "waiting" | "warn"`.
+
+- [ ] **Step 2: Add `"debug"` to the union**
+
+In `src/tracker/jsonl.ts`, extend the union:
+
+```ts
+export interface LogEntry {
+  workflow: string;
+  itemId: string;
+  runId?: string;
+  level: "step" | "success" | "error" | "waiting" | "warn" | "debug";
+  message: string;
+  ts: string;
+}
+```
+
+- [ ] **Step 3: Mirror in dashboard types**
+
+In `src/dashboard/components/types.ts`, apply the same extension to the `LogEntry` interface.
+
+- [ ] **Step 4: Typecheck**
+
+Run: `npm run typecheck:all`
+
+Expected: PASS. If any existing code asserts an exhaustive switch over `level`, it will need a `case "debug":` added — do that inline.
+
+- [ ] **Step 5: Commit (bundled with 0.2)**
+
+Do not commit yet — bundled with Task 0.2's commit.
+
+### Task 0.2: Implement `log.debug` with DEBUG env gating
+
+**Files:**
+- Modify: `src/utils/log.ts`
+- Create: `tests/unit/utils/log-debug.test.ts`
+
+- [ ] **Step 1: Write failing test**
+
+Create `tests/unit/utils/log-debug.test.ts`:
+
+```ts
+import { describe, it, beforeEach, afterEach } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { log, withLogContext } from "../../../src/utils/log.js";
+
+describe("log.debug", () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "log-debug-")); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  it("writes to JSONL with level='debug' when inside a log context", async () => {
+    await withLogContext("test-wf", "item-1", async () => {
+      log.debug("hello debug");
+    }, dir);
+
+    const file = join(dir, "test-wf-" + new Date().toISOString().slice(0, 10) + "-logs.jsonl");
+    assert.ok(existsSync(file), `expected JSONL file at ${file}`);
+    const lines = readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
+    const parsed = lines.map((l) => JSON.parse(l));
+    const debugLines = parsed.filter((p) => p.level === "debug");
+    assert.strictEqual(debugLines.length, 1);
+    assert.strictEqual(debugLines[0].message, "hello debug");
+  });
+
+  it("does not throw when called outside a log context", () => {
+    // No context set — should be a no-op for JSONL, just console
+    assert.doesNotThrow(() => log.debug("no context"));
+  });
+});
+```
+
+- [ ] **Step 2: Run test**
+
+Run: `npm run test -- tests/unit/utils/log-debug.test.ts`
+
+Expected: FAIL — `log.debug` not defined.
+
+- [ ] **Step 3: Implement `log.debug`**
+
+In `src/utils/log.ts`, modify the `log` export:
+
+```ts
+const DEBUG_ENABLED = process.env.DEBUG === "true" || process.env.DEBUG === "1";
+
+function emitDebug(msg: string): void {
+  // Console: only when DEBUG env var is set — keep default console uncluttered
+  if (DEBUG_ENABLED) {
+    console.log(pc.gray("· " + msg));
+  }
+  // JSONL: always (if in a log context) — so retrospective analysis has the data
+  const ctx = logStore.getStore();
+  if (ctx) {
+    appendLogEntry(
+      {
+        workflow: ctx.workflow,
+        itemId: ctx.itemId,
+        ...(ctx.runId ? { runId: ctx.runId } : {}),
+        level: "debug",
+        message: msg,
+        ts: new Date().toISOString(),
+      },
+      ctx.dir,
+    );
+  }
+}
+
+export const log = {
+  step: (msg: string): void => emit("step", pc.blue("->"), msg),
+  success: (msg: string): void => emit("success", pc.green("✓"), msg),
+  waiting: (msg: string): void => emit("waiting", pc.yellow("⌛"), msg),
+  warn: (msg: string): void => emit("warn", pc.yellow("!"), msg),
+  error: (msg: string): void => emit("error", pc.red("✗"), msg, true),
+  debug: (msg: string): void => emitDebug(msg),
+};
+```
+
+The helper is named `emitDebug` (not reusing `emit`) because the console gating differs — only print to stdout when `DEBUG=true`.
+
+- [ ] **Step 4: Run test**
+
+Run: `npm run test -- tests/unit/utils/log-debug.test.ts`
+
+Expected: PASS (2/2).
+
+- [ ] **Step 5: Full tests + typecheck**
+
+Run: `npm run typecheck:all && npm run test`
+
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/utils/log.ts src/tracker/jsonl.ts src/dashboard/components/types.ts \
+       tests/unit/utils/log-debug.test.ts
+git commit -m "feat(log): log.debug — JSONL-always, console-gated on DEBUG env var"
+```
+
+### Task 0.3: Dashboard renders `"debug"` level with dimmed styling
+
+**Files:**
+- Modify: `src/dashboard/components/LogLine.tsx`
+
+- [ ] **Step 1: Read current LogLine level handling**
+
+Run: `grep -n "level\|\"step\"\|\"success\"\|\"error\"\|\"warn\"" src/dashboard/components/LogLine.tsx`
+
+Find where `level` is switched on.
+
+- [ ] **Step 2: Add debug case**
+
+In `src/dashboard/components/LogLine.tsx`, wherever the level-to-icon/color mapping lives, add:
+
+```tsx
+// Inside the level switch (example — adjust to match existing shape):
+if (level === "debug") {
+  return {
+    icon: ChevronRight,  // or another lucide-react icon, dimmed
+    color: "text-muted-foreground/40",  // very dim
+    category: "debug",
+  };
+}
+```
+
+If the component uses the pattern-based mapping from `src/dashboard/CLAUDE.md` log-icon table (`"step"` default → blue `ArrowRight`), handle debug as its own distinct case to prevent it from accidentally looking like a step.
+
+- [ ] **Step 3: Add "Debug" category filter tab (optional — defer if complex)**
+
+If LogStream's filter tabs (`All / Errors / Auth / Fill / …`) are easy to extend, add a "Debug" tab. If not, skip — debug lines render in "All" only, muted, and that's fine.
+
+- [ ] **Step 4: Build dashboard**
+
+Run: `npm run build:dashboard`
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/dashboard/components/LogLine.tsx
+git commit -m "feat(dashboard): render debug-level logs with dimmed styling"
+```
 
 ---
 
@@ -800,11 +1008,13 @@ npm run separation:dry 3917
 
 Verify: step boundary logs appear; error classification works if failure simulated.
 
-- [ ] **Step 3: Verify dashboard log stream is not noisier than before**
+- [ ] **Step 3: Verify dashboard renders debug logs as expected**
 
-Open the Log Stream for a past entry. The dashboard uses `log.step` + `log.success` + `log.error` + `log.warn`. `log.debug` should NOT render in the frontend (confirm `src/utils/log.ts` behavior — if debug IS rendered, gate it behind `DEBUG=true` env var).
-
-If debug currently renders in the dashboard, file as a follow-up — don't block this plan.
+Open the Log Stream for a run that executed with the new logging (or trigger a short dry-run to generate some). Verify:
+- Debug-level log lines appear in the "All" tab with a dimmed icon + color per Task 0.3.
+- Debug lines do NOT drown out step/success/error messages (they should be visually subordinate).
+- If `DEBUG=true` is NOT set in the environment, debug lines still appear in the dashboard (JSONL-backed) but NOT in the terminal console.
+- If `DEBUG=true` IS set, debug lines also appear in terminal (for live debugging).
 
 ---
 
@@ -819,12 +1029,13 @@ If debug currently renders in the dashboard, file as a follow-up — don't block
 
 ## Rollout order
 
-1. **Phase 1** (classifier) — prerequisite for later phases.
-2. **Phase 2** (selector fallback) — low risk, independent.
-3. **Phase 3** (pre-click state) — depends on Phase 1 classifier.
-4. **Phase 4** (workflow boundary) — depends on Phase 1.
-5. **Phase 5** (kernel) — depends on Phase 1.
-6. **Phase 6** — manual verification.
+1. **Phase 0** (log.debug + level extension) — prerequisite for all other phases.
+2. **Phase 1** (classifier) — prerequisite for Phases 3/4/5.
+3. **Phase 2** (selector fallback) — low risk, independent.
+4. **Phase 3** (pre-click state) — depends on Phase 0 + Phase 1.
+5. **Phase 4** (workflow boundary) — depends on Phase 0 + Phase 1.
+6. **Phase 5** (kernel) — depends on Phase 0 + Phase 1.
+7. **Phase 6** — manual verification.
 
 Each phase lands as its commits; no branching. Typical phase = 1–3 commits.
 
