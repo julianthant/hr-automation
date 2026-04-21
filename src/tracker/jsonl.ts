@@ -235,6 +235,17 @@ export interface WithTrackedWorkflowOpts {
   initialData?: Record<string, string>;
   /** Pre-assigned runId (batch mode) — skips run computation and initial pending emit. */
   preAssignedRunId?: string;
+  /**
+   * Pool-/batch-assigned workflow instance name. When provided, the wrapper
+   * REUSES this name instead of calling `generateInstanceName` and SKIPS the
+   * `emitWorkflowStart` / `emitWorkflowEnd` calls on every code path
+   * (success, error, SIGINT/SIGTERM). The batch runner that owns the
+   * lifecycle (e.g. `withBatchLifecycle`) is responsible for both emits,
+   * ensuring the dashboard sees ONE session-panel row per batch regardless
+   * of item count. `data.instance` on tracker rows still gets stamped so the
+   * dashboard's `EntryItem` still renders an instance chip per row.
+   */
+  preAssignedInstance?: string;
   /** Override tracker directory — defaults to DEFAULT_DIR (`.tracker`). Mainly for test isolation. */
   dir?: string;
 }
@@ -306,8 +317,8 @@ export async function withTrackedWorkflow<T>(
   // for entry/log isolation would still leak workflow_start/step_change/etc.
   // into the real `.tracker/sessions.jsonl` and clutter the operator's
   // SessionPanel with dead test workflow instances.
-  const instanceName = generateInstanceName(workflow, dir);
-  emitWorkflowStart(instanceName, dir);
+  const instanceName = opts.preAssignedInstance ?? generateInstanceName(workflow, dir);
+  if (!opts.preAssignedInstance) emitWorkflowStart(instanceName, dir);
   // Store instance name in tracker data so EntryItem can show it
   data.instance = instanceName;
 
@@ -344,7 +355,10 @@ export async function withTrackedWorkflow<T>(
       execSync('wmic process where "name=\'chrome.exe\' and CommandLine like \'%--enable-automation%\'" call terminate', { stdio: "ignore" });
     } catch { /* best-effort */ }
     for (const cb of cleanupFns) { try { cb(); } catch { /* best-effort */ } }
-    emitWorkflowEnd(instanceName, "failed");
+    // Skip the end-emit when a batch runner owns the lifecycle — it writes
+    // its own `workflow_end(failed)` in its SIGINT path so the orphan-start
+    // heal in generateInstanceName doesn't need to kick in.
+    if (!opts.preAssignedInstance) emitWorkflowEnd(instanceName, "failed", dir);
     const error = `Process terminated (${signal})`;
     const now = ts();
     const date = now.slice(0, 10);
@@ -409,13 +423,13 @@ export async function withTrackedWorkflow<T>(
     }
 
     emit("done");
-    emitWorkflowEnd(instanceName, "done", dir);
+    if (!opts.preAssignedInstance) emitWorkflowEnd(instanceName, "done", dir);
     return result;
   } catch (e) {
     const error = classifyError(e);
     log.error(error);
     emit("failed", { error, ...(lastStep ? { step: lastStep } : {}) });
-    emitWorkflowEnd(instanceName, "failed", dir);
+    if (!opts.preAssignedInstance) emitWorkflowEnd(instanceName, "failed", dir);
     throw e;
   } finally {
     process.removeAllListeners("SIGINT");
