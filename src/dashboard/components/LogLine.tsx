@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 import {
   Pencil, MousePointer, ArrowDownToLine, Search, ListFilter,
-  KeyRound, Download, Check, X, Hourglass, ArrowRight,
+  KeyRound, Download, Check, X, Hourglass, ArrowRight, ChevronRight,
 } from "lucide-react";
 import type { LogCategory, RunEvent } from "./types";
 import { getLogCategory } from "./types";
@@ -19,6 +19,7 @@ const ICON_MAP: Record<LogCategory, { icon: typeof Check; color: string }> = {
   error: { icon: X, color: "text-destructive" },
   waiting: { icon: Hourglass, color: "text-[#fbbf24]" },
   step: { icon: ArrowRight, color: "text-blue-400" },
+  debug: { icon: ChevronRight, color: "text-muted-foreground/40" },
 };
 
 type LogLineEntry =
@@ -56,8 +57,9 @@ export function LogLine({ entry, isCurrent, onCopy }: LogLineProps) {
         "flex-1 break-words",
         category === "success" && "text-[#4ade80]",
         category === "error" && "text-destructive",
+        category === "debug" && "text-muted-foreground/60",
         isCurrent && "text-primary",
-        category !== "success" && category !== "error" && !isCurrent && "text-secondary-foreground",
+        category !== "success" && category !== "error" && category !== "debug" && !isCurrent && "text-secondary-foreground",
       )}>
         {entry.message}
       </span>

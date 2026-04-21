@@ -252,9 +252,10 @@ export function formatStepName(step: string): string {
     .replace(/\b\w+/g, (w) => STEP_ABBREVIATIONS[w.toLowerCase()] || w.charAt(0).toUpperCase() + w.slice(1));
 }
 
-export type LogCategory = "fill" | "navigate" | "extract" | "search" | "select" | "auth" | "download" | "success" | "error" | "waiting" | "step";
+export type LogCategory = "fill" | "navigate" | "extract" | "search" | "select" | "auth" | "download" | "success" | "error" | "waiting" | "step" | "debug";
 
 export function getLogCategory(level: string, message: string): LogCategory {
+  if (level === "debug") return "debug";
   if (level === "success") return "success";
   if (level === "error") return "error";
   if (level === "waiting") return "waiting";
