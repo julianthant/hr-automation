@@ -342,3 +342,16 @@ async function tileWindows(
     }
   }
 }
+
+/**
+ * Return a sessionDir path isolated by process PID. Use this for persistent
+ * Chrome profiles (launchPersistentContext) in workflows that may be run as
+ * multiple parallel OS processes — each process gets its own directory so
+ * Chromium's ProcessSingleton lock doesn't collide.
+ *
+ * @param basePath The non-isolated base (e.g. ~/ukg_session_sep)
+ * @param pid Override for testing. Defaults to process.pid.
+ */
+export function getProcessIsolatedSessionDir(basePath: string, pid: number = process.pid): string {
+  return `${basePath}_pid${pid}`;
+}
