@@ -1,6 +1,8 @@
 import type { Page, Locator } from "playwright";
 import { log } from "../../utils/log.js";
+import { errorMessage } from "../../utils/errors.js";
 import { jobSummary } from "./selectors.js";
+import { waitForPeopleSoftProcessing } from "./navigate.js";
 
 /** Direct URL — skips sidebar, no iframe wrapper. */
 const JOB_SUMMARY_URL =
@@ -82,7 +84,24 @@ export async function extractWorkLocation(
   const root = await getFormRoot(page);
 
   log.step("[Job Summary] Clicking Work Location tab...");
-  await jobSummary.workLocationTab(root).click({ timeout: 10_000 });
+  // Today's run on doc 3917 saw this click flake while same-day sibling docs
+  // succeeded — transient PeopleSoft processing state, not a selector issue.
+  // Wait for any in-flight processing before the tab click, then retry once.
+  const psFrame = page.frameLocator("#main_target_win0"); // allow-inline-selector -- iframe FrameLocator for PS processing probe
+  await waitForPeopleSoftProcessing(psFrame, 15_000).catch(() => {});
+
+  const clickOnce = async (): Promise<void> => {
+    await jobSummary.workLocationTab(root).click({ timeout: 15_000 });
+  };
+
+  try {
+    await clickOnce();
+  } catch (e) {
+    log.warn(`[Job Summary] Work Location tab click flaked — retrying once: ${errorMessage(e)}`);
+    await page.waitForTimeout(2_000);
+    await waitForPeopleSoftProcessing(psFrame, 15_000).catch(() => {});
+    await clickOnce();
+  }
   await page.waitForTimeout(3_000);
 
   // Extract first data row using PeopleSoft grid IDs
