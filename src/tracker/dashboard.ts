@@ -26,6 +26,18 @@ import { detectFailurePattern } from "./failure-detector.js";
 import { notify } from "./notify.js";
 import { pruneOldStepCache } from "../core/index.js";
 
+/**
+ * Canonical sort key for a session event. Events emitted by
+ * emitScreenshotEvent use numeric `ts` (ms since epoch) while other
+ * event emitters use ISO `timestamp`. Normalize both into an ISO string
+ * so localeCompare sorts correctly.
+ */
+export function getEventSortKey(e: { timestamp?: string; ts?: number }): string {
+  if (typeof e.timestamp === "string" && e.timestamp.length > 0) return e.timestamp;
+  if (typeof e.ts === "number" && Number.isFinite(e.ts)) return new Date(e.ts).toISOString();
+  return "";
+}
+
 // Resolve path to built dashboard HTML (vite-plugin-singlefile output)
 const DASHBOARD_HTML_PATH = join(
   import.meta.dirname ?? ".",
@@ -1152,7 +1164,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
           }
         }
 
-        filtered.sort((a, b) => (a.timestamp ?? "").localeCompare(b.timestamp ?? ""));
+        filtered.sort((a, b) => getEventSortKey(a).localeCompare(getEventSortKey(b)));
 
         if (firstTick) {
           if (filtered.length > 0) res.write(`data: ${JSON.stringify(filtered)}\n\n`);
