@@ -1,7 +1,7 @@
 import type { Page } from "playwright";
 import { launchBrowser } from "../../browser/launch.js";
 import { log } from "../../utils/log.js";
-import { errorMessage } from "../../utils/errors.js";
+import { errorMessage, classifyPlaywrightError } from "../../utils/errors.js";
 import {
   defineWorkflow,
   runWorkflow,
@@ -26,6 +26,7 @@ import { extractRawFields, extractRecordPageFields } from "./extract.js";
 import { validateEmployeeData } from "./schema.js";
 import type { EmployeeData } from "./schema.js";
 import { buildTransactionPlan } from "./enter.js";
+import { TEMPLATE_ID } from "./config.js";
 import { buildDownloadPath, downloadCrmDocuments } from "./download.js";
 import { retryStep } from "./retry.js";
 import { z } from "zod/v4";
@@ -124,7 +125,10 @@ export const onboardingWorkflow = defineWorkflow({
     // --- Phase 1: CRM auth + record lookup + extraction ---
 
     await ctx.step("crm-auth", async () => {
+      const t0 = Date.now();
+      log.debug(`[Step: crm-auth] START email='${email}'`);
       await ctx.page("crm");
+      log.step(`[Step: crm-auth] END took=${Date.now() - t0}ms`);
     });
 
     const crmPage = await ctx.page("crm");
@@ -175,57 +179,75 @@ export const onboardingWorkflow = defineWorkflow({
     });
 
     await ctx.step("extraction", async () => {
-      // Cache-hit branch — skip CRM re-scrape if a recent extraction exists
-      // for this email. Pre-step nav (searchByEmail, selectLatestResult,
-      // extractRecordPageFields, navigateToSection) has still run, so we
-      // re-apply recordFields's dept + recruitment numbers on top of cache.
-      const cached = stepCacheGet<EmployeeData>(
-        "onboarding",
-        email,
-        "extraction",
-        { withinHours: 2 },
-      );
-      if (cached) {
-        log.warn("Using cached extraction data (≤2 h old) — skipping CRM re-scrape");
-        data = cached;
+      const t0 = Date.now();
+      log.debug(`[Step: extraction] START email='${email}'`);
+      let cacheHit = false;
+      try {
+        // Cache-hit branch — skip CRM re-scrape if a recent extraction exists
+        // for this email. Pre-step nav (searchByEmail, selectLatestResult,
+        // extractRecordPageFields, navigateToSection) has still run, so we
+        // re-apply recordFields's dept + recruitment numbers on top of cache.
+        const cached = stepCacheGet<EmployeeData>(
+          "onboarding",
+          email,
+          "extraction",
+          { withinHours: 2 },
+        );
+        if (cached) {
+          cacheHit = true;
+          log.warn("Using cached extraction data (≤2 h old) — skipping CRM re-scrape");
+          data = cached;
+          if (recordFields.departmentNumber) data = { ...data, departmentNumber: recordFields.departmentNumber };
+          if (recordFields.recruitmentNumber) data = { ...data, recruitmentNumber: recordFields.recruitmentNumber };
+          ctx.updateData(buildDetailFieldsPayload(data));
+          return;
+        }
+
+        // Cache-miss branch — normal extraction from CRM.
+        const rawData = await ctx.retry(
+          () => extractRawFields(crmPage),
+          { attempts: 2 },
+        );
+        try {
+          data = validateEmployeeData(rawData);
+        } catch (e) {
+          throw new ExtractionError(`Schema validation failed: ${errorMessage(e)}`);
+        }
         if (recordFields.departmentNumber) data = { ...data, departmentNumber: recordFields.departmentNumber };
         if (recordFields.recruitmentNumber) data = { ...data, recruitmentNumber: recordFields.recruitmentNumber };
+
         ctx.updateData(buildDetailFieldsPayload(data));
-        return;
+
+        // Cache write is best-effort: a disk-full / permission error must NOT
+        // fail the step — the underlying extraction already succeeded. Log-warn
+        // and move on; next rerun will re-scrape, which is correct behavior.
+        try {
+          stepCacheSet("onboarding", email, "extraction", data);
+        } catch (e) {
+          log.warn(`Step cache write failed (continuing): ${errorMessage(e)}`);
+        }
+
+        log.success("Employee data extracted and validated");
+      } finally {
+        log.step(
+          `[Step: extraction] END took=${Date.now() - t0}ms `
+          + `cacheHit=${cacheHit} `
+          + `departmentNumber='${data?.departmentNumber || "<none>"}' `
+          + `positionNumber='${data?.positionNumber || "<none>"}' `
+          + `name='${data?.firstName ?? ""} ${data?.lastName ?? ""}'`,
+        );
       }
-
-      // Cache-miss branch — normal extraction from CRM.
-      const rawData = await ctx.retry(
-        () => extractRawFields(crmPage),
-        { attempts: 2 },
-      );
-      try {
-        data = validateEmployeeData(rawData);
-      } catch (e) {
-        throw new ExtractionError(`Schema validation failed: ${errorMessage(e)}`);
-      }
-      if (recordFields.departmentNumber) data = { ...data, departmentNumber: recordFields.departmentNumber };
-      if (recordFields.recruitmentNumber) data = { ...data, recruitmentNumber: recordFields.recruitmentNumber };
-
-      ctx.updateData(buildDetailFieldsPayload(data));
-
-      // Cache write is best-effort: a disk-full / permission error must NOT
-      // fail the step — the underlying extraction already succeeded. Log-warn
-      // and move on; next rerun will re-scrape, which is correct behavior.
-      try {
-        stepCacheSet("onboarding", email, "extraction", data);
-      } catch (e) {
-        log.warn(`Step cache write failed (continuing): ${errorMessage(e)}`);
-      }
-
-      log.success("Employee data extracted and validated");
     });
 
     // --- Phase 2: PDF download (non-fatal) ---
 
     await ctx.step("pdf-download", async () => {
+      const t0 = Date.now();
+      log.debug(`[Step: pdf-download] START`);
       if (!data) throw new Error("extraction did not produce data");
       const folderPath = buildDownloadPath(data.firstName, data.lastName, data.middleName);
+      let fileCount = 0;
+      let downloadErr = "";
       try {
         await ctx.retry(
           async () => {
@@ -237,32 +259,56 @@ export const onboardingWorkflow = defineWorkflow({
           () => downloadCrmDocuments(crmPage, folderPath, {}),
           { attempts: 2, backoffMs: 2_000 },
         );
+        fileCount = saved.length;
         ctx.updateData({
           pdfDownload: `${saved.length} file(s)`,
           pdfFolder: folderPath,
         });
       } catch (err) {
-        const msg = errorMessage(err);
-        log.error(`PDF download failed (continuing without PDFs): ${msg}`);
-        ctx.updateData({ pdfDownload: `Failed: ${msg.slice(0, 80)}` });
+        downloadErr = errorMessage(err);
+        log.error(`PDF download failed (continuing without PDFs): ${downloadErr}`);
+        ctx.updateData({ pdfDownload: `Failed: ${downloadErr.slice(0, 80)}` });
       }
+      log.step(
+        `[Step: pdf-download] END took=${Date.now() - t0}ms `
+        + `fileCount=${fileCount} error='${downloadErr || "<empty>"}'`,
+      );
     });
 
     // --- Phase 3: UCPath auth + person search (rehire short-circuit) ---
 
     await ctx.step("ucpath-auth", async () => {
+      const t0 = Date.now();
+      log.debug(`[Step: ucpath-auth] START`);
       await ctx.page("ucpath");
+      log.step(`[Step: ucpath-auth] END took=${Date.now() - t0}ms`);
     });
 
     const ucpathPage = await ctx.page("ucpath");
 
     const searchResult = await ctx.step("person-search", async () => {
+      const t0 = Date.now();
       if (!data) throw new Error("extraction did not produce data");
       const ssnDigits = data.ssn?.replace(/-/g, "") ?? "";
-      return ctx.retry(
+      const ssnLast4 = ssnDigits.slice(-4) || "<empty>";
+      log.debug(
+        `[Step: person-search] START ssnLast4='${ssnLast4}' `
+        + `dob='${data.dob ?? "<none>"}' `
+        + `name='${data.firstName} ${data.lastName}'`,
+      );
+      const result = await ctx.retry(
         () => searchPerson(ucpathPage, ssnDigits, data!.firstName, data!.lastName, data!.dob ?? ""),
         { attempts: 2 },
       );
+      const matchCount = result.matches?.length ?? 0;
+      const firstEmplId = result.matches?.[0]?.emplId ?? "";
+      const resultLabel = result.found ? (matchCount > 1 ? "duplicate" : "rehire") : "new-hire";
+      log.step(
+        `[Step: person-search] END took=${Date.now() - t0}ms `
+        + `result='${resultLabel}' matchCount=${matchCount} `
+        + `emplId='${firstEmplId || "<empty>"}'`,
+      );
+      return result;
     });
 
     if (searchResult.found) {
@@ -289,106 +335,149 @@ export const onboardingWorkflow = defineWorkflow({
     // --- Phase 4: I-9 search (existing) or creation (new) ---
 
     const i9ProfileId = await ctx.step("i9-creation", async () => {
-      if (!data) throw new Error("extraction did not produce data");
-      if (!data.ssn) throw new Error("Cannot create I-9 without SSN");
-      if (!data.dob) throw new Error("Cannot create I-9 without DOB");
-      if (!data.departmentNumber) throw new Error("Cannot create I-9 without department number");
+      const t0 = Date.now();
+      let resultPid = "";
+      let mode: "existing" | "created" | "pending" = "pending";
+      try {
+        if (!data) throw new Error("extraction did not produce data");
+        if (!data.ssn) throw new Error("Cannot create I-9 without SSN");
+        if (!data.dob) throw new Error("Cannot create I-9 without DOB");
+        if (!data.departmentNumber) throw new Error("Cannot create I-9 without department number");
 
-      const i9Page = await ctx.page("i9");
+        log.debug(
+          `[Step: i9-creation] START ssnLast4='${data.ssn.replace(/-/g, "").slice(-4)}' `
+          + `dept='${data.departmentNumber}'`,
+        );
 
-      // Search for existing profile first — avoids duplicate creation on re-runs.
-      const ssnWithDashes = data.ssn!.replace(/(\d{3})(\d{2})(\d{4})/, "$1-$2-$3");
-      const searchResults = await ctx.retry(
-        () => searchI9Employee(i9Page, { ssn: ssnWithDashes }),
-        { attempts: 2 },
-      );
+        const i9Page = await ctx.page("i9");
 
-      if (searchResults.length > 0 && searchResults[0].profileId) {
-        const pid = searchResults[0].profileId;
-        log.success(`Existing I-9 profile found: ${pid} — skipping creation`);
-        ctx.updateData({ i9ProfileId: pid, i9SearchOnly: "true" });
-        // Close search dialog
+        // Search for existing profile first — avoids duplicate creation on re-runs.
+        const ssnWithDashes = data.ssn!.replace(/(\d{3})(\d{2})(\d{4})/, "$1-$2-$3");
+        const searchResults = await ctx.retry(
+          () => searchI9Employee(i9Page, { ssn: ssnWithDashes }),
+          { attempts: 2 },
+        );
+
+        if (searchResults.length > 0 && searchResults[0].profileId) {
+          const pid = searchResults[0].profileId;
+          log.success(`Existing I-9 profile found: ${pid} — skipping creation`);
+          ctx.updateData({ i9ProfileId: pid, i9SearchOnly: "true" });
+          // Close search dialog
+          await i9Page.keyboard.press("Escape");
+          resultPid = pid;
+          mode = "existing";
+          return pid;
+        }
+
+        log.step("No existing I-9 profile — creating new one");
+        // Close search dialog before navigating to create flow
         await i9Page.keyboard.press("Escape");
+        await i9Page.waitForTimeout(500);
+
+        const i9Result = await ctx.retry(
+          async () => {
+            const result = await createI9Employee(i9Page, {
+              firstName: data!.firstName,
+              middleName: data!.middleName,
+              lastName: data!.lastName,
+              ssn: data!.ssn!,
+              dob: data!.dob!,
+              email: data!.email ?? email,
+              departmentNumber: data!.departmentNumber!,
+              startDate: data!.effectiveDate,
+            });
+            if (!result.success || !result.profileId) {
+              throw new Error(result.error ?? "I-9 creation returned no profile ID");
+            }
+            return result;
+          },
+          { attempts: 2, backoffMs: 3_000 },
+        );
+        const pid = i9Result.profileId!;
+        log.success(`I-9 profile created: ${pid}`);
+        ctx.updateData({ i9ProfileId: pid });
+        resultPid = pid;
+        mode = "created";
         return pid;
+      } finally {
+        log.step(
+          `[Step: i9-creation] END took=${Date.now() - t0}ms `
+          + `mode='${mode}' profileId='${resultPid || "<empty>"}'`,
+        );
       }
-
-      log.step("No existing I-9 profile — creating new one");
-      // Close search dialog before navigating to create flow
-      await i9Page.keyboard.press("Escape");
-      await i9Page.waitForTimeout(500);
-
-      const i9Result = await ctx.retry(
-        async () => {
-          const result = await createI9Employee(i9Page, {
-            firstName: data!.firstName,
-            middleName: data!.middleName,
-            lastName: data!.lastName,
-            ssn: data!.ssn!,
-            dob: data!.dob!,
-            email: data!.email ?? email,
-            departmentNumber: data!.departmentNumber!,
-            startDate: data!.effectiveDate,
-          });
-          if (!result.success || !result.profileId) {
-            throw new Error(result.error ?? "I-9 creation returned no profile ID");
-          }
-          return result;
-        },
-        { attempts: 2, backoffMs: 3_000 },
-      );
-      const pid = i9Result.profileId!;
-      log.success(`I-9 profile created: ${pid}`);
-      ctx.updateData({ i9ProfileId: pid });
-      return pid;
     });
 
     // --- Phase 5: UCPath Smart HR Transaction ---
 
     await ctx.step("transaction", async () => {
-      if (!data) throw new Error("extraction did not produce data");
-
-      // Idempotency: key on (workflow, emplId-or-NEW, ssn, effectiveDate). For
-      // a fresh hire, emplId doesn't exist yet so we use "NEW"; the SSN +
-      // effectiveDate combination still uniquely identifies the intended txn.
-      const idempKey = hashKey({
-        workflow: "onboarding",
-        emplId: searchResult.matches?.[0]?.emplId ?? "NEW",
-        ssn: data.ssn ?? "",
-        effectiveDate: data.effectiveDate,
-      });
-      if (hasRecentlySucceeded(idempKey)) {
-        const existingTxId = findRecentTransactionId(idempKey);
-        const note = existingTxId
-          ? `transaction already submitted recently (txId ${existingTxId}) — skipping (idempotency)`
-          : "transaction already submitted recently — skipping (idempotency)";
-        log.warn(note);
-        ctx.updateData({
-          status: "Skipped (Duplicate)",
-          idempotencySkip: "true",
-          ...(existingTxId ? { transactionId: existingTxId } : {}),
-        });
-        return;
-      }
-
+      const t0 = Date.now();
+      let txnExit = "<empty>";
+      let failedAtStep: string | null = null;
       try {
-        const plan = buildTransactionPlan(data, ucpathPage, i9ProfileId);
-        log.step("Executing Smart HR transaction plan...");
-        await plan.execute();
-        log.success("Transaction created successfully in UCPath");
-        // transactionId isn't surfaced by ActionPlan today — record empty string;
-        // the key match is what prevents duplicates on re-run.
-        recordSuccess(idempKey, "", "onboarding");
-        ctx.updateData({ status: "Done" });
-      } catch (error) {
-        // `ctx.retry` rethrows the underlying error verbatim on exhaustion, so the
-        // old `RetryStepError` branch no longer fires on kernel-handler callsites.
-        // TransactionError still carries a useful step name; everything else
-        // falls through to `errorMessage()`.
-        const errMsg = error instanceof TransactionError
-          ? `Transaction failed at step "${error.step ?? "unknown"}": ${error.message}`
-          : `Transaction failed: ${errorMessage(error)}`;
-        ctx.updateData({ status: "Failed", transactionError: errMsg });
-        throw new Error(errMsg);
+        if (!data) throw new Error("extraction did not produce data");
+
+        log.debug(
+          `[Step: transaction] START template='${TEMPLATE_ID}' `
+          + `effectiveDate='${data.effectiveDate}'`,
+        );
+
+        // Idempotency: key on (workflow, emplId-or-NEW, ssn, effectiveDate). For
+        // a fresh hire, emplId doesn't exist yet so we use "NEW"; the SSN +
+        // effectiveDate combination still uniquely identifies the intended txn.
+        const idempKey = hashKey({
+          workflow: "onboarding",
+          emplId: searchResult.matches?.[0]?.emplId ?? "NEW",
+          ssn: data.ssn ?? "",
+          effectiveDate: data.effectiveDate,
+        });
+        if (hasRecentlySucceeded(idempKey)) {
+          const existingTxId = findRecentTransactionId(idempKey);
+          const note = existingTxId
+            ? `transaction already submitted recently (txId ${existingTxId}) — skipping (idempotency)`
+            : "transaction already submitted recently — skipping (idempotency)";
+          log.warn(note);
+          ctx.updateData({
+            status: "Skipped (Duplicate)",
+            idempotencySkip: "true",
+            ...(existingTxId ? { transactionId: existingTxId } : {}),
+          });
+          txnExit = existingTxId ? `<skipped:${existingTxId}>` : "<skipped>";
+          return;
+        }
+
+        try {
+          const plan = buildTransactionPlan(data, ucpathPage, i9ProfileId);
+          log.step("Executing Smart HR transaction plan...");
+          await plan.execute();
+          log.success("Transaction created successfully in UCPath");
+          // transactionId isn't surfaced by ActionPlan today — record empty string;
+          // the key match is what prevents duplicates on re-run.
+          recordSuccess(idempKey, "", "onboarding");
+          ctx.updateData({ status: "Done" });
+          // ActionPlan doesn't surface the txn number; leave as "<empty>" sentinel.
+        } catch (error) {
+          // `ctx.retry` rethrows the underlying error verbatim on exhaustion, so the
+          // old `RetryStepError` branch no longer fires on kernel-handler callsites.
+          // TransactionError still carries a useful step name; everything else
+          // falls through to `errorMessage()`.
+          const classified = classifyPlaywrightError(error);
+          log.error(`[Transaction] ${classified.kind}: ${classified.summary}`);
+          log.debug(`[Transaction] full error: ${errorMessage(error)}`);
+          failedAtStep = error instanceof TransactionError
+            ? (error.step ?? "unknown")
+            : classified.kind;
+          const errMsg = error instanceof TransactionError
+            ? `Transaction failed at step "${error.step ?? "unknown"}": ${error.message}`
+            : `Transaction failed: ${errorMessage(error)}`;
+          ctx.updateData({ status: "Failed", transactionError: errMsg });
+          throw new Error(errMsg);
+        }
+      } finally {
+        const exitStr = failedAtStep ? `<failed at step: ${failedAtStep}>` : txnExit;
+        log.step(
+          `[Step: transaction] END took=${Date.now() - t0}ms `
+          + `txnNumber='${exitStr}'`,
+        );
       }
     });
   },
