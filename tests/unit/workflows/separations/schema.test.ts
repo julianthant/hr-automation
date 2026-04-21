@@ -50,7 +50,7 @@ describe("buildTerminationComments", () => {
     const result = buildTerminationComments("03/15/2026", "03/14/2026", "999888");
     assert.equal(
       result,
-      "Termination EFF 03/15/2026. Last day worked: 03/14/2026. Kuali form #999888.",
+      "Termination EFF 03/15/2026. Last day worked 03/14/2026. Kuali form #999888.",
     );
   });
 
