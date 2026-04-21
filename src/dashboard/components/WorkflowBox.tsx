@@ -56,6 +56,26 @@ function StatusPill({
 export function WorkflowBox({ workflow }: WorkflowBoxProps) {
   const { instance, active, currentItemId, currentStep, finalStatus, sessions } = workflow;
 
+  if (workflow.crashedOnLaunch) {
+    return (
+      <div className="flex-shrink-0 border-[1.5px] border-destructive/30 rounded-lg p-1.5 bg-destructive/5">
+        <div className="flex items-center gap-1 mb-0.5 px-0.5">
+          <span className="w-[5px] h-[5px] rounded-full flex-shrink-0 bg-destructive" />
+          <span className="text-[11px] font-semibold text-[#c4b5fd]">{instance}</span>
+          <span className="flex-1" />
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-destructive bg-destructive/12 px-1.5 py-0.5 rounded">
+            Launch failed
+          </span>
+        </div>
+        <div className="px-0.5">
+          <span className="text-[10px] italic text-destructive/80">
+            Launch failed — check Queue row for details
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(

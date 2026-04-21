@@ -181,6 +181,7 @@ export interface WorkflowInstanceState {
   active: boolean;
   /** True while the spawning Node process (and therefore its Playwright browsers) is still alive. */
   pidAlive: boolean;
+  crashedOnLaunch?: boolean;
   currentItemId: string | null;
   currentStep: string | null;
   finalStatus: "done" | "failed" | null;
