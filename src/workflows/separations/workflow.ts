@@ -74,6 +74,8 @@ import {
   UC_INVOL_TERM_TEMPLATE,
 } from "./config.js";
 import { PATHS, UCPATH_SMART_HR_URL } from "../../config.js";
+import { getProcessIsolatedSessionDir } from "../../core/session.js";
+import { rmSync } from "node:fs";
 
 /** Input schema for the separations kernel workflow — only docId from the CLI. */
 const SeparationInputSchema = z.object({
@@ -148,7 +150,7 @@ export const separationsWorkflow = defineWorkflow({
         const ok = await loginToUKG(page, instance);
         if (!ok) throw new Error("Old Kronos (UKG) authentication failed");
       },
-      sessionDir: PATHS.ukgSessionSep,
+      sessionDir: getProcessIsolatedSessionDir(PATHS.ukgSessionSep),
     },
     {
       id: "new-kronos",
@@ -497,7 +499,12 @@ export async function runSeparation(
     previewSeparationPipeline(docId);
     return;
   }
-  await runWorkflow(separationsWorkflow, { docId });
+  const sessionDir = getProcessIsolatedSessionDir(PATHS.ukgSessionSep);
+  try {
+    await runWorkflow(separationsWorkflow, { docId });
+  } finally {
+    try { rmSync(sessionDir, { recursive: true, force: true }); } catch { /* non-fatal */ }
+  }
 }
 
 /**
@@ -521,21 +528,26 @@ export async function runSeparationBatch(
     return { total: docIds.length, succeeded: docIds.length, failed: 0 };
   }
 
+  const sessionDir = getProcessIsolatedSessionDir(PATHS.ukgSessionSep);
   const now = new Date().toISOString();
   const items = docIds.map((id) => ({ docId: id }));
-  const result = await runWorkflowBatch(separationsWorkflow, items, {
-    deriveItemId: (item) => (item as SeparationInput).docId,
-    onPreEmitPending: (item, runId) => {
-      const { docId } = item as SeparationInput;
-      trackEvent({
-        workflow: "separations",
-        timestamp: now,
-        id: docId,
-        runId,
-        status: "pending",
-        data: { docId },
-      });
-    },
-  });
-  return { total: result.total, succeeded: result.succeeded, failed: result.failed };
+  try {
+    const result = await runWorkflowBatch(separationsWorkflow, items, {
+      deriveItemId: (item) => (item as SeparationInput).docId,
+      onPreEmitPending: (item, runId) => {
+        const { docId } = item as SeparationInput;
+        trackEvent({
+          workflow: "separations",
+          timestamp: now,
+          id: docId,
+          runId,
+          status: "pending",
+          data: { docId },
+        });
+      },
+    });
+    return { total: result.total, succeeded: result.succeeded, failed: result.failed };
+  } finally {
+    try { rmSync(sessionDir, { recursive: true, force: true }); } catch { /* non-fatal */ }
+  }
 }
