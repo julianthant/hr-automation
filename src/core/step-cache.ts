@@ -18,6 +18,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { log } from "../utils/log.js";
 import { emitCacheHit } from "../tracker/session-events.js";
 
 export const DEFAULT_STEP_CACHE_DIR = ".tracker/step-cache";
@@ -119,17 +120,28 @@ export function stepCacheGet<T>(
 ): T | null {
   const dir = opts.dir ?? DEFAULT_STEP_CACHE_DIR;
   const path = stepFile(dir, workflow, itemId, stepName);
-  if (!existsSync(path)) return null;
+  if (!existsSync(path)) {
+    log.debug(
+      `[StepCache] miss: workflow='${workflow}' itemId='${itemId}' step='${stepName}' reason='no-file'`,
+    );
+    return null;
+  }
 
   let record: StepCacheRecord<T>;
   try {
     const raw = readFileSync(path, "utf-8");
     record = JSON.parse(raw) as StepCacheRecord<T>;
   } catch {
+    log.debug(
+      `[StepCache] miss: workflow='${workflow}' itemId='${itemId}' step='${stepName}' reason='parse-error'`,
+    );
     return null;
   }
 
   if (!record || typeof record.ts !== "string" || !("value" in record)) {
+    log.debug(
+      `[StepCache] miss: workflow='${workflow}' itemId='${itemId}' step='${stepName}' reason='corrupt-record'`,
+    );
     return null;
   }
 
@@ -137,9 +149,19 @@ export function stepCacheGet<T>(
   const withinHours = opts.withinHours !== undefined ? opts.withinHours : 2;
   if (withinHours > 0) {
     const ts = Date.parse(record.ts);
-    if (Number.isNaN(ts)) return null;
+    if (Number.isNaN(ts)) {
+      log.debug(
+        `[StepCache] miss: workflow='${workflow}' itemId='${itemId}' step='${stepName}' reason='bad-ts'`,
+      );
+      return null;
+    }
     const cutoff = Date.now() - withinHours * 60 * 60 * 1000;
-    if (ts < cutoff) return null;
+    if (ts < cutoff) {
+      log.debug(
+        `[StepCache] miss: workflow='${workflow}' itemId='${itemId}' step='${stepName}' reason='ttl-expired-${withinHours}h'`,
+      );
+      return null;
+    }
   }
 
   try {
@@ -147,6 +169,14 @@ export function stepCacheGet<T>(
   } catch {
     // best-effort instrumentation; never let an emit failure mask a cache hit
   }
+
+  const tsMs = Date.parse(record.ts);
+  const ageHours = Number.isNaN(tsMs)
+    ? NaN
+    : (Date.now() - tsMs) / (1000 * 60 * 60);
+  log.debug(
+    `[StepCache] hit: workflow='${workflow}' itemId='${itemId}' step='${stepName}' age=${ageHours.toFixed(1)}h`,
+  );
 
   return record.value;
 }
