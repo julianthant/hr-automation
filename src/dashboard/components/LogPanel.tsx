@@ -4,7 +4,6 @@ import { StepPipeline } from "./StepPipeline";
 import { LogStream } from "./LogStream";
 import { RunSelector } from "./RunSelector";
 import { EmptyState } from "./EmptyState";
-import { FailureDrillDown } from "./FailureDrillDown";
 import { ScreenshotsPanel } from "./ScreenshotsPanel";
 import { useLogs } from "./hooks/useLogs";
 import { useRunEvents } from "./hooks/useRunEvents";
@@ -226,12 +225,6 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
           stepDurations={activeRun?.stepDurations ?? entry?.stepDurations}
           entry={entry ?? undefined}
         />
-      )}
-
-      {/* Failure drill-down: classified error + last 20 log lines + screenshot
-          strip. Only renders when the active run actually failed. */}
-      {runStatus === "failed" && entry && (
-        <FailureDrillDown entry={entry} workflow={workflow} logs={logs} />
       )}
 
       <LogStream
