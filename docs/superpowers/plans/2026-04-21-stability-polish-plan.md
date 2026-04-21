@@ -264,15 +264,16 @@ Run: `head -40 src/dashboard/components/ui/popover.tsx`
 
 Expected: Radix popover export (`Popover`, `PopoverTrigger`, `PopoverContent`).
 
-- [ ] **Step 2: Add Popover import to StepPipeline**
+- [ ] **Step 2: Add Popover + useRef imports to StepPipeline**
 
 Near the top of `src/dashboard/components/StepPipeline.tsx`, add:
 
 ```tsx
+import { useRef, useState } from "react";  // extend existing react import
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 ```
 
-(Or the relative path `./ui/popover` — match existing import style in the file.)
+(Or the relative path `./ui/popover` — match existing import style in the file. `useState` may already be imported; ensure `useRef` is added.)
 
 - [ ] **Step 3: Rewrite AuthSuperChip component**
 
@@ -285,6 +286,20 @@ interface AuthSuperChipProps {
 
 function AuthSuperChip({ children }: AuthSuperChipProps) {
   const [open, setOpen] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleOpen = () => {
+    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
+    if (openTimer.current) clearTimeout(openTimer.current);
+    openTimer.current = setTimeout(() => setOpen(true), 100);
+  };
+  const scheduleClose = () => {
+    if (openTimer.current) { clearTimeout(openTimer.current); openTimer.current = null; }
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => setOpen(false), 200);
+  };
+
   const groupStatus = authGroupStatus(children);
 
   const knownDurations = children.filter((c) => c.durationMs !== undefined);
@@ -308,8 +323,8 @@ function AuthSuperChip({ children }: AuthSuperChipProps) {
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <div
-          onMouseEnter={() => setOpen(true)}
-          onMouseLeave={() => setOpen(false)}
+          onMouseEnter={scheduleOpen}
+          onMouseLeave={scheduleClose}
           title={hoverTitle}
           className="flex-1 min-w-[86px] flex flex-col justify-center items-start gap-1.5 cursor-default"
           style={{ background: "none", border: "none", padding: 0, textAlign: "left" }}
@@ -381,8 +396,8 @@ function AuthSuperChip({ children }: AuthSuperChipProps) {
         align="center"
         sideOffset={8}
         className="w-auto p-2"
-        onMouseEnter={() => setOpen(true)}
-        onMouseLeave={() => setOpen(false)}
+        onMouseEnter={scheduleOpen}
+        onMouseLeave={scheduleClose}
       >
         <div className="flex flex-col gap-1.5 text-xs">
           {children.map((child) => {
