@@ -57,3 +57,7 @@ schemas/*.schema.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Scratch files (chat references, not meant to be committed)
+/image.png
+/notes.md
