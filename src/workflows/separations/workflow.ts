@@ -68,6 +68,8 @@ import {
   mapReasonCode,
   getInitials,
 } from "./schema.js";
+import type { SeparationData } from "./schema.js";
+import { stepCacheGet, stepCacheSet } from "../../core/step-cache.js";
 import {
   KUALI_SPACE_URL,
   UC_VOL_TERM_TEMPLATE,
@@ -204,6 +206,13 @@ export const separationsWorkflow = defineWorkflow({
 
     // ─── Step 1: Extract Kuali data ───
     const kualiData = await ctx.step("kuali-extraction", async () => {
+      const cached = stepCacheGet<SeparationData>("separations", docId, "kuali-extraction");
+      if (cached) {
+        log.success(`[Kuali] Extraction cached (doc ${docId}) — reusing`);
+        const ucpathPage = await ctx.page("ucpath");
+        ucpathPage.on("dialog", (d) => d.accept().catch(() => {}));
+        return cached;
+      }
       const kualiPage = await ctx.page("kuali");
       // Auto-dismiss PeopleSoft dialogs on UCPath — important when a previous
       // doc's transaction leaves a confirmation modal up (batch mode state).
@@ -212,7 +221,9 @@ export const separationsWorkflow = defineWorkflow({
 
       await openActionList(kualiPage);
       await clickDocument(kualiPage, docId);
-      return extractSeparationData(kualiPage);
+      const extracted = await extractSeparationData(kualiPage);
+      try { stepCacheSet("separations", docId, "kuali-extraction", extracted); } catch { /* best-effort */ }
+      return extracted;
     });
 
     const isVol = isVoluntaryTermination(kualiData.terminationType);
