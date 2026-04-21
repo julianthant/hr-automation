@@ -10,6 +10,8 @@
     "start-onboarding": "node --import tsx/esm --env-file=.env src/cli.ts start-onboarding",
     "start-onboarding:dry": "node --import tsx/esm --env-file=.env src/cli.ts start-onboarding --dry-run",
     "start-onboarding:batch": "node --import tsx/esm --env-file=.env src/cli.ts start-onboarding --parallel",
+    "onboarding":        "node --import tsx/esm --env-file=.env src/cli.ts onboarding",
+    "onboarding:dry":    "node --import tsx/esm --env-file=.env src/cli.ts onboarding --dry-run",
     "work-study": "node --import tsx/esm --env-file=.env src/cli.ts work-study",
     "work-study:dry": "node --import tsx/esm --env-file=.env src/cli.ts work-study --dry-run",
     "emergency-contact": "node --import tsx/esm --env-file=.env src/cli.ts emergency-contact",
