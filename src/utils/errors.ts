@@ -42,3 +42,58 @@ export function classifyError(err: unknown): string {
   const firstLine = raw.split("\n")[0];
   return firstLine.length > 120 ? firstLine.slice(0, 117) + "..." : firstLine;
 }
+
+export type PlaywrightErrorKind =
+  | "timeout"
+  | "timeout-disabled"
+  | "timeout-hidden"
+  | "timeout-intercepted"
+  | "timeout-stale"
+  | "navigation-interrupted"
+  | "process-singleton"
+  | "unknown";
+
+export interface ClassifiedError {
+  kind: PlaywrightErrorKind;
+  summary: string;
+  original: string;
+}
+
+/**
+ * Classify a Playwright/browser automation error into a small kind-enum so
+ * downstream logs + dashboards can group failures without string-matching
+ * 2000-char error strings everywhere.
+ */
+export function classifyPlaywrightError(err: unknown): ClassifiedError {
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  const lower = msg.toLowerCase();
+
+  if (lower.includes("processsingleton")) {
+    return { kind: "process-singleton", summary: "Chrome profile lock held by another process", original: msg };
+  }
+  // nav-interrupted must be checked BEFORE detached — "frame was detached" contains "detached"
+  if (lower.includes("err_aborted") || lower.includes("frame was detached") || lower.includes("navigation was aborted")) {
+    return { kind: "navigation-interrupted", summary: "Navigation aborted mid-action", original: msg };
+  }
+  // NOT nested inside the timeout gate below — stale-DOM errors can surface
+  // as plain "detached" messages without the word "Timeout" (e.g. during
+  // navigation races). The "timeout-" name prefix is retained for caller
+  // grouping consistency with the other timeout-* kinds.
+  if (lower.includes("no longer attached to the dom") || lower.includes("detached")) {
+    return { kind: "timeout-stale", summary: "Element detached from DOM before action completed", original: msg };
+  }
+  if (lower.includes("timeout")) {
+    if (lower.includes("not enabled") || /\bdisabled\b/.test(lower)) {
+      return { kind: "timeout-disabled", summary: "Element visible but disabled when timeout fired", original: msg };
+    }
+    if (lower.includes("intercepts pointer")) {
+      return { kind: "timeout-intercepted", summary: "Another element intercepted the click (modal/overlay)", original: msg };
+    }
+    if (lower.includes("not visible") || lower.includes("hidden")) {
+      return { kind: "timeout-hidden", summary: "Element never became visible", original: msg };
+    }
+    return { kind: "timeout", summary: "Generic timeout — no specific cause found in error body", original: msg };
+  }
+
+  return { kind: "unknown", summary: msg.slice(0, 120), original: msg };
+}
