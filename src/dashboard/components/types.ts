@@ -91,7 +91,7 @@ export interface LogEntry {
   workflow: string;
   itemId: string;
   runId?: string;
-  level: "step" | "success" | "error" | "waiting" | "warn";
+  level: "step" | "success" | "error" | "waiting" | "warn" | "debug";
   message: string;
   ts: string;
 }
