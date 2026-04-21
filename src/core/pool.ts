@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { RegisteredWorkflow, BatchResult, RunOpts } from './types.js'
 import { Session } from './session.js'
 import { deriveItemId, runOneItem } from './workflow.js'
+import { log } from '../utils/log.js'
 
 interface PoolItem<TData> {
   item: TData
@@ -44,16 +45,20 @@ export async function runWorkflowPool<TData, TSteps extends readonly string[]>(
   const queue: PoolItem<TData>[] = [...perItem]
   const result: BatchResult = { total: items.length, succeeded: 0, failed: 0, errors: [] }
 
-  async function worker(): Promise<void> {
+  async function worker(index: number): Promise<void> {
+    log.step(`[Pool W${index}] Starting`)
     const session = await Session.launch(wf.config.systems, {
       authChain: wf.config.authChain,
       tiling: wf.config.tiling,
       launchFn: opts.launchFn,
     })
+    log.success(`[Pool W${index}] Session ready`)
     try {
       while (queue.length > 0) {
         const next = queue.shift()
         if (next === undefined) break
+        const remaining = queue.length
+        log.step(`[Pool W${index}] Taking item (${remaining} remaining in queue)`)
         const { item, itemId, runId } = next
         const r = await runOneItem({
           wf,
@@ -68,12 +73,13 @@ export async function runWorkflowPool<TData, TSteps extends readonly string[]>(
         if (r.ok) result.succeeded++
         else { result.failed++; result.errors.push({ item, error: r.error }) }
       }
+      log.step(`[Pool W${index}] Queue empty — exiting`)
     } finally {
       await session.close()
     }
   }
 
   const workerCount = Math.min(poolSize, items.length)
-  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  await Promise.all(Array.from({ length: workerCount }, (_, i) => worker(i)))
   return result
 }

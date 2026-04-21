@@ -6,7 +6,7 @@ import { Stepper } from './stepper.js'
 import { makeCtx } from './ctx.js'
 import { trackEvent, withTrackedWorkflow, emitScreenshotEvent, type WithTrackedWorkflowOpts } from '../tracker/jsonl.js'
 import { makeScreenshotFn } from './screenshot.js'
-import { withLogContext } from '../utils/log.js'
+import { withLogContext, log } from '../utils/log.js'
 import { classifyError } from '../utils/errors.js'
 import { runWorkflowPool } from './pool.js'
 import { runWorkflowSharedContextPool } from './shared-context-pool.js'
@@ -476,7 +476,11 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
     if (i === 0 || !batch?.betweenItems) return undefined
     return async () => {
       for (const hook of batch.betweenItems!) {
-        if (hook === 'reset-browsers' || hook === 'navigate-home') {
+        if (hook === 'reset-browsers') {
+          const t0 = Date.now()
+          for (const s of wf.config.systems) await session.reset(s.id)
+          log.step(`[Batch] Reset browsers (took ${Date.now() - t0}ms)`)
+        } else if (hook === 'navigate-home') {
           for (const s of wf.config.systems) await session.reset(s.id)
         } else if (hook === 'health-check') {
           for (const s of wf.config.systems) {
@@ -492,6 +496,7 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
   try {
     for (let i = 0; i < perItem.length; i++) {
       const { item, itemId, runId } = perItem[i]
+      log.step(`[Batch] Item ${i + 1}/${perItem.length}: itemId='${itemId}'`)
       const r = await runOneItem({
         wf,
         session,
