@@ -1,6 +1,6 @@
 import type { Page, Locator } from "playwright";
 import { log } from "../../utils/log.js";
-import { errorMessage } from "../../utils/errors.js";
+import { errorMessage, classifyPlaywrightError } from "../../utils/errors.js";
 import { jobSummary } from "./selectors.js";
 import { waitForPeopleSoftProcessing } from "./navigate.js";
 
@@ -88,6 +88,17 @@ export async function extractWorkLocation(
   // succeeded — transient PeopleSoft processing state, not a selector issue.
   // Wait for any in-flight processing before the tab click, then retry once.
   const psFrame = page.frameLocator("#main_target_win0"); // allow-inline-selector -- iframe FrameLocator for PS processing probe
+
+  // Pre-click page health dump — when Work Location flakes we want to know
+  // from logs alone whether the iframe was present, the URL drifted, or the
+  // selector simply had no matches. `page.frames()` is sync in Playwright.
+  const frameCount = page.frames().length;
+  const url = page.url();
+  const rootCountCheck = await root.count().catch(() => -1);
+  log.debug(
+    `[Job Summary] pre-click state: url=${url} frames=${frameCount} root-matches=${rootCountCheck}`,
+  );
+
   await waitForPeopleSoftProcessing(psFrame, 15_000).catch(() => {});
 
   const clickOnce = async (): Promise<void> => {
@@ -97,7 +108,10 @@ export async function extractWorkLocation(
   try {
     await clickOnce();
   } catch (e) {
-    log.warn(`[Job Summary] Work Location tab click flaked — retrying once: ${errorMessage(e)}`);
+    const classified = classifyPlaywrightError(e);
+    log.warn(
+      `[Job Summary] Work Location tab click flaked (${classified.kind}) — retrying once. url=${page.url()}: ${errorMessage(e)}`,
+    );
     await page.waitForTimeout(2_000);
     await waitForPeopleSoftProcessing(psFrame, 15_000).catch(() => {});
     await clickOnce();
