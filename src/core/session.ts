@@ -5,6 +5,7 @@ import type { SystemConfig, SessionObserver, CaptureFileOpts } from './types.js'
 import { launchBrowser } from '../browser/launch.js'
 import { computeTileLayout } from '../browser/tiling.js'
 import { log } from '../utils/log.js'
+import { classifyPlaywrightError, errorMessage } from '../utils/errors.js'
 
 export function formatCaptureFilename(args: {
   workflow: string
@@ -319,10 +320,22 @@ export class Session {
 }
 
 async function defaultLaunchOne(opts: LaunchOneOpts): Promise<SystemSlot> {
-  const { browser, context, page } = await launchBrowser({
-    sessionDir: opts.system.sessionDir,
-  })
-  return { page, context, browser }
+  const systemId = opts.system.id
+  const sessionDir = opts.system.sessionDir
+  try {
+    const { browser, context, page } = await launchBrowser({
+      sessionDir,
+    })
+    return { page, context, browser }
+  } catch (e) {
+    const classified = classifyPlaywrightError(e)
+    if (classified.kind === 'process-singleton') {
+      log.error(`[Session: ${systemId}] ProcessSingleton collision — another process holds the Chrome profile lock. pid=${process.pid} sessionDir='${sessionDir ?? '<ephemeral>'}'`)
+    } else {
+      log.error(`[Session: ${systemId}] launch failed: ${classified.kind} — ${classified.summary}`)
+    }
+    throw e
+  }
 }
 
 const AUTH_MAX_ATTEMPTS = 3;
@@ -333,13 +346,22 @@ async function loginWithRetry(
   instance?: string,
   onFailed?: () => void,
 ): Promise<void> {
+  let lastError: string | undefined
   for (let attempt = 1; attempt <= AUTH_MAX_ATTEMPTS; attempt++) {
+    if (attempt > 1) {
+      log.warn(`[Auth: ${system.id}] Retrying (attempt ${attempt}/${AUTH_MAX_ATTEMPTS}) — previous error: ${lastError ?? '<none>'}`)
+    } else {
+      log.step(`[Auth: ${system.id}] Starting login (attempt ${attempt}/${AUTH_MAX_ATTEMPTS})`)
+    }
     try {
       await system.login(page, instance)
+      if (attempt > 1) {
+        log.success(`[Auth: ${system.id}] Recovered on attempt ${attempt}`)
+      }
       return
     } catch (err) {
+      lastError = errorMessage(err)
       if (attempt < AUTH_MAX_ATTEMPTS) {
-        log.step(`Auth failed for ${system.id} (attempt ${attempt}/${AUTH_MAX_ATTEMPTS}) — refreshing and retrying...`)
         await page.goto('about:blank').catch(() => {})
         await page.waitForTimeout(1_000)
       } else {
