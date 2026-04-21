@@ -218,8 +218,26 @@ export function emitCacheHit(
 
 // ── Instance naming ────────────────────────────────────
 
+/**
+ * True if `pid` belongs to a live process. Uses `process.kill(pid, 0)` which
+ * only raises ESRCH if no such process exists. Returns `false` on any error
+ * — we conservatively treat permission denials (EPERM) as dead so stale
+ * orphans from other users/containers don't block instance numbering.
+ */
+function isPidAlive(pid: number): boolean {
+  if (!Number.isFinite(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const STALE_START_THRESHOLD_MS = 60_000;
+
 /** Generate a unique instance name like "Separation 1", "Separation 2", etc. */
-export function generateInstanceName(workflowType: string): string {
+export function generateInstanceName(workflowType: string, dir?: string): string {
   const labels: Record<string, string> = {
     onboarding: "Onboarding",
     separations: "Separation",
@@ -230,13 +248,22 @@ export function generateInstanceName(workflowType: string): string {
   };
   const label = labels[workflowType] || workflowType;
 
-  const events = readSessionEvents();
-  // Count starts and ends per instance name. A name is "active" when it has
-  // been started more times than it has ended (handles re-use across sessions).
+  const events = readSessionEvents(dir);
+  // Count starts and ends per instance name. A `workflow_start` is effectively
+  // "ended" (ignored) when its pid is dead AND its timestamp is older than the
+  // stale-start threshold — this self-heals crashed runs whose SIGINT never
+  // emitted `workflow_end` (e.g. a `kill -9` or an exit before the handler
+  // ran). Fresh orphans (<60 s old) still block the slot so a legitimately
+  // in-flight run isn't stepped on by a parallel start.
   const startCount = new Map<string, number>();
   const endCount = new Map<string, number>();
+  const now = Date.now();
   for (const e of events) {
     if (e.type === "workflow_start") {
+      const ts = Date.parse(e.timestamp);
+      const ageMs = Number.isFinite(ts) ? now - ts : 0;
+      const stale = ageMs > STALE_START_THRESHOLD_MS && !isPidAlive(e.pid);
+      if (stale) continue;
       startCount.set(e.workflowInstance, (startCount.get(e.workflowInstance) ?? 0) + 1);
     }
     if (e.type === "workflow_end") {
@@ -249,7 +276,6 @@ export function generateInstanceName(workflowType: string): string {
     const name = `${label} ${n}`;
     const s = startCount.get(name) ?? 0;
     const e = endCount.get(name) ?? 0;
-    // Name is available if it was never started, or all starts have been ended
     if (s <= e) break;
     n++;
   }

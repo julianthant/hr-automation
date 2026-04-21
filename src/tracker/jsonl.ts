@@ -306,7 +306,7 @@ export async function withTrackedWorkflow<T>(
   // for entry/log isolation would still leak workflow_start/step_change/etc.
   // into the real `.tracker/sessions.jsonl` and clutter the operator's
   // SessionPanel with dead test workflow instances.
-  const instanceName = generateInstanceName(workflow);
+  const instanceName = generateInstanceName(workflow, dir);
   emitWorkflowStart(instanceName, dir);
   // Store instance name in tracker data so EntryItem can show it
   data.instance = instanceName;
