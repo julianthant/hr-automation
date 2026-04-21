@@ -434,67 +434,70 @@ export const separationsWorkflow = defineWorkflow({
     await ctx.step("ucpath-transaction", async () => {
       const t0 = Date.now();
       log.debug(`[Step: ucpath-transaction] START empl='${kualiData.eid}' template='${template}'`);
-      log.step("=== UCPath Smart HR Transaction ===");
-      const ucpathPage = await ctx.page("ucpath");
-
       try {
-        await navigateToSmartHR(ucpathPage);
-        await clickSmartHRTransactions(ucpathPage);
+        log.step("=== UCPath Smart HR Transaction ===");
+        const ucpathPage = await ctx.page("ucpath");
 
-        const frame = getContentFrame(ucpathPage);
-        await selectTemplate(frame, template);
-        await enterEffectiveDate(frame, finalTermEffDate);
-
-        const createResult = await clickCreateTransaction(ucpathPage, frame);
-        if (!createResult.success) {
-          log.error(`[UCPath Txn] Create failed: ${createResult.error}`);
-          return;
-        }
-        log.step("[UCPath Txn] Filling Empl ID...");
-        await frame.getByRole("textbox", { name: "Empl ID" }).fill(kualiData.eid, { timeout: 10_000 });
-        await selectReasonCode(ucpathPage, frame, ucpathReason);
-        await fillComments(frame, finalComments);
-
-        // Convert "Last, First" → "First Last" for UCPath name matching
-        const nameParts = kualiData.employeeName.split(",").map((s) => s.trim());
-        const ucpathName = nameParts.length >= 2 ? `${nameParts[1]} ${nameParts[0]}` : kualiData.employeeName;
-        const submitResult = await clickSaveAndSubmit(ucpathPage, frame, ucpathName);
-        transactionNumber = submitResult.transactionNumber ?? "";
-        log.step(
-          `[UCPath Txn] submit result: success=${submitResult.success} `
-          + `txnNumber='${transactionNumber || "<empty>"}' `
-          + `reasonMessage='${submitResult.error ?? "<none>"}'`,
-        );
-        if (!submitResult.success) {
-          log.error(`[UCPath Txn] Submit failed: ${submitResult.error}`);
-          return;
-        }
-        if (!transactionNumber) {
-          submittedWithoutTxnNumber = true;
-          return;
-        }
-        log.success(`[UCPath Txn] Transaction submitted (#${transactionNumber})`);
-        await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-submitted' });
-      } catch (e) {
-        log.error(`[UCPath Txn] Failed: ${errorMessage(e)}`);
-      }
-
-      // In batch mode, navigate UCPath back to Smart HR base URL so the next
-      // doc's transaction starts from a clean page. Kernel's between-items
-      // reset-browsers also does this via the resetUrl SystemConfig field, but
-      // we do it immediately here so the current phase3 step doesn't collide
-      // with a confirmation modal left over on the page.
-      if (ctx.isBatch) {
         try {
           await navigateToSmartHR(ucpathPage);
-        } catch {
-          // Non-fatal — the between-items reset will retry
+          await clickSmartHRTransactions(ucpathPage);
+
+          const frame = getContentFrame(ucpathPage);
+          await selectTemplate(frame, template);
+          await enterEffectiveDate(frame, finalTermEffDate);
+
+          const createResult = await clickCreateTransaction(ucpathPage, frame);
+          if (!createResult.success) {
+            log.error(`[UCPath Txn] Create failed: ${createResult.error}`);
+            return;
+          }
+          log.step("[UCPath Txn] Filling Empl ID...");
+          await frame.getByRole("textbox", { name: "Empl ID" }).fill(kualiData.eid, { timeout: 10_000 });
+          await selectReasonCode(ucpathPage, frame, ucpathReason);
+          await fillComments(frame, finalComments);
+
+          // Convert "Last, First" → "First Last" for UCPath name matching
+          const nameParts = kualiData.employeeName.split(",").map((s) => s.trim());
+          const ucpathName = nameParts.length >= 2 ? `${nameParts[1]} ${nameParts[0]}` : kualiData.employeeName;
+          const submitResult = await clickSaveAndSubmit(ucpathPage, frame, ucpathName);
+          transactionNumber = submitResult.transactionNumber ?? "";
+          log.step(
+            `[UCPath Txn] submit result: success=${submitResult.success} `
+            + `txnNumber='${transactionNumber || "<empty>"}' `
+            + `reasonMessage='${submitResult.error ?? "<none>"}'`,
+          );
+          if (!submitResult.success) {
+            log.error(`[UCPath Txn] Submit failed: ${submitResult.error}`);
+            return;
+          }
+          if (!transactionNumber) {
+            submittedWithoutTxnNumber = true;
+            return;
+          }
+          log.success(`[UCPath Txn] Transaction submitted (#${transactionNumber})`);
+          await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-submitted' });
+        } catch (e) {
+          log.error(`[UCPath Txn] Failed: ${errorMessage(e)}`);
         }
+
+        // In batch mode, navigate UCPath back to Smart HR base URL so the next
+        // doc's transaction starts from a clean page. Kernel's between-items
+        // reset-browsers also does this via the resetUrl SystemConfig field, but
+        // we do it immediately here so the current phase3 step doesn't collide
+        // with a confirmation modal left over on the page.
+        if (ctx.isBatch) {
+          try {
+            await navigateToSmartHR(ucpathPage);
+          } catch {
+            // Non-fatal — the between-items reset will retry
+          }
+        }
+      } finally {
+        log.step(
+          `[Step: ucpath-transaction] END took=${Date.now() - t0}ms `
+          + `txnNumber='${transactionNumber || "<empty>"}'`,
+        );
       }
-      log.step(
-        `[Step: ucpath-transaction] END took=${Date.now() - t0}ms `
-        + `txnNumber='${transactionNumber || "<none>"}'`,
-      );
     });
 
     if (submittedWithoutTxnNumber) {
