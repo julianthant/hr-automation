@@ -684,7 +684,7 @@ So the frontend never has to fetch the full log stream to show "started 3m ago, 
 | `EntryItem` + `StepPipeline` | `stepDurations` | per-item row with step timing chips |
 | `LogPanel` | logs JSONL | log stream for a selected entry |
 | `RunSelector` | `/api/runs` | switch between retries of the same itemId |
-| `FailureDrillDown` | `/api/screenshots` + logs | click failed row → screenshots + last 20 logs |
+| `ScreenshotsPanel` / `ScreenshotCard` | `/api/screenshots` | dedicated tab: grid of captured screenshots per entry (superseded the inline `FailureDrillDown` on 2026-04-21) |
 | `SessionPanel` | `sessions.jsonl` | live browser/auth/Duo-queue state |
 | `SelectorWarningsPanel` | logs (filtered by "selector fallback triggered") | surface stale selectors |
 | `SearchBar` | `/api/search` | cross-workflow search across historical JSONL |
