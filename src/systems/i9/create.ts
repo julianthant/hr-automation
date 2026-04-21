@@ -1,9 +1,9 @@
 import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
-import { errorMessage } from "../../utils/errors.js";
+import { errorMessage, classifyPlaywrightError } from "../../utils/errors.js";
 import type { I9EmployeeInput, I9Result } from "./types.js";
 import { profile, remoteI9, dashboard } from "./selectors.js";
-import { closeAllKendoWindows } from "./navigate.js";
+import { closeAllKendoWindows, snapshotKendoWindows } from "./navigate.js";
 
 /**
  * Create a new I-9 employee record in I9 Complete.
@@ -29,10 +29,12 @@ export async function createI9Employee(
     // Step 1: Navigate to new employee profile
     log.step("Clicking 'Create New I-9 : New Employee'...");
     await closeAllKendoWindows(page);
+    log.debug(`I9 create — pre-click state: ${await snapshotKendoWindows(page)}`);
     try {
       await dashboard.createNewI9Link(page).click({ timeout: 10_000 });
     } catch (e) {
-      log.warn(`Create New I-9 click blocked — force-closing modals and retrying: ${errorMessage(e)}`);
+      const classified = classifyPlaywrightError(e);
+      log.warn(`I9 create — click blocked (${classified.kind}: ${classified.summary}) — state: ${await snapshotKendoWindows(page)}`);
       await closeAllKendoWindows(page);
       await dashboard.createNewI9Link(page).click({ timeout: 10_000 });
     }
