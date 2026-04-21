@@ -53,7 +53,7 @@ export function LogStream({ logs, events = [], loading, screenshotsSlot }: LogSt
     ].sort((a, b) => {
       const ta = a.kind === "log" ? a.entry.ts : a.entry.timestamp;
       const tb = b.kind === "log" ? b.entry.ts : b.entry.timestamp;
-      return ta.localeCompare(tb);
+      return (ta ?? "").localeCompare(tb ?? "");
     });
   } else {
     displayed = logs
