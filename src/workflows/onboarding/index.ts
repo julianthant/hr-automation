@@ -5,6 +5,7 @@ export { buildTransactionPlan } from "./enter.js";
 export { runOnboarding, onboardingWorkflow } from "./workflow.js";
 export type { OnboardingOptions } from "./workflow.js";
 export { runParallel, loadBatchFile } from "./parallel.js";
+export { runOnboardingPositional } from "./positional.js";
 export { buildDownloadPath, downloadCrmDocuments } from "./download.js";
 export type { DownloadedDoc } from "./download.js";
 export { retryStep, RetryStepError } from "./retry.js";

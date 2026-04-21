@@ -5,7 +5,7 @@ import { errorMessage } from "./utils/errors.js";
 import { launchBrowser } from "./browser/launch.js";
 import { loginToUCPath, loginToACTCrm } from "./auth/login.js";
 import type { AuthResult } from "./auth/types.js";
-import { runOnboarding, runParallel } from "./workflows/onboarding/index.js";
+import { runOnboarding, runParallel, runOnboardingPositional } from "./workflows/onboarding/index.js";
 import { runWorkStudy, WorkStudyInputSchema } from "./workflows/work-study/index.js";
 import { runEmergencyContact } from "./workflows/emergency-contact/index.js";
 import { runParallelKronos, DEFAULT_WORKERS } from "./workflows/old-kronos-reports/index.js";
@@ -113,6 +113,34 @@ program
       await runParallel(options.parallel, { dryRun: options.dryRun });
     } else {
       await runOnboarding(email!, { dryRun: options.dryRun });
+    }
+  });
+
+// ─── onboarding (positional emails) ───
+
+program
+  .command("onboarding")
+  .description("Run onboarding for one or more emails (positional). Pool size = min(N, 4), override with --workers.")
+  .argument("<emails...>", "Employee email(s)")
+  .option("--dry-run", "Preview without running")
+  .option("--workers <N>", "Pool size override", parseInt)
+  .action(async (emails: string[], options: { dryRun?: boolean; workers?: number }) => {
+    try {
+      validateEnv();
+    } catch {
+      process.exit(1);
+    }
+
+    if (options.workers !== undefined && (options.workers < 1 || !Number.isFinite(options.workers))) {
+      log.error("--workers must be a positive integer.");
+      process.exit(1);
+    }
+
+    try {
+      await runOnboardingPositional(emails, { dryRun: options.dryRun, poolSize: options.workers });
+    } catch (error) {
+      log.error(`Onboarding failed: ${errorMessage(error)}`);
+      process.exit(1);
     }
   });
 
