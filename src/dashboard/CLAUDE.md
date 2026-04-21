@@ -252,7 +252,8 @@ src/dashboard/
     TopBar.tsx, QueuePanel.tsx, EntryItem.tsx, LogPanel.tsx
     StepPipeline.tsx, LogStream.tsx, LogLine.tsx, StatPills.tsx
     RunSelector.tsx, EmptyState.tsx
-    SearchBar.tsx, SearchResults.tsx, ScreenshotsPanel.tsx, ScreenshotCard.tsx
+    SearchBar.tsx, SearchResults.tsx
+    ScreenshotsPanel.tsx, ScreenshotCard.tsx, ScreenshotLightbox.tsx
     SessionPanel.tsx, WorkflowBox.tsx, BrowserChip.tsx, SelectorWarningsPanel.tsx
     entry-display.ts (resolveEntryName / resolveEntryId)
     types.ts (TrackerEntry, LogEntry, RunInfo, AuthState, BrowserState, etc.)
