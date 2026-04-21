@@ -387,6 +387,13 @@ export const separationsWorkflow = defineWorkflow({
 
     // ─── Step 6: UCPath Smart HR Transaction ───
     let transactionNumber = "";
+    // Tracks the specific "submit succeeded but no txn # extracted" case.
+    // We must abort before kuali-finalization so we don't write a blank
+    // transaction number back to the Kuali form. Raised outside the step's
+    // try/catch because we want it to propagate, unlike ordinary submit
+    // failures which are logged and allowed to fall through to finalization
+    // (so the Kuali form gets its "left blank for manual entry" treatment).
+    let submittedWithoutTxnNumber = false;
     await ctx.step("ucpath-transaction", async () => {
       log.step("=== UCPath Smart HR Transaction ===");
       const ucpathPage = await ctx.page("ucpath");
@@ -418,12 +425,11 @@ export const separationsWorkflow = defineWorkflow({
           return;
         }
         transactionNumber = submitResult.transactionNumber ?? "";
-        if (submitResult.success && !transactionNumber) {
-          throw new Error(
-            "Transaction submitted but transaction number could not be extracted — aborting before Kuali finalization writes empty value",
-          );
+        if (!transactionNumber) {
+          submittedWithoutTxnNumber = true;
+          return;
         }
-        log.success(`[UCPath Txn] Transaction submitted${transactionNumber ? ` (#${transactionNumber})` : ""}`);
+        log.success(`[UCPath Txn] Transaction submitted (#${transactionNumber})`);
         await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-submitted' });
       } catch (e) {
         log.error(`[UCPath Txn] Failed: ${errorMessage(e)}`);
@@ -442,6 +448,12 @@ export const separationsWorkflow = defineWorkflow({
         }
       }
     });
+
+    if (submittedWithoutTxnNumber) {
+      throw new Error(
+        "Transaction submitted but transaction number could not be extracted — aborting before Kuali finalization writes empty value",
+      );
+    }
 
     // ─── Step 7: Kuali finalization ───
     await ctx.step("kuali-finalization", async () => {
