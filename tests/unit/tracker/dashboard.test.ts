@@ -91,4 +91,40 @@ describe("computeStepDurations", () => {
     assert.equal(durations.A, 5_000);
     assert.equal(durations.B, 5_000);
   });
+
+  it("absorbs the pending→first-running gap into step 1 so sum matches global elapsed", () => {
+    // Realistic kernel shape: pending fires immediately at workflow start,
+    // then the first `running` event (often auth:<system>) doesn't fire until
+    // after browser launch + session setup — a ~5s gap in practice. Without
+    // the anchor fix, that gap was silently dropped. With it, step 1's
+    // duration = (step 2 start) - (pending ts), and the sum of durations
+    // equals the global elapsed time the top-level timer shows.
+    const entries = [
+      { timestamp: "2026-04-17T10:00:00.000Z", status: "pending" as const },
+      { timestamp: "2026-04-17T10:00:05.000Z", status: "running" as const, step: "auth:ucpath" },
+      { timestamp: "2026-04-17T10:00:20.000Z", status: "running" as const, step: "transaction" },
+      { timestamp: "2026-04-17T10:00:35.000Z", status: "done" as const },
+    ];
+    const durations = computeStepDurations(entries);
+    assert.equal(durations["auth:ucpath"], 20_000, "auth absorbs the 5s pre-step gap (20s, not 15s)");
+    assert.equal(durations.transaction, 15_000, "transaction unchanged");
+
+    const totalElapsed = Date.parse("2026-04-17T10:00:35.000Z") - Date.parse("2026-04-17T10:00:00.000Z");
+    const sum = Object.values(durations).reduce((a, b) => a + b, 0);
+    assert.equal(sum, totalElapsed, "sum of step durations equals total elapsed time");
+  });
+
+  it("tiles elapsed time when no pending event is present (first running is the anchor)", () => {
+    // Legacy fixtures / tests that don't emit `pending` should still behave
+    // sensibly: the earliest timestamp seen (the first running event) becomes
+    // the anchor, so nothing changes versus old behavior.
+    const entries = [
+      { timestamp: "2026-04-17T10:00:00.000Z", status: "running" as const, step: "A" },
+      { timestamp: "2026-04-17T10:00:10.000Z", status: "running" as const, step: "B" },
+      { timestamp: "2026-04-17T10:00:30.000Z", status: "done" as const },
+    ];
+    const durations = computeStepDurations(entries);
+    assert.equal(durations.A, 10_000);
+    assert.equal(durations.B, 20_000);
+  });
 });

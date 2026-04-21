@@ -853,6 +853,15 @@ export function buildSearchHandler(deps: SearchDeps) {
  * are included. The last step is closed out by a subsequent `done` / `failed`
  * event; a still-running final step yields no duration for that step (yet).
  *
+ * The first step's start is anchored at the earliest valid timestamp in the
+ * run (typically the `pending` event), NOT at its own `running` event. This
+ * way the pre-first-step gap — browser launch, session setup, any time
+ * between workflow start and the first emitted step — is absorbed into
+ * step 1's duration instead of being silently lost. The upshot:
+ * `sum(stepDurations)` tiles the full elapsed time shown by the global
+ * `useElapsed` counter (pending → done/failed), so the timeline matches the
+ * dashboard's top-level timer.
+ *
  * Why pull this out of `/events`? It's pure data-over-data — easily unit
  * testable, easily reusable if we later want to expose durations through
  * another endpoint.
@@ -871,10 +880,16 @@ export function computeStepDurations(
   const durations: Record<string, number> = {};
   let currentStep: string | null = null;
   let currentStepStartMs: number | null = null;
+  // Earliest valid timestamp in the run — anchors step 1 so pending→first-
+  // running gaps aren't lost. Populated lazily on the first parse-able ts.
+  let workflowStartMs: number | null = null;
+  let firstStepSeen = false;
 
   for (const e of sorted) {
     const tsMs = Date.parse(e.timestamp);
     if (Number.isNaN(tsMs)) continue;
+
+    if (workflowStartMs === null) workflowStartMs = tsMs;
 
     const isTerminal = e.status === "done" || e.status === "failed" || e.status === "skipped";
     const nextStep = isTerminal ? null : e.step ?? null;
@@ -891,7 +906,15 @@ export function computeStepDurations(
 
     if (nextStep !== currentStep) {
       currentStep = nextStep;
-      currentStepStartMs = nextStep ? tsMs : null;
+      if (nextStep && !firstStepSeen) {
+        // Anchor step 1 at the workflow's earliest timestamp so the
+        // pre-first-step gap is absorbed. workflowStartMs is guaranteed
+        // non-null here because we set it above on the first valid ts.
+        currentStepStartMs = workflowStartMs ?? tsMs;
+        firstStepSeen = true;
+      } else {
+        currentStepStartMs = nextStep ? tsMs : null;
+      }
     }
   }
 
