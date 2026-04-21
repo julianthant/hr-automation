@@ -52,7 +52,7 @@ export function buildTerminationComments(
   lastDayWorked: string,
   docId: string,
 ): string {
-  return `Termination EFF ${terminationEffDate}. Last day worked: ${lastDayWorked}. Kuali form #${docId}.`;
+  return `Termination EFF ${terminationEffDate}. Last day worked ${lastDayWorked}. Kuali form #${docId}.`;
 }
 
 /**
