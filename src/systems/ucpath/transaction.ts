@@ -1,4 +1,4 @@
-import type { Page, FrameLocator } from "playwright";
+import type { Page, FrameLocator, Locator } from "playwright";
 import type { TransactionResult } from "./types.js";
 import {
   waitForPeopleSoftProcessing,
@@ -501,6 +501,22 @@ export async function clickEmployeeExperienceTab(
 
 // ─── STEP 8: Save and Submit ───
 
+export async function waitForSaveEnabled(
+  btn: Pick<Locator, "isEnabled" | "waitFor">,
+  opts: { timeoutMs?: number; pollMs?: number } = {},
+): Promise<void> {
+  const { timeoutMs = 15_000, pollMs = 500 } = opts;
+  await btn.waitFor({ state: "visible", timeout: Math.min(timeoutMs, 10_000) } as never).catch(() => {});
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await btn.isEnabled().catch(() => false)) return;
+    await new Promise((r) => setTimeout(r, pollMs));
+  }
+  throw new Error(
+    "Save and Submit remained disabled after 15 s — tab walk likely incomplete (visit all 4 Smart HR tabs + fill Initiator Comments + re-click Personal Data before save)",
+  );
+}
+
 /**
  * @param employeeName - Full name (e.g. "Ivette Lima Montes") used to find the
  *   transaction in the Transactions in Progress list after submit.
@@ -513,7 +529,14 @@ export async function clickSaveAndSubmit(
   log.step("Clicking Save and Submit...");
   await dismissModalMask(page);
 
-  await smartHR.saveAndSubmitButton(frame).click({ timeout: 10_000 });
+  const btn = smartHR.saveAndSubmitButton(frame);
+  try {
+    await waitForSaveEnabled(btn, { timeoutMs: 15_000 });
+  } catch (e) {
+    await page.screenshot({ path: `.screenshots/save-disabled-${Date.now()}.png` }).catch(() => {});
+    throw e;
+  }
+  await btn.click({ timeout: 10_000 });
   await page.waitForTimeout(5_000);
   await waitForPeopleSoftProcessing(frame, 30_000);
 
