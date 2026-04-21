@@ -12,3 +12,10 @@ export type EidLookupInput = z.infer<typeof EidLookupInputSchema>;
 export const EidLookupCrmInputSchema = EidLookupInputSchema;
 
 export type EidLookupCrmInput = EidLookupInput;
+
+/** Per-item shape for the shared-context-pool batch mode (one name per kernel item). */
+export const EidLookupItemSchema = z.object({
+  name: z.string().min(1),
+});
+
+export type EidLookupItem = z.infer<typeof EidLookupItemSchema>;

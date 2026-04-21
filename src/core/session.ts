@@ -52,11 +52,29 @@ interface LaunchOneOpts {
 }
 
 export class Session {
+  private parent: Session | null = null
+
   private constructor(private state: SessionState) {}
 
   /** Test-only factory to construct a Session with pre-built state. */
   static forTesting(state: SessionState): Session {
     return new Session(state)
+  }
+
+  /**
+   * Build a per-worker Session view on top of an already-launched parent.
+   * Pages are allocated lazily on first `page(id)` call — each worker gets
+   * its own Playwright Page opened against the parent's per-system
+   * BrowserContext. `browser: null` on each worker slot signals that the
+   * worker does not own the browser lifetime; use `closeWorkerPages()` in
+   * the worker's `finally` block and let the parent close the context/browser.
+   */
+  static forWorker(parent: Session): Session {
+    const browsers = new Map<string, SystemSlot>()
+    const readyPromises = new Map(parent.state.readyPromises)
+    const session = new Session({ systems: parent.state.systems, browsers, readyPromises })
+    session.parent = parent
+    return session
   }
 
   static async launch(systems: SystemConfig[], opts: LaunchOpts = {}): Promise<Session> {
@@ -148,7 +166,14 @@ export class Session {
     const ready = this.state.readyPromises.get(id)
     if (!ready) throw new Error(`unknown system: ${id}`)
     await ready
-    const slot = this.state.browsers.get(id)
+    let slot = this.state.browsers.get(id)
+    if (!slot && this.parent) {
+      const parentSlot = this.parent.state.browsers.get(id)
+      if (!parentSlot) throw new Error(`no browser for system: ${id}`)
+      const page = await parentSlot.context.newPage()
+      slot = { page, context: parentSlot.context, browser: null }
+      this.state.browsers.set(id, slot)
+    }
     if (!slot) throw new Error(`no browser for system: ${id}`)
     return slot.page
   }
@@ -157,6 +182,21 @@ export class Session {
     for (const slot of this.state.browsers.values()) {
       await slot.context.close()
       if (slot.browser) await slot.browser.close()
+    }
+  }
+
+  /**
+   * Close every page this worker-session opened (from Session.forWorker).
+   * Contexts and browsers belong to the parent — left untouched.
+   * Best-effort: a close failure on one page never blocks siblings.
+   */
+  async closeWorkerPages(): Promise<void> {
+    for (const slot of this.state.browsers.values()) {
+      try {
+        if (!slot.page.isClosed()) await slot.page.close()
+      } catch {
+        // best-effort
+      }
     }
   }
 

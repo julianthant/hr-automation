@@ -1,32 +1,21 @@
 /**
  * EID Lookup workflow: search employees by name in parallel tabs.
  *
- * Kernel-based. Each CLI run is one workflow run. Inside the `searching` step,
- * the handler fans out the name list across N tabs (page-per-worker) sharing
- * one BrowserContext + one UCPath Duo auth. CRM-on mode adds a second browser
- * for cross-verification.
- *
- * Excel tracker writes go through `updateEidTracker` / `updateEidTrackerNotFound`
- * with an async-mutex to serialize concurrent worker writes.
+ * Kernel-based (shared-context-pool mode). Each CLI invocation launches one
+ * UCPath browser (+ CRM browser in CRM mode), authenticates once per system,
+ * then fans out N names across N tabs in each shared BrowserContext. Each
+ * name is a separate kernel item so the dashboard shows one row per name.
  */
 
-import { Mutex } from "async-mutex";
-import type { Page } from "playwright";
-import { defineWorkflow, runWorkflow } from "../../core/index.js";
+import { defineWorkflow, runWorkflowBatch } from "../../core/index.js";
 import type { Ctx } from "../../core/types.js";
+import { trackEvent } from "../../tracker/jsonl.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
-import { runWorkerPool } from "../../utils/worker-pool.js";
 import { loginToUCPath, loginToACTCrm } from "../../auth/login.js";
 import { searchByName, parseNameInput, type EidResult } from "./search.js";
-import { searchCrmByName, datesWithinDays, type CrmRecord } from "./crm-search.js";
-import { updateEidTracker, updateEidTrackerNotFound } from "./tracker.js";
-import {
-  EidLookupInputSchema,
-  EidLookupCrmInputSchema,
-  type EidLookupInput,
-  type EidLookupCrmInput,
-} from "./schema.js";
+import { searchCrmByName, datesWithinDays } from "./crm-search.js";
+import { EidLookupItemSchema, type EidLookupItem } from "./schema.js";
 
 export interface EidLookupOptions {
   /** Number of parallel browser tabs. Default: min(names.length, 4). */
@@ -44,181 +33,107 @@ export interface LookupResult {
   error?: string;
 }
 
-const stepsNoCrm = ["ucpath-auth", "searching"] as const;
-const stepsCrm = ["ucpath-auth", "searching", "crm-auth", "cross-verification"] as const;
+const stepsNoCrm = ["searching"] as const;
+const stepsCrm = ["searching", "cross-verification"] as const;
 
 /**
- * Run the searching phase: fan out the name list across N worker tabs in the
- * shared UCPath context, write Excel rows under a mutex, collect results.
- * Used by both no-CRM and CRM-on handlers.
+ * Perform the UCPath SDCMP/HDH search for one name and stamp the result
+ * fields onto the tracker entry's data. Returns the raw results so the
+ * CRM step can cross-reference them.
  */
-async function runSearchingPhase(
-  ucpathPage: Page,
-  input: EidLookupInput,
-): Promise<LookupResult[]> {
-  const context = ucpathPage.context();
-
-  // Mutex serializes concurrent Excel writes from parallel workers — the
-  // tracker file is xlsx (not jsonl), so two workers writing simultaneously
-  // would corrupt it. JSONL writes are atomic per-line and don't need this.
-  const trackerMutex = new Mutex();
-  const lockedUpdateEidTracker = async (name: string, r: EidResult): Promise<void> => {
-    const release = await trackerMutex.acquire();
-    try { await updateEidTracker(name, r); } finally { release(); }
-  };
-  const lockedUpdateEidTrackerNotFound = async (name: string): Promise<void> => {
-    const release = await trackerMutex.acquire();
-    try { await updateEidTrackerNotFound(name); } finally { release(); }
-  };
-
-  const results: LookupResult[] = [];
-
-  log.step(`Searching ${input.names.length} name(s) with ${input.workers} parallel worker(s)...`);
-
-  await runWorkerPool({
-    items: input.names,
-    workerCount: input.workers,
-    // setup: first worker reuses the auth page; subsequent workers open new tabs
-    // in the same context (shared auth, separate page state).
-    setup: async (workerId) => {
-      if (workerId === 1) return ucpathPage;
-      return await context.newPage();
-    },
-    // process: run the search on this worker's tab, write Excel row(s) under mutex.
-    process: async (nameInput, workerPage, workerId) => {
-      const prefix = `[Worker ${workerId}]`;
-      log.step(`${prefix} Searching: "${nameInput}"`);
-      try {
-        const result = await searchByName(workerPage, nameInput);
-        if (result.sdcmpResults.length > 0) {
-          log.success(`${prefix} Found ${result.sdcmpResults.length} result(s) for "${nameInput}":`);
-          for (const r of result.sdcmpResults) {
-            log.success(
-              `  EID: ${r.emplId} | ${r.department ?? "?"} | ${r.jobCodeDescription} | ${r.name} | ${r.expectedEndDate || "Active"}`,
-            );
-            await lockedUpdateEidTracker(nameInput, r);
-          }
-          results.push({ name: nameInput, found: true, sdcmpResults: result.sdcmpResults });
-        } else {
-          log.step(`${prefix} No SDCMP results for "${nameInput}"`);
-          await lockedUpdateEidTrackerNotFound(nameInput);
-          results.push({ name: nameInput, found: false, sdcmpResults: [] });
-        }
-      } catch (err) {
-        const msg = errorMessage(err);
-        log.error(`${prefix} Failed for "${nameInput}": ${msg}`);
-        results.push({ name: nameInput, found: false, sdcmpResults: [], error: msg });
-        // DO NOT rethrow — worker pool would log a duplicate error and we
-        // already recorded the failure; the next queue item should proceed.
-      }
-    },
-  });
-
-  return results;
-}
-
-/** Pretty-print the per-name results at the end of each run. */
-function logSummary(results: LookupResult[]): void {
-  log.step("\n=== EID Lookup Summary ===");
-  for (const r of results) {
-    if (r.sdcmpResults.length > 0) {
-      const eids = r.sdcmpResults
-        .map((s) => `${s.emplId} (${s.department ?? "?"} | ${s.expectedEndDate || "Active"})`)
-        .join(", ");
-      log.success(`${r.name} → ${eids}`);
-    } else {
-      log.error(`${r.name} → ${r.error ?? "No SDCMP results"}`);
-    }
+async function searchingStep<TSteps extends readonly string[]>(
+  ctx: Ctx<TSteps, EidLookupItem>,
+  input: EidLookupItem,
+): Promise<EidResult[]> {
+  const page = await ctx.page("ucpath");
+  const result = await searchByName(page, input.name);
+  if (result.sdcmpResults.length === 0) {
+    log.step(`No SDCMP results for "${input.name}"`);
+    ctx.updateData({ emplId: "Not found" });
+    return [];
   }
+  const first = result.sdcmpResults[0];
+  log.success(
+    `Found ${result.sdcmpResults.length} result(s) for "${input.name}": EID ${first.emplId} | ${first.department ?? "?"} | ${first.jobCodeDescription}`,
+  );
+  ctx.updateData({
+    emplId: first.emplId,
+    department: first.department ?? "",
+    jobTitle: first.jobCodeDescription ?? "",
+  });
+  return result.sdcmpResults;
 }
 
 /**
- * Cross-verify one name against CRM. Logs hire-date matches; does not write
- * to the Excel tracker (tracker rows already include the SDCMP details).
+ * Cross-verify one name against CRM. Emits `crmMatch` as one of:
+ *  - "direct" — UCPath EID matched a CRM record's UCPath EID
+ *  - "date"   — UCPath effective date matched a CRM firstDayOfService (±7d)
+ *  - "none"   — CRM returned records but none matched
+ *  - ""       — CRM returned no records for this name
  */
-async function crossVerifyOne(
-  crmPage: Page,
-  nameInput: string,
-  results: LookupResult[],
+async function crossVerificationStep<TSteps extends readonly string[]>(
+  ctx: Ctx<TSteps, EidLookupItem>,
+  input: EidLookupItem,
+  sdcmp: EidResult[],
 ): Promise<void> {
+  const crmPage = await ctx.page("crm");
+
   let parsed: ReturnType<typeof parseNameInput>;
   try {
-    parsed = parseNameInput(nameInput);
+    parsed = parseNameInput(input.name);
   } catch (err) {
-    log.error(`CRM cross-verify: invalid name "${nameInput}" — ${errorMessage(err)}`);
+    log.error(`CRM cross-verify: invalid name "${input.name}" — ${errorMessage(err)}`);
+    ctx.updateData({ crmMatch: "" });
     return;
   }
-  const { lastName, first: firstName } = parsed;
 
-  let crmRecords: CrmRecord[] = [];
+  let crmRecords: Awaited<ReturnType<typeof searchCrmByName>> = [];
   try {
-    crmRecords = await searchCrmByName(crmPage, lastName, firstName);
+    crmRecords = await searchCrmByName(crmPage, parsed.lastName, parsed.first);
   } catch (err) {
-    log.error(`CRM cross-verify: search failed for "${nameInput}" — ${errorMessage(err)}`);
+    log.error(`CRM cross-verify: search failed for "${input.name}" — ${errorMessage(err)}`);
+    ctx.updateData({ crmMatch: "" });
     return;
   }
 
   if (crmRecords.length === 0) {
-    log.step(`CRM: no records for "${nameInput}"`);
+    log.step(`CRM: no records for "${input.name}"`);
+    ctx.updateData({ crmMatch: "" });
     return;
   }
 
-  // Pull the SDCMP results we found earlier for this name (best-effort match by string).
-  const ucpathHit = results.find((r) => r.name === nameInput);
-  const allSdcmp = ucpathHit?.sdcmpResults ?? [];
-
-  // Direct UCPath EID match
   for (const crec of crmRecords) {
     if (crec.ucpathEmployeeId) {
-      log.step(`CRM has UCPath EID: ${crec.ucpathEmployeeId} for ${crec.name}`);
-      const match = allSdcmp.find((r) => r.emplId === crec.ucpathEmployeeId);
+      const match = sdcmp.find((r) => r.emplId === crec.ucpathEmployeeId);
       if (match) {
         log.success(`Direct EID match: ${match.emplId} — ${match.department}`);
+        ctx.updateData({ crmMatch: "direct" });
+        return;
       }
     }
   }
 
-  // Hire date match (±7 days)
   for (const crec of crmRecords) {
     const crmDate = crec.firstDayOfService;
     if (!crmDate) continue;
-    for (const ucRec of allSdcmp) {
+    for (const ucRec of sdcmp) {
       const ucDate = ucRec.effectiveDate;
       if (!ucDate) continue;
       if (datesWithinDays(crmDate, ucDate, 7)) {
-        log.success(
-          `Date match: CRM "${crmDate}" ≈ UCPath "${ucDate}" → EID ${ucRec.emplId} | ${ucRec.department}`,
-        );
+        log.success(`Date match: CRM "${crmDate}" ≈ UCPath "${ucDate}" → EID ${ucRec.emplId}`);
+        ctx.updateData({ crmMatch: "date" });
+        return;
       }
     }
   }
+
+  ctx.updateData({ crmMatch: "none" });
 }
 
 /**
- * Format a short "Name1, Name2, Name3, ..." summary for the tracker `data`
- * record so the dashboard queue row has something meaningful from the first
- * `pending` emit (before auth completes and the handler runs).
- */
-function summarizeNames(names: string[]): string {
-  const head = names.slice(0, 3).join(", ");
-  return head + (names.length > 3 ? ", ..." : "");
-}
-
-/**
- * Collapse the search results into a single display string for the dashboard's
- * EID cell: deduped, comma-joined EIDs if any were found; "Not found" if every
- * name missed. One run can return multiple SDCMP hits per name (e.g. multiple
- * appointments sharing the same EID) — dedupe by emplId so the cell doesn't
- * show 10417041 twice for one employee.
- */
-function summarizeEids(results: LookupResult[]): string {
-  const eids = [...new Set(results.flatMap((r) => r.sdcmpResults.map((s) => s.emplId)))];
-  return eids.length > 0 ? eids.join(", ") : "Not found";
-}
-
-/**
- * No-CRM kernel definition. One UCPath system, two steps. Handler fans out
- * the name list across N worker tabs in a single shared BrowserContext.
+ * No-CRM kernel definition. One UCPath system, one step per item.
+ * Each item = one searched name; shared-context-pool fans out N tabs
+ * against a single UCPath browser + Duo auth.
  */
 export const eidLookupWorkflow = defineWorkflow({
   name: "eid-lookup",
@@ -234,39 +149,31 @@ export const eidLookupWorkflow = defineWorkflow({
   ],
   authSteps: false,
   steps: stepsNoCrm,
-  schema: EidLookupInputSchema,
+  schema: EidLookupItemSchema,
   tiling: "single",
   authChain: "sequential",
-  // Per-name results stay in Excel (one CLI run = one workflow row — see
-  // CLAUDE.md "Acceptable regression"). `searchName` is seeded from input;
-  // `emplId` is stamped after searching completes and collapses the outcome
-  // into a single cell: deduped EID list on success, "Not found" on miss.
+  batch: { mode: "shared-context-pool", poolSize: 4, preEmitPending: true },
   detailFields: [
     { key: "searchName", label: "Search" },
     { key: "emplId", label: "EID" },
+    { key: "department", label: "Dept" },
+    { key: "jobTitle", label: "Title" },
   ],
   getName: (d) => d.searchName ?? "",
   getId: (d) => d.searchName ?? "",
-  initialData: (input) => ({
-    searchName: summarizeNames(input.names),
-  }),
-  handler: async (ctx: Ctx<typeof stepsNoCrm, EidLookupInput>, input) => {
-    ctx.markStep("ucpath-auth");
-    const ucpathPage = await ctx.page("ucpath");
-
-    const results = await ctx.step("searching", async () => {
-      const r = await runSearchingPhase(ucpathPage, input);
-      ctx.updateData({ emplId: summarizeEids(r) });
-      return r;
+  initialData: (input) => ({ searchName: input.name }),
+  handler: async (ctx: Ctx<typeof stepsNoCrm, EidLookupItem>, input) => {
+    ctx.updateData({ searchName: input.name });
+    await ctx.step("searching", async () => {
+      await searchingStep(ctx, input);
     });
-
-    logSummary(results);
   },
 });
 
 /**
- * CRM-on kernel definition. Two systems (UCPath + CRM), four steps,
- * sequential auth (Duo ×2 — UCPath first, then CRM).
+ * CRM-on kernel definition. Two systems (UCPath + CRM), two handler steps.
+ * Each item = one searched name with its own UCPath tab AND its own CRM tab.
+ * Sequential auth chain — Duo ×1 UCPath then ×1 CRM, once for the whole pool.
  */
 export const eidLookupCrmWorkflow = defineWorkflow({
   name: "eid-lookup",
@@ -289,51 +196,57 @@ export const eidLookupCrmWorkflow = defineWorkflow({
   ],
   authSteps: false,
   steps: stepsCrm,
-  schema: EidLookupCrmInputSchema,
+  schema: EidLookupItemSchema,
   tiling: "auto",
   authChain: "sequential",
+  batch: { mode: "shared-context-pool", poolSize: 4, preEmitPending: true },
   detailFields: [
     { key: "searchName", label: "Search" },
     { key: "emplId", label: "EID" },
+    { key: "department", label: "Dept" },
+    { key: "jobTitle", label: "Title" },
+    { key: "crmMatch", label: "CRM Match" },
   ],
   getName: (d) => d.searchName ?? "",
   getId: (d) => d.searchName ?? "",
-  initialData: (input) => ({
-    searchName: summarizeNames(input.names),
-  }),
-  handler: async (ctx: Ctx<typeof stepsCrm, EidLookupCrmInput>, input) => {
-    ctx.markStep("ucpath-auth");
-    const ucpathPage = await ctx.page("ucpath");
-
-    ctx.markStep("crm-auth");
-    const crmPage = await ctx.page("crm");
-
-    const results = await ctx.step("searching", async () => {
-      const r = await runSearchingPhase(ucpathPage, input);
-      ctx.updateData({ emplId: summarizeEids(r) });
-      return r;
-    });
-
+  initialData: (input) => ({ searchName: input.name }),
+  handler: async (ctx: Ctx<typeof stepsCrm, EidLookupItem>, input) => {
+    ctx.updateData({ searchName: input.name });
+    const sdcmp = await ctx.step("searching", async () => searchingStep(ctx, input));
     await ctx.step("cross-verification", async () => {
-      log.step(`\n--- CRM Cross-Verification (${input.names.length} name(s)) ---`);
-      for (const nameInput of input.names) {
-        await crossVerifyOne(crmPage, nameInput, results);
-      }
+      await crossVerificationStep(ctx, input, sdcmp);
     });
-
-    logSummary(results);
   },
 });
 
 /**
+ * Dedupe preserving first-seen order. Duplicate names would collide on the
+ * name-derived itemId (`deriveItemId: item => item.name`); dedupe at the
+ * CLI boundary so the kernel never sees two items with the same id.
+ */
+export function dedupeNames(names: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const n of names) {
+    if (seen.has(n)) {
+      log.warn(`Duplicate name skipped: "${n}"`);
+      continue;
+    }
+    seen.add(n);
+    out.push(n);
+  }
+  return out;
+}
+
+/**
  * CLI adapter for `tsx src/cli.ts eid-lookup <names...>`.
  *
- * Pre-kernel phases:
- *   1. Validate inputs.
+ *   1. Validate inputs (>=1 name).
  *   2. Dry-run short-circuit: log the planned name list + CRM mode, exit 0
  *      without launching a browser.
- *   3. Pick the right workflow definition based on `useCrm`.
- *   4. Delegate to runWorkflow.
+ *   3. Dedupe duplicate names (warn + drop).
+ *   4. Pick the right workflow definition based on `useCrm`.
+ *   5. Delegate to runWorkflowBatch (shared-context-pool mode).
  */
 export async function runEidLookup(
   names: string[],
@@ -356,15 +269,32 @@ export async function runEidLookup(
     return;
   }
 
-  const input: EidLookupInput = { names, workers };
+  const uniqueNames = dedupeNames(names);
+  const items: EidLookupItem[] = uniqueNames.map((name) => ({ name }));
+  const now = new Date().toISOString();
+  const batchOpts = {
+    poolSize: workers,
+    deriveItemId: (item: unknown) => (item as EidLookupItem).name,
+    onPreEmitPending: (item: unknown, runId: string) => {
+      const n = (item as EidLookupItem).name;
+      trackEvent({
+        workflow: "eid-lookup",
+        timestamp: now,
+        id: n,
+        runId,
+        status: "pending",
+        data: { searchName: n, __name: n, __id: n },
+      });
+    },
+  };
 
   try {
-    if (useCrm) {
-      await runWorkflow(eidLookupCrmWorkflow, input);
-    } else {
-      await runWorkflow(eidLookupWorkflow, input);
-    }
-    log.success("EID lookup complete");
+    const result = useCrm
+      ? await runWorkflowBatch(eidLookupCrmWorkflow, items, batchOpts)
+      : await runWorkflowBatch(eidLookupWorkflow, items, batchOpts);
+    log.success(
+      `EID lookup complete: ${result.succeeded}/${result.total} succeeded, ${result.failed} failed`,
+    );
   } catch (err) {
     log.error(`EID lookup failed: ${errorMessage(err)}`);
     process.exit(1);

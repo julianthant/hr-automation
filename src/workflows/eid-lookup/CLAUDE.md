@@ -2,11 +2,11 @@
 
 Searches UCPath Person Organizational Summary for employees by name, filters for SDCMP business unit and Housing/Dining/Hospitality departments, with optional CRM cross-verification.
 
-**Kernel-based.** Two `defineWorkflow` definitions in `workflow.ts`:
-- `eidLookupWorkflow` (no-CRM): 1 system (UCPath), 2 steps (`ucpath-auth` → `searching`)
-- `eidLookupCrmWorkflow` (CRM-on): 2 systems (UCPath + CRM, sequential auth), 4 steps (`ucpath-auth` → `searching` → `crm-auth` → `cross-verification`)
+**Kernel-based (shared-context-pool mode).** Two `defineWorkflow` definitions in `workflow.ts`:
+- `eidLookupWorkflow` (no-CRM): 1 system (UCPath), 1 handler step per item (`searching`)
+- `eidLookupCrmWorkflow` (CRM-on): 2 systems (UCPath + CRM, sequential auth), 2 handler steps per item (`searching` → `cross-verification`)
 
-Both share one searching/cross-verify body. Inside `ctx.step("searching", ...)` the handler calls `runWorkerPool` from `src/utils/worker-pool.ts` to fan out the name list across N tabs in a single shared `BrowserContext` (page-per-worker pattern — one Duo auth, multiple parallel searches). Per-name Excel tracker writes go through an async-mutex; per-name JSONL rows are NOT emitted (one workflow run per CLI invocation — see "Acceptable regression" below).
+Each CLI invocation runs N names as N kernel items concurrently: one browser per system + one Duo per system for the whole pool, N per-worker tabs spawned lazily from each system's shared `BrowserContext`. Each name produces its own `pending → running → done/failed` tracker row in the dashboard with per-step timing.
 
 ## Selector intelligence
 
@@ -22,23 +22,28 @@ This workflow touches two systems: **ucpath**, **crm** (CRM only in `--crm` mode
 
 ## Files
 
-- `schema.ts` — Zod `EidLookupInputSchema` (`{ names: string[], workers: number }`); CRM-on alias `EidLookupCrmInputSchema` is the same shape.
+- `schema.ts` — Zod schemas. `EidLookupItemSchema` = per-kernel-item shape (`{ name }`); `EidLookupInputSchema` / `EidLookupCrmInputSchema` = legacy CLI-boundary batch shape (`{ names, workers }`) kept for backward compatibility.
 - `search.ts` — Multi-strategy name search (`searchByName`, `parseNameInput`): "Last, First Middle" → tries full → first → middle, drills into SDCMP results, filters by HDH keywords. Kernel-agnostic.
-- `crm-search.ts` — CRM cross-verification (`searchCrmByName`, `datesWithinDays`): last/first name search, extracts PPS ID + UCPath EID + hire date + dept, ±7 day date matching helper. Kernel-agnostic.
-- `tracker.ts` — Excel writer (`updateEidTracker`, `updateEidTrackerNotFound`) → `eid-lookup-tracker.xlsx`. Preserved per workflows CLAUDE.md grandfather clause.
-- `workflow.ts` — Kernel definitions (`eidLookupWorkflow`, `eidLookupCrmWorkflow`) + CLI adapter (`runEidLookup`). Dry-run branch bypasses the kernel (no browser; logs the planned name list + CRM mode + worker count).
+- `crm-search.ts` — CRM cross-verification helpers (`searchCrmByName`, `datesWithinDays`): last/first name search, extracts PPS ID + UCPath EID + hire date + dept, ±7 day date matching. Kernel-agnostic.
+- `workflow.ts` — Kernel definitions (`eidLookupWorkflow`, `eidLookupCrmWorkflow`) + shared step helpers (`searchingStep`, `crossVerificationStep`) + CLI adapter (`runEidLookup`) + `dedupeNames` helper. Dry-run branch bypasses the kernel.
 - `index.ts` — Barrel exports.
+
+No `tracker.ts` — dashboard JSONL only. The xlsx tracker was removed on 2026-04-21 (see Lessons Learned).
 
 ## Kernel Config
 
 | Field | `eidLookupWorkflow` | `eidLookupCrmWorkflow` |
 |-------|---------------------|------------------------|
 | `systems` | `[ucpath]` | `[ucpath, crm]` |
-| `steps` | `["ucpath-auth", "searching"]` | `["ucpath-auth", "searching", "crm-auth", "cross-verification"]` |
-| `schema` | `EidLookupInputSchema` | `EidLookupCrmInputSchema` |
+| `steps` | `["searching"]` | `["searching", "cross-verification"]` |
+| `schema` | `EidLookupItemSchema` | `EidLookupItemSchema` |
+| `authSteps` | `false` | `false` |
 | `authChain` | `"sequential"` | `"sequential"` |
 | `tiling` | `"single"` | `"auto"` |
-| `detailFields` | `[]` | `[]` |
+| `batch` | `{ mode: "shared-context-pool", poolSize: 4, preEmitPending: true }` | same |
+| `detailFields` | `searchName, emplId, department, jobTitle` | `+ crmMatch` |
+| `getName` / `getId` | `d.searchName` | `d.searchName` |
+| `initialData` | `{ searchName: input.name }` | same |
 
 ## Data Flow
 
@@ -46,47 +51,38 @@ This workflow touches two systems: **ucpath**, **crm** (CRM only in `--crm` mode
 CLI: tsx src/cli.ts eid-lookup "Last, First Middle" [...] [--no-crm] [--workers N] [--dry-run]
   → runEidLookup (CLI adapter)
     → if --dry-run: log planned name list + CRM mode, exit 0 (no browser)
-    → if --no-crm: runWorkflow(eidLookupWorkflow, { names, workers })
-    → else: runWorkflow(eidLookupCrmWorkflow, { names, workers })
-      → Kernel Session.launch: 1-2 browsers, sequential auth (Duo ×1 or ×2)
-      → Handler markStep("ucpath-auth"); await ctx.page("ucpath")
-      → (CRM mode) markStep("crm-auth"); await ctx.page("crm")
-      → ctx.step("searching", async () => {
-          runWorkerPool({
-            items: names,
-            workerCount,
-            setup: workerId => workerId === 1 ? authPage : context.newPage(),
-            process: async (name, workerPage) => {
-              const result = await searchByName(workerPage, name)
-              for (const r of result.sdcmpResults) await lockedUpdateEidTracker(name, r)
-            },
-          })
-          ctx.updateData({ totalNames, foundCount, missingCount })
-        })
-      → (CRM mode) ctx.step("cross-verification", async () => {
-          for (const name of names) await crossVerifyOne(crmPage, name, results)
-        })
-      → Console summary table
+    → dedupeNames: drop + warn on exact duplicates
+    → names.map(n => ({ name: n }))  → kernel items
+    → onPreEmitPending: trackEvent("pending") per item with searchName seeded
+    → runWorkflowBatch(wf, items, { poolSize: workers, deriveItemId, onPreEmitPending })
+      → Dispatch to runWorkflowSharedContextPool
+        → Session.launch([ucpath(, crm)]) ONCE: 1-2 browsers, Duo ×1 or ×2
+        → N workers, each a Session.forWorker view of the parent:
+          - Lazy per-worker Page opens on first ctx.page(id) from shared context
+          - runOneItem wraps each item in withTrackedWorkflow
+          - handler: updateData({ searchName }); step("searching", ...)
+                     [CRM mode] step("cross-verification", ...)
+          - step failures become per-item `failed` tracker rows; batch continues
+        → Worker teardown: closeWorkerPages (no context/browser close)
+      → Parent session.close: close contexts + browsers exactly once
+    → Final log: "N/M succeeded, K failed"
 ```
 
-## Worker pool semantics
+## Shared-context pool semantics
 
-- N workers (`--workers`, default `min(names.length, 4)`) share one `BrowserContext`. Worker 1 reuses the auth page; workers 2..N each call `context.newPage()` for a fresh tab.
-- Queue-based distribution via `runWorkerPool` from `src/utils/worker-pool.ts`. Each worker pulls names from a shared queue until empty.
-- Per-name failures (search throws) are caught in the `process` callback, logged, and push a `failed` LookupResult. The queue continues. The kernel sees one workflow run with one transition — no per-name dashboard rows.
-- Concurrent Excel writes are serialized via an async `Mutex` around `updateEidTracker` / `updateEidTrackerNotFound`. JSONL writes (handled by the kernel) need no coordination — `appendFileSync` is atomic per-line.
-
-## Acceptable regression: per-name JSONL rows
-
-Pre-kernel, every name was wrapped in its own `withTrackedWorkflow` so the dashboard showed one row per name. The kernel migration ships ONE row per CLI invocation (e.g. "lookup 20 names" → 1 dashboard row, not 20). Per-name results still land in Excel + console logs.
-
-Restoring per-name rows requires `runWorkflowBatch` with a `mode: "pool"` variant that respects shared-context semantics (currently the pool launches one browser per worker — too heavy for eid-lookup's "1 Duo, N tabs" model). Tracked under deviation #3 in the migration plan; out of scope for this migration.
+- N workers (`--workers`, default `min(names.length, 4)`) share per-system `BrowserContext`s. Each worker opens its own Page on first `ctx.page(id)` call (lazy allocation).
+- Queue-based distribution inside `runWorkflowSharedContextPool` — workers pull items from a shared queue until empty.
+- Per-name failures become `failed` tracker rows via `runOneItem`'s catch; the worker continues to the next queue item.
+- Duplicate names in the CLI input are deduped at the adapter level (warn + drop). Duplicate-name requests would collide on the name-derived `itemId`.
+- JSONL writes (kernel-owned `trackEvent`) need no coordination — `appendFileSync` is atomic per-line.
 
 ## Dashboard integration
 
 - Workflow name: `eid-lookup`
-- Step config (declared on `defineWorkflow({ steps })`): `["ucpath-auth", "searching", "crm-auth", "cross-verification"]` — no-CRM mode only fires the first two; CRM mode fires all four.
-- Detail fields (declared on `defineWorkflow({ detailFields })`): `searchName`, `emplId`, `started`, `elapsed`. (`name` for the dashboard's `getName` resolver comes from `ctx.updateData` indirectly — currently empty after migration since per-name updates went away. Acceptable for this migration; the row's ID is the kernel-derived UUID + the rolled-up summary stats.)
+- Steps (per-item): `["searching"]` no-CRM / `["searching", "cross-verification"]` CRM mode.
+  - One-time auth runs BEFORE the pool starts and does NOT emit per-item auth rows.
+- Detail fields: `searchName, emplId, department, jobTitle` (+ `crmMatch` in CRM mode).
+- Item ID on the dashboard = the searched name (deduped). `__name` / `__id` seeded on the initial pending row via `onPreEmitPending` so the row reads correctly before `searching` runs.
 
 ## Name Search Strategy
 
@@ -103,8 +99,9 @@ Restoring per-name rows requires `runWorkflowBatch` with a `mode: "pool"` varian
 - "View All" button may need re-clicking after drill-in if results are paginated (rowIndex > 10)
 - CRM search uses different strategy: last name first, then first name
 - CRM date matching uses ±7 day tolerance for hire date comparison
-- Parallel mode: shared auth context (one Duo), multiple tabs, queue-based distribution
-- Browsers kept open for inspection (no automatic close)
+- Each worker gets its own UCPath tab AND its own CRM tab — concurrent CRM name searches on separate pages. If ACT CRM ever rate-limits, revert is to collapse `cross-verification` into a post-pool pass (separate step list, single CRM page).
+- Browsers kept open for inspection (no automatic close past `parent.close()` at end of pool)
+- Only the FIRST SDCMP result per name stamps the detail fields; the full result list lives in the step log output. Multi-result names are rare (one employee ≈ one SDCMP record).
 
 ## Verified Selectors
 
@@ -112,4 +109,5 @@ Restoring per-name rows requires `runWorkflowBatch` with a `mode: "pool"` varian
 
 ## Lessons Learned
 
-- **2026-04-17: Migrated to kernel.** `runEidLookup` is a CLI adapter over `runWorkflow(eidLookupWorkflow OR eidLookupCrmWorkflow, { names, workers })`. The handler calls `runWorkerPool` inside `ctx.step("searching", ...)` — `runWorkerPool` is a helper, NOT a kernel mode. Per-name JSONL emit was deliberately dropped (one workflow run per CLI invocation); per-name results stay in `eid-lookup-tracker.xlsx`. Don't reintroduce raw `launchBrowser` in the handler. Don't try to switch to `runWorkflowBatch`/`runWorkflowPool` until the kernel grows a shared-context pool mode — today's pool launches one browser per worker, which would re-trigger Duo per worker. **Live run pending user verification** — UCPath + CRM Duo can't be approved this session, so only dry-run + tests validate this migration.
+- **2026-04-21: Shared-context-pool + xlsx removal.** Replaced the handler-side `runWorkerPool` with the kernel's new `batch.mode: "shared-context-pool"`. TData is now `{ name: string }` — one kernel item per name, one dashboard row per name, same "1 Duo per system, N tabs" browser topology. CRM cross-verification moved inside the per-item handler (was a post-pool pass). Excel tracker (`tracker.ts` + `eid-lookup-tracker.xlsx`) fully removed — JSONL + dashboard are the only observability. `async-mutex` use dropped with the xlsx writes. Kernel addition: `Session.forWorker(parent)` + lazy `page(id)` branch + `closeWorkerPages()`. **Live run pending user verification** — UCPath + CRM Duo can't be approved this session; dry-run + unit tests validate this migration.
+- **2026-04-17: Migrated to kernel (historical).** First kernel cut used `runWorkerPool` inside `ctx.step("searching", ...)` as a helper. One workflow run per CLI invocation; per-name JSONL rows were the "Acceptable regression" closed by the 2026-04-21 change. Left here to explain why `search.ts` / `crm-search.ts` are kernel-agnostic helpers (they were authored before the kernel existed and survive the 2026-04-21 rewrite untouched).
