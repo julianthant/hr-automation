@@ -58,6 +58,8 @@ describe("buildSelectorWarningsHandler", () => {
   it("groups and counts `selector fallback triggered: <label>` warns", () => {
     const today = isoDate(0);
     writeLog(`onboarding-${today}-logs.jsonl`, [
+      // Legacy (pre-timing) format — kept as a fixture to prove the regex is
+      // backward-compatible with older JSONL files on disk.
       {
         workflow: "onboarding",
         itemId: "a",
@@ -65,19 +67,24 @@ describe("buildSelectorWarningsHandler", () => {
         message: "selector fallback triggered: ucpath.jobData.compRateCodeInput",
         ts: new Date().toISOString(),
       },
+      // New slow-success (warn) format emitted by safe.ts after Task 2.1.
       {
         workflow: "onboarding",
         itemId: "b",
         level: "warn",
-        message: "selector fallback triggered: ucpath.jobData.compRateCodeInput",
+        message:
+          "selector fallback triggered: ucpath.jobData.compRateCodeInput (click took 3400ms — likely fallback-hit or page stall)",
         ts: new Date(Date.now() + 1000).toISOString(),
       },
-      // A different label
+      // New failure (error) format — shares the same anchor so it aggregates
+      // under the same label. Exercises the warn/error OR branch in the
+      // handler.
       {
         workflow: "onboarding",
         itemId: "c",
-        level: "warn",
-        message: "selector fallback triggered: ucpath.personalData.ssnInput",
+        level: "error",
+        message:
+          "selector fallback triggered: ucpath.personalData.ssnInput (fill failed after 10000ms — TimeoutError: locator.fill timed out)",
         ts: new Date(Date.now() + 2000).toISOString(),
       },
     ]);
@@ -85,7 +92,8 @@ describe("buildSelectorWarningsHandler", () => {
     const handler = buildSelectorWarningsHandler(TEST_DIR);
     const rows = handler(7);
     assert.equal(rows.length, 2);
-    // Sorted by count desc — compRateCodeInput (2) first, then ssnInput (1)
+    // Sorted by count desc — compRateCodeInput (2: 1 legacy + 1 new-format)
+    // aggregates under one label regardless of the timing suffix.
     assert.equal(rows[0].label, "ucpath.jobData.compRateCodeInput");
     assert.equal(rows[0].count, 2);
     assert.deepEqual(rows[0].workflows, ["onboarding"]);

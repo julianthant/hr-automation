@@ -12,11 +12,24 @@ belong in the system that owns them, not in common.
   `dismissModalMask` / `hidePeopleSoftModalMask` re-export this from
   `src/systems/ucpath/navigate.ts` and `personal-data.ts`.
 - `safe.ts` — `safeClick(locator, { label })` and `safeFill(locator, value,
-  { label })`: instrumented wrappers that log a
-  `log.warn("selector fallback triggered: <label>")` when the underlying
-  Playwright call throws (typically a `TimeoutError` from an exhausted
-  `.or()` fallback chain). Best-effort — never stalls; re-throws the
-  original error so callers still see the failure.
+  { label })`: instrumented wrappers around Playwright's click/fill. Three
+  tiers of instrumentation, gated on call latency:
+    - **quick success** (≤ 3s) — `log.debug("<label>: clicked in Nms")`
+      (only surfaces on stdout when `DEBUG=true`; always written to JSONL
+      when a log context is active).
+    - **slow success** (> 3s) — `log.warn("selector fallback triggered:
+      <label> (click took Nms — likely fallback-hit or page stall)")`.
+      Inferred fallback-hit: Playwright's `.or()` doesn't surface which
+      branch matched, so we use elapsed time as a proxy. The wording is
+      hedged because a plain slow page load can also push latency past 3s
+      without any fallback involvement.
+    - **failure** — `log.error("selector fallback triggered: <label>
+      (click failed after Nms — <error message>)")` then re-throws the
+      original error. Shares the `selector fallback triggered:` marker
+      with the warn case so the dashboard's Selector Health Panel
+      aggregates both on `<label>`.
+  The 3_000ms threshold is overridable via a `_slowThresholdMs` option
+  (underscore-prefixed = test-only escape hatch).
 - `index.ts` — Barrel exports.
 
 ## Pattern
@@ -31,10 +44,18 @@ await safeClick(
 );
 ```
 
-When the underlying `.click()` throws (primary and all fallbacks exhausted),
-you'll see `! selector fallback triggered: ucpath.jobData.compRateCodeInput`
-in the log stream. That's the signal the anchor has rotted and needs a live
-re-mapping via playwright-cli.
+Example log lines you'll see in practice:
+
+```
+·  ucpath.jobData.compRateCodeInput: clicked in 87ms
+!  selector fallback triggered: ucpath.jobData.compRateCodeInput (click took 3421ms — likely fallback-hit or page stall)
+✗  selector fallback triggered: ucpath.jobData.compRateCodeInput (click failed after 10000ms — TimeoutError: locator.click timed out)
+```
+
+The second and third are the re-mapping signals: primary anchor is either
+slow enough that a fallback branch likely won, or the primary + all
+fallbacks are stale. Trigger a live re-mapping via playwright-cli when you
+see these accumulating in the dashboard's Selector Health Panel.
 
 ## Why not more?
 
@@ -66,4 +87,27 @@ to scan the existing catalogs. The CLI ranks both selectors and lessons.
 
 ## Lessons Learned
 
-*(empty — add entries as common helpers grow)*
+### 2026-04-21 — `safeClick`/`safeFill` log contract changed (Task 2.1)
+
+Before: single `log.warn("selector fallback triggered: <label>")` only on
+throw. After: three-tier timing-based instrumentation (quick-success →
+debug, slow-success → warn, failure → error), all three failure/slow
+branches sharing the `selector fallback triggered: <label>` anchor.
+
+Paired change: the Selector Health Panel regex in `src/tracker/dashboard.ts`
+(`SELECTOR_FALLBACK_RE`) was updated to stop the capture at the first `(`
+so label aggregation is stable across legacy (no suffix), slow-success
+(`(click took Nms — ...)`), and failure (`(click failed after Nms — ...)`)
+shapes. The handler also now accepts `level === "error"` alongside
+`level === "warn"` — otherwise the most valuable signal (primary + all
+fallbacks stale) would not feed the panel.
+
+If you change the message shape in `safe.ts` again, keep these three
+invariants:
+
+1. The literal string `selector fallback triggered: <label>` must be the
+   prefix (with `<label>` unbroken — no spaces inside, no prefix tokens)
+   on every dashboard-visible branch.
+2. Anything after `<label>` must start with ` (` so the dashboard regex
+   captures cleanly.
+3. The log `level` must be `warn` (slow-success) or `error` (failure).
