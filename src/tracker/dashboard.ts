@@ -569,17 +569,27 @@ export interface SelectorWarningRow {
 
 /**
  * Regex that extracts the selector label from a `safeClick`/`safeFill`
- * instrumentation warn. Keep in sync with the format in
+ * instrumentation log line. Keep in sync with the format in
  * `src/systems/common/safe.ts`.
+ *
+ * Matches all three shapes that share the `selector fallback triggered:`
+ * anchor:
+ *   - legacy (pre-timing) : `selector fallback triggered: <label>`
+ *   - slow-success (warn) : `selector fallback triggered: <label> (click took Nms — ...)`
+ *   - failure (error)     : `selector fallback triggered: <label> (click failed after Nms — ...)`
+ *
+ * The lazy `[^(]+?` capture stops at the first `(` of the timing suffix (if
+ * present) so every variant aggregates under the same `<label>` key.
  */
-const SELECTOR_FALLBACK_RE = /selector fallback triggered:\s*(.+)$/;
+const SELECTOR_FALLBACK_RE = /selector fallback triggered:\s*([^(]+?)\s*(?:\(.*)?$/;
 
 /**
  * Build a handler that scans log JSONL files in `dir` across the current day
- * plus `days - 1` prior days, keeps entries whose `level === "warn"` and
- * message matches `selector fallback triggered: <label>`, and returns one
- * aggregated `SelectorWarningRow` per distinct label (sorted by count desc,
- * tie-broken by most recent `lastTs`).
+ * plus `days - 1` prior days, keeps entries whose `level` is `warn` (slow
+ * success) or `error` (failure) and whose message matches
+ * `selector fallback triggered: <label>` (optionally followed by a timing
+ * suffix), and returns one aggregated `SelectorWarningRow` per distinct
+ * label (sorted by count desc, tie-broken by most recent `lastTs`).
  *
  * Factored out of the HTTP handler so it can be unit-tested against a temp
  * directory without booting the SSE server.
@@ -627,7 +637,13 @@ export function buildSelectorWarningsHandler(
         } catch {
           continue;
         }
-        if (entry.level !== "warn" || typeof entry.message !== "string") continue;
+        // Accept both warn (slow-success) and error (failure) — they share
+        // the `selector fallback triggered:` marker. See safe.ts for shapes.
+        if (
+          (entry.level !== "warn" && entry.level !== "error") ||
+          typeof entry.message !== "string"
+        )
+          continue;
         const match = entry.message.match(SELECTOR_FALLBACK_RE);
         if (!match) continue;
         const label = match[1].trim();
