@@ -72,6 +72,13 @@ export interface WorkflowInstanceState {
   active: boolean;
   /** True while the spawning Node process (and therefore its Playwright browsers) is still alive. */
   pidAlive: boolean;
+  /**
+   * True when workflow_end (finalStatus=failed) fired but no browser_launch event
+   * was ever emitted for this instance — i.e. the workflow crashed before
+   * Playwright launched a browser. Used by the dashboard to render a
+   * "Launch failed" placeholder in place of the usual session/browser chips.
+   */
+  crashedOnLaunch?: boolean;
   currentItemId: string | null;
   currentStep: string | null;
   finalStatus: "done" | "failed" | null;
@@ -170,6 +177,23 @@ export function rebuildSessionState(dir?: string): SessionState {
     // Intentionally do NOT clear currentItemId on item_complete — the dashboard
     // keeps the last item visible after the workflow ends so users can see which
     // employee/record the session was for, even after it's done.
+  }
+
+  // Flag workflows that crashed before any browser could launch. A workflow that
+  // ended in failed status but never emitted a browser_launch is indistinguishable
+  // from normal "no-active-sessions" in the dashboard UI — this flag lets
+  // SessionPanel render a dedicated "Launch failed" placeholder so the user
+  // knows the run crashed early and where to look for details.
+  const instancesWithBrowserLaunch = new Set<string>();
+  for (const e of events) {
+    if (e.type === "browser_launch" && e.workflowInstance) {
+      instancesWithBrowserLaunch.add(e.workflowInstance);
+    }
+  }
+  for (const wf of wfMap.values()) {
+    if (wf.finalStatus === "failed" && !instancesWithBrowserLaunch.has(wf.instance)) {
+      wf.crashedOnLaunch = true;
+    }
   }
 
   // Build Duo queue (unresolved requests only)

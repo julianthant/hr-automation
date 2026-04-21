@@ -188,6 +188,36 @@ describe("rebuildSessionState — workflows", () => {
     assert.equal(state.workflows[0].active, true);
     assert.equal(state.workflows[0].pidAlive, true);
   });
+
+  it("flags workflow as crashedOnLaunch when end=failed and no browser_launch occurred", () => {
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "Crashed 1" }, dir);
+    emitSessionEvent({
+      type: "workflow_end", workflowInstance: "Crashed 1", finalStatus: "failed",
+    }, dir);
+    const state = rebuildSessionState(dir);
+    const wf = state.workflows.find((w) => w.instance === "Crashed 1");
+    assert.ok(wf, "workflow entry should exist");
+    assert.equal(wf!.crashedOnLaunch, true);
+    assert.equal(wf!.finalStatus, "failed");
+  });
+
+  it("does NOT flag crashedOnLaunch when browser_launch emitted before failure", () => {
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "Partial 1" }, dir);
+    emitSessionEvent({
+      type: "session_create", workflowInstance: "Partial 1", sessionId: "S1",
+    }, dir);
+    emitSessionEvent({
+      type: "browser_launch", workflowInstance: "Partial 1",
+      sessionId: "S1", browserId: "b1", system: "Kuali",
+    }, dir);
+    emitSessionEvent({
+      type: "workflow_end", workflowInstance: "Partial 1", finalStatus: "failed",
+    }, dir);
+    const state = rebuildSessionState(dir);
+    const wf = state.workflows.find((w) => w.instance === "Partial 1");
+    assert.ok(wf);
+    assert.notEqual(wf!.crashedOnLaunch, true);
+  });
 });
 
 describe("rebuildSessionState — duoQueue", () => {

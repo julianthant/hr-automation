@@ -13,7 +13,10 @@ export function SessionPanel() {
   // dies. We keep the workflow visible through the DONE/FAILED pill until then, and
   // drop it automatically once pidAlive flips to false (i.e., user closed the browser
   // / Ctrl+C'd the run / dry-run process naturally exited).
-  const visible = state.workflows.filter((w) => w.pidAlive);
+  // Include crashed-on-launch workflows even after pidAlive flips false — the
+  // placeholder is how the user learns that an instance failed before any
+  // browser could launch.
+  const visible = state.workflows.filter((w) => w.pidAlive || w.crashedOnLaunch);
   const isEmpty = visible.length === 0;
 
   return (
