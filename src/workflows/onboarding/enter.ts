@@ -138,7 +138,10 @@ export function buildTransactionPlan(
   // Step 9: Job Data tab
   plan.add(
     "Click Job Data tab",
-    () => clickJobDataTab(page, getContentFrame(page)),
+    async () => {
+      await clickJobDataTab(page, getContentFrame(page));
+      log.step(`[TabWalk] Job Data loaded (tabs visited: Personal Data \u2713, Job Data \u2713)`);
+    },
   );
 
   // Step 10: Fill job data
@@ -158,13 +161,19 @@ export function buildTransactionPlan(
   // Step 11: Earns Dist tab
   plan.add(
     "Click Earns Dist tab",
-    () => clickEarnsDistTab(page, getContentFrame(page)),
+    async () => {
+      await clickEarnsDistTab(page, getContentFrame(page));
+      log.step(`[TabWalk] Earns Dist loaded (tabs visited: Personal Data \u2713, Job Data \u2713, Earns Dist \u2713)`);
+    },
   );
 
   // Step 12: Employee Experience tab
   plan.add(
     "Click Employee Experience tab",
-    () => clickEmployeeExperienceTab(page, getContentFrame(page)),
+    async () => {
+      await clickEmployeeExperienceTab(page, getContentFrame(page));
+      log.step(`[TabWalk] Employee Experience loaded (tabs visited: Personal Data \u2713, Job Data \u2713, Earns Dist \u2713, Employee Experience \u2713)`);
+    },
   );
 
   // Step 13: Initiator comments (fill on last tab before submit)
@@ -173,6 +182,7 @@ export function buildTransactionPlan(
     async () => {
       const frame = getContentFrame(page);
       await frame.locator("#UC_SS_TRANSACT_COMMENTS").fill(commentsText, { timeout: 10_000 });
+      log.step(`[TabWalk] Initiator Comments filled (${commentsText.length} chars)`);
     },
   );
 
@@ -186,6 +196,7 @@ export function buildTransactionPlan(
       await page.waitForTimeout(3_000);
       await waitForPeopleSoftProcessing(frame, 10_000);
       log.success("Personal Data tab loaded (all tabs visited)");
+      log.step(`[TabWalk] Personal Data re-clicked — all 4 tabs visited, Save should now be enabled`);
     },
   );
 
