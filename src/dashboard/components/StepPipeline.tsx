@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 import { formatStepName, formatStepDuration, type TrackerEntry } from "./types";
 import { Popover, PopoverTrigger, PopoverContent } from "./ui/popover";
@@ -169,6 +169,13 @@ function AuthSuperChip({ children }: AuthSuperChipProps) {
     closeTimer.current = setTimeout(() => setOpen(false), 200);
   };
 
+  useEffect(() => {
+    return () => {
+      if (openTimer.current) clearTimeout(openTimer.current);
+      if (closeTimer.current) clearTimeout(closeTimer.current);
+    };
+  }, []);
+
   const groupStatus = authGroupStatus(children);
 
   const aggregate = computeAuthGroupDuration(children);
@@ -189,11 +196,14 @@ function AuthSuperChip({ children }: AuthSuperChipProps) {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <div
+        <button
+          type="button"
           onMouseEnter={scheduleOpen}
           onMouseLeave={scheduleClose}
-          title={hoverTitle}
-          className="flex-1 min-w-[86px] flex flex-col justify-center items-start gap-1.5 cursor-default"
+          onFocus={scheduleOpen}
+          onBlur={scheduleClose}
+          aria-label={hoverTitle}
+          className="flex-1 min-w-[86px] flex flex-col justify-center items-start gap-1.5 cursor-default focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm"
           style={{ background: "none", border: "none", padding: 0, textAlign: "left" }}
         >
           {/* Label */}
@@ -257,7 +267,7 @@ function AuthSuperChip({ children }: AuthSuperChipProps) {
           >
             {durationLabel || (isPending ? "—" : isActive ? "…" : "—")}
           </span>
-        </div>
+        </button>
       </PopoverTrigger>
       <PopoverContent
         align="center"
