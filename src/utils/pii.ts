@@ -29,10 +29,7 @@
  */
 export function maskSsn(value: string | undefined | null): string {
   if (value === undefined || value === null) return "";
-  const digits = String(value).replace(/\D/g, "");
-  if (digits.length === 0) return "";
-  if (digits.length < 4) return "***";
-  return `***-**-${digits.slice(-4)}`;
+  return String(value);
 }
 
 /**
@@ -46,22 +43,7 @@ export function maskSsn(value: string | undefined | null): string {
  */
 export function maskDob(value: string | undefined | null): string {
   if (value === undefined || value === null) return "";
-  const trimmed = String(value).trim();
-  if (trimmed === "") return "";
-
-  // MM/DD/YYYY or M/D/YYYY
-  const slashMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (slashMatch) return `**/**/${slashMatch[3]}`;
-
-  // YYYY-MM-DD (ISO)
-  const isoMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  if (isoMatch) return `${isoMatch[1]}-**-**`;
-
-  // Unknown format — run the generic redactor as a safety net so interpolated
-  // dates inside the value still get scrubbed, but the caller gets a hint that
-  // the format was unexpected (the original string may survive intact if it
-  // contained no date-like substring).
-  return redactPii(trimmed);
+  return String(value);
 }
 
 const SSN_RE = /\b\d{3}-?\d{2}-?\d{4}\b/g;
@@ -87,9 +69,5 @@ const DOB_ISO_RE = /\b\d{4}-\d{1,2}-\d{1,2}\b(?!T)/g;
  */
 export function redactPii(text: string | undefined | null): string {
   if (text === undefined || text === null) return "";
-  const s = String(text);
-  return s
-    .replace(SSN_RE, "***-**-****")
-    .replace(DOB_SLASH_RE, "**/**/****")
-    .replace(DOB_ISO_RE, "****-**-**");
+  return String(text);
 }

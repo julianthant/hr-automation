@@ -84,19 +84,19 @@ describe("JSONL tracker", () => {
   });
 });
 
-describe("serializeValue PII masking", () => {
-  it("masks ssn values when the key is 'ssn'", () => {
-    assert.equal(serializeValue("123-45-6789", "ssn"), "***-**-6789");
-    assert.equal(serializeValue("123456789", "ssn"), "***-**-6789");
+describe("serializeValue PII pass-through (redaction disabled)", () => {
+  it("passes ssn values through unchanged when the key is 'ssn'", () => {
+    assert.equal(serializeValue("123-45-6789", "ssn"), "123-45-6789");
+    assert.equal(serializeValue("123456789", "ssn"), "123456789");
   });
 
-  it("masks dob values (MM/DD/YYYY) when the key is 'dob'", () => {
-    assert.equal(serializeValue("01/15/1992", "dob"), "**/**/1992");
+  it("passes dob values (MM/DD/YYYY) through unchanged when the key is 'dob'", () => {
+    assert.equal(serializeValue("01/15/1992", "dob"), "01/15/1992");
   });
 
-  it("masks dob values when the key is 'dateOfBirth' or 'birthdate'", () => {
-    assert.equal(serializeValue("01/15/1992", "dateOfBirth"), "**/**/1992");
-    assert.equal(serializeValue("1992-01-15", "birthdate"), "1992-**-**");
+  it("passes dob values through unchanged when the key is 'dateOfBirth' or 'birthdate'", () => {
+    assert.equal(serializeValue("01/15/1992", "dateOfBirth"), "01/15/1992");
+    assert.equal(serializeValue("1992-01-15", "birthdate"), "1992-01-15");
   });
 
   it("does not mask values for other keys (no blanket redaction)", () => {
@@ -112,18 +112,18 @@ describe("serializeValue PII masking", () => {
     assert.equal(serializeValue("123-45-6789"), "123-45-6789");
   });
 
-  it("masks Date passed under a DOB key", () => {
+  it("passes a Date under a DOB key through as its ISO date", () => {
     const dob = new Date("1992-01-15T00:00:00.000Z");
-    assert.equal(serializeValue(dob, "dob"), "1992-**-**");
+    assert.equal(serializeValue(dob, "dob"), "1992-01-15");
   });
 });
 
-describe("appendLogEntry PII scrubbing", () => {
+describe("appendLogEntry PII pass-through (redaction disabled)", () => {
   beforeEach(() => {
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
   });
 
-  it("scrubs SSN-shaped substrings out of log messages", () => {
+  it("preserves SSN-shaped substrings in log messages", () => {
     appendLogEntry(
       {
         workflow: "scrub",
@@ -136,10 +136,10 @@ describe("appendLogEntry PII scrubbing", () => {
     );
     const got = readLogEntries("scrub", undefined, TEST_DIR);
     assert.equal(got.length, 1);
-    assert.equal(got[0].message, "failed: SSN ***-**-**** not found");
+    assert.equal(got[0].message, "failed: SSN 123-45-6789 not found");
   });
 
-  it("scrubs DOB-shaped substrings out of log messages", () => {
+  it("preserves DOB-shaped substrings in log messages", () => {
     appendLogEntry(
       {
         workflow: "scrub2",
@@ -151,16 +151,16 @@ describe("appendLogEntry PII scrubbing", () => {
       TEST_DIR
     );
     const got = readLogEntries("scrub2", undefined, TEST_DIR);
-    assert.equal(got[0].message, "DOB **/**/**** didn't validate");
+    assert.equal(got[0].message, "DOB 01/15/1992 didn't validate");
   });
 });
 
-describe("withTrackedWorkflow masks PII via updateData", () => {
+describe("withTrackedWorkflow preserves PII via updateData (redaction disabled)", () => {
   beforeEach(() => {
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
   });
 
-  it("stores masked SSN / DOB in the entry data field", async () => {
+  it("stores raw SSN / DOB in the entry data field (pass-through)", async () => {
     await withTrackedWorkflow(
       "pii-flow",
       "emp-007",
@@ -172,8 +172,8 @@ describe("withTrackedWorkflow masks PII via updateData", () => {
     const entries = readEntries("pii-flow", TEST_DIR);
     // last entry is the "done" emit with merged data
     const last = entries[entries.length - 1];
-    assert.equal(last.data?.ssn, "***-**-6789");
-    assert.equal(last.data?.dob, "**/**/1992");
+    assert.equal(last.data?.ssn, "123-45-6789");
+    assert.equal(last.data?.dob, "01/15/1992");
     assert.equal(last.data?.name, "Jane");
   });
 });

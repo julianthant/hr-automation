@@ -1152,7 +1152,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
           }
         }
 
-        filtered.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+        filtered.sort((a, b) => (a.timestamp ?? "").localeCompare(b.timestamp ?? ""));
 
         if (firstTick) {
           if (filtered.length > 0) res.write(`data: ${JSON.stringify(filtered)}\n\n`);

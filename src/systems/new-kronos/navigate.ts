@@ -174,20 +174,23 @@ export async function getTimecardLastDate(page: Page): Promise<string | null> {
   const result = await page.evaluate(() => {
     const year = new Date().getFullYear();
 
-    // Get date rows from pinned container
-    const pinned = document.querySelector(".ui-grid-pinned-container");
-    if (!pinned) return null;
+    const viewports = document.querySelectorAll(".ui-grid-viewport");
+    if (viewports.length < 2) return null;
+
+    // First viewport is the left pinned column (dates)
+    // Last viewport is the right scrollable data column (punches)
+    const dateVp = viewports[0];
+    const dataVp = viewports[viewports.length - 1];
 
     const dateRows: string[] = [];
-    pinned.querySelectorAll("[role='row']").forEach((r) => {
+    let lastSeenDate = "";
+    dateVp.querySelectorAll("[role='row']").forEach((r) => {
       const t = r.textContent?.trim().replace(/[^\w\s/]/g, "").trim() ?? "";
-      if (/^[A-Z][a-z]{2}\s+\d+\/\d+$/.test(t)) dateRows.push(t);
+      if (/^[A-Z][a-z]{2}\s+\d+\/\d+$/.test(t)) {
+        lastSeenDate = t;
+      }
+      dateRows.push(lastSeenDate);
     });
-
-    // Get data rows from viewport (last viewport has the scrollable data)
-    const viewports = document.querySelectorAll(".ui-grid-viewport");
-    const dataVp = viewports[viewports.length - 1];
-    if (!dataVp) return null;
 
     const dataRows = dataVp.querySelectorAll("[role='row']");
 

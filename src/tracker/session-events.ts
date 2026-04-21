@@ -231,15 +231,26 @@ export function generateInstanceName(workflowType: string): string {
   const label = labels[workflowType] || workflowType;
 
   const events = readSessionEvents();
-  const starts = new Set<string>();
-  const ends = new Set<string>();
+  // Count starts and ends per instance name. A name is "active" when it has
+  // been started more times than it has ended (handles re-use across sessions).
+  const startCount = new Map<string, number>();
+  const endCount = new Map<string, number>();
   for (const e of events) {
-    if (e.type === "workflow_start") starts.add(e.workflowInstance);
-    if (e.type === "workflow_end") ends.add(e.workflowInstance);
+    if (e.type === "workflow_start") {
+      startCount.set(e.workflowInstance, (startCount.get(e.workflowInstance) ?? 0) + 1);
+    }
+    if (e.type === "workflow_end") {
+      endCount.set(e.workflowInstance, (endCount.get(e.workflowInstance) ?? 0) + 1);
+    }
   }
 
   let n = 1;
-  while (starts.has(`${label} ${n}`) && !ends.has(`${label} ${n}`)) {
+  while (true) {
+    const name = `${label} ${n}`;
+    const s = startCount.get(name) ?? 0;
+    const e = endCount.get(name) ?? 0;
+    // Name is available if it was never started, or all starts have been ended
+    if (s <= e) break;
     n++;
   }
   return `${label} ${n}`;
