@@ -132,6 +132,14 @@ async function checkOldKronosResult(page: Page): Promise<boolean> {
  * between docs, which navigates each system's `resetUrl` so the next doc starts
  * from a clean page state.
  */
+
+export function resolveJobSummaryResult(
+  result: PromiseSettledResult<JobSummaryData | undefined>,
+): JobSummaryData | undefined {
+  if (result.status === "fulfilled") return result.value;
+  throw new Error(`UCPath Job Summary extraction failed: ${errorMessage(result.reason)}`);
+}
+
 export const separationsWorkflow = defineWorkflow({
   name: "separations",
   label: "Separations",
@@ -296,10 +304,11 @@ export const separationsWorkflow = defineWorkflow({
     } else {
       log.error(`[New Kronos] Error: ${errorMessage(phase1.newK.reason)}`);
     }
-    if (phase1.jobSummary.status === "fulfilled") {
-      jobSummaryData = phase1.jobSummary.value;
-    } else {
-      log.error(`[UCPath Job Summary] Failed: ${errorMessage(phase1.jobSummary.reason)}`);
+    try {
+      jobSummaryData = resolveJobSummaryResult(phase1.jobSummary);
+    } catch (e) {
+      log.error(errorMessage(e));
+      throw e;
     }
     if (phase1.kualiTimekeeper.status === "rejected") {
       log.error(`[Kuali] Timekeeper fill failed: ${errorMessage(phase1.kualiTimekeeper.reason)}`);
