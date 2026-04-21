@@ -1,7 +1,7 @@
 import type { Page } from "playwright";
 import { z } from "zod/v4";
 import { log } from "../../utils/log.js";
-import { errorMessage } from "../../utils/errors.js";
+import { errorMessage, classifyPlaywrightError } from "../../utils/errors.js";
 import { defineWorkflow, runWorkflow, runWorkflowBatch } from "../../core/index.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 
@@ -22,6 +22,7 @@ import {
   updateSeparationDate,
   clickSave,
 } from "../../systems/kuali/index.js";
+import type { KualiSeparationData } from "../../systems/kuali/index.js";
 
 // Old Kronos module
 import {
@@ -206,24 +207,34 @@ export const separationsWorkflow = defineWorkflow({
 
     // ─── Step 1: Extract Kuali data ───
     const kualiData = await ctx.step("kuali-extraction", async () => {
+      const t0 = Date.now();
+      log.debug(`[Step: kuali-extraction] START docId='${docId}'`);
       const cached = stepCacheGet<SeparationData>("separations", docId, "kuali-extraction");
+      let result: SeparationData | KualiSeparationData;
       if (cached) {
         log.success(`[Kuali] Extraction cached (doc ${docId}) — reusing`);
         const ucpathPage = await ctx.page("ucpath");
         ucpathPage.on("dialog", (d) => d.accept().catch(() => {}));
-        return cached;
-      }
-      const kualiPage = await ctx.page("kuali");
-      // Auto-dismiss PeopleSoft dialogs on UCPath — important when a previous
-      // doc's transaction leaves a confirmation modal up (batch mode state).
-      const ucpathPage = await ctx.page("ucpath");
-      ucpathPage.on("dialog", (d) => d.accept().catch(() => {}));
+        result = cached;
+      } else {
+        const kualiPage = await ctx.page("kuali");
+        // Auto-dismiss PeopleSoft dialogs on UCPath — important when a previous
+        // doc's transaction leaves a confirmation modal up (batch mode state).
+        const ucpathPage = await ctx.page("ucpath");
+        ucpathPage.on("dialog", (d) => d.accept().catch(() => {}));
 
-      await openActionList(kualiPage);
-      await clickDocument(kualiPage, docId);
-      const extracted = await extractSeparationData(kualiPage);
-      try { stepCacheSet("separations", docId, "kuali-extraction", extracted); } catch { /* best-effort */ }
-      return extracted;
+        await openActionList(kualiPage);
+        await clickDocument(kualiPage, docId);
+        const extracted = await extractSeparationData(kualiPage);
+        try { stepCacheSet("separations", docId, "kuali-extraction", extracted); } catch { /* best-effort */ }
+        result = extracted;
+      }
+      log.step(
+        `[Step: kuali-extraction] END took=${Date.now() - t0}ms `
+        + `employeeName='${result.employeeName}' eid='${result.eid}' `
+        + `lastDayWorked='${result.lastDayWorked}' separationDate='${result.separationDate}'`,
+      );
+      return result;
     });
 
     const isVol = isVoluntaryTermination(kualiData.terminationType);
@@ -247,8 +258,10 @@ export const separationsWorkflow = defineWorkflow({
     log.step(`[Old Kronos / New Kronos] Date range: ${kronosStart} – ${kronosEnd}`);
 
     const phase1 = await ctx.step("kronos-search", async () => {
+      const t0 = Date.now();
+      log.debug(`[Step: kronos-search] START eid='${kualiData.eid}'`);
       log.step("=== PHASE 1: Kronos + Job Summary + Kuali fill (parallel) ===");
-      return ctx.parallel({
+      const result = await ctx.parallel({
         oldK: async () => {
           const page = await ctx.page("old-kronos");
           // Old Kronos: set date range FIRST, then search by ID
@@ -294,6 +307,14 @@ export const separationsWorkflow = defineWorkflow({
           log.success("[Kuali] Timekeeper name filled");
         },
       });
+      log.step(
+        `[Step: kronos-search] END took=${Date.now() - t0}ms `
+        + `oldK found=${result.oldK.status === "fulfilled"} `
+        + `newK found=${result.newK.status === "fulfilled"} `
+        + `jobSummary ok=${result.jobSummary.status === "fulfilled"} `
+        + `kualiTimekeeper ok=${result.kualiTimekeeper.status === "fulfilled"}`,
+      );
+      return result;
     });
 
     // ─── Process Phase 1 results (preserve PromiseSettledResult fallback semantics) ───
@@ -307,22 +328,30 @@ export const separationsWorkflow = defineWorkflow({
       oldKronosFound = phase1.oldK.value.found;
       oldKronosDate = phase1.oldK.value.date;
     } else {
-      log.error(`[Old Kronos] Error: ${errorMessage(phase1.oldK.reason)}`);
+      const classified = classifyPlaywrightError(phase1.oldK.reason);
+      log.error(`[Old Kronos] ${classified.kind}: ${classified.summary}`);
+      log.debug(`[Old Kronos] full error: ${errorMessage(phase1.oldK.reason)}`);
     }
     if (phase1.newK.status === "fulfilled") {
       newKronosFound = phase1.newK.value.found;
       newKronosDate = phase1.newK.value.date;
     } else {
-      log.error(`[New Kronos] Error: ${errorMessage(phase1.newK.reason)}`);
+      const classified = classifyPlaywrightError(phase1.newK.reason);
+      log.error(`[New Kronos] ${classified.kind}: ${classified.summary}`);
+      log.debug(`[New Kronos] full error: ${errorMessage(phase1.newK.reason)}`);
     }
-    try {
-      jobSummaryData = resolveJobSummaryResult(phase1.jobSummary);
-    } catch (e) {
-      log.error(errorMessage(e));
-      throw e;
+    if (phase1.jobSummary.status === "rejected") {
+      const classified = classifyPlaywrightError(phase1.jobSummary.reason);
+      log.error(`[UCPath Job Summary] ${classified.kind}: ${classified.summary}`);
+      log.debug(`[UCPath Job Summary] full error: ${errorMessage(phase1.jobSummary.reason)}`);
     }
+    // resolveJobSummaryResult throws on rejection (classified log emitted above);
+    // no duplicate log.error here — the rejection is fatal and the throw propagates.
+    jobSummaryData = resolveJobSummaryResult(phase1.jobSummary);
     if (phase1.kualiTimekeeper.status === "rejected") {
-      log.error(`[Kuali] Timekeeper fill failed: ${errorMessage(phase1.kualiTimekeeper.reason)}`);
+      const classified = classifyPlaywrightError(phase1.kualiTimekeeper.reason);
+      log.error(`[Kuali Timekeeper] ${classified.kind}: ${classified.summary}`);
+      log.debug(`[Kuali Timekeeper] full error: ${errorMessage(phase1.kualiTimekeeper.reason)}`);
     }
 
     log.step(`[Old Kronos] ${oldKronosFound ? "Found" : "Not found"} (${oldKronosDate ?? "no time"})`);
@@ -370,6 +399,8 @@ export const separationsWorkflow = defineWorkflow({
 
     // ─── Step 5: ucpath-job-summary (Kuali term date + dept/payroll fill) ───
     await ctx.step("ucpath-job-summary", async () => {
+      const t0 = Date.now();
+      log.debug(`[Step: ucpath-job-summary] START eid='${kualiData.eid}'`);
       log.step("[Kuali] Filling termination effective date + department/payroll...");
       await kualiPage
         .getByRole("textbox", { name: "Termination Effective Date*" })
@@ -383,6 +414,12 @@ export const separationsWorkflow = defineWorkflow({
         });
         log.success("[Kuali] Department + payroll filled");
       }
+      log.step(
+        `[Step: ucpath-job-summary] END took=${Date.now() - t0}ms `
+        + `dept='${jobSummaryData?.departmentDescription ?? ""}' `
+        + `jobCode='${jobSummaryData?.jobCode ?? ""}' `
+        + `payrollTitle='${jobSummaryData?.jobDescription ?? ""}'`,
+      );
     });
 
     // ─── Step 6: UCPath Smart HR Transaction ───
@@ -395,6 +432,8 @@ export const separationsWorkflow = defineWorkflow({
     // (so the Kuali form gets its "left blank for manual entry" treatment).
     let submittedWithoutTxnNumber = false;
     await ctx.step("ucpath-transaction", async () => {
+      const t0 = Date.now();
+      log.debug(`[Step: ucpath-transaction] START empl='${kualiData.eid}' template='${template}'`);
       log.step("=== UCPath Smart HR Transaction ===");
       const ucpathPage = await ctx.page("ucpath");
 
@@ -420,11 +459,16 @@ export const separationsWorkflow = defineWorkflow({
         const nameParts = kualiData.employeeName.split(",").map((s) => s.trim());
         const ucpathName = nameParts.length >= 2 ? `${nameParts[1]} ${nameParts[0]}` : kualiData.employeeName;
         const submitResult = await clickSaveAndSubmit(ucpathPage, frame, ucpathName);
+        transactionNumber = submitResult.transactionNumber ?? "";
+        log.step(
+          `[UCPath Txn] submit result: success=${submitResult.success} `
+          + `txnNumber='${transactionNumber || "<empty>"}' `
+          + `reasonMessage='${submitResult.error ?? "<none>"}'`,
+        );
         if (!submitResult.success) {
           log.error(`[UCPath Txn] Submit failed: ${submitResult.error}`);
           return;
         }
-        transactionNumber = submitResult.transactionNumber ?? "";
         if (!transactionNumber) {
           submittedWithoutTxnNumber = true;
           return;
@@ -447,6 +491,10 @@ export const separationsWorkflow = defineWorkflow({
           // Non-fatal — the between-items reset will retry
         }
       }
+      log.step(
+        `[Step: ucpath-transaction] END took=${Date.now() - t0}ms `
+        + `txnNumber='${transactionNumber || "<none>"}'`,
+      );
     });
 
     if (submittedWithoutTxnNumber) {
@@ -457,6 +505,8 @@ export const separationsWorkflow = defineWorkflow({
 
     // ─── Step 7: Kuali finalization ───
     await ctx.step("kuali-finalization", async () => {
+      const t0 = Date.now();
+      log.debug(`[Step: kuali-finalization] START txnNumber='${transactionNumber || "<empty>"}'`);
       log.step("=== PHASE 3: Kuali finalization ===");
 
       // Always fill checkbox + radio; fill txn number if we have it
@@ -478,6 +528,7 @@ export const separationsWorkflow = defineWorkflow({
 
       await clickSave(kualiPage);
       await ctx.screenshot({ kind: 'form', label: 'kuali-finalization-saved' });
+      log.step(`[Step: kuali-finalization] END took=${Date.now() - t0}ms success`);
     });
 
     // Final state snapshot for the dashboard detail panel / JSONL readers.
