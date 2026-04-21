@@ -60,6 +60,23 @@ export interface RunOneItemOpts<TData, TSteps extends readonly string[]> {
    * throws do.
    */
   preHandler?: () => Promise<void>
+  /**
+   * Pool-/batch-assigned workflow instance name. Threaded into
+   * `withTrackedWorkflow` via `preAssignedInstance` so a single batch runner
+   * owns the workflow_start/end lifecycle for the entire batch.
+   */
+  preAssignedInstance?: string
+  /**
+   * Batch-level auth timings to inject as synthetic `running` tracker entries
+   * at the recorded `startTs` timestamps BEFORE the handler runs. Each entry
+   * produces one `step: "auth:<systemId>"` row with
+   * `timestamp = new Date(startTs).toISOString()`, so `computeStepDurations`
+   * tiles elapsed time correctly — the gap between each auth entry and the
+   * next (auth or handler) step becomes that auth's duration.
+   *
+   * Paired with `preAssignedInstance` when called from `withBatchLifecycle`.
+   */
+  authTimings?: Array<{ systemId: string; startTs: number; endTs: number }>
 }
 
 /**
@@ -133,6 +150,30 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       trackerDir,
     )
   }
+  // Inject batch-level auth timings as synthetic `running` tracker entries
+  // with the REAL per-system startTs. `computeStepDurations` reads the gap
+  // between each `running` entry and the NEXT step-bearing entry to compute
+  // the previous step's duration, so writing these in system-order at the
+  // recorded timestamps tiles elapsed time exactly: pending → auth:<sys1>
+  // (at sys1 start) → auth:<sys2> (at sys2 start) → first handler step →
+  // ... → done. Emitted OUTSIDE withTrackedWorkflow so the entries share
+  // `runId` but don't trigger the wrapper's internal step-change dedupe.
+  if (args.authTimings && args.authTimings.length > 0) {
+    for (const { systemId, startTs } of args.authTimings) {
+      trackEvent(
+        {
+          workflow: wf.config.name,
+          timestamp: new Date(startTs).toISOString(),
+          id: itemId,
+          runId,
+          status: 'running',
+          step: `auth:${systemId}`,
+          data: stringifiedSeed,
+        },
+        trackerDir,
+      )
+    }
+  }
   try {
     await withLogContext(wf.config.name, itemId, async () => {
       await withTrackedWorkflow(
@@ -163,6 +204,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
         {
           ...buildTrackerOpts(wf),
           preAssignedRunId: runId,
+          preAssignedInstance: args.preAssignedInstance,
           dir: trackerDir,
           initialData: stringifiedSeed,
         },
