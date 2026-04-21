@@ -10,7 +10,11 @@
     "rootDir": "src",
     "declaration": true,
     "resolveJsonModule": true,
-    "verbatimModuleSyntax": true
+    "verbatimModuleSyntax": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/dashboard/*"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["src/dashboard/**/*"]

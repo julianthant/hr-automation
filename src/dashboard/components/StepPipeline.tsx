@@ -1,6 +1,7 @@
-import { useState } from "react";
-import { cn } from "@/lib/utils";
+import { useRef, useState } from "react";
+import { cn } from "../lib/utils";
 import { formatStepName, formatStepDuration, type TrackerEntry } from "./types";
+import { Popover, PopoverTrigger, PopoverContent } from "./ui/popover";
 
 interface StepPipelineProps {
   steps: string[];
@@ -123,23 +124,59 @@ function authRailStyle(status: StepStatus): React.CSSProperties {
   }
 }
 
+/**
+ * Aggregate child durations for an auth super-chip timer.
+ *
+ * Graceful degradation: if any children are still running (no duration yet),
+ * we still render the total of known durations with a "partial" flag so the
+ * caller can append a "+" suffix ("3.4s+") rather than hiding the timer
+ * entirely. Returns undefined only when no child has a known duration.
+ */
+export function computeAuthGroupDuration(
+  children: StepView[],
+): { totalMs: number; partial: boolean } | undefined {
+  const known = children.filter((c) => c.durationMs !== undefined);
+  if (known.length === 0) return undefined;
+  const totalMs = known.reduce((sum, c) => sum + (c.durationMs ?? 0), 0);
+  return { totalMs, partial: known.length < children.length };
+}
+
 // ── AuthSuperChip ─────────────────────────────────────────────────────────────
 
 interface AuthSuperChipProps {
   children: StepView[];
-  expanded: boolean;
-  onToggle: () => void;
 }
 
-function AuthSuperChip({ children, expanded, onToggle }: AuthSuperChipProps) {
+function AuthSuperChip({ children }: AuthSuperChipProps) {
+  const [open, setOpen] = useState(false);
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleOpen = () => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+    if (openTimer.current) clearTimeout(openTimer.current);
+    openTimer.current = setTimeout(() => setOpen(true), 100);
+  };
+  const scheduleClose = () => {
+    if (openTimer.current) {
+      clearTimeout(openTimer.current);
+      openTimer.current = null;
+    }
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => setOpen(false), 200);
+  };
+
   const groupStatus = authGroupStatus(children);
 
-  // Aggregate duration: sum of all known child durations (shown only if all have one)
-  const allHaveDuration = children.every((c) => c.durationMs !== undefined);
-  const totalDurationMs = allHaveDuration
-    ? children.reduce((sum, c) => sum + (c.durationMs ?? 0), 0)
-    : undefined;
-  const durationLabel = totalDurationMs !== undefined ? formatStepDuration(totalDurationMs) : "";
+  const aggregate = computeAuthGroupDuration(children);
+  const totalDurationMs = aggregate?.totalMs;
+  const partial = aggregate?.partial ?? false;
+  const durationLabel = totalDurationMs !== undefined
+    ? `${formatStepDuration(totalDurationMs)}${partial ? "+" : ""}`
+    : "";
 
   const isCached = groupStatus === "cached";
   const isComplete = groupStatus === "completed";
@@ -150,81 +187,117 @@ function AuthSuperChip({ children, expanded, onToggle }: AuthSuperChipProps) {
   const hoverTitle = buildAuthGroupTitle(children);
 
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      title={hoverTitle}
-      className="flex-1 min-w-[86px] flex flex-col justify-center items-start gap-1.5 cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-      style={{ background: "none", border: "none", padding: 0, textAlign: "left" }}
-    >
-      {/* Label */}
-      <span
-        className={cn(
-          "text-[11.5px] tracking-tight leading-none truncate w-full transition-colors",
-          !isCached && isComplete && "text-[#4ade80] font-medium",
-          !isCached && isActive && "text-primary font-semibold",
-          !isCached && isFailedStep && "text-destructive font-semibold",
-          !isCached && isPending && "text-muted-foreground/50 font-medium",
-          isCached && "font-medium",
-        )}
-        style={isCached ? { color: "#3b82f6" } : undefined}
-      >
-        Authenticating ({children.length})
-        <span
-          aria-hidden
-          style={{ marginLeft: 4, fontSize: 9, opacity: 0.55, verticalAlign: "middle" }}
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <div
+          onMouseEnter={scheduleOpen}
+          onMouseLeave={scheduleClose}
+          title={hoverTitle}
+          className="flex-1 min-w-[86px] flex flex-col justify-center items-start gap-1.5 cursor-default"
+          style={{ background: "none", border: "none", padding: 0, textAlign: "left" }}
         >
-          {expanded ? "▲" : "▼"}
-        </span>
-      </span>
-
-      {/* Rail */}
-      <div
-        className="relative w-full h-[3px] rounded-full"
-        style={isCached ? { backgroundColor: "#3b82f6", boxShadow: "0 0 0 3px rgba(59,130,246,0.15)" } : undefined}
-      >
-        {isPending ? (
-          <div
-            aria-hidden
-            className="absolute inset-0 rounded-full opacity-70 overflow-hidden"
-            style={{
-              backgroundImage:
-                "repeating-linear-gradient(to right, hsl(var(--border)) 0 4px, transparent 4px 8px)",
-            }}
-          />
-        ) : (
-          <div
+          {/* Label */}
+          <span
             className={cn(
-              "absolute inset-0 rounded-full overflow-hidden transition-colors",
-              isComplete && "bg-[#4ade80]/80",
-              isActive && "bg-primary/25",
-              isFailedStep && "bg-destructive/80",
+              "text-[11.5px] tracking-tight leading-none truncate w-full transition-colors",
+              !isCached && isComplete && "text-[#4ade80] font-medium",
+              !isCached && isActive && "text-primary font-semibold",
+              !isCached && isFailedStep && "text-destructive font-semibold",
+              !isCached && isPending && "text-muted-foreground/50 font-medium",
+              isCached && "font-medium",
             )}
-            style={authRailStyle(groupStatus)}
-          />
-        )}
-        {isActive && (
-          <div
-            aria-hidden
-            className="absolute inset-y-0 left-0 w-1/2 rounded-full bg-primary animate-[pulse_1.6s_ease-in-out_infinite]"
-          />
-        )}
-      </div>
+            style={isCached ? { color: "#3b82f6" } : undefined}
+          >
+            Authenticating ({children.length})
+          </span>
 
-      {/* Duration / state label */}
-      <span
-        className={cn(
-          "text-[10px] font-mono tabular-nums leading-none h-[10px] transition-colors",
-          !isCached && isComplete && (durationLabel ? "text-[#4ade80]/70" : "text-[#4ade80]/40"),
-          !isCached && isFailedStep && (durationLabel ? "text-destructive/70" : "text-destructive/40"),
-          !isCached && isActive && "text-primary/70",
-          !isCached && isPending && "text-muted-foreground/35",
-        )}
-        aria-hidden={!durationLabel && !isPending}
+          {/* Rail */}
+          <div
+            className="relative w-full h-[3px] rounded-full"
+            style={isCached ? { backgroundColor: "#3b82f6", boxShadow: "0 0 0 3px rgba(59,130,246,0.15)" } : undefined}
+          >
+            {isPending ? (
+              <div
+                aria-hidden
+                className="absolute inset-0 rounded-full opacity-70 overflow-hidden"
+                style={{
+                  backgroundImage:
+                    "repeating-linear-gradient(to right, hsl(var(--border)) 0 4px, transparent 4px 8px)",
+                }}
+              />
+            ) : (
+              <div
+                className={cn(
+                  "absolute inset-0 rounded-full overflow-hidden transition-colors",
+                  isComplete && "bg-[#4ade80]/80",
+                  isActive && "bg-primary/25",
+                  isFailedStep && "bg-destructive/80",
+                )}
+                style={authRailStyle(groupStatus)}
+              />
+            )}
+            {isActive && (
+              <div
+                aria-hidden
+                className="absolute inset-y-0 left-0 w-1/2 rounded-full bg-primary animate-[pulse_1.6s_ease-in-out_infinite]"
+              />
+            )}
+          </div>
+
+          {/* Duration / state label */}
+          <span
+            className={cn(
+              "text-[10px] font-mono tabular-nums leading-none h-[10px] transition-colors",
+              !isCached && isComplete && (durationLabel ? "text-[#4ade80]/70" : "text-[#4ade80]/40"),
+              !isCached && isFailedStep && (durationLabel ? "text-destructive/70" : "text-destructive/40"),
+              !isCached && isActive && "text-primary/70",
+              !isCached && isPending && "text-muted-foreground/35",
+            )}
+            aria-hidden={!durationLabel && !isPending}
+          >
+            {durationLabel || (isPending ? "—" : isActive ? "…" : "—")}
+          </span>
+        </div>
+      </PopoverTrigger>
+      <PopoverContent
+        align="center"
+        sideOffset={8}
+        className="w-auto p-2"
+        onMouseEnter={scheduleOpen}
+        onMouseLeave={scheduleClose}
       >
-        {durationLabel || (isPending ? "—" : isActive ? "…" : "—")}
-      </span>
-    </button>
+        <div className="flex flex-col gap-1.5 text-xs">
+          {children.map((child) => {
+            const systemId = child.name.startsWith("auth:") ? child.name.slice(5) : child.name;
+            const statusGlyph =
+              child.status === "completed" || child.status === "cached"
+                ? "✓"
+                : child.status === "failed"
+                  ? "✗"
+                  : child.status === "running"
+                    ? "…"
+                    : "–";
+            const glyphColor =
+              child.status === "completed" || child.status === "cached"
+                ? "text-[#4ade80]"
+                : child.status === "failed"
+                  ? "text-destructive"
+                  : child.status === "running"
+                    ? "text-primary"
+                    : "text-muted-foreground";
+            return (
+              <div key={child.name} className="flex items-center gap-3 min-w-[180px]">
+                <span className={cn("w-3 text-center", glyphColor)}>{statusGlyph}</span>
+                <span className="font-mono text-[11px]">{systemId}</span>
+                <span className="ml-auto font-mono text-[10px] text-muted-foreground tabular-nums">
+                  {child.durationMs !== undefined ? formatStepDuration(child.durationMs) : "—"}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -245,13 +318,10 @@ function AuthSuperChip({ children, expanded, onToggle }: AuthSuperChipProps) {
  *   • Pending steps use a dashed rail so "not yet run" reads visually
  *     distinct from "ran quickly" (solid green).
  *   • Consecutive steps matching `auth:*` are collapsed into a single
- *     "Authenticating (N)" super-chip. Hover for per-system detail;
- *     click to expand each child as its own small chip below the pipeline.
+ *     "Authenticating (N)" super-chip. Hover reveals per-system detail
+ *     (Radix popover), no click / expansion state.
  */
 export function StepPipeline({ steps, currentStep, status, stepDurations, entry }: StepPipelineProps) {
-  // Track expanded state for each auth-group by its first child step name
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-
   if (steps.length === 0) return null;
 
   const isDone = status === "done";
@@ -293,15 +363,6 @@ export function StepPipeline({ steps, currentStep, status, stepDurations, entry 
   // Group auth steps into super-chips
   const nodes = groupAuthSteps(stepViews);
 
-  function toggleGroup(groupKey: string) {
-    setExpandedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(groupKey)) next.delete(groupKey);
-      else next.add(groupKey);
-      return next;
-    });
-  }
-
   return (
     <div className="border-b border-border">
       {/* Main pipeline rail */}
@@ -312,15 +373,7 @@ export function StepPipeline({ steps, currentStep, status, stepDurations, entry 
         {nodes.map((node) => {
           if (isAuthGroup(node)) {
             const groupKey = node.children[0]?.name ?? "auth-group";
-            const isExpanded = expandedGroups.has(groupKey);
-            return (
-              <AuthSuperChip
-                key={groupKey}
-                children={node.children}
-                expanded={isExpanded}
-                onToggle={() => toggleGroup(groupKey)}
-              />
-            );
+            return <AuthSuperChip key={groupKey} children={node.children} />;
           }
 
           // Normal chip — unchanged from original
@@ -446,106 +499,6 @@ export function StepPipeline({ steps, currentStep, status, stepDurations, entry 
           );
         })}
       </div>
-
-      {/* Expanded auth-group children — rendered below the main rail when toggled */}
-      {nodes
-        .filter(isAuthGroup)
-        .filter((node) => expandedGroups.has(node.children[0]?.name ?? ""))
-        .map((node) => {
-          const groupKey = node.children[0]?.name ?? "auth-group";
-          return (
-            <div
-              key={`expanded-${groupKey}`}
-              style={{
-                marginTop: 0,
-                marginLeft: 24,
-                marginRight: 24,
-                marginBottom: 10,
-                paddingLeft: 10,
-                borderLeft: "2px solid hsl(var(--border))",
-                display: "flex",
-                gap: 16,
-                flexWrap: "wrap",
-              }}
-            >
-              {node.children.map((child) => {
-                const systemId = child.name.startsWith("auth:")
-                  ? child.name.slice(5)
-                  : child.name;
-                const isCached = child.status === "cached";
-                const isComplete = child.status === "completed";
-                const isActive = child.status === "running";
-                const isFailedStep = child.status === "failed";
-                const isPending = child.status === "pending";
-                const durationLabel =
-                  child.durationMs !== undefined
-                    ? formatStepDuration(child.durationMs)
-                    : "";
-
-                const textColor = isCached
-                  ? "#3b82f6"
-                  : isComplete
-                    ? "#4ade80"
-                    : isActive
-                      ? "hsl(var(--primary))"
-                      : isFailedStep
-                        ? "hsl(var(--destructive))"
-                        : "hsl(var(--muted-foreground) / 0.5)";
-
-                return (
-                  <div
-                    key={child.name}
-                    style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 72 }}
-                  >
-                    {/* System id label */}
-                    <span
-                      style={{
-                        fontFamily: "JetBrains Mono, ui-monospace, monospace",
-                        fontSize: 10,
-                        fontWeight: 500,
-                        color: textColor,
-                      }}
-                    >
-                      {systemId}
-                    </span>
-                    {/* Mini rail */}
-                    <div className="relative rounded-full" style={{ height: 3, width: "100%" }}>
-                      {isPending ? (
-                        <div
-                          className="absolute inset-0 rounded-full opacity-70 overflow-hidden"
-                          style={{
-                            backgroundImage:
-                              "repeating-linear-gradient(to right, hsl(var(--border)) 0 4px, transparent 4px 8px)",
-                          }}
-                        />
-                      ) : (
-                        <div
-                          className={cn(
-                            "absolute inset-0 rounded-full",
-                            isComplete && "bg-[#4ade80]/80",
-                            isActive && "bg-primary/25",
-                            isFailedStep && "bg-destructive/80",
-                            isCached && "bg-blue-500",
-                          )}
-                        />
-                      )}
-                    </div>
-                    {/* Duration */}
-                    <span
-                      style={{
-                        fontFamily: "JetBrains Mono, ui-monospace, monospace",
-                        fontSize: 10,
-                        color: "hsl(var(--muted-foreground) / 0.6)",
-                      }}
-                    >
-                      {durationLabel || "—"}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })}
 
       {cacheHits.length > 0 && (
         <div
