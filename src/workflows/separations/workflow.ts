@@ -418,6 +418,11 @@ export const separationsWorkflow = defineWorkflow({
           return;
         }
         transactionNumber = submitResult.transactionNumber ?? "";
+        if (submitResult.success && !transactionNumber) {
+          throw new Error(
+            "Transaction submitted but transaction number could not be extracted — aborting before Kuali finalization writes empty value",
+          );
+        }
         log.success(`[UCPath Txn] Transaction submitted${transactionNumber ? ` (#${transactionNumber})` : ""}`);
         await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-submitted' });
       } catch (e) {
