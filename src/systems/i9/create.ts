@@ -3,6 +3,7 @@ import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import type { I9EmployeeInput, I9Result } from "./types.js";
 import { profile, remoteI9, dashboard } from "./selectors.js";
+import { closeAllKendoWindows } from "./navigate.js";
 
 /**
  * Create a new I-9 employee record in I9 Complete.
@@ -27,7 +28,14 @@ export async function createI9Employee(
   try {
     // Step 1: Navigate to new employee profile
     log.step("Clicking 'Create New I-9 : New Employee'...");
-    await dashboard.createNewI9Link(page).click({ timeout: 10_000 });
+    await closeAllKendoWindows(page);
+    try {
+      await dashboard.createNewI9Link(page).click({ timeout: 10_000 });
+    } catch (e) {
+      log.warn(`Create New I-9 click blocked — force-closing modals and retrying: ${errorMessage(e)}`);
+      await closeAllKendoWindows(page);
+      await dashboard.createNewI9Link(page).click({ timeout: 10_000 });
+    }
     await page.waitForURL("**/employee/profile", { timeout: 10_000 });
     log.step("Employee Profile form loaded");
 

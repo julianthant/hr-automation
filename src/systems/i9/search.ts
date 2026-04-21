@@ -2,6 +2,7 @@ import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
 import type { I9SearchCriteria, I9SearchResult } from "./types.js";
 import { dashboard, search as searchSelectors } from "./selectors.js";
+import { closeAllKendoWindows } from "./navigate.js";
 
 /**
  * Search for an existing employee in I9 Complete.
@@ -72,6 +73,7 @@ export async function searchI9Employee(
   await page.waitForTimeout(1_000);
 
   // Parse results grid
+  await closeAllKendoWindows(page);
   return parseSearchResults(page);
 }
 
