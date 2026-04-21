@@ -115,8 +115,9 @@ Kuali extract → SeparationData → 4-way parallel:
 
 **EID lookup (kernel)**
 ```
-Names → Person Org Summary (UCPath, N tabs) → SDCMP/HDH filter
-  → Excel tracker | optional CRM cross-verify
+Names → (shared-context pool, N tabs) → Person Org Summary (UCPath)
+  → SDCMP/HDH filter → per-name dashboard row
+  [optional] → CRM search + hire-date / EID cross-verify
 ```
 
 Observability for every workflow: `.tracker/{workflow}-{YYYY-MM-DD}.jsonl` + `*-logs.jsonl`, streamed to the dashboard. Some workflows also write xlsx trackers (see per-workflow docs).
@@ -169,7 +170,7 @@ export async function runMyWorkflow(input: MyInput) {
 
 Run `npm run new:workflow -- my-workflow --systems ucpath,crm` to scaffold the five canonical files. The generated `CLAUDE.md` links the per-system `LESSONS.md` + `SELECTORS.md` for each declared system and embeds the "Before mapping a new selector" boilerplate so the loop is self-bootstrapping. Then add a Commander subcommand in `src/cli.ts`, add npm scripts to `package.json`, fill in the schema + handler, and that's the whole story — no dashboard registry edits needed.
 
-See `src/workflows/work-study/` for a clean one-system example, `src/workflows/emergency-contact/` for batch-mode with `preEmitPending`, `src/workflows/onboarding/` for multi-system sequential auth + pool-mode parallel, `src/workflows/old-kronos-reports/` for pool-mode with per-worker sessionDir injection, and `src/workflows/eid-lookup/` for the in-handler `runWorkerPool` pattern (shared-context fan-out from a single Duo auth).
+See `src/workflows/work-study/` for a clean one-system example, `src/workflows/emergency-contact/` for batch-mode with `preEmitPending`, `src/workflows/onboarding/` for multi-system sequential auth + pool-mode parallel, `src/workflows/old-kronos-reports/` for pool-mode with per-worker sessionDir injection, and `src/workflows/eid-lookup/` for `shared-context-pool` mode (N per-item tabs fanning out from a single Duo auth per system).
 
 All production workflows are kernel-based as of 2026-04-17. No `defineDashboardMetadata(...)` callers remain in `src/workflows/*`. New workflows should follow the kernel path exclusively; the legacy shape is institutional memory only.
 
@@ -204,7 +205,7 @@ Side-effect-free work can be memoized via `stepCacheGet`/`stepCacheSet` (from `s
 
 Run modes: `runWorkflow(wf, data)` for a single item; `runWorkflowBatch(wf, items)` for sequential batch (with optional `onPreEmitPending` for dashboard pre-emit); `runWorkflowPool(wf, items)` for N-worker pool (N Sessions, each with its own Duo). Each per-item path is wrapped in `withLogContext` + `withTrackedWorkflow`, so you never call those directly from a handler.
 
-Escape hatches: `ctx.session.page(id)` / `ctx.session.newWindow(id)` expose the underlying Session. Use them only when the kernel's declarative shape doesn't express what you need (e.g. `runWorkerPool` in eid-lookup).
+Escape hatches: `ctx.session.page(id)` / `ctx.session.newWindow(id)` expose the underlying Session. Use them only when the kernel's declarative shape doesn't express what you need.
 
 ## Environment
 
@@ -295,7 +296,7 @@ Current step tracking per workflow:
 |---|---|
 | onboarding | crm-auth → extraction → pdf-download → ucpath-auth → person-search → i9-creation → transaction |
 | separations | auth:kuali → auth:old-kronos → auth:new-kronos → auth:ucpath → kuali-extraction → kronos-search → ucpath-job-summary → ucpath-transaction → kuali-finalization |
-| eid-lookup | ucpath-auth → searching (+ crm-auth → cross-verification in CRM mode) |
+| eid-lookup | searching (+ cross-verification in CRM mode) — one row per name via shared-context-pool |
 | kronos-reports | searching → extracting → downloading |
 | work-study | ucpath-auth → transaction |
 | emergency-contact | navigation → fill-form → save |
@@ -354,5 +355,5 @@ These patterns existed pre-kernel and are intentionally removed. Do not reintrod
 - **Hand-rolled auth-ready promises** — `authChain: "interleaved"` in the kernel does this. Older docs showed ~140 lines of promise-chain recipes; they are obsolete.
 - **`WF_CONFIG` in the frontend** — deleted in subsystem D. Dashboard UI metadata is now server-side in the kernel registry.
 - **`markStaleRunningEntries`** — removed; caused false "Process interrupted" failures. Replaced by a SIGINT handler in `withTrackedWorkflow`.
-- **Per-workflow Excel tracker as primary observability** — dashboard JSONL is the source of truth. Existing xlsx writers (`updateEidTracker`, `updateWorkStudyTracker`, etc.) are retained for historical use and are Excel-only (they no longer emit tracker events).
+- **Per-workflow Excel tracker as primary observability** — dashboard JSONL is the source of truth. Existing xlsx writers (`updateWorkStudyTracker`, onboarding's + old-kronos-reports' trackers, etc.) are retained for historical use and are Excel-only (they no longer emit tracker events). Eid-lookup's xlsx tracker was removed entirely on 2026-04-21 — JSONL + dashboard cover it.
 - **Raw `page.locator("...")` calls in system `.ts` files** — all selectors go through `src/systems/<system>/selectors.ts`. The inline-selectors test guard enforces this.

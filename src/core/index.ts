@@ -16,6 +16,7 @@ export {
   deriveItemId,
 } from './workflow.js'
 export { runWorkflowPool } from './pool.js'
+export { runWorkflowSharedContextPool } from './shared-context-pool.js'
 export { Session } from './session.js'
 export { Stepper } from './stepper.js'
 export { makeCtx } from './ctx.js'

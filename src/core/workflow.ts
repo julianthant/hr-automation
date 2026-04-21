@@ -9,6 +9,7 @@ import { makeScreenshotFn } from './screenshot.js'
 import { withLogContext } from '../utils/log.js'
 import { classifyError } from '../utils/errors.js'
 import { runWorkflowPool } from './pool.js'
+import { runWorkflowSharedContextPool } from './shared-context-pool.js'
 import { makeAuthObserver } from '../tracker/auth-observer.js'
 
 /**
@@ -421,6 +422,9 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
   const batch = wf.config.batch
   if (batch?.mode === 'pool') {
     return runWorkflowPool(wf, items, opts)
+  }
+  if (batch?.mode === 'shared-context-pool') {
+    return runWorkflowSharedContextPool(wf, items, opts)
   }
 
   // Sequential mode: validate all items upfront.

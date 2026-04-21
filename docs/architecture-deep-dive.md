@@ -80,11 +80,11 @@ src/
 
 **Read-it-once mental model:**
 
-| Layer | Answers the question |
-|---|---|
-| `core/` | "How do I *run* any workflow?" |
-| `systems/` | "How do I *talk to* UCPath / CRM / I9?" |
-| `workflows/` | "What is *this particular* workflow's flow?" |
+| Layer        | Answers the question                         |
+| ------------ | -------------------------------------------- |
+| `core/`      | "How do I _run_ any workflow?"               |
+| `systems/`   | "How do I _talk to_ UCPath / CRM / I9?"      |
+| `workflows/` | "What is _this particular_ workflow's flow?" |
 
 ```mermaid
 flowchart TB
@@ -163,8 +163,8 @@ Every workflow re-implemented: browser launch, tiling, auth retry, screenshot-on
 #### `ctx.page(id)` — get a Playwright Page, waiting for auth
 
 ```ts
-const ucpath = await ctx.page("ucpath")
-await ucpath.goto("/hr/...")
+const ucpath = await ctx.page("ucpath");
+await ucpath.goto("/hr/...");
 ```
 
 Under the hood: `ctx.page(id) === ctx.session.page(id)`. The `Session` holds a `Map<systemId, { page, browser, context }>` plus a `Map<systemId, Promise<void>>` of "auth-ready" promises. Calling `ctx.page("ucpath")` `await`s the ucpath ready promise before returning — so if you're on an `interleaved` auth chain and ucpath's Duo hasn't been approved yet, this call blocks until it is.
@@ -185,9 +185,9 @@ sequenceDiagram
 
 ```ts
 await ctx.step("extraction", async () => {
-  const data = await extractEmployee(page)
-  ctx.updateData({ name: data.fullName })
-})
+  const data = await extractEmployee(page);
+  ctx.updateData({ name: data.fullName });
+});
 ```
 
 What happens on the way in: `emitStep(name)` — writes a `running` entry to `.tracker/{workflow}-{date}.jsonl` so the dashboard row updates to show this step.
@@ -195,6 +195,7 @@ What happens on the way in: `emitStep(name)` — writes a `running` entry to `.t
 What happens on success: nothing extra, your value is returned.
 
 What happens on **failure**:
+
 1. `screenshotFn(name)` fires — screenshots **every open page** to `.screenshots/{workflow}-{itemId}-{step}-{systemId}-{ts}.png`
 2. `emitFailed(name, classifiedError)` fires — writes a `failed` entry
 3. The error is **re-thrown** so your handler's control flow continues to work as expected
@@ -212,12 +213,12 @@ flowchart TB
 
 #### `ctx.markStep(name)` vs `ctx.step(name, fn)`
 
-| | `step` | `markStep` |
-|---|---|---|
-| Wraps a body | ✅ | ❌ |
-| Emits `running` | ✅ | ✅ |
-| Catches errors | ✅ | ❌ |
-| Screenshots on failure | ✅ | ❌ |
+|                        | `step` | `markStep` |
+| ---------------------- | ------ | ---------- |
+| Wraps a body           | ✅     | ❌         |
+| Emits `running`        | ✅     | ✅         |
+| Catches errors         | ✅     | ❌         |
+| Screenshots on failure | ✅     | ❌         |
 
 `markStep` is for phase transitions whose work is already managed elsewhere. Example: onboarding's `"crm-auth"` step is actually handled by `Session.launch` before the handler runs — but the dashboard still wants the row to say "currently in crm-auth." You call `ctx.markStep("crm-auth")` to announce it.
 
@@ -228,14 +229,16 @@ flowchart TB
 const r = await ctx.parallel({
   kronos: () => downloadKronos(),
   kuali: () => extractKuali(),
-})
-if (r.kronos.status === "fulfilled") { use(r.kronos.value) }
+});
+if (r.kronos.status === "fulfilled") {
+  use(r.kronos.value);
+}
 
 // parallelAll — Promise.all shape (first failure tears the rest down)
 const { kronos, kuali } = await ctx.parallelAll({
   kronos: () => downloadKronos(),
   kuali: () => extractKuali(),
-})
+});
 ```
 
 Used by separations for its 4-way Phase-1 fan-out (Old Kronos + New Kronos + UCPath Job Summary + Kuali timekeeper fill, all in parallel).
@@ -243,10 +246,11 @@ Used by separations for its 4-way Phase-1 fan-out (Old Kronos + New Kronos + UCP
 #### `ctx.retry(fn, opts)` — linear backoff
 
 ```ts
-const data = await ctx.retry(
-  () => extractEmployee(page),
-  { attempts: 3, backoffMs: 1000, onAttempt: (n, err) => log.warn(`attempt ${n}: ${err}`) }
-)
+const data = await ctx.retry(() => extractEmployee(page), {
+  attempts: 3,
+  backoffMs: 1000,
+  onAttempt: (n, err) => log.warn(`attempt ${n}: ${err}`),
+});
 ```
 
 Attempt N waits `backoffMs * (N-1)` ms before retrying (default 0, 1s, 2s). On exhaustion, the **last error** is re-thrown verbatim.
@@ -254,7 +258,7 @@ Attempt N waits `backoffMs * (N-1)` ms before retrying (default 0, 1s, 2s). On e
 #### `ctx.updateData(patch)` — push fields into the dashboard row
 
 ```ts
-ctx.updateData({ emplId: "1234567", name: "Jane Doe", wage: "$25.00" })
+ctx.updateData({ emplId: "1234567", name: "Jane Doe", wage: "$25.00" });
 ```
 
 This is what makes the dashboard's per-row detail grid populate. Every key you list in `detailFields` (on `defineWorkflow`) should be populated by at least one `ctx.updateData({ key: ... })` call — a runtime `log.warn` fires at workflow end if any declared field was never populated.
@@ -338,9 +342,9 @@ flowchart TB
 
 ```ts
 interface SessionState {
-  systems: SystemConfig[]
-  browsers: Map<string, { page, browser, context }>
-  readyPromises: Map<string, Promise<void>>  // one per system, resolves when auth completes
+  systems: SystemConfig[];
+  browsers: Map<string, { page; browser; context }>;
+  readyPromises: Map<string, Promise<void>>; // one per system, resolves when auth completes
 }
 ```
 
@@ -353,14 +357,14 @@ interface SessionState {
 
 **Key methods used by handlers (via `Ctx`):**
 
-| Method | Purpose |
-|---|---|
-| `page(id)` | `await readyPromises.get(id)` then return `browsers.get(id).page` |
-| `reset(id)` | `page.goto(system.resetUrl)` — clear state between batch items |
-| `healthCheck(id)` | check if page is closed; placeholder for deeper probes |
-| `screenshotAll(prefix)` | screenshot every open page (best-effort, never throws) |
-| `killChrome()` | SIGINT force-kill path |
-| `close()` | graceful close: each context + browser closed in turn |
+| Method                  | Purpose                                                           |
+| ----------------------- | ----------------------------------------------------------------- |
+| `page(id)`              | `await readyPromises.get(id)` then return `browsers.get(id).page` |
+| `reset(id)`             | `page.goto(system.resetUrl)` — clear state between batch items    |
+| `healthCheck(id)`       | check if page is closed; placeholder for deeper probes            |
+| `screenshotAll(prefix)` | screenshot every open page (best-effort, never throws)            |
+| `killChrome()`          | SIGINT force-kill path                                            |
+| `close()`               | graceful close: each context + browser closed in turn             |
 
 ### `Stepper` — the state/emits manager (`src/core/stepper.ts`)
 
@@ -368,8 +372,8 @@ interface SessionState {
 
 ```ts
 class Stepper {
-  private data: Record<string, unknown> = {}
-  private currentStep: string | null = null
+  private data: Record<string, unknown> = {};
+  private currentStep: string | null = null;
   // constructor receives: emitStep, emitData, emitFailed, screenshotFn
 }
 ```
@@ -402,7 +406,7 @@ updateData(patch) {
 }
 ```
 
-The emitted data is the *accumulated* dictionary, so every tracker entry carries the latest full snapshot of whatever `updateData` has been called with so far.
+The emitted data is the _accumulated_ dictionary, so every tracker entry carries the latest full snapshot of whatever `updateData` has been called with so far.
 
 ### `registry` — workflow metadata (`src/core/registry.ts`)
 
@@ -410,11 +414,11 @@ An in-memory `Map<name, WorkflowMetadata>` populated at module-load time when `d
 
 ```ts
 interface WorkflowMetadata {
-  name: string           // "onboarding"
-  label: string          // "Onboarding"
-  steps: readonly string[]
-  systems: string[]      // ["crm", "ucpath", "i9"]
-  detailFields: Array<{ key, label }>
+  name: string; // "onboarding"
+  label: string; // "Onboarding"
+  steps: readonly string[];
+  systems: string[]; // ["crm", "ucpath", "i9"]
+  detailFields: Array<{ key; label }>;
 }
 ```
 
@@ -432,9 +436,9 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
     steps: config.steps,
     systems: config.systems.map((s) => s.id),
     detailFields: (config.detailFields ?? []).map(normalizeDetailField),
-  }
-  register(metadata)
-  return { config, metadata }
+  };
+  register(metadata);
+  return { config, metadata };
 }
 ```
 
@@ -454,11 +458,13 @@ flowchart TB
     ENTRY -->|single| SGL[runWorkflow]
     ENTRY -->|many items| BATCH[runWorkflowBatch]
     BATCH -->|batch.mode == pool| POOL[runWorkflowPool]
+    BATCH -->|batch.mode == shared-context-pool| SCP[runWorkflowSharedContextPool]
     BATCH -->|default: sequential| SEQ[sequential loop]
 
     SGL --> S1[1 Session<br/>1 Duo per system]
     SEQ --> S2[1 Session<br/>reused across all items]
     POOL --> S3[N Sessions<br/>N Duos per system]
+    SCP --> S4[1 Session<br/>1 Duo per system<br/>N lazy tabs per context]
 ```
 
 ### Mode 1: `runWorkflow(wf, data)` — single item
@@ -555,7 +561,7 @@ sequenceDiagram
     end
 ```
 
-The `withTrackedWorkflow` wrapper checks `preAssignedRunId` — if set, it *skips* the duplicate `pending` emit it would normally write, because the caller already wrote one with the same runId.
+The `withTrackedWorkflow` wrapper checks `preAssignedRunId` — if set, it _skips_ the duplicate `pending` emit it would normally write, because the caller already wrote one with the same runId.
 
 ---
 
@@ -670,6 +676,7 @@ flowchart LR
 ### SSE enrichment
 
 Each `/events` tick enriches tracker entries with:
+
 - `firstLogTs`, `lastLogTs` — per (itemId, runId) earliest/latest log timestamps
 - `lastLogMessage` — most recent log line
 - `stepDurations` — per-step wall-clock ms (computed from step transitions)
@@ -678,16 +685,16 @@ So the frontend never has to fetch the full log stream to show "started 3m ago, 
 
 ### Dashboard panels (all observation-only as of 2026-04-18)
 
-| Panel | Data source | Purpose |
-|---|---|---|
-| `QueuePanel` | tracker entries | live list of pending/running/done/failed |
-| `EntryItem` + `StepPipeline` | `stepDurations` | per-item row with step timing chips |
-| `LogPanel` | logs JSONL | log stream for a selected entry |
-| `RunSelector` | `/api/runs` | switch between retries of the same itemId |
-| `ScreenshotsPanel` / `ScreenshotCard` | `/api/screenshots` | dedicated tab: grid of captured screenshots per entry (superseded the inline `FailureDrillDown` on 2026-04-21) |
-| `SessionPanel` | `sessions.jsonl` | live browser/auth/Duo-queue state |
-| `SelectorWarningsPanel` | logs (filtered by "selector fallback triggered") | surface stale selectors |
-| `SearchBar` | `/api/search` | cross-workflow search across historical JSONL |
+| Panel                                 | Data source                                      | Purpose                                                                                                        |
+| ------------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `QueuePanel`                          | tracker entries                                  | live list of pending/running/done/failed                                                                       |
+| `EntryItem` + `StepPipeline`          | `stepDurations`                                  | per-item row with step timing chips                                                                            |
+| `LogPanel`                            | logs JSONL                                       | log stream for a selected entry                                                                                |
+| `RunSelector`                         | `/api/runs`                                      | switch between retries of the same itemId                                                                      |
+| `ScreenshotsPanel` / `ScreenshotCard` | `/api/screenshots`                               | dedicated tab: grid of captured screenshots per entry (superseded the inline `FailureDrillDown` on 2026-04-21) |
+| `SessionPanel`                        | `sessions.jsonl`                                 | live browser/auth/Duo-queue state                                                                              |
+| `SelectorWarningsPanel`               | logs (filtered by "selector fallback triggered") | surface stale selectors                                                                                        |
+| `SearchBar`                           | `/api/search`                                    | cross-workflow search across historical JSONL                                                                  |
 
 ### The "⚡ RUN" drawer is gone
 
@@ -706,13 +713,13 @@ Problem: a workflow submits a Smart HR transaction to UCPath, then crashes befor
 Solution: before submitting, hash a stable key and check if the same key succeeded recently.
 
 ```ts
-const key = hashKey({ workflow: "onboarding", emplId, ssn, effectiveDate })
+const key = hashKey({ workflow: "onboarding", emplId, ssn, effectiveDate });
 if (await hasRecentlySucceeded(key, { withinDays: 14 })) {
-  log.warn("Idempotency hit — skipping duplicate submit")
-  return { status: "Skipped (Duplicate)" }
+  log.warn("Idempotency hit — skipping duplicate submit");
+  return { status: "Skipped (Duplicate)" };
 }
 // ... submit transaction ...
-await recordSuccess(key, transactionId, "onboarding")
+await recordSuccess(key, transactionId, "onboarding");
 ```
 
 Storage: `.tracker/idempotency.jsonl`, one success record per line. Sorted-keys JSON so field order doesn't affect the hash.
@@ -727,22 +734,22 @@ Solution: cache step outputs, keyed by (workflow, itemId, stepName), with a shor
 
 ```ts
 // At step start:
-const cached = stepCacheGet<EmployeeData>(
-  "onboarding", email, "extraction",
-  { withinHours: 2 }
-)
+const cached = stepCacheGet<EmployeeData>("onboarding", email, "extraction", {
+  withinHours: 2,
+});
 if (cached) {
-  data = cached
-  ctx.updateData(data)
-  return  // skip the expensive scrape
+  data = cached;
+  ctx.updateData(data);
+  return; // skip the expensive scrape
 }
 
 // Scrape normally:
-data = await extractRawFields(page)
+data = await extractRawFields(page);
 
 // At step end:
-try { stepCacheSet("onboarding", email, "extraction", data) }
-catch {} // write failures mustn't fail the step
+try {
+  stepCacheSet("onboarding", email, "extraction", data);
+} catch {} // write failures mustn't fail the step
 ```
 
 ```
@@ -757,7 +764,7 @@ catch {} // write failures mustn't fail the step
 - **Atomic write** via rename dance — partial writes never get read.
 - **Path safety**: all three segments (workflow, itemId, stepName) sanitized — `/`, `\`, `..`, NUL, ASCII ctrl chars rejected on write/clear.
 
-**Deliberately scoped:** this is a *primitive*, not a full kernel-level "resume from last successful step." A full resume would require handlers to thread state through ctx instead of local closures (onboarding mutates `let data: EmployeeData | null` inside steps). The primitive delivers the actual user-visible savings (~2–3 min on retry) without the handler rewrite.
+**Deliberately scoped:** this is a _primitive_, not a full kernel-level "resume from last successful step." A full resume would require handlers to thread state through ctx instead of local closures (onboarding mutates `let data: EmployeeData | null` inside steps). The primitive delivers the actual user-visible savings (~2–3 min on retry) without the handler rewrite.
 
 ### How they compose
 
@@ -812,11 +819,12 @@ export const smartHR = {
    */
   // verified 2026-04-16
   saveSubmitButton: (frame: FrameLocator) =>
-    frame.getByRole("button", { name: "Save and Submit" })
-      .or(frame.locator("input[value='Save']"))  // fallback
-      .or(frame.locator("#SAVE_PB")),             // 2nd fallback
+    frame
+      .getByRole("button", { name: "Save and Submit" })
+      .or(frame.locator("input[value='Save']")) // fallback
+      .or(frame.locator("#SAVE_PB")), // 2nd fallback
   // ...
-}
+};
 ```
 
 **Three conventions enforced by unit tests:**
@@ -828,7 +836,7 @@ export const smartHR = {
 ### `safeClick` / `safeFill` — telemetry on fallback matches
 
 ```ts
-await safeClick(smartHR.saveSubmitButton(frame), "save-submit-button")
+await safeClick(smartHR.saveSubmitButton(frame), "save-submit-button");
 ```
 
 If the primary selector misses but a `.or(...)` fallback matches, `safeClick` emits `log.warn("selector fallback triggered: save-submit-button")`. The dashboard's `SelectorWarningsPanel` aggregates those warns across N days — so when a fallback starts matching regularly, you know the primary selector is stale before it fully breaks.
@@ -950,30 +958,30 @@ sequenceDiagram
 
 ## 11. Glossary
 
-| Term | Meaning |
-|---|---|
-| **Kernel** | Code under `src/core/`. Owns browser lifecycle, auth, tracker wrapping, ctx construction. |
-| **Handler** | The `async (ctx, data) => {...}` function on `WorkflowConfig.handler`. Your business logic. |
-| **`Ctx`** | The façade object the handler receives. Exposes `page/step/markStep/parallel/retry/updateData/…`. |
-| **`Session`** | Manages browsers + auth-ready promises, one per system. Created by `Session.launch`. |
-| **`Stepper`** | Holds current step + accumulated data; wraps step bodies with screenshot-on-failure emit. |
-| **`defineWorkflow`** | Declaration helper. Registers metadata + returns `RegisteredWorkflow` the run fns consume. |
-| **`RegisteredWorkflow`** | `{ config, metadata }` — the handle run fns receive. |
-| **Run mode** | `runWorkflow` (single) / `runWorkflowBatch` (sequential many) / `runWorkflowPool` (parallel many). |
-| **Auth chain** | `sequential` = Duo one-at-a-time blocking; `interleaved` = first blocks, rest chain in background. |
-| **Duo** | UCSD's MFA push notification. Manual — operator approves on phone. Two concurrent pushes would error. |
-| **Tracker** | Append-only JSONL under `.tracker/` written by the tracker wrapper. Dashboard's source of truth. |
-| **SSE** | Server-Sent Events. How the dashboard streams live tracker updates to React. |
-| **`runId`** | Unique UUID per workflow run. Appears on every tracker entry + log line. |
-| **`itemId`** | Stable per-subject id (emplId/docId/email/UUID). Groups retries of the same subject across runs. |
-| **`WF_CONFIG`** | **Obsolete.** Pre-kernel frontend workflow metadata. Now registry-driven. |
-| **`defineDashboardMetadata`** | Legacy registry affordance for non-kernel workflows. **No current callers.** |
-| **`withTrackedWorkflow`** | Tracker lifecycle wrapper. Kernel-internal — handlers never call it directly. |
-| **Idempotency key** | SHA-256 hash of transactional fields. Prevents duplicate submits on crash-retry. |
-| **Step-cache** | Per-step output cache under `.tracker/step-cache/`. Prevents re-doing expensive read-only work. |
-| **Selector intelligence** | `SELECTORS.md` + `LESSONS.md` + `common-intents.txt` + `selector:search` per system. |
-| **`safeClick`/`safeFill`** | Wrappers that log `selector fallback triggered` when `.or(...)` fallbacks match. |
-| **`playwright-cli`** | Standalone tool for mapping selectors. `open --headed` + `snapshot` dumps accessibility tree with refs. |
+| Term                          | Meaning                                                                                                 |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **Kernel**                    | Code under `src/core/`. Owns browser lifecycle, auth, tracker wrapping, ctx construction.               |
+| **Handler**                   | The `async (ctx, data) => {...}` function on `WorkflowConfig.handler`. Your business logic.             |
+| **`Ctx`**                     | The façade object the handler receives. Exposes `page/step/markStep/parallel/retry/updateData/…`.       |
+| **`Session`**                 | Manages browsers + auth-ready promises, one per system. Created by `Session.launch`.                    |
+| **`Stepper`**                 | Holds current step + accumulated data; wraps step bodies with screenshot-on-failure emit.               |
+| **`defineWorkflow`**          | Declaration helper. Registers metadata + returns `RegisteredWorkflow` the run fns consume.              |
+| **`RegisteredWorkflow`**      | `{ config, metadata }` — the handle run fns receive.                                                    |
+| **Run mode**                  | `runWorkflow` (single) / `runWorkflowBatch` (sequential many) / `runWorkflowPool` (parallel many).      |
+| **Auth chain**                | `sequential` = Duo one-at-a-time blocking; `interleaved` = first blocks, rest chain in background.      |
+| **Duo**                       | UCSD's MFA push notification. Manual — operator approves on phone. Two concurrent pushes would error.   |
+| **Tracker**                   | Append-only JSONL under `.tracker/` written by the tracker wrapper. Dashboard's source of truth.        |
+| **SSE**                       | Server-Sent Events. How the dashboard streams live tracker updates to React.                            |
+| **`runId`**                   | Unique UUID per workflow run. Appears on every tracker entry + log line.                                |
+| **`itemId`**                  | Stable per-subject id (emplId/docId/email/UUID). Groups retries of the same subject across runs.        |
+| **`WF_CONFIG`**               | **Obsolete.** Pre-kernel frontend workflow metadata. Now registry-driven.                               |
+| **`defineDashboardMetadata`** | Legacy registry affordance for non-kernel workflows. **No current callers.**                            |
+| **`withTrackedWorkflow`**     | Tracker lifecycle wrapper. Kernel-internal — handlers never call it directly.                           |
+| **Idempotency key**           | SHA-256 hash of transactional fields. Prevents duplicate submits on crash-retry.                        |
+| **Step-cache**                | Per-step output cache under `.tracker/step-cache/`. Prevents re-doing expensive read-only work.         |
+| **Selector intelligence**     | `SELECTORS.md` + `LESSONS.md` + `common-intents.txt` + `selector:search` per system.                    |
+| **`safeClick`/`safeFill`**    | Wrappers that log `selector fallback triggered` when `.or(...)` fallbacks match.                        |
+| **`playwright-cli`**          | Standalone tool for mapping selectors. `open --headed` + `snapshot` dumps accessibility tree with refs. |
 
 ---
 
