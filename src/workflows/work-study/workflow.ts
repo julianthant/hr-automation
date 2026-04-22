@@ -163,3 +163,33 @@ export async function runWorkStudy(
     process.exit(1);
   }
 }
+
+/**
+ * Daemon-mode CLI adapter. Dispatches a single work-study item through the
+ * shared daemon queue instead of running an in-process single-item kernel
+ * call: first call spawns a detached daemon (1 Duo), subsequent calls
+ * enqueue + wake alive daemons.
+ *
+ * See `src/core/daemon-client.ts::ensureDaemonsAndEnqueue` for flag
+ * semantics and `src/workflows/work-study/CLAUDE.md` ("Daemon mode") for
+ * user-facing docs. `runWorkStudy` above remains untouched so tests and
+ * scripting can still run the work-study workflow directly without the
+ * daemon.
+ */
+export async function runWorkStudyCli(
+  emplId: string,
+  effectiveDate: string,
+  options: { new?: boolean; parallel?: number } = {},
+): Promise<void> {
+  if (!emplId || !effectiveDate) {
+    log.error("runWorkStudyCli: emplId and effectiveDate are required");
+    process.exitCode = 1;
+    return;
+  }
+  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
+  await ensureDaemonsAndEnqueue(
+    workStudyWorkflow,
+    [{ emplId, effectiveDate }],
+    { new: options.new, parallel: options.parallel },
+  );
+}
