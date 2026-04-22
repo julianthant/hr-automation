@@ -209,3 +209,54 @@ test('runWorkflowPool: falls back to wf.config.batch.poolSize when opts.poolSize
   assert.equal(result.succeeded, 8)
   assert.equal(launchCalls, 3, 'should fall back to wf.config.batch.poolSize (3)')
 })
+
+test('runWorkflowPool: emits exactly one workflow_start + one workflow_end(done) per batch (across N workers)', async (t) => {
+  const tmp = mkdtempSync(join(tmpdir(), 'pool-one-instance-'))
+  t.after(() => cleanupDir(tmp))
+  const wfName = `pool-oneinst-${Date.now()}`
+  const wf = defineWorkflow({
+    name: wfName,
+    systems: [{ id: 'ucpath', login: async () => {} }],
+    steps: ['s1'] as const,
+    schema: z.object({ k: z.string() }),
+    batch: { mode: 'pool', poolSize: 2 },
+    handler: async (ctx) => { await ctx.step('s1', async () => {}) },
+  })
+
+  await runWorkflowPool(
+    wf,
+    [{ k: 'a' }, { k: 'b' }, { k: 'c' }, { k: 'd' }],
+    {
+      launchFn: () => Promise.resolve(fakeSlot()),
+      trackerDir: tmp,
+      deriveItemId: (item: unknown) => (item as { k: string }).k,
+    },
+  )
+
+  const sessPath = join(tmp, 'sessions.jsonl')
+  assert.ok(existsSync(sessPath), 'sessions.jsonl written')
+  const events = readFileSync(sessPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  const starts = events.filter((e: any) => e.type === 'workflow_start')
+  const ends = events.filter((e: any) => e.type === 'workflow_end')
+  assert.equal(starts.length, 1, 'one workflow_start per batch')
+  assert.equal(ends.length, 1, 'one workflow_end per batch')
+  assert.equal(ends[0].finalStatus, 'done')
+
+  // All items should share the same instance name.
+  const entries = readTrackerEntries(tmp, wfName)
+  const dones = entries.filter((e: any) => e.status === 'done')
+  assert.equal(dones.length, 4, 'four done entries')
+  const instance = (dones[0] as any).data.instance
+  assert.ok(instance, 'instance stamped')
+  assert.ok(
+    dones.every((e: any) => e.data.instance === instance),
+    'all items share pool instance',
+  )
+
+  // auth_start fires once per worker × system (each worker has its own Session
+  // and authenticates independently) — but all attributed to the same instance.
+  const authStarts = events.filter((e: any) => e.type === 'auth_start')
+  // Pool size 2, 1 system → 2 auth_starts
+  assert.equal(authStarts.length, 2, 'auth_start fires per worker (×1 system)')
+  assert.ok(authStarts.every((e: any) => e.workflowInstance === instance), 'all auth_starts attribute to batch instance')
+})
