@@ -52,7 +52,7 @@ src/workflows/emergency-contact/scripts/   ← workflow-specific dev tools
 
 ### `src/workflows/emergency-contact/scripts/` (workflow-specific)
 
-- **`download-roster.ts`** — One-shot SharePoint roster downloader. Wraps `downloadSharePointFile` from `../sharepoint-download.ts` with a CLI front-end. Co-located with the workflow because it's the only consumer.
+- **`download-roster.ts`** — One-shot SharePoint roster downloader. Wraps `downloadSharePointFile` from [`src/workflows/sharepoint-download/`](../../workflows/sharepoint-download/) (the canonical location as of 2026-04-22) with a CLI front-end. Co-located with emergency-contact because that's this script's primary consumer, but the underlying helper is cross-cutting.
 - **`verify-roster.ts`** — One-shot roster verification (without running the workflow). Wraps `verifyBatchAgainstRoster` from `../roster-verify.ts`. Co-located with the workflow because it's the only consumer.
 
 ## Conventions

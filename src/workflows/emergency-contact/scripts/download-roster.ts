@@ -2,13 +2,14 @@
  * Standalone CLI wrapper for downloadSharePointFile().
  *
  * Usage:
- *   tsx --env-file=.env src/scripts/download-sharepoint-roster.ts "<sharepoint-url>"
+ *   tsx --env-file=.env src/workflows/emergency-contact/scripts/download-roster.ts "<sharepoint-url>"
  *
  * Saves to .tracker/rosters/<timestamp>-<filename>.xlsx.
- * For workflow integration, import downloadSharePointFile from src/workflows/emergency-contact/sharepoint-download.ts directly.
+ * For workflow integration, import downloadSharePointFile from
+ * src/workflows/sharepoint-download (this is the canonical location).
  */
 import path from "node:path";
-import { downloadSharePointFile } from "../sharepoint-download.js";
+import { downloadSharePointFile } from "../../sharepoint-download/index.js";
 import { validateEnv } from "../../../utils/env.js";
 import { log } from "../../../utils/log.js";
 

@@ -39,7 +39,7 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
       description: "Approve Duo on your phone when prompted.",
     });
     try {
-      const res = await fetch("/api/emergency-contact/download-roster", {
+      const res = await fetch("/api/sharepoint-download/run", {
         method: "POST",
       });
       const body = (await res.json().catch(() => ({}))) as {
