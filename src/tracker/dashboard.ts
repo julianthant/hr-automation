@@ -43,6 +43,15 @@ export function getEventSortKey(e: { timestamp?: string; ts?: number }): string 
   return "";
 }
 
+/**
+ * How long after a crash-on-launch the dashboard keeps rendering the red
+ * "Launch failed" placeholder in the live Sessions rail. Past this window the
+ * failed run is considered historical — details still live in
+ * `.tracker/sessions.jsonl` and the workflow's per-day log, but the Sessions
+ * panel (which is a "live / currently happening" view) stops pinning it.
+ */
+const CRASH_ON_LAUNCH_WINDOW_MS = 15 * 60 * 1000;
+
 // Resolve path to built dashboard HTML (vite-plugin-singlefile output)
 const DASHBOARD_HTML_PATH = join(
   import.meta.dirname ?? ".",
@@ -189,14 +198,31 @@ export function rebuildSessionState(dir?: string): SessionState {
   // from normal "no-active-sessions" in the dashboard UI — this flag lets
   // SessionPanel render a dedicated "Launch failed" placeholder so the user
   // knows the run crashed early and where to look for details.
+  //
+  // Age gate: SessionPanel keeps crashedOnLaunch entries visible even after
+  // pidAlive flips false (that's the point of the placeholder — the Node
+  // process that crashed is already gone). But sessions.jsonl is append-only
+  // across orchestrator sessions, so without a time cutoff a crash from days
+  // ago would permanently pin itself to the live Sessions rail. Only flag
+  // crashes whose workflow_end is within CRASH_ON_LAUNCH_WINDOW_MS.
   const instancesWithBrowserLaunch = new Set<string>();
+  const workflowEndTimestamps = new Map<string, string>();
   for (const e of events) {
     if (e.type === "browser_launch" && e.workflowInstance) {
       instancesWithBrowserLaunch.add(e.workflowInstance);
     }
+    if (e.type === "workflow_end" && e.workflowInstance && e.timestamp) {
+      workflowEndTimestamps.set(e.workflowInstance, e.timestamp);
+    }
   }
+  const now = Date.now();
   for (const wf of wfMap.values()) {
-    if (wf.finalStatus === "failed" && !instancesWithBrowserLaunch.has(wf.instance)) {
+    if (wf.finalStatus !== "failed") continue;
+    if (instancesWithBrowserLaunch.has(wf.instance)) continue;
+    const endTs = workflowEndTimestamps.get(wf.instance);
+    if (!endTs) continue;
+    const ageMs = now - Date.parse(endTs);
+    if (Number.isFinite(ageMs) && ageMs <= CRASH_ON_LAUNCH_WINDOW_MS) {
       wf.crashedOnLaunch = true;
     }
   }
