@@ -10,6 +10,7 @@ import { withLogContext, log } from '../utils/log.js'
 import { classifyError } from '../utils/errors.js'
 import { runWorkflowPool } from './pool.js'
 import { runWorkflowSharedContextPool } from './shared-context-pool.js'
+import { withBatchLifecycle } from './batch-lifecycle.js'
 import { makeAuthObserver } from '../tracker/auth-observer.js'
 
 /**
@@ -502,59 +503,81 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
     }
   }
 
-  const session = await Session.launch(wf.config.systems, {
-    authChain: wf.config.authChain,
-    tiling: wf.config.tiling,
-    launchFn: opts.launchFn,
-  })
-
   const result: BatchResult = { total: items.length, succeeded: 0, failed: 0, errors: [] }
 
-  // Sequential between-items hook — skipped on the first item (fresh auth
-  // state). Threaded into runOneItem via `preHandler` so the hook runs INSIDE
-  // the withTrackedWorkflow envelope; throws here surface as failed tracker
-  // entries the same way handler throws do.
-  const makePreHandler = (i: number): (() => Promise<void>) | undefined => {
-    if (i === 0 || !batch?.betweenItems) return undefined
-    return async () => {
-      for (const hook of batch.betweenItems!) {
-        if (hook === 'reset-browsers') {
-          const t0 = Date.now()
-          for (const s of wf.config.systems) await session.reset(s.id)
-          log.step(`[Batch] Reset browsers (took ${Date.now() - t0}ms)`)
-        } else if (hook === 'navigate-home') {
-          for (const s of wf.config.systems) await session.reset(s.id)
-        } else if (hook === 'health-check') {
-          for (const s of wf.config.systems) {
-            if (!(await session.healthCheck(s.id))) {
-              throw new Error(`health-check failed for ${s.id}`)
+  return withBatchLifecycle(
+    {
+      workflow: wf.config.name,
+      systems: wf.config.systems,
+      perItem: perItem.map(({ item, itemId, runId }) => ({ item, itemId, runId })),
+      trackerDir: opts.trackerDir,
+    },
+    async ({ instance, markTerminated, makeObserver }) => {
+      const { observer, getAuthTimings } = makeObserver('1')
+      const session = await Session.launch(wf.config.systems, {
+        authChain: wf.config.authChain,
+        tiling: wf.config.tiling,
+        launchFn: opts.launchFn,
+        observer,
+      })
+
+      // Await every system's readyPromise before snapshotting authTimings
+      // (interleaved authChain returns once first system is ready).
+      for (const sys of wf.config.systems) {
+        try { await session.page(sys.id) } catch { /* auth failure surfaces elsewhere */ }
+      }
+      const authTimings = wf.config.authSteps !== false ? getAuthTimings() : undefined
+
+      // Sequential between-items hook — skipped on the first item (fresh
+      // auth state). Threaded into runOneItem via `preHandler` so hook runs
+      // INSIDE withTrackedWorkflow; throws surface as `failed` tracker rows
+      // just like handler throws.
+      const makePreHandler = (i: number): (() => Promise<void>) | undefined => {
+        if (i === 0 || !batch?.betweenItems) return undefined
+        return async () => {
+          for (const hook of batch.betweenItems!) {
+            if (hook === 'reset-browsers') {
+              const t0 = Date.now()
+              for (const s of wf.config.systems) await session.reset(s.id)
+              log.step(`[Batch] Reset browsers (took ${Date.now() - t0}ms)`)
+            } else if (hook === 'navigate-home') {
+              for (const s of wf.config.systems) await session.reset(s.id)
+            } else if (hook === 'health-check') {
+              for (const s of wf.config.systems) {
+                if (!(await session.healthCheck(s.id))) {
+                  throw new Error(`health-check failed for ${s.id}`)
+                }
+              }
             }
           }
         }
       }
-    }
-  }
 
-  try {
-    for (let i = 0; i < perItem.length; i++) {
-      const { item, itemId, runId } = perItem[i]
-      log.step(`[Batch] Item ${i + 1}/${perItem.length}: itemId='${itemId}'`)
-      const r = await runOneItem({
-        wf,
-        session,
-        item,
-        itemId,
-        runId,
-        trackerStub: opts.trackerStub,
-        trackerDir: opts.trackerDir,
-        callerPreEmits,
-        preHandler: makePreHandler(i),
-      })
-      if (r.ok) result.succeeded++
-      else { result.failed++; result.errors.push({ item, error: r.error }) }
-    }
-  } finally {
-    await session.close()
-  }
-  return result
+      try {
+        for (let i = 0; i < perItem.length; i++) {
+          const { item, itemId, runId } = perItem[i]
+          log.step(`[Batch] Item ${i + 1}/${perItem.length}: itemId='${itemId}'`)
+          const r = await runOneItem({
+            wf,
+            session,
+            item,
+            itemId,
+            runId,
+            trackerStub: opts.trackerStub,
+            trackerDir: opts.trackerDir,
+            callerPreEmits,
+            preHandler: makePreHandler(i),
+            preAssignedInstance: instance,
+            authTimings,
+          })
+          markTerminated(runId)
+          if (r.ok) result.succeeded++
+          else { result.failed++; result.errors.push({ item, error: r.error }) }
+        }
+      } finally {
+        await session.close()
+      }
+      return result
+    },
+  )
 }
