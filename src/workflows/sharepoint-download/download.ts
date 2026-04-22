@@ -16,8 +16,13 @@
  * Note: this helper is intentionally NOT wired through `defineWorkflow()`.
  * It's a one-shot utility invoked either from the dashboard button
  * (`buildSharePointRosterDownloadHandler`) or from emergency-contact's
- * pre-flight roster verification. It produces no tracker JSONL events and
- * therefore doesn't surface in the workflow dropdown.
+ * pre-flight roster verification. It does not emit workflow-tracker entries,
+ * so it stays out of the workflow dropdown. When the optional `session`
+ * option is passed (dashboard path) it DOES emit dashboard session-panel
+ * events (workflow_start/end at the handler layer; browser_launch,
+ * auth_start/complete, duo_request/complete, step_change here) so the
+ * operator can see the run live in the Sessions rail just like a kernel
+ * workflow. Standalone CLI + preflight paths pass no `session` → silent.
  */
 import path from "node:path";
 import fs from "node:fs";
@@ -34,6 +39,44 @@ import {
   excelOnline,
   fileMenu,
 } from "../../systems/sharepoint/selectors.js";
+import {
+  emitSessionCreate,
+  emitSessionClose,
+  emitBrowserLaunch,
+  emitBrowserClose,
+  emitAuthStart,
+  emitAuthComplete,
+  emitStepChange,
+  emitSessionEvent,
+} from "../../tracker/session-events.js";
+
+/**
+ * Optional callback hook invoked at every phase transition of the download
+ * flow. When non-null, `downloadSharePointFile` mirrors its progress into the
+ * dashboard's Sessions rail (browser chip + auth state + current step) via
+ * the tracker's session-events JSONL. Omit (or pass `undefined`) for the
+ * standalone-CLI / emergency-contact-preflight paths, which either don't need
+ * UI surfacing or are already inside a kernel workflow with its own events.
+ */
+export interface DownloadSharePointSession {
+  /**
+   * Workflow instance label, typically generated via
+   * `generateInstanceName("sharepoint-download")` → "SharePoint 1". Must
+   * match the same instance the caller emitted `workflow_start` with, or the
+   * Session panel won't correlate the two event streams.
+   */
+  instance: string;
+  /**
+   * Browser chip label. Defaults to `"sharepoint"` — the convention matching
+   * other systems (`ucpath`, `kuali`, etc.).
+   */
+  system?: string;
+  /**
+   * Tracker directory. Defaults to `DEFAULT_DIR` (`.tracker/`). Passed through
+   * so tests can point at a tmp dir without polluting the real SSE stream.
+   */
+  dir?: string;
+}
 
 export interface DownloadSharePointOptions {
   /** URL of the SharePoint file to open (e.g. a shared Excel Online link) */
@@ -44,6 +87,8 @@ export interface DownloadSharePointOptions {
   downloadTimeoutSeconds?: number;
   /** Max seconds to wait for Duo approval. Default 180. */
   duoTimeoutSeconds?: number;
+  /** Optional — when provided, emit dashboard Session-panel lifecycle events (see `DownloadSharePointSession`). */
+  session?: DownloadSharePointSession;
 }
 
 async function handleMicrosoftEmailStep(page: Page): Promise<void> {
@@ -124,11 +169,26 @@ async function tryClickDownload(page: Page): Promise<boolean> {
 export async function downloadSharePointFile(
   options: DownloadSharePointOptions,
 ): Promise<string> {
-  const { url, outDir, downloadTimeoutSeconds = 300, duoTimeoutSeconds = 180 } = options;
+  const { url, outDir, downloadTimeoutSeconds = 300, duoTimeoutSeconds = 180, session } = options;
 
   fs.mkdirSync(outDir, { recursive: true });
 
+  // Session-panel bookkeeping — only emits when the caller opted into it.
+  // Unique ids are suffixed with `process.pid + Date.now()` so concurrent runs
+  // (blocked at the HTTP layer today, but defensive) never collide.
+  const systemLabel = session?.system ?? "sharepoint";
+  const sessionId = session ? `sp-session-${process.pid}-${Date.now()}` : "";
+  const browserId = session ? `sp-browser-${process.pid}-${Date.now()}` : "";
+  const step = session
+    ? (name: string) => emitStepChange(session.instance, name, session.dir)
+    : () => {};
+
   const { browser, context, page } = await launchBrowser({ acceptDownloads: true });
+
+  if (session) {
+    emitSessionCreate(session.instance, sessionId, session.dir);
+    emitBrowserLaunch(session.instance, sessionId, browserId, systemLabel, session.dir);
+  }
 
   const downloadPromise = new Promise<Download>((resolve) => {
     page.once("download", resolve);
@@ -147,6 +207,7 @@ export async function downloadSharePointFile(
   };
 
   try {
+    step("navigate");
     log.step(`Navigating to SharePoint: ${url.slice(0, 80)}...`);
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
     await page.waitForTimeout(3_000);
@@ -157,29 +218,83 @@ export async function downloadSharePointFile(
       (await page.locator('input[name="j_username"]').count()) > 0;
 
     if (onSso) {
+      step("sso");
+      if (session) {
+        emitAuthStart(session.instance, browserId, systemLabel, session.dir);
+      }
       log.step("UCSD SSO detected — filling credentials...");
       await fillSsoCredentials(page);
       await clickSsoSubmit(page);
 
-      const approved = await pollDuoApproval(page, {
-        systemLabel: "SharePoint",
-        successUrlMatch: (u) =>
-          u.includes("sharepoint.com") ||
-          u.includes("office.com") ||
-          u.includes("login.microsoftonline.com/kmsi") ||
-          u.includes("login.microsoftonline.com/login.srf"),
-        timeoutSeconds: duoTimeoutSeconds,
-      });
-      if (!approved) {
-        throw new Error("Duo approval timed out during SharePoint login");
+      // Duo — emit request/complete so the browser chip flips to the
+      // duo_waiting (yellow/glow) state for the duration of the phone tap.
+      // Request-id only has to be unique within the `.tracker/sessions.jsonl`
+      // file; instance + timestamp is plenty.
+      const duoRequestId = session
+        ? `${session.instance}-${systemLabel}-${Date.now()}`
+        : "";
+      if (session) {
+        step("duo");
+        emitSessionEvent(
+          {
+            type: "duo_request",
+            workflowInstance: session.instance,
+            system: systemLabel,
+            browserId,
+            duoRequestId,
+          },
+          session.dir,
+        );
+      }
+
+      try {
+        const approved = await pollDuoApproval(page, {
+          systemLabel: "SharePoint",
+          successUrlMatch: (u) =>
+            u.includes("sharepoint.com") ||
+            u.includes("office.com") ||
+            u.includes("login.microsoftonline.com/kmsi") ||
+            u.includes("login.microsoftonline.com/login.srf"),
+          timeoutSeconds: duoTimeoutSeconds,
+        });
+        if (!approved) {
+          throw new Error("Duo approval timed out during SharePoint login");
+        }
+      } finally {
+        // Always emit duo_complete — even on the throw path above, this
+        // resolves the duo_request so the session-panel chip doesn't stay
+        // stuck in duo_waiting after the workflow ends.
+        if (session) {
+          emitSessionEvent(
+            {
+              type: "duo_complete",
+              workflowInstance: session.instance,
+              system: systemLabel,
+              browserId,
+              duoRequestId,
+            },
+            session.dir,
+          );
+        }
+      }
+
+      if (session) {
+        emitAuthComplete(session.instance, browserId, systemLabel, session.dir);
       }
     } else {
       log.step("No SSO redirect — possibly already authenticated via cached cookies");
+      // Cached-cookie path: fake the auth lifecycle so the chip still
+      // transitions idle → authed instead of looking stuck.
+      if (session) {
+        emitAuthStart(session.instance, browserId, systemLabel, session.dir);
+        emitAuthComplete(session.instance, browserId, systemLabel, session.dir);
+      }
     }
 
     await page.waitForTimeout(3_000);
     await dismissStaySignedIn(page);
 
+    step("download");
     log.step("Waiting for Excel Online viewer to settle...");
     await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => {});
     await page.waitForTimeout(5_000);
@@ -219,5 +334,9 @@ export async function downloadSharePointFile(
     return outPath;
   } finally {
     await closeBrowser();
+    if (session) {
+      emitBrowserClose(session.instance, browserId, systemLabel, session.dir);
+      emitSessionClose(session.instance, sessionId, session.dir);
+    }
   }
 }
