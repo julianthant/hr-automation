@@ -13,6 +13,10 @@
     "onboarding": "tsx --env-file=.env src/cli.ts onboarding",
     "onboarding:dry": "tsx --env-file=.env src/cli.ts onboarding --dry-run",
     "onboarding:batch": "tsx --env-file=.env src/cli.ts onboarding --batch",
+    "onboarding:direct": "tsx --env-file=.env src/cli.ts onboarding --direct",
+    "onboarding:status": "tsx --env-file=.env src/cli.ts daemon-status onboarding",
+    "onboarding:stop": "tsx --env-file=.env src/cli.ts daemon-stop onboarding",
+    "onboarding:attach": "tsx --env-file=.env src/cli.ts daemon-attach onboarding",
 
     "separation": "tsx --env-file=.env src/cli.ts separation",
     "separation:dry": "tsx --env-file=.env src/cli.ts separation --dry-run",

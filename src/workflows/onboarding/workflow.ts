@@ -510,6 +510,61 @@ export async function runOnboarding(
 }
 
 /**
+ * Daemon-mode CLI adapter for `npm run onboarding <email...>`.
+ *
+ * Enqueues one `{email}` item per CLI argument onto any alive `onboarding`
+ * daemon (or spawns one via `ensureDaemonsAndEnqueue`). Daemons keep
+ * CRM + UCPath browsers warm across invocations so repeat onboards don't
+ * re-Duo every time — CRM's Duo alone costs ~30-60s per run, so this is
+ * the biggest wall-clock savings of any converted workflow.
+ *
+ * Onboarding's `defineWorkflow` already declares `batch: { mode: "pool" }`,
+ * which is how `runWorkflowBatch` → `runWorkflowPool` (legacy `--direct`
+ * path + `--batch` flag) fans a batch across N workers. Daemon mode is
+ * orthogonal: each alive daemon is one long-lived single-worker Session
+ * claiming items off the shared queue. For throughput, start N daemons
+ * with `-p N` — the shared `fs.mkdir` claim mutex distributes items across
+ * them identically to pool workers, with the added benefit that the
+ * daemons survive the batch.
+ *
+ * Constraints:
+ *   - `--dry-run` still bypasses daemon mode entirely (CRM-only preview,
+ *     no spawn, no enqueue).
+ *   - `--batch` (reads batch.yaml) routes through `runParallel` / `--direct`
+ *     because the daemon adapter takes emails positionally. If you want
+ *     daemon-mode batch processing, pass the emails explicitly on the
+ *     CLI — `npm run onboarding a@uc b@uc c@uc` fans across alive daemons
+ *     via the shared queue.
+ */
+export async function runOnboardingCli(
+  emails: string[],
+  options: { dryRun?: boolean; new?: boolean; parallel?: number } = {},
+): Promise<void> {
+  if (emails.length === 0) {
+    log.error("runOnboardingCli: no emails provided");
+    process.exitCode = 1;
+    return;
+  }
+
+  if (options.dryRun) {
+    // Daemon can't share a single CRM browser across N dry-run previews
+    // without launching the full session — fall back to the sequential
+    // imperative dry-run that `runOnboarding` already owns.
+    for (const email of emails) {
+      await runOnboardingDryRun(email);
+    }
+    return;
+  }
+
+  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
+  const inputs = emails.map((email) => ({ email }));
+  await ensureDaemonsAndEnqueue(onboardingWorkflow, inputs, {
+    new: options.new,
+    parallel: options.parallel,
+  });
+}
+
+/**
  * Single-browser imperative dry-run: CRM auth + extraction + plan preview, no UCPath/I9.
  *
  * Mirrors the old dryRun short-circuit semantics without launching unnecessary browsers.

@@ -64,7 +64,9 @@ Workflows where daemon mode is **not** appropriate (do NOT convert):
 - **Non-CLI workflows** like `sharepoint-download` (dashboard button, fire-and-forget `runWorkflow`) — daemon mode solves "avoid re-Duo on repeated CLI runs," which doesn't apply when the dashboard holds one long-lived session.
 - **Workflows invoked programmatically from other workflows** — daemon mode is client/daemon IPC; an in-process caller should keep using `runWorkflow` / `runWorkflowBatch` directly.
 
-Currently converted: `separations`, `work-study`. Pending: `onboarding`, `old-kronos-reports`, `eid-lookup`, `emergency-contact`. No behavior change intended — daemon mode wraps the same `runOneItem` kernel primitive, so per-item tracker output is byte-identical to the legacy path.
+Currently converted: `separations`, `work-study`, `eid-lookup`, `onboarding`. Pending: `old-kronos-reports`, `emergency-contact`. No behavior change intended — daemon mode wraps the same `runOneItem` kernel primitive, so per-item tracker output is byte-identical to the legacy path.
+
+**Onboarding note** — one alive daemon = one single-worker session with 3 browsers (CRM + UCPath + I9) and 2 Duos (I9 is SSO no-2FA). Heaviest per-daemon cost of any converted workflow, but biggest savings per repeat invocation (CRM Duo alone is ~30-60s). The workflow's `batch.mode: "pool"` is orthogonal: it governs `runWorkflowBatch` fan-out in the legacy `--direct` path. Daemon-mode parallelism comes from running N daemons (`-p N`), each a single worker claiming off the shared queue. `--dry-run` and `--batch` both auto-force `--direct` (dry-run skips the full session launch; batch.yaml is read in-process).
 
 ## Existing Workflows
 

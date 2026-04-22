@@ -38,6 +38,14 @@ const WORKFLOWS: Record<string, () => Promise<AnyRegisteredWorkflow>> = {
     const mod = await import("./workflows/eid-lookup/index.js");
     return mod.eidLookupCrmWorkflow as unknown as AnyRegisteredWorkflow;
   },
+  // Onboarding daemon holds 3 browsers (CRM + UCPath + I9) per session with
+  // 2 Duos (I9 is SSO no-2FA). Heaviest per-daemon resource cost, but biggest
+  // re-Duo savings since CRM's Duo alone is ~30-60s. --dry-run and --batch
+  // (reads batch.yaml) route to the legacy in-process path.
+  onboarding: async () => {
+    const mod = await import("./workflows/onboarding/index.js");
+    return mod.onboardingWorkflow as unknown as AnyRegisteredWorkflow;
+  },
 };
 
 async function main(): Promise<void> {
