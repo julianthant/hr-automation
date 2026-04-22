@@ -45,7 +45,7 @@ No `tracker.ts` — dashboard JSONL only. The xlsx tracker was removed on 2026-0
 | `authChain` | `"sequential"` | `"sequential"` | `"sequential"` | `"sequential"` |
 | `tiling` | `"single"` | `"auto"` | `"auto"` | `"auto"` |
 | `batch` | `{ mode: "shared-context-pool", poolSize: 4, preEmitPending: true }` | same | same | same |
-| `detailFields` | `searchName, emplId, department, jobTitle` | `+ crmMatch` | `+ i9Signer, i9Status` | `+ crmMatch, i9Signer, i9Status` |
+| `detailFields` | `searchName, emplId, department` | `+ crmMatch` | `+ i9Signer, i9Status` | `+ crmMatch, i9Signer, i9Status` |
 | `getName` / `getId` | `d.searchName` | same | same | same |
 | `initialData` | `{ searchName: input.name }` | same | same | same |
 
