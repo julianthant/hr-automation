@@ -88,6 +88,10 @@ Lives under `.tracker/emergency-contact/` (gitignored — contains PII). Each re
   notes: []                    # extraction uncertainty flags (unused by code — for user eyeballing)
 ```
 
+## Dashboard roster download
+
+A Download icon button sits to the right of the queue search input on every workflow's dashboard (not just emergency-contact — operators often pull the roster while looking at other queues). Clicking it hits `POST /api/emergency-contact/download-roster` (backed by `buildEmergencyRosterDownloadHandler` in `src/tracker/dashboard.ts`), which reads `ONBOARDING_ROSTER_URL` from env, reuses `downloadSharePointFile()`, and saves the xlsx into `src/data/<YYYY-MM-DDTHH-MM-SS>-<suggested>.xlsx`. The endpoint holds a module-level `rosterDownloadInFlight` lock — concurrent clicks get `409`, the dashboard surfaces this as a warning toast. Missing env var → `400` with an actionable message. Duo approval still requires a manual phone tap; the dashboard's existing step-log stream shows the SSO/Duo waiting states during the run.
+
 ## Pre-flight roster verification
 
 Optional but recommended. `--roster-url` downloads the latest roster from SharePoint (via `downloadSharePointFile` — handles SSO + Duo); `--roster-path` uses a local xlsx you already have. Uses `verifyBatchAgainstRoster` in `src/workflows/emergency-contact/roster-verify.ts`:

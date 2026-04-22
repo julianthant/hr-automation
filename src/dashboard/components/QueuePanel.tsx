@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
-import { Search, Inbox, X } from "lucide-react";
+import { Search, Inbox, X, Download, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { StatPills } from "./StatPills";
 import { EntryItem } from "./EntryItem";
 import { EmptyState } from "./EmptyState";
@@ -29,6 +30,51 @@ interface QueuePanelProps {
 export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }: QueuePanelProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [downloadingRoster, setDownloadingRoster] = useState(false);
+
+  async function handleDownloadRoster() {
+    if (downloadingRoster) return;
+    setDownloadingRoster(true);
+    const pending = toast.loading("Downloading onboarding spreadsheet…", {
+      description: "Approve Duo on your phone when prompted.",
+    });
+    try {
+      const res = await fetch("/api/emergency-contact/download-roster", {
+        method: "POST",
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        path?: string;
+        filename?: string;
+        error?: string;
+      };
+      toast.dismiss(pending);
+      if (res.ok && body.ok) {
+        toast.success("Roster downloaded", {
+          description: body.path ?? body.filename ?? "Saved to src/data/",
+          duration: 6000,
+        });
+      } else if (res.status === 409) {
+        toast.warning("Already downloading", {
+          description:
+            body.error ?? "A roster download is already in progress.",
+        });
+      } else {
+        toast.error("Roster download failed", {
+          description: body.error ?? `HTTP ${res.status}`,
+          duration: 8000,
+        });
+      }
+    } catch (err) {
+      toast.dismiss(pending);
+      toast.error("Roster download failed", {
+        description:
+          err instanceof Error ? err.message : "Network error contacting the dashboard backend.",
+      });
+    } finally {
+      setDownloadingRoster(false);
+    }
+  }
 
   const filtered = useMemo(() => {
     let result = entries;
@@ -50,9 +96,13 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
   return (
     <div className="w-[320px] min-[1440px]:w-[400px] 2xl:w-[480px] flex-shrink-0 border-r border-border flex flex-col bg-background">
       {/* ── Search row — h-[60px] matches the LogPanel header height across
-            the gap so the first horizontal divider aligns. ── */}
-      <div className="h-[60px] flex items-center px-3 min-[1440px]:px-4 border-b border-border bg-card flex-shrink-0">
-        <div className="flex items-center gap-2 bg-secondary border border-border rounded-lg px-3 py-2 w-full focus-within:border-primary transition-colors">
+            the gap so the first horizontal divider aligns. A "download
+            onboarding spreadsheet" icon button sits to the right of the
+            search input — always visible; the endpoint is workflow-agnostic
+            (it pulls the shared SharePoint roster used by onboarding /
+            emergency-contact / etc.). ── */}
+      <div className="h-[60px] flex items-center gap-2 px-3 min-[1440px]:px-4 border-b border-border bg-card flex-shrink-0">
+        <div className="flex items-center gap-2 bg-secondary border border-border rounded-lg px-3 py-2 flex-1 min-w-0 focus-within:border-primary transition-colors">
           <Search aria-hidden className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
           <input
             type="text"
@@ -73,6 +123,20 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
             </button>
           )}
         </div>
+        <button
+          type="button"
+          onClick={handleDownloadRoster}
+          disabled={downloadingRoster}
+          aria-label="Download onboarding spreadsheet"
+          title="Download onboarding spreadsheet"
+          className="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-secondary border border-border text-muted-foreground hover:text-foreground hover:bg-accent hover:border-primary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
+        >
+          {downloadingRoster ? (
+            <Loader2 aria-hidden className="w-4 h-4 animate-spin" />
+          ) : (
+            <Download aria-hidden className="w-4 h-4" />
+          )}
+        </button>
       </div>
 
       {/* ── Status filter strip — h-[69.5px] makes the section's bottom
