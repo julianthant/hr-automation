@@ -68,7 +68,7 @@ npm run test                                       # Unit tests
 npm run build:dashboard                            # Single-file dashboard build
 ```
 
-All runtime scripts use `tsx --env-file=.env`. If `npm` is blocked by group policy, invoke tsx directly: `./node_modules/.bin/tsx --env-file=.env src/cli.ts <command>`.
+All runtime scripts use `tsx --env-file=.env` (tsx is in `devDependencies` and picks up the env file natively). If `npm run` is blocked by group policy, invoke tsx directly: `./node_modules/.bin/tsx --env-file=.env src/cli.ts <command>`. If the `tsx` binary itself is blocked (symlinked bins occasionally are), fall back to `node --import tsx/esm --env-file=.env src/cli.ts <command>` — same behaviour, just wordier.
 
 ## Architecture
 
