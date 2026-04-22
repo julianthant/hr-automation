@@ -13,8 +13,10 @@ SharePoint pushes you through four auth layers. Every other workflow that talks 
 1. **Microsoft AAD email prefill** (`login.microsoftonline.com/.../oauth2/authorize`) — sometimes skipped when cookies are warm.
    - `microsoft.emailInput(page).fill("${userId}@ucsd.edu")`
    - `microsoft.nextButton(page).click()`
-2. **UCSD Shibboleth SSO** (`a5.ucsd.edu`) — shared with UCPath / Kuali / new-Kronos / ACT CRM.
-   - `fillSsoCredentials(page)` + `clickSsoSubmit(page)` from `src/auth/sso-fields.ts`.
+2. **UCSD ADFS federation login** (`ad-wfs-aws.ucsd.edu/adfs/ls/`) — NOT the Shibboleth IdP at `a5.ucsd.edu` that UCPath / Kuali / Kronos / CRM use. Microsoft pre-populates the username via the `?username=` URL param; just fill the password and click Sign in.
+   - `adfs.passwordInput(page).fill(password)`
+   - `adfs.submitButton(page).click()`
+   - See `handleAdfsLogin()` in `src/workflows/sharepoint-download/download.ts` for the canonical caller. Falls back to Shibboleth (`fillSsoCredentials` + `clickSsoSubmit`) if AAD ever routes us there instead — detection is URL-prefix based.
 3. **Duo MFA** (`api-*.duosecurity.com/frame/frameless/v4/auth`).
    - `pollDuoApproval(page, { systemLabel: "SharePoint", successUrlMatch: (u) => u.includes("sharepoint.com") || u.includes("office.com") || u.includes("login.microsoftonline.com/kmsi"), timeoutSeconds: 180 })` from `src/auth/duo-poll.ts`. The poller already handles "Try Again" (Duo push timeout → resend) and "Yes, this is my device" (device-trust nudge) — do not duplicate.
 4. **KMSI / "Stay signed in?"** (`login.microsoftonline.com/login.srf`).
@@ -53,5 +55,6 @@ The hover-first pattern is critical: clicking `Create a Copy` (instead of hoveri
 
 ## Lessons Learned
 
+- **2026-04-22: SharePoint federates through ADFS (`ad-wfs-aws.ucsd.edu`), not Shibboleth (`a5.ucsd.edu`).** Initial `loginToSharePoint` reused the Shibboleth-scoped SSO detection (`url.includes("a5.ucsd.edu") || input[name="j_username"]`) and `fillSsoCredentials` helper. For the SharePoint redirect chain, AAD actually hands off to UCSD's ADFS endpoint, which has a different form shape (`input[name="UserName"]` / `input[name="Password"]` / `#submitButton`). Detection fell through to "No SSO redirect — cached cookies" and the run failed the post-auth URL check. Fixed by adding `adfs.*` selectors + an ADFS branch in `handleAdfsLogin`. See `LESSONS.md` for the full write-up.
 - **2026-04-22: Excel Online ribbon is iframe-scoped.** Mapped the full download flow via `playwright-cli -s=sp-roster`. Initial implementation's `page.getByRole("button", { name: /file/i })` returned 0 matches because the ribbon lives inside `iframe[name="WacFrame_Excel_0"]`. Wrapped every post-KMSI selector in `getExcelFrame(page)` and the click started working. Also discovered that `File → Download a Copy` is a flyout under `Create a Copy` (not a direct item), so the interaction is `hover(createACopy) → click(downloadACopy)`, not `click(File) → click(downloadACopy)`.
 - **2026-04-22: Export flyout does NOT contain xlsx.** First instinct was to probe `File → Export → Download as Workbook`. Export only offers PDF / CSV / CSV UTF-8 / ODS. xlsx is under `Create a Copy`.

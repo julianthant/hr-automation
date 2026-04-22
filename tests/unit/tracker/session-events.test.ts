@@ -244,6 +244,48 @@ describe("rebuildSessionState — workflows", () => {
       "stale crashes (>15m old) must not pin themselves to the live Sessions rail",
     );
   });
+
+  it("flips pidAlive=false for in-process workflows once workflow_end fires (SessionPanel consistency)", () => {
+    // Regression guard for the `sharepoint-download` dashboard button. Fire-and-forget
+    // workflows run INSIDE the dashboard server process, so the recorded pid equals
+    // the dashboard's own pid — `process.kill(pid, 0)` always succeeds while the
+    // dashboard is up, which would pin the workflow box to the Sessions rail forever.
+    // Once workflow_end fires, pidAlive must flip false so the SessionPanel removes
+    // the box, matching the behavior of spawned-child workflows whose process exits
+    // shortly after end.
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "SharePoint Download 1" }, dir);
+    emitSessionEvent({
+      type: "browser_launch", workflowInstance: "SharePoint Download 1",
+      sessionId: "1", browserId: "sharepoint", system: "sharepoint",
+    }, dir);
+    emitSessionEvent({
+      type: "workflow_end", workflowInstance: "SharePoint Download 1", finalStatus: "failed",
+    }, dir);
+    const state = rebuildSessionState(dir);
+    const wf = state.workflows.find((w) => w.instance === "SharePoint Download 1");
+    assert.ok(wf);
+    assert.equal(
+      wf!.pidAlive, false,
+      "in-process workflow (pid === process.pid) must be treated as ended once workflow_end fires",
+    );
+    assert.equal(
+      wf!.crashedOnLaunch, undefined,
+      "browser_launch was emitted, so this is NOT a crashed-on-launch case",
+    );
+    assert.equal(wf!.finalStatus, "failed");
+  });
+
+  it("keeps pidAlive=true for in-process workflows that have NOT yet ended", () => {
+    // Corollary of the above: while a fire-and-forget run is still in-flight
+    // (workflow_start fired, no workflow_end yet), pidAlive must stay true
+    // so the Sessions rail shows it. Only after workflow_end do we flip it.
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "SharePoint Running" }, dir);
+    const state = rebuildSessionState(dir);
+    const wf = state.workflows.find((w) => w.instance === "SharePoint Running");
+    assert.ok(wf);
+    assert.equal(wf!.pidAlive, true);
+    assert.equal(wf!.finalStatus, null);
+  });
 });
 
 describe("rebuildSessionState — duoQueue", () => {

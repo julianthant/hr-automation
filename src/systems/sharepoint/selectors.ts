@@ -55,6 +55,57 @@ export const microsoft = {
       .or(page.locator('input[type="submit"]')),
 };
 
+// ─── UCSD ADFS federation login (`ad-wfs-aws.ucsd.edu/adfs/ls/`) ───────────
+//
+// For SharePoint / OneDrive, UCSD federates Microsoft AAD through an ADFS
+// endpoint (`ad-wfs-aws.ucsd.edu`) instead of the Shibboleth IdP at
+// `a5.ucsd.edu` used by UCPath / CRM / Kuali. The form is visually simpler:
+// a pre-populated "User Account" textbox (Microsoft passes the email through
+// on the URL), a "Password" textbox, and a "Sign in" button. After submit it
+// hands off to the normal Duo frame — the same `pollDuoApproval` /
+// `requestDuoApproval` helpers work against it unchanged.
+//
+// Field names (`UserName` / `Password` / `#submitButton`) are stable ADFS
+// defaults and are reused across every UC federated ADFS tenant, so the
+// primary selectors below are safe.
+
+export const adfs = {
+  /**
+   * "User Account" textbox on the ADFS sign-in page. Usually pre-populated
+   * by Microsoft via the `?username=` URL parameter; we still explicitly
+   * re-fill it defensively in case the hand-off ever misses. Primary is the
+   * stable name attribute; fallbacks are the DOM id and the accessible name.
+   * verified 2026-04-22
+   * @tags adfs, ucsd, sharepoint, username, textbox, login
+   */
+  usernameInput: (page: Page): Locator =>
+    page
+      .locator('input[name="UserName"]')
+      .or(page.locator("#userNameInput"))
+      .or(page.getByRole("textbox", { name: /User Account/i })),
+
+  /**
+   * "Password" textbox on the ADFS sign-in page.
+   * verified 2026-04-22
+   * @tags adfs, ucsd, sharepoint, password, textbox, login
+   */
+  passwordInput: (page: Page): Locator =>
+    page
+      .locator('input[name="Password"]')
+      .or(page.locator("#passwordInput"))
+      .or(page.getByRole("textbox", { name: /^password$/i })),
+
+  /**
+   * "Sign in" submit button on the ADFS sign-in page.
+   * verified 2026-04-22
+   * @tags adfs, ucsd, sharepoint, submit, sign-in, button, login
+   */
+  submitButton: (page: Page): Locator =>
+    page
+      .locator("#submitButton")
+      .or(page.getByRole("button", { name: /^sign in$/i })),
+};
+
 // ─── "Keep me signed in?" (KMSI) interstitial — post-Duo ────────────────────
 
 export const kmsi = {
