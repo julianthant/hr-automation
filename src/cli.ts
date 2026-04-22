@@ -6,10 +6,10 @@ import { launchBrowser } from "./browser/launch.js";
 import { loginToUCPath, loginToACTCrm } from "./auth/login.js";
 import type { AuthResult } from "./auth/types.js";
 import { runOnboarding, runParallel, runOnboardingPositional } from "./workflows/onboarding/index.js";
-import { runWorkStudy, WorkStudyInputSchema } from "./workflows/work-study/index.js";
+import { runWorkStudy, runWorkStudyCli, WorkStudyInputSchema } from "./workflows/work-study/index.js";
 import { runEmergencyContact } from "./workflows/emergency-contact/index.js";
 import { runParallelKronos, DEFAULT_WORKERS } from "./workflows/old-kronos-reports/index.js";
-import { runSeparation, runSeparationBatch } from "./workflows/separations/index.js";
+import { runSeparation, runSeparationBatch, runSeparationCli } from "./workflows/separations/index.js";
 import { runEidLookup } from "./workflows/eid-lookup/index.js";
 import { exportToExcel } from "./tracker/export-excel.js";
 
@@ -148,11 +148,18 @@ program
 
 program
   .command("work-study")
-  .description("Work study: update position pool via PayPath Actions")
+  .description("Work study: update position pool via PayPath Actions. Daemon-mode by default — enqueues to an alive daemon or spawns one. Use --direct for the legacy in-process single-item path.")
   .argument("<emplId>", "Employee ID (e.g. 10862930)")
   .argument("<effectiveDate>", "Effective date in MM/DD/YYYY format")
   .option("--dry-run", "Preview actions without submitting")
-  .action(async (emplId: string, effectiveDate: string, options: { dryRun?: boolean }) => {
+  .option("--direct", "Bypass daemon mode and run in-process (legacy — blocks on auth each run)")
+  .option("-n, --new", "Spawn an additional daemon even if others are alive")
+  .option("-p, --parallel <count>", "Ensure N daemons are alive", (v) => parseInt(v, 10))
+  .action(async (
+    emplId: string,
+    effectiveDate: string,
+    options: { dryRun?: boolean; direct?: boolean; new?: boolean; parallel?: number },
+  ) => {
     try {
       validateEnv();
     } catch {
@@ -165,7 +172,20 @@ program
       process.exit(1);
     }
 
-    await runWorkStudy(parsed.data, { dryRun: options.dryRun });
+    if (options.direct || options.dryRun) {
+      await runWorkStudy(parsed.data, { dryRun: options.dryRun });
+      return;
+    }
+
+    try {
+      await runWorkStudyCli(parsed.data.emplId, parsed.data.effectiveDate, {
+        new: options.new,
+        parallel: options.parallel,
+      });
+    } catch (err) {
+      log.error(`Work study dispatch failed: ${errorMessage(err)}`);
+      process.exit(1);
+    }
   });
 
 // ─── emergency-contact ───
@@ -246,36 +266,54 @@ program
 
 program
   .command("separation")
-  .description("Process employee separation(s): Kuali → Kronos → UCPath. Multiple IDs = batch mode (shared browsers, sequential processing).")
+  .alias("separations")
+  .description("Process employee separation(s): Kuali → Kronos → UCPath. Daemon-mode by default — enqueues docIds to an alive daemon or spawns one. Use --direct for the legacy in-process batch path.")
   .argument("<docIds...>", "Kuali document number(s) (e.g. 3508 or 3881 3882 3883 3884)")
   .option("--dry-run", "Extract data only, don't fill forms")
-  .action(async (docIds: string[], options: { dryRun?: boolean }) => {
+  .option("--direct", "Bypass daemon mode and run in-process (legacy — reopens browsers + re-auths every invocation)")
+  .option("-n, --new", "Spawn an additional daemon even if others are alive")
+  .option("-p, --parallel <count>", "Ensure N daemons are alive", (v) => parseInt(v, 10))
+  .action(async (
+    docIds: string[],
+    options: { dryRun?: boolean; direct?: boolean; new?: boolean; parallel?: number },
+  ) => {
     try {
       validateEnv();
     } catch {
       process.exit(1);
     }
 
-    if (docIds.length === 1) {
+    if (options.direct) {
+      if (docIds.length === 1) {
+        try {
+          await runSeparation(docIds[0], { dryRun: options.dryRun });
+          log.success(`Separation complete for doc #${docIds[0]}`);
+        } catch (error) {
+          log.error(`Separation workflow failed: ${errorMessage(error)}`);
+          process.exit(1);
+        }
+        return;
+      }
+      log.step(`Batch mode (direct): ${docIds.length} separations — ${docIds.join(", ")}`);
       try {
-        await runSeparation(docIds[0], { dryRun: options.dryRun });
-        log.success(`Separation complete for doc #${docIds[0]}`);
+        const result = await runSeparationBatch(docIds, { dryRun: options.dryRun });
+        log.success(`Batch complete: ${result.succeeded}/${result.total} succeeded`);
+        if (result.failed > 0) process.exit(1);
       } catch (error) {
-        log.error(`Separation workflow failed: ${errorMessage(error)}`);
+        log.error(`Separation batch failed: ${errorMessage(error)}`);
         process.exit(1);
       }
       return;
     }
 
-    // Batch mode — runWorkflowBatch handles pending emits, auth, browser reuse,
-    // between-items reset, and per-doc failure isolation.
-    log.step(`Batch mode: ${docIds.length} separations — ${docIds.join(", ")}`);
     try {
-      const result = await runSeparationBatch(docIds, { dryRun: options.dryRun });
-      log.success(`Batch complete: ${result.succeeded}/${result.total} succeeded`);
-      if (result.failed > 0) process.exit(1);
+      await runSeparationCli(docIds, {
+        dryRun: options.dryRun,
+        new: options.new,
+        parallel: options.parallel,
+      });
     } catch (error) {
-      log.error(`Separation batch failed: ${errorMessage(error)}`);
+      log.error(`Separation dispatch failed: ${errorMessage(error)}`);
       process.exit(1);
     }
   });
@@ -367,6 +405,71 @@ program
   .option("-o, --output <path>", "Output file path")
   .action(async (workflow: string, opts: { output?: string }) => {
     await exportToExcel(workflow, opts.output);
+  });
+
+// ─── daemon lifecycle (applies to any daemon-mode workflow) ───
+
+const DAEMON_WORKFLOWS = ["separations", "work-study"] as const;
+
+program
+  .command("daemon-status [workflow]")
+  .description("Show alive daemons + queue state. Without [workflow] lists every daemon-enabled workflow.")
+  .action(async (workflow?: string) => {
+    const { findAliveDaemons, readQueueState } = await import("./core/index.js");
+    const workflows = workflow ? [workflow] : [...DAEMON_WORKFLOWS];
+    for (const wf of workflows) {
+      const alive = await findAliveDaemons(wf);
+      const state = await readQueueState(wf).catch(() => null);
+      console.log(`\n[${wf}]`);
+      if (alive.length === 0) console.log("  no alive daemons");
+      for (const d of alive) {
+        console.log(
+          `  ${d.instanceId}  pid=${d.pid}  port=${d.port}  startedAt=${d.startedAt}`,
+        );
+      }
+      if (state) {
+        console.log(
+          `  queue: queued=${state.queued.length} claimed=${state.claimed.length} done=${state.done.length} failed=${state.failed.length}`,
+        );
+      }
+    }
+  });
+
+program
+  .command("daemon-stop <workflow>")
+  .description("Stop all alive daemons for a workflow. Default: soft (drain in-flight, re-queue on exit).")
+  .option("-f, --force", "Mark in-flight items as failed instead of re-queueing")
+  .action(async (workflow: string, opts: { force?: boolean }) => {
+    const { stopDaemons } = await import("./core/index.js");
+    const n = await stopDaemons(workflow, !!opts.force);
+    console.log(`Sent stop to ${n} daemon(s) for '${workflow}'.`);
+  });
+
+program
+  .command("daemon-attach <workflow>")
+  .description("Tail logs of every alive daemon for a workflow. Ctrl+C detaches; daemons keep running.")
+  .action(async (workflow: string) => {
+    const { findAliveDaemons, daemonsDir } = await import("./core/index.js");
+    const alive = await findAliveDaemons(workflow);
+    if (alive.length === 0) {
+      console.log(`No alive daemons for '${workflow}'.`);
+      return;
+    }
+    const { spawn } = await import("node:child_process");
+    const { existsSync, readdirSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const dir = daemonsDir();
+    if (!existsSync(dir)) {
+      console.log("no .tracker/daemons dir");
+      return;
+    }
+    const logs = readdirSync(dir).filter((f) => f.startsWith(`${workflow}-`) && f.endsWith(".log"));
+    if (logs.length === 0) {
+      console.log(`no log files in ${dir}`);
+      return;
+    }
+    const tail = spawn("tail", ["-f", ...logs.map((l) => join(dir, l))], { stdio: "inherit" });
+    tail.on("exit", () => process.exit(0));
   });
 
 program.parse();
