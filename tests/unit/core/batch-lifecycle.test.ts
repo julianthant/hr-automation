@@ -134,6 +134,40 @@ test('withBatchLifecycle: emits session_create for the allocated instance', asyn
   assert.ok(sc.workflowInstance.startsWith('sessioncreate'))
 })
 
+test('withBatchLifecycle: ownSigint=false skips installing the SIGINT handler', async () => {
+  const dir = TMP()
+  const before = process.listenerCount('SIGINT')
+  await withBatchLifecycle(
+    {
+      workflow: 'sigtest',
+      perItem: [],
+      trackerDir: dir,
+      ownSigint: false,
+    },
+    async () => {
+      // Inside the body, listener count must equal `before` — no handler was added.
+      assert.equal(process.listenerCount('SIGINT'), before, 'no SIGINT handler installed when ownSigint=false')
+    },
+  )
+  assert.equal(process.listenerCount('SIGINT'), before, 'listener count restored after body')
+})
+
+test('withBatchLifecycle: ownSigint default (true) installs and removes the handler', async () => {
+  const dir = TMP()
+  const before = process.listenerCount('SIGINT')
+  await withBatchLifecycle(
+    {
+      workflow: 'sigtest2',
+      perItem: [],
+      trackerDir: dir,
+    },
+    async () => {
+      assert.equal(process.listenerCount('SIGINT'), before + 1, 'SIGINT handler installed by default')
+    },
+  )
+  assert.equal(process.listenerCount('SIGINT'), before, 'listener count restored after body')
+})
+
 test('createBatchObserver: pairs onAuthStart/onAuthComplete into authTimings', async () => {
   const dir = TMP()
   const { observer, getAuthTimings } = createBatchObserver('Test 1', '1', dir)
