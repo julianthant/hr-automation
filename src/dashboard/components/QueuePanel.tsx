@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { Search, Inbox, X, Download, Loader2, ChevronDown } from "lucide-react";
+import { Search, Inbox, X, Download, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { StatPills } from "./StatPills";
 import { EntryItem } from "./EntryItem";
@@ -181,7 +181,7 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
             title="Download a SharePoint spreadsheet"
             disabled={downloading || !hasOptions}
             className={cn(
-              "group flex-shrink-0 h-9 pl-2.5 pr-1.5 flex items-center gap-1 rounded-lg bg-secondary border border-border text-muted-foreground transition-colors outline-none",
+              "flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-secondary border border-border text-muted-foreground transition-colors outline-none",
               "hover:text-foreground hover:bg-accent hover:border-primary",
               "data-[state=open]:text-foreground data-[state=open]:bg-accent data-[state=open]:border-primary",
               "focus-visible:ring-2 focus-visible:ring-primary",
@@ -193,10 +193,6 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
             ) : (
               <Download aria-hidden className="w-4 h-4" />
             )}
-            <ChevronDown
-              aria-hidden
-              className="w-3 h-3 transition-transform group-data-[state=open]:rotate-180"
-            />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-[260px]">
             {!options ? (
@@ -218,7 +214,7 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
                       handleDownload(opt);
                     }}
                     className={cn(
-                      "flex-col items-start gap-0.5 cursor-pointer",
+                      "justify-between gap-2 cursor-pointer",
                       !opt.configured && "opacity-60",
                     )}
                     title={
@@ -227,21 +223,14 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
                         : undefined
                     }
                   >
-                    <span className="flex items-center justify-between w-full">
-                      <span className="font-medium text-[13px]">{opt.label}</span>
-                      {isRunning ? (
-                        <Loader2 aria-hidden className="w-3.5 h-3.5 animate-spin text-primary" />
-                      ) : !opt.configured ? (
-                        <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">
-                          unset
-                        </span>
-                      ) : null}
-                    </span>
-                    {opt.description && (
-                      <span className="text-[11px] text-muted-foreground leading-tight">
-                        {opt.description}
+                    <span className="font-medium text-[13px]">{opt.label}</span>
+                    {isRunning ? (
+                      <Loader2 aria-hidden className="w-3.5 h-3.5 animate-spin text-primary" />
+                    ) : !opt.configured ? (
+                      <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">
+                        unset
                       </span>
-                    )}
+                    ) : null}
                   </DropdownMenuItem>
                 );
               })
