@@ -46,7 +46,14 @@ async function searchingStep<TSteps extends readonly string[]>(
   input: EidLookupItem,
 ): Promise<EidResult[]> {
   const page = await ctx.page("ucpath");
-  const result = await searchByName(page, input.name);
+  let result: Awaited<ReturnType<typeof searchByName>>;
+  try {
+    result = await searchByName(page, input.name);
+  } catch (err) {
+    log.error(`Search failed for "${input.name}": ${errorMessage(err)}`);
+    ctx.updateData({ emplId: "Error" });
+    throw err;
+  }
   if (result.sdcmpResults.length === 0) {
     log.step(`No SDCMP results for "${input.name}"`);
     ctx.updateData({ emplId: "Not found" });
@@ -66,10 +73,11 @@ async function searchingStep<TSteps extends readonly string[]>(
 
 /**
  * Cross-verify one name against CRM. Emits `crmMatch` as one of:
- *  - "direct" — UCPath EID matched a CRM record's UCPath EID
- *  - "date"   — UCPath effective date matched a CRM firstDayOfService (±7d)
- *  - "none"   — CRM returned records but none matched
- *  - ""       — CRM returned no records for this name
+ *  - "direct"   — UCPath EID matched a CRM record's UCPath EID
+ *  - "date"     — UCPath effective date matched a CRM firstDayOfService (±7d)
+ *  - "crm-only" — CRM had an EID but UCPath returned no SDCMP results
+ *  - "none"     — CRM returned records but none matched
+ *  - ""         — CRM returned no records for this name
  */
 async function crossVerificationStep<TSteps extends readonly string[]>(
   ctx: Ctx<TSteps, EidLookupItem>,
@@ -99,6 +107,24 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
   if (crmRecords.length === 0) {
     log.step(`CRM: no records for "${input.name}"`);
     ctx.updateData({ crmMatch: "" });
+    return;
+  }
+
+  // CRM-only path: UCPath returned no SDCMP results but CRM has an EID.
+  // This surfaces the CRM-sourced EID so the dashboard shows it instead of "Not found".
+  if (sdcmp.length === 0) {
+    const withEid = crmRecords.find((r) => r.ucpathEmployeeId);
+    if (withEid) {
+      log.success(`CRM-only EID: ${withEid.ucpathEmployeeId} (UCPath had no SDCMP match)`);
+      ctx.updateData({
+        emplId: withEid.ucpathEmployeeId,
+        department: withEid.department ?? "",
+        crmMatch: "crm-only",
+      });
+      return;
+    }
+    // CRM returned records but none had an EID — can't verify anything
+    ctx.updateData({ crmMatch: "none" });
     return;
   }
 
@@ -147,7 +173,7 @@ export const eidLookupWorkflow = defineWorkflow({
       },
     },
   ],
-  authSteps: false,
+  authSteps: true,
   steps: stepsNoCrm,
   schema: EidLookupItemSchema,
   tiling: "single",
@@ -194,7 +220,7 @@ export const eidLookupCrmWorkflow = defineWorkflow({
       },
     },
   ],
-  authSteps: false,
+  authSteps: true,
   steps: stepsCrm,
   schema: EidLookupItemSchema,
   tiling: "auto",
