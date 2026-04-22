@@ -13,6 +13,7 @@ import { trackEvent } from "../../tracker/jsonl.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath, loginToACTCrm } from "../../auth/login.js";
+import { loginToI9, lookupSection2Signer } from "../../systems/i9/index.js";
 import { searchByName, parseNameInput, type EidResult } from "./search.js";
 import { searchCrmByName, datesWithinDays } from "./crm-search.js";
 import { EidLookupItemSchema, type EidLookupItem } from "./schema.js";
@@ -22,6 +23,8 @@ export interface EidLookupOptions {
   workers?: number;
   /** Whether to run CRM cross-verification. Default: true. */
   useCrm?: boolean;
+  /** Whether to run I-9 Section 2 signer lookup. Default: false. */
+  useI9?: boolean;
   /** Preview the planned name list without launching a browser. */
   dryRun?: boolean;
 }
@@ -35,6 +38,8 @@ export interface LookupResult {
 
 const stepsNoCrm = ["searching"] as const;
 const stepsCrm = ["searching", "cross-verification"] as const;
+const stepsI9 = ["searching", "i9-signer-lookup"] as const;
+const stepsCrmI9 = ["searching", "cross-verification", "i9-signer-lookup"] as const;
 
 /**
  * Perform the UCPath SDCMP/HDH search for one name and stamp the result
@@ -157,6 +162,57 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
 }
 
 /**
+ * I-9 Section 2 signer lookup. Searches I9 Complete by last/first name,
+ * navigates to the matched profile's Summary page, and reads the
+ * "Signed Section 2" audit-trail row. Stamps two fields onto the tracker:
+ *  - `i9Signer`   — the signer's name, or a human-readable status phrase
+ *                   ("Not signed", "Historical", "Not found in I-9")
+ *  - `i9Status`   — machine-readable status ("signed" | "unsigned" |
+ *                   "historical" | "not-found" | "error")
+ *
+ * Name parsing mirrors `crossVerificationStep`: parse the "Last, First Middle"
+ * input once and search by last + first. An invalid name emits `i9Status=error`
+ * and leaves `i9Signer` as the parse error message.
+ */
+async function i9SignerStep<TSteps extends readonly string[]>(
+  ctx: Ctx<TSteps, EidLookupItem>,
+  input: EidLookupItem,
+): Promise<void> {
+  const i9Page = await ctx.page("i9");
+
+  let parsed: ReturnType<typeof parseNameInput>;
+  try {
+    parsed = parseNameInput(input.name);
+  } catch (err) {
+    const msg = errorMessage(err);
+    log.error(`I9 signer: invalid name "${input.name}" — ${msg}`);
+    ctx.updateData({ i9Status: "error", i9Signer: msg });
+    return;
+  }
+
+  const result = await lookupSection2Signer(i9Page, {
+    lastName: parsed.lastName,
+    firstName: parsed.first,
+  });
+
+  // Map structured result → flat tracker fields. `i9Signer` always has a
+  // non-empty string so the dashboard detail cell never renders as an
+  // em-dash for a completed lookup — even when nobody signed.
+  const signerLabel =
+    result.status === "signed"
+      ? result.signerName ?? "(unknown)"
+      : result.status === "unsigned"
+        ? "Not signed"
+        : result.status === "historical"
+          ? "Historical (paper)"
+          : result.status === "not-found"
+            ? "Not found in I-9"
+            : result.detail ?? "Error";
+
+  ctx.updateData({ i9Status: result.status, i9Signer: signerLabel });
+}
+
+/**
  * No-CRM kernel definition. One UCPath system, one step per item.
  * Each item = one searched name; shared-context-pool fans out N tabs
  * against a single UCPath browser + Duo auth.
@@ -246,6 +302,121 @@ export const eidLookupCrmWorkflow = defineWorkflow({
 });
 
 /**
+ * I9-on (no CRM) kernel definition. Two systems (UCPath + I9), two
+ * handler steps. Each item = one searched name gets UCPath EID lookup and
+ * an I-9 Section 2 signer check. Sequential auth: Duo ×1 UCPath then email+
+ * password ×1 I9 (no Duo).
+ */
+export const eidLookupI9Workflow = defineWorkflow({
+  name: "eid-lookup",
+  label: "EID Lookup",
+  systems: [
+    {
+      id: "ucpath",
+      login: async (page, instance) => {
+        const ok = await loginToUCPath(page, instance);
+        if (!ok) throw new Error("UCPath authentication failed");
+      },
+    },
+    {
+      id: "i9",
+      login: async (page) => {
+        const ok = await loginToI9(page);
+        if (!ok) throw new Error("I9 authentication failed");
+      },
+    },
+  ],
+  authSteps: true,
+  steps: stepsI9,
+  schema: EidLookupItemSchema,
+  tiling: "auto",
+  authChain: "sequential",
+  batch: { mode: "shared-context-pool", poolSize: 4, preEmitPending: true },
+  detailFields: [
+    { key: "searchName", label: "Search" },
+    { key: "emplId", label: "EID" },
+    { key: "department", label: "Dept" },
+    { key: "jobTitle", label: "Title" },
+    { key: "i9Signer", label: "Section 2 Signed By" },
+    { key: "i9Status", label: "I-9 Status" },
+  ],
+  getName: (d) => d.searchName ?? "",
+  getId: (d) => d.searchName ?? "",
+  initialData: (input) => ({ searchName: input.name }),
+  handler: async (ctx: Ctx<typeof stepsI9, EidLookupItem>, input) => {
+    ctx.updateData({ searchName: input.name });
+    await ctx.step("searching", async () => {
+      await searchingStep(ctx, input);
+    });
+    await ctx.step("i9-signer-lookup", async () => {
+      await i9SignerStep(ctx, input);
+    });
+  },
+});
+
+/**
+ * CRM + I9 kernel definition. Three systems (UCPath + CRM + I9), three
+ * handler steps. Max-fidelity variant: cross-verifies CRM and also reports
+ * who signed Section 2 on the I-9. Sequential auth: Duo ×1 UCPath, Duo ×1
+ * CRM, email+password ×1 I9.
+ */
+export const eidLookupCrmI9Workflow = defineWorkflow({
+  name: "eid-lookup",
+  label: "EID Lookup",
+  systems: [
+    {
+      id: "ucpath",
+      login: async (page, instance) => {
+        const ok = await loginToUCPath(page, instance);
+        if (!ok) throw new Error("UCPath authentication failed");
+      },
+    },
+    {
+      id: "crm",
+      login: async (page, instance) => {
+        const ok = await loginToACTCrm(page, instance);
+        if (!ok) throw new Error("CRM authentication failed");
+      },
+    },
+    {
+      id: "i9",
+      login: async (page) => {
+        const ok = await loginToI9(page);
+        if (!ok) throw new Error("I9 authentication failed");
+      },
+    },
+  ],
+  authSteps: true,
+  steps: stepsCrmI9,
+  schema: EidLookupItemSchema,
+  tiling: "auto",
+  authChain: "sequential",
+  batch: { mode: "shared-context-pool", poolSize: 4, preEmitPending: true },
+  detailFields: [
+    { key: "searchName", label: "Search" },
+    { key: "emplId", label: "EID" },
+    { key: "department", label: "Dept" },
+    { key: "jobTitle", label: "Title" },
+    { key: "crmMatch", label: "CRM Match" },
+    { key: "i9Signer", label: "Section 2 Signed By" },
+    { key: "i9Status", label: "I-9 Status" },
+  ],
+  getName: (d) => d.searchName ?? "",
+  getId: (d) => d.searchName ?? "",
+  initialData: (input) => ({ searchName: input.name }),
+  handler: async (ctx: Ctx<typeof stepsCrmI9, EidLookupItem>, input) => {
+    ctx.updateData({ searchName: input.name });
+    const sdcmp = await ctx.step("searching", async () => searchingStep(ctx, input));
+    await ctx.step("cross-verification", async () => {
+      await crossVerificationStep(ctx, input, sdcmp);
+    });
+    await ctx.step("i9-signer-lookup", async () => {
+      await i9SignerStep(ctx, input);
+    });
+  },
+});
+
+/**
  * Dedupe preserving first-seen order. Duplicate names would collide on the
  * name-derived itemId (`deriveItemId: item => item.name`); dedupe at the
  * CLI boundary so the kernel never sees two items with the same id.
@@ -283,15 +454,17 @@ export async function runEidLookup(
     process.exit(1);
   }
   const useCrm = options.useCrm !== false;
+  const useI9 = options.useI9 === true;
   const workers = options.workers ?? Math.min(names.length, 4);
 
   if (options.dryRun) {
     log.step("=== DRY RUN MODE ===");
     log.step(`CRM cross-verification: ${useCrm ? "ON" : "OFF"}`);
+    log.step(`I-9 Section 2 signer lookup: ${useI9 ? "ON" : "OFF"}`);
     log.step(`Workers: ${workers}`);
     log.step(`Names (${names.length}):`);
     for (const n of names) log.step(`  - ${n}`);
-    log.success("Dry run complete — no browser launched, no UCPath/CRM contact made");
+    log.success("Dry run complete — no browser launched, no UCPath/CRM/I9 contact made");
     return;
   }
 
@@ -314,10 +487,19 @@ export async function runEidLookup(
     },
   };
 
+  // Pick the workflow definition based on the 2×2 of {CRM, I9} flags and
+  // dispatch in-branch so each call typechecks against its own `steps` tuple
+  // (the four definitions have different `readonly string[]` shapes, so a
+  // unified variable would widen to a union TypeScript can't narrow).
   try {
-    const result = useCrm
-      ? await runWorkflowBatch(eidLookupCrmWorkflow, items, batchOpts)
-      : await runWorkflowBatch(eidLookupWorkflow, items, batchOpts);
+    const result =
+      useCrm && useI9
+        ? await runWorkflowBatch(eidLookupCrmI9Workflow, items, batchOpts)
+        : useCrm
+          ? await runWorkflowBatch(eidLookupCrmWorkflow, items, batchOpts)
+          : useI9
+            ? await runWorkflowBatch(eidLookupI9Workflow, items, batchOpts)
+            : await runWorkflowBatch(eidLookupWorkflow, items, batchOpts);
     log.success(
       `EID lookup complete: ${result.succeeded}/${result.total} succeeded, ${result.failed} failed`,
     );

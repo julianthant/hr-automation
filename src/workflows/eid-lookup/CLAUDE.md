@@ -1,67 +1,73 @@
 # EID Lookup Workflow
 
-Searches UCPath Person Organizational Summary for employees by name, filters for SDCMP business unit and Housing/Dining/Hospitality departments, with optional CRM cross-verification.
+Searches UCPath Person Organizational Summary for employees by name, filters for SDCMP business unit and Housing/Dining/Hospitality departments, with optional CRM cross-verification and optional I-9 Section 2 signer lookup.
 
-**Kernel-based (shared-context-pool mode).** Two `defineWorkflow` definitions in `workflow.ts`:
-- `eidLookupWorkflow` (no-CRM): 1 system (UCPath), 1 handler step per item (`searching`)
-- `eidLookupCrmWorkflow` (CRM-on): 2 systems (UCPath + CRM, sequential auth), 2 handler steps per item (`searching` → `cross-verification`)
+**Kernel-based (shared-context-pool mode).** Four `defineWorkflow` definitions in `workflow.ts`, one per feature combination — the CLI picks the right one based on `--no-crm` / `--i9` flags:
+- `eidLookupWorkflow` (no CRM, no I9): 1 system (UCPath), 1 step — `searching`
+- `eidLookupCrmWorkflow` (CRM on): 2 systems (UCPath + CRM), 2 steps — `searching` → `cross-verification`
+- `eidLookupI9Workflow` (I9 on, no CRM): 2 systems (UCPath + I9), 2 steps — `searching` → `i9-signer-lookup`
+- `eidLookupCrmI9Workflow` (CRM + I9): 3 systems (UCPath + CRM + I9), 3 steps — `searching` → `cross-verification` → `i9-signer-lookup`
 
 Each CLI invocation runs N names as N kernel items concurrently: one browser per system + one Duo per system for the whole pool, N per-worker tabs spawned lazily from each system's shared `BrowserContext`. Each name produces its own `pending → running → done/failed` tracker row in the dashboard with per-step timing.
 
 ## Selector intelligence
 
-This workflow touches two systems: **ucpath**, **crm** (CRM only in `--crm` mode).
+This workflow touches up to three systems: **ucpath** (always), **crm** (in default or `--i9` mode; skipped by `--no-crm`), **i9** (only with `--i9`).
 
-- Before mapping or remapping any selector, run `npm run selector:search "<intent>"` (e.g. `"person org summary"`, `"crm name search"`, `"sdcmp filter"`).
+- Before mapping or remapping any selector, run `npm run selector:search "<intent>"` (e.g. `"person org summary"`, `"crm name search"`, `"sdcmp filter"`, `"i9 summary signer"`).
 - Per-system lessons (read before re-mapping):
   - [`src/systems/ucpath/LESSONS.md`](../../systems/ucpath/LESSONS.md)
   - [`src/systems/crm/LESSONS.md`](../../systems/crm/LESSONS.md)
+  - [`src/systems/i9/LESSONS.md`](../../systems/i9/LESSONS.md)
 - Per-system catalogs (auto-generated):
   - [`src/systems/ucpath/SELECTORS.md`](../../systems/ucpath/SELECTORS.md)
   - [`src/systems/crm/SELECTORS.md`](../../systems/crm/SELECTORS.md)
+  - [`src/systems/i9/SELECTORS.md`](../../systems/i9/SELECTORS.md)
 
 ## Files
 
 - `schema.ts` — Zod schemas. `EidLookupItemSchema` = per-kernel-item shape (`{ name }`); `EidLookupInputSchema` / `EidLookupCrmInputSchema` = legacy CLI-boundary batch shape (`{ names, workers }`) kept for backward compatibility.
 - `search.ts` — Multi-strategy name search (`searchByName`, `parseNameInput`): "Last, First Middle" → tries full → first → middle, drills into SDCMP results, filters by HDH keywords. Kernel-agnostic.
 - `crm-search.ts` — CRM cross-verification helpers (`searchCrmByName`, `datesWithinDays`): last/first name search, extracts PPS ID + UCPath EID + hire date + dept, ±7 day date matching. Kernel-agnostic.
-- `workflow.ts` — Kernel definitions (`eidLookupWorkflow`, `eidLookupCrmWorkflow`) + shared step helpers (`searchingStep`, `crossVerificationStep`) + CLI adapter (`runEidLookup`) + `dedupeNames` helper. Dry-run branch bypasses the kernel.
+- `workflow.ts` — Kernel definitions (`eidLookupWorkflow`, `eidLookupCrmWorkflow`, `eidLookupI9Workflow`, `eidLookupCrmI9Workflow`) + shared step helpers (`searchingStep`, `crossVerificationStep`, `i9SignerStep`) + CLI adapter (`runEidLookup`) + `dedupeNames` helper. I-9 lookup delegates to `src/systems/i9/signer.ts::lookupSection2Signer`. Dry-run branch bypasses the kernel.
 - `index.ts` — Barrel exports.
 
 No `tracker.ts` — dashboard JSONL only. The xlsx tracker was removed on 2026-04-21 (see Lessons Learned).
 
 ## Kernel Config
 
-| Field | `eidLookupWorkflow` | `eidLookupCrmWorkflow` |
-|-------|---------------------|------------------------|
-| `systems` | `[ucpath]` | `[ucpath, crm]` |
-| `steps` | `["searching"]` | `["searching", "cross-verification"]` |
-| `schema` | `EidLookupItemSchema` | `EidLookupItemSchema` |
-| `authSteps` | `true` | `true` |
-| `authChain` | `"sequential"` | `"sequential"` |
-| `tiling` | `"single"` | `"auto"` |
-| `batch` | `{ mode: "shared-context-pool", poolSize: 4, preEmitPending: true }` | same |
-| `detailFields` | `searchName, emplId, department, jobTitle` | `+ crmMatch` |
-| `getName` / `getId` | `d.searchName` | `d.searchName` |
-| `initialData` | `{ searchName: input.name }` | same |
+| Field | `eidLookupWorkflow` | `eidLookupCrmWorkflow` | `eidLookupI9Workflow` | `eidLookupCrmI9Workflow` |
+|-------|---------------------|------------------------|------------------------|--------------------------|
+| `systems` | `[ucpath]` | `[ucpath, crm]` | `[ucpath, i9]` | `[ucpath, crm, i9]` |
+| `steps` | `["searching"]` | `["searching", "cross-verification"]` | `["searching", "i9-signer-lookup"]` | `["searching", "cross-verification", "i9-signer-lookup"]` |
+| `schema` | `EidLookupItemSchema` | same | same | same |
+| `authSteps` | `true` | `true` | `true` | `true` |
+| `authChain` | `"sequential"` | `"sequential"` | `"sequential"` | `"sequential"` |
+| `tiling` | `"single"` | `"auto"` | `"auto"` | `"auto"` |
+| `batch` | `{ mode: "shared-context-pool", poolSize: 4, preEmitPending: true }` | same | same | same |
+| `detailFields` | `searchName, emplId, department, jobTitle` | `+ crmMatch` | `+ i9Signer, i9Status` | `+ crmMatch, i9Signer, i9Status` |
+| `getName` / `getId` | `d.searchName` | same | same | same |
+| `initialData` | `{ searchName: input.name }` | same | same | same |
 
 ## Data Flow
 
 ```
-CLI: tsx src/cli.ts eid-lookup "Last, First Middle" [...] [--no-crm] [--workers N] [--dry-run]
+CLI: tsx src/cli.ts eid-lookup "Last, First Middle" [...] [--no-crm] [--i9] [--workers N] [--dry-run]
   → runEidLookup (CLI adapter)
-    → if --dry-run: log planned name list + CRM mode, exit 0 (no browser)
+    → if --dry-run: log planned name list + CRM/I9 mode, exit 0 (no browser)
     → dedupeNames: drop + warn on exact duplicates
     → names.map(n => ({ name: n }))  → kernel items
     → onPreEmitPending: trackEvent("pending") per item with searchName seeded
-    → runWorkflowBatch(wf, items, { poolSize: workers, deriveItemId, onPreEmitPending })
+    → workflow = pickBy(useCrm, useI9) over the 4 kernel variants
+    → runWorkflowBatch(workflow, items, { poolSize: workers, deriveItemId, onPreEmitPending })
       → Dispatch to runWorkflowSharedContextPool
-        → Session.launch([ucpath(, crm)]) ONCE: 1-2 browsers, Duo ×1 or ×2
+        → Session.launch([ucpath(, crm)(, i9)]) ONCE: 1–3 browsers, Duo ×1–2 (I9 has no Duo)
         → N workers, each a Session.forWorker view of the parent:
           - Lazy per-worker Page opens on first ctx.page(id) from shared context
           - runOneItem wraps each item in withTrackedWorkflow
           - handler: updateData({ searchName }); step("searching", ...)
                      [CRM mode] step("cross-verification", ...)
+                     [I9 mode]  step("i9-signer-lookup", ...)
           - step failures become per-item `failed` tracker rows; batch continues
         → Worker teardown: closeWorkerPages (no context/browser close)
       → Parent session.close: close contexts + browsers exactly once
@@ -110,6 +116,7 @@ CLI: tsx src/cli.ts eid-lookup "Last, First Middle" [...] [--no-crm] [--workers 
 
 ## Lessons Learned
 
+- **2026-04-22: `--i9` Section 2 signer lookup.** Added two new kernel variants (`eidLookupI9Workflow`, `eidLookupCrmI9Workflow`) that add I-9 Complete as a second/third system, plus `i9SignerStep` that delegates to `src/systems/i9/signer.ts::lookupSection2Signer`. Signer sourced from the "Electronic I-9 Audit Trail" row whose event cell reads "Signed Section 2" (4th cell = Created By); mapped live on 2026-04-22 against profile 2082422 via `/form-I9/summary/{profileId}/{i9Id}?isRemoteAccess=False`. Historical (paper) records land on `/form-I9-historical/…` and lack the signed-section-2 row — those are surfaced as `i9Status=historical` rather than conflating with "unsigned". `i9Signer` is always a non-empty human-readable string (signer name / "Not signed" / "Historical (paper)" / "Not found in I-9" / error detail) so the dashboard detail cell never em-dashes for a completed lookup. I-9 login is email+password, no Duo, so the extra system adds zero MFA overhead.
 - **2026-04-21: Batch-level instance + injected authTimings.** Shared-context-pool now runs inside `withBatchLifecycle` (`src/core/batch-lifecycle.ts`). One `workflow_start` / `workflow_end` per batch instead of N. A single `SessionObserver` captures `authTimings` during `Session.launch`; those timings are passed to every `runOneItem` call and become synthetic pre-handler `running` entries (`auth:ucpath`, `auth:crm`) with real start timestamps. Sum of step durations now tiles exactly to the per-item elapsed. SIGINT mid-batch fans out `failed` tracker rows for every un-terminated item and emits one `workflow_end(failed)`. `authSteps` was always `true` in code — earlier doc listed `false`, which was wrong.
 - **2026-04-21: Shared-context-pool + xlsx removal.** Replaced the handler-side `runWorkerPool` with the kernel's new `batch.mode: "shared-context-pool"`. TData is now `{ name: string }` — one kernel item per name, one dashboard row per name, same "1 Duo per system, N tabs" browser topology. CRM cross-verification moved inside the per-item handler (was a post-pool pass). Excel tracker (`tracker.ts` + `eid-lookup-tracker.xlsx`) fully removed — JSONL + dashboard are the only observability. `async-mutex` use dropped with the xlsx writes. Kernel addition: `Session.forWorker(parent)` + lazy `page(id)` branch + `closeWorkerPages()`. **Live run pending user verification** — UCPath + CRM Duo can't be approved this session; dry-run + unit tests validate this migration.
 - **2026-04-17: Migrated to kernel (historical).** First kernel cut used `runWorkerPool` inside `ctx.step("searching", ...)` as a helper. One workflow run per CLI invocation; per-name JSONL rows were the "Acceptable regression" closed by the 2026-04-21 change. Left here to explain why `search.ts` / `crm-search.ts` are kernel-agnostic helpers (they were authored before the kernel existed and survive the 2026-04-21 rewrite untouched).

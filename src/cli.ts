@@ -284,12 +284,13 @@ program
 
 program
   .command("eid-lookup")
-  .description("Look up Employee IDs by name via Person Organizational Summary (UCPath, optional CRM cross-verify)")
+  .description("Look up Employee IDs by name via Person Organizational Summary (UCPath, optional CRM cross-verify, optional I-9 Section 2 signer lookup)")
   .argument("<names...>", 'One or more names in "Last, First Middle" format')
   .option("--workers <N>", "Number of parallel browser tabs (default: min(names.length, 4))", parseInt)
   .option("--no-crm", "Skip CRM cross-verification (UCPath only)")
+  .option("--i9", "Also look up who signed Section 2 in I-9 Complete")
   .option("-d, --dry-run", "Preview the planned name list without launching a browser")
-  .action(async (names: string[], options: { workers?: number; crm?: boolean; dryRun?: boolean }) => {
+  .action(async (names: string[], options: { workers?: number; crm?: boolean; i9?: boolean; dryRun?: boolean }) => {
     try {
       validateEnv();
     } catch {
@@ -301,9 +302,11 @@ program
     }
     // Commander's --no-crm flag surfaces as `options.crm === false`; default true.
     const useCrm = options.crm !== false;
+    const useI9 = options.i9 === true;
     await runEidLookup(names, {
       workers: options.workers,
       useCrm,
+      useI9,
       dryRun: options.dryRun,
     });
   });

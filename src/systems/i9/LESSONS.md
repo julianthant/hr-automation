@@ -36,3 +36,12 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Failed because:** I-9 Complete's post-save redirect is asynchronous; reading the URL too early returns the create-form URL or a transient interstitial.
 **Fix:** `await page.waitForURL(/\/employee\/profile\/\d+/)` (or equivalent) before extracting the `profileId` segment. The kernel `ctx.retry` wrapper is sufficient if the wait is included inside it.
 **Tags:** profileId, url, redirect, race, save, wait
+
+## 2026-04-22 — Section 2 signer from the Summary audit trail (not the Section 2 tab)
+
+**Tried:** First pass considered opening the Section 2 form tab and reading the signature block, which changes layout depending on whether Section 2 was completed inline vs. via a remote agent.
+**Failed because:** The Section 2 tab's DOM shape varies by completion path, and paper-imported I-9s don't expose it at all — it's an unreliable anchor across the four record flavors we care about.
+**Fix:** Navigate to `/form-I9/summary/{profileId}/{i9Id}?isRemoteAccess=False` and read the "Electronic I-9 Audit Trail" grid. The row whose accessible name matches `/Signed Section 2/` is uniformly present on every modern signed I-9, and its 4th cell (`Created By`) is the signer's display name. Historical (paper) records get redirected to `/form-I9-historical/{profileId}/{i9Id}/0` and legitimately lack this row — detect via `page.url().includes("/form-I9-historical/")` and report `status: "historical"` rather than conflating with unsigned. Always anchor the wait on the stable "I-9 Record Summary Information" heading (present on both URL shapes) before reading. Use `.first()` on the audit row so amended records with multiple Section 2 signings return the most recent.
+**Selector:** `summary.heading`, `summary.signedSection2Row` in `selectors.ts`; consumed from `signer.ts::lookupSection2Signer`.
+**References:** Mapped live against profile 2082422 on 2026-04-22 via Playwright CLI.
+**Tags:** summary, audit-trail, signer, section2, historical, unsigned, signed, row, createdby

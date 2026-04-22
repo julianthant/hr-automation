@@ -1,13 +1,14 @@
 # I9 Module
 
-Automates I9 Complete (Tracker I-9 by Mitratech) for employment verification: login, employee creation, and search.
+Automates I9 Complete (Tracker I-9 by Mitratech) for employment verification: login, employee creation, search, and Section 2 signer lookup.
 
 ## Files
 
 - `login.ts` — `loginToI9(page)`: email/password auth (no Duo MFA), auto-appends `@ucsd.edu` if needed, dismisses training notification popup after login
 - `create.ts` — `createI9Employee(page, input)`: fills profile form, saves, selects "Remote - Section 1 Only", fills start date, creates I-9 record. Returns `I9Result` with `profileId` extracted from URL
 - `search.ts` — `searchI9Employee(page, criteria)`: flexible search by lastName/firstName/ssn/profileId/employeeId, parses grid results (9 columns)
-- `selectors.ts` — **Selector registry** (Subsystem A). Grouped: `login`, `dashboard`, `profile`, `remoteI9`, `search`.
+- `signer.ts` — `lookupSection2Signer(page, criteria)`: search → navigate to `/form-I9/summary/{profileId}/{i9Id}` → read "Signed Section 2" row from the Electronic I-9 Audit Trail. Returns `Section2SignerResult` with `status: signed | unsigned | historical | not-found | error` and `signerName`. Used by the `eid-lookup` workflow's `--i9` mode.
+- `selectors.ts` — **Selector registry** (Subsystem A). Grouped: `login`, `dashboard`, `profile`, `remoteI9`, `search`, `summary`.
 - `types.ts` — `I9EmployeeInput`, `I9Result`, `I9SearchCriteria`, `I9SearchResult`
 - `index.ts` — Barrel exports (includes `i9Selectors` registry barrel)
 
@@ -39,12 +40,14 @@ See [`SELECTORS.md`](./SELECTORS.md) for the auto-generated catalog of every sel
 - Grid parsing: last `.getByRole("grid")` in dialog is results, earlier grids are headers
 - Search button uses direct selector `#divSearchOptions` (not accessible role)
 - Returns `I9Result` error object on validation failure (doesn't throw)
+- Summary-page signer lookup: modern electronic I-9s resolve to `/form-I9/summary/{profileId}/{i9Id}`; paper-imported records redirect to `/form-I9-historical/…` and lack the "Signed Section 2" audit row. Detect with `page.url().includes("/form-I9-historical/")` to distinguish `historical` from genuinely `unsigned`.
+- Audit trail columns are `[Section, Date, Event, Created By]` — signer lives in cell index 3 (zero-based) of the row whose accessible name matches `/Signed Section 2/`. Use `.first()` on that locator so amended I-9s (multiple signings) always return the most recent.
 
 ## Verified Selectors
 
 All Playwright selectors for this system live in [`selectors.ts`](./selectors.ts),
-grouped by flow (`login`, `dashboard`, `profile`, `remoteI9`, `search`). Each
-selector carries a `// verified YYYY-MM-DD` inline comment.
+grouped by flow (`login`, `dashboard`, `profile`, `remoteI9`, `search`, `summary`).
+Each selector carries a `// verified YYYY-MM-DD` inline comment.
 
 **Do not add inline selectors outside `selectors.ts`.** The
 [`tests/unit/systems/inline-selectors.test.ts`](../../../tests/unit/systems/inline-selectors.test.ts)
@@ -55,4 +58,4 @@ registry row locators).
 
 ## Lessons Learned
 
-*(Add entries here when I9 bugs are fixed — document root cause and fix so the same error never recurs)*
+- **2026-04-22: Section 2 signer — parse the audit trail, not the Section 2 tab.** The `/form-I9/summary/{profileId}/{i9Id}` page renders an "Electronic I-9 Audit Trail" grid that lists every lifecycle event including "Signed Section 2" (signer in the 4th cell, `Created By`). Reading the signer from the audit trail is structurally the same for both modern electronic and re-opened records, whereas the Section 2 tab's layout varies by flow type. Historical (paper) imports redirect to `/form-I9-historical/{profileId}/{i9Id}/0` and have no audit row for Section 2 — detect via URL prefix after `page.goto(summaryUrl)` and report `status: "historical"` rather than conflating with `unsigned`. Mapped live on 2026-04-22 against profile 2082422.
