@@ -19,7 +19,7 @@ Core automation for Old UKG Kronos: employee search, navigation, modal handling,
    a. Add the selector function with JSDoc (one-line summary, `@tags`, `verified YYYY-MM-DD`).
    b. Run `npm run selectors:catalog` to regenerate [`SELECTORS.md`](./SELECTORS.md).
    c. If you discovered a non-obvious failure mode along the way, append a lesson to [`LESSONS.md`](./LESSONS.md) following its template.
-   d. Verify the inline-selector test still passes: `node --import tsx/esm --test tests/unit/systems/inline-selectors.test.ts`.
+   d. Verify the inline-selector test still passes: `tsx --test tests/unit/systems/inline-selectors.test.ts`.
 
 See [`SELECTORS.md`](./SELECTORS.md) for the auto-generated catalog of every selector this module exports.
 

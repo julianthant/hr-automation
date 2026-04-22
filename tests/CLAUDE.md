@@ -48,5 +48,5 @@ Pure-logic modules: schemas, date math, mapping tables, reducers, regex classifi
 ```bash
 npm test                    # Run all tests
 npm run typecheck:all       # Typecheck tests + src together
-node --import tsx/esm --test tests/unit/workflows/separations/schema.test.ts   # Single file
+tsx --test tests/unit/workflows/separations/schema.test.ts   # Single file
 ```
