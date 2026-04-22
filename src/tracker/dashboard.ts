@@ -980,6 +980,84 @@ export function computeStepDurations(
 }
 
 /**
+ * Summary of a run's timeline derived from its tracker JSONL history.
+ * `earliestTrackerTs` is the single source of truth for "when did this run
+ * start" — it matches the anchor `computeStepDurations` uses, so the header
+ * Elapsed timer, the step pipeline durations, and the queue-row elapsed all
+ * reference the same t=0. For batch items that means the synthetic auth
+ * `running` entries at `onAuthStart` timestamps (injected by `runOneItem` —
+ * see src/core/workflow.ts) are what anchor the run.
+ */
+export interface RunTimeline {
+  /** 1-indexed chronological position among runs for the same itemId. */
+  ordinal: number;
+  /** Earliest tracker-entry ts for this run. */
+  earliestTrackerTs: string;
+  /** Latest tracker-entry ts for this run. */
+  latestTrackerTs: string;
+}
+
+/** Return the earlier of two ISO timestamps, ignoring undefined inputs. */
+function pickEarlier(a: string | undefined, b: string | undefined): string | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return a < b ? a : b;
+}
+
+/** Return the later of two ISO timestamps, ignoring undefined inputs. */
+function pickLater(a: string | undefined, b: string | undefined): string | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return a > b ? a : b;
+}
+
+/**
+ * Build a `runId → RunTimeline` map for all runs of a single itemId.
+ *
+ * Runs are ordered (and ordinals assigned) by each run's earliest tracker
+ * entry timestamp, NOT by parsing the trailing `#N` off the runId. This
+ * means the two coexisting runId shapes — legacy `{id}#N` and the UUID
+ * format emitted by batch/pool runners — are numbered consistently:
+ * "run #1" is always the chronologically first run for that item.
+ *
+ * Exported so both the SSE `/events` enrichment and `/api/runs` can use the
+ * same assignment rule — the ordinal a queue row shows MUST match the
+ * ordinal the RunSelector dropdown shows for the same runId.
+ */
+export function buildRunTimelines(
+  entries: Array<{ runId?: string; id: string; timestamp: string }>,
+): Map<string, RunTimeline> {
+  const spans = new Map<string, { earliestTs: string; latestTs: string }>();
+  for (const e of entries) {
+    const rid = e.runId || `${e.id}#1`;
+    const prev = spans.get(rid);
+    if (!prev) {
+      spans.set(rid, { earliestTs: e.timestamp, latestTs: e.timestamp });
+    } else {
+      if (e.timestamp < prev.earliestTs) prev.earliestTs = e.timestamp;
+      if (e.timestamp > prev.latestTs) prev.latestTs = e.timestamp;
+    }
+  }
+  // Secondary sort by runId keeps the assignment deterministic if two runs
+  // share the same earliest timestamp (realistic for synthetic fixtures;
+  // production tracker writes are microsecond-distinct).
+  const sorted = [...spans.entries()].sort(([ra, sa], [rb, sb]) =>
+    sa.earliestTs < sb.earliestTs ? -1 :
+    sa.earliestTs > sb.earliestTs ? 1 :
+    ra.localeCompare(rb),
+  );
+  const out = new Map<string, RunTimeline>();
+  sorted.forEach(([rid, span], i) => {
+    out.set(rid, {
+      ordinal: i + 1,
+      earliestTrackerTs: span.earliestTs,
+      latestTrackerTs: span.latestTs,
+    });
+  });
+  return out;
+}
+
+/**
  * Memoized per-step average durations (ms) keyed by `${workflow}::${dir}`.
  * TTL'd at 60s to keep the /events poll cycle cheap even with dozens of
  * entries carrying cacheHits. The dir component in the key is what lets
@@ -1373,6 +1451,24 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
           stepDurationsByRun.set(key, computeStepDurations(rows));
         }
 
+        // Per-item run timelines: ordinal + tracker-span. Enrichment below
+        // folds `earliestTrackerTs` into firstLogTs and `latestTrackerTs`
+        // into lastLogTs so the header Elapsed timer and queue-row elapsed
+        // both anchor at the run's REAL start (which for batch items is
+        // the synthetic auth running entry, pre-handler). This makes the
+        // step pipeline tile elapsed exactly — sum(stepDurations) ≡
+        // (lastLogTs - firstLogTs). See RunTimeline JSDoc for why.
+        const entriesByItem = new Map<string, TrackerEntry[]>();
+        for (const e of entries) {
+          const arr = entriesByItem.get(e.id) ?? [];
+          arr.push(e);
+          entriesByItem.set(e.id, arr);
+        }
+        const timelinesByItem = new Map<string, Map<string, RunTimeline>>();
+        for (const [itemId, rows] of entriesByItem) {
+          timelinesByItem.set(itemId, buildRunTimelines(rows));
+        }
+
         // ── Cache-hit enrichment ────────────────────────────────────────
         // Read session events tolerantly and map cache_hit records to each
         // runId. Tolerant JSON parse matches the pattern used in
@@ -1432,12 +1528,27 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
             }
             cacheStepAvgsField = avgs;
           }
+
+          // Fold the tracker-span into firstLogTs/lastLogTs so the frontend
+          // reads a single "run start → now" window that includes the
+          // synthetic auth entries (batch mode) or the pending entry (single
+          // mode). Min/max across both sources keeps legacy log-only runs
+          // behaving the same.
+          const timeline = timelinesByItem.get(e.id)?.get(rid);
+          const logFirstTs = logFirst.get(key);
+          const logLastTs = logLast.get(key);
+          const trackerFirstTs = timeline?.earliestTrackerTs;
+          const trackerLastTs = timeline?.latestTrackerTs;
+          const spanFirstTs = pickEarlier(logFirstTs, trackerFirstTs);
+          const spanLastTs = pickLater(logLastTs, trackerLastTs);
+
           return {
             ...e,
-            firstLogTs: logFirst.get(key),
-            lastLogTs: logLast.get(key),
+            firstLogTs: spanFirstTs,
+            lastLogTs: spanLastTs,
             lastLogMessage: logLastMsg.get(key),
             stepDurations: stepDurationsByRun.get(key) ?? {},
+            ...(timeline ? { runOrdinal: timeline.ordinal } : {}),
             ...(screenshotCount !== undefined ? { screenshotCount } : {}),
             ...(cacheHitsField !== undefined ? { cacheHits: cacheHitsField } : {}),
             ...(cacheStepAvgsField !== undefined ? { cacheStepAvgs: cacheStepAvgsField } : {}),
@@ -1478,10 +1589,11 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       const date = url.searchParams.get("date") ?? undefined;
       res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
 
-      // Attach per-run step durations + first/last log timestamps so the
-      // frontend can render the correct timeline + Started/Elapsed for
-      // whichever run the operator picks in RunSelector. Without this, the
-      // deduped entry (latest run) bleeds its timings into every past run.
+      // Attach per-run step durations, a single timeline span (covers both
+      // the synthetic auth tracker entries and the handler's log lines), and
+      // a chronological ordinal so the UI labels runs consistently even for
+      // UUID-format runIds. Both shapes ({id}#N, UUID) share the SAME
+      // ordinal-assignment rule — see `buildRunTimelines`.
       const runs = readRunsForId(wf, id, date, dir);
 
       const allForItem = date
@@ -1496,6 +1608,8 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         else historyByRun.set(rid, [slim]);
       }
 
+      const timelines = buildRunTimelines(allForItem);
+
       const allLogs = date
         ? readLogEntriesForDate(wf, id, date, dir)
         : readLogEntries(wf, id, dir);
@@ -1507,12 +1621,16 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         logLast.set(rid, l.ts);
       }
 
-      const enrichedRuns = runs.map((r) => ({
-        ...r,
-        stepDurations: computeStepDurations(historyByRun.get(r.runId) ?? []),
-        firstLogTs: logFirst.get(r.runId),
-        lastLogTs: logLast.get(r.runId),
-      }));
+      const enrichedRuns = runs.map((r) => {
+        const timeline = timelines.get(r.runId);
+        return {
+          ...r,
+          stepDurations: computeStepDurations(historyByRun.get(r.runId) ?? []),
+          firstLogTs: pickEarlier(logFirst.get(r.runId), timeline?.earliestTrackerTs),
+          lastLogTs: pickLater(logLast.get(r.runId), timeline?.latestTrackerTs),
+          ...(timeline ? { runOrdinal: timeline.ordinal } : {}),
+        };
+      });
       res.end(JSON.stringify(enrichedRuns));
       return;
     }

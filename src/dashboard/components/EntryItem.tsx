@@ -31,7 +31,16 @@ export function EntryItem({ entry, selected, onClick }: EntryItemProps) {
     ? formatDuration(firstTs, lastTs)
     : null;
 
-  const runNumber = entry.runId?.split("#")[1] || "1";
+  // Prefer the backend-assigned chronological ordinal — it's the only path
+  // that works for UUID-format runIds (batch/pool runners). Legacy fallback
+  // parses the `{id}#N` shape; final fallback is 1 so "#0" never appears.
+  let runNumber: number;
+  if (typeof entry.runOrdinal === "number" && entry.runOrdinal > 0) {
+    runNumber = entry.runOrdinal;
+  } else {
+    const parsed = Number.parseInt(entry.runId?.split("#")[1] ?? "", 10);
+    runNumber = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+  }
   const time = entry.firstLogTs || entry.timestamp
     ? new Date(entry.firstLogTs || entry.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
     : "";

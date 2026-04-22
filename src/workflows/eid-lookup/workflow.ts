@@ -16,7 +16,7 @@ import { loginToUCPath, loginToACTCrm } from "../../auth/login.js";
 import { loginToI9, lookupSection2Signer } from "../../systems/i9/index.js";
 import { searchByName, parseNameInput, type EidResult } from "./search.js";
 import { searchCrmByName, datesWithinDays } from "./crm-search.js";
-import { EidLookupItemSchema, type EidLookupItem } from "./schema.js";
+import { EidLookupItemSchema, normalizeName, type EidLookupItem } from "./schema.js";
 
 export interface EidLookupOptions {
   /** Number of parallel browser tabs. Default: min(names.length, 4). */
@@ -416,6 +416,9 @@ export const eidLookupCrmI9Workflow = defineWorkflow({
  * Dedupe preserving first-seen order. Duplicate names would collide on the
  * name-derived itemId (`deriveItemId: item => item.name`); dedupe at the
  * CLI boundary so the kernel never sees two items with the same id.
+ *
+ * Comparison is case-insensitive *after* `normalizeName` is applied upstream,
+ * but we keep a belt-and-suspenders Set on the already-normalized strings.
  */
 export function dedupeNames(names: string[]): string[] {
   const seen = new Set<string>();
@@ -429,6 +432,16 @@ export function dedupeNames(names: string[]): string[] {
     out.push(n);
   }
   return out;
+}
+
+/**
+ * Normalize every input name to "Last, First Middle" title-case + dedupe
+ * duplicates post-normalization. Applied at every CLI entry point
+ * (`runEidLookup`, `runEidLookupCli`) so both the legacy in-process path
+ * and the daemon-mode path feed the search pipeline identical strings.
+ */
+export function prepareNames(names: string[]): string[] {
+  return dedupeNames(names.map((n) => normalizeName(n)));
 }
 
 /**
@@ -453,18 +466,19 @@ export async function runEidLookup(
   const useI9 = options.useI9 === true;
   const workers = options.workers ?? Math.min(names.length, 4);
 
+  const uniqueNames = prepareNames(names);
+
   if (options.dryRun) {
     log.step("=== DRY RUN MODE ===");
     log.step(`CRM cross-verification: ${useCrm ? "ON" : "OFF"}`);
     log.step(`I-9 Section 2 signer lookup: ${useI9 ? "ON" : "OFF"}`);
     log.step(`Workers: ${workers}`);
-    log.step(`Names (${names.length}):`);
-    for (const n of names) log.step(`  - ${n}`);
+    log.step(`Names (${uniqueNames.length} after normalize + dedupe):`);
+    for (const n of uniqueNames) log.step(`  - ${n}`);
     log.success("Dry run complete — no browser launched, no UCPath/CRM/I9 contact made");
     return;
   }
 
-  const uniqueNames = dedupeNames(names);
   const items: EidLookupItem[] = uniqueNames.map((name) => ({ name }));
   const now = new Date().toISOString();
   const batchOpts = {
@@ -503,4 +517,53 @@ export async function runEidLookup(
     log.error(`EID lookup failed: ${errorMessage(err)}`);
     process.exit(1);
   }
+}
+
+/**
+ * Daemon-mode CLI adapter for `npm run eid-lookup <names...>`.
+ *
+ * Mirrors `runSeparationCli` / `runWorkStudyCli`: enqueues one `{name}` item
+ * per unique, normalized name to any alive `eid-lookup` daemon (or spawns
+ * one via `ensureDaemonsAndEnqueue`). Keeps the UCPath + CRM browser session
+ * warm across batches so subsequent names don't re-Duo.
+ *
+ * Constraints baked into this adapter:
+ *   - The daemon's `Session` is launched with a fixed systems list at spawn
+ *     time, so only ONE workflow variant can run per daemon. We hard-wire
+ *     `eidLookupCrmWorkflow` (UCPath + CRM, no I-9) as the daemon default —
+ *     that's the flag combo the `eid-lookup` CLI command uses when no flags
+ *     are passed.
+ *   - `--no-crm` (UCPath-only) and `--i9` (adds I-9) change the systems
+ *     list, so those flag combos route to `runEidLookup` (legacy
+ *     in-process path) instead of the daemon. The CLI wiring in
+ *     `src/cli.ts` enforces this.
+ *   - `--dry-run` still bypasses the daemon entirely (no browser, no
+ *     spawn) — normalized name list is printed and we exit 0.
+ */
+export async function runEidLookupCli(
+  names: string[],
+  options: { dryRun?: boolean; new?: boolean; parallel?: number } = {},
+): Promise<void> {
+  if (names.length === 0) {
+    log.error("runEidLookupCli: no names provided");
+    process.exitCode = 1;
+    return;
+  }
+
+  const uniqueNames = prepareNames(names);
+
+  if (options.dryRun) {
+    log.step("=== DRY RUN MODE (daemon) ===");
+    log.step(`Names (${uniqueNames.length} after normalize + dedupe):`);
+    for (const n of uniqueNames) log.step(`  - ${n}`);
+    log.success("Dry run complete — no browser launched, no daemon spawned");
+    return;
+  }
+
+  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
+  const inputs = uniqueNames.map((name) => ({ name }));
+  await ensureDaemonsAndEnqueue(eidLookupCrmWorkflow, inputs, {
+    new: options.new,
+    parallel: options.parallel,
+  });
 }

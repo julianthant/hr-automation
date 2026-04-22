@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { computeStepDurations } from "../../../src/tracker/dashboard.js";
+import { computeStepDurations, buildRunTimelines } from "../../../src/tracker/dashboard.js";
 
 describe("computeStepDurations", () => {
   it("returns empty object for no entries", () => {
@@ -157,5 +157,67 @@ describe("computeStepDurations", () => {
     const totalElapsed = Date.parse("2026-04-21T21:42:40.000Z") - Date.parse("2026-04-21T21:41:26.000Z");
     const sum = Object.values(durations).reduce((a, b) => a + b, 0);
     assert.equal(sum, totalElapsed, "pool-item durations tile exactly to total elapsed");
+  });
+});
+
+describe("buildRunTimelines", () => {
+  it("returns an empty map for no entries", () => {
+    assert.equal(buildRunTimelines([]).size, 0);
+  });
+
+  it("assigns ordinal 1 to the chronologically earliest run, not the earliest runId", () => {
+    // Two runs of the same item: runId `b` started FIRST, `a` second.
+    // Alphabetical sort would mis-number them (`a` as #1); earliest-ts sort
+    // is correct (`b` as #1).
+    const entries = [
+      { id: "item1", runId: "a", timestamp: "2026-04-17T10:00:10.000Z" },
+      { id: "item1", runId: "a", timestamp: "2026-04-17T10:00:20.000Z" },
+      { id: "item1", runId: "b", timestamp: "2026-04-17T10:00:00.000Z" },
+      { id: "item1", runId: "b", timestamp: "2026-04-17T10:00:05.000Z" },
+    ];
+    const timelines = buildRunTimelines(entries);
+    assert.equal(timelines.get("b")?.ordinal, 1, "b ran first → ordinal 1");
+    assert.equal(timelines.get("a")?.ordinal, 2, "a ran second → ordinal 2");
+  });
+
+  it("captures the earliest/latest timestamp per run (synthetic auth + handler span)", () => {
+    // Simulates a batch item: synthetic auth row at t=0, handler rows at t=12s/t=20s.
+    // earliestTrackerTs must be the auth row's ts so the timer includes auth.
+    const entries = [
+      { id: "item1", runId: "uuid-1", timestamp: "2026-04-17T10:00:00.000Z" },
+      { id: "item1", runId: "uuid-1", timestamp: "2026-04-17T10:00:12.000Z" },
+      { id: "item1", runId: "uuid-1", timestamp: "2026-04-17T10:00:20.000Z" },
+    ];
+    const timelines = buildRunTimelines(entries);
+    const t = timelines.get("uuid-1");
+    assert.equal(t?.earliestTrackerTs, "2026-04-17T10:00:00.000Z");
+    assert.equal(t?.latestTrackerTs, "2026-04-17T10:00:20.000Z");
+    assert.equal(t?.ordinal, 1);
+  });
+
+  it("falls back to `${id}#1` when runId is absent", () => {
+    const entries = [
+      { id: "item1", timestamp: "2026-04-17T10:00:00.000Z" },
+      { id: "item1", timestamp: "2026-04-17T10:00:30.000Z" },
+    ];
+    const timelines = buildRunTimelines(entries);
+    assert.equal(timelines.get("item1#1")?.ordinal, 1);
+    assert.equal(timelines.get("item1#1")?.earliestTrackerTs, "2026-04-17T10:00:00.000Z");
+    assert.equal(timelines.get("item1#1")?.latestTrackerTs, "2026-04-17T10:00:30.000Z");
+  });
+
+  it("handles mixed legacy {id}#N and UUID runIds in one item's history", () => {
+    // Real-world: an item ran once in legacy batch (item1#1), then re-ran
+    // via a UUID-emitting pool worker. Ordinals must reflect chronology, not
+    // runId shape.
+    const entries = [
+      { id: "item1", runId: "item1#1", timestamp: "2026-04-17T09:00:00.000Z" },
+      { id: "item1", runId: "item1#1", timestamp: "2026-04-17T09:00:30.000Z" },
+      { id: "item1", runId: "9f3ea-uuid", timestamp: "2026-04-17T10:00:00.000Z" },
+      { id: "item1", runId: "9f3ea-uuid", timestamp: "2026-04-17T10:00:45.000Z" },
+    ];
+    const timelines = buildRunTimelines(entries);
+    assert.equal(timelines.get("item1#1")?.ordinal, 1);
+    assert.equal(timelines.get("9f3ea-uuid")?.ordinal, 2);
   });
 });
