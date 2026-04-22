@@ -11,18 +11,27 @@ npm run start-onboarding:dry <email>   # Dry-run onboarding (CRM extract only, n
 npm run start-onboarding:batch -- <N>  # Batch onboarding with N parallel workers (kernel pool mode)
 npm run extract <email>                # Extract employee data from CRM only
 
-# Separations
-npm run separation <docId> [docId ...] # Single doc or batch; shared browsers across docs
-npm run separation:dry <docId>         # Dry-run (extract + log only)
+# Separations (daemon mode by default — see "Daemon mode" below)
+npm run separation <docId> [docId ...] # Enqueue to an alive daemon or spawn one
+npm run separation:dry <docId>         # Dry-run (extract + log only; no daemon)
+npm run separation:direct <docId>      # Legacy in-process path (reopens browsers + re-Duo every run)
+npm run separation:status              # Show alive daemons + queue depth
+npm run separation:stop                # Soft-stop all daemons (drain in-flight)
+npm run separation:attach              # Tail daemon logs (Ctrl+C detaches)
 
 # Kronos Reports
 npm run kronos                         # Download Time Detail PDFs (4 workers, kernel pool mode)
 npm run kronos:dry                     # Dry-run (preview employee list)
 npm run kronos -- --workers 8          # Custom worker count
 
-# Work Study
-npm run work-study <emplId> <date>     # PayPath position pool update
-npm run work-study:dry <emplId> <date> # Dry-run (preview ActionPlan only)
+# Work Study (daemon mode by default — see "Daemon mode" below)
+npm run work-study <emplId> <date>     # Enqueue to an alive daemon or spawn one
+npm run work-study:dry <emplId> <date> # Dry-run (preview ActionPlan only; no daemon)
+npm run work-study:direct <emplId> <date> # Legacy in-process path (one UCPath Duo per run)
+npm run work-study:status              # Show alive daemons + queue depth
+npm run work-study:stop                # Soft-stop all daemons
+npm run work-study:attach              # Tail daemon logs
+npm run daemons:status                 # Status across every daemon-enabled workflow
 
 # Emergency Contact
 npm run emergency-contact <batchYaml>      # Fill Emergency Contact for every record
@@ -207,6 +216,28 @@ Run modes: `runWorkflow(wf, data)` for a single item; `runWorkflowBatch(wf, item
 
 Escape hatches: `ctx.session.page(id)` / `ctx.session.newWindow(id)` expose the underlying Session. Use them only when the kernel's declarative shape doesn't express what you need.
 
+## Daemon mode (persistent workflow processes)
+
+Kernel workflows exposed on the CLI (`npm run separation <ids>`, `npm run work-study <emplId> <date>`) default to **daemon mode**:
+
+- **First invocation with no alive daemon** → spawns one detached daemon (`tsx src/cli-daemon.ts <workflow>`), waits for auth (Duo once), enqueues the item. Daemon stays alive after processing.
+- **Subsequent invocations** → append to the shared queue (`.tracker/daemons/{workflow}.queue.jsonl`) and `POST /wake` every alive daemon. No re-Duo.
+- **Multi-daemon dispatch**: all alive daemons for a workflow race to claim the next queued row via an atomic `fs.mkdir` mutex. Whichever daemon finishes its current item first grabs the next — dynamic load balancing without a coordinator.
+- **Keepalive**: every 15 min idle, each daemon runs `session.healthCheck(system)` per system so SAML/Duo sessions don't silently expire between items.
+
+Flags (on `separation` and `work-study`):
+- `-n, --new` — spawn one **additional** daemon even if others are alive.
+- `-p, --parallel <N>` — ensure ≥N daemons are alive before enqueueing (spawns `max(0, N - alive)`).
+- `--dry-run` — preview in-process; no daemon spawned.
+- `--direct` — bypass daemon mode, run the legacy in-process `runWorkflow` / `runWorkflowBatch` path.
+
+Lifecycle commands (converted workflows: `separations`, `work-study`):
+- `npm run daemons:status` (or `:status` per workflow) — alive daemons + queue depth.
+- `npm run <workflow>:stop` — soft-stop (drain in-flight, re-queue). Use `-- --force` to mark in-flight as failed and exit immediately.
+- `npm run <workflow>:attach` — tail daemon log files. Ctrl+C detaches; daemons keep running.
+
+Converting a new workflow to daemon mode is mechanical — see `src/workflows/CLAUDE.md#daemon-mode-conversion-template`. Implementation: `src/core/daemon-{types,registry,queue,client}.ts` + `src/core/daemon.ts` (main loop) + `src/cli-daemon.ts` (entry). Full design doc: `docs/superpowers/specs/2026-04-22-workflow-daemon-mode-design.md`.
+
 ## Environment
 
 Copy `.env.example` → `.env` and set:
@@ -310,7 +341,7 @@ Implementation details live in `src/dashboard/CLAUDE.md` (frontend) and `src/tra
 These items appear in plans/improvements docs but were not shipped in 2026-04-18's selector-intelligence + runner-removal pass. They'll be picked up in a later session.
 
 - **Stats panel + run-diff frontend.** ~357 lines of backend handler scaffolding (`buildStatsHandler`, `buildDiffHandler`, types) sit uncommitted in `src/tracker/dashboard.ts`. No tests, no frontend, no route registration. Decide: commit + open frontend tickets, or `git checkout -- src/tracker/dashboard.ts` to discard. Note that `computeStepDurations` is committed and powers the StepPipeline timing chips already — discarding the scaffolding would NOT regress those.
-- **Replacement workflow launcher.** Out of scope for this pass; user will wire something else where ⚡ RUN used to be. The `TopBar`'s `rightSlot` prop is preserved for that future mount.
+- **Replacement workflow launcher.** ✅ Shipped 2026-04-22 as **daemon mode** — see the "Daemon mode (persistent workflow processes)" section above. CLI invocations of `separation` / `work-study` now enqueue to long-lived daemons instead of spawning a fresh process + re-Duo per run. `TopBar`'s `rightSlot` prop is still preserved for a future in-dashboard UI mount (dashboard-side queue viz / enqueue button is a follow-up).
 - **Bundle size code-split** (handoff §1.8). Bundle is 906.74 KB after runner removal (down from 940.65 KB).
 - **ESLint rule for selectors** (handoff §8.3). The `tests/unit/systems/inline-selectors.test.ts` guard still enforces "no inline selectors outside `selectors.ts`" — promotion to ESLint is editor-time-feedback only.
 - **Step-cache shipped 2026-04-18; kernel-level resume deferred indefinitely.** `src/core/step-cache.ts` is the primitive; onboarding's `extraction` + `pdf-download` opt in. Saves ~2–3 min on onboarding retry-after-failure. A full kernel `Ctx.step(name, fn, { resumable: true })` opt-in + `npm run resume <runId>` CLI was explicitly scoped out because onboarding's handler holds state in local closures (`let data: EmployeeData | null`) — kernel-level step-skip would require a ~100-line handler restructure for no additional user-visible savings. Design doc: `docs/superpowers/specs/2026-04-18-step-cache-design.md`.

@@ -2,7 +2,7 @@
 
 Multi-system employee termination: extracts data from Kuali Build, searches Old & New Kronos for timesheets, creates the UCPath termination transaction, fetches Job Summary, and fills Kuali finalization fields.
 
-**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflow` (single-doc) or `src/core/runWorkflowBatch` (multi-doc sequential mode). The kernel owns browser launch, auth-chain orchestration, per-doc tracker entries, SIGINT cleanup, and screenshot-on-failure. The CLI adapters `runSeparation` and `runSeparationBatch` handle dry-run (which bypasses the kernel entirely — no browser) and forward real runs to the kernel.
+**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflow` (single-doc) or `src/core/runWorkflowBatch` (multi-doc sequential mode). The kernel owns browser launch, auth-chain orchestration, per-doc tracker entries, SIGINT cleanup, and screenshot-on-failure. The CLI adapters `runSeparation` and `runSeparationBatch` handle dry-run (which bypasses the kernel entirely — no browser) and forward real runs to the kernel. The **daemon-mode adapter** `runSeparationCli` (added 2026-04-22) is what `npm run separation` actually invokes: it enqueues one or more `{docId}` items to any alive separation daemon (or spawns one) via `ensureDaemonsAndEnqueue`.
 
 ## What this workflow does
 
@@ -30,7 +30,7 @@ This workflow touches four systems: **kuali**, **ucpath**, **old-kronos**, **new
 
 - `schema.ts` — `SeparationData` Zod schema + helpers (`computeTerminationEffDate`, `buildTerminationComments`, `mapReasonCode`, `getInitials`, `buildDateChangeComments`, `resolveKronosDates`, `computeKronosDateRange`)
 - `config.ts` — URLs, template IDs (`UC_VOL_TERM`, `UC_INVOL_TERM`), 2560x1440 tiling dimensions
-- `workflow.ts` — Kernel definition (`separationsWorkflow`) + CLI adapters (`runSeparation`, `runSeparationBatch`). Dry-run branch bypasses the kernel (no browser launch; prints pipeline preview)
+- `workflow.ts` — Kernel definition (`separationsWorkflow`) + CLI adapters (`runSeparation`, `runSeparationBatch`, `runSeparationCli`). Dry-run branch bypasses the kernel (no browser launch; prints pipeline preview). `runSeparationCli` is the daemon-mode entry used by `npm run separation` — it validates via `SeparationInputSchema`, honors `--dry-run`, and otherwise forwards to `ensureDaemonsAndEnqueue(separationsWorkflow, docIds.map(docId => ({docId})), { new, parallel })`.
 - `index.ts` — Barrel exports (no `defineDashboardMetadata` — `defineWorkflow` self-registers)
 - `explore-kronos.ts` — Dev script (selector discovery)
 - `KRONOS-SELECTORS.md` — Historical selector notes from the Kronos mapping session
@@ -50,7 +50,17 @@ This workflow touches four systems: **kuali**, **ucpath**, **old-kronos**, **new
 ## Data Flow
 
 ```
-CLI: npm run separation <docId> [<docId2> ...]
+CLI: npm run separation <docId> [<docId2> ...]           (daemon mode — default)
+  → runSeparationCli — daemon-mode CLI adapter
+    → if --dry-run: previewSeparationPipeline(docId) — prints 7-step plan, exits 0 (no browser, no daemon)
+    → else: ensureDaemonsAndEnqueue(separationsWorkflow, inputs, { new, parallel })
+      - Discovers alive daemons via .tracker/daemons/separations-*.lock.json + /whoami liveness
+      - Spawns N additional daemons via computeSpawnPlan(aliveCount, flags) — Duo once per new daemon
+      - Validates every input with SeparationInputSchema (input-time), fails fast if invalid
+      - Appends `enqueue` events to .tracker/daemons/separations.queue.jsonl
+      - POST /wake to every alive daemon; daemons race to claim via fs.mkdir mutex
+
+CLI: npm run separation:direct <docId> [<docId2> ...]    (legacy in-process path)
   → runSeparation (single) / runSeparationBatch (multi) — CLI adapters
     → if --dry-run: previewSeparationPipeline(docId) — prints 7-step plan, exits 0 (no browser)
     → else (single): runWorkflow(separationsWorkflow, { docId })
@@ -156,6 +166,7 @@ Selectors used inside this workflow live in the per-system registries: `src/syst
 
 ## Lessons Learned
 
+- **2026-04-22: Daemon mode (`runSeparationCli`).** `npm run separation <id...>` now enqueues to an alive daemon (or spawns one) instead of launching 4 fresh browsers + re-Duo-ing every invocation. Multi-daemon dispatch uses the shared `.tracker/daemons/separations.queue.jsonl` + `fs.mkdir` mutex: start two daemons with `npm run separation 123 -p 2`, and the next batch of three docs enqueues to the shared queue — whichever daemon finishes its current doc first grabs the next unclaimed row. `--direct` flag retained for tests and edge cases. Dry-run still bypasses the daemon entirely. Kernel behavior per-doc is byte-identical to the legacy path because the daemon just calls `runOneItem` in a loop — only the instance wrapping (`withBatchLifecycle`) + SessionPanel aggregation differ. **Design doc**: `docs/superpowers/specs/2026-04-22-workflow-daemon-mode-design.md`.
 - **2026-04-21: Batch-level instance for sequential-batch runs.** `runWorkflowBatch` sequential branch now runs inside `withBatchLifecycle` (`src/core/batch-lifecycle.ts`). One `workflow_start` / `workflow_end` per batch — SessionPanel shows ONE `Separation N` row for a batch of N docs instead of N. One `Session.launch` + one `SessionObserver` captures `authTimings` for all 4 systems (interleaved); those timings are injected into every item's tracker rows as synthetic pre-handler `auth:<id>` entries with real start timestamps. The `betweenItems: ["reset-browsers"]` hook still runs between items inside the lifecycle body. SIGINT fans out `failed` rows for un-terminated items + emits one `workflow_end(failed)`.
 - **2026-04-17: Migrated to the kernel.** `runSeparation` + `runSeparationBatch` are CLI adapters over `runWorkflow` / `runWorkflowBatch`. `authChain: "interleaved"` replaces the hand-rolled `oldKronosReady.catch(...).then(...)` promise chain — `Session.launch` does the blocking Duo #1 + chains Duos #2..#4 in background with per-step `.catch(() => {})` so one bad auth doesn't block siblings. `ctx.page(id)` awaits each system's ready promise, so `ctx.parallel({ oldK, newK, jobSummary, kualiTimekeeper })` inside Phase 1 implicitly blocks on the correct Duo per task. Batch mode via `runWorkflowBatch` sequential — browsers reused across docs, `session.reset(id)` runs between docs for all 4 systems (each has a `resetUrl`). Dry-run bypasses the kernel entirely (no browser, no Kuali extraction — prints a 7-step plan and exits 0). `defineDashboardMetadata` dropped from `index.ts` (the kernel self-registers via `defineWorkflow`). `run.ts` deleted (dead code — `src/cli.ts separation <ids...>` owns batch entry via `runSeparationBatch`). `SessionWindows` / `BrowserWindow` types dropped (the kernel owns the session). Don't reintroduce raw `launchBrowser` / `withTrackedWorkflow` / `withLogContext` / `ensurePageHealthy` calls in the workflow or CLI adapters — those live in `src/core/` now. **Live-run pending user verification** — 4 simultaneous Duo approvals can't be exercised this session; only dry-runs + tests validate the migration.
 - **2026-04-10: Kronos dates only overriding when later** — Original `resolveKronosDates` logic only updated Kuali dates when Kronos dates were later. Wrong: if Kronos shows an earlier last-day-worked (employee stopped working before Kuali's separation date), that should still override. Fix: Kronos always overrides when dates differ.

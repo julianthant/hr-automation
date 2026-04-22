@@ -2,7 +2,7 @@
 
 Updates employee position pool and compensation data for work-study awards in UCPath PayPath Actions.
 
-**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflow`. The kernel owns browser launch, UCPath auth, tracker emission, SIGINT cleanup. The handler is a two-step pipeline (`ucpath-auth` → `transaction`) over a single UCPath browser.
+**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflow`. The kernel owns browser launch, UCPath auth, tracker emission, SIGINT cleanup. The handler is a two-step pipeline (`ucpath-auth` → `transaction`) over a single UCPath browser. The **daemon-mode adapter** `runWorkStudyCli` (added 2026-04-22) is what `npm run work-study` actually invokes: it enqueues `{emplId, effectiveDate}` to any alive work-study daemon (or spawns one) via `ensureDaemonsAndEnqueue`.
 
 ## Selector intelligence
 
@@ -17,7 +17,7 @@ This workflow touches one system: **ucpath**.
 - `schema.ts` — Zod `WorkStudyInput` schema (emplId: 5+ digits, effectiveDate: MM/DD/YYYY)
 - `enter.ts` — Builds `ActionPlan` for the PayPath transaction: navigate → collapse sidebar → search by Empl ID → fill position data (reason "JRL", pool "F") → fill Job Data/Additional Pay comments → save/submit
 - `tracker.ts` — Writes to `work-study-tracker.xlsx` (Excel-only). JSONL events are emitted by the kernel — do not call `trackEvent` here
-- `workflow.ts` — Kernel definition (`workStudyWorkflow`) + CLI adapter (`runWorkStudy`). Dry-run branch bypasses the kernel (no browser launch; previews the ActionPlan directly)
+- `workflow.ts` — Kernel definition (`workStudyWorkflow`) + CLI adapters (`runWorkStudy`, `runWorkStudyCli`). Dry-run branch bypasses the kernel (no browser launch; previews the ActionPlan directly). `runWorkStudyCli` is the daemon-mode entry used by `npm run work-study` — forwards `{emplId, effectiveDate}` to `ensureDaemonsAndEnqueue(workStudyWorkflow, [...], { new, parallel })`.
 - `index.ts` — Barrel exports
 
 ## Kernel Config
@@ -33,7 +33,15 @@ This workflow touches one system: **ucpath**.
 ## Data Flow
 
 ```
-CLI: npm run work-study <emplId> <effectiveDate>
+CLI: npm run work-study <emplId> <effectiveDate>                  (daemon mode — default)
+  → runWorkStudyCli — daemon-mode CLI adapter
+    → if --dry-run: plan.preview() (no browser, no daemon)
+    → else: ensureDaemonsAndEnqueue(workStudyWorkflow, [{emplId, effectiveDate}], { new, parallel })
+      - Discovers alive daemons via .tracker/daemons/work-study-*.lock.json + /whoami
+      - Spawns daemon(s) per computeSpawnPlan; validates input; enqueues; POST /wake
+      - Daemon runs the legacy handler below in a loop (one Session, Duo once, reused across items)
+
+CLI: npm run work-study:direct <emplId> <effectiveDate>            (legacy in-process path)
   → runWorkStudy (CLI adapter)
     → if --dry-run: plan.preview() (no browser)
     → else: runWorkflow(workStudyWorkflow, input)
