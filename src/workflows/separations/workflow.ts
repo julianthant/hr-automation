@@ -642,3 +642,35 @@ export async function runSeparationBatch(
     try { rmSync(sessionDir, { recursive: true, force: true }); } catch { /* non-fatal */ }
   }
 }
+
+/**
+ * Daemon-mode CLI adapter. Dispatches docIds through the shared daemon queue
+ * instead of launching an in-process batch: first call spawns a detached
+ * daemon + pays Duo once, subsequent calls enqueue + wake alive daemons.
+ *
+ * See `src/core/daemon-client.ts::ensureDaemonsAndEnqueue` for flag semantics
+ * and `src/workflows/separations/CLAUDE.md` ("Daemon mode") for user-facing
+ * docs. `runSeparation` / `runSeparationBatch` above remain untouched so
+ * tests and scripting can still run the separations workflow directly
+ * without the daemon.
+ */
+export async function runSeparationCli(
+  docIds: string[],
+  options: { dryRun?: boolean; new?: boolean; parallel?: number } = {},
+): Promise<void> {
+  if (docIds.length === 0) {
+    log.error("runSeparationCli: no doc IDs provided");
+    process.exitCode = 1;
+    return;
+  }
+  if (options.dryRun) {
+    for (const docId of docIds) previewSeparationPipeline(docId);
+    return;
+  }
+  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
+  const inputs = docIds.map((docId) => ({ docId }));
+  await ensureDaemonsAndEnqueue(separationsWorkflow, inputs, {
+    new: options.new,
+    parallel: options.parallel,
+  });
+}
