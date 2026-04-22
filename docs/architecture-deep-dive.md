@@ -550,7 +550,7 @@ sequenceDiagram
     K->>T: pending a (runId=α)
     K->>T: pending b (runId=β)
     K->>T: pending c (runId=γ)
-    T-->>D: SSE: 3 pending rows
+    T->>D: SSE: 3 pending rows
     K->>K: Session.launch (1 Duo)
     loop for each item
         K->>T: running a

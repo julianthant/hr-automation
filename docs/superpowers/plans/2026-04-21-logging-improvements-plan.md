@@ -70,13 +70,13 @@ Rules of thumb applied:
 - Modify: `src/tracker/jsonl.ts` (LogEntry type)
 - Modify: `src/dashboard/components/types.ts` (frontend mirror of LogEntry)
 
-- [ ] **Step 1: Find the LogEntry type definition in tracker**
+- [x] **Step 1: Find the LogEntry type definition in tracker**
 
 Run: `grep -n "level:" src/tracker/jsonl.ts | head -10`
 
 Find the `LogEntry` interface. Its `level` field is currently a union of string literals: `"step" | "success" | "error" | "waiting" | "warn"`.
 
-- [ ] **Step 2: Add `"debug"` to the union**
+- [x] **Step 2: Add `"debug"` to the union**
 
 In `src/tracker/jsonl.ts`, extend the union:
 
@@ -91,17 +91,17 @@ export interface LogEntry {
 }
 ```
 
-- [ ] **Step 3: Mirror in dashboard types**
+- [x] **Step 3: Mirror in dashboard types**
 
 In `src/dashboard/components/types.ts`, apply the same extension to the `LogEntry` interface.
 
-- [ ] **Step 4: Typecheck**
+- [x] **Step 4: Typecheck**
 
 Run: `npm run typecheck:all`
 
 Expected: PASS. If any existing code asserts an exhaustive switch over `level`, it will need a `case "debug":` added — do that inline.
 
-- [ ] **Step 5: Commit (bundled with 0.2)**
+- [x] **Step 5: Commit (bundled with 0.2)**
 
 Do not commit yet — bundled with Task 0.2's commit.
 
@@ -111,7 +111,7 @@ Do not commit yet — bundled with Task 0.2's commit.
 - Modify: `src/utils/log.ts`
 - Create: `tests/unit/utils/log-debug.test.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 Create `tests/unit/utils/log-debug.test.ts`:
 
@@ -149,13 +149,13 @@ describe("log.debug", () => {
 });
 ```
 
-- [ ] **Step 2: Run test**
+- [x] **Step 2: Run test**
 
 Run: `npm run test -- tests/unit/utils/log-debug.test.ts`
 
 Expected: FAIL — `log.debug` not defined.
 
-- [ ] **Step 3: Implement `log.debug`**
+- [x] **Step 3: Implement `log.debug`**
 
 In `src/utils/log.ts`, modify the `log` export:
 
@@ -196,19 +196,19 @@ export const log = {
 
 The helper is named `emitDebug` (not reusing `emit`) because the console gating differs — only print to stdout when `DEBUG=true`.
 
-- [ ] **Step 4: Run test**
+- [x] **Step 4: Run test**
 
 Run: `npm run test -- tests/unit/utils/log-debug.test.ts`
 
 Expected: PASS (2/2).
 
-- [ ] **Step 5: Full tests + typecheck**
+- [x] **Step 5: Full tests + typecheck**
 
 Run: `npm run typecheck:all && npm run test`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/utils/log.ts src/tracker/jsonl.ts src/dashboard/components/types.ts \
@@ -221,13 +221,13 @@ git commit -m "feat(log): log.debug — JSONL-always, console-gated on DEBUG env
 **Files:**
 - Modify: `src/dashboard/components/LogLine.tsx`
 
-- [ ] **Step 1: Read current LogLine level handling**
+- [x] **Step 1: Read current LogLine level handling**
 
 Run: `grep -n "level\|\"step\"\|\"success\"\|\"error\"\|\"warn\"" src/dashboard/components/LogLine.tsx`
 
 Find where `level` is switched on.
 
-- [ ] **Step 2: Add debug case**
+- [x] **Step 2: Add debug case**
 
 In `src/dashboard/components/LogLine.tsx`, wherever the level-to-icon/color mapping lives, add:
 
@@ -244,17 +244,17 @@ if (level === "debug") {
 
 If the component uses the pattern-based mapping from `src/dashboard/CLAUDE.md` log-icon table (`"step"` default → blue `ArrowRight`), handle debug as its own distinct case to prevent it from accidentally looking like a step.
 
-- [ ] **Step 3: Add "Debug" category filter tab (optional — defer if complex)**
+- [x] **Step 3: Add "Debug" category filter tab (optional — defer if complex)**
 
 If LogStream's filter tabs (`All / Errors / Auth / Fill / …`) are easy to extend, add a "Debug" tab. If not, skip — debug lines render in "All" only, muted, and that's fine.
 
-- [ ] **Step 4: Build dashboard**
+- [x] **Step 4: Build dashboard**
 
 Run: `npm run build:dashboard`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/dashboard/components/LogLine.tsx
@@ -271,7 +271,7 @@ git commit -m "feat(dashboard): render debug-level logs with dimmed styling"
 - Modify: `src/utils/errors.ts`
 - Create: `tests/unit/utils/classify-playwright-error.test.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 Create `tests/unit/utils/classify-playwright-error.test.ts`:
 
@@ -326,13 +326,13 @@ describe("classifyPlaywrightError", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `npm run test -- tests/unit/utils/classify-playwright-error.test.ts`
 
 Expected: FAIL — export not defined.
 
-- [ ] **Step 3: Implement classifier**
+- [x] **Step 3: Implement classifier**
 
 In `src/utils/errors.ts`, add at the bottom:
 
@@ -388,13 +388,13 @@ export function classifyPlaywrightError(err: unknown): ClassifiedError {
 }
 ```
 
-- [ ] **Step 4: Run test**
+- [x] **Step 4: Run test**
 
 Run: `npm run test -- tests/unit/utils/classify-playwright-error.test.ts`
 
 Expected: PASS (8/8).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/utils/errors.ts tests/unit/utils/classify-playwright-error.test.ts
@@ -413,19 +413,19 @@ git commit -m "feat(utils): classifyPlaywrightError — groups Playwright errors
 - Modify: `src/systems/common/` (find the safeClick / safeFill file — likely `selector-helpers.ts` or `index.ts`)
 - Create: `tests/unit/systems/common/selector-fallback-logging.test.ts`
 
-- [ ] **Step 1: Locate safeClick/safeFill**
+- [x] **Step 1: Locate safeClick/safeFill**
 
 Run: `grep -rn "selector fallback triggered" src/systems/common/`
 
 Note the file + function.
 
-- [ ] **Step 2: Read the current implementation**
+- [x] **Step 2: Read the current implementation**
 
 Run: `grep -n -B2 -A30 "function safeClick\|function safeFill" src/systems/common/*.ts`
 
 Understand how fallbacks are tried (Playwright's `.or()` chain is internal to the Locator, so "which one matched" isn't directly introspectable — but we can log the attempt count that triggered before success).
 
-- [ ] **Step 3: Write failing test**
+- [x] **Step 3: Write failing test**
 
 Create `tests/unit/systems/common/selector-fallback-logging.test.ts`:
 
@@ -464,7 +464,7 @@ describe.skip("safeClick fallback attempt logging", () => {
 
 (Skipped until the implementation supports attempt-level callbacks. The real test is the observable behavior in integration runs.)
 
-- [ ] **Step 4: Instrument safeClick / safeFill**
+- [x] **Step 4: Instrument safeClick / safeFill**
 
 In the common file, modify `safeClick`:
 
@@ -498,13 +498,13 @@ export async function safeClick(
 
 Apply the same pattern to `safeFill`. The heuristic (>3 s ⇒ fallback likely) is imperfect but matches empirical Playwright behavior: primary selector resolutions complete in <500 ms; fallback chains exhaust the timeout on prior entries before matching.
 
-- [ ] **Step 5: Typecheck + existing tests**
+- [x] **Step 5: Typecheck + existing tests**
 
 Run: `npm run typecheck && npm run test -- tests/unit/systems/`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/systems/common/ tests/unit/systems/common/selector-fallback-logging.test.ts
@@ -522,7 +522,7 @@ git commit -m "feat(systems): log selector fallback timing — primary-vs-fallba
 - Modify: `src/systems/i9/create.ts` (log before create click)
 - Modify: `src/systems/i9/search.ts` (log before search-options click)
 
-- [ ] **Step 1: Add snapshotKendoWindows helper**
+- [x] **Step 1: Add snapshotKendoWindows helper**
 
 In `src/systems/i9/navigate.ts` (created/extended in stability-polish D.1 plan):
 
@@ -548,7 +548,7 @@ export async function snapshotKendoWindows(page: Page): Promise<string> {
 }
 ```
 
-- [ ] **Step 2: Use it in create.ts**
+- [x] **Step 2: Use it in create.ts**
 
 In `src/systems/i9/create.ts`, before the create link click:
 
@@ -567,7 +567,7 @@ try {
 
 Ensure `classifyPlaywrightError` is imported from `src/utils/errors.js`, and `snapshotKendoWindows` from `./navigate.js`.
 
-- [ ] **Step 3: Use it in search.ts**
+- [x] **Step 3: Use it in search.ts**
 
 In `src/systems/i9/search.ts`, before returning, add:
 
@@ -577,13 +577,13 @@ await closeAllKendoWindows(page);
 return parseSearchResults(page);
 ```
 
-- [ ] **Step 4: Typecheck + tests**
+- [x] **Step 4: Typecheck + tests**
 
 Run: `npm run typecheck && npm run test -- tests/unit/systems/i9/`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/systems/i9/
@@ -595,13 +595,13 @@ git commit -m "feat(i9): log k-window inventory before critical clicks + use cla
 **Files:**
 - Modify: `src/workflows/onboarding/enter.ts`
 
-- [ ] **Step 1: Grep for tab plan steps**
+- [x] **Step 1: Grep for tab plan steps**
 
 Run: `grep -n "tab.*click\|Personal Data\|Job Data\|Earns Dist\|Employee Experience" src/workflows/onboarding/enter.ts`
 
 Find the `plan.add` entries for each tab.
 
-- [ ] **Step 2: Add per-tab state log**
+- [x] **Step 2: Add per-tab state log**
 
 After each tab click block in `enter.ts`, add (matching the existing log style):
 
@@ -618,7 +618,7 @@ Do this for each of the 4 tabs. On the final re-click of Personal Data, log:
 log.step(`[TabWalk] Personal Data re-clicked — all 4 tabs visited, Save should now be enabled`);
 ```
 
-- [ ] **Step 3: Log Initiator Comments fill**
+- [x] **Step 3: Log Initiator Comments fill**
 
 Find the `fillComments` call in `enter.ts`. After it:
 
@@ -626,13 +626,13 @@ Find the `fillComments` call in `enter.ts`. After it:
 log.step(`[TabWalk] Initiator Comments filled (${finalComments.length} chars)`);
 ```
 
-- [ ] **Step 4: Typecheck + smoke**
+- [x] **Step 4: Typecheck + smoke**
 
 Run: `npm run typecheck && npm run build:dashboard`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/workflows/onboarding/enter.ts
@@ -644,11 +644,11 @@ git commit -m "feat(onboarding): log tab-walk progress — Save-disabled failure
 **Files:**
 - Modify: `src/systems/ucpath/job-summary.ts`
 
-- [ ] **Step 1: Read current extractWorkLocation**
+- [x] **Step 1: Read current extractWorkLocation**
 
 Run: `grep -n "extractWorkLocation\|workLocationTab\|getFormRoot" src/systems/ucpath/job-summary.ts`
 
-- [ ] **Step 2: Add pre-click state dump**
+- [x] **Step 2: Add pre-click state dump**
 
 Before the Work Location click (the site modified in stability-polish C.4):
 
@@ -662,7 +662,7 @@ await waitForPeopleSoftProcessing(root as FrameLocator, 15_000).catch(() => {});
 // existing clickOnce retry from stability-polish task C.4
 ```
 
-- [ ] **Step 3: On retry, log what changed**
+- [x] **Step 3: On retry, log what changed**
 
 Inside the catch, before calling `clickOnce` again:
 
@@ -676,13 +676,13 @@ Inside the catch, before calling `clickOnce` again:
 }
 ```
 
-- [ ] **Step 4: Typecheck + tests**
+- [x] **Step 4: Typecheck + tests**
 
 Run: `npm run typecheck && npm run test -- tests/unit/systems/ucpath/`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/systems/ucpath/job-summary.ts
@@ -698,7 +698,7 @@ git commit -m "feat(ucpath): log Job Summary page state (url, frames, root count
 **Files:**
 - Modify: `src/workflows/separations/workflow.ts`
 
-- [ ] **Step 1: Add a step-timing wrapper log**
+- [x] **Step 1: Add a step-timing wrapper log**
 
 At the top of each `ctx.step` callback in `src/workflows/separations/workflow.ts`, log entry. At the end, log exit with duration. Pattern:
 
@@ -719,7 +719,7 @@ Apply to:
 - `ucpath-transaction` → log entry (empl + template); on exit, txn # (or "<none>" if absent)
 - `kuali-finalization` → log entry txn #; on exit, success
 
-- [ ] **Step 2: Log phase 1 task outcomes concretely**
+- [x] **Step 2: Log phase 1 task outcomes concretely**
 
 In the phase1 result processing (~L285-304), replace the current error logs with classified variants. Before:
 
@@ -737,7 +737,7 @@ log.debug(`[Old Kronos] full error: ${errorMessage(phase1.oldK.reason)}`);
 
 Same for `[New Kronos]`, `[UCPath Job Summary]`, `[Kuali Timekeeper]`.
 
-- [ ] **Step 3: Log transaction submit outcome in detail**
+- [x] **Step 3: Log transaction submit outcome in detail**
 
 At line ~398 (after transactionNumber assignment):
 
@@ -752,13 +752,13 @@ if (submitResult.success && !transactionNumber) {
 }
 ```
 
-- [ ] **Step 4: Typecheck + tests**
+- [x] **Step 4: Typecheck + tests**
 
 Run: `npm run typecheck && npm run test -- tests/unit/workflows/separations/`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/workflows/separations/workflow.ts
@@ -770,7 +770,7 @@ git commit -m "feat(separations): step boundary logs (entry/exit + handoff state
 **Files:**
 - Modify: `src/workflows/onboarding/workflow.ts`
 
-- [ ] **Step 1: Apply step-timing pattern**
+- [x] **Step 1: Apply step-timing pattern**
 
 For each `ctx.step(...)` in `src/workflows/onboarding/workflow.ts`:
 - `crm-auth` → log entry (email); exit (auth time)
@@ -781,7 +781,7 @@ For each `ctx.step(...)` in `src/workflows/onboarding/workflow.ts`:
 - `i9-creation` → entry (existing profileId if any, or "creating new"); exit (new profileId)
 - `transaction` → entry (template, effectiveDate); exit (txn # or "<failed at step: XXX>")
 
-- [ ] **Step 2: Classify errors in the transaction catch**
+- [x] **Step 2: Classify errors in the transaction catch**
 
 Find the catch block in onboarding's transaction step. Apply:
 
@@ -794,13 +794,13 @@ Find the catch block in onboarding's transaction step. Apply:
 }
 ```
 
-- [ ] **Step 3: Typecheck + tests**
+- [x] **Step 3: Typecheck + tests**
 
 Run: `npm run typecheck && npm run test -- tests/unit/workflows/onboarding/`
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/workflows/onboarding/workflow.ts
@@ -816,13 +816,13 @@ git commit -m "feat(onboarding): step boundary + handoff logs + classified trans
 **Files:**
 - Modify: `src/core/session.ts`
 
-- [ ] **Step 1: Find auth retry loop**
+- [x] **Step 1: Find auth retry loop**
 
 Run: `grep -n "loginWithRetry\|attempt\|retry" src/core/session.ts`
 
 There's a 3-attempt retry around login per `src/core/CLAUDE.md`.
 
-- [ ] **Step 2: Log attempt number + prior error**
+- [x] **Step 2: Log attempt number + prior error**
 
 In the retry loop body, add:
 
@@ -848,7 +848,7 @@ for (let attempt = 1; attempt <= 3; attempt++) {
 
 Match whatever variable names the existing code uses; don't rename. Just add the logs.
 
-- [ ] **Step 3: Log ProcessSingleton specifically**
+- [x] **Step 3: Log ProcessSingleton specifically**
 
 Find the launchBrowser / launchPersistentContext call site. Wrap in:
 
@@ -869,13 +869,13 @@ try {
 
 Import `classifyPlaywrightError` from `../utils/errors.js`.
 
-- [ ] **Step 4: Typecheck + tests**
+- [x] **Step 4: Typecheck + tests**
 
 Run: `npm run typecheck && npm run test -- tests/unit/core/`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/core/session.ts
