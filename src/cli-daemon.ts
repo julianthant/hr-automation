@@ -31,6 +31,13 @@ const WORKFLOWS: Record<string, () => Promise<AnyRegisteredWorkflow>> = {
     const mod = await import("./workflows/work-study/index.js");
     return mod.workStudyWorkflow as unknown as AnyRegisteredWorkflow;
   },
+  // EID Lookup daemon runs the CRM-on variant (UCPath + CRM, no I-9) — that's
+  // the default flag combo for `npm run eid-lookup`. --no-crm and --i9 route
+  // to the legacy in-process path (see `runEidLookupCli` for the rationale).
+  "eid-lookup": async () => {
+    const mod = await import("./workflows/eid-lookup/index.js");
+    return mod.eidLookupCrmWorkflow as unknown as AnyRegisteredWorkflow;
+  },
 };
 
 async function main(): Promise<void> {

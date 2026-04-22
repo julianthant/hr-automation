@@ -50,6 +50,41 @@ export interface EidSearchResult {
 }
 
 /**
+ * Department whitelist keywords. A result's `department` field must contain
+ * one of these (case-insensitive) to be considered an "accepted" HDH result.
+ *
+ * Covers the canonical HDH department name ("HOUSING/DINING/HOSPITALITY")
+ * plus legitimate variants observed in live data:
+ *   - "HOUSING/DINING/HOSPITALITY"  (HDH central dept 000412)
+ *   - "On Campus Housing"           (LACMP sub-dept 317000 — HDH-adjacent)
+ *   - "Dining Services"             (any HDH dining sub-dept)
+ *   - "Hospitality Services"        (future-proofing for HDH re-orgs)
+ *
+ * Explicit exclusions by design (even though they are SDCMP business unit):
+ *   - "QUALCOMM INSTITUTE", "RADY SCHOOL OF MANAGEMENT", "ENROLLMENT
+ *     MANAGEMENT", any academic/administrative unit — HDH HR only cares
+ *     about employees currently assigned to HDH departments.
+ */
+const ACCEPTED_DEPT_KEYWORDS = ["housing", "dining", "hospitality"] as const;
+
+/**
+ * Return `true` if the given department name matches the HDH whitelist.
+ * Matching is substring-based and case-insensitive. Undefined / empty
+ * inputs return `false`.
+ *
+ * Used as a post-drill-in filter in `searchByName`: we drill into every
+ * SDCMP business-unit result to pull the department description, then keep
+ * only those whose dept passes `isAcceptedDept`. This replaces the prior
+ * BU-only filter which incorrectly accepted SDCMP results for non-HDH
+ * departments (e.g. QUALCOMM INSTITUTE).
+ */
+export function isAcceptedDept(dept: string | undefined | null): boolean {
+  if (!dept) return false;
+  const normalized = dept.toLowerCase();
+  return ACCEPTED_DEPT_KEYWORDS.some((kw) => normalized.includes(kw));
+}
+
+/**
  * Parse "Last, First Middle" input format into name parts.
  */
 export function parseNameInput(input: string): {
@@ -535,6 +570,15 @@ async function populateDepartments(
 
 /**
  * Run a single name search and return results.
+ *
+ * Two-stage filter:
+ *   1. BU filter (synchronous) — keeps only SDCMP business-unit rows so we
+ *      only spend drill-in time on San Diego candidates.
+ *   2. Dept filter (applied later in `searchByName` after `populateDepartments`
+ *      fills in dept names) — final HDH acceptance.
+ *
+ * `sdcmpResults` here is the *candidate* set (BU=SDCMP, dept not yet known);
+ * `searchByName` narrows it to HDH-accepted rows before returning.
  */
 async function searchOnce(
   page: Page,
@@ -546,10 +590,10 @@ async function searchOnce(
   const results = await extractResults(page, frame);
   const sdcmpResults = results.filter((r) => r.businessUnit === "SDCMP");
 
-  log.step(`Search: "${lastName}, ${name}" returned ${results.length} total → ${sdcmpResults.length} after SDCMP/HDH filter`);
+  log.step(`Search: "${lastName}, ${name}" returned ${results.length} total → ${sdcmpResults.length} SDCMP candidate(s) (HDH dept filter applied post-drill-in)`);
 
   if (sdcmpResults.length > 0) {
-    log.success(`Found ${sdcmpResults.length} SDCMP result(s) for "${lastName}, ${name}"`);
+    log.success(`Found ${sdcmpResults.length} SDCMP candidate(s) for "${lastName}, ${name}"`);
   } else if (results.length > 0) {
     log.step(`Found ${results.length} result(s) but none for SDCMP`);
   }
@@ -624,15 +668,31 @@ export async function searchByName(
     }
   }
 
-  // If we found SDCMP results, drill into each to populate department details
+  // If we found SDCMP candidates, drill into each to populate department
+  // details, then apply the HDH dept whitelist. SDCMP is a coarse BU filter;
+  // the final "accepted" bit is department-level (see `isAcceptedDept`).
+  let hdhResults: EidResult[] = [];
   if (sdcmpResults.length > 0) {
-    log.step(`Drilling into ${sdcmpResults.length} SDCMP result(s) for department details...`);
+    log.step(`Drilling into ${sdcmpResults.length} SDCMP candidate(s) for department details...`);
     await populateDepartments(page, frame, sdcmpResults);
+    hdhResults = sdcmpResults.filter((r) => isAcceptedDept(r.department));
+    const rejected = sdcmpResults.filter((r) => !isAcceptedDept(r.department));
+    if (rejected.length > 0) {
+      const summary = rejected
+        .map((r) => `EID ${r.emplId} (${r.department ?? "<no dept>"})`)
+        .join(", ");
+      log.step(`Filtered out ${rejected.length} non-HDH SDCMP result(s): ${summary}`);
+    }
+    if (hdhResults.length > 0) {
+      log.success(`${hdhResults.length} HDH-accepted result(s) after dept filter`);
+    } else {
+      log.step(`0 HDH-accepted result(s) — all ${sdcmpResults.length} SDCMP candidate(s) rejected by dept filter`);
+    }
   }
 
   return {
-    found: sdcmpResults.length > 0,
-    sdcmpResults,
+    found: hdhResults.length > 0,
+    sdcmpResults: hdhResults,
     allAttempts,
   };
 }

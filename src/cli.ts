@@ -10,7 +10,7 @@ import { runWorkStudy, runWorkStudyCli, WorkStudyInputSchema } from "./workflows
 import { runEmergencyContact } from "./workflows/emergency-contact/index.js";
 import { runParallelKronos, DEFAULT_WORKERS } from "./workflows/old-kronos-reports/index.js";
 import { runSeparation, runSeparationBatch, runSeparationCli } from "./workflows/separations/index.js";
-import { runEidLookup } from "./workflows/eid-lookup/index.js";
+import { runEidLookup, runEidLookupCli } from "./workflows/eid-lookup/index.js";
 import { exportToExcel } from "./tracker/export-excel.js";
 
 const program = new Command();
@@ -322,13 +322,27 @@ program
 
 program
   .command("eid-lookup")
-  .description("Look up Employee IDs by name via Person Organizational Summary (UCPath, optional CRM cross-verify, optional I-9 Section 2 signer lookup)")
+  .description("Look up Employee IDs by name via Person Organizational Summary (UCPath + CRM cross-verify by default). Daemon mode: keeps UCPath+CRM sessions alive across batches (no re-Duo).")
   .argument("<names...>", 'One or more names in "Last, First Middle" format')
-  .option("--workers <N>", "Number of parallel browser tabs (default: min(names.length, 4))", parseInt)
-  .option("--no-crm", "Skip CRM cross-verification (UCPath only)")
-  .option("--i9", "Also look up who signed Section 2 in I-9 Complete")
+  .option("--workers <N>", "Number of parallel browser tabs (legacy --direct mode only; default: min(names.length, 4))", parseInt)
+  .option("--no-crm", "Skip CRM cross-verification (UCPath only) — forces --direct mode")
+  .option("--i9", "Also look up who signed Section 2 in I-9 Complete — forces --direct mode")
   .option("-d, --dry-run", "Preview the planned name list without launching a browser")
-  .action(async (names: string[], options: { workers?: number; crm?: boolean; i9?: boolean; dryRun?: boolean }) => {
+  .option("-n, --new", "Force spawn of a brand-new daemon (ignores alive ones for dispatch)")
+  .option("-p, --parallel <N>", "Fan out across N daemons (reuses up to N alive; spawns the rest)", parseInt)
+  .option("--direct", "Run in legacy in-process mode (no daemon, re-Duos every invocation)")
+  .action(async (
+    names: string[],
+    options: {
+      workers?: number;
+      crm?: boolean;
+      i9?: boolean;
+      dryRun?: boolean;
+      new?: boolean;
+      parallel?: number;
+      direct?: boolean;
+    },
+  ) => {
     try {
       validateEnv();
     } catch {
@@ -338,14 +352,38 @@ program
       log.error("--workers must be a positive integer.");
       process.exit(1);
     }
+    if (options.parallel !== undefined && (options.parallel < 1 || !Number.isFinite(options.parallel))) {
+      log.error("--parallel must be a positive integer.");
+      process.exit(1);
+    }
     // Commander's --no-crm flag surfaces as `options.crm === false`; default true.
     const useCrm = options.crm !== false;
     const useI9 = options.i9 === true;
-    await runEidLookup(names, {
-      workers: options.workers,
-      useCrm,
-      useI9,
+
+    // Daemon mode supports only the default variant (UCPath + CRM, no I-9).
+    // Any variant-changing flag (--no-crm, --i9) OR explicit --direct routes
+    // to the legacy in-process path.
+    const mustDirect = options.direct === true || !useCrm || useI9;
+
+    if (mustDirect) {
+      if (!options.direct && (!useCrm || useI9)) {
+        log.step(
+          `[eid-lookup] --${!useCrm ? "no-crm" : "i9"} forces --direct mode (daemon supports only the default CRM-on variant)`,
+        );
+      }
+      await runEidLookup(names, {
+        workers: options.workers,
+        useCrm,
+        useI9,
+        dryRun: options.dryRun,
+      });
+      return;
+    }
+
+    await runEidLookupCli(names, {
       dryRun: options.dryRun,
+      new: options.new,
+      parallel: options.parallel,
     });
   });
 

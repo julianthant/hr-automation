@@ -15,9 +15,15 @@ interface RunSelectorProps {
   onSelect: (runId: string) => void;
 }
 
-/** Parse the run number from a runId like `email#25`. Falls back to 0 if absent. */
-function runNumber(runId: string): number {
-  const n = Number.parseInt(runId.split("#")[1] ?? "", 10);
+/**
+ * Display ordinal for a run. Prefers the backend-assigned `runOrdinal`
+ * (chronological, 1-indexed, works for both `{id}#N` and UUID runIds).
+ * Falls back to parsing `{id}#N` for legacy payloads that predate the
+ * `runOrdinal` enrichment — and finally to 0 if neither is available.
+ */
+function runNumber(run: RunInfo): number {
+  if (typeof run.runOrdinal === "number" && run.runOrdinal > 0) return run.runOrdinal;
+  const n = Number.parseInt(run.runId.split("#")[1] ?? "", 10);
   return Number.isFinite(n) ? n : 0;
 }
 
@@ -44,14 +50,14 @@ function statusColor(status: string): string {
 export function RunSelector({ runs, activeRunId, onSelect }: RunSelectorProps) {
   // Numeric desc — newest run on top regardless of how it was inserted upstream.
   const sortedRuns = useMemo(
-    () => [...runs].sort((a, b) => runNumber(b.runId) - runNumber(a.runId)),
+    () => [...runs].sort((a, b) => runNumber(b) - runNumber(a)),
     [runs],
   );
 
   if (sortedRuns.length === 0) return null;
 
   const active = sortedRuns.find((r) => r.runId === activeRunId) ?? sortedRuns[0];
-  const activeNum = runNumber(active.runId);
+  const activeNum = runNumber(active);
   const totalRuns = sortedRuns.length;
 
   return (
@@ -75,7 +81,7 @@ export function RunSelector({ runs, activeRunId, onSelect }: RunSelectorProps) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-[200px] max-h-[320px] overflow-y-auto">
         {sortedRuns.map((run) => {
-          const num = runNumber(run.runId);
+          const num = runNumber(run);
           const isActive = run.runId === active.runId;
           return (
             <DropdownMenuItem

@@ -18,12 +18,27 @@ export interface TrackerEntry {
   error?: string;
   /** First-seen timestamp for this entry (computed by useEntries, not from backend). */
   startTimestamp?: string;
-  /** First log timestamp (enriched by backend SSE). */
+  /**
+   * Run start — the earliest timestamp the dashboard knows about for this
+   * run, across both the tracker JSONL and the log JSONL. For batch items
+   * this is the synthetic auth `running` entry injected at `onAuthStart`
+   * (so the timer includes auth); for single-run items it's the `pending`
+   * entry. Anchors the header Elapsed + queue-row elapsed so they tile
+   * the step pipeline exactly.
+   */
   firstLogTs?: string;
-  /** Last log timestamp (enriched by backend SSE). */
+  /** Run end — latest timestamp across tracker + log JSONL (enriched by backend SSE). */
   lastLogTs?: string;
   /** Last log message (enriched by backend SSE, for queue display). */
   lastLogMessage?: string;
+  /**
+   * 1-indexed chronological run number for this item (enriched by backend
+   * SSE + /api/runs). Derived from the earliest tracker entry timestamp, so
+   * works consistently for both legacy `{id}#N` runIds and UUID-format
+   * runIds emitted by batch/pool runners. Prefer this over parsing the
+   * runId string — that path only works for the `{id}#N` shape.
+   */
+  runOrdinal?: number;
   /**
    * Per-step durations in milliseconds (enriched by backend SSE).
    * Key: step name declared by the workflow. Value: ms between that step's
@@ -106,13 +121,20 @@ export interface RunInfo {
    *  rendering the timeline, so that picking an older run via RunSelector
    *  shows that run's actual timing instead of the latest run's. */
   stepDurations?: Record<string, number>;
-  /** First log timestamp observed in THIS run. Used for the "Started" cell
-   *  and Elapsed base so the header timing switches with the run selector
-   *  instead of always reflecting the latest run. */
+  /** Run start — earliest timestamp across tracker + log JSONL for THIS
+   *  run. Anchors the "Started" cell and Elapsed so the header timing
+   *  switches with the run selector. Includes the synthetic auth tracker
+   *  entries for batch items (so the timer covers auth). See
+   *  `RunTimeline` in src/tracker/dashboard.ts for the single source of
+   *  truth on run-span semantics. */
   firstLogTs?: string;
-  /** Last log timestamp observed in THIS run. Used for Elapsed when the
-   *  run is no longer live (done/failed). */
+  /** Run end — latest timestamp across tracker + log JSONL for THIS run.
+   *  Used for Elapsed when the run is no longer live (done/failed). */
   lastLogTs?: string;
+  /** 1-indexed chronological run number assigned server-side. Prefer this
+   *  over parsing `runId.split('#')[1]` — UUID runIds have no trailing
+   *  `#N`. See `buildRunTimelines` in src/tracker/dashboard.ts. */
+  runOrdinal?: number;
 }
 
 // ── Detail-value formatting ──────────────────────────────

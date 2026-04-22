@@ -38,10 +38,15 @@ npm run emergency-contact <batchYaml>      # Fill Emergency Contact for every re
 npm run emergency-contact:dry <batchYaml>  # Preview records (no browser)
 # Flags: --roster-url "<sp-url>" | --roster-path <xlsx> | --ignore-roster-mismatch
 
-# EID Lookup (no npm script — CLI directly)
-tsx --env-file=.env src/cli.ts eid-lookup "Last, First Middle"
-tsx --env-file=.env src/cli.ts eid-lookup --workers 4 "Name1" "Name2"
-tsx --env-file=.env src/cli.ts eid-lookup --dry-run --no-crm "Name"
+# EID Lookup (daemon mode by default — see "Daemon mode" below)
+npm run eid-lookup "Last, First Middle"          # Enqueue to an alive daemon or spawn one (CRM-on default)
+npm run eid-lookup:dry "Last, First Middle"      # Dry-run: normalize + dedupe + print (no daemon)
+npm run eid-lookup:direct -- "Last, First"       # Legacy in-process path (forces fresh Duo)
+npm run eid-lookup -- --no-crm "Last, First"     # UCPath-only → auto-forces --direct
+npm run eid-lookup -- --i9 "Last, First"         # +I-9 Section 2 signer → auto-forces --direct
+npm run eid-lookup:status                        # Show alive daemons + queue depth
+npm run eid-lookup:stop                          # Soft-stop all daemons
+npm run eid-lookup:attach                        # Tail the first alive daemon's log
 
 # Dashboard (separate terminal — auto-updates as workflows run)
 npm run dashboard            # SSE backend (:3838) + Vite dev (:5173) — open http://localhost:5173
@@ -218,20 +223,22 @@ Escape hatches: `ctx.session.page(id)` / `ctx.session.newWindow(id)` expose the 
 
 ## Daemon mode (persistent workflow processes)
 
-Kernel workflows exposed on the CLI (`npm run separation <ids>`, `npm run work-study <emplId> <date>`) default to **daemon mode**:
+Kernel workflows exposed on the CLI (`npm run separation <ids>`, `npm run work-study <emplId> <date>`, `npm run eid-lookup <names...>`) default to **daemon mode**:
 
 - **First invocation with no alive daemon** → spawns one detached daemon (`tsx src/cli-daemon.ts <workflow>`), waits for auth (Duo once), enqueues the item. Daemon stays alive after processing.
 - **Subsequent invocations** → append to the shared queue (`.tracker/daemons/{workflow}.queue.jsonl`) and `POST /wake` every alive daemon. No re-Duo.
 - **Multi-daemon dispatch**: all alive daemons for a workflow race to claim the next queued row via an atomic `fs.mkdir` mutex. Whichever daemon finishes its current item first grabs the next — dynamic load balancing without a coordinator.
 - **Keepalive**: every 15 min idle, each daemon runs `session.healthCheck(system)` per system so SAML/Duo sessions don't silently expire between items.
 
-Flags (on `separation` and `work-study`):
+Flags (on `separation`, `work-study`, `eid-lookup`):
 - `-n, --new` — spawn one **additional** daemon even if others are alive.
 - `-p, --parallel <N>` — ensure ≥N daemons are alive before enqueueing (spawns `max(0, N - alive)`).
 - `--dry-run` — preview in-process; no daemon spawned.
 - `--direct` — bypass daemon mode, run the legacy in-process `runWorkflow` / `runWorkflowBatch` path.
 
-Lifecycle commands (converted workflows: `separations`, `work-study`):
+`eid-lookup` has two extra variant flags (`--no-crm`, `--i9`) that change the systems list; those combos are incompatible with a long-lived daemon's fixed session and **auto-force `--direct`** (with an announcing log line). The daemon hard-wires the default CRM-on variant (`eidLookupCrmWorkflow`).
+
+Lifecycle commands (converted workflows: `separations`, `work-study`, `eid-lookup`):
 - `npm run daemons:status` (or `:status` per workflow) — alive daemons + queue depth.
 - `npm run <workflow>:stop` — soft-stop (drain in-flight, re-queue). Use `-- --force` to mark in-flight as failed and exit immediately.
 - `npm run <workflow>:attach` — tail daemon log files. Ctrl+C detaches; daemons keep running.
@@ -327,7 +334,7 @@ Current step tracking per workflow:
 |---|---|
 | onboarding | crm-auth → extraction → pdf-download → ucpath-auth → person-search → i9-creation → transaction |
 | separations | auth:kuali → auth:old-kronos → auth:new-kronos → auth:ucpath → kuali-extraction → kronos-search → ucpath-job-summary → ucpath-transaction → kuali-finalization |
-| eid-lookup | searching (+ cross-verification in CRM mode) — one row per name via shared-context-pool |
+| eid-lookup | searching + cross-verification (daemon mode default; shared-context-pool in `--direct`). One row per name. |
 | kronos-reports | searching → extracting → downloading |
 | work-study | ucpath-auth → transaction |
 | emergency-contact | navigation → fill-form → save |
