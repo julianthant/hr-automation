@@ -26,7 +26,10 @@ import type { WorkflowMetadata } from "../core/types.js";
 import { detectFailurePattern } from "./failure-detector.js";
 import { notify } from "./notify.js";
 import { pruneOldStepCache } from "../core/index.js";
-import { buildSharePointRosterDownloadHandler } from "../workflows/sharepoint-download/index.js";
+import {
+  buildSharePointRosterDownloadHandler,
+  buildSharePointListHandler,
+} from "../workflows/sharepoint-download/index.js";
 
 /**
  * Canonical sort key for a session event. Events emitted by
@@ -1554,12 +1557,48 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     }
 
     if (
+      req.method === "GET" &&
+      url.pathname === "/api/sharepoint-download/list"
+    ) {
+      const list = buildSharePointListHandler()();
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(JSON.stringify(list));
+      return;
+    }
+
+    if (
       req.method === "POST" &&
       url.pathname === "/api/sharepoint-download/run"
     ) {
       const handler = buildSharePointRosterDownloadHandler();
       try {
-        const { status, body } = await handler();
+        // Inline body parse — the only POST route on this server that takes
+        // a JSON body. A full body-parser middleware would be overkill.
+        const chunks: Buffer[] = [];
+        for await (const chunk of req) {
+          chunks.push(chunk as Buffer);
+          if (Buffer.concat(chunks).byteLength > 4096) {
+            throw new Error("Request body too large");
+          }
+        }
+        const raw = Buffer.concat(chunks).toString("utf8").trim();
+        let input: { id?: string } = {};
+        if (raw) {
+          try {
+            input = JSON.parse(raw) as { id?: string };
+          } catch {
+            res.writeHead(400, {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+            });
+            res.end(JSON.stringify({ ok: false, error: "Invalid JSON body" }));
+            return;
+          }
+        }
+        const { status, body } = await handler(input);
         res.writeHead(status, {
           "Content-Type": "application/json",
           "Access-Control-Allow-Origin": "*",
