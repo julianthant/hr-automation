@@ -37,7 +37,7 @@ No `tracker.ts` — dashboard JSONL only. The xlsx tracker was removed on 2026-0
 | `systems` | `[ucpath]` | `[ucpath, crm]` |
 | `steps` | `["searching"]` | `["searching", "cross-verification"]` |
 | `schema` | `EidLookupItemSchema` | `EidLookupItemSchema` |
-| `authSteps` | `false` | `false` |
+| `authSteps` | `true` | `true` |
 | `authChain` | `"sequential"` | `"sequential"` |
 | `tiling` | `"single"` | `"auto"` |
 | `batch` | `{ mode: "shared-context-pool", poolSize: 4, preEmitPending: true }` | same |
@@ -80,7 +80,8 @@ CLI: tsx src/cli.ts eid-lookup "Last, First Middle" [...] [--no-crm] [--workers 
 
 - Workflow name: `eid-lookup`
 - Steps (per-item): `["searching"]` no-CRM / `["searching", "cross-verification"]` CRM mode.
-  - One-time auth runs BEFORE the pool starts and does NOT emit per-item auth rows.
+  - `authSteps: true` → the kernel prepends per-system `auth:<systemId>` step labels to the visible pipeline. Actual auth timing is **captured once per batch** by a `SessionObserver` wired via `withBatchLifecycle`, then injected into each item's tracker rows as synthetic pre-handler `running` entries (step = `auth:ucpath`, `auth:crm`) with the real `onAuthStart` timestamp. The pool runs auth ONCE but every per-item row tiles exactly to elapsed with accurate per-system durations.
+- **Batch instance (2026-04-21):** Every item in a batch shares a single workflow instance (e.g. `EID Lookup 1`). `runWorkflowSharedContextPool` emits exactly one `workflow_start` + one `workflow_end(done|failed)` per CLI invocation. The dashboard's SessionPanel therefore shows ONE row per batch, not N.
 - Detail fields: `searchName, emplId, department, jobTitle` (+ `crmMatch` in CRM mode).
 - Item ID on the dashboard = the searched name (deduped). `__name` / `__id` seeded on the initial pending row via `onPreEmitPending` so the row reads correctly before `searching` runs.
 
@@ -109,5 +110,6 @@ CLI: tsx src/cli.ts eid-lookup "Last, First Middle" [...] [--no-crm] [--workers 
 
 ## Lessons Learned
 
+- **2026-04-21: Batch-level instance + injected authTimings.** Shared-context-pool now runs inside `withBatchLifecycle` (`src/core/batch-lifecycle.ts`). One `workflow_start` / `workflow_end` per batch instead of N. A single `SessionObserver` captures `authTimings` during `Session.launch`; those timings are passed to every `runOneItem` call and become synthetic pre-handler `running` entries (`auth:ucpath`, `auth:crm`) with real start timestamps. Sum of step durations now tiles exactly to the per-item elapsed. SIGINT mid-batch fans out `failed` tracker rows for every un-terminated item and emits one `workflow_end(failed)`. `authSteps` was always `true` in code — earlier doc listed `false`, which was wrong.
 - **2026-04-21: Shared-context-pool + xlsx removal.** Replaced the handler-side `runWorkerPool` with the kernel's new `batch.mode: "shared-context-pool"`. TData is now `{ name: string }` — one kernel item per name, one dashboard row per name, same "1 Duo per system, N tabs" browser topology. CRM cross-verification moved inside the per-item handler (was a post-pool pass). Excel tracker (`tracker.ts` + `eid-lookup-tracker.xlsx`) fully removed — JSONL + dashboard are the only observability. `async-mutex` use dropped with the xlsx writes. Kernel addition: `Session.forWorker(parent)` + lazy `page(id)` branch + `closeWorkerPages()`. **Live run pending user verification** — UCPath + CRM Duo can't be approved this session; dry-run + unit tests validate this migration.
 - **2026-04-17: Migrated to kernel (historical).** First kernel cut used `runWorkerPool` inside `ctx.step("searching", ...)` as a helper. One workflow run per CLI invocation; per-name JSONL rows were the "Acceptable regression" closed by the 2026-04-21 change. Left here to explain why `search.ts` / `crm-search.ts` are kernel-agnostic helpers (they were authored before the kernel existed and survive the 2026-04-21 rewrite untouched).
