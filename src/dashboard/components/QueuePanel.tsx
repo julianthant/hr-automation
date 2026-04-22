@@ -194,7 +194,7 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
               <Download aria-hidden className="w-4 h-4" />
             )}
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-[260px]">
+          <DropdownMenuContent align="end" className="min-w-0 w-auto">
             {!options ? (
               <div className="px-3 py-2 text-[12px] text-muted-foreground">Loading…</div>
             ) : options.length === 0 ? (
