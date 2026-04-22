@@ -292,10 +292,46 @@ export const search = {
       .getByRole("row"),
 };
 
+// ─── Summary / Electronic I-9 Audit Trail ─────────────────────────────────
+//
+// Section 2 signer lookup: when an I-9 is opened via the
+// `/employee/navToNextAction/{profileId}?i9Id={i9Id}` link from search
+// results, the page lands on `/form-I9/summary/{profileId}/{i9Id}` (modern
+// records) or `/form-I9-historical/{profileId}/{i9Id}/0` (paper-imported).
+// Both render the same "I-9 Record Summary Information" heading and the
+// Electronic I-9 Audit Trail table below it. Modern records that have been
+// signed include a row whose accessible name contains "Signed Section 2";
+// the 4th cell of that row is the signer's name.
+
+const SIGNED_SECTION_2_RE = /Signed Section 2/;
+
+export const summary = {
+  /**
+   * I-9 Record Summary heading. Anchor for "summary view has rendered".
+   * verified 2026-04-22
+   * @tags summary, heading, i9, record
+   */
+  heading: (page: Page): Locator =>
+    page.getByRole("heading", { name: "I-9 Record Summary Information" }),
+
+  /**
+   * Electronic I-9 Audit Trail row whose event cell reads
+   * "Signed Section 2". `.first()` guards against amended records with
+   * multiple Section 2 signings — the most recent is always the top row.
+   * Absent on paper-imported (historical) records. The signer name is in
+   * the 4th cell of this row — read via a row-scoped `.getByRole("cell")`
+   * inline selector in the consumer (see `i9-signer.ts`). verified 2026-04-22
+   * @tags audit-trail, signed, section2, row, i9
+   */
+  signedSection2Row: (page: Page): Locator =>
+    page.getByRole("row", { name: SIGNED_SECTION_2_RE }).first(),
+};
+
 export const i9Selectors = {
   login,
   dashboard,
   profile,
   remoteI9,
   search,
+  summary,
 };
