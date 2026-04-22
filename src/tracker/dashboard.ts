@@ -273,6 +273,17 @@ export function rebuildSessionState(dir?: string): SessionState {
   // SessionPanel uses `pidAlive` to remove a workflow once its session is closed,
   // while `active` stays authoritative for the DONE/FAILED pill in the brief window
   // between workflow_end firing and the Node process exiting.
+  //
+  // In-process (fire-and-forget) workflows: when a workflow runs INSIDE the
+  // dashboard server process (e.g. the `sharepoint-download` HTTP handler
+  // fires `runWorkflow()` without awaiting), the recorded pid equals the
+  // dashboard's own pid — so `process.kill(pid, 0)` always succeeds while
+  // the dashboard is up, pinning the workflow box to the Sessions rail
+  // forever even after it has completed or failed. Treat an in-process run
+  // as "session ended" the moment `workflow_end` fires, matching the behavior
+  // of spawned-child workflows whose process exits shortly after end. This
+  // keeps the Sessions rail consistent across both execution models.
+  const ownPid = process.pid;
   for (const wf of workflows) {
     // Pick the LATEST workflow_start for this instance — when a workflow is re-run
     // under the same instance name, earlier starts reference dead pids. findLast
@@ -282,6 +293,10 @@ export function rebuildSessionState(dir?: string): SessionState {
     );
     const startEv = starts[starts.length - 1];
     if (!startEv) { wf.pidAlive = false; continue; }
+    if (startEv.pid === ownPid && wf.finalStatus !== null) {
+      wf.pidAlive = false;
+      continue;
+    }
     try { process.kill(startEv.pid, 0); wf.pidAlive = true; }
     catch { wf.pidAlive = false; }
   }

@@ -39,6 +39,7 @@ import { validateEnv } from "../../utils/env.js";
 import { log } from "../../utils/log.js";
 import {
   microsoft,
+  adfs,
   kmsi,
   getExcelFrame,
   excelOnline,
@@ -77,6 +78,34 @@ async function dismissStaySignedIn(page: Page): Promise<void> {
 }
 
 /**
+ * Fill the UCSD ADFS federation login form and click Sign in. Unlike the
+ * Shibboleth IdP used by UCPath / CRM / Kuali, SharePoint / OneDrive routes
+ * through `ad-wfs-aws.ucsd.edu/adfs/ls/` — a visually simpler form with
+ * `name="UserName"` + `name="Password"` + `#submitButton`. The password is
+ * pulled from the same `UCPATH_PASSWORD` env var (it's the same UCSD SSO
+ * password). The username field is usually pre-populated via the `?username=`
+ * URL parameter Microsoft passes along, but we re-fill defensively.
+ */
+async function handleAdfsLogin(page: Page): Promise<void> {
+  const { password } = validateEnv();
+
+  log.step("UCSD ADFS detected — filling password...");
+
+  // Only refill username if empty — Microsoft usually populates it via URL.
+  const usernameField = adfs.usernameInput(page).first();
+  const currentUser = await usernameField.inputValue().catch(() => "");
+  if (!currentUser) {
+    const { userId } = validateEnv();
+    await usernameField.fill(`${userId}@ucsd.edu`, { timeout: 5_000 });
+  }
+
+  await adfs.passwordInput(page).first().fill(password, { timeout: 5_000 });
+  await page.waitForTimeout(300);
+  await adfs.submitButton(page).first().click({ timeout: 5_000 });
+  log.step("ADFS submit clicked");
+}
+
+/**
  * Navigate to a SharePoint URL and complete the full Microsoft AAD +
  * UCSD Shibboleth + Duo + KMSI auth flow. Returns when the page has
  * stabilized on a SharePoint/Office domain.
@@ -102,14 +131,31 @@ export async function loginToSharePoint(
 
   await handleMicrosoftEmailStep(page);
 
-  const onSso =
-    page.url().includes("a5.ucsd.edu") ||
+  // UCSD federates Microsoft AAD through two different SSO front-ends
+  // depending on the target service:
+  //   - `a5.ucsd.edu` (Shibboleth IdP) for UCPath / CRM / Kuali / Kronos.
+  //   - `ad-wfs-aws.ucsd.edu/adfs/ls/` (ADFS) for SharePoint / OneDrive.
+  // The ADFS form has different field names (`UserName` / `Password`), so
+  // the Shibboleth `fillSsoCredentials` helper can't cover it. Detect both.
+  const currentUrl = page.url();
+  const onShibboleth =
+    currentUrl.includes("a5.ucsd.edu") ||
     (await page.locator('input[name="j_username"]').count()) > 0;
+  const onAdfs =
+    currentUrl.includes("ad-wfs-aws.ucsd.edu") ||
+    currentUrl.includes("/adfs/ls") ||
+    (await page.locator('input[name="UserName"]').count()) > 0;
 
-  if (onSso) {
-    log.step("UCSD SSO detected — filling credentials...");
-    await fillSsoCredentials(page);
-    await clickSsoSubmit(page);
+  const needsSso = onShibboleth || onAdfs;
+
+  if (needsSso) {
+    if (onShibboleth) {
+      log.step("UCSD Shibboleth SSO detected — filling credentials...");
+      await fillSsoCredentials(page);
+      await clickSsoSubmit(page);
+    } else {
+      await handleAdfsLogin(page);
+    }
 
     // When called from a kernel workflow we have an `instance` and route
     // through the Duo queue so the Sessions rail's Duo chip lights up and
