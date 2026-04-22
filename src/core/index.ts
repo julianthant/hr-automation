@@ -42,3 +42,41 @@ export type {
   StepCacheGetOpts,
   StepCacheSetOpts,
 } from './step-cache.js'
+export {
+  daemonsDir,
+  lockfilePath,
+  ensureDaemonsDir,
+  randomInstanceId,
+  writeLockfile,
+  readLockfile,
+  isProcessAlive,
+  findAliveDaemons,
+  spawnDaemon,
+} from './daemon-registry.js'
+export {
+  enqueueItems,
+  claimNextItem,
+  markItemDone,
+  markItemFailed,
+  unclaimItem,
+  recoverOrphanedClaims,
+  readQueueState,
+  queueFilePath,
+  queueLockDirPath,
+} from './daemon-queue.js'
+export {
+  ensureDaemonsAndEnqueue,
+  stopDaemons,
+  computeSpawnPlan,
+} from './daemon-client.js'
+export { runWorkflowDaemon } from './daemon.js'
+export type { DaemonOpts } from './daemon.js'
+export type {
+  DaemonLockfile,
+  Daemon,
+  QueueEvent,
+  QueueItem,
+  QueueState,
+  DaemonFlags,
+  EnqueueResult,
+} from './daemon-types.js'
