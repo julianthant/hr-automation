@@ -46,7 +46,7 @@ export function EntryItem({ entry, selected, onClick }: EntryItemProps) {
     <div
       onClick={onClick}
       className={cn(
-        "h-[69.5px] px-5 py-1.5 border-b border-border cursor-pointer transition-colors flex flex-col justify-center gap-0.5 overflow-hidden leading-tight",
+        "h-[69.5px] px-5 py-1.5 border-b border-border cursor-pointer transition-colors flex flex-col justify-evenly overflow-hidden leading-tight",
         "hover:bg-secondary",
         selected && "bg-accent border-r-[3px] border-r-primary pr-[17px]",
       )}
@@ -59,10 +59,22 @@ export function EntryItem({ entry, selected, onClick }: EntryItemProps) {
         </span>
       </div>
 
-      {/* Row 2: time + run + elapsed/duration. Kept within the 69.5px slot
-          that lines up with the LogPanel's detail-grid rows across the
-          column gap; padding/leading tightened to make room for a third
-          EID row when eid-lookup has stamped one. */}
+      {/* Row 2: EID. Rendered only when the workflow has stamped data.emplId
+          (today: eid-lookup). Slotted between the name and the time/meta
+          row so the resolved identifier sits visually closest to the
+          operator-readable name. Uses the same mono/muted treatment as the
+          detail grid so the value matches the LogPanel's EID cell. */}
+      {emplId && (
+        <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground min-w-0">
+          <span className="uppercase tracking-wider text-[10px] flex-shrink-0">EID</span>
+          <span className="truncate text-foreground" title={emplId}>{emplId}</span>
+        </div>
+      )}
+
+      {/* Row 3 (or Row 2 when no EID): time + run + elapsed/duration. Kept
+          within the 69.5px slot that lines up with the LogPanel's
+          detail-grid rows across the column gap; padding/leading tightened
+          to make room for the EID row when eid-lookup has stamped one. */}
       <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground min-w-0">
         <span className="flex-shrink-0">{time}</span>
         <span className="bg-secondary px-1.5 py-px rounded font-medium flex-shrink-0">#{runNumber}</span>
@@ -82,16 +94,6 @@ export function EntryItem({ entry, selected, onClick }: EntryItemProps) {
           <span className="flex-shrink-0">{duration}</span>
         )}
       </div>
-
-      {/* Row 3: EID. Rendered only when the workflow has stamped data.emplId
-          (today: eid-lookup). Uses the same mono/muted treatment as the
-          detail grid so the value visually matches the LogPanel's EID cell. */}
-      {emplId && (
-        <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground min-w-0">
-          <span className="uppercase tracking-wider text-[10px] flex-shrink-0">EID</span>
-          <span className="truncate text-foreground" title={emplId}>{emplId}</span>
-        </div>
-      )}
     </div>
   );
 }
