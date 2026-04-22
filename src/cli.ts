@@ -5,7 +5,7 @@ import { errorMessage } from "./utils/errors.js";
 import { launchBrowser } from "./browser/launch.js";
 import { loginToUCPath, loginToACTCrm } from "./auth/login.js";
 import type { AuthResult } from "./auth/types.js";
-import { runOnboarding, runParallel, runOnboardingPositional } from "./workflows/onboarding/index.js";
+import { runOnboarding, runOnboardingCli, runParallel, runOnboardingPositional } from "./workflows/onboarding/index.js";
 import { runWorkStudy, runWorkStudyCli, WorkStudyInputSchema } from "./workflows/work-study/index.js";
 import { runEmergencyContact } from "./workflows/emergency-contact/index.js";
 import { runParallelKronos, DEFAULT_WORKERS } from "./workflows/old-kronos-reports/index.js";
@@ -82,24 +82,41 @@ program
 
 // ─── onboarding ───
 //
-// One command, three execution paths:
-//   onboarding <email>            → single-mode (runOnboarding)
-//   onboarding <email1> <email2>… → pool mode (runOnboardingPositional)
-//   onboarding --batch            → reads batch.yaml (runParallel)
-// --dry-run + --workers modify the active path.
+// Daemon mode by default — enqueues to an alive onboarding daemon (or spawns
+// one) so CRM + UCPath sessions stay warm across batches. Legacy paths remain
+// via explicit flags:
+//   onboarding <email> [<email>...]     → daemon-mode enqueue (default)
+//   onboarding <email> [...] --direct   → legacy in-process path
+//                                          (single mode for N=1, pool mode for N>1)
+//   onboarding --batch                   → reads batch.yaml, legacy pool mode
+//   onboarding --dry-run <email>         → CRM-only preview (no daemon)
+// -n, --new and -p, --parallel <N> are daemon-only.
 
 program
   .command("onboarding")
   .description(
     "Onboard one or more employees: extract from CRM, search UCPath, create transaction. " +
-      "Single email → single mode. Multiple emails → pool mode (min(N, 4); override with --workers). " +
-      "--batch reads src/workflows/onboarding/batch.yaml.",
+      "Daemon mode by default — sessions persist across invocations (no re-Duo). " +
+      "--batch reads src/workflows/onboarding/batch.yaml (forces --direct).",
   )
   .argument("[emails...]", "Employee email(s) — omit when using --batch")
-  .option("--dry-run", "Preview actions without creating transactions")
-  .option("--batch", "Read emails from src/workflows/onboarding/batch.yaml instead of positional args")
-  .option("--workers <N>", "Pool size override (batch mode: worker count)", parseInt)
-  .action(async (emails: string[], options: { dryRun?: boolean; batch?: boolean; workers?: number }) => {
+  .option("--dry-run", "Preview actions without creating transactions (forces --direct)")
+  .option("--batch", "Read emails from src/workflows/onboarding/batch.yaml (forces --direct)")
+  .option("--workers <N>", "Pool size override (--direct mode only; --batch: worker count)", parseInt)
+  .option("-n, --new", "Force spawn of a brand-new daemon (ignores alive ones for dispatch)")
+  .option("-p, --parallel <N>", "Fan out across N daemons (reuses up to N alive; spawns the rest)", parseInt)
+  .option("--direct", "Run in legacy in-process mode (no daemon; re-Duos every invocation)")
+  .action(async (
+    emails: string[],
+    options: {
+      dryRun?: boolean;
+      batch?: boolean;
+      workers?: number;
+      new?: boolean;
+      parallel?: number;
+      direct?: boolean;
+    },
+  ) => {
     try {
       validateEnv();
     } catch {
@@ -118,17 +135,45 @@ program
       log.error("--workers must be a positive integer.");
       process.exit(1);
     }
+    if (options.parallel !== undefined && (options.parallel < 1 || !Number.isFinite(options.parallel))) {
+      log.error("--parallel must be a positive integer.");
+      process.exit(1);
+    }
+
+    // Daemon mode is incompatible with --batch (reads batch.yaml in-process)
+    // and --dry-run (short-circuits before launching a browser). Route both
+    // to the legacy in-process path, with an announcing log line when the
+    // override is implicit (user didn't pass --direct explicitly).
+    const mustDirect = options.direct === true || options.batch === true || options.dryRun === true;
 
     try {
-      if (options.batch) {
-        await runParallel(options.workers ?? 4, { dryRun: options.dryRun });
+      if (mustDirect) {
+        if (!options.direct && options.batch) {
+          log.step("[onboarding] --batch forces --direct mode (reads batch.yaml in-process)");
+        } else if (!options.direct && options.dryRun) {
+          log.step("[onboarding] --dry-run forces --direct mode (CRM-only preview; no daemon)");
+        }
+
+        if (options.batch) {
+          await runParallel(options.workers ?? 4, { dryRun: options.dryRun });
+          return;
+        }
+        if (emails.length === 1) {
+          await runOnboarding(emails[0], { dryRun: options.dryRun });
+          return;
+        }
+        await runOnboardingPositional(emails, {
+          dryRun: options.dryRun,
+          poolSize: options.workers,
+        });
         return;
       }
-      if (emails.length === 1) {
-        await runOnboarding(emails[0], { dryRun: options.dryRun });
-        return;
-      }
-      await runOnboardingPositional(emails, { dryRun: options.dryRun, poolSize: options.workers });
+
+      await runOnboardingCli(emails, {
+        dryRun: options.dryRun,
+        new: options.new,
+        parallel: options.parallel,
+      });
     } catch (error) {
       log.error(`Onboarding failed: ${errorMessage(error)}`);
       process.exit(1);

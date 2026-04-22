@@ -2,7 +2,7 @@ export { extractRawFields, extractRecordPageFields } from "./extract.js";
 export { validateEmployeeData, EmployeeDataSchema } from "./schema.js";
 export type { EmployeeData } from "./schema.js";
 export { buildTransactionPlan } from "./enter.js";
-export { runOnboarding, onboardingWorkflow } from "./workflow.js";
+export { runOnboarding, runOnboardingCli, onboardingWorkflow } from "./workflow.js";
 export type { OnboardingOptions } from "./workflow.js";
 export { runParallel, loadBatchFile } from "./parallel.js";
 export { runOnboardingPositional } from "./positional.js";

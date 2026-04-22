@@ -5,11 +5,14 @@ UCPath HR automation for UCSD. Playwright-driven onboarding, separations, EID lo
 ## Commands
 
 ```bash
-# Onboarding (single command, three modes — positional | batch.yaml | dry-run)
-npm run onboarding <email>                   # Full onboarding for one employee (single mode)
-npm run onboarding <email1> <email2> ...     # Multi-employee pool (min(N, 4) workers; override with --workers)
-npm run onboarding:dry <email>               # Dry-run (CRM extract only, no UCPath)
-npm run onboarding:batch -- --workers <N>    # Read emails from src/workflows/onboarding/batch.yaml (N workers)
+# Onboarding (daemon mode by default — see "Daemon mode" below)
+npm run onboarding <email> [<email> ...]     # Enqueue to an alive daemon or spawn one (CRM + UCPath + I9 warm)
+npm run onboarding:dry <email>               # Dry-run (CRM extract only, no UCPath — forces --direct)
+npm run onboarding:batch -- --workers <N>    # Read emails from src/workflows/onboarding/batch.yaml (forces --direct)
+npm run onboarding:direct <email>            # Legacy in-process path (reopens 3 browsers + re-Duo every run)
+npm run onboarding:status                    # Show alive daemons + queue depth
+npm run onboarding:stop                      # Soft-stop all daemons
+npm run onboarding:attach                    # Tail daemon logs
 npm run extract <email>                      # Extract employee data from CRM only
 
 # Separations (daemon mode by default — see "Daemon mode" below)
@@ -224,14 +227,14 @@ Escape hatches: `ctx.session.page(id)` / `ctx.session.newWindow(id)` expose the 
 
 ## Daemon mode (persistent workflow processes)
 
-Kernel workflows exposed on the CLI (`npm run separation <ids>`, `npm run work-study <emplId> <date>`, `npm run eid-lookup <names...>`) default to **daemon mode**:
+Kernel workflows exposed on the CLI (`npm run separation <ids>`, `npm run work-study <emplId> <date>`, `npm run eid-lookup <names...>`, `npm run onboarding <emails...>`) default to **daemon mode**:
 
 - **First invocation with no alive daemon** → spawns one detached daemon (`tsx src/cli-daemon.ts <workflow>`), waits for auth (Duo once), enqueues the item. Daemon stays alive after processing.
 - **Subsequent invocations** → append to the shared queue (`.tracker/daemons/{workflow}.queue.jsonl`) and `POST /wake` every alive daemon. No re-Duo.
 - **Multi-daemon dispatch**: all alive daemons for a workflow race to claim the next queued row via an atomic `fs.mkdir` mutex. Whichever daemon finishes its current item first grabs the next — dynamic load balancing without a coordinator.
 - **Keepalive**: every 15 min idle, each daemon runs `session.healthCheck(system)` per system so SAML/Duo sessions don't silently expire between items.
 
-Flags (on `separation`, `work-study`, `eid-lookup`):
+Flags (on `separation`, `work-study`, `eid-lookup`, `onboarding`):
 - `-n, --new` — spawn one **additional** daemon even if others are alive.
 - `-p, --parallel <N>` — ensure ≥N daemons are alive before enqueueing (spawns `max(0, N - alive)`).
 - `--dry-run` — preview in-process; no daemon spawned.
@@ -239,7 +242,9 @@ Flags (on `separation`, `work-study`, `eid-lookup`):
 
 `eid-lookup` has two extra variant flags (`--no-crm`, `--i9`) that change the systems list; those combos are incompatible with a long-lived daemon's fixed session and **auto-force `--direct`** (with an announcing log line). The daemon hard-wires the default CRM-on variant (`eidLookupCrmWorkflow`).
 
-Lifecycle commands (converted workflows: `separations`, `work-study`, `eid-lookup`):
+`onboarding` has two flags that auto-force `--direct`: `--dry-run` (CRM-only preview, short-circuits before launching the full 3-browser session) and `--batch` (reads `batch.yaml` in-process — if you want daemon-mode batch processing, pass emails positionally: `npm run onboarding a@uc b@uc c@uc` fans across alive daemons via the shared queue). The daemon itself runs the standard `onboardingWorkflow` (CRM + UCPath + I9, 2 Duos per session since I9 is SSO no-2FA). For throughput, start N daemons with `-p N`.
+
+Lifecycle commands (converted workflows: `separations`, `work-study`, `eid-lookup`, `onboarding`):
 - `npm run daemons:status` (or `:status` per workflow) — alive daemons + queue depth.
 - `npm run <workflow>:stop` — soft-stop (drain in-flight, re-queue). Use `-- --force` to mark in-flight as failed and exit immediately.
 - `npm run <workflow>:attach` — tail daemon log files. Ctrl+C detaches; daemons keep running.
