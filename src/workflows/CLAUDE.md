@@ -70,7 +70,7 @@ Currently converted: `separations`, `work-study`. Pending: `onboarding`, `old-kr
 
 | Workflow | CLI | Systems | Kernel? | Parallelism |
 |---|---|---|---|---|
-| onboarding | `npm run start-onboarding` | CRM, UCPath, I9 | Yes | Pool mode (N workers, kernel) via `runWorkflowBatch` |
+| onboarding | `npm run onboarding` (positional emails; `--batch` reads batch.yaml; `:dry` for preview) | CRM, UCPath, I9 | Yes | Single mode for one email; pool mode (N workers, kernel) via `runWorkflowBatch` for multi |
 | separations | `npm run separation` | Kuali, Old Kronos, New Kronos, UCPath | Yes (sequential batch via runWorkflowBatch) | 4 tiled browsers, interleaved auth, ctx.parallel for Phase-1 4-way fan-out |
 | eid-lookup | `tsx src/cli.ts eid-lookup` | UCPath + optional CRM | Yes | N tabs in one shared context (runWorkerPool in handler) |
 | old-kronos-reports | `npm run kronos` | UKG | Yes | Pool mode (N workers, kernel) |

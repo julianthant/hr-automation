@@ -11,7 +11,7 @@ import { DEFAULT_DIR } from "../../../../src/tracker/jsonl.js";
  * - `runWorkflowBatch` in pool mode pairs `onPreEmitPending` with per-item runIds
  *   so the dashboard shows one row per email keyed on the email itself.
  * - `opts.poolSize` override propagates through `runWorkflowBatch` into
- *   `runWorkflowPool` (covers `npm run start-onboarding:batch -- <N>` where
+ *   `runWorkflowPool` (covers `npm run onboarding:batch -- --workers <N>` where
  *   `<N>` overrides the workflow's `batch.poolSize = 4` default).
  *
  * Matches the kronos-reports precedent in

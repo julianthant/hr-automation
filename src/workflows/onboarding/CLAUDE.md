@@ -2,7 +2,7 @@
 
 Automates full UC employee hiring: extracts data from ACT CRM, validates with Zod, searches UCPath for duplicates, searches I9 before creating a profile, creates Smart HR transactions.
 
-**Kernel-based (single + pool).** Both single-mode (`npm run start-onboarding <email>`) and parallel-batch mode (`npm run start-onboarding:batch -- <N>`) are declared via `defineWorkflow` in `workflow.ts`. Single-mode runs through `src/core/runWorkflow`; batch mode delegates to `runWorkflowBatch` → `runWorkflowPool` (N workers, each with its own Session = 3 browsers: CRM + UCPath + I9, 2 Duos per worker since I9 has no 2FA). The kernel owns browser launch, auth chain, queue fan-out, per-item `withTrackedWorkflow` wrapping, SIGINT cleanup, screenshot on failure.
+**Kernel-based (single + pool).** Single-mode (`npm run onboarding <email>`), positional pool mode (`npm run onboarding <email1> <email2> ...`), and batch.yaml pool mode (`npm run onboarding:batch -- --workers <N>`) are all declared via `defineWorkflow` in `workflow.ts`. Single-mode runs through `src/core/runWorkflow`; both pool variants delegate to `runWorkflowBatch` → `runWorkflowPool` (N workers, each with its own Session = 3 browsers: CRM + UCPath + I9, 2 Duos per worker since I9 has no 2FA). The kernel owns browser launch, auth chain, queue fan-out, per-item `withTrackedWorkflow` wrapping, SIGINT cleanup, screenshot on failure.
 
 ## Selector intelligence
 
@@ -27,7 +27,8 @@ This workflow touches three systems: **crm**, **ucpath**, **i9**.
 - `download.ts` — Fetches CRM record PDFs (Doc 1 + Doc 3) directly from iDocs document server URL. Saves to `~/Downloads/onboarding/{Last, First Middle} EID/`
 - `retry.ts` — `retryStep(name, fn, opts)` helper: linear backoff, per-attempt error logs, throws `RetryStepError` after exhausting attempts. Used only by the dry-run branch in `workflow.ts` (no `ctx` available there). Kernel-side callsites use `ctx.retry` instead
 - `workflow.ts` — Kernel definition (`onboardingWorkflow`) + CLI adapter (`runOnboarding`). Handler runs 5 phases across CRM / UCPath / I9 with `ctx.step` wrapping. Dry-run branch bypasses kernel (CRM only)
-- `parallel.ts` — CLI adapter for batch mode (`runParallel`). Loads `batch.yaml` email list and delegates to `runWorkflowBatch(onboardingWorkflow, items, { poolSize, deriveItemId, onPreEmitPending })` — kernel owns workers, auth, fan-out
+- `parallel.ts` — CLI adapter for `--batch` mode (`runParallel`). Loads `batch.yaml` email list and delegates to `runWorkflowBatch(onboardingWorkflow, items, { poolSize, deriveItemId, onPreEmitPending })` — kernel owns workers, auth, fan-out
+- `positional.ts` — CLI adapter for positional multi-email mode (`runOnboardingPositional`). Takes emails directly from the CLI (no batch file) and delegates to `runWorkflowBatch` with `poolSize = opts.poolSize ?? min(N, 4)`
 - `index.ts` — Barrel exports
 
 ## Kernel Config
@@ -37,7 +38,7 @@ This workflow touches three systems: **crm**, **ucpath**, **i9**.
 | `systems` | `[crm, ucpath, i9]` — each wraps its login fn to throw on false | 3 independent auth systems |
 | `steps` | `["crm-auth", "extraction", "pdf-download", "ucpath-auth", "person-search", "i9-creation", "transaction"] as const` | Registered to the dashboard registry at `defineWorkflow` time |
 | `authChain` | `"sequential"` | CRM work happens before UCPath auth; sequential avoids wasting Duo prompts on systems we might not reach (rehire case). I9 auth has no Duo (SSO without 2FA) so 2 Duos per run/worker, not 3. |
-| `batch` | `{ mode: "pool", poolSize: 4, preEmitPending: true }` | Enables `runWorkflowBatch(onboardingWorkflow, items)` to run through `runWorkflowPool` (N workers, shared queue). `poolSize: 4` is the default; the CLI's `--parallel N` overrides via `RunOpts.poolSize`. Single-mode `runWorkflow` ignores `batch`. |
+| `batch` | `{ mode: "pool", poolSize: 4, preEmitPending: true }` | Enables `runWorkflowBatch(onboardingWorkflow, items)` to run through `runWorkflowPool` (N workers, shared queue). `poolSize: 4` is the default; the CLI's `--workers N` overrides via `RunOpts.poolSize`. Single-mode `runWorkflow` ignores `batch`. |
 | `tiling` | `"auto"` (kernel picks for multi-system) | 3 browsers tiled then fullscreened; bringToFront per system during auth |
 | `detailFields` | labeled (Employee, Email, Dept #, Position #, Wage, Eff Date, I9 Profile) + `getName`/`getId` resolvers | Rich detail panel populated via `ctx.updateData(...)` across the 5 phases |
 
@@ -45,7 +46,7 @@ This workflow touches three systems: **crm**, **ucpath**, **i9**.
 
 **Single mode:**
 ```
-CLI: npm run start-onboarding <email>
+CLI: npm run onboarding <email>
   → runOnboarding (CLI adapter)
     → if --dry-run: runOnboardingDryRun (CRM only, imperative)
     → else: runWorkflow(onboardingWorkflow, { email })
@@ -59,9 +60,16 @@ CLI: npm run start-onboarding <email>
       → Handler phase 5 "transaction" → executes ActionPlan → status: "Done"
 ```
 
-**Batch / parallel mode:**
+**Pool mode — positional emails:**
 ```
-CLI: npm run start-onboarding:batch -- <N>
+CLI: npm run onboarding <email1> <email2> ...
+  → runOnboardingPositional(emails, { poolSize?: opts.workers }) (CLI adapter)
+    → runWorkflowBatch(onboardingWorkflow, items, { poolSize: opts.workers ?? min(N, 4), deriveItemId: i => i.email, onPreEmitPending })
+```
+
+**Pool mode — batch.yaml file:**
+```
+CLI: npm run onboarding:batch -- --workers <N>
   → runParallel(N) (CLI adapter)
     → loadBatchFile → emails: string[]
     → runWorkflowBatch(onboardingWorkflow, items, { poolSize: N, deriveItemId: i => i.email, onPreEmitPending })
@@ -76,7 +84,7 @@ CLI: npm run start-onboarding:batch -- <N>
 ## Parallel Mode Notes
 
 - **2 Duos per worker, not 3**: I9 uses UCSD SSO without 2FA. Only CRM + UCPath trigger Duo prompts. With `poolSize = 4`, the user approves **8 Duos total** during worker startup (4 workers × 2 Duos each). The kernel's `Session.launch` stages these per-worker; `bringToFront()` surfaces the active tab before each Duo.
-- **Dry-run is single-mode only**: `runParallel` with `options.dryRun = true` logs a warning and returns. The real-run imperative CRM-only dry-run lives in `workflow.ts`'s `runOnboardingDryRun` for `npm run start-onboarding:dry <email>`.
+- **Dry-run is single-mode only**: `runParallel` with `options.dryRun = true` logs a warning and returns; `runOnboardingPositional` with `dryRun` just logs the email list. The real-run imperative CRM-only dry-run lives in `workflow.ts`'s `runOnboardingDryRun` and fires from the single-email branch of the `onboarding` CLI command (`npm run onboarding:dry <email>`).
 - **Per-worker browser cleanup**: the kernel's Session owns browser teardown per worker via `session.close()` in `runWorkflowPool`'s `finally` block. Previously `parallel.ts` explicitly "left browsers open for observability"; now all worker browsers close after the batch finishes (same as any kernel workflow).
 
 ## Gotchas

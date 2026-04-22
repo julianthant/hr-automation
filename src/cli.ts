@@ -80,63 +80,54 @@ program
     }
   });
 
-// ─── start-onboarding ───
-
-program
-  .command("start-onboarding")
-  .description("Start onboarding: extract from CRM, search UCPath, create transaction")
-  .argument("[email]", "Employee email (for single-employee mode)")
-  .option("--dry-run", "Preview actions without creating transaction")
-  .option("--parallel <N>", "Process batch file with N parallel workers", parseInt)
-  .action(async (email: string | undefined, options: { dryRun?: boolean; parallel?: number }) => {
-    try {
-      validateEnv();
-    } catch {
-      process.exit(1);
-    }
-
-    // Validate: exactly one of email or --parallel
-    if (email && options.parallel) {
-      log.error("Cannot use both email and --parallel. Use email for single mode, --parallel for batch mode.");
-      process.exit(1);
-    }
-    if (!email && !options.parallel) {
-      log.error("Provide an email for single mode or --parallel <N> for batch mode.");
-      process.exit(1);
-    }
-
-    if (options.parallel) {
-      if (options.parallel < 1 || !Number.isFinite(options.parallel)) {
-        log.error("--parallel must be a positive integer.");
-        process.exit(1);
-      }
-      await runParallel(options.parallel, { dryRun: options.dryRun });
-    } else {
-      await runOnboarding(email!, { dryRun: options.dryRun });
-    }
-  });
-
-// ─── onboarding (positional emails) ───
+// ─── onboarding ───
+//
+// One command, three execution paths:
+//   onboarding <email>            → single-mode (runOnboarding)
+//   onboarding <email1> <email2>… → pool mode (runOnboardingPositional)
+//   onboarding --batch            → reads batch.yaml (runParallel)
+// --dry-run + --workers modify the active path.
 
 program
   .command("onboarding")
-  .description("Run onboarding for one or more emails (positional). Pool size = min(N, 4), override with --workers.")
-  .argument("<emails...>", "Employee email(s)")
-  .option("--dry-run", "Preview without running")
-  .option("--workers <N>", "Pool size override", parseInt)
-  .action(async (emails: string[], options: { dryRun?: boolean; workers?: number }) => {
+  .description(
+    "Onboard one or more employees: extract from CRM, search UCPath, create transaction. " +
+      "Single email → single mode. Multiple emails → pool mode (min(N, 4); override with --workers). " +
+      "--batch reads src/workflows/onboarding/batch.yaml.",
+  )
+  .argument("[emails...]", "Employee email(s) — omit when using --batch")
+  .option("--dry-run", "Preview actions without creating transactions")
+  .option("--batch", "Read emails from src/workflows/onboarding/batch.yaml instead of positional args")
+  .option("--workers <N>", "Pool size override (batch mode: worker count)", parseInt)
+  .action(async (emails: string[], options: { dryRun?: boolean; batch?: boolean; workers?: number }) => {
     try {
       validateEnv();
     } catch {
       process.exit(1);
     }
 
+    if (options.batch && emails.length > 0) {
+      log.error("Cannot combine --batch with positional emails. Pick one.");
+      process.exit(1);
+    }
+    if (!options.batch && emails.length === 0) {
+      log.error("Provide at least one email, or use --batch to read from batch.yaml.");
+      process.exit(1);
+    }
     if (options.workers !== undefined && (options.workers < 1 || !Number.isFinite(options.workers))) {
       log.error("--workers must be a positive integer.");
       process.exit(1);
     }
 
     try {
+      if (options.batch) {
+        await runParallel(options.workers ?? 4, { dryRun: options.dryRun });
+        return;
+      }
+      if (emails.length === 1) {
+        await runOnboarding(emails[0], { dryRun: options.dryRun });
+        return;
+      }
       await runOnboardingPositional(emails, { dryRun: options.dryRun, poolSize: options.workers });
     } catch (error) {
       log.error(`Onboarding failed: ${errorMessage(error)}`);
