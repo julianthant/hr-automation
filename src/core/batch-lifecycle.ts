@@ -97,10 +97,22 @@ export interface BatchLifecycleOpts<TData> {
   systems?: SystemConfig[]
   /** Every item the batch will process. The helper uses this list to fan out
    * `failed` tracker rows on SIGINT / auth failure. Terminal states are
-   * signalled via `markTerminated(runId)`. */
+   * signalled via `markTerminated(runId)`. Daemon mode passes an empty
+   * array — items arrive dynamically, and in-flight state is tracked by
+   * the daemon loop itself. */
   perItem: Array<{ item: unknown; itemId: string; runId: string }>
   /** Tracker directory override — defaults to `.tracker` via DEFAULT_DIR. */
   trackerDir?: string
+  /**
+   * Default `true`: install our own SIGINT handler that fans out `failed`
+   * rows for every non-terminated `perItem` entry and calls
+   * `process.exit(130)`. Pass `false` when the caller (e.g. daemon mode)
+   * owns SIGINT and needs to run its own cleanup — unclaim in-flight
+   * queue items, close browsers, unlink lockfiles — before exiting. When
+   * `false`, the body is still wrapped in the try/catch that writes
+   * `failed` rows on thrown errors; only the signal listener is skipped.
+   */
+  ownSigint?: boolean
 }
 
 export interface BatchLifecycleCtx {
@@ -184,12 +196,15 @@ export async function withBatchLifecycle<TData, R>(
     }
   }
 
-  const sigintHandler = (): void => {
-    fanoutFailed('Process terminated (SIGINT)')
-    closeWorkflow('failed')
-    process.exit(130)
-  }
-  process.on('SIGINT', sigintHandler)
+  const ownSigint = opts.ownSigint !== false
+  const sigintHandler: (() => void) | null = ownSigint
+    ? (): void => {
+        fanoutFailed('Process terminated (SIGINT)')
+        closeWorkflow('failed')
+        process.exit(130)
+      }
+    : null
+  if (sigintHandler) process.on('SIGINT', sigintHandler)
 
   const makeObserver = (sessionId: string): BatchObserverHandle =>
     createBatchObserver(instance, sessionId, opts.trackerDir)
@@ -221,6 +236,6 @@ export async function withBatchLifecycle<TData, R>(
     closeWorkflow('failed')
     throw err
   } finally {
-    process.off('SIGINT', sigintHandler)
+    if (sigintHandler) process.off('SIGINT', sigintHandler)
   }
 }
