@@ -219,6 +219,31 @@ describe("rebuildSessionState — workflows", () => {
     assert.ok(wf);
     assert.notEqual(wf!.crashedOnLaunch, true);
   });
+
+  it("does NOT flag crashedOnLaunch for a stale workflow_end older than the age window", () => {
+    // Write events directly with an ancient timestamp — emitSessionEvent always
+    // stamps `now`, so we bypass it to simulate a crash from a previous
+    // orchestrator session still sitting in append-only sessions.jsonl.
+    const stale = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+    const path = getSessionsFilePath(dir);
+    const start = {
+      type: "workflow_start", timestamp: stale, pid: 999999,
+      workflowInstance: "Stale Crash",
+    };
+    const end = {
+      type: "workflow_end", timestamp: stale, pid: 999999,
+      workflowInstance: "Stale Crash", finalStatus: "failed",
+    };
+    writeFileSync(path, JSON.stringify(start) + "\n" + JSON.stringify(end) + "\n");
+
+    const state = rebuildSessionState(dir);
+    const wf = state.workflows.find((w) => w.instance === "Stale Crash");
+    assert.ok(wf, "workflow entry should still be built from the events");
+    assert.notEqual(
+      wf!.crashedOnLaunch, true,
+      "stale crashes (>15m old) must not pin themselves to the live Sessions rail",
+    );
+  });
 });
 
 describe("rebuildSessionState — duoQueue", () => {
