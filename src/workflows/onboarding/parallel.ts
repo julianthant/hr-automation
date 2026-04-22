@@ -38,11 +38,11 @@ export async function loadBatchFile(): Promise<string[]> {
 }
 
 /**
- * CLI adapter for `npm run start-onboarding:batch -- <N>`. Thin shim over
+ * CLI adapter for `npm run onboarding:batch -- --workers <N>`. Thin shim over
  * `runWorkflowBatch` (pool mode). Owns only pre-kernel concerns:
  *
  *   1. Load + validate `batch.yaml`.
- *   2. Warn if `--dry-run` is combined with `--parallel` (dry-run stays
+ *   2. Warn if `--dry-run` is combined with `--batch` (dry-run stays
  *      single-mode-only; see single-mode `runOnboardingDryRun`).
  *   3. Build `items: { email }[]` for the kernel schema and delegate to
  *      `runWorkflowBatch(onboardingWorkflow, items, { poolSize, deriveItemId,
@@ -64,7 +64,7 @@ export async function runParallel(
   log.step(`Starting ${parallelCount} worker(s)`);
 
   if (options.dryRun) {
-    log.warn("Dry-run not supported in parallel/batch mode — run single-mode `npm run start-onboarding:dry <email>` instead.");
+    log.warn("Dry-run not supported in parallel/batch mode — run single-mode `npm run onboarding:dry <email>` instead.");
     return;
   }
 

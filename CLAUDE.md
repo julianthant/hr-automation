@@ -5,11 +5,12 @@ UCPath HR automation for UCSD. Playwright-driven onboarding, separations, EID lo
 ## Commands
 
 ```bash
-# Onboarding
-npm run start-onboarding <email>       # Full onboarding for one employee
-npm run start-onboarding:dry <email>   # Dry-run onboarding (CRM extract only, no UCPath)
-npm run start-onboarding:batch -- <N>  # Batch onboarding with N parallel workers (kernel pool mode)
-npm run extract <email>                # Extract employee data from CRM only
+# Onboarding (single command, three modes — positional | batch.yaml | dry-run)
+npm run onboarding <email>                   # Full onboarding for one employee (single mode)
+npm run onboarding <email1> <email2> ...     # Multi-employee pool (min(N, 4) workers; override with --workers)
+npm run onboarding:dry <email>               # Dry-run (CRM extract only, no UCPath)
+npm run onboarding:batch -- --workers <N>    # Read emails from src/workflows/onboarding/batch.yaml (N workers)
+npm run extract <email>                      # Extract employee data from CRM only
 
 # Separations (daemon mode by default — see "Daemon mode" below)
 npm run separation <docId> [docId ...] # Enqueue to an alive daemon or spawn one

@@ -5,9 +5,11 @@ import { trackEvent } from "../../tracker/jsonl.js";
 import { onboardingWorkflow } from "./workflow.js";
 
 /**
- * Run onboarding for N emails in pool mode. Pool size defaults to min(N, 4).
- * Unlike runParallel (which reads batch.yaml), this takes emails directly from
- * the CLI: `npm run onboarding <email1> <email2> ...`.
+ * Run onboarding for N emails in pool mode. Pool size defaults to min(N, 4),
+ * overridable via `opts.poolSize` (wired to the `--workers N` CLI flag).
+ *
+ * Unlike `runParallel` (which reads `batch.yaml`), this takes emails directly
+ * from the CLI: `npm run onboarding <email1> <email2> ...`.
  */
 export async function runOnboardingPositional(
   emails: string[],

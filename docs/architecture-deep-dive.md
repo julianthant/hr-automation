@@ -37,7 +37,7 @@ The **kernel** (`src/core/`) takes that declaration and handles every piece of i
 
 ```mermaid
 flowchart LR
-    A[CLI command<br/>npm run start-onboarding] --> B[Workflow adapter<br/>runOnboarding]
+    A[CLI command<br/>npm run onboarding] --> B[Workflow adapter<br/>runOnboarding]
     B --> C[Kernel<br/>runWorkflow / Batch / Pool]
     C --> D[Handler<br/>your Playwright code]
     D -->|writes JSONL| E[.tracker/*.jsonl]
@@ -876,7 +876,7 @@ The fuzzy search is a pure in-repo scorer (no Fuse.js, no embeddings, no new dep
 
 ## 10. End-to-end: one onboarding, step by step
 
-Let's trace `npm run start-onboarding jane@ucsd.edu` from CLI to completed transaction.
+Let's trace `npm run onboarding jane@ucsd.edu` from CLI to completed transaction.
 
 ```mermaid
 sequenceDiagram
@@ -889,7 +889,7 @@ sequenceDiagram
     participant T as Tracker JSONL
     participant D as Dashboard
 
-    CLI->>RUN: start-onboarding jane@ucsd.edu
+    CLI->>RUN: onboarding jane@ucsd.edu
     RUN->>K: runWorkflow(onboardingWorkflow, { email })
     K->>K: schema.parse({ email }) ✓
     K->>K: itemId = "jane@ucsd.edu"

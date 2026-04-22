@@ -23,10 +23,11 @@ cp .env.example .env   # fill in your UCSD credentials
 ### Onboarding
 
 ```bash
-npm run start-onboarding <email>       # Full onboarding workflow
-npm run start-onboarding:dry <email>   # Dry-run (preview, no UCPath changes)
-npm run start-onboarding:batch -- <N>  # Batch with N parallel workers
-npm run extract <email>                # Extract employee data from CRM only
+npm run onboarding <email>                   # Full onboarding for one employee
+npm run onboarding <email1> <email2> ...     # Pool mode (min(N, 4) workers; override with --workers)
+npm run onboarding:dry <email>               # Dry-run (preview, no UCPath changes)
+npm run onboarding:batch -- --workers <N>    # Batch mode — reads src/workflows/onboarding/batch.yaml (N workers)
+npm run extract <email>                      # Extract employee data from CRM only
 ```
 
 ### Separations

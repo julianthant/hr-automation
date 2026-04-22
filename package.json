@@ -10,11 +10,9 @@
     "test-login:fresh": "tsx --env-file=.env src/cli.ts test-login --fresh",
 
     "extract": "tsx --env-file=.env src/cli.ts extract",
-    "start-onboarding": "tsx --env-file=.env src/cli.ts start-onboarding",
-    "start-onboarding:dry": "tsx --env-file=.env src/cli.ts start-onboarding --dry-run",
-    "start-onboarding:batch": "tsx --env-file=.env src/cli.ts start-onboarding --parallel",
     "onboarding": "tsx --env-file=.env src/cli.ts onboarding",
     "onboarding:dry": "tsx --env-file=.env src/cli.ts onboarding --dry-run",
+    "onboarding:batch": "tsx --env-file=.env src/cli.ts onboarding --batch",
 
     "separation": "tsx --env-file=.env src/cli.ts separation",
     "separation:dry": "tsx --env-file=.env src/cli.ts separation --dry-run",
