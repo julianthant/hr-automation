@@ -81,9 +81,12 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
       return;
     }
     setDownloadingId(option.id);
-    const pending = toast.loading(`Downloading ${option.label}…`, {
-      description: "Approve Duo on your phone when prompted.",
-    });
+    // Fire-and-forget: the backend responds 202 as soon as the kernel run
+    // is launched. The actual download (Duo tap + Excel click) still takes
+    // 2-3 min; operator watches progress in the Sessions rail, LogPanel
+    // (pick "SharePoint Download" in the workflow dropdown), and the final
+    // status on the tracker row in the Queue. We only show the "launched"
+    // toast here — no long spinner tied to HTTP connection lifetime.
     try {
       const res = await fetch("/api/sharepoint-download/run", {
         method: "POST",
@@ -92,14 +95,13 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
       });
       const body = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
-        path?: string;
-        filename?: string;
+        status?: "launched";
         error?: string;
       };
-      toast.dismiss(pending);
-      if (res.ok && body.ok) {
-        toast.success(`${option.label} downloaded`, {
-          description: body.path ?? body.filename ?? "Saved to src/data/",
+      if (res.status === 202 && body.ok) {
+        toast.success(`${option.label} started`, {
+          description:
+            "Approve Duo on your phone. Watch progress in the Sessions panel.",
           duration: 6000,
         });
       } else if (res.status === 409) {
@@ -108,14 +110,13 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
             body.error ?? "A SharePoint download is already in progress.",
         });
       } else {
-        toast.error(`${option.label} download failed`, {
+        toast.error(`${option.label} failed to start`, {
           description: body.error ?? `HTTP ${res.status}`,
           duration: 8000,
         });
       }
     } catch (err) {
-      toast.dismiss(pending);
-      toast.error(`${option.label} download failed`, {
+      toast.error(`${option.label} failed to start`, {
         description:
           err instanceof Error ? err.message : "Network error contacting the dashboard backend.",
       });

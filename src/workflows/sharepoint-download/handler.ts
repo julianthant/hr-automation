@@ -1,14 +1,29 @@
-import { mkdirSync } from "node:fs";
-import { relative, resolve, sep } from "node:path";
+/**
+ * HTTP-layer handlers for the dashboard's SharePoint download dropdown.
+ *
+ *   GET  /api/sharepoint-download/list  → `buildSharePointListHandler`
+ *   POST /api/sharepoint-download/run   → `buildSharePointRosterDownloadHandler`
+ *
+ * The `/run` handler fires the kernel workflow
+ * (`sharepointDownloadWorkflow`) **fire-and-forget**: it returns 202
+ * immediately with `{ok, id, label, status: "launched"}` and lets the
+ * dashboard surface progress via the Session panel + LogPanel + Queue row.
+ * The alternative (blocking until download completes) would hold the HTTP
+ * socket open for 2-3 minutes including Duo tap, which is worse UX.
+ *
+ * A module-level boolean `rosterDownloadInFlight` prevents concurrent runs
+ * across ALL ids — two different spreadsheets still compete for the same
+ * phone-tap resource, so 409 is returned rather than stacking headed
+ * browsers.
+ */
+import { resolve } from "node:path";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
+import { runWorkflow } from "../../core/index.js";
 import {
-  emitWorkflowStart,
-  emitWorkflowEnd,
-  emitItemStart,
-  generateInstanceName,
-} from "../../tracker/session-events.js";
-import { downloadSharePointFile } from "./download.js";
+  sharepointDownloadWorkflow,
+  _setPendingLandingUrl,
+} from "./workflow.js";
 import {
   SHAREPOINT_DOWNLOADS,
   getDownloadSpec,
@@ -19,22 +34,27 @@ import {
 /**
  * HTTP response shape for the dashboard's roster-download endpoint.
  *
- * Kept narrow (status + body) so the handler stays framework-agnostic —
- * `src/tracker/dashboard.ts` plugs it into the native Node HTTP server,
- * but any caller (tests, future RPC transport) can reuse the shape as-is.
+ * With fire-and-forget semantics, the 202 body no longer includes `path` or
+ * `filename` — those land on the tracker row instead (watch the Queue panel
+ * for the finished record).
  */
 export interface RosterDownloadResponse {
-  status: 200 | 400 | 404 | 409 | 500;
+  status: 202 | 400 | 404 | 409 | 500;
   body:
-    | { ok: true; id: string; label: string; path: string; filename: string }
+    | { ok: true; id: string; label: string; status: "launched" }
     | { ok: false; error: string };
 }
 
 export interface RosterDownloadHandlerOptions {
   /** Default root directory for downloads, overridable per-spec via `spec.outDir`. Default: `<cwd>/src/data`. */
   outDir?: string;
-  /** Injected for tests. Defaults to the real SharePoint helper. */
-  downloader?: typeof downloadSharePointFile;
+  /**
+   * Injected for tests — fires the kernel workflow. Defaults to the real
+   * `runWorkflow`. Tests can swap in a promise-returning stub to assert the
+   * handler's pre-launch side effects (pending-url set, lock flipped, etc.)
+   * without actually spinning up a browser.
+   */
+  runWorkflowFn?: typeof runWorkflow;
   /** Injected for tests. Defaults to `(name) => process.env[name]`. */
   getEnv?: (name: string) => string | undefined;
 }
@@ -66,6 +86,7 @@ let rosterDownloadInFlight = false;
 /** Test-only hook: reset the in-flight lock between test cases. */
 export function _resetInFlightForTests(): void {
   rosterDownloadInFlight = false;
+  _setPendingLandingUrl(null);
 }
 
 /** Test-only: peek at the lock state. */
@@ -112,26 +133,28 @@ function resolveOutDir(
  * Factory for `POST /api/sharepoint-download/run`.
  *
  * Expects a JSON body `{ id: "<registry-id>" }`. Looks up the spec, reads
- * `process.env[spec.envVar]`, launches a headed browser via
- * `downloadSharePointFile` (SSO + Duo), saves the resulting file, and
- * returns a JSON result.
+ * `process.env[spec.envVar]`, and fires `runWorkflow(sharepointDownloadWorkflow, ...)`
+ * WITHOUT awaiting it. Returns 202 immediately so the operator isn't
+ * blocked for 2-3 min waiting on a Duo tap. Progress is visible via the
+ * Session panel (live box + Duo chip) and the LogPanel / Queue row once the
+ * kernel writes its tracker entries.
  *
  * Response status codes:
- *   200 — download completed
+ *   202 — workflow launched (download still in progress)
  *   400 — body missing `id`, or env var unset for a known id
  *   404 — unknown id (lists known ids in error)
  *   409 — another download is already in progress
- *   500 — download helper threw
+ *   500 — synchronous pre-launch failure (validation / env lookup)
  *
- * A module-level boolean lock prevents concurrent runs across ALL ids.
- * Factored as a pure-ish handler (no req/res coupling) to mirror
- * `buildSelectorWarningsHandler` and stay easy to unit-test.
+ * Post-launch failures (auth timeout, Duo timeout, Excel click failure)
+ * surface as FAILED on the tracker row — they don't hit this HTTP response
+ * because the client is already gone.
  */
 export function buildSharePointRosterDownloadHandler(
   options: RosterDownloadHandlerOptions = {},
 ): (input: { id?: string }) => Promise<RosterDownloadResponse> {
   const defaultOutDir = options.outDir ?? resolve(process.cwd(), "src/data");
-  const download = options.downloader ?? downloadSharePointFile;
+  const runWorkflowImpl = options.runWorkflowFn ?? runWorkflow;
   const getEnv = options.getEnv ?? ((name: string) => process.env[name]);
 
   return async (input) => {
@@ -175,43 +198,36 @@ export function buildSharePointRosterDownloadHandler(
       };
     }
 
+    // Commit: we're launching. Flip the lock + seed the landing URL that
+    // `systems[].login` will read. Both cleared in the fire-and-forget
+    // promise's `.finally()` regardless of outcome.
     rosterDownloadInFlight = true;
-    // Register this run as a dashboard-visible "workflow instance" so the
-    // operator sees a box in the Sessions rail identical to kernel workflows
-    // (purple border, browser chip, auth-state glow, DONE/FAILED pill).
-    // `generateInstanceName("sharepoint-download")` → "SharePoint 1",
-    // "SharePoint 2", ... reusing the shared numbering + stale-start
-    // self-healing in session-events.ts.
-    const instance = generateInstanceName("sharepoint-download");
-    emitWorkflowStart(instance);
-    // Populate the box's "current item" line with the spec label so the
-    // operator knows which spreadsheet this instance is pulling — the same
-    // slot kernel workflows use for email / doc-id.
-    emitItemStart(instance, spec.label);
-    let finalStatus: "done" | "failed" = "failed";
-    try {
-      const outDir = resolveOutDir(spec, defaultOutDir);
-      mkdirSync(outDir, { recursive: true });
-      const saved = await download({
-        url,
-        outDir,
-        session: { instance, system: "sharepoint" },
-      });
-      const relPath = relative(process.cwd(), saved) || saved;
-      const filename = saved.split(sep).pop() ?? saved;
-      log.success(`SharePoint download complete (${spec.id}): ${relPath}`);
-      finalStatus = "done";
-      return {
-        status: 200,
-        body: { ok: true, id: spec.id, label: spec.label, path: relPath, filename },
-      };
-    } catch (e) {
-      const message = errorMessage(e);
-      log.error(`SharePoint download failed (${spec.id}): ${message}`);
-      return { status: 500, body: { ok: false, error: message } };
-    } finally {
-      emitWorkflowEnd(instance, finalStatus);
-      rosterDownloadInFlight = false;
-    }
+    const outDir = resolveOutDir(spec, defaultOutDir);
+    _setPendingLandingUrl(url);
+
+    const runPromise = (async () => {
+      try {
+        await runWorkflowImpl(sharepointDownloadWorkflow, {
+          id: spec.id,
+          label: spec.label,
+          url,
+          outDir,
+        });
+        log.success(`SharePoint download complete (${spec.id})`);
+      } catch (e) {
+        log.error(`SharePoint download failed (${spec.id}): ${errorMessage(e)}`);
+      } finally {
+        _setPendingLandingUrl(null);
+        rosterDownloadInFlight = false;
+      }
+    })();
+    // Detach — fire-and-forget. The catch above should handle all errors,
+    // but this guard defends against any async throw that escapes it.
+    runPromise.catch(() => {});
+
+    return {
+      status: 202,
+      body: { ok: true, id: spec.id, label: spec.label, status: "launched" },
+    };
   };
 }

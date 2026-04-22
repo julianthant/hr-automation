@@ -40,11 +40,11 @@ Add a Commander subcommand to `src/cli.ts` invoking your workflow's CLI adapter.
 | old-kronos-reports | `npm run kronos` | UKG | Yes | Pool mode (N workers, kernel) |
 | work-study | `npm run work-study` | UCPath | Yes | Single |
 | emergency-contact | `npm run emergency-contact` | UCPath | Yes (batch, `preEmitPending`) | Single browser, one record at a time |
-| sharepoint-download | _Dashboard button_ / `tsx src/workflows/emergency-contact/scripts/download-roster.ts` | SharePoint | **No** (intentionally non-kernel — operator utility, not an HR record) | Single (headed browser, gated by Duo) |
+| sharepoint-download | _Dashboard button_ (fire-and-forget) / `tsx src/workflows/emergency-contact/scripts/download-roster.ts` (non-kernel CLI) | SharePoint | Yes (single-item, module-level URL injection) | Single (headed browser, gated by Duo) |
 
-### Non-kernel workflow exception: `sharepoint-download/`
+### `sharepoint-download` — notable shape
 
-This is the **only** directory under `src/workflows/` that deliberately does NOT call `defineWorkflow` — it's a one-shot operator utility (the dashboard queue-header Download button + emergency-contact pre-flight roster download) that produces a file, not a tracker record. Because it has no `defineWorkflow` registration and writes no `.tracker/*.jsonl` files, it never surfaces in the TopBar dropdown (the dropdown unions `registered` + `listWorkflows()` — both ignore it). See `src/workflows/sharepoint-download/CLAUDE.md` for when to NOT copy this pattern.
+Kernel workflow (since 2026-04-22), but with two non-standard wrinkles documented in its `CLAUDE.md`: (1) `systems[].login` reads the per-run file URL from a module-level mutable (`pendingLandingUrl`) because the kernel's `SystemConfig.login` signature doesn't pass `input`, and (2) the dashboard HTTP handler fires `runWorkflow` fire-and-forget and returns 202, so the socket isn't held open for the 2-3 min download window. Both are safe under the handler's cross-id in-flight lock. See `src/workflows/sharepoint-download/CLAUDE.md` before copying either pattern.
 
 ## Lessons Learned
 

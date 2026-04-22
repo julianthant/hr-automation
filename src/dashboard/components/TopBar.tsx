@@ -26,6 +26,7 @@ const PREFERRED_ORDER = [
   "eid-lookup",
   "work-study",
   "emergency-contact",
+  "sharepoint-download",
 ];
 
 interface TopBarProps {
