@@ -61,7 +61,7 @@ export interface SharePointDownloadSpec {
 export const SHAREPOINT_DOWNLOADS: readonly SharePointDownloadSpec[] = [
   {
     id: "onboarding",
-    label: "Onboarding roster",
+    label: "Onboarding Roster",
     description: "New-hire spreadsheet used by onboarding + emergency-contact",
     envVar: "ONBOARDING_ROSTER_URL",
   },
