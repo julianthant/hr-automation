@@ -161,6 +161,50 @@ test('runWorkflowBatch sequential emits per-item tracker entries', async (t) => 
   }
 })
 
+test('runWorkflowBatch sequential: emits exactly one workflow_start + one workflow_end(done) per batch', async (t) => {
+  const tmp = mkdtempSync(join(tmpdir(), 'batch-one-instance-'))
+  t.after(() => cleanupDir(tmp))
+  const wfName = `batch-oneinst-${Date.now()}`
+
+  const wf = defineWorkflow({
+    name: wfName,
+    systems: [{ id: 'ucpath', login: async () => {} }],
+    steps: ['s1'] as const,
+    schema: z.object({ k: z.string() }),
+    batch: { mode: 'sequential' },
+    handler: async (ctx) => { await ctx.step('s1', async () => {}) },
+  })
+
+  await runWorkflowBatch(
+    wf,
+    [{ k: 'a' }, { k: 'b' }, { k: 'c' }],
+    {
+      launchFn: () => Promise.resolve(fakeSlot()),
+      trackerDir: tmp,
+      deriveItemId: (item: unknown) => (item as { k: string }).k,
+    },
+  )
+
+  const sessPath = join(tmp, 'sessions.jsonl')
+  assert.ok(existsSync(sessPath), 'sessions.jsonl written')
+  const events = readFileSync(sessPath, 'utf-8').trim().split('\n').map((l) => JSON.parse(l))
+  const starts = events.filter((e: any) => e.type === 'workflow_start')
+  const ends = events.filter((e: any) => e.type === 'workflow_end')
+  assert.equal(starts.length, 1, 'one workflow_start per sequential batch')
+  assert.equal(ends.length, 1, 'one workflow_end per sequential batch')
+  assert.equal(ends[0].finalStatus, 'done')
+
+  const entries = readTrackerEntries(tmp, wfName)
+  const dones = entries.filter((e: any) => e.status === 'done')
+  assert.equal(dones.length, 3, 'three done entries (one per item)')
+  const instance = (dones[0] as any).data.instance
+  assert.ok(instance, 'instance stamped on done entries')
+  assert.ok(
+    dones.every((e: any) => e.data.instance === instance),
+    'all sequential items share the batch instance',
+  )
+})
+
 test('runWorkflowBatch sequential emits per-item failed tracker entry and continues', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'batch-tracker-fail-'))
   t.after(() => cleanupDir(tmp))
