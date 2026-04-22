@@ -1,6 +1,6 @@
 import { createServer, type Server } from "http";
-import { readFileSync, existsSync, unlinkSync, statSync, readdirSync, createReadStream, mkdirSync } from "fs";
-import { join, resolve, sep, relative } from "path";
+import { readFileSync, existsSync, unlinkSync, statSync, readdirSync, createReadStream } from "fs";
+import { join, resolve, sep } from "path";
 import {
   readEntries,
   readLogEntries,
@@ -26,7 +26,7 @@ import type { WorkflowMetadata } from "../core/types.js";
 import { detectFailurePattern } from "./failure-detector.js";
 import { notify } from "./notify.js";
 import { pruneOldStepCache } from "../core/index.js";
-import { downloadSharePointFile } from "../workflows/emergency-contact/sharepoint-download.js";
+import { buildSharePointRosterDownloadHandler } from "../workflows/sharepoint-download/index.js";
 
 /**
  * Canonical sort key for a session event. Events emitted by
@@ -684,88 +684,17 @@ export function buildSelectorWarningsHandler(
   };
 }
 
-// ── Emergency-contact roster download trigger ──────────────────────────────
+// ── SharePoint roster download trigger ─────────────────────────────────────
 //
-// Single concurrency lock — one manual download at a time. Gated by a human
-// tapping Duo, so contention is rare; a boolean is enough. Exported getter
-// for tests.
-let rosterDownloadInFlight = false;
-export function isRosterDownloadInFlight(): boolean {
-  return rosterDownloadInFlight;
-}
-
-export interface RosterDownloadResponse {
-  status: 200 | 400 | 409 | 500;
-  body:
-    | { ok: true; path: string; filename: string }
-    | { ok: false; error: string };
-}
-
-export interface RosterDownloadHandlerOptions {
-  /** Where to save. Default: <repo>/src/data (relative to process.cwd()). */
-  outDir?: string;
-  /** Injected for tests. Defaults to the real SharePoint helper. */
-  downloader?: typeof downloadSharePointFile;
-  /** Injected for tests. Defaults to `process.env.ONBOARDING_ROSTER_URL`. */
-  getUrl?: () => string | undefined;
-}
-
-/**
- * Factory for the POST /api/emergency-contact/download-roster handler.
- *
- * Launches a headed browser via `downloadSharePointFile` (SSO + Duo), saves
- * the resulting file into `outDir`, and returns a JSON result. A module-level
- * boolean lock prevents concurrent runs. Missing env var → 400, not 500, so
- * the dashboard can show a useful setup-time toast.
- *
- * Factored as a pure-ish handler (no req/res coupling) to match the
- * `buildSelectorWarningsHandler` style and make future unit tests trivial.
- */
-export function buildEmergencyRosterDownloadHandler(
-  options: RosterDownloadHandlerOptions = {},
-): () => Promise<RosterDownloadResponse> {
-  const outDir = options.outDir ?? resolve(process.cwd(), "src/data");
-  const download = options.downloader ?? downloadSharePointFile;
-  const getUrl = options.getUrl ?? (() => process.env.ONBOARDING_ROSTER_URL);
-
-  return async () => {
-    const url = getUrl();
-    if (!url || !url.trim()) {
-      return {
-        status: 400,
-        body: {
-          ok: false,
-          error:
-            "ONBOARDING_ROSTER_URL env var not set. Add it to .env (see .env.example) and restart the dashboard.",
-        },
-      };
-    }
-    if (rosterDownloadInFlight) {
-      return {
-        status: 409,
-        body: { ok: false, error: "A roster download is already in progress" },
-      };
-    }
-    rosterDownloadInFlight = true;
-    try {
-      mkdirSync(outDir, { recursive: true });
-      const saved = await download({ url: url.trim(), outDir });
-      const relPath = relative(process.cwd(), saved) || saved;
-      const filename = saved.split(sep).pop() ?? saved;
-      log.success(`Roster download complete: ${relPath}`);
-      return {
-        status: 200,
-        body: { ok: true, path: relPath, filename },
-      };
-    } catch (e) {
-      const message = errorMessage(e);
-      log.error(`Roster download failed: ${message}`);
-      return { status: 500, body: { ok: false, error: message } };
-    } finally {
-      rosterDownloadInFlight = false;
-    }
-  };
-}
+// Factory + in-flight lock live in `src/workflows/sharepoint-download/` now;
+// the dashboard just wires the factory into the HTTP route below. Routes are
+// namespaced under /api/sharepoint-download/ to reflect that the button is
+// workflow-agnostic (see `src/workflows/sharepoint-download/CLAUDE.md`).
+export { isDownloadInFlight as isRosterDownloadInFlight } from "../workflows/sharepoint-download/index.js";
+export type {
+  RosterDownloadResponse,
+  RosterDownloadHandlerOptions,
+} from "../workflows/sharepoint-download/index.js";
 
 /**
  * Minimal TrackerEntry shape needed for step-duration computation. Kept
@@ -1626,9 +1555,9 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
 
     if (
       req.method === "POST" &&
-      url.pathname === "/api/emergency-contact/download-roster"
+      url.pathname === "/api/sharepoint-download/run"
     ) {
-      const handler = buildEmergencyRosterDownloadHandler();
+      const handler = buildSharePointRosterDownloadHandler();
       try {
         const { status, body } = await handler();
         res.writeHead(status, {

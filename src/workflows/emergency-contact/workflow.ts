@@ -6,7 +6,7 @@ import { loginToUCPath } from "../../auth/login.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 import { TransactionError } from "../../systems/ucpath/types.js";
 import { navigateToEmergencyContact } from "../../systems/ucpath/personal-data.js";
-import { downloadSharePointFile } from "./sharepoint-download.js";
+import { downloadSharePointFile } from "../sharepoint-download/index.js";
 import { verifyBatchAgainstRoster } from "./roster-verify.js";
 import {
   buildEmergencyContactPlan,
