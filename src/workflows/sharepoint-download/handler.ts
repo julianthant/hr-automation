@@ -2,6 +2,12 @@ import { mkdirSync } from "node:fs";
 import { relative, resolve, sep } from "node:path";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
+import {
+  emitWorkflowStart,
+  emitWorkflowEnd,
+  emitItemStart,
+  generateInstanceName,
+} from "../../tracker/session-events.js";
 import { downloadSharePointFile } from "./download.js";
 import {
   SHAREPOINT_DOWNLOADS,
@@ -170,13 +176,31 @@ export function buildSharePointRosterDownloadHandler(
     }
 
     rosterDownloadInFlight = true;
+    // Register this run as a dashboard-visible "workflow instance" so the
+    // operator sees a box in the Sessions rail identical to kernel workflows
+    // (purple border, browser chip, auth-state glow, DONE/FAILED pill).
+    // `generateInstanceName("sharepoint-download")` → "SharePoint 1",
+    // "SharePoint 2", ... reusing the shared numbering + stale-start
+    // self-healing in session-events.ts.
+    const instance = generateInstanceName("sharepoint-download");
+    emitWorkflowStart(instance);
+    // Populate the box's "current item" line with the spec label so the
+    // operator knows which spreadsheet this instance is pulling — the same
+    // slot kernel workflows use for email / doc-id.
+    emitItemStart(instance, spec.label);
+    let finalStatus: "done" | "failed" = "failed";
     try {
       const outDir = resolveOutDir(spec, defaultOutDir);
       mkdirSync(outDir, { recursive: true });
-      const saved = await download({ url, outDir });
+      const saved = await download({
+        url,
+        outDir,
+        session: { instance, system: "sharepoint" },
+      });
       const relPath = relative(process.cwd(), saved) || saved;
       const filename = saved.split(sep).pop() ?? saved;
       log.success(`SharePoint download complete (${spec.id}): ${relPath}`);
+      finalStatus = "done";
       return {
         status: 200,
         body: { ok: true, id: spec.id, label: spec.label, path: relPath, filename },
@@ -186,6 +210,7 @@ export function buildSharePointRosterDownloadHandler(
       log.error(`SharePoint download failed (${spec.id}): ${message}`);
       return { status: 500, body: { ok: false, error: message } };
     } finally {
+      emitWorkflowEnd(instance, finalStatus);
       rosterDownloadInFlight = false;
     }
   };

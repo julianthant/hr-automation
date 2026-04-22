@@ -11,10 +11,12 @@ One-shot utility for pulling a shared SharePoint / Excel Online file to a local 
 This directory lives under `src/workflows/` for co-location with the other automation flows, but it deliberately does **NOT**:
 
 - Call `defineWorkflow()` — so it never registers with the kernel registry that backs `/api/workflow-definitions`.
-- Emit tracker JSONL events — so `listWorkflows()` (which scans `.tracker/*.jsonl`) never sees it.
+- Emit tracker JSONL entries (`.tracker/<workflow>.jsonl` / `<workflow>-<date>-logs.jsonl`) — so `listWorkflows()` never sees it and the Queue panel never gains a row for it.
 - Have a `schema.ts` / `enter.ts` / batch-mode plumbing — there's no batch here, just one file to fetch.
 
 Net effect: the sharepoint-download "workflow" never appears in the TopBar workflow dropdown. That's by design — the download is an operator utility, not an HR record to track.
+
+It **does** emit dashboard **session** events (`.tracker/sessions.jsonl`) when invoked from the dashboard handler, so the Sessions rail surfaces a live workflow box with browser chip + auth / Duo states + DONE/FAILED pill — exactly like kernel workflows. See "Session-panel integration" below. Preflight / standalone CLI invocations pass no `session` option and stay silent.
 
 ## Files
 
@@ -36,6 +38,26 @@ All auth logic is shared with every other system. Do NOT re-implement:
 ## Download location
 
 The dashboard endpoint and standalone CLI **always** land bytes via `Playwright download.saveAs(outPath)` with `outPath` rooted inside the project tree (`src/data/` for dashboard, `.tracker/rosters/` for emergency-contact pre-flight). The `.playwright-cli/` directory is only used by the `playwright-cli` interactive tool during selector mapping — if you see an xlsx land there, it's a selector-mapping artifact, not a production download; delete it.
+
+## Session-panel integration
+
+When `buildSharePointRosterDownloadHandler` is invoked (dashboard button click), it generates a `"SharePoint N"` instance via `generateInstanceName("sharepoint-download")` and emits the same session-events JSONL stream kernel workflows do:
+
+| Phase | Event(s) emitted | Session-panel effect |
+|---|---|---|
+| Handler entry | `workflow_start` + `item_start` (currentItemId = spec label) | Purple workflow box appears with "SharePoint N" title and the roster label in the item slot |
+| Browser launches | `session_create` + `browser_launch` (system = `"sharepoint"`) | Idle (hourglass) chip appears inside the box |
+| Page navigates | `step_change` = `"navigate"` | Cyan current-step pill flips to "Navigate" |
+| SSO fill starts | `step_change` = `"sso"` + `auth_start` | Chip → authenticating (blue spinner) |
+| Duo approval waiting | `step_change` = `"duo"` + `duo_request` (browserId + duoRequestId) | Chip → duo_waiting (yellow glow) + row in Duo queue |
+| Duo approved | `duo_complete` + `auth_complete` | Chip → authed (green check) |
+| Excel download phase | `step_change` = `"download"` | Pill flips to "Download" |
+| Handler exit (success) | `workflow_end` finalStatus = `"done"` + `browser_close` + `session_close` | Pill → green DONE, chip fades; box drops once pid dies |
+| Handler exit (failure) | `workflow_end` finalStatus = `"failed"` (still runs `browser_close` + `session_close` via `finally`) | Pill → red FAILED |
+
+All events are gated on the `session` option being passed to `downloadSharePointFile`. The handler always passes it; `runPreflight` / the standalone CLI do not, so those paths stay silent and don't pollute `sessions.jsonl`.
+
+`duo_complete` is emitted even on the Duo-timeout throw path (via `try/finally` around `pollDuoApproval`) so a failed run never leaves a permanent `duo_waiting` chip pinned in the Sessions rail.
 
 ## Concurrency
 
@@ -59,3 +81,4 @@ If the registry grows past ~6 entries consider switching the dropdown to grouped
 
 - **2026-04-22: Not every "workflow" belongs in the kernel.** Initially lived at `src/workflows/emergency-contact/sharepoint-download.ts` because emergency-contact was the first consumer. Once the dashboard button was added (for every workflow, not just emergency-contact), it became clear the helper is a cross-cutting utility that just happens to be tall enough to deserve its own directory. Promoted to `src/workflows/sharepoint-download/` with the explicit non-kernel rule above so it stays out of the dropdown while enjoying co-location with real workflows.
 - **2026-04-22: Dropdown + registry beats single-purpose button.** First cut was a single `Download onboarding spreadsheet` button hardcoded to `ONBOARDING_ROSTER_URL`. Folded into a `SHAREPOINT_DOWNLOADS` registry + `DropdownMenu` the same day — future spreadsheets (separations roster, kronos report links, etc.) are a one-liner in `registry.ts` + one env var. Handler split into `buildSharePointListHandler` (cheap, synchronous) feeding the dropdown on mount and `buildSharePointRosterDownloadHandler` (expensive, headed-browser) for the actual click. Concurrency lock stays id-agnostic because it's gating the Duo-tap resource, not a per-spreadsheet queue.
+- **2026-04-22: Session-panel surfacing via opt-in session events.** Originally invisible in the Sessions rail because the helper never registered with the kernel — operators clicking the button got no visual feedback beyond the toast until the file appeared. Fixed by threading an optional `session` option through `downloadSharePointFile` that toggles session-events JSONL emission on/off. Preflight + CLI paths pass `undefined` (silent); the dashboard handler always passes `{ instance: generateInstanceName("sharepoint-download"), system: "sharepoint" }` → full WorkflowBox with browser chip + auth/Duo state + DONE/FAILED pill, no other frontend changes needed. Critical detail: `duo_complete` is emitted in a `finally` around `pollDuoApproval` so a timeout/throw never leaves a permanent `duo_waiting` chip; `workflow_end` and `browser_close` / `session_close` are similarly `finally`-wrapped.

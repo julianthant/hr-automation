@@ -245,6 +245,10 @@ export function generateInstanceName(workflowType: string, dir?: string): string
     "kronos-reports": "Kronos",
     "work-study": "Work Study",
     "emergency-contact": "Emergency Contact",
+    // Dashboard's SharePoint download button surfaces in the Session panel
+    // as "SharePoint 1", "SharePoint 2", ... — not a kernel workflow, but
+    // it owns a browser + Duo tap and benefits from the same lifecycle UI.
+    "sharepoint-download": "SharePoint",
   };
   const label = labels[workflowType] || workflowType;
 
