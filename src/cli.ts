@@ -9,7 +9,7 @@ import { runOnboarding, runOnboardingCli, runParallel, runOnboardingPositional }
 import { runWorkStudy, runWorkStudyCli, WorkStudyInputSchema } from "./workflows/work-study/index.js";
 import { runEmergencyContact, runEmergencyContactCli } from "./workflows/emergency-contact/index.js";
 import { runParallelKronos, DEFAULT_WORKERS } from "./workflows/old-kronos-reports/index.js";
-import { runSeparation, runSeparationBatch, runSeparationCli } from "./workflows/separations/index.js";
+import { runSeparation, runSeparationBatch, runSeparationCli, runSeparationRecover } from "./workflows/separations/index.js";
 import { runEidLookup, runEidLookupCli } from "./workflows/eid-lookup/index.js";
 import {
   runOathSignature,
@@ -371,6 +371,34 @@ program
       });
     } catch (error) {
       log.error(`Separation dispatch failed: ${errorMessage(error)}`);
+      process.exit(1);
+    }
+  });
+
+// ─── separation:recover ───
+
+program
+  .command("separation-recover")
+  .description("Recover stuck separation doc(s) — submitted UCPath transaction but didn't capture txn #. Seeds an empty idempotency record so the normal flow takes the readback-only resume path (no re-submit).")
+  .argument("<docIds...>", "Kuali document number(s) previously stuck in 'submitted-without-txn-number' state")
+  .option("-n, --new", "Spawn an additional daemon even if others are alive")
+  .option("-p, --parallel <count>", "Ensure N daemons are alive", (v) => parseInt(v, 10))
+  .action(async (
+    docIds: string[],
+    options: { new?: boolean; parallel?: number },
+  ) => {
+    try {
+      validateEnv();
+    } catch {
+      process.exit(1);
+    }
+    try {
+      await runSeparationRecover(docIds, {
+        new: options.new,
+        parallel: options.parallel,
+      });
+    } catch (error) {
+      log.error(`Separation recovery failed: ${errorMessage(error)}`);
       process.exit(1);
     }
   });
