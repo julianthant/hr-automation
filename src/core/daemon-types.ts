@@ -44,6 +44,13 @@ export type QueueEvent =
       input: unknown
       enqueuedAt: string
       enqueuedBy: string
+      /**
+       * Optional pre-assigned runId. When set, the claiming daemon reuses
+       * this runId in its claim event + all downstream tracker rows instead
+       * of generating a fresh UUID. Lets the CLI pre-emit a `pending` tracker
+       * row at enqueue time without risking two rows per item.
+       */
+      runId?: string
     }
   | {
       type: 'claim'

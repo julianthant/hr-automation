@@ -1,6 +1,7 @@
 import type { Page } from "playwright";
 import { launchBrowser } from "../../browser/launch.js";
 import { log } from "../../utils/log.js";
+import { trackEvent } from "../../tracker/jsonl.js";
 import { errorMessage, classifyPlaywrightError } from "../../utils/errors.js";
 import {
   defineWorkflow,
@@ -558,10 +559,31 @@ export async function runOnboardingCli(
 
   const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
   const inputs = emails.map((email) => ({ email }));
-  await ensureDaemonsAndEnqueue(onboardingWorkflow, inputs, {
-    new: options.new,
-    parallel: options.parallel,
-  });
+  const now = new Date().toISOString();
+  await ensureDaemonsAndEnqueue(
+    onboardingWorkflow,
+    inputs,
+    {
+      new: options.new,
+      parallel: options.parallel,
+    },
+    {
+      // Match the positional-mode pre-emit payload (`positional.ts`) so
+      // daemon mode and legacy `--direct` pool mode surface the same shape
+      // to the dashboard. runId pre-assigned by `enqueueItems` pairs 1:1
+      // with the downstream running/done rows emitted by the daemon.
+      onPreEmitPending: (item, runId) => {
+        trackEvent({
+          workflow: "onboarding",
+          timestamp: now,
+          id: item.email,
+          runId,
+          status: "pending",
+          data: { email: item.email },
+        });
+      },
+    },
+  );
 }
 
 /**

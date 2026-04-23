@@ -7,6 +7,18 @@ import type { Daemon, DaemonFlags, EnqueueResult } from './daemon-types.js'
 import type { RegisteredWorkflow } from './types.js'
 
 /**
+ * Optional caller-provided callback fired once per input AFTER the enqueue
+ * event has been appended but BEFORE any spawn/auth work begins. Mirrors
+ * `RunOpts.onPreEmitPending` from `runWorkflowBatch`: lets CLI adapters emit
+ * a `pending` tracker row per item so the dashboard's queue panel populates
+ * instantly (instead of waiting for the daemon to finish Duo + claim + emit
+ * its own pending row). The runId passed here matches the enqueue event's
+ * pre-assigned runId, so downstream tracker rows (running/done) pair 1:1
+ * with the pre-emitted row.
+ */
+export type OnPreEmitPending<TData> = (input: TData, runId: string) => void
+
+/**
  * Pure spawn-math helper. Given the current alive-daemon count and the
  * user's flags, return how many new daemons to spawn. Extracted so the
  * routing rule can be unit-tested without mocking `spawnDaemon`.
@@ -51,9 +63,29 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
   wf: RegisteredWorkflow<TData, TSteps>,
   inputs: TData[],
   flags: DaemonFlags = {},
-  opts: { trackerDir?: string; quiet?: boolean } = {},
+  opts: {
+    trackerDir?: string
+    quiet?: boolean
+    /**
+     * Caller-provided hook fired per item IMMEDIATELY after the enqueue event
+     * is written, BEFORE any spawn/auth work. Lets CLI adapters emit a
+     * `pending` tracker row so the dashboard queue panel populates instantly.
+     * Exceptions thrown by this callback are caught and logged so a bad
+     * adapter can't break the enqueue flow.
+     */
+    onPreEmitPending?: OnPreEmitPending<TData>
+    /**
+     * Optional item-ID deriver. Defaults to the kernel's built-in `deriveItemId`
+     * (walks top-level `emplId` / `docId` / `email`) with a UUID fallback.
+     * Use this when the input's identifier is nested (e.g.
+     * `input.employee.employeeId`) or follows a composite shape (e.g.
+     * `p{NN}-{emplId}`). The returned id is used both as the queue item id
+     * and the `runId`-pairing anchor for `onPreEmitPending`.
+     */
+    deriveItemId?: (input: TData) => string
+  } = {},
 ): Promise<EnqueueResult> {
-  const { trackerDir, quiet } = opts
+  const { trackerDir, quiet, onPreEmitPending } = opts
 
   if (inputs.length === 0) {
     throw new Error('ensureDaemonsAndEnqueue: inputs[] must not be empty')
@@ -71,6 +103,71 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
   const alive = await findAliveDaemons(wf.config.name, trackerDir)
   const spawnCount = computeSpawnPlan(alive.length, flags)
 
+  // ---------------------------------------------------------------------
+  // Step 1: enqueue FIRST (before spawn). Queue append is a file write and
+  // takes <10ms — the dashboard and any alive daemon see the items
+  // immediately. Daemons that need to be spawned will claim from the
+  // already-populated queue as soon as their auth chain finishes.
+  //
+  // This order was flipped as of 2026-04-22: the prior order was
+  // `spawn → enqueue → wake`, which (a) made the CLI wait up to 5min for
+  // Duo approval before writing anything to the queue, and (b) hid all the
+  // items from the dashboard queue panel during that wait. The new order
+  // is `enqueue → wake alive → spawn new → (newly-spawned daemons self-claim)`.
+  // ---------------------------------------------------------------------
+
+  const idFn = (input: TData, idx: number): string => {
+    if (opts.deriveItemId) return opts.deriveItemId(input)
+    const fallback = `${Date.now()}-${idx}-${randomUUID().slice(0, 8)}`
+    return deriveItemId(input, fallback)
+  }
+
+  const enqueued = await enqueueItems(wf.config.name, inputs, idFn, trackerDir)
+
+  if (onPreEmitPending) {
+    for (let i = 0; i < inputs.length; i++) {
+      try {
+        onPreEmitPending(inputs[i], enqueued[i].runId)
+      } catch (err) {
+        log.warn(
+          `ensureDaemonsAndEnqueue: onPreEmitPending threw for '${enqueued[i].id}': ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      }
+    }
+  }
+
+  if (!quiet) {
+    for (const { id, position } of enqueued) {
+      log.success(`Queued ${wf.config.name} '${id}' (position ${position}).`)
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Step 2: wake every ALREADY-ALIVE daemon so they re-check the queue on
+  // the next event-loop tick. Fire-and-forget: a dead daemon's wake fails
+  // silently, and the newly-appended item will still be claimed by any
+  // other alive daemon (or a newly-spawned one below).
+  // ---------------------------------------------------------------------
+  await Promise.all(
+    alive.map((d) =>
+      fetch(`http://127.0.0.1:${d.port}/wake`, { method: 'POST' }).catch(() => {
+        /* ignore — wake is best-effort */
+      }),
+    ),
+  )
+
+  // ---------------------------------------------------------------------
+  // Step 3: spawn additional daemons if needed (serial — Duo can't be
+  // approved in parallel). Each new daemon's claim loop starts naturally
+  // after Session.launch, so we don't need to wake them explicitly.
+  //
+  // We await the spawns so the CLI only exits after every requested daemon
+  // is at least lockfile-registered — gives callers a chance to see spawn
+  // failures instead of the process silently returning while items sit
+  // un-processable in the queue.
+  // ---------------------------------------------------------------------
   if (!quiet && spawnCount > 0) {
     const why =
       flags.parallel !== undefined
@@ -86,7 +183,6 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
 
   const spawned: Daemon[] = []
   for (let i = 0; i < spawnCount; i++) {
-    // Sequential: Duo cannot be approved in parallel reliably.
     const d = await spawnDaemon(wf.config.name, trackerDir)
     spawned.push(d)
   }
@@ -96,28 +192,7 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
     throw new Error('ensureDaemonsAndEnqueue: expected at least one daemon after spawn phase')
   }
 
-  const idFn = (input: TData, idx: number): string => {
-    const fallback = `${Date.now()}-${idx}-${randomUUID().slice(0, 8)}`
-    return deriveItemId(input, fallback)
-  }
-
-  const enqueued = await enqueueItems(wf.config.name, inputs, idFn, trackerDir)
-
-  // Fire-and-forget wake — best-effort, ignore failures. Empty-queue daemons
-  // resume their claim loop on the next event-loop tick; busy daemons naturally
-  // re-check the queue when they finish their current item.
-  await Promise.all(
-    daemons.map((d) =>
-      fetch(`http://127.0.0.1:${d.port}/wake`, { method: 'POST' }).catch(() => {
-        /* ignore — wake is best-effort */
-      }),
-    ),
-  )
-
   if (!quiet) {
-    for (const { id, position } of enqueued) {
-      log.success(`Queued ${wf.config.name} '${id}' (position ${position}).`)
-    }
     log.step(`${daemons.length} daemon(s) processing.`)
   }
 

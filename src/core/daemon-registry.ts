@@ -15,6 +15,15 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import type { Daemon, DaemonLockfile } from './daemon-types.js'
 
 /**
+ * Absolute path to the repo-local tsx binary. We spawn this directly instead
+ * of `npx tsx` so `child.pid` matches the tsx process's pid (and therefore
+ * the lockfile pid) — npx inserts an intermediate shell whose pid never
+ * matches anything we can discover, which caused `spawnDaemon`'s 5-minute
+ * timeout even when the daemon came up cleanly in 2s (pre-2026-04-22 bug).
+ */
+const TSX_BIN = resolve(process.cwd(), 'node_modules/.bin/tsx')
+
+/**
  * Default on-disk location for daemon lockfiles + queue + log files.
  * Resolvable relative to CWD for normal use; override-able via trackerDir
  * for tests and sandboxed runs.
@@ -187,7 +196,11 @@ export async function spawnDaemon(workflow: string, trackerDir?: string): Promis
   const env = { ...process.env }
   if (trackerDir) env.HRAUTO_TRACKER_DIR = resolve(trackerDir)
 
-  const child: ChildProcess = spawn('npx', ['tsx', 'src/cli-daemon.ts', workflow], {
+  // Spawn tsx directly (not via `npx tsx`) so child.pid matches the daemon
+  // process's pid. npx wraps tsx in a shell, so `child.pid` would be the
+  // shell's pid — which never matches the lockfile and would make the
+  // findAliveDaemons match below time out after 5 minutes.
+  const child: ChildProcess = spawn(TSX_BIN, ['src/cli-daemon.ts', workflow], {
     detached: true,
     stdio: ['ignore', logFd, logFd],
     env,

@@ -64,7 +64,9 @@ Workflows where daemon mode is **not** appropriate (do NOT convert):
 - **Non-CLI workflows** like `sharepoint-download` (dashboard button, fire-and-forget `runWorkflow`) — daemon mode solves "avoid re-Duo on repeated CLI runs," which doesn't apply when the dashboard holds one long-lived session.
 - **Workflows invoked programmatically from other workflows** — daemon mode is client/daemon IPC; an in-process caller should keep using `runWorkflow` / `runWorkflowBatch` directly.
 
-Currently converted: `separations`, `work-study`, `eid-lookup`, `onboarding`. Pending: `old-kronos-reports`, `emergency-contact`. No behavior change intended — daemon mode wraps the same `runOneItem` kernel primitive, so per-item tracker output is byte-identical to the legacy path.
+Currently converted: `separations`, `work-study`, `eid-lookup`, `onboarding`, `oath-signature`, `emergency-contact`. Pending: `old-kronos-reports`. No behavior change intended — daemon mode wraps the same `runOneItem` kernel primitive, so per-item tracker output is byte-identical to the legacy path.
+
+**Emergency-contact note** — the CLI adapter reads YAML + runs roster preflight in-process (before any daemon work), then enqueues each `EmergencyContactRecord` as a separate queue item. `--dry-run` bypasses the daemon entirely. Pass a custom `deriveItemId` to `ensureDaemonsAndEnqueue` because the EID is nested under `input.employee.employeeId` and the composite `p{NN}-{emplId}` id shape is what the legacy path already writes.
 
 **Onboarding note** — one alive daemon = one single-worker session with 3 browsers (CRM + UCPath + I9) and 2 Duos (I9 is SSO no-2FA). Heaviest per-daemon cost of any converted workflow, but biggest savings per repeat invocation (CRM Duo alone is ~30-60s). The workflow's `batch.mode: "pool"` is orthogonal: it governs `runWorkflowBatch` fan-out in the legacy `--direct` path. Daemon-mode parallelism comes from running N daemons (`-p N`), each a single worker claiming off the shared queue. `--dry-run` and `--batch` both auto-force `--direct` (dry-run skips the full session launch; batch.yaml is read in-process).
 
@@ -78,6 +80,7 @@ Currently converted: `separations`, `work-study`, `eid-lookup`, `onboarding`. Pe
 | old-kronos-reports | `npm run kronos` | UKG | Yes | Pool mode (N workers, kernel) |
 | work-study | `npm run work-study` | UCPath | Yes | Single |
 | emergency-contact | `npm run emergency-contact` | UCPath | Yes (batch, `preEmitPending`) | Single browser, one record at a time |
+| oath-signature | `npm run oath-signature <emplId...>` | UCPath | Yes (daemon-mode by default; sequential batch + `preEmitPending`) | Single browser; N daemons via `-p N` |
 | sharepoint-download | _Dashboard button_ (fire-and-forget) / `tsx src/workflows/emergency-contact/scripts/download-roster.ts` (non-kernel CLI) | SharePoint | Yes (single-item, module-level URL injection) | Single (headed browser, gated by Duo) |
 
 ### `sharepoint-download` — notable shape

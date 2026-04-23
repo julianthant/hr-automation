@@ -58,10 +58,22 @@ export function createBatchObserver(
   // exactly once per system even under retries — retries stay inside
   // `loginWithRetry` — so this map stays tidy.
   const pendingStart = new Map<string, number>()
+  // Pool mode passes worker-scoped sessionIds (`w0`, `w1`, …) that are NOT
+  // pre-registered by `withBatchLifecycle` (which only emits `session_create`
+  // for the default batch sessionId `'1'` at line 165). Without a matching
+  // `session_create`, the SessionPanel's `rebuildSessionState` attaches
+  // browsers to a phantom session. Lazy-emit it on first `onBrowserLaunch`
+  // so per-worker sessions show up correctly. Suppress for `'1'` because the
+  // batch-level pre-emit already covered that case.
+  let registeredSession = sessionId === '1'
 
   const observer: SessionObserver = {
     instance,
     onBrowserLaunch: (systemId, browserId) => {
+      if (!registeredSession) {
+        emitSessionCreate(instance, sessionId, trackerDir)
+        registeredSession = true
+      }
       emitBrowserLaunch(instance, sessionId, browserId, systemId, trackerDir)
     },
     onAuthStart: (systemId, browserId) => {

@@ -172,12 +172,14 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           tiling: wf.config.tiling,
           observer,
         })
+        // Awaiting each system's ready promise forces the interleaved
+        // auth chain to complete before `getAuthTimings()` snapshots.
+        // Rejections propagate to `withBatchLifecycle`'s catch so an
+        // auth failure shuts the daemon down cleanly (lockfile unlink,
+        // in-flight unclaim) instead of entering the claim loop with a
+        // broken session and failing every queued item individually.
         for (const sys of wf.config.systems) {
-          try {
-            await session.page(sys.id)
-          } catch {
-            /* auth failure surfaces via withBatchLifecycle catch */
-          }
+          await session.page(sys.id)
         }
         const authTimings = wf.config.authSteps !== false ? getAuthTimings() : undefined
 

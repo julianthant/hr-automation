@@ -1320,9 +1320,22 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         "Access-Control-Allow-Origin": "*",
       });
 
-      // TODO(2026-04-26): delete the fallback path once all events have runId.
-      const RUNID_FALLBACK_UNTIL = new Date("2026-04-26T00:00:00Z").getTime();
-      const fallbackEnabled = Date.now() < RUNID_FALLBACK_UNTIL;
+      // Load-bearing, not legacy. Reviewed 2026-04-23:
+      //
+      // Batch / pool / daemon runs do `Session.launch` at BATCH scope —
+      // outside any `withLogContext`, so `getLogRunId()` returns undefined
+      // and the emitted `auth_start` / `auth_complete` / `browser_launch`
+      // session events carry no `runId`. Those batch-scope events belong
+      // to every item in the batch, so the per-item Events tab needs the
+      // pid+time-window fallback to surface them. Removing it truncates
+      // the Events tab for anything that isn't a single-run kernel
+      // workflow.
+      //
+      // Cleaner long-term: filter by `workflowInstance` (already on every
+      // session event) instead of pid. For now keep the pid fallback
+      // permanently on. If you remove it, first back-fill runId on
+      // batch-scope emits OR switch to instance-based filtering.
+      const fallbackEnabled = true;
 
       let sentCount = 0;
       let firstTick = true;
