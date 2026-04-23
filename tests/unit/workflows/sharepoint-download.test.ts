@@ -33,8 +33,8 @@ test("buildSharePointRosterDownloadHandler: fires kernel runWorkflow and returns
 
   _resetInFlightForTests();
 
-  let invocations = 0;
-  let capturedInput: { id: string; label: string; url: string; outDir: string } | null = null;
+  type CapturedInput = { id: string; label: string; url: string; outDir: string };
+  const captured: CapturedInput[] = [];
   const handler = buildSharePointRosterDownloadHandler({
     outDir: tmp,
     getEnv: (name) =>
@@ -43,8 +43,7 @@ test("buildSharePointRosterDownloadHandler: fires kernel runWorkflow and returns
     // to simulate the real run taking time, so the handler's 202 must be
     // returned BEFORE this promise resolves.
     runWorkflowFn: (async (_wf, input) => {
-      invocations++;
-      capturedInput = input as typeof capturedInput;
+      captured.push(input as CapturedInput);
       await new Promise((resolve) => setTimeout(resolve, 50));
     }) as typeof import("../../../src/core/workflow.js").runWorkflow,
   });
@@ -64,13 +63,11 @@ test("buildSharePointRosterDownloadHandler: fires kernel runWorkflow and returns
 
   // Let the background run complete so the lock clears.
   await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.equal(invocations, 1, "runWorkflow should be called exactly once");
-  assert.ok(capturedInput, "runWorkflow should receive an input");
-  if (capturedInput) {
-    assert.equal(capturedInput.id, "onboarding");
-    assert.equal(capturedInput.label, "Onboarding Roster");
-    assert.equal(capturedInput.url, "https://example.com/file.xlsx");
-  }
+  assert.equal(captured.length, 1, "runWorkflow should be called exactly once");
+  const input = captured[0];
+  assert.equal(input.id, "onboarding");
+  assert.equal(input.label, "Onboarding Roster");
+  assert.equal(input.url, "https://example.com/file.xlsx");
 });
 
 test("buildSharePointRosterDownloadHandler: 400 when env var unset", async () => {

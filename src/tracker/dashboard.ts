@@ -44,6 +44,65 @@ export function getEventSortKey(e: { timestamp?: string; ts?: number }): string 
 }
 
 /**
+ * Resolve a runId to its batch's workflowInstance by looking up the tracker
+ * entry that carries that runId. Returns the first matching `data.instance`
+ * string, or `undefined` if no entry is found or the entry lacks the field.
+ *
+ * Pre-2026-04-21 entries may not have `data.instance`; those degrade to
+ * `undefined` and the caller's batch-scope fallback becomes a no-op.
+ */
+export function resolveInstanceForRun(
+  trackers: Array<Pick<TrackerEntry, "runId" | "data">>,
+  runId: string,
+): string | undefined {
+  if (!runId) return undefined;
+  for (const t of trackers) {
+    if (t.runId !== runId) continue;
+    const instance = t.data?.instance;
+    if (typeof instance === "string" && instance.length > 0) return instance;
+  }
+  return undefined;
+}
+
+/**
+ * Filter session events down to those that belong to a single run. Used by
+ * the `/events/run-events` SSE handler.
+ *
+ * Two matching paths:
+ *
+ * 1. **Direct:** events carrying the exact requested `runId`.
+ * 2. **Batch-scope fallback:** events emitted outside any per-item
+ *    `withLogContext` (so they have no `runId`), attributed to this run via
+ *    matching `workflowInstance`. Batch / pool / daemon workflows call
+ *    `Session.launch` at batch scope — `auth_start`, `auth_complete`, and
+ *    `browser_launch` events for those launches carry an instance but no
+ *    runId.
+ *
+ * Batch workflows assign one `workflowInstance` per batch (e.g. `"Separation
+ * 1"`), so instance-scoping correctly isolates each batch's events — even
+ * when a long-lived daemon processes multiple batches under one pid. (The
+ * previous pid-based fallback leaked across batches for daemons; this does
+ * not.)
+ *
+ * Pure: no filesystem access, no clock. Callers pass already-loaded arrays.
+ */
+export function filterEventsForRun(
+  events: SessionEvent[],
+  trackers: Array<Pick<TrackerEntry, "runId" | "data">>,
+  runId: string,
+): SessionEvent[] {
+  const direct = events.filter((e) => e.runId === runId);
+  const instance = resolveInstanceForRun(trackers, runId);
+  const batchScope = instance
+    ? events.filter((e) => !e.runId && e.workflowInstance === instance)
+    : [];
+
+  const merged = [...direct, ...batchScope];
+  merged.sort((a, b) => getEventSortKey(a).localeCompare(getEventSortKey(b)));
+  return merged;
+}
+
+/**
  * How long after a crash-on-launch the dashboard keeps rendering the red
  * "Launch failed" placeholder in the live Sessions rail. Past this window the
  * failed run is considered historical — details still live in
@@ -938,8 +997,12 @@ export function computeStepDurations(
   const durations: Record<string, number> = {};
   let currentStep: string | null = null;
   let currentStepStartMs: number | null = null;
-  // Earliest valid timestamp in the run — anchors step 1 so pending→first-
-  // running gaps aren't lost. Populated lazily on the first parse-able ts.
+  // Anchor step 1 at the first non-`pending` event. The `pending` row is
+  // written at enqueue time in daemon / pre-emit batch mode (potentially
+  // minutes/hours before the item starts actual work), so using it would
+  // bleed the full queue-wait duration into step 1's duration. The first
+  // `running` event is the "work started here" moment; that's what the
+  // step pipeline should measure.
   let workflowStartMs: number | null = null;
   let firstStepSeen = false;
 
@@ -947,7 +1010,7 @@ export function computeStepDurations(
     const tsMs = Date.parse(e.timestamp);
     if (Number.isNaN(tsMs)) continue;
 
-    if (workflowStartMs === null) workflowStartMs = tsMs;
+    if (workflowStartMs === null && e.status !== "pending") workflowStartMs = tsMs;
 
     const isTerminal = e.status === "done" || e.status === "failed" || e.status === "skipped";
     const nextStep = isTerminal ? null : e.step ?? null;
@@ -1025,23 +1088,52 @@ function pickLater(a: string | undefined, b: string | undefined): string | undef
  * ordinal the RunSelector dropdown shows for the same runId.
  */
 export function buildRunTimelines(
-  entries: Array<{ runId?: string; id: string; timestamp: string }>,
+  entries: Array<{ runId?: string; id: string; timestamp: string; status?: string }>,
 ): Map<string, RunTimeline> {
-  const spans = new Map<string, { earliestTs: string; latestTs: string }>();
+  // `earliestTs` anchors the run's timer (header Elapsed, queue-row elapsed,
+  // step pipeline widths). We prefer the first non-`pending` event — in
+  // daemon mode and pre-emitted batch mode, the `pending` row is written
+  // at enqueue time (potentially minutes/hours before the item claims a
+  // worker), so using it would attribute the full queue-wait duration to
+  // the item's elapsed timer. The first `running` / `done` / `failed` /
+  // `skipped` event is the real "work started here" anchor. Items that
+  // are still queued (only a `pending` row exists) fall back to the
+  // pending timestamp so the queue row still has a sortable timestamp.
+  const spans = new Map<
+    string,
+    { earliestWorkTs: string | null; earliestAnyTs: string; latestTs: string }
+  >();
   for (const e of entries) {
     const rid = e.runId || `${e.id}#1`;
+    const isWork = e.status !== "pending";
     const prev = spans.get(rid);
     if (!prev) {
-      spans.set(rid, { earliestTs: e.timestamp, latestTs: e.timestamp });
+      spans.set(rid, {
+        earliestWorkTs: isWork ? e.timestamp : null,
+        earliestAnyTs: e.timestamp,
+        latestTs: e.timestamp,
+      });
     } else {
-      if (e.timestamp < prev.earliestTs) prev.earliestTs = e.timestamp;
+      if (isWork && (prev.earliestWorkTs === null || e.timestamp < prev.earliestWorkTs)) {
+        prev.earliestWorkTs = e.timestamp;
+      }
+      if (e.timestamp < prev.earliestAnyTs) prev.earliestAnyTs = e.timestamp;
       if (e.timestamp > prev.latestTs) prev.latestTs = e.timestamp;
     }
+  }
+  // Flatten: earliestTs = earliestWorkTs ?? earliestAnyTs (pending-only
+  // queued runs fall back to the pending timestamp for sort stability).
+  const spansFlat = new Map<string, { earliestTs: string; latestTs: string }>();
+  for (const [rid, s] of spans) {
+    spansFlat.set(rid, {
+      earliestTs: s.earliestWorkTs ?? s.earliestAnyTs,
+      latestTs: s.latestTs,
+    });
   }
   // Secondary sort by runId keeps the assignment deterministic if two runs
   // share the same earliest timestamp (realistic for synthetic fixtures;
   // production tracker writes are microsecond-distinct).
-  const sorted = [...spans.entries()].sort(([ra, sa], [rb, sb]) =>
+  const sorted = [...spansFlat.entries()].sort(([ra, sa], [rb, sb]) =>
     sa.earliestTs < sb.earliestTs ? -1 :
     sa.earliestTs > sb.earliestTs ? 1 :
     ra.localeCompare(rb),
@@ -1312,7 +1404,10 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     }
 
     if (url.pathname === "/events/run-events") {
+      const wf = url.searchParams.get("workflow") ?? workflow;
       const requestedRunId = url.searchParams.get("runId") ?? "";
+      const date = url.searchParams.get("date") ?? "";
+      const today = new Date().toISOString().slice(0, 10);
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
@@ -1320,22 +1415,12 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         "Access-Control-Allow-Origin": "*",
       });
 
-      // Load-bearing, not legacy. Reviewed 2026-04-23:
-      //
-      // Batch / pool / daemon runs do `Session.launch` at BATCH scope —
-      // outside any `withLogContext`, so `getLogRunId()` returns undefined
-      // and the emitted `auth_start` / `auth_complete` / `browser_launch`
-      // session events carry no `runId`. Those batch-scope events belong
-      // to every item in the batch, so the per-item Events tab needs the
-      // pid+time-window fallback to surface them. Removing it truncates
-      // the Events tab for anything that isn't a single-run kernel
-      // workflow.
-      //
-      // Cleaner long-term: filter by `workflowInstance` (already on every
-      // session event) instead of pid. For now keep the pid fallback
-      // permanently on. If you remove it, first back-fill runId on
-      // batch-scope emits OR switch to instance-based filtering.
-      const fallbackEnabled = true;
+      // Batch / pool / daemon workflows call `Session.launch` at batch scope
+      // (outside per-item `withLogContext`), so their `auth_*` and
+      // `browser_launch` session events carry a `workflowInstance` but no
+      // `runId`. `filterEventsForRun` resolves `runId -> tracker entry ->
+      // data.instance` and pulls in those batch-scope events by matching
+      // instance. See `filterEventsForRun` jsdoc for the full contract.
 
       let sentCount = 0;
       let firstTick = true;
@@ -1362,21 +1447,16 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
           // Any read failure → empty list; next tick may recover.
         }
 
-        let filtered = allEvents.filter((e) => e.runId === requestedRunId);
-
-        if (fallbackEnabled) {
-          const anchor = allEvents.find(
-            (e) => e.type === "workflow_start" && e.runId === requestedRunId,
-          );
-          if (anchor) {
-            const pidMatched = allEvents.filter(
-              (e) => !e.runId && e.pid === anchor.pid,
-            );
-            filtered = [...filtered, ...pidMatched];
-          }
+        let trackerEntries: TrackerEntry[] = [];
+        try {
+          trackerEntries = (date && date !== today)
+            ? readEntriesForDate(wf, date, dir)
+            : readEntries(wf, dir);
+        } catch {
+          // Tracker read failure → instance fallback becomes a no-op for this tick.
         }
 
-        filtered.sort((a, b) => getEventSortKey(a).localeCompare(getEventSortKey(b)));
+        const filtered = filterEventsForRun(allEvents, trackerEntries, requestedRunId);
 
         if (firstTick) {
           if (filtered.length > 0) res.write(`data: ${JSON.stringify(filtered)}\n\n`);

@@ -45,11 +45,15 @@ export function EntryItem({ entry, selected, onClick }: EntryItemProps) {
     ? new Date(entry.firstLogTs || entry.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
     : "";
 
-  // EID lookup: show the resolved Empl ID as a third row when it's been
-  // stamped onto the entry. Populated by eid-lookup's searchingStep /
-  // crossVerificationStep ("Not found" / "Error" are kept verbatim so the
-  // operator can distinguish "we searched and missed" from "still running").
+  // Row 2 identifiers:
+  //   - eid-lookup stamps `data.emplId` (verbatim "Not found" / "Error" kept
+  //     so the operator can distinguish "we searched and missed" from "still
+  //     running").
+  //   - separations stamps `data.docId` (Kuali document number) immediately
+  //     and `data.eid` after kuali-extraction.
   const emplId = entry.data?.emplId;
+  const docId = entry.data?.docId;
+  const eid = entry.data?.eid;
 
   return (
     <div
@@ -60,23 +64,33 @@ export function EntryItem({ entry, selected, onClick }: EntryItemProps) {
         selected && "bg-accent border-r-[3px] border-r-primary pr-[17px]",
       )}
     >
-      {/* Row 1: Name + status badge */}
-      <div className="flex items-center justify-between min-w-0">
-        <span className="font-semibold text-[14px] truncate">{name || entry.id}</span>
-        <span className={cn("text-[10px] font-semibold px-2.5 py-0.5 rounded-xl uppercase tracking-wide font-mono flex-shrink-0 ml-2", badgeStyles[entry.status])}>
+      {/* Row 1: Name (+ Doc # for separations) + status badge. The Doc #
+          trails the name as a smaller muted-foreground mono chip — no
+          label, just the number — so the operator can tell rows apart at
+          a glance without shifting to Row 2. */}
+      <div className="flex items-center justify-between min-w-0 gap-2">
+        <div className="flex items-baseline gap-2 min-w-0">
+          <span className="font-semibold text-[14px] truncate">{name || entry.id}</span>
+          {docId && (
+            <span className="text-[11px] font-mono text-muted-foreground flex-shrink-0" title={docId}>
+              {docId}
+            </span>
+          )}
+        </div>
+        <span className={cn("text-[10px] font-semibold px-2.5 py-0.5 rounded-xl uppercase tracking-wide font-mono flex-shrink-0", badgeStyles[entry.status])}>
           {entry.status}
         </span>
       </div>
 
-      {/* Row 2: EID. Rendered only when the workflow has stamped data.emplId
-          (today: eid-lookup). Slotted between the name and the time/meta
+      {/* Row 2: EID (eid-lookup stamps `data.emplId`; separations stamps
+          `data.eid`). Slotted between the name/doc row and the time/meta
           row so the resolved identifier sits visually closest to the
-          operator-readable name. Uses the same mono/muted treatment as the
-          detail grid so the value matches the LogPanel's EID cell. */}
-      {emplId && (
+          operator-readable name. Uses the same mono/muted treatment as
+          the detail grid so the value matches the LogPanel's EID cell. */}
+      {(emplId || eid) && (
         <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground min-w-0">
           <span className="uppercase tracking-wider text-[10px] flex-shrink-0">EID</span>
-          <span className="truncate text-foreground" title={emplId}>{emplId}</span>
+          <span className="truncate text-foreground" title={emplId || eid}>{emplId || eid}</span>
         </div>
       )}
 

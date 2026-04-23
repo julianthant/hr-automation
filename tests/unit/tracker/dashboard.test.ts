@@ -92,13 +92,13 @@ describe("computeStepDurations", () => {
     assert.equal(durations.B, 5_000);
   });
 
-  it("absorbs the pending→first-running gap into step 1 so sum matches global elapsed", () => {
-    // Realistic kernel shape: pending fires immediately at workflow start,
-    // then the first `running` event (often auth:<system>) doesn't fire until
-    // after browser launch + session setup — a ~5s gap in practice. Without
-    // the anchor fix, that gap was silently dropped. With it, step 1's
-    // duration = (step 2 start) - (pending ts), and the sum of durations
-    // equals the global elapsed time the top-level timer shows.
+  it("excludes the pending→first-running gap so queue-wait is not charged to step 1", () => {
+    // In daemon mode and pre-emit batch mode, `pending` is written at
+    // enqueue time — potentially minutes/hours before the item actually
+    // starts running. Charging that gap to step 1 would inflate every
+    // item's elapsed timer by its queue-wait duration. The anchor is the
+    // first non-`pending` event; step 1's duration measures only its own
+    // active window.
     const entries = [
       { timestamp: "2026-04-17T10:00:00.000Z", status: "pending" as const },
       { timestamp: "2026-04-17T10:00:05.000Z", status: "running" as const, step: "auth:ucpath" },
@@ -106,12 +106,16 @@ describe("computeStepDurations", () => {
       { timestamp: "2026-04-17T10:00:35.000Z", status: "done" as const },
     ];
     const durations = computeStepDurations(entries);
-    assert.equal(durations["auth:ucpath"], 20_000, "auth absorbs the 5s pre-step gap (20s, not 15s)");
+    assert.equal(durations["auth:ucpath"], 15_000, "auth = its own window (auth:ucpath → transaction), NOT pending → transaction");
     assert.equal(durations.transaction, 15_000, "transaction unchanged");
 
-    const totalElapsed = Date.parse("2026-04-17T10:00:35.000Z") - Date.parse("2026-04-17T10:00:00.000Z");
+    // Sum tiles the working window (first-running → done), not the
+    // pending-inclusive window. This matches the header Elapsed timer,
+    // which also anchors at the first non-pending event.
+    const workingElapsed =
+      Date.parse("2026-04-17T10:00:35.000Z") - Date.parse("2026-04-17T10:00:05.000Z");
     const sum = Object.values(durations).reduce((a, b) => a + b, 0);
-    assert.equal(sum, totalElapsed, "sum of step durations equals total elapsed time");
+    assert.equal(sum, workingElapsed, "sum of step durations equals first-running → done");
   });
 
   it("tiles elapsed time when no pending event is present (first running is the anchor)", () => {
@@ -128,13 +132,14 @@ describe("computeStepDurations", () => {
     assert.equal(durations.B, 20_000);
   });
 
-  it("pool-item shape: pending → auth:ucpath → auth:crm → handler steps → done tiles exactly", () => {
+  it("pool-item shape: pending → auth:ucpath → auth:crm → handler steps → done tiles the working window", () => {
     // Locks in the shape `runOneItem` emits when the batch runner injects
     // per-system authTimings before the handler runs. Each synthetic
-    // `running` entry is stamped with the REAL observer-recorded startTs,
-    // so the gap between each entry and the next step-bearing entry becomes
-    // that step's duration. The whole run tiles exactly to the elapsed
-    // between `pending` and `done` — no gaps lost, no overlap double-counted.
+    // `running` entry is stamped with the REAL observer-recorded startTs.
+    // The durations tile exactly from the first non-`pending` event to
+    // `done` — pending→first-running is queue/enqueue overhead and is
+    // deliberately excluded so daemon-mode items aren't charged the
+    // minutes/hours their pending row sat waiting for a worker.
     const entries = [
       { timestamp: "2026-04-21T21:41:26.000Z", status: "pending" as const },
       { timestamp: "2026-04-21T21:41:28.762Z", status: "running" as const, step: "auth:ucpath" },
@@ -145,18 +150,20 @@ describe("computeStepDurations", () => {
     ];
     const durations = computeStepDurations(entries);
 
-    // auth:ucpath spans pending (21:41:26) → auth:crm (21:41:44) = 18s
-    assert.equal(durations["auth:ucpath"], 18_000, "auth:ucpath absorbs pre-step gap + its own window");
-    // auth:crm spans auth:crm (21:41:44) → searching (21:42:13) = 29s
+    // auth:ucpath spans 21:41:28.762 → auth:crm (21:41:44) = 15.238s
+    assert.equal(durations["auth:ucpath"], 15_238, "auth:ucpath = its own window (no pre-pending absorption)");
+    // auth:crm spans 21:41:44 → searching (21:42:13) = 29s
     assert.equal(durations["auth:crm"], 29_000, "auth:crm duration is crm-start → first handler step");
     // searching spans 21:42:13 → 21:42:27 = 14s
     assert.equal(durations.searching, 14_000, "searching duration");
     // cross-verification spans 21:42:27 → 21:42:40 = 13s
     assert.equal(durations["cross-verification"], 13_000, "cross-verification duration");
 
-    const totalElapsed = Date.parse("2026-04-21T21:42:40.000Z") - Date.parse("2026-04-21T21:41:26.000Z");
+    // Working window = first-running (21:41:28.762) → done (21:42:40) = 71.238s.
+    const workingElapsed =
+      Date.parse("2026-04-21T21:42:40.000Z") - Date.parse("2026-04-21T21:41:28.762Z");
     const sum = Object.values(durations).reduce((a, b) => a + b, 0);
-    assert.equal(sum, totalElapsed, "pool-item durations tile exactly to total elapsed");
+    assert.equal(sum, workingElapsed, "pool-item durations tile to the working window, not pending-inclusive");
   });
 });
 
