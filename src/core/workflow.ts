@@ -115,7 +115,17 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
     stepper.setScreenshotFn(ctx.screenshot)
     try {
       if (args.preHandler) await args.preHandler()
-      await wf.config.handler(ctx, item)
+      try {
+        await wf.config.handler(ctx, item)
+      } catch (err) {
+        // Capture state for any throw that escapes ctx.step. In-step throws
+        // already get a screenshot via Stepper.step's catch, so in that
+        // path we see two files — different labels (`step:<name>` vs
+        // `handler-throw`) keep them distinguishable. Best-effort: a
+        // screenshot failure must never mask the original error.
+        try { await ctx.screenshot({ kind: 'error', label: 'handler-throw' }) } catch { /* best-effort */ }
+        throw err
+      }
       return { ok: true }
     } catch (err) {
       return { ok: false, error: classifyError(err) }
@@ -200,7 +210,16 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
           })
           stepper.setScreenshotFn(ctx.screenshot)
           if (args.preHandler) await args.preHandler()
-          await wf.config.handler(ctx, item)
+          try {
+            await wf.config.handler(ctx, item)
+          } catch (err) {
+            // Covers throws that escape ctx.step (e.g. separations'
+            // resolveJobSummaryResult unwrap or the post-step
+            // submittedWithoutTxnNumber guard). Stepper.step already
+            // screenshots in-step throws; same label convention applies.
+            try { await ctx.screenshot({ kind: 'error', label: 'handler-throw' }) } catch { /* best-effort */ }
+            throw err
+          }
         },
         {
           ...buildTrackerOpts(wf),
@@ -408,7 +427,14 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
     }
 
     try {
-      await wf.config.handler(ctx, data)
+      try {
+        await wf.config.handler(ctx, data)
+      } catch (err) {
+        // Same screenshot-on-handler-throw hoist as runOneItem (see the
+        // two other call sites). Best-effort; original throw always wins.
+        try { await ctx.screenshot({ kind: 'error', label: 'handler-throw' }) } catch { /* best-effort */ }
+        throw err
+      }
     } finally {
       if (sigintHandler) process.off('SIGINT', sigintHandler)
       await session.close()
