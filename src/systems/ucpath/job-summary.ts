@@ -4,6 +4,7 @@ import { errorMessage, classifyPlaywrightError } from "../../utils/errors.js";
 import { jobSummary } from "./selectors.js";
 import { waitForPeopleSoftProcessing } from "./navigate.js";
 import { dismissPeopleSoftModalMask } from "../common/modal.js";
+import { lookupJobInfoByEidFromPersonOrgSummary } from "./person-org-summary-fallback.js";
 
 /** Direct URL — skips sidebar, no iframe wrapper. */
 const JOB_SUMMARY_URL =
@@ -62,9 +63,15 @@ export async function navigateToWorkforceJobSummary(page: Page): Promise<void> {
 }
 
 /**
- * Search for an employee by Empl ID.
+ * Search for an employee by Empl ID. Returns `true` if results were found,
+ * `false` if the page shows "No matching values were found." — a common
+ * state for certain employee types (non-UCSD Business Unit, historical
+ * records, etc.) that Workforce Job Summary's default filters exclude.
+ *
+ * Callers should fall back to `lookupJobInfoByEidFromPersonOrgSummary`
+ * when this returns `false`.
  */
-export async function searchJobSummary(page: Page, emplId: string): Promise<void> {
+export async function searchJobSummary(page: Page, emplId: string): Promise<boolean> {
   const root = await getFormRoot(page);
 
   log.step(`[Job Summary] Searching for Empl ID: ${emplId}`);
@@ -72,7 +79,22 @@ export async function searchJobSummary(page: Page, emplId: string): Promise<void
   await jobSummary.searchButton(root).click({ timeout: 10_000 });
 
   await page.waitForTimeout(5_000);
+
+  // Detect the "no results" state. PeopleSoft shows literal text:
+  //   "No matching values were found."
+  // when the search criteria match zero rows. Without this check the
+  // subsequent Work Location tab click waits 15–30s before timing out
+  // on a phantom locator.
+  const noResults = await root
+    .getByText("No matching values were found.") // allow-inline-selector -- literal PeopleSoft empty-results sentinel
+    .count()
+    .catch(() => 0);
+  if (noResults > 0) {
+    log.warn(`[Job Summary] No matching values for Empl ID ${emplId} — Workforce Job Summary search returned empty.`);
+    return false;
+  }
   log.success(`[Job Summary] Results loaded for ${emplId}`);
+  return true;
 }
 
 /**
@@ -199,13 +221,31 @@ export async function extractJobInfo(
 
 /**
  * Full flow: navigate, search, extract all data.
+ *
+ * Workforce Job Summary's search has default filters (Business Unit,
+ * HR Status, Organizational Relationship) that exclude certain employees —
+ * observed failure modes include historical records and non-SDCMP BUs.
+ * When the primary search returns "No matching values were found.", we
+ * fall back to Person Organizational Summary, which has broader coverage
+ * and a fixed iframe layout. `lookupJobInfoByEidFromPersonOrgSummary`
+ * returns the same 4 fields; callers never see the branch.
  */
 export async function getJobSummaryData(
   page: Page,
   emplId: string,
 ): Promise<JobSummaryData> {
   await navigateToWorkforceJobSummary(page);
-  await searchJobSummary(page, emplId);
+  const found = await searchJobSummary(page, emplId);
+
+  if (!found) {
+    log.warn(`[Job Summary] Workforce Job Summary returned no results for EID ${emplId}. Falling back to Person Organizational Summary.`);
+    const fallback = await lookupJobInfoByEidFromPersonOrgSummary(page, emplId);
+    if (fallback) return fallback;
+    throw new Error(
+      `Job Summary lookup failed for EID ${emplId}: neither Workforce Job Summary nor Person Organizational Summary returned results`,
+    );
+  }
+
   const workLocation = await extractWorkLocation(page);
   const jobInfo = await extractJobInfo(page);
 
