@@ -244,6 +244,29 @@ export class Session {
     }
   }
 
+  /**
+   * Register a handler that fires when any system's browser disconnects
+   * (user closed the window, Chrome crashed, OS killed the process, etc.).
+   * Returns an unsubscribe function that detaches every listener.
+   *
+   * Worker slots (browser: null) are skipped — the parent owns browser
+   * lifetime in shared-context-pool mode.
+   */
+  onBrowserDisconnect(handler: (systemId: string) => void): () => void {
+    const registered: Array<{ browser: Browser; listener: () => void }> = []
+    for (const [systemId, slot] of this.state.browsers) {
+      if (!slot.browser) continue
+      const listener = (): void => handler(systemId)
+      slot.browser.on('disconnected', listener)
+      registered.push({ browser: slot.browser, listener })
+    }
+    return (): void => {
+      for (const { browser, listener } of registered) {
+        try { browser.off('disconnected', listener) } catch { /* ignore */ }
+      }
+    }
+  }
+
   async killChrome(): Promise<void> {
     // SIGINT teardown — force-close all browsers without awaiting graceful shutdown.
     for (const slot of this.state.browsers.values()) {

@@ -166,22 +166,39 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         ownSigint: false,
       },
       async ({ instance, markTerminated, makeObserver }) => {
-        const { observer, getAuthTimings } = makeObserver('1')
+        // The observer is still wired so SessionPanel / Events tab can
+        // show the one-time daemon auth, but we deliberately do NOT
+        // snapshot authTimings for per-item injection — see the comment
+        // at the `runOneItem` call site below.
+        const { observer } = makeObserver('1')
         const session = await launchFn(wf.config.systems, {
           authChain: wf.config.authChain,
           tiling: wf.config.tiling,
           observer,
         })
-        // Awaiting each system's ready promise forces the interleaved
-        // auth chain to complete before `getAuthTimings()` snapshots.
-        // Rejections propagate to `withBatchLifecycle`'s catch so an
-        // auth failure shuts the daemon down cleanly (lockfile unlink,
-        // in-flight unclaim) instead of entering the claim loop with a
-        // broken session and failing every queued item individually.
+        // Force every system's auth to complete at daemon startup so the
+        // claim loop doesn't race with in-progress Duo prompts. Rejections
+        // propagate to `withBatchLifecycle`'s catch so an auth failure
+        // shuts the daemon down cleanly (lockfile unlink, in-flight
+        // unclaim) instead of entering the claim loop with a broken
+        // session and failing every queued item individually.
         for (const sys of wf.config.systems) {
           await session.page(sys.id)
         }
-        const authTimings = wf.config.authSteps !== false ? getAuthTimings() : undefined
+
+        // Closing any window (user intent) or a browser crash should terminate
+        // the daemon — a daemon whose browsers are gone can't serve queued
+        // items anyway. Mirrors SIGTERM: set shuttingDown, resolve the idle
+        // waiters so the loop exits. In-flight teardown runs in `finally`.
+        const unsubscribeDisconnect = session.onBrowserDisconnect((systemId) => {
+          if (shuttingDown) return
+          log.warn(
+            `[Daemon ${wf.config.name}/${instanceId}] browser disconnected (${systemId}); shutting down`,
+          )
+          shuttingDown = true
+          shutdownResolve?.()
+          wakeResolve?.()
+        })
 
         // Orphan recovery on startup: include self in alive set so we don't
         // accidentally unclaim items we just claimed on a previous (crashed)
@@ -214,6 +231,16 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
               const runId = item.runId ?? randomUUID()
               inFlight = { itemId: item.id, runId }
               lastActivity = Date.now()
+              // authTimings is intentionally NOT forwarded in daemon mode.
+              // The observer captures one set of timings when the daemon's
+              // Session authenticates at startup; re-injecting them into
+              // every queued item stamps synthetic `auth:<id>` rows at
+              // daemon-start time, so item #N's earliest tracker row is
+              // minutes/hours in the past and the dashboard timer shows
+              // the full queue-wait duration inside its auth phase.
+              // In daemon mode each item's timer should anchor at its own
+              // first `running` event (first real handler step); the
+              // one-time daemon auth is still visible via SessionPanel.
               const r = await runOneItem({
                 wf,
                 session,
@@ -223,7 +250,6 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 trackerDir,
                 callerPreEmits: false,
                 preAssignedInstance: instance,
-                authTimings,
               })
               markTerminated(runId)
               if (r.ok) {
@@ -278,6 +304,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
             }
           }
         } finally {
+          unsubscribeDisconnect()
           if (inFlight) {
             if (forceShutdown) {
               await markItemFailed(
