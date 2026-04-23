@@ -581,22 +581,53 @@ export async function clickSaveAndSubmit(
       const txnFrame = getContentFrame(page);
 
       if (employeeName) {
-        // Search for exact name link (e.g. "Ivette Lima Montes"). PeopleSoft
-        // shows first name + last name as a link. Dynamic name → inline.
-        const nameLink = txnFrame.getByRole("link", { name: employeeName }); // allow-inline-selector
-        if ((await nameLink.count()) > 0) {
-          log.step(`Clicking employee: ${employeeName}`);
-          await nameLink.first().click({ timeout: 5_000 });
-        } else {
-          // Try partial match — last name only. Dynamic regex → inline.
-          const lastName = employeeName.split(",")[0]?.trim() ?? employeeName.split(" ").pop() ?? "";
-          const partialLink = txnFrame.getByRole("link", { name: new RegExp(lastName, "i") }); // allow-inline-selector
-          if ((await partialLink.count()) > 0) {
-            log.step(`Clicking employee (partial match): ${lastName}`);
-            await partialLink.last().click({ timeout: 5_000 });
-          } else {
-            log.step(`Employee link not found: ${employeeName}`);
+        // The newly-submitted transaction can take several seconds to appear
+        // in the Smart HR Transactions list. Poll for up to 15s, trying
+        // multiple name forms on each tick (yesterday's failures hit both
+        // the canonical "First Last" and the "Last, First" forms — the
+        // caller may pass either shape depending on upstream conversion).
+        //
+        // Name-form candidates:
+        //   1. employeeName as passed
+        //   2. flipped form: "Last, First Middle" ↔ "First Middle Last"
+        //   3. partial regex on last name only (final fallback)
+        const parts = employeeName.includes(",")
+          ? employeeName.split(",").map((s) => s.trim())
+          : employeeName.split(" ").map((s) => s.trim());
+        const lastName = employeeName.includes(",")
+          ? (parts[0] ?? "")
+          : (parts[parts.length - 1] ?? "");
+        const flipped = employeeName.includes(",")
+          ? parts.slice().reverse().join(" ")
+          : (parts.length >= 2
+              ? `${parts[parts.length - 1]}, ${parts.slice(0, -1).join(" ")}`
+              : employeeName);
+
+        const deadline = Date.now() + 15_000;
+        let clicked = false;
+        while (!clicked && Date.now() < deadline) {
+          const candidates: Array<{ label: string; locator: Locator }> = [
+            { label: employeeName, locator: txnFrame.getByRole("link", { name: employeeName }) }, // allow-inline-selector -- dynamic name match
+            { label: flipped, locator: txnFrame.getByRole("link", { name: flipped }) }, // allow-inline-selector -- dynamic flipped-name match
+          ];
+          if (lastName) {
+            candidates.push({
+              label: `partial:${lastName}`,
+              locator: txnFrame.getByRole("link", { name: new RegExp(lastName, "i") }), // allow-inline-selector -- dynamic last-name regex
+            });
           }
+          for (const { label, locator } of candidates) {
+            if ((await locator.count()) > 0) {
+              log.step(`Clicking employee: ${label}`);
+              await locator.first().click({ timeout: 5_000 });
+              clicked = true;
+              break;
+            }
+          }
+          if (!clicked) await page.waitForTimeout(1_500);
+        }
+        if (!clicked) {
+          log.step(`Employee link not found after 15s poll: ${employeeName}`);
         }
         await page.waitForTimeout(5_000);
 
