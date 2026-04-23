@@ -24,6 +24,7 @@
     "separation:status": "tsx --env-file=.env src/cli.ts daemon-status separations",
     "separation:stop": "tsx --env-file=.env src/cli.ts daemon-stop separations",
     "separation:attach": "tsx --env-file=.env src/cli.ts daemon-attach separations",
+    "separation:recover": "tsx --env-file=.env src/cli.ts separation-recover",
 
     "work-study": "tsx --env-file=.env src/cli.ts work-study",
     "work-study:dry": "tsx --env-file=.env src/cli.ts work-study --dry-run",
