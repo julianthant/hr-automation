@@ -3,6 +3,7 @@ import { log } from "../../utils/log.js";
 import { errorMessage, classifyPlaywrightError } from "../../utils/errors.js";
 import { jobSummary } from "./selectors.js";
 import { waitForPeopleSoftProcessing } from "./navigate.js";
+import { dismissPeopleSoftModalMask } from "../common/modal.js";
 
 /** Direct URL — skips sidebar, no iframe wrapper. */
 const JOB_SUMMARY_URL =
@@ -102,7 +103,14 @@ export async function extractWorkLocation(
   await waitForPeopleSoftProcessing(psFrame, 15_000).catch(() => {});
 
   const clickOnce = async (): Promise<void> => {
-    await jobSummary.workLocationTab(root).click({ timeout: 15_000 });
+    // Dismiss PeopleSoft's transparent modal mask before every attempt — it
+    // leaks across tab switches and "subtree intercepts pointer events" the
+    // click. Re-probe the form root because direct-URL navigation can inject
+    // the iframe late (first probe runs at function entry, before the
+    // iframe loads).
+    await dismissPeopleSoftModalMask(page);
+    const attemptRoot = await getFormRoot(page);
+    await jobSummary.workLocationTab(attemptRoot).click({ timeout: 15_000 });
   };
 
   try {
@@ -154,9 +162,11 @@ export async function extractWorkLocation(
 export async function extractJobInfo(
   page: Page,
 ): Promise<{ jobCode: string; jobDescription: string }> {
-  const root = await getFormRoot(page);
-
   log.step("[Job Summary] Clicking Job Information tab...");
+  // Same modal-mask + re-probe pattern as extractWorkLocation — the tab
+  // click can flake on the same transparent overlay.
+  await dismissPeopleSoftModalMask(page);
+  const root = await getFormRoot(page);
   await jobSummary.jobInformationTab(root).click({ timeout: 10_000 });
   await page.waitForTimeout(3_000);
 
