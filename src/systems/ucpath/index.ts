@@ -23,6 +23,7 @@ export {
   clickEarnsDistTab,
   clickEmployeeExperienceTab,
   clickSaveAndSubmit,
+  readLatestTransactionNumber,
   parsePayRate,
   buildCommentsText,
 } from "./transaction.js";

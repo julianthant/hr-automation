@@ -57,8 +57,15 @@ import {
   fillComments,
   clickSaveAndSubmit,
   getJobSummaryData,
+  readLatestTransactionNumber,
 } from "../../systems/ucpath/index.js";
 import type { JobSummaryData } from "../../systems/ucpath/index.js";
+import {
+  hashKey,
+  hasRecentlySucceeded,
+  findRecentTransactionId,
+  recordSuccess,
+} from "../../core/idempotency.js";
 
 import {
   computeTerminationEffDate,
@@ -431,12 +438,61 @@ export const separationsWorkflow = defineWorkflow({
     // failures which are logged and allowed to fall through to finalization
     // (so the Kuali form gets its "left blank for manual entry" treatment).
     let submittedWithoutTxnNumber = false;
+    // Idempotency key — identifies this specific termination transaction.
+    // Two scenarios this protects against:
+    //   1. Prior run submitted AND captured txn# → skip UCPath entirely,
+    //      resume at Kuali finalization with the recorded txn#.
+    //   2. Prior run submitted but readback failed (empty txn# recorded) →
+    //      skip the submit (would be a duplicate), run readback-only to
+    //      recover the txn#, then continue to Kuali finalization.
+    // Key fields: workflow + docId + emplId. docId alone is unique per
+    // Kuali doc; emplId is a cross-check that the Kuali extraction resolved
+    // to the same employee as last time.
+    const idempKey = hashKey({
+      workflow: "separations",
+      docId,
+      emplId: kualiData.eid,
+    });
+
     await ctx.step("ucpath-transaction", async () => {
       const t0 = Date.now();
       log.debug(`[Step: ucpath-transaction] START empl='${kualiData.eid}' template='${template}'`);
       try {
         log.step("=== UCPath Smart HR Transaction ===");
         const ucpathPage = await ctx.page("ucpath");
+
+        // Convert "Last, First" → "First Last" for UCPath name matching
+        const nameParts = kualiData.employeeName.split(",").map((s) => s.trim());
+        const ucpathName = nameParts.length >= 2 ? `${nameParts[1]} ${nameParts[0]}` : kualiData.employeeName;
+
+        // Idempotency check — before attempting the submit.
+        if (hasRecentlySucceeded(idempKey)) {
+          const recordedTxn = findRecentTransactionId(idempKey) ?? "";
+          if (recordedTxn) {
+            log.warn(`[UCPath Txn] Prior submit recorded (txn #${recordedTxn}) — skipping UCPath submit (idempotency)`);
+            transactionNumber = recordedTxn;
+            ctx.updateData({ idempotencySkip: "submit" });
+            return;
+          }
+          // Submit happened but txn# wasn't captured — run readback only.
+          log.warn("[UCPath Txn] Prior submit recorded without txn # — running readback only (idempotency)");
+          ctx.updateData({ idempotencySkip: "submit-readback" });
+          try {
+            const recoveredTxn = await readLatestTransactionNumber(ucpathPage, ucpathName);
+            if (recoveredTxn) {
+              transactionNumber = recoveredTxn;
+              recordSuccess(idempKey, recoveredTxn, "separations");
+              log.success(`[UCPath Txn] Recovered txn #${recoveredTxn} via readback`);
+              await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-recovered' });
+            } else {
+              submittedWithoutTxnNumber = true;
+            }
+          } catch (e) {
+            log.error(`[UCPath Txn] Readback-only path failed: ${errorMessage(e)}`);
+            submittedWithoutTxnNumber = true;
+          }
+          return;
+        }
 
         try {
           await navigateToSmartHR(ucpathPage);
@@ -456,9 +512,6 @@ export const separationsWorkflow = defineWorkflow({
           await selectReasonCode(ucpathPage, frame, ucpathReason);
           await fillComments(frame, finalComments);
 
-          // Convert "Last, First" → "First Last" for UCPath name matching
-          const nameParts = kualiData.employeeName.split(",").map((s) => s.trim());
-          const ucpathName = nameParts.length >= 2 ? `${nameParts[1]} ${nameParts[0]}` : kualiData.employeeName;
           const submitResult = await clickSaveAndSubmit(ucpathPage, frame, ucpathName);
           transactionNumber = submitResult.transactionNumber ?? "";
           log.step(
@@ -470,6 +523,11 @@ export const separationsWorkflow = defineWorkflow({
             log.error(`[UCPath Txn] Submit failed: ${submitResult.error}`);
             return;
           }
+          // Record idempotency IMMEDIATELY after a successful submit — even
+          // if txn# is empty. A retry that comes here with an empty record
+          // will skip the submit and try readback only, avoiding a duplicate
+          // UCPath termination transaction.
+          recordSuccess(idempKey, transactionNumber, "separations");
           if (!transactionNumber) {
             submittedWithoutTxnNumber = true;
             return;
