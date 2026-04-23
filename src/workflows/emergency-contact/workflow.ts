@@ -124,6 +124,7 @@ export const emergencyContactWorkflow = defineWorkflow({
       const plan = buildEmergencyContactPlan(record, page, planCtx);
       try {
         await plan.execute();
+        await ctx.screenshot({ kind: 'form', label: 'emergency-contact-saved' });
       } catch (err) {
         if (err instanceof TransactionError) {
           throw new Error(
