@@ -266,6 +266,15 @@ export async function withTrackedWorkflow<T>(
      * entry. Use this instead of encoding failure info into a mangled step name.
      */
     emitFailed: (step: string, error: string) => void,
+    /**
+     * The tracker-stamped runId for this invocation — either the caller's
+     * `preAssignedRunId` or the auto-generated `{id}#N` value. Callers that
+     * build a Stepper / screenshot emitter inside the body should thread this
+     * in so their emitted events correlate 1:1 with the JSONL rows. Without
+     * this, the body would generate its own runId for Stepper while the
+     * tracker stamps a different one on its rows (prior bug fixed 2026-04-23).
+     */
+    runId: string,
   ) => Promise<T>,
   opts: WithTrackedWorkflowOpts = {},
 ): Promise<T> {
@@ -408,6 +417,7 @@ export async function withTrackedWorkflow<T>(
       (cb) => cleanupFns.push(cb),
       session,
       emitFailedFn,
+      runId,
     );
 
     // Runtime warning (Option A) — any declared detailField key that the

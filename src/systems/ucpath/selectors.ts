@@ -542,6 +542,118 @@ export const emergencyContact = {
     page.getByRole("textbox", { name: "Contact Name" }),
 };
 
+// ─── Person Profiles → Oath Signature (standalone deep-link URL) ──────────
+//
+// Person Profile uses a DIFFERENT iframe from Smart HR:
+//   - Smart HR / PayPath → `#main_target_win0`   (use `getContentFrame`)
+//   - Person Profiles     → `#ptifrmtgtframe`     (use `getPersonProfileFrame`)
+//
+// The component URL path is `c/SETUP_PROFILE_MANAGEMENT.JPM_PERSON_PROFILE.GBL`.
+// See `src/workflows/oath-signature/enter.ts` for the full flow.
+// verified 2026-04-22 via playwright-cli on EID 10873075
+
+export const oathSignature = {
+  /**
+   * Person Profiles content iframe FrameLocator. Distinct from Smart HR's
+   * `#main_target_win0` — this component mounts inside `#ptifrmtgtframe`
+   * (name="TargetContent"). verified 2026-04-22
+   * @tags iframe, frame, person-profile, oath
+   */
+  getPersonProfileFrame: (page: Page): FrameLocator =>
+    page.frameLocator("#ptifrmtgtframe"),
+
+  /**
+   * Empl ID textbox on the Find-an-Existing-Value search form. verified 2026-04-22
+   * @tags empl, id, employee, textbox, person-profile, search
+   */
+  emplIdInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Empl ID" }),
+
+  /**
+   * Search button (exact: true disambiguates from "Save Search"). verified 2026-04-22
+   * @tags search, button, person-profile
+   */
+  searchButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Search", exact: true }),
+
+  /**
+   * Clear button on the search form — clears Empl ID between iterations. verified 2026-04-22
+   * @tags clear, button, person-profile, search
+   */
+  clearSearchButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Clear", exact: true }),
+
+  /**
+   * "Add New Oath Signature Date" link on the loaded Person Profile. The
+   * primary anchor is the PeopleSoft action id; accessible-name fallback
+   * covers rename-proof backups. Two links share the same name (icon +
+   * text) — `.first()` picks the icon/primary anchor.
+   * verified 2026-04-22 (id: DERIVED_JPM_JP_JPM_JP_ADD_CAT_ITM$41$$0)
+   * @tags add, new, oath, signature, link, person-profile
+   */
+  addNewOathLink: (f: FrameLocator): Locator =>
+    f
+      .locator('[id="DERIVED_JPM_JP_JPM_JP_ADD_CAT_ITM$41$$0"]')
+      .or(f.getByRole("link", { name: "Add New Oath Signature Date" }).first()),
+
+  /**
+   * "There are currently no Oath Signature Date for this profile..." sentinel.
+   * When visible on the loaded profile, the employee has no existing oath —
+   * safe to add. When absent, an oath already exists (idempotency skip).
+   * verified 2026-04-22
+   * @tags no, existing, oath, sentinel, text, person-profile
+   */
+  noOathSentinel: (f: FrameLocator): Locator =>
+    f.getByText("There are currently no Oath Signature Date", { exact: false }),
+
+  /**
+   * Oath Signature Date textbox inside the "Add New Oath Signature Date"
+   * sub-form. Defaults to today's date on open. verified 2026-04-22
+   * @tags oath, signature, date, textbox, person-profile
+   */
+  oathDateInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Oath Signature Date" }),
+
+  /**
+   * OK button on the oath-detail sub-form — applies the row and returns to
+   * the profile. verified 2026-04-22
+   * @tags ok, button, oath, sub-form, person-profile
+   */
+  oathOkButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "OK", exact: true }),
+
+  /**
+   * Cancel button on the oath-detail sub-form — used by test/dry paths. verified 2026-04-22
+   * @tags cancel, button, oath, sub-form, person-profile
+   */
+  oathCancelButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Cancel", exact: true }),
+
+  /**
+   * Save button at the bottom of the Person Profile form — commits the
+   * staged oath row to the database. verified 2026-04-22
+   * @tags save, button, person-profile
+   */
+  saveButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Save", exact: true }),
+
+  /**
+   * Return to Search button shown after save — clears the profile and
+   * returns to the empty search form for the next EID. verified 2026-04-22
+   * @tags return, search, button, person-profile
+   */
+  returnToSearchButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Return to Search", exact: true }),
+
+  /**
+   * Employee name display on the loaded Person Profile — visible near the
+   * Empl ID header. Extracted for tracker rows + dashboard. verified 2026-04-22
+   * @tags employee, name, display, person-profile
+   */
+  employeeNameDisplay: (f: FrameLocator): Locator =>
+    f.locator('[id*="UC_JPM_PRS_I_PERSON_NAME"], [id*="PSXLATITEM_XLATLONGNAME"]').first(),
+};
+
 // ─── Barrel: grouped namespace export ──────────────────────────────────────
 
 /**
@@ -560,5 +672,6 @@ export const ucpathSelectors = {
   jobSummary,
   hrTasks,
   emergencyContact,
+  oathSignature,
   getContentFrame,
 };

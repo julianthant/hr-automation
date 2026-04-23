@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, appendFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, appendFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -20,15 +20,67 @@ test('enqueueItems creates queue file and assigns 1-indexed positions', async ()
   const dir = TMP()
   try {
     const result = await enqueueItems('wf', [{ x: 1 }, { x: 2 }, { x: 3 }], (_, i) => ['a', 'b', 'c'][i], dir)
-    assert.deepEqual(result, [
-      { id: 'a', position: 1 },
-      { id: 'b', position: 2 },
-      { id: 'c', position: 3 },
-    ])
+    assert.equal(result.length, 3)
+    assert.equal(result[0].id, 'a')
+    assert.equal(result[0].position, 1)
+    assert.match(result[0].runId, /^[0-9a-f-]{36}$/)
+    assert.equal(result[1].id, 'b')
+    assert.equal(result[1].position, 2)
+    assert.match(result[1].runId, /^[0-9a-f-]{36}$/)
+    assert.equal(result[2].id, 'c')
+    assert.equal(result[2].position, 3)
+    assert.match(result[2].runId, /^[0-9a-f-]{36}$/)
+    // Pre-assigned runIds must be distinct (one per enqueue event).
+    assert.equal(new Set(result.map((r) => r.runId)).size, 3)
+
     const state = await readQueueState('wf', dir)
     assert.deepEqual(state.queued.map((q) => q.id), ['a', 'b', 'c'])
     assert.equal(state.queued[0].state, 'queued')
     assert.deepEqual(state.queued[0].input, { x: 1 })
+    // readQueueState folds the runId field through from the enqueue event.
+    assert.equal(state.queued[0].runId, result[0].runId)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('claimNextItem reuses the pre-assigned runId from the enqueue event', async () => {
+  const dir = TMP()
+  try {
+    const enq = await enqueueItems('wf', [{ x: 1 }], () => 'a', dir)
+    const preAssigned = enq[0].runId
+    const claimed = await claimNextItem('wf', 'worker1', dir)
+    assert.ok(claimed)
+    assert.equal(claimed.runId, preAssigned)
+    const state = await readQueueState('wf', dir)
+    assert.equal(state.claimed[0]?.runId, preAssigned)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('claimNextItem generates a fresh runId for legacy enqueue events (no pre-assignment)', async () => {
+  const dir = TMP()
+  try {
+    // Simulate a queue.jsonl written by an older version that didn't carry
+    // a runId in its enqueue events. The daemon must still claim it and
+    // assign a runId at claim time so downstream tracker rows have one.
+    mkdirSync(join(dir, 'daemons'), { recursive: true })
+    const path = queueFilePath('wf', dir)
+    appendFileSync(
+      path,
+      JSON.stringify({
+        type: 'enqueue',
+        id: 'legacy-a',
+        workflow: 'wf',
+        input: { x: 1 },
+        enqueuedAt: new Date().toISOString(),
+        enqueuedBy: 'cli-legacy',
+      }) + '\n',
+    )
+    const claimed = await claimNextItem('wf', 'worker1', dir)
+    assert.ok(claimed)
+    assert.match(claimed.runId!, /^[0-9a-f-]{36}$/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

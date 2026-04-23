@@ -355,8 +355,15 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
      * into a mutable holder before auth fires.
      */
     onSessionReady?: (session: Session, runId: string, stepper: Stepper, trackerDir: string | undefined) => void,
+    /**
+     * Pass the tracker's runId in from the real-run branch so the Stepper,
+     * screenshot emitter, and tracker JSONL all share one id. When absent
+     * (trackerStub / preAssignedRunId path), falls back to the legacy
+     * generator — either a UUID from opts, or a fresh UUID.
+     */
+    forcedRunId?: string,
   ): Promise<void> => {
-    const runId = opts.preAssignedRunId ?? randomUUID()
+    const runId = forcedRunId ?? opts.preAssignedRunId ?? randomUUID()
     const stepper = new Stepper({
       workflow: wf.config.name,
       itemId: String(itemId),
@@ -429,14 +436,17 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
     await withTrackedWorkflow(
       wf.config.name,
       String(itemId),
-      async (setStep, updateData, _onCleanup, sessionCtx, emitFailed) => {
+      async (setStep, updateData, _onCleanup, sessionCtx, emitFailed, trackerRunId) => {
         // Strategy B: mutable holder so onReady can swap in a real ScreenshotFn.
         const boundScreenshot: { fn: import('./types.js').ScreenshotFn } = {
           fn: async () => ({ kind: 'error', label: '', step: null, ts: Date.now(), files: [] }),
         }
         const observer = buildSessionObserver(wf, sessionCtx, setStep, emitFailed, boundScreenshot)
+        // Thread tracker's runId into run() so Stepper + screenshot events
+        // share the same id as the JSONL rows (fixed 2026-04-23 — previously
+        // the inner `run()` generated its own UUID while the tracker wrote
+        // `{id}#N`, desyncing screenshot-to-run correlation).
         await run(setStep, updateData, false, observer, (session, runId, stepper, trackerDir) => {
-          // onReady: swap in the real ScreenshotFn now that we have a Session ref.
           boundScreenshot.fn = makeScreenshotFn({
             session,
             runId,
@@ -445,7 +455,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
             emit: (ev) => emitScreenshotEvent(ev, { dir: trackerDir }),
             currentStep: () => stepper.getCurrentStep(),
           })
-        })
+        }, trackerRunId)
       },
       {
         ...buildTrackerOpts(wf),

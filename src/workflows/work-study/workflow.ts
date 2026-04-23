@@ -7,6 +7,7 @@ import {
   findRecentTransactionId,
 } from "../../core/index.js";
 import { log } from "../../utils/log.js";
+import { trackEvent } from "../../tracker/jsonl.js";
 import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath } from "../../auth/login.js";
 import { buildWorkStudyPlan, type WorkStudyContext } from "./enter.js";
@@ -187,9 +188,26 @@ export async function runWorkStudyCli(
     return;
   }
   const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
+  const now = new Date().toISOString();
   await ensureDaemonsAndEnqueue(
     workStudyWorkflow,
     [{ emplId, effectiveDate }],
     { new: options.new, parallel: options.parallel },
+    {
+      // Pre-emit `pending` so the dashboard queue populates immediately,
+      // even if the daemon is still mid-Duo. runId is pre-assigned inside
+      // `ensureDaemonsAndEnqueue` so the eventual running/done rows pair
+      // with this pending row under the same runId.
+      onPreEmitPending: (item, runId) => {
+        trackEvent({
+          workflow: "work-study",
+          timestamp: now,
+          id: item.emplId,
+          runId,
+          status: "pending",
+          data: { emplId: item.emplId, effectiveDate: item.effectiveDate },
+        });
+      },
+    },
   );
 }

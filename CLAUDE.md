@@ -37,10 +37,14 @@ npm run work-study:stop                # Soft-stop all daemons
 npm run work-study:attach              # Tail daemon logs
 npm run daemons:status                 # Status across every daemon-enabled workflow
 
-# Emergency Contact
-npm run emergency-contact <batchYaml>      # Fill Emergency Contact for every record
-npm run emergency-contact:dry <batchYaml>  # Preview records (no browser)
-# Flags: --roster-url "<sp-url>" | --roster-path <xlsx> | --ignore-roster-mismatch
+# Emergency Contact (daemon mode by default — see "Daemon mode" below)
+npm run emergency-contact <batchYaml>      # Load YAML → preflight → enqueue each record to an alive daemon
+npm run emergency-contact:dry <batchYaml>  # Preview records (no browser, no daemon)
+npm run emergency-contact:direct <batchYaml> # Legacy in-process path (one UCPath Duo per run)
+npm run emergency-contact:status           # Show alive daemons + queue depth
+npm run emergency-contact:stop             # Soft-stop all daemons
+npm run emergency-contact:attach           # Tail daemon logs
+# Flags: --roster-url "<sp-url>" | --roster-path <xlsx> | --ignore-roster-mismatch | -p <N> | -n
 
 # EID Lookup (daemon mode by default — see "Daemon mode" below)
 npm run eid-lookup "Last, First Middle"          # Enqueue to an alive daemon or spawn one (CRM-on default)
@@ -51,6 +55,14 @@ npm run eid-lookup -- --i9 "Last, First"         # +I-9 Section 2 signer → aut
 npm run eid-lookup:status                        # Show alive daemons + queue depth
 npm run eid-lookup:stop                          # Soft-stop all daemons
 npm run eid-lookup:attach                        # Tail the first alive daemon's log
+
+# Oath Signature (daemon mode by default — see "Daemon mode" below)
+npm run oath-signature <emplId> [emplId ...]     # Enqueue to an alive daemon or spawn one (UCPath only)
+npm run oath-signature:dry <emplId>              # Dry-run: print ActionPlan preview, no browser
+npm run oath-signature:direct <emplId>           # Legacy in-process path (one UCPath Duo per run)
+npm run oath-signature:status                    # Show alive daemons + queue depth
+npm run oath-signature:stop                      # Soft-stop all daemons
+npm run oath-signature:attach                    # Tail daemon logs
 
 # Dashboard (separate terminal — auto-updates as workflows run)
 npm run dashboard            # SSE backend (:3838) + Vite dev (:5173) — open http://localhost:5173
@@ -244,7 +256,7 @@ Flags (on `separation`, `work-study`, `eid-lookup`, `onboarding`):
 
 `onboarding` has two flags that auto-force `--direct`: `--dry-run` (CRM-only preview, short-circuits before launching the full 3-browser session) and `--batch` (reads `batch.yaml` in-process — if you want daemon-mode batch processing, pass emails positionally: `npm run onboarding a@uc b@uc c@uc` fans across alive daemons via the shared queue). The daemon itself runs the standard `onboardingWorkflow` (CRM + UCPath + I9, 2 Duos per session since I9 is SSO no-2FA). For throughput, start N daemons with `-p N`.
 
-Lifecycle commands (converted workflows: `separations`, `work-study`, `eid-lookup`, `onboarding`):
+Lifecycle commands (converted workflows: `separations`, `work-study`, `eid-lookup`, `onboarding`, `oath-signature`, `emergency-contact`):
 - `npm run daemons:status` (or `:status` per workflow) — alive daemons + queue depth.
 - `npm run <workflow>:stop` — soft-stop (drain in-flight, re-queue). Use `-- --force` to mark in-flight as failed and exit immediately.
 - `npm run <workflow>:attach` — tail daemon log files. Ctrl+C detaches; daemons keep running.
@@ -334,16 +346,17 @@ Each per-system `CLAUDE.md` links to its `LESSONS.md` + `SELECTORS.md` and embed
 
 Workflows emit JSONL entries via the kernel's `withTrackedWorkflow` wrapping; the SSE server reads `.tracker/{workflow}-{YYYY-MM-DD}.jsonl` + `*-logs.jsonl`, enriches entries with `firstLogTs`/`lastLogTs`/`lastLogMessage`, and streams to the React SPA. The dashboard reads all UI metadata (label, steps, systems, detailFields) from the server-side registry populated by `defineWorkflow` / `defineDashboardMetadata` — no frontend edits needed when you add a workflow.
 
-Current step tracking per workflow:
+Current step tracking per workflow. Steps prefixed with `auth:` are auto-prepended by the kernel from each workflow's `systems[]` list (one per system, in order) unless the workflow opts out via `authSteps: false` in `defineWorkflow`:
 
 | Workflow | Steps |
 |---|---|
-| onboarding | crm-auth → extraction → pdf-download → ucpath-auth → person-search → i9-creation → transaction |
-| separations | auth:kuali → auth:old-kronos → auth:new-kronos → auth:ucpath → kuali-extraction → kronos-search → ucpath-job-summary → ucpath-transaction → kuali-finalization |
-| eid-lookup | searching + cross-verification (daemon mode default; shared-context-pool in `--direct`). One row per name. |
-| kronos-reports | searching → extracting → downloading |
-| work-study | ucpath-auth → transaction |
-| emergency-contact | navigation → fill-form → save |
+| onboarding | crm-auth → extraction → pdf-download → ucpath-auth → person-search → i9-creation → transaction (workflow opts out of auto-prepend; declares its own `*-auth` steps) |
+| separations | auth:kuali → auth:old-kronos → auth:new-kronos → auth:ucpath → kuali-extraction → kronos-search → ucpath-job-summary → ucpath-transaction → kuali-finalization (auth steps kernel-prepended) |
+| eid-lookup | auth:ucpath → auth:crm → searching → cross-verification (daemon mode default; shared-context-pool in `--direct`). One row per name. |
+| kronos-reports | auth:old-kronos → searching → extracting → downloading |
+| work-study | ucpath-auth → transaction (opts out of auto-prepend) |
+| emergency-contact | auth:ucpath → navigation → fill-form → save |
+| oath-signature | ucpath-auth → transaction (opts out of auto-prepend) |
 
 As of 2026-04-18, the dashboard is **observation-only**. The previous "⚡ RUN" drawer + `RunnerLauncher` button + `SchemaForm` + `runner-recents` localStorage helper + the backend `buildSpawnHandler`/`buildCancelHandler`/`buildActiveRunsHandler`/`buildWorkflowSchemaHandler` factories + the child-process registry were all removed. Workflows are launched via the npm scripts above (or whatever replacement launcher the user wires up later — out of scope for this pass). Live session monitoring (`SessionPanel`), selector-warning aggregation (`SelectorWarningsPanel`), screenshot browsing (`ScreenshotsPanel` — replaced the inline `FailureDrillDown` on 2026-04-21), step-timing chips (`StepPipeline`), and cross-workflow search (`SearchBar`) all keep working — they read kernel-emitted events from `src/tracker/jsonl.ts`, independent of any launcher.
 
@@ -353,7 +366,6 @@ Implementation details live in `src/dashboard/CLAUDE.md` (frontend) and `src/tra
 
 These items appear in plans/improvements docs but were not shipped in 2026-04-18's selector-intelligence + runner-removal pass. They'll be picked up in a later session.
 
-- **Stats panel + run-diff frontend.** ~357 lines of backend handler scaffolding (`buildStatsHandler`, `buildDiffHandler`, types) sit uncommitted in `src/tracker/dashboard.ts`. No tests, no frontend, no route registration. Decide: commit + open frontend tickets, or `git checkout -- src/tracker/dashboard.ts` to discard. Note that `computeStepDurations` is committed and powers the StepPipeline timing chips already — discarding the scaffolding would NOT regress those.
 - **Replacement workflow launcher.** ✅ Shipped 2026-04-22 as **daemon mode** — see the "Daemon mode (persistent workflow processes)" section above. CLI invocations of `separation` / `work-study` now enqueue to long-lived daemons instead of spawning a fresh process + re-Duo per run. `TopBar`'s `rightSlot` prop is still preserved for a future in-dashboard UI mount (dashboard-side queue viz / enqueue button is a follow-up).
 - **Bundle size code-split** (handoff §1.8). Bundle is 906.74 KB after runner removal (down from 940.65 KB).
 - **ESLint rule for selectors** (handoff §8.3). The `tests/unit/systems/inline-selectors.test.ts` guard still enforces "no inline selectors outside `selectors.ts`" — promotion to ESLint is editor-time-feedback only.

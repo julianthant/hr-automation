@@ -562,8 +562,31 @@ export async function runEidLookupCli(
 
   const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
   const inputs = uniqueNames.map((name) => ({ name }));
-  await ensureDaemonsAndEnqueue(eidLookupCrmWorkflow, inputs, {
-    new: options.new,
-    parallel: options.parallel,
-  });
+  const now = new Date().toISOString();
+  await ensureDaemonsAndEnqueue(
+    eidLookupCrmWorkflow,
+    inputs,
+    {
+      new: options.new,
+      parallel: options.parallel,
+    },
+    {
+      // Match the existing `runEidLookupBatch` pre-emit payload so the
+      // dashboard queue panel shows the same `{searchName, __name, __id}`
+      // shape whether the user runs the daemon CLI or `--direct`. The
+      // runId here is the pre-assigned one from `enqueueItems`, so the
+      // eventual running/done rows pair 1:1.
+      onPreEmitPending: (item, runId) => {
+        const n = item.name;
+        trackEvent({
+          workflow: "eid-lookup",
+          timestamp: now,
+          id: n,
+          runId,
+          status: "pending",
+          data: { searchName: n, __name: n, __id: n },
+        });
+      },
+    },
+  );
 }

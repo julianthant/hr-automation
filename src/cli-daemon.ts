@@ -46,6 +46,21 @@ const WORKFLOWS: Record<string, () => Promise<AnyRegisteredWorkflow>> = {
     const mod = await import("./workflows/onboarding/index.js");
     return mod.onboardingWorkflow as unknown as AnyRegisteredWorkflow;
   },
+  // Oath Signature: single UCPath browser + 1 Duo. Handler is short (8
+  // plan steps, ~15s/EID) so daemon mode's biggest win is batching N EIDs
+  // without re-Duo.
+  "oath-signature": async () => {
+    const mod = await import("./workflows/oath-signature/index.js");
+    return mod.oathSignatureWorkflow as unknown as AnyRegisteredWorkflow;
+  },
+  // Emergency Contact: single UCPath browser + 1 Duo. Records arrive via
+  // batch YAML in the CLI adapter; daemon processes each record as a
+  // standalone queue item. `betweenItems: ["reset-browsers"]` in the kernel
+  // config resets the UCPath page between records.
+  "emergency-contact": async () => {
+    const mod = await import("./workflows/emergency-contact/index.js");
+    return mod.emergencyContactWorkflow as unknown as AnyRegisteredWorkflow;
+  },
 };
 
 async function main(): Promise<void> {

@@ -7,10 +7,15 @@ import { loginToUCPath, loginToACTCrm } from "./auth/login.js";
 import type { AuthResult } from "./auth/types.js";
 import { runOnboarding, runOnboardingCli, runParallel, runOnboardingPositional } from "./workflows/onboarding/index.js";
 import { runWorkStudy, runWorkStudyCli, WorkStudyInputSchema } from "./workflows/work-study/index.js";
-import { runEmergencyContact } from "./workflows/emergency-contact/index.js";
+import { runEmergencyContact, runEmergencyContactCli } from "./workflows/emergency-contact/index.js";
 import { runParallelKronos, DEFAULT_WORKERS } from "./workflows/old-kronos-reports/index.js";
 import { runSeparation, runSeparationBatch, runSeparationCli } from "./workflows/separations/index.js";
 import { runEidLookup, runEidLookupCli } from "./workflows/eid-lookup/index.js";
+import {
+  runOathSignature,
+  runOathSignatureCli,
+  OathSignatureInputSchema,
+} from "./workflows/oath-signature/index.js";
 import { exportToExcel } from "./tracker/export-excel.js";
 
 const program = new Command();
@@ -228,17 +233,23 @@ program
 
 program
   .command("emergency-contact")
-  .description("Fill Emergency Contact in UCPath for every record in a batch YAML")
+  .description("Fill Emergency Contact in UCPath for every record in a batch YAML (daemon mode by default)")
   .argument("<batchYaml>", "Path to batch YAML (e.g. .tracker/emergency-contact/batch-YYYY-MM-DD.yml)")
   .option("--dry-run", "Preview records without touching UCPath")
   .option("--roster-url <url>", "SharePoint URL of roster xlsx — downloaded + used for pre-flight verification")
   .option("--roster-path <path>", "Local roster xlsx for pre-flight verification (skip download)")
   .option("--ignore-roster-mismatch", "Continue even if roster verification reports mismatches")
+  .option("--direct", "Bypass daemon mode; run the legacy in-process batch")
+  .option("-n, --new", "Spawn an additional daemon even if others are alive")
+  .option("-p, --parallel <count>", "Ensure at least N daemons are alive before enqueueing", parseInt)
   .action(async (batchYaml: string, options: {
     dryRun?: boolean;
     rosterUrl?: string;
     rosterPath?: string;
     ignoreRosterMismatch?: boolean;
+    direct?: boolean;
+    new?: boolean;
+    parallel?: number;
   }) => {
     try {
       validateEnv();
@@ -246,13 +257,23 @@ program
       process.exit(1);
     }
 
+    const shared = {
+      dryRun: options.dryRun,
+      rosterUrl: options.rosterUrl,
+      rosterPath: options.rosterPath,
+      ignoreRosterMismatch: options.ignoreRosterMismatch,
+    };
+
     try {
-      await runEmergencyContact(batchYaml, {
-        dryRun: options.dryRun,
-        rosterUrl: options.rosterUrl,
-        rosterPath: options.rosterPath,
-        ignoreRosterMismatch: options.ignoreRosterMismatch,
-      });
+      if (options.direct || options.dryRun) {
+        await runEmergencyContact(batchYaml, shared);
+      } else {
+        await runEmergencyContactCli(batchYaml, {
+          ...shared,
+          new: options.new,
+          parallel: options.parallel,
+        });
+      }
     } catch (err) {
       log.error(`Emergency Contact batch failed: ${errorMessage(err)}`);
       process.exit(1);
@@ -354,6 +375,86 @@ program
     }
   });
 
+// ─── oath-signature ───
+
+program
+  .command("oath-signature")
+  .alias("oath")
+  .description(
+    "Add a new Oath Signature Date to the UCPath Person Profile for one or " +
+      "more EIDs. Daemon-mode by default — enqueues each EID to an alive daemon " +
+      "(or spawns one). --direct bypasses the daemon for a single EID (legacy in-process).",
+  )
+  .argument("<emplIds...>", "One or more employee IDs (e.g. 10873075 10862930)")
+  .option("--date <MM/DD/YYYY>", "Override the signature date (default: UCPath prefills today)")
+  .option("--dry-run", "Preview actions without touching UCPath (forces --direct, single EID only)")
+  .option("--direct", "Bypass daemon mode and run in-process (single EID only)")
+  .option("-n, --new", "Force spawn of a brand-new daemon (ignores alive ones for dispatch)")
+  .option("-p, --parallel <N>", "Fan out across N daemons (reuses up to N alive; spawns the rest)", parseInt)
+  .action(async (
+    emplIds: string[],
+    options: {
+      date?: string;
+      dryRun?: boolean;
+      direct?: boolean;
+      new?: boolean;
+      parallel?: number;
+    },
+  ) => {
+    try {
+      validateEnv();
+    } catch {
+      process.exit(1);
+    }
+
+    if (emplIds.length === 0) {
+      log.error("Provide at least one Empl ID.");
+      process.exit(1);
+    }
+    if (options.parallel !== undefined && (options.parallel < 1 || !Number.isFinite(options.parallel))) {
+      log.error("--parallel must be a positive integer.");
+      process.exit(1);
+    }
+
+    // Validate every EID up front so a malformed tail doesn't fire Duo prompts.
+    const inputs: Array<{ emplId: string; date?: string }> = [];
+    for (const emplId of emplIds) {
+      const parsed = OathSignatureInputSchema.safeParse({ emplId, date: options.date });
+      if (!parsed.success) {
+        log.error(
+          `Invalid input for ${emplId}: ${parsed.error.issues.map((i) => i.message).join(", ")}`,
+        );
+        process.exit(1);
+      }
+      inputs.push(parsed.data);
+    }
+
+    // --direct / --dry-run are single-EID only — the in-process path doesn't
+    // loop. Multi-EID callers should use the default daemon mode.
+    const mustDirect = options.direct === true || options.dryRun === true;
+    if (mustDirect) {
+      if (inputs.length > 1) {
+        log.error(
+          "--direct / --dry-run support only one EID at a time. " +
+            "Use the default daemon mode for multi-EID runs.",
+        );
+        process.exit(1);
+      }
+      await runOathSignature(inputs[0], { dryRun: options.dryRun });
+      return;
+    }
+
+    try {
+      await runOathSignatureCli(inputs, {
+        new: options.new,
+        parallel: options.parallel,
+      });
+    } catch (err) {
+      log.error(`Oath Signature dispatch failed: ${errorMessage(err)}`);
+      process.exit(1);
+    }
+  });
+
 // ─── eid-lookup ───
 
 program
@@ -444,6 +545,7 @@ program
       import("./workflows/eid-lookup/index.js"),
       import("./workflows/emergency-contact/index.js"),
       import("./workflows/old-kronos-reports/index.js"),
+      import("./workflows/oath-signature/index.js"),
     ]);
 
     const { startDashboard } = await import("./tracker/dashboard.js");
@@ -483,7 +585,14 @@ program
 
 // ─── daemon lifecycle (applies to any daemon-mode workflow) ───
 
-const DAEMON_WORKFLOWS = ["separations", "work-study"] as const;
+const DAEMON_WORKFLOWS = [
+  "separations",
+  "work-study",
+  "oath-signature",
+  "eid-lookup",
+  "onboarding",
+  "emergency-contact",
+] as const;
 
 program
   .command("daemon-status [workflow]")

@@ -218,6 +218,81 @@ export async function runEmergencyContact(
   }
 }
 
+/**
+ * Daemon-mode CLI adapter.
+ *
+ * One invocation reads the whole batch YAML, runs roster preflight in-process
+ * (before any daemon work), then enqueues each record 1:1 to the shared
+ * `.tracker/daemons/emergency-contact.queue.jsonl`. Whichever alive daemon
+ * finishes its current record first claims the next; `--parallel K` fans
+ * out across K daemons (K × UCPath Duo on fresh spawn).
+ *
+ * Dry-run bypasses the daemon entirely (prints planned fills, exits 0).
+ * Roster preflight still runs in-process because the YAML's EID/name
+ * verification must gate the whole batch BEFORE any record lands in the
+ * queue — a daemon can't block the spawn-plan on roster results without
+ * coupling two concerns.
+ *
+ * Item-ID shape `p{NN}-{emplId}` (via `recordItemId`) matches the existing
+ * legacy path — the kernel's default `deriveItemId` only walks top-level
+ * fields and the EID is nested under `employee.employeeId`, so we pass a
+ * custom deriver to `ensureDaemonsAndEnqueue`.
+ */
+export async function runEmergencyContactCli(
+  batchYaml: string,
+  options: EmergencyContactOptions & { new?: boolean; parallel?: number } = {},
+): Promise<void> {
+  const batch = loadBatch(batchYaml);
+  log.step(`Loaded batch "${batch.batchName}" — ${batch.records.length} records`);
+
+  if (options.dryRun) {
+    log.step("=== DRY RUN MODE ===");
+    for (const record of batch.records) {
+      log.step(
+        `[page ${record.sourcePage}] EID ${record.employee.employeeId} — ${record.employee.name} | ` +
+          `contact="${record.emergencyContact.name}" rel="${record.emergencyContact.relationship}" ` +
+          `sameAddr=${record.emergencyContact.sameAddressAsEmployee}`,
+      );
+      if (record.notes.length > 0) {
+        for (const note of record.notes) log.step(`  NOTE: ${note}`);
+      }
+    }
+    log.success("Dry run complete — no changes made to UCPath");
+    return;
+  }
+
+  await runPreflight(batch, options);
+
+  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
+  const now = new Date().toISOString();
+  await ensureDaemonsAndEnqueue(
+    emergencyContactWorkflow,
+    batch.records,
+    { new: options.new, parallel: options.parallel },
+    {
+      deriveItemId: (item) => recordItemId(item as EmergencyContactRecord),
+      onPreEmitPending: (item, runId) => {
+        const record = item as EmergencyContactRecord;
+        trackEvent({
+          workflow: WORKFLOW,
+          timestamp: now,
+          id: recordItemId(record),
+          runId,
+          status: "pending",
+          data: {
+            batchName: batch.batchName,
+            sourcePage: String(record.sourcePage),
+            emplId: record.employee.employeeId,
+            employeeName: record.employee.name,
+            contactName: record.emergencyContact.name,
+            relationship: record.emergencyContact.relationship,
+          },
+        });
+      },
+    },
+  );
+}
+
 async function runPreflight(
   batch: EmergencyContactBatch,
   options: EmergencyContactOptions,

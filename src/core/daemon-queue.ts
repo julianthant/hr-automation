@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomUUID, type UUID } from 'node:crypto'
 import {
   appendFileSync,
   existsSync,
@@ -68,6 +68,10 @@ export async function readQueueState(workflow: string, trackerDir?: string): Pro
         input: ev.input,
         enqueuedAt: ev.enqueuedAt,
         state: 'queued',
+        // Propagate a pre-assigned runId (if the CLI generated one at enqueue
+        // time to pair with an onPreEmitPending callback). `claimNextItem`
+        // reads this and reuses it in the claim event.
+        runId: ev.runId,
       })
     } else if (ev.type === 'claim') {
       const existing = byId.get(ev.id)
@@ -119,21 +123,27 @@ export async function readQueueState(workflow: string, trackerDir?: string): Pro
 }
 
 /**
- * Append N `enqueue` events in insertion order. Returns each new item's
- * 1-indexed position in the resulting queued list.
+ * Append N `enqueue` events in insertion order. Each event carries a
+ * pre-assigned `runId` (UUID v4) so the CLI can emit a matching `pending`
+ * tracker row at enqueue time — when the claiming daemon folds the queue
+ * state, it reads this runId and reuses it in its claim event, so the
+ * tracker sees ONE runId from pending → running → done (no duplicate rows
+ * in the dashboard queue panel). Returns each new item's 1-indexed position
+ * in the resulting queued list plus its pre-assigned runId.
  */
 export async function enqueueItems<T>(
   workflow: string,
   inputs: T[],
   idFn: (input: T, index: number) => string,
   trackerDir?: string,
-): Promise<Array<{ id: string; position: number }>> {
+): Promise<Array<{ id: string; position: number; runId: UUID }>> {
   if (inputs.length === 0) return []
   const enqueuedBy = `cli-${process.pid}`
-  const newIds: string[] = []
+  const assigned: Array<{ id: string; runId: UUID }> = []
   for (let i = 0; i < inputs.length; i++) {
     const id = idFn(inputs[i], i)
-    newIds.push(id)
+    const runId = randomUUID()
+    assigned.push({ id, runId })
     appendEvent(
       workflow,
       {
@@ -143,6 +153,7 @@ export async function enqueueItems<T>(
         input: inputs[i],
         enqueuedAt: nowIso(),
         enqueuedBy,
+        runId,
       },
       trackerDir,
     )
@@ -150,9 +161,9 @@ export async function enqueueItems<T>(
   // Position computation: fold and find each id's position in queued[].
   const state = await readQueueState(workflow, trackerDir)
   const queuedIds = state.queued.map((q) => q.id)
-  return newIds.map((id) => {
+  return assigned.map(({ id, runId }) => {
     const idx = queuedIds.indexOf(id)
-    return { id, position: idx >= 0 ? idx + 1 : 0 }
+    return { id, position: idx >= 0 ? idx + 1 : 0, runId }
   })
 }
 
@@ -239,7 +250,12 @@ export async function claimNextItem(
     const state = await readQueueState(workflow, trackerDir)
     if (state.queued.length === 0) return null
     const next = state.queued[0]
-    const runId = randomUUID()
+    // Reuse the enqueue-time runId if one was pre-assigned (see
+    // `enqueueItems`) so the caller's pre-emitted `pending` tracker row
+    // pairs 1:1 with the downstream running/done rows. Fall back to a
+    // fresh UUID for enqueue events written before the pre-assignment
+    // feature landed (backward-compat with older queue.jsonl files).
+    const runId = next.runId ?? randomUUID()
     const claimedAt = nowIso()
     appendEvent(
       workflow,

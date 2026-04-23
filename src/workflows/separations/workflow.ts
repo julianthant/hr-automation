@@ -669,8 +669,31 @@ export async function runSeparationCli(
   }
   const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
   const inputs = docIds.map((docId) => ({ docId }));
-  await ensureDaemonsAndEnqueue(separationsWorkflow, inputs, {
-    new: options.new,
-    parallel: options.parallel,
-  });
+  const now = new Date().toISOString();
+  await ensureDaemonsAndEnqueue(
+    separationsWorkflow,
+    inputs,
+    {
+      new: options.new,
+      parallel: options.parallel,
+    },
+    {
+      // Emit a `pending` tracker row per docId at enqueue time so the
+      // dashboard queue panel populates BEFORE the daemon finishes Duo.
+      // Matches the `runSeparationBatch` pre-emit payload (shape is
+      // read back by SessionPanel + QueuePanel); runId is pre-assigned
+      // by enqueueItems so the eventual running/done rows pair 1:1.
+      onPreEmitPending: (item, runId) => {
+        const { docId } = item;
+        trackEvent({
+          workflow: "separations",
+          timestamp: now,
+          id: docId,
+          runId,
+          status: "pending",
+          data: { docId },
+        });
+      },
+    },
+  );
 }
