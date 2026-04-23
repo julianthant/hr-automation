@@ -88,6 +88,7 @@ export const oathSignatureWorkflow = defineWorkflow({
 
       const plan = buildOathSignaturePlan(input, page, oathCtx);
       await plan.execute();
+      await ctx.screenshot({ kind: 'form', label: 'oath-signature-saved' });
 
       if (oathCtx.employeeName) {
         ctx.updateData({ name: oathCtx.employeeName });

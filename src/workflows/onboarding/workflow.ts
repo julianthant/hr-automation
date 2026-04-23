@@ -450,6 +450,7 @@ export const onboardingWorkflow = defineWorkflow({
           const plan = buildTransactionPlan(data, ucpathPage, i9ProfileId);
           log.step("Executing Smart HR transaction plan...");
           await plan.execute();
+          await ctx.screenshot({ kind: 'form', label: 'onboarding-transaction-submitted' });
           log.success("Transaction created successfully in UCPath");
           // transactionId isn't surfaced by ActionPlan today — record empty string;
           // the key match is what prevents duplicates on re-run.
