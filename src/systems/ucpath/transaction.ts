@@ -573,79 +573,8 @@ export async function clickSaveAndSubmit(
       await okButton.click({ timeout: 5_000 });
       await page.waitForTimeout(3_000);
 
-      // Step 2: Re-navigate same way as initial: URL to HR Tasks, then sidebar click
-      log.step("Re-navigating to Smart HR Transactions...");
-      await navigateToSmartHR(page);
-      await clickSmartHRTransactions(page);
-      await page.waitForTimeout(3_000);
-      const txnFrame = getContentFrame(page);
-
       if (employeeName) {
-        // The newly-submitted transaction can take several seconds to appear
-        // in the Smart HR Transactions list. Poll for up to 15s, trying
-        // multiple name forms on each tick (yesterday's failures hit both
-        // the canonical "First Last" and the "Last, First" forms — the
-        // caller may pass either shape depending on upstream conversion).
-        //
-        // Name-form candidates:
-        //   1. employeeName as passed
-        //   2. flipped form: "Last, First Middle" ↔ "First Middle Last"
-        //   3. partial regex on last name only (final fallback)
-        const parts = employeeName.includes(",")
-          ? employeeName.split(",").map((s) => s.trim())
-          : employeeName.split(" ").map((s) => s.trim());
-        const lastName = employeeName.includes(",")
-          ? (parts[0] ?? "")
-          : (parts[parts.length - 1] ?? "");
-        const flipped = employeeName.includes(",")
-          ? parts.slice().reverse().join(" ")
-          : (parts.length >= 2
-              ? `${parts[parts.length - 1]}, ${parts.slice(0, -1).join(" ")}`
-              : employeeName);
-
-        const deadline = Date.now() + 15_000;
-        let clicked = false;
-        while (!clicked && Date.now() < deadline) {
-          const candidates: Array<{ label: string; locator: Locator }> = [
-            { label: employeeName, locator: txnFrame.getByRole("link", { name: employeeName }) }, // allow-inline-selector -- dynamic name match
-            { label: flipped, locator: txnFrame.getByRole("link", { name: flipped }) }, // allow-inline-selector -- dynamic flipped-name match
-          ];
-          if (lastName) {
-            candidates.push({
-              label: `partial:${lastName}`,
-              locator: txnFrame.getByRole("link", { name: new RegExp(lastName, "i") }), // allow-inline-selector -- dynamic last-name regex
-            });
-          }
-          for (const { label, locator } of candidates) {
-            if ((await locator.count()) > 0) {
-              log.step(`Clicking employee: ${label}`);
-              await locator.first().click({ timeout: 5_000 });
-              clicked = true;
-              break;
-            }
-          }
-          if (!clicked) await page.waitForTimeout(1_500);
-        }
-        if (!clicked) {
-          log.step(`Employee link not found after 15s poll: ${employeeName}`);
-        }
-        await page.waitForTimeout(5_000);
-
-        // Step 3: Click Continue on transaction details page
-        const continueBtn = smartHR.continueButton(txnFrame);
-        if ((await continueBtn.count()) > 0) {
-          await continueBtn.click({ timeout: 5_000 });
-          await page.waitForTimeout(8_000);
-
-          // Step 4: Extract "Transaction ID: T002XXXXXX" from the re-opened form
-          const bodyText = await txnFrame.locator("body").innerText({ timeout: 5_000 }).catch(() => ""); // allow-inline-selector -- body innerText readback for regex scrape
-          const tMatch = bodyText.match(/Transaction ID:\s*(T\d+)/)
-            ?? bodyText.match(/Transaction:\s*(T\d+)/i);
-          if (tMatch) {
-            transactionNumber = tMatch[1];
-            log.step(`Transaction number: ${transactionNumber}`);
-          }
-        }
+        transactionNumber = await readLatestTransactionNumber(page, employeeName);
       }
     }
 
@@ -657,6 +586,97 @@ export async function clickSaveAndSubmit(
   }
 
   return { success: true, transactionNumber };
+}
+
+/**
+ * Re-navigate to Smart HR Transactions, find the employee's most recent
+ * transaction row, and extract its `T######` transaction number.
+ *
+ * Used both by `clickSaveAndSubmit` (immediately after OK on the confirmation
+ * dialog) and by retry/recovery paths that know a transaction was submitted
+ * but didn't capture the number on the first pass. Returns empty string when
+ * the lookup fails — callers should treat that as "couldn't read back",
+ * never as "no transaction exists".
+ *
+ * Polls the Transactions list for up to 15s with three name-form candidates
+ * (exact, flipped, last-name regex) since PeopleSoft takes a beat to refresh
+ * the list after a submit.
+ */
+export async function readLatestTransactionNumber(
+  page: Page,
+  employeeName: string,
+): Promise<string> {
+  // Re-navigate same way as initial: URL to HR Tasks, then sidebar click
+  log.step("Re-navigating to Smart HR Transactions...");
+  await navigateToSmartHR(page);
+  await clickSmartHRTransactions(page);
+  await page.waitForTimeout(3_000);
+  const txnFrame = getContentFrame(page);
+
+  // The newly-submitted transaction can take several seconds to appear
+  // in the Smart HR Transactions list. Poll for up to 15s, trying
+  // multiple name forms on each tick.
+  //
+  // Name-form candidates:
+  //   1. employeeName as passed
+  //   2. flipped form: "Last, First Middle" ↔ "First Middle Last"
+  //   3. partial regex on last name only (final fallback)
+  const parts = employeeName.includes(",")
+    ? employeeName.split(",").map((s) => s.trim())
+    : employeeName.split(" ").map((s) => s.trim());
+  const lastName = employeeName.includes(",")
+    ? (parts[0] ?? "")
+    : (parts[parts.length - 1] ?? "");
+  const flipped = employeeName.includes(",")
+    ? parts.slice().reverse().join(" ")
+    : (parts.length >= 2
+        ? `${parts[parts.length - 1]}, ${parts.slice(0, -1).join(" ")}`
+        : employeeName);
+
+  const deadline = Date.now() + 15_000;
+  let clicked = false;
+  while (!clicked && Date.now() < deadline) {
+    const candidates: Array<{ label: string; locator: Locator }> = [
+      { label: employeeName, locator: txnFrame.getByRole("link", { name: employeeName }) }, // allow-inline-selector -- dynamic name match
+      { label: flipped, locator: txnFrame.getByRole("link", { name: flipped }) }, // allow-inline-selector -- dynamic flipped-name match
+    ];
+    if (lastName) {
+      candidates.push({
+        label: `partial:${lastName}`,
+        locator: txnFrame.getByRole("link", { name: new RegExp(lastName, "i") }), // allow-inline-selector -- dynamic last-name regex
+      });
+    }
+    for (const { label, locator } of candidates) {
+      if ((await locator.count()) > 0) {
+        log.step(`Clicking employee: ${label}`);
+        await locator.first().click({ timeout: 5_000 });
+        clicked = true;
+        break;
+      }
+    }
+    if (!clicked) await page.waitForTimeout(1_500);
+  }
+  if (!clicked) {
+    log.step(`Employee link not found after 15s poll: ${employeeName}`);
+    return "";
+  }
+  await page.waitForTimeout(5_000);
+
+  // Click Continue on transaction details page
+  const continueBtn = smartHR.continueButton(txnFrame);
+  if ((await continueBtn.count()) === 0) return "";
+  await continueBtn.click({ timeout: 5_000 });
+  await page.waitForTimeout(8_000);
+
+  // Extract "Transaction ID: T002XXXXXX" from the re-opened form
+  const bodyText = await txnFrame.locator("body").innerText({ timeout: 5_000 }).catch(() => ""); // allow-inline-selector -- body innerText readback for regex scrape
+  const tMatch = bodyText.match(/Transaction ID:\s*(T\d+)/)
+    ?? bodyText.match(/Transaction:\s*(T\d+)/i);
+  if (tMatch) {
+    log.step(`Transaction number: ${tMatch[1]}`);
+    return tMatch[1];
+  }
+  return "";
 }
 
 // ─── Helpers ───
