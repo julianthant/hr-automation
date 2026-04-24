@@ -634,8 +634,25 @@ program
       console.log(`\n[${wf}]`);
       if (alive.length === 0) console.log("  no alive daemons");
       for (const d of alive) {
+        // Best-effort phase probe via /status — lets users see whether a
+        // daemon is stuck in `authenticating` (Duo not clearing) vs `idle`
+        // vs `processing`. 1s timeout so a hung daemon doesn't block status.
+        let phase: string = "?";
+        try {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 1_000);
+          const res = await fetch(`http://127.0.0.1:${d.port}/status`, { signal: ctrl.signal });
+          clearTimeout(timer);
+          if (res.ok) {
+            const body = (await res.json()) as { phase?: string; inFlight?: string | null };
+            phase = body.phase ?? "?";
+            if (body.inFlight) phase += `(${body.inFlight})`;
+          }
+        } catch {
+          phase = "unreachable";
+        }
         console.log(
-          `  ${d.instanceId}  pid=${d.pid}  port=${d.port}  startedAt=${d.startedAt}`,
+          `  ${d.instanceId}  pid=${d.pid}  port=${d.port}  phase=${phase}  startedAt=${d.startedAt}`,
         );
       }
       if (state) {
