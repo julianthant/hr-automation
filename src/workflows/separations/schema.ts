@@ -244,3 +244,28 @@ export function buildDateChangeComments(
   }
   return lines.join("\n");
 }
+
+/**
+ * Throw if the supplied MM/DD/YYYY date is strictly in the future. Caller
+ * controls the field-name context via the `fieldLabel` argument so the error
+ * message points at the right Kuali field (Last Day Worked vs Separation
+ * Date). Compares against local midnight today — "today" is always valid.
+ */
+export function validateLastDayWorked(
+  dateStr: string,
+  fieldLabel: string = "Last Day Worked",
+): void {
+  const [m, d, y] = dateStr.split("/").map(Number);
+  if (!m || !d || !y) {
+    throw new Error(`${fieldLabel} has unparseable date: "${dateStr}" (expected MM/DD/YYYY)`);
+  }
+  const supplied = new Date(y, m - 1, d);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (supplied.getTime() > today.getTime()) {
+    const todayStr = `${String(today.getMonth() + 1).padStart(2, "0")}/${String(today.getDate()).padStart(2, "0")}/${today.getFullYear()}`;
+    throw new Error(
+      `${fieldLabel} cannot be in the future: got "${dateStr}" (today is ${todayStr}). Employee is not yet eligible for separation.`,
+    );
+  }
+}
