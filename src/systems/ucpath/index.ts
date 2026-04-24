@@ -35,4 +35,6 @@ export {
   extractJobInfo,
   getJobSummaryData,
 } from "./job-summary.js";
-export type { JobSummaryData } from "./job-summary.js";
+export type { JobSummaryData, GetJobSummaryOpts } from "./job-summary.js";
+export { lookupEmplIdByName } from "./employee-search.js";
+export type { EmployeeLookupResult } from "./employee-search.js";
