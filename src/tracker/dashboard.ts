@@ -19,11 +19,13 @@ import { errorMessage } from "../utils/errors.js";
 import {
   readSessionEvents,
   getSessionsFilePath,
+  workflowNameFromInstance,
   type SessionEvent,
 } from "./session-events.js";
 import { getAll as getAllRegisteredWorkflows } from "../core/registry.js";
 import type { WorkflowMetadata } from "../core/types.js";
 import { PATHS } from "../config.js";
+import { stopDaemons } from "../core/daemon-client.js";
 import { detectFailurePattern } from "./failure-detector.js";
 import { notify } from "./notify.js";
 import {
@@ -181,6 +183,8 @@ export interface SessionInfo {
 
 export interface WorkflowInstanceState {
   instance: string;
+  /** Kebab-case workflow name resolved from the instance label (e.g. "Separation 1" → "separations"). null when unrecognised. */
+  workflow: string | null;
   active: boolean;
   /** True while the spawning Node process (and therefore its Playwright browsers) is still alive. */
   pidAlive: boolean;
@@ -224,6 +228,7 @@ export function rebuildSessionState(dir?: string): SessionState {
     if (e.type === "workflow_start") {
       wfMap.set(inst, {
         instance: inst,
+        workflow: workflowNameFromInstance(inst),
         active: true,
         pidAlive: true,
         currentItemId: null,
@@ -1797,6 +1802,61 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
           "Access-Control-Allow-Origin": "*",
         });
         res.end(JSON.stringify(body));
+      } catch (e) {
+        res.writeHead(500, {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        });
+        res.end(JSON.stringify({ ok: false, error: errorMessage(e) }));
+      }
+      return;
+    }
+
+    if (
+      req.method === "POST" &&
+      url.pathname === "/api/daemon/stop"
+    ) {
+      // Thin proxy over stopDaemons() — discovers alive daemons for the
+      // given workflow and POSTs /stop to each. Soft by default (drain
+      // in-flight + exit); `force: true` for hard-stop.
+      try {
+        const chunks: Buffer[] = [];
+        for await (const chunk of req) {
+          chunks.push(chunk as Buffer);
+          if (Buffer.concat(chunks).byteLength > 4096) {
+            throw new Error("Request body too large");
+          }
+        }
+        const raw = Buffer.concat(chunks).toString("utf8").trim();
+        let input: { workflow?: string; force?: boolean } = {};
+        if (raw) {
+          try {
+            input = JSON.parse(raw) as { workflow?: string; force?: boolean };
+          } catch {
+            res.writeHead(400, {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+            });
+            res.end(JSON.stringify({ ok: false, error: "Invalid JSON body" }));
+            return;
+          }
+        }
+        const workflow = input.workflow?.trim();
+        if (!workflow) {
+          res.writeHead(400, {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          });
+          res.end(JSON.stringify({ ok: false, error: "workflow is required" }));
+          return;
+        }
+        const force = input.force === true;
+        const stopped = await stopDaemons(workflow, force, dir);
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        });
+        res.end(JSON.stringify({ ok: true, workflow, force, stopped }));
       } catch (e) {
         res.writeHead(500, {
           "Content-Type": "application/json",
