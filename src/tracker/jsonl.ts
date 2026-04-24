@@ -598,17 +598,27 @@ export function readRunsForId(
     runMap.set(rid, e);
     if (e.step) lastStep.set(rid, e.step);
   }
+  // Earliest tracker timestamp per run (the pending emit) — defines
+  // chronological order regardless of runId shape.
+  const runFirstTs = new Map<string, string>();
+  for (const e of entries) {
+    const rid = e.runId || `${e.id}#1`;
+    const existing = runFirstTs.get(rid);
+    if (!existing || e.timestamp < existing) runFirstTs.set(rid, e.timestamp);
+  }
+
   const raw = [...runMap.values()]
     .map((e) => {
       const rid = e.runId || `${e.id}#1`;
       return { runId: rid, status: e.status, step: lastStep.get(rid), timestamp: e.timestamp };
     })
-    // Numeric sort by trailing run number (`email#10` after `email#2`, not before).
+    // Chronological asc (oldest first, newest last — callers rely on
+    // data[length-1] to be the latest run). Both legacy `{id}#N` and UUID
+    // runIds use tracker timestamps so the sort is shape-agnostic.
     .sort((a, b) => {
-      const an = Number.parseInt(a.runId.split("#")[1] ?? "", 10);
-      const bn = Number.parseInt(b.runId.split("#")[1] ?? "", 10);
-      if (Number.isFinite(an) && Number.isFinite(bn)) return an - bn;
-      return a.runId.localeCompare(b.runId);
+      const at = runFirstTs.get(a.runId) ?? a.timestamp;
+      const bt = runFirstTs.get(b.runId) ?? b.timestamp;
+      return at.localeCompare(bt);
     });
 
   if (raw.length <= 1) return raw;
