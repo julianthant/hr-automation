@@ -297,13 +297,10 @@ export const separationsWorkflow = defineWorkflow({
         jobSummary: async (): Promise<JobSummaryData | undefined> => {
           const page = await ctx.page("ucpath");
           log.step("[UCPath] Starting Job Summary lookup...");
-          // Pass the employee name as a last-resort fallback hint. If the
-          // Kuali EID is wrong (typo on the HR admin side), the three-tier
-          // cascade in getJobSummaryData will use the name to find the
-          // correct EID via Person Org Summary. The corrected EID comes
-          // back in the result's `emplIdUsed` field; see resolvedEid
-          // handling after Phase 1 completes.
-          return getJobSummaryData(page, kualiData.eid, { nameHint: kualiData.employeeName });
+          // Throws with a clear "verify EID in Kuali" message if Workforce
+          // Job Summary returns no results. No cross-source fallbacks —
+          // wrong EIDs get surfaced, not silently corrected.
+          return getJobSummaryData(page, kualiData.eid);
         },
         kualiTimekeeper: async () => {
           const page = await ctx.page("kuali");
@@ -353,26 +350,6 @@ export const separationsWorkflow = defineWorkflow({
     // resolveJobSummaryResult throws on rejection (classified log emitted above);
     // no duplicate log.error here — the rejection is fatal and the throw propagates.
     jobSummaryData = resolveJobSummaryResult(phase1.jobSummary);
-
-    // Resolve the canonical EID for all downstream UCPath operations.
-    // getJobSummaryData's tier-3 name fallback returns a possibly-corrected
-    // EID in `emplIdUsed`; when it differs from the Kuali-supplied EID, use
-    // the corrected one for the UCPath transaction submit and the
-    // idempotency key. Kronos searches already ran above with the Kuali EID
-    // — updating them retroactively would require re-running the step; out
-    // of scope for this pass. The Kuali form itself still displays the
-    // original EID (Kuali is not re-written with the correction — that's
-    // a user decision, not automation's).
-    const resolvedEid = jobSummaryData?.emplIdUsed ?? kualiData.eid;
-    if (resolvedEid !== kualiData.eid) {
-      log.warn(
-        `[Separations] Kuali EID '${kualiData.eid}' didn't resolve in UCPath; `
-        + `name fallback ('${kualiData.employeeName}') found correct EID '${resolvedEid}'. `
-        + `UCPath transaction will use the corrected EID.`,
-      );
-      ctx.updateData({ eid: resolvedEid, kualiEid: kualiData.eid });
-    }
-
     if (phase1.kualiTimekeeper.status === "rejected") {
       const classified = classifyPlaywrightError(phase1.kualiTimekeeper.reason);
       log.error(`[Kuali Timekeeper] ${classified.kind}: ${classified.summary}`);
@@ -465,13 +442,11 @@ export const separationsWorkflow = defineWorkflow({
     //      recover the txn#, then continue to Kuali finalization.
     // Key fields: workflow + docId + emplId. docId alone is unique per
     // Kuali doc; emplId is a cross-check that the Kuali extraction resolved
-    // to the same employee as last time. Uses resolvedEid so a corrected
-    // EID reuses the prior run's idempotency record (same employee, same
-    // doc, regardless of whether Kuali still has a typo).
+    // to the same employee as last time.
     const idempKey = hashKey({
       workflow: "separations",
       docId,
-      emplId: resolvedEid,
+      emplId: kualiData.eid,
     });
 
     await ctx.step("ucpath-transaction", async () => {
@@ -533,8 +508,8 @@ export const separationsWorkflow = defineWorkflow({
             log.error(`[UCPath Txn] Create failed: ${createResult.error}`);
             return;
           }
-          log.step(`[UCPath Txn] Filling Empl ID '${resolvedEid}'${resolvedEid !== kualiData.eid ? ` (corrected from Kuali's '${kualiData.eid}')` : ""}...`);
-          await frame.getByRole("textbox", { name: "Empl ID" }).fill(resolvedEid, { timeout: 10_000 });
+          log.step("[UCPath Txn] Filling Empl ID...");
+          await frame.getByRole("textbox", { name: "Empl ID" }).fill(kualiData.eid, { timeout: 10_000 });
           await selectReasonCode(ucpathPage, frame, ucpathReason);
           await fillComments(frame, finalComments);
 
