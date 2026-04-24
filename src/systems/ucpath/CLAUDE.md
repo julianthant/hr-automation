@@ -8,9 +8,7 @@ PeopleSoft HR automation: Smart HR transactions, person search, job summary extr
 - `navigate.ts` — `getContentFrame(page)` (iframe `#main_target_win0`), `waitForPeopleSoftProcessing(frame)`, `searchPerson(page, ssn, firstName, lastName, dob)`, `navigateToSmartHR(page)` (direct URL preferred, menu fallback), `dismissModalMask(page)` (legacy alias — re-exports from `src/systems/common/modal.ts`)
 - `transaction.ts` — Full Smart HR flow: template selection, effective date, create transaction, reason code, personal data, comments, job data tabs, save/submit. Exports ~15 individual step functions
 - `personal-data.ts` — Emergency Contact standalone component: `navigateToEmergencyContact(page, emplId)`, `readExistingContactNames(page)`, `hidePeopleSoftModalMask(page)` (legacy alias — re-exports from `src/systems/common/modal.ts`)
-- `job-summary.ts` — `getJobSummaryData(page, emplId, opts?)`: three-tier cascade — Workforce Job Summary by EID → Person Org Summary by EID → **[opt-in via `opts.nameHint`]** name-based lookup + retry Person Org Summary. Returns `emplIdUsed` so callers can detect when tier 3 swapped in a corrected EID.
-- `employee-search.ts` — `lookupEmplIdByName(page, name)`: simple Person Org Summary name search (no dept filter) used as a last-resort fallback when EID-based lookups fail. Returns first matching EID or `null`. Not dept-filtered — callers needing SDCMP/HDH filtering should use the eid-lookup workflow instead.
-- `person-org-summary-fallback.ts` — `lookupJobInfoByEidFromPersonOrgSummary(page, emplId)`: tier-2 fallback for `getJobSummaryData` — broader coverage than Workforce Job Summary (handles historical records, non-SDCMP BUs).
+- `job-summary.ts` — `getJobSummaryData(page, emplId)`: navigates to Workforce Job Summary, searches by EID, extracts work location (deptId, description) and job info (jobCode, description). Throws with a clear "verify EID in upstream record" message when Workforce returns no results — no cross-source auto-fallback by design.
 - `selectors.ts` — **Selector registry** (Subsystem A). All Playwright locators grouped by flow: `smartHR`, `personalData`, `comments`, `jobData`, `personSearch`, `jobSummary`, `hrTasks`, `emergencyContact`. Callers import group-level namespaces and invoke `selector(root)` to get a Locator.
 - `types.ts` — `TransactionResult`, `TransactionError`, `PlannedAction`, `PersonSearchResult`, `PersonalDataInput`, `JobDataInput`, `JobSummaryData`
 - `index.ts` — Barrel exports (includes `ucpathSelectors` registry barrel)
@@ -78,20 +76,23 @@ whitelisted via end-of-line `// allow-inline-selector` comments.
 When you verify a selector via playwright-cli, update the `// verified`
 comment in `selectors.ts` to today's date.
 
-## Workflow-aware fallback primitives
+## No cross-source auto-fallbacks
 
-When UCPath returns empty for a read that callers depend on, the system provides cascading fallbacks rather than forcing every workflow to re-implement the retry logic. The pattern for adding a new one:
+`getJobSummaryData` throws on empty Workforce Job Summary results. We do NOT fall back to Person Organizational Summary by EID, and we do NOT attempt name-based EID correction. A previous iteration (2026-04-23) shipped a three-tier cascade (Workforce → PersonOrg by EID → name-based lookup) — that code was reverted same day because silent fallbacks hide the underlying data problem.
 
-1. **Keep the fallback stateless w.r.t. workflow context** — it should take `page` + the bare minimum upstream hints, return a shape structurally compatible with the primary path. This lets any workflow opt in with a one-line change at the call site.
-2. **Make it opt-in via `opts`** — existing callers keep their terse signature; new callers pass `{ nameHint: ... }` or `{ ssnHint: ... }` or whatever applies.
-3. **Surface what actually resolved** — if the fallback swaps in a corrected value (EID, SSN, etc.), return it in the result so callers can thread the correction downstream.
-4. **Best-effort, return null on failure** — never throw from a fallback; the primary path's caller already knows how to handle "no data."
+When an upstream record has the wrong EID (Kuali Build, Salesforce, etc.), the correct fix is:
 
-Reference implementation: the three-tier cascade in `getJobSummaryData` — Workforce JS → Person Org Summary by EID → name-based EID lookup + retry. Separations wires tier 3 by passing `kualiData.employeeName` as `nameHint`; onboarding / work-study / emergency-contact can opt in the same way when wrong-EID scenarios emerge in their flows.
+1. The workflow errors with a legible message naming the offending EID.
+2. The user opens the upstream record and corrects it.
+3. The workflow is re-run. Idempotency primitives prevent duplicate submits.
+
+Auto-correction via cross-source name matching is a correctness risk: names aren't unique, variants can match different employees, and a silent match produces a wrong-employee transaction. Transient-error retries (Playwright timeouts, auth flakes) still go through `loginWithRetry` / `ctx.retry` — that's retrying the same operation, not substituting data.
+
+**Before adding any cross-source fallback to a UCPath read, confirm with the user.** The default answer is no.
 
 ## Lessons Learned
 
-- **2026-04-23: Three-tier EID cascade in `getJobSummaryData`.** Added tier 3 (name-based lookup via `lookupEmplIdByName`) that fires when tiers 1–2 both return empty AND the caller passes `opts.nameHint`. Result carries `emplIdUsed` so callers can detect when the EID was corrected (e.g. HR admin typo in an upstream system). Design: `docs/superpowers/specs/2026-04-23-daemon-isolation-and-separations-stability-design.md` Part 3.
 - **2026-04-23: `page.screenshot` outlier removed from `transaction.ts`.** `clickSaveAndSubmit` no longer captures its own ad-hoc `.screenshots/save-disabled-*.png` on waitForSaveEnabled timeout. Workflow handlers that want diagnostic captures call `ctx.screenshot({ kind: 'error', label: ... })` from their catch block — keeps the system module ctx-free and routes the image through the structured tracker pipeline.
+- **2026-04-23: Three-tier EID cascade reverted.** Briefly shipped Workforce → PersonOrg by EID → name-based-lookup cascade in `getJobSummaryData`. User pushed back same day — preference is to fail loudly with a clear error so upstream data (Kuali EID) gets corrected at the source. Cross-source auto-fallbacks are off by default. `employee-search.ts` and `person-org-summary-fallback.ts` were deleted with the revert. The spec `docs/superpowers/specs/2026-04-23-daemon-isolation-and-separations-stability-design.md` describes the original design; Parts 3.1, 3.2, 3.4 and portions of Part 4 no longer reflect shipped code.
 - **2026-04-10: Transaction number extraction after confirmation OK** — After clicking OK on the UCPath confirmation dialog, the transaction page navigates away and the transaction number is no longer visible. Fix: after clicking OK, renavigate to Smart HR via `navigateToSmartHR()` + `clickSmartHRTransactions()` to reach the transactions list, then extract the most recent transaction number from there.
 - **2026-04-10: framenavigated listener cleanup** — The `[NAV]` `framenavigated` listener registered during UCPath auth (to detect successful login) must be removed after auth completes. If left active, it fires on every subsequent PeopleSoft page navigation, creating noisy log entries and potential interference with navigation detection logic.
