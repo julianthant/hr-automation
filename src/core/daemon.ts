@@ -36,6 +36,22 @@ export interface DaemonOpts {
 const DEFAULT_IDLE_MS = 15 * 60 * 1000
 
 /**
+ * Daemon lifecycle phases — exposed via /status so CLI callers and
+ * `npm run daemon-attach` can see what the daemon is doing at any moment.
+ * Helps diagnose "browsers don't launch" (stuck in `authenticating`) vs
+ * "queue isn't processing" (stuck in `idle` with queueDepth > 0) vs
+ * "healthCheck hung" (stuck in `keepalive`).
+ */
+export type DaemonPhase =
+  | 'launching'      // before session.launch
+  | 'authenticating' // during session.launch + per-system page() waits
+  | 'idle'           // claim loop, no item in flight
+  | 'processing'     // runOneItem in progress
+  | 'keepalive'      // 15min idle tick: healthCheck + orphan recovery
+  | 'draining'       // shutdown, finishing in-flight teardown
+  | 'exited'         // terminal
+
+/**
  * Long-running daemon loop. Must be invoked from a DETACHED process via
  * `src/cli-daemon.ts`. Owns:
  *   - HTTP server for /whoami /status /wake /stop
@@ -69,6 +85,13 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   let inFlight: { itemId: string; runId: string } | null = null
   let queueDepthCache = 0
   let lastActivity = Date.now()
+  let phase: DaemonPhase = 'launching'
+  const setPhase = (next: DaemonPhase): void => {
+    if (phase === next) return
+    const prev = phase
+    phase = next
+    log.step(`[Daemon ${wf.config.name}/${instanceId}] phase: ${prev} → ${next}`)
+  }
 
   const server: Server = createServer((req, res) => {
     const url = req.url ?? '/'
@@ -90,6 +113,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         JSON.stringify({
           workflow: wf.config.name,
           instanceId,
+          phase,
           queueDepth: queueDepthCache,
           inFlight: inFlight?.itemId ?? null,
           lastActivity: new Date(lastActivity).toISOString(),
@@ -168,19 +192,33 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
       },
       async ({ instance, markTerminated, makeObserver }) => {
         const { observer, getAuthTimings } = makeObserver('1')
-        const session = await launchFn(wf.config.systems, {
-          authChain: wf.config.authChain,
-          tiling: wf.config.tiling,
-          observer,
-        })
-        // Force every system's auth to complete at daemon startup so the
-        // claim loop doesn't race with in-progress Duo prompts. Rejections
-        // propagate to `withBatchLifecycle`'s catch so an auth failure
-        // shuts the daemon down cleanly (lockfile unlink, in-flight
-        // unclaim) instead of entering the claim loop with a broken
-        // session and failing every queued item individually.
-        for (const sys of wf.config.systems) {
-          await session.page(sys.id)
+        setPhase('authenticating')
+        let session: Session
+        try {
+          session = await launchFn(wf.config.systems, {
+            authChain: wf.config.authChain,
+            tiling: wf.config.tiling,
+            observer,
+          })
+          // Force every system's auth to complete at daemon startup so the
+          // claim loop doesn't race with in-progress Duo prompts. Rejections
+          // propagate to `withBatchLifecycle`'s catch so an auth failure
+          // shuts the daemon down cleanly (lockfile unlink, in-flight
+          // unclaim) instead of entering the claim loop with a broken
+          // session and failing every queued item individually.
+          for (const sys of wf.config.systems) {
+            await session.page(sys.id)
+          }
+        } catch (e) {
+          // Surface the failure with structured context so `npm run <wf>:attach`
+          // shows an actionable line instead of a silent daemon exit. Classify
+          // via the Playwright error taxonomy when the error looks like a browser
+          // launch fault (ProcessSingleton, etc.).
+          const summary = e instanceof Error ? (e.message ?? String(e)) : String(e)
+          log.error(
+            `[Daemon ${wf.config.name}/${instanceId}] auth/launch failed during phase='${phase}' — ${summary}`,
+          )
+          throw e
         }
 
         // Snapshot the real auth timings now that every system has finished
@@ -222,6 +260,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         }
 
         try {
+          setPhase('idle')
           while (!shuttingDown) {
             const state = await readQueueState(wf.config.name, trackerDir)
             queueDepthCache = state.queued.length
@@ -238,6 +277,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
             })
 
             if (item) {
+              setPhase('processing')
               const runId = item.runId ?? randomUUID()
               inFlight = { itemId: item.id, runId }
               lastActivity = Date.now()
@@ -276,6 +316,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 await markItemFailed(wf.config.name, item.id, r.error, runId, trackerDir)
               }
               inFlight = null
+              setPhase('idle')
               continue
             }
 
@@ -299,6 +340,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
             if (shuttingDown) break
 
             // Keepalive tick: recover orphans + healthCheck each system.
+            setPhase('keepalive')
             const aliveNow = await findAliveDaemons(wf.config.name, trackerDir)
             const aliveSetNow = new Set(aliveNow.map((d) => d.instanceId))
             aliveSetNow.add(instanceId)
@@ -320,8 +362,10 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 )
               }
             }
+            setPhase('idle')
           }
         } finally {
+          setPhase('draining')
           unsubscribeDisconnect()
           if (inFlight) {
             if (forceShutdown) {
@@ -355,6 +399,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
       /* best-effort */
     }
     await new Promise<void>((resolve) => server.close(() => resolve()))
+    setPhase('exited')
     log.step(`[Daemon ${wf.config.name}/${instanceId}] exited cleanly`)
   }
 }
