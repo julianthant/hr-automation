@@ -205,6 +205,8 @@ export interface WorkflowInstanceState {
   pidAlive: boolean;
   crashedOnLaunch?: boolean;
   currentItemId: string | null;
+  /** True between item_start and item_complete — i.e. a real item is currently being processed. */
+  itemInFlight: boolean;
   currentStep: string | null;
   finalStatus: "done" | "failed" | null;
   sessions: SessionInfo[];

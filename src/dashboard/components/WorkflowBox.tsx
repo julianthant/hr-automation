@@ -8,19 +8,42 @@ interface WorkflowBoxProps {
 }
 
 // Step/status pill styled like StepPipeline labels.
-// Active:        cyan pill with current step (e.g. "PDF Download")
-// Done:          green "DONE" pill
-// Failed:        red "FAILED" pill
-// Fallback:      dim step-name pill when status is unknown (legacy events / pre-first-step)
+// Active + item running:   cyan pill with the doc/item currently being processed
+// Active + idle:           dim "Idle" pill (daemon waiting for the next queued item)
+// Active + no item event:  cyan pill with current step (legacy/non-daemon fallback)
+// Done:                    green "DONE" pill
+// Failed:                  red "FAILED" pill
+// Fallback:                dim step-name pill when status is unknown
 function StatusPill({
   active,
   currentStep,
+  currentItemId,
+  itemInFlight,
   finalStatus,
 }: {
   active: boolean;
   currentStep: string | null;
+  currentItemId: string | null;
+  itemInFlight: boolean;
   finalStatus: "done" | "failed" | null;
 }) {
+  if (active && itemInFlight && currentItemId) {
+    return (
+      <span
+        className="text-[10px] font-mono text-[#22d3ee] bg-[#06b6d41a] px-1.5 py-0.5 rounded truncate max-w-[160px]"
+        title={currentItemId}
+      >
+        {currentItemId}
+      </span>
+    );
+  }
+  if (active && !itemInFlight) {
+    return (
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground bg-muted/30 px-1.5 py-0.5 rounded">
+        Idle
+      </span>
+    );
+  }
   if (active && currentStep) {
     return (
       <span className="text-[10px] font-mono text-[#22d3ee] bg-[#06b6d41a] px-1.5 py-0.5 rounded">
@@ -54,7 +77,7 @@ function StatusPill({
 }
 
 export function WorkflowBox({ workflow }: WorkflowBoxProps) {
-  const { instance, active, currentItemId, currentStep, finalStatus, sessions } = workflow;
+  const { instance, active, currentItemId, itemInFlight, currentStep, finalStatus, sessions } = workflow;
 
   if (workflow.crashedOnLaunch) {
     return (
@@ -95,14 +118,20 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
         />
         <span className="text-[11px] font-semibold text-[#c4b5fd]">{instance}</span>
         <span className="flex-1" />
-        <StatusPill active={active} currentStep={currentStep} finalStatus={finalStatus} />
+        <StatusPill
+          active={active}
+          currentStep={currentStep}
+          currentItemId={currentItemId}
+          itemInFlight={itemInFlight}
+          finalStatus={finalStatus}
+        />
       </div>
 
-      {/* Current item (email/doc ID) — shown directly under the instance title */}
-      {currentItemId && (
+      {/* Current step — only shown when the pill is occupied by a doc ID (item in flight) */}
+      {active && itemInFlight && currentItemId && currentStep && (
         <div className="px-0.5 mb-1">
-          <span className="text-[10px] font-mono text-[#a78bfa] truncate block" title={currentItemId}>
-            {currentItemId}
+          <span className="text-[10px] font-mono text-[#a78bfa] truncate block">
+            {formatStepName(currentStep)}
           </span>
         </div>
       )}

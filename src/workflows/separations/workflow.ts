@@ -76,8 +76,6 @@ import {
   mapReasonCode,
   getInitials,
 } from "./schema.js";
-import type { SeparationData } from "./schema.js";
-import { stepCacheGet, stepCacheSet } from "../../core/step-cache.js";
 import {
   KUALI_SPACE_URL,
   UC_VOL_TERM_TEMPLATE,
@@ -213,29 +211,23 @@ export const separationsWorkflow = defineWorkflow({
     ctx.updateData({ docId });
 
     // ─── Step 1: Extract Kuali data ───
+    // Kuali docs are user-editable between runs (e.g. correcting a wrong EID
+    // after a failed first pass). Caching the extraction would serve stale
+    // values on retry, so always re-read. See
+    // docs/superpowers/specs/2026-04-23-daemon-isolation-and-separations-stability-design.md
+    // Part 1.2 for the general caching rule (write-once / non-user-editable only).
     const kualiData = await ctx.step("kuali-extraction", async () => {
       const t0 = Date.now();
       log.debug(`[Step: kuali-extraction] START docId='${docId}'`);
-      const cached = stepCacheGet<SeparationData>("separations", docId, "kuali-extraction");
-      let result: SeparationData | KualiSeparationData;
-      if (cached) {
-        log.success(`[Kuali] Extraction cached (doc ${docId}) — reusing`);
-        const ucpathPage = await ctx.page("ucpath");
-        ucpathPage.on("dialog", (d) => d.accept().catch(() => {}));
-        result = cached;
-      } else {
-        const kualiPage = await ctx.page("kuali");
-        // Auto-dismiss PeopleSoft dialogs on UCPath — important when a previous
-        // doc's transaction leaves a confirmation modal up (batch mode state).
-        const ucpathPage = await ctx.page("ucpath");
-        ucpathPage.on("dialog", (d) => d.accept().catch(() => {}));
+      const kualiPage = await ctx.page("kuali");
+      // Auto-dismiss PeopleSoft dialogs on UCPath — important when a previous
+      // doc's transaction leaves a confirmation modal up (batch mode state).
+      const ucpathPage = await ctx.page("ucpath");
+      ucpathPage.on("dialog", (d) => d.accept().catch(() => {}));
 
-        await openActionList(kualiPage);
-        await clickDocument(kualiPage, docId);
-        const extracted = await extractSeparationData(kualiPage);
-        try { stepCacheSet("separations", docId, "kuali-extraction", extracted); } catch { /* best-effort */ }
-        result = extracted;
-      }
+      await openActionList(kualiPage);
+      await clickDocument(kualiPage, docId);
+      const result = await extractSeparationData(kualiPage);
       log.step(
         `[Step: kuali-extraction] END took=${Date.now() - t0}ms `
         + `employeeName='${result.employeeName}' eid='${result.eid}' `
@@ -471,7 +463,11 @@ export const separationsWorkflow = defineWorkflow({
           if (recordedTxn) {
             log.warn(`[UCPath Txn] Prior submit recorded (txn #${recordedTxn}) — skipping UCPath submit (idempotency)`);
             transactionNumber = recordedTxn;
-            ctx.updateData({ idempotencySkip: "submit" });
+            // Persist the recovered txn # immediately. If a later step
+            // (kuali-finalization) throws, the handler exits before the
+            // final updateData at the end of the handler — without this
+            // inline call the dashboard detail panel shows "—".
+            ctx.updateData({ transactionNumber, idempotencySkip: "submit" });
             return;
           }
           // Submit happened but txn# wasn't captured — run readback only.
@@ -482,6 +478,8 @@ export const separationsWorkflow = defineWorkflow({
             if (recoveredTxn) {
               transactionNumber = recoveredTxn;
               recordSuccess(idempKey, recoveredTxn, "separations");
+              // Persist immediately — see comment at the idempotency-hit path above.
+              ctx.updateData({ transactionNumber });
               log.success(`[UCPath Txn] Recovered txn #${recoveredTxn} via readback`);
               await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-recovered' });
             } else {
@@ -532,6 +530,9 @@ export const separationsWorkflow = defineWorkflow({
             submittedWithoutTxnNumber = true;
             return;
           }
+          // Persist txn # immediately so kuali-finalization failures don't
+          // drop it from the tracker entry's data.
+          ctx.updateData({ transactionNumber });
           log.success(`[UCPath Txn] Transaction submitted (#${transactionNumber})`);
           await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-submitted' });
         } catch (e) {
