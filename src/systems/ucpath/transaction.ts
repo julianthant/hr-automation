@@ -530,12 +530,11 @@ export async function clickSaveAndSubmit(
   await dismissModalMask(page);
 
   const btn = smartHR.saveAndSubmitButton(frame);
-  try {
-    await waitForSaveEnabled(btn, { timeoutMs: 15_000 });
-  } catch (e) {
-    await page.screenshot({ path: `.screenshots/save-disabled-${Date.now()}.png` }).catch(() => {});
-    throw e;
-  }
+  // Any ad-hoc save-disabled screenshot lives on the handler side via
+  // ctx.screenshot() — keeping this module ctx-free means separations /
+  // onboarding / etc can attach their own labeling + kind without
+  // teaching this low-level function about the kernel.
+  await waitForSaveEnabled(btn, { timeoutMs: 15_000 });
   await btn.click({ timeout: 10_000 });
   await page.waitForTimeout(5_000);
   await waitForPeopleSoftProcessing(frame, 30_000);

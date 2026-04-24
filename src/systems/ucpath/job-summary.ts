@@ -5,6 +5,7 @@ import { jobSummary } from "./selectors.js";
 import { waitForPeopleSoftProcessing } from "./navigate.js";
 import { dismissPeopleSoftModalMask } from "../common/modal.js";
 import { lookupJobInfoByEidFromPersonOrgSummary } from "./person-org-summary-fallback.js";
+import { lookupEmplIdByName } from "./employee-search.js";
 
 /** Direct URL — skips sidebar, no iframe wrapper. */
 const JOB_SUMMARY_URL =
@@ -15,6 +16,24 @@ export interface JobSummaryData {
   departmentDescription: string;
   jobCode: string;
   jobDescription: string;
+  /**
+   * The EID that actually resolved. Matches the input `emplId` unless the
+   * name-based fallback fired (tier 3 of the cascade — see
+   * `getJobSummaryData` jsdoc). Callers that downstream fill the EID onto
+   * UCPath Smart HR forms should use this value, not the input — it may
+   * correct an upstream typo.
+   */
+  emplIdUsed: string;
+}
+
+export interface GetJobSummaryOpts {
+  /**
+   * Employee name hint ("Last, First Middle" or "First Last") used as a
+   * last-resort fallback when tiers 1 and 2 return empty. Pass this when
+   * you have both an EID and a name from different upstream systems; the
+   * name will cross-check the EID when UCPath doesn't recognize it.
+   */
+  nameHint?: string;
 }
 
 /**
@@ -222,37 +241,77 @@ export async function extractJobInfo(
 /**
  * Full flow: navigate, search, extract all data.
  *
- * Workforce Job Summary's search has default filters (Business Unit,
- * HR Status, Organizational Relationship) that exclude certain employees —
- * observed failure modes include historical records and non-SDCMP BUs.
- * When the primary search returns "No matching values were found.", we
- * fall back to Person Organizational Summary, which has broader coverage
- * and a fixed iframe layout. `lookupJobInfoByEidFromPersonOrgSummary`
- * returns the same 4 fields; callers never see the branch.
+ * Three-tier cascade (each tier only runs if the prior returned empty):
+ *
+ * 1. **Workforce Job Summary by EID** — the primary path. Default filters
+ *    (Business Unit, HR Status, Organizational Relationship) exclude
+ *    historical records and non-SDCMP BUs, so sometimes this returns
+ *    empty even for a valid EID.
+ * 2. **Person Organizational Summary by EID** — broader coverage, fixed
+ *    iframe layout. Shipped 2026-04-23 (840280e). Handles the
+ *    "employee exists but Workforce filters hid them" case.
+ * 3. **Name-based EID lookup** (opt-in via `opts.nameHint`) — when BOTH
+ *    EID-based tiers fail AND a name hint was provided, search Person
+ *    Org Summary by name to find the correct EID, then retry tier 2
+ *    with that EID. Catches upstream typos (e.g. HR admin entered
+ *    `1058653` for an employee whose real EID is `10586530`).
+ *
+ * Returns `emplIdUsed` in the result so callers can detect when tier 3
+ * changed the EID and thread the corrected value into downstream steps.
  */
 export async function getJobSummaryData(
   page: Page,
   emplId: string,
+  opts?: GetJobSummaryOpts,
 ): Promise<JobSummaryData> {
   await navigateToWorkforceJobSummary(page);
   const found = await searchJobSummary(page, emplId);
 
-  if (!found) {
-    log.warn(`[Job Summary] Workforce Job Summary returned no results for EID ${emplId}. Falling back to Person Organizational Summary.`);
-    const fallback = await lookupJobInfoByEidFromPersonOrgSummary(page, emplId);
-    if (fallback) return fallback;
-    throw new Error(
-      `Job Summary lookup failed for EID ${emplId}: neither Workforce Job Summary nor Person Organizational Summary returned results`,
-    );
+  if (found) {
+    const workLocation = await extractWorkLocation(page);
+    const jobInfo = await extractJobInfo(page);
+    return {
+      deptId: workLocation.deptId,
+      departmentDescription: workLocation.departmentDescription,
+      jobCode: jobInfo.jobCode,
+      jobDescription: jobInfo.jobDescription,
+      emplIdUsed: emplId,
+    };
   }
 
-  const workLocation = await extractWorkLocation(page);
-  const jobInfo = await extractJobInfo(page);
+  // Tier 2: Person Org Summary by EID.
+  log.warn(`[Job Summary] Workforce Job Summary returned no results for EID ${emplId}. Falling back to Person Organizational Summary.`);
+  const tier2 = await lookupJobInfoByEidFromPersonOrgSummary(page, emplId);
+  if (tier2) return { ...tier2, emplIdUsed: emplId };
 
-  return {
-    deptId: workLocation.deptId,
-    departmentDescription: workLocation.departmentDescription,
-    jobCode: jobInfo.jobCode,
-    jobDescription: jobInfo.jobDescription,
-  };
+  // Tier 3: name-based fallback (only when caller supplied a name hint).
+  if (opts?.nameHint) {
+    log.warn(`[Job Summary] Tier 2 also empty for EID ${emplId}. Attempting name-based fallback with hint='${opts.nameHint}'.`);
+    const nameResult = await lookupEmplIdByName(page, opts.nameHint);
+    if (nameResult && nameResult.emplId && nameResult.emplId !== emplId) {
+      log.warn(
+        `[Job Summary] Name fallback resolved '${opts.nameHint}' to EID ${nameResult.emplId} (input EID was ${emplId}). Retrying Person Org Summary with corrected EID.`,
+      );
+      const tier3 = await lookupJobInfoByEidFromPersonOrgSummary(page, nameResult.emplId);
+      if (tier3) {
+        log.success(`[Job Summary] Recovered via name fallback: emplIdUsed=${nameResult.emplId} (input was ${emplId}).`);
+        return { ...tier3, emplIdUsed: nameResult.emplId };
+      }
+      log.warn(
+        `[Job Summary] Name fallback found EID ${nameResult.emplId} but Person Org Summary still returned no job data for it.`,
+      );
+    } else if (nameResult && nameResult.emplId === emplId) {
+      log.warn(
+        `[Job Summary] Name fallback resolved to the same EID ${emplId} that already failed — no corrective action possible.`,
+      );
+    } else {
+      log.warn(`[Job Summary] Name fallback exhausted — no match for '${opts.nameHint}'.`);
+    }
+  }
+
+  throw new Error(
+    `Job Summary lookup failed for EID ${emplId}: `
+    + `neither Workforce Job Summary nor Person Organizational Summary returned results`
+    + (opts?.nameHint ? ` (name fallback with hint '${opts.nameHint}' also failed)` : ""),
+  );
 }
