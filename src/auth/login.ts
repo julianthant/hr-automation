@@ -4,7 +4,7 @@ import { pollDuoApproval } from "./duo-poll.js";
 import { requestDuoApproval } from "../tracker/duo-queue.js";
 import { validateEnv } from "../utils/env.js";
 import { UKG_URL } from "../config.js";
-import { fillSsoCredentials, clickSsoSubmit } from "./sso-fields.js";
+import { fillSsoCredentials, clickSsoSubmit, isSsoFormReady } from "./sso-fields.js";
 import { gotoWithRetry } from "../browser/launch.js";
 import { debugScreenshot } from "../utils/screenshot.js";
 
@@ -17,15 +17,13 @@ import { debugScreenshot } from "../utils/screenshot.js";
  * @param page - Playwright page instance
  * @returns true if authentication succeeded, false otherwise
  */
-export async function loginToUCPath(page: Page, instance?: string): Promise<boolean> {
-  // Track every navigation for debugging the redirect chain — removed after login
-  const navListener = (frame: import("playwright").Frame) => {
-    if (frame === page.mainFrame()) {
-      log.step(`[NAV] ${frame.url()}`);
-    }
-  };
-  page.on("framenavigated", navListener);
-
+/**
+ * UCPath prepare phase: navigate through the login → campus-discovery → SSO
+ * hop chain and fill credentials. Leaves the page at the SSO form with the
+ * Submit button ready to click. Idempotent — safe to call again on a stale
+ * form (the nav resets the Shibboleth token automatically).
+ */
+export async function ucpathNavigateAndFill(page: Page): Promise<boolean> {
   log.step("Navigating to UCPath...");
   await page.goto("https://ucpath.ucsd.edu", {
     waitUntil: "domcontentloaded",
@@ -33,8 +31,6 @@ export async function loginToUCPath(page: Page, instance?: string): Promise<bool
   });
   log.step(`Login page loaded | URL: ${page.url()}`);
 
-  // Click the "Log in to UCPath" button in the main banner
-  // SELECTOR: adjusted after live testing -- button OR link
   const loginButton =
     page.getByRole("button", { name: /log in to ucpath/i }).or(
       page.getByRole("link", { name: /log in to ucpath/i }),
@@ -42,8 +38,6 @@ export async function loginToUCPath(page: Page, instance?: string): Promise<bool
   await loginButton.first().click({ timeout: 10_000 });
   log.step(`After "Log in" click | URL: ${page.url()}`);
 
-  // UC-wide identity provider discovery page -- select UCSD campus
-  // Retry up to 3 times if the redirect fails (chrome-error / network glitch)
   for (let attempt = 1; attempt <= 3; attempt++) {
     log.step(`Selecting UC San Diego... (attempt ${attempt})`);
     const campusLink = page.getByRole("link", {
@@ -51,30 +45,49 @@ export async function loginToUCPath(page: Page, instance?: string): Promise<bool
     });
     await campusLink.click({ timeout: 10_000 });
     log.step(`After campus select | URL: ${page.url()}`);
-
     try {
-      await page.waitForURL(
-        (url) => url.hostname.includes("a5.ucsd.edu"),
-        { timeout: 15_000 },
-      );
-      break; // success
+      await page.waitForURL((url) => url.hostname.includes("a5.ucsd.edu"), { timeout: 15_000 });
+      break;
     } catch {
       if (page.url().includes("chrome-error") && attempt < 3) {
         log.step(`SSO redirect failed (chrome-error) — retrying navigation...`);
-        await page.goto("https://ucpath.ucsd.edu", {
-          waitUntil: "domcontentloaded",
-          timeout: 15_000,
-        });
+        await page.goto("https://ucpath.ucsd.edu", { waitUntil: "domcontentloaded", timeout: 15_000 });
         await loginButton.first().click({ timeout: 10_000 });
         continue;
       }
-      throw new Error(`SSO redirect failed after ${attempt} attempts (URL: ${page.url()})`);
+      return false;
     }
   }
   log.step(`SSO login page loaded | URL: ${page.url()}`);
 
-  // Fill SSO credentials and submit
-  await fillSsoCredentials(page);
+  try {
+    await fillSsoCredentials(page);
+  } catch {
+    log.error("Could not find UCPath SSO login fields after navigation");
+    return false;
+  }
+  log.step("UCPath: credentials filled (not submitted yet)");
+  return true;
+}
+
+/**
+ * UCPath submit phase: click Submit and wait for Duo approval. Checks
+ * staleness first — if the SSO form's submit button is no longer present
+ * (Shibboleth token expired while we waited for earlier Duos), re-runs
+ * ucpathNavigateAndFill() once before submitting.
+ */
+export async function ucpathSubmitAndWaitForDuo(page: Page, instance?: string): Promise<boolean> {
+  if (!(await isSsoFormReady(page))) {
+    log.warn("UCPath SSO form gone stale — re-preparing before submit");
+    const ok = await ucpathNavigateAndFill(page);
+    if (!ok) return false;
+  }
+
+  const navListener = (frame: import("playwright").Frame) => {
+    if (frame === page.mainFrame()) log.step(`[NAV] ${frame.url()}`);
+  };
+  page.on("framenavigated", navListener);
+
   await clickSsoSubmit(page);
   log.step(`After login click | URL: ${page.url()}`);
 
@@ -120,6 +133,17 @@ export async function loginToUCPath(page: Page, instance?: string): Promise<bool
   log.step(`Final auth URL: ${page.url()}`);
   log.success("UCPath authenticated");
   return true;
+}
+
+/**
+ * Authenticate to UCPath through UCSD Shibboleth SSO with Duo MFA.
+ * All-in-one wrapper for workflows that don't use the parallel-prepare
+ * optimization — just composes navigateAndFill + submitAndWaitForDuo.
+ */
+export async function loginToUCPath(page: Page, instance?: string): Promise<boolean> {
+  const filled = await ucpathNavigateAndFill(page);
+  if (!filled) return false;
+  return await ucpathSubmitAndWaitForDuo(page, instance);
 }
 
 /**
@@ -306,41 +330,73 @@ export async function ukgSubmitAndWaitForDuo(page: Page, instance?: string): Pro
  * @param url - Kuali Build URL to navigate to
  * @returns true if authentication succeeded, false otherwise
  */
-export async function loginToKuali(page: Page, url: string, instance?: string): Promise<boolean> {
+/**
+ * Kuali prepare phase: navigate + fill SSO credentials. Returns
+ * "already_logged_in" when a persistent session is still valid.
+ */
+export async function kualiNavigateAndFill(
+  page: Page,
+  url: string,
+): Promise<boolean | "already_logged_in"> {
   log.step("Navigating to Kuali Build...");
-  await page.goto(url, {
-    waitUntil: "domcontentloaded",
-    timeout: 60_000,
-  });
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   await page.waitForTimeout(3_000);
 
-  // Check if already logged in (must still be on kualibuild after redirects settle)
   if (page.url().includes("kualibuild")) {
     log.success("Kuali Build already authenticated");
-    return true;
+    return "already_logged_in";
   }
 
-  log.step("Logging in via UCSD SSO...");
-
+  log.step("Kuali: filling SSO credentials...");
   try {
     await fillSsoCredentials(page);
-    await clickSsoSubmit(page);
-    log.step("Credentials submitted — waiting for Duo MFA...");
   } catch {
-    // SSO may have auto-forwarded to Duo (credentials remembered) — check before bailing
     if (page.url().includes("duosecurity.com")) {
-      log.step("SSO auto-forwarded to Duo — waiting for approval...");
+      log.step("Kuali SSO auto-forwarded to Duo during prepare — treat as ready");
+      return true;
+    }
+    log.error(`Kuali: could not find SSO login fields (URL: ${page.url()})`);
+    return false;
+  }
+  log.step("Kuali: credentials filled (not submitted yet)");
+  return true;
+}
+
+/**
+ * Kuali submit phase: re-prepare on stale form, click Submit, wait for Duo.
+ */
+export async function kualiSubmitAndWaitForDuo(
+  page: Page,
+  url: string,
+  instance?: string,
+): Promise<boolean> {
+  if (page.url().includes("kualibuild")) {
+    log.success("Kuali Build authenticated (auto-login detected before submit)");
+    return true;
+  }
+  if (!(await isSsoFormReady(page))) {
+    log.warn("Kuali SSO form gone stale — re-preparing before submit");
+    const prep = await kualiNavigateAndFill(page, url);
+    if (prep === "already_logged_in") return true;
+    if (!prep) return false;
+  }
+
+  try {
+    await clickSsoSubmit(page);
+    log.step("Kuali: credentials submitted — waiting for Duo MFA...");
+  } catch {
+    if (page.url().includes("duosecurity.com")) {
+      log.step("Kuali SSO auto-forwarded to Duo — waiting for approval...");
     } else if (page.url().includes("kualibuild")) {
       log.success("Kuali Build authenticated (SSO auto-login)");
       return true;
     } else {
-      log.error(`Could not find Kuali SSO login fields (URL: ${page.url()})`);
+      log.error(`Kuali: submit click failed (URL: ${page.url()})`);
       return false;
     }
   }
 
-  // Poll for Duo approval or URL change
   const duoOptions = {
     successUrlMatch: "kualibuild" as const,
     recovery: async (p: Page) => {
@@ -360,9 +416,18 @@ export async function loginToKuali(page: Page, url: string, instance?: string): 
     log.error("Kuali Build authentication timed out");
     return false;
   }
-
   log.success("Kuali Build authenticated");
   return true;
+}
+
+/**
+ * All-in-one wrapper preserving the legacy callsite contract.
+ */
+export async function loginToKuali(page: Page, url: string, instance?: string): Promise<boolean> {
+  const prep = await kualiNavigateAndFill(page, url);
+  if (prep === "already_logged_in") return true;
+  if (!prep) return false;
+  return await kualiSubmitAndWaitForDuo(page, url, instance);
 }
 
 /**
@@ -375,41 +440,61 @@ export async function loginToKuali(page: Page, url: string, instance?: string): 
  * @param page - Playwright page instance
  * @returns true if authentication succeeded, false otherwise
  */
-export async function loginToNewKronos(page: Page, instance?: string): Promise<boolean> {
-  const wfdUrl = "https://ucsd-sso.prd.mykronos.com/wfd/home";
+const NEW_KRONOS_WFD_URL = "https://ucsd-sso.prd.mykronos.com/wfd/home";
 
+/**
+ * New Kronos prepare phase: navigate + fill SSO credentials.
+ */
+export async function newKronosNavigateAndFill(
+  page: Page,
+): Promise<boolean | "already_logged_in"> {
   log.step("Navigating to new Kronos (WFD)...");
-  await page.goto(wfdUrl, {
-    waitUntil: "domcontentloaded",
-    timeout: 60_000,
-  });
+  await page.goto(NEW_KRONOS_WFD_URL, { waitUntil: "domcontentloaded", timeout: 60_000 });
   await page.waitForTimeout(5_000);
 
-  // Check if already logged in
   if (page.url().includes("mykronos.com/wfd")) {
     log.success("New Kronos (WFD) already authenticated");
-    return true;
+    return "already_logged_in";
   }
 
-  log.step("Logging in via UCSD SSO...");
-
+  log.step("New Kronos: filling SSO credentials...");
   try {
     await fillSsoCredentials(page);
   } catch {
     log.error("Could not find new Kronos SSO login fields");
     return false;
   }
+  log.step("New Kronos: credentials filled (not submitted yet)");
+  return true;
+}
+
+/**
+ * New Kronos submit phase: re-prepare on stale form, click Submit, wait for Duo.
+ */
+export async function newKronosSubmitAndWaitForDuo(
+  page: Page,
+  instance?: string,
+): Promise<boolean> {
+  if (page.url().includes("mykronos.com/wfd")) {
+    log.success("New Kronos (WFD) authenticated (auto-login detected before submit)");
+    return true;
+  }
+  if (!(await isSsoFormReady(page))) {
+    log.warn("New Kronos SSO form gone stale — re-preparing before submit");
+    const prep = await newKronosNavigateAndFill(page);
+    if (prep === "already_logged_in") return true;
+    if (!prep) return false;
+  }
 
   await clickSsoSubmit(page);
-  log.step("Credentials submitted — waiting for Duo MFA...");
+  log.step("New Kronos: credentials submitted — waiting for Duo MFA...");
 
-  // Poll for Duo approval or URL change
   const duoOptions = {
     successUrlMatch: "mykronos.com/wfd" as const,
     recovery: async (p: Page) => {
       if (p.url().includes("#failedLogin")) {
         log.step("Session timeout detected — re-navigating...");
-        await p.goto(wfdUrl, { waitUntil: "domcontentloaded", timeout: 10_000 }).catch(() => {});
+        await p.goto(NEW_KRONOS_WFD_URL, { waitUntil: "domcontentloaded", timeout: 10_000 }).catch(() => {});
         await p.waitForTimeout(3_000);
       }
     },
@@ -422,7 +507,16 @@ export async function loginToNewKronos(page: Page, instance?: string): Promise<b
     log.error("New Kronos (WFD) authentication timed out");
     return false;
   }
-
   log.success("New Kronos (WFD) authenticated");
   return true;
+}
+
+/**
+ * All-in-one wrapper preserving the legacy callsite contract.
+ */
+export async function loginToNewKronos(page: Page, instance?: string): Promise<boolean> {
+  const prep = await newKronosNavigateAndFill(page);
+  if (prep === "already_logged_in") return true;
+  if (!prep) return false;
+  return await newKronosSubmitAndWaitForDuo(page, instance);
 }

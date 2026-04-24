@@ -5,8 +5,19 @@ import { errorMessage, classifyPlaywrightError } from "../../utils/errors.js";
 import { defineWorkflow, runWorkflow, runWorkflowBatch } from "../../core/index.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 
-// Auth wrappers
-import { loginToKuali, loginToUKG, loginToUCPath, loginToNewKronos } from "../../auth/login.js";
+// Auth wrappers — split into prepare (nav + fill) + submit (click + Duo)
+// phases so Session.launch can pre-fill every SSO form in parallel before
+// the serial Duo chain begins.
+import {
+  kualiNavigateAndFill,
+  kualiSubmitAndWaitForDuo,
+  ukgNavigateAndFill,
+  ukgSubmitAndWaitForDuo,
+  ucpathNavigateAndFill,
+  ucpathSubmitAndWaitForDuo,
+  newKronosNavigateAndFill,
+  newKronosSubmitAndWaitForDuo,
+} from "../../auth/login.js";
 
 // Kuali module
 import {
@@ -151,33 +162,48 @@ export const separationsWorkflow = defineWorkflow({
   systems: [
     {
       id: "kuali",
+      prepareLogin: async (page) => {
+        const prep = await kualiNavigateAndFill(page, KUALI_SPACE_URL);
+        if (prep === false) throw new Error("Kuali prepareLogin failed");
+      },
       login: async (page, instance) => {
-        const ok = await loginToKuali(page, KUALI_SPACE_URL, instance);
+        const ok = await kualiSubmitAndWaitForDuo(page, KUALI_SPACE_URL, instance);
         if (!ok) throw new Error("Kuali authentication failed");
       },
       resetUrl: KUALI_SPACE_URL,
     },
     {
       id: "old-kronos",
+      prepareLogin: async (page) => {
+        const prep = await ukgNavigateAndFill(page);
+        if (prep === false) throw new Error("UKG prepareLogin failed");
+      },
       login: async (page, instance) => {
-        const ok = await loginToUKG(page, instance);
+        const ok = await ukgSubmitAndWaitForDuo(page, instance);
         if (!ok) throw new Error("Old Kronos (UKG) authentication failed");
       },
       sessionDir: getProcessIsolatedSessionDir(PATHS.ukgSessionSep),
     },
     {
       id: "new-kronos",
+      prepareLogin: async (page) => {
+        const prep = await newKronosNavigateAndFill(page);
+        if (prep === false) throw new Error("New Kronos prepareLogin failed");
+      },
       login: async (page, instance) => {
-        await page.goto(NEW_KRONOS_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
-        const ok = await loginToNewKronos(page, instance);
+        const ok = await newKronosSubmitAndWaitForDuo(page, instance);
         if (!ok) throw new Error("New Kronos authentication failed");
       },
       resetUrl: NEW_KRONOS_URL,
     },
     {
       id: "ucpath",
+      prepareLogin: async (page) => {
+        const prep = await ucpathNavigateAndFill(page);
+        if (!prep) throw new Error("UCPath prepareLogin failed");
+      },
       login: async (page, instance) => {
-        const ok = await loginToUCPath(page, instance);
+        const ok = await ucpathSubmitAndWaitForDuo(page, instance);
         if (!ok) throw new Error("UCPath authentication failed");
       },
       resetUrl: UCPATH_SMART_HR_URL,

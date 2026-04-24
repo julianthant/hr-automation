@@ -73,3 +73,22 @@ export async function clickSsoSubmit(page: Page): Promise<void> {
   await page.locator(SSO_SUBMIT_SELECTOR).click({ timeout: 5_000 });
   log.step("SSO submit clicked");
 }
+
+/**
+ * True if the SSO submit button is currently on the page. Used to detect
+ * whether a prepared (navigated + credentials-filled) page is still at the
+ * SSO form, or whether Shibboleth's anti-CSRF token has expired and
+ * re-navigation is needed.
+ *
+ * Shibboleth tokens typically live 5–10 minutes. When a downstream system
+ * has been sitting pre-filled while earlier Duos are approved, the form
+ * can drift out of that window — detected here as "submit button missing".
+ */
+export async function isSsoFormReady(page: Page): Promise<boolean> {
+  try {
+    const count = await page.locator(SSO_SUBMIT_SELECTOR).count();
+    return count > 0;
+  } catch {
+    return false;
+  }
+}
