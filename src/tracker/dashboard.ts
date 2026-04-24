@@ -101,7 +101,7 @@ export function resolveInstanceForRun(
  */
 export function filterEventsForRun(
   events: SessionEvent[],
-  trackers: Array<Pick<TrackerEntry, "runId" | "data" | "timestamp">>,
+  trackers: Array<Pick<TrackerEntry, "runId" | "status" | "data" | "timestamp">>,
   runId: string,
   runEndFallback: number = Date.now(),
 ): SessionEvent[] {
@@ -123,11 +123,22 @@ export function filterEventsForRun(
         .map((e) => new Date(getEventSortKey(e)).getTime())
         .filter((n) => Number.isFinite(n));
       const runStart = Math.min(...trackerTimes);
-      const runEnd = Math.max(
-        ...trackerTimes,
-        ...(directTimes.length > 0 ? directTimes : []),
-        runEndFallback,
+      // If this run reached a terminal status (done / failed / skipped),
+      // cap runEnd at the last tracker timestamp. Without this check, the
+      // default `runEndFallback = Date.now()` stretched the window all the
+      // way to "now", pulling in orphan events from later items that the
+      // same daemon processed on the same `workflowInstance`.
+      const terminated = runEntries.some(
+        (t) => t.status === "done" || t.status === "failed" || t.status === "skipped",
       );
+      const lastTrackerTs = Math.max(...trackerTimes);
+      const runEnd = terminated
+        ? Math.max(lastTrackerTs, ...(directTimes.length > 0 ? directTimes : []))
+        : Math.max(
+            lastTrackerTs,
+            ...(directTimes.length > 0 ? directTimes : []),
+            runEndFallback,
+          );
       batchScope = events.filter((e) => {
         if (e.runId) return false;
         if (e.workflowInstance !== instance) return false;

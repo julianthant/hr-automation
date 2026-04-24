@@ -12,42 +12,59 @@ import type { WorkflowInstanceState } from "./types";
  * label (the stop endpoint requires it).
  */
 function EndDaemonButton({ workflow }: { workflow: string }) {
-  const [ending, setEnding] = useState(false);
-  const label = ending ? "Ending…" : "End";
+  const [sending, setSending] = useState(false);
+  // Click once → soft stop. Click again within 4s → force stop. Resets after
+  // the SSE flips `pidAlive` (component unmounts) or after a 4s fallback so
+  // the button doesn't get stuck if the daemon is wedged in auth / Duo.
+  const [confirmForce, setConfirmForce] = useState(false);
+
+  const postStop = async (force: boolean) => {
+    setSending(true);
+    const toastId = toast.loading(force ? `Force-stopping ${workflow} daemon…` : `Stopping ${workflow} daemon…`);
+    try {
+      const res = await fetch("/api/daemon/stop", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workflow, force }),
+      });
+      const json = (await res.json()) as { ok: boolean; stopped?: number; error?: string };
+      if (!res.ok || !json.ok) {
+        toast.error(`Failed to stop daemon: ${json.error ?? `HTTP ${res.status}`}`, { id: toastId });
+        return;
+      }
+      toast.success(
+        force
+          ? `Force-stop sent — ${json.stopped ?? 0} daemon(s) killed`
+          : `Soft-stop sent — ${json.stopped ?? 0} daemon(s) will drain and exit`,
+        { id: toastId },
+      );
+      if (!force) {
+        // Offer a force-kill escape hatch for 4s — useful when the daemon is
+        // stuck in Session.launch / Duo and the soft-stop flag can't land.
+        setConfirmForce(true);
+        setTimeout(() => setConfirmForce(false), 4_000);
+      } else {
+        setConfirmForce(false);
+      }
+    } catch (err) {
+      toast.error(`Failed to stop daemon: ${(err as Error).message}`, { id: toastId });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const label = sending ? "…" : confirmForce ? "Force?" : "End";
+  const title = confirmForce
+    ? `Click to hard-kill the ${workflow} daemon (abandons in-flight work)`
+    : `Soft-stop the ${workflow} daemon (drain in-flight then exit)`;
 
   return (
     <button
       type="button"
-      disabled={ending}
-      onClick={async () => {
-        if (ending) return;
-        setEnding(true);
-        const toastId = toast.loading(`Stopping ${workflow} daemon…`);
-        try {
-          const res = await fetch("/api/daemon/stop", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ workflow, force: false }),
-          });
-          const json = (await res.json()) as { ok: boolean; stopped?: number; error?: string };
-          if (!res.ok || !json.ok) {
-            toast.error(`Failed to stop daemon: ${json.error ?? `HTTP ${res.status}`}`, { id: toastId });
-            setEnding(false);
-            return;
-          }
-          toast.success(
-            `Soft-stop sent — ${json.stopped ?? 0} daemon(s) will drain and exit`,
-            { id: toastId },
-          );
-          // Leave `ending` true — the SSE state will flip `pidAlive` false shortly,
-          // which unmounts this component entirely.
-        } catch (err) {
-          toast.error(`Failed to stop daemon: ${(err as Error).message}`, { id: toastId });
-          setEnding(false);
-        }
-      }}
+      disabled={sending}
+      onClick={() => postStop(confirmForce)}
       className="text-[10px] font-semibold uppercase tracking-wide text-destructive bg-destructive/10 hover:bg-destructive/20 border border-destructive/40 px-1.5 py-0.5 rounded transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-      title={`Soft-stop the ${workflow} daemon (drain in-flight then exit)`}
+      title={title}
     >
       {label}
     </button>
