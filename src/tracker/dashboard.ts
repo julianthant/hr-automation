@@ -73,29 +73,68 @@ export function resolveInstanceForRun(
  * 1. **Direct:** events carrying the exact requested `runId`.
  * 2. **Batch-scope fallback:** events emitted outside any per-item
  *    `withLogContext` (so they have no `runId`), attributed to this run via
- *    matching `workflowInstance`. Batch / pool / daemon workflows call
- *    `Session.launch` at batch scope — `auth_start`, `auth_complete`, and
- *    `browser_launch` events for those launches carry an instance but no
- *    runId.
+ *    matching `workflowInstance` AND falling within the run's
+ *    `[runStart, runEnd]` time window. `Session.launch` emits `auth_start` /
+ *    `auth_complete` / `browser_launch` at batch scope without a runId.
  *
- * Batch workflows assign one `workflowInstance` per batch (e.g. `"Separation
- * 1"`), so instance-scoping correctly isolates each batch's events — even
- * when a long-lived daemon processes multiple batches under one pid. (The
- * previous pid-based fallback leaked across batches for daemons; this does
- * not.)
+ * **Time-window in daemon mode.** A batch workflow (sequential/pool/
+ * shared-context-pool) assigns one `workflowInstance` per batch, so
+ * `workflowInstance` alone isolates each batch. A **daemon** keeps the same
+ * `workflowInstance` for its entire lifetime — it processes many items
+ * (each a distinct `runId`) under one instance. Without the time window,
+ * orphan events from every past or concurrent item in the daemon would
+ * bleed into each item's drill-in view. Filtering orphan events to the
+ * target run's tracker-entry span fixes the leak without breaking legacy
+ * batch shapes (a batch's orphan events all fall inside the batch's span
+ * anyway).
  *
- * Pure: no filesystem access, no clock. Callers pass already-loaded arrays.
+ * `runStart` = earliest tracker-entry timestamp for this runId.
+ * `runEnd` = max(latest tracker ts for runId, latest direct-event ts for
+ * runId, `now` — via `runEndFallback` arg, default `Date.now()`). The
+ * `now`/direct-event extension matters for in-progress items where no
+ * terminal tracker entry exists yet.
+ *
+ * Pure: no filesystem access. Clock is injected via `runEndFallback` so
+ * tests stay deterministic.
  */
 export function filterEventsForRun(
   events: SessionEvent[],
-  trackers: Array<Pick<TrackerEntry, "runId" | "data">>,
+  trackers: Array<Pick<TrackerEntry, "runId" | "data" | "timestamp">>,
   runId: string,
+  runEndFallback: number = Date.now(),
 ): SessionEvent[] {
   const direct = events.filter((e) => e.runId === runId);
   const instance = resolveInstanceForRun(trackers, runId);
-  const batchScope = instance
-    ? events.filter((e) => !e.runId && e.workflowInstance === instance)
-    : [];
+
+  let batchScope: SessionEvent[] = [];
+  if (instance) {
+    const runEntries = trackers.filter((t) => t.runId === runId);
+    if (runEntries.length === 0) {
+      // Degenerate: instance resolved but no tracker entries to build a
+      // window from. Skip the fallback rather than over-include.
+      batchScope = [];
+    } else {
+      const trackerTimes = runEntries
+        .map((t) => new Date(t.timestamp).getTime())
+        .filter((n) => Number.isFinite(n));
+      const directTimes = direct
+        .map((e) => new Date(getEventSortKey(e)).getTime())
+        .filter((n) => Number.isFinite(n));
+      const runStart = Math.min(...trackerTimes);
+      const runEnd = Math.max(
+        ...trackerTimes,
+        ...(directTimes.length > 0 ? directTimes : []),
+        runEndFallback,
+      );
+      batchScope = events.filter((e) => {
+        if (e.runId) return false;
+        if (e.workflowInstance !== instance) return false;
+        const ets = new Date(getEventSortKey(e)).getTime();
+        if (!Number.isFinite(ets)) return false;
+        return ets >= runStart && ets <= runEnd;
+      });
+    }
+  }
 
   const merged = [...direct, ...batchScope];
   merged.sort((a, b) => getEventSortKey(a).localeCompare(getEventSortKey(b)));
@@ -153,6 +192,8 @@ export interface WorkflowInstanceState {
    */
   crashedOnLaunch?: boolean;
   currentItemId: string | null;
+  /** True between item_start and item_complete — i.e. a real item is currently being processed. */
+  itemInFlight: boolean;
   currentStep: string | null;
   finalStatus: "done" | "failed" | null;
   sessions: SessionInfo[];
@@ -186,6 +227,7 @@ export function rebuildSessionState(dir?: string): SessionState {
         active: true,
         pidAlive: true,
         currentItemId: null,
+        itemInFlight: false,
         currentStep: null,
         finalStatus: null,
         sessions: [],
@@ -245,7 +287,14 @@ export function rebuildSessionState(dir?: string): SessionState {
     }
     if (e.type === "item_start" && e.currentItemId) {
       const wf = wfMap.get(inst);
-      if (wf) wf.currentItemId = e.currentItemId!;
+      if (wf) {
+        wf.currentItemId = e.currentItemId!;
+        wf.itemInFlight = true;
+      }
+    }
+    if (e.type === "item_complete") {
+      const wf = wfMap.get(inst);
+      if (wf) wf.itemInFlight = false;
     }
     // Intentionally do NOT clear currentItemId on item_complete — the dashboard
     // keeps the last item visible after the workflow ends so users can see which
@@ -522,17 +571,23 @@ export function buildScreenshotsHandler(
       }
 
       // 2. Build grouped entries from events. Track which file paths are covered.
+      //    Only include files that still exist on disk — sessions.jsonl persists
+      //    across cleanup cycles so stale references are common.
       const coveredPaths = new Set<string>();
       const grouped: ScreenshotGroupedEntry[] = [];
       for (const ev of events) {
-        const files = ev.files.map((f) => {
+        const files: ScreenshotGroupedEntry["files"] = [];
+        for (const f of ev.files) {
+          if (!existsSync(f.path)) continue;
           coveredPaths.add(f.path);
-          return {
+          files.push({
             system: f.system,
             path: f.path,
             url: `/screenshots/${encodeURIComponent(f.path.split(/[/\\]/).pop() ?? "")}`,
-          };
-        });
+          });
+        }
+        // Skip the entire entry if none of its files survived cleanup.
+        if (files.length === 0) continue;
         grouped.push({
           ts: ev.ts,
           kind: ev.kind,

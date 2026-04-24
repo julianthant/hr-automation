@@ -23,6 +23,7 @@ import {
   readQueueState,
 } from './daemon-queue.js'
 import type { DaemonLockfile } from './daemon-types.js'
+import { emitItemStart, emitItemComplete } from '../tracker/session-events.js'
 
 export interface DaemonOpts {
   trackerDir?: string
@@ -166,11 +167,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         ownSigint: false,
       },
       async ({ instance, markTerminated, makeObserver }) => {
-        // The observer is still wired so SessionPanel / Events tab can
-        // show the one-time daemon auth, but we deliberately do NOT
-        // snapshot authTimings for per-item injection — see the comment
-        // at the `runOneItem` call site below.
-        const { observer } = makeObserver('1')
+        const { observer, getAuthTimings } = makeObserver('1')
         const session = await launchFn(wf.config.systems, {
           authChain: wf.config.authChain,
           tiling: wf.config.tiling,
@@ -185,6 +182,19 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         for (const sys of wf.config.systems) {
           await session.page(sys.id)
         }
+
+        // Snapshot the real auth timings now that every system has finished
+        // authenticating. We inject these into the FIRST queued item only so
+        // its step pipeline shows the actual per-system Duo durations. Every
+        // subsequent item gets synthesized zero-duration timings anchored at
+        // its own claim time — auth really was free for those items (the
+        // daemon reuses the session), so "Authenticating (4) — 0s" is the
+        // truthful display. Passing the real startup timings to item #N would
+        // re-stamp synthetic auth rows at daemon-start time and drag the
+        // entry's firstLogTs minutes/hours into the past, inflating its
+        // elapsed timer by the full queue-wait gap.
+        const startupAuthTimings = wf.config.authSteps !== false ? getAuthTimings() : undefined
+        let firstItemClaimed = false
 
         // Closing any window (user intent) or a browser crash should terminate
         // the daemon — a daemon whose browsers are gone can't serve queued
@@ -231,16 +241,22 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
               const runId = item.runId ?? randomUUID()
               inFlight = { itemId: item.id, runId }
               lastActivity = Date.now()
-              // authTimings is intentionally NOT forwarded in daemon mode.
-              // The observer captures one set of timings when the daemon's
-              // Session authenticates at startup; re-injecting them into
-              // every queued item stamps synthetic `auth:<id>` rows at
-              // daemon-start time, so item #N's earliest tracker row is
-              // minutes/hours in the past and the dashboard timer shows
-              // the full queue-wait duration inside its auth phase.
-              // In daemon mode each item's timer should anchor at its own
-              // first `running` event (first real handler step); the
-              // one-time daemon auth is still visible via SessionPanel.
+              // First item gets the real startup auth timings; subsequent
+              // items get zero-duration synthetic timings anchored at claim
+              // time so the step pipeline tiles "Authenticating (4) — 0s"
+              // instead of "—" without dragging the entry's anchor back to
+              // daemon-start.
+              let itemAuthTimings = startupAuthTimings
+              if (firstItemClaimed && wf.config.authSteps !== false) {
+                const claimTs = Date.now()
+                itemAuthTimings = wf.config.systems.map((sys) => ({
+                  systemId: sys.id,
+                  startTs: claimTs,
+                  endTs: claimTs,
+                }))
+              }
+              firstItemClaimed = true
+              emitItemStart(instance, item.id, trackerDir)
               const r = await runOneItem({
                 wf,
                 session,
@@ -250,7 +266,9 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 trackerDir,
                 callerPreEmits: false,
                 preAssignedInstance: instance,
+                authTimings: itemAuthTimings,
               })
+              emitItemComplete(instance, item.id, trackerDir)
               markTerminated(runId)
               if (r.ok) {
                 await markItemDone(wf.config.name, item.id, runId, trackerDir)

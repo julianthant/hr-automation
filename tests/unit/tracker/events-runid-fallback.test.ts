@@ -48,10 +48,10 @@ async function collectSSE(
   return messages;
 }
 
-function trackerEntry(runId: string, instance?: string): TrackerEntry {
+function trackerEntry(runId: string, instance?: string, timestamp: string = "2026-04-23T10:00:00Z"): TrackerEntry {
   return {
     workflow: "onboarding",
-    timestamp: "2026-04-23T10:00:00Z",
+    timestamp,
     id: "alice@example.com",
     runId,
     status: "running",
@@ -156,6 +156,103 @@ describe("filterEventsForRun", () => {
     const out = filterEventsForRun(events, [trackerEntry("A")], "A");
     assert.equal(out.length, 1);
     assert.equal(out[0].runId, "A");
+  });
+
+  it("isolates items within a single daemon instance via time window", () => {
+    // Daemon mode: one workflowInstance spans many items across time.
+    // Daemon startup auth runs 10:00:00–10:00:45.
+    // Item A (first) inherits real authTimings — its synthetic auth
+    // tracker rows stamp its runStart at 10:00:00.
+    // Item B (subsequent) gets zero-duration synthetic rows at claim
+    // time (10:11:00) — daemon startup events fall OUT of its window.
+    const events: SessionEvent[] = [
+      // Daemon startup (orphan events, no runId)
+      ev({ type: "workflow_start", timestamp: "2026-04-23T10:00:00Z", workflowInstance: "Separation 1" }),
+      ev({ type: "browser_launch", timestamp: "2026-04-23T10:00:10Z", workflowInstance: "Separation 1", sessionId: "s1", browserId: "b1", system: "kuali" }),
+      ev({ type: "auth_start", timestamp: "2026-04-23T10:00:30Z", workflowInstance: "Separation 1", browserId: "b1", system: "kuali" }),
+      // Item A direct events
+      ev({ type: "item_start", runId: "A", timestamp: "2026-04-23T10:01:00Z", workflowInstance: "Separation 1", currentItemId: "3924" }),
+      ev({ type: "item_complete", runId: "A", timestamp: "2026-04-23T10:05:00Z", workflowInstance: "Separation 1", currentItemId: "3924" }),
+      // Orphan between items — keepalive or similar, belongs to the daemon
+      // lifetime but no specific item.
+      ev({ type: "browser_launch", timestamp: "2026-04-23T10:07:00Z", workflowInstance: "Separation 1", sessionId: "s2", browserId: "b2", system: "kuali" }),
+      // Item B direct events
+      ev({ type: "item_start", runId: "B", timestamp: "2026-04-23T10:11:00Z", workflowInstance: "Separation 1", currentItemId: "3927" }),
+      ev({ type: "item_complete", runId: "B", timestamp: "2026-04-23T10:15:00Z", workflowInstance: "Separation 1", currentItemId: "3927" }),
+    ];
+    // Item A's first tracker entry is at daemon startup (real authTimings
+    // injected synthetic tracker rows). Item B's first tracker entry is at
+    // claim time (zero-duration synthetic rows).
+    const trackers = [
+      trackerEntry("A", "Separation 1", "2026-04-23T10:00:00Z"),
+      trackerEntry("A", "Separation 1", "2026-04-23T10:05:00Z"),
+      trackerEntry("B", "Separation 1", "2026-04-23T10:11:00Z"),
+      trackerEntry("B", "Separation 1", "2026-04-23T10:15:00Z"),
+    ];
+
+    // View of A: daemon startup events + A's direct events. The between-items
+    // 10:07 browser_launch is AFTER A's window, must not appear.
+    const outA = filterEventsForRun(events, trackers, "A", Date.parse("2026-04-23T10:06:00Z"));
+    assert.deepEqual(
+      outA.map((e) => ({ type: e.type, runId: e.runId ?? null, ts: e.timestamp })),
+      [
+        { type: "workflow_start", runId: null, ts: "2026-04-23T10:00:00Z" },
+        { type: "browser_launch", runId: null, ts: "2026-04-23T10:00:10Z" },
+        { type: "auth_start", runId: null, ts: "2026-04-23T10:00:30Z" },
+        { type: "item_start", runId: "A", ts: "2026-04-23T10:01:00Z" },
+        { type: "item_complete", runId: "A", ts: "2026-04-23T10:05:00Z" },
+      ],
+    );
+
+    // View of B: only B's window. No leak from the daemon startup events OR
+    // the between-items browser_launch.
+    const outB = filterEventsForRun(events, trackers, "B", Date.parse("2026-04-23T10:16:00Z"));
+    assert.deepEqual(
+      outB.map((e) => ({ type: e.type, runId: e.runId ?? null, ts: e.timestamp })),
+      [
+        { type: "item_start", runId: "B", ts: "2026-04-23T10:11:00Z" },
+        { type: "item_complete", runId: "B", ts: "2026-04-23T10:15:00Z" },
+      ],
+    );
+  });
+
+  it("extends run window to now for in-progress items (no terminal tracker entry)", () => {
+    // Item is running (no item_complete), only an auth_start tracker ts.
+    // The direct item_start event is AFTER the tracker's recorded ts, so the
+    // window must extend to include it. The runEndFallback (Date.now()
+    // default, here overridden to a future ts) ensures live events attach.
+    const events: SessionEvent[] = [
+      ev({ type: "auth_start", timestamp: "2026-04-23T10:00:00Z", workflowInstance: "Separation 1", browserId: "b1", system: "kuali" }),
+      ev({ type: "item_start", runId: "A", timestamp: "2026-04-23T10:01:00Z", workflowInstance: "Separation 1", currentItemId: "3927" }),
+      ev({ type: "browser_launch", timestamp: "2026-04-23T10:02:00Z", workflowInstance: "Separation 1", sessionId: "s1", browserId: "b2", system: "kuali" }),
+    ];
+    const trackers = [trackerEntry("A", "Separation 1", "2026-04-23T10:00:00Z")];
+
+    const out = filterEventsForRun(events, trackers, "A", Date.parse("2026-04-23T10:03:00Z"));
+    // All three events should appear: auth_start is at runStart (boundary),
+    // item_start is direct, browser_launch is orphan but within the extended window.
+    assert.equal(out.length, 3);
+    assert.deepEqual(out.map((e) => e.type), ["auth_start", "item_start", "browser_launch"]);
+  });
+
+  it("excludes orphan events after runEndFallback for a completed run", () => {
+    // Item completed at 10:05. A daemon-level event at 10:07 (after the run
+    // ended) must not be attributed to the completed run, even though it
+    // shares the workflowInstance.
+    const events: SessionEvent[] = [
+      ev({ type: "item_start", runId: "A", timestamp: "2026-04-23T10:01:00Z", workflowInstance: "Separation 1", currentItemId: "3924" }),
+      ev({ type: "item_complete", runId: "A", timestamp: "2026-04-23T10:05:00Z", workflowInstance: "Separation 1", currentItemId: "3924" }),
+      ev({ type: "browser_launch", timestamp: "2026-04-23T10:07:00Z", workflowInstance: "Separation 1", sessionId: "s1", browserId: "b1", system: "kuali" }),
+    ];
+    const trackers = [
+      trackerEntry("A", "Separation 1", "2026-04-23T10:01:00Z"),
+      trackerEntry("A", "Separation 1", "2026-04-23T10:05:00Z"),
+    ];
+
+    // Simulate "now" = 10:06 (before the 10:07 orphan event).
+    const out = filterEventsForRun(events, trackers, "A", Date.parse("2026-04-23T10:06:00Z"));
+    assert.equal(out.length, 2);
+    assert.deepEqual(out.map((e) => e.type), ["item_start", "item_complete"]);
   });
 });
 

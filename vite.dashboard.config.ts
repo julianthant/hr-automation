@@ -20,6 +20,7 @@ export default defineConfig({
     proxy: {
       "/api": "http://localhost:3838",
       "/events": "http://localhost:3838",
+      "/screenshots": "http://localhost:3838",
     },
   },
 });
