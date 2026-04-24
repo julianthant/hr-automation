@@ -25,9 +25,8 @@ After each `/events` SSE poll cycle, `scanFailurePatterns()` runs today's tracke
 
 - `cleanOldTrackerFiles(maxAgeDays, dir)` — deletes JSONL files whose filename date (YYYY-MM-DD) is older than `maxAgeDays`. Returns count deleted.
 - `cleanOldScreenshots(maxAgeDays, dir)` — deletes PNGs in `.screenshots/` whose filename-embedded ms timestamp (trailing segment before `.png`) is older than `maxAgeDays`. Returns count deleted. Malformed names (no numeric trailing segment) are skipped — never accidentally deleted.
-- `pruneOldStepCache(maxAgeHours, dir)` — deletes step-cache JSON files under `.tracker/step-cache/{workflow}-{itemId}/{stepName}.json` whose mtime is older than `maxAgeHours`. Empty item directories are removed. Returns count deleted. Lives in `src/core/step-cache.ts` but participates in the same cleanup cadence.
-- `npm run clean:tracker` — CLI wrapper in `src/scripts/clean-tracker.ts`. By default cleans tracker JSONL + screenshots + step-cache. Accepts `--days N` (default 7), `--dir PATH`, `--screenshots-dir PATH`, `--step-cache-dir PATH`, `--no-screenshots`, `--no-step-cache`, `--screenshots-only`, `--step-cache-only`.
-- `startDashboard()` runs a one-time startup prune at 30 days for tracker JSONL, screenshots, AND step-cache (conservative — per-request `/api/preflight` still handles the 7-day ongoing prune for tracker files; preflight does NOT touch step-cache because walking the step-cache tree on every request is unnecessary). Pass `{ noClean: true }` or `--no-clean` CLI flag to skip.
+- `npm run clean:tracker` — CLI wrapper in `src/scripts/clean-tracker.ts`. By default cleans tracker JSONL + screenshots. Accepts `--days N` (default 7), `--dir PATH`, `--screenshots-dir PATH`, `--no-screenshots`, `--screenshots-only`.
+- `startDashboard()` runs a one-time startup prune at 30 days for tracker JSONL + screenshots (per-request `/api/preflight` still handles the 7-day ongoing prune for tracker files). Pass `{ noClean: true }` or `--no-clean` CLI flag to skip.
 
 ## `withTrackedWorkflow(workflow, id, data, fn)`
 
@@ -72,10 +71,10 @@ await withTrackedWorkflow("separations", docId, {}, async (setStep, updateData) 
 - `GET /api/search?q=Q[&days=N]` — cross-workflow tracker entry search (`buildSearchHandler`)
 - `GET /api/selector-warnings?days=N` — aggregated selector-fallback warns across N days (default 7)
 - `GET /api/preflight` — startup checks + cleanedFiles count
-- `SSE /events?workflow=X&date=Y` — stream entries (enriched with `firstLogTs`, `lastLogTs`, `lastLogMessage`, `stepDurations`) + `wfCounts` every 1s. Entries are also enriched with `cacheHits: string[]` (deduped step names with `cache_hit` events for that runId) and `cacheStepAvgs: Record<string, number>` (per-step historical avg in ms, last 7 days × workflow, capped at 100 prior runs, memoized 60s).
+- `SSE /events?workflow=X&date=Y` — stream entries (enriched with `firstLogTs`, `lastLogTs`, `lastLogMessage`, `stepDurations`) + `wfCounts` every 1s.
 - `SSE /events/logs?workflow=X&id=Y&date=Z[&runId=R]` — stream log entries every 500ms
 - `SSE /events/sessions` — stream `SessionState` (workflow instances + browsers + duo queue) for `SessionPanel`
-- `SSE /events/run-events?workflow=X&id=Y&runId=Z[&date=D]` — stream kernel session events for a specific run (workflow_start, browser_launch, duo_*, auth_*, item_*, cache_hit, etc.) every 500ms. Same delta semantics as `/events/logs`. Events lacking `runId` (emitted by `Session.launch` at batch scope, outside per-item `withLogContext`) are attributed to a run via `workflowInstance`: the handler resolves `runId -> tracker entry -> data.instance`, then pulls in no-`runId` events that share that instance. Implemented by the pure `filterEventsForRun(events, trackers, runId)` function, exported for unit-test access.
+- `SSE /events/run-events?workflow=X&id=Y&runId=Z[&date=D]` — stream kernel session events for a specific run (workflow_start, browser_launch, duo_*, auth_*, item_*, etc.) every 500ms. Same delta semantics as `/events/logs`. Events lacking `runId` (emitted by `Session.launch` at batch scope, outside per-item `withLogContext`) are attributed to a run via `workflowInstance`: the handler resolves `runId -> tracker entry -> data.instance`, then pulls in no-`runId` events that share that instance. Implemented by the pure `filterEventsForRun(events, trackers, runId)` function, exported for unit-test access.
 
 API-only: does not serve HTML. The React dashboard is served by Vite dev server (port 5173) which proxies API calls to 3838.
 

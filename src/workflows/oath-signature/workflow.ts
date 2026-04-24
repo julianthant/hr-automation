@@ -1,9 +1,6 @@
 import {
   defineWorkflow,
   runWorkflow,
-  hashKey,
-  hasRecentlySucceeded,
-  recordSuccess,
 } from "../../core/index.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
@@ -69,23 +66,10 @@ export const oathSignatureWorkflow = defineWorkflow({
     const page = await ctx.page("ucpath");
 
     await ctx.step("transaction", async () => {
-      // Idempotency: key on (workflow, emplId, date|today). Prevents
-      // re-adding the same oath if the daemon crashes between OK/Save and
-      // the tracker write. UCPath itself also allows multiple rows per
-      // person — this guard exists to prevent accidental dupes from retries.
-      const idempKey = hashKey({
-        workflow: WORKFLOW,
-        emplId: input.emplId,
-        date: input.date ?? "today",
-      });
-      if (hasRecentlySucceeded(idempKey)) {
-        log.warn(
-          `Oath signature already recorded recently for ${input.emplId} — skipping (idempotency).`,
-        );
-        ctx.updateData({ status: "Skipped (Duplicate)", idempotencySkip: "true" });
-        return;
-      }
-
+      // The live-page probe inside buildOathSignaturePlan still skips the
+      // OK/Save steps when an oath already exists on the profile — that's
+      // the sole duplicate guard now. Tracker-side idempotency was removed
+      // 2026-04-23 per user direction (fail-loud / no silent skip-by-record).
       const plan = buildOathSignaturePlan(input, page, oathCtx);
       await plan.execute();
       await ctx.screenshot({ kind: 'form', label: 'oath-signature-saved' });
@@ -94,17 +78,13 @@ export const oathSignatureWorkflow = defineWorkflow({
         ctx.updateData({ name: oathCtx.employeeName });
       }
       if (oathCtx.alreadyHasOath) {
-        ctx.updateData({
-          status: "Skipped (Existing Oath)",
-          idempotencySkip: "true",
-        });
+        ctx.updateData({ status: "Skipped (Existing Oath)" });
         log.success(
           `Skipped ${input.emplId}${oathCtx.employeeName ? ` (${oathCtx.employeeName})` : ""} — oath already on file.`,
         );
         return;
       }
 
-      recordSuccess(idempKey, "", WORKFLOW);
       log.success(
         `Oath signature added for ${input.emplId}${oathCtx.employeeName ? ` (${oathCtx.employeeName})` : ""}.`,
       );

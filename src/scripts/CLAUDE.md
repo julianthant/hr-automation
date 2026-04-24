@@ -14,7 +14,7 @@ src/scripts/
 │   ├── new-workflow.ts   — scaffolds a new kernel workflow's 5 canonical files
 │   └── export-schemas.ts — per-workflow Zod → JSON Schema export to schemas/
 ├── ops/              ← operational tooling
-│   ├── clean-tracker.ts  — prunes .tracker JSONL + .screenshots PNGs + step-cache
+│   ├── clean-tracker.ts  — prunes .tracker JSONL + .screenshots PNGs
 │   └── setup.ts          — first-use environment validation wizard
 └── debug/            ← manual one-off dev tools
     └── kronos.ts         — auth both Kronos systems + map/test/explore subcommands
@@ -39,7 +39,7 @@ src/workflows/emergency-contact/scripts/   ← workflow-specific dev tools
 
 ### `ops/`
 
-- **`clean-tracker.ts`** — Prunes `.tracker/*.jsonl`, `.screenshots/*.png`, AND `.tracker/step-cache/**` files older than N days. Flags: `--days N`, `--dir`, `--screenshots-dir`, `--step-cache-dir`, `--no-screenshots`, `--no-step-cache`, `--screenshots-only`, `--step-cache-only`. Default cleans all three. Wired as `npm run clean:tracker`. Exports `cleanTrackerMain` for tests.
+- **`clean-tracker.ts`** — Prunes `.tracker/*.jsonl` and `.screenshots/*.png` files older than N days. Flags: `--days N`, `--dir`, `--screenshots-dir`, `--no-screenshots`, `--screenshots-only`. Default cleans both. Wired as `npm run clean:tracker`. Exports `cleanTrackerMain` for tests.
 - **`setup.ts`** — First-use environment validation wizard. Fixed checks for `.env` keys (existence only, never values), Node ≥ 20, `tsx`, Playwright chromium cache, `.tracker/` + `.screenshots/` + `~/Downloads/onboarding/` writability, macOS notification capability (warn-only on non-darwin), optional `jq`. Prints `[ok]` / `[warn]` / `[fail]` per check with a fix suggestion. Exits 0 if all pass or only warnings; exits 1 on any failure. Wired as `npm run setup`.
 
 ### `debug/`

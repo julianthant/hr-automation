@@ -24,6 +24,7 @@ export {
   clickEmployeeExperienceTab,
   clickSaveAndSubmit,
   readLatestTransactionNumber,
+  findExistingTerminationTransaction,
   parsePayRate,
   buildCommentsText,
 } from "./transaction.js";

@@ -7,13 +7,7 @@ import { getLogRunId } from "../utils/log.js";
 
 /**
  * Structured events emitted by the kernel during workflow execution.
- *
- * Originally scoped to session/browser/auth lifecycle. As of 2026-04-19 also
- * carries step-execution annotations (e.g. `cache_hit`) that are no-ops for
- * `rebuildSessionState` but appear in the dashboard's Events tab via the
- * `/events/run-events` SSE.
- *
- * If a third non-lifecycle event lands, consider renaming to KernelEventType.
+ * Session/browser/auth/item lifecycle + per-step step_change + screenshot.
  */
 export type SessionEventType =
   | "workflow_start" | "workflow_end"
@@ -23,7 +17,6 @@ export type SessionEventType =
   | "duo_request" | "duo_start" | "duo_complete" | "duo_timeout"
   | "item_start" | "item_complete"
   | "step_change"
-  | "cache_hit"
   | "screenshot";
 
 export interface ScreenshotSessionEvent {
@@ -51,8 +44,6 @@ export interface SessionEvent {
   data?: Record<string, string>;
   /** Workflow item runId, written when emitted inside a withLogContext + setLogRunId scope. */
   runId?: string;
-  /** Step name for step-scoped events like cache_hit. */
-  step?: string;
 }
 
 // ── File path ──────────────────────────────────────────
@@ -200,20 +191,6 @@ export function emitItemStart(instance: string, itemId: string, dir?: string): v
 
 export function emitItemComplete(instance: string, itemId: string, dir?: string): void {
   emitSessionEvent({ type: "item_complete", workflowInstance: instance, currentItemId: itemId }, dir);
-}
-
-export function emitCacheHit(
-  workflowInstance: string,
-  itemId: string,
-  step: string,
-  dir?: string,
-): void {
-  emitSessionEvent({
-    type: "cache_hit",
-    workflowInstance,
-    currentItemId: itemId,
-    step,
-  }, dir);
 }
 
 // ── Instance naming ────────────────────────────────────

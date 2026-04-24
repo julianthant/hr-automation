@@ -92,7 +92,6 @@ const EVENT_VISUAL: Record<RunEvent["type"], { glyph: string; color: string }> =
   item_start:       { glyph: "▦", color: "#e5e5e5" },
   item_complete:    { glyph: "▩", color: "#6b7280" },
   step_change:      { glyph: "→", color: "#6b7280" },
-  cache_hit:        { glyph: "❄", color: "#3b82f6" },
   screenshot:       { glyph: "⬛", color: "#a78bfa" },
 };
 

@@ -678,6 +678,121 @@ export async function readLatestTransactionNumber(
   return "";
 }
 
+/**
+ * Look up an existing Smart HR transaction for a given employee that
+ * matches a specific template + effective date. Returns the transaction
+ * number (e.g. "T002126379") if found, or `null` if no matching row
+ * exists on the Smart HR Transactions list.
+ *
+ * Used as a pre-submit idempotence check: before creating a new
+ * termination transaction, callers check whether one already exists for
+ * this employee + effective date + template. A hit means the prior run
+ * already submitted (possibly without capturing the txn# locally) —
+ * return the number, skip the resubmit, propagate it to downstream
+ * steps (e.g. Kuali finalization).
+ *
+ * Match semantics: row's text contains the employee name (as
+ * PeopleSoft's link labels use it), the effective date (MM/DD/YYYY),
+ * AND at least one of the passed template codes. Falls back through
+ * three name forms (original, flipped, last-name regex) same as
+ * `readLatestTransactionNumber` to handle PeopleSoft's display
+ * variants.
+ *
+ * Best-effort: returns `null` on any navigation / parse failure rather
+ * than throwing, because a failed pre-check should degrade to "no
+ * existing transaction found — proceed with submit" rather than halting
+ * the workflow. Real submit failures surface through the subsequent
+ * `clickSaveAndSubmit` call.
+ */
+export async function findExistingTerminationTransaction(
+  page: Page,
+  employeeName: string,
+  effectiveDate: string,
+  templateCodes: readonly string[],
+): Promise<string | null> {
+  try {
+    log.step(`[Txn Lookup] Checking for existing transaction: name='${employeeName}' effDate='${effectiveDate}' templates=[${templateCodes.join(",")}]`);
+    await navigateToSmartHR(page);
+    await clickSmartHRTransactions(page);
+    await page.waitForTimeout(3_000);
+    const frame = getContentFrame(page);
+
+    // Build the same name-form candidates readLatestTransactionNumber uses so
+    // we tolerate "Last, First" vs "First Last" display variants.
+    const parts = employeeName.includes(",")
+      ? employeeName.split(",").map((s) => s.trim())
+      : employeeName.split(" ").map((s) => s.trim());
+    const lastName = employeeName.includes(",")
+      ? (parts[0] ?? "")
+      : (parts[parts.length - 1] ?? "");
+    const flipped = employeeName.includes(",")
+      ? parts.slice().reverse().join(" ")
+      : (parts.length >= 2
+          ? `${parts[parts.length - 1]}, ${parts.slice(0, -1).join(" ")}`
+          : employeeName);
+    const nameForms = [employeeName, flipped, lastName].filter((s) => s.length > 0);
+
+    // Scan every row in every grid inside the iframe for one where the row
+    // text matches any name-form AND contains the effective date AND
+    // contains one of the template codes. Return the row's employee link
+    // label so we can click it next.
+    const match = await frame.locator("body").evaluate( // allow-inline-selector -- body scan for smart-hr-transactions list
+      (body, { nameForms, date, templates }: { nameForms: string[]; date: string; templates: string[] }) => {
+        const tables = body.querySelectorAll("table");
+        for (const table of Array.from(tables)) {
+          for (const row of Array.from((table as HTMLTableElement).rows)) {
+            const text = row.textContent ?? "";
+            if (!text.includes(date)) continue;
+            if (!templates.some((t) => text.includes(t))) continue;
+            const nameHit = nameForms.find((n) =>
+              n.length > 0 && text.toLowerCase().includes(n.toLowerCase()),
+            );
+            if (!nameHit) continue;
+            return { nameHit };
+          }
+        }
+        return null;
+      },
+      { nameForms, date: effectiveDate, templates: [...templateCodes] },
+    ).catch(() => null);
+
+    if (!match) {
+      log.step(`[Txn Lookup] No existing transaction found`);
+      return null;
+    }
+    log.step(`[Txn Lookup] Matching row found for name='${match.nameHit}' — reading txn #`);
+
+    // Click the row's employee link (by the name form that matched) and
+    // extract "Transaction ID: T002XXXXXX" from the detail page body.
+    const link = frame.getByRole("link", { name: match.nameHit }); // allow-inline-selector -- dynamic matched-name link
+    if ((await link.count()) === 0) {
+      log.warn(`[Txn Lookup] Row matched but link for '${match.nameHit}' disappeared before click — treating as no match`);
+      return null;
+    }
+    await link.first().click({ timeout: 5_000 });
+    await page.waitForTimeout(4_000);
+
+    const continueBtn = smartHR.continueButton(frame);
+    if ((await continueBtn.count()) > 0) {
+      await continueBtn.click({ timeout: 5_000 });
+      await page.waitForTimeout(6_000);
+    }
+
+    const bodyText = await frame.locator("body").innerText({ timeout: 5_000 }).catch(() => ""); // allow-inline-selector -- body innerText readback for regex scrape
+    const tMatch = bodyText.match(/Transaction ID:\s*(T\d+)/)
+      ?? bodyText.match(/Transaction:\s*(T\d+)/i);
+    if (tMatch) {
+      log.success(`[Txn Lookup] Existing transaction #${tMatch[1]} found for ${employeeName}`);
+      return tMatch[1];
+    }
+    log.warn(`[Txn Lookup] Matched row but couldn't extract Transaction ID from detail page — treating as no match`);
+    return null;
+  } catch (e) {
+    log.warn(`[Txn Lookup] Lookup threw (treating as no match): ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
+}
+
 // ─── Helpers ───
 
 /**

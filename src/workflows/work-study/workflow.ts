@@ -1,10 +1,6 @@
 import {
   defineWorkflow,
   runWorkflow,
-  hashKey,
-  hasRecentlySucceeded,
-  recordSuccess,
-  findRecentTransactionId,
 } from "../../core/index.js";
 import { log } from "../../utils/log.js";
 import { trackEvent } from "../../tracker/jsonl.js";
@@ -68,51 +64,22 @@ export const workStudyWorkflow = defineWorkflow({
     ctx.markStep("ucpath-auth");
     await ctx.page("ucpath");
 
-    // Idempotency skip flips to true if hasRecentlySucceeded matches — the
-    // tracker row then records the skip instead of a successful run.
-    let skipped = false;
-
     // Step 2: execute the PayPath transaction plan.
     await ctx.step("transaction", async () => {
-      // Idempotency: key on (workflow, emplId, effectiveDate, positionPool).
-      // Prevents re-submitting the same award if the worker crashes between
-      // plan.execute() success and the tracker write.
-      const idempKey = hashKey({
-        workflow: "work-study",
-        emplId: input.emplId,
-        effectiveDate: input.effectiveDate,
-        positionPool: "F",
-      });
-      if (hasRecentlySucceeded(idempKey)) {
-        const existingTxId = findRecentTransactionId(idempKey);
-        const note = existingTxId
-          ? `work-study update already submitted recently (txId ${existingTxId}) — skipping (idempotency)`
-          : "work-study update already submitted recently — skipping (idempotency)";
-        log.warn(note);
-        ctx.updateData({
-          status: "Skipped (Duplicate)",
-          idempotencySkip: "true",
-          ...(existingTxId ? { transactionId: existingTxId } : {}),
-        });
-        skipped = true;
-        return;
-      }
-
       const page = await ctx.page("ucpath");
       const plan = buildWorkStudyPlan(input, page, wsCtx);
       await plan.execute();
-      recordSuccess(idempKey, "", "work-study");
       ctx.updateData({ name: wsCtx.employeeName });
     });
 
-    // Tracker row — reflect skip vs success. Non-fatal if Excel write fails.
+    // Tracker row — non-fatal if Excel write fails.
     try {
       await updateWorkStudyTracker({
         emplId: input.emplId,
         employeeName: wsCtx.employeeName,
         effectiveDate: input.effectiveDate,
         positionPool: "F",
-        status: skipped ? "Skipped (Duplicate)" : "Done",
+        status: "Done",
         error: "",
         timestamp: new Date().toISOString(),
       });
