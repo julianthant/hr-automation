@@ -69,6 +69,7 @@ import {
   resolveKronosDates,
   mapReasonCode,
   getInitials,
+  validateLastDayWorked,
 } from "./schema.js";
 import {
   KUALI_SPACE_URL,
@@ -229,6 +230,13 @@ export const separationsWorkflow = defineWorkflow({
       );
       return result;
     });
+
+    // Preflight: reject future-dated separations so we don't waste Kronos/UCPath
+    // work on a record that isn't yet actionable. Both Last Day Worked and
+    // Separation Date are checked because either can be post-dated by the
+    // requester.
+    validateLastDayWorked(kualiData.lastDayWorked, "Last Day Worked");
+    validateLastDayWorked(kualiData.separationDate, "Separation Date");
 
     const isVol = isVoluntaryTermination(kualiData.terminationType);
     const termEffDate = computeTerminationEffDate(kualiData.separationDate);
