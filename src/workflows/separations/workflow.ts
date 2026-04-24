@@ -224,6 +224,16 @@ export const separationsWorkflow = defineWorkflow({
       await openActionList(kualiPage);
       await clickDocument(kualiPage, docId);
       const result = await extractSeparationData(kualiPage);
+      // Write extracted fields onto the tracker row BEFORE the step returns.
+      // Anything that throws downstream (validateLastDayWorked, Kronos, Kuali
+      // finalize, etc.) still leaves a populated detail grid instead of a row
+      // of em-dashes.
+      ctx.updateData({
+        name: result.employeeName,
+        eid: result.eid,
+        separationDate: result.separationDate,
+        terminationType: isVoluntaryTermination(result.terminationType) ? "Vol" : "Invol",
+      });
       log.step(
         `[Step: kuali-extraction] END took=${Date.now() - t0}ms `
         + `employeeName='${result.employeeName}' eid='${result.eid}' `
@@ -249,7 +259,6 @@ export const separationsWorkflow = defineWorkflow({
     log.step(`Template: "${template}" — ${isVol ? "voluntary termination" : "involuntary termination"}`);
     log.step(`Reason code: Kuali type "${kualiData.terminationType}" → UCPath reason "${ucpathReason}"`);
     log.step(`Termination effective date: ${termEffDate} (separation date ${kualiData.separationDate} + 1 day)`);
-    ctx.updateData({ name: kualiData.employeeName, eid: kualiData.eid });
     log.step(`Employee: ${kualiData.employeeName} | EID: ${kualiData.eid}`);
     log.step(`Type: ${kualiData.terminationType} (${isVol ? "VOL" : "INVOL"}) | Eff: ${termEffDate}`);
 
