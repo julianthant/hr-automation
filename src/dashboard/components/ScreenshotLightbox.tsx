@@ -1,30 +1,62 @@
 import { useEffect } from "react";
 import type { ScreenshotEntry } from "./hooks/useRunScreenshots";
 
+/** One flattened (entry, file-within-entry) pair in the lightbox queue. */
+export interface LightboxItem {
+  entry: ScreenshotEntry;
+  fileIdx: number;
+}
+
 export function ScreenshotLightbox({
-  entry,
-  fileIdx,
+  items,
+  idx,
   onNavigate,
   onClose,
 }: {
-  entry: ScreenshotEntry;
-  fileIdx: number;
+  items: LightboxItem[];
+  idx: number;
   onNavigate: (nextIdx: number) => void;
   onClose: () => void;
 }) {
+  // Arrow-keys cross entry boundaries so the operator can scroll through
+  // every captured image with one hand — Mac Preview–style.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-      if (e.key === "ArrowLeft") onNavigate(Math.max(0, fileIdx - 1));
-      if (e.key === "ArrowRight")
-        onNavigate(Math.min(entry.files.length - 1, fileIdx + 1));
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key === "ArrowLeft") {
+        if (idx > 0) onNavigate(idx - 1);
+        return;
+      }
+      if (e.key === "ArrowRight") {
+        if (idx < items.length - 1) onNavigate(idx + 1);
+        return;
+      }
+      // Optional niceties that feel right in a Preview-style viewer.
+      if (e.key === "Home") {
+        if (idx !== 0) onNavigate(0);
+        return;
+      }
+      if (e.key === "End") {
+        const last = items.length - 1;
+        if (idx !== last) onNavigate(last);
+        return;
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [entry, fileIdx, onNavigate, onClose]);
+  }, [idx, items.length, onNavigate, onClose]);
 
+  const current = items[idx];
+  if (!current) return null;
+  const { entry, fileIdx } = current;
   const file = entry.files[fileIdx];
   if (!file) return null;
+
+  const hasPrev = idx > 0;
+  const hasNext = idx < items.length - 1;
 
   return (
     <div
@@ -43,31 +75,30 @@ export function ScreenshotLightbox({
         <div className="absolute bottom-2 left-2 bg-background/90 rounded px-2 py-1 text-[11px] font-mono text-foreground/80">
           <span className="uppercase tracking-wider">{file.system}</span>
           <span className="text-muted-foreground">
-            {" "}
-            · {fileIdx + 1} / {entry.files.length}
+            {" "}· {idx + 1} / {items.length}
           </span>
           {" · "}
           <span className="truncate max-w-[40ch] inline-block align-bottom">
             {entry.label}
           </span>
         </div>
-        {entry.files.length > 1 && (
+        {items.length > 1 && (
           <>
             <button
               type="button"
-              disabled={fileIdx === 0}
+              disabled={!hasPrev}
+              aria-label="Previous screenshot"
               className="absolute left-2 top-1/2 -translate-y-1/2 bg-background/90 rounded px-2 py-1 text-xs font-mono text-foreground/80 disabled:opacity-30 hover:bg-background transition-colors"
-              onClick={() => onNavigate(Math.max(0, fileIdx - 1))}
+              onClick={() => hasPrev && onNavigate(idx - 1)}
             >
               ‹
             </button>
             <button
               type="button"
-              disabled={fileIdx === entry.files.length - 1}
+              disabled={!hasNext}
+              aria-label="Next screenshot"
               className="absolute right-10 top-1/2 -translate-y-1/2 bg-background/90 rounded px-2 py-1 text-xs font-mono text-foreground/80 disabled:opacity-30 hover:bg-background transition-colors"
-              onClick={() =>
-                onNavigate(Math.min(entry.files.length - 1, fileIdx + 1))
-              }
+              onClick={() => hasNext && onNavigate(idx + 1)}
             >
               ›
             </button>
