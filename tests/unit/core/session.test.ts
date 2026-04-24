@@ -196,6 +196,7 @@ test('session.healthCheck: returns false when missing system id', async () => {
 
 test('session.screenshotAll: writes one PNG per open page, skips closed, returns paths', async () => {
   const { existsSync, rmSync } = await import('node:fs')
+  const { PATHS } = await import('../../../src/config.js')
   const shotCalls: Array<{ id: string; path: string }> = []
   const mkPage = (id: string, closed: boolean) => ({
     isClosed: () => closed,
@@ -220,24 +221,27 @@ test('session.screenshotAll: writes one PNG per open page, skips closed, returns
   const paths = await s.screenshotAll('test-prefix')
   try {
     assert.equal(paths.length, 2, 'only 2 open pages → 2 paths')
-    assert.ok(existsSync('.screenshots'), '.screenshots directory created')
-    // Each path matches `.screenshots/<prefix>-<systemId>-<timestamp>.png`
+    assert.ok(existsSync(PATHS.screenshotDir), `${PATHS.screenshotDir} directory created`)
+    // Each path matches `<screenshotDir>/<prefix>-<systemId>-<timestamp>.png`
+    const escapedDir = PATHS.screenshotDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const pathRe = new RegExp(`^${escapedDir}[\\\\/]test-prefix-(ucpath|kuali)-\\d+\\.png$`)
     for (const p of paths) {
-      assert.match(p, /^\.screenshots[\\/]test-prefix-(ucpath|kuali)-\d+\.png$/)
+      assert.match(p, pathRe)
     }
     // Screenshot calls correspond 1:1 to returned paths
     assert.equal(shotCalls.length, 2)
     const ids = shotCalls.map((c) => c.id).sort()
     assert.deepEqual(ids, ['kuali', 'ucpath'])
   } finally {
-    // Best-effort cleanup — directory is in .gitignore so leftover files are fine
-    // but we clean up to stay tidy across test runs.
-    try { rmSync('.screenshots', { recursive: true, force: true }) } catch { /* ignore */ }
+    // Best-effort cleanup — files under src/data/screenshots/ are gitignored so
+    // leftovers are fine, but we clean per-test to stay tidy across runs.
+    try { rmSync(PATHS.screenshotDir, { recursive: true, force: true }) } catch { /* ignore */ }
   }
 })
 
 test('session.screenshotAll: a failed screenshot does not skip siblings', async () => {
   const { rmSync } = await import('node:fs')
+  const { PATHS } = await import('../../../src/config.js')
   const mkOk = (id: string) => ({
     isClosed: () => false,
     screenshot: async () => { /* ok */ void id },
@@ -269,7 +273,7 @@ test('session.screenshotAll: a failed screenshot does not skip siblings', async 
     assert.ok(paths.some((p) => p.includes('-c-')))
     assert.ok(!paths.some((p) => p.includes('-b-bad-')))
   } finally {
-    try { rmSync('.screenshots', { recursive: true, force: true }) } catch { /* ignore */ }
+    try { rmSync(PATHS.screenshotDir, { recursive: true, force: true }) } catch { /* ignore */ }
   }
 })
 

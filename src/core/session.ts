@@ -6,6 +6,7 @@ import { launchBrowser } from '../browser/launch.js'
 import { computeTileLayout } from '../browser/tiling.js'
 import { log } from '../utils/log.js'
 import { classifyPlaywrightError, errorMessage } from '../utils/errors.js'
+import { PATHS } from '../config.js'
 
 export function formatCaptureFilename(args: {
   workflow: string
@@ -283,13 +284,13 @@ export class Session {
   async screenshotAll(prefix: string): Promise<string[]> {
     const paths: string[] = []
     try {
-      await fs.mkdir('.screenshots', { recursive: true })
+      await fs.mkdir(PATHS.screenshotDir, { recursive: true })
     } catch { /* best-effort */ }
     for (const [id, slot] of this.state.browsers.entries()) {
       try {
         if (slot.page.isClosed()) continue
       } catch { continue }
-      const path = join('.screenshots', `${prefix}-${id}-${Date.now()}.png`)
+      const path = join(PATHS.screenshotDir, `${prefix}-${id}-${Date.now()}.png`)
       try {
         await slot.page.screenshot({ path })
         paths.push(path)
@@ -305,7 +306,7 @@ export class Session {
    * for each file successfully written.
    */
   async captureAll(opts: CaptureFileOpts): Promise<Array<{ system: string; path: string; bytes: number }>> {
-    const outDir = '.screenshots'
+    const outDir = PATHS.screenshotDir
     try {
       await fs.mkdir(outDir, { recursive: true })
     } catch { /* best-effort */ }

@@ -23,6 +23,7 @@ import {
 } from "./session-events.js";
 import { getAll as getAllRegisteredWorkflows } from "../core/registry.js";
 import type { WorkflowMetadata } from "../core/types.js";
+import { PATHS } from "../config.js";
 import { detectFailurePattern } from "./failure-detector.js";
 import { notify } from "./notify.js";
 import {
@@ -479,7 +480,7 @@ export function buildWorkflowsHandler(): () => WorkflowMetadata[] {
 }
 
 /** Default root dir for kernel failure screenshots. Matches `screenshotAll`. */
-export const SCREENSHOTS_DIR = ".screenshots";
+export const SCREENSHOTS_DIR = PATHS.screenshotDir;
 
 export interface ScreenshotListEntry {
   filename: string;
