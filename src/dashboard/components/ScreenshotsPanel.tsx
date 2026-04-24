@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ScreenshotCard } from "./ScreenshotCard";
-import { ScreenshotLightbox } from "./ScreenshotLightbox";
+import { ScreenshotLightbox, type LightboxItem } from "./ScreenshotLightbox";
 import {
   useRunScreenshots,
   type ScreenshotEntry,
@@ -18,10 +18,27 @@ export function ScreenshotsPanel({
   date: string | null;
 }) {
   const { entries } = useRunScreenshots(workflow, itemId, runId, date);
-  const [lightbox, setLightbox] = useState<{
-    entry: ScreenshotEntry;
-    fileIdx: number;
-  } | null>(null);
+  const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
+
+  const { errors, others, flat } = useMemo(() => {
+    const errs = entries
+      .filter((e) => e.kind === "error")
+      .sort((a, b) => b.ts - a.ts);
+    const oth = entries
+      .filter((e) => e.kind !== "error")
+      .sort((a, b) => b.ts - a.ts);
+    // Flatten into one arrow-keyable queue. Error screenshots first (the
+    // operator typically wants to see failures before form captures), then
+    // form / manual. Within an entry, files go in declared order so the
+    // viewer's left/right always lands on a deterministic neighbor.
+    const f: LightboxItem[] = [];
+    for (const entry of [...errs, ...oth]) {
+      for (let i = 0; i < entry.files.length; i++) {
+        f.push({ entry, fileIdx: i });
+      }
+    }
+    return { errors: errs, others: oth, flat: f };
+  }, [entries]);
 
   if (entries.length === 0) {
     return (
@@ -31,12 +48,12 @@ export function ScreenshotsPanel({
     );
   }
 
-  const errors = entries
-    .filter((e) => e.kind === "error")
-    .sort((a, b) => b.ts - a.ts);
-  const others = entries
-    .filter((e) => e.kind !== "error")
-    .sort((a, b) => b.ts - a.ts);
+  const openFlat = (entry: ScreenshotEntry, fileIdx: number) => {
+    const idx = flat.findIndex(
+      (item) => item.entry === entry && item.fileIdx === fileIdx,
+    );
+    if (idx >= 0) setLightboxIdx(idx);
+  };
 
   return (
     <div className="space-y-4 px-6 py-4 overflow-y-auto">
@@ -50,7 +67,7 @@ export function ScreenshotsPanel({
               <ScreenshotCard
                 key={`${e.ts}-${e.label}`}
                 entry={e}
-                onOpen={(entry, i) => setLightbox({ entry, fileIdx: i })}
+                onOpen={openFlat}
               />
             ))}
           </div>
@@ -67,19 +84,19 @@ export function ScreenshotsPanel({
               <ScreenshotCard
                 key={`${e.ts}-${e.label}`}
                 entry={e}
-                onOpen={(entry, i) => setLightbox({ entry, fileIdx: i })}
+                onOpen={openFlat}
               />
             ))}
           </div>
         </section>
       )}
 
-      {lightbox && (
+      {lightboxIdx !== null && flat.length > 0 && (
         <ScreenshotLightbox
-          entry={lightbox.entry}
-          fileIdx={lightbox.fileIdx}
-          onNavigate={(i) => setLightbox({ ...lightbox, fileIdx: i })}
-          onClose={() => setLightbox(null)}
+          items={flat}
+          idx={Math.min(lightboxIdx, flat.length - 1)}
+          onNavigate={setLightboxIdx}
+          onClose={() => setLightboxIdx(null)}
         />
       )}
     </div>
