@@ -51,8 +51,12 @@ export function LogStream({ logs, events = [], loading, screenshotsSlot }: LogSt
       ...logs.map((l) => ({ kind: "log" as const, entry: l })),
       ...events.map((e) => ({ kind: "event" as const, entry: e })),
     ].sort((a, b) => {
-      const ta = a.kind === "log" ? a.entry.ts : a.entry.timestamp;
-      const tb = b.kind === "log" ? b.entry.ts : b.entry.timestamp;
+      const ta = a.kind === "log"
+        ? a.entry.ts
+        : (a.entry.timestamp ?? (typeof a.entry.ts === "number" ? new Date(a.entry.ts).toISOString() : ""));
+      const tb = b.kind === "log"
+        ? b.entry.ts
+        : (b.entry.timestamp ?? (typeof b.entry.ts === "number" ? new Date(b.entry.ts).toISOString() : ""));
       return (ta ?? "").localeCompare(tb ?? "");
     });
   } else {
@@ -142,7 +146,7 @@ export function LogStream({ logs, events = [], loading, screenshotsSlot }: LogSt
               />
             ) : (
               <LogLine
-                key={`evt-${item.entry.timestamp}-${i}`}
+                key={`evt-${item.entry.timestamp ?? item.entry.ts ?? "noTs"}-${i}`}
                 entry={{ ...item.entry, kind: "event" }}
                 isCurrent={false}
                 onCopy={handleCopy}

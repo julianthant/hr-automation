@@ -238,9 +238,15 @@ export type RunEventType =
 
 export interface RunEvent {
   type: RunEventType;
-  timestamp: string;
-  pid: number;
-  workflowInstance: string;
+  /** ISO-8601 timestamp. Missing on legacy screenshot events written before
+   * 2026-04-23 — those only carry `ts` (numeric ms). Consumers should use
+   * `resolveRunEventTimestamp(event)` to get a valid Date regardless. */
+  timestamp?: string;
+  /** Numeric ms since epoch. Populated on screenshot events; absent on
+   * everything else. */
+  ts?: number;
+  pid?: number;
+  workflowInstance?: string;
   runId?: string;
   step?: string;
   system?: string;
@@ -252,6 +258,21 @@ export interface RunEvent {
   screenshotKind?: "form" | "error" | "manual";
   screenshotLabel?: string;
   screenshotFileCount?: number;
+}
+
+/**
+ * Return a Date for a RunEvent even when it lacks the ISO `timestamp`
+ * field. Screenshot events emitted before 2026-04-23 only carried `ts`
+ * (numeric ms); both new shape and legacy shape are supported here so the
+ * Events tab doesn't render "Invalid Date" for historical rows.
+ */
+export function resolveRunEventTimestamp(event: RunEvent): Date {
+  if (event.timestamp) {
+    const d = new Date(event.timestamp);
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  if (typeof event.ts === "number") return new Date(event.ts);
+  return new Date(NaN);
 }
 
 // ── Step name formatting (stable — used by StepPipeline + WorkflowBox) ──

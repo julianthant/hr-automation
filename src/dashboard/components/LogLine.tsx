@@ -4,6 +4,7 @@ import {
   KeyRound, Download, Check, X, Hourglass, ArrowRight, ChevronRight,
 } from "lucide-react";
 import type { LogCategory, RunEvent } from "./types";
+import { resolveRunEventTimestamp } from "./types";
 import { getLogCategory } from "./types";
 import type { CollapsedLogEntry } from "./hooks/useLogs";
 
@@ -100,11 +101,14 @@ function EventLine({ event }: { event: RunEvent }) {
   // Match LogLine's timestamp format + column geometry so Events + regular
   // log lines line up vertically in the stream (same px-6, min-w-[72px],
   // 14px icon, gap-3.5, font-mono text-[13px]).
-  const time = new Date(event.timestamp).toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+  const eventDate = resolveRunEventTimestamp(event);
+  const time = Number.isNaN(eventDate.getTime())
+    ? "—"
+    : eventDate.toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
   const detail = event.system ?? event.step ?? event.currentStep ?? event.currentItemId ?? "";
   const label = event.type === "screenshot"
     ? [
