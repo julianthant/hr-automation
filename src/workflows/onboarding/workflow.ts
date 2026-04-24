@@ -6,12 +6,6 @@ import { errorMessage, classifyPlaywrightError } from "../../utils/errors.js";
 import {
   defineWorkflow,
   runWorkflow,
-  hashKey,
-  hasRecentlySucceeded,
-  recordSuccess,
-  findRecentTransactionId,
-  stepCacheGet,
-  stepCacheSet,
 } from "../../core/index.js";
 import { loginToUCPath, loginToACTCrm } from "../../auth/login.js";
 import {
@@ -182,29 +176,7 @@ export const onboardingWorkflow = defineWorkflow({
     await ctx.step("extraction", async () => {
       const t0 = Date.now();
       log.debug(`[Step: extraction] START email='${email}'`);
-      let cacheHit = false;
       try {
-        // Cache-hit branch — skip CRM re-scrape if a recent extraction exists
-        // for this email. Pre-step nav (searchByEmail, selectLatestResult,
-        // extractRecordPageFields, navigateToSection) has still run, so we
-        // re-apply recordFields's dept + recruitment numbers on top of cache.
-        const cached = stepCacheGet<EmployeeData>(
-          "onboarding",
-          email,
-          "extraction",
-          { withinHours: 2 },
-        );
-        if (cached) {
-          cacheHit = true;
-          log.warn("Using cached extraction data (≤2 h old) — skipping CRM re-scrape");
-          data = cached;
-          if (recordFields.departmentNumber) data = { ...data, departmentNumber: recordFields.departmentNumber };
-          if (recordFields.recruitmentNumber) data = { ...data, recruitmentNumber: recordFields.recruitmentNumber };
-          ctx.updateData(buildDetailFieldsPayload(data));
-          return;
-        }
-
-        // Cache-miss branch — normal extraction from CRM.
         const rawData = await ctx.retry(
           () => extractRawFields(crmPage),
           { attempts: 2 },
@@ -218,21 +190,10 @@ export const onboardingWorkflow = defineWorkflow({
         if (recordFields.recruitmentNumber) data = { ...data, recruitmentNumber: recordFields.recruitmentNumber };
 
         ctx.updateData(buildDetailFieldsPayload(data));
-
-        // Cache write is best-effort: a disk-full / permission error must NOT
-        // fail the step — the underlying extraction already succeeded. Log-warn
-        // and move on; next rerun will re-scrape, which is correct behavior.
-        try {
-          stepCacheSet("onboarding", email, "extraction", data);
-        } catch (e) {
-          log.warn(`Step cache write failed (continuing): ${errorMessage(e)}`);
-        }
-
         log.success("Employee data extracted and validated");
       } finally {
         log.step(
           `[Step: extraction] END took=${Date.now() - t0}ms `
-          + `cacheHit=${cacheHit} `
           + `departmentNumber='${data?.departmentNumber || "<none>"}' `
           + `positionNumber='${data?.positionNumber || "<none>"}' `
           + `name='${data?.firstName ?? ""} ${data?.lastName ?? ""}'`,
@@ -422,39 +383,12 @@ export const onboardingWorkflow = defineWorkflow({
           + `effectiveDate='${data.effectiveDate}'`,
         );
 
-        // Idempotency: key on (workflow, emplId-or-NEW, ssn, effectiveDate). For
-        // a fresh hire, emplId doesn't exist yet so we use "NEW"; the SSN +
-        // effectiveDate combination still uniquely identifies the intended txn.
-        const idempKey = hashKey({
-          workflow: "onboarding",
-          emplId: searchResult.matches?.[0]?.emplId ?? "NEW",
-          ssn: data.ssn ?? "",
-          effectiveDate: data.effectiveDate,
-        });
-        if (hasRecentlySucceeded(idempKey)) {
-          const existingTxId = findRecentTransactionId(idempKey);
-          const note = existingTxId
-            ? `transaction already submitted recently (txId ${existingTxId}) — skipping (idempotency)`
-            : "transaction already submitted recently — skipping (idempotency)";
-          log.warn(note);
-          ctx.updateData({
-            status: "Skipped (Duplicate)",
-            idempotencySkip: "true",
-            ...(existingTxId ? { transactionId: existingTxId } : {}),
-          });
-          txnExit = existingTxId ? `<skipped:${existingTxId}>` : "<skipped>";
-          return;
-        }
-
         try {
           const plan = buildTransactionPlan(data, ucpathPage, i9ProfileId);
           log.step("Executing Smart HR transaction plan...");
           await plan.execute();
           await ctx.screenshot({ kind: 'form', label: 'onboarding-transaction-submitted' });
           log.success("Transaction created successfully in UCPath");
-          // transactionId isn't surfaced by ActionPlan today — record empty string;
-          // the key match is what prevents duplicates on re-run.
-          recordSuccess(idempKey, "", "onboarding");
           ctx.updateData({ status: "Done" });
           // ActionPlan doesn't surface the txn number; leave as "<empty>" sentinel.
         } catch (error) {

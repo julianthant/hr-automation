@@ -13,17 +13,13 @@ interface StepPipelineProps {
   status: string;
   /** Per-step durations in ms (from backend enrichment). */
   stepDurations?: Record<string, number>;
-  /**
-   * Full tracker entry for the active run — used to surface cache decoration
-   * (steps whose result was reused from cache) and their historical averages.
-   * Optional; absence simply means no cache decoration is drawn.
-   */
+  /** Full tracker entry for the active run. Reserved for future decoration. */
   entry?: TrackerEntry;
 }
 
 // ── Auth-step grouping ────────────────────────────────────────────────────────
 
-type StepStatus = "pending" | "running" | "completed" | "failed" | "cached";
+type StepStatus = "pending" | "running" | "completed" | "failed";
 
 interface StepView {
   name: string;
@@ -67,7 +63,7 @@ function groupAuthSteps(steps: StepView[]): PipelineNode[] {
 /** Derive a collapsed status from the children of an auth-group super-chip. */
 function authGroupStatus(children: StepView[]): StepStatus {
   if (children.some((c) => c.status === "failed")) return "failed";
-  if (children.every((c) => c.status === "completed" || c.status === "cached")) return "completed";
+  if (children.every((c) => c.status === "completed")) return "completed";
   if (children.some((c) => c.status === "running")) return "running";
   return "pending";
 }
@@ -97,7 +93,7 @@ function buildAuthGroupTitle(children: StepView[]): string {
     .map((child) => {
       const systemId = child.name.startsWith("auth:") ? child.name.slice(5) : child.name;
       const statusGlyph =
-        child.status === "completed" || child.status === "cached"
+        child.status === "completed"
           ? "✓"
           : child.status === "failed"
             ? "✗"
@@ -121,8 +117,6 @@ function authRailStyle(status: StepStatus): React.CSSProperties {
       return {};  // uses className
     case "running":
       return {};  // uses className
-    case "cached":
-      return { backgroundColor: "#3b82f6" };
     default:
       return {};
   }
@@ -161,7 +155,6 @@ function AuthSuperChip({ children }: AuthSuperChipProps) {
     ? `${formatStepDuration(totalDurationMs)}${partial ? "+" : ""}`
     : "";
 
-  const isCached = groupStatus === "cached";
   const isComplete = groupStatus === "completed";
   const isActive = groupStatus === "running";
   const isFailedStep = groupStatus === "failed";
@@ -183,22 +176,18 @@ function AuthSuperChip({ children }: AuthSuperChipProps) {
           <span
             className={cn(
               "text-[11.5px] tracking-tight leading-none truncate w-full transition-colors",
-              !isCached && isComplete && "text-[#4ade80] font-medium",
-              !isCached && isActive && "text-primary font-semibold",
-              !isCached && isFailedStep && "text-destructive font-semibold",
-              !isCached && isPending && "text-muted-foreground/50 font-medium",
-              isCached && "font-medium",
+              isComplete && "text-[#4ade80] font-medium",
+              isActive && "text-primary font-semibold",
+              isFailedStep && "text-destructive font-semibold",
+              isPending && "text-muted-foreground/50 font-medium",
             )}
-            style={isCached ? { color: "#3b82f6" } : undefined}
           >
             Authenticating ({children.length})
           </span>
 
           {/* Rail */}
-          <div
-            className="relative w-full h-[3px] rounded-full"
-            style={isCached ? { backgroundColor: "#3b82f6", boxShadow: "0 0 0 3px rgba(59,130,246,0.15)" } : undefined}
-          >
+          <div className="relative w-full h-[3px] rounded-full">
+
             {isPending ? (
               <div
                 aria-hidden
@@ -231,10 +220,10 @@ function AuthSuperChip({ children }: AuthSuperChipProps) {
           <span
             className={cn(
               "text-[10px] font-mono tabular-nums leading-none h-[10px] transition-colors",
-              !isCached && isComplete && (durationLabel ? "text-[#4ade80]/70" : "text-[#4ade80]/40"),
-              !isCached && isFailedStep && (durationLabel ? "text-destructive/70" : "text-destructive/40"),
-              !isCached && isActive && "text-primary/70",
-              !isCached && isPending && "text-muted-foreground/35",
+              isComplete && (durationLabel ? "text-[#4ade80]/70" : "text-[#4ade80]/40"),
+              isFailedStep && (durationLabel ? "text-destructive/70" : "text-destructive/40"),
+              isActive && "text-primary/70",
+              isPending && "text-muted-foreground/35",
             )}
             aria-hidden={!durationLabel && !isPending}
           >
@@ -252,7 +241,7 @@ function AuthSuperChip({ children }: AuthSuperChipProps) {
           {children.map((child) => {
             const systemId = child.name.startsWith("auth:") ? child.name.slice(5) : child.name;
             const statusGlyph =
-              child.status === "completed" || child.status === "cached"
+              child.status === "completed"
                 ? "✓"
                 : child.status === "failed"
                   ? "✗"
@@ -260,7 +249,7 @@ function AuthSuperChip({ children }: AuthSuperChipProps) {
                     ? "…"
                     : "–";
             const glyphColor =
-              child.status === "completed" || child.status === "cached"
+              child.status === "completed"
                 ? "text-[#4ade80]"
                 : child.status === "failed"
                   ? "text-destructive"
@@ -304,14 +293,11 @@ function AuthSuperChip({ children }: AuthSuperChipProps) {
  *     "Authenticating (N)" super-chip. Hover reveals per-system detail
  *     (Radix popover), no click / expansion state.
  */
-export function StepPipeline({ steps, currentStep, status, stepDurations, entry }: StepPipelineProps) {
+export function StepPipeline({ steps, currentStep, status, stepDurations }: StepPipelineProps) {
   if (steps.length === 0) return null;
 
   const isDone = status === "done";
   const isFailed = status === "failed";
-  const cacheHits = entry?.cacheHits ?? [];
-  const cacheStepAvgs = entry?.cacheStepAvgs ?? {};
-  const cachedSet = new Set(cacheHits);
 
   // Strip ":failed:<reason>" suffix while preserving the "auth:<id>" prefix.
   // The previous implementation used .split(":")[0] which incorrectly mapped
@@ -330,16 +316,14 @@ export function StepPipeline({ steps, currentStep, status, stepDurations, entry 
     const isActive = !isDone && !isFailed && i === currentIdx;
     const isFailedStep = isFailed && i === currentIdx;
     const isPending = !isComplete && !isActive && !isFailedStep;
-    const isCached = cachedSet.has(step);
 
     let derivedStatus: StepStatus;
-    if (isCached) derivedStatus = "cached";
-    else if (isComplete) derivedStatus = "completed";
+    if (isComplete) derivedStatus = "completed";
     else if (isActive) derivedStatus = "running";
     else if (isFailedStep) derivedStatus = "failed";
     else derivedStatus = "pending";
 
-    const durationMs = isPending || isCached ? undefined : stepDurations?.[step];
+    const durationMs = isPending ? undefined : stepDurations?.[step];
     return { name: step, status: derivedStatus, durationMs };
   });
 
@@ -361,7 +345,7 @@ export function StepPipeline({ steps, currentStep, status, stepDurations, entry 
 
           // Normal chip — unchanged from original
           const { name: step, status: stepStatus, durationMs } = node;
-          const isCached = stepStatus === "cached";
+          const isCached = false; // legacy — cache display removed
           const isComplete = stepStatus === "completed";
           const isActive = stepStatus === "running";
           const isFailedStep = stepStatus === "failed";
@@ -369,11 +353,7 @@ export function StepPipeline({ steps, currentStep, status, stepDurations, entry 
 
           const durationLabel =
             typeof durationMs === "number" ? formatStepDuration(durationMs) : "";
-          const cacheAvg = cacheStepAvgs[step];
-          const cacheTooltip =
-            isCached && typeof cacheAvg === "number" && cacheAvg > 0
-              ? `${step} · normally ~${formatStepDuration(cacheAvg)}`
-              : undefined;
+          const cacheTooltip: string | undefined = undefined;
 
           return (
             <div
@@ -483,7 +463,7 @@ export function StepPipeline({ steps, currentStep, status, stepDurations, entry 
         })}
       </div>
 
-      {cacheHits.length > 0 && (
+      {false && (
         <div
           style={{
             marginTop: 16,
@@ -504,7 +484,7 @@ export function StepPipeline({ steps, currentStep, status, stepDurations, entry 
         >
           <span style={{ fontSize: 14, color: "#3b82f6", lineHeight: 1 }}>{"\u2744"}</span>
           <span>
-            {cacheHits.length} of {steps.length} steps reused from cache
+            {0} of {steps.length} steps reused from cache
           </span>
         </div>
       )}

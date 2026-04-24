@@ -52,10 +52,6 @@ export interface TrackerEntry {
    * backend SSE). Always undefined unless `status === "failed"`.
    */
   screenshotCount?: number;
-  /** Step names whose result was reused from cache during this run. */
-  cacheHits?: string[];
-  /** Per-step historical avg duration (ms), keyed by step name in cacheHits. */
-  cacheStepAvgs?: Record<string, number>;
 }
 
 /** Metadata for a single failure screenshot, as returned by /api/screenshots. */
@@ -236,7 +232,6 @@ export type RunEventType =
   | "duo_request" | "duo_start" | "duo_complete" | "duo_timeout"
   | "item_start" | "item_complete"
   | "step_change"
-  | "cache_hit"
   | "screenshot";
 
 export interface RunEvent {

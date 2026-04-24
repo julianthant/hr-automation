@@ -84,7 +84,7 @@ When an upstream record has the wrong EID (Kuali Build, Salesforce, etc.), the c
 
 1. The workflow errors with a legible message naming the offending EID.
 2. The user opens the upstream record and corrects it.
-3. The workflow is re-run. Idempotency primitives prevent duplicate submits.
+3. The workflow is re-run. Separations' pre-submit existence check (`findExistingTerminationTransaction`, scans the Smart HR Transactions list for an existing row matching `(employeeName, effectiveDate, template)`) prevents duplicate submits on re-run. Other workflows rely on their own live-page probes where applicable — there is no tracker-side idempotency cache as of 2026-04-23.
 
 Auto-correction via cross-source name matching is a correctness risk: names aren't unique, variants can match different employees, and a silent match produces a wrong-employee transaction. Transient-error retries (Playwright timeouts, auth flakes) still go through `loginWithRetry` / `ctx.retry` — that's retrying the same operation, not substituting data.
 

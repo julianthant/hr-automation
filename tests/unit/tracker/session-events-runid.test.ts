@@ -38,19 +38,4 @@ describe("emitSessionEvent + runId", () => {
     assert.equal(events[0].runId, undefined);
   });
 
-  it("supports cache_hit type with step field", async () => {
-    await withLogContext("onboarding", "alice@example.com", async () => {
-      setLogRunId("alice@example.com#1");
-      emitSessionEvent({
-        type: "cache_hit",
-        workflowInstance: "Onboarding 1",
-        step: "extraction",
-      }, tmp);
-    });
-    const events = readEvents();
-    assert.equal(events.length, 1);
-    assert.equal(events[0].type, "cache_hit");
-    assert.equal(events[0].step, "extraction");
-    assert.equal(events[0].runId, "alice@example.com#1");
-  });
 });

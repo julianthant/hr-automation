@@ -17,7 +17,7 @@ Given one or more EIDs (plus an optional `--date MM/DD/YYYY`), for each EID:
 2. Search by Empl ID (lands directly on the profile — EID is unique).
 3. Extract the employee name and probe the page for an existing oath (the
    "There are currently no Oath Signature Date…" sentinel). If absent, skip
-   add/save (idempotency).
+   add/save (live-page dupe-protection).
 4. Click **Add New Oath Signature Date** → (optionally override the date)
    → **OK** → **Save**.
 5. Click **Return to Search** so the browser is left on a clean search
@@ -75,8 +75,8 @@ CLI: npm run oath-signature <emplId...> [--date MM/DD/YYYY]   (daemon — defaul
       - Each daemon pulls from the queue:
           • reset browser to about:blank (betweenItems)
           • handler → plan.execute() → add oath → OK → Save → return-to-search
-          • idempotency: skip if hasRecentlySucceeded(hashKey) OR if the
-            existing-oath sentinel is absent on profile load
+          • dupe-protection: skip add/save if the existing-oath sentinel
+            is absent on profile load (live-page probe)
 
 CLI: npm run oath-signature:direct <emplId> [--date MM/DD/YYYY]   (legacy in-process)
   → runOathSignature — single EID only
@@ -84,16 +84,15 @@ CLI: npm run oath-signature:direct <emplId> [--date MM/DD/YYYY]   (legacy in-pro
     → else: runWorkflow(oathSignatureWorkflow, input)
 ```
 
-## Idempotency
+## Dupe-protection
 
-Two independent guards:
+Single guard (tracker-side idempotency removed 2026-04-23):
 
-1. **Live page probe** — if the profile doesn't show the "no oath signature
-   date" sentinel on load, the plan skips the add/OK/Save steps and marks
-   the item `Skipped (Existing Oath)`.
-2. **Tracker-side `recordSuccess`** — `hashKey({workflow, emplId, date})`
-   short-circuits re-runs within the recent-success window. Marked
-   `Skipped (Duplicate)`.
+- **Live page probe** — if the profile doesn't show the "no oath signature
+  date" sentinel on load, the plan skips the add/OK/Save steps and marks
+  the item `Skipped (Existing Oath)`. The existing-oath state on the live
+  profile is the source of truth; a retry against the same EID converges
+  correctly without a tracker-side cache.
 
 ## Gotchas
 
@@ -109,6 +108,14 @@ Two independent guards:
 
 ## Lessons Learned
 
+- **2026-04-23: Removed tracker-side idempotency guard; only the live-page
+  probe remains.** `src/core/idempotency.ts` was deleted repo-wide. The
+  earlier two-guard design (live-page sentinel + `hashKey({workflow,
+  emplId, date})` → `hasRecentlySucceeded`) collapses to one guard: if the
+  profile shows "no oath signature date" on load, add + save; otherwise
+  skip with `status: "Skipped (Existing Oath)"`. The live profile is the
+  source of truth — a retry against the same EID converges correctly
+  without a tracker-side cache.
 - **2026-04-22: Initial implementation.** Mapped on EID 10873075 (Liam
   Kustenbauder). End-to-end live run verified: search → add → OK → save →
   return-to-search. Daemon mode wired from day one to match `work-study` /

@@ -57,15 +57,9 @@ import {
   fillComments,
   clickSaveAndSubmit,
   getJobSummaryData,
-  readLatestTransactionNumber,
+  findExistingTerminationTransaction,
 } from "../../systems/ucpath/index.js";
 import type { JobSummaryData } from "../../systems/ucpath/index.js";
-import {
-  hashKey,
-  hasRecentlySucceeded,
-  findRecentTransactionId,
-  recordSuccess,
-} from "../../core/idempotency.js";
 
 import {
   computeTerminationEffDate,
@@ -433,21 +427,6 @@ export const separationsWorkflow = defineWorkflow({
     // failures which are logged and allowed to fall through to finalization
     // (so the Kuali form gets its "left blank for manual entry" treatment).
     let submittedWithoutTxnNumber = false;
-    // Idempotency key — identifies this specific termination transaction.
-    // Two scenarios this protects against:
-    //   1. Prior run submitted AND captured txn# → skip UCPath entirely,
-    //      resume at Kuali finalization with the recorded txn#.
-    //   2. Prior run submitted but readback failed (empty txn# recorded) →
-    //      skip the submit (would be a duplicate), run readback-only to
-    //      recover the txn#, then continue to Kuali finalization.
-    // Key fields: workflow + docId + emplId. docId alone is unique per
-    // Kuali doc; emplId is a cross-check that the Kuali extraction resolved
-    // to the same employee as last time.
-    const idempKey = hashKey({
-      workflow: "separations",
-      docId,
-      emplId: kualiData.eid,
-    });
 
     await ctx.step("ucpath-transaction", async () => {
       const t0 = Date.now();
@@ -460,38 +439,26 @@ export const separationsWorkflow = defineWorkflow({
         const nameParts = kualiData.employeeName.split(",").map((s) => s.trim());
         const ucpathName = nameParts.length >= 2 ? `${nameParts[1]} ${nameParts[0]}` : kualiData.employeeName;
 
-        // Idempotency check — before attempting the submit.
-        if (hasRecentlySucceeded(idempKey)) {
-          const recordedTxn = findRecentTransactionId(idempKey) ?? "";
-          if (recordedTxn) {
-            log.warn(`[UCPath Txn] Prior submit recorded (txn #${recordedTxn}) — skipping UCPath submit (idempotency)`);
-            transactionNumber = recordedTxn;
-            // Persist the recovered txn # immediately. If a later step
-            // (kuali-finalization) throws, the handler exits before the
-            // final updateData at the end of the handler — without this
-            // inline call the dashboard detail panel shows "—".
-            ctx.updateData({ transactionNumber, idempotencySkip: "submit" });
-            return;
-          }
-          // Submit happened but txn# wasn't captured — run readback only.
-          log.warn("[UCPath Txn] Prior submit recorded without txn # — running readback only (idempotency)");
-          ctx.updateData({ idempotencySkip: "submit-readback" });
-          try {
-            const recoveredTxn = await readLatestTransactionNumber(ucpathPage, ucpathName);
-            if (recoveredTxn) {
-              transactionNumber = recoveredTxn;
-              recordSuccess(idempKey, recoveredTxn, "separations");
-              // Persist immediately — see comment at the idempotency-hit path above.
-              ctx.updateData({ transactionNumber });
-              log.success(`[UCPath Txn] Recovered txn #${recoveredTxn} via readback`);
-              await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-recovered' });
-            } else {
-              submittedWithoutTxnNumber = true;
-            }
-          } catch (e) {
-            log.error(`[UCPath Txn] Readback-only path failed: ${errorMessage(e)}`);
-            submittedWithoutTxnNumber = true;
-          }
+        // Pre-submit existence check — replaces the former idempotency cache.
+        // Before writing a new Smart HR termination, scan the Transactions list
+        // for a row matching (this employee, this effective date, VOL/INVOL
+        // template). If one already exists, reuse its txn# and skip the
+        // submit. If not, proceed with the normal submit flow.
+        const existingTxn = await findExistingTerminationTransaction(
+          ucpathPage,
+          ucpathName,
+          finalTermEffDate,
+          [UC_VOL_TERM_TEMPLATE, UC_INVOL_TERM_TEMPLATE],
+        );
+        if (existingTxn) {
+          log.warn(`[UCPath Txn] Existing termination transaction #${existingTxn} found on Smart HR list — skipping submit.`);
+          transactionNumber = existingTxn;
+          // Persist the txn # immediately. If kuali-finalization throws
+          // later, the handler exits before the final updateData at the end
+          // of the body — without this inline call the dashboard detail
+          // panel shows "—".
+          ctx.updateData({ transactionNumber, existingTransactionFound: "true" });
+          await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-existing' });
           return;
         }
 
@@ -524,11 +491,6 @@ export const separationsWorkflow = defineWorkflow({
             log.error(`[UCPath Txn] Submit failed: ${submitResult.error}`);
             return;
           }
-          // Record idempotency IMMEDIATELY after a successful submit — even
-          // if txn# is empty. A retry that comes here with an empty record
-          // will skip the submit and try readback only, avoiding a duplicate
-          // UCPath termination transaction.
-          recordSuccess(idempKey, transactionNumber, "separations");
           if (!transactionNumber) {
             submittedWithoutTxnNumber = true;
             return;
@@ -722,80 +684,6 @@ export async function runSeparationBatch(
  * tests and scripting can still run the separations workflow directly
  * without the daemon.
  */
-/**
- * Look up the most recent `eid` recorded in any separations tracker file
- * for the given docId. Used by `runSeparationRecover` to compute the
- * idempotency key without touching UCPath.
- *
- * Scans tracker JSONL files across all dates (newest first), returns the
- * first entry matching `id === docId` with a non-empty `data.eid`.
- */
-async function findEmplIdForDoc(docId: string): Promise<string | null> {
-  const { readEntriesForDate, listDatesForWorkflow } = await import("../../tracker/jsonl.js");
-  const dates = listDatesForWorkflow("separations");
-  for (const date of dates) {
-    const entries = readEntriesForDate("separations", date);
-    for (const e of entries) {
-      if (e.id !== docId) continue;
-      const eid = e.data?.eid;
-      if (typeof eid === "string" && eid.length > 0) return eid;
-    }
-  }
-  return null;
-}
-
-/**
- * Recovery CLI for separations docs stuck in the "submitted without txn#"
- * state. Seeds an empty idempotency record for each docId so the next
- * `runSeparationCli` run takes the readback-only resume path (skipping the
- * UCPath termination submit that would otherwise double-submit), then
- * invokes `runSeparationCli` to process the docs through the normal daemon
- * queue.
- *
- * Guard: if an idempotency record already exists for a docId (e.g. the
- * workflow already recorded success after Task B's wiring landed), we skip
- * the seed — the workflow will use whatever record already exists.
- *
- * Precondition: each docId must have at least one prior tracker entry with
- * a populated `data.eid`. Without that we can't compute the idempotency
- * key.
- */
-export async function runSeparationRecover(
-  docIds: string[],
-  options: { dryRun?: boolean; new?: boolean; parallel?: number } = {},
-): Promise<void> {
-  if (docIds.length === 0) {
-    log.error("runSeparationRecover: no doc IDs provided");
-    process.exitCode = 1;
-    return;
-  }
-  log.step(`[Recover] Seeding idempotency for ${docIds.length} doc(s)...`);
-  const recoverable: string[] = [];
-  for (const docId of docIds) {
-    const emplId = await findEmplIdForDoc(docId);
-    if (!emplId) {
-      log.error(`[Recover] No prior tracker entry with eid found for doc ${docId} — cannot seed idempotency. Run the normal separation flow instead.`);
-      continue;
-    }
-    const key = hashKey({ workflow: "separations", docId, emplId });
-    if (hasRecentlySucceeded(key)) {
-      log.warn(`[Recover] Idempotency record already exists for doc ${docId} (emplId=${emplId}); skipping seed`);
-      recoverable.push(docId);
-      continue;
-    }
-    recordSuccess(key, "", "separations");
-    log.success(`[Recover] Seeded empty idempotency for doc ${docId} (emplId=${emplId})`);
-    recoverable.push(docId);
-  }
-  if (recoverable.length === 0) {
-    log.error("[Recover] No recoverable docs — aborting.");
-    process.exitCode = 1;
-    return;
-  }
-  log.step(`[Recover] Enqueueing ${recoverable.length} doc(s) through normal separation flow — the idempotency check will trigger the readback-only path.`);
-  await runSeparationCli(recoverable, options);
-}
-
 export async function runSeparationCli(
   docIds: string[],
   options: { dryRun?: boolean; new?: boolean; parallel?: number } = {},
