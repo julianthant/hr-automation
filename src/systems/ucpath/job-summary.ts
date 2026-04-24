@@ -67,9 +67,16 @@ export async function navigateToWorkforceJobSummary(page: Page): Promise<void> {
  * Workforce Job Summary's default filters (Business Unit, HR Status,
  * Organizational Relationship) can produce for valid employees.
  *
- * Callers treat `false` as a terminal error — see `getJobSummaryData`.
- * Cross-source auto-fallback was removed intentionally; upstream data
- * needs to be corrected rather than silently worked around.
+ * When UCPath returns multiple rows (rehires, multiple concurrent jobs),
+ * PeopleSoft stays on a search-results grid rather than auto-redirecting to
+ * the detail page. This function detects the grid, filters out terminated
+ * rows, and drills into the first active row so downstream tabs (Work
+ * Location / Job Information) find the detail view. Throws if every row is
+ * terminated — that's a data problem for the caller, not a retry case.
+ *
+ * Callers treat `false` as a terminal no-results error. Cross-source
+ * auto-fallback was removed intentionally; upstream data needs to be
+ * corrected rather than silently worked around.
  */
 export async function searchJobSummary(page: Page, emplId: string): Promise<boolean> {
   const root = await getFormRoot(page);
@@ -94,7 +101,57 @@ export async function searchJobSummary(page: Page, emplId: string): Promise<bool
     return false;
   }
   log.success(`[Job Summary] Results loaded for ${emplId}`);
+
+  await handleMultiRowGrid(page, root, emplId);
   return true;
+}
+
+/**
+ * Multi-row grid branch. Runs after a non-empty search. If PeopleSoft rendered
+ * the search-results grid (2+ rows) rather than auto-redirecting to the
+ * detail page, pick the first non-terminated row and drill in. If the grid
+ * is not present, the search auto-redirected — nothing to do.
+ */
+async function handleMultiRowGrid(
+  page: Page,
+  root: Locator,
+  emplId: string,
+): Promise<void> {
+  const gridCount = await jobSummary
+    .searchResultsGrid(root)
+    .count()
+    .catch(() => 0);
+  if (gridCount === 0) {
+    // Auto-redirected to detail page; caller proceeds with tab clicks.
+    return;
+  }
+
+  const rows = jobSummary.searchResultRows(root);
+  const total = await rows.count();
+  log.step(`[Job Summary] Multi-row grid detected (${total} rows) for EID ${emplId} — filtering for non-terminated`);
+
+  for (let i = 0; i < total; i++) {
+    const row = rows.nth(i);
+    const statusText = (
+      await jobSummary
+        .rowHrStatusCell(row)
+        .first()
+        .textContent({ timeout: 2_000 })
+        .catch(() => "")
+    )?.trim() ?? "";
+    const isTerminated = /terminat/i.test(statusText);
+    log.debug(`[Job Summary] Row ${i + 1}/${total}: status='${statusText}' terminated=${isTerminated}`);
+    if (isTerminated) continue;
+
+    log.step(`[Job Summary] Drilling into row ${i + 1}/${total} (status='${statusText || "unknown"}')`);
+    await jobSummary.rowDrillInLink(row).first().click({ timeout: 10_000 });
+    await page.waitForTimeout(2_000);
+    return;
+  }
+
+  throw new Error(
+    `[Job Summary] Multi-row grid for EID ${emplId}: all ${total} rows were Terminated — no actionable row to drill into. Verify the EID in Kuali Build, or the employee may already be fully separated.`,
+  );
 }
 
 /**
