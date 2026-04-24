@@ -322,6 +322,38 @@ export async function updateSeparationDate(
 }
 
 /**
+ * Defense-in-depth re-read of the Kuali transaction number input immediately
+ * before Save. `fillWithVerify` at fill-time reads back the DOM value, but
+ * downstream edits to sibling fields can clear this input if the form's
+ * reactive bindings reset on blur. If we find it empty or wrong, we refill
+ * once using Playwright's `fill()` and re-read. A second mismatch throws so
+ * the run fails loud rather than persisting a Kuali row with a blank txn #.
+ */
+export async function verifyTxnNumberFilled(
+  page: Page,
+  expected: string,
+): Promise<void> {
+  const field = transactionResults.transactionNumber(page)
+  // Brief grace period for Kuali's form bindings to settle after prior edits.
+  await page.waitForTimeout(300)
+  const firstRead = await field.inputValue()
+  if (firstRead === expected) return
+
+  log.warn(
+    `[Kuali] Txn # unexpectedly '${firstRead}' before save — refilling to '${expected}'`,
+  )
+  await field.fill(expected, { timeout: 5_000 })
+  await page.waitForTimeout(300)
+  const secondRead = await field.inputValue()
+  if (secondRead !== expected) {
+    throw new Error(
+      `[Kuali] Transaction Number mismatch before save: expected='${expected}' actual='${secondRead}' — refusing to click Save with missing txn#`,
+    )
+  }
+  log.success(`[Kuali] Txn # recovered to '${expected}' before save`)
+}
+
+/**
  * Click the Save button in the Kuali form top navbar.
  * Waits for network idle to ensure the AJAX save request completes
  * (critical for batch mode where the process may exit after the last doc).
