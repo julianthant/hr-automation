@@ -82,33 +82,34 @@ export function EntryItem({ entry, selected, onClick }: EntryItemProps) {
         </span>
       </div>
 
-      {/* Row 2: EID (eid-lookup stamps `data.emplId`; separations stamps
-          `data.eid`). Slotted between the name/doc row and the time/meta
-          row so the resolved identifier sits visually closest to the
-          operator-readable name. Uses the same mono/muted treatment as
-          the detail grid so the value matches the LogPanel's EID cell. */}
-      {(emplId || eid) && (
+      {/* Row 2: live log message (running) or error (failed). Takes the
+          slot previously occupied by the EID row so operators see the
+          most current activity directly under the name. */}
+      {(isFailed && entry.error) || (isRunning && entry.lastLogMessage) ? (
         <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground min-w-0">
-          <span className="uppercase tracking-wider text-[10px] flex-shrink-0">EID</span>
-          <span className="truncate text-foreground" title={emplId || eid}>{emplId || eid}</span>
+          {isFailed && entry.error ? (
+            <span className="flex items-center gap-1 text-destructive truncate min-w-0">
+              <X className="w-3 h-3 flex-shrink-0" />
+              <span className="truncate">{entry.error}</span>
+            </span>
+          ) : (
+            <span className="truncate min-w-0">{entry.lastLogMessage}</span>
+          )}
         </div>
-      )}
+      ) : null}
 
-      {/* Row 3 (or Row 2 when no EID): time + run + elapsed/duration. Kept
-          within the 69.5px slot that lines up with the LogPanel's
-          detail-grid rows across the column gap; padding/leading tightened
-          to make room for the EID row when eid-lookup has stamped one. */}
+      {/* Row 3: time + run + EID (eid-lookup stamps `data.emplId`;
+          separations stamps `data.eid`) + elapsed/duration. EID moved
+          beside the run chip so all identifiers cluster in the
+          time/meta row. */}
       <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground min-w-0">
         <span className="flex-shrink-0">{time}</span>
         <span className="bg-secondary px-1.5 py-px rounded font-medium flex-shrink-0">#{runNumber}</span>
-        {isFailed && entry.error ? (
-          <span className="flex items-center gap-1 text-destructive truncate min-w-0">
-            <X className="w-3 h-3 flex-shrink-0" />
-            <span className="truncate">{entry.error}</span>
+        {(emplId || eid) && (
+          <span className="truncate text-foreground flex-shrink min-w-0" title={emplId || eid}>
+            {emplId || eid}
           </span>
-        ) : isRunning && entry.lastLogMessage ? (
-          <span className="truncate min-w-0">{entry.lastLogMessage}</span>
-        ) : null}
+        )}
         <span className="flex-1" />
         {isRunning && elapsed && (
           <span className="text-primary flex-shrink-0">{elapsed}</span>

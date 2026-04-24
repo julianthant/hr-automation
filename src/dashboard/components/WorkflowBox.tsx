@@ -1,26 +1,25 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { BrowserChip } from "./BrowserChip";
+import { Check, X, KeyRound, Loader2, Hourglass, Square, CircleX } from "lucide-react";
+import type { AuthState, WorkflowInstanceState } from "./types";
 import { formatStepName } from "./types";
-import type { WorkflowInstanceState } from "./types";
 
 /**
- * "End" button — soft-stops the daemon behind this WorkflowBox via
- * POST /api/daemon/stop. Only rendered when the daemon is still alive
- * AND we can resolve its kebab-case workflow name from the instance
- * label (the stop endpoint requires it).
+ * Soft-stops the daemon behind this WorkflowBox via POST /api/daemon/stop.
+ * Click once → soft stop. Click again within 4s → force stop. Resets on
+ * SSE `pidAlive` flip (component unmounts) or after a 4s fallback so the
+ * button doesn't get stuck if the daemon is wedged in auth / Duo.
  */
 function EndDaemonButton({ workflow }: { workflow: string }) {
   const [sending, setSending] = useState(false);
-  // Click once → soft stop. Click again within 4s → force stop. Resets after
-  // the SSE flips `pidAlive` (component unmounts) or after a 4s fallback so
-  // the button doesn't get stuck if the daemon is wedged in auth / Duo.
   const [confirmForce, setConfirmForce] = useState(false);
 
   const postStop = async (force: boolean) => {
     setSending(true);
-    const toastId = toast.loading(force ? `Force-stopping ${workflow} daemon…` : `Stopping ${workflow} daemon…`);
+    const toastId = toast.loading(
+      force ? `Force-stopping ${workflow} daemon…` : `Stopping ${workflow} daemon…`,
+    );
     try {
       const res = await fetch("/api/daemon/stop", {
         method: "POST",
@@ -39,8 +38,6 @@ function EndDaemonButton({ workflow }: { workflow: string }) {
         { id: toastId },
       );
       if (!force) {
-        // Offer a force-kill escape hatch for 4s — useful when the daemon is
-        // stuck in Session.launch / Duo and the soft-stop flag can't land.
         setConfirmForce(true);
         setTimeout(() => setConfirmForce(false), 4_000);
       } else {
@@ -53,95 +50,81 @@ function EndDaemonButton({ workflow }: { workflow: string }) {
     }
   };
 
-  const label = sending ? "…" : confirmForce ? "Force?" : "End";
   const title = confirmForce
     ? `Click to hard-kill the ${workflow} daemon (abandons in-flight work)`
     : `Soft-stop the ${workflow} daemon (drain in-flight then exit)`;
+  const Icon = confirmForce ? CircleX : Square;
 
   return (
     <button
       type="button"
       disabled={sending}
       onClick={() => postStop(confirmForce)}
-      className="text-[10px] font-semibold uppercase tracking-wide text-destructive bg-destructive/10 hover:bg-destructive/20 border border-destructive/40 px-1.5 py-0.5 rounded transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+      className={cn(
+        "w-6 h-6 inline-flex items-center justify-center rounded-md transition-colors flex-shrink-0",
+        "text-muted-foreground hover:text-destructive hover:bg-destructive/10",
+        confirmForce && "text-destructive bg-destructive/10 ring-1 ring-destructive/40",
+        "disabled:opacity-50 disabled:cursor-not-allowed",
+      )}
       title={title}
+      aria-label={title}
     >
-      {label}
+      {sending ? (
+        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+      ) : (
+        <Icon className="w-3.5 h-3.5" strokeWidth={2.25} />
+      )}
     </button>
   );
 }
 
-interface WorkflowBoxProps {
-  workflow: WorkflowInstanceState;
+/* ----------------------------------------------------------------------
+ * Auth-state visual tokens. Single source of truth for every system
+ * tile so colors, icons, and labels never drift between surfaces.
+ * -------------------------------------------------------------------- */
+
+const authColor: Record<AuthState, string> = {
+  idle: "text-muted-foreground",
+  authenticating: "text-[#60a5fa]",
+  authed: "text-[#4ade80]",
+  duo_waiting: "text-[#fbbf24]",
+  failed: "text-[#f87171]",
+};
+
+const authBg: Record<AuthState, string> = {
+  idle: "bg-muted/20 border-border/60",
+  authenticating: "bg-[#2563eb]/10 border-[#2563eb]/30",
+  authed: "bg-[#16a34a]/10 border-[#16a34a]/30",
+  duo_waiting: "bg-[#eab308]/10 border-[#eab308]/40 animate-duo-glow",
+  failed: "bg-[#ef4444]/10 border-[#ef4444]/40",
+};
+
+const authLabel: Record<AuthState, string> = {
+  idle: "Pending",
+  authenticating: "Authing",
+  authed: "Ready",
+  duo_waiting: "Duo",
+  failed: "Failed",
+};
+
+function AuthIcon({ state, className }: { state: AuthState; className?: string }) {
+  const cls = cn("w-3 h-3", className);
+  switch (state) {
+    case "authed":
+      return <Check className={cls} strokeWidth={3} />;
+    case "authenticating":
+      return <Loader2 className={cn(cls, "animate-spin")} />;
+    case "duo_waiting":
+      return <KeyRound className={cls} />;
+    case "failed":
+      return <X className={cls} strokeWidth={3} />;
+    default:
+      return <Hourglass className={cls} />;
+  }
 }
 
-// Step/status pill styled like StepPipeline labels.
-// Active + item running:   cyan pill with the doc/item currently being processed
-// Active + idle:           dim "Idle" pill (daemon waiting for the next queued item)
-// Active + no item event:  cyan pill with current step (legacy/non-daemon fallback)
-// Done:                    green "DONE" pill
-// Failed:                  red "FAILED" pill
-// Fallback:                dim step-name pill when status is unknown
-function StatusPill({
-  active,
-  currentStep,
-  currentItemId,
-  itemInFlight,
-  finalStatus,
-}: {
-  active: boolean;
-  currentStep: string | null;
-  currentItemId: string | null;
-  itemInFlight: boolean;
-  finalStatus: "done" | "failed" | null;
-}) {
-  if (active && itemInFlight && currentItemId) {
-    return (
-      <span
-        className="text-[10px] font-mono text-[#22d3ee] bg-[#06b6d41a] px-1.5 py-0.5 rounded truncate max-w-[160px]"
-        title={currentItemId}
-      >
-        {currentItemId}
-      </span>
-    );
-  }
-  if (active && !itemInFlight) {
-    return (
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground bg-muted/30 px-1.5 py-0.5 rounded">
-        Idle
-      </span>
-    );
-  }
-  if (active && currentStep) {
-    return (
-      <span className="text-[10px] font-mono text-[#22d3ee] bg-[#06b6d41a] px-1.5 py-0.5 rounded">
-        {formatStepName(currentStep)}
-      </span>
-    );
-  }
-  if (!active && finalStatus === "done") {
-    return (
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-[#4ade80] bg-[#4ade8012] px-1.5 py-0.5 rounded">
-        Done
-      </span>
-    );
-  }
-  if (!active && finalStatus === "failed") {
-    return (
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-destructive bg-destructive/12 px-1.5 py-0.5 rounded">
-        Failed
-      </span>
-    );
-  }
-  // Fallback: show the last known step name (no generic "starting…" / "ended" label)
-  if (currentStep) {
-    return (
-      <span className="text-[10px] font-mono text-[#6b7280] bg-[#6b72801a] px-1.5 py-0.5 rounded">
-        {formatStepName(currentStep)}
-      </span>
-    );
-  }
-  return null;
+interface WorkflowBoxProps {
+  workflow: WorkflowInstanceState;
 }
 
 export function WorkflowBox({ workflow }: WorkflowBoxProps) {
@@ -159,78 +142,109 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
 
   if (workflow.crashedOnLaunch) {
     return (
-      <div className="flex-shrink-0 border-[1.5px] border-destructive/30 rounded-lg p-1.5 bg-destructive/5">
-        <div className="flex items-center gap-1 mb-0.5 px-0.5">
-          <span className="w-[5px] h-[5px] rounded-full flex-shrink-0 bg-destructive" />
-          <span className="text-[11px] font-semibold text-[#c4b5fd]">{instance}</span>
-          <span className="flex-1" />
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-destructive bg-destructive/12 px-1.5 py-0.5 rounded">
+      <div className="flex-shrink-0 rounded-xl border border-destructive/30 bg-destructive/5 p-2.5">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full flex-shrink-0 bg-destructive" />
+          <span className="text-[14px] font-semibold text-foreground truncate flex-1">{instance}</span>
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-destructive">
             Launch failed
           </span>
         </div>
-        <div className="px-0.5">
-          <span className="text-[10px] italic text-destructive/80">
-            Launch failed — check Queue row for details
-          </span>
-        </div>
+        <p className="mt-1 text-[10.5px] text-destructive/80 leading-tight">
+          Check Queue row for details
+        </p>
       </div>
     );
   }
 
+  const browsers = sessions.flatMap((s) => s.browsers);
+  const totalBrowsers = browsers.length;
+  const authedBrowsers = browsers.filter((b) => b.authState === "authed").length;
+
+  const subline = !active
+    ? finalStatus === "failed"
+      ? "Run failed"
+      : finalStatus === "done"
+        ? "Run complete"
+        : "Daemon ended"
+    : itemInFlight && currentItemId
+      ? currentStep
+        ? `${currentItemId} · ${formatStepName(currentStep)}`
+        : currentItemId
+      : authedBrowsers === totalBrowsers && totalBrowsers > 0
+        ? "Ready · waiting for next item"
+        : `Authenticating ${authedBrowsers}/${totalBrowsers}`;
+
+  const statusDot = !active
+    ? finalStatus === "failed"
+      ? "bg-destructive"
+      : "bg-muted-foreground/60"
+    : itemInFlight
+      ? "bg-[#22d3ee] animate-pulse"
+      : authedBrowsers === totalBrowsers && totalBrowsers > 0
+        ? "bg-[#4ade80]"
+        : "bg-[#60a5fa] animate-pulse";
+
   return (
     <div
       className={cn(
-        "flex-shrink-0 border-[1.5px] rounded-lg p-1.5 transition-opacity",
-        active
-          ? "border-[#7c3aed44] bg-[#7c3aed08]"
-          : "border-[#7c3aed22] bg-[#7c3aed04] opacity-45",
+        "flex-shrink-0 rounded-xl border bg-card/60 transition-opacity",
+        active ? "border-border shadow-[0_0_0_1px_rgba(167,139,250,0.06)]" : "border-border/50 opacity-55",
       )}
     >
-      {/* Header: dot + instance name + step/status pill */}
-      <div className="flex items-center gap-1 mb-0.5 px-0.5">
-        <span
-          className={cn(
-            "w-[5px] h-[5px] rounded-full flex-shrink-0",
-            active ? "bg-[#4ade80]" : finalStatus === "failed" ? "bg-destructive" : "bg-[#444]",
-          )}
-        />
-        <span className="text-[11px] font-semibold text-[#c4b5fd]">{instance}</span>
-        <span className="flex-1" />
-        <StatusPill
-          active={active}
-          currentStep={currentStep}
-          currentItemId={currentItemId}
-          itemInFlight={itemInFlight}
-          finalStatus={finalStatus}
-        />
-        {active && pidAlive && workflowName && (
-          <EndDaemonButton workflow={workflowName} />
-        )}
-      </div>
-
-      {/* Current step — only shown when the pill is occupied by a doc ID (item in flight) */}
-      {active && itemInFlight && currentItemId && currentStep && (
-        <div className="px-0.5 mb-1">
-          <span className="text-[10px] font-mono text-[#a78bfa] truncate block">
-            {formatStepName(currentStep)}
-          </span>
-        </div>
-      )}
-
-      {/* Session boxes — internal sessionId is intentionally not rendered (it's a debug identifier) */}
-      <div className="flex gap-1">
-        {sessions.map((sess) => (
-          <div
-            key={sess.sessionId}
-            className="border-[1.5px] border-[#2563eb28] rounded-md p-1 bg-[#2563eb06]"
-          >
-            <div className="flex gap-0.5 flex-wrap">
-              {sess.browsers.map((b) => (
-                <BrowserChip key={b.browserId} system={b.system} authState={b.authState} />
-              ))}
+      <div className="px-2.5 pt-2 pb-2.5">
+        {/* Header: dot + title/subline stack + End icon */}
+        <div className="flex items-start gap-2 min-w-0">
+          <span className={cn("w-2 h-2 rounded-full flex-shrink-0 mt-1.5", statusDot)} />
+          <div className="flex-1 min-w-0">
+            <div className="text-[14px] font-semibold text-foreground leading-tight truncate">
+              {instance}
+            </div>
+            <div
+              className="mt-0.5 text-[10.5px] font-mono text-muted-foreground truncate leading-tight"
+              title={subline}
+            >
+              {subline}
             </div>
           </div>
-        ))}
+          {active && pidAlive && workflowName && <EndDaemonButton workflow={workflowName} />}
+        </div>
+
+        {/* 2×2 grid of system tiles — each browser is a tile with icon,
+            system name, and uppercase state caption. Tile border color
+            encodes auth state so the grid is scannable at a glance. */}
+        {browsers.length > 0 && (
+          <div className="mt-2 grid grid-cols-2 gap-1">
+            {browsers.map((b) => (
+              <div
+                key={b.browserId}
+                className={cn(
+                  "rounded-md border px-1.5 py-1 min-w-0 transition-colors",
+                  authBg[b.authState],
+                )}
+                title={`${b.system} · ${authLabel[b.authState]}`}
+              >
+                <div className="flex items-center gap-1 min-w-0">
+                  <AuthIcon
+                    state={b.authState}
+                    className={cn("w-3 h-3 flex-shrink-0", authColor[b.authState])}
+                  />
+                  <span className="text-[11px] font-mono text-foreground truncate leading-none">
+                    {b.system}
+                  </span>
+                </div>
+                <div
+                  className={cn(
+                    "mt-0.5 text-[9.5px] uppercase tracking-wider font-semibold leading-none",
+                    authColor[b.authState],
+                  )}
+                >
+                  {authLabel[b.authState]}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

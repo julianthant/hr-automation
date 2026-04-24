@@ -23,6 +23,13 @@ export interface SystemConfig {
   prepareLogin?: (page: Page) => Promise<void>
   sessionDir?: string
   resetUrl?: string
+  /**
+   * Opt into Playwright download capture for this system's browser context.
+   * Must be `true` before any handler calls `download.saveAs(...)` — otherwise
+   * Playwright throws `Pass { acceptDownloads: true } when you are creating
+   * your browser context`. Default `false`.
+   */
+  acceptDownloads?: boolean
 }
 
 /**

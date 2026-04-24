@@ -24,6 +24,7 @@ import {
 } from './daemon-queue.js'
 import type { DaemonLockfile } from './daemon-types.js'
 import { emitItemStart, emitItemComplete } from '../tracker/session-events.js'
+import { trackEvent } from '../tracker/jsonl.js'
 
 export interface DaemonOpts {
   trackerDir?: string
@@ -391,6 +392,67 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
             }
             markTerminated(inFlight.runId)
             inFlight = null
+          }
+          // Orphan-queue cleanup: if this is the last alive daemon, any items
+          // still sitting in the queue (enqueued but never claimed) have no
+          // one to process them. Mark them failed in both the queue AND the
+          // tracker so the dashboard's pending rows don't stick forever. A
+          // future re-enqueue creates a new event + runId; no ambiguity.
+          try {
+            const otherAlive = (await findAliveDaemons(wf.config.name, trackerDir))
+              .filter((d) => d.instanceId !== instanceId)
+            if (otherAlive.length === 0) {
+              const state = await readQueueState(wf.config.name, trackerDir)
+              if (state.queued.length > 0) {
+                log.warn(
+                  `[Daemon ${wf.config.name}/${instanceId}] last daemon exiting with ${state.queued.length} unclaimed queue item(s); marking failed`,
+                )
+                const nowIso = new Date().toISOString()
+                const failError =
+                  'Daemon stopped before this item could be processed (browsers closed).'
+                for (const item of state.queued) {
+                  const runId = item.runId ?? randomUUID()
+                  try {
+                    await markItemFailed(wf.config.name, item.id, failError, runId, trackerDir)
+                  } catch {
+                    /* best-effort — queue event append; tracker row below is the user-visible signal */
+                  }
+                  try {
+                    const data: Record<string, string> =
+                      item.input && typeof item.input === 'object'
+                        ? Object.fromEntries(
+                            Object.entries(item.input as Record<string, unknown>)
+                              .filter(([, v]) => v !== undefined && v !== null)
+                              .map(([k, v]) => [
+                                k,
+                                typeof v === 'object' ? JSON.stringify(v) : String(v),
+                              ]),
+                          )
+                        : {}
+                    trackEvent(
+                      {
+                        workflow: wf.config.name,
+                        timestamp: nowIso,
+                        id: item.id,
+                        runId,
+                        status: 'failed',
+                        data,
+                        error: failError,
+                      },
+                      trackerDir,
+                    )
+                  } catch {
+                    /* best-effort */
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            log.warn(
+              `[Daemon ${wf.config.name}/${instanceId}] orphan-queue cleanup failed: ${
+                e instanceof Error ? e.message : String(e)
+              }`,
+            )
           }
           try {
             await session.close()

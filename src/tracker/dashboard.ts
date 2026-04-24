@@ -26,6 +26,7 @@ import { getAll as getAllRegisteredWorkflows } from "../core/registry.js";
 import type { WorkflowMetadata } from "../core/types.js";
 import { PATHS } from "../config.js";
 import { stopDaemons } from "../core/daemon-client.js";
+import { enqueueFromHttp, validateEnqueueRequest } from "../core/enqueue-dispatch.js";
 import { detectFailurePattern } from "./failure-detector.js";
 import { notify } from "./notify.js";
 import {
@@ -1382,10 +1383,12 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         if (runId) entries = entries.filter((l) => l.runId ? l.runId === runId : runId.endsWith("#1"));
 
         if (firstTick) {
-          // First tick: send ALL existing logs so frontend has full history
-          if (entries.length > 0) {
-            res.write(`data: ${JSON.stringify(entries)}\n\n`);
-          }
+          // First tick: ALWAYS send — even an empty array. The frontend's
+          // useLogs hook transitions from "loading skeleton" to "loaded"
+          // on its first message; skipping the write for an empty dataset
+          // leaves the UI stuck on skeleton forever (e.g. for a runId that
+          // has a pending/failed tracker row but never produced any logs).
+          res.write(`data: ${JSON.stringify(entries)}\n\n`);
           sentCount = entries.length;
           firstTick = false;
         } else if (entries.length > sentCount) {
@@ -1456,7 +1459,10 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         const filtered = filterEventsForRun(allEvents, trackerEntries, requestedRunId);
 
         if (firstTick) {
-          if (filtered.length > 0) res.write(`data: ${JSON.stringify(filtered)}\n\n`);
+          // First tick: ALWAYS send — matching /events/logs. Empty-array
+          // sends are how useRunEvents learns "full history has been
+          // delivered (and there's none)", dismissing its skeleton.
+          res.write(`data: ${JSON.stringify(filtered)}\n\n`);
           sentCount = filtered.length;
           firstTick = false;
         } else if (filtered.length > sentCount) {
@@ -1813,6 +1819,100 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
           "Access-Control-Allow-Origin": "*",
         });
         res.end(JSON.stringify(body));
+      } catch (e) {
+        res.writeHead(500, {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        });
+        res.end(JSON.stringify({ ok: false, error: errorMessage(e) }));
+      }
+      return;
+    }
+
+    if (
+      req.method === "POST" &&
+      url.pathname === "/api/enqueue"
+    ) {
+      // Generic enqueue-to-daemon-queue endpoint for the dashboard Run
+      // panel. Body: { workflow: string, inputs: object[] } — each input
+      // is a typed workflow-input (e.g. {docId} for separations). Spawns
+      // one daemon if none are alive (Duo prompt in operator's browser);
+      // otherwise just appends to the shared queue and wakes alive
+      // daemons. Returns 202 with {ok, workflow, enqueued}.
+      try {
+        const chunks: Buffer[] = [];
+        for await (const chunk of req) {
+          chunks.push(chunk as Buffer);
+          // 64 KB cap — an enqueue body is just the workflow name + a
+          // list of small input objects; anything larger is almost
+          // certainly a bug or abuse.
+          if (Buffer.concat(chunks).byteLength > 65_536) {
+            throw new Error("Request body too large");
+          }
+        }
+        const raw = Buffer.concat(chunks).toString("utf8").trim();
+        let input: { workflow?: string; inputs?: unknown[] } = {};
+        if (raw) {
+          try {
+            input = JSON.parse(raw) as { workflow?: string; inputs?: unknown[] };
+          } catch {
+            res.writeHead(400, {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+            });
+            res.end(JSON.stringify({ ok: false, error: "Invalid JSON body" }));
+            return;
+          }
+        }
+        const workflow = input.workflow?.trim();
+        if (!workflow) {
+          res.writeHead(400, {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          });
+          res.end(JSON.stringify({ ok: false, error: "workflow is required" }));
+          return;
+        }
+        if (!Array.isArray(input.inputs) || input.inputs.length === 0) {
+          res.writeHead(400, {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          });
+          res.end(JSON.stringify({ ok: false, error: "inputs must be a non-empty array" }));
+          return;
+        }
+        // Pre-validate synchronously so schema / unknown-workflow errors
+        // surface as 400s. After that, fire-and-forget the actual
+        // enqueue+spawn — first-invocation spawn can wait up to 5min for
+        // Duo auth, and we don't want the HTTP connection open that long
+        // (matches the sharepoint-download/run fire-and-forget pattern).
+        const validation = await validateEnqueueRequest(workflow, input.inputs);
+        if (!validation.ok) {
+          res.writeHead(400, {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          });
+          res.end(JSON.stringify({ ok: false, workflow, enqueued: 0, error: validation.error }));
+          return;
+        }
+        const enqueueInputs = input.inputs;
+        void enqueueFromHttp(workflow, enqueueInputs, dir).catch((err) => {
+          // Background task — log only. Pending tracker rows will already
+          // be on disk by this point (onPreEmitPending fires after the
+          // fast enqueueItems step); only the subsequent spawn/wake can
+          // realistically fail here.
+          // eslint-disable-next-line no-console
+          console.error(`[POST /api/enqueue] background task failed: ${errorMessage(err)}`);
+        });
+        res.writeHead(202, {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        });
+        res.end(JSON.stringify({
+          ok: true,
+          workflow,
+          enqueued: enqueueInputs.length,
+        }));
       } catch (e) {
         res.writeHead(500, {
           "Content-Type": "application/json",

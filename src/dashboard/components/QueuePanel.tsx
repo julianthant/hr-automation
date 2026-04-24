@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { StatPills } from "./StatPills";
 import { EntryItem } from "./EntryItem";
 import { EmptyState } from "./EmptyState";
+import { QuickRunPanel } from "./QuickRunPanel";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -147,6 +148,13 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
 
   return (
     <div className="w-[320px] min-[1440px]:w-[400px] 2xl:w-[480px] flex-shrink-0 border-r border-border flex flex-col bg-background">
+      {/* ── Quick-run row — h-[60px] text box + Run button for enqueueing
+            items to the current workflow's daemon. Renders only for
+            workflows registered in src/dashboard/lib/quick-run-registry.ts
+            (separations today; more as they're added). When hidden, the
+            queue panel still lays out from the search row below. ── */}
+      <QuickRunPanel workflow={workflow} />
+
       {/* ── Search row — h-[60px] matches the LogPanel header height across
             the gap so the first horizontal divider aligns. A "download from
             SharePoint" dropdown sits to the right of the search input —
