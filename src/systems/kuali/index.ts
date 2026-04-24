@@ -10,6 +10,7 @@ export {
   fillTimekeeperComments,
   updateLastDayWorked,
   updateSeparationDate,
+  verifyTxnNumberFilled,
   clickSave,
 } from "./navigate.js";
 

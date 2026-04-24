@@ -20,6 +20,7 @@ import {
   fillTimekeeperComments,
   updateLastDayWorked,
   updateSeparationDate,
+  verifyTxnNumberFilled,
   clickSave,
 } from "../../systems/kuali/index.js";
 import type { KualiSeparationData } from "../../systems/kuali/index.js";
@@ -567,6 +568,7 @@ export const separationsWorkflow = defineWorkflow({
         await fillTimekeeperComments(kualiPage, dateChangeComments);
       }
 
+      await verifyTxnNumberFilled(kualiPage, transactionNumber);
       await clickSave(kualiPage);
       await ctx.screenshot({ kind: 'form', label: 'kuali-finalization-saved' });
       log.step(`[Step: kuali-finalization] END took=${Date.now() - t0}ms success`);
