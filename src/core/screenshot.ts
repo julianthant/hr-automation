@@ -4,6 +4,11 @@ import type { ScreenshotFn, ScreenshotOpts, ScreenshotCapture } from './types.js
 export interface ScreenshotEvent {
   type: 'screenshot'
   runId: string
+  /** ISO-8601 timestamp. Mirrors other session events so the dashboard
+   * renders a real date in the Events tab instead of "Invalid Date". */
+  timestamp: string
+  /** Numeric ms since epoch. Same clock as `timestamp`; kept for
+   * back-compat with existing readers. */
   ts: number
   kind: 'form' | 'error' | 'manual'
   label: string
@@ -44,6 +49,7 @@ export function makeScreenshotFn(deps: ScreenshotDeps): ScreenshotFn {
       deps.emit({
         type: 'screenshot',
         runId: deps.runId,
+        timestamp: new Date(ts).toISOString(),
         ts,
         kind: opts.kind,
         label: opts.label,

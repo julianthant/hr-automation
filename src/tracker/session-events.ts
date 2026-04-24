@@ -22,6 +22,14 @@ export type SessionEventType =
 export interface ScreenshotSessionEvent {
   type: "screenshot";
   runId: string;
+  /** ISO-8601 timestamp. Mirrors SessionEvent.timestamp so the dashboard
+   * doesn't see "Invalid Date" when it renders screenshot events alongside
+   * other session events (which use `timestamp`). Populated from the same
+   * clock as `ts`. */
+  timestamp: string;
+  /** Numeric ms since epoch. Kept for back-compat with existing readers
+   * and to uniquely identify the capture alongside `label` + `system`
+   * inside filenames. */
   ts: number;
   kind: "form" | "error" | "manual";
   label: string;
