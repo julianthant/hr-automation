@@ -5,6 +5,22 @@ import type { log } from '../utils/log.js'
 export interface SystemConfig {
   id: string
   login: (page: Page, instance?: string) => Promise<void>
+  /**
+   * Optional "pre-flight" phase: navigate + fill credentials without
+   * submitting. When provided, `Session.launch` runs this for EVERY
+   * system in parallel immediately after browsers open and BEFORE the
+   * sequential Duo chain begins. Then each system's `login` only needs
+   * to click Submit + wait for Duo — saving 3–8 seconds of navigation
+   * per system on the total session spin-up time.
+   *
+   * Implementation MUST be idempotent — `login` is expected to detect a
+   * stale SSO form (Shibboleth anti-CSRF expired while waiting for
+   * upstream Duos) and re-invoke this preparer automatically.
+   *
+   * Throw to signal a hard preparation failure; auth will still try
+   * `login` (which may succeed via re-prepare) before failing the item.
+   */
+  prepareLogin?: (page: Page) => Promise<void>
   sessionDir?: string
   resetUrl?: string
 }

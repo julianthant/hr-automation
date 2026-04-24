@@ -100,6 +100,31 @@ export class Session {
       opts.observer?.onBrowserLaunch?.(s.id, s.id)
     }
 
+    // Parallel prepare: for any system that declares a `prepareLogin`, run
+    // it concurrently across all browsers BEFORE the Duo chain starts. Each
+    // preparer navigates + fills the SSO form but does NOT submit; the
+    // subsequent sequential `login` phase just clicks submit + waits for
+    // Duo. Saves 3–8s per system of redundant navigation.
+    //
+    // Best-effort: a prepare failure here is logged but not fatal — the
+    // `login` phase is expected to detect a missing/stale form and re-run
+    // the preparer itself before clicking submit.
+    const toPrepare = systems.filter((s) => typeof s.prepareLogin === 'function')
+    if (toPrepare.length > 0) {
+      log.step(`[Session] Prepare-login in parallel for ${toPrepare.length} system(s): ${toPrepare.map((s) => s.id).join(', ')}`)
+      await Promise.allSettled(
+        toPrepare.map(async (s) => {
+          const slot = browsers.get(s.id)
+          if (!slot) return
+          try {
+            await s.prepareLogin!(slot.page)
+          } catch (err) {
+            log.warn(`[Session: ${s.id}] prepareLogin failed — login phase will re-prepare: ${errorMessage(err)}`)
+          }
+        }),
+      )
+    }
+
     if (authChain === 'sequential') {
       for (const s of systems) {
         const slot = browsers.get(s.id)!
