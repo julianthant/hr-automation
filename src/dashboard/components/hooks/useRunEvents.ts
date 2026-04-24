@@ -47,13 +47,16 @@ export function useRunEvents(
     es.onmessage = (e) => {
       try {
         const newEntries: RunEvent[] = JSON.parse(e.data);
-        if (!Array.isArray(newEntries) || newEntries.length === 0) return;
+        if (!Array.isArray(newEntries)) return;
 
         if (!gotSseData) {
+          // First tick carries full history (possibly empty). Dismiss
+          // skeleton even when empty so runs with no session events don't
+          // stall the loading state forever.
           setEvents(newEntries);
           setLoading(false);
           gotSseData = true;
-        } else {
+        } else if (newEntries.length > 0) {
           setEvents((prev) => [...prev, ...newEntries]);
         }
       } catch {}

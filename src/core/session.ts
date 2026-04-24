@@ -369,6 +369,7 @@ async function defaultLaunchOne(opts: LaunchOneOpts): Promise<SystemSlot> {
   try {
     const { browser, context, page } = await launchBrowser({
       sessionDir,
+      acceptDownloads: opts.system.acceptDownloads,
     })
     return { page, context, browser }
   } catch (e) {

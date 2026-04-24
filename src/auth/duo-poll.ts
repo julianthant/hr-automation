@@ -112,6 +112,27 @@ export async function pollDuoApproval(
         log.step('Duo: clicked "Yes, this is my device" trust button');
       }
 
+      // Detect the UCSD SSO "Web Login Service - Stale Request" page —
+      // shown when the SAML execution context expires between the
+      // initial SSO form and the post-Duo assertion. The recovery
+      // callback above gets first crack; if the page is still showing
+      // "Stale Request", abort this attempt so loginWithRetry can
+      // navigate to the service URL fresh (which triggers a new SAML
+      // flow with a fresh execution id).
+      const currentUrl = page.url();
+      if (currentUrl.includes("a5.ucsd.edu")) {
+        const staleCount = await page
+          .getByText("Web Login Service - Stale Request")
+          .count()
+          .catch(() => 0);
+        if (staleCount > 0) {
+          log.error(
+            `[Auth${systemLabel ? `: ${systemLabel}` : ""}] SSO Stale Request page detected at ${currentUrl} — SAML execution expired during Duo. Returning false so loginWithRetry can restart with a fresh navigation.`,
+          );
+          return false;
+        }
+      }
+
       // Check if the URL indicates successful auth
       if (urlMatches(page.url())) {
         // Run optional additional verification

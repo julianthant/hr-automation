@@ -491,20 +491,16 @@ export const separationsWorkflow = defineWorkflow({
         log.step("=== UCPath Smart HR Transaction ===");
         const ucpathPage = await ctx.page("ucpath");
 
-        // Convert "Last, First" → "First Last" for UCPath name matching
-        const nameParts = kualiData.employeeName.split(",").map((s) => s.trim());
-        const ucpathName = nameParts.length >= 2 ? `${nameParts[1]} ${nameParts[0]}` : kualiData.employeeName;
-
-        // Pre-submit existence check — replaces the former idempotency cache.
-        // Before writing a new Smart HR termination, scan the Transactions list
-        // for a row matching (this employee, this effective date, VOL/INVOL
-        // template). If one already exists, reuse its txn# and skip the
-        // submit. If not, proceed with the normal submit flow.
+        // Pre-submit existence check — match by EID (Person ID column) +
+        // effective date + "Terminatn" action. Names are unreliable
+        // (Kuali-vs-UCPath nickname/spelling/column-order variants cause
+        // real dupes — EID 10794813 Aki Uchida, 2026-04-24); EID is
+        // deterministic. If a row already exists, reuse its txn# and skip
+        // the submit.
         const existingTxn = await findExistingTerminationTransaction(
           ucpathPage,
-          ucpathName,
+          kualiData.eid,
           finalTermEffDate,
-          [UC_VOL_TERM_TEMPLATE, UC_INVOL_TERM_TEMPLATE],
         );
         if (existingTxn) {
           log.warn(`[UCPath Txn] Existing termination transaction #${existingTxn} found on Smart HR list — skipping submit.`);
@@ -536,7 +532,7 @@ export const separationsWorkflow = defineWorkflow({
           await selectReasonCode(ucpathPage, frame, ucpathReason);
           await fillComments(frame, finalComments);
 
-          const submitResult = await clickSaveAndSubmit(ucpathPage, frame, ucpathName);
+          const submitResult = await clickSaveAndSubmit(ucpathPage, frame, kualiData.eid);
           transactionNumber = submitResult.transactionNumber ?? "";
           log.step(
             `[UCPath Txn] submit result: success=${submitResult.success} `

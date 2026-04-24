@@ -88,6 +88,7 @@ export const sharepointDownloadWorkflow: RegisteredWorkflow<
     {
       id: "sharepoint",
       login: sharepointLogin,
+      acceptDownloads: true,
     },
   ],
   authSteps: true,

@@ -13,7 +13,6 @@ import {
   getContentFrame,
 } from "./selectors.js";
 import { log } from "../../utils/log.js";
-import { fuzzyNameMatch } from "../../utils/fuzzy-match.js";
 
 // ─── STEP 1: Navigate sidebar → Smart HR Templates → Smart HR Transactions ───
 
@@ -519,13 +518,16 @@ export async function waitForSaveEnabled(
 }
 
 /**
- * @param employeeName - Full name (e.g. "Ivette Lima Montes") used to find the
- *   transaction in the Transactions in Progress list after submit.
+ * @param employeeId - EID used to match the transaction row by its Person
+ *   ID column after submit. Required to read back the transaction number;
+ *   if omitted, the post-submit txn# readback is skipped. Onboarding
+ *   omits it because new-hire rows show Person ID "NEW" until the
+ *   transaction is fully processed — no EID exists to match against.
  */
 export async function clickSaveAndSubmit(
   page: Page,
   frame: FrameLocator,
-  employeeName?: string,
+  employeeId?: string,
 ): Promise<TransactionResult> {
   log.step("Clicking Save and Submit...");
   await dismissModalMask(page);
@@ -573,8 +575,8 @@ export async function clickSaveAndSubmit(
       await okButton.click({ timeout: 5_000 });
       await page.waitForTimeout(3_000);
 
-      if (employeeName) {
-        transactionNumber = await readLatestTransactionNumber(page, employeeName);
+      if (employeeId) {
+        transactionNumber = await readLatestTransactionNumber(page, employeeId);
       }
     }
 
@@ -598,68 +600,48 @@ export async function clickSaveAndSubmit(
  * the lookup fails — callers should treat that as "couldn't read back",
  * never as "no transaction exists".
  *
- * Polls the Transactions list for up to 15s with three name-form candidates
- * (exact, flipped, last-name regex) since PeopleSoft takes a beat to refresh
- * the list after a submit.
+ * Row match is by the Person ID column (EID) — deterministic and
+ * unambiguous. Name matching was removed because upstream records (Kuali)
+ * can disagree with UCPath's stored display name (nicknames like "Aki" vs
+ * "Akitsugu", Last/First column confusion, spelling variants) and a
+ * name-miss here cascades to "submit with no txn#" → retry → duplicate.
+ *
+ * Polls the Transactions list for up to 15s — the newly-submitted
+ * transaction takes a beat to appear.
  */
 export async function readLatestTransactionNumber(
   page: Page,
-  employeeName: string,
+  employeeId: string,
 ): Promise<string> {
-  // Re-navigate same way as initial: URL to HR Tasks, then sidebar click
   log.step("Re-navigating to Smart HR Transactions...");
   await navigateToSmartHR(page);
   await clickSmartHRTransactions(page);
   await page.waitForTimeout(3_000);
   const txnFrame = getContentFrame(page);
 
-  // The newly-submitted transaction can take several seconds to appear
-  // in the Smart HR Transactions list. Poll for up to 15s, trying
-  // multiple name forms on each tick.
-  //
-  // Name-form candidates:
-  //   1. employeeName as passed
-  //   2. flipped form: "Last, First Middle" ↔ "First Middle Last"
-  //   3. partial regex on last name only (final fallback)
-  const parts = employeeName.includes(",")
-    ? employeeName.split(",").map((s) => s.trim())
-    : employeeName.split(" ").map((s) => s.trim());
-  const lastName = employeeName.includes(",")
-    ? (parts[0] ?? "")
-    : (parts[parts.length - 1] ?? "");
-  const flipped = employeeName.includes(",")
-    ? parts.slice().reverse().join(" ")
-    : (parts.length >= 2
-        ? `${parts[parts.length - 1]}, ${parts.slice(0, -1).join(" ")}`
-        : employeeName);
-
-  const deadline = Date.now() + 15_000;
-  let clicked = false;
-  while (!clicked && Date.now() < deadline) {
-    const candidates: Array<{ label: string; locator: Locator }> = [
-      { label: employeeName, locator: txnFrame.getByRole("link", { name: employeeName }) }, // allow-inline-selector -- dynamic name match
-      { label: flipped, locator: txnFrame.getByRole("link", { name: flipped }) }, // allow-inline-selector -- dynamic flipped-name match
-    ];
-    if (lastName) {
-      candidates.push({
-        label: `partial:${lastName}`,
-        locator: txnFrame.getByRole("link", { name: new RegExp(lastName, "i") }), // allow-inline-selector -- dynamic last-name regex
-      });
-    }
-    for (const { label, locator } of candidates) {
-      if ((await locator.count()) > 0) {
-        log.step(`Clicking employee: ${label}`);
-        await locator.first().click({ timeout: 5_000 });
-        clicked = true;
-        break;
-      }
-    }
-    if (!clicked) await page.waitForTimeout(1_500);
-  }
-  if (!clicked) {
-    log.step(`Employee link not found after 15s poll: ${employeeName}`);
+  if (!employeeId) {
+    log.warn("[Txn Readback] No EID provided — cannot locate the submitted transaction");
     return "";
   }
+
+  const deadline = Date.now() + 15_000;
+  let linkText = "";
+  while (!linkText && Date.now() < deadline) {
+    linkText = (await findTransactionRowLinkByEid(txnFrame, employeeId)) ?? "";
+    if (!linkText) await page.waitForTimeout(1_500);
+  }
+  if (!linkText) {
+    log.step(`Transaction row for EID ${employeeId} not found after 15s poll`);
+    return "";
+  }
+
+  log.step(`Clicking transaction row for EID ${employeeId} (link='${linkText}')`);
+  const link = txnFrame.getByRole("link", { name: linkText }); // allow-inline-selector -- dynamic matched-name link
+  if ((await link.count()) === 0) {
+    log.warn(`[Txn Readback] Row matched but link '${linkText}' disappeared before click`);
+    return "";
+  }
+  await link.first().click({ timeout: 5_000 });
   await page.waitForTimeout(5_000);
 
   // Click Continue on transaction details page
@@ -680,24 +662,27 @@ export async function readLatestTransactionNumber(
 }
 
 /**
- * Look up an existing Smart HR transaction for a given employee that
- * matches a specific template + effective date. Returns the transaction
- * number (e.g. "T002126379") if found, or `null` if no matching row
- * exists on the Smart HR Transactions list.
+ * Look up an existing Smart HR termination transaction for a given
+ * employee. Returns the transaction number (e.g. "T002126379") if found,
+ * or `null` if no matching row exists on the Smart HR Transactions list.
  *
  * Used as a pre-submit idempotence check: before creating a new
  * termination transaction, callers check whether one already exists for
- * this employee + effective date + template. A hit means the prior run
- * already submitted (possibly without capturing the txn# locally) —
- * return the number, skip the resubmit, propagate it to downstream
- * steps (e.g. Kuali finalization).
+ * this EID + effective date. A hit means the prior run already submitted
+ * (possibly without capturing the txn# locally) — return the number,
+ * skip the resubmit, propagate it to downstream steps (e.g. Kuali
+ * finalization).
  *
- * Match semantics: row's text contains the employee name (as
- * PeopleSoft's link labels use it), the effective date (MM/DD/YYYY),
- * AND at least one of the passed template codes. Falls back through
- * three name forms (original, flipped, last-name regex) same as
- * `readLatestTransactionNumber` to handle PeopleSoft's display
- * variants.
+ * Match semantics: row's Person ID column equals `employeeId`, row text
+ * contains the effective date (MM/DD/YYYY), and row text contains
+ * "Terminat" (covers "Terminatn"/"Termination" Action display variants —
+ * avoids false positives on non-termination JOB rows like transfers for
+ * the same employee on the same day). Name is NOT used for matching
+ * because upstream records can disagree with UCPath's stored display
+ * name (nicknames like "Aki" vs "Akitsugu", Last/First column confusion,
+ * spelling variants) — the previous name+template approach silently
+ * missed duplicates and produced real dupes (EID 10794813 Aki Uchida,
+ * 2026-04-24).
  *
  * Best-effort: returns `null` on any navigation / parse failure rather
  * than throwing, because a failed pre-check should degrade to "no
@@ -707,108 +692,33 @@ export async function readLatestTransactionNumber(
  */
 export async function findExistingTerminationTransaction(
   page: Page,
-  employeeName: string,
+  employeeId: string,
   effectiveDate: string,
-  templateCodes: readonly string[],
 ): Promise<string | null> {
   try {
-    log.step(`[Txn Lookup] Checking for existing transaction: name='${employeeName}' effDate='${effectiveDate}' templates=[${templateCodes.join(",")}]`);
+    log.step(`[Txn Lookup] Checking for existing termination: eid='${employeeId}' effDate='${effectiveDate}'`);
+    if (!employeeId) {
+      log.warn(`[Txn Lookup] Empty EID — skipping pre-submit existence check`);
+      return null;
+    }
     await navigateToSmartHR(page);
     await clickSmartHRTransactions(page);
     await page.waitForTimeout(3_000);
     const frame = getContentFrame(page);
 
-    // Build the same name-form candidates readLatestTransactionNumber uses so
-    // we tolerate "Last, First" vs "First Last" display variants.
-    const parts = employeeName.includes(",")
-      ? employeeName.split(",").map((s) => s.trim())
-      : employeeName.split(" ").map((s) => s.trim());
-    const lastName = employeeName.includes(",")
-      ? (parts[0] ?? "")
-      : (parts[parts.length - 1] ?? "");
-    const flipped = employeeName.includes(",")
-      ? parts.slice().reverse().join(" ")
-      : (parts.length >= 2
-          ? `${parts[parts.length - 1]}, ${parts.slice(0, -1).join(" ")}`
-          : employeeName);
-    const nameForms = [employeeName, flipped, lastName].filter((s) => s.length > 0);
-
-    // First pass: collect every row that matches (date, template) regardless
-    // of name. Name matching happens in Node-land below so we can apply
-    // fuzzy matching (Kuali vs UCPath spelling diffs like
-    // "Aki Uchiha" vs "Aki Uchida") without duplicating the edit-distance
-    // helper into the page.evaluate body.
-    const candidates = await frame.locator("body").evaluate( // allow-inline-selector -- body scan for smart-hr-transactions list
-      (body, { date, templates }: { date: string; templates: string[] }) => {
-        const out: Array<{ linkText: string; rowText: string }> = [];
-        const tables = body.querySelectorAll("table");
-        for (const table of Array.from(tables)) {
-          for (const row of Array.from((table as HTMLTableElement).rows)) {
-            const rowText = row.textContent ?? "";
-            if (!rowText.includes(date)) continue;
-            if (!templates.some((t) => rowText.includes(t))) continue;
-            const link = row.querySelector("a");
-            const linkText = (link?.textContent ?? "").trim();
-            if (!linkText) continue;
-            out.push({ linkText, rowText });
-          }
-        }
-        return out;
-      },
-      { date: effectiveDate, templates: [...templateCodes] },
-    ).catch(() => [] as Array<{ linkText: string; rowText: string }>);
-
-    if (candidates.length === 0) {
-      log.step(`[Txn Lookup] No existing transaction found`);
+    const linkText = await findTransactionRowLinkByEid(frame, employeeId, {
+      effectiveDate,
+      requireTerminationAction: true,
+    });
+    if (!linkText) {
+      log.step(`[Txn Lookup] No existing termination found for eid=${employeeId} date=${effectiveDate}`);
       return null;
     }
+    log.step(`[Txn Lookup] Matching row found (link='${linkText}') — reading txn #`);
 
-    // Exact substring match first (fast, high-precision) — preserves the
-    // pre-fuzzy behavior for every case that wasn't broken.
-    let nameHit: string | undefined;
-    for (const c of candidates) {
-      const hit = nameForms.find((n) =>
-        n.length > 0 && c.rowText.toLowerCase().includes(n.toLowerCase()),
-      );
-      if (hit) {
-        nameHit = c.linkText;
-        break;
-      }
-    }
-
-    // Fuzzy fallback: no exact substring hit but we have candidate rows
-    // already narrowed by (date, template). Try a bounded edit-distance
-    // match against each candidate's link text. Log loud when we fuzzy
-    // match so audits can catch any false positives.
-    if (!nameHit) {
-      for (const c of candidates) {
-        for (const form of nameForms) {
-          if (!form) continue;
-          if (fuzzyNameMatch(form, c.linkText)) {
-            log.warn(
-              `[Txn Lookup] Fuzzy name match: '${form}' ~ '${c.linkText}' (row matched date+template; falling back to closeness)`,
-            );
-            nameHit = c.linkText;
-            break;
-          }
-        }
-        if (nameHit) break;
-      }
-    }
-
-    if (!nameHit) {
-      log.step(
-        `[Txn Lookup] ${candidates.length} date+template candidate(s) but no name match: ${candidates.map((c) => c.linkText).join(", ")}`,
-      );
-      return null;
-    }
-    log.step(`[Txn Lookup] Matching row found for name='${nameHit}' — reading txn #`);
-
-    // Click the row's employee link (by the name form that matched) and
-    // extract "Transaction ID: T002XXXXXX" from the detail page body.
-    const link = frame.getByRole("link", { name: nameHit }); // allow-inline-selector -- dynamic matched-name link
+    const link = frame.getByRole("link", { name: linkText }); // allow-inline-selector -- dynamic matched-name link
     if ((await link.count()) === 0) {
-      log.warn(`[Txn Lookup] Row matched but link for '${nameHit}' disappeared before click — treating as no match`);
+      log.warn(`[Txn Lookup] Row matched but link '${linkText}' disappeared before click — treating as no match`);
       return null;
     }
     await link.first().click({ timeout: 5_000 });
@@ -824,7 +734,7 @@ export async function findExistingTerminationTransaction(
     const tMatch = bodyText.match(/Transaction ID:\s*(T\d+)/)
       ?? bodyText.match(/Transaction:\s*(T\d+)/i);
     if (tMatch) {
-      log.success(`[Txn Lookup] Existing transaction #${tMatch[1]} found for ${employeeName}`);
+      log.success(`[Txn Lookup] Existing transaction #${tMatch[1]} found for eid=${employeeId}`);
       return tMatch[1];
     }
     log.warn(`[Txn Lookup] Matched row but couldn't extract Transaction ID from detail page — treating as no match`);
@@ -833,6 +743,46 @@ export async function findExistingTerminationTransaction(
     log.warn(`[Txn Lookup] Lookup threw (treating as no match): ${e instanceof Error ? e.message : String(e)}`);
     return null;
   }
+}
+
+/**
+ * Scan the Smart HR Transactions list inside `frame` for a row whose
+ * Person ID cell equals `employeeId`. Returns the row's employee-link
+ * text (which callers can pass to `getByRole("link", { name })` for
+ * clicking) or `null` if no row matches.
+ *
+ * EID match is done by exact cell content (`cell.textContent.trim() ===
+ * employeeId`) rather than substring-of-row-text to avoid false positives
+ * from dept IDs / location codes that might incidentally contain the EID
+ * digits.
+ */
+async function findTransactionRowLinkByEid(
+  frame: FrameLocator,
+  employeeId: string,
+  opts?: { effectiveDate?: string; requireTerminationAction?: boolean },
+): Promise<string | null> {
+  return await frame.locator("body").evaluate( // allow-inline-selector -- body scan for smart-hr-transactions list
+    (body, { eid, date, requireTerm }: { eid: string; date?: string; requireTerm?: boolean }) => {
+      const tables = body.querySelectorAll("table");
+      for (const table of Array.from(tables)) {
+        for (const row of Array.from((table as HTMLTableElement).rows)) {
+          const rowText = row.textContent ?? "";
+          if (date && !rowText.includes(date)) continue;
+          if (requireTerm && !/Terminat/i.test(rowText)) continue;
+          const hasEidCell = Array.from(row.cells).some(
+            (c) => (c.textContent ?? "").trim() === eid,
+          );
+          if (!hasEidCell) continue;
+          const link = row.querySelector("a");
+          const linkText = (link?.textContent ?? "").trim();
+          if (!linkText) continue;
+          return linkText;
+        }
+      }
+      return null;
+    },
+    { eid: employeeId, date: opts?.effectiveDate, requireTerm: opts?.requireTerminationAction },
+  ).catch(() => null);
 }
 
 // ─── Helpers ───

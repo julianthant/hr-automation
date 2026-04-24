@@ -54,13 +54,16 @@ export function useLogs(
     es.onmessage = (e) => {
       try {
         const newEntries: LogEntry[] = JSON.parse(e.data);
-        if (!Array.isArray(newEntries) || newEntries.length === 0) return;
+        if (!Array.isArray(newEntries)) return;
 
         if (!gotSseData) {
+          // First tick carries the full (possibly-empty) history. Dismiss
+          // the loading skeleton even when empty, so runs with no logs
+          // (orphan-failed items, pre-start entries) don't hang forever.
           setRawLogs(newEntries);
           setLoading(false);
           gotSseData = true;
-        } else {
+        } else if (newEntries.length > 0) {
           setRawLogs((prev) => [...prev, ...newEntries]);
         }
       } catch {}
