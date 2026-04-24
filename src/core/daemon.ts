@@ -133,17 +133,28 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         body += c
       })
       req.on('end', () => {
+        let force = false
         try {
           const parsed = body ? (JSON.parse(body) as { force?: boolean }) : {}
-          forceShutdown = !!parsed.force
+          force = !!parsed.force
         } catch {
           /* ignore */
         }
+        forceShutdown = force
         shuttingDown = true
         shutdownResolve?.()
         wakeResolve?.()
         res.writeHead(200, { 'content-type': 'application/json' })
         res.end('{"ok":true}')
+        if (force) {
+          // Soft-stop flags don't interrupt a blocking Session.launch (Duo
+          // auth, browser launch retries). Give the response 50ms to flush
+          // then hard-exit so the wedged daemon + its Playwright children
+          // really die. The OS reaps orphaned Chromium processes via SIGHUP
+          // when the parent exits, and the lockfile's `isPidAlive` check
+          // will report the daemon as dead on the next discovery pass.
+          setTimeout(() => process.exit(1), 50)
+        }
       })
       return
     }
