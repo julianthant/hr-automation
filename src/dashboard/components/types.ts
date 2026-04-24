@@ -196,6 +196,8 @@ export interface SessionInfo {
 
 export interface WorkflowInstanceState {
   instance: string;
+  /** Kebab-case workflow name resolved from the instance label (e.g. "Separation 1" → "separations"). null when unrecognised. */
+  workflow: string | null;
   active: boolean;
   /** True while the spawning Node process (and therefore its Playwright browsers) is still alive. */
   pidAlive: boolean;

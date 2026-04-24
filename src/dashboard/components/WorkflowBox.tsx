@@ -1,7 +1,58 @@
+import { useState } from "react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { BrowserChip } from "./BrowserChip";
 import { formatStepName } from "./types";
 import type { WorkflowInstanceState } from "./types";
+
+/**
+ * "End" button — soft-stops the daemon behind this WorkflowBox via
+ * POST /api/daemon/stop. Only rendered when the daemon is still alive
+ * AND we can resolve its kebab-case workflow name from the instance
+ * label (the stop endpoint requires it).
+ */
+function EndDaemonButton({ workflow }: { workflow: string }) {
+  const [ending, setEnding] = useState(false);
+  const label = ending ? "Ending…" : "End";
+
+  return (
+    <button
+      type="button"
+      disabled={ending}
+      onClick={async () => {
+        if (ending) return;
+        setEnding(true);
+        const toastId = toast.loading(`Stopping ${workflow} daemon…`);
+        try {
+          const res = await fetch("/api/daemon/stop", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ workflow, force: false }),
+          });
+          const json = (await res.json()) as { ok: boolean; stopped?: number; error?: string };
+          if (!res.ok || !json.ok) {
+            toast.error(`Failed to stop daemon: ${json.error ?? `HTTP ${res.status}`}`, { id: toastId });
+            setEnding(false);
+            return;
+          }
+          toast.success(
+            `Soft-stop sent — ${json.stopped ?? 0} daemon(s) will drain and exit`,
+            { id: toastId },
+          );
+          // Leave `ending` true — the SSE state will flip `pidAlive` false shortly,
+          // which unmounts this component entirely.
+        } catch (err) {
+          toast.error(`Failed to stop daemon: ${(err as Error).message}`, { id: toastId });
+          setEnding(false);
+        }
+      }}
+      className="text-[10px] font-semibold uppercase tracking-wide text-destructive bg-destructive/10 hover:bg-destructive/20 border border-destructive/40 px-1.5 py-0.5 rounded transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+      title={`Soft-stop the ${workflow} daemon (drain in-flight then exit)`}
+    >
+      {label}
+    </button>
+  );
+}
 
 interface WorkflowBoxProps {
   workflow: WorkflowInstanceState;
@@ -77,7 +128,17 @@ function StatusPill({
 }
 
 export function WorkflowBox({ workflow }: WorkflowBoxProps) {
-  const { instance, active, currentItemId, itemInFlight, currentStep, finalStatus, sessions } = workflow;
+  const {
+    instance,
+    workflow: workflowName,
+    active,
+    pidAlive,
+    currentItemId,
+    itemInFlight,
+    currentStep,
+    finalStatus,
+    sessions,
+  } = workflow;
 
   if (workflow.crashedOnLaunch) {
     return (
@@ -125,6 +186,9 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
           itemInFlight={itemInFlight}
           finalStatus={finalStatus}
         />
+        {active && pidAlive && workflowName && (
+          <EndDaemonButton workflow={workflowName} />
+        )}
       </div>
 
       {/* Current step — only shown when the pill is occupied by a doc ID (item in flight) */}

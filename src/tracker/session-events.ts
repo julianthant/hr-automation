@@ -213,18 +213,34 @@ function isPidAlive(pid: number): boolean {
 
 const STALE_START_THRESHOLD_MS = 60_000;
 
+/** Maps kebab-case workflow name → human-readable instance label prefix. */
+export const INSTANCE_LABELS: Record<string, string> = {
+  onboarding: "Onboarding",
+  separations: "Separation",
+  "eid-lookup": "EID Lookup",
+  "kronos-reports": "Kronos",
+  "work-study": "Work Study",
+  "emergency-contact": "Emergency Contact",
+  "sharepoint-download": "SharePoint Download",
+  "oath-signature": "Oath Signature",
+};
+
+/**
+ * Reverse of `INSTANCE_LABELS`. Given an instance name like "Separation 1",
+ * strip the trailing number and resolve back to the kebab-case workflow
+ * name ("separations"). Returns null when the label is unrecognised.
+ */
+export function workflowNameFromInstance(instance: string): string | null {
+  const stripped = instance.replace(/\s+\d+$/, "").trim();
+  for (const [wf, label] of Object.entries(INSTANCE_LABELS)) {
+    if (label === stripped) return wf;
+  }
+  return null;
+}
+
 /** Generate a unique instance name like "Separation 1", "Separation 2", etc. */
 export function generateInstanceName(workflowType: string, dir?: string): string {
-  const labels: Record<string, string> = {
-    onboarding: "Onboarding",
-    separations: "Separation",
-    "eid-lookup": "EID Lookup",
-    "kronos-reports": "Kronos",
-    "work-study": "Work Study",
-    "emergency-contact": "Emergency Contact",
-    "sharepoint-download": "SharePoint Download",
-  };
-  const label = labels[workflowType] || workflowType;
+  const label = INSTANCE_LABELS[workflowType] || workflowType;
 
   const events = readSessionEvents(dir);
   // Count starts and ends per instance name. A `workflow_start` is effectively
