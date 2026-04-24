@@ -43,6 +43,7 @@ import {
   clickGoToTimecard as clickNewKronosGoToTimecard,
   setDateRange as setNewKronosDateRange,
   getTimecardLastDate as getNewKronosTimecardLastDate,
+  scrollNewKronosTimecardToDate,
   NEW_KRONOS_URL,
 } from "../../systems/new-kronos/index.js";
 
@@ -382,6 +383,18 @@ export const separationsWorkflow = defineWorkflow({
           : (oldKronosDate ? "Old Kronos" : "New Kronos"))
       : "Kuali (no change)";
     log.step(`[Old Kronos / New Kronos] Resolved dates — using ${chosenDateSource}`);
+
+    // Position the New Kronos timecard view so the chosen Last Day Worked
+    // is the topmost visible row. Any error screenshot taken later in the
+    // run (handler-throw in ucpath-transaction / kuali-finalization) will
+    // then show the operator the chosen date + every row after it, so they
+    // can verify "was there actually a later date that should have been
+    // picked?" without opening the Kronos browser themselves. Best-effort —
+    // a scroll failure here must not disrupt the rest of the run.
+    try {
+      const newKronosPage = await ctx.page("new-kronos");
+      await scrollNewKronosTimecardToDate(newKronosPage, resolved.lastDayWorked);
+    } catch { /* best-effort */ }
 
     // Early-populate separationDate so the dashboard shows it as soon as
     // Kronos reconciliation completes (not only after the transaction submits).
