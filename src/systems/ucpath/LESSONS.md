@@ -58,3 +58,11 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Failed because:** When the search returns exactly 1 match, PeopleSoft skips the results grid and jumps straight to the detail page. The grid selector then times out.
 **Fix:** Detect both code paths. After clicking Search, check whether the URL changed to a detail page (single match) or remained on the results grid; branch accordingly. A simple `Promise.race` between "detail page loaded" and "results grid visible" works.
 **Tags:** person, search, results, grid, redirect, single, detail
+
+## 2026-04-23 — Workforce Job Summary multi-row grid blocks detail-page tabs
+
+**Tried:** Clicking the "Work Location" tab immediately after `searchJobSummary` returns `true`.
+**Failed because:** When the search matches 2+ Job Summary rows (rehires or employees with multiple concurrent jobs), PeopleSoft stays on the search-results grid instead of auto-redirecting to the detail page. The Work Location tab doesn't exist on the grid, so the click times out at 15s even with the one-retry flake handler. Doc 3930 failed this way: search found a terminated + an active row for EID 10767007; old behavior blindly assumed the detail page was up.
+**Fix:** After `searchJobSummary` passes the "No matching values were found" check, `handleMultiRowGrid(page, root, emplId)` probes `jobSummary.searchResultsGrid(root).count()`. Zero → single-row auto-redirect, proceed. Non-zero → enumerate rows via `jobSummary.searchResultRows(root)`, read each `rowHrStatusCell` text, skip rows where `/terminat/i` matches, drill in via `rowDrillInLink` on the first non-terminated row. Throws with a "verify EID in Kuali Build" message if every row is terminated — that's a data problem, not a retry case.
+**Selector:** see `jobSummary.searchResultsGrid`, `jobSummary.searchResultRows`, `jobSummary.rowHrStatusCell`, `jobSummary.rowDrillInLink` in selectors.ts (added 2026-04-23).
+**Tags:** multi-row, grid, terminated, job-summary, drill-in, work-location

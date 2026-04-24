@@ -475,6 +475,56 @@ export const jobSummary = {
    */
   mainTargetIframeProbe: (page: Page): Locator =>
     page.locator("#main_target_win0"),
+
+  /**
+   * Multi-row search-results grid container. Zero count → PeopleSoft
+   * auto-redirected to the detail page (single-row case). Non-zero count →
+   * multiple rows returned; caller must drill into one before clicking
+   * detail-page tabs. verified 2026-04-23
+   * @tags multi-row, grid, search, results, job-summary
+   */
+  searchResultsGrid: (root: Locator): Locator =>
+    root
+      .locator('[id*="SEARCH_RESULT"]')
+      .or(root.locator(".PSLEVEL1GRID")),
+
+  /**
+   * Data rows inside the multi-row search-results grid. Filter by a 7+ digit
+   * pattern matches employee IDs and skips header / separator rows.
+   * verified 2026-04-23
+   * @tags multi-row, rows, grid, search, results, job-summary
+   */
+  searchResultRows: (root: Locator): Locator =>
+    root
+      .locator('[id*="SEARCH_RESULT"] tr, .PSLEVEL1GRID tr')
+      .filter({ hasText: /\d{7,}/ }),
+
+  /**
+   * HR Status / Empl Status cell inside a single row. PeopleSoft emits the
+   * literal text "Terminated" or "Active" (or "Terminated With Pay" /
+   * "Suspended"). Caller checks the textContent for the "Terminat" prefix to
+   * filter out inactive employments. verified 2026-04-23
+   * @tags multi-row, hr-status, terminated, active, cell, job-summary
+   */
+  rowHrStatusCell: (row: Locator): Locator =>
+    row
+      .locator('td:has-text("Terminated")')
+      .or(row.locator('td:has-text("Active")'))
+      .or(row.locator('span:has-text("Terminated")'))
+      .or(row.locator('span:has-text("Active")')),
+
+  /**
+   * Drill-in link that navigates from the grid to the detail page for the
+   * matching row. PeopleSoft variants: "drill in" link (Emergency Contact
+   * style), EMPLID hyperlink, or a generic first link inside the row.
+   * verified 2026-04-23
+   * @tags multi-row, drill-in, select, link, job-summary
+   */
+  rowDrillInLink: (row: Locator): Locator =>
+    row
+      .getByRole("link", { name: /drill in/i })
+      .or(row.locator('a[id*="EMPLID"]'))
+      .or(row.getByRole("link").first()),
 };
 
 // ─── HR Tasks navigation (top-level page before iframe interactions) ──────
