@@ -4,6 +4,7 @@ import { execSync } from "child_process";
 import { log, setLogRunId } from "../utils/log.js";
 import { classifyError } from "../utils/errors.js";
 import { maskSsn, maskDob, redactPii } from "../utils/pii.js";
+import { PATHS } from "../config.js";
 import {
   generateInstanceName,
   emitWorkflowStart,
@@ -544,7 +545,7 @@ export function cleanOldTrackerFiles(maxAgeDays: number = 30, dir: string = DEFA
  */
 export function cleanOldScreenshots(
   maxAgeDays: number = 30,
-  dir: string = ".screenshots",
+  dir: string = PATHS.screenshotDir,
 ): number {
   if (!existsSync(dir)) return 0;
   const cutoffMs = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;

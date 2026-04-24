@@ -13,7 +13,7 @@ export const PATHS = {
   downloadsDir: join(HOME, "Downloads"),
   ukgSessionBase: join(HOME, "ukg_session"),
   ukgSessionSep: join(HOME, "ukg_session_sep"),
-  screenshotDir: ".auth",
+  screenshotDir: "src/data/screenshots",
   trackerDir: ".tracker",
 } as const;
 

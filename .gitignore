@@ -48,12 +48,15 @@ docs/superpowers/
 # Excel tracking files
 *.xlsx
 
-# Onboarding roster / other downloaded data (local-only, PII-adjacent).
-# The dir itself is tracked via .gitkeep so the dashboard download target exists.
+# Downloaded rosters + captured screenshots (local-only, PII-adjacent).
+# Directory shells are tracked via .gitkeep so runtime writers find the targets.
 src/data/*
 !src/data/.gitkeep
+!src/data/screenshots/
+src/data/screenshots/*
+!src/data/screenshots/.gitkeep
 
-# Screenshots (dev debugging)
+# Legacy screenshot location — kept for cleanup on older working trees.
 .screenshots/
 
 # Generated JSON Schemas (re-generated via `npm run schemas:export`)
