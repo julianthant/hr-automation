@@ -280,7 +280,10 @@ export class Session {
       } catch { continue }
       const path = join(PATHS.screenshotDir, `${prefix}-${id}-${Date.now()}.png`)
       try {
-        await slot.page.screenshot({ path })
+        // `fullPage: true` — capture the entire scrollable page, not just
+        // the viewport. Kuali + UCPath forms are long; a viewport-only shot
+        // clips off Final Transactions, comments, and the save button area.
+        await slot.page.screenshot({ path, fullPage: true })
         paths.push(path)
       } catch { /* best-effort — one failed screenshot mustn't skip siblings */ }
     }
@@ -308,7 +311,11 @@ export class Session {
           label: opts.label, system: id, ts: opts.ts,
         })
         const p = join(outDir, filename)
-        const buf = await slot.page.screenshot({ path: p })
+        // `fullPage: true` — capture the whole scrollable page, not just
+        // the viewport, so the operator can see the full Kuali / UCPath
+        // form (Final Transactions + comments + Save button) without
+        // opening the browser.
+        const buf = await slot.page.screenshot({ path: p, fullPage: true })
         results.push({ system: id, path: p, bytes: buf.byteLength })
       } catch {
         // Best-effort — per-page failures don't block siblings
@@ -321,7 +328,7 @@ export class Session {
           label: opts.label, system: 'ad-hoc', ts: opts.ts,
         })
         const p = join(outDir, filename)
-        const buf = await pg.screenshot({ path: p })
+        const buf = await pg.screenshot({ path: p, fullPage: true })
         results.push({ system: 'ad-hoc', path: p, bytes: buf.byteLength })
       } catch {
         // Best-effort
