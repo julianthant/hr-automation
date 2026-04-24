@@ -52,8 +52,30 @@ When an escape hatch becomes a recurring pattern across workflows, promote it to
 - **Without updating tests.** Kernel tests live in `tests/unit/core/`. Changes to `Session.launch`, `Stepper.step`, or `buildTrackerOpts` likely need new fixtures.
 - **Without updating the root `CLAUDE.md` kernel primer.** Future sessions read that before touching kernel internals. Keep it in sync.
 
+## Run isolation in daemon mode
+
+A daemon keeps one `workflowInstance` for its entire lifetime and processes many items (each with a distinct `runId`) under that single instance. Four rules keep events, step durations, and dashboard state from bleeding across items:
+
+1. **Every per-item tracker row carries `runId` + `workflowInstance`.** The SSE endpoint (`/events/run-events`) and `filterEventsForRun` trust `runId` first. Events with a `runId` that doesn't match the requested run are never shown.
+
+2. **Orphan events (no `runId`) fall back to `workflowInstance` + time window.** `Session.launch` emits `auth_start` / `auth_complete` / `browser_launch` at batch scope with no runId. `filterEventsForRun` attributes these to a run only if they (a) share `workflowInstance` AND (b) fall within the run's `[firstTrackerTs, lastTrackerTs]` span. The time-window gate prevents daemon-lifetime events from leaking across items. `runEndFallback` (default `Date.now()`) extends the window for in-progress runs whose tracker hasn't emitted a terminal status yet.
+
+3. **`itemInFlight` is the authoritative live-state signal.** The daemon emits `item_start` on claim and `item_complete` on release. Dashboard's `WorkflowInstanceState.itemInFlight` flips on those boundaries — use it for "Idle" vs "processing <doc>" UI, never infer live state from tracker rows.
+
+4. **`authTimings` rotation in daemon mode.** Real per-system Duo durations are captured once at daemon startup and injected into item #1 only. Every subsequent item gets zero-duration synthetic `auth:<systemId>` tracker rows anchored at its claim time. Re-using startup timings for item #N would drag that item's `firstLogTs` back to daemon-start and inflate its elapsed timer by the full queue-wait gap.
+
+## Caching rule for step-cache callers
+
+Cache only sources that are **write-once** OR **not user-editable**. User-editable sources (Kuali Build docs, Salesforce records users edit between runs, anything the user may correct after a failed first pass) must not be cached — stale-data retries produce wrong-employee / wrong-value outcomes. The savings from caching expensive extractions is usually ~10–30s; the risk of a silently-wrong retry outweighs that.
+
+Safe callers: onboarding's `extraction` step (CRM record, edited only at hire creation). Unsafe callers (correctly NOT wired): separations' `kuali-extraction` (users fix form typos between runs).
+
+If a user-editable source REALLY needs caching, invalidate manually between runs (delete the cache file) or add a `invalidateIfPriorRunFailed` guard (design deferred — not a current need).
+
 ## Lessons Learned
 
+- **2026-04-23: `filterEventsForRun` time-window fallback.** Orphan-event attribution by `workflowInstance` alone leaked across items in daemon mode (one instance spans many items). Added a `[firstTrackerTs, lastTrackerTs]` window using per-run tracker timestamps + a `runEndFallback` arg for testability. Design: `docs/superpowers/specs/2026-04-23-daemon-isolation-and-separations-stability-design.md` Part 2.1.
+- **2026-04-23: Daemon lifecycle phase tracking.** `runWorkflowDaemon` now advances a `DaemonPhase` state machine (`launching → authenticating → idle → processing → keepalive → draining → exited`) with `log.step` transitions and exposes the current phase via `/status`. `npm run <workflow>-status` probes `/status` per alive daemon (1s timeout) and prints phase alongside pid/port, so "browsers don't launch" surfaces as "phase=authenticating for 5+ minutes" instead of a silent CLI timeout.
 - **2026-04-15: `bringToFront()` before each system's login.** Multi-browser tiling hides background tabs; the active one must surface before the user approves Duo. Fixed in `Session.launch`.
 - **2026-04-16: Auth retry on Duo timeout.** `loginWithRetry` refreshes `about:blank` and retries login up to 3 attempts on auth failure. Replaces the old "workflow crashes on flaky Duo" behavior.
 - **2026-04-17 (subsystem D): `buildTrackerOpts` extracted.** All three modes pass identical richness-hook bundles to `withTrackedWorkflow` — the runtime warning, getName, and getId are consistent across single / batch / pool.
