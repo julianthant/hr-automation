@@ -74,7 +74,6 @@ export async function runWorkflowPool<TData, TSteps extends readonly string[]>(
         const { observer, getAuthTimings } = makeObserver(`w${index}`)
         const session = await Session.launch(wf.config.systems, {
           authChain: wf.config.authChain,
-          tiling: wf.config.tiling,
           launchFn: opts.launchFn,
           observer,
         })

@@ -38,7 +38,6 @@ export const workStudyWorkflow = defineWorkflow({
   authSteps: false,
   steps: workStudySteps,
   schema: WorkStudyInputSchema,
-  tiling: "single",
   authChain: "sequential",
   // Matches pre-subsystem-D WF_CONFIG["work-study"].detailFields:
   // Employee/EmplId are rendered by the dashboard from name + id; Started/Elapsed

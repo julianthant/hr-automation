@@ -97,7 +97,7 @@ export function ScreenshotLightbox({
               type="button"
               disabled={!hasNext}
               aria-label="Next screenshot"
-              className="absolute right-10 top-1/2 -translate-y-1/2 bg-background/90 rounded px-2 py-1 text-xs font-mono text-foreground/80 disabled:opacity-30 hover:bg-background transition-colors"
+              className="absolute right-2 top-1/2 -translate-y-1/2 bg-background/90 rounded px-2 py-1 text-xs font-mono text-foreground/80 disabled:opacity-30 hover:bg-background transition-colors"
               onClick={() => hasNext && onNavigate(idx + 1)}
             >
               ›

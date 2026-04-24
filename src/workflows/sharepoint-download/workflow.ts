@@ -93,7 +93,6 @@ export const sharepointDownloadWorkflow: RegisteredWorkflow<
   authSteps: true,
   steps: sharepointDownloadSteps,
   schema: SharePointDownloadInputSchema,
-  tiling: "single",
   authChain: "sequential",
   detailFields: [
     { key: "label", label: "Spreadsheet" },

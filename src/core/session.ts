@@ -3,7 +3,6 @@ import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import type { SystemConfig, SessionObserver, CaptureFileOpts } from './types.js'
 import { launchBrowser } from '../browser/launch.js'
-import { computeTileLayout } from '../browser/tiling.js'
 import { log } from '../utils/log.js'
 import { classifyPlaywrightError, errorMessage } from '../utils/errors.js'
 import { PATHS } from '../config.js'
@@ -33,7 +32,6 @@ interface SessionState {
 
 export interface LaunchOpts {
   authChain?: 'sequential' | 'interleaved'
-  tiling?: 'auto' | 'single' | 'side-by-side'
   /** Injection point for tests. */
   launchFn?: (opts: LaunchOneOpts) => Promise<SystemSlot>
   /** Observability bundle — see SessionObserver in types.ts. */
@@ -48,9 +46,6 @@ export interface LaunchOpts {
 
 interface LaunchOneOpts {
   system: SystemConfig
-  tileIndex: number
-  tileCount: number
-  tiling: 'auto' | 'single' | 'side-by-side'
 }
 
 export class Session {
@@ -81,7 +76,6 @@ export class Session {
 
   static async launch(systems: SystemConfig[], opts: LaunchOpts = {}): Promise<Session> {
     const authChain = opts.authChain ?? (systems.length > 1 ? 'interleaved' : 'sequential')
-    const tiling = opts.tiling ?? (systems.length > 1 ? 'auto' : 'single')
     const launchOne = opts.launchFn ?? defaultLaunchOne
 
     // Construct the Session with empty maps first so onReady can wire observers
@@ -92,11 +86,11 @@ export class Session {
     const session = new Session({ systems, browsers, readyPromises })
     opts.onReady?.(session)
 
-    // Launch all browsers in parallel.
+    // Launch all browsers in parallel. Windows land wherever Chromium drops
+    // them — tiling was removed 2026-04-23 once Playwright's default window
+    // placement proved fine for the small (≤4) browser counts we actually use.
     const slots = await Promise.all(
-      systems.map((s, i) =>
-        launchOne({ system: s, tileIndex: i, tileCount: systems.length, tiling }),
-      ),
+      systems.map((s) => launchOne({ system: s })),
     )
     systems.forEach((s, i) => browsers.set(s.id, slots[i]))
 
@@ -104,12 +98,6 @@ export class Session {
     // (one browser per system); if that changes later, mint UUIDs here.
     for (const s of systems) {
       opts.observer?.onBrowserLaunch?.(s.id, s.id)
-    }
-
-    // Tile windows using actual screen dimensions (detected from first browser via CDP).
-    // Skip when a custom launchFn is provided (test injection — no real browsers to tile).
-    if (tiling !== 'single' && systems.length > 1 && !opts.launchFn) {
-      await tileWindows(systems, browsers)
     }
 
     if (authChain === 'sequential') {
@@ -392,39 +380,6 @@ async function loginWithRetry(
         onFailed?.()
         throw err
       }
-    }
-  }
-}
-
-async function tileWindows(
-  systems: SystemConfig[],
-  browsers: Map<string, SystemSlot>,
-): Promise<void> {
-  const firstSlot = browsers.get(systems[0].id)!
-  const screen = await firstSlot.page.evaluate(() => ({
-    width: window.screen.availWidth,
-    height: window.screen.availHeight,
-  }))
-
-  for (let i = 0; i < systems.length; i++) {
-    const slot = browsers.get(systems[i].id)!
-    const tile = computeTileLayout(i, systems.length, screen)
-    try {
-      const client = await slot.context.newCDPSession(slot.page)
-      const { windowId } = await client.send('Browser.getWindowForTarget') as { windowId: number }
-      await client.send('Browser.setWindowBounds', {
-        windowId,
-        bounds: {
-          left: tile.position.x,
-          top: tile.position.y,
-          width: tile.size.width,
-          height: tile.size.height,
-          windowState: 'normal',
-        },
-      })
-      await client.detach()
-    } catch {
-      // CDP tiling is best-effort — fall through if unsupported
     }
   }
 }

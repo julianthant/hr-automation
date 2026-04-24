@@ -306,7 +306,6 @@ export const kronosReportsWorkflow = defineWorkflow({
   authSteps: false,
   steps: kronosSteps,
   schema: KronosItemSchema,
-  tiling: "single",
   authChain: "sequential",
   batch: {
     mode: "pool",
