@@ -13,6 +13,7 @@ import {
   getContentFrame,
 } from "./selectors.js";
 import { log } from "../../utils/log.js";
+import { fuzzyNameMatch } from "../../utils/fuzzy-match.js";
 
 // ─── STEP 1: Navigate sidebar → Smart HR Templates → Smart HR Transactions ───
 
@@ -732,41 +733,82 @@ export async function findExistingTerminationTransaction(
           : employeeName);
     const nameForms = [employeeName, flipped, lastName].filter((s) => s.length > 0);
 
-    // Scan every row in every grid inside the iframe for one where the row
-    // text matches any name-form AND contains the effective date AND
-    // contains one of the template codes. Return the row's employee link
-    // label so we can click it next.
-    const match = await frame.locator("body").evaluate( // allow-inline-selector -- body scan for smart-hr-transactions list
-      (body, { nameForms, date, templates }: { nameForms: string[]; date: string; templates: string[] }) => {
+    // First pass: collect every row that matches (date, template) regardless
+    // of name. Name matching happens in Node-land below so we can apply
+    // fuzzy matching (Kuali vs UCPath spelling diffs like
+    // "Aki Uchiha" vs "Aki Uchida") without duplicating the edit-distance
+    // helper into the page.evaluate body.
+    const candidates = await frame.locator("body").evaluate( // allow-inline-selector -- body scan for smart-hr-transactions list
+      (body, { date, templates }: { date: string; templates: string[] }) => {
+        const out: Array<{ linkText: string; rowText: string }> = [];
         const tables = body.querySelectorAll("table");
         for (const table of Array.from(tables)) {
           for (const row of Array.from((table as HTMLTableElement).rows)) {
-            const text = row.textContent ?? "";
-            if (!text.includes(date)) continue;
-            if (!templates.some((t) => text.includes(t))) continue;
-            const nameHit = nameForms.find((n) =>
-              n.length > 0 && text.toLowerCase().includes(n.toLowerCase()),
-            );
-            if (!nameHit) continue;
-            return { nameHit };
+            const rowText = row.textContent ?? "";
+            if (!rowText.includes(date)) continue;
+            if (!templates.some((t) => rowText.includes(t))) continue;
+            const link = row.querySelector("a");
+            const linkText = (link?.textContent ?? "").trim();
+            if (!linkText) continue;
+            out.push({ linkText, rowText });
           }
         }
-        return null;
+        return out;
       },
-      { nameForms, date: effectiveDate, templates: [...templateCodes] },
-    ).catch(() => null);
+      { date: effectiveDate, templates: [...templateCodes] },
+    ).catch(() => [] as Array<{ linkText: string; rowText: string }>);
 
-    if (!match) {
+    if (candidates.length === 0) {
       log.step(`[Txn Lookup] No existing transaction found`);
       return null;
     }
-    log.step(`[Txn Lookup] Matching row found for name='${match.nameHit}' — reading txn #`);
+
+    // Exact substring match first (fast, high-precision) — preserves the
+    // pre-fuzzy behavior for every case that wasn't broken.
+    let nameHit: string | undefined;
+    for (const c of candidates) {
+      const hit = nameForms.find((n) =>
+        n.length > 0 && c.rowText.toLowerCase().includes(n.toLowerCase()),
+      );
+      if (hit) {
+        nameHit = c.linkText;
+        break;
+      }
+    }
+
+    // Fuzzy fallback: no exact substring hit but we have candidate rows
+    // already narrowed by (date, template). Try a bounded edit-distance
+    // match against each candidate's link text. Log loud when we fuzzy
+    // match so audits can catch any false positives.
+    if (!nameHit) {
+      for (const c of candidates) {
+        for (const form of nameForms) {
+          if (!form) continue;
+          if (fuzzyNameMatch(form, c.linkText)) {
+            log.warn(
+              `[Txn Lookup] Fuzzy name match: '${form}' ~ '${c.linkText}' (row matched date+template; falling back to closeness)`,
+            );
+            nameHit = c.linkText;
+            break;
+          }
+        }
+        if (nameHit) break;
+      }
+    }
+
+    if (!nameHit) {
+      log.step(
+        `[Txn Lookup] ${candidates.length} date+template candidate(s) but no name match: ${candidates.map((c) => c.linkText).join(", ")}`,
+      );
+      return null;
+    }
+    log.step(`[Txn Lookup] Matching row found for name='${nameHit}' — reading txn #`);
 
     // Click the row's employee link (by the name form that matched) and
     // extract "Transaction ID: T002XXXXXX" from the detail page body.
-    const link = frame.getByRole("link", { name: match.nameHit }); // allow-inline-selector -- dynamic matched-name link
+    const link = frame.getByRole("link", { name: nameHit }); // allow-inline-selector -- dynamic matched-name link
     if ((await link.count()) === 0) {
-      log.warn(`[Txn Lookup] Row matched but link for '${match.nameHit}' disappeared before click — treating as no match`);
+      log.warn(`[Txn Lookup] Row matched but link for '${nameHit}' disappeared before click — treating as no match`);
       return null;
     }
     await link.first().click({ timeout: 5_000 });
