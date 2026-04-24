@@ -60,7 +60,6 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   systems: SystemConfig[]
   steps: TSteps
   schema: ZodType<TData>
-  tiling?: 'auto' | 'single' | 'side-by-side'
   authChain?: 'sequential' | 'interleaved'
   batch?: BatchConfig
   /**
@@ -167,9 +166,6 @@ export interface RunOpts {
   preAssignedRunId?: string
   launchFn?: (opts: {
     system: SystemConfig
-    tileIndex: number
-    tileCount: number
-    tiling: 'auto' | 'single' | 'side-by-side'
   }) => Promise<{ page: import('playwright').Page; context: import('playwright').BrowserContext; browser: import('playwright').Browser }>
   /** Skip withLogContext + withTrackedWorkflow wrapping (tests — use no-op emitters). */
   trackerStub?: boolean

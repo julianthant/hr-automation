@@ -395,7 +395,6 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
 
     const session = await Session.launch(wf.config.systems, {
       authChain: wf.config.authChain,
-      tiling: wf.config.tiling,
       launchFn: opts.launchFn,
       observer,
       onReady: (sess) => onSessionReady?.(sess, runId, stepper, opts.trackerDir),
@@ -552,7 +551,6 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
       const { observer, getAuthTimings } = makeObserver('1')
       const session = await Session.launch(wf.config.systems, {
         authChain: wf.config.authChain,
-        tiling: wf.config.tiling,
         launchFn: opts.launchFn,
         observer,
       })

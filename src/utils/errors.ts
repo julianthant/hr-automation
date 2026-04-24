@@ -38,9 +38,12 @@ export function classifyError(err: unknown): string {
       return replacement.replace(/\$(\d)/g, (_, i) => match[parseInt(i)] || "");
     }
   }
-  // No pattern matched — return first line, truncated
-  const firstLine = raw.split("\n")[0];
-  return firstLine.length > 120 ? firstLine.slice(0, 117) + "..." : firstLine;
+  // No pattern matched — return first line in full. Dashboard log-line
+  // rendering handles long strings via `break-words`; truncating here
+  // clips actionable details (e.g. "Last Day Worked cannot be in the
+  // future: got '05/01/2026' ... not yet eligible for separation" gets
+  // cut mid-word so operators can't read the full diagnosis).
+  return raw.split("\n")[0];
 }
 
 export type PlaywrightErrorKind =

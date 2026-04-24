@@ -45,7 +45,6 @@ test('runWorkflow: observer bridges Session.launch hooks to sessionCtx + setStep
     // auth:ucpath is auto-prepended by the registry; 'work' is the only declared step.
     steps: ['work'] as const,
     schema: z.object({}).passthrough(),
-    tiling: 'single',
     authChain: 'sequential',
     handler: async (ctx) => { ctx.markStep('work') },
   })
@@ -87,7 +86,6 @@ test('runWorkflow: observer guards setStep against undeclared step names', async
     systems: [{ id: 'mystery', login: async () => {} }],
     steps: ['work'] as const, // no "mystery-auth"
     schema: z.object({}).passthrough(),
-    tiling: 'single',
     authChain: 'sequential',
     handler: async (ctx) => { ctx.markStep('work') },
   })

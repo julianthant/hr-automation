@@ -185,7 +185,6 @@ export const separationsWorkflow = defineWorkflow({
   steps: separationsSteps,
   schema: SeparationInputSchema,
   authChain: "interleaved",
-  tiling: "auto",
   batch: {
     mode: "sequential",
     betweenItems: ["reset-browsers"],

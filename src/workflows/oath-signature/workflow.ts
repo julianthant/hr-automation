@@ -43,7 +43,6 @@ export const oathSignatureWorkflow = defineWorkflow({
   authSteps: false,
   steps: oathSignatureSteps,
   schema: OathSignatureInputSchema,
-  tiling: "single",
   authChain: "sequential",
   batch: {
     mode: "sequential",

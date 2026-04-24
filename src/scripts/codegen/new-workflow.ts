@@ -166,7 +166,6 @@ export const ${camelName}Workflow = defineWorkflow({
   ],
   steps: ${camelName}Steps,
   schema: ${pascalName}InputSchema,
-  tiling: "single",
   authChain: "sequential",
   detailFields: [{ key: "exampleId", label: "Example ID" }],
   getId: (d) => d.exampleId ?? "",

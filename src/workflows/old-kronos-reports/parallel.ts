@@ -7,7 +7,7 @@ import { errorMessage } from "../../utils/errors.js";
 import { runWorkflowBatch } from "../../core/index.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 import { launchBrowser } from "../../browser/launch.js";
-import { computeTileLayout } from "../../browser/tiling.js";
+import { SCREEN } from "../../config.js";
 import { createLockedTracker } from "../../tracker/locked.js";
 import {
   kronosReportsWorkflow,
@@ -125,20 +125,19 @@ export async function runParallelKronos(
   const sessionDirs: string[] = [];
   let workerCounter = 0;
   const launchFn: NonNullable<Parameters<typeof runWorkflowBatch<KronosItem, typeof kronosReportsWorkflow.config.steps>>[2]>["launchFn"] =
-    async ({ system: _system, tileIndex: _tileIndex, tileCount: _tileCount, tiling: _tiling }) => {
+    async ({ system: _system }) => {
       workerCounter += 1;
       const workerId = workerCounter;
       const prefix = `[W${workerId}]`;
       const sessionDir = `${SESSION_DIR}_worker${workerId}`;
       sessionDirs.push(sessionDir);
 
-      const tile = computeTileLayout(workerId - 1, actualWorkers);
-      log.step(`${prefix} Window: ${tile.size.width}x${tile.size.height} at (${tile.position.x},${tile.position.y})`);
+      log.step(`${prefix} Launching worker browser (viewport ${SCREEN.width - 20}x${SCREEN.height - 80})`);
 
       const { browser, context, page } = await launchBrowser({
         sessionDir,
-        viewport: tile.viewport,
-        args: tile.args,
+        viewport: { width: SCREEN.width - 20, height: SCREEN.height - 80 },
+        args: [`--window-position=0,0`, `--window-size=${SCREEN.width},${SCREEN.height}`],
         acceptDownloads: true,
       });
       return { browser: browser as never, context, page };

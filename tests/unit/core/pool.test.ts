@@ -164,7 +164,6 @@ test('runWorkflowPool: initialData merges into each item pending entry', async (
     systems: [{ id: 'sys', login: async () => {} }],
     steps: ['go'] as const,
     schema: z.object({ n: z.number() }),
-    tiling: 'single',
     authChain: 'sequential',
     batch: { mode: 'pool', poolSize: 2 },
     getName: (d) => d.label ?? '',

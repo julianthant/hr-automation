@@ -208,7 +208,6 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         try {
           session = await launchFn(wf.config.systems, {
             authChain: wf.config.authChain,
-            tiling: wf.config.tiling,
             observer,
           })
           // Force every system's auth to complete at daemon startup so the

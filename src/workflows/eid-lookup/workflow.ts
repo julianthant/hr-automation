@@ -232,7 +232,6 @@ export const eidLookupWorkflow = defineWorkflow({
   authSteps: true,
   steps: stepsNoCrm,
   schema: EidLookupItemSchema,
-  tiling: "single",
   authChain: "sequential",
   batch: { mode: "shared-context-pool", poolSize: 4, preEmitPending: true },
   detailFields: [
@@ -278,7 +277,6 @@ export const eidLookupCrmWorkflow = defineWorkflow({
   authSteps: true,
   steps: stepsCrm,
   schema: EidLookupItemSchema,
-  tiling: "auto",
   authChain: "sequential",
   batch: { mode: "shared-context-pool", poolSize: 4, preEmitPending: true },
   detailFields: [
@@ -327,7 +325,6 @@ export const eidLookupI9Workflow = defineWorkflow({
   authSteps: true,
   steps: stepsI9,
   schema: EidLookupItemSchema,
-  tiling: "auto",
   authChain: "sequential",
   batch: { mode: "shared-context-pool", poolSize: 4, preEmitPending: true },
   detailFields: [
@@ -386,7 +383,6 @@ export const eidLookupCrmI9Workflow = defineWorkflow({
   authSteps: true,
   steps: stepsCrmI9,
   schema: EidLookupItemSchema,
-  tiling: "auto",
   authChain: "sequential",
   batch: { mode: "shared-context-pool", poolSize: 4, preEmitPending: true },
   detailFields: [
