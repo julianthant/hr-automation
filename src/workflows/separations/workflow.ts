@@ -217,12 +217,14 @@ export const separationsWorkflow = defineWorkflow({
     betweenItems: ["reset-browsers"],
   },
   detailFields: [
-    { key: "name",              label: "Employee" },
-    { key: "eid",               label: "EID" },
-    { key: "docId",             label: "Doc ID" },
-    { key: "terminationType",   label: "Term Type" },
-    { key: "separationDate",    label: "Sep Date" },
-    { key: "transactionNumber", label: "Txn #" },
+    { key: "name",              label: "Employee",       editable: true  },
+    { key: "eid",               label: "EID",            editable: true  },
+    { key: "docId",             label: "Doc ID"                          },
+    { key: "terminationType",   label: "Term Type"                       }, // computed (Vol/Invol) — display only
+    { key: "rawTerminationType",label: "Reason",         editable: true  }, // raw Kuali type — drives reason-code mapping
+    { key: "separationDate",    label: "Sep Date",       editable: true  },
+    { key: "lastDayWorked",     label: "Last Day Worked", editable: true },
+    { key: "transactionNumber", label: "Txn #"                           },
   ],
   getName: (d) => d.name ?? "",
   getId: (d) => d.docId ?? "",
@@ -238,35 +240,76 @@ export const separationsWorkflow = defineWorkflow({
     // values on retry, so always re-read. See
     // docs/superpowers/specs/2026-04-23-daemon-isolation-and-separations-stability-design.md
     // Part 1.2 for the general caching rule (write-once / non-user-editable only).
-    const kualiData = await ctx.step("kuali-extraction", async () => {
-      const t0 = Date.now();
-      log.debug(`[Step: kuali-extraction] START docId='${docId}'`);
-      const kualiPage = await ctx.page("kuali");
-      // Auto-dismiss PeopleSoft dialogs on UCPath — important when a previous
-      // doc's transaction leaves a confirmation modal up (batch mode state).
-      const ucpathPage = await ctx.page("ucpath");
-      ucpathPage.on("dialog", (d) => d.accept().catch(() => {}));
+    //
+    // Edit-and-resume bypass: if every required field is already in
+    // ctx.data (the dashboard's "Run with these values" path pre-merges
+    // them via the kernel's prefilledData channel), skip the extraction
+    // step entirely and synthesize a kualiData object from those values.
+    // The downstream code path is unchanged — it reads from kualiData,
+    // which now mirrors what extraction would have returned.
+    const requiredKualiFields = [
+      "name",
+      "eid",
+      "rawTerminationType",
+      "separationDate",
+      "lastDayWorked",
+    ] as const;
+    const allPrefilled = requiredKualiFields.every(
+      (k) => typeof ctx.data[k] === "string" && (ctx.data[k] as string).length > 0,
+    );
 
-      await openActionList(kualiPage);
-      await clickDocument(kualiPage, docId);
-      const result = await extractSeparationData(kualiPage);
-      // Write extracted fields onto the tracker row BEFORE the step returns.
-      // Anything that throws downstream (validateLastDayWorked, Kronos, Kuali
-      // finalize, etc.) still leaves a populated detail grid instead of a row
-      // of em-dashes.
-      ctx.updateData({
-        name: result.employeeName,
-        eid: result.eid,
-        separationDate: result.separationDate,
-        terminationType: isVoluntaryTermination(result.terminationType) ? "Vol" : "Invol",
-      });
+    let kualiData: Awaited<ReturnType<typeof extractSeparationData>>;
+    if (allPrefilled) {
+      ctx.skipStep("kuali-extraction");
       log.step(
-        `[Step: kuali-extraction] END took=${Date.now() - t0}ms `
-        + `employeeName='${result.employeeName}' eid='${result.eid}' `
-        + `lastDayWorked='${result.lastDayWorked}' separationDate='${result.separationDate}'`,
+        `[Step: kuali-extraction] SKIPPED — using prefilled data ` +
+        `(employeeName='${ctx.data.name}' eid='${ctx.data.eid}' ` +
+        `rawTerminationType='${ctx.data.rawTerminationType}')`,
       );
-      return result;
-    });
+      kualiData = {
+        employeeName: ctx.data.name as string,
+        eid: ctx.data.eid as string,
+        terminationType: ctx.data.rawTerminationType as string,
+        separationDate: ctx.data.separationDate as string,
+        lastDayWorked: ctx.data.lastDayWorked as string,
+        // `location` isn't read downstream — empty string is safe and keeps
+        // the synthesized object structurally compatible with KualiSeparationData.
+        location: "",
+      };
+    } else {
+      kualiData = await ctx.step("kuali-extraction", async () => {
+        const t0 = Date.now();
+        log.debug(`[Step: kuali-extraction] START docId='${docId}'`);
+        const kualiPage = await ctx.page("kuali");
+        // Auto-dismiss PeopleSoft dialogs on UCPath — important when a previous
+        // doc's transaction leaves a confirmation modal up (batch mode state).
+        const ucpathPage = await ctx.page("ucpath");
+        ucpathPage.on("dialog", (d) => d.accept().catch(() => {}));
+
+        await openActionList(kualiPage);
+        await clickDocument(kualiPage, docId);
+        const result = await extractSeparationData(kualiPage);
+        // Write extracted fields onto the tracker row BEFORE the step returns.
+        // Anything that throws downstream (validateLastDayWorked, Kronos, Kuali
+        // finalize, etc.) still leaves a populated detail grid instead of a row
+        // of em-dashes. `rawTerminationType` is the un-mapped Kuali string —
+        // edit-and-resume needs it for `mapReasonCode()` on the bypass path.
+        ctx.updateData({
+          name: result.employeeName,
+          eid: result.eid,
+          rawTerminationType: result.terminationType,
+          separationDate: result.separationDate,
+          lastDayWorked: result.lastDayWorked,
+          terminationType: isVoluntaryTermination(result.terminationType) ? "Vol" : "Invol",
+        });
+        log.step(
+          `[Step: kuali-extraction] END took=${Date.now() - t0}ms `
+          + `employeeName='${result.employeeName}' eid='${result.eid}' `
+          + `lastDayWorked='${result.lastDayWorked}' separationDate='${result.separationDate}'`,
+        );
+        return result;
+      });
+    }
 
     // Preflight: reject future-dated separations so we don't waste Kronos/UCPath
     // work on a record that isn't yet actionable. Both Last Day Worked and

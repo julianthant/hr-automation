@@ -59,17 +59,17 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     currentStep: () => stepper.getCurrentStep(),
   })
 
-  return {
-    page: (id) => session.page(id),
-    step: (name, fn) => stepper.step(name as string, fn),
-    markStep: (name) => stepper.markStep(name as string),
-    skipStep: (name) => stepper.skipStep(name as string),
-    parallel: (tasks) => stepper.parallel(tasks),
-    parallelAll: (tasks) => stepper.parallelAll(tasks),
+  const ctx = {
+    page: (id: string) => session.page(id),
+    step: <R>(name: string, fn: () => Promise<R>) => stepper.step(name, fn),
+    markStep: (name: string) => stepper.markStep(name),
+    skipStep: (name: string) => stepper.skipStep(name),
+    parallel: <T extends Record<string, () => Promise<unknown>>>(tasks: T) => stepper.parallel(tasks),
+    parallelAll: <T extends Record<string, () => Promise<unknown>>>(tasks: T) => stepper.parallelAll(tasks),
     retry,
-    updateData: (patch) => stepper.updateData(patch as Record<string, unknown>),
+    updateData: (patch: Record<string, unknown>) => stepper.updateData(patch),
     session: {
-      page: (id) => session.page(id),
+      page: (id: string) => session.page(id),
       newWindow: async () => {
         throw new Error('newWindow not yet implemented')
       },
@@ -82,4 +82,12 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     runId,
     screenshot,
   }
+  // `data` is a live getter — each access returns a fresh shallow copy of
+  // the stepper's accumulated data, including anything pre-merged from the
+  // input's `prefilledData` channel before the handler started.
+  Object.defineProperty(ctx, 'data', {
+    get: () => stepper.getData(),
+    enumerable: true,
+  })
+  return ctx as unknown as Ctx<TSteps, TData>
 }

@@ -227,7 +227,7 @@ interface DaemonInfo {
 }
 ```
 
-Reads `findAliveDaemons(workflow)` from `daemon-registry.ts`, fans out to each daemon's `GET /status` (already exists per `core/CLAUDE.md`) for `phase` + `currentItem`. `itemsProcessed` is computed by counting `done` + `failed` tracker rows whose `data.daemonPid === pid` since `startedAt` — requires the daemon to stamp its pid into emitted tracker rows (one-line addition in `runWorkflowDaemon`).
+Reads `findAliveDaemons(workflow)` from `daemon-registry.ts`, fans out to each daemon's `GET /status` (already exists per `core/CLAUDE.md`) for `phase` + `currentItem`. `itemsProcessed` is computed by reading `.tracker/daemons/<workflow>.queue.jsonl` and counting `done` + `failed` events whose `claimedBy === instanceId` (the queue protocol already records this — no kernel change needed).
 
 ```
 POST /api/daemons/spawn
@@ -275,10 +275,20 @@ Edit-and-resume requires opt-in for workflows with extraction:
   ```
 - `index.ts` (registry config): mark editable detailFields. Likely candidates: effective date, separation reason, manager. The current detailFields (Employee, EID, Doc ID) are mostly identifiers and stay non-editable — the editable set should be the fields that drive Kuali timekeeper / UCPath fills, which means we may need to *add* detailFields here, not just flag existing ones.
 
-### 3.2 Onboarding (`src/workflows/onboarding/`)
+### 3.2 Onboarding (`src/workflows/onboarding/`) — deferred
 
-- `workflow.ts` handler: gate the `extraction` step on `!ctx.data.firstName`.
-- `index.ts`: mark editable detailFields (likely employee name, dept, position, wage, eff date, I9 profile).
+Onboarding's `EmployeeData` is ~17 fields (names, SSN, address, wage, dates,
+appointment, etc.), and the handler's downstream phases (`pdf-download`,
+`person-search`, `i9-creation`, `transaction`) read from a locally-scoped
+`data: EmployeeData | null` variable rather than from `ctx.data`. Wiring the
+extraction-bypass requires either a synthesize-from-`ctx.data` branch with
+~17 field reads, or a refactor to thread the variable through ctx.data
+exclusively. Either is bigger than separations and out of scope for this
+landing pass — opening a follow-up. Until then, onboarding's edit-and-resume
+falls back to "edit-and-rerun-with-prefilled-values-overwritten-by-extraction,"
+which is not useful — the dashboard's Edit Data tab will not surface a
+"Run with these values" affordance for onboarding entries (handled by
+checking the workflow's `editable` detailFields list — empty = no tab).
 
 ### 3.3 Other workflows
 
@@ -329,7 +339,6 @@ Output: a visual spec document covering color/icon/spacing/typography choices fo
    - Merge `input.prefilledData` into `ctx.data` before handler runs (via `splitPrefilled`, no input mutation).
    - Add `ctx.skipStep(name)` to `Stepper`, plumbed through `withTrackedWorkflow` to emit `status:"skipped"`.
    - Add `editable?: boolean` to `DetailField` type.
-   - Daemon stamps its pid into emitted tracker rows.
 2. **Backend endpoints** (no UI yet):
    - `/api/retry`, `/api/retry-bulk`, `/api/run-with-data`.
    - `/api/cancel-queued`, `/api/queue/bump`.
