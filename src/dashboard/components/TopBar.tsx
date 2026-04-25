@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, ChevronDown, Monitor } from "lucide-react";
 import { useClock } from "./hooks/useClock";
 import { cn } from "@/lib/utils";
 import { useWorkflows, autoLabel } from "../workflows-context";
+import { useQueueDepth } from "./hooks/useQueueDepth";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -72,6 +73,7 @@ export function TopBar({
   const registered = useWorkflows();
   const labelFor = (wf: string): string =>
     registered.find((r) => r.name === wf)?.label ?? autoLabel(wf);
+  const queueDepth = useQueueDepth();
 
   // Union: registry workflows + any extras seen via SSE (files on disk the
   // backend registry doesn't know about). Preferred-order list wins, then
@@ -152,8 +154,21 @@ export function TopBar({
                   <span className={cn("font-medium", wf === workflow && "font-semibold text-primary")}>
                     {labelFor(wf)}
                   </span>
-                  <span className={cn("font-mono text-[11px] tabular-nums", (entryCounts[wf] || 0) > 0 ? "text-primary font-semibold" : "text-muted-foreground")}>
-                    {entryCounts[wf] || 0}
+                  <span className="flex items-center gap-1.5">
+                    {/* Queue-depth pill — pending items waiting in the daemon
+                        queue. Warning-tinted (matches pending status). Only
+                        rendered when > 0 so empty workflows stay visually clean. */}
+                    {(queueDepth[wf] || 0) > 0 && (
+                      <span
+                        className="px-1.5 py-0.5 rounded-full bg-[#fbbf24]/15 text-[#fbbf24] text-[10px] font-mono font-medium tabular-nums"
+                        title={`${queueDepth[wf]} queued`}
+                      >
+                        {queueDepth[wf]}
+                      </span>
+                    )}
+                    <span className={cn("font-mono text-[11px] tabular-nums", (entryCounts[wf] || 0) > 0 ? "text-primary font-semibold" : "text-muted-foreground")}>
+                      {entryCounts[wf] || 0}
+                    </span>
                   </span>
                 </span>
               </DropdownMenuItem>
