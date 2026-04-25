@@ -217,14 +217,21 @@ export const separationsWorkflow = defineWorkflow({
     betweenItems: ["reset-browsers"],
   },
   detailFields: [
-    { key: "name",              label: "Employee",       editable: true  },
-    { key: "eid",               label: "EID",            editable: true  },
-    { key: "docId",             label: "Doc ID"                          },
-    { key: "terminationType",   label: "Term Type"                       }, // computed (Vol/Invol) — display only
-    { key: "rawTerminationType",label: "Reason",         editable: true  }, // raw Kuali type — drives reason-code mapping
-    { key: "separationDate",    label: "Sep Date",       editable: true  },
-    { key: "lastDayWorked",     label: "Last Day Worked", editable: true },
-    { key: "transactionNumber", label: "Txn #"                           },
+    { key: "name",              label: "Employee",        editable: true                          },
+    { key: "eid",               label: "EID",             editable: true                          },
+    { key: "docId",             label: "Doc ID"                                                   },
+    { key: "terminationType",   label: "Term Type"                                                }, // computed (Vol/Invol) — display only
+    // separationDate stays editable for edit-and-resume but doesn't show in
+    // the LogPanel detail grid — keeps the grid focused on identifiers.
+    { key: "separationDate",    label: "Sep Date",        editable: true, displayInGrid: false    },
+    { key: "lastDayWorked",     label: "Last Day Worked", editable: true                          },
+    { key: "transactionNumber", label: "Txn #",           editable: true                          },
+    // `rawTerminationType` is intentionally NOT in detailFields — it's an
+    // internal field used to reconstruct kualiData on the edit-and-resume
+    // bypass path, not meant for the user. The kernel still stores it in
+    // ctx.data via updateData; the run-with-data backend merges the
+    // previous run's full data into prefilledData so non-editable fields
+    // (rawTerminationType, terminationType) carry over.
   ],
   getName: (d) => d.name ?? "",
   getId: (d) => d.docId ?? "",
@@ -243,10 +250,16 @@ export const separationsWorkflow = defineWorkflow({
     //
     // Edit-and-resume bypass: if every required field is already in
     // ctx.data (the dashboard's "Run with these values" path pre-merges
-    // them via the kernel's prefilledData channel), skip the extraction
-    // step entirely and synthesize a kualiData object from those values.
-    // The downstream code path is unchanged — it reads from kualiData,
-    // which now mirrors what extraction would have returned.
+    // them via the kernel's prefilledData channel — including non-
+    // editable fields carried over from the previous run's data, see
+    // buildRunWithDataHandler), skip the extraction step entirely and
+    // synthesize a kualiData object from those values. The downstream
+    // code path is unchanged — it reads from kualiData, which now
+    // mirrors what extraction would have returned.
+    //
+    // `rawTerminationType` is required (downstream `mapReasonCode` reads
+    // it) but isn't surfaced as an editable field — it carries over from
+    // the previous run's data via the run-with-data merge.
     const requiredKualiFields = [
       "name",
       "eid",

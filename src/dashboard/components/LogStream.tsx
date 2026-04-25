@@ -137,8 +137,8 @@ export function LogStream({ logs, events = [], loading, screenshotsSlot, editDat
         </div>
       )}
 
-      {/* Log lines — hidden when Screenshots tab is active */}
-      <div ref={scrollRef} className={cn("flex-1 overflow-y-auto py-3 border-b border-border", tab?.source === "screenshots" && "hidden")}>
+      {/* Log lines — hidden when Screenshots or Edit Data tab is active */}
+      <div ref={scrollRef} className={cn("flex-1 overflow-y-auto py-3 border-b border-border", (tab?.source === "screenshots" || tab?.source === "edit-data") && "hidden")}>
         {loading && displayed.length === 0 ? (
           <div className="space-y-[6px] px-6 py-3">
             {Array.from({ length: 12 }).map((_, i) => (
@@ -177,8 +177,10 @@ export function LogStream({ logs, events = [], loading, screenshotsSlot, editDat
       </div>
 
       {/* Footer — h-[41px] so its top border aligns with SelectorHealth
-          header on the right rail across the column gap. */}
-      <div className="h-[41px] flex items-center justify-between px-6 text-[12px] text-muted-foreground flex-shrink-0">
+          header on the right rail across the column gap. Hidden when a
+          non-log slot tab (screenshots / edit-data) owns the panel —
+          the streaming/auto-scroll affordances aren't relevant there. */}
+      <div className={cn("h-[41px] flex items-center justify-between px-6 text-[12px] text-muted-foreground flex-shrink-0", (tab?.source === "screenshots" || tab?.source === "edit-data") && "hidden")}>
         <div className="flex items-center gap-2 leading-none">
           <span className="relative flex items-center justify-center w-[7px] h-[7px]">
             <span className="absolute inset-0 rounded-full bg-primary/50 animate-ping" />

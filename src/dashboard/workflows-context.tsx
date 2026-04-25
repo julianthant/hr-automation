@@ -7,11 +7,13 @@ export interface WorkflowMetadata {
   steps: string[]
   systems: string[]
   /**
-   * Labeled detailFields — always `{ key, label, editable? }` from
-   * /api/workflow-definitions. `editable: true` opts the field into the
-   * dashboard's Edit Data tab; absent / false means display-only.
+   * Labeled detailFields — always `{ key, label, editable?, displayInGrid? }`
+   * from /api/workflow-definitions.
+   *   - `editable: true`        → field renders in the Edit Data tab.
+   *   - `displayInGrid: false`  → field is hidden from LogPanel's detail grid
+   *                                (still shown in Edit Data when editable).
    */
-  detailFields: Array<{ key: string; label: string; editable?: boolean }>
+  detailFields: Array<{ key: string; label: string; editable?: boolean; displayInGrid?: boolean }>
 }
 
 const WorkflowsContext = createContext<WorkflowMetadata[] | null>(null)

@@ -127,11 +127,13 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
     ? new Date(displayTs).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" })
     : "";
 
-  // Compose the full detail-field list: registered workflow fields + the two
-  // synthesized (Started/Elapsed) cells. Always show Started + Elapsed so
-  // timing info is visible without requiring workflows to declare them.
+  // Compose the full detail-field list: registered workflow fields whose
+  // `displayInGrid` isn't explicitly false + the two synthesized
+  // (Started/Elapsed) cells. Edit-only fields (e.g. separations'
+  // separationDate) stay declared on the workflow but are hidden here —
+  // they only render in the Edit Data tab.
   const allDetailFields: Array<{ key: string; label: string }> = [
-    ...detailFields,
+    ...detailFields.filter((f) => f.displayInGrid !== false),
     { key: "__started", label: "Started" },
     { key: "__elapsed", label: "Elapsed" },
   ];
