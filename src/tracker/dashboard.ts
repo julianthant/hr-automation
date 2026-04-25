@@ -1,5 +1,5 @@
 import { createServer, type Server } from "http";
-import { readFileSync, existsSync, unlinkSync, statSync, readdirSync, createReadStream } from "fs";
+import { readFileSync, existsSync, unlinkSync, statSync, readdirSync, createReadStream, watchFile, unwatchFile } from "fs";
 import { join, resolve, sep } from "path";
 import {
   readEntries,
@@ -27,6 +27,18 @@ import type { WorkflowMetadata } from "../core/types.js";
 import { PATHS } from "../config.js";
 import { stopDaemons } from "../core/daemon-client.js";
 import { enqueueFromHttp, validateEnqueueRequest } from "../core/enqueue-dispatch.js";
+import {
+  buildRetryHandler,
+  buildRetryBulkHandler,
+  buildRunWithDataHandler,
+  buildCancelQueuedHandler,
+  buildQueueBumpHandler,
+  buildDaemonsListHandler,
+  buildDaemonsSpawnHandler,
+  buildDaemonsStopHandler,
+  resolveDaemonLogPath,
+  readQueueDepth,
+} from "./dashboard-ops.js";
 import { detectFailurePattern } from "./failure-detector.js";
 import { notify } from "./notify.js";
 import {
@@ -1975,6 +1987,221 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         });
         res.end(JSON.stringify({ ok: false, error: errorMessage(e) }));
       }
+      return;
+    }
+
+    // ============================================================
+    // Dashboard ops endpoints — retry, edit-and-resume, queue
+    // mutations, daemon ops. All workflow-agnostic; each takes
+    // `workflow` in the body / query and operates on tracker / queue
+    // / daemon-registry files keyed by that workflow.
+    // ============================================================
+
+    /**
+     * Read & parse a JSON body off the request, with a hard size cap to
+     * keep the SSE server from being swamped by an unbounded POST. Used
+     * by every operations endpoint below.
+     */
+    const readJsonBody = async (
+      maxBytes = 64_536,
+    ): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; error: string }> => {
+      try {
+        const chunks: Buffer[] = [];
+        for await (const chunk of req) {
+          chunks.push(chunk as Buffer);
+          if (Buffer.concat(chunks).byteLength > maxBytes) {
+            return { ok: false, error: "Request body too large" };
+          }
+        }
+        const raw = Buffer.concat(chunks).toString("utf8").trim();
+        if (!raw) return { ok: true, body: {} };
+        return { ok: true, body: JSON.parse(raw) as Record<string, unknown> };
+      } catch {
+        return { ok: false, error: "Invalid JSON body" };
+      }
+    };
+
+    const writeJson = (statusCode: number, body: unknown): void => {
+      res.writeHead(statusCode, {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(JSON.stringify(body));
+    };
+
+    if (req.method === "POST" && url.pathname === "/api/retry") {
+      const parsed = await readJsonBody();
+      if (!parsed.ok) return writeJson(400, { ok: false, error: parsed.error });
+      const result = await buildRetryHandler(dir)({
+        workflow: String(parsed.body.workflow ?? ""),
+        id: String(parsed.body.id ?? ""),
+        runId: parsed.body.runId ? String(parsed.body.runId) : undefined,
+      });
+      writeJson(result.ok ? 202 : 400, result);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/retry-bulk") {
+      const parsed = await readJsonBody();
+      if (!parsed.ok) return writeJson(400, { ok: false, error: parsed.error });
+      const ids = Array.isArray(parsed.body.ids)
+        ? (parsed.body.ids as unknown[]).map(String)
+        : [];
+      const result = await buildRetryBulkHandler(dir)({
+        workflow: String(parsed.body.workflow ?? ""),
+        ids,
+      });
+      writeJson(202, result);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/run-with-data") {
+      const parsed = await readJsonBody();
+      if (!parsed.ok) return writeJson(400, { ok: false, error: parsed.error });
+      const data =
+        parsed.body.data && typeof parsed.body.data === "object"
+          ? (parsed.body.data as Record<string, unknown>)
+          : {};
+      const result = await buildRunWithDataHandler(dir)({
+        workflow: String(parsed.body.workflow ?? ""),
+        id: String(parsed.body.id ?? ""),
+        runId: parsed.body.runId ? String(parsed.body.runId) : undefined,
+        data,
+      });
+      writeJson(result.ok ? 202 : 400, result);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/cancel-queued") {
+      const parsed = await readJsonBody();
+      if (!parsed.ok) return writeJson(400, { ok: false, error: parsed.error });
+      const result = await buildCancelQueuedHandler(dir)({
+        workflow: String(parsed.body.workflow ?? ""),
+        id: String(parsed.body.id ?? ""),
+      });
+      const status = result.ok ? 200 : (result.status ?? 400);
+      writeJson(status, result);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/queue/bump") {
+      const parsed = await readJsonBody();
+      if (!parsed.ok) return writeJson(400, { ok: false, error: parsed.error });
+      const result = await buildQueueBumpHandler(dir)({
+        workflow: String(parsed.body.workflow ?? ""),
+        id: String(parsed.body.id ?? ""),
+      });
+      const status = result.ok ? 200 : (result.status ?? 400);
+      writeJson(status, result);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/daemons") {
+      const workflow = url.searchParams.get("workflow") ?? undefined;
+      const list = await buildDaemonsListHandler(dir)(workflow ?? undefined);
+      writeJson(200, list);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/daemons/spawn") {
+      const parsed = await readJsonBody();
+      if (!parsed.ok) return writeJson(400, { ok: false, error: parsed.error });
+      const count = typeof parsed.body.count === "number" ? parsed.body.count : 1;
+      // Spawn is fire-and-forget — Duo can take up to 5min and we don't want
+      // to hold an HTTP connection open for that long. Frontend re-polls
+      // /api/daemons to discover the new daemon as it comes online.
+      const handler = buildDaemonsSpawnHandler(dir);
+      void handler({
+        workflow: String(parsed.body.workflow ?? ""),
+        count,
+      }).catch((err) => {
+        log.error(`[POST /api/daemons/spawn] background spawn failed: ${errorMessage(err)}`);
+      });
+      writeJson(202, { ok: true, queued: count });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/daemons/stop") {
+      const parsed = await readJsonBody();
+      if (!parsed.ok) return writeJson(400, { ok: false, error: parsed.error });
+      const result = await buildDaemonsStopHandler(dir)({
+        workflow: parsed.body.workflow ? String(parsed.body.workflow) : undefined,
+        force: parsed.body.force === true,
+      });
+      writeJson(200, result);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/events/daemon-log") {
+      const pidStr = url.searchParams.get("pid") ?? "";
+      const pid = Number.parseInt(pidStr, 10);
+      if (!Number.isFinite(pid) || pid <= 0) {
+        return writeJson(400, { ok: false, error: "valid pid query param required" });
+      }
+      const path = await resolveDaemonLogPath(pid, dir);
+      if (!path) {
+        return writeJson(404, { ok: false, error: "no log file for that pid" });
+      }
+      // SSE stream of log lines. Read existing tail (last 4KB) immediately,
+      // then watchFile() for appends.
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        "Access-Control-Allow-Origin": "*",
+      });
+      let bytesSent = 0;
+      try {
+        const stat = statSync(path);
+        const tailBytes = Math.min(stat.size, 4096);
+        const startAt = Math.max(0, stat.size - tailBytes);
+        const stream = createReadStream(path, { start: startAt, end: stat.size });
+        for await (const chunk of stream) {
+          for (const line of String(chunk).split("\n")) {
+            if (!line) continue;
+            res.write(`data: ${JSON.stringify({ line, ts: new Date().toISOString() })}\n\n`);
+          }
+        }
+        bytesSent = stat.size;
+      } catch {
+        /* ignore — file may be empty */
+      }
+      const onChange = (curr: { size: number }): void => {
+        if (curr.size <= bytesSent) return;
+        try {
+          const stream = createReadStream(path, { start: bytesSent, end: curr.size });
+          let buffered = "";
+          stream.on("data", (chunk) => {
+            buffered += String(chunk);
+          });
+          stream.on("end", () => {
+            for (const line of buffered.split("\n")) {
+              if (!line) continue;
+              res.write(`data: ${JSON.stringify({ line, ts: new Date().toISOString() })}\n\n`);
+            }
+            bytesSent = curr.size;
+          });
+        } catch {
+          /* ignore */
+        }
+      };
+      watchFile(path, { interval: 500 }, onChange);
+      req.on("close", () => {
+        unwatchFile(path, onChange);
+        res.end();
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/queue-depth") {
+      // Per-workflow queue depth. Used by TopBar's queue-depth pill.
+      // Returns: { [workflow]: number }
+      const workflows = listWorkflows(dir);
+      const result: Record<string, number> = {};
+      for (const wf of workflows) {
+        result[wf] = readQueueDepth(wf, dir);
+      }
+      writeJson(200, result);
       return;
     }
 
