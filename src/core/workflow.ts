@@ -27,6 +27,49 @@ function stringifyMap(d: Record<string, unknown>): Record<string, string> {
 }
 
 /**
+ * Best-effort coercion of an arbitrary input into a `Record<string, unknown>`
+ * so it can ride on the `pending` tracker row's `input` field. Non-objects
+ * become `null` (caller skips writing the field). Does NOT clone — the
+ * returned reference is the same object the kernel got, by design: the
+ * tracker line is JSON-stringified at write time, so downstream mutation
+ * by the handler can't reach back into the file.
+ */
+function toRecord(input: unknown): Record<string, unknown> | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null
+  return input as Record<string, unknown>
+}
+
+/**
+ * Split a `prefilledData` channel out of an arbitrary input object without
+ * mutating the original. Used by the kernel's edit-and-resume path: the
+ * dashboard re-enqueues an item with `prefilledData: <user-edited fields>`,
+ * the kernel strips the channel before handing the input to the workflow's
+ * Zod schema (so the schema doesn't need to know about it), and merges the
+ * stripped values into `ctx.data` via `updateData(...)` BEFORE the handler
+ * runs. Handlers gate their extraction step on data presence (e.g.
+ * `if (!ctx.data.foo) await ctx.step("extraction", ...)`) to opt in.
+ *
+ * Returns `{ cleaned, prefilled }`. `prefilled` is null when the input has
+ * no `prefilledData` field or it's not an object — both are "no-op" cases.
+ */
+export function splitPrefilled(input: unknown): {
+  cleaned: unknown
+  prefilled: Record<string, unknown> | null
+} {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return { cleaned: input, prefilled: null }
+  }
+  const obj = input as Record<string, unknown>
+  if (!('prefilledData' in obj)) return { cleaned: input, prefilled: null }
+  const { prefilledData, ...rest } = obj
+  const prefilled =
+    prefilledData && typeof prefilledData === 'object' && !Array.isArray(prefilledData)
+      ? (prefilledData as Record<string, unknown>)
+      : null
+  return { cleaned: rest, prefilled }
+}
+
+/**
  * Build the richness-hook bundle for `withTrackedWorkflow` from a workflow
  * config. Extracted so all three modes (runWorkflow, runWorkflowBatch,
  * runWorkflowPool) pass the identical shape — keeps the runtime warning,
@@ -93,6 +136,17 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
   args: RunOneItemOpts<TData, TSteps>,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const { wf, session, item, itemId, runId, trackerDir, callerPreEmits } = args
+  // Strip the kernel-level prefilledData channel out of the input before it
+  // reaches the handler. `cleaned` is what the handler sees; `prefilled`
+  // gets merged into ctx.data via updateData(...) before invocation so the
+  // handler's gating checks (`if (!ctx.data.foo) ...`) see the prefilled
+  // values and skip extraction. The original `item` reference (still
+  // including prefilledData) is preserved for the pending row's `input`
+  // field — retry recovers the channel verbatim, so the next run is
+  // idempotent without the dashboard remembering it had to re-attach the
+  // channel.
+  const { cleaned: cleanedItem, prefilled } = splitPrefilled(item)
+  const handlerInput = cleanedItem as TData
 
   if (args.trackerStub) {
     const stepper = new Stepper({
@@ -102,6 +156,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       emitStep: () => {},
       emitData: () => {},
       emitFailed: () => {},
+      emitSkipped: () => {},
     })
     const ctx = makeCtx<TSteps, TData>({
       session,
@@ -115,8 +170,9 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
     stepper.setScreenshotFn(ctx.screenshot)
     try {
       if (args.preHandler) await args.preHandler()
+      if (prefilled) ctx.updateData(prefilled as Partial<TData & Record<string, unknown>>)
       try {
-        await wf.config.handler(ctx, item)
+        await wf.config.handler(ctx, handlerInput)
       } catch (err) {
         // Capture state for any throw that escapes ctx.step. In-step throws
         // already get a screenshot via Stepper.step's catch, so in that
@@ -138,8 +194,11 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
   // (unless the caller opted into preEmitPending) so the dashboard shows the
   // row before the first step runs; withTrackedWorkflow skips its own pending
   // emit when preAssignedRunId is provided.
-  const seedData = wf.config.initialData?.(item) ?? {}
+  const seedData = wf.config.initialData?.(handlerInput) ?? {}
   const stringifiedSeed = stringifyMap(seedData)
+  // The full input (including any prefilledData channel) rides on the
+  // pending row so retry / edit-and-resume can reconstruct the call.
+  const inputForRow = toRecord(item)
   if (!callerPreEmits) {
     // Also compute __name / __id so the queue shows the friendly name from t=0.
     const nameFn = wf.config.getName
@@ -157,6 +216,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
         runId,
         status: 'pending',
         data: enriched,
+        ...(inputForRow ? { input: inputForRow } : {}),
       },
       trackerDir,
     )
@@ -190,7 +250,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       await withTrackedWorkflow(
         wf.config.name,
         itemId,
-        async (setStep, updateData, _onCleanup, _sessionCtx, emitFailed) => {
+        async (setStep, updateData, _onCleanup, _sessionCtx, emitFailed, _trackerRunId, emitSkipped) => {
           const stepper = new Stepper({
             workflow: wf.config.name,
             itemId,
@@ -198,6 +258,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
             emitStep: setStep,
             emitData: updateData,
             emitFailed,
+            emitSkipped,
           })
           const ctx = makeCtx<TSteps, TData>({
             session,
@@ -210,8 +271,9 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
           })
           stepper.setScreenshotFn(ctx.screenshot)
           if (args.preHandler) await args.preHandler()
+          if (prefilled) ctx.updateData(prefilled as Partial<TData & Record<string, unknown>>)
           try {
-            await wf.config.handler(ctx, item)
+            await wf.config.handler(ctx, handlerInput)
           } catch (err) {
             // Covers throws that escape ctx.step (e.g. separations'
             // resolveJobSummaryResult unwrap or the post-step
@@ -227,6 +289,10 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
           preAssignedInstance: args.preAssignedInstance,
           dir: trackerDir,
           initialData: stringifiedSeed,
+          // `input` only matters when this branch owns the pending emit
+          // (callerPreEmits=false above). When the caller pre-emitted, the
+          // input is already on that row — no need to re-stamp.
+          ...(callerPreEmits ? {} : (inputForRow ? { input: inputForRow } : {})),
         },
       )
     }, trackerDir)
@@ -343,15 +409,25 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
   data: TData,
   opts: RunOpts = {},
 ): Promise<void> {
+  // Strip the kernel-level prefilledData channel out before anything else.
+  // The schema validates the cleaned input (so workflow schemas don't need
+  // to declare the channel), and `prefilled` is pre-merged into ctx.data so
+  // handler-side `if (!ctx.data.foo) await ctx.step("extraction", ...)`
+  // gates kick in. The full `data` (with channel) rides on the pending row
+  // for retry.
+  const { cleaned: cleanedData, prefilled } = splitPrefilled(data)
+  const handlerInput = cleanedData as TData
+  const inputForRow = toRecord(data)
+
   // 1. Validate data. Wrap to ensure error message matches /validation/i.
   try {
-    wf.config.schema.parse(data)
+    wf.config.schema.parse(handlerInput)
   } catch (err) {
     throw new Error(`validation error: ${err instanceof Error ? err.message : String(err)}`)
   }
 
   // 2. Derive itemId from common id fields, fall back to UUID.
-  const itemId = opts.itemId ?? deriveItemId(data, randomUUID())
+  const itemId = opts.itemId ?? deriveItemId(handlerInput, randomUUID())
 
   const run = async (
     setStep: (s: string) => void,
@@ -381,6 +457,12 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
      * generator — either a UUID from opts, or a fresh UUID.
      */
     forcedRunId?: string,
+    /**
+     * Routes Stepper's `skipStep` through the tracker. Wired by the
+     * real-run branch from withTrackedWorkflow's body callback; the
+     * trackerStub branch passes a no-op.
+     */
+    emitSkipped: (step: string) => void = () => {},
   ): Promise<void> => {
     const runId = forcedRunId ?? opts.preAssignedRunId ?? randomUUID()
     const stepper = new Stepper({
@@ -391,6 +473,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
       // Tracker's updateData now accepts unknown; it stringifies at the write boundary.
       emitData: updateData,
       emitFailed: (step, error) => setStep(`${step}:failed:${error}`),
+      emitSkipped,
     })
 
     const session = await Session.launch(wf.config.systems, {
@@ -427,7 +510,8 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
 
     try {
       try {
-        await wf.config.handler(ctx, data)
+        if (prefilled) ctx.updateData(prefilled as Partial<TData & Record<string, unknown>>)
+        await wf.config.handler(ctx, handlerInput)
       } catch (err) {
         // Same screenshot-on-handler-throw hoist as runOneItem (see the
         // two other call sites). Best-effort; original throw always wins.
@@ -457,11 +541,11 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
   // writes a `failed` tracker entry + log entry before exiting. A kernel
   // handler on top would just duplicate cleanup, so don't install one.
   await withLogContext(wf.config.name, String(itemId), async () => {
-    const seedData = wf.config.initialData?.(data) ?? {}
+    const seedData = wf.config.initialData?.(handlerInput) ?? {}
     await withTrackedWorkflow(
       wf.config.name,
       String(itemId),
-      async (setStep, updateData, _onCleanup, sessionCtx, emitFailed, trackerRunId) => {
+      async (setStep, updateData, _onCleanup, sessionCtx, emitFailed, trackerRunId, emitSkipped) => {
         // Strategy B: mutable holder so onReady can swap in a real ScreenshotFn.
         const boundScreenshot: { fn: import('./types.js').ScreenshotFn } = {
           fn: async () => ({ kind: 'error', label: '', step: null, ts: Date.now(), files: [] }),
@@ -480,13 +564,14 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
             emit: (ev) => emitScreenshotEvent(ev, { dir: trackerDir }),
             currentStep: () => stepper.getCurrentStep(),
           })
-        }, trackerRunId)
+        }, trackerRunId, emitSkipped)
       },
       {
         ...buildTrackerOpts(wf),
         preAssignedRunId: opts.preAssignedRunId,
         dir: opts.trackerDir,
         initialData: stringifyMap(seedData),
+        ...(inputForRow ? { input: inputForRow } : {}),
       },
     )
   }, opts.trackerDir)
@@ -505,10 +590,14 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
     return runWorkflowSharedContextPool(wf, items, opts)
   }
 
-  // Sequential mode: validate all items upfront.
+  // Sequential mode: validate all items upfront. Strip the prefilledData
+  // channel before parsing so workflow schemas don't have to know about
+  // the kernel-level edit-and-resume contract — strict()-mode schemas
+  // would otherwise reject the channel as an unknown key.
   items.forEach((item) => {
     try {
-      wf.config.schema.parse(item)
+      const { cleaned } = splitPrefilled(item)
+      wf.config.schema.parse(cleaned)
     } catch (err) {
       throw new Error(`validation error: ${err instanceof Error ? err.message : String(err)}`)
     }

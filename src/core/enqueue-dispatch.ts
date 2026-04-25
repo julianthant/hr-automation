@@ -14,7 +14,7 @@
  * workflow-specific backend wiring.
  */
 import { loadWorkflow } from "./workflow-loaders.js";
-import { deriveItemId } from "./workflow.js";
+import { deriveItemId, splitPrefilled } from "./workflow.js";
 import { trackEvent } from "../tracker/jsonl.js";
 import { log } from "../utils/log.js";
 
@@ -104,7 +104,13 @@ export async function enqueueFromHttp(
   // but surfacing it early lets us return 400 with a precise message instead
   // of a generic 500 for schema mismatches).
   for (const input of inputs) {
-    const result = wf.config.schema.safeParse(input);
+    // Strip the kernel-level prefilledData channel before validating so
+    // strict()-mode workflow schemas don't reject it as unknown. The
+    // channel rides through to the daemon via the queue file (input is
+    // serialized verbatim) and the kernel re-strips at handler-invocation
+    // time — see splitPrefilled in src/core/workflow.ts.
+    const { cleaned } = splitPrefilled(input);
+    const result = wf.config.schema.safeParse(cleaned);
     if (!result.success) {
       return {
         ok: false,
@@ -128,6 +134,14 @@ export async function enqueueFromHttp(
         onPreEmitPending: (item, runId) => {
           const data = serializeInputForTracker(item);
           const id = deriveItemId(item, runId);
+          // Persist the original input verbatim on the pending row so the
+          // dashboard's retry / edit-and-resume features can reconstruct
+          // the call without per-workflow input-shaping logic. See the
+          // `input` field on `TrackerEntry` in src/tracker/jsonl.ts.
+          const input =
+            item && typeof item === "object" && !Array.isArray(item)
+              ? (item as Record<string, unknown>)
+              : undefined;
           trackEvent(
             {
               workflow: wf.config.name,
@@ -136,6 +150,7 @@ export async function enqueueFromHttp(
               runId,
               status: "pending",
               data,
+              ...(input ? { input } : {}),
             },
             trackerDir,
           );

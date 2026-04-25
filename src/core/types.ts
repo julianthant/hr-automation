@@ -68,12 +68,14 @@ export interface BatchConfig {
 
 /**
  * Labeled or legacy `detailFields` entry. The registry normalizes both shapes
- * into `{ key, label }` for the dashboard — workflows can continue to declare
- * plain `string[]` (auto-title-cased label) or upgrade to the explicit shape.
+ * into `{ key, label, editable }` for the dashboard — workflows can continue
+ * to declare plain `string[]` (auto-title-cased label, non-editable) or
+ * upgrade to the explicit shape with optional `editable: true` to opt the
+ * field into the dashboard's Edit Data tab.
  */
 export type DetailField<TData> =
   | (keyof TData & string)
-  | { key: string; label: string }
+  | { key: string; label: string; editable?: boolean }
 
 export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   name: string
@@ -137,6 +139,14 @@ export interface Ctx<TSteps extends readonly string[], TData> {
   page(id: string): Promise<Page>
   step<R>(name: TSteps[number], fn: () => Promise<R>): Promise<R>
   markStep(name: TSteps[number]): void
+  /**
+   * Announce that a step is intentionally bypassed (e.g. extracted data was
+   * pre-populated by an edit-and-resume run, so extraction need not run).
+   * Emits a `skipped` tracker row for that step name. Updates `currentStep`
+   * the same way `markStep` does, so subsequent step transitions advance the
+   * pipeline correctly.
+   */
+  skipStep(name: TSteps[number]): void
   parallel<T extends Record<string, () => Promise<unknown>>>(
     tasks: T,
   ): Promise<{ [K in keyof T]: PromiseSettledResult<Awaited<ReturnType<T[K]>>> }>
@@ -168,8 +178,11 @@ export interface WorkflowMetadata {
   label: string
   steps: readonly string[]
   systems: string[]
-  /** Normalized labeled detailFields — always `{ key, label }` on the wire. */
-  detailFields: Array<{ key: string; label: string }>
+  /**
+   * Normalized labeled detailFields — always `{ key, label, editable }` on
+   * the wire. `editable` is omitted when false (legacy + most fields).
+   */
+  detailFields: Array<{ key: string; label: string; editable?: boolean }>
 }
 
 export interface RegisteredWorkflow<TData, TSteps extends readonly string[]> {

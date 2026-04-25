@@ -128,6 +128,15 @@ export interface TrackerEntry {
    * falls back to `data` when a key is missing from `typedData`.
    */
   typedData?: Record<string, TypedValue>;
+  /**
+   * Original validated input the workflow was invoked with. Set ONLY on
+   * `pending` rows by the enqueue / kernel pre-emit path. Subsequent status
+   * updates (running/done/failed) do not touch this field — retry & edit-and-
+   * resume read it from the run's pending entry. Absent on rows written
+   * before this field landed; consumers must fall back to `data`-based
+   * reconstruction or report "input unavailable" rather than crashing.
+   */
+  input?: Record<string, unknown>;
   error?: string;
 }
 
@@ -247,6 +256,13 @@ export interface WithTrackedWorkflowOpts {
    * dashboard's `EntryItem` still renders an instance chip per row.
    */
   preAssignedInstance?: string;
+  /**
+   * Original validated input the run was invoked with. Stamped onto the
+   * initial `pending` tracker row only. Used by the dashboard's retry / edit-
+   * and-resume features to reconstruct the input verbatim. Optional — when
+   * absent, the pending row is written without the `input` field.
+   */
+  input?: Record<string, unknown>;
   /** Override tracker directory — defaults to DEFAULT_DIR (`.tracker`). Mainly for test isolation. */
   dir?: string;
 }
@@ -276,6 +292,15 @@ export async function withTrackedWorkflow<T>(
      * tracker stamps a different one on its rows (prior bug fixed 2026-04-23).
      */
     runId: string,
+    /**
+     * Emit a "this step was bypassed" signal — writes a `skipped` tracker
+     * row that the dashboard's StepPipeline can render distinctly from
+     * `done`. Use for edit-and-resume style flows where extracted data was
+     * pre-populated and the extraction step is intentionally not executed.
+     * The bypassed step name still becomes `currentStep` so subsequent
+     * step transitions advance the pipeline correctly.
+     */
+    emitSkipped: (step: string) => void,
   ) => Promise<T>,
   opts: WithTrackedWorkflowOpts = {},
 ): Promise<T> {
@@ -316,6 +341,8 @@ export async function withTrackedWorkflow<T>(
       status,
       data,
       ...(Object.keys(typedData).length > 0 ? { typedData } : {}),
+      // `input` rides ONLY on the initial pending row (see TrackerEntry doc).
+      ...(status === "pending" && opts.input ? { input: opts.input } : {}),
       ...extra,
     }, dir);
   };
@@ -402,6 +429,16 @@ export async function withTrackedWorkflow<T>(
     emitStepChange(instanceName, encoded, dir)
   }
 
+  // emitSkipped: announce a bypassed step. Writes a single `skipped` tracker
+  // row with the step name. Updates lastStep so a later terminal failure
+  // attributes correctly. No corresponding emitStepChange — the dashboard
+  // SessionPanel's "current step" tracking treats skipped as a no-op
+  // advance for live state (the session-events stream covers running steps).
+  const emitSkippedFn = (step: string) => {
+    lastStep = step
+    emit("skipped", { step })
+  }
+
   try {
     const result = await fn(
       (step) => { lastStep = step; emit("running", { step }); emitStepChange(instanceName, step, dir); },
@@ -419,6 +456,7 @@ export async function withTrackedWorkflow<T>(
       session,
       emitFailedFn,
       runId,
+      emitSkippedFn,
     );
 
     // Runtime warning (Option A) — any declared detailField key that the

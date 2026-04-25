@@ -9,6 +9,13 @@ export interface StepperOpts {
   emitData: (data: Record<string, unknown>) => void
   emitFailed: (step: string, error: string) => void
   /**
+   * Announce that a step was intentionally bypassed. Routes to the tracker's
+   * `skipped` status emit. Optional — older callers that haven't been
+   * updated will see the no-op default and `skipStep` will silently do
+   * nothing for them, which is safe (no false `running` row written).
+   */
+  emitSkipped?: (name: string) => void
+  /**
    * Optional screenshot callable invoked inside `step`'s catch, BEFORE `emitFailed` runs.
    * When present, the stepper calls it with { kind: "error", label: stepName }.
    * Errors are swallowed; the original throw always wins.
@@ -49,6 +56,19 @@ export class Stepper {
   markStep(name: string): void {
     this.currentStep = name
     this.opts.emitStep(name)
+  }
+
+  /**
+   * Announce that a step was intentionally bypassed. Updates `currentStep`
+   * and fires `emitSkipped` (if wired) so the dashboard's pipeline shows a
+   * distinct "skipped" treatment rather than the green "done" dot. Use for
+   * edit-and-resume-style flows where extracted data was pre-populated by
+   * the kernel's `prefilledData` channel and the extraction step is
+   * intentionally not executed.
+   */
+  skipStep(name: string): void {
+    this.currentStep = name
+    this.opts.emitSkipped?.(name)
   }
 
   updateData(patch: Record<string, unknown>): void {
