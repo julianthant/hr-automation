@@ -147,6 +147,14 @@ export interface Ctx<TSteps extends readonly string[], TData> {
    * pipeline correctly.
    */
   skipStep(name: TSteps[number]): void
+  /**
+   * Snapshot of the accumulated tracker data as written so far via
+   * `updateData(...)`. Includes anything the kernel pre-merged from the
+   * input's `prefilledData` channel (edit-and-resume), so handlers can
+   * gate steps on data presence (`if (!ctx.data.foo) await ctx.step(...)`).
+   * Returns a fresh shallow copy each access; mutating it has no effect.
+   */
+  readonly data: Record<string, unknown>
   parallel<T extends Record<string, () => Promise<unknown>>>(
     tasks: T,
   ): Promise<{ [K in keyof T]: PromiseSettledResult<Awaited<ReturnType<T[K]>>> }>
