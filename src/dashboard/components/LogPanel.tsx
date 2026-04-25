@@ -3,6 +3,7 @@ import { TerminalSquare } from "lucide-react";
 import { StepPipeline } from "./StepPipeline";
 import { LogStream } from "./LogStream";
 import { RunSelector } from "./RunSelector";
+import { RetryButton } from "./RetryButton";
 import { EmptyState } from "./EmptyState";
 import { ScreenshotsPanel } from "./ScreenshotsPanel";
 import { useLogs } from "./hooks/useLogs";
@@ -167,7 +168,12 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
             </>
           )}
         </div>
-        <RunSelector runs={runs} activeRunId={activeRunId} onSelect={setActiveRunId} />
+        <div className="flex items-center gap-1">
+          <RunSelector runs={runs} activeRunId={activeRunId} onSelect={setActiveRunId} />
+          {runStatus === "failed" && entry && (
+            <RetryButton workflow={entry.workflow} id={entry.id} size="md" />
+          )}
+        </div>
       </div>
 
       {/* Detail grid — rendered from registry metadata via formatTrackerValue;

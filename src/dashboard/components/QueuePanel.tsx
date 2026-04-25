@@ -3,6 +3,7 @@ import { Search, Inbox, X, Download, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { StatPills } from "./StatPills";
 import { EntryItem } from "./EntryItem";
+import { BulkRetryBar } from "./BulkRetryBar";
 import { EmptyState } from "./EmptyState";
 import { QuickRunPanel } from "./QuickRunPanel";
 import {
@@ -257,6 +258,19 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
 
       {/* ── Entry list ── */}
       <div className="flex-1 overflow-y-auto">
+        {/* Sticky bulk-retry bar — only present when ≥1 failed entry is in
+            the current filter view. The sticky scope is THIS scroll
+            container (the entry list), not the viewport. */}
+        {(() => {
+          const failedIds = filtered
+            .filter((e) => e.status === "failed")
+            .map((e) => e.id);
+          if (failedIds.length === 0) return null;
+          // Pick a workflow name from any failed entry — within QueuePanel
+          // all entries belong to the selected workflow, so the first wins.
+          const wf = filtered.find((e) => e.status === "failed")?.workflow ?? "";
+          return <BulkRetryBar workflow={wf} failedIds={failedIds} />;
+        })()}
         {loading ? (
           <div className="space-y-0">
             {Array.from({ length: 6 }).map((_, i) => (

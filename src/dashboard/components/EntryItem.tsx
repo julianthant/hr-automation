@@ -3,6 +3,8 @@ import { X } from "lucide-react";
 import type { TrackerEntry } from "./types";
 import { resolveEntryName } from "./entry-display";
 import { useElapsed, formatDuration } from "./hooks/useElapsed";
+import { RetryButton } from "./RetryButton";
+import { QueueItemControls } from "./QueueItemControls";
 
 interface EntryItemProps {
   entry: TrackerEntry;
@@ -116,6 +118,15 @@ export function EntryItem({ entry, selected, onClick }: EntryItemProps) {
         )}
         {(isDone || isFailed) && duration && (
           <span className="flex-shrink-0">{duration}</span>
+        )}
+        {/* Inline ops controls — failed rows get retry; pending rows get
+            cancel + bump. Stop event propagation inside the buttons so
+            the row's onClick (selecting the entry) doesn't fire. */}
+        {isFailed && (
+          <RetryButton workflow={entry.workflow} id={entry.id} className="flex-shrink-0 ml-1" />
+        )}
+        {isPending && (
+          <QueueItemControls workflow={entry.workflow} id={entry.id} className="flex-shrink-0 ml-1" />
         )}
       </div>
     </div>
