@@ -68,14 +68,21 @@ export interface BatchConfig {
 
 /**
  * Labeled or legacy `detailFields` entry. The registry normalizes both shapes
- * into `{ key, label, editable }` for the dashboard — workflows can continue
- * to declare plain `string[]` (auto-title-cased label, non-editable) or
- * upgrade to the explicit shape with optional `editable: true` to opt the
- * field into the dashboard's Edit Data tab.
+ * into `{ key, label, editable, displayInGrid }` for the dashboard — workflows
+ * can continue to declare plain `string[]` (auto-title-cased label,
+ * non-editable, default-displayed) or upgrade to the explicit shape with
+ * optional flags:
+ *   - `editable: true`        → opts the field into the dashboard's Edit Data tab.
+ *   - `displayInGrid: false`  → hides the field from LogPanel's detail grid
+ *                                (still rendered in the Edit Data tab when editable).
+ *
+ * The two flags are independent: a field can be edit-only (off in grid, on in
+ * edit form), display-only (default — on in grid, off in edit form), both, or
+ * declared but hidden everywhere (rare, mostly useful for tracker-only data).
  */
 export type DetailField<TData> =
   | (keyof TData & string)
-  | { key: string; label: string; editable?: boolean }
+  | { key: string; label: string; editable?: boolean; displayInGrid?: boolean }
 
 export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   name: string
@@ -187,10 +194,11 @@ export interface WorkflowMetadata {
   steps: readonly string[]
   systems: string[]
   /**
-   * Normalized labeled detailFields — always `{ key, label, editable }` on
-   * the wire. `editable` is omitted when false (legacy + most fields).
+   * Normalized labeled detailFields — always `{ key, label, editable?, displayInGrid? }`
+   * on the wire. `editable` and `displayInGrid` are omitted when they
+   * match the default (false + true respectively).
    */
-  detailFields: Array<{ key: string; label: string; editable?: boolean }>
+  detailFields: Array<{ key: string; label: string; editable?: boolean; displayInGrid?: boolean }>
 }
 
 export interface RegisteredWorkflow<TData, TSteps extends readonly string[]> {

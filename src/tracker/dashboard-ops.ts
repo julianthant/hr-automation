@@ -48,6 +48,29 @@ export function findEntryInput(
   return { input: candidates[0].input as Record<string, unknown> };
 }
 
+/**
+ * Latest accumulated `data` for an id across all rows (any status).
+ * Used by edit-and-resume to seed prefilledData with non-editable fields
+ * carried over from the previous run (e.g. separations' rawTerminationType
+ * — needed by `mapReasonCode` downstream but not surfaced as an editable
+ * field in the dashboard). Excludes kernel-internal keys (`__name`,
+ * `__id`, `instance`) so those don't leak into a fresh run.
+ */
+export function findLatestEntryData(
+  workflow: string,
+  id: string,
+  dir: string,
+): Record<string, string> {
+  const entries = readEntries(workflow, dir).filter((e) => e.id === id && e.data);
+  if (entries.length === 0) return {};
+  entries.sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
+  const data = { ...(entries[0].data ?? {}) };
+  delete data.__name;
+  delete data.__id;
+  delete data.instance;
+  return data;
+}
+
 export interface RetryRequest {
   workflow: string;
   id: string;
@@ -114,7 +137,15 @@ export function buildRunWithDataHandler(dir: string) {
     }
     const lookup = findEntryInput(req.workflow, req.id, req.runId, dir);
     if ("error" in lookup) return { ok: false, error: lookup.error };
-    const inputWithPrefill = { ...lookup.input, prefilledData: req.data };
+    // Merge the previous run's accumulated data with the user's overrides.
+    // The user's edits win on key collision. This carries non-editable
+    // fields (e.g. separations' rawTerminationType — used by downstream
+    // mapReasonCode but not surfaced as an editable detail field) into
+    // the bypass path so the handler's gating check sees the full set
+    // of required fields.
+    const previousData = findLatestEntryData(req.workflow, req.id, dir);
+    const mergedPrefill = { ...previousData, ...req.data };
+    const inputWithPrefill = { ...lookup.input, prefilledData: mergedPrefill };
     const result = await enqueueFromHttp(req.workflow, [inputWithPrefill], dir);
     if (!result.ok) return { ok: false, error: result.error ?? "enqueue failed" };
     return { ok: true };

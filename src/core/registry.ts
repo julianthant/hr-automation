@@ -67,17 +67,22 @@ export function autoLabel(key: string): string {
 
 /**
  * Normalize a `WorkflowConfig.detailFields` entry (string or labeled) into the
- * wire shape `{ key, label, editable? }`. Exported for tests and for
- * `defineWorkflow`'s metadata construction. String entries default to
- * non-editable (the legacy shape predates the edit-and-resume opt-in).
+ * wire shape `{ key, label, editable?, displayInGrid? }`. Exported for tests
+ * and for `defineWorkflow`'s metadata construction. String entries default to
+ * non-editable, displayed-in-grid (the legacy shape predates both flags).
+ *
+ * Defaults are dropped from the wire shape so default rows stay compact —
+ * only non-default values ride through.
  */
 export function normalizeDetailField(
-  entry: string | { key: string; label: string; editable?: boolean },
-): { key: string; label: string; editable?: boolean } {
+  entry: string | { key: string; label: string; editable?: boolean; displayInGrid?: boolean },
+): { key: string; label: string; editable?: boolean; displayInGrid?: boolean } {
   if (typeof entry === 'string') return { key: entry, label: autoLabel(entry) }
-  // Drop `editable: false` from the wire shape so default rows stay compact;
-  // only `true` rides through.
-  return entry.editable
-    ? { key: entry.key, label: entry.label, editable: true }
-    : { key: entry.key, label: entry.label }
+  const out: { key: string; label: string; editable?: boolean; displayInGrid?: boolean } = {
+    key: entry.key,
+    label: entry.label,
+  }
+  if (entry.editable) out.editable = true
+  if (entry.displayInGrid === false) out.displayInGrid = false
+  return out
 }
