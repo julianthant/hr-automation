@@ -13,13 +13,21 @@ interface LogStreamProps {
   loading: boolean;
   /** Rendered in place of the log list when the Screenshots tab is active. */
   screenshotsSlot?: ReactNode;
+  /**
+   * Rendered in place of the log list when the Edit Data tab is active.
+   * Tab itself only appears in the filter bar when this slot is provided
+   * (see editDataAvailable below).
+   */
+  editDataSlot?: ReactNode;
+  /** Whether the workflow has any editable fields — gates the Edit Data tab. */
+  editDataAvailable?: boolean;
 }
 
 const FILTER_TABS: {
   key: string;
   label: string;
   categories: LogCategory[];
-  source?: "events" | "screenshots";
+  source?: "events" | "screenshots" | "edit-data";
 }[] = [
   { key: "all", label: "All", categories: [] },
   { key: "errors", label: "Errors", categories: ["error"] },
@@ -29,13 +37,14 @@ const FILTER_TABS: {
   { key: "extract", label: "Extract", categories: ["extract"] },
   { key: "events", label: "Events", categories: [], source: "events" },
   { key: "screenshots", label: "Screenshots", categories: [], source: "screenshots" },
+  { key: "edit-data", label: "Edit Data", categories: [], source: "edit-data" },
 ];
 
 type DisplayItem =
   | { kind: "log"; entry: CollapsedLogEntry }
   | { kind: "event"; entry: RunEvent };
 
-export function LogStream({ logs, events = [], loading, screenshotsSlot }: LogStreamProps) {
+export function LogStream({ logs, events = [], loading, screenshotsSlot, editDataSlot, editDataAvailable }: LogStreamProps) {
   const [filter, setFilter] = useState("all");
   const [autoScroll, setAutoScroll] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -91,7 +100,7 @@ export function LogStream({ logs, events = [], loading, screenshotsSlot }: LogSt
     <>
       {/* Filter tabs */}
       <div className="flex items-center gap-0.5 px-6 py-2 border-b border-border flex-shrink-0">
-        {FILTER_TABS.map((tab) => (
+        {FILTER_TABS.filter((t) => t.key !== "edit-data" || editDataAvailable).map((tab) => (
           <button
             key={tab.key}
             onClick={() => setFilter(tab.key)}
@@ -112,6 +121,17 @@ export function LogStream({ logs, events = [], loading, screenshotsSlot }: LogSt
           {screenshotsSlot ?? (
             <div className="px-6 py-4 text-sm text-muted-foreground">
               No screenshots captured for this run yet.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Edit Data slot — shown when Edit Data tab is active and the workflow opts in */}
+      {tab?.source === "edit-data" && (
+        <div className="flex-1 overflow-y-auto border-b border-border flex">
+          {editDataSlot ?? (
+            <div className="flex-1 px-6 py-4 text-sm text-muted-foreground">
+              Edit Data is unavailable for this run.
             </div>
           )}
         </div>
