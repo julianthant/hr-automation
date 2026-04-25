@@ -1,6 +1,7 @@
 import { useSessions } from "./hooks/useSessions";
 import { WorkflowBox } from "./WorkflowBox";
 import { SelectorWarningsPanel } from "./SelectorWarningsPanel";
+import { DaemonsSection } from "./DaemonsSection";
 
 /**
  * Right rail of the dashboard. The "SESSIONS" header label + Monitor icon
@@ -29,6 +30,12 @@ export function SessionPanel() {
   return (
     <div className="w-[240px] min-[1440px]:w-[280px] 2xl:w-[320px] flex-shrink-0 flex flex-col bg-card overflow-hidden">
       <div className="flex-1 overflow-y-auto p-2 border-b border-border">
+        {/* Alive daemons surface above workflow instances. The two
+            concepts are distinct: daemons are persistent processes
+            holding browsers + Duo state, instances are batch-scoped
+            run lifecycles. Folding them into one panel keeps the
+            right rail focused on "what's alive on this machine." */}
+        <DaemonsSection />
         {active.length === 0 ? (
           <div className="text-[11px] text-muted-foreground px-1.5 py-2">No active workflows</div>
         ) : (
