@@ -6,6 +6,7 @@ import { RunSelector } from "./RunSelector";
 import { RetryButton } from "./RetryButton";
 import { EmptyState } from "./EmptyState";
 import { ScreenshotsPanel } from "./ScreenshotsPanel";
+import { EditDataTab } from "./EditDataTab";
 import { useLogs } from "./hooks/useLogs";
 import { useRunEvents } from "./hooks/useRunEvents";
 import { useElapsed, formatDuration } from "./hooks/useElapsed";
@@ -245,6 +246,8 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
             date={date}
           />
         }
+        editDataAvailable={detailFields.some((f) => f.editable)}
+        editDataSlot={<EditDataTab workflow={workflow} entry={entry ?? null} />}
       />
     </div>
   );

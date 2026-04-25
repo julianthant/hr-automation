@@ -6,8 +6,12 @@ export interface WorkflowMetadata {
   label: string
   steps: string[]
   systems: string[]
-  /** Labeled detailFields — always `{ key, label }` from /api/workflow-definitions. */
-  detailFields: Array<{ key: string; label: string }>
+  /**
+   * Labeled detailFields — always `{ key, label, editable? }` from
+   * /api/workflow-definitions. `editable: true` opts the field into the
+   * dashboard's Edit Data tab; absent / false means display-only.
+   */
+  detailFields: Array<{ key: string; label: string; editable?: boolean }>
 }
 
 const WorkflowsContext = createContext<WorkflowMetadata[] | null>(null)
