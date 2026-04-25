@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Toaster, toast } from "sonner";
+import { TooltipProvider } from "./components/ui/tooltip";
 import { TopBar } from "./components/TopBar";
 import { QueuePanel } from "./components/QueuePanel";
 import { LogPanel } from "./components/LogPanel";
@@ -117,6 +118,7 @@ export default function App() {
   const selectedEntry = entries.find((e) => e.id === selectedId) || null;
 
   return (
+    <TooltipProvider delayDuration={150} skipDelayDuration={300}>
     <div className="flex flex-col h-screen">
       <Toaster
         position="bottom-right"
@@ -155,5 +157,6 @@ export default function App() {
         <SessionPanel />
       </div>
     </div>
+    </TooltipProvider>
   );
 }
