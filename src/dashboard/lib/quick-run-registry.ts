@@ -48,7 +48,7 @@ export interface QuickRunConfig {
  * piece, drops empties, and maps each piece to `{ [fieldName]: value }`.
  * Used by separations (`docId`), onboarding (`email`), and
  * oath-signature (`emplId`) — any workflow whose Zod schema has exactly
- * one required string field.
+ * one required string field AND whose values never contain commas.
  */
 export function parseCommaSeparated(fieldName: string) {
   return (raw: string): QuickRunParseResult => {
@@ -66,10 +66,37 @@ export function parseCommaSeparated(fieldName: string) {
   };
 }
 
+/**
+ * Semicolon-separated single-string-field parser. Use when the value
+ * itself may contain commas — e.g. eid-lookup takes `"Last, First"` name
+ * strings, so the top-level separator must be `;`. Trims whitespace
+ * around the semicolons (so `"Smith, John ; Doe, Jane"` is fine) and
+ * drops empties.
+ */
+export function parseSemicolonSeparated(fieldName: string) {
+  return (raw: string): QuickRunParseResult => {
+    const pieces = raw
+      .split(";")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (pieces.length === 0) {
+      return { ok: false, error: `Enter at least one ${fieldName}` };
+    }
+    return {
+      ok: true,
+      inputs: pieces.map((value) => ({ [fieldName]: value })),
+    };
+  };
+}
+
 export const QUICK_RUN_REGISTRY: Record<string, QuickRunConfig> = {
   separations: {
     placeholder: "Enter doc IDs, comma-separated (e.g. 3930, 3929)",
     parseInput: parseCommaSeparated("docId"),
+  },
+  "eid-lookup": {
+    placeholder: 'Enter names, semicolon-separated (e.g. Smith, John; Doe, Jane)',
+    parseInput: parseSemicolonSeparated("name"),
   },
 };
 

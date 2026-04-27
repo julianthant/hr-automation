@@ -289,6 +289,82 @@ export class Session {
   }
 
   /**
+   * Capture a screenshot of the entire page content, including content inside
+   * scrollable inner containers (Kuali modals, PeopleSoft iframes with
+   * fixed-height overflow wrappers). `fullPage: true` alone only expands the
+   * document height — it doesn't release `overflow: auto/scroll` on inner
+   * divs. So we temporarily strip overflow + max-height + height caps from
+   * every scrollable element, let layout settle, take the shot, then restore
+   * the original inline styles. Restoration is best-effort; a late-failing
+   * restore still leaves the DOM visually consistent because we reset styles
+   * back to whatever was inline before our mutation.
+   *
+   * The mutation window is ~300ms (waitForTimeout) — acceptable for form-audit
+   * screenshots which happen between discrete Playwright actions, not during
+   * active typing.
+   */
+  static async captureFullPage(page: Page, path: string): Promise<Buffer> {
+    let restoreFn: (() => Promise<void>) | null = null
+    try {
+      await page.evaluate(() => {
+        interface Saved {
+          el: HTMLElement
+          overflow: string
+          overflowX: string
+          overflowY: string
+          maxHeight: string
+          height: string
+        }
+        const saved: Saved[] = []
+        for (const el of Array.from(document.querySelectorAll<HTMLElement>('*'))) {
+          const s = getComputedStyle(el)
+          const scrolls =
+            (s.overflowY === 'auto' || s.overflowY === 'scroll' || s.overflowX === 'auto' || s.overflowX === 'scroll') &&
+            (el.scrollHeight > el.clientHeight + 2 || el.scrollWidth > el.clientWidth + 2)
+          if (!scrolls) continue
+          saved.push({
+            el,
+            overflow: el.style.overflow,
+            overflowX: el.style.overflowX,
+            overflowY: el.style.overflowY,
+            maxHeight: el.style.maxHeight,
+            height: el.style.height,
+          })
+          el.style.overflow = 'visible'
+          el.style.overflowX = 'visible'
+          el.style.overflowY = 'visible'
+          el.style.maxHeight = 'none'
+          el.style.height = 'auto'
+        }
+        ;(window as unknown as { __restoreScrollContainers?: () => void }).__restoreScrollContainers = () => {
+          for (const r of saved) {
+            r.el.style.overflow = r.overflow
+            r.el.style.overflowX = r.overflowX
+            r.el.style.overflowY = r.overflowY
+            r.el.style.maxHeight = r.maxHeight
+            r.el.style.height = r.height
+          }
+          delete (window as unknown as { __restoreScrollContainers?: () => void }).__restoreScrollContainers
+        }
+      })
+      restoreFn = async () => {
+        try {
+          await page.evaluate(() => {
+            const w = window as unknown as { __restoreScrollContainers?: () => void }
+            w.__restoreScrollContainers?.()
+          })
+        } catch { /* best-effort */ }
+      }
+      // Let layout reflow after removing height caps.
+      await page.waitForTimeout(300)
+      const buf = await page.screenshot({ path, fullPage: true })
+      return buf
+    } finally {
+      if (restoreFn) await restoreFn()
+    }
+  }
+
+  /**
    * Take a screenshot of every open page in the Session and write PNGs to
    * `.screenshots/<prefix>-<systemId>-<timestamp>.png`. Best-effort — a failure
    * on one page (closed tab, I/O error) never skips the siblings. Returns the
@@ -305,10 +381,12 @@ export class Session {
       } catch { continue }
       const path = join(PATHS.screenshotDir, `${prefix}-${id}-${Date.now()}.png`)
       try {
-        // `fullPage: true` — capture the entire scrollable page, not just
-        // the viewport. Kuali + UCPath forms are long; a viewport-only shot
-        // clips off Final Transactions, comments, and the save button area.
-        await slot.page.screenshot({ path, fullPage: true })
+        // captureFullPage: expand inner scroll containers (Kuali modals,
+        // PeopleSoft frames) before `fullPage: true`, then restore. A
+        // plain `fullPage` shot alone clips off Final Transactions,
+        // comments, and the Save button area because those live inside
+        // overflow-auto divs.
+        await Session.captureFullPage(slot.page, path)
         paths.push(path)
       } catch { /* best-effort — one failed screenshot mustn't skip siblings */ }
     }
@@ -336,11 +414,11 @@ export class Session {
           label: opts.label, system: id, ts: opts.ts,
         })
         const p = join(outDir, filename)
-        // `fullPage: true` — capture the whole scrollable page, not just
-        // the viewport, so the operator can see the full Kuali / UCPath
-        // form (Final Transactions + comments + Save button) without
-        // opening the browser.
-        const buf = await slot.page.screenshot({ path: p, fullPage: true })
+        // Use captureFullPage so inner-scroll containers (Kuali form
+        // modals, PeopleSoft frames) are expanded before the fullPage
+        // shot — otherwise Final Transactions / comments / Save button
+        // sit in an overflow-auto div and get clipped.
+        const buf = await Session.captureFullPage(slot.page, p)
         results.push({ system: id, path: p, bytes: buf.byteLength })
       } catch {
         // Best-effort — per-page failures don't block siblings
@@ -353,7 +431,7 @@ export class Session {
           label: opts.label, system: 'ad-hoc', ts: opts.ts,
         })
         const p = join(outDir, filename)
-        const buf = await pg.screenshot({ path: p, fullPage: true })
+        const buf = await Session.captureFullPage(pg, p)
         results.push({ system: 'ad-hoc', path: p, bytes: buf.byteLength })
       } catch {
         // Best-effort
