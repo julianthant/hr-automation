@@ -2207,8 +2207,9 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
 
     if (url.pathname === "/api/preflight") {
       // 30-day floor so the operator always has at least the last month
-      // of workflow history available for retro investigation.
+      // of workflow history + screenshots available for retro investigation.
       const deleted = cleanOldTrackerFiles(30, dir);
+      const deletedShots = cleanOldScreenshots(30);
 
       // Only delete sessions.jsonl if it hasn't been touched for >24h (truly stale).
       // Stale workflows from crashed processes are handled by rebuildSessionState
@@ -2225,7 +2226,8 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
 
       const checks = [
         { name: "Dashboard connected", passed: true, detail: "SSE server running" },
-        { name: "Old logs cleaned", passed: true, detail: `${deleted} file${deleted !== 1 ? "s" : ""} removed (> 7 days)` },
+        { name: "Old logs cleaned", passed: true, detail: `${deleted} file${deleted !== 1 ? "s" : ""} removed (> 30 days)` },
+        { name: "Old screenshots cleaned", passed: true, detail: `${deletedShots} screenshot${deletedShots !== 1 ? "s" : ""} removed (> 30 days)` },
         { name: "Session state", passed: true, detail: sessionsCleaned ? "Stale session file cleaned" : "OK" },
       ];
       res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });

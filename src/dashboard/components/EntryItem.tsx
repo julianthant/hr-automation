@@ -61,7 +61,7 @@ export function EntryItem({ entry, selected, onClick }: EntryItemProps) {
     <div
       onClick={onClick}
       className={cn(
-        "h-[82px] px-5 py-2.5 border-b border-border cursor-pointer transition-colors flex flex-col justify-between gap-1.5 overflow-hidden leading-tight",
+        "h-[82px] px-5 py-2.5 border-b border-border cursor-pointer transition-colors flex flex-col justify-center gap-1.5 overflow-hidden leading-tight",
         "hover:bg-secondary",
         selected && "bg-accent border-r-[3px] border-r-primary pr-[17px]",
       )}
