@@ -69,12 +69,12 @@ export function createBatchObserver(
 
   const observer: SessionObserver = {
     instance,
-    onBrowserLaunch: (systemId, browserId) => {
+    onBrowserLaunch: (systemId, browserId, chromiumPid) => {
       if (!registeredSession) {
         emitSessionCreate(instance, sessionId, trackerDir)
         registeredSession = true
       }
-      emitBrowserLaunch(instance, sessionId, browserId, systemId, trackerDir)
+      emitBrowserLaunch(instance, sessionId, browserId, systemId, trackerDir, chromiumPid)
     },
     onAuthStart: (systemId, browserId) => {
       pendingStart.set(systemId, Date.now())

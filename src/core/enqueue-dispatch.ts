@@ -132,7 +132,23 @@ export async function enqueueFromHttp(
       {
         trackerDir,
         onPreEmitPending: (item, runId) => {
-          const data = serializeInputForTracker(item);
+          const baseData = serializeInputForTracker(item);
+          // If the input carries a `prefilledData` channel (edit-and-resume
+          // path: dashboard re-enqueues with user-edited fields), hoist
+          // those flat keys onto the tracker row's `data` so the dashboard's
+          // EditDataTab + detail panel show the user-supplied values
+          // instead of an opaque JSON-encoded `prefilledData` blob. The
+          // base input keys (e.g. `docId`) win on collision since they're
+          // the canonical identifiers.
+          const prefilled =
+            item && typeof item === "object" && !Array.isArray(item)
+              ? (item as { prefilledData?: unknown }).prefilledData
+              : undefined;
+          const data: Record<string, string> =
+            prefilled && typeof prefilled === "object" && !Array.isArray(prefilled)
+              ? { ...serializeInputForTracker(prefilled), ...baseData }
+              : baseData;
+          delete data.prefilledData;
           const id = deriveItemId(item, runId);
           // Persist the original input verbatim on the pending row so the
           // dashboard's retry / edit-and-resume features can reconstruct

@@ -1,5 +1,6 @@
 import type { Page, Browser, BrowserContext } from 'playwright'
 import { promises as fs } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import type { SystemConfig, SessionObserver, CaptureFileOpts } from './types.js'
 import { launchBrowser } from '../browser/launch.js'
@@ -22,6 +23,11 @@ interface SystemSlot {
   page: Page
   browser: Browser | null  // null in persistent-session mode
   context: BrowserContext
+  /** OS pid of the Chromium process Playwright spawned. Captured by diffing
+   * `pgrep -P` around the launch (Playwright's public Browser API doesn't
+   * expose the process pid). Undefined if the diff failed (Windows, sandbox,
+   * or unusual process tree). */
+  chromiumPid?: number
 }
 
 interface SessionState {
@@ -96,8 +102,12 @@ export class Session {
 
     // Fire onBrowserLaunch for each system. browserId === systemId today
     // (one browser per system); if that changes later, mint UUIDs here.
+    // `slot.chromiumPid` was captured by `defaultLaunchOne` via pgrep diff
+    // so the dashboard's force-stop path can SIGKILL orphaned Chromium when
+    // the Node parent dies. Undefined when the diff failed (Windows, etc.).
     for (const s of systems) {
-      opts.observer?.onBrowserLaunch?.(s.id, s.id)
+      const slot = browsers.get(s.id)
+      opts.observer?.onBrowserLaunch?.(s.id, s.id, slot?.chromiumPid)
     }
 
     // Parallel prepare: for any system that declares a `prepareLogin`, run
@@ -441,15 +451,38 @@ export class Session {
   }
 }
 
+function listChildPids(parentPid: number): number[] {
+  // pgrep is on macOS + Linux. Windows path falls through and returns []
+  // (chromium-pid wiring is best-effort there; force-stop still SIGKILLs
+  // the parent, OS handles orphan reaping differently per platform).
+  if (process.platform === 'win32') return []
+  try {
+    const out = execFileSync('pgrep', ['-P', String(parentPid)], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 1000,
+    }).toString()
+    return out.trim().split('\n').filter(Boolean).map(Number).filter(Number.isFinite)
+  } catch {
+    return []
+  }
+}
+
 async function defaultLaunchOne(opts: LaunchOneOpts): Promise<SystemSlot> {
   const systemId = opts.system.id
   const sessionDir = opts.system.sessionDir
+  // Snapshot child pids so we can diff out the new Chromium process after
+  // launch. Playwright spawns Chromium as a direct child of the Node parent;
+  // there's only one new direct child per launchBrowser() call.
+  const childrenBefore = new Set(listChildPids(process.pid))
   try {
     const { browser, context, page } = await launchBrowser({
       sessionDir,
       acceptDownloads: opts.system.acceptDownloads,
     })
-    return { page, context, browser }
+    const childrenAfter = listChildPids(process.pid)
+    const newChildren = childrenAfter.filter((p) => !childrenBefore.has(p))
+    const chromiumPid = newChildren[0]
+    return { page, context, browser, chromiumPid }
   } catch (e) {
     const classified = classifyPlaywrightError(e)
     if (classified.kind === 'process-singleton') {

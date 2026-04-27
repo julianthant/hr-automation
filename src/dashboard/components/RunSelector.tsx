@@ -66,7 +66,7 @@ export function RunSelector({ runs, activeRunId, onSelect }: RunSelectorProps) {
         <button
           aria-label={`Run #${activeNum} of ${totalRuns} — ${active.status}`}
           className={cn(
-            "flex items-center gap-2 px-3 py-1 rounded-md border border-border bg-secondary cursor-pointer transition-colors hover:border-primary data-[state=open]:border-primary outline-none focus-visible:ring-2 focus-visible:ring-primary",
+            "flex items-center gap-2 h-8 px-3 rounded-lg border border-border bg-secondary cursor-pointer transition-colors hover:border-primary data-[state=open]:border-primary outline-none focus-visible:ring-2 focus-visible:ring-primary",
           )}
         >
           <span className={cn("flex items-center gap-1 font-mono text-xs font-medium tabular-nums", statusColor(active.status))}>

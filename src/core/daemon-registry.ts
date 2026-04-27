@@ -100,21 +100,34 @@ export function isProcessAlive(pid: number): boolean {
   }
 }
 
+/**
+ * Three-state probe so callers can distinguish "definitely stale lockfile"
+ * (positive identity mismatch — the port is bound by a different daemon, or
+ * by some unrelated process) from "transiently unreachable" (timeout or
+ * connection error — daemon's event loop may be momentarily busy). The
+ * latter must NOT trigger an unlink: orphaning a healthy daemon causes
+ * `enqueueFromHttp` to spawn a duplicate.
+ */
+type ProbeResult = 'match' | 'mismatch' | 'unreachable'
+
 async function probeWhoami(
   port: number,
   expected: { workflow: string; instanceId: string },
-  timeoutMs = 500,
-): Promise<boolean> {
+  timeoutMs = 1500,
+): Promise<ProbeResult> {
   try {
     const ctrl = new AbortController()
     const t = setTimeout(() => ctrl.abort(), timeoutMs)
     const res = await fetch(`http://127.0.0.1:${port}/whoami`, { signal: ctrl.signal })
     clearTimeout(t)
-    if (!res.ok) return false
+    if (!res.ok) return 'unreachable'
     const body = (await res.json()) as { workflow?: string; instanceId?: string }
-    return body.workflow === expected.workflow && body.instanceId === expected.instanceId
+    if (body.workflow === expected.workflow && body.instanceId === expected.instanceId) {
+      return 'match'
+    }
+    return 'mismatch'
   } catch {
-    return false
+    return 'unreachable'
   }
 }
 
@@ -158,11 +171,23 @@ export async function findAliveDaemons(workflow: string, trackerDir?: string): P
       safeUnlink(path)
       continue
     }
-    const ok = await probeWhoami(lock.port, { workflow: lock.workflow, instanceId: lock.instanceId })
-    if (!ok) {
+    const probe = await probeWhoami(lock.port, {
+      workflow: lock.workflow,
+      instanceId: lock.instanceId,
+    })
+    if (probe === 'mismatch') {
+      // Positive identity mismatch: that port is bound by a different daemon
+      // (or an unrelated process). Lockfile is stale — unlink so subsequent
+      // probes don't keep checking it.
       safeUnlink(path)
       continue
     }
+    // 'match' OR ('unreachable' && PID alive) — trust the lockfile. The
+    // unreachable-but-alive case happens when the daemon's event loop is
+    // briefly busy (sync write during keepalive, mid-Playwright RPC). The
+    // alternative — unlinking — orphans a healthy daemon and forces enqueue
+    // callers to spawn a duplicate. Best-effort wake fan-out tolerates a
+    // wedged probe; spawning duplicates is a far worse failure mode.
     alive.push({
       workflow: lock.workflow,
       instanceId: lock.instanceId,

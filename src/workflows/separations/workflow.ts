@@ -226,6 +226,11 @@ export const separationsWorkflow = defineWorkflow({
     { key: "separationDate",    label: "Sep Date",        editable: true, displayInGrid: false    },
     { key: "lastDayWorked",     label: "Last Day Worked", editable: true                          },
     { key: "transactionNumber", label: "Txn #",           editable: true                          },
+    // Free-form Kuali timekeeper-comments override. Edit-and-resume only —
+    // not surfaced in the LogPanel detail grid. `fillTimekeeperComments` is
+    // append-aware: existing field content is preserved + a newline-joined
+    // append is filled.
+    { key: "comments",          label: "Comments",        editable: true, displayInGrid: false, multiline: true },
     // `rawTerminationType` is intentionally NOT in detailFields — it's an
     // internal field used to reconstruct kualiData on the edit-and-resume
     // bypass path, not meant for the user. The kernel still stores it in
@@ -240,6 +245,17 @@ export const separationsWorkflow = defineWorkflow({
 
     // Stamp docId immediately so the dashboard row shows it from step 1.
     ctx.updateData({ docId });
+
+    // Capture edit-and-resume skip flags BEFORE any step runs. After
+    // kuali-extraction completes, ctx.data.lastDayWorked is populated
+    // unconditionally — these flags must be read at handler entry to
+    // distinguish "user prefilled this" from "extraction filled this".
+    const lastDayWorkedPrefilled =
+      typeof ctx.data.lastDayWorked === "string"
+      && (ctx.data.lastDayWorked as string).length > 0;
+    const txnNumberPrefilled =
+      typeof ctx.data.transactionNumber === "string"
+      && (ctx.data.transactionNumber as string).length > 0;
 
     // ─── Step 1: Extract Kuali data ───
     // Kuali docs are user-editable between runs (e.g. correcting a wrong EID
@@ -350,6 +366,34 @@ export const separationsWorkflow = defineWorkflow({
     );
     log.step(`[Old Kronos / New Kronos] Date range: ${kronosStart} – ${kronosEnd}`);
 
+    // ─── Process Phase 1 results (preserve PromiseSettledResult fallback semantics) ───
+    let oldKronosDate: string | null = null;
+    let newKronosDate: string | null = null;
+    let oldKronosFound = false;
+    let newKronosFound = false;
+    let jobSummaryData: JobSummaryData | undefined;
+
+    if (lastDayWorkedPrefilled) {
+      // Edit-and-resume: user has supplied lastDayWorked — skip Kronos
+      // verification entirely. Job Summary lookup + Kuali timekeeper-name
+      // fill are also bypassed; both run on the original pass and either
+      // already filled the form (subsequent retry) or are non-fatal if
+      // missing (step 4 dept/payroll fill no-ops on undefined jobSummaryData;
+      // timekeeper name is filled here as a best-effort to keep the form
+      // complete on resume).
+      ctx.skipStep("kronos-search");
+      log.step(
+        `[Step: kronos-search] SKIPPED — lastDayWorked='${ctx.data.lastDayWorked}' `
+        + `prefilled (edit-and-resume)`,
+      );
+      try {
+        const kp = await ctx.page("kuali");
+        await fillTimekeeperTasks(kp, timekeeperName);
+        log.success("[Kuali] Timekeeper name filled (kronos-search skip path)");
+      } catch (e) {
+        log.warn(`[Kuali] timekeeper-name fill failed during kronos-search skip: ${errorMessage(e)}`);
+      }
+    } else {
     const phase1 = await ctx.step("kronos-search", async () => {
       const t0 = Date.now();
       log.debug(`[Step: kronos-search] START eid='${kualiData.eid}'`);
@@ -413,13 +457,6 @@ export const separationsWorkflow = defineWorkflow({
       return result;
     });
 
-    // ─── Process Phase 1 results (preserve PromiseSettledResult fallback semantics) ───
-    let oldKronosDate: string | null = null;
-    let newKronosDate: string | null = null;
-    let oldKronosFound = false;
-    let newKronosFound = false;
-    let jobSummaryData: JobSummaryData | undefined;
-
     if (phase1.oldK.status === "fulfilled") {
       oldKronosFound = phase1.oldK.value.found;
       oldKronosDate = phase1.oldK.value.date;
@@ -452,6 +489,7 @@ export const separationsWorkflow = defineWorkflow({
 
     log.step(`[Old Kronos] ${oldKronosFound ? "Found" : "Not found"} (${oldKronosDate ?? "no time"})`);
     log.step(`[New Kronos] ${newKronosFound ? "Found" : "Not found"} (${newKronosDate ?? "no time"})`);
+    } // end !lastDayWorkedPrefilled branch
 
     // ─── Resolve Kronos dates (Kronos overrides Kuali — ground truth) ───
     const resolved = resolveKronosDates(
@@ -531,7 +569,15 @@ export const separationsWorkflow = defineWorkflow({
     });
 
     // ─── Step 6: UCPath Smart HR Transaction ───
-    let transactionNumber = "";
+    // Edit-and-resume: a prefilled `transactionNumber` means UCPath already
+    // accepted the submit on a prior run and the user just wants Kuali
+    // finalization re-run (the failure was downstream). Skip the step
+    // entirely — no Smart HR navigation, no findExistingTerminationTransaction
+    // probe, no submit. The prefilled value flows straight into
+    // kuali-finalization's transaction-results fill.
+    let transactionNumber = txnNumberPrefilled
+      ? (ctx.data.transactionNumber as string)
+      : "";
     // Tracks the specific "submit succeeded but no txn # extracted" case.
     // We must abort before kuali-finalization so we don't write a blank
     // transaction number back to the Kuali form. Raised outside the step's
@@ -540,6 +586,14 @@ export const separationsWorkflow = defineWorkflow({
     // (so the Kuali form gets its "left blank for manual entry" treatment).
     let submittedWithoutTxnNumber = false;
 
+    if (txnNumberPrefilled) {
+      ctx.skipStep("ucpath-transaction");
+      log.step(
+        `[Step: ucpath-transaction] SKIPPED — transactionNumber='${transactionNumber}' `
+        + `prefilled (edit-and-resume)`,
+      );
+      ctx.updateData({ transactionNumber });
+    } else {
     await ctx.step("ucpath-transaction", async () => {
       const t0 = Date.now();
       log.debug(`[Step: ucpath-transaction] START empl='${kualiData.eid}' template='${template}'`);
@@ -643,6 +697,7 @@ export const separationsWorkflow = defineWorkflow({
         "Transaction submitted but transaction number could not be extracted — aborting before Kuali finalization writes empty value",
       );
     }
+    } // end !txnNumberPrefilled branch
 
     // ─── Step 7: Kuali finalization ───
     await ctx.step("kuali-finalization", async () => {
@@ -662,9 +717,17 @@ export const separationsWorkflow = defineWorkflow({
         kualiData.separationDate, resolved.separationDate,
         initials,
       );
-      if (dateChangeComments) {
-        log.step(`[Kuali] Date change comments: ${dateChangeComments}`);
-        await fillTimekeeperComments(kualiPage, dateChangeComments);
+      // User-supplied free-form Kuali timekeeper-comments override (set
+      // via the dashboard's EditDataTab → prefilledData channel). Joined
+      // with auto-generated date-change comments using a newline. The
+      // combined string is then handed to `fillTimekeeperComments`, which
+      // reads the form's existing value and prepends it (also newline-
+      // joined) so nothing the user / prior run wrote gets clobbered.
+      const userComments = ((ctx.data.comments as string | undefined) ?? "").trim();
+      const newComments = [dateChangeComments, userComments].filter(Boolean).join("\n");
+      if (newComments) {
+        log.step(`[Kuali] Comments to add: ${newComments}`);
+        await fillTimekeeperComments(kualiPage, newComments);
       }
 
       await verifyTxnNumberFilled(kualiPage, transactionNumber);

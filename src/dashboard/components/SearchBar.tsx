@@ -107,7 +107,7 @@ export function SearchBar({ onSelect }: SearchBarProps) {
   return (
     <div ref={boxRef} className="relative">
       <div
-        className="flex items-center gap-2 bg-secondary border border-border rounded-lg px-3 py-1.5 w-full focus-within:border-primary transition-colors"
+        className="flex items-center gap-2 bg-secondary border border-border rounded-lg h-8 px-3 w-full focus-within:border-primary transition-colors"
       >
         <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
         <input

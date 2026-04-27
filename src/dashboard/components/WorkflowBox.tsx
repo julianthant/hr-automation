@@ -26,17 +26,40 @@ function EndDaemonButton({ workflow }: { workflow: string }) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ workflow, force }),
       });
-      const json = (await res.json()) as { ok: boolean; stopped?: number; error?: string };
+      const json = (await res.json()) as {
+        ok: boolean;
+        stopped?: number;
+        daemonsStopped?: number;
+        processesKilled?: number;
+        browsersKilled?: number;
+        queuedCancelled?: number;
+        error?: string;
+      };
       if (!res.ok || !json.ok) {
         toast.error(`Failed to stop daemon: ${json.error ?? `HTTP ${res.status}`}`, { id: toastId });
         return;
       }
-      toast.success(
-        force
-          ? `Force-stop sent — ${json.stopped ?? 0} daemon(s) killed`
-          : `Soft-stop sent — ${json.stopped ?? 0} daemon(s) will drain and exit`,
-        { id: toastId },
-      );
+      const daemons = json.daemonsStopped ?? 0;
+      const procs = json.processesKilled ?? 0;
+      const browsers = json.browsersKilled ?? 0;
+      const queued = json.queuedCancelled ?? 0;
+      const total = json.stopped ?? daemons + procs;
+      const parts: string[] = [];
+      if (daemons > 0) parts.push(`${daemons} daemon${daemons === 1 ? "" : "s"}`);
+      if (procs > 0) parts.push(`${procs} process${procs === 1 ? "" : "es"}`);
+      if (browsers > 0) parts.push(`${browsers} browser${browsers === 1 ? "" : "s"}`);
+      if (queued > 0) parts.push(`${queued} queued item${queued === 1 ? "" : "s"}`);
+      const detail = parts.length > 0 ? parts.join(" + ") : "nothing alive";
+      if (total === 0 && queued === 0 && browsers === 0) {
+        toast.warning(`Nothing to stop — no alive ${workflow} daemons, processes, browsers, or queued items`, { id: toastId });
+      } else {
+        toast.success(
+          force
+            ? `Force-stop sent — ${detail} cleared`
+            : `Soft-stop sent — ${detail} will drain and exit`,
+          { id: toastId },
+        );
+      }
       if (!force) {
         setConfirmForce(true);
         setTimeout(() => setConfirmForce(false), 4_000);

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Toaster, toast } from "sonner";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { TopBar } from "./components/TopBar";
@@ -10,6 +10,8 @@ import { usePreflight } from "./components/hooks/usePreflight";
 import { useWorkflow, autoLabel } from "./workflows-context";
 import { resolveEntryName } from "./components/entry-display";
 import type { SearchResultRow } from "./components/types";
+import { WorkflowRail } from "./components/WorkflowRail";
+import { QuickRunPanel } from "./components/QuickRunPanel";
 
 /** Read initial state from URL search params so refresh preserves selection */
 function readUrlState() {
@@ -37,7 +39,13 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(initial.selectedId);
   const [date, setDate] = useState(initial.date);
   const [availableDates, setAvailableDates] = useState<string[]>([]);
-  const prevStatusRef = useMemo(() => new Map<string, string>(), []);
+  // Status map for the currently-watched (workflow, date). Reset whenever
+  // the user navigates to a different key so each viewing session starts
+  // fresh — only LIVE transitions observed during continuous viewing fire
+  // toasts. Discovering a historical completion by switching dates does
+  // not fire a toast.
+  const statusRef = useRef<Map<string, string>>(new Map());
+  const lastToastKeyRef = useRef<string>("");
 
   // Pre-flight check on mount
   usePreflight();
@@ -48,7 +56,7 @@ export default function App() {
   }, [workflow, selectedId, date]);
 
   // SSE entries
-  const { entries, workflows, wfCounts, connected, loading } = useEntries(workflow, date);
+  const { entries, entriesKey, workflows, wfCounts, connected, loading } = useEntries(workflow, date);
 
   // Fetch available dates when workflow changes. The selected date is
   // preserved across workflow switches — operators want to stay on the date
@@ -67,27 +75,46 @@ export default function App() {
   const meta = useWorkflow(workflow);
   const wfLabel = meta?.label ?? autoLabel(workflow);
 
-  // Toast on completion/failure
+  // Toast on completion/failure for LIVE transitions only — i.e. an entry
+  // whose status changed while the user was continuously watching the
+  // current (workflow, date). Two safeguards prevent stale-data toasts:
+  //
+  //   1. `entriesKey` gate — when the date or workflow changes, useEntries
+  //      sets `entriesKey=""` until a fresh SSE message arrives. Skipping
+  //      the effect while `entriesKey` doesn't match the target key keeps
+  //      stale entries from the previous date from being recorded under
+  //      the new key (which would falsely fire toasts on id collisions
+  //      once the new SSE delivers).
+  //   2. Reset `statusRef` on key change — the first batch under each new
+  //      key is treated as silent first-observation, so navigating to a
+  //      past date or back to a previously-viewed one never fires toasts
+  //      for transitions that happened while the user was elsewhere.
   useEffect(() => {
-    for (const entry of entries) {
-      const prevStatus = prevStatusRef.get(entry.id);
-      if (prevStatus && prevStatus !== entry.status) {
-        const name = resolveEntryName(entry);
-        if (entry.status === "done") {
-          toast.success(`${name} completed`, {
-            description: `${wfLabel} finished`,
-            duration: 5000,
-          });
-        } else if (entry.status === "failed") {
-          toast.error(`${name} failed`, {
-            description: entry.error || "Unknown error",
-            duration: 8000,
-          });
-        }
-      }
-      prevStatusRef.set(entry.id, entry.status);
+    const targetKey = `${workflow}|${date}`;
+    if (entriesKey !== targetKey) return;
+    if (lastToastKeyRef.current !== targetKey) {
+      statusRef.current = new Map();
+      lastToastKeyRef.current = targetKey;
     }
-  }, [entries, wfLabel, prevStatusRef]);
+    for (const entry of entries) {
+      const prevStatus = statusRef.current.get(entry.id);
+      statusRef.current.set(entry.id, entry.status);
+      if (prevStatus === undefined) continue;
+      if (prevStatus === entry.status) continue;
+      const name = resolveEntryName(entry);
+      if (entry.status === "done") {
+        toast.success(`${name} completed`, {
+          description: `${wfLabel} finished`,
+          duration: 5000,
+        });
+      } else if (entry.status === "failed") {
+        toast.error(`${name} failed`, {
+          description: entry.error || "Unknown error",
+          duration: 8000,
+        });
+      }
+    }
+  }, [entries, entriesKey, wfLabel, workflow, date]);
 
   // Update document title
   useEffect(() => {
@@ -117,6 +144,14 @@ export default function App() {
 
   const selectedEntry = entries.find((e) => e.id === selectedId) || null;
 
+  // Failed IDs across the current workflow + date — feeds QuickRunPanel's
+  // retry-all button. Workflow-scoped (not filter-scoped) since QuickRunPanel
+  // now lives in the TopBar and is read as a workflow-level action.
+  const failedIds = useMemo(
+    () => entries.filter((e) => e.status === "failed").map((e) => e.id),
+    [entries],
+  );
+
   return (
     <TooltipProvider delayDuration={150} skipDelayDuration={300}>
     <div className="flex flex-col h-screen">
@@ -131,17 +166,22 @@ export default function App() {
         }}
       />
       <TopBar
-        workflow={workflow}
-        workflows={workflows}
-        onWorkflowChange={handleWorkflowChange}
         date={date}
         onDateChange={setDate}
         availableDates={availableDates}
         connected={connected}
-        entryCounts={entryCounts}
         onSearchSelect={handleSearchSelect}
+        queueZoneContent={
+          <QuickRunPanel workflow={workflow} failedIds={failedIds} />
+        }
       />
       <div className="flex flex-1 overflow-hidden">
+        <WorkflowRail
+          workflow={workflow}
+          workflows={workflows}
+          entryCounts={entryCounts}
+          onWorkflowChange={handleWorkflowChange}
+        />
         <QueuePanel
           entries={entries}
           workflow={workflow}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Play, Loader2 } from "lucide-react";
+import { Play, Loader2, Save, RefreshCcw } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "./types";
@@ -8,6 +8,13 @@ import { useWorkflow } from "../workflows-context";
 interface EditDataTabProps {
   workflow: string;
   entry: TrackerEntry | null;
+  /** Active run selection from the LogPanel. When set, `Refresh from logs`
+   * pulls data from this specific run; otherwise it falls back to the
+   * richest data across all runs of this id. */
+  runId?: string | null;
+  /** Date filter currently shown by the dashboard (YYYY-MM-DD). Forwarded
+   * to the entry-data endpoint so the lookup hits the right JSONL file. */
+  date?: string;
 }
 
 /**
@@ -19,7 +26,7 @@ interface EditDataTabProps {
  * merges them into ctx.data, and the workflow's extraction step is
  * bypassed via its `if (!ctx.data.X) await ctx.step(...)` gate.
  */
-export function EditDataTab({ workflow, entry }: EditDataTabProps) {
+export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) {
   const meta = useWorkflow(workflow);
   const editableFields = useMemo(
     () => (meta?.detailFields ?? []).filter((f) => f.editable),
@@ -35,6 +42,8 @@ export function EditDataTab({ workflow, entry }: EditDataTabProps) {
 
   const [values, setValues] = useState<Record<string, string>>(initial);
   const [pending, setPending] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Reset when the entry / editable set changes (e.g. user picks a different row).
   useEffect(() => {
@@ -62,6 +71,93 @@ export function EditDataTab({ workflow, entry }: EditDataTabProps) {
 
   const onReset = (): void => {
     setValues(initial);
+  };
+
+  const onRefresh = async (): Promise<void> => {
+    if (refreshing || !entry) return;
+    setRefreshing(true);
+    const t = toast.loading(`Refreshing from tracker…`);
+    try {
+      const params = new URLSearchParams({ workflow, id: entry.id });
+      if (runId) params.set("runId", runId);
+      if (date) params.set("date", date);
+      const res = await fetch(`/api/entry-data?${params.toString()}`);
+      const body = (await res.json()) as {
+        ok: boolean;
+        data?: Record<string, string>;
+        runId?: string | null;
+        source?: "active-run" | "fallback" | "none";
+        error?: string;
+      };
+      if (!res.ok || !body.ok) {
+        toast.error(`Refresh failed`, { id: t, description: body.error ?? `HTTP ${res.status}` });
+        return;
+      }
+      const fresh = body.data ?? {};
+      // Only fill keys we have inputs for; leave others alone.
+      const next: Record<string, string> = { ...values };
+      let filled = 0;
+      for (const f of editableFields) {
+        const v = fresh[f.key];
+        if (v != null && String(v).trim() !== "") {
+          next[f.key] = String(v);
+          filled += 1;
+        }
+      }
+      setValues(next);
+      if (filled === 0) {
+        toast.warning(`No data to import`, {
+          id: t,
+          description: `No tracker entries for this run had values for the editable fields`,
+        });
+      } else {
+        toast.success(`Pulled ${filled} field${filled === 1 ? "" : "s"} from tracker`, {
+          id: t,
+          description: body.source === "fallback"
+            ? `Sourced from a different run of this id (active run had no data)`
+            : `Sourced from the active run`,
+        });
+      }
+    } catch (err) {
+      toast.error(`Refresh failed`, {
+        id: t,
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const onSave = async (): Promise<void> => {
+    if (saving || pending) return;
+    setSaving(true);
+    const t = toast.loading(`Saving ${entry.id}…`);
+    try {
+      const res = await fetch("/api/save-data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workflow, id: entry.id, data: values }),
+      });
+      const body = (await res.json()) as { ok: boolean; error?: string };
+      if (body.ok) {
+        toast.success(`Saved`, {
+          id: t,
+          description: `${entry.id} values persisted — survives refreshes`,
+        });
+      } else {
+        toast.error(`Save failed`, {
+          id: t,
+          description: body.error ?? `HTTP ${res.status}`,
+        });
+      }
+    } catch (err) {
+      toast.error(`Save failed`, {
+        id: t,
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const onSubmit = async (): Promise<void> => {
@@ -116,26 +212,62 @@ export function EditDataTab({ workflow, entry }: EditDataTabProps) {
             >
               {f.label}
             </label>
-            <input
-              id={`edit-data-${f.key}`}
-              type="text"
-              value={values[f.key] ?? ""}
-              onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-              className={cn(
-                "w-full rounded-md border border-border/60 bg-background",
-                "px-2.5 py-1.5 text-sm font-mono text-foreground",
-                "transition-colors duration-150",
-                "focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/40",
-              )}
-            />
+            {f.multiline ? (
+              <textarea
+                id={`edit-data-${f.key}`}
+                value={values[f.key] ?? ""}
+                onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+                rows={3}
+                className={cn(
+                  "w-full min-h-[4.5rem] rounded-md border border-border/60 bg-background",
+                  "px-2.5 py-1.5 text-sm font-mono text-foreground",
+                  "transition-colors duration-150 resize-y",
+                  "focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/40",
+                )}
+              />
+            ) : (
+              <input
+                id={`edit-data-${f.key}`}
+                type="text"
+                value={values[f.key] ?? ""}
+                onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+                className={cn(
+                  "w-full rounded-md border border-border/60 bg-background",
+                  "px-2.5 py-1.5 text-sm font-mono text-foreground",
+                  "transition-colors duration-150",
+                  "focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/40",
+                )}
+              />
+            )}
           </div>
         ))}
       </div>
       <div className="pt-3 flex items-center justify-end gap-2">
         <button
           type="button"
+          onClick={onRefresh}
+          disabled={refreshing || pending || saving}
+          title="Pull the latest values for this run from tracker entries. Falls back to the richest data across runs of this id when the active run has none."
+          className={cn(
+            "inline-flex items-center gap-1.5 h-8 px-3 rounded-md cursor-pointer",
+            "text-xs font-medium border border-border/60",
+            "text-muted-foreground bg-transparent",
+            "transition-colors duration-150",
+            "hover:text-foreground hover:bg-muted",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
+          )}
+        >
+          {refreshing ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <RefreshCcw className="h-3.5 w-3.5" />
+          )}
+          Refresh from logs
+        </button>
+        <button
+          type="button"
           onClick={onReset}
-          disabled={!dirty || pending}
+          disabled={!dirty || pending || saving}
           className={cn(
             "inline-flex items-center h-8 px-3 rounded-md cursor-pointer",
             "text-xs font-medium border border-border/60",
@@ -149,8 +281,29 @@ export function EditDataTab({ workflow, entry }: EditDataTabProps) {
         </button>
         <button
           type="button"
+          onClick={onSave}
+          disabled={!dirty || pending || saving}
+          title="Persist these values without running. Survives dashboard refresh."
+          className={cn(
+            "inline-flex items-center gap-1.5 h-8 px-3 rounded-md cursor-pointer",
+            "text-xs font-medium border border-border/60",
+            "text-foreground bg-transparent",
+            "transition-colors duration-150",
+            "hover:bg-muted",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
+          )}
+        >
+          {saving ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Save className="h-3.5 w-3.5" />
+          )}
+          Save
+        </button>
+        <button
+          type="button"
           onClick={onSubmit}
-          disabled={pending}
+          disabled={pending || saving}
           className={cn(
             "inline-flex items-center gap-1.5 h-8 px-3 rounded-md cursor-pointer",
             "bg-primary text-primary-foreground text-xs font-medium",

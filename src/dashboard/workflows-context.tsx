@@ -13,7 +13,7 @@ export interface WorkflowMetadata {
    *   - `displayInGrid: false`  → field is hidden from LogPanel's detail grid
    *                                (still shown in Edit Data when editable).
    */
-  detailFields: Array<{ key: string; label: string; editable?: boolean; displayInGrid?: boolean }>
+  detailFields: Array<{ key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean }>
 }
 
 const WorkflowsContext = createContext<WorkflowMetadata[] | null>(null)

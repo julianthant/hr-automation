@@ -1,29 +1,39 @@
 import { useState, type FormEvent } from "react";
-import { Play, Loader2 } from "lucide-react";
+import { Play, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { getQuickRunConfig } from "@/lib/quick-run-registry";
+import { SharePointDownloadButton } from "./SharePointDownloadButton";
 
 interface QuickRunPanelProps {
   workflow: string;
+  failedIds: string[];
 }
 
 /**
- * QuickRunPanel — the text-box-plus-Run-button row above the QueuePanel's
- * search bar. Visible only for workflows registered in
- * `src/dashboard/lib/quick-run-registry.ts`; returns null otherwise so the
- * parent's layout stays clean for workflows that don't support quick
- * enqueue (e.g. emergency-contact, which needs YAML input).
+ * QuickRunPanel — host-agnostic input + run + retry-all cluster, mounted in
+ * the TopBar's queue zone. Contains an input + an icon-only Run button + an
+ * icon-only Retry-all button (only visible when ≥1 failed entry exists for
+ * the current workflow + date).
+ *
+ * Visible only for workflows registered in
+ * `src/dashboard/lib/quick-run-registry.ts`. Workflows without a quick-run
+ * config (e.g. emergency-contact, which needs YAML input) render null so
+ * the queue zone in TopBar stays blank for them.
  *
  * On submit: parses the text into typed inputs via the registry, POSTs
  * `/api/enqueue`, shows a sonner toast with the result. If no daemon is
  * alive for the target workflow, the backend spawns one — the operator
  * will see a Duo prompt in the freshly-launched browser.
+ *
+ * Retry-all: POSTs `/api/retry-bulk` with every failed entry ID for the
+ * current workflow + date. Per-id error breakdown surfaces in a sonner toast.
  */
-export function QuickRunPanel({ workflow }: QuickRunPanelProps) {
+export function QuickRunPanel({ workflow, failedIds }: QuickRunPanelProps) {
   const config = getQuickRunConfig(workflow);
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   if (!config) return null;
 
@@ -75,16 +85,53 @@ export function QuickRunPanel({ workflow }: QuickRunPanelProps) {
     void submit();
   }
 
-  const disabled = submitting || value.trim().length === 0;
+  async function retryAll() {
+    if (retrying || failedIds.length === 0) return;
+    setRetrying(true);
+    const t = toast.loading(`Retrying ${failedIds.length} failed…`);
+    try {
+      const res = await fetch("/api/retry-bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workflow, ids: failedIds }),
+      });
+      const body = (await res.json()) as {
+        ok: boolean;
+        count: number;
+        errors: Array<{ id: string; error: string }>;
+      };
+      if (body.errors.length === 0) {
+        toast.success(`Retry enqueued`, {
+          id: t,
+          description: `${body.count} of ${failedIds.length} re-queued`,
+        });
+      } else {
+        toast.warning(`Partial retry`, {
+          id: t,
+          description: `${body.count} ok · ${body.errors.length} failed (${body.errors[0].error})`,
+        });
+      }
+    } catch (err) {
+      toast.error(`Retry-all failed`, {
+        id: t,
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setRetrying(false);
+    }
+  }
+
+  const runDisabled = submitting || value.trim().length === 0;
+  const failedCount = failedIds.length;
 
   return (
     <form
       onSubmit={onSubmit}
-      className="h-[60px] flex items-center gap-2 px-3 min-[1440px]:px-4 border-b border-border bg-card flex-shrink-0"
+      className="flex items-center gap-2 w-full min-w-0"
     >
       <div
         className={cn(
-          "flex items-center gap-2 bg-secondary border border-border rounded-lg px-3 py-2 flex-1 min-w-0 transition-colors",
+          "flex items-center gap-2 bg-secondary border border-border rounded-lg h-8 px-3 flex-1 min-w-0 transition-colors",
           submitting ? "opacity-60" : "focus-within:border-primary",
         )}
       >
@@ -95,16 +142,16 @@ export function QuickRunPanel({ workflow }: QuickRunPanelProps) {
           onChange={(e) => setValue(e.target.value)}
           disabled={submitting}
           aria-label={`Enqueue ${workflow}`}
-          className="flex-1 bg-transparent border-none outline-none text-foreground text-sm font-sans placeholder:text-muted-foreground min-w-0 disabled:cursor-not-allowed"
+          className="flex-1 bg-transparent border-none outline-none text-foreground text-[13px] font-sans placeholder:text-muted-foreground min-w-0 disabled:cursor-not-allowed"
         />
       </div>
       <button
         type="submit"
-        disabled={disabled}
+        disabled={runDisabled}
         aria-label={`Run ${workflow}`}
         title={`Enqueue ${workflow} items`}
         className={cn(
-          "flex-shrink-0 h-9 flex items-center gap-1.5 rounded-lg px-3 text-sm font-medium transition-colors outline-none",
+          "flex-shrink-0 h-8 w-8 flex items-center justify-center rounded-lg transition-colors outline-none",
           "bg-primary text-primary-foreground border border-primary",
           "hover:bg-primary/90 hover:border-primary/90",
           "focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-card",
@@ -116,8 +163,30 @@ export function QuickRunPanel({ workflow }: QuickRunPanelProps) {
         ) : (
           <Play aria-hidden className="w-3.5 h-3.5" />
         )}
-        <span>Run</span>
       </button>
+      {failedCount > 0 && (
+        <button
+          type="button"
+          onClick={retryAll}
+          disabled={retrying}
+          aria-label={`Retry all ${failedCount} failed entries`}
+          title={`Retry ${failedCount} failed ${failedCount === 1 ? "entry" : "entries"}`}
+          className={cn(
+            "flex-shrink-0 h-8 w-8 flex items-center justify-center rounded-lg transition-colors outline-none",
+            "bg-destructive/10 text-destructive border border-destructive/40",
+            "hover:bg-destructive/20 hover:border-destructive/60",
+            "focus-visible:ring-2 focus-visible:ring-destructive focus-visible:ring-offset-1 focus-visible:ring-offset-card",
+            "disabled:opacity-50 disabled:cursor-wait cursor-pointer",
+          )}
+        >
+          {retrying ? (
+            <Loader2 aria-hidden className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <RotateCcw aria-hidden className="w-3.5 h-3.5" />
+          )}
+        </button>
+      )}
+      <SharePointDownloadButton />
     </form>
   );
 }
