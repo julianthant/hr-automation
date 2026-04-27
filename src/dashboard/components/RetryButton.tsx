@@ -55,9 +55,14 @@ export function RetryButton({ workflow, id, size = "sm", className }: RetryButto
     }
   };
 
-  const sizeClass = size === "md" ? "h-7 w-7" : "h-6 w-6";
-  const iconClass = size === "md" ? "h-4 w-4" : "h-3.5 w-3.5";
+  const sizeClass = size === "md" ? "h-8 w-8" : "h-6 w-6";
+  const iconClass = size === "md" ? "h-3.5 w-3.5" : "h-3.5 w-3.5";
 
+  // The "md" variant lives in the LogPanel header next to the date-navigator
+  // chevron; mirroring the QuickRunPanel retry-all button (red destructive
+  // pill with border) keeps a consistent "retry = destructive action" cue
+  // across the navbar + log header. The "sm" inline variant on EntryItem
+  // rows stays muted-tone so the queue list isn't a sea of red dots.
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -68,12 +73,20 @@ export function RetryButton({ workflow, id, size = "sm", className }: RetryButto
           onClick={onClick}
           className={cn(
             sizeClass,
-            "inline-flex items-center justify-center rounded-md cursor-pointer",
-            "text-muted-foreground bg-transparent",
-            "transition-colors duration-150",
-            "hover:text-foreground hover:bg-muted",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-            "disabled:opacity-60 disabled:cursor-wait",
+            "inline-flex items-center justify-center cursor-pointer transition-colors outline-none",
+            size === "md"
+              ? cn(
+                  "rounded-lg bg-destructive/10 text-destructive border border-destructive/40",
+                  "hover:bg-destructive/20 hover:border-destructive/60",
+                  "focus-visible:ring-2 focus-visible:ring-destructive focus-visible:ring-offset-1 focus-visible:ring-offset-card",
+                  "disabled:opacity-50 disabled:cursor-not-allowed",
+                )
+              : cn(
+                  "rounded-md text-muted-foreground bg-transparent",
+                  "hover:text-foreground hover:bg-muted",
+                  "focus-visible:ring-2 focus-visible:ring-primary/40",
+                  "disabled:opacity-60 disabled:cursor-wait",
+                ),
             className,
           )}
         >

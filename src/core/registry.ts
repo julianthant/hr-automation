@@ -75,14 +75,15 @@ export function autoLabel(key: string): string {
  * only non-default values ride through.
  */
 export function normalizeDetailField(
-  entry: string | { key: string; label: string; editable?: boolean; displayInGrid?: boolean },
-): { key: string; label: string; editable?: boolean; displayInGrid?: boolean } {
+  entry: string | { key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean },
+): { key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean } {
   if (typeof entry === 'string') return { key: entry, label: autoLabel(entry) }
-  const out: { key: string; label: string; editable?: boolean; displayInGrid?: boolean } = {
+  const out: { key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean } = {
     key: entry.key,
     label: entry.label,
   }
   if (entry.editable) out.editable = true
   if (entry.displayInGrid === false) out.displayInGrid = false
+  if (entry.multiline) out.multiline = true
   return out
 }

@@ -52,6 +52,10 @@ export interface SessionEvent {
   data?: Record<string, string>;
   /** Workflow item runId, written when emitted inside a withLogContext + setLogRunId scope. */
   runId?: string;
+  /** OS pid of the Chromium process for `browser_launch` events. Lets the
+   * dashboard's force-stop path SIGKILL orphaned browsers when the Node
+   * parent dies. Only populated for `type === "browser_launch"`. */
+  chromiumPid?: number;
 }
 
 // ── File path ──────────────────────────────────────────
@@ -172,9 +176,24 @@ export function emitSessionClose(instance: string, sessionId: string, dir?: stri
 }
 
 export function emitBrowserLaunch(
-  instance: string, sessionId: string, browserId: string, system: string, dir?: string,
+  instance: string,
+  sessionId: string,
+  browserId: string,
+  system: string,
+  dir?: string,
+  chromiumPid?: number,
 ): void {
-  emitSessionEvent({ type: "browser_launch", workflowInstance: instance, sessionId, browserId, system }, dir);
+  emitSessionEvent(
+    {
+      type: "browser_launch",
+      workflowInstance: instance,
+      sessionId,
+      browserId,
+      system,
+      ...(typeof chromiumPid === "number" ? { chromiumPid } : {}),
+    },
+    dir,
+  );
 }
 
 export function emitBrowserClose(instance: string, browserId: string, system: string, dir?: string): void {

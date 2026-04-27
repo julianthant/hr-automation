@@ -288,8 +288,14 @@ export async function fillTimekeeperComments(
   comments: string,
 ): Promise<void> {
   if (!comments) return;
-  log.step(`Filling Timekeeper/Approver Comments: ${comments}`);
-  await timekeeperTasks.timekeeperComments(page).fill(comments, { timeout: 5_000 });
+  const field = timekeeperTasks.timekeeperComments(page);
+  const existing = (await field.inputValue({ timeout: 5_000 }).catch(() => "")).trim();
+  const combined = existing ? `${existing}\n${comments}` : comments;
+  log.step(
+    `Filling Timekeeper/Approver Comments `
+    + `(existing=${existing.length} chars, appending=${comments.length} chars)`,
+  );
+  await field.fill(combined, { timeout: 5_000 });
   log.success("Timekeeper comments filled");
 }
 

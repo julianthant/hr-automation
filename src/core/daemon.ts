@@ -276,16 +276,18 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
             const state = await readQueueState(wf.config.name, trackerDir)
             queueDepthCache = state.queued.length
 
-            const item = await claimNextItem(
-              wf.config.name,
-              instanceId,
-              trackerDir,
-            ).catch((e) => {
-              log.warn(
-                `[Daemon ${instanceId}] claim error: ${e instanceof Error ? e.message : String(e)}`,
-              )
-              return null
-            })
+            const item = shuttingDown
+              ? null
+              : await claimNextItem(
+                  wf.config.name,
+                  instanceId,
+                  trackerDir,
+                ).catch((e) => {
+                  log.warn(
+                    `[Daemon ${instanceId}] claim error: ${e instanceof Error ? e.message : String(e)}`,
+                  )
+                  return null
+                })
 
             if (item) {
               setPhase('processing')
@@ -378,82 +380,6 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         } finally {
           setPhase('draining')
           unsubscribeDisconnect()
-          if (inFlight) {
-            if (forceShutdown) {
-              await markItemFailed(
-                wf.config.name,
-                inFlight.itemId,
-                'interrupted',
-                inFlight.runId,
-                trackerDir,
-              )
-            } else {
-              await unclaimItem(wf.config.name, inFlight.itemId, 'sigint-soft', trackerDir)
-            }
-            markTerminated(inFlight.runId)
-            inFlight = null
-          }
-          // Orphan-queue cleanup: if this is the last alive daemon, any items
-          // still sitting in the queue (enqueued but never claimed) have no
-          // one to process them. Mark them failed in both the queue AND the
-          // tracker so the dashboard's pending rows don't stick forever. A
-          // future re-enqueue creates a new event + runId; no ambiguity.
-          try {
-            const otherAlive = (await findAliveDaemons(wf.config.name, trackerDir))
-              .filter((d) => d.instanceId !== instanceId)
-            if (otherAlive.length === 0) {
-              const state = await readQueueState(wf.config.name, trackerDir)
-              if (state.queued.length > 0) {
-                log.warn(
-                  `[Daemon ${wf.config.name}/${instanceId}] last daemon exiting with ${state.queued.length} unclaimed queue item(s); marking failed`,
-                )
-                const nowIso = new Date().toISOString()
-                const failError =
-                  'Daemon stopped before this item could be processed (browsers closed).'
-                for (const item of state.queued) {
-                  const runId = item.runId ?? randomUUID()
-                  try {
-                    await markItemFailed(wf.config.name, item.id, failError, runId, trackerDir)
-                  } catch {
-                    /* best-effort — queue event append; tracker row below is the user-visible signal */
-                  }
-                  try {
-                    const data: Record<string, string> =
-                      item.input && typeof item.input === 'object'
-                        ? Object.fromEntries(
-                            Object.entries(item.input as Record<string, unknown>)
-                              .filter(([, v]) => v !== undefined && v !== null)
-                              .map(([k, v]) => [
-                                k,
-                                typeof v === 'object' ? JSON.stringify(v) : String(v),
-                              ]),
-                          )
-                        : {}
-                    trackEvent(
-                      {
-                        workflow: wf.config.name,
-                        timestamp: nowIso,
-                        id: item.id,
-                        runId,
-                        status: 'failed',
-                        data,
-                        error: failError,
-                      },
-                      trackerDir,
-                    )
-                  } catch {
-                    /* best-effort */
-                  }
-                }
-              }
-            }
-          } catch (e) {
-            log.warn(
-              `[Daemon ${wf.config.name}/${instanceId}] orphan-queue cleanup failed: ${
-                e instanceof Error ? e.message : String(e)
-              }`,
-            )
-          }
           try {
             await session.close()
           } catch {
@@ -463,6 +389,125 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
       },
     )
   } finally {
+    // Orphan-queue cleanup runs here (outer finally) instead of inside the
+    // body so it executes on EVERY exit path, including when `Session.launch`
+    // throws before the claim loop even starts (user closes browser during
+    // Duo, ProcessSingleton collision, etc.). Previously this only ran when
+    // the body's inner try/finally was reached, so launch-phase failures left
+    // pre-emitted `pending` tracker rows hanging forever.
+    //
+    // Order matters: cleanup BEFORE lockfile unlink so `findAliveDaemons`
+    // still includes self in the alive set — `otherAlive.length === 0`
+    // correctly identifies "this is the last alive daemon, no one else will
+    // process these items".
+    try {
+      // Snapshot inFlight into a local — TypeScript's flow analysis can't
+      // see assignments inside the async body callback (different closure),
+      // so without the local + cast it narrows `inFlight` to `null` here
+      // even though the body may have set it.
+      const inFlightSnapshot = inFlight as { itemId: string; runId: string } | null
+      if (inFlightSnapshot) {
+        const nowIso = new Date().toISOString()
+        const failError = forceShutdown
+          ? 'Daemon force-stopped while processing this item.'
+          : 'Daemon stopped while processing this item (browsers closed or crashed).'
+        try {
+          if (forceShutdown) {
+            await markItemFailed(
+              wf.config.name,
+              inFlightSnapshot.itemId,
+              failError,
+              inFlightSnapshot.runId,
+              trackerDir,
+            )
+          } else {
+            // Soft stop: re-queue so a future daemon can pick up.
+            await unclaimItem(wf.config.name, inFlightSnapshot.itemId, 'sigint-soft', trackerDir)
+          }
+        } catch {
+          /* best-effort */
+        }
+        // Always write a tracker `failed` row for force shutdowns so the
+        // dashboard doesn't show the item stuck in `running` state. Soft
+        // shutdowns leave the tracker as-is — the unclaim returns the item
+        // to `queued` and the orphan-queue sweep below handles it if no
+        // other daemons are alive to claim it.
+        if (forceShutdown) {
+          try {
+            trackEvent(
+              {
+                workflow: wf.config.name,
+                timestamp: nowIso,
+                id: inFlightSnapshot.itemId,
+                runId: inFlightSnapshot.runId,
+                status: 'failed',
+                error: failError,
+              },
+              trackerDir,
+            )
+          } catch {
+            /* best-effort */
+          }
+        }
+        inFlight = null
+      }
+
+      const otherAlive = (await findAliveDaemons(wf.config.name, trackerDir))
+        .filter((d) => d.instanceId !== instanceId)
+      if (otherAlive.length === 0) {
+        const state = await readQueueState(wf.config.name, trackerDir)
+        if (state.queued.length > 0) {
+          log.warn(
+            `[Daemon ${wf.config.name}/${instanceId}] last daemon exiting with ${state.queued.length} unclaimed queue item(s); marking failed`,
+          )
+          const nowIso = new Date().toISOString()
+          const failError =
+            'Daemon stopped before this item could be processed (browsers closed).'
+          for (const item of state.queued) {
+            const runId = item.runId ?? randomUUID()
+            try {
+              await markItemFailed(wf.config.name, item.id, failError, runId, trackerDir)
+            } catch {
+              /* best-effort — queue event append; tracker row below is the user-visible signal */
+            }
+            try {
+              const data: Record<string, string> =
+                item.input && typeof item.input === 'object'
+                  ? Object.fromEntries(
+                      Object.entries(item.input as Record<string, unknown>)
+                        .filter(([, v]) => v !== undefined && v !== null)
+                        .map(([k, v]) => [
+                          k,
+                          typeof v === 'object' ? JSON.stringify(v) : String(v),
+                        ]),
+                    )
+                  : {}
+              trackEvent(
+                {
+                  workflow: wf.config.name,
+                  timestamp: nowIso,
+                  id: item.id,
+                  runId,
+                  status: 'failed',
+                  data,
+                  error: failError,
+                },
+                trackerDir,
+              )
+            } catch {
+              /* best-effort */
+            }
+          }
+        }
+      }
+    } catch (e) {
+      log.warn(
+        `[Daemon ${wf.config.name}/${instanceId}] orphan-queue cleanup failed: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      )
+    }
+
     process.off('SIGINT', onSigint)
     process.off('SIGTERM', onSigterm)
     try {

@@ -49,8 +49,12 @@ export interface SystemConfig {
 export interface SessionObserver {
   /** Workflow-instance name for Duo queue correlation. */
   instance?: string
-  /** Fires once per system after its browser is ready. */
-  onBrowserLaunch?: (systemId: string, browserId: string) => void
+  /** Fires once per system after its browser is ready. `chromiumPid` is
+   * the OS pid of the Chromium process Playwright launched, used by the
+   * dashboard's force-stop path to SIGKILL orphaned browsers when the Node
+   * parent dies. Undefined if the underlying Browser handle didn't expose a
+   * pid (rare — happens with some custom Playwright transports). */
+  onBrowserLaunch?: (systemId: string, browserId: string, chromiumPid?: number) => void
   /** Fires before the first auth attempt for a system. Retries do NOT re-fire. */
   onAuthStart?: (systemId: string, browserId: string) => void
   /** Fires after successful login (possibly after retries). */
@@ -82,7 +86,7 @@ export interface BatchConfig {
  */
 export type DetailField<TData> =
   | (keyof TData & string)
-  | { key: string; label: string; editable?: boolean; displayInGrid?: boolean }
+  | { key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean }
 
 export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   name: string
@@ -198,7 +202,7 @@ export interface WorkflowMetadata {
    * on the wire. `editable` and `displayInGrid` are omitted when they
    * match the default (false + true respectively).
    */
-  detailFields: Array<{ key: string; label: string; editable?: boolean; displayInGrid?: boolean }>
+  detailFields: Array<{ key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean }>
 }
 
 export interface RegisteredWorkflow<TData, TSteps extends readonly string[]> {

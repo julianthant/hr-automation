@@ -11,6 +11,7 @@ import {
   readRunsForId,
   cleanOldTrackerFiles,
   cleanOldScreenshots,
+  trackEvent,
   DEFAULT_DIR,
   type TrackerEntry,
 } from "./jsonl.js";
@@ -26,11 +27,14 @@ import { getAll as getAllRegisteredWorkflows } from "../core/registry.js";
 import type { WorkflowMetadata } from "../core/types.js";
 import { PATHS } from "../config.js";
 import { stopDaemons } from "../core/daemon-client.js";
+import { findAliveDaemons } from "../core/daemon-registry.js";
+import { readQueueState, markItemFailed } from "../core/daemon-queue.js";
 import { enqueueFromHttp, validateEnqueueRequest } from "../core/enqueue-dispatch.js";
 import {
   buildRetryHandler,
   buildRetryBulkHandler,
   buildRunWithDataHandler,
+  buildSaveDataHandler,
   buildCancelQueuedHandler,
   buildQueueBumpHandler,
   buildDaemonsListHandler,
@@ -500,6 +504,77 @@ export async function scanFailurePatterns(): Promise<void> {
   } catch (err) {
     // Best-effort — never crash the poll cycle.
     log.warn(`scanFailurePatterns skipped: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * Safety net: detect queued items whose workflow has zero alive daemons,
+ * mark them failed in both the queue and the tracker so the dashboard's
+ * pending rows don't stick when the daemon's own teardown cleanup didn't run
+ * (force-kill, OS crash, daemon process killed without graceful exit).
+ *
+ * Runs alongside `scanFailurePatterns` from the `/events` SSE poll. Cheap:
+ * one `readQueueState` + one `findAliveDaemons` per workflow with non-empty
+ * queue. Idempotent — once an item is marked failed, the next pass sees
+ * `state.queued.length === 0` for that id.
+ *
+ * Does NOT touch claimed items: those are owned by a daemon (alive or
+ * recently dead). The daemon's own `recoverOrphanedClaims` keepalive sweep
+ * handles dead-daemon claim recovery; this sweep handles "queued, no one to
+ * pick up" specifically.
+ */
+export async function scanOrphanedQueueItems(dir = DEFAULT_DIR): Promise<void> {
+  try {
+    const workflows = listWorkflows(dir);
+    for (const wf of workflows) {
+      const state = await readQueueState(wf, dir);
+      if (state.queued.length === 0) continue;
+      const alive = await findAliveDaemons(wf, dir);
+      if (alive.length > 0) continue;
+      log.warn(
+        `[orphan-sweep] ${wf}: ${state.queued.length} queued item(s) with 0 alive daemons; marking failed`,
+      );
+      const nowIso = new Date().toISOString();
+      const failError =
+        "No alive daemon available to process this item. Start a daemon and retry.";
+      for (const item of state.queued) {
+        const runId = item.runId ?? `${item.id}#1`;
+        try {
+          await markItemFailed(wf, item.id, failError, runId, dir);
+        } catch {
+          /* best-effort */
+        }
+        try {
+          const data: Record<string, string> =
+            item.input && typeof item.input === "object"
+              ? Object.fromEntries(
+                  Object.entries(item.input as Record<string, unknown>)
+                    .filter(([, v]) => v !== undefined && v !== null)
+                    .map(([k, v]) => [
+                      k,
+                      typeof v === "object" ? JSON.stringify(v) : String(v),
+                    ]),
+                )
+              : {};
+          trackEvent(
+            {
+              workflow: wf,
+              timestamp: nowIso,
+              id: item.id,
+              runId,
+              status: "failed",
+              data,
+              error: failError,
+            },
+            dir,
+          );
+        } catch {
+          /* best-effort */
+        }
+      }
+    }
+  } catch (err) {
+    log.warn(`scanOrphanedQueueItems skipped: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -1361,6 +1436,52 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       return;
     }
 
+    if (url.pathname === "/api/entry-data") {
+      // Returns the richest tracker `data` map for a given (workflow, id,
+      // runId) — used by EditDataTab's "Refresh from logs" button to refill
+      // the form from whatever the latest run extracted. Falls back to the
+      // richest data across runs of this id if the requested runId has nothing.
+      const wf = url.searchParams.get("workflow") ?? workflow;
+      const id = url.searchParams.get("id") ?? "";
+      const runId = url.searchParams.get("runId") ?? "";
+      const date = url.searchParams.get("date");
+      if (!wf || !id) {
+        res.writeHead(400, {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        });
+        res.end(JSON.stringify({ ok: false, error: "workflow and id are required" }));
+        return;
+      }
+      const entries = (date ? readEntriesForDate(wf, date, dir) : readEntries(wf, dir))
+        .filter((e) => e.id === id);
+      // Pick the richest (most non-empty fields) entry for the runId. The
+      // last-running tracker row usually has the fullest `data` (kernel
+      // updates merge into ctx.data, written on every step transition).
+      // If the runId match is empty (e.g. user views run #2 which never
+      // emitted any data because it was cancelled), fall back to richest
+      // across all runs of this id.
+      const richness = (e: TrackerEntry): number =>
+        Object.values(e.data ?? {}).filter((v) => v != null && String(v).trim() !== "").length;
+      const sorted = [...entries].sort((a, b) => {
+        const r = richness(b) - richness(a);
+        if (r !== 0) return r;
+        return (b.timestamp ?? "").localeCompare(a.timestamp ?? "");
+      });
+      const sameRun = runId ? sorted.find((e) => e.runId === runId) : undefined;
+      const fallback = sorted[0];
+      const chosen = (sameRun && richness(sameRun) > 0) ? sameRun : fallback;
+      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify({
+        ok: true,
+        runId: chosen?.runId ?? null,
+        timestamp: chosen?.timestamp ?? null,
+        data: chosen?.data ?? {},
+        source: chosen ? (chosen.runId === runId ? "active-run" : "fallback") : "none",
+      }));
+      return;
+    }
+
     if (url.pathname === "/api/logs") {
       const wf = url.searchParams.get("workflow") ?? workflow;
       const id = url.searchParams.get("id") ?? "";
@@ -1644,6 +1765,11 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         // swallows its own errors so a notification glitch can't derail the
         // cycle.
         void scanFailurePatterns();
+        // Safety net for queued items whose daemon died without running its
+        // own orphan-queue cleanup (force-kill, OS crash). Marks them failed
+        // so pending rows don't stick. Idempotent + cheap when queues are
+        // empty.
+        void scanOrphanedQueueItems(dir);
       };
       send();
       const interval = setInterval(send, 1_000);
@@ -1939,9 +2065,16 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       req.method === "POST" &&
       url.pathname === "/api/daemon/stop"
     ) {
-      // Thin proxy over stopDaemons() — discovers alive daemons for the
-      // given workflow and POSTs /stop to each. Soft by default (drain
-      // in-flight + exit); `force: true` for hard-stop.
+      // Stop everything we can identify as "this workflow":
+      //   1. Alive daemons → POST /stop (soft drain, or hard exit if force).
+      //   2. Non-daemon Node processes whose `workflow_start` is still
+      //      active+pidAlive (legacy `:direct` runs, or daemons whose
+      //      lockfile was unlinked but whose process is still wedged in
+      //      auth) → SIGTERM (soft) or SIGKILL (force).
+      // Daemon pids are excluded from the signal pass so we don't double-hit
+      // them after the HTTP /stop is already in flight. SIGKILL won't reap
+      // orphaned Chromium children — the OS will eventually, but a stale
+      // browser window may need a manual close.
       try {
         const chunks: Buffer[] = [];
         for await (const chunk of req) {
@@ -1974,12 +2107,143 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
           return;
         }
         const force = input.force === true;
-        const stopped = await stopDaemons(workflow, force, dir);
+
+        const aliveDaemons = await findAliveDaemons(workflow, dir);
+        const daemonPids = new Set(aliveDaemons.map((d) => d.pid));
+        const daemonsStopped = await stopDaemons(workflow, force, dir);
+
+        const events = dir ? readSessionEvents(dir) : readSessionEvents();
+        const startsByInstance = new Map<string, SessionEvent>();
+        const endedInstances = new Set<string>();
+        // Active browser_launch chromiumPids per instance — killed alongside
+        // the parent so we don't leak Chromium windows. macOS doesn't reap
+        // orphans from SIGKILL'd Node parents the way Linux's prctl path does.
+        const browserPidsByInstance = new Map<string, Set<number>>();
+        for (const e of events) {
+          if (!e.workflowInstance) continue;
+          if (workflowNameFromInstance(e.workflowInstance) !== workflow) continue;
+          if (e.type === "workflow_start") startsByInstance.set(e.workflowInstance, e);
+          if (e.type === "workflow_end") endedInstances.add(e.workflowInstance);
+          if (e.type === "browser_launch" && typeof e.chromiumPid === "number") {
+            const set = browserPidsByInstance.get(e.workflowInstance) ?? new Set<number>();
+            set.add(e.chromiumPid);
+            browserPidsByInstance.set(e.workflowInstance, set);
+          }
+          if (e.type === "browser_close" && e.workflowInstance) {
+            // No chromiumPid on close events today, but the instance's
+            // browser_close means the browser is gone — drop everything for
+            // that instance to avoid signalling an already-recycled pid.
+            // Soft heuristic: only drop on unambiguous full-close (no system).
+            // Per-system close events still leave us erring on the side of
+            // signalling, which on a stale pid is a no-op.
+          }
+        }
+        const ownPid = process.pid;
+        const signal: NodeJS.Signals = force ? "SIGKILL" : "SIGTERM";
+        let processesKilled = 0;
+        let browsersKilled = 0;
+        const killedInstances: string[] = [];
+
+        // Pid set we're about to signal at the Node-parent level. Used to
+        // skip browser kills for instances whose parent we DIDN'T touch
+        // (those are presumed alive and managing their own browser lifetime).
+        const targetedInstances = new Set<string>();
+        for (const [instance, startEv] of startsByInstance) {
+          if (endedInstances.has(instance)) continue;
+          const pid = startEv.pid;
+          if (!pid || pid === ownPid) continue;
+          if (daemonPids.has(pid)) {
+            // Daemons handle their own teardown via /stop. We still want
+            // their orphaned Chromium killed on force, so include the
+            // instance in targetedInstances below.
+            if (force) targetedInstances.add(instance);
+            continue;
+          }
+          try { process.kill(pid, 0); } catch { continue; }
+          try {
+            process.kill(pid, signal);
+            processesKilled += 1;
+            killedInstances.push(instance);
+            targetedInstances.add(instance);
+          } catch (e) {
+            log.warn(
+              `[/api/daemon/stop] failed to ${signal} pid=${pid} instance='${instance}': ${errorMessage(e)}`,
+            );
+          }
+        }
+
+        // Force-kill orphaned Chromium for every targeted instance. Soft
+        // stop assumes the parent will close its own browsers during drain.
+        if (force) {
+          for (const instance of targetedInstances) {
+            const pids = browserPidsByInstance.get(instance);
+            if (!pids) continue;
+            for (const cPid of pids) {
+              try { process.kill(cPid, 0); } catch { continue; }
+              try {
+                process.kill(cPid, "SIGKILL");
+                browsersKilled += 1;
+              } catch (e) {
+                log.warn(
+                  `[/api/daemon/stop] failed to SIGKILL chromium pid=${cPid} instance='${instance}': ${errorMessage(e)}`,
+                );
+              }
+            }
+          }
+        }
+
+        if (processesKilled > 0) {
+          log.step(
+            `[/api/daemon/stop] ${signal} sent to ${processesKilled} non-daemon ${workflow} process(es): ${killedInstances.join(", ")}`,
+          );
+        }
+        if (browsersKilled > 0) {
+          log.step(
+            `[/api/daemon/stop] SIGKILL'd ${browsersKilled} orphaned Chromium process(es) for ${workflow}`,
+          );
+        }
+
+        // Force-stop also clears the queue: with daemons killed, queued items
+        // would otherwise sit forever (or get picked up by a future daemon
+        // unexpectedly). Soft stop preserves the queue so a draining daemon
+        // can keep working it. Cancel reuses the same per-id handler that the
+        // dashboard's X button uses — appends a `failed` queue event + emits
+        // a `failed` tracker row with `step: "cancelled"`.
+        let queuedCancelled = 0;
+        if (force) {
+          try {
+            const state = await readQueueState(workflow, dir);
+            const cancelHandler = buildCancelQueuedHandler(dir);
+            for (const item of state.queued) {
+              const result = await cancelHandler({ workflow, id: item.id });
+              if (result.ok) queuedCancelled += 1;
+            }
+            if (queuedCancelled > 0) {
+              log.step(
+                `[/api/daemon/stop] cancelled ${queuedCancelled} queued ${workflow} item(s) on force-stop`,
+              );
+            }
+          } catch (e) {
+            log.warn(
+              `[/api/daemon/stop] failed to cancel queued items: ${errorMessage(e)}`,
+            );
+          }
+        }
+
         res.writeHead(200, {
           "Content-Type": "application/json",
           "Access-Control-Allow-Origin": "*",
         });
-        res.end(JSON.stringify({ ok: true, workflow, force, stopped }));
+        res.end(JSON.stringify({
+          ok: true,
+          workflow,
+          force,
+          stopped: daemonsStopped + processesKilled,
+          daemonsStopped,
+          processesKilled,
+          browsersKilled,
+          queuedCancelled,
+        }));
       } catch (e) {
         res.writeHead(500, {
           "Content-Type": "application/json",
@@ -2069,6 +2333,22 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         data,
       });
       writeJson(result.ok ? 202 : 400, result);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/save-data") {
+      const parsed = await readJsonBody();
+      if (!parsed.ok) return writeJson(400, { ok: false, error: parsed.error });
+      const data =
+        parsed.body.data && typeof parsed.body.data === "object"
+          ? (parsed.body.data as Record<string, unknown>)
+          : {};
+      const result = await buildSaveDataHandler(dir)({
+        workflow: String(parsed.body.workflow ?? ""),
+        id: String(parsed.body.id ?? ""),
+        data,
+      });
+      writeJson(result.ok ? 200 : 400, result);
       return;
     }
 

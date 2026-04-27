@@ -3,6 +3,15 @@ import type { TrackerEntry } from "../types";
 
 interface UseEntriesResult {
   entries: TrackerEntry[];
+  /**
+   * `${workflow}|${date}` of the data currently in `entries`. Empty string
+   * means a new subscription is in flight and `entries` is stale from the
+   * previous (workflow, date). Consumers (e.g. App's toast effect) should
+   * skip processing until this matches the target key — otherwise stale
+   * entries from the previous date pollute per-key status maps and produce
+   * spurious "transition" toasts when fresh data arrives with id collisions.
+   */
+  entriesKey: string;
   workflows: string[];
   wfCounts: Record<string, number>;
   connected: boolean;
@@ -15,6 +24,7 @@ interface UseEntriesResult {
  */
 export function useEntries(workflow: string, date: string): UseEntriesResult {
   const [entries, setEntries] = useState<TrackerEntry[]>([]);
+  const [entriesKey, setEntriesKey] = useState("");
   const [workflows, setWorkflows] = useState<string[]>([]);
   const [wfCounts, setWfCounts] = useState<Record<string, number>>({});
   const [connected, setConnected] = useState(false);
@@ -23,6 +33,7 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
 
   useEffect(() => {
     setLoading(true);
+    setEntriesKey("");
     // Reset the entry-hash memo on every (workflow, date) change so a new
     // subscription always emits a fresh diff — otherwise the hash carried
     // over from the previous date can short-circuit the first message on
@@ -88,6 +99,7 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
           });
 
         setEntries(deduped);
+        setEntriesKey(`${workflow}|${date}`);
         setWorkflows(wfs || []);
         if (counts) setWfCounts(counts);
       } catch {
@@ -106,5 +118,5 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
     };
   }, [workflow, date]);
 
-  return { entries, workflows, wfCounts, connected, loading };
+  return { entries, entriesKey, workflows, wfCounts, connected, loading };
 }

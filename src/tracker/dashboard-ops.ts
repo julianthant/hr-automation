@@ -81,7 +81,8 @@ export interface RetryRequest {
  * Single-entry retry: look up the original input from the pending row,
  * re-enqueue via the existing daemon dispatch path. The kernel auto-
  * increments runId so the new run shows up as a fresh row in the
- * dashboard's RunSelector.
+ * dashboard's RunSelector. Reuses an alive daemon when one exists; spawns
+ * a fresh one when none do (matches the CLI semantics).
  */
 export function buildRetryHandler(dir: string) {
   return async (req: RetryRequest): Promise<{ ok: true } | { ok: false; error: string }> => {
@@ -127,6 +128,11 @@ export interface RunWithDataRequest {
  * attached to the original input. The kernel's splitPrefilled merges
  * those values into ctx.data before the handler runs; handlers that gate
  * their extraction step on data presence then skip extraction.
+ *
+ * Like retry, refuses to auto-spawn a fresh daemon — the user is editing data
+ * to re-run on the daemon they already have running, not booting a new
+ * session. When no daemon is alive, returns an actionable error so the user
+ * can spawn one deliberately via the SESSIONS panel.
  */
 export function buildRunWithDataHandler(dir: string) {
   return async (
@@ -137,6 +143,8 @@ export function buildRunWithDataHandler(dir: string) {
     }
     const lookup = findEntryInput(req.workflow, req.id, req.runId, dir);
     if ("error" in lookup) return { ok: false, error: lookup.error };
+    const guardError = await requireAliveDaemon(req.workflow, dir);
+    if (guardError) return { ok: false, error: guardError };
     // Merge the previous run's accumulated data with the user's overrides.
     // The user's edits win on key collision. This carries non-editable
     // fields (e.g. separations' rawTerminationType — used by downstream
@@ -148,6 +156,70 @@ export function buildRunWithDataHandler(dir: string) {
     const inputWithPrefill = { ...lookup.input, prefilledData: mergedPrefill };
     const result = await enqueueFromHttp(req.workflow, [inputWithPrefill], dir);
     if (!result.ok) return { ok: false, error: result.error ?? "enqueue failed" };
+    return { ok: true };
+  };
+}
+
+export interface SaveDataRequest {
+  workflow: string;
+  id: string;
+  data: Record<string, unknown>;
+}
+
+/**
+ * Save edited values onto an entry's tracker row WITHOUT triggering a new run.
+ * Appends a synthetic tracker entry that mirrors the latest row's status,
+ * step, and runId, but with `data` merged with the user's edits. The
+ * frontend dedupe (latest-per-id) picks it up on next SSE tick so refreshes
+ * preserve the saved values.
+ *
+ * Refuses to save when the latest status is `pending` or `running` — the
+ * kernel may emit a status update concurrently and our synthetic row could
+ * race / overwrite legitimate state. Terminal statuses (done / failed /
+ * skipped) are safe to overlay.
+ */
+export function buildSaveDataHandler(dir: string) {
+  return async (
+    req: SaveDataRequest,
+  ): Promise<{ ok: true } | { ok: false; error: string }> => {
+    if (!req.workflow || !req.id || !req.data || typeof req.data !== "object") {
+      return { ok: false, error: "workflow, id, and data are required" };
+    }
+    const entries = readEntries(req.workflow, dir).filter((e) => e.id === req.id);
+    if (entries.length === 0) {
+      return { ok: false, error: `no tracker entry found for id=${req.id}` };
+    }
+    entries.sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
+    const latest = entries[0];
+    if (latest.status === "pending" || latest.status === "running") {
+      return {
+        ok: false,
+        error: `cannot save while entry is ${latest.status} — wait for it to finish`,
+      };
+    }
+    // Coerce user-supplied values to strings (TrackerEntry.data is
+    // Record<string, string>). Drop empty strings only when they would
+    // overwrite a non-empty existing value, so deliberately-cleared fields
+    // round-trip but blanks from un-touched inputs don't clobber prior data.
+    const merged: Record<string, string> = { ...(latest.data ?? {}) };
+    for (const [k, v] of Object.entries(req.data)) {
+      const next = typeof v === "string" ? v : v == null ? "" : String(v);
+      if (next === "" && merged[k]) continue;
+      merged[k] = next;
+    }
+    const entry: TrackerEntry = {
+      workflow: req.workflow,
+      timestamp: new Date().toISOString(),
+      id: req.id,
+      runId: latest.runId,
+      status: latest.status,
+      step: latest.step,
+      data: merged,
+      // Don't carry `input` — that field is reserved for `pending` rows by
+      // the kernel; this synthetic row never originated from an enqueue.
+      error: latest.error,
+    };
+    trackEvent(entry, dir);
     return { ok: true };
   };
 }

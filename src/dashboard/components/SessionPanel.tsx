@@ -28,7 +28,7 @@ export function SessionPanel() {
   const active = visible.filter((w) => w.active || w.crashedOnLaunch);
 
   return (
-    <div className="w-[240px] min-[1440px]:w-[280px] 2xl:w-[320px] flex-shrink-0 flex flex-col bg-card overflow-hidden">
+    <div className="w-[200px] min-[1440px]:w-[240px] 2xl:w-[280px] flex-shrink-0 flex flex-col bg-card overflow-hidden">
       <div className="flex-1 overflow-y-auto p-2 border-b border-border">
         {/* Alive daemons surface above workflow instances. The two
             concepts are distinct: daemons are persistent processes

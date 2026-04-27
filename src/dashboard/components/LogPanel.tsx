@@ -249,7 +249,14 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
           />
         }
         editDataAvailable={detailFields.some((f) => f.editable)}
-        editDataSlot={<EditDataTab workflow={workflow} entry={entry ?? null} />}
+        editDataSlot={
+          <EditDataTab
+            workflow={workflow}
+            entry={entry ?? null}
+            runId={activeRunId}
+            date={date}
+          />
+        }
       />
     </div>
   );

@@ -106,18 +106,64 @@ test('findAliveDaemons unlinks lockfile for dead PID', async () => {
   }
 })
 
-test('findAliveDaemons unlinks lockfile when /whoami handshake fails (port stolen)', async () => {
+test('findAliveDaemons preserves lockfile when /whoami is unreachable but PID is alive', async () => {
   const dir = TMP()
   try {
-    // Port 1 is virtually guaranteed to fail HTTP connect; use current PID so it's alive.
+    // Port 1 is virtually guaranteed to fail HTTP connect (unreachable); the
+    // PID is our own (alive). Under the previous contract this unlinked the
+    // lockfile aggressively — which orphaned healthy daemons whose event loop
+    // was momentarily busy (e.g. mid-keepalive sync write), causing
+    // enqueueFromHttp to spawn duplicates. New contract: only unlink on
+    // dead-PID OR positive identity mismatch from /whoami. An unreachable
+    // probe with an alive PID is treated as "transiently busy, trust the
+    // lockfile."
     const path = lockfilePath('wftest', 'stolen', dir)
     writeLockfile(
       { workflow: 'wftest', instanceId: 'stolen', pid: process.pid, port: 1, startedAt: 'x', hostname: 'h', version: 1 },
       path,
     )
     const alive = await findAliveDaemons('wftest', dir)
-    assert.deepEqual(alive, [])
-    assert.equal(existsSync(path), false)
+    assert.equal(alive.length, 1)
+    assert.equal(alive[0].instanceId, 'stolen')
+    assert.equal(existsSync(path), true)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('findAliveDaemons unlinks lockfile when /whoami returns a mismatched identity', async () => {
+  const dir = TMP()
+  try {
+    // Spin up a real HTTP server on an ephemeral port that responds to
+    // /whoami with a DIFFERENT workflow/instanceId — simulates the "port
+    // stolen by an unrelated daemon" case. This is the only scenario where
+    // unlinking a lockfile-with-alive-PID is correct: the lockfile points
+    // at a port whose resident is provably not us.
+    const { createServer } = await import('node:http')
+    const server = createServer((req, res) => {
+      if (req.url === '/whoami') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ workflow: 'someoneElse', instanceId: 'other' }))
+        return
+      }
+      res.writeHead(404)
+      res.end()
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+    const addr = server.address()
+    const port = typeof addr === 'object' && addr ? addr.port : 0
+    try {
+      const path = lockfilePath('wftest', 'mismatched', dir)
+      writeLockfile(
+        { workflow: 'wftest', instanceId: 'mismatched', pid: process.pid, port, startedAt: 'x', hostname: 'h', version: 1 },
+        path,
+      )
+      const alive = await findAliveDaemons('wftest', dir)
+      assert.deepEqual(alive, [])
+      assert.equal(existsSync(path), false)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
