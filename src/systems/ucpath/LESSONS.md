@@ -59,6 +59,14 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Fix:** Detect both code paths. After clicking Search, check whether the URL changed to a detail page (single match) or remained on the results grid; branch accordingly. A simple `Promise.race` between "detail page loaded" and "results grid visible" works.
 **Tags:** person, search, results, grid, redirect, single, detail
 
+## 2026-04-24 — `personSearch` and `personOrgSummary` are different forms, not aliases
+
+**Tried:** Treating `personSearch.*` as the canonical "person lookup" group when implementing a name-keyed lookup.
+**Failed because:** They are two different PeopleSoft Find-an-Existing-Value forms with disjoint field shapes. `personSearch.*` targets the Search/Match component (`/c/...HCR_SM_SEARCH.GBL`) AFTER selecting `Search Type=Person, Search Parameter=PERSON_SEARCH` and clicking Search once — at which point SSN, First Name, Last Name, and DOB inputs appear (`CHAR_INPUT$0..2`, `DATE_INPUT$3`). `personOrgSummary.*` targets `/c/...PERSON_ORG_SUMM.GBL` directly, which exposes Empl ID, Last Name, and Name (first/middle) only — no SSN, no DOB. The HR Tasks sidebar surfaces both: "Search Person" → Search/Match, "Person Organizational Summary" → its own page.
+**Fix:** Choose by use case. Onboarding's Smart-HR-side rehire detection uses `personSearch.*` (SSN + name + DOB). EID lookup and any future name-only lookup use `personOrgSummary.*`. They share `#PTS_CFG_CL_WRK_PTS_SRCH_BTN` for the Search submit only because that's a generic Find-an-Existing-Value control.
+**Selector:** `personSearch.*`, `personOrgSummary.*` in `selectors.ts`
+**Tags:** person, search, org-summary, find-existing-value, lookup, hr-tasks
+
 ## 2026-04-23 — Workforce Job Summary multi-row grid blocks detail-page tabs
 
 **Tried:** Clicking the "Work Location" tab immediately after `searchJobSummary` returns `true`.

@@ -528,6 +528,17 @@ export const jobSummary = {
 };
 
 // ─── HR Tasks navigation (top-level page before iframe interactions) ──────
+//
+// HR Tasks is the activity-guide landing page reached at the URL stored in
+// `UCPATH_SMART_HR_URL`. The left sidebar (`<navigation aria-label="HR Tasks
+// Item List">`) has 7 top-level items; 5 of them are expandable categories
+// whose toggle href is `javascript:void(0);` and whose accessible name ends
+// in "(select to expand or collapse child steps)". The 2 leaf top-level
+// items, plus all 18 leaf children, link to `/c/...GBL?NavColl=true` URLs
+// that load inside `#main_target_win0`. Top-level link names are duplicated
+// (img alt + text — e.g. "Search Person Search Person") so accessible-name
+// matchers should use anchored regex rather than `exact: true`.
+// Sidebar tree mapped 2026-04-24 via playwright-cli.
 
 export const hrTasks = {
   /**
@@ -538,18 +549,675 @@ export const hrTasks = {
     page.getByRole("link", { name: /HR Tasks/i }).or(page.getByText("HR Tasks")),
 
   /**
-   * Sidebar: Smart HR Templates link. verified 2026-03-16
-   * @tags sidebar, smart-hr, templates, link, hr-tasks
+   * Sidebar `<navigation>` region containing all HR Tasks nav items.
+   * Useful as a scoping root for sidebar-only locators. verified 2026-04-24
+   * @tags sidebar, navigation, region, hr-tasks
+   */
+  itemList: (page: Page): Locator =>
+    page.getByRole("navigation", { name: "HR Tasks Item List" }),
+
+  /**
+   * Sidebar top-level: Search Person (Search/Match form). Top-level links
+   * have duplicated accessible names ("X X"), so anchor with `^X`.
+   * verified 2026-04-24
+   * @tags sidebar, search, person, link, hr-tasks
+   */
+  searchPersonLink: (page: Page): Locator =>
+    page.getByRole("link", { name: /^Search Person/ }),
+
+  /**
+   * Sidebar top-level: Person Organizational Summary. verified 2026-04-24
+   * @tags sidebar, person-org-summary, link, hr-tasks
+   */
+  personOrgSummaryLink: (page: Page): Locator =>
+    page.getByRole("link", { name: /^Person Organizational Summary/ }),
+
+  /**
+   * Sidebar category toggle: Contract Pay (expand/collapse). The "(select to
+   * expand or collapse child steps)" suffix disambiguates the category
+   * header from any child link starting with the same prefix. verified 2026-04-24
+   * @tags sidebar, contract-pay, category, link, hr-tasks
+   */
+  contractPayLink: (page: Page): Locator =>
+    page.getByRole("link", {
+      name: /^Contract Pay .*select to expand or collapse/,
+    }),
+
+  /**
+   * Sidebar leaf under Contract Pay: Contract Payment Details. verified 2026-04-24
+   * @tags sidebar, contract-pay, payment-details, link, hr-tasks
+   */
+  contractPaymentDetailsLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Contract Payment Details", exact: true }),
+
+  /**
+   * Sidebar leaf under Contract Pay: Update Contract Pay NA. verified 2026-04-24
+   * @tags sidebar, contract-pay, update, link, hr-tasks
+   */
+  updateContractPayNaLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Update Contract Pay NA", exact: true }),
+
+  /**
+   * Sidebar category toggle: PayPath/Additional Pay. verified 2026-04-24
+   * @tags sidebar, paypath, additional-pay, category, link, hr-tasks
+   */
+  payPathLink: (page: Page): Locator =>
+    page.getByRole("link", {
+      name: /^PayPath\/Additional Pay .*select to expand or collapse/,
+    }),
+
+  /**
+   * Sidebar leaf under PayPath: Create Additional Pay. verified 2026-04-24
+   * @tags sidebar, paypath, additional-pay, create, link, hr-tasks
+   */
+  createAdditionalPayLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Create Additional Pay", exact: true }),
+
+  /**
+   * Sidebar leaf under PayPath: Self Service Additional Pay. verified 2026-04-24
+   * @tags sidebar, paypath, self-service, additional-pay, link, hr-tasks
+   */
+  selfServiceAdditionalPayLink: (page: Page): Locator =>
+    page.getByRole("link", {
+      name: "Self Service Additional Pay",
+      exact: true,
+    }),
+
+  /**
+   * Sidebar leaf under PayPath: PayPath Actions (combined staff+academic
+   * entry). verified 2026-04-24
+   * @tags sidebar, paypath, actions, link, hr-tasks
+   */
+  payPathActionsLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "PayPath Actions", exact: true }),
+
+  /**
+   * Sidebar leaf under PayPath: PayPath Actions ACAD. verified 2026-04-24
+   * @tags sidebar, paypath, actions, academic, link, hr-tasks
+   */
+  payPathActionsAcadLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "PayPath Actions ACAD", exact: true }),
+
+  /**
+   * Sidebar leaf under PayPath: PayPath Actions STAFF. verified 2026-04-24
+   * @tags sidebar, paypath, actions, staff, link, hr-tasks
+   */
+  payPathActionsStaffLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "PayPath Actions STAFF", exact: true }),
+
+  /**
+   * Sidebar category toggle: Job Data Related. verified 2026-04-24
+   * @tags sidebar, job-data, category, link, hr-tasks
+   */
+  jobDataRelatedLink: (page: Page): Locator =>
+    page.getByRole("link", {
+      name: /^Job Data Related .*select to expand or collapse/,
+    }),
+
+  /**
+   * Sidebar leaf under Job Data Related: Job Data. verified 2026-04-24
+   * @tags sidebar, job-data, link, hr-tasks
+   */
+  jobDataLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Job Data", exact: true }),
+
+  /**
+   * Sidebar leaf under Job Data Related: UC Employee Review. verified 2026-04-24
+   * @tags sidebar, job-data, uc-employee-review, link, hr-tasks
+   */
+  ucEmployeeReviewLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "UC Employee Review", exact: true }),
+
+  /**
+   * Sidebar leaf under Job Data Related: Workforce Job Summary (separations
+   * + emergency-contact entry point). verified 2026-04-24
+   * @tags sidebar, job-data, workforce, job-summary, link, hr-tasks
+   */
+  workforceJobSummaryLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Workforce Job Summary", exact: true }),
+
+  /**
+   * Sidebar category toggle: Personal Data Related. verified 2026-04-24
+   * @tags sidebar, personal-data, category, link, hr-tasks
+   */
+  personalDataRelatedLink: (page: Page): Locator =>
+    page.getByRole("link", {
+      name: /^Personal Data Related .*select to expand or collapse/,
+    }),
+
+  /**
+   * Sidebar leaf under Personal Data Related: Activities. verified 2026-04-24
+   * @tags sidebar, personal-data, activities, link, hr-tasks
+   */
+  activitiesLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Activities", exact: true }),
+
+  /**
+   * Sidebar leaf under Personal Data Related: Emergency Contact. verified 2026-04-24
+   * @tags sidebar, personal-data, emergency-contact, link, hr-tasks
+   */
+  emergencyContactLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Emergency Contact", exact: true }),
+
+  /**
+   * Sidebar leaf under Personal Data Related: Identification Data. verified 2026-04-24
+   * @tags sidebar, personal-data, identification, link, hr-tasks
+   */
+  identificationDataLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Identification Data", exact: true }),
+
+  /**
+   * Sidebar leaf under Personal Data Related: Modify a Person. verified 2026-04-24
+   * @tags sidebar, personal-data, modify, link, hr-tasks
+   */
+  modifyAPersonLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Modify a Person", exact: true }),
+
+  /**
+   * Sidebar leaf under Personal Data Related: Person Checklist. verified 2026-04-24
+   * @tags sidebar, personal-data, checklist, link, hr-tasks
+   */
+  personChecklistLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Person Checklist", exact: true }),
+
+  /**
+   * Sidebar leaf under Personal Data Related: Person Profiles (oath-signature
+   * entry point). verified 2026-04-24
+   * @tags sidebar, personal-data, person-profiles, oath, link, hr-tasks
+   */
+  personProfilesLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Person Profiles", exact: true }),
+
+  /**
+   * Sidebar leaf under Personal Data Related: Security Clearance. verified 2026-04-24
+   * @tags sidebar, personal-data, security-clearance, link, hr-tasks
+   */
+  securityClearanceLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Security Clearance", exact: true }),
+
+  /**
+   * Sidebar leaf under Personal Data Related: UC External System IDs.
+   * verified 2026-04-24
+   * @tags sidebar, personal-data, external-system-ids, link, hr-tasks
+   */
+  ucExternalSystemIdsLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "UC External System IDs", exact: true }),
+
+  /**
+   * Sidebar category toggle: Smart HR Templates. The legacy `getByText`
+   * variant from before 2026-04-24 still matched this same node loosely;
+   * the precise role+regex form here distinguishes the toggle from any
+   * descendant "Smart HR Templates" text. verified 2026-04-24
+   * @tags sidebar, smart-hr, templates, category, link, hr-tasks
    */
   smartHRTemplatesLink: (page: Page): Locator =>
     page.getByText("Smart HR Templates"),
 
   /**
-   * Sidebar: Smart HR Transactions link. verified 2026-03-16
+   * Sidebar leaf under Smart HR Templates: Smart HR Transactions. verified 2026-03-16
    * @tags sidebar, smart-hr, transactions, link, hr-tasks
    */
   smartHRTransactionsLink: (page: Page): Locator =>
     page.getByText("Smart HR Transactions"),
+
+  /**
+   * Sidebar leaf under Smart HR Templates: SS Smart HR Transactions
+   * (self-service variant). verified 2026-04-24
+   * @tags sidebar, smart-hr, self-service, transactions, link, hr-tasks
+   */
+  ssSmartHRTransactionsLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "SS Smart HR Transactions", exact: true }),
+
+  /**
+   * Sidebar leaf under Smart HR Templates: Smart HR Transaction Status.
+   * verified 2026-04-24
+   * @tags sidebar, smart-hr, status, transactions, link, hr-tasks
+   */
+  smartHRTransactionStatusLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Smart HR Transaction Status", exact: true }),
+};
+
+// ─── Person Organizational Summary (HR Tasks → sidebar leaf) ──────────────
+//
+// PERSON_ORG_SUMM.GBL is a Find-an-Existing-Value search form distinct from
+// `personSearch.*` (which targets the Search/Match form configured for the
+// PERSON_SEARCH parameter). This form's primary inputs are Empl ID, Last
+// Name, and Name (first/middle); SSN and DOB are not exposed here. eid-lookup
+// uses this page; future workflows that need name-keyed person lookup should
+// reuse these selectors. Single-result redirects skip the grid (see
+// LESSONS.md "Person Org Summary single-result redirect"). verified 2026-04-24
+
+export const personOrgSummary = {
+  /**
+   * Empl ID textbox. Exact: true avoids matching label-shaped probes
+   * elsewhere on the form. verified 2026-04-24
+   * @tags empl, id, employee, textbox, person-org-summary
+   */
+  emplIdInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Empl ID", exact: true }),
+
+  /**
+   * Last Name textbox. verified 2026-04-24
+   * @tags last-name, name, textbox, person-org-summary
+   */
+  lastNameInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Last Name" }),
+
+  /**
+   * Name (first/middle) textbox. Exact: true is required because "Last Name"
+   * also contains "Name". verified 2026-04-24
+   * @tags name, first-name, middle-name, textbox, person-org-summary
+   */
+  nameInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Name", exact: true }),
+
+  /**
+   * Case Sensitive checkbox — toggles case-aware name matching. verified 2026-04-24
+   * @tags case, sensitive, checkbox, person-org-summary
+   */
+  caseSensitiveCheckbox: (f: FrameLocator): Locator =>
+    f.getByRole("checkbox", { name: "Case Sensitive" }),
+
+  /**
+   * Search submit button. The `#PTS_CFG_CL_WRK_PTS_SRCH_BTN` ID is the
+   * stable PeopleSoft Find-an-Existing-Value search trigger and is shared
+   * with the Search Person / Search/Match form. verified 2026-04-24
+   * @tags search, submit, button, person-org-summary
+   */
+  searchButton: (f: FrameLocator): Locator =>
+    f.locator("#PTS_CFG_CL_WRK_PTS_SRCH_BTN"),
+
+  /**
+   * Clear search criteria button. Used between iterations of name-strategy
+   * fallbacks (Last + First → Last + Middle, etc.) so stale values don't
+   * leak across attempts. verified 2026-04-24
+   * @tags clear, button, person-org-summary
+   */
+  clearButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Clear", exact: true }),
+};
+
+// ─── PayPath Actions (HR Tasks → PayPath/Additional Pay → PayPath Actions) ─
+//
+// `/c/UC_EXTENSIONS.UC_E102_STAFF_ACAD.GBL` — combined staff+academic entry.
+// Find-an-Existing-Value search form drills into the actual PayPath edit
+// page where Job Data fields (position, comp rate, etc.) are filled. The
+// edit page reuses `jobData.*` selectors; this group covers the search
+// form. work-study uses this navigation chain via the sidebar (see
+// `src/workflows/work-study/enter.ts`). The post-search Save button has
+// the unique ID `UC_E102_PP_WRK_SUBMIT_BTN` and is registered here for
+// shared reuse. ACAD-only and STAFF-only variants live at
+// `UC_E102_ACAD_ACTNS.GBL` / `UC_E102_STAF_ACTNS.GBL` and have the same
+// search-form shape — selectors here apply to all three.
+// verified 2026-04-24
+
+export const payPathActions = {
+  /**
+   * Empl ID textbox. Most common search key. verified 2026-04-24
+   * @tags empl, id, employee, textbox, paypath-actions
+   */
+  emplIdInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Empl ID", exact: true }),
+
+  /**
+   * Empl Record textbox. Disambiguates between concurrent jobs for the
+   * same employee. verified 2026-04-24
+   * @tags empl, record, textbox, paypath-actions
+   */
+  emplRecordInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Empl Record" }),
+
+  /**
+   * Name textbox. exact: true required because "Last Name" and other
+   * cells contain "Name". verified 2026-04-24
+   * @tags name, textbox, paypath-actions
+   */
+  nameInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Name", exact: true }),
+
+  /**
+   * Business Unit textbox. exact: true avoids matching "Look up Business
+   * Unit". verified 2026-04-24
+   * @tags business-unit, textbox, paypath-actions
+   */
+  businessUnitInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Business Unit", exact: true }),
+
+  /**
+   * Business Unit magnifying-glass lookup button. verified 2026-04-24
+   * @tags business-unit, lookup, button, paypath-actions
+   */
+  businessUnitLookupButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Look up Business Unit" }),
+
+  /**
+   * Position Number textbox. verified 2026-04-24
+   * @tags position, number, textbox, paypath-actions
+   */
+  positionNumberInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Position Number", exact: true }),
+
+  /**
+   * Position Number lookup button. verified 2026-04-24
+   * @tags position, number, lookup, button, paypath-actions
+   */
+  positionNumberLookupButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Look up Position Number" }),
+
+  /**
+   * Department textbox. verified 2026-04-24
+   * @tags department, textbox, paypath-actions
+   */
+  departmentInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Department", exact: true }),
+
+  /**
+   * Department lookup button. verified 2026-04-24
+   * @tags department, lookup, button, paypath-actions
+   */
+  departmentLookupButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Look up Department" }),
+
+  /**
+   * Job Code textbox. verified 2026-04-24
+   * @tags job-code, textbox, paypath-actions
+   */
+  jobCodeInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Job Code", exact: true }),
+
+  /**
+   * Job Code lookup button. verified 2026-04-24
+   * @tags job-code, lookup, button, paypath-actions
+   */
+  jobCodeLookupButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Look up Job Code" }),
+
+  /**
+   * Employee Classification textbox. verified 2026-04-24
+   * @tags employee, classification, textbox, paypath-actions
+   */
+  employeeClassificationInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Employee Classification", exact: true }),
+
+  /**
+   * Employee Classification lookup button. verified 2026-04-24
+   * @tags employee, classification, lookup, button, paypath-actions
+   */
+  employeeClassificationLookupButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Look up Employee Classification" }),
+
+  /**
+   * Employee Status combobox. Options: Active, Leave With Pay, Leave of
+   * Absence, Short Work Break. verified 2026-04-24
+   * @tags employee, status, combobox, paypath-actions
+   */
+  employeeStatusSelect: (f: FrameLocator): Locator =>
+    f.getByRole("combobox", { name: "Employee Status" }),
+
+  /**
+   * Case Sensitive checkbox. verified 2026-04-24
+   * @tags case, sensitive, checkbox, paypath-actions
+   */
+  caseSensitiveCheckbox: (f: FrameLocator): Locator =>
+    f.getByRole("checkbox", { name: "Case Sensitive" }),
+
+  /**
+   * Search submit button. Shared `#PTS_CFG_CL_WRK_PTS_SRCH_BTN` ID with
+   * other Find-an-Existing-Value forms. verified 2026-04-24
+   * @tags search, submit, button, paypath-actions
+   */
+  searchButton: (f: FrameLocator): Locator =>
+    f.locator("#PTS_CFG_CL_WRK_PTS_SRCH_BTN"),
+
+  /**
+   * Clear search criteria button. verified 2026-04-24
+   * @tags clear, button, paypath-actions
+   */
+  clearButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Clear", exact: true }),
+
+  /**
+   * Save and Submit button on the post-search PayPath edit page. The
+   * `UC_E102_PP_WRK_SUBMIT_BTN` ID is unique to PayPath Actions (distinct
+   * from Smart HR's `smartHR.saveAndSubmitButton`). Verified in
+   * `src/workflows/work-study/enter.ts`.
+   * @tags save, submit, button, paypath-actions, edit
+   */
+  saveAndSubmitButton: (f: FrameLocator): Locator =>
+    f.locator("#UC_E102_PP_WRK_SUBMIT_BTN"),
+};
+
+// ─── SS Smart HR Transactions (self-service Smart HR) ─────────────────────
+//
+// `/c/UC_EXTENSIONS.UC_SS_TBH.GBL` — self-service variant of Smart HR
+// Transactions, surfacing in-flight self-service hires/changes for review.
+// Find-an-Existing-Value search form keyed on Transaction ID, Empl ID,
+// Action, Approval Status, and Business Unit. Distinct from the standard
+// Smart HR Transactions page (which is `smartHR.*`). verified 2026-04-24
+
+export const ssSmartHRTransactions = {
+  /**
+   * Transaction ID textbox. verified 2026-04-24
+   * @tags transaction, id, textbox, ss-smart-hr
+   */
+  transactionIdInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Transaction ID" }),
+
+  /**
+   * Name textbox. verified 2026-04-24
+   * @tags name, textbox, ss-smart-hr
+   */
+  nameInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Name", exact: true }),
+
+  /**
+   * Empl ID textbox. verified 2026-04-24
+   * @tags empl, id, employee, textbox, ss-smart-hr
+   */
+  emplIdInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Empl ID", exact: true }),
+
+  /**
+   * Action textbox (PeopleSoft action code, e.g. HIR, REH). verified 2026-04-24
+   * @tags action, code, textbox, ss-smart-hr
+   */
+  actionInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Action", exact: true }),
+
+  /**
+   * Action lookup button. verified 2026-04-24
+   * @tags action, lookup, button, ss-smart-hr
+   */
+  actionLookupButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Look up Action" }),
+
+  /**
+   * Approval Status combobox. Options: Approved, Denied, Error, Manually
+   * Processed, Pending, Pushed Back. verified 2026-04-24
+   * @tags approval, status, combobox, ss-smart-hr
+   */
+  approvalStatusSelect: (f: FrameLocator): Locator =>
+    f.getByRole("combobox", { name: "Approval Status" }),
+
+  /**
+   * Business Unit textbox. verified 2026-04-24
+   * @tags business-unit, textbox, ss-smart-hr
+   */
+  businessUnitInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Business Unit", exact: true }),
+
+  /**
+   * Business Unit lookup button. verified 2026-04-24
+   * @tags business-unit, lookup, button, ss-smart-hr
+   */
+  businessUnitLookupButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Look up Business Unit" }),
+
+  /**
+   * Case Sensitive checkbox. verified 2026-04-24
+   * @tags case, sensitive, checkbox, ss-smart-hr
+   */
+  caseSensitiveCheckbox: (f: FrameLocator): Locator =>
+    f.getByRole("checkbox", { name: "Case Sensitive" }),
+
+  /**
+   * Search submit button (`#PTS_CFG_CL_WRK_PTS_SRCH_BTN`). verified 2026-04-24
+   * @tags search, submit, button, ss-smart-hr
+   */
+  searchButton: (f: FrameLocator): Locator =>
+    f.locator("#PTS_CFG_CL_WRK_PTS_SRCH_BTN"),
+
+  /**
+   * Clear search criteria button. verified 2026-04-24
+   * @tags clear, button, ss-smart-hr
+   */
+  clearButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Clear", exact: true }),
+};
+
+// ─── Smart HR Transaction Status (filter + results dashboard) ─────────────
+//
+// `/c/ADMINISTER_WORKFORCE_(GBL).HR_TBH_STATUS.GBL` — distinct shape from
+// the other HR Tasks pages: a filter form with a results grid below it,
+// not a Find-an-Existing-Value drill-in form. Surfaces all in-flight
+// Smart HR transactions for review (status: Pending, Processed, Cancelled,
+// etc.). The Download button stays disabled until a Refresh runs and
+// returns rows. Date inputs default to a 20-day window centered on today
+// — caller should overwrite both before searching across longer ranges.
+// verified 2026-04-24
+
+export const smartHRTransactionStatus = {
+  /**
+   * HR Review Status combobox — top filter. Options: All, Cancelled,
+   * My Transactions, Pending, Processed. verified 2026-04-24
+   * @tags hr-review, status, combobox, transaction-status
+   */
+  hrReviewStatusSelect: (f: FrameLocator): Locator =>
+    f.getByRole("combobox", { name: "HR Review Status" }),
+
+  /**
+   * Business Unit textbox filter. verified 2026-04-24
+   * @tags business-unit, textbox, transaction-status
+   */
+  businessUnitInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Business Unit", exact: true }),
+
+  /**
+   * Business Unit lookup button. verified 2026-04-24
+   * @tags business-unit, lookup, button, transaction-status
+   */
+  businessUnitLookupButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Look up Business Unit" }),
+
+  /**
+   * Transaction Type combobox. Options: All, Change Job Data, Change Job
+   * and Profile Data, Change Personal Data, Change Personal and Job Data,
+   * Change Personal and Profile Data, Change Personal/Job and Profile Data,
+   * Change Profile Data, Hire/Rehire, Hire/Rehire and Profile Data,
+   * RecruitingHire/Rehire/Transfer. verified 2026-04-24
+   * @tags transaction-type, combobox, transaction-status
+   */
+  transactionTypeSelect: (f: FrameLocator): Locator =>
+    f.getByRole("combobox", { name: "Transaction Type" }),
+
+  /**
+   * Empl ID textbox filter. verified 2026-04-24
+   * @tags empl, id, employee, textbox, transaction-status
+   */
+  emplIdInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Empl ID", exact: true }),
+
+  /**
+   * Transaction Status combobox. Options: Action Required, All, Cancel,
+   * Completed, Denied, Error, Hired/Added, Requested. verified 2026-04-24
+   * @tags transaction-status, combobox, status, transaction-status
+   */
+  transactionStatusSelect: (f: FrameLocator): Locator =>
+    f.getByRole("combobox", { name: "Transaction Status" }),
+
+  /**
+   * First Name textbox filter. verified 2026-04-24
+   * @tags first-name, name, textbox, transaction-status
+   */
+  firstNameInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "First Name" }),
+
+  /**
+   * Start Date From textbox (MM/DD/YYYY). Defaults to ~10 days before
+   * today. verified 2026-04-24
+   * @tags start-date, from, date, textbox, transaction-status
+   */
+  startDateFromInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Start Date From" }),
+
+  /**
+   * Calendar picker for Start Date From. verified 2026-04-24
+   * @tags start-date, from, calendar, button, transaction-status
+   */
+  startDateFromCalendarButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Calendar Start Date From" }),
+
+  /**
+   * "To" date textbox (MM/DD/YYYY) — paired with Start Date From.
+   * Defaults to ~10 days after today. verified 2026-04-24
+   * @tags to-date, end-date, date, textbox, transaction-status
+   */
+  toDateInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "To", exact: true }),
+
+  /**
+   * Calendar picker for the To date. verified 2026-04-24
+   * @tags to-date, end-date, calendar, button, transaction-status
+   */
+  toDateCalendarButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Calendar To" }),
+
+  /**
+   * Last Name textbox filter. verified 2026-04-24
+   * @tags last-name, name, textbox, transaction-status
+   */
+  lastNameInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Last Name" }),
+
+  /**
+   * Download button — stays disabled until a Refresh has populated rows.
+   * verified 2026-04-24
+   * @tags download, button, transaction-status
+   */
+  downloadButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Download", exact: true }),
+
+  /**
+   * Refresh button — runs the filter and populates the results grid.
+   * verified 2026-04-24
+   * @tags refresh, button, transaction-status
+   */
+  refreshButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Refresh", exact: true }),
+
+  /**
+   * Clear button — resets all filter fields to defaults. verified 2026-04-24
+   * @tags clear, button, transaction-status
+   */
+  clearButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Clear", exact: true }),
+
+  /**
+   * Toolbar button: "Download Transaction Status Table to Excel" — exports
+   * the results grid as XLSX. verified 2026-04-24
+   * @tags download, excel, export, button, transaction-status
+   */
+  downloadToExcelButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Download Transaction Status Table to Excel" }),
+
+  /**
+   * "Smart HR Transactions" return link at the bottom of the form.
+   * Submits a JS action that navigates back to the Smart HR Transactions
+   * landing. verified 2026-04-24
+   * @tags return, smart-hr, link, transaction-status
+   */
+  returnToSmartHRLink: (f: FrameLocator): Locator =>
+    f.getByRole("link", { name: "Smart HR Transactions" }),
 };
 
 // ─── Emergency Contact (standalone, deep-link URL, no iframe) ─────────────
@@ -721,6 +1389,10 @@ export const ucpathSelectors = {
   personSearch,
   jobSummary,
   hrTasks,
+  personOrgSummary,
+  payPathActions,
+  ssSmartHRTransactions,
+  smartHRTransactionStatus,
   emergencyContact,
   oathSignature,
   getContentFrame,
