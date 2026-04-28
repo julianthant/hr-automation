@@ -9,6 +9,7 @@ test('emitScreenshotEvent appends a screenshot record to sessions.jsonl', async 
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'scr-evt-'))
   emitScreenshotEvent({
     type: 'screenshot', runId: 'run-1', ts: 1776712000000,
+    timestamp: new Date(1776712000000).toISOString(),
     kind: 'form', label: 'kuali-saved', step: 'kuali-finalization',
     files: [{ system: 'kuali', path: '/tmp/a.png' }],
   }, { dir: tmp })
