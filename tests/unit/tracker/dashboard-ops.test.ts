@@ -47,7 +47,10 @@ describe("findEntryInput", () => {
     assert.deepEqual(result, { input: { docId: "3930" } });
   });
 
-  it("returns an error when no pending row has stored input", () => {
+  it("falls back to data when no row has stored input (CLI-enqueued path)", () => {
+    // CLI adapters (runSeparationCli etc.) emit pending rows without `input`.
+    // findEntryInput must derive the retry payload from `data` so retry works
+    // for entries that didn't go through the HTTP enqueue path.
     trackEvent(
       {
         workflow: "separations",
@@ -61,6 +64,35 @@ describe("findEntryInput", () => {
       tmp,
     );
     const result = findEntryInput("separations", "3930", undefined, tmp);
+    assert.deepEqual(result, { input: { docId: "3930" } });
+  });
+
+  it("strips kernel-internal keys from data when falling back", () => {
+    // `instance` / `__name` / `__id` are stamped onto rows by the kernel +
+    // legacy adapters; they aren't part of any workflow's Zod input schema
+    // and must not leak into the reconstructed retry payload.
+    trackEvent(
+      {
+        workflow: "eid-lookup",
+        timestamp: "2026-04-24T12:00:00.000Z",
+        id: "Smith, Jane",
+        runId: "u-1",
+        status: "pending",
+        data: {
+          searchName: "Smith, Jane",
+          __name: "Smith, Jane",
+          __id: "Smith, Jane",
+          instance: "EID Lookup 1",
+        },
+      },
+      tmp,
+    );
+    const result = findEntryInput("eid-lookup", "Smith, Jane", undefined, tmp);
+    assert.deepEqual(result, { input: { searchName: "Smith, Jane" } });
+  });
+
+  it("returns an error when no entry exists for the id", () => {
+    const result = findEntryInput("separations", "9999", undefined, tmp);
     assert.ok("error" in result);
   });
 

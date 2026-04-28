@@ -21,6 +21,7 @@ import {
   readSessionEvents,
   getSessionsFilePath,
   workflowNameFromInstance,
+  emitWorkflowEnd,
   type SessionEvent,
 } from "./session-events.js";
 import { getAll as getAllRegisteredWorkflows } from "../core/registry.js";
@@ -29,7 +30,11 @@ import { PATHS } from "../config.js";
 import { stopDaemons } from "../core/daemon-client.js";
 import { findAliveDaemons } from "../core/daemon-registry.js";
 import { readQueueState, markItemFailed } from "../core/daemon-queue.js";
-import { enqueueFromHttp, validateEnqueueRequest } from "../core/enqueue-dispatch.js";
+import {
+  enqueueFromHttp,
+  validateEnqueueRequest,
+  buildTrackerDataForInput,
+} from "../core/enqueue-dispatch.js";
 import {
   buildRetryHandler,
   buildRetryBulkHandler,
@@ -508,6 +513,19 @@ export async function scanFailurePatterns(): Promise<void> {
 }
 
 /**
+ * Grace period before treating a queued-with-no-alive-daemons item as truly
+ * orphaned. Covers the spawn-startup window: tsx cold start (1-3s) + module
+ * loading (1-2s) + lockfile write (instant). After the lockfile lands,
+ * `findAliveDaemons` returns the spawning daemon and the scan skips. Using
+ * 90s gives generous headroom for slow disks / busy machines without holding
+ * pending rows visibly stuck. `ensureDaemonsAndEnqueue`'s spawn deadline is
+ * 5 minutes; truly failed spawns are caught by the spawn promise rejection
+ * itself (logged as `[POST /api/enqueue] background task failed`), so we
+ * don't need to wait that long here.
+ */
+const ORPHAN_QUEUE_GRACE_MS = 90_000;
+
+/**
  * Safety net: detect queued items whose workflow has zero alive daemons,
  * mark them failed in both the queue and the tracker so the dashboard's
  * pending rows don't stick when the daemon's own teardown cleanup didn't run
@@ -518,6 +536,16 @@ export async function scanFailurePatterns(): Promise<void> {
  * queue. Idempotent — once an item is marked failed, the next pass sees
  * `state.queued.length === 0` for that id.
  *
+ * **Grace-period guard**: only items whose `enqueuedAt` is older than
+ * `ORPHAN_QUEUE_GRACE_MS` are eligible. Otherwise the scan would race a
+ * legitimately-spawning daemon during its tsx cold-start window (lockfile
+ * not yet written → `findAliveDaemons` returns 0 → false-positive orphan).
+ * Concrete failure mode this prevents: user clicks "Run with these values"
+ * with no alive daemon, `enqueueFromHttp` fires the spawn in the background,
+ * the next /events tick (1s later) sees an empty alive set + a queued item
+ * and marks it failed — even though the daemon is mid-launch and would
+ * claim it within seconds.
+ *
  * Does NOT touch claimed items: those are owned by a daemon (alive or
  * recently dead). The daemon's own `recoverOrphanedClaims` keepalive sweep
  * handles dead-daemon claim recovery; this sweep handles "queued, no one to
@@ -526,18 +554,27 @@ export async function scanFailurePatterns(): Promise<void> {
 export async function scanOrphanedQueueItems(dir = DEFAULT_DIR): Promise<void> {
   try {
     const workflows = listWorkflows(dir);
+    const nowMs = Date.now();
     for (const wf of workflows) {
       const state = await readQueueState(wf, dir);
       if (state.queued.length === 0) continue;
+      // Filter to items that have aged past the grace window. If everything
+      // queued is fresh, skip the alive-daemon probe entirely.
+      const stale = state.queued.filter((item) => {
+        const enqMs = Date.parse(item.enqueuedAt);
+        if (!Number.isFinite(enqMs)) return true; // unparseable → treat as old
+        return nowMs - enqMs >= ORPHAN_QUEUE_GRACE_MS;
+      });
+      if (stale.length === 0) continue;
       const alive = await findAliveDaemons(wf, dir);
       if (alive.length > 0) continue;
       log.warn(
-        `[orphan-sweep] ${wf}: ${state.queued.length} queued item(s) with 0 alive daemons; marking failed`,
+        `[orphan-sweep] ${wf}: ${stale.length} queued item(s) past grace with 0 alive daemons; marking failed`,
       );
       const nowIso = new Date().toISOString();
       const failError =
         "No alive daemon available to process this item. Start a daemon and retry.";
-      for (const item of state.queued) {
+      for (const item of stale) {
         const runId = item.runId ?? `${item.id}#1`;
         try {
           await markItemFailed(wf, item.id, failError, runId, dir);
@@ -545,17 +582,12 @@ export async function scanOrphanedQueueItems(dir = DEFAULT_DIR): Promise<void> {
           /* best-effort */
         }
         try {
-          const data: Record<string, string> =
-            item.input && typeof item.input === "object"
-              ? Object.fromEntries(
-                  Object.entries(item.input as Record<string, unknown>)
-                    .filter(([, v]) => v !== undefined && v !== null)
-                    .map(([k, v]) => [
-                      k,
-                      typeof v === "object" ? JSON.stringify(v) : String(v),
-                    ]),
-                )
-              : {};
+          // Same shape as the pending row from `onPreEmitPending` so
+          // prefilledData (edit-and-resume) lands as flat top-level keys.
+          // Otherwise the failed row's barer `data` overrides the pending
+          // row in the dashboard's latest-per-id dedupe and the user's
+          // edits disappear from the detail grid.
+          const data = buildTrackerDataForInput(item.input);
           trackEvent(
             {
               workflow: wf,
@@ -2203,6 +2235,43 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
           );
         }
 
+        // Phantom-instance cleanup: any `workflow_start` whose pid is dead
+        // AND has no matching `workflow_end` is an orphaned SessionPanel
+        // box the user can't otherwise dismiss (the daemon was force-killed
+        // / OS-crashed before its withBatchLifecycle could emit
+        // `workflow_end`). Synthesize a `workflow_end(failed)` per phantom
+        // so the SessionPanel filters them out on the next /events tick.
+        // This runs unconditionally on every stop click — when the user
+        // hits X they want it gone, regardless of whether a real process
+        // was found to kill.
+        let phantomsCleared = 0;
+        for (const [instance, startEv] of startsByInstance) {
+          if (endedInstances.has(instance)) continue;
+          const pid = startEv.pid;
+          // Skip dashboard's own pid — those are in-process workflows
+          // (e.g. sharepoint-download) tracked via `finalStatus` instead.
+          if (!pid || pid === ownPid) continue;
+          // If the process is alive, leave it alone. The signal pass above
+          // already targeted it; emitting a fake workflow_end here would
+          // race the daemon's real workflow_end during graceful drain.
+          let alive = false;
+          try { process.kill(pid, 0); alive = true; } catch { /* dead */ }
+          if (alive) continue;
+          try {
+            emitWorkflowEnd(instance, "failed", dir);
+            phantomsCleared += 1;
+          } catch (e) {
+            log.warn(
+              `[/api/daemon/stop] failed to synthesize workflow_end for phantom '${instance}': ${errorMessage(e)}`,
+            );
+          }
+        }
+        if (phantomsCleared > 0) {
+          log.step(
+            `[/api/daemon/stop] cleared ${phantomsCleared} phantom ${workflow} instance(s) from SessionPanel`,
+          );
+        }
+
         // Force-stop also clears the queue: with daemons killed, queued items
         // would otherwise sit forever (or get picked up by a future daemon
         // unexpectedly). Soft stop preserves the queue so a draining daemon
@@ -2243,6 +2312,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
           processesKilled,
           browsersKilled,
           queuedCancelled,
+          phantomsCleared,
         }));
       } catch (e) {
         res.writeHead(500, {

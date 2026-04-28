@@ -24,7 +24,30 @@ import { enqueueFromHttp } from "../core/enqueue-dispatch.js";
 import { stopDaemons } from "../core/daemon-client.js";
 import { join } from "path";
 
-/** Lookup an entry's stored input by (workflow, id, runId?). Latest matching pending row wins. */
+/** Kernel-internal keys we strip when reconstructing an input from `data`.
+ * These get stamped onto rows by the kernel (instance) or workflow adapters
+ * (__name / __id) but aren't part of any workflow's Zod input schema. */
+const KERNEL_DATA_KEYS = new Set(["instance", "__name", "__id"]);
+
+/**
+ * Lookup an entry's input by (workflow, id, runId?). Three-tier fallback so
+ * retry works regardless of how the entry was originally enqueued:
+ *
+ *   1. **Latest pending row with stored `input`** — set by the HTTP path
+ *      (`enqueue-dispatch.ts onPreEmitPending`). Carries the verbatim input
+ *      object including any nested fields (work-study's effectiveDate,
+ *      emergency-contact's full record).
+ *   2. **Any tracker row with stored `input`** — covers re-enqueues where a
+ *      later pending row exists but didn't get an `input` write.
+ *   3. **Fallback: latest entry's `data` field** — for CLI-enqueued items
+ *      where each workflow's hand-rolled `onPreEmitPending` skips the
+ *      `input` field entirely (separations, eid-lookup, oath-signature,
+ *      emergency-contact, onboarding all do this today). Strips
+ *      kernel-internal keys (`instance`, `__name`, `__id`) so they don't
+ *      leak into the schema. Workflow schemas are non-strict z.object so
+ *      extras (e.g. data fields produced by the workflow itself) are
+ *      stripped at validation time without erroring.
+ */
 export function findEntryInput(
   workflow: string,
   id: string,
@@ -32,20 +55,40 @@ export function findEntryInput(
   dir: string,
 ): { input: Record<string, unknown> } | { error: string } {
   const entries = readEntries(workflow, dir);
-  // Filter to pending rows for the requested id (and runId if specified).
-  // input only rides on pending rows by design (see TrackerEntry).
-  const candidates = entries.filter((e) => {
+  const matchingId = entries.filter((e) => {
     if (e.id !== id) return false;
-    if (e.status !== "pending") return false;
     if (runId && e.runId !== runId) return false;
-    return Boolean(e.input);
+    return true;
   });
-  if (candidates.length === 0) {
-    return { error: "no pending row with stored input found for this entry" };
+  if (matchingId.length === 0) {
+    return { error: `no tracker entry found for id=${id}` };
   }
-  // Latest pending wins (timestamps are ISO strings — lexicographic sort works).
-  candidates.sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
-  return { input: candidates[0].input as Record<string, unknown> };
+  // Tier 1: pending row with stored input.
+  const pendingWithInput = matchingId
+    .filter((e) => e.status === "pending" && Boolean(e.input))
+    .sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
+  if (pendingWithInput.length > 0) {
+    return { input: pendingWithInput[0].input as Record<string, unknown> };
+  }
+  // Tier 2: any row with stored input.
+  const anyWithInput = matchingId
+    .filter((e) => Boolean(e.input))
+    .sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
+  if (anyWithInput.length > 0) {
+    return { input: anyWithInput[0].input as Record<string, unknown> };
+  }
+  // Tier 3: derive from the latest entry's data (CLI-enqueued workflows).
+  const sorted = [...matchingId].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
+  const data = sorted[0].data;
+  if (data && typeof data === "object") {
+    const input: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(data)) {
+      if (KERNEL_DATA_KEYS.has(k)) continue;
+      input[k] = v;
+    }
+    if (Object.keys(input).length > 0) return { input };
+  }
+  return { error: "no input or data found to reconstruct retry payload" };
 }
 
 /**
@@ -129,10 +172,10 @@ export interface RunWithDataRequest {
  * those values into ctx.data before the handler runs; handlers that gate
  * their extraction step on data presence then skip extraction.
  *
- * Like retry, refuses to auto-spawn a fresh daemon — the user is editing data
- * to re-run on the daemon they already have running, not booting a new
- * session. When no daemon is alive, returns an actionable error so the user
- * can spawn one deliberately via the SESSIONS panel.
+ * Reuses an alive daemon when one exists; spawns a fresh one when none do
+ * (matches the CLI semantics — `ensureDaemonsAndEnqueue` with `flags = {}`
+ * picks alive daemons over spawning a new one, so a busy daemon doesn't
+ * trigger a duplicate spawn).
  */
 export function buildRunWithDataHandler(dir: string) {
   return async (
@@ -143,8 +186,6 @@ export function buildRunWithDataHandler(dir: string) {
     }
     const lookup = findEntryInput(req.workflow, req.id, req.runId, dir);
     if ("error" in lookup) return { ok: false, error: lookup.error };
-    const guardError = await requireAliveDaemon(req.workflow, dir);
-    if (guardError) return { ok: false, error: guardError };
     // Merge the previous run's accumulated data with the user's overrides.
     // The user's edits win on key collision. This carries non-editable
     // fields (e.g. separations' rawTerminationType — used by downstream
