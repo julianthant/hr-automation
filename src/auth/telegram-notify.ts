@@ -111,3 +111,14 @@ export function formatAuthEventMessage(ev: AuthEvent): string {
   if (ev.runId) lines.push(`Run: <code>${escapeHtml(ev.runId)}</code>`);
   return lines.join("\n");
 }
+
+/**
+ * Public entry point. Reads `process.env` live on each call so changes to
+ * env vars (tests, dotenv reload) take effect without re-importing.
+ */
+export async function notifyAuthEvent(ev: AuthEvent): Promise<void> {
+  return createTelegramNotifier({
+    tokenValue: process.env.TELEGRAM_BOT_TOKEN,
+    chatIdValue: process.env.TELEGRAM_CHAT_ID,
+  })(ev);
+}

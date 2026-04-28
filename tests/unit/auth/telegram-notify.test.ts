@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   createTelegramNotifier,
   formatAuthEventMessage,
+  notifyAuthEvent,
   type AuthEvent,
   type FetchFn,
 } from "../../../src/auth/telegram-notify.js";
@@ -239,5 +240,20 @@ describe("createTelegramNotifier — error swallowing", () => {
       chatIdValue: "987",
     });
     await assert.doesNotReject(notify(sampleEvent));
+  });
+});
+
+describe("notifyAuthEvent — default instance reads process.env", () => {
+  it("no-ops when env vars are absent (covers production default path)", async () => {
+    const oldT = process.env.TELEGRAM_BOT_TOKEN;
+    const oldC = process.env.TELEGRAM_CHAT_ID;
+    delete process.env.TELEGRAM_BOT_TOKEN;
+    delete process.env.TELEGRAM_CHAT_ID;
+    try {
+      await assert.doesNotReject(notifyAuthEvent(sampleEvent));
+    } finally {
+      if (oldT !== undefined) process.env.TELEGRAM_BOT_TOKEN = oldT;
+      if (oldC !== undefined) process.env.TELEGRAM_CHAT_ID = oldC;
+    }
   });
 });
