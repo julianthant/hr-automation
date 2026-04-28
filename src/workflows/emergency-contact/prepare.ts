@@ -5,8 +5,12 @@ import { ocrDocument, type OcrRequest, type OcrResult } from "../../ocr/index.js
 import { dateLocal, trackEvent } from "../../tracker/jsonl.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
-import { findLatestRoster, loadRoster } from "./roster-loader.js";
-import { matchAgainstRoster, compareUsAddresses } from "./match.js";
+import {
+  findLatestRoster,
+  loadRoster,
+  matchAgainstRoster,
+  compareUsAddresses,
+} from "../../match/index.js";
 import {
   OcrOutputSchema,
   PrepareRowDataSchema,
@@ -88,7 +92,7 @@ export function __setEidLookupEnqueueForTests(fn: EidLookupEnqueueFn | undefined
  */
 export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
   const runId = input.runId ?? randomUUID();
-  const id = `prep-${dateLocal()}-${runId.slice(0, 8)}`;
+  const id = `ec-prep-${dateLocal()}-${runId.slice(0, 8)}`;
   const trackerDir = input.trackerDir;
 
   const writeTracker = (
@@ -343,7 +347,7 @@ async function resolveEidsAsync(
             const target = input.name;
             const found = lookupInputs.find((x) => x.name === target);
             const idx = found?.__prepIndex ?? 0;
-            return `prep-${runId}-r${idx}`;
+            return `ec-prep-${runId}-r${idx}`;
           },
         },
       );
@@ -366,7 +370,7 @@ async function resolveEidsAsync(
 
   // ── Subscribe to eid-lookup tracker JSONL for completions.
   const eidLookupFile = join(trackerDir ?? ".tracker", `eid-lookup-${dateLocal()}.jsonl`);
-  const expectedIds = new Set(pending.map(({ i }) => `prep-${runId}-r${i}`));
+  const expectedIds = new Set(pending.map(({ i }) => `ec-prep-${runId}-r${i}`));
   let resolvedCount = 0;
   let lastSize = 0;
 

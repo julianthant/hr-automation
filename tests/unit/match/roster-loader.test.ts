@@ -8,7 +8,7 @@ import {
   findLatestRoster,
   listRosters,
   loadRoster,
-} from "../../../../src/workflows/emergency-contact/roster-loader.js";
+} from "../../../src/match/roster-loader.js";
 
 async function writeFakeRoster(
   path: string,
