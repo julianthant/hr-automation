@@ -40,7 +40,7 @@ src/workflows/emergency-contact/scripts/   ← workflow-specific dev tools
 ### `ops/`
 
 - **`clean-tracker.ts`** — Prunes `.tracker/*.jsonl` and `.screenshots/*.png` files older than N days. Flags: `--days N`, `--dir`, `--screenshots-dir`, `--no-screenshots`, `--screenshots-only`. Default cleans both. Wired as `npm run clean:tracker`. Exports `cleanTrackerMain` for tests.
-- **`setup.ts`** — First-use environment validation wizard. Fixed checks for `.env` keys (existence only, never values), Node ≥ 20, `tsx`, Playwright chromium cache, `.tracker/` + `.screenshots/` + `~/Downloads/onboarding/` writability, macOS notification capability (warn-only on non-darwin), optional `jq`. Prints `[ok]` / `[warn]` / `[fail]` per check with a fix suggestion. Exits 0 if all pass or only warnings; exits 1 on any failure. Wired as `npm run setup`.
+- **`setup.ts`** — First-use environment validation wizard. Fixed checks for `.env` keys (existence only, never values), Node ≥ 20, `tsx`, Playwright chromium cache, `.tracker/` + `.screenshots/` + `~/Downloads/onboarding/` writability, macOS notification capability (warn-only on non-darwin), optional `jq`. Prints `[ok]` / `[warn]` / `[fail]` per check with a fix suggestion. Exits 0 if all pass or only warnings; exits 1 on any failure. Wired as `npm run setup`. **`npm run setup:telegram`** dispatches the interactive Telegram bot wizard via the `--telegram` arg — creates a bot via @BotFather, discovers chat_id from `/getUpdates`, writes both to `.env` (idempotent), sends a confirmation DM. Exports `runAllChecks`, `setupMain`, `runTelegramSetup`, `validateBotToken`, `discoverChatId`, `writeEnvVar` for tests.
 
 ### `debug/`
 

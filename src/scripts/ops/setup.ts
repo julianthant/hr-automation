@@ -28,6 +28,7 @@ import {
 import { execSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import readline from "node:readline";
 
 export type CheckStatus = "ok" | "warn" | "fail";
 
@@ -299,6 +300,106 @@ export function checkJq(): CheckResult {
   };
 }
 
+// ─── Telegram setup helpers ────────────────────────────────────────────────
+
+/** Token validation outcome — narrows on `.ok`. */
+export type TokenValidation =
+  | { ok: true; token: string }
+  | { ok: false; reason: string };
+
+/** Validate a BotFather-issued token. Format: `<digits>:<30+ chars>`. */
+export function validateBotToken(input: string): TokenValidation {
+  const trimmed = input.trim();
+  if (trimmed.length === 0) {
+    return { ok: false, reason: "token is empty" };
+  }
+  // BotFather tokens look like 7234567890:AAH-... — digits, colon, ~35 alphanum.
+  const m = /^\d+:[A-Za-z0-9_-]{30,}$/.exec(trimmed);
+  if (!m) {
+    return {
+      ok: false,
+      reason: "token does not match BotFather format (digits:alphanum)",
+    };
+  }
+  return { ok: true, token: trimmed };
+}
+
+export type ChatIdDiscovery =
+  | { ok: true; chatId: string }
+  | { ok: false; reason: string };
+
+interface TelegramUpdate {
+  update_id: number;
+  message?: { chat?: { id?: number | string } };
+}
+
+/**
+ * Fetch /getUpdates and return the chat_id of the most recent message. Used
+ * once during setup; afterwards the chat_id lives in .env. `fetchFn` is
+ * injectable for tests.
+ */
+export async function discoverChatId(
+  token: string,
+  opts: { fetchFn?: typeof fetch } = {},
+): Promise<ChatIdDiscovery> {
+  const fetchFn = opts.fetchFn ?? fetch;
+  try {
+    const url = `https://api.telegram.org/bot${token}/getUpdates`;
+    const res = await fetchFn(url, {
+      method: "GET",
+      signal: AbortSignal.timeout(5_000),
+    });
+    const body = (await res.json()) as {
+      ok?: boolean;
+      result?: TelegramUpdate[];
+    };
+    if (!body.ok || !Array.isArray(body.result)) {
+      return { ok: false, reason: "Telegram /getUpdates returned non-ok" };
+    }
+    const updates = body.result;
+    if (updates.length === 0) {
+      return {
+        ok: false,
+        reason:
+          "no updates yet — message your bot once on Telegram, then re-run setup",
+      };
+    }
+    // Most recent update is last in the array per Telegram's getUpdates docs.
+    const latest = updates[updates.length - 1];
+    const id = latest.message?.chat?.id;
+    if (id === undefined || id === null) {
+      return {
+        ok: false,
+        reason: "latest update has no message.chat.id (was it a channel post?)",
+      };
+    }
+    return { ok: true, chatId: String(id) };
+  } catch (err) {
+    return { ok: false, reason: (err as Error).message };
+  }
+}
+
+/**
+ * Read or create the .env file in `cwd`, set or replace `key=value`.
+ * Idempotent. Preserves trailing newline. Never logs the value.
+ */
+export function writeEnvVar(cwd: string, key: string, value: string): void {
+  const envPath = path.join(cwd, ".env");
+  let contents = "";
+  if (existsSync(envPath)) {
+    contents = readFileSync(envPath, "utf-8");
+  }
+  const lineRegex = new RegExp(`^\\s*${key}\\s*=.*$`, "m");
+  const line = `${key}=${value}`;
+  if (lineRegex.test(contents)) {
+    contents = contents.replace(lineRegex, line);
+  } else {
+    if (contents.length > 0 && !contents.endsWith("\n")) contents += "\n";
+    contents += `${line}\n`;
+  }
+  writeFileSync(envPath, contents);
+}
+
 // ─── Orchestration ────────────────────────────────────────────────────────────
 
 /**
@@ -391,6 +492,111 @@ export function setupMain(): number {
   return exitCode;
 }
 
+// ─── Interactive Telegram setup wizard ────────────────────────────────────────
+
+function prompt(question: string): Promise<string> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  return new Promise<string>((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer);
+    });
+  });
+}
+
+/**
+ * Interactive Telegram setup wizard. Walks the operator through:
+ *   1. Confirming both env vars are unset (skips if already present)
+ *   2. BotFather token entry + format validation
+ *   3. Asking the operator to message the bot once
+ *   4. /getUpdates → discover chat_id
+ *   5. Writing both to .env (idempotent)
+ *   6. Sending a confirmation Telegram message
+ *
+ * Returns the exit code (0 success, 1 failure). Side-effects scoped to `cwd`
+ * so callers / tests can target tmp dirs.
+ */
+export async function runTelegramSetup(cwd: string = process.cwd()): Promise<number> {
+  console.log(pc.bold("HR Automation — Telegram bot setup"));
+  console.log("");
+
+  if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
+    console.log(
+      pc.green(
+        "  Already configured (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID set in .env).",
+      ),
+    );
+    console.log(
+      "  To reconfigure: clear those .env lines and re-run `npm run setup:telegram`.",
+    );
+    return 0;
+  }
+
+  console.log("Step 1 of 3 — Create the bot");
+  console.log("  • Open Telegram on your phone.");
+  console.log("  • Message @BotFather, send /newbot, follow the prompts.");
+  console.log("  • BotFather will give you a token like 7234567890:AAH...");
+  console.log("");
+
+  let token: string;
+  for (;;) {
+    const input = await prompt("Paste the bot token: ");
+    const v = validateBotToken(input);
+    if (v.ok) {
+      token = v.token;
+      break;
+    }
+    console.log(pc.red(`  Invalid: ${v.reason}. Try again, or Ctrl+C to cancel.`));
+  }
+
+  writeEnvVar(cwd, "TELEGRAM_BOT_TOKEN", token);
+  console.log(pc.green("  ✓ TELEGRAM_BOT_TOKEN saved to .env"));
+  console.log("");
+
+  console.log("Step 2 of 3 — Discover your chat_id");
+  console.log("  • Tap the bot's username link from BotFather to open a chat.");
+  console.log("  • Send any text message to the bot (e.g. 'hi').");
+  console.log("");
+  await prompt("Press enter once you've messaged the bot: ");
+
+  const chatRes = await discoverChatId(token);
+  if (!chatRes.ok) {
+    console.log(pc.red(`  Failed: ${chatRes.reason}`));
+    return 1;
+  }
+  writeEnvVar(cwd, "TELEGRAM_CHAT_ID", chatRes.chatId);
+  console.log(pc.green(`  ✓ TELEGRAM_CHAT_ID=${chatRes.chatId} saved to .env`));
+  console.log("");
+
+  console.log("Step 3 of 3 — Send a confirmation message");
+  // Inline send (don't import telegram-notify — keep the wizard
+  // dependency-light and self-contained).
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatRes.chatId,
+        text:
+          "✅ Telegram setup complete. You'll get Duo notifications here when a workflow needs approval.",
+      }),
+      signal: AbortSignal.timeout(5_000),
+    });
+    console.log(pc.green("  ✓ Confirmation message sent. Check your phone."));
+  } catch (err) {
+    console.log(
+      pc.yellow(
+        `  Confirmation send failed: ${(err as Error).message}. .env is saved; you can test later.`,
+      ),
+    );
+  }
+  console.log("");
+  return 0;
+}
+
 // Only run when invoked directly (not when imported by tests).
 const isMainModule =
   import.meta.url === `file://${process.argv[1]}` ||
@@ -398,5 +604,10 @@ const isMainModule =
   process.argv[1]?.endsWith("setup.js");
 
 if (isMainModule) {
-  process.exit(setupMain());
+  const arg = process.argv[2];
+  if (arg === "--telegram" || arg === "telegram") {
+    runTelegramSetup().then((code) => process.exit(code));
+  } else {
+    process.exit(setupMain());
+  }
 }

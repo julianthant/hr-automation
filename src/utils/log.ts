@@ -81,6 +81,11 @@ export function getLogRunId(): string | undefined {
   return logStore.getStore()?.runId;
 }
 
+/** Read the workflow name from the current AsyncLocalStorage log context, if set. */
+export function getLogWorkflow(): string | undefined {
+  return logStore.getStore()?.workflow;
+}
+
 export function withLogContext<T>(
   workflow: string,
   itemId: string,
