@@ -127,11 +127,13 @@ async function checkOldKronosResult(page: Page): Promise<boolean> {
 /**
  * Kernel definition for the separations workflow.
  *
- * 4 systems, interleaved auth: Kuali blocking (Duo #1), then Old Kronos (Duo #2),
- * New Kronos (Duo #3), UCPath (Duo #4) chained in background via the kernel's
- * `authChain: "interleaved"` mode. `ctx.page(id)` awaits each system's ready
- * promise, so work tasks inside `ctx.parallel` start as soon as their individual
- * Duo clears — no waiting for all 4 auths to complete before any work begins.
+ * 4 systems, parallel-staggered auth: every browser's SSO form is pre-filled
+ * in parallel via `prepareLogin`, then submit clicks fire 5 seconds apart
+ * (Kuali at t=0, Old Kronos at t=5s, New Kronos at t=10s, UCPath at t=15s).
+ * All 4 Duo prompts pend on the user's phone simultaneously — the user can
+ * approve them in any order. `ctx.page(id)` awaits each system's ready
+ * promise, so phase-1 tasks start as soon as their individual Duo clears
+ * (in approval order, not click order).
  *
  * Phase 1 (`kronos-search`) runs 4 tasks in parallel via `ctx.parallel`:
  *   - Old Kronos timecard search
@@ -211,7 +213,7 @@ export const separationsWorkflow = defineWorkflow({
   ],
   steps: separationsSteps,
   schema: SeparationInputSchema,
-  authChain: "interleaved",
+  authChain: "parallel-staggered",
   batch: {
     mode: "sequential",
     betweenItems: ["reset-browsers"],
@@ -276,13 +278,15 @@ export const separationsWorkflow = defineWorkflow({
     // `rawTerminationType` is required (downstream `mapReasonCode` reads
     // it) but isn't surfaced as an editable field — it carries over from
     // the previous run's data via the run-with-data merge.
-    const requiredKualiFields = [
-      "name",
-      "eid",
-      "rawTerminationType",
-      "separationDate",
-      "lastDayWorked",
-    ] as const;
+    // `rawTerminationType` is consumed only by `mapReasonCode`, which lives
+    // inside the `ucpath-transaction` step. When that step is being skipped
+    // (txn # prefilled — pure Kuali-finalization retry path), the field is
+    // not load-bearing, so drop it from the bypass requirement. This makes
+    // edit-and-resume robust against cancel-queued / save-data lineage that
+    // can drop internal fields between runs.
+    const requiredKualiFields = txnNumberPrefilled
+      ? (["name", "eid", "separationDate", "lastDayWorked"] as const)
+      : (["name", "eid", "rawTerminationType", "separationDate", "lastDayWorked"] as const);
     const allPrefilled = requiredKualiFields.every(
       (k) => typeof ctx.data[k] === "string" && (ctx.data[k] as string).length > 0,
     );
@@ -291,14 +295,21 @@ export const separationsWorkflow = defineWorkflow({
     if (allPrefilled) {
       ctx.skipStep("kuali-extraction");
       log.step(
-        `[Step: kuali-extraction] SKIPPED — using prefilled data ` +
-        `(employeeName='${ctx.data.name}' eid='${ctx.data.eid}' ` +
-        `rawTerminationType='${ctx.data.rawTerminationType}')`,
+        `[Step: kuali-extraction] SKIPPED — using manual input from edit-data ` +
+        `(name='${ctx.data.name}' eid='${ctx.data.eid}' ` +
+        `lastDayWorked='${ctx.data.lastDayWorked}' separationDate='${ctx.data.separationDate}'` +
+        (txnNumberPrefilled ? `; txn # prefilled — rawTerminationType not required)` : `)`),
       );
       kualiData = {
         employeeName: ctx.data.name as string,
         eid: ctx.data.eid as string,
-        terminationType: ctx.data.rawTerminationType as string,
+        // Fall back chain: raw Kuali string → display-only "Vol"/"Invol" → empty.
+        // The empty fallback is only reachable on the txnNumberPrefilled path
+        // where mapReasonCode (the only consumer) won't run.
+        terminationType:
+          (ctx.data.rawTerminationType as string | undefined) ??
+          (ctx.data.terminationType as string | undefined) ??
+          "",
         separationDate: ctx.data.separationDate as string,
         lastDayWorked: ctx.data.lastDayWorked as string,
         // `location` isn't read downstream — empty string is safe and keeps
@@ -383,8 +394,8 @@ export const separationsWorkflow = defineWorkflow({
       // complete on resume).
       ctx.skipStep("kronos-search");
       log.step(
-        `[Step: kronos-search] SKIPPED — lastDayWorked='${ctx.data.lastDayWorked}' `
-        + `prefilled (edit-and-resume)`,
+        `[Step: kronos-search] SKIPPED — using manual input from edit-data ` +
+        `(lastDayWorked='${ctx.data.lastDayWorked}' — Kronos verification not needed)`,
       );
       try {
         const kp = await ctx.page("kuali");
@@ -543,30 +554,42 @@ export const separationsWorkflow = defineWorkflow({
     }
     const finalComments = buildTerminationComments(finalTermEffDate, resolved.lastDayWorked, docId);
 
-    // ─── Step 5: ucpath-job-summary (Kuali term date + dept/payroll fill) ───
-    await ctx.step("ucpath-job-summary", async () => {
-      const t0 = Date.now();
-      log.debug(`[Step: ucpath-job-summary] START eid='${kualiData.eid}'`);
-      log.step("[Kuali] Filling termination effective date + department/payroll...");
-      await kualiPage
-        .getByRole("textbox", { name: "Termination Effective Date*" })
-        .fill(finalTermEffDate, { timeout: 5_000 });
-
-      if (jobSummaryData && (jobSummaryData.departmentDescription || jobSummaryData.jobCode)) {
+    // ─── Step 5: ucpath-job-summary — fill Kuali department/payroll from
+    // the UCPath Job Summary data fetched in Phase 1's parallel block.
+    // The Kuali Termination Effective Date fill moved to kuali-finalization
+    // (where it belongs — it's a Kuali-side fill, not a UCPath lookup). The
+    // step is therefore skipped when no UCPath data is available, which
+    // also covers the edit-and-resume bypass path (lastDayWorkedPrefilled →
+    // kronos-search skipped → jobSummaryData undefined).
+    const hasUcpathFillData = !!jobSummaryData &&
+      (!!jobSummaryData.departmentDescription || !!jobSummaryData.jobCode);
+    if (!hasUcpathFillData) {
+      ctx.skipStep("ucpath-job-summary");
+      log.step(
+        lastDayWorkedPrefilled
+          ? `[Step: ucpath-job-summary] SKIPPED — manual input from edit-data ` +
+            `(lastDayWorked prefilled, no UCPath fetch ran)`
+          : `[Step: ucpath-job-summary] SKIPPED — UCPath Job Summary returned no fillable data`,
+      );
+    } else {
+      await ctx.step("ucpath-job-summary", async () => {
+        const t0 = Date.now();
+        log.debug(`[Step: ucpath-job-summary] START eid='${kualiData.eid}'`);
+        log.step("[Kuali] Filling department + payroll from UCPath Job Summary...");
         await fillFinalTransactions(kualiPage, {
-          department: jobSummaryData.departmentDescription,
-          payrollTitleCode: jobSummaryData.jobCode,
-          payrollTitle: jobSummaryData.jobDescription,
+          department: jobSummaryData!.departmentDescription,
+          payrollTitleCode: jobSummaryData!.jobCode,
+          payrollTitle: jobSummaryData!.jobDescription,
         });
         log.success("[Kuali] Department + payroll filled");
-      }
-      log.step(
-        `[Step: ucpath-job-summary] END took=${Date.now() - t0}ms `
-        + `dept='${jobSummaryData?.departmentDescription ?? ""}' `
-        + `jobCode='${jobSummaryData?.jobCode ?? ""}' `
-        + `payrollTitle='${jobSummaryData?.jobDescription ?? ""}'`,
-      );
-    });
+        log.step(
+          `[Step: ucpath-job-summary] END took=${Date.now() - t0}ms `
+          + `dept='${jobSummaryData!.departmentDescription ?? ""}' `
+          + `jobCode='${jobSummaryData!.jobCode ?? ""}' `
+          + `payrollTitle='${jobSummaryData!.jobDescription ?? ""}'`,
+        );
+      });
+    }
 
     // ─── Step 6: UCPath Smart HR Transaction ───
     // Edit-and-resume: a prefilled `transactionNumber` means UCPath already
@@ -589,8 +612,8 @@ export const separationsWorkflow = defineWorkflow({
     if (txnNumberPrefilled) {
       ctx.skipStep("ucpath-transaction");
       log.step(
-        `[Step: ucpath-transaction] SKIPPED — transactionNumber='${transactionNumber}' `
-        + `prefilled (edit-and-resume)`,
+        `[Step: ucpath-transaction] SKIPPED — using manual input from edit-data ` +
+        `(transactionNumber='${transactionNumber}' — UCPath submit not needed)`,
       );
       ctx.updateData({ transactionNumber });
     } else {
@@ -704,6 +727,17 @@ export const separationsWorkflow = defineWorkflow({
       const t0 = Date.now();
       log.debug(`[Step: kuali-finalization] START txnNumber='${transactionNumber || "<empty>"}'`);
       log.step("=== PHASE 3: Kuali finalization ===");
+
+      // Termination Effective Date — required for every Kuali save. Lives
+      // here (not inside ucpath-job-summary) so the dashboard pipeline
+      // accurately distinguishes "Kuali fill" from "UCPath dept/payroll
+      // lookup". When no UCPath data was fetched (edit-and-resume bypass
+      // path), ucpath-job-summary is skipped entirely and this fill is
+      // the only Kuali term-eff-date write that happens.
+      log.step(`[Kuali] Filling Termination Effective Date: ${finalTermEffDate}`);
+      await kualiPage
+        .getByRole("textbox", { name: "Termination Effective Date*" })
+        .fill(finalTermEffDate, { timeout: 5_000 });
 
       // Always fill checkbox + radio; fill txn number if we have it
       await fillTransactionResults(kualiPage, transactionNumber);

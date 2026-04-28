@@ -46,7 +46,7 @@ Submit button: always `button[name="_eventId_proceed"]` (avoids collision with "
 ## Gotchas
 
 - **Duo MFA is manual** — automation pauses and polls for user phone approval
-- **Duo must be sequential** — multiple simultaneous Duo prompts cause errors
+- **Duo serialization** — historically all sessions submitted Duo prompts strictly sequentially because simultaneous prompts collided. As of 2026-04-27 the kernel supports `authChain: "parallel-staggered"` which spaces submits 5s apart and lets prompts overlap; separations uses this mode. If a workflow needs guaranteed serialization (slow Duo provider, customer-policy reason, regression on the staggered path), keep `authChain: "sequential"` or `"interleaved"`
 - UCPath may redirect back to campus discovery page after Duo — retry loop (3x) handles this
 - UKG `ukgNavigateAndFill` returns `true | false | "already_logged_in"` (string return for persistent session detection)
 - UKG is the only flow with network error retry logic (5s backoff for transient errors)

@@ -92,12 +92,20 @@ export function findEntryInput(
 }
 
 /**
- * Latest accumulated `data` for an id across all rows (any status).
+ * Merged accumulated `data` for an id across every tracker row (any status).
  * Used by edit-and-resume to seed prefilledData with non-editable fields
- * carried over from the previous run (e.g. separations' rawTerminationType
- * — needed by `mapReasonCode` downstream but not surfaced as an editable
- * field in the dashboard). Excludes kernel-internal keys (`__name`,
- * `__id`, `instance`) so those don't leak into a fresh run.
+ * carried over from prior runs (e.g. separations' rawTerminationType,
+ * deptId, departmentDescription).
+ *
+ * Implementation: oldest → newest fold, latest non-empty value wins per
+ * key. Replaces the prior "latest row's data only" lookup, which broke
+ * lineage when the latest row was a cancel-queued synthetic failed entry
+ * or a /api/save-data persist that only carried the editable subset of
+ * fields. With the merge, even if a later row drops a key, the most
+ * recent non-empty value from any earlier row is preserved.
+ *
+ * Excludes kernel-internal keys (`__name`, `__id`, `instance`) so those
+ * don't leak into a fresh run's prefilledData channel.
  */
 export function findLatestEntryData(
   workflow: string,
@@ -106,12 +114,17 @@ export function findLatestEntryData(
 ): Record<string, string> {
   const entries = readEntries(workflow, dir).filter((e) => e.id === id && e.data);
   if (entries.length === 0) return {};
-  entries.sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
-  const data = { ...(entries[0].data ?? {}) };
-  delete data.__name;
-  delete data.__id;
-  delete data.instance;
-  return data;
+  // Ascending sort so later non-empty values overwrite earlier ones per key.
+  entries.sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
+  const merged: Record<string, string> = {};
+  for (const e of entries) {
+    for (const [k, v] of Object.entries(e.data ?? {})) {
+      if (k === "__name" || k === "__id" || k === "instance") continue;
+      if (v === undefined || v === null || v === "") continue;
+      merged[k] = String(v);
+    }
+  }
+  return merged;
 }
 
 export interface RetryRequest {

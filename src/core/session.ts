@@ -37,7 +37,13 @@ interface SessionState {
 }
 
 export interface LaunchOpts {
-  authChain?: 'sequential' | 'interleaved'
+  authChain?: 'sequential' | 'interleaved' | 'parallel-staggered'
+  /**
+   * Override the inter-submit stagger for `parallel-staggered` authChain.
+   * Defaults to 5000ms. Lowered to a small value in unit tests so the
+   * stagger doesn't dominate test wall time.
+   */
+  staggerMs?: number
   /** Injection point for tests. */
   launchFn?: (opts: LaunchOneOpts) => Promise<SystemSlot>
   /** Observability bundle — see SessionObserver in types.ts. */
@@ -147,6 +153,48 @@ export class Session {
         opts.observer?.onAuthComplete?.(s.id, s.id)
       }
       systems.forEach((s) => readyPromises.set(s.id, Promise.resolve()))
+    } else if (authChain === 'parallel-staggered') {
+      // Parallel-staggered: every system's login fires in its own promise,
+      // each one waiting i*5s before clicking submit so that Duo prompts
+      // arrive ~5s apart on the user's phone (avoids the multi-prompt
+      // collision documented in src/auth/CLAUDE.md while still letting all
+      // Duos pend in parallel — total auth time is max(single Duo) + (N-1)*5s
+      // instead of sum(all Duos)). The IIFEs are constructed and registered
+      // in `readyPromises` synchronously, so `Session.launch` returns
+      // immediately and per-system handlers can proceed via `ctx.page(id)`
+      // as each Duo clears (in user-approval order, not click order).
+      const STAGGER_MS = opts.staggerMs ?? 5_000
+      const submitPromises: Promise<void>[] = []
+      for (let i = 0; i < systems.length; i++) {
+        const sys = systems[i]
+        const slot = browsers.get(sys.id)!
+        const p = (async () => {
+          // Each system fires `i * STAGGER_MS` after t=0. System 0 fires
+          // immediately; system 1 after STAGGER_MS; system 2 after 2*STAGGER_MS;
+          // etc. This accumulates so concurrent Duos arrive evenly spaced
+          // on the user's phone, not back-to-back per IIFE.
+          if (i > 0) await new Promise((resolve) => setTimeout(resolve, i * STAGGER_MS))
+          await slot.page.bringToFront()
+          opts.observer?.onAuthStart?.(sys.id, sys.id)
+          await loginWithRetry(
+            sys, slot.page, opts.observer?.instance,
+            () => opts.observer?.onAuthFailed?.(sys.id, sys.id),
+          )
+          opts.observer?.onAuthComplete?.(sys.id, sys.id)
+        })()
+        // Prevent unhandled-rejection warnings if nobody consumes this
+        // promise; per-system handlers consume it via `await ctx.page(id)`,
+        // but a workflow that ignores a system would otherwise log noisily.
+        p.catch(() => {})
+        readyPromises.set(sys.id, p)
+        submitPromises.push(p)
+      }
+      // Don't await all submitPromises here — `Session.launch` resolves once
+      // every system has its `readyPromise` registered, matching the shape
+      // used by `interleaved`. Auth failures surface via the observer's
+      // `onAuthFailed` (kernel emits a `failed` tracker row attributed to
+      // `auth:<systemId>`), not by throwing out of Session.launch.
+      void Promise.allSettled(submitPromises)
     } else {
       // Interleaved: auth system[0] blocking; chain the rest in background.
       const firstSlot = browsers.get(systems[0].id)!
@@ -324,6 +372,7 @@ export class Session {
           overflowY: string
           maxHeight: string
           height: string
+          minHeight: string
         }
         const saved: Saved[] = []
         for (const el of Array.from(document.querySelectorAll<HTMLElement>('*'))) {
@@ -331,7 +380,15 @@ export class Session {
           const scrolls =
             (s.overflowY === 'auto' || s.overflowY === 'scroll' || s.overflowX === 'auto' || s.overflowX === 'scroll') &&
             (el.scrollHeight > el.clientHeight + 2 || el.scrollWidth > el.clientWidth + 2)
-          if (!scrolls) continue
+          // Also catch elements constrained purely by max-height (Kuali action-list
+          // modal sizes itself with `max-height: calc(...)` + flex layout, no
+          // scrollbar present until content overflows). Without this branch the
+          // earlier overflow-only filter let those modals clip the screenshot.
+          const constrained =
+            s.maxHeight !== 'none' &&
+            parseFloat(s.maxHeight) > 0 &&
+            el.scrollHeight > el.clientHeight + 2
+          if (!scrolls && !constrained) continue
           saved.push({
             el,
             overflow: el.style.overflow,
@@ -339,13 +396,23 @@ export class Session {
             overflowY: el.style.overflowY,
             maxHeight: el.style.maxHeight,
             height: el.style.height,
+            minHeight: el.style.minHeight,
           })
           el.style.overflow = 'visible'
           el.style.overflowX = 'visible'
           el.style.overflowY = 'visible'
           el.style.maxHeight = 'none'
           el.style.height = 'auto'
+          // Flex children won't grow if min-height is set — neutralize it so
+          // the modal's inner form can expand to its full content height.
+          el.style.minHeight = '0'
         }
+        // Reset scroll position so fullPage starts from the top of the
+        // (now expanded) document. Kuali's action-list modal often starts
+        // mid-document if the operator scrolled in a previous step.
+        window.scrollTo(0, 0)
+        // Force a layout flush so subsequent reads see the new geometry.
+        void document.body.offsetHeight
         ;(window as unknown as { __restoreScrollContainers?: () => void }).__restoreScrollContainers = () => {
           for (const r of saved) {
             r.el.style.overflow = r.overflow
@@ -353,6 +420,7 @@ export class Session {
             r.el.style.overflowY = r.overflowY
             r.el.style.maxHeight = r.maxHeight
             r.el.style.height = r.height
+            r.el.style.minHeight = r.minHeight
           }
           delete (window as unknown as { __restoreScrollContainers?: () => void }).__restoreScrollContainers
         }
@@ -365,8 +433,10 @@ export class Session {
           })
         } catch { /* best-effort */ }
       }
-      // Let layout reflow after removing height caps.
-      await page.waitForTimeout(300)
+      // 800ms settle: Kuali's modal has a CSS height transition that 300ms
+      // (the previous value) clipped intermittently. The capture is between
+      // discrete Playwright actions, not during typing — extra 500ms is fine.
+      await page.waitForTimeout(800)
       const buf = await page.screenshot({ path, fullPage: true })
       return buf
     } finally {

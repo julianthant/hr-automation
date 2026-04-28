@@ -91,6 +91,73 @@ test('session.launch (interleaved): first login blocks; subsequent logins resolv
   await s.close()
 })
 
+test('session.launch (parallel-staggered): submits fire `staggerMs` apart, Duos pend in parallel', async () => {
+  // Use staggerMs: 50 in tests so wall time is bounded; production default
+  // is 5_000ms (mirrors the user-visible behavior of "Duo prompts arrive
+  // ~5s apart on phone, all pending in parallel until approved").
+  const STAGGER_MS = 50
+  const completed: Array<{ id: string; at: number }> = []
+  const start = Date.now()
+  const mkSys = (id: string): SystemConfig => ({
+    id,
+    login: async () => {
+      // Simulated Duo wait — varies per system so we can also verify
+      // completion order tracks user-approval order, not click order.
+      await new Promise((r) => setTimeout(r, 20))
+      completed.push({ id, at: Date.now() - start })
+    },
+  })
+
+  const systems = [mkSys('a'), mkSys('b'), mkSys('c')]
+  const s = await Session.launch(systems, {
+    authChain: 'parallel-staggered',
+    staggerMs: STAGGER_MS,
+    launchFn: fakeLaunch,
+  })
+
+  // Session.launch returns immediately — readyPromises are registered but
+  // not awaited (matching interleaved's shape). Per-system completion
+  // happens in `await ctx.page(id)` calls.
+  await Promise.all([s.page('a'), s.page('b'), s.page('c')])
+
+  // Equal-duration logins: completion order matches click order (a, b, c).
+  assert.deepEqual(completed.map((c) => c.id), ['a', 'b', 'c'])
+  // 'a' completes after its 20ms login. 'b' completes only after a 50ms
+  // stagger + 20ms login (≥50ms). 'c' completes after 2*50ms + 20ms login.
+  assert.ok(
+    completed[1].at >= STAGGER_MS,
+    `expected b completion ≥${STAGGER_MS}ms (post-stagger), got ${completed[1].at}ms`,
+  )
+  assert.ok(
+    completed[2].at >= 2 * STAGGER_MS,
+    `expected c completion ≥${2 * STAGGER_MS}ms (post-2x-stagger), got ${completed[2].at}ms`,
+  )
+  await s.close()
+})
+
+test('session.launch (parallel-staggered): one auth failure does not block siblings', async () => {
+  // Mirrors the equivalent interleaved-mode test: a mid-chain failure
+  // surfaces via that system's readyPromise rejecting, but NOT through
+  // Session.launch itself, and NOT by blocking other systems' logins.
+  const completed: string[] = []
+  const systems: SystemConfig[] = [
+    { id: 'a', login: async () => { completed.push('a') } },
+    { id: 'b', login: async () => { throw new Error('b login failed') } },
+    { id: 'c', login: async () => { completed.push('c') } },
+  ]
+  const s = await Session.launch(systems, {
+    authChain: 'parallel-staggered',
+    staggerMs: 10,
+    launchFn: fakeLaunch,
+  })
+
+  await assert.rejects(() => s.page('b'), /b login failed/)
+  const pageC = await s.page('c')
+  assert.ok(pageC)
+  assert.deepEqual(completed, ['a', 'c'])
+  await s.close()
+})
+
 test('session.launch (interleaved): failed auth on system N does not block system N+1', async () => {
   const completed: string[] = []
   const systems: SystemConfig[] = [
