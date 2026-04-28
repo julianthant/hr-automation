@@ -267,7 +267,14 @@ test('session.screenshotAll: writes one PNG per open page, skips closed, returns
   const shotCalls: Array<{ id: string; path: string }> = []
   const mkPage = (id: string, closed: boolean) => ({
     isClosed: () => closed,
-    screenshot: async (opts: { path: string }) => { shotCalls.push({ id, path: opts.path }) },
+    // captureFullPage uses page.evaluate + waitForTimeout to expand
+    // inner-scroll containers before the screenshot. Stub both so the
+    // mock page survives the full capture path.
+    evaluate: async (_fn: unknown) => undefined,
+    waitForTimeout: async (_ms: number) => undefined,
+    screenshot: async (opts: { path: string }) => {
+      shotCalls.push({ id, path: opts.path })
+    },
   }) as unknown as import('playwright').Page
 
   const s = Session.forTesting({
@@ -311,10 +318,14 @@ test('session.screenshotAll: a failed screenshot does not skip siblings', async 
   const { PATHS } = await import('../../../src/config.js')
   const mkOk = (id: string) => ({
     isClosed: () => false,
+    evaluate: async (_fn: unknown) => undefined,
+    waitForTimeout: async (_ms: number) => undefined,
     screenshot: async () => { /* ok */ void id },
   }) as unknown as import('playwright').Page
   const mkBad = () => ({
     isClosed: () => false,
+    evaluate: async (_fn: unknown) => undefined,
+    waitForTimeout: async (_ms: number) => undefined,
     screenshot: async () => { throw new Error('disk full') },
   }) as unknown as import('playwright').Page
 
