@@ -69,6 +69,17 @@ import {
   sweepStuckOathPrepRows,
 } from "./oath-signature-http.js";
 import { readMultipart } from "./multipart-helper.js";
+import {
+  createSessionStore,
+  handleStart as handleCaptureStart,
+  handleManifest as handleCaptureManifest,
+  handleUpload as handleCaptureUpload,
+  handleDeletePhoto as handleCaptureDeletePhoto,
+  handleFinalize as handleCaptureFinalize,
+  handleDiscard as handleCaptureDiscard,
+  pickLanIp,
+  type CaptureSessionStore,
+} from "../capture/index.js";
 
 /**
  * Canonical sort key for a session event. Events emitted by
@@ -488,6 +499,37 @@ let server: Server | null = null;
  * for test isolation.
  */
 const failureAlertCooldown = new Map<string, number>();
+
+// ─── Capture module wiring ──────────────────────────────────
+//
+// One in-memory session store per dashboard process. mobile.html is read
+// once at module load and served as plain text for every /capture/:token
+// request — the token only matters to the JS inside the page, which
+// extracts it from location.pathname and uses it to call the API
+// endpoints. onFinalize is a no-op stub today; oath paper-mode will
+// register a real callback via a per-workflow registry lookup once
+// `feature/oath-dual-mode` lands.
+
+const captureStore: CaptureSessionStore = createSessionStore();
+const CAPTURE_PHOTOS_DIR = ".tracker/captures";
+const CAPTURE_UPLOADS_DIR = ".tracker/uploads";
+const captureMobileHtmlPath = join(
+  import.meta.dirname ?? ".",
+  "../capture/mobile.html",
+);
+let captureMobileHtmlCache: string | undefined;
+function getCaptureMobileHtml(): string {
+  if (captureMobileHtmlCache !== undefined) return captureMobileHtmlCache;
+  try {
+    captureMobileHtmlCache = readFileSync(captureMobileHtmlPath, "utf-8");
+  } catch {
+    captureMobileHtmlCache = "<!DOCTYPE html><html><body>capture mobile UI not built</body></html>";
+  }
+  return captureMobileHtmlCache;
+}
+const captureNoopFinalize = async (): Promise<void> => {
+  /* TODO: register per-workflow finalize callbacks once oath paper-mode lands */
+};
 
 /**
  * Test helper — clears the cooldown map so tests can re-run scans without
@@ -2737,6 +2779,142 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       ];
       res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
       res.end(JSON.stringify({ checks }));
+      return;
+    }
+
+    // ─── Capture routes ──────────────────────────────────────
+    //
+    //   POST /api/capture/start            → JSON { workflow, contextHint? }
+    //   GET  /capture/:token               → static mobile.html
+    //   GET  /api/capture/manifest/:token  → JSON manifest for the phone
+    //   POST /api/capture/upload?token=…   → multipart file
+    //   POST /api/capture/delete-photo     → JSON { token, index }
+    //   POST /api/capture/finalize         → JSON { token }
+    //   POST /api/capture/discard          → JSON { sessionId, reason? }
+    //   GET  /api/capture/sessions         → JSON list (operator side)
+    //
+    // Photos persist under .tracker/captures/<sessionId>/; bundled PDFs
+    // land in .tracker/uploads/<sessionId>.pdf — same dir emergency-contact's
+    // prepare flow uses, so downstream OCR consumers find both.
+
+    if (req.method === "POST" && url.pathname === "/api/capture/start") {
+      const parsed = await readJsonBody(4096);
+      if (!parsed.ok) return writeJson(400, { ok: false, error: parsed.error });
+      const result = await handleCaptureStart(
+        {
+          workflow: String(parsed.body.workflow ?? ""),
+          contextHint: parsed.body.contextHint
+            ? String(parsed.body.contextHint)
+            : undefined,
+        },
+        {
+          store: captureStore,
+          lanIp: pickLanIp(),
+          port,
+          onFinalize: captureNoopFinalize,
+        },
+      );
+      writeJson(result.status, result.body);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname.startsWith("/capture/")) {
+      // Strip the token from the path; the JS inside the page reads it from
+      // location.pathname so we don't need to substitute server-side.
+      res.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-cache",
+      });
+      res.end(getCaptureMobileHtml());
+      return;
+    }
+
+    if (
+      req.method === "GET" &&
+      url.pathname.startsWith("/api/capture/manifest/")
+    ) {
+      const token = url.pathname.slice("/api/capture/manifest/".length);
+      const result = handleCaptureManifest(token, { store: captureStore });
+      writeJson(result.status, result.body);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/capture/upload") {
+      const token = url.searchParams.get("token") ?? "";
+      // 11 MB cap leaves a 1MB margin over the per-photo 10MB enforced by
+      // handleCaptureUpload — multipart envelope overhead.
+      const mp = await readMultipart(req, 11 * 1024 * 1024);
+      if (!mp.ok) return writeJson(400, { ok: false, error: mp.error });
+      const file = mp.parsed.files["file"];
+      if (!file) {
+        return writeJson(400, { ok: false, error: "missing 'file' part" });
+      }
+      const result = await handleCaptureUpload(
+        { token, bytes: file.data, originalName: file.filename },
+        { store: captureStore, photosDir: CAPTURE_PHOTOS_DIR },
+      );
+      writeJson(result.status, result.body);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/capture/delete-photo") {
+      const parsed = await readJsonBody(4096);
+      if (!parsed.ok) return writeJson(400, { ok: false, error: parsed.error });
+      const result = handleCaptureDeletePhoto(
+        {
+          token: String(parsed.body.token ?? ""),
+          index: Number(parsed.body.index),
+        },
+        { store: captureStore, photosDir: CAPTURE_PHOTOS_DIR },
+      );
+      writeJson(result.status, result.body);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/capture/finalize") {
+      const parsed = await readJsonBody(4096);
+      if (!parsed.ok) return writeJson(400, { ok: false, error: parsed.error });
+      const result = await handleCaptureFinalize(
+        { token: String(parsed.body.token ?? "") },
+        {
+          store: captureStore,
+          photosDir: CAPTURE_PHOTOS_DIR,
+          uploadsDir: CAPTURE_UPLOADS_DIR,
+        },
+      );
+      writeJson(result.status, result.body);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/capture/discard") {
+      const parsed = await readJsonBody(4096);
+      if (!parsed.ok) return writeJson(400, { ok: false, error: parsed.error });
+      const result = handleCaptureDiscard(
+        {
+          sessionId: String(parsed.body.sessionId ?? ""),
+          reason: parsed.body.reason ? String(parsed.body.reason) : undefined,
+        },
+        { store: captureStore, photosDir: CAPTURE_PHOTOS_DIR },
+      );
+      writeJson(result.status, result.body);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/capture/sessions") {
+      // Strip the onFinalize function from the response — Functions can't be
+      // JSON-serialized (and would leak nothing useful anyway).
+      const sessions = captureStore.listAll().map((s) => ({
+        sessionId: s.sessionId,
+        token: s.token,
+        workflow: s.workflow,
+        contextHint: s.contextHint,
+        createdAt: s.createdAt,
+        expiresAt: s.expiresAt,
+        state: s.state,
+        photos: s.photos,
+        pdfPath: s.pdfPath,
+      }));
+      writeJson(200, sessions);
       return;
     }
 
