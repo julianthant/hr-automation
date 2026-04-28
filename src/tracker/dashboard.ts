@@ -55,6 +55,14 @@ import {
   buildSharePointRosterDownloadHandler,
   buildSharePointListHandler,
 } from "../workflows/sharepoint-download/index.js";
+import {
+  handlePrepareUpload,
+  handleApproveBatch,
+  handleDiscardPrepare,
+  listRosters,
+  sweepStuckPrepRows,
+} from "./emergency-contact-http.js";
+import { readMultipart } from "./multipart-helper.js";
 
 /**
  * Canonical sort key for a session event. Events emitted by
@@ -1417,6 +1425,19 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     } catch (err) {
       log.step(`Screenshot startup prune skipped: ${err instanceof Error ? err.message : String(err)}`);
     }
+    // Sweep emergency-contact prep rows that were left in transient state by
+    // a previous dashboard process — the OCR + eid-lookup pipeline lives in
+    // this Node process, so a backend restart leaves any in-flight prep row
+    // orphaned. Idempotent: only emits on rows whose latest status is
+    // pending/running.
+    try {
+      const swept = sweepStuckPrepRows(dir);
+      if (swept > 0) {
+        log.step(`Marked ${swept} stuck emergency-contact prepare row${swept === 1 ? "" : "s"} as failed`);
+      }
+    } catch (err) {
+      log.step(`Prep-row sweep skipped: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /** Standard JSON response helper. */
@@ -2364,6 +2385,75 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       });
       res.end(JSON.stringify(body));
     };
+
+    // ─── Emergency-contact "Run" button endpoints ───────────────
+    //
+    // Four routes power the dashboard's TopBar Run flow:
+    //   POST /api/emergency-contact/prepare        → multipart PDF upload, kicks off OCR
+    //   POST /api/emergency-contact/approve-batch  → fan out reviewed records to daemons
+    //   POST /api/emergency-contact/discard-prepare → cancel a pending prep row
+    //   GET  /api/rosters                          → list available xlsx rosters
+    //
+    // Each handler lives in `emergency-contact-http.ts` so route bodies
+    // here stay short and the handlers can be unit-tested.
+
+    if (req.method === "GET" && url.pathname === "/api/rosters") {
+      try {
+        writeJson(200, listRosters());
+      } catch (e) {
+        writeJson(500, { ok: false, error: errorMessage(e) });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/emergency-contact/prepare") {
+      // 50MB cap is comfortably above a typical scanned 8-page PDF (~3-10MB)
+      // while keeping a runaway upload from swamping the SSE server.
+      const mp = await readMultipart(req, 50 * 1024 * 1024);
+      if (!mp.ok) return writeJson(400, { ok: false, error: mp.error });
+      const file = mp.parsed.files["pdf"];
+      const rosterMode = mp.parsed.fields["rosterMode"]?.trim();
+      if (!file) return writeJson(400, { ok: false, error: "missing 'pdf' file part" });
+      if (rosterMode !== "download" && rosterMode !== "existing") {
+        return writeJson(400, { ok: false, error: "rosterMode must be 'download' or 'existing'" });
+      }
+      const result = await handlePrepareUpload(
+        { pdfBytes: file.data, pdfOriginalName: file.filename, rosterMode },
+        dir,
+      );
+      writeJson(result.ok ? 202 : 400, result);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/emergency-contact/approve-batch") {
+      // 1 MB cap — preview record JSON is small (~1-2KB per record × N records).
+      // 1 MB comfortably handles a 200-record batch without enabling abuse.
+      const parsedBody = await readJsonBody(1024 * 1024);
+      if (!parsedBody.ok) return writeJson(400, { ok: false, error: parsedBody.error });
+      const result = await handleApproveBatch(
+        {
+          parentRunId: String(parsedBody.body.parentRunId ?? ""),
+          records: Array.isArray(parsedBody.body.records) ? parsedBody.body.records : [],
+        },
+        dir,
+      );
+      writeJson(result.ok ? 202 : 400, result);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/emergency-contact/discard-prepare") {
+      const parsedBody = await readJsonBody(4096);
+      if (!parsedBody.ok) return writeJson(400, { ok: false, error: parsedBody.error });
+      const result = await handleDiscardPrepare(
+        {
+          parentRunId: String(parsedBody.body.parentRunId ?? ""),
+          reason: parsedBody.body.reason ? String(parsedBody.body.reason) : undefined,
+        },
+        dir,
+      );
+      writeJson(result.ok ? 200 : 400, result);
+      return;
+    }
 
     if (req.method === "POST" && url.pathname === "/api/retry") {
       const parsed = await readJsonBody();

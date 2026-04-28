@@ -30,6 +30,14 @@ export interface PrepareInput {
   rosterDir: string;
   uploadsDir: string;
   trackerDir?: string;
+  /**
+   * Externally-supplied runId. The HTTP handler uses this so it can
+   * return the parentRunId in its response BEFORE awaiting OCR — the
+   * synchronous "pending" write happens before the first await, so the
+   * tracker row exists by the time the fire-and-forget caller resumes.
+   * When omitted, `runPrepare` generates one.
+   */
+  runId?: string;
 }
 
 export interface PrepareOutput {
@@ -79,7 +87,7 @@ export function __setEidLookupEnqueueForTests(fn: EidLookupEnqueueFn | undefined
  *     → running(eid-lookup) → ... → done                  (with progressive updates)
  */
 export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
-  const runId = randomUUID();
+  const runId = input.runId ?? randomUUID();
   const id = `prep-${dateLocal()}-${runId.slice(0, 8)}`;
   const trackerDir = input.trackerDir;
 
