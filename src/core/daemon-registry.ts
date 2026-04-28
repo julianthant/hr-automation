@@ -11,7 +11,7 @@ import {
 } from 'node:fs'
 import { hostname } from 'node:os'
 import { join, resolve } from 'node:path'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import type { Daemon, DaemonLockfile } from './daemon-types.js'
 
 /**
@@ -203,6 +203,82 @@ export async function findAliveDaemons(workflow: string, trackerDir?: string): P
 
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
+}
+
+/**
+ * SIGKILL any Chromium processes whose parent process is dead. These are
+ * orphaned Playwright-launched Chromium subprocesses left over from a daemon
+ * that exited without being able to clean up its browsers (SIGKILL, OOM,
+ * crash, force-stop with too-short exit window).
+ *
+ * Why this matters: the symptom is "8 chrome windows after retry" — when the
+ * user retries while a previous daemon's chromium is still running but its
+ * tsx parent is gone (`ppid === 1` on Linux/macOS — adopted by init), the
+ * new daemon stacks fresh chromium on top of the orphans. Calling this
+ * function before each fresh `spawnDaemon` keeps the workspace tidy.
+ *
+ * Filter: we match Playwright's bundled Chromium via the path
+ * `Chromium.app/Contents/MacOS/Chromium` (macOS) or `chrome-linux/chrome`
+ * (Linux). User-installed Google Chrome has a different bundle path and
+ * is never matched. No Windows handling — pgrep isn't available on win32.
+ *
+ * Best-effort throughout: a missing pgrep, ps, or process.kill error never
+ * throws — returns 0 in those cases. Tests can override the binary discovery
+ * via env or by stubbing `execFileSync`.
+ *
+ * Returns the count of processes successfully sent SIGKILL.
+ */
+export async function killOrphanedChromiumProcesses(): Promise<number> {
+  if (process.platform === 'win32') return 0
+  // pgrep -fl matches the full command line; we filter to playwright's
+  // bundled chromium binary path (different from Google Chrome). The
+  // patterns cover macOS (.app bundle) and Linux (chrome-linux dir).
+  const patterns = ['Chromium\\.app/Contents/MacOS/Chromium', 'chrome-linux/chrome']
+  const candidates = new Set<number>()
+  for (const pat of patterns) {
+    try {
+      const out = execFileSync('pgrep', ['-f', pat], {
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 2000,
+      }).toString()
+      for (const line of out.trim().split('\n')) {
+        const pid = Number(line.trim())
+        if (Number.isFinite(pid) && pid > 0 && pid !== process.pid) candidates.add(pid)
+      }
+    } catch {
+      /* pgrep returns non-zero when no match — treat as no candidates */
+    }
+  }
+  if (candidates.size === 0) return 0
+  let killed = 0
+  for (const pid of candidates) {
+    let ppid: number | null = null
+    try {
+      const out = execFileSync('ps', ['-o', 'ppid=', '-p', String(pid)], {
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 1000,
+      }).toString().trim()
+      ppid = Number.parseInt(out, 10)
+    } catch {
+      // Process disappeared between pgrep and ps — already dead, skip.
+      continue
+    }
+    if (!Number.isFinite(ppid) || ppid === null) continue
+    // ppid === 1: orphaned (adopted by init).
+    // ppid alive: chrome has a live owner (another daemon, a real user
+    //   chrome session unrelated to us, etc.) — leave it alone.
+    // ppid not alive: race window where the parent died but init hasn't
+    //   reaped yet — chrome is dying, kill to be sure.
+    const ownerAlive = ppid !== 1 && isProcessAlive(ppid)
+    if (ownerAlive) continue
+    try {
+      process.kill(pid, 'SIGKILL')
+      killed++
+    } catch {
+      /* already gone — race */
+    }
+  }
+  return killed
 }
 
 /**

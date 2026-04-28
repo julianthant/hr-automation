@@ -29,7 +29,7 @@ export function DaemonRow({ daemon, onAfterAction }: DaemonRowProps) {
   const onEnd = async (): Promise<void> => {
     if (ending) return;
     setEnding(true);
-    const t = toast.loading(`Stopping daemon pid ${daemon.pid}…`);
+    const t = toast.loading(`Stopping worker (PID ${daemon.pid})…`);
     try {
       const res = await fetch("/api/daemons/stop", {
         method: "POST",
@@ -37,16 +37,16 @@ export function DaemonRow({ daemon, onAfterAction }: DaemonRowProps) {
         body: JSON.stringify({ workflow: daemon.workflow }),
       });
       if (res.ok) {
-        toast.success(`Stop signal sent`, {
+        toast.success(`Worker stopping`, {
           id: t,
-          description: `${daemon.workflow} pid ${daemon.pid}`,
+          description: `${daemon.workflow} · PID ${daemon.pid}`,
         });
         onAfterAction();
       } else {
-        toast.error(`Stop failed`, { id: t, description: `HTTP ${res.status}` });
+        toast.error(`Couldn't stop worker`, { id: t, description: `HTTP ${res.status}` });
       }
     } catch (err) {
-      toast.error(`Stop failed`, {
+      toast.error(`Couldn't stop worker`, {
         id: t,
         description: err instanceof Error ? err.message : String(err),
       });

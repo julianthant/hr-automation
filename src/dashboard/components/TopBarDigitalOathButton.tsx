@@ -74,8 +74,8 @@ function DigitalOathModal({
         setSubmitting(false);
         return;
       }
-      toast.success("Digital lookup started", {
-        description: `Looking up ${eids.length} EID${eids.length === 1 ? "" : "s"} in CRM (Duo on phone)`,
+      toast.success("CRM lookup started", {
+        description: `Looking up ${eids.length} EID${eids.length === 1 ? "" : "s"} — approve Duo on your phone`,
       });
       setText("");
       onOpenChange(false);

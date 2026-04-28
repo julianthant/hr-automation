@@ -124,25 +124,37 @@ export async function readQueueState(workflow: string, trackerDir?: string): Pro
 
 /**
  * Append N `enqueue` events in insertion order. Each event carries a
- * pre-assigned `runId` (UUID v4) so the CLI can emit a matching `pending`
+ * `runId` (UUID v4) so the CLI / HTTP handler can emit a matching `pending`
  * tracker row at enqueue time — when the claiming daemon folds the queue
  * state, it reads this runId and reuses it in its claim event, so the
  * tracker sees ONE runId from pending → running → done (no duplicate rows
  * in the dashboard queue panel). Returns each new item's 1-indexed position
- * in the resulting queued list plus its pre-assigned runId.
+ * in the resulting queued list plus its runId.
+ *
+ * `preAssignedRunIds`: if provided, each runId is reused verbatim from the
+ * caller (e.g. `ensureDaemonsAndEnqueue` pre-assigns them to fire the
+ * `onPreEmitPending` callback BEFORE spawn — the same runId then rides
+ * through to the queue file's enqueue event). Length must match `inputs`.
+ * If omitted, one fresh UUID is generated per input (legacy behavior).
  */
 export async function enqueueItems<T>(
   workflow: string,
   inputs: T[],
   idFn: (input: T, index: number) => string,
   trackerDir?: string,
+  preAssignedRunIds?: ReadonlyArray<UUID>,
 ): Promise<Array<{ id: string; position: number; runId: UUID }>> {
   if (inputs.length === 0) return []
+  if (preAssignedRunIds && preAssignedRunIds.length !== inputs.length) {
+    throw new Error(
+      `enqueueItems: preAssignedRunIds length ${preAssignedRunIds.length} does not match inputs length ${inputs.length}`,
+    )
+  }
   const enqueuedBy = `cli-${process.pid}`
   const assigned: Array<{ id: string; runId: UUID }> = []
   for (let i = 0; i < inputs.length; i++) {
     const id = idFn(inputs[i], i)
-    const runId = randomUUID()
+    const runId = preAssignedRunIds?.[i] ?? randomUUID()
     assigned.push({ id, runId })
     appendEvent(
       workflow,

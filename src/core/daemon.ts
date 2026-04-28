@@ -91,6 +91,18 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   let queueDepthCache = 0
   let lastActivity = Date.now()
   let phase: DaemonPhase = 'launching'
+  // Session reference exposed to the /status handler so the dashboard
+  // (and the spawn pre-check in `daemon-registry`) can inventory which
+  // chromium PIDs belong to this daemon. Assigned inside the
+  // `withBatchLifecycle` body once `Session.launch` resolves; remains
+  // null during `phase === 'launching'`. Force-stop paths can also read
+  // it to SIGTERM/SIGKILL chromium directly.
+  let activeSession: Session | null = null
+  // Cooperative-cancel signal for the in-flight item. Set by the
+  // POST /cancel-current handler when itemId+runId match the current
+  // in-flight item; cleared after the next item starts. Stepper checks
+  // this at every step boundary and throws CancelledError.
+  let cancelTarget: { itemId: string; runId: string } | null = null
   const setPhase = (next: DaemonPhase): void => {
     if (phase === next) return
     const prev = phase
@@ -121,7 +133,12 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           phase,
           queueDepth: queueDepthCache,
           inFlight: inFlight?.itemId ?? null,
+          inFlightRunId: inFlight?.runId ?? null,
           lastActivity: new Date(lastActivity).toISOString(),
+          // chromePids is best-effort: undefined during phase === 'launching'
+          // (session not yet allocated) and on win32 (defaultLaunchOne's
+          // pgrep diff returns no children). Spawn pre-check tolerates both.
+          chromePids: activeSession ? Object.values(activeSession.chromePids) : [],
         }),
       )
       return
@@ -130,6 +147,50 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
       wakeResolve?.()
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end('{"ok":true}')
+      return
+    }
+    if (req.method === 'POST' && url === '/cancel-current') {
+      let body = ''
+      req.on('data', (c) => {
+        body += c
+      })
+      req.on('end', () => {
+        // Body shape: `{ itemId: string, runId: string }`. Match against
+        // the in-flight tuple to avoid cancelling an unrelated next item
+        // if the user clicked stale UI. Any mismatch → 409.
+        let parsed: { itemId?: unknown; runId?: unknown } = {}
+        try {
+          parsed = body ? (JSON.parse(body) as { itemId?: unknown; runId?: unknown }) : {}
+        } catch {
+          /* malformed body — fall through to 400 below */
+        }
+        if (typeof parsed.itemId !== 'string' || typeof parsed.runId !== 'string') {
+          res.writeHead(400, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'itemId and runId are required strings' }))
+          return
+        }
+        const reqItemId = parsed.itemId
+        const reqRunId = parsed.runId
+        if (!inFlight || inFlight.itemId !== reqItemId || inFlight.runId !== reqRunId) {
+          res.writeHead(409, { 'content-type': 'application/json' })
+          res.end(
+            JSON.stringify({
+              ok: false,
+              error: 'no matching in-flight item — already finished or claim has rotated',
+            }),
+          )
+          return
+        }
+        // Set the cooperative-cancel flag. Stepper's next step boundary
+        // throws CancelledError, claim loop catches kind='cancelled',
+        // resets pages, claims next item.
+        cancelTarget = { itemId: reqItemId, runId: reqRunId }
+        log.warn(
+          `[Daemon ${wf.config.name}/${instanceId}] cancel-current accepted for item=${reqItemId} runId=${reqRunId}`,
+        )
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, accepted: true }))
+      })
       return
     }
     if (req.method === 'POST' && url === '/stop') {
@@ -243,6 +304,10 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
             authChain: wf.config.authChain,
             observer,
           })
+          // Expose to the /status handler + force-stop path. Cleared in
+          // the outer `finally` to avoid a stale reference outliving the
+          // session's lifetime.
+          activeSession = session
           // Force every system's auth to complete at daemon startup so the
           // claim loop doesn't race with in-progress Duo prompts. Rejections
           // propagate to `withBatchLifecycle`'s catch so an auth failure
@@ -352,6 +417,8 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 callerPreEmits: false,
                 preAssignedInstance: instance,
                 authTimings: itemAuthTimings,
+                isCancelRequested: () =>
+                  cancelTarget?.itemId === item.id && cancelTarget?.runId === runId,
               })
               emitItemComplete(instance, item.id, trackerDir)
               markTerminated(runId)
@@ -360,6 +427,25 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
               } else {
                 await markItemFailed(wf.config.name, item.id, r.error, runId, trackerDir)
               }
+              // Reset every system's page to its `resetUrl` after a
+              // cancelled item — leaves the daemon's auth intact but
+              // returns the workflow surface to a clean starting state
+              // for the next claim. Reset failures are best-effort: a
+              // failed reset won't block the next item from claiming.
+              if (r.ok === false && r.kind === 'cancelled') {
+                for (const sys of wf.config.systems) {
+                  try {
+                    await session.reset(sys.id)
+                  } catch (resetErr) {
+                    log.warn(
+                      `[Daemon ${instanceId}] post-cancel reset(${sys.id}) failed: ${
+                        resetErr instanceof Error ? resetErr.message : String(resetErr)
+                      }`,
+                    )
+                  }
+                }
+              }
+              cancelTarget = null
               inFlight = null
               setPhase('idle')
               continue

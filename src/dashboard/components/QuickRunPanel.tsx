@@ -42,7 +42,7 @@ export function QuickRunPanel({ workflow, failedIds }: QuickRunPanelProps) {
     if (!config) return;
     const parsed = config.parseInput(value);
     if (!parsed.ok) {
-      toast.error("Can't enqueue", { description: parsed.error });
+      toast.error("Invalid input", { description: parsed.error });
       return;
     }
     setSubmitting(true);
@@ -59,21 +59,21 @@ export function QuickRunPanel({ workflow, failedIds }: QuickRunPanelProps) {
       };
       if (res.status === 202 && body.ok) {
         const n = body.enqueued ?? parsed.inputs.length;
-        toast.success(`Queued ${n} ${n === 1 ? "item" : "items"} for ${workflow}`, {
+        toast.success(`Added ${n} ${n === 1 ? "item" : "items"} to ${workflow}`, {
           description:
-            "If no daemon was alive, a new one is spawning — approve Duo in the new browser window.",
+            "If no worker was running, one is starting — approve Duo in the new browser window.",
           duration: 6000,
         });
         setValue("");
       } else {
-        toast.error("Enqueue failed", {
+        toast.error("Couldn't add to queue", {
           description: body.error ?? `HTTP ${res.status}`,
           duration: 8000,
         });
       }
     } catch (err) {
-      toast.error("Enqueue failed", {
-        description: err instanceof Error ? err.message : "Network error contacting the dashboard backend.",
+      toast.error("Couldn't add to queue", {
+        description: err instanceof Error ? err.message : String(err),
       });
     } finally {
       setSubmitting(false);
@@ -88,7 +88,7 @@ export function QuickRunPanel({ workflow, failedIds }: QuickRunPanelProps) {
   async function retryAll() {
     if (retrying || failedIds.length === 0) return;
     setRetrying(true);
-    const t = toast.loading(`Retrying ${failedIds.length} failed…`);
+    const t = toast.loading(`Retrying ${failedIds.length} failed items…`);
     try {
       const res = await fetch("/api/retry-bulk", {
         method: "POST",
@@ -101,18 +101,18 @@ export function QuickRunPanel({ workflow, failedIds }: QuickRunPanelProps) {
         errors: Array<{ id: string; error: string }>;
       };
       if (body.errors.length === 0) {
-        toast.success(`Retry enqueued`, {
+        toast.success(`Retry scheduled`, {
           id: t,
-          description: `${body.count} of ${failedIds.length} re-queued`,
+          description: `${body.count} of ${failedIds.length} items re-added to queue`,
         });
       } else {
-        toast.warning(`Partial retry`, {
+        toast.warning(`Some retries failed`, {
           id: t,
-          description: `${body.count} ok · ${body.errors.length} failed (${body.errors[0].error})`,
+          description: `${body.count} succeeded · ${body.errors.length} failed (${body.errors[0].error})`,
         });
       }
     } catch (err) {
-      toast.error(`Retry-all failed`, {
+      toast.error(`Couldn't retry failed items`, {
         id: t,
         description: err instanceof Error ? err.message : String(err),
       });

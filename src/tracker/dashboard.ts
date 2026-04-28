@@ -76,10 +76,16 @@ import {
   handleManifest as handleCaptureManifest,
   handleUpload as handleCaptureUpload,
   handleDeletePhoto as handleCaptureDeletePhoto,
+  handleReplacePhoto as handleCaptureReplacePhoto,
+  handleReorder as handleCaptureReorder,
+  handleExtend as handleCaptureExtend,
+  handleValidate as handleCaptureValidate,
   handleFinalize as handleCaptureFinalize,
   handleDiscard as handleCaptureDiscard,
   pickLanIp,
+  type CaptureSessionEvent,
   type CaptureSessionStore,
+  type CapturedPhoto,
 } from "../capture/index.js";
 
 /**
@@ -527,6 +533,107 @@ function getCaptureMobileHtml(): string {
   return captureMobileHtmlCache;
 }
 
+// Phone-side HEIC → JPEG polyfill, served from the project's
+// node_modules/heic2any rather than a CDN so the LAN works air-gapped.
+// `npm install heic2any` populates this; if it's missing the route
+// 502s and the phone's `script.onerror` shows "Couldn't load HEIC
+// converter" — same failure mode the CDN had on offline networks.
+const heic2anyAssetPath = join(
+  import.meta.dirname ?? ".",
+  "../../node_modules/heic2any/dist/heic2any.min.js",
+);
+let heic2anyAssetCache: Buffer | undefined;
+function getHeic2anyAsset(): Buffer | undefined {
+  if (heic2anyAssetCache !== undefined) return heic2anyAssetCache;
+  try {
+    heic2anyAssetCache = readFileSync(heic2anyAssetPath);
+  } catch {
+    return undefined;
+  }
+  return heic2anyAssetCache;
+}
+
+/**
+ * Workflow → capture metadata. The frontend's TopBarCaptureButton hides
+ * itself when its workflow isn't here; finalize dispatch still happens
+ * inside `makeCaptureFinalize` (the registry refactor that moves the
+ * finalize handler in here is a follow-up).
+ */
+const captureRegistrations: Record<
+  string,
+  { label: string; contextHints?: string[] }
+> = {
+  "oath-signature": { label: "Capture paper roster" },
+};
+
+// ─── Capture SSE channel ────────────────────────────────────
+//
+// A single subscription on `captureStore` fans every mutation out to
+// every open dashboard tab. Modal-side `useCaptureSession` opens an
+// EventSource against `/api/capture/sessions/stream` only while the
+// dialog is open, so the channel is cheap when no operator is looking.
+
+interface CaptureSseClient {
+  id: number;
+  res: import("http").ServerResponse;
+}
+let nextCaptureSseClientId = 0;
+const captureSseClients = new Set<CaptureSseClient>();
+
+/**
+ * Strip secrets + non-serializable fields out of a session for the
+ * SSE / list endpoints. **Never** include `token` — it leaves the
+ * server only in the response to `/api/capture/start` per the spec's
+ * "Token never echoed in SSE" invariant.
+ */
+function serializeCaptureSession(
+  s: import("../capture/sessions.js").CaptureSession,
+): {
+  sessionId: string;
+  workflow: string;
+  contextHint?: string;
+  state: import("../capture/sessions.js").CaptureSessionState;
+  createdAt: number;
+  expiresAt: number;
+  phoneConnectedAt: number | null;
+  photos: CapturedPhoto[];
+  pdfPath?: string;
+} {
+  return {
+    sessionId: s.sessionId,
+    workflow: s.workflow,
+    contextHint: s.contextHint,
+    state: s.state,
+    createdAt: s.createdAt,
+    expiresAt: s.expiresAt,
+    phoneConnectedAt: s.phoneConnectedAt ?? null,
+    photos: s.photos,
+    ...(s.pdfPath ? { pdfPath: s.pdfPath } : {}),
+  };
+}
+
+function captureSseFanOut(eventName: string, data: unknown): void {
+  const payload = `event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const client of [...captureSseClients]) {
+    try {
+      client.res.write(payload);
+    } catch {
+      captureSseClients.delete(client);
+    }
+  }
+}
+
+captureStore.subscribe((event: CaptureSessionEvent) => {
+  captureSseFanOut("session-event", event);
+});
+
+// 15s heartbeat keeps NAT/proxy connections alive and lets the client
+// notice a silent disconnect within one window.
+const captureHeartbeatInterval = setInterval(() => {
+  captureSseFanOut("heartbeat", { ts: Date.now() });
+}, 15_000);
+captureHeartbeatInterval.unref?.();
+
 /**
  * Per-workflow finalize dispatcher. Once the capture module bundles the
  * PDF and sets `session.pdfPath`, route the finalized session to the
@@ -606,17 +713,21 @@ export async function scanFailurePatterns(): Promise<void> {
 
 /**
  * Grace period before treating a queued-with-no-alive-daemons item as truly
- * orphaned. Must cover the full spawn-to-lockfile window: tsx cold start
- * (1–3s) + module loading (1–2s) + browser launches + Duo approval for every
- * declared system. Separations declares 4 systems with sequential Duo
- * approval — that can take several minutes. Until the daemon's
- * `Session.launch` completes, no lockfile exists, so `findAliveDaemons`
- * returns 0 and the orphan sweep can race the dashboard's own in-flight
- * spawn. Set to 5 minutes to match `spawnDaemon`'s own deadline:
- * inside that window the spawn is still legitimately in progress; past it,
- * the spawn promise will already have rejected and there's no daemon coming.
+ * orphaned. As of 2026-04-28 (Cluster A spec), the grace is **0 ms**.
+ *
+ * Rationale: `ensureDaemonsAndEnqueue` was reordered so the queue file is
+ * only appended AFTER `spawnDaemon` returns (lockfile registered). Therefore
+ * every item in the queue file has a registered daemon by construction;
+ * "queue file has items + 0 alive daemons" can only happen if that daemon
+ * died after writing. Failing the items immediately matches the user's
+ * "if the daemon dies, fail all queued ones" rule.
+ *
+ * Pre-2026-04-28 the grace was 5 minutes to cover the spawn-to-lockfile
+ * window; with the new ordering that window is closed. Legacy queue items
+ * left over from earlier runs (where a daemon died without exit cleanup)
+ * are correctly treated as orphaned and failed on first poll.
  */
-const ORPHAN_QUEUE_GRACE_MS = 5 * 60_000;
+const ORPHAN_QUEUE_GRACE_MS = 0;
 
 /**
  * Safety net: detect queued items whose workflow has zero alive daemons,
@@ -629,15 +740,12 @@ const ORPHAN_QUEUE_GRACE_MS = 5 * 60_000;
  * queue. Idempotent — once an item is marked failed, the next pass sees
  * `state.queued.length === 0` for that id.
  *
- * **Grace-period guard**: only items whose `enqueuedAt` is older than
- * `ORPHAN_QUEUE_GRACE_MS` are eligible. Otherwise the scan would race a
- * legitimately-spawning daemon during its tsx cold-start window (lockfile
- * not yet written → `findAliveDaemons` returns 0 → false-positive orphan).
- * Concrete failure mode this prevents: user clicks "Run with these values"
- * with no alive daemon, `enqueueFromHttp` fires the spawn in the background,
- * the next /events tick (1s later) sees an empty alive set + a queued item
- * and marks it failed — even though the daemon is mid-launch and would
- * claim it within seconds.
+ * **Grace = 0 (2026-04-28)**: with the spawn-then-enqueue reorder in
+ * `ensureDaemonsAndEnqueue`, the queue file is only appended after a daemon
+ * lockfile is registered. Any item present in queue + 0 alive daemons is a
+ * genuine orphan, not a spawn-in-flight race. Failing immediately matches
+ * the "daemon dies → fail queued" rule. The legacy 5-minute grace was
+ * removed because the spawn-to-lockfile window is now closed by ordering.
  *
  * Does NOT touch claimed items: those are owned by a daemon (alive or
  * recently dead). The daemon's own `recoverOrphanedClaims` keepalive sweep
@@ -2933,7 +3041,21 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       url.pathname.startsWith("/api/capture/manifest/")
     ) {
       const token = url.pathname.slice("/api/capture/manifest/".length);
-      const result = handleCaptureManifest(token, { store: captureStore });
+      // First manifest hit doubles as "phone connected" — capture the
+      // UA + IP so an audit consumer can attribute photos to a device.
+      const ua = req.headers["user-agent"];
+      const fwd = req.headers["x-forwarded-for"];
+      const remoteIp =
+        (typeof fwd === "string" ? fwd.split(",")[0]?.trim() : undefined) ||
+        req.socket?.remoteAddress ||
+        undefined;
+      const result = handleCaptureManifest(token, {
+        store: captureStore,
+        phoneInfo: {
+          userAgent: typeof ua === "string" ? ua : undefined,
+          ip: remoteIp,
+        },
+      });
       writeJson(result.status, result.body);
       return;
     }
@@ -3000,20 +3122,213 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     }
 
     if (req.method === "GET" && url.pathname === "/api/capture/sessions") {
-      // Strip the onFinalize function from the response — Functions can't be
-      // JSON-serialized (and would leak nothing useful anyway).
-      const sessions = captureStore.listAll().map((s) => ({
-        sessionId: s.sessionId,
-        token: s.token,
-        workflow: s.workflow,
-        contextHint: s.contextHint,
-        createdAt: s.createdAt,
-        expiresAt: s.expiresAt,
-        state: s.state,
-        photos: s.photos,
-        pdfPath: s.pdfPath,
-      }));
-      writeJson(200, sessions);
+      // Legacy poll endpoint — kept one release for backcompat per the
+      // spec's migration plan §4. Modal uses SSE now. `serializeCaptureSession`
+      // omits `token` to align with the SSE invariant.
+      writeJson(200, captureStore.listAll().map(serializeCaptureSession));
+      return;
+    }
+
+    // ─── Capture: photo serving (path-traversal guarded) ──────
+    if (
+      req.method === "GET" &&
+      url.pathname.startsWith("/api/capture/photos/")
+    ) {
+      const rest = url.pathname.slice("/api/capture/photos/".length);
+      const slash = rest.indexOf("/");
+      if (slash < 0) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      const sessionIdRaw = decodeURIComponent(rest.slice(0, slash));
+      const indexStr = rest.slice(slash + 1);
+      // The store's sessionIds are randomUUID() (8-4-4-4-12 hex+dashes).
+      // Anything else is a path-traversal probe — reject without
+      // distinguishing causes.
+      if (!/^[a-f0-9-]{8,80}$/i.test(sessionIdRaw)) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      const idx = Number(indexStr);
+      if (!Number.isInteger(idx) || idx < 0) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      const session = captureStore.getById(sessionIdRaw);
+      if (!session) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      const photo = session.photos.find((p) => p.index === idx);
+      if (!photo) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      // photo.filename is server-generated — we never accept user-supplied
+      // names that could contain `..`. The store-resolved lookup is the
+      // authoritative source.
+      const filePath = join(CAPTURE_PHOTOS_DIR, sessionIdRaw, photo.filename);
+      if (!existsSync(filePath)) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      const stat = statSync(filePath);
+      res.writeHead(200, {
+        "Content-Type": photo.mime,
+        "Cache-Control": "no-cache, must-revalidate",
+        "Content-Length": String(stat.size),
+      });
+      createReadStream(filePath).pipe(res);
+      return;
+    }
+
+    // ─── Capture: replace photo (multipart {token, index, file}) ─
+    if (req.method === "POST" && url.pathname === "/api/capture/replace-photo") {
+      const mp = await readMultipart(req, 11 * 1024 * 1024);
+      if (!mp.ok) return writeJson(400, { ok: false, error: mp.error });
+      const file = mp.parsed.files["file"];
+      if (!file) {
+        return writeJson(400, { ok: false, error: "missing 'file' part" });
+      }
+      const token = mp.parsed.fields["token"] ?? "";
+      const indexStr = mp.parsed.fields["index"];
+      if (!token) {
+        return writeJson(400, { ok: false, error: "missing 'token' field" });
+      }
+      if (indexStr === undefined) {
+        return writeJson(400, { ok: false, error: "missing 'index' field" });
+      }
+      const idx = Number(indexStr);
+      if (!Number.isInteger(idx) || idx < 0) {
+        return writeJson(400, {
+          ok: false,
+          error: "'index' must be a non-negative integer",
+        });
+      }
+      const blurField = mp.parsed.fields["blurScore"];
+      const blurScore =
+        blurField !== undefined && blurField !== ""
+          ? Number(blurField)
+          : undefined;
+      const result = await handleCaptureReplacePhoto(
+        {
+          token,
+          index: idx,
+          bytes: file.data,
+          originalName: file.filename,
+          ...(typeof blurScore === "number" && Number.isFinite(blurScore)
+            ? { blurScore }
+            : {}),
+        },
+        { store: captureStore, photosDir: CAPTURE_PHOTOS_DIR },
+      );
+      writeJson(result.status, result.body);
+      return;
+    }
+
+    // ─── Capture: reorder photos (positional) ─────────────────
+    if (req.method === "POST" && url.pathname === "/api/capture/reorder") {
+      const parsed = await readJsonBody(4096);
+      if (!parsed.ok) return writeJson(400, { ok: false, error: parsed.error });
+      const result = handleCaptureReorder(
+        {
+          token: String(parsed.body.token ?? ""),
+          fromIndex: Number(parsed.body.fromIndex),
+          toIndex: Number(parsed.body.toIndex),
+        },
+        { store: captureStore },
+      );
+      writeJson(result.status, result.body);
+      return;
+    }
+
+    // ─── Capture: extend session ──────────────────────────────
+    if (req.method === "POST" && url.pathname === "/api/capture/extend") {
+      const parsed = await readJsonBody(4096);
+      if (!parsed.ok) return writeJson(400, { ok: false, error: parsed.error });
+      const byMsRaw = parsed.body.byMs;
+      const byMs =
+        typeof byMsRaw === "number" && Number.isFinite(byMsRaw)
+          ? byMsRaw
+          : undefined;
+      const result = handleCaptureExtend(
+        {
+          sessionId: String(parsed.body.sessionId ?? ""),
+          ...(byMs !== undefined ? { byMs } : {}),
+        },
+        { store: captureStore },
+      );
+      writeJson(result.status, result.body);
+      return;
+    }
+
+    // ─── Capture: validate (gates Finalize CTA) ───────────────
+    if (req.method === "POST" && url.pathname === "/api/capture/validate") {
+      const parsed = await readJsonBody(4096);
+      if (!parsed.ok) return writeJson(400, { ok: false, error: parsed.error });
+      const result = handleCaptureValidate(
+        { sessionId: String(parsed.body.sessionId ?? "") },
+        { store: captureStore },
+      );
+      writeJson(result.status, result.body);
+      return;
+    }
+
+    // ─── Capture: registry (TopBar gate) ──────────────────────
+    if (req.method === "GET" && url.pathname === "/api/capture/registry") {
+      writeJson(200, captureRegistrations);
+      return;
+    }
+
+    // ─── Capture: SSE stream (modal uses while open) ──────────
+    if (
+      req.method === "GET" &&
+      url.pathname === "/api/capture/sessions/stream"
+    ) {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+      const sessions = captureStore.listAll().map(serializeCaptureSession);
+      res.write(
+        `event: session-list\ndata: ${JSON.stringify({ sessions })}\n\n`,
+      );
+      const id = ++nextCaptureSseClientId;
+      const client: CaptureSseClient = { id, res };
+      captureSseClients.add(client);
+      req.on("close", () => {
+        captureSseClients.delete(client);
+      });
+      return;
+    }
+
+    // ─── Capture: heic2any polyfill (gap 6 — local serving) ───
+    if (
+      req.method === "GET" &&
+      url.pathname === "/capture-assets/heic2any.min.js"
+    ) {
+      const buf = getHeic2anyAsset();
+      if (!buf) {
+        res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end(
+          "heic2any not installed on dashboard host — run `npm install heic2any`",
+        );
+        return;
+      }
+      res.writeHead(200, {
+        "Content-Type": "text/javascript; charset=utf-8",
+        "Cache-Control": "public, max-age=86400",
+        "Content-Length": String(buf.length),
+      });
+      res.end(buf);
       return;
     }
 

@@ -1,5 +1,5 @@
 import { classifyError } from '../utils/errors.js'
-import type { ScreenshotFn } from './types.js'
+import { CancelledError, type ScreenshotFn } from './types.js'
 
 export interface StepperOpts {
   workflow: string
@@ -21,6 +21,19 @@ export interface StepperOpts {
    * Errors are swallowed; the original throw always wins.
    */
   screenshotFn?: ScreenshotFn
+  /**
+   * Cooperative-cancel probe. Polled at the start of every `step(name, fn)`
+   * call before `emitStep`/`fn`. When it returns true, the stepper marks
+   * the current step as `"cancelled"` (so the dashboard tracker row uses
+   * that step name on the auto-emitted `failed` row) and throws
+   * `CancelledError(name)` — `fn` never runs, no diagnostic screenshot is
+   * captured, and the daemon's claim loop sees the typed error and resets
+   * pages before the next item.
+   *
+   * Optional — older Stepper callers that don't pass this never check
+   * for cancellation, preserving today's behavior verbatim.
+   */
+  isCancelRequested?: () => boolean
 }
 
 export class Stepper {
@@ -30,11 +43,28 @@ export class Stepper {
   constructor(private opts: StepperOpts) {}
 
   async step<R>(name: string, fn: () => Promise<R>): Promise<R> {
+    // Cooperative-cancel check at step boundary. If the daemon set the
+    // cancel flag for the in-flight item, mark step="cancelled" on the
+    // tracker (so the auto-emitted `failed` row carries that step name)
+    // and throw without invoking `fn` or capturing a screenshot. The
+    // daemon's claim loop catches `CancelledError`, resets pages, and
+    // claims the next item.
+    if (this.opts.isCancelRequested?.()) {
+      this.currentStep = 'cancelled'
+      this.opts.emitStep('cancelled')
+      throw new CancelledError(name)
+    }
     this.currentStep = name
     this.opts.emitStep(name)
     try {
       return await fn()
     } catch (err) {
+      // CancelledError thrown from inside `fn` (e.g. handler explicitly
+      // checks ctx and throws): same suppression rule — no screenshot,
+      // no emitFailed; let runOneItem's catch produce the cancelled row.
+      if (err instanceof CancelledError) {
+        throw err
+      }
       // Best-effort screenshot BEFORE emitFailed so the filename correlates with
       // the failed-step event. Errors inside screenshotFn are swallowed — the
       // original throw must always win.

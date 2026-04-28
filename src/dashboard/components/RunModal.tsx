@@ -146,7 +146,7 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
         setSubmitting(false);
         return;
       }
-      toast.success("Started preparation", {
+      toast.success("Preparation started", {
         description: file.name,
       });
       onOpenChange(false);

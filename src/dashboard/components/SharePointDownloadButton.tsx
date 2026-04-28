@@ -47,7 +47,7 @@ export function SharePointDownloadButton({ size = "h-8 w-8" }: { size?: string }
     if (downloadingId) return;
     if (!option.configured) {
       toast.warning(`${option.label} not configured`, {
-        description: `Set ${option.envVar} in .env and restart the dashboard.`,
+        description: `Set ${option.envVar} in .env and restart the dashboard`,
       });
       return;
     }
@@ -64,26 +64,26 @@ export function SharePointDownloadButton({ size = "h-8 w-8" }: { size?: string }
         error?: string;
       };
       if (res.status === 202 && body.ok) {
-        toast.success(`${option.label} started`, {
+        toast.success(`${option.label} download started`, {
           description:
             "Approve Duo on your phone. Watch progress in the Sessions panel.",
           duration: 6000,
         });
       } else if (res.status === 409) {
-        toast.warning("Already downloading", {
+        toast.warning("Download already in progress", {
           description:
-            body.error ?? "A SharePoint download is already in progress.",
+            body.error ?? "A download is already running. Wait for it to finish.",
         });
       } else {
-        toast.error(`${option.label} failed to start`, {
+        toast.error(`${option.label} couldn't start`, {
           description: body.error ?? `HTTP ${res.status}`,
           duration: 8000,
         });
       }
     } catch (err) {
-      toast.error(`${option.label} failed to start`, {
+      toast.error(`${option.label} couldn't start`, {
         description:
-          err instanceof Error ? err.message : "Network error contacting the dashboard backend.",
+          err instanceof Error ? err.message : String(err),
       });
     } finally {
       setDownloadingId(null);

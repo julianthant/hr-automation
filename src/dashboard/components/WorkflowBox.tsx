@@ -18,7 +18,7 @@ function EndDaemonButton({ workflow }: { workflow: string }) {
   const postStop = async (force: boolean) => {
     setSending(true);
     const toastId = toast.loading(
-      force ? `Force-stopping ${workflow} daemon…` : `Stopping ${workflow} daemon…`,
+      force ? `Force-stopping ${workflow}…` : `Stopping ${workflow}…`,
     );
     try {
       const res = await fetch("/api/daemon/stop", {
@@ -37,7 +37,7 @@ function EndDaemonButton({ workflow }: { workflow: string }) {
         error?: string;
       };
       if (!res.ok || !json.ok) {
-        toast.error(`Failed to stop daemon: ${json.error ?? `HTTP ${res.status}`}`, { id: toastId });
+        toast.error(`Couldn't stop ${workflow}`, { id: toastId, description: json.error ?? `HTTP ${res.status}` });
         return;
       }
       const daemons = json.daemonsStopped ?? 0;
@@ -47,17 +47,17 @@ function EndDaemonButton({ workflow }: { workflow: string }) {
       const phantoms = json.phantomsCleared ?? 0;
       const total = json.stopped ?? daemons + procs;
       const parts: string[] = [];
-      if (daemons > 0) parts.push(`${daemons} daemon${daemons === 1 ? "" : "s"}`);
+      if (daemons > 0) parts.push(`${daemons} worker${daemons === 1 ? "" : "s"}`);
       if (procs > 0) parts.push(`${procs} process${procs === 1 ? "" : "es"}`);
       if (browsers > 0) parts.push(`${browsers} browser${browsers === 1 ? "" : "s"}`);
       if (queued > 0) parts.push(`${queued} queued item${queued === 1 ? "" : "s"}`);
-      if (phantoms > 0) parts.push(`${phantoms} phantom${phantoms === 1 ? "" : "s"}`);
+      if (phantoms > 0) parts.push(`${phantoms} stale session${phantoms === 1 ? "" : "s"}`);
       const detail = parts.length > 0 ? parts.join(" + ") : "nothing alive";
       if (total === 0 && queued === 0 && browsers === 0 && phantoms === 0) {
-        toast.warning(`Nothing to stop — no alive ${workflow} daemons, processes, browsers, or queued items`, { id: toastId });
+        toast.warning(`Nothing to stop — no active ${workflow} workers, processes, browsers, or queued items`, { id: toastId });
       } else if (total === 0 && queued === 0 && browsers === 0 && phantoms > 0) {
         toast.success(
-          `Cleared ${phantoms} stale ${workflow} session${phantoms === 1 ? "" : "s"} from the panel (no live process found)`,
+          `Cleared ${phantoms} stale ${workflow} session${phantoms === 1 ? "" : "s"} from the panel`,
           { id: toastId },
         );
       } else {
@@ -75,7 +75,7 @@ function EndDaemonButton({ workflow }: { workflow: string }) {
         setConfirmForce(false);
       }
     } catch (err) {
-      toast.error(`Failed to stop daemon: ${(err as Error).message}`, { id: toastId });
+      toast.error(`Couldn't stop ${workflow}`, { id: toastId, description: (err as Error).message });
     } finally {
       setSending(false);
     }

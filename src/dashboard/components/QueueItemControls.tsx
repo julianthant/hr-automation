@@ -36,18 +36,18 @@ export function QueueItemControls({ workflow, id, className }: QueueItemControls
       if (body.ok) {
         toast.success(verbed, { id: t, description: id });
       } else if (res.status === 409) {
-        toast.warning(`Already claimed`, {
+        toast.warning(`Already in progress`, {
           id: t,
-          description: body.error ?? "A daemon picked it up before us.",
+          description: body.error ?? "This item was picked up before the action could complete.",
         });
       } else {
-        toast.error(`${action} failed`, {
+        toast.error(`${action === "cancel" ? "Cancel" : "Bump"} failed`, {
           id: t,
           description: body.error ?? `HTTP ${res.status}`,
         });
       }
     } catch (err) {
-      toast.error(`${action} failed`, {
+      toast.error(`${action === "cancel" ? "Cancel" : "Bump"} failed`, {
         id: t,
         description: err instanceof Error ? err.message : String(err),
       });

@@ -2,192 +2,1245 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#020617">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Capture</title>
+  <!-- HEIC → JPEG client-side polyfill, loaded lazily on first iOS HEIC pick.
+       jsdelivr serves a fixed semver so we don't pull a moving target. -->
+  <link rel="preload" as="script" href="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js">
   <style>
-    * { box-sizing: border-box; }
-    body {
-      font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      margin: 0; padding: 16px; background: #f5f5f7; color: #1c1c1e;
+    /* Tokens — mirror the dashboard's --capture-* palette so the surfaces
+       feel like one product. Hex matches docs/superpowers/specs/2026-04-28-capture-redesign-visual-direction.md §1.2 verbatim. */
+    :root {
+      --bg-page: #020617;
+      --bg-modal: #0F172A;
+      --bg-raised: #1E293B;
+      --bg-raised-hi: #334155;
+      --border: #334155;
+      --border-subtle: #1E293B;
+
+      --fg-primary: #F8FAFC;
+      --fg-secondary: #CBD5E1;
+      --fg-muted: #94A3B8;
+      --fg-faint: #64748B;
+
+      --success: #22C55E;
+      --success-fg: #4ADE80;
+      --success-bg: rgba(34, 197, 94, 0.18);
+
+      --warn: #F59E0B;
+      --warn-fg: #FBBF24;
+      --warn-bg: rgba(245, 158, 11, 0.18);
+
+      --error: #EF4444;
+      --error-fg: #F87171;
+      --error-bg: rgba(239, 68, 68, 0.18);
+
+      --focus-ring: #22D3EE;
+
+      --ease-enter:  cubic-bezier(0.16, 1, 0.3, 1);
+      --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+      --ease-smooth: cubic-bezier(0.45, 0, 0.55, 1);
     }
-    h1 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
-    .hint { color: #6e6e73; margin-bottom: 16px; font-size: 14px; }
-    .primary, .done {
-      width: 100%; padding: 14px; border: 0; border-radius: 12px;
-      font-size: 17px; font-weight: 600; margin-bottom: 16px;
-      cursor: pointer; display: block; text-align: center;
+
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0; padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", system-ui, sans-serif;
+      background: var(--bg-page);
+      color: var(--fg-primary);
+      overscroll-behavior: contain;
+      touch-action: manipulation;
     }
-    .primary { background: #007aff; color: white; }
-    .done { background: #34c759; color: white; }
-    .done:disabled { background: #c7c7cc; cursor: not-allowed; }
-    .photos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
-    .photo {
-      aspect-ratio: 1; background: #fff; border-radius: 8px; overflow: hidden;
-      position: relative; box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+    button, label, [role="button"] { touch-action: manipulation; }
+    input, button, select { font: inherit; color: inherit; }
+
+    .app {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      min-height: 100dvh;
     }
-    .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .photo button {
-      position: absolute; top: 4px; right: 4px; width: 24px; height: 24px;
-      border: 0; border-radius: 50%; background: rgba(0,0,0,0.6); color: white;
-      font-size: 14px; line-height: 1; cursor: pointer;
+
+    /* ── Sticky header ─────────────────────────────────────────── */
+    header.bar {
+      position: sticky; top: 0; z-index: 10;
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      min-height: 56px;
+      background: rgba(15, 23, 42, 0.95);
+      backdrop-filter: saturate(180%) blur(8px);
+      -webkit-backdrop-filter: saturate(180%) blur(8px);
+      border-bottom: 1px solid var(--border-subtle);
     }
-    .meta { color: #6e6e73; font-size: 13px; text-align: center; margin: 12px 0; }
+    .title { font-size: 16px; font-weight: 600; line-height: 1.2; min-width: 0; }
+    .title small {
+      display: block; font-size: 12px; font-weight: 400;
+      color: var(--fg-muted); margin-top: 2px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px; border-radius: 999px;
+      font-size: 11px; font-weight: 700;
+      letter-spacing: 0.04em; text-transform: uppercase;
+      transition: background-color 200ms var(--ease-smooth), color 200ms var(--ease-smooth);
+    }
+    .pill .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      display: inline-block; flex-shrink: 0;
+    }
+    .pill.connected { background: var(--success-bg); color: var(--success-fg); }
+    .pill.connected .dot { background: var(--success); }
+    .pill.reconnecting { background: var(--error-bg); color: var(--error-fg); }
+    .pill.reconnecting .dot { background: var(--error); animation: blink 1s linear infinite; }
+    .pill.session-closed { background: var(--bg-raised); color: var(--fg-muted); }
+    .pill.session-closed .dot { background: var(--fg-muted); }
+
+    @keyframes blink { 50% { opacity: 0.35; } }
+
+    /* ── Main scrollable area ─────────────────────────────────── */
+    main {
+      padding: 12px 16px 80px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .substrip {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-size: 13px; margin-bottom: 12px; color: var(--fg-muted);
+    }
+    .substrip strong { color: var(--fg-primary); font-weight: 600; }
+    .substrip .saved { font-size: 12px; color: var(--success-fg); }
+    .substrip .saved.dim { color: var(--fg-faint); }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      align-items: start;
+    }
+
+    .tile {
+      aspect-ratio: 3 / 4;
+      position: relative;
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      animation: tile-in 320ms var(--ease-bounce) both;
+      transition: transform 180ms var(--ease-smooth);
+      cursor: pointer;
+    }
+    .tile.blur-flagged {
+      border-color: transparent;
+      outline: 2px solid var(--warn);
+      outline-offset: -2px;
+      animation: tile-in 320ms var(--ease-bounce) both, blur-flash 800ms var(--ease-smooth) 1;
+    }
+    .tile.dragging { transform: scale(1.04); z-index: 5; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+    .tile.drag-other { opacity: 0.6; }
+    .tile img {
+      width: 100%; height: 100%; object-fit: cover; display: block;
+      pointer-events: none;
+    }
+    .tile.blank { background: #FFFFFF; }
+    .tile.blank::after {
+      content: "blank page";
+      position: absolute; inset: 0;
+      display: grid; place-items: center;
+      color: #475569; font-size: 12px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.06em;
+    }
+
+    @keyframes tile-in {
+      from { opacity: 0; transform: translateY(-4px) scale(0.92); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes blur-flash {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+      50%      { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.55); }
+    }
+
+    .tile .badge {
+      position: absolute;
+      padding: 2px 7px;
+      border-radius: 6px;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 13px;
+      font-weight: 700;
+      tabular-nums: 1;
+      background: rgba(2, 6, 23, 0.65);
+      color: var(--fg-primary);
+      pointer-events: none;
+    }
+    .tile .badge.idx { top: 6px; left: 8px; }
+    .tile .badge.status {
+      bottom: 6px; left: 6px;
+      font-family: inherit; font-size: 11px;
+      padding: 2px 6px; border-radius: 4px;
+      letter-spacing: 0.02em; font-weight: 600;
+    }
+    .tile .badge.uploaded { background: rgba(34, 197, 94, 0.85); color: #03110A; }
+    .tile .badge.pending { background: rgba(15, 23, 42, 0.85); color: var(--fg-muted); }
+    .tile .badge.failed { background: rgba(239, 68, 68, 0.9); color: #FFFFFF; }
+    .tile .badge.converting { background: rgba(245, 158, 11, 0.85); color: #1F1300; }
+    .tile .badge.blur {
+      top: 6px; right: 6px;
+      background: rgba(245, 158, 11, 0.92); color: #1F1300;
+      font-family: inherit; font-size: 10px;
+      padding: 2px 6px; border-radius: 4px;
+      letter-spacing: 0.04em; font-weight: 700; text-transform: uppercase;
+    }
+
+    .add-tile {
+      aspect-ratio: 3 / 4;
+      border: 2px dashed rgba(148, 163, 184, 0.35);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--fg-muted);
+      font-size: 28px; font-weight: 200; line-height: 1;
+      display: grid; place-items: center;
+      cursor: pointer;
+      transition: border-color 180ms var(--ease-smooth), color 180ms var(--ease-smooth);
+    }
+    .add-tile span { font-size: 12px; margin-left: 6px; font-weight: 500; }
+    .add-tile:focus-visible {
+      outline: 2px solid var(--focus-ring);
+      outline-offset: 2px;
+    }
+
+    /* ── Sticky footer ─────────────────────────────────────────── */
+    footer.actions {
+      position: sticky; bottom: 0; z-index: 10;
+      padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+      background: rgba(15, 23, 42, 0.95);
+      backdrop-filter: saturate(180%) blur(8px);
+      -webkit-backdrop-filter: saturate(180%) blur(8px);
+      border-top: 1px solid var(--border-subtle);
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .btn {
+      display: flex; justify-content: center; align-items: center;
+      gap: 8px;
+      width: 100%;
+      min-height: 44px;
+      padding: 12px 16px;
+      border: 0;
+      border-radius: 12px;
+      font-size: 16px; font-weight: 600;
+      cursor: pointer;
+      transition: background 180ms var(--ease-smooth), opacity 180ms;
+    }
+    .btn-secondary {
+      background: var(--bg-raised);
+      color: var(--fg-primary);
+    }
+    .btn-secondary:active { background: var(--bg-raised-hi); }
+    .btn-primary {
+      background: var(--success);
+      color: #03110A;
+      font-size: 17px; font-weight: 700;
+      min-height: 52px;
+    }
+    .btn-primary:active { background: #16A34A; }
+    .btn-primary:disabled, .btn-secondary:disabled {
+      opacity: 0.45; cursor: not-allowed;
+    }
+    .btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+    .helper {
+      font-size: 12px;
+      color: var(--fg-faint);
+      text-align: center;
+      line-height: 1.4;
+    }
+
+    input[type=file] { position: absolute; left: -9999px; }
+
+    /* ── Action sheet (long-press menu) ────────────────────────── */
+    .scrim {
+      position: fixed; inset: 0; z-index: 50;
+      background: rgba(2, 6, 23, 0.78);
+      display: none;
+      animation: scrim-in 180ms var(--ease-enter) both;
+    }
+    .scrim.open { display: block; }
+    @keyframes scrim-in { from { opacity: 0; } to { opacity: 1; } }
+
+    .sheet {
+      position: fixed; left: 12px; right: 12px;
+      bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+      z-index: 51;
+      background: var(--bg-modal);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      transform: translateY(100%);
+      transition: transform 220ms var(--ease-enter);
+    }
+    .scrim.open ~ .sheet, .sheet.open { transform: translateY(0); }
+    .sheet-row {
+      width: 100%;
+      display: flex; align-items: center; gap: 14px;
+      padding: 16px 20px;
+      background: transparent;
+      border: 0;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--fg-primary);
+      font-size: 16px;
+      text-align: left;
+      cursor: pointer;
+      min-height: 56px;
+    }
+    .sheet-row:last-child { border-bottom: 0; }
+    .sheet-row:active { background: var(--bg-raised); }
+    .sheet-row.danger { color: var(--error-fg); }
+    .sheet-row svg { flex-shrink: 0; }
+    .sheet-cancel {
+      margin-top: 8px;
+      background: var(--bg-modal);
+      font-weight: 700;
+    }
+
+    /* ── Lightbox ───────────────────────────────────────────────── */
+    .lightbox {
+      position: fixed; inset: 0; z-index: 60;
+      background: #000;
+      display: none;
+      align-items: center; justify-content: center;
+      animation: lightbox-in 180ms var(--ease-enter) both;
+    }
+    .lightbox.open { display: flex; }
+    .lightbox img {
+      max-width: 100%; max-height: 100dvh;
+      object-fit: contain;
+    }
+    .lightbox-close {
+      position: absolute; top: 16px; right: 16px;
+      width: 44px; height: 44px;
+      border-radius: 50%;
+      border: 0;
+      background: rgba(15, 23, 42, 0.85);
+      color: var(--fg-primary);
+      cursor: pointer;
+      display: grid; place-items: center;
+    }
+    @keyframes lightbox-in { from { opacity: 0; } to { opacity: 1; } }
+
+    /* ── Banner (errors / session closed) ──────────────────────── */
     .banner {
-      padding: 12px; background: #ffd60a; color: #1c1c1e; border-radius: 8px;
-      margin-bottom: 16px; font-size: 14px; display: none;
+      padding: 12px 14px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      font-size: 14px;
+      line-height: 1.4;
+      display: flex; align-items: flex-start; gap: 8px;
     }
-    .banner.visible { display: block; }
-    .success {
-      background: #34c759; color: white; padding: 24px; border-radius: 12px;
-      text-align: center; font-size: 18px; font-weight: 600; display: none;
+    .banner.error { background: var(--error-bg); color: var(--error-fg); border-left: 3px solid var(--error); }
+    .banner.warn { background: var(--warn-bg); color: var(--warn-fg); border-left: 3px solid var(--warn); }
+    .banner.info { background: var(--bg-raised); color: var(--fg-secondary); }
+
+    .success-screen {
+      display: none;
+      flex-direction: column; align-items: center; justify-content: center;
+      padding: 48px 24px;
+      text-align: center;
     }
-    .success.visible { display: block; }
-    input[type=file] { display: none; }
+    .success-screen.visible { display: flex; }
+    .success-icon {
+      width: 72px; height: 72px;
+      border-radius: 50%;
+      background: var(--success);
+      display: grid; place-items: center;
+      animation: pop 480ms var(--ease-bounce) both;
+      margin-bottom: 20px;
+    }
+    .success-icon svg { width: 40px; height: 40px; color: #03110A; }
+    .success-screen h2 { margin: 0 0 8px; font-size: 22px; font-weight: 700; }
+    .success-screen p { margin: 0; color: var(--fg-muted); font-size: 14px; }
+    @keyframes pop {
+      from { opacity: 0; transform: scale(0.6); }
+      60% { opacity: 1; transform: scale(1.12); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    /* ── Reduced motion fallback ───────────────────────────────── */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
   </style>
 </head>
 <body>
-  <h1 id="title">Capture</h1>
-  <div id="hint" class="hint"></div>
-  <div id="banner" class="banner"></div>
 
-  <label class="primary" for="picker" id="capture-btn">📷 Take Photo</label>
-  <input type="file" id="picker" accept="image/*" capture="environment">
+<div class="app">
+  <header class="bar" role="banner">
+    <div class="title">
+      <span id="workflow-label">Capture</span>
+      <small id="context-hint"></small>
+    </div>
+    <span class="pill connected" id="conn-pill" role="status" aria-live="polite">
+      <span class="dot" aria-hidden="true"></span>
+      <span id="conn-text">Connected</span>
+    </span>
+  </header>
 
-  <div id="photos" class="photos"></div>
-  <div id="meta" class="meta">No photos yet.</div>
+  <main id="main">
+    <div class="substrip">
+      <span><strong id="photo-count">0</strong> <span id="photo-count-noun">photos</span></span>
+      <span class="saved dim" id="saved-status">auto-saved locally</span>
+    </div>
 
-  <button id="done" class="done" disabled>Done &amp; Process</button>
+    <div id="banner-host" aria-live="polite"></div>
 
-  <div id="success" class="success">✅ Sent. You can close this tab.</div>
+    <div class="grid" id="grid" role="list"></div>
+
+    <div class="success-screen" id="success" role="status">
+      <div class="success-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+      </div>
+      <h2>Sent for processing</h2>
+      <p>You can close this tab.</p>
+    </div>
+  </main>
+
+  <footer class="actions" id="footer">
+    <label for="picker" class="btn btn-secondary" id="take-btn">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"></path>
+        <circle cx="12" cy="13" r="4"></circle>
+      </svg>
+      Take photo
+    </label>
+    <input type="file" id="picker" accept="image/*,image/heic,image/heif" capture="environment">
+    <button class="btn btn-primary" id="done-btn" disabled>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+      <span id="done-label">Done</span>
+    </button>
+    <p class="helper">Long-press a photo for retake · mark blank · delete</p>
+  </footer>
+</div>
+
+<!-- Action sheet (long-press menu) -->
+<div class="scrim" id="sheet-scrim" aria-hidden="true"></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" hidden>
+  <div id="sheet-title" style="padding: 14px 20px 4px; font-size: 12px; color: var(--fg-faint); text-transform: uppercase; letter-spacing: 0.06em;">Photo <span id="sheet-photo-num"></span></div>
+  <button class="sheet-row" id="sheet-retake" type="button">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <polyline points="23 4 23 10 17 10"></polyline>
+      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+    </svg>
+    Retake photo
+  </button>
+  <button class="sheet-row" id="sheet-mark-blank" type="button">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="4" y="3" width="16" height="18" rx="2"></rect>
+    </svg>
+    Replace with blank page
+  </button>
+  <button class="sheet-row danger" id="sheet-delete" type="button">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <polyline points="3 6 5 6 21 6"></polyline>
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+    </svg>
+    Delete
+  </button>
+  <button class="sheet-row sheet-cancel" id="sheet-cancel" type="button">Cancel</button>
+</div>
+
+<!-- Lightbox -->
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Photo preview">
+  <button class="lightbox-close" id="lightbox-close" type="button" aria-label="Close preview">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <line x1="18" y1="6" x2="6" y2="18"></line>
+      <line x1="6" y1="6" x2="18" y2="18"></line>
+    </svg>
+  </button>
+  <img id="lightbox-img" alt="">
+</div>
 
 <script>
 (function () {
+  "use strict";
+
+  // ─── Config ─────────────────────────────────────────────────────────
   var TOKEN = location.pathname.split("/").pop();
-  var photosEl = document.getElementById("photos");
-  var metaEl = document.getElementById("meta");
-  var doneEl = document.getElementById("done");
-  var bannerEl = document.getElementById("banner");
-  var successEl = document.getElementById("success");
-  var titleEl = document.getElementById("title");
-  var hintEl = document.getElementById("hint");
-  var pickerEl = document.getElementById("picker");
+  var STORAGE_KEY = "capture:manifest:" + TOKEN;
+  var BLUR_THRESHOLD = 80;          // Laplacian variance below this = flagged
+  var UPLOAD_PARALLELISM = 3;       // simultaneous uploads
+  var UPLOAD_RETRIES = 3;
+  var UPLOAD_BACKOFF_BASE = 800;    // ms
+  var POLL_MANIFEST_INTERVAL = 8_000;
+  var LONG_PRESS_MS = 700;
 
-  var photos = [];
+  // ─── DOM refs ───────────────────────────────────────────────────────
+  var els = {
+    workflowLabel: document.getElementById("workflow-label"),
+    contextHint: document.getElementById("context-hint"),
+    connPill: document.getElementById("conn-pill"),
+    connText: document.getElementById("conn-text"),
+    photoCount: document.getElementById("photo-count"),
+    photoCountNoun: document.getElementById("photo-count-noun"),
+    savedStatus: document.getElementById("saved-status"),
+    bannerHost: document.getElementById("banner-host"),
+    grid: document.getElementById("grid"),
+    success: document.getElementById("success"),
+    footer: document.getElementById("footer"),
+    picker: document.getElementById("picker"),
+    takeBtn: document.getElementById("take-btn"),
+    doneBtn: document.getElementById("done-btn"),
+    doneLabel: document.getElementById("done-label"),
+    sheet: document.getElementById("sheet"),
+    sheetScrim: document.getElementById("sheet-scrim"),
+    sheetPhotoNum: document.getElementById("sheet-photo-num"),
+    sheetRetake: document.getElementById("sheet-retake"),
+    sheetMarkBlank: document.getElementById("sheet-mark-blank"),
+    sheetDelete: document.getElementById("sheet-delete"),
+    sheetCancel: document.getElementById("sheet-cancel"),
+    lightbox: document.getElementById("lightbox"),
+    lightboxImg: document.getElementById("lightbox-img"),
+    lightboxClose: document.getElementById("lightbox-close"),
+  };
 
-  function render() {
-    photosEl.innerHTML = "";
-    photos.forEach(function (p) {
-      var div = document.createElement("div");
-      div.className = "photo";
-      var img = document.createElement("img");
-      img.src = p.dataUrl;
-      div.appendChild(img);
-      var btn = document.createElement("button");
-      btn.textContent = "×";
-      btn.onclick = function () { removePhoto(p.index); };
-      div.appendChild(btn);
-      photosEl.appendChild(div);
-    });
-    metaEl.textContent = photos.length === 0
-      ? "No photos yet."
-      : photos.length + " photo" + (photos.length === 1 ? "" : "s");
-    doneEl.disabled = photos.length === 0;
+  // ─── State ──────────────────────────────────────────────────────────
+  var state = {
+    sessionState: "open",          // open | finalizing | finalized | discarded | expired
+    contextHint: "",
+    photos: [],                    // [{ index, dataUrl, status, blurFlagged, blank, retryCount }]
+    pickerMode: "add",             // "add" | "retake-N"
+    sheetPhotoIndex: null,
+    uploading: 0,
+    uploadQueue: [],
+    finalized: false,
+  };
+
+  // ─── localStorage manifest persistence ──────────────────────────────
+  function persistManifest() {
+    try {
+      var slim = state.photos.map(function (p) {
+        return {
+          index: p.index,
+          status: p.status,
+          blurFlagged: !!p.blurFlagged,
+          blank: !!p.blank,
+        };
+      });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        ts: Date.now(),
+        photos: slim,
+      }));
+    } catch (e) { /* private mode / quota — ignore */ }
   }
 
-  function refreshManifest() {
-    fetch("/api/capture/manifest/" + TOKEN)
-      .then(function (res) {
-        if (!res.ok) {
-          bannerEl.textContent = "Session not found or expired.";
-          bannerEl.classList.add("visible");
-          doneEl.disabled = true;
-          return null;
+  function loadManifest() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      if (!parsed || !Array.isArray(parsed.photos)) return null;
+      return parsed.photos;
+    } catch (e) { return null; }
+  }
+
+  function clearManifest() {
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* ignore */ }
+  }
+
+  // ─── Connection state ───────────────────────────────────────────────
+  function setConnection(s) {
+    els.connPill.classList.remove("connected", "reconnecting", "session-closed");
+    if (s === "connected") {
+      els.connPill.classList.add("connected");
+      els.connText.textContent = "Connected";
+    } else if (s === "reconnecting") {
+      els.connPill.classList.add("reconnecting");
+      els.connText.textContent = "Reconnecting…";
+    } else {
+      els.connPill.classList.add("session-closed");
+      els.connText.textContent = s === "expired" ? "Expired"
+        : s === "discarded" ? "Closed by operator"
+        : s === "finalized" ? "Sent" : "Offline";
+    }
+  }
+
+  // ─── Banner helpers ─────────────────────────────────────────────────
+  function showBanner(level, text) {
+    clearBanner();
+    var b = document.createElement("div");
+    b.className = "banner " + level;
+    b.textContent = text;
+    b.setAttribute("role", level === "error" ? "alert" : "status");
+    els.bannerHost.appendChild(b);
+  }
+  function clearBanner() {
+    els.bannerHost.innerHTML = "";
+  }
+
+  // ─── Manifest reconciliation ───────────────────────────────────────
+  // On page load, hydrate from localStorage placeholders for instant UI,
+  // then fetch the server's authoritative manifest and merge.
+  function reconcileManifest() {
+    return fetch("/api/capture/manifest/" + encodeURIComponent(TOKEN))
+      .then(function (r) {
+        if (!r.ok) {
+          if (r.status === 404 || r.status === 410) {
+            state.sessionState = "expired";
+            setConnection("expired");
+            showBanner("error", "Session not found or expired. Start a new capture from the dashboard.");
+            disableEverything();
+            return null;
+          }
+          throw new Error("HTTP " + r.status);
         }
-        return res.json();
+        return r.json();
       })
       .then(function (m) {
         if (!m) return;
-        titleEl.textContent = "Capture for " + (m.contextHint || "");
-        hintEl.textContent = "Tap to take photos. Tap Done when finished.";
-        if (m.state !== "open") {
-          bannerEl.textContent = "Session " + m.state + ".";
-          bannerEl.classList.add("visible");
-          doneEl.disabled = true;
+        setConnection("connected");
+        state.sessionState = m.state || "open";
+        state.contextHint = m.contextHint || "";
+        if (state.contextHint) els.contextHint.textContent = state.contextHint;
+        if (m.workflow) els.workflowLabel.textContent = m.workflow;
+
+        // Server is the source of truth for photos. Drop local-only entries
+        // whose upload never landed.
+        var serverByIndex = {};
+        (m.photos || []).forEach(function (p) {
+          serverByIndex[p.index] = p;
+        });
+
+        var merged = [];
+        (m.photos || []).forEach(function (p) {
+          // Preserve any existing dataUrl from local state (so we don't lose
+          // the thumbnail bitmap on reload).
+          var local = state.photos.find(function (x) { return x.index === p.index; });
+          merged.push({
+            index: p.index,
+            filename: p.filename,
+            status: "uploaded",
+            blurFlagged: !!p.blurFlagged,
+            blank: false, // server doesn't track blank; assumed false on reload
+            dataUrl: local && local.dataUrl ? local.dataUrl : null,
+          });
+        });
+        state.photos = merged.sort(function (a, b) { return a.index - b.index; });
+        persistManifest();
+        renderAll();
+
+        if (state.sessionState !== "open") {
+          handleNonOpenState(state.sessionState);
         }
       })
-      .catch(function () { /* ignore — operator may be offline */ });
+      .catch(function () {
+        setConnection("reconnecting");
+      });
   }
 
-  function handleFile(file) {
+  function handleNonOpenState(s) {
+    setConnection(s);
+    disableEverything();
+    if (s === "finalized") {
+      els.success.classList.add("visible");
+      els.grid.style.display = "none";
+      els.footer.style.display = "none";
+      clearManifest();
+      state.finalized = true;
+    } else if (s === "discarded") {
+      showBanner("warn", "This session was closed from the dashboard.");
+    } else if (s === "expired") {
+      showBanner("error", "Session expired. Start a new capture from the dashboard.");
+    } else if (s === "finalizing") {
+      showBanner("info", "Bundling photos for processing…");
+    }
+  }
+
+  function disableEverything() {
+    els.takeBtn.style.pointerEvents = "none";
+    els.takeBtn.style.opacity = "0.45";
+    els.picker.disabled = true;
+    els.doneBtn.disabled = true;
+  }
+
+  // ─── Render ─────────────────────────────────────────────────────────
+  function renderAll() {
+    var n = state.photos.length;
+    els.photoCount.textContent = String(n);
+    els.photoCountNoun.textContent = n === 1 ? "photo" : "photos";
+
+    var anyPending = state.photos.some(function (p) { return p.status !== "uploaded"; });
+    els.savedStatus.textContent = anyPending ? "uploading…" : "auto-saved locally";
+    els.savedStatus.classList.toggle("dim", !anyPending);
+
+    var uploadedCount = state.photos.filter(function (p) { return p.status === "uploaded"; }).length;
+    els.doneLabel.textContent = uploadedCount > 0
+      ? "Done · upload " + uploadedCount
+      : "Done";
+    els.doneBtn.disabled = uploadedCount === 0 || state.sessionState !== "open";
+
+    // Render tiles
+    els.grid.innerHTML = "";
+    state.photos.forEach(function (p, i) {
+      els.grid.appendChild(buildTile(p));
+    });
+
+    // Trailing "+ Add" placeholder
+    if (state.sessionState === "open") {
+      var add = document.createElement("button");
+      add.type = "button";
+      add.className = "add-tile";
+      add.setAttribute("aria-label", "Add photo");
+      add.innerHTML = '<span style="font-size:24px;font-weight:300">＋</span><span>Add</span>';
+      add.addEventListener("click", function () {
+        state.pickerMode = "add";
+        els.picker.click();
+      });
+      els.grid.appendChild(add);
+    }
+  }
+
+  function buildTile(p) {
+    var tile = document.createElement("div");
+    tile.className = "tile" + (p.blurFlagged ? " blur-flagged" : "") + (p.blank ? " blank" : "");
+    tile.setAttribute("role", "listitem");
+    tile.setAttribute("data-index", String(p.index));
+    tile.setAttribute("aria-label", "Photo " + (p.index + 1) + (p.blurFlagged ? " (flagged blurry)" : ""));
+
+    if (!p.blank && p.dataUrl) {
+      var img = document.createElement("img");
+      img.src = p.dataUrl;
+      img.alt = "";
+      img.draggable = false;
+      tile.appendChild(img);
+    }
+
+    var idxBadge = document.createElement("span");
+    idxBadge.className = "badge idx";
+    idxBadge.textContent = String(p.index + 1);
+    tile.appendChild(idxBadge);
+
+    if (p.status !== "uploaded") {
+      var s = document.createElement("span");
+      s.className = "badge status " + (p.status === "uploading" ? "pending" : p.status === "failed" ? "failed" : p.status === "converting" ? "converting" : "pending");
+      s.textContent = p.status === "uploading" ? "↗ uploading…"
+        : p.status === "failed" ? "✕ retry"
+        : p.status === "converting" ? "→ converting"
+        : "queued";
+      tile.appendChild(s);
+    } else if (!p.blurFlagged) {
+      var ok = document.createElement("span");
+      ok.className = "badge status uploaded";
+      ok.textContent = "✓";
+      tile.appendChild(ok);
+    }
+
+    if (p.blurFlagged) {
+      var b = document.createElement("span");
+      b.className = "badge blur";
+      b.textContent = "⚠ blur";
+      tile.appendChild(b);
+    }
+
+    // Tap = lightbox preview. Long-press = action sheet.
+    bindTapAndLongPress(tile, p.index);
+
+    return tile;
+  }
+
+  // ─── Tap / long-press ──────────────────────────────────────────────
+  function bindTapAndLongPress(tile, photoIndex) {
+    var pressTimer = null;
+    var startX = 0, startY = 0;
+    var moved = false;
+    var triggered = false;
+
+    tile.addEventListener("pointerdown", function (e) {
+      if (state.sessionState !== "open") return;
+      startX = e.clientX; startY = e.clientY; moved = false; triggered = false;
+      pressTimer = setTimeout(function () {
+        triggered = true;
+        if (navigator.vibrate) navigator.vibrate(15);
+        openSheet(photoIndex);
+      }, LONG_PRESS_MS);
+      tile.setPointerCapture && tile.setPointerCapture(e.pointerId);
+    }, { passive: true });
+
+    tile.addEventListener("pointermove", function (e) {
+      if (Math.abs(e.clientX - startX) > 8 || Math.abs(e.clientY - startY) > 8) {
+        moved = true;
+        if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+      }
+    }, { passive: true });
+
+    tile.addEventListener("pointerup", function () {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+      if (!moved && !triggered) openLightbox(photoIndex);
+    }, { passive: true });
+
+    tile.addEventListener("pointercancel", function () {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+    });
+  }
+
+  // ─── Action sheet ──────────────────────────────────────────────────
+  function openSheet(photoIndex) {
+    state.sheetPhotoIndex = photoIndex;
+    els.sheetPhotoNum.textContent = String(photoIndex + 1);
+    els.sheet.removeAttribute("hidden");
+    els.sheet.classList.add("open");
+    els.sheetScrim.classList.add("open");
+  }
+  function closeSheet() {
+    els.sheet.classList.remove("open");
+    els.sheetScrim.classList.remove("open");
+    setTimeout(function () { els.sheet.setAttribute("hidden", ""); }, 220);
+    state.sheetPhotoIndex = null;
+  }
+  els.sheetScrim.addEventListener("click", closeSheet);
+  els.sheetCancel.addEventListener("click", closeSheet);
+
+  els.sheetRetake.addEventListener("click", function () {
+    var idx = state.sheetPhotoIndex;
+    closeSheet();
+    if (idx == null) return;
+    state.pickerMode = "retake-" + idx;
+    els.picker.click();
+  });
+
+  els.sheetMarkBlank.addEventListener("click", function () {
+    var idx = state.sheetPhotoIndex;
+    closeSheet();
+    if (idx == null) return;
+    replaceWithBlank(idx);
+  });
+
+  els.sheetDelete.addEventListener("click", function () {
+    var idx = state.sheetPhotoIndex;
+    closeSheet();
+    if (idx == null) return;
+    deletePhoto(idx);
+  });
+
+  // ─── Lightbox ──────────────────────────────────────────────────────
+  function openLightbox(photoIndex) {
+    var p = state.photos.find(function (x) { return x.index === photoIndex; });
+    if (!p) return;
+    if (p.blank) {
+      els.lightboxImg.alt = "blank page";
+      els.lightboxImg.src = "";
+      els.lightbox.style.background = "#FFFFFF";
+    } else if (p.dataUrl) {
+      els.lightboxImg.src = p.dataUrl;
+      els.lightboxImg.alt = "Photo " + (photoIndex + 1);
+      els.lightbox.style.background = "#000";
+    } else {
+      return; // nothing to show yet
+    }
+    els.lightbox.classList.add("open");
+  }
+  function closeLightbox() {
+    els.lightbox.classList.remove("open");
+  }
+  els.lightboxClose.addEventListener("click", closeLightbox);
+  els.lightbox.addEventListener("click", function (e) {
+    if (e.target === els.lightbox) closeLightbox();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") {
+      if (els.lightbox.classList.contains("open")) closeLightbox();
+      else if (els.sheet.classList.contains("open")) closeSheet();
+    }
+  });
+
+  // ─── HEIC conversion ────────────────────────────────────────────────
+  var heicLoaderPromise = null;
+  function ensureHeic() {
+    if (heicLoaderPromise) return heicLoaderPromise;
+    if (typeof window.heic2any === "function") return Promise.resolve(window.heic2any);
+    heicLoaderPromise = new Promise(function (resolve, reject) {
+      var script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js";
+      script.async = true;
+      script.onload = function () { resolve(window.heic2any); };
+      script.onerror = function () { reject(new Error("Couldn't load HEIC converter")); };
+      document.head.appendChild(script);
+    });
+    return heicLoaderPromise;
+  }
+
+  function isHeic(file) {
+    if (!file) return false;
+    var name = (file.name || "").toLowerCase();
+    var type = (file.type || "").toLowerCase();
+    return type === "image/heic" || type === "image/heif" || /\.(heic|heif)$/.test(name);
+  }
+
+  function maybeConvertHeic(file) {
+    if (!isHeic(file)) return Promise.resolve(file);
+    return ensureHeic()
+      .then(function (heic2any) {
+        return heic2any({ blob: file, toType: "image/jpeg", quality: 0.85 });
+      })
+      .then(function (out) {
+        var blob = Array.isArray(out) ? out[0] : out;
+        var jpegName = (file.name || "photo").replace(/\.[^.]+$/, "") + ".jpg";
+        return new File([blob], jpegName, { type: "image/jpeg" });
+      });
+  }
+
+  // ─── Blur detection ────────────────────────────────────────────────
+  // Downsamples the image to ~200px wide, runs a 4-neighbor Laplacian
+  // over grayscale, and returns the variance. Higher = sharper.
+  // Threshold below BLUR_THRESHOLD = flagged.
+  function computeBlurScore(file) {
+    return new Promise(function (resolve) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var W = 200;
+          var H = Math.round((img.naturalHeight / img.naturalWidth) * W) || W;
+          var canvas = document.createElement("canvas");
+          canvas.width = W; canvas.height = H;
+          var ctx = canvas.getContext("2d");
+          if (!ctx) { resolve(null); return; }
+          ctx.drawImage(img, 0, 0, W, H);
+          var data = ctx.getImageData(0, 0, W, H).data;
+
+          var gray = new Float32Array(W * H);
+          for (var i = 0, j = 0; i < data.length; i += 4, j++) {
+            gray[j] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+          }
+          var sum = 0, sum2 = 0, count = 0;
+          for (var y = 1; y < H - 1; y++) {
+            for (var x = 1; x < W - 1; x++) {
+              var k = y * W + x;
+              var lap = -gray[k - W] - gray[k - 1] + 4 * gray[k] - gray[k + 1] - gray[k + W];
+              sum += lap;
+              sum2 += lap * lap;
+              count++;
+            }
+          }
+          var mean = sum / count;
+          var variance = sum2 / count - mean * mean;
+          resolve(variance);
+        } catch (e) {
+          resolve(null);
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        resolve(null);
+      };
+      img.src = url;
+    });
+  }
+
+  function fileToDataUrl(file) {
+    return new Promise(function (resolve, reject) {
+      var r = new FileReader();
+      r.onload = function () { resolve(String(r.result)); };
+      r.onerror = function () { reject(r.error || new Error("read failed")); };
+      r.readAsDataURL(file);
+    });
+  }
+
+  // ─── Upload pipeline ────────────────────────────────────────────────
+  // Each photo flows: pick → maybeConvertHeic → blur scan + thumbnail →
+  // optimistic add to state with status "uploading" → POST upload →
+  // status "uploaded" with server-assigned index. Up to UPLOAD_PARALLELISM
+  // uploads run concurrently; failures retry with exponential backoff.
+
+  function pickedFile(file) {
     if (!file) return;
-    var reader = new FileReader();
-    reader.onload = function () {
-      var dataUrl = reader.result;
+    var mode = state.pickerMode;
+    state.pickerMode = "add";
+    if (mode === "add") {
+      handleAddPhoto(file);
+    } else if (mode.indexOf("retake-") === 0) {
+      var idx = parseInt(mode.slice(7), 10);
+      handleRetakePhoto(idx, file);
+    }
+  }
+
+  function handleAddPhoto(file) {
+    var slot = {
+      index: nextProvisionalIndex(),
+      status: "converting",
+      blurFlagged: false,
+      blank: false,
+      dataUrl: null,
+      retryCount: 0,
+      provisional: true,
+    };
+    state.photos.push(slot);
+    persistManifest();
+    renderAll();
+
+    Promise.all([maybeConvertHeic(file), Promise.resolve()])
+      .then(function (results) {
+        var conv = results[0];
+        return Promise.all([
+          fileToDataUrl(conv),
+          computeBlurScore(conv),
+        ]).then(function (a) {
+          return { file: conv, dataUrl: a[0], blurScore: a[1] };
+        });
+      })
+      .then(function (res) {
+        slot.dataUrl = res.dataUrl;
+        slot.status = "uploading";
+        slot.blurFlagged = typeof res.blurScore === "number" && res.blurScore < BLUR_THRESHOLD;
+        renderAll();
+        return uploadFile(slot, res.file, res.blurScore, /*replaceIndex*/ null);
+      })
+      .catch(function (err) {
+        slot.status = "failed";
+        renderAll();
+        if (navigator.vibrate) navigator.vibrate([20, 60, 20]);
+        showBanner("error", "Upload failed: " + (err && err.message ? err.message : "unknown"));
+      });
+  }
+
+  function handleRetakePhoto(targetIndex, file) {
+    var photo = state.photos.find(function (p) { return p.index === targetIndex; });
+    if (!photo) return;
+    photo.status = "converting";
+    photo.blank = false;
+    photo.blurFlagged = false;
+    renderAll();
+
+    maybeConvertHeic(file)
+      .then(function (conv) {
+        return Promise.all([
+          fileToDataUrl(conv),
+          computeBlurScore(conv),
+        ]).then(function (a) {
+          return { file: conv, dataUrl: a[0], blurScore: a[1] };
+        });
+      })
+      .then(function (res) {
+        photo.dataUrl = res.dataUrl;
+        photo.status = "uploading";
+        photo.blurFlagged = typeof res.blurScore === "number" && res.blurScore < BLUR_THRESHOLD;
+        renderAll();
+        return uploadFile(photo, res.file, res.blurScore, targetIndex);
+      })
+      .catch(function (err) {
+        photo.status = "failed";
+        renderAll();
+        showBanner("error", "Retake upload failed: " + (err && err.message ? err.message : "unknown"));
+      });
+  }
+
+  function nextProvisionalIndex() {
+    if (state.photos.length === 0) return 0;
+    var max = state.photos.reduce(function (m, p) { return Math.max(m, p.index); }, -1);
+    return max + 1;
+  }
+
+  function uploadFile(slot, file, blurScore, replaceIndex) {
+    var fd = new FormData();
+    fd.append("file", file, file.name || ("photo-" + (slot.index + 1) + ".jpg"));
+
+    var url, opts;
+    if (replaceIndex !== null && replaceIndex !== undefined) {
+      url = "/api/capture/replace-photo";
+      // Server expects multipart with extra fields; encode token + index
+      // alongside the file part so this round-trips through the existing
+      // multipart parser.
+      fd.append("token", TOKEN);
+      fd.append("index", String(replaceIndex));
+      opts = { method: "POST", body: fd };
+    } else {
+      url = "/api/capture/upload?token=" + encodeURIComponent(TOKEN);
+      opts = { method: "POST", body: fd };
+    }
+
+    return uploadWithRetry(url, opts, slot, 0)
+      .then(function (body) {
+        if (replaceIndex !== null && replaceIndex !== undefined) {
+          slot.status = "uploaded";
+          if (typeof body.blurFlagged === "boolean") slot.blurFlagged = body.blurFlagged;
+        } else {
+          // Server assigns the canonical photoIndex.
+          slot.index = typeof body.photoIndex === "number" ? body.photoIndex : slot.index;
+          slot.status = "uploaded";
+          slot.provisional = false;
+          if (typeof body.blurFlagged === "boolean") slot.blurFlagged = body.blurFlagged;
+        }
+        if (navigator.vibrate) navigator.vibrate(10);
+        persistManifest();
+        renderAll();
+      })
+      .catch(function (err) {
+        slot.status = "failed";
+        renderAll();
+        showBanner("error", "Upload failed: " + (err && err.message ? err.message : "unknown"));
+      });
+  }
+
+  function uploadWithRetry(url, opts, slot, attempt) {
+    return fetch(url, opts).then(function (resp) {
+      if (resp.ok) return resp.json();
+      if (resp.status === 409 || resp.status === 410 || resp.status === 404) {
+        return resp.json().catch(function () { return {}; }).then(function (b) {
+          throw new Error(b.error || "Session closed");
+        });
+      }
+      throw new Error("HTTP " + resp.status);
+    }).catch(function (err) {
+      if (attempt < UPLOAD_RETRIES) {
+        slot.retryCount = attempt + 1;
+        var delay = UPLOAD_BACKOFF_BASE * Math.pow(2, attempt);
+        return new Promise(function (resolve) { setTimeout(resolve, delay); })
+          .then(function () { return uploadWithRetry(url, opts, slot, attempt + 1); });
+      }
+      throw err;
+    });
+  }
+
+  // ─── Replace with blank ────────────────────────────────────────────
+  function replaceWithBlank(targetIndex) {
+    var canvas = document.createElement("canvas");
+    canvas.width = 612; canvas.height = 792; // letter @ 72dpi
+    var ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    canvas.toBlob(function (blob) {
+      if (!blob) return;
+      var file = new File([blob], "blank-" + (targetIndex + 1) + ".jpg", { type: "image/jpeg" });
+      var photo = state.photos.find(function (p) { return p.index === targetIndex; });
+      if (!photo) return;
+      photo.status = "uploading";
+      photo.blurFlagged = false;
+      photo.blank = true;
+      photo.dataUrl = null;
+      renderAll();
+
       var fd = new FormData();
       fd.append("file", file);
-      fetch("/api/capture/upload?token=" + encodeURIComponent(TOKEN), {
-        method: "POST",
-        body: fd
-      }).then(function (res) {
-        if (!res.ok) {
-          return res.json().catch(function () { return {}; }).then(function (err) {
-            alert("Upload failed: " + (err.error || res.status));
-          });
-        }
-        return res.json().then(function (body) {
-          photos.push({ index: body.photoIndex, dataUrl: dataUrl });
-          render();
+      fd.append("token", TOKEN);
+      fd.append("index", String(targetIndex));
+      uploadWithRetry("/api/capture/replace-photo", { method: "POST", body: fd }, photo, 0)
+        .then(function () {
+          photo.status = "uploaded";
+          renderAll();
+          persistManifest();
+        })
+        .catch(function () {
+          photo.status = "failed";
+          renderAll();
+          showBanner("error", "Couldn't mark page as blank");
         });
-      });
-    };
-    reader.readAsDataURL(file);
+    }, "image/jpeg", 0.92);
   }
 
-  function removePhoto(index) {
+  // ─── Delete ────────────────────────────────────────────────────────
+  function deletePhoto(targetIndex) {
+    var photo = state.photos.find(function (p) { return p.index === targetIndex; });
+    if (!photo) return;
+    photo.status = "uploading";
+    renderAll();
     fetch("/api/capture/delete-photo", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: TOKEN, index: index })
-    }).then(function (res) {
-      if (res.ok) {
-        photos = photos.filter(function (p) { return p.index !== index; });
-        render();
-      }
+      body: JSON.stringify({ token: TOKEN, index: targetIndex }),
+    }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      state.photos = state.photos.filter(function (p) { return p.index !== targetIndex; });
+      persistManifest();
+      // Re-fetch manifest so server-assigned indices match if any reshuffle.
+      reconcileManifest();
+    }).catch(function () {
+      photo.status = "uploaded";
+      renderAll();
+      showBanner("error", "Couldn't delete photo");
     });
   }
 
-  pickerEl.addEventListener("change", function (e) {
-    var file = e.target.files[0];
-    handleFile(file);
-    e.target.value = "";
-  });
-
-  doneEl.addEventListener("click", function () {
-    if (!confirm("Process " + photos.length + " photo(s)?")) return;
-    doneEl.disabled = true;
+  // ─── Done / Finalize ───────────────────────────────────────────────
+  els.doneBtn.addEventListener("click", function () {
+    if (els.doneBtn.disabled) return;
+    var n = state.photos.filter(function (p) { return p.status === "uploaded"; }).length;
+    var msg = "Send " + n + " photo" + (n === 1 ? "" : "s") + " for processing?";
+    if (!confirm(msg)) return;
+    els.doneBtn.disabled = true;
+    els.doneLabel.textContent = "Sending…";
     fetch("/api/capture/finalize", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: TOKEN })
-    }).then(function (res) {
-      if (res.ok) {
-        successEl.classList.add("visible");
-        document.getElementById("capture-btn").style.display = "none";
-        photosEl.style.display = "none";
-        metaEl.style.display = "none";
-        doneEl.style.display = "none";
-      } else {
-        return res.json().catch(function () { return {}; }).then(function (err) {
-          alert("Finalize failed: " + (err.error || res.status));
-          doneEl.disabled = false;
+      body: JSON.stringify({ token: TOKEN }),
+    }).then(function (r) {
+      if (!r.ok) {
+        return r.json().catch(function () { return {}; }).then(function (b) {
+          throw new Error(b.error || "HTTP " + r.status);
         });
       }
+      els.success.classList.add("visible");
+      document.querySelector("main .substrip").style.display = "none";
+      els.grid.style.display = "none";
+      els.footer.style.display = "none";
+      clearManifest();
+      if (navigator.vibrate) navigator.vibrate([10, 60, 10]);
+    }).catch(function (err) {
+      els.doneBtn.disabled = false;
+      els.doneLabel.textContent = "Done · upload";
+      showBanner("error", "Finalize failed: " + (err && err.message ? err.message : "unknown"));
     });
   });
 
-  refreshManifest();
-  setInterval(refreshManifest, 5000);
+  // ─── Picker wiring ─────────────────────────────────────────────────
+  els.picker.addEventListener("change", function (e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    pickedFile(file);
+    e.target.value = ""; // allow same-file reselection
+  });
+
+  // ─── Boot ──────────────────────────────────────────────────────────
+  // 1. Render placeholders from localStorage (instant).
+  // 2. Reconcile with server manifest.
+  // 3. Poll every 8s for state changes (operator-side discard, expiry).
+  function boot() {
+    var local = loadManifest();
+    if (local && Array.isArray(local) && local.length > 0) {
+      state.photos = local.map(function (p) {
+        return {
+          index: p.index,
+          status: "uploaded",
+          blurFlagged: !!p.blurFlagged,
+          blank: !!p.blank,
+          dataUrl: null,
+        };
+      });
+      renderAll();
+    } else {
+      renderAll();
+    }
+    reconcileManifest();
+    setInterval(reconcileManifest, POLL_MANIFEST_INTERVAL);
+  }
+
+  // Reconnect probe — simple polling fallback if SSE is unavailable.
+  // The phone doesn't subscribe to the operator-side SSE; manifest poll
+  // is enough for "did the operator close my session?" awareness.
+  window.addEventListener("online", function () { reconcileManifest(); });
+  window.addEventListener("focus", function () { reconcileManifest(); });
+
+  boot();
 })();
 </script>
+
 </body>
 </html>
