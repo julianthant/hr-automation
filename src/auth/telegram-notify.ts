@@ -83,11 +83,31 @@ export function createTelegramNotifier(
   };
 }
 
+const KIND_HEADER: Record<AuthEventKind, string> = {
+  "duo-waiting": "🔐  Duo prompt",
+  "duo-approved": "✅  Duo approved",
+  "duo-timeout": "⌛  Duo timed out",
+  "duo-resent": "🔄  Duo push resent",
+};
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 /**
  * Render an AuthEvent into a short HTML-formatted Telegram message. Pure
- * function — exported for unit-test access. Real implementation lands in
- * the next task; this is the minimal stub the env-gating tests need.
+ * function — exported for unit-test access. The HTML escaping covers the
+ * three chars Telegram's HTML parse_mode treats specially (`& < >`); other
+ * Unicode passes through.
  */
 export function formatAuthEventMessage(ev: AuthEvent): string {
-  return `${ev.kind} ${ev.systemLabel} ${ev.workflow}`;
+  const lines: string[] = [];
+  lines.push(`${KIND_HEADER[ev.kind]} — <b>${escapeHtml(ev.systemLabel)}</b>`);
+  lines.push(`Workflow: <code>${escapeHtml(ev.workflow)}</code>`);
+  if (ev.detail) lines.push(escapeHtml(ev.detail));
+  if (ev.runId) lines.push(`Run: <code>${escapeHtml(ev.runId)}</code>`);
+  return lines.join("\n");
 }
