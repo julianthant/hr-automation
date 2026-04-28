@@ -6,7 +6,7 @@ import {
   readExistingContactNames,
 } from "../../systems/ucpath/personal-data.js";
 import { mapRelationship } from "./config.js";
-import { levenshteinDistance } from "./levenshtein.js";
+import { levenshteinDistance } from "../../match/index.js";
 import type { EmergencyContactRecord } from "./schema.js";
 
 export interface EmergencyContactContext {

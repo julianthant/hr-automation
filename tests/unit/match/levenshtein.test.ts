@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { levenshteinDistance } from "../../../../src/workflows/emergency-contact/levenshtein.js";
+import { levenshteinDistance } from "../../../src/match/levenshtein.js";
 
 describe("levenshteinDistance", () => {
   it("returns 0 for identical strings", () => {

@@ -62,6 +62,12 @@ import {
   listRosters,
   sweepStuckPrepRows,
 } from "./emergency-contact-http.js";
+import {
+  handleOathPrepareUpload,
+  handleOathApproveBatch,
+  handleOathDiscardPrepare,
+  sweepStuckOathPrepRows,
+} from "./oath-signature-http.js";
 import { readMultipart } from "./multipart-helper.js";
 
 /**
@@ -1438,6 +1444,14 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     } catch (err) {
       log.step(`Prep-row sweep skipped: ${err instanceof Error ? err.message : String(err)}`);
     }
+    try {
+      const sweptOath = sweepStuckOathPrepRows(dir);
+      if (sweptOath > 0) {
+        log.step(`Marked ${sweptOath} stuck oath-signature prepare row${sweptOath === 1 ? "" : "s"} as failed`);
+      }
+    } catch (err) {
+      log.step(`Oath prep-row sweep skipped: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /** Standard JSON response helper. */
@@ -2445,6 +2459,55 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       const parsedBody = await readJsonBody(4096);
       if (!parsedBody.ok) return writeJson(400, { ok: false, error: parsedBody.error });
       const result = await handleDiscardPrepare(
+        {
+          parentRunId: String(parsedBody.body.parentRunId ?? ""),
+          reason: parsedBody.body.reason ? String(parsedBody.body.reason) : undefined,
+        },
+        dir,
+      );
+      writeJson(result.ok ? 200 : 400, result);
+      return;
+    }
+
+    // ─── Oath-signature paper-roster prep endpoints ───────────
+    //
+    // Same shape as emergency-contact's prep flow (parent prep row →
+    // OCR → roster match → user review → approve fans out to N kernel
+    // queue items). No `rosterMode` field — paper rosters always match
+    // against the SharePoint onboarding xlsx in `.tracker/rosters/` or
+    // `src/data/`. Handlers live in `oath-signature-http.ts`.
+
+    if (req.method === "POST" && url.pathname === "/api/oath-signature/prepare") {
+      const mp = await readMultipart(req, 50 * 1024 * 1024);
+      if (!mp.ok) return writeJson(400, { ok: false, error: mp.error });
+      const file = mp.parsed.files["pdf"];
+      if (!file) return writeJson(400, { ok: false, error: "missing 'pdf' file part" });
+      const result = await handleOathPrepareUpload(
+        { pdfBytes: file.data, pdfOriginalName: file.filename },
+        dir,
+      );
+      writeJson(result.ok ? 202 : 400, result);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/oath-signature/approve-batch") {
+      const parsedBody = await readJsonBody(1024 * 1024);
+      if (!parsedBody.ok) return writeJson(400, { ok: false, error: parsedBody.error });
+      const result = await handleOathApproveBatch(
+        {
+          parentRunId: String(parsedBody.body.parentRunId ?? ""),
+          records: Array.isArray(parsedBody.body.records) ? parsedBody.body.records : [],
+        },
+        dir,
+      );
+      writeJson(result.ok ? 202 : 400, result);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/oath-signature/discard-prepare") {
+      const parsedBody = await readJsonBody(4096);
+      if (!parsedBody.ok) return writeJson(400, { ok: false, error: parsedBody.error });
+      const result = await handleOathDiscardPrepare(
         {
           parentRunId: String(parsedBody.body.parentRunId ?? ""),
           reason: parsedBody.body.reason ? String(parsedBody.body.reason) : undefined,

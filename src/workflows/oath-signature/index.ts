@@ -8,3 +8,19 @@ export {
   oathSignatureWorkflow,
 } from "./workflow.js";
 export type { OathSignatureOptions } from "./workflow.js";
+export {
+  OathOcrOutputSchema,
+  OathPrepareRowDataSchema,
+  OathPreviewRecordSchema,
+  OathRosterOcrRecordSchema,
+  MatchStateSchema,
+} from "./preview-schema.js";
+export type {
+  MatchState,
+  OathOcrOutput,
+  OathPrepareRowData,
+  OathPreviewRecord,
+  OathRosterOcrRecord,
+} from "./preview-schema.js";
+export { runPaperOathPrepare } from "./prepare.js";
+export type { PaperOathPrepareInput, PaperOathPrepareOutput } from "./prepare.js";

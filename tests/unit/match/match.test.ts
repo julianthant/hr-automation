@@ -6,7 +6,7 @@ import {
   compareUsAddresses,
   matchAgainstRoster,
   type RosterRow,
-} from "../../../../src/workflows/emergency-contact/match.js";
+} from "../../../src/match/match.js";
 
 describe("scoreNameMatch", () => {
   it("scores 1.0 for exact match (case + whitespace insensitive)", () => {

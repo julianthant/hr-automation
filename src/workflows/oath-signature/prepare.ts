@@ -9,44 +9,39 @@ import {
   findLatestRoster,
   loadRoster,
   matchAgainstRoster,
-  compareUsAddresses,
 } from "../../match/index.js";
 import {
-  OcrOutputSchema,
-  PrepareRowDataSchema,
-  type PreviewRecord,
-  type PrepareRowData,
+  OathOcrOutputSchema,
+  OathPrepareRowDataSchema,
+  type OathPrepareRowData,
+  type OathPreviewRecord,
 } from "./preview-schema.js";
-import type { EmergencyContactRecord } from "./schema.js";
 
-const WORKFLOW = "emergency-contact";
+const WORKFLOW = "oath-signature";
 
-/** Auto-accept threshold for roster name match. Records below land in lookup-pending. */
+/** Auto-accept threshold for roster name match. Below → eid-lookup. */
 const ROSTER_AUTO_ACCEPT = 0.85;
 
-/** How long the prep handler waits for eid-lookup completions before giving up. */
+/** How long resolveEidsAsync waits for eid-lookup completions before giving up. */
 const EID_LOOKUP_TIMEOUT_MS = 10 * 60_000;
 
-export interface PrepareInput {
+export interface PaperOathPrepareInput {
   pdfPath: string;
   pdfOriginalName: string;
-  rosterMode: "download" | "existing";
   rosterDir: string;
   uploadsDir: string;
   trackerDir?: string;
   /**
-   * Externally-supplied runId. The HTTP handler uses this so it can
-   * return the parentRunId in its response BEFORE awaiting OCR — the
-   * synchronous "pending" write happens before the first await, so the
-   * tracker row exists by the time the fire-and-forget caller resumes.
-   * When omitted, `runPrepare` generates one.
+   * Externally-supplied runId. The HTTP handler uses this so it can return
+   * `parentRunId` synchronously — `runPaperOathPrepare` writes the pending
+   * tracker row before its first await, so by the time the fire-and-forget
+   * promise hands back, the row exists on disk.
    */
   runId?: string;
 }
 
-export interface PrepareOutput {
+export interface PaperOathPrepareOutput {
   runId: string;
-  /** Same as runId — exposed under both names so the HTTP shim is explicit. */
   parentRunId: string;
 }
 
@@ -66,38 +61,42 @@ type EidLookupEnqueueFn = (
 ) => Promise<void>;
 let _eidLookupEnqueueFn: EidLookupEnqueueFn | undefined;
 
-/**
- * @internal — test escape hatch. Replaces the eid-lookup daemon enqueue
- * with a no-op (or test-defined behavior). When unset, the real
- * `ensureDaemonsAndEnqueue` is used.
- */
+/** @internal — test escape hatch. */
 export function __setEidLookupEnqueueForTests(fn: EidLookupEnqueueFn | undefined): void {
   _eidLookupEnqueueFn = fn;
 }
 
-// ─── Public entry point ────────────────────────────────────
+// ─── Public entry ─────────────────────────────────────────
 
 /**
- * Run OCR + roster match on a PDF and write a tracker row with
- * `data.mode === "prepare"`. Returns immediately after the synchronous
- * OCR + match phase; the async EID-lookup phase (if any records need it)
- * continues in the background and emits further `running` events as
- * each record resolves.
+ * Run OCR + roster match on a paper-oath-roster PDF and write a tracker
+ * row with `data.mode === "prepare"`. Returns immediately after the
+ * synchronous OCR + match phase; the async EID-lookup phase (if any
+ * unmatched signed rows) continues in the background and emits further
+ * `running` events as each record resolves.
  *
- * Status transitions written to tracker:
+ * Status transitions:
  *   pending → running(loading-roster) → running(ocr) → running(matching)
  *     → done                                              (no eid-lookup needed)
  *     OR
  *     → running(eid-lookup) → ... → done                  (with progressive updates)
+ *
+ * Unsigned rows (`signed === false`) are kept in the records list with
+ * `matchState: "extracted"`, `selected: false`, and skipped from both
+ * roster matching and eid-lookup. They give the operator a complete
+ * picture of the page (so they can spot OCR misreads) without ever
+ * becoming approvable kernel inputs.
  */
-export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
+export async function runPaperOathPrepare(
+  input: PaperOathPrepareInput,
+): Promise<PaperOathPrepareOutput> {
   const runId = input.runId ?? randomUUID();
-  const id = `ec-prep-${dateLocal()}-${runId.slice(0, 8)}`;
+  const id = `oath-prep-${dateLocal()}-${runId.slice(0, 8)}`;
   const trackerDir = input.trackerDir;
 
   const writeTracker = (
     status: "pending" | "running" | "done" | "failed",
-    data: Partial<PrepareRowData>,
+    data: Partial<OathPrepareRowData>,
     step?: string,
     error?: string,
   ): void => {
@@ -116,18 +115,18 @@ export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
     );
   };
 
-  // Initial pending row.
+  // Initial pending row — written before the first await so the HTTP
+  // handler's fire-and-forget caller sees the row by the time it returns.
   writeTracker("pending", {
     mode: "prepare",
     pdfPath: input.pdfPath,
     pdfOriginalName: input.pdfOriginalName,
-    rosterMode: input.rosterMode,
     rosterPath: "",
     records: [],
   });
 
   try {
-    // ── 1. Pick roster
+    // ── 1. Pick the roster
     if (!existsSync(input.rosterDir)) {
       mkdirSync(input.rosterDir, { recursive: true });
     }
@@ -135,29 +134,35 @@ export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
     if (!rosterRef) {
       writeTracker(
         "failed",
-        { mode: "prepare", pdfPath: input.pdfPath, pdfOriginalName: input.pdfOriginalName, rosterMode: input.rosterMode, rosterPath: "", records: [] },
+        {
+          mode: "prepare",
+          pdfPath: input.pdfPath,
+          pdfOriginalName: input.pdfOriginalName,
+          rosterPath: "",
+          records: [],
+        },
         undefined,
-        `No roster found in ${input.rosterDir}. Use "download" mode or place an .xlsx there.`,
+        `No roster found in ${input.rosterDir}. Place an .xlsx there or use the SharePoint Download button.`,
       );
       return { runId, parentRunId: runId };
     }
     writeTracker("running", { rosterPath: rosterRef.filename }, "loading-roster");
     const roster = await loadRoster(rosterRef.path);
-    log.step(`[prepare] Loaded roster ${rosterRef.filename} (${roster.length} rows)`);
+    log.step(`[oath-prep] Loaded roster ${rosterRef.filename} (${roster.length} rows)`);
 
     // ── 2. Run OCR
     writeTracker("running", { rosterPath: rosterRef.filename }, "ocr");
     const ocrFn = _ocrFn ?? (ocrDocument as OcrFn);
     const ocrResult = await ocrFn({
       pdfPath: input.pdfPath,
-      schema: OcrOutputSchema,
-      schemaName: "emergency-contact-batch",
+      schema: OathOcrOutputSchema,
+      schemaName: "oath-roster-batch",
     });
     log.step(
-      `[prepare] OCR returned ${ocrResult.data.length} record(s) (provider=${ocrResult.provider}, attempts=${ocrResult.attempts}, cached=${ocrResult.cached})`,
+      `[oath-prep] OCR returned ${ocrResult.data.length} record(s) (provider=${ocrResult.provider}, attempts=${ocrResult.attempts}, cached=${ocrResult.cached})`,
     );
 
-    // ── 3. Match each record (synchronous: form-EID + roster)
+    // ── 3. Match each record against the roster
     writeTracker(
       "running",
       {
@@ -169,24 +174,25 @@ export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
       "matching",
     );
 
-    const records: PreviewRecord[] = ocrResult.data.map((r): PreviewRecord => {
-      const existingEid = r.employee.employeeId?.trim();
-      if (existingEid) {
+    const records: OathPreviewRecord[] = ocrResult.data.map((r): OathPreviewRecord => {
+      // Unsigned row: skip matching, deselect, keep in the preview for
+      // operator visibility (catches OCR misreads of the signed/unsigned
+      // column).
+      if (!r.signed) {
         return {
           ...r,
-          matchState: "matched",
-          matchSource: "form",
-          matchConfidence: 1.0,
-          selected: true,
+          employeeId: "",
+          matchState: "extracted",
+          selected: false,
           warnings: [],
         };
       }
-      const result = matchAgainstRoster(roster, r.employee.name);
+      const result = matchAgainstRoster(roster, r.printedName);
       if (result.bestScore >= ROSTER_AUTO_ACCEPT) {
         const top = result.candidates[0];
         return {
           ...r,
-          employee: { ...r.employee, employeeId: top.eid },
+          employeeId: top.eid,
           matchState: "matched",
           matchSource: "roster",
           matchConfidence: top.score,
@@ -198,9 +204,10 @@ export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
               : [],
         };
       }
-      // No good roster match — eid-lookup needed.
+      // Signed but no good roster match — eid-lookup needed.
       return {
         ...r,
+        employeeId: "",
         matchState: "lookup-pending",
         rosterCandidates: result.candidates.slice(0, 3),
         selected: true,
@@ -211,54 +218,33 @@ export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
       };
     });
 
-    // ── 4. Address sanity check (using employee.homeAddress vs roster row)
-    for (const r of records) {
-      if (r.matchSource === "roster") {
-        const top = r.rosterCandidates?.[0];
-        if (top) {
-          const rosterRow = roster.find((x) => x.eid === top.eid);
-          if (rosterRow && rosterRow.street) {
-            r.addressMatch = compareUsAddresses(
-              r.employee.homeAddress ?? null,
-              {
-                street: rosterRow.street,
-                city: rosterRow.city,
-                state: rosterRow.state,
-                zip: rosterRow.zip,
-              },
-            );
-          }
-        }
-      }
-    }
-
-    // ── 5. Build the final data object
-    const finalData: PrepareRowData = {
+    // ── 4. Build the final data object
+    const finalData: OathPrepareRowData = {
       mode: "prepare",
       pdfPath: input.pdfPath,
       pdfOriginalName: input.pdfOriginalName,
-      rosterMode: input.rosterMode,
       rosterPath: rosterRef.filename,
       records,
       ocrProvider: ocrResult.provider,
       ocrAttempts: ocrResult.attempts,
       ocrCached: ocrResult.cached,
     };
-    PrepareRowDataSchema.parse(finalData); // throws if invariants broken
+    OathPrepareRowDataSchema.parse(finalData);
 
-    // ── 6. If all records have a terminal matchState, write done now.
+    // ── 5. Done now if no records need eid-lookup; else kick off async
     const anyPending = records.some((r) => r.matchState === "lookup-pending");
     if (!anyPending) {
       writeTracker("done", finalData);
-      log.success(`[prepare] All ${records.length} record(s) matched without eid-lookup`);
+      log.success(
+        `[oath-prep] All ${records.filter((r) => r.selected).length} approvable record(s) matched without eid-lookup`,
+      );
     } else {
       writeTracker("running", finalData, "eid-lookup");
       log.step(
-        `[prepare] ${records.filter((r) => r.matchState === "lookup-pending").length} record(s) need eid-lookup — kicking off async`,
+        `[oath-prep] ${records.filter((r) => r.matchState === "lookup-pending").length} record(s) need eid-lookup — kicking off async`,
       );
-      // Fire async; HTTP handler returns immediately after this function returns.
       void resolveEidsAsync(runId, id, finalData, trackerDir).catch((err) => {
-        log.warn(`[prepare] resolveEidsAsync threw: ${errorMessage(err)}`);
+        log.warn(`[oath-prep] resolveEidsAsync threw: ${errorMessage(err)}`);
       });
     }
 
@@ -270,7 +256,6 @@ export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
         mode: "prepare",
         pdfPath: input.pdfPath,
         pdfOriginalName: input.pdfOriginalName,
-        rosterMode: input.rosterMode,
         rosterPath: "",
         records: [],
       },
@@ -286,7 +271,7 @@ export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
 async function resolveEidsAsync(
   runId: string,
   id: string,
-  data: PrepareRowData,
+  data: OathPrepareRowData,
   trackerDir?: string,
 ): Promise<void> {
   const pending = data.records
@@ -323,9 +308,8 @@ async function resolveEidsAsync(
     );
   };
 
-  // ── Enqueue eid-lookup items (one per pending record).
   const lookupInputs = pending.map(({ r, i }) => ({
-    name: r.employee.name,
+    name: r.printedName,
     __prepIndex: i,
   }));
 
@@ -335,8 +319,6 @@ async function resolveEidsAsync(
     } else {
       const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
       const { eidLookupCrmWorkflow } = await import("../eid-lookup/index.js");
-      // The eid-lookup schema is z.object({ name }). Strip __prepIndex when
-      // sending; recover the index from the deriveItemId output instead.
       const enqueueInputs = lookupInputs.map(({ name }) => ({ name }));
       await ensureDaemonsAndEnqueue(
         eidLookupCrmWorkflow,
@@ -347,13 +329,15 @@ async function resolveEidsAsync(
             const target = input.name;
             const found = lookupInputs.find((x) => x.name === target);
             const idx = found?.__prepIndex ?? 0;
-            return `ec-prep-${runId}-r${idx}`;
+            return `oath-prep-${runId}-r${idx}`;
           },
         },
       );
     }
   } catch (err) {
-    log.warn(`[prepare] eid-lookup enqueue failed: ${errorMessage(err)} — marking remaining as unresolved`);
+    log.warn(
+      `[oath-prep] eid-lookup enqueue failed: ${errorMessage(err)} — marking remaining as unresolved`,
+    );
     for (const { i } of pending) {
       data.records[i].matchState = "unresolved";
       data.records[i].warnings.push(`eid-lookup unavailable: ${errorMessage(err)}`);
@@ -362,15 +346,14 @@ async function resolveEidsAsync(
     return;
   }
 
-  // Mark records as lookup-running.
   for (const { i } of pending) {
     data.records[i].matchState = "lookup-running";
   }
   writeRunningEidLookup();
 
-  // ── Subscribe to eid-lookup tracker JSONL for completions.
+  // ── Subscribe to eid-lookup tracker JSONL for completions
   const eidLookupFile = join(trackerDir ?? ".tracker", `eid-lookup-${dateLocal()}.jsonl`);
-  const expectedIds = new Set(pending.map(({ i }) => `ec-prep-${runId}-r${i}`));
+  const expectedIds = new Set(pending.map(({ i }) => `oath-prep-${runId}-r${i}`));
   let resolvedCount = 0;
   let lastSize = 0;
 
@@ -408,7 +391,7 @@ async function resolveEidsAsync(
       const eid = (entry.data?.emplId ?? "").trim();
       const looksLikeEid = /^\d{5,}$/.test(eid);
       if (entry.status === "done" && looksLikeEid) {
-        rec.employee.employeeId = eid;
+        rec.employeeId = eid;
         rec.matchState = "resolved";
         rec.matchSource = "eid-lookup";
       } else {
@@ -422,16 +405,13 @@ async function resolveEidsAsync(
     }
     lastSize = cur.size;
     if (progressed) writeRunningEidLookup();
-    if (resolvedCount >= pending.length) {
-      finalize();
-    }
+    if (resolvedCount >= pending.length) finalize();
   };
 
   let finalized = false;
   const finalize = (): void => {
     if (finalized) return;
     finalized = true;
-    // Mark anything still hanging as unresolved.
     for (const { i } of pending) {
       const r = data.records[i];
       if (r.matchState === "lookup-pending" || r.matchState === "lookup-running") {
@@ -450,8 +430,6 @@ async function resolveEidsAsync(
   let watcher: ReturnType<typeof fsWatch> | undefined;
   try {
     if (existsSync(eidLookupFile)) {
-      lastSize = statSync(eidLookupFile).size;
-      // Re-read from 0 in case results landed before subscription.
       lastSize = 0;
     }
     checkFile();
@@ -459,35 +437,31 @@ async function resolveEidsAsync(
       try {
         watcher = fsWatch(eidLookupFile, { persistent: false }, () => checkFile());
       } catch {
-        // fs.watch failed — fall back to polling
+        // fs.watch failed — polling covers
       }
-      // Periodic poll as belt-and-braces (some filesystems miss watch events,
-      // and fs.watch on a non-existent file throws ENOENT — polling covers
-      // the gap until the file appears).
       const poll = setInterval(() => {
         checkFile();
         if (finalized) clearInterval(poll);
       }, 200);
       poll.unref?.();
 
-      // Hard timeout safety net.
       setTimeout(() => {
         if (!finalized) {
-          log.warn(`[prepare] eid-lookup timeout after ${EID_LOOKUP_TIMEOUT_MS}ms`);
+          log.warn(`[oath-prep] eid-lookup timeout after ${EID_LOOKUP_TIMEOUT_MS}ms`);
           finalize();
           clearInterval(poll);
         }
       }, EID_LOOKUP_TIMEOUT_MS).unref?.();
     }
   } catch (err) {
-    log.warn(`[prepare] subscription setup failed: ${errorMessage(err)}`);
+    log.warn(`[oath-prep] subscription setup failed: ${errorMessage(err)}`);
     finalize();
   }
 }
 
 // ─── Helpers ──────────────────────────────────────────────
 
-function flattenForData(d: Partial<PrepareRowData>): Record<string, string> {
+function flattenForData(d: Partial<OathPrepareRowData>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(d)) {
     if (v === undefined || v === null) continue;
