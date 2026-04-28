@@ -3,3 +3,7 @@ export { navigateToSection } from "./navigate.js";
 export { extractField } from "./extract.js";
 export { ExtractionError } from "./types.js";
 export { crmSelectors } from "./selectors.js";
+export {
+  lookupOathSignatureDate,
+  formatCrmDateAsMmDdYyyy,
+} from "./onboarding-history.js";
