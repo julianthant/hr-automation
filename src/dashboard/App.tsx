@@ -12,6 +12,8 @@ import { resolveEntryName } from "./components/entry-display";
 import type { SearchResultRow } from "./components/types";
 import { WorkflowRail } from "./components/WorkflowRail";
 import { QuickRunPanel } from "./components/QuickRunPanel";
+import { TopBarRunButton } from "./components/TopBarRunButton";
+import { parsePrepareRowData } from "./components/preview-types";
 import { dateLocal } from "./lib/utils";
 
 /** Read initial state from URL search params so refresh preserves selection */
@@ -173,7 +175,20 @@ export default function App() {
         connected={connected}
         onSearchSelect={handleSearchSelect}
         queueZoneContent={
-          <QuickRunPanel workflow={workflow} failedIds={failedIds} />
+          <div className="flex items-center gap-2">
+            <QuickRunPanel workflow={workflow} failedIds={failedIds} />
+            {workflow === "emergency-contact" && (
+              <TopBarRunButton
+                busyCount={
+                  entries.filter(
+                    (e) =>
+                      (e.status === "pending" || e.status === "running") &&
+                      parsePrepareRowData(e.data) !== null,
+                  ).length
+                }
+              />
+            )}
+          </div>
         }
       />
       <div className="flex flex-1 overflow-hidden">
