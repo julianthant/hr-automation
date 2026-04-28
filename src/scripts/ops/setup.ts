@@ -299,6 +299,106 @@ export function checkJq(): CheckResult {
   };
 }
 
+// ─── Telegram setup helpers ────────────────────────────────────────────────
+
+/** Token validation outcome — narrows on `.ok`. */
+export type TokenValidation =
+  | { ok: true; token: string }
+  | { ok: false; reason: string };
+
+/** Validate a BotFather-issued token. Format: `<digits>:<30+ chars>`. */
+export function validateBotToken(input: string): TokenValidation {
+  const trimmed = input.trim();
+  if (trimmed.length === 0) {
+    return { ok: false, reason: "token is empty" };
+  }
+  // BotFather tokens look like 7234567890:AAH-... — digits, colon, ~35 alphanum.
+  const m = /^\d+:[A-Za-z0-9_-]{30,}$/.exec(trimmed);
+  if (!m) {
+    return {
+      ok: false,
+      reason: "token does not match BotFather format (digits:alphanum)",
+    };
+  }
+  return { ok: true, token: trimmed };
+}
+
+export type ChatIdDiscovery =
+  | { ok: true; chatId: string }
+  | { ok: false; reason: string };
+
+interface TelegramUpdate {
+  update_id: number;
+  message?: { chat?: { id?: number | string } };
+}
+
+/**
+ * Fetch /getUpdates and return the chat_id of the most recent message. Used
+ * once during setup; afterwards the chat_id lives in .env. `fetchFn` is
+ * injectable for tests.
+ */
+export async function discoverChatId(
+  token: string,
+  opts: { fetchFn?: typeof fetch } = {},
+): Promise<ChatIdDiscovery> {
+  const fetchFn = opts.fetchFn ?? fetch;
+  try {
+    const url = `https://api.telegram.org/bot${token}/getUpdates`;
+    const res = await fetchFn(url, {
+      method: "GET",
+      signal: AbortSignal.timeout(5_000),
+    });
+    const body = (await res.json()) as {
+      ok?: boolean;
+      result?: TelegramUpdate[];
+    };
+    if (!body.ok || !Array.isArray(body.result)) {
+      return { ok: false, reason: "Telegram /getUpdates returned non-ok" };
+    }
+    const updates = body.result;
+    if (updates.length === 0) {
+      return {
+        ok: false,
+        reason:
+          "no updates yet — message your bot once on Telegram, then re-run setup",
+      };
+    }
+    // Most recent update is last in the array per Telegram's getUpdates docs.
+    const latest = updates[updates.length - 1];
+    const id = latest.message?.chat?.id;
+    if (id === undefined || id === null) {
+      return {
+        ok: false,
+        reason: "latest update has no message.chat.id (was it a channel post?)",
+      };
+    }
+    return { ok: true, chatId: String(id) };
+  } catch (err) {
+    return { ok: false, reason: (err as Error).message };
+  }
+}
+
+/**
+ * Read or create the .env file in `cwd`, set or replace `key=value`.
+ * Idempotent. Preserves trailing newline. Never logs the value.
+ */
+export function writeEnvVar(cwd: string, key: string, value: string): void {
+  const envPath = path.join(cwd, ".env");
+  let contents = "";
+  if (existsSync(envPath)) {
+    contents = readFileSync(envPath, "utf-8");
+  }
+  const lineRegex = new RegExp(`^\\s*${key}\\s*=.*$`, "m");
+  const line = `${key}=${value}`;
+  if (lineRegex.test(contents)) {
+    contents = contents.replace(lineRegex, line);
+  } else {
+    if (contents.length > 0 && !contents.endsWith("\n")) contents += "\n";
+    contents += `${line}\n`;
+  }
+  writeFileSync(envPath, contents);
+}
+
 // ─── Orchestration ────────────────────────────────────────────────────────────
 
 /**
