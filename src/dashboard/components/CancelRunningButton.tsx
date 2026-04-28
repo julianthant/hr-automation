@@ -3,6 +3,7 @@ import { Square, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { clearActionToast, registerActionToast } from "./hooks/useActionToasts";
 
 interface CancelRunningButtonProps {
   workflow: string;
@@ -30,8 +31,24 @@ export function CancelRunningButton({ workflow, id, runId, className }: CancelRu
 
   const fire = async () => {
     setPending(true);
-    const t = toast.loading(`Cancel requested for ${id}…`, {
-      description: "Daemon stops at next step boundary (0–30s).",
+    // Loading toast is held open until the entries SSE observes a terminal
+    // status for (workflow, id, runId). The kind="cancel-running" entry in
+    // the action-toast registry maps the toast id so resolveActionToastsForEntry
+    // (called from App's entries effect) can update it in-place when the
+    // tracker writes step="cancelled" or any other terminal state.
+    const t = toast.loading(`Cancelling ${id}…`, {
+      description: "Daemon stops at the next step boundary (up to 30s).",
+    });
+    registerActionToast({
+      toastId: t,
+      workflow,
+      id,
+      runId,
+      kind: "cancel-running",
+      timeoutMs: 30_000,
+      fallbackMessage: `Still cancelling ${id}…`,
+      fallbackDescription:
+        "Daemon hasn't reached a step boundary yet. Check the entry status directly.",
     });
     try {
       const res = await fetch("/api/cancel-running", {
@@ -41,11 +58,14 @@ export function CancelRunningButton({ workflow, id, runId, className }: CancelRu
       });
       const body = (await res.json()) as { ok: boolean; error?: string; accepted?: boolean };
       if (body.ok) {
-        toast.success(`Cancel requested`, {
-          id: t,
-          description: "The daemon will stop at the next step boundary and pick up the next item.",
-        });
-      } else if (res.status === 409) {
+        // Daemon accepted the request — leave the loading toast open. SSE
+        // will resolve it with a concrete "Cancelled" message once the
+        // tracker row hits step="cancelled".
+        return;
+      }
+      // Immediate failure: resolve the toast now and clear the registry
+      // entry so the SSE effect ignores any later transitions for this run.
+      if (res.status === 409) {
         toast.warning(`No matching item in flight`, {
           id: t,
           description: body.error ?? "The item likely just finished.",
@@ -61,11 +81,13 @@ export function CancelRunningButton({ workflow, id, runId, className }: CancelRu
           description: body.error ?? `HTTP ${res.status}`,
         });
       }
+      clearActionToast(workflow, id, runId, "cancel-running");
     } catch (err) {
       toast.error(`Cancel failed`, {
         id: t,
         description: err instanceof Error ? err.message : String(err),
       });
+      clearActionToast(workflow, id, runId, "cancel-running");
     } finally {
       setPending(false);
     }

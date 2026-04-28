@@ -9,6 +9,7 @@ import { useEntries } from "./components/hooks/useEntries";
 import { usePreflight } from "./components/hooks/usePreflight";
 import { useTelegramToasts } from "./components/hooks/useTelegramToasts";
 import { useCaptureToasts } from "./components/hooks/useCaptureToasts";
+import { resolveActionToastsForEntry } from "./components/hooks/useActionToasts";
 import { useWorkflow, autoLabel } from "./workflows-context";
 import { resolveEntryName } from "./components/entry-display";
 import type { SearchResultRow } from "./components/types";
@@ -110,12 +111,22 @@ export default function App() {
       statusRef.current.set(entry.id, entry.status);
       if (prevStatus === undefined) continue;
       if (prevStatus === entry.status) continue;
+      // Resolve any pending action toasts (cancel-running, cancel-queued)
+      // BEFORE the generic status toasts. The action resolution updates
+      // an existing toast id with a specific message; the generic toast
+      // below fires a separate notification for the user's awareness.
+      resolveActionToastsForEntry(entry);
       const name = resolveEntryName(entry);
+      const isCancelled = entry.status === "failed" && entry.step === "cancelled";
       if (entry.status === "done") {
         toast.success(`${name} completed`, {
           description: `${wfLabel} finished`,
           duration: 5000,
         });
+      } else if (isCancelled) {
+        // The action-toast resolver already updated the loading toast
+        // with a specific "Cancelled" message. The generic flow doesn't
+        // need to fire a redundant `error` toast — would just be noise.
       } else if (entry.status === "failed") {
         toast.error(`${name} failed`, {
           description: entry.error || "Unknown error",
