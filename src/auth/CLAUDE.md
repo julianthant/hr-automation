@@ -19,8 +19,9 @@ systems: [{
 ## Files
 
 - `login.ts` — All login flows: `loginToUCPath`, `loginToACTCrm`, `loginToUKG` (split into `ukgNavigateAndFill` + `ukgSubmitAndWaitForDuo`), `loginToKuali`, `loginToNewKronos`
-- `duo-poll.ts` — `pollDuoApproval(page, options)` — unified Duo polling loop with URL match, successCheck, postApproval, recovery callbacks, and optional `systemLabel` for the voice-cue hook
+- `duo-poll.ts` — `pollDuoApproval(page, options)` — unified Duo polling loop with URL match, successCheck, postApproval, recovery callbacks, and optional `systemLabel` for the voice-cue + Telegram hooks
 - `voice-cue.ts` — `cueDuo(systemId)` — best-effort macOS voice cue ("Duo for UCPath") spoken via `say` when `HR_AUTOMATION_VOICE_CUES=1`. No-op on non-darwin or when the env var is unset. Per-systemId 30s cooldown prevents rapid duplicates across auth retries. Never throws. `pollDuoApproval` calls this once per auth attempt before the polling loop starts
+- `telegram-notify.ts` — `notifyAuthEvent(ev)` — best-effort Telegram DM via Bot API on Duo `waiting` / `approved` / `timeout` / `resent`. Activated only when `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` are both in env; no-op otherwise. Mirrors `voice-cue.ts` (factory `createTelegramNotifier` + default instance, never throws). Workflow + runId pulled from `AsyncLocalStorage` log context so messages name the kernel item without per-call-site plumbing
 - `session.ts` — `isOnAuthenticatedPage(page)` — URL-based check for ACT CRM auth state (not session persistence)
 - `types.ts` — `LoginOptions` (fresh flag), `AuthResult` (ucpath/actCrm booleans)
 
@@ -61,3 +62,4 @@ Submit button: always `button[name="_eventId_proceed"]` (avoids collision with "
 ## Lessons Learned
 
 - **2026-04-10: Duo pollDuoApproval auto-retry on timeout** — Duo MFA can time out if the user doesn't approve in time (e.g. phone not nearby). `pollDuoApproval` now auto-retries on timeout by clicking the "Try Again" button in the Duo iframe. This avoids the entire workflow failing because of a single missed Duo prompt.
+- **2026-04-28: Telegram bot for remote Duo approval.** Hooked into `pollDuoApproval` at four points (`duo-waiting` after `cueDuo`, `duo-resent` in the Try-Again branch, `duo-approved` in the success branch, `duo-timeout` after the loop exhausts) so every login flow benefits without per-flow opt-in. `notifyAuthEvent` reads `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` live from `process.env` on each call so dotenv reload mid-process picks up new values. Workflow + runId pulled from the log ALS via `getLogWorkflow()` / `getLogRunId()`. Auto-discovered `chat_id` via `/getUpdates` during the `npm run setup:telegram` wizard; phone number isn't stored in code or env — only the chat_id lives in `.env`. Token + chat_id required; missing either var → silent no-op (so unconfigured operators aren't blocked). Best-effort fire-and-forget — every error path swallowed; 5 s `AbortSignal.timeout` so a slow Telegram never blocks polling.
