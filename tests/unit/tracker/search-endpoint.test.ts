@@ -5,7 +5,7 @@ import {
   buildSearchSummary,
   type SearchDeps,
 } from "../../../src/tracker/dashboard.js";
-import type { TrackerEntry } from "../../../src/tracker/jsonl.js";
+import { dateLocal, type TrackerEntry } from "../../../src/tracker/jsonl.js";
 
 /** Build a quick TrackerEntry fixture — defaults cover the common shape. */
 function entry(partial: Partial<TrackerEntry>): TrackerEntry {
@@ -187,7 +187,7 @@ describe("buildSearchHandler", () => {
     const recent = new Date();
     recent.setDate(recent.getDate() - 5);
 
-    const toDate = (d: Date) => d.toISOString().slice(0, 10);
+    const toDate = (d: Date) => dateLocal(d);
     const toIso = (d: Date) => d.toISOString();
 
     const bucket = {

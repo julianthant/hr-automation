@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { withTrackedWorkflow } from '../../../src/tracker/jsonl.js'
+import { withTrackedWorkflow, dateLocal } from '../../../src/tracker/jsonl.js'
 
 const TMP = () => mkdtempSync(join(tmpdir(), 'hrauto-preassigned-instance-'))
 
@@ -29,7 +29,7 @@ test('withTrackedWorkflow: preAssignedInstance skips workflow_start/end and stam
     assert.equal(ends.length, 0, 'no workflow_end emitted under preAssignedInstance')
   }
 
-  const today = new Date().toISOString().slice(0, 10)
+  const today = dateLocal()
   const entries = readFileSync(join(dir, `test-wf-${today}.jsonl`), 'utf8')
     .trim().split('\n').filter(Boolean)
     .map((l) => JSON.parse(l))

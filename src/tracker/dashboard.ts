@@ -12,6 +12,7 @@ import {
   cleanOldTrackerFiles,
   cleanOldScreenshots,
   trackEvent,
+  dateLocal,
   DEFAULT_DIR,
   type TrackerEntry,
 } from "./jsonl.js";
@@ -514,16 +515,17 @@ export async function scanFailurePatterns(): Promise<void> {
 
 /**
  * Grace period before treating a queued-with-no-alive-daemons item as truly
- * orphaned. Covers the spawn-startup window: tsx cold start (1-3s) + module
- * loading (1-2s) + lockfile write (instant). After the lockfile lands,
- * `findAliveDaemons` returns the spawning daemon and the scan skips. Using
- * 90s gives generous headroom for slow disks / busy machines without holding
- * pending rows visibly stuck. `ensureDaemonsAndEnqueue`'s spawn deadline is
- * 5 minutes; truly failed spawns are caught by the spawn promise rejection
- * itself (logged as `[POST /api/enqueue] background task failed`), so we
- * don't need to wait that long here.
+ * orphaned. Must cover the full spawn-to-lockfile window: tsx cold start
+ * (1–3s) + module loading (1–2s) + browser launches + Duo approval for every
+ * declared system. Separations declares 4 systems with sequential Duo
+ * approval — that can take several minutes. Until the daemon's
+ * `Session.launch` completes, no lockfile exists, so `findAliveDaemons`
+ * returns 0 and the orphan sweep can race the dashboard's own in-flight
+ * spawn. Set to 5 minutes to match `spawnDaemon`'s own deadline:
+ * inside that window the spawn is still legitimately in progress; past it,
+ * the spawn promise will already have rejected and there's no daemon coming.
  */
-const ORPHAN_QUEUE_GRACE_MS = 90_000;
+const ORPHAN_QUEUE_GRACE_MS = 5 * 60_000;
 
 /**
  * Safety net: detect queued items whose workflow has zero alive daemons,
@@ -902,7 +904,7 @@ export function buildSelectorWarningsHandler(
     for (let i = 0; i < daysNormalized; i++) {
       const d = new Date(today);
       d.setDate(d.getDate() - i);
-      dates.push(d.toISOString().slice(0, 10));
+      dates.push(dateLocal(d));
     }
 
     // Aggregate by label. Track distinct workflow set per label.
@@ -1097,7 +1099,7 @@ export function buildSearchHandler(deps: SearchDeps) {
     // ISO dates, which is what we want here.
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - (days - 1));
-    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    const cutoffStr = dateLocal(cutoff);
 
     // Latest-per-run aggregation. Key: `${workflow}::${id}::${runId}`
     const byRun = new Map<string, { row: SearchResultRow; ts: string }>();
@@ -1531,7 +1533,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       const id = url.searchParams.get("id") ?? "";
       const runId = url.searchParams.get("runId") ?? "";
       const date = url.searchParams.get("date") ?? "";
-      const today = new Date().toISOString().slice(0, 10);
+      const today = dateLocal();
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
@@ -1572,7 +1574,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       const wf = url.searchParams.get("workflow") ?? workflow;
       const requestedRunId = url.searchParams.get("runId") ?? "";
       const date = url.searchParams.get("date") ?? "";
-      const today = new Date().toISOString().slice(0, 10);
+      const today = dateLocal();
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
@@ -1662,7 +1664,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     if (url.pathname === "/events") {
       const wf = url.searchParams.get("workflow") ?? workflow;
       const date = url.searchParams.get("date") ?? "";
-      const today = new Date().toISOString().slice(0, 10);
+      const today = dateLocal();
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",

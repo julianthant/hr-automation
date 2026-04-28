@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { log, withLogContext } from "../../../src/utils/log.js";
+import { dateLocal } from "../../../src/tracker/jsonl.js";
 
 describe("log.debug", () => {
   let dir: string;
@@ -15,7 +16,7 @@ describe("log.debug", () => {
       log.debug("hello debug");
     }, dir);
 
-    const file = join(dir, "test-wf-" + new Date().toISOString().slice(0, 10) + "-logs.jsonl");
+    const file = join(dir, "test-wf-" + dateLocal() + "-logs.jsonl");
     assert.ok(existsSync(file), `expected JSONL file at ${file}`);
     const lines = readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
     const parsed = lines.map((l) => JSON.parse(l));

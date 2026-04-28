@@ -9,13 +9,14 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { buildSelectorWarningsHandler } from "../../../src/tracker/dashboard.js";
+import { dateLocal } from "../../../src/tracker/jsonl.js";
 
 const TEST_DIR = ".tracker-selector-warnings-test";
 
 function isoDate(daysAgo: number): string {
   const d = new Date();
   d.setDate(d.getDate() - daysAgo);
-  return d.toISOString().slice(0, 10);
+  return dateLocal(d);
 }
 
 function writeLog(

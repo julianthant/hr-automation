@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight, Monitor } from "lucide-react";
 import type { ReactNode } from "react";
 import { useClock } from "./hooks/useClock";
-import { cn } from "@/lib/utils";
+import { cn, dateLocal } from "@/lib/utils";
 import { Popover, PopoverTrigger, PopoverContent } from "./ui/popover";
 import { Calendar } from "./ui/calendar";
 import { SearchBar } from "./SearchBar";
@@ -67,7 +67,7 @@ export function TopBar({
   const navigateDay = (dir: -1 | 1) => {
     const d = new Date(dateObj);
     d.setDate(d.getDate() + dir);
-    onDateChange(d.toISOString().slice(0, 10));
+    onDateChange(dateLocal(d));
   };
 
   const handleCalendarSelect = (dateStr: string) => {

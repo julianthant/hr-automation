@@ -120,27 +120,69 @@ export interface RetryRequest {
   runId?: string;
 }
 
-/**
- * Single-entry retry: look up the original input from the pending row,
- * re-enqueue via the existing daemon dispatch path. The kernel auto-
- * increments runId so the new run shows up as a fresh row in the
- * dashboard's RunSelector. Reuses an alive daemon when one exists; spawns
- * a fresh one when none do (matches the CLI semantics).
- */
-export function buildRetryHandler(dir: string) {
-  return async (req: RetryRequest): Promise<{ ok: true } | { ok: false; error: string }> => {
-    if (!req.workflow || !req.id) return { ok: false, error: "workflow and id are required" };
-    const lookup = findEntryInput(req.workflow, req.id, req.runId, dir);
-    if ("error" in lookup) return { ok: false, error: lookup.error };
-    const result = await enqueueFromHttp(req.workflow, [lookup.input], dir);
-    if (!result.ok) return { ok: false, error: result.error ?? "enqueue failed" };
-    return { ok: true };
-  };
+export interface RunWithDataRequest {
+  workflow: string;
+  id: string;
+  data: Record<string, unknown>;
+  runId?: string;
 }
 
 export interface RetryBulkRequest {
   workflow: string;
   ids: string[];
+}
+
+type ReEnqueueResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Re-enqueue a tracker entry — the shared core of `/api/retry` and
+ * `/api/run-with-data`. Looks up the original input, optionally attaches a
+ * `prefilledData` channel (edit-and-resume), and dispatches via the same
+ * daemon path the CLI uses. The kernel auto-increments runId so the new run
+ * shows up as a fresh row in the dashboard's RunSelector. Reuses an alive
+ * daemon when one exists; spawns a fresh one when none do.
+ *
+ * `prefilledData` is the only difference between retry (omit) and edit-and-
+ * resume (provide user edits). When provided, it's merged with the previous
+ * run's accumulated data so non-editable fields (e.g. separations'
+ * `rawTerminationType` — used by downstream `mapReasonCode` but not surfaced
+ * as an editable detail field) carry over and the handler's gating check
+ * sees the full set of required fields. The user's edits win on collision.
+ */
+async function reEnqueueEntry(
+  workflow: string,
+  id: string,
+  runId: string | undefined,
+  prefilledData: Record<string, unknown> | undefined,
+  dir: string,
+): Promise<ReEnqueueResult> {
+  if (!workflow || !id) return { ok: false, error: "workflow and id are required" };
+  const lookup = findEntryInput(workflow, id, runId, dir);
+  if ("error" in lookup) return { ok: false, error: lookup.error };
+
+  let input: Record<string, unknown> = lookup.input;
+  if (prefilledData) {
+    const previousData = findLatestEntryData(workflow, id, dir);
+    input = { ...input, prefilledData: { ...previousData, ...prefilledData } };
+  }
+
+  const result = await enqueueFromHttp(workflow, [input], dir);
+  if (!result.ok) return { ok: false, error: result.error ?? "enqueue failed" };
+  return { ok: true };
+}
+
+export function buildRetryHandler(dir: string) {
+  return (req: RetryRequest): Promise<ReEnqueueResult> =>
+    reEnqueueEntry(req.workflow, req.id, req.runId, undefined, dir);
+}
+
+export function buildRunWithDataHandler(dir: string) {
+  return (req: RunWithDataRequest): Promise<ReEnqueueResult> => {
+    if (!req.data || typeof req.data !== "object") {
+      return Promise.resolve({ ok: false, error: "data is required" });
+    }
+    return reEnqueueEntry(req.workflow, req.id, req.runId, req.data, dir);
+  };
 }
 
 export function buildRetryBulkHandler(dir: string) {
@@ -156,48 +198,6 @@ export function buildRetryBulkHandler(dir: string) {
       else errors.push({ id, error: r.error });
     }
     return { ok: true, count, errors };
-  };
-}
-
-export interface RunWithDataRequest {
-  workflow: string;
-  id: string;
-  data: Record<string, unknown>;
-  runId?: string;
-}
-
-/**
- * Edit-and-resume: re-enqueue an entry with a `prefilledData` channel
- * attached to the original input. The kernel's splitPrefilled merges
- * those values into ctx.data before the handler runs; handlers that gate
- * their extraction step on data presence then skip extraction.
- *
- * Reuses an alive daemon when one exists; spawns a fresh one when none do
- * (matches the CLI semantics — `ensureDaemonsAndEnqueue` with `flags = {}`
- * picks alive daemons over spawning a new one, so a busy daemon doesn't
- * trigger a duplicate spawn).
- */
-export function buildRunWithDataHandler(dir: string) {
-  return async (
-    req: RunWithDataRequest,
-  ): Promise<{ ok: true } | { ok: false; error: string }> => {
-    if (!req.workflow || !req.id || !req.data || typeof req.data !== "object") {
-      return { ok: false, error: "workflow, id, and data are required" };
-    }
-    const lookup = findEntryInput(req.workflow, req.id, req.runId, dir);
-    if ("error" in lookup) return { ok: false, error: lookup.error };
-    // Merge the previous run's accumulated data with the user's overrides.
-    // The user's edits win on key collision. This carries non-editable
-    // fields (e.g. separations' rawTerminationType — used by downstream
-    // mapReasonCode but not surfaced as an editable detail field) into
-    // the bypass path so the handler's gating check sees the full set
-    // of required fields.
-    const previousData = findLatestEntryData(req.workflow, req.id, dir);
-    const mergedPrefill = { ...previousData, ...req.data };
-    const inputWithPrefill = { ...lookup.input, prefilledData: mergedPrefill };
-    const result = await enqueueFromHttp(req.workflow, [inputWithPrefill], dir);
-    if (!result.ok) return { ok: false, error: result.error ?? "enqueue failed" };
-    return { ok: true };
   };
 }
 

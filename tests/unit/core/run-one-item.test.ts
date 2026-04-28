@@ -6,11 +6,12 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { defineWorkflow, runOneItem } from '../../../src/core/workflow.js'
 import { Session } from '../../../src/core/session.js'
+import { dateLocal } from '../../../src/tracker/jsonl.js'
 
 const TMP = () => mkdtempSync(join(tmpdir(), 'hrauto-runone-'))
 
 function readTracker(dir: string, workflow: string): any[] {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = dateLocal()
   const p = join(dir, `${workflow}-${today}.jsonl`)
   return readFileSync(p, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
 }
