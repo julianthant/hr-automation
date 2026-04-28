@@ -3,8 +3,10 @@ import { Search, Inbox, X } from "lucide-react";
 import { StatPills } from "./StatPills";
 import { EntryItem } from "./EntryItem";
 import { EmptyState } from "./EmptyState";
+import { PreviewRow } from "./PreviewRow";
 import type { TrackerEntry } from "./types";
 import { resolveEntryName } from "./entry-display";
+import { parsePrepareRowData } from "./preview-types";
 
 interface QueuePanelProps {
   entries: TrackerEntry[];
@@ -31,8 +33,28 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
+  // Prep rows are split out so they can render at the top of the panel
+  // regardless of search/filter. The user always wants to see "what's
+  // currently being prepared" — hiding it behind a status filter would be
+  // surprising. Filter out terminal-and-already-approved (step="approved")
+  // prep rows so the panel doesn't accumulate stale review affordances.
+  const previewEntries = useMemo(
+    () =>
+      entries.filter((e) => {
+        const data = parsePrepareRowData(e.data);
+        if (!data) return false;
+        if (e.status === "done" && e.step === "approved") return false;
+        if (e.status === "failed" && e.step === "discarded") return false;
+        return true;
+      }),
+    [entries],
+  );
+
   const filtered = useMemo(() => {
-    let result = entries;
+    // Exclude prep rows from the regular list — they render via PreviewRow
+    // above. Whether or not the prep row was filtered out by approve/discard
+    // above, it should never double-render here.
+    let result = entries.filter((e) => parsePrepareRowData(e.data) === null);
     if (statusFilter) {
       result = result.filter((e) =>
         statusFilter === "pending" ? e.status === "pending" || e.status === "skipped" : e.status === statusFilter,
@@ -89,6 +111,12 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
 
       {/* ── Entry list ── */}
       <div className="flex-1 overflow-y-auto">
+        {/* Pinned: emergency-contact preview rows. Sit above the scrollable
+            list. They're tall when expanded, but the parent is itself
+            scrollable so the list can scroll past them. */}
+        {previewEntries.map((e) => (
+          <PreviewRow key={`prep-${e.runId ?? e.id}`} entry={e} />
+        ))}
         {loading ? (
           <div className="space-y-0">
             {Array.from({ length: 6 }).map((_, i) => (
