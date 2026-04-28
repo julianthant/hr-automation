@@ -18,7 +18,6 @@ import {
   claimNextItem,
   markItemDone,
   markItemFailed,
-  unclaimItem,
   recoverOrphanedClaims,
   readQueueState,
 } from './daemon-queue.js'
@@ -64,9 +63,10 @@ export type DaemonPhase =
  *   - Session lifetime (one `Session.launch` on startup, `session.close`
  *     on shutdown)
  *   - Shared-queue claim loop with 15-min keepalive + orphan recovery
- *   - SIGINT/SIGTERM handlers — in-flight item re-queued via `unclaim`
- *     (reason: 'sigint-soft') on graceful stop, or marked failed on
- *     force stop
+ *   - SIGINT/SIGTERM handlers — in-flight item always marked failed
+ *     (no graceful re-queue path as of 2026-04-28; per Cluster A spec
+ *     every shutdown is force semantics). Queued items also fail via
+ *     the outer-finally cleanup.
  *
  * Does NOT install its own SIGINT handler via withBatchLifecycle —
  * we pass `ownSigint: false` so batch-lifecycle skips its
@@ -199,46 +199,53 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         body += c
       })
       req.on('end', () => {
-        let force = false
+        // The `force` body field is parsed but IGNORED as of the 2026-04-28
+        // Cluster A spec. Every /stop is now force semantics: in-flight item
+        // marked failed (not re-queued), queued items marked failed, chrome
+        // SIGTERM → SIGKILL, daemon exits. Per user direction: "I don't want
+        // graceful. I don't want the requeue. I want to see it fail when
+        // daemon dies because I already have the retry buttons for that. I
+        // don't want unfinished business."
         try {
-          const parsed = body ? (JSON.parse(body) as { force?: boolean }) : {}
-          force = !!parsed.force
+          // Tolerate malformed bodies — the field is no-op anyway.
+          if (body) JSON.parse(body)
         } catch {
           /* ignore */
         }
-        forceShutdown = force
+        forceShutdown = true
         shuttingDown = true
         shutdownResolve?.()
         wakeResolve?.()
         res.writeHead(200, { 'content-type': 'application/json' })
         res.end('{"ok":true}')
-        if (force) {
-          // Force-stop chrome SIGTERM + 2s grace + SIGKILL via the
-          // tracked PIDs (Session.killChromeHard). Replaces the old
-          // `setTimeout(50ms, exit)` which left chromium subprocesses
-          // adopted by init (`ppid === 1`) — leading to the "8 chrome
-          // windows after retry" pile-up. After the chrome kill we
-          // exit; lockfile unlink / outer finally still run via the
-          // process exit handler chain.
-          ;(async (): Promise<void> => {
-            // 50ms grace so the HTTP response fully flushes to the caller
-            // before we tear chrome down.
-            await new Promise((r) => setTimeout(r, 50))
+        // Kill tracked chromium PIDs (SIGTERM + 2s grace + SIGKILL). With
+        // chrome dead, any pending Playwright awaits in `Session.launch`
+        // or in-flight handlers reject immediately with "browser closed",
+        // unwinding the natural shutdown path. The outer-finally cleanup
+        // then marks in-flight failed, marks queued failed, unlinks the
+        // lockfile, and the daemon function returns. We deliberately do
+        // NOT call `process.exit(1)` here — natural shutdown is enough
+        // and matches the test runner's expectations (tests inject a
+        // stub `sessionLaunchFn` and await the daemon promise).
+        ;(async (): Promise<void> => {
+          // 50ms grace so the HTTP response fully flushes before we tear
+          // chrome down (otherwise the caller might see an aborted socket
+          // even though the kill went through cleanly).
+          await new Promise((r) => setTimeout(r, 50))
+          if (activeSession) {
             try {
-              if (activeSession) {
-                await activeSession.killChromeHard(2_000)
-              }
+              await activeSession.killChromeHard(2_000)
             } catch (err) {
               log.warn(
                 `[Daemon ${wf.config.name}/${instanceId}] killChromeHard error: ${
                   err instanceof Error ? err.message : String(err)
                 }`,
               )
-            } finally {
-              process.exit(1)
             }
-          })().catch(() => process.exit(1))
-        }
+          }
+        })().catch(() => {
+          /* best-effort — the natural shutdown path runs regardless */
+        })
       })
       return
     }
@@ -547,47 +554,39 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
       // even though the body may have set it.
       const inFlightSnapshot = inFlight as { itemId: string; runId: string } | null
       if (inFlightSnapshot) {
+        // 2026-04-28 Cluster A: every shutdown path is force semantics.
+        // Mark in-flight failed in BOTH the queue and the tracker — never
+        // re-queue. Per user direction: "I don't want graceful. I don't
+        // want the requeue. I want to see it fail when daemon dies."
         const nowIso = new Date().toISOString()
         const failError = forceShutdown
           ? 'Daemon force-stopped while processing this item.'
           : 'Daemon stopped while processing this item (browsers closed or crashed).'
         try {
-          if (forceShutdown) {
-            await markItemFailed(
-              wf.config.name,
-              inFlightSnapshot.itemId,
-              failError,
-              inFlightSnapshot.runId,
-              trackerDir,
-            )
-          } else {
-            // Soft stop: re-queue so a future daemon can pick up.
-            await unclaimItem(wf.config.name, inFlightSnapshot.itemId, 'sigint-soft', trackerDir)
-          }
+          await markItemFailed(
+            wf.config.name,
+            inFlightSnapshot.itemId,
+            failError,
+            inFlightSnapshot.runId,
+            trackerDir,
+          )
+        } catch {
+          /* best-effort — queue event append; tracker row below is the user-visible signal */
+        }
+        try {
+          trackEvent(
+            {
+              workflow: wf.config.name,
+              timestamp: nowIso,
+              id: inFlightSnapshot.itemId,
+              runId: inFlightSnapshot.runId,
+              status: 'failed',
+              error: failError,
+            },
+            trackerDir,
+          )
         } catch {
           /* best-effort */
-        }
-        // Always write a tracker `failed` row for force shutdowns so the
-        // dashboard doesn't show the item stuck in `running` state. Soft
-        // shutdowns leave the tracker as-is — the unclaim returns the item
-        // to `queued` and the orphan-queue sweep below handles it if no
-        // other daemons are alive to claim it.
-        if (forceShutdown) {
-          try {
-            trackEvent(
-              {
-                workflow: wf.config.name,
-                timestamp: nowIso,
-                id: inFlightSnapshot.itemId,
-                runId: inFlightSnapshot.runId,
-                status: 'failed',
-                error: failError,
-              },
-              trackerDir,
-            )
-          } catch {
-            /* best-effort */
-          }
         }
         inFlight = null
       }
