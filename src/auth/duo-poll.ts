@@ -30,6 +30,20 @@ function emitTelegram(
 }
 
 /**
+ * Fixed Duo poll cadence. Replaces the prior 2-second cadence.
+ *
+ * Rationale (2026-04-28): when separations launches 4 systems with
+ * `parallel-staggered` Duo, the 2s cadence produced bursty SSO/Duo
+ * requests that occasionally tripped UCSD-side errors. A fixed 5s
+ * cadence keeps the per-system request rate low and the cross-system
+ * total well under SSO's tolerance, at the cost of a small detection
+ * latency increase (worst case ≈5s after approval).
+ *
+ * Exported so tests can override via the `pollIntervalMs` option.
+ */
+export const DUO_POLL_INTERVAL_MS = 5_000;
+
+/**
  * Options for polling Duo MFA approval.
  */
 export interface DuoPollOptions {
@@ -38,6 +52,12 @@ export interface DuoPollOptions {
    * Default: 180 seconds.
    */
   timeoutSeconds?: number;
+
+  /**
+   * Override the poll cadence in milliseconds. Default: `DUO_POLL_INTERVAL_MS`
+   * (5000ms). Tests pass smaller values; production should leave unset.
+   */
+  pollIntervalMs?: number;
 
   /**
    * Determines whether the current URL indicates successful authentication.
@@ -97,6 +117,8 @@ export async function pollDuoApproval(
   options: DuoPollOptions,
 ): Promise<boolean> {
   const { timeoutSeconds = 180, successUrlMatch, successCheck, postApproval, recovery, systemLabel } = options;
+  const pollIntervalMs = options.pollIntervalMs ?? DUO_POLL_INTERVAL_MS;
+  const pollIntervalSec = pollIntervalMs / 1000;
 
   const urlMatches = (url: string): boolean => {
     if (typeof successUrlMatch === "string") {
@@ -116,7 +138,7 @@ export async function pollDuoApproval(
 
   log.waiting("Waiting for Duo approval (approve on your phone)...");
 
-  for (let elapsed = 0; elapsed < timeoutSeconds; elapsed += 2) {
+  for (let elapsed = 0; elapsed < timeoutSeconds; elapsed += pollIntervalSec) {
     try {
       // Run optional recovery callback to handle mid-auth errors (e.g., SAML redirects)
       if (recovery) {
@@ -132,7 +154,7 @@ export async function pollDuoApproval(
         await tryAgainBtn.first().click({ timeout: 5_000 });
         log.waiting("Duo push resent — approve on your phone...");
         emitTelegram("duo-resent", systemLabel ?? "system", "Push resent");
-        await page.waitForTimeout(2_000);
+        await page.waitForTimeout(pollIntervalMs);
         continue;
       }
 
@@ -171,7 +193,7 @@ export async function pollDuoApproval(
         if (successCheck) {
           const verified = await successCheck(page);
           if (!verified) {
-            await page.waitForTimeout(2_000);
+            await page.waitForTimeout(pollIntervalMs);
             continue;
           }
         }
@@ -190,7 +212,7 @@ export async function pollDuoApproval(
       // Page may be navigating — swallow and retry
     }
 
-    await page.waitForTimeout(2_000);
+    await page.waitForTimeout(pollIntervalMs);
   }
 
   log.error("Duo approval timed out");

@@ -76,7 +76,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
   const onRefresh = async (): Promise<void> => {
     if (refreshing || !entry) return;
     setRefreshing(true);
-    const t = toast.loading(`Refreshing from tracker…`);
+    const t = toast.loading(`Loading latest data…`);
     try {
       const params = new URLSearchParams({ workflow, id: entry.id });
       if (runId) params.set("runId", runId);
@@ -90,7 +90,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
         error?: string;
       };
       if (!res.ok || !body.ok) {
-        toast.error(`Refresh failed`, { id: t, description: body.error ?? `HTTP ${res.status}` });
+        toast.error(`Couldn't load data`, { id: t, description: body.error ?? `HTTP ${res.status}` });
         return;
       }
       const fresh = body.data ?? {};
@@ -106,20 +106,20 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
       }
       setValues(next);
       if (filled === 0) {
-        toast.warning(`No data to import`, {
+        toast.warning(`No data available`, {
           id: t,
-          description: `No tracker entries for this run had values for the editable fields`,
+          description: `No values found for the editable fields in this run`,
         });
       } else {
-        toast.success(`Pulled ${filled} field${filled === 1 ? "" : "s"} from tracker`, {
+        toast.success(`Updated ${filled} field${filled === 1 ? "" : "s"} from logs`, {
           id: t,
           description: body.source === "fallback"
-            ? `Sourced from a different run of this id (active run had no data)`
-            : `Sourced from the active run`,
+            ? `Sourced from a previous run of this item`
+            : `Sourced from the current run`,
         });
       }
     } catch (err) {
-      toast.error(`Refresh failed`, {
+      toast.error(`Couldn't load data`, {
         id: t,
         description: err instanceof Error ? err.message : String(err),
       });
@@ -131,7 +131,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
   const onSave = async (): Promise<void> => {
     if (saving || pending) return;
     setSaving(true);
-    const t = toast.loading(`Saving ${entry.id}…`);
+    const t = toast.loading(`Saving changes for ${entry.id}…`);
     try {
       const res = await fetch("/api/save-data", {
         method: "POST",
@@ -140,18 +140,18 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
       });
       const body = (await res.json()) as { ok: boolean; error?: string };
       if (body.ok) {
-        toast.success(`Saved`, {
+        toast.success(`Changes saved`, {
           id: t,
-          description: `${entry.id} values persisted — survives refreshes`,
+          description: `${entry.id} — values will persist across sessions`,
         });
       } else {
-        toast.error(`Save failed`, {
+        toast.error(`Couldn't save`, {
           id: t,
           description: body.error ?? `HTTP ${res.status}`,
         });
       }
     } catch (err) {
-      toast.error(`Save failed`, {
+      toast.error(`Couldn't save`, {
         id: t,
         description: err instanceof Error ? err.message : String(err),
       });
@@ -163,7 +163,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
   const onSubmit = async (): Promise<void> => {
     if (pending) return;
     setPending(true);
-    const t = toast.loading(`Running ${entry.id} with edited data…`);
+    const t = toast.loading(`Starting ${entry.id} with edited data…`);
     try {
       const res = await fetch("/api/run-with-data", {
         method: "POST",
@@ -176,18 +176,18 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
       });
       const body = (await res.json()) as { ok: boolean; error?: string };
       if (body.ok) {
-        toast.success(`Run enqueued`, {
+        toast.success(`Run started`, {
           id: t,
-          description: `${entry.id} will use these values; extraction step is bypassed`,
+          description: `${entry.id} will use the edited values`,
         });
       } else {
-        toast.error(`Enqueue failed`, {
+        toast.error(`Couldn't start run`, {
           id: t,
           description: body.error ?? `HTTP ${res.status}`,
         });
       }
     } catch (err) {
-      toast.error(`Enqueue failed`, {
+      toast.error(`Couldn't start run`, {
         id: t,
         description: err instanceof Error ? err.message : String(err),
       });

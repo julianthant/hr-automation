@@ -35,18 +35,18 @@ export function RetryButton({ workflow, id, size = "sm", className }: RetryButto
       });
       const body = (await res.json()) as { ok: boolean; error?: string };
       if (body.ok) {
-        toast.success(`Retry enqueued`, {
+        toast.success(`Retry scheduled`, {
           id: t,
           description: id,
         });
       } else {
-        toast.error(`Retry failed`, {
+        toast.error(`Couldn't retry`, {
           id: t,
           description: body.error ?? `HTTP ${res.status}`,
         });
       }
     } catch (err) {
-      toast.error(`Retry failed`, {
+      toast.error(`Couldn't retry`, {
         id: t,
         description: err instanceof Error ? err.message : String(err),
       });
@@ -76,17 +76,17 @@ export function RetryButton({ workflow, id, size = "sm", className }: RetryButto
             "inline-flex items-center justify-center cursor-pointer transition-colors outline-none",
             size === "md"
               ? cn(
-                  "rounded-lg bg-destructive/10 text-destructive border border-destructive/40",
-                  "hover:bg-destructive/20 hover:border-destructive/60",
-                  "focus-visible:ring-2 focus-visible:ring-destructive focus-visible:ring-offset-1 focus-visible:ring-offset-card",
-                  "disabled:opacity-50 disabled:cursor-not-allowed",
-                )
+                "rounded-lg bg-destructive/10 text-destructive border border-destructive/40",
+                "hover:bg-destructive/20 hover:border-destructive/60",
+                "focus-visible:ring-2 focus-visible:ring-destructive focus-visible:ring-offset-1 focus-visible:ring-offset-card",
+                "disabled:opacity-50 disabled:cursor-not-allowed",
+              )
               : cn(
-                  "rounded-md text-muted-foreground bg-transparent",
-                  "hover:text-foreground hover:bg-muted",
-                  "focus-visible:ring-2 focus-visible:ring-primary/40",
-                  "disabled:opacity-60 disabled:cursor-wait",
-                ),
+                "rounded-md text-muted-foreground bg-transparent",
+                "hover:text-foreground hover:bg-muted",
+                "focus-visible:ring-2 focus-visible:ring-primary/40",
+                "disabled:opacity-60 disabled:cursor-wait",
+              ),
             className,
           )}
         >

@@ -8,6 +8,7 @@ import { trackEvent, withTrackedWorkflow, emitScreenshotEvent, type WithTrackedW
 import { makeScreenshotFn } from './screenshot.js'
 import { withLogContext, log } from '../utils/log.js'
 import { classifyError } from '../utils/errors.js'
+import { CancelledError } from './types.js'
 import { runWorkflowPool } from './pool.js'
 import { runWorkflowSharedContextPool } from './shared-context-pool.js'
 import { withBatchLifecycle } from './batch-lifecycle.js'
@@ -121,7 +122,26 @@ export interface RunOneItemOpts<TData, TSteps extends readonly string[]> {
    * Paired with `preAssignedInstance` when called from `withBatchLifecycle`.
    */
   authTimings?: Array<{ systemId: string; startTs: number; endTs: number }>
+  /**
+   * Cooperative-cancel probe forwarded to the per-item `Stepper`. The daemon
+   * passes `() => cancelTarget?.itemId === itemId && cancelTarget?.runId === runId`,
+   * so a /cancel-current request that names this exact item triggers a
+   * `CancelledError` at the next `ctx.step(...)` boundary. When omitted (CLI
+   * direct mode, in-process tests), cancellation is never observed — preserves
+   * legacy behavior verbatim.
+   */
+  isCancelRequested?: () => boolean
 }
+
+/**
+ * Result shape of `runOneItem`. The optional `kind: 'cancelled'` discriminator
+ * lets the daemon's claim loop branch into "reset every system to its
+ * resetUrl before next claim" instead of treating the failure as a generic
+ * handler throw.
+ */
+export type RunOneItemResult =
+  | { ok: true }
+  | { ok: false; error: string; kind?: 'cancelled' }
 
 /**
  * Run one item through the kernel envelope: emit pending (unless caller
@@ -134,7 +154,7 @@ export interface RunOneItemOpts<TData, TSteps extends readonly string[]> {
  */
 export async function runOneItem<TData, TSteps extends readonly string[]>(
   args: RunOneItemOpts<TData, TSteps>,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<RunOneItemResult> {
   const { wf, session, item, itemId, runId, trackerDir, callerPreEmits } = args
   // Strip the kernel-level prefilledData channel out of the input before it
   // reaches the handler. `cleaned` is what the handler sees; `prefilled`
@@ -157,6 +177,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       emitData: () => {},
       emitFailed: () => {},
       emitSkipped: () => {},
+      isCancelRequested: args.isCancelRequested,
     })
     const ctx = makeCtx<TSteps, TData>({
       session,
@@ -174,6 +195,10 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       try {
         await wf.config.handler(ctx, handlerInput)
       } catch (err) {
+        // CancelledError: skip the diagnostic screenshot — the cancel
+        // is intentional, no state worth capturing. Rethrow so the
+        // outer catch surfaces the kind discriminator.
+        if (err instanceof CancelledError) throw err
         // Capture state for any throw that escapes ctx.step. In-step throws
         // already get a screenshot via Stepper.step's catch, so in that
         // path we see two files — different labels (`step:<name>` vs
@@ -184,6 +209,9 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       }
       return { ok: true }
     } catch (err) {
+      if (err instanceof CancelledError) {
+        return { ok: false, kind: 'cancelled', error: err.message }
+      }
       return { ok: false, error: classifyError(err) }
     }
   }
@@ -259,6 +287,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
             emitData: updateData,
             emitFailed,
             emitSkipped,
+            isCancelRequested: args.isCancelRequested,
           })
           const ctx = makeCtx<TSteps, TData>({
             session,
@@ -275,6 +304,11 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
           try {
             await wf.config.handler(ctx, handlerInput)
           } catch (err) {
+            // CancelledError: no diagnostic screenshot — the cancel was
+            // intentional and the page state is already being reset by
+            // the daemon's claim loop. Rethrow so the outer catch in
+            // runOneItem surfaces the kind discriminator.
+            if (err instanceof CancelledError) throw err
             // Covers throws that escape ctx.step (e.g. separations'
             // resolveJobSummaryResult unwrap or the post-step
             // submittedWithoutTxnNumber guard). Stepper.step already
@@ -298,6 +332,9 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
     }, trackerDir)
     return { ok: true }
   } catch (err) {
+    if (err instanceof CancelledError) {
+      return { ok: false, kind: 'cancelled', error: err.message }
+    }
     return { ok: false, error: classifyError(err) }
   }
 }

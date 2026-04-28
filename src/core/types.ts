@@ -137,6 +137,28 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   handler: (ctx: Ctx<TSteps, TData>, data: TData) => Promise<void>
 }
 
+/**
+ * Thrown by `Stepper.step` when the daemon's cancel-current flag is set
+ * for the currently-in-flight item, BEFORE the stepper invokes the wrapped
+ * `fn`. Carries the would-be-step's name so the caller (runOneItem) can
+ * surface "Cancelled before step '<X>'" in the failed tracker row.
+ *
+ * Distinct from regular Errors so kernel + daemon paths can branch on it:
+ *   - `Stepper.step` throws WITHOUT calling `emitFailed` or `screenshotFn`
+ *     (no diagnostic capture for an intentional cancel)
+ *   - `runOneItem` returns `{ ok: false, kind: "cancelled", error: ... }`
+ *     instead of the generic failed-shape
+ *   - daemon's claim loop, on `kind === "cancelled"`, resets every
+ *     system's page to its `resetUrl` before claiming the next item
+ */
+export class CancelledError extends Error {
+  readonly cancelled = true as const
+  constructor(public readonly stepName: string) {
+    super(`Cancelled by user before step '${stepName}'`)
+    this.name = 'CancelledError'
+  }
+}
+
 export interface RetryOpts {
   /** Max attempts including the first. Default 3. */
   attempts?: number

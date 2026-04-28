@@ -54,7 +54,7 @@ function DaemonGroup({
   const onSpawn = async (): Promise<void> => {
     if (spawning) return;
     setSpawning(true);
-    const t = toast.loading(`Spawning ${label} daemon…`);
+    const t = toast.loading(`Starting ${label} worker…`);
     try {
       const res = await fetch("/api/daemons/spawn", {
         method: "POST",
@@ -62,17 +62,17 @@ function DaemonGroup({
         body: JSON.stringify({ workflow, count: 1 }),
       });
       if (res.ok) {
-        toast.success(`Spawn queued`, {
+        toast.success(`${label} worker started`, {
           id: t,
           description: `Approve Duo to bring it online`,
         });
         // Re-poll soon — daemon may take 30-60s to come online behind Duo.
         setTimeout(onRefresh, 2_000);
       } else {
-        toast.error(`Spawn failed`, { id: t, description: `HTTP ${res.status}` });
+        toast.error(`Couldn't start ${label} worker`, { id: t, description: `HTTP ${res.status}` });
       }
     } catch (err) {
-      toast.error(`Spawn failed`, {
+      toast.error(`Couldn't start ${label} worker`, {
         id: t,
         description: err instanceof Error ? err.message : String(err),
       });
@@ -84,7 +84,7 @@ function DaemonGroup({
   const onStopAll = async (): Promise<void> => {
     if (stopping) return;
     setStopping(true);
-    const t = toast.loading(`Stopping all ${label} daemons…`);
+    const t = toast.loading(`Stopping all ${label} workers…`);
     try {
       const res = await fetch("/api/daemons/stop", {
         method: "POST",
@@ -92,13 +92,13 @@ function DaemonGroup({
         body: JSON.stringify({ workflow }),
       });
       if (res.ok) {
-        toast.success(`Stop signal sent`, { id: t, description: `${daemons.length} daemons` });
+        toast.success(`${label} workers stopping`, { id: t, description: `${daemons.length} workers will shut down` });
         onRefresh();
       } else {
-        toast.error(`Stop failed`, { id: t, description: `HTTP ${res.status}` });
+        toast.error(`Couldn't stop ${label} workers`, { id: t, description: `HTTP ${res.status}` });
       }
     } catch (err) {
-      toast.error(`Stop failed`, {
+      toast.error(`Couldn't stop ${label} workers`, {
         id: t,
         description: err instanceof Error ? err.message : String(err),
       });

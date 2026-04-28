@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import type { DuoPollOptions } from "../../../src/auth/duo-poll.js";
+import { DUO_POLL_INTERVAL_MS, type DuoPollOptions } from "../../../src/auth/duo-poll.js";
 
 describe("DuoPollOptions interface", () => {
   it("accepts string successUrlMatch", () => {
@@ -86,5 +86,24 @@ describe("DuoPollOptions interface", () => {
     assert.equal(match("https://crm.ucsd.edu/hr"), true);
     assert.equal(match("https://act-crm.my.site.com/login"), false);
     assert.equal(opts.timeoutSeconds, 60);
+  });
+
+  it("accepts optional pollIntervalMs override", () => {
+    const opts: DuoPollOptions = {
+      successUrlMatch: "kualibuild",
+      pollIntervalMs: 100,
+    };
+    assert.equal(opts.pollIntervalMs, 100);
+  });
+
+  it("pollIntervalMs is optional", () => {
+    const opts: DuoPollOptions = { successUrlMatch: "kualibuild" };
+    assert.equal(opts.pollIntervalMs, undefined);
+  });
+});
+
+describe("DUO_POLL_INTERVAL_MS constant", () => {
+  it("is fixed at 5000ms — matches the 2026-04-28 cluster A spec", () => {
+    assert.equal(DUO_POLL_INTERVAL_MS, 5_000);
   });
 });

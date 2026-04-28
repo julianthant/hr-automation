@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto'
-import { findAliveDaemons, spawnDaemon } from './daemon-registry.js'
+import { randomUUID, type UUID } from 'node:crypto'
+import { findAliveDaemons, killOrphanedChromiumProcesses, spawnDaemon } from './daemon-registry.js'
 import { enqueueItems } from './daemon-queue.js'
 import { deriveItemId } from './workflow.js'
 import { log } from '../utils/log.js'
@@ -7,16 +7,34 @@ import type { Daemon, DaemonFlags, EnqueueResult } from './daemon-types.js'
 import type { RegisteredWorkflow } from './types.js'
 
 /**
- * Optional caller-provided callback fired once per input AFTER the enqueue
- * event has been appended but BEFORE any spawn/auth work begins. Mirrors
- * `RunOpts.onPreEmitPending` from `runWorkflowBatch`: lets CLI adapters emit
- * a `pending` tracker row per item so the dashboard's queue panel populates
- * instantly (instead of waiting for the daemon to finish Duo + claim + emit
- * its own pending row). The runId passed here matches the enqueue event's
- * pre-assigned runId, so downstream tracker rows (running/done) pair 1:1
- * with the pre-emitted row.
+ * Optional caller-provided callback fired once per input IMMEDIATELY at the
+ * top of `ensureDaemonsAndEnqueue`, BEFORE any spawn or queue-file write.
+ * Lets CLI adapters / HTTP handlers emit a `pending` tracker row per item
+ * so the dashboard's queue panel populates instantly (in <100ms) — even
+ * during the 5-10s lockfile-registration window of a fresh daemon spawn.
+ *
+ * The runId passed here is pre-assigned (UUID v4) and is forwarded to the
+ * queue file's `enqueue` event verbatim, so downstream `claim`/`running`/
+ * `done`/`failed` events pair 1:1 with this pre-emitted row.
+ *
+ * Pre-emit timing changed 2026-04-28 (Cluster A spec). Prior versions
+ * fired this AFTER queue write; the reorder is what lets the orphan sweep
+ * tighten to 0 grace — every queue-file entry now has a registered daemon
+ * by construction.
  */
 export type OnPreEmitPending<TData> = (input: TData, runId: string) => void
+
+/**
+ * Optional caller-provided callback fired once per input when pre-emit
+ * succeeded but spawn-or-enqueue subsequently failed. Lets the caller
+ * mark stranded `pending` tracker rows as `failed` so the dashboard
+ * doesn't show ghost entries that no daemon will ever process.
+ *
+ * Fired only for inputs whose `onPreEmitPending` callback already ran;
+ * if pre-emit itself threw, the contract assumes the caller didn't write
+ * the row to begin with and there's nothing to fail.
+ */
+export type OnPreEmitFailed<TData> = (input: TData, runId: string, error: string) => void
 
 /**
  * Pure spawn-math helper. Given the current alive-daemon count and the
@@ -67,13 +85,21 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
     trackerDir?: string
     quiet?: boolean
     /**
-     * Caller-provided hook fired per item IMMEDIATELY after the enqueue event
-     * is written, BEFORE any spawn/auth work. Lets CLI adapters emit a
-     * `pending` tracker row so the dashboard queue panel populates instantly.
+     * Caller-provided hook fired per item IMMEDIATELY at the top of this
+     * function, BEFORE any spawn or queue-file write. Lets CLI adapters /
+     * HTTP handlers emit a `pending` tracker row so the dashboard queue panel
+     * populates within ~100ms — even during a 5-10s spawn-lockfile window.
      * Exceptions thrown by this callback are caught and logged so a bad
      * adapter can't break the enqueue flow.
      */
     onPreEmitPending?: OnPreEmitPending<TData>
+    /**
+     * Caller-provided hook fired per item when pre-emit succeeded but spawn
+     * (or queue-write) subsequently failed. Lets the caller mark the
+     * stranded `pending` tracker row as `failed` so the dashboard doesn't
+     * show ghost entries.
+     */
+    onPreEmitFailed?: OnPreEmitFailed<TData>
     /**
      * Optional item-ID deriver. Defaults to the kernel's built-in `deriveItemId`
      * (walks top-level `emplId` / `docId` / `email`) with a UUID fallback.
@@ -85,7 +111,7 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
     deriveItemId?: (input: TData) => string
   } = {},
 ): Promise<EnqueueResult> {
-  const { trackerDir, quiet, onPreEmitPending } = opts
+  const { trackerDir, quiet, onPreEmitPending, onPreEmitFailed } = opts
 
   if (inputs.length === 0) {
     throw new Error('ensureDaemonsAndEnqueue: inputs[] must not be empty')
@@ -103,34 +129,43 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
   const alive = await findAliveDaemons(wf.config.name, trackerDir)
   const spawnCount = computeSpawnPlan(alive.length, flags)
 
-  // ---------------------------------------------------------------------
-  // Step 1: enqueue FIRST (before spawn). Queue append is a file write and
-  // takes <10ms — the dashboard and any alive daemon see the items
-  // immediately. Daemons that need to be spawned will claim from the
-  // already-populated queue as soon as their auth chain finishes.
-  //
-  // This order was flipped as of 2026-04-22: the prior order was
-  // `spawn → enqueue → wake`, which (a) made the CLI wait up to 5min for
-  // Duo approval before writing anything to the queue, and (b) hid all the
-  // items from the dashboard queue panel during that wait. The new order
-  // is `enqueue → wake alive → spawn new → (newly-spawned daemons self-claim)`.
-  // ---------------------------------------------------------------------
-
   const idFn = (input: TData, idx: number): string => {
     if (opts.deriveItemId) return opts.deriveItemId(input)
     const fallback = `${Date.now()}-${idx}-${randomUUID().slice(0, 8)}`
     return deriveItemId(input, fallback)
   }
 
-  const enqueued = await enqueueItems(wf.config.name, inputs, idFn, trackerDir)
+  // ---------------------------------------------------------------------
+  // Order (2026-04-28 reorder per Cluster A spec):
+  //   1. Pre-assign runIds for every input
+  //   2. FIRE onPreEmitPending (dashboard sees pending rows in <100ms)
+  //   3. Cleanup orphan chromium processes if we're about to spawn (so
+  //      a fresh daemon doesn't pile chrome on top of leaked tabs from
+  //      a SIGKILLed predecessor)
+  //   4. Spawn new daemons (await lockfile registration, ~5-10s)
+  //   5. Wake every alive daemon (now includes spawned ones)
+  //   6. Append items to queue file — ONLY after a daemon is registered,
+  //      so the orphan sweep can be aggressive (5s/0-grace) without
+  //      false-positives during a spawn-in-flight window.
+  //
+  // Failure handling: if step 4 throws, we fire onPreEmitFailed for
+  // every pre-emitted runId so the caller can mark the stranded
+  // `pending` tracker rows as `failed`. The queue file is never touched
+  // on this path → the orphan sweep doesn't see anything to fail.
+  // ---------------------------------------------------------------------
 
+  // Step 1: pre-assign runIds. Generated synchronously so step 2 has them.
+  const ids = inputs.map(idFn)
+  const runIds: UUID[] = inputs.map(() => randomUUID())
+
+  // Step 2: pre-emit (dashboard pending rows visible immediately).
   if (onPreEmitPending) {
     for (let i = 0; i < inputs.length; i++) {
       try {
-        onPreEmitPending(inputs[i], enqueued[i].runId)
+        onPreEmitPending(inputs[i], runIds[i])
       } catch (err) {
         log.warn(
-          `ensureDaemonsAndEnqueue: onPreEmitPending threw for '${enqueued[i].id}': ${
+          `ensureDaemonsAndEnqueue: onPreEmitPending threw for '${ids[i]}': ${
             err instanceof Error ? err.message : String(err)
           }`,
         )
@@ -138,65 +173,107 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
     }
   }
 
-  if (!quiet) {
-    for (const { id, position } of enqueued) {
-      log.success(`Queued ${wf.config.name} '${id}' (position ${position}).`)
+  // From here, any thrown error MUST notify onPreEmitFailed so the caller
+  // can mark the pending rows as failed (no queue-file entry exists yet).
+  const handleSpawnFailure = (err: unknown): never => {
+    const message = err instanceof Error ? err.message : String(err)
+    if (onPreEmitFailed) {
+      for (let i = 0; i < inputs.length; i++) {
+        try {
+          onPreEmitFailed(inputs[i], runIds[i], message)
+        } catch (cbErr) {
+          log.warn(
+            `ensureDaemonsAndEnqueue: onPreEmitFailed threw for '${ids[i]}': ${
+              cbErr instanceof Error ? cbErr.message : String(cbErr)
+            }`,
+          )
+        }
+      }
     }
+    throw err
   }
 
-  // ---------------------------------------------------------------------
-  // Step 2: wake every ALREADY-ALIVE daemon so they re-check the queue on
-  // the next event-loop tick. Fire-and-forget: a dead daemon's wake fails
-  // silently, and the newly-appended item will still be claimed by any
-  // other alive daemon (or a newly-spawned one below).
-  // ---------------------------------------------------------------------
-  await Promise.all(
-    alive.map((d) =>
-      fetch(`http://127.0.0.1:${d.port}/wake`, { method: 'POST' }).catch(() => {
-        /* ignore — wake is best-effort */
-      }),
-    ),
-  )
+  try {
+    // Step 3: kill orphan chromium before spawning. Cheap no-op when
+    // spawnCount === 0 (no orphans expected to interfere) — but always
+    // worth doing once per session to clean up stale state.
+    if (spawnCount > 0) {
+      try {
+        const killed = await killOrphanedChromiumProcesses()
+        if (killed > 0 && !quiet) {
+          log.step(`[Daemon] Killed ${killed} orphaned Chromium process(es) before spawn.`)
+        }
+      } catch (err) {
+        // Non-fatal: orphan cleanup is best-effort. A failure here would
+        // typically be a missing pgrep/ps binary; the daemon spawn is
+        // still attempted so the user isn't blocked.
+        log.warn(
+          `[Daemon] Orphan-chromium cleanup failed (continuing): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      }
+    }
 
-  // ---------------------------------------------------------------------
-  // Step 3: spawn additional daemons if needed (serial — Duo can't be
-  // approved in parallel). Each new daemon's claim loop starts naturally
-  // after Session.launch, so we don't need to wake them explicitly.
-  //
-  // We await the spawns so the CLI only exits after every requested daemon
-  // is at least lockfile-registered — gives callers a chance to see spawn
-  // failures instead of the process silently returning while items sit
-  // un-processable in the queue.
-  // ---------------------------------------------------------------------
-  if (!quiet && spawnCount > 0) {
-    const why =
-      flags.parallel !== undefined
-        ? flags.new
-          ? `--parallel ${flags.parallel} --new (${alive.length} alive)`
-          : `--parallel ${flags.parallel} (${alive.length} alive)`
-        : flags.new
-          ? `--new (${alive.length} alive)`
-          : `no alive daemons`
-    log.step(`[Daemon] Spawning ${spawnCount} new ${wf.config.name} daemon(s) (${why}).`)
-    log.step('[Daemon] Approve Duo(s) in the new browser window(s); this takes 30s–2min.')
+    // Step 4: spawn additional daemons if needed (serial — Duo can't be
+    // approved in parallel). After this step every requested daemon is
+    // lockfile-registered (spawnDaemon blocks until /whoami responds).
+    if (!quiet && spawnCount > 0) {
+      const why =
+        flags.parallel !== undefined
+          ? flags.new
+            ? `--parallel ${flags.parallel} --new (${alive.length} alive)`
+            : `--parallel ${flags.parallel} (${alive.length} alive)`
+          : flags.new
+            ? `--new (${alive.length} alive)`
+            : `no alive daemons`
+      log.step(`[Daemon] Spawning ${spawnCount} new ${wf.config.name} daemon(s) (${why}).`)
+      log.step('[Daemon] Approve Duo(s) in the new browser window(s); this takes 30s–2min.')
+    }
+
+    const spawned: Daemon[] = []
+    for (let i = 0; i < spawnCount; i++) {
+      const d = await spawnDaemon(wf.config.name, trackerDir)
+      spawned.push(d)
+    }
+
+    const daemons = [...alive, ...spawned]
+    if (daemons.length === 0) {
+      throw new Error('ensureDaemonsAndEnqueue: expected at least one daemon after spawn phase')
+    }
+
+    // Step 5: wake every alive daemon (alive ∪ spawned). Fire-and-forget;
+    // a wake failure on one daemon doesn't block the others.
+    await Promise.all(
+      daemons.map((d) =>
+        fetch(`http://127.0.0.1:${d.port}/wake`, { method: 'POST' }).catch(() => {
+          /* ignore — wake is best-effort */
+        }),
+      ),
+    )
+
+    // Step 6: write queue file. Now safe — at least one daemon is registered
+    // for this workflow, so the orphan sweep won't false-positive on these
+    // items in the spawn-in-flight window.
+    const enqueued = await enqueueItems(
+      wf.config.name,
+      inputs,
+      idFn,
+      trackerDir,
+      runIds,
+    )
+
+    if (!quiet) {
+      for (const { id, position } of enqueued) {
+        log.success(`Queued ${wf.config.name} '${id}' (position ${position}).`)
+      }
+      log.step(`${daemons.length} daemon(s) processing.`)
+    }
+
+    return { enqueued, daemons }
+  } catch (err) {
+    return handleSpawnFailure(err)
   }
-
-  const spawned: Daemon[] = []
-  for (let i = 0; i < spawnCount; i++) {
-    const d = await spawnDaemon(wf.config.name, trackerDir)
-    spawned.push(d)
-  }
-
-  const daemons = [...alive, ...spawned]
-  if (daemons.length === 0) {
-    throw new Error('ensureDaemonsAndEnqueue: expected at least one daemon after spawn phase')
-  }
-
-  if (!quiet) {
-    log.step(`${daemons.length} daemon(s) processing.`)
-  }
-
-  return { enqueued, daemons }
 }
 
 /**

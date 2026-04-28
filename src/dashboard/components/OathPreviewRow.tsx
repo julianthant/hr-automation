@@ -122,7 +122,7 @@ export function OathPreviewRow({ entry }: OathPreviewRowProps) {
       });
       const body = (await resp.json()) as { ok: boolean; enqueued?: number; error?: string };
       if (!resp.ok || !body.ok) {
-        toast.error("Approve failed", { description: body.error ?? "Server error" });
+        toast.error("Couldn't approve batch", { description: body.error ?? "Server error" });
         setSubmitting(false);
         return;
       }
@@ -134,7 +134,7 @@ export function OathPreviewRow({ entry }: OathPreviewRowProps) {
       setLocalEdits({});
       setReviewOpen(false);
     } catch (err) {
-      toast.error("Approve failed", {
+      toast.error("Couldn't approve batch", {
         description: err instanceof Error ? err.message : "Network error",
       });
       setSubmitting(false);
@@ -153,7 +153,7 @@ export function OathPreviewRow({ entry }: OathPreviewRowProps) {
       });
       const body = (await resp.json()) as { ok: boolean; error?: string };
       if (!resp.ok || !body.ok) {
-        toast.error("Discard failed", { description: body.error ?? "Server error" });
+        toast.error("Couldn't discard preparation", { description: body.error ?? "Server error" });
         setSubmitting(false);
         return;
       }
@@ -161,7 +161,7 @@ export function OathPreviewRow({ entry }: OathPreviewRowProps) {
       window.localStorage.removeItem(`oath-prep-edits:${entry.runId ?? entry.id}`);
       setLocalEdits({});
     } catch (err) {
-      toast.error("Discard failed", {
+      toast.error("Couldn't discard preparation", {
         description: err instanceof Error ? err.message : "Network error",
       });
       setSubmitting(false);

@@ -2,33 +2,41 @@ import { useState } from "react";
 import { Camera } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CaptureModal } from "./CaptureModal";
+import { useCaptureRegistration } from "./hooks/useCaptureRegistration";
 
 /**
- * "Capture" CTA in the TopBar's queue zone. Opens a modal with a QR
- * code; the operator scans on their phone, takes photos of paper
- * rosters, taps Done, and the bundled PDF flows through the
- * workflow's onFinalize handler in the backend (see
- * `src/tracker/dashboard.ts → makeCaptureFinalize`).
+ * "Capture" CTA in the TopBar's queue zone.
  *
- * Only mounted for workflows that actually have a finalize handler —
- * adding a new consumer is one prop in the App.tsx mount + one case
- * in `makeCaptureFinalize`.
+ * Self-gating: queries `GET /api/capture/registry` via
+ * `useCaptureRegistration(workflow)` and renders nothing if the active
+ * workflow hasn't registered a capture handler. New workflows opt in
+ * by calling `captureRegistry.register({...})` server-side; no UI
+ * change required (matches the spec's "generic primitive" decision).
+ *
+ * Modal is mounted here (not at the App root) so its lifecycle is
+ * scoped to button clicks — fresh state per session, SSE stream
+ * scoped to the dialog being open.
  */
 export interface TopBarCaptureButtonProps {
+  /** The currently-active workflow on the dashboard. */
   workflow: string;
-  /** Free-text shown to the operator on the mobile page. */
+  /** Optional per-invocation context shown above the photo list on mobile. */
   contextHint?: string;
 }
 
 export function TopBarCaptureButton({ workflow, contextHint }: TopBarCaptureButtonProps) {
+  const registration = useCaptureRegistration(workflow);
   const [open, setOpen] = useState(false);
+
+  if (!registration) return null;
+
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        aria-label="Capture from phone"
-        title="Capture photos from phone via QR code"
+        aria-label={registration.label}
+        title={registration.label}
         className={cn(
           "h-8 px-3 inline-flex items-center gap-1.5 rounded-lg",
           "text-sm font-medium",
@@ -39,12 +47,13 @@ export function TopBarCaptureButton({ workflow, contextHint }: TopBarCaptureButt
         )}
       >
         <Camera aria-hidden className="h-3.5 w-3.5" />
-        <span>Capture</span>
+        <span>{registration.label}</span>
       </button>
       <CaptureModal
         open={open}
         onOpenChange={setOpen}
         workflow={workflow}
+        workflowLabel={registration.label}
         contextHint={contextHint}
       />
     </>

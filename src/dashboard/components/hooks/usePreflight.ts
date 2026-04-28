@@ -45,7 +45,7 @@ export function usePreflight(): void {
         }
 
         toast.warning(
-          `Pre-flight: ${failed.length} issue${failed.length === 1 ? "" : "s"}`,
+          `Startup check: ${failed.length} issue${failed.length === 1 ? "" : "s"} found`,
           {
             description: failed.map((c) => c.detail).join(" · "),
             duration: 10_000,

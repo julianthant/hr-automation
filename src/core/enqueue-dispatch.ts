@@ -181,6 +181,29 @@ export async function enqueueFromHttp(
             trackerDir,
           );
         },
+        onPreEmitFailed: (item, runId, error) => {
+          // Pre-emit succeeded but spawn-or-enqueue failed; the dashboard
+          // already shows a `pending` row for this runId and there's no
+          // queue-file entry for the orphan sweep to clean up. Write a
+          // matching `failed` row so the row terminates instead of
+          // becoming a ghost. Use the same data-shape helper as the
+          // pending emit so prefilledData (edit-and-resume) values stay
+          // visible on the failed row.
+          const data = buildTrackerDataForInput(item);
+          const id = deriveItemId(item, runId);
+          trackEvent(
+            {
+              workflow: wf.config.name,
+              timestamp: new Date().toISOString(),
+              id,
+              runId,
+              status: "failed",
+              data,
+              error: `Spawn failed before enqueue: ${error}`,
+            },
+            trackerDir,
+          );
+        },
       },
     );
   } catch (err) {

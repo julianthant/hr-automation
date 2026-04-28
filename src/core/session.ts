@@ -235,6 +235,63 @@ export class Session {
     return this.state.systems.map((s) => s.id)
   }
 
+  /**
+   * Map of `systemId → chromium parent process pid` for every browser this
+   * Session launched, captured by `defaultLaunchOne` via a pgrep diff around
+   * `chromium.launch`. Worker sessions (browser: null) inherit nothing — they
+   * don't own any chrome lifetime. Used by:
+   *   - daemon `/status` so the dashboard / spawn pre-check can see what
+   *     chromium processes belong to which alive daemon
+   *   - `Session.killChromeHard` (force-stop teardown) to SIGTERM/SIGKILL
+   *     chromium directly when Playwright's graceful close is too slow
+   *     (e.g. mid-Playwright-RPC the parent dies → ChildProcess.close() never
+   *     completes → 50ms exit window leaks chromium)
+   */
+  get chromePids(): Record<string, number> {
+    const out: Record<string, number> = {}
+    for (const [id, slot] of this.state.browsers) {
+      if (slot.chromiumPid && Number.isFinite(slot.chromiumPid)) {
+        out[id] = slot.chromiumPid
+      }
+    }
+    return out
+  }
+
+  /**
+   * Hard-kill every tracked chromium process. SIGTERM first, wait
+   * `gracePeriodMs`, then SIGKILL any survivors. Worker sessions (browser:
+   * null) inherit no PIDs from the parent's slots, so calling this on a
+   * worker is a no-op. Best-effort: a kill EPERM/ESRCH never throws.
+   *
+   * Used by the daemon's force-stop path to guarantee chromium is dead
+   * before `process.exit()` runs — replacing the prior "graceful
+   * `browser.close()` with 50ms window" approach which often left
+   * chromium subprocesses orphaned (adopted by init, ppid=1) and
+   * cascaded into the "8 chrome windows after retry" bug.
+   */
+  killChromeHard(gracePeriodMs = 2_000): Promise<number> {
+    const pids = Object.values(this.chromePids)
+    if (pids.length === 0) return Promise.resolve(0)
+    let killed = 0
+    for (const pid of pids) {
+      try { process.kill(pid, 'SIGTERM'); killed++ } catch { /* already dead */ }
+    }
+    return new Promise<number>((resolve) => {
+      setTimeout(() => {
+        for (const pid of pids) {
+          try {
+            process.kill(pid, 0) // is it still alive?
+            // Still alive — escalate.
+            try { process.kill(pid, 'SIGKILL') } catch { /* race — gone now */ }
+          } catch {
+            // ESRCH — process already gone
+          }
+        }
+        resolve(killed)
+      }, gracePeriodMs).unref()
+    })
+  }
+
   async page(id: string): Promise<Page> {
     const ready = this.state.readyPromises.get(id)
     if (!ready) throw new Error(`unknown system: ${id}`)

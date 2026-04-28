@@ -8,6 +8,7 @@ import { SessionPanel } from "./components/SessionPanel";
 import { useEntries } from "./components/hooks/useEntries";
 import { usePreflight } from "./components/hooks/usePreflight";
 import { useTelegramToasts } from "./components/hooks/useTelegramToasts";
+import { useCaptureToasts } from "./components/hooks/useCaptureToasts";
 import { useWorkflow, autoLabel } from "./workflows-context";
 import { resolveEntryName } from "./components/entry-display";
 import type { SearchResultRow } from "./components/types";
@@ -56,6 +57,7 @@ export default function App() {
   // Pre-flight check on mount
   usePreflight();
   useTelegramToasts();
+  useCaptureToasts();
 
   // Sync state to URL so refresh preserves selection
   useEffect(() => {
@@ -192,15 +194,8 @@ export default function App() {
                 }
               />
             )}
-            {workflow === "oath-signature" && (
-              <>
-                <TopBarCaptureButton
-                  workflow={workflow}
-                  contextHint="Photo each signed roster page, then tap Done"
-                />
-                <TopBarDigitalOathButton />
-              </>
-            )}
+            <TopBarCaptureButton workflow={workflow} />
+            {workflow === "oath-signature" && <TopBarDigitalOathButton />}
           </div>
         }
       />
