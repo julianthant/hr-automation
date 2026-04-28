@@ -1,6 +1,33 @@
 import type { Page } from "playwright";
-import { log } from "../utils/log.js";
+import { getLogRunId, getLogWorkflow, log } from "../utils/log.js";
 import { cueDuo } from "./voice-cue.js";
+import {
+  notifyAuthEvent,
+  type AuthEventKind,
+} from "./telegram-notify.js";
+
+/**
+ * Fire a best-effort Telegram notification with the active log context's
+ * workflow + runId. Reads ALS each call so the message includes the kernel
+ * item that triggered the auth wait. Always swallows errors.
+ */
+function emitTelegram(
+  kind: AuthEventKind,
+  systemLabel: string,
+  detail?: string,
+): void {
+  const workflow = getLogWorkflow() ?? "(unknown)";
+  const runId = getLogRunId();
+  void notifyAuthEvent({
+    kind,
+    systemLabel,
+    workflow,
+    ...(runId ? { runId } : {}),
+    ...(detail ? { detail } : {}),
+  }).catch(() => {
+    /* notifyAuthEvent already swallows; this is belt-and-suspenders */
+  });
+}
 
 /**
  * Options for polling Duo MFA approval.
@@ -83,6 +110,10 @@ export async function pollDuoApproval(
   // they're not looking at the terminal. Never blocks; never throws.
   await cueDuo(systemLabel ?? "system").catch(() => {});
 
+  // Best-effort Telegram DM. Activated when TELEGRAM_BOT_TOKEN +
+  // TELEGRAM_CHAT_ID are set; otherwise no-op.
+  emitTelegram("duo-waiting", systemLabel ?? "system", "Approve on your phone");
+
   log.waiting("Waiting for Duo approval (approve on your phone)...");
 
   for (let elapsed = 0; elapsed < timeoutSeconds; elapsed += 2) {
@@ -100,6 +131,7 @@ export async function pollDuoApproval(
         log.step("Duo push timed out — clicking Try Again...");
         await tryAgainBtn.first().click({ timeout: 5_000 });
         log.waiting("Duo push resent — approve on your phone...");
+        emitTelegram("duo-resent", systemLabel ?? "system", "Push resent");
         await page.waitForTimeout(2_000);
         continue;
       }
@@ -145,6 +177,7 @@ export async function pollDuoApproval(
         }
 
         log.step(`Duo approved | URL: ${page.url()}`);
+        emitTelegram("duo-approved", systemLabel ?? "system");
 
         // Run post-approval hook if provided
         if (postApproval) {
@@ -161,5 +194,6 @@ export async function pollDuoApproval(
   }
 
   log.error("Duo approval timed out");
+  emitTelegram("duo-timeout", systemLabel ?? "system");
   return false;
 }
