@@ -5,8 +5,9 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { withLogContext, setLogRunId } from "../../../src/utils/log.js";
 import { emitStepChange, type SessionEvent } from "../../../src/tracker/session-events.js";
+import { dateLocal } from "../../../src/tracker/jsonl.js";
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => dateLocal();
 
 describe("emitStepChange dedupe against recent step log", () => {
   let tmp: string;

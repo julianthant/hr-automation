@@ -12,6 +12,7 @@ import { join } from "path";
 import {
   cleanOldTrackerFiles,
   cleanOldScreenshots,
+  dateLocal,
 } from "../../../../src/tracker/jsonl.js";
 import { cleanTrackerMain } from "../../../../src/scripts/ops/clean-tracker.js";
 
@@ -33,7 +34,7 @@ function writeFixture(filename: string, ageDays: number): string {
 function isoDate(daysAgo: number): string {
   const d = new Date();
   d.setDate(d.getDate() - daysAgo);
-  return d.toISOString().slice(0, 10);
+  return dateLocal(d);
 }
 
 describe("cleanOldTrackerFiles (clean-tracker script)", () => {

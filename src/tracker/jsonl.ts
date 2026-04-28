@@ -24,6 +24,16 @@ import {
 
 export const DEFAULT_DIR = ".tracker";
 
+/**
+ * YYYY-MM-DD in the system's local timezone. Tracker filenames roll over at
+ * local midnight (not UTC midnight) so reads/writes stay coherent for the
+ * user's day — without this, every operation between local 5pm PDT and local
+ * midnight reads/writes a different file than the dashboard is showing.
+ */
+export function dateLocal(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 export interface LogEntry {
   workflow: string;
   itemId: string;
@@ -34,8 +44,7 @@ export interface LogEntry {
 }
 
 function getLogFilePath(workflow: string, dir: string): string {
-  const today = new Date().toISOString().slice(0, 10);
-  return join(dir, `${workflow}-${today}-logs.jsonl`);
+  return join(dir, `${workflow}-${dateLocal()}-logs.jsonl`);
 }
 
 export function appendLogEntry(entry: LogEntry, dir: string = DEFAULT_DIR): void {
@@ -141,8 +150,7 @@ export interface TrackerEntry {
 }
 
 function getLogPath(workflow: string, dir: string): string {
-  const today = new Date().toISOString().slice(0, 10);
-  return join(dir, `${workflow}-${today}.jsonl`);
+  return join(dir, `${workflow}-${dateLocal()}.jsonl`);
 }
 
 export function trackEvent(entry: TrackerEntry, dir: string = DEFAULT_DIR): void {
@@ -556,7 +564,7 @@ export function cleanOldTrackerFiles(maxAgeDays: number = 30, dir: string = DEFA
   if (!existsSync(dir)) return 0;
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - maxAgeDays);
-  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  const cutoffStr = dateLocal(cutoff);
 
   let deleted = 0;
   for (const f of readdirSync(dir)) {

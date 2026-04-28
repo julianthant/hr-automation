@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { defineWorkflow, runWorkflow } from '../../../src/core/workflow.js'
+import { dateLocal } from '../../../src/tracker/jsonl.js'
 
 function fakeSlot() {
   return {
@@ -15,7 +16,7 @@ function fakeSlot() {
 }
 
 function readTrackerEntries(workflow: string, dir: string): Array<Record<string, unknown>> {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = dateLocal()
   const path = join(dir, `${workflow}-${today}.jsonl`)
   if (!existsSync(path)) return []
   return readFileSync(path, 'utf-8')

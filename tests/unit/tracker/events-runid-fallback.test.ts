@@ -10,7 +10,7 @@ import {
   resolveInstanceForRun,
 } from "../../../src/tracker/dashboard.js";
 import type { SessionEvent } from "../../../src/tracker/session-events.js";
-import type { TrackerEntry } from "../../../src/tracker/jsonl.js";
+import { dateLocal, type TrackerEntry } from "../../../src/tracker/jsonl.js";
 
 function appendEvent(dir: string, event: object): void {
   appendFileSync(join(dir, "sessions.jsonl"), JSON.stringify(event) + "\n");
@@ -274,7 +274,7 @@ describe("/events/run-events instance-based fallback (HTTP)", () => {
   });
 
   it("streams batch-scope events attributed via workflowInstance", async () => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = dateLocal();
     appendTrackerEntry(tmp, "onboarding", today, trackerEntry("A", "Onboarding 1"));
 
     appendEvent(tmp, { type: "workflow_start", timestamp: "2026-04-23T10:00:00Z", pid: 1234, workflowInstance: "Onboarding 1" });

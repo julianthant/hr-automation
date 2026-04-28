@@ -12,6 +12,7 @@ import { resolveEntryName } from "./components/entry-display";
 import type { SearchResultRow } from "./components/types";
 import { WorkflowRail } from "./components/WorkflowRail";
 import { QuickRunPanel } from "./components/QuickRunPanel";
+import { dateLocal } from "./lib/utils";
 
 /** Read initial state from URL search params so refresh preserves selection */
 function readUrlState() {
@@ -19,7 +20,7 @@ function readUrlState() {
   return {
     workflow: params.get("wf") || "onboarding",
     selectedId: params.get("id") || null,
-    date: params.get("date") || new Date().toISOString().slice(0, 10),
+    date: params.get("date") || dateLocal(),
   };
 }
 

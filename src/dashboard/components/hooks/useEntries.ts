@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import type { TrackerEntry } from "../types";
+import { dateLocal } from "../../lib/utils";
 
 interface UseEntriesResult {
   entries: TrackerEntry[];
@@ -40,7 +41,7 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
     // the new one, stranding `wfCounts` at its previous value.
     prevHashRef.current = "";
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = dateLocal();
     let sseUrl = "/events?workflow=" + encodeURIComponent(workflow);
     if (date && date !== today) {
       sseUrl += "&date=" + encodeURIComponent(date);

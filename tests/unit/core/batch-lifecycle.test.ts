@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { withBatchLifecycle, createBatchObserver } from '../../../src/core/batch-lifecycle.js'
+import { dateLocal } from '../../../src/tracker/jsonl.js'
 
 const TMP = () => mkdtempSync(join(tmpdir(), 'hrauto-batchlife-'))
 
@@ -14,7 +15,7 @@ function readSessions(dir: string): any[] {
 }
 
 function readTracker(dir: string, wf: string): any[] {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = dateLocal()
   const p = join(dir, `${wf}-${today}.jsonl`)
   if (!existsSync(p)) return []
   return readFileSync(p, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))

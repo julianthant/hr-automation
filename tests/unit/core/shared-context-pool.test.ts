@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { defineWorkflow } from '../../../src/core/workflow.js'
 import { runWorkflowSharedContextPool } from '../../../src/core/shared-context-pool.js'
+import { dateLocal } from '../../../src/tracker/jsonl.js'
 
 function fakeSlot() {
   return {
@@ -22,7 +23,7 @@ function fakeSlot() {
 }
 
 function readTracker(dir: string, wf: string): any[] {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = dateLocal()
   const p = join(dir, `${wf}-${today}.jsonl`)
   if (!existsSync(p)) return []
   return readFileSync(p, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))

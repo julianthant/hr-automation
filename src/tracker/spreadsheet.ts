@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import { dateLocal } from "./jsonl.js";
 
 /** Column definition for ExcelJS worksheets. */
 export interface ColumnDef {
@@ -24,7 +25,7 @@ export async function appendRow(
     // File does not exist yet — fresh workbook
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = dateLocal();
   let sheet = workbook.getWorksheet(today);
 
   if (!sheet) {

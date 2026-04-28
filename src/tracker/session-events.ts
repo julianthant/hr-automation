@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
-import { DEFAULT_DIR } from "./jsonl.js";
+import { DEFAULT_DIR, dateLocal } from "./jsonl.js";
 import { getLogRunId } from "../utils/log.js";
 
 // ── Types ──────────────────────────────────────────────
@@ -117,8 +117,7 @@ function recentStepLogExists(
   step: string,
   dir: string,
 ): boolean {
-  const date = new Date().toISOString().slice(0, 10);
-  const path = join(dir, `${workflow}-${date}-logs.jsonl`);
+  const path = join(dir, `${workflow}-${dateLocal()}-logs.jsonl`);
   if (!existsSync(path)) return false;
   let content: string;
   try { content = readFileSync(path, "utf-8"); } catch { return false; }
@@ -152,12 +151,11 @@ export function emitStepChange(instance: string, step: string, dir?: string): vo
     // the workflow name here, only the instance label). Constant-cost: each
     // scan reads the tail of one or two small JSONL files.
     let workflowFiles: string[] = [];
+    const dateSuffix = `-${dateLocal()}-logs.jsonl`;
     try {
-      const dateSuffix = `-${new Date().toISOString().slice(0, 10)}-logs.jsonl`;
       workflowFiles = readdirSync(resolvedDir).filter((f) => f.endsWith(dateSuffix));
     } catch { /* dir might not exist yet */ }
     for (const f of workflowFiles) {
-      const dateSuffix = `-${new Date().toISOString().slice(0, 10)}-logs.jsonl`;
       const wf = f.slice(0, f.length - dateSuffix.length);
       if (recentStepLogExists(wf, runId, step, resolvedDir)) {
         return; // dedupe

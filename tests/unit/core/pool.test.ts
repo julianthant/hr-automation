@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { defineWorkflow } from '../../../src/core/workflow.js'
 import { runWorkflowPool } from '../../../src/core/pool.js'
+import { dateLocal } from '../../../src/tracker/jsonl.js'
 
 const fakeLaunch = () => Promise.resolve({
   page: { bringToFront: async () => {} } as unknown as import('playwright').Page,
@@ -22,7 +23,7 @@ function fakeSlot() {
 }
 
 function readTrackerEntries(dir: string, workflow: string): Array<Record<string, unknown>> {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = dateLocal()
   const path = join(dir, `${workflow}-${today}.jsonl`)
   if (!existsSync(path)) return []
   return readFileSync(path, 'utf-8')

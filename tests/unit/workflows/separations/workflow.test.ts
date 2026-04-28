@@ -4,7 +4,7 @@ import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { defineWorkflow, runWorkflowBatch } from "../../../../src/core/index.js";
-import { DEFAULT_DIR } from "../../../../src/tracker/jsonl.js";
+import { DEFAULT_DIR, dateLocal } from "../../../../src/tracker/jsonl.js";
 
 /**
  * Tests covering the separations migration's shape:
@@ -29,7 +29,7 @@ function fakeSlot() {
 }
 
 function cleanupWorkflow(workflow: string) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = dateLocal();
   for (const suffix of [".jsonl", "-logs.jsonl"]) {
     const p = join(DEFAULT_DIR, `${workflow}-${today}${suffix}`);
     if (existsSync(p)) rmSync(p);
