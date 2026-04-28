@@ -96,3 +96,61 @@ export class NoExistingContactError extends Error {
     this.name = "NoExistingContactError";
   }
 }
+
+/**
+ * Demote an existing emergency contact by unchecking its Primary Contact
+ * checkbox, then save. Used by the emergency-contact workflow's fuzzy-
+ * duplicate path: when an existing record's name fuzzily matches the new
+ * contact (e.g. historical typo "Tomako Langley" vs new "Tomoko Longley"),
+ * we demote the historical entry and add the new contact as primary.
+ *
+ * Idempotent: if the primary is already unchecked, just saves.
+ * Throws if `existingName` doesn't match any row's Contact Name input.
+ *
+ * Caller is expected to be on the Emergency Contact editor (post
+ * `navigateToEmergencyContact`). After the save settles, callers usually
+ * re-navigate via `navigateToEmergencyContact(page, emplId)` so the
+ * subsequent "Add a new row" plan starts from a clean editor state.
+ */
+export async function demoteExistingContact(
+  page: Page,
+  existingName: string,
+): Promise<void> {
+  log.step(`Demoting existing contact "${existingName}"...`);
+
+  await hidePeopleSoftModalMask(page);
+
+  const nameInputs = await emergencyContact.contactNameInputs(page).all();
+  let targetIndex = -1;
+  for (let i = 0; i < nameInputs.length; i++) {
+    const v = await nameInputs[i].inputValue({ timeout: 2_000 }).catch(() => "");
+    if (v.trim() === existingName.trim()) {
+      targetIndex = i;
+      break;
+    }
+  }
+  if (targetIndex === -1) {
+    throw new Error(
+      `demoteExistingContact: no Contact Name row matched "${existingName}". ` +
+        `Existing rows: [${nameInputs.length} found]`,
+    );
+  }
+
+  const primaryCheckboxes = emergencyContact.primaryContactCheckboxes(page);
+  const cb = primaryCheckboxes.nth(targetIndex);
+  const checked = await cb.isChecked({ timeout: 5_000 }).catch(() => false);
+  if (checked) {
+    await cb.uncheck({ timeout: 5_000 });
+    await page.waitForTimeout(500);
+    log.step(`Unchecked Primary Contact on row ${targetIndex + 1}`);
+  } else {
+    log.step(`Row ${targetIndex + 1} already non-primary — skipping uncheck`);
+  }
+
+  await hidePeopleSoftModalMask(page);
+  await emergencyContact.saveButton(page).click({ timeout: 10_000 });
+  await page.waitForTimeout(2_000);
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+
+  log.success(`Demoted "${existingName}" — Primary Contact unchecked + saved`);
+}
