@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { createServer, type Server } from 'node:http'
-import { unlinkSync } from 'node:fs'
+import { existsSync, unlinkSync } from 'node:fs'
 import type { RegisteredWorkflow } from './types.js'
 import { Session } from './session.js'
 import { runOneItem } from './workflow.js'
@@ -33,9 +33,12 @@ export interface DaemonOpts {
   sessionLaunchFn?: typeof Session.launch
   /** Test-only: cap the idle wait window (default 15min). */
   idleTimeoutMs?: number
+  /** Test-only: cap the lockfile self-heal interval (default 10s). */
+  lockHealIntervalMs?: number
 }
 
 const DEFAULT_IDLE_MS = 15 * 60 * 1000
+const DEFAULT_LOCK_HEAL_MS = 10_000
 
 /**
  * Daemon lifecycle phases — exposed via /status so CLI callers and
@@ -182,6 +185,34 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   log.step(
     `[Daemon ${wf.config.name}/${instanceId}] listening on 127.0.0.1:${port} (pid=${process.pid})`,
   )
+
+  // Self-heal: if anything (force-stop bypassing the unlink-via-finally,
+  // an external cleanup script, a misbehaving sweep) deletes our lockfile
+  // while we're still alive, rewrite it on the next tick. Without this, a
+  // subsequent dashboard `findAliveDaemons` returns 0, `computeSpawnPlan`
+  // recommends a fresh spawn, and the user ends up with a duplicate daemon
+  // alongside this one (browsers x2, Duo x2, "Separation 1" recycled).
+  // 10s is fast enough that the next dashboard retry sees a restored
+  // lockfile within a beat; the writeLockfile cost is ~1KB synchronous
+  // disk I/O on a 10s cadence — negligible.
+  const lockHealInterval = setInterval(() => {
+    if (shuttingDown) return
+    try {
+      if (!existsSync(lockPath)) {
+        log.warn(
+          `[Daemon ${wf.config.name}/${instanceId}] lockfile missing — restoring`,
+        )
+        writeLockfile(lock, lockPath)
+      }
+    } catch (err) {
+      log.warn(
+        `[Daemon ${wf.config.name}/${instanceId}] lockfile heal failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+    }
+  }, opts.lockHealIntervalMs ?? DEFAULT_LOCK_HEAL_MS)
+  lockHealInterval.unref()
 
   const sigHandler = (sig: string): void => {
     log.warn(`[Daemon ${wf.config.name}/${instanceId}] received ${sig}; shutting down`)
@@ -507,6 +538,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
 
     process.off('SIGINT', onSigint)
     process.off('SIGTERM', onSigterm)
+    clearInterval(lockHealInterval)
     try {
       unlinkSync(lockPath)
     } catch {

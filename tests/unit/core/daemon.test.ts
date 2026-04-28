@@ -278,3 +278,59 @@ test('runWorkflowDaemon: cleans up lockfile even when idle is interrupted', asyn
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('runWorkflowDaemon: self-heals lockfile when externally deleted', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-heal-'))
+  try {
+    const wf = defineWorkflow({
+      name: 'dint-heal',
+      schema: z.object({ id: z.string() }),
+      steps: ['a'],
+      systems: [],
+      authSteps: false,
+      handler: async () => {},
+    })
+
+    const runPromise = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: stubLaunch(),
+      idleTimeoutMs: 10_000,
+      lockHealIntervalMs: 50,
+    })
+
+    const { port } = await waitForDaemon('dint-heal', dir)
+    const daemonsSubdir = join(dir, 'daemons')
+    const lockfileName = readdirSync(daemonsSubdir).find((f) =>
+      f.startsWith('dint-heal-') && f.endsWith('.lock.json'),
+    )!
+    const lockPath = join(daemonsSubdir, lockfileName)
+    assert.ok(existsSync(lockPath), 'lockfile should exist after start')
+
+    // Simulate the bug: something external removes the lockfile while
+    // the daemon is healthy. findAliveDaemons would return 0 and trigger
+    // a duplicate spawn. The self-heal should rewrite the lockfile within
+    // one heal-interval tick.
+    rmSync(lockPath)
+    assert.equal(existsSync(lockPath), false)
+
+    await waitFor(() => existsSync(lockPath), 2000)
+    assert.ok(existsSync(lockPath), 'lockfile should be restored by self-heal')
+
+    // findAliveDaemons must now see the daemon again.
+    const alive = await findAliveDaemons('dint-heal', dir)
+    assert.equal(alive.length, 1)
+    assert.equal(alive[0].port, port)
+
+    await fetch(`http://127.0.0.1:${port}/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    await runPromise
+
+    assert.equal(existsSync(lockPath), false, 'lockfile removed on graceful stop')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
