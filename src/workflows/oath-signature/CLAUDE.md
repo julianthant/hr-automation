@@ -107,6 +107,19 @@ Single guard (tracker-side idempotency removed 2026-04-23):
   profile is the source of truth; a retry against the same EID converges
   correctly without a tracker-side cache.
 
+## Capture integration (mobile-photo entry)
+
+`src/capture/` is the alternate entry point: instead of uploading a
+pre-scanned PDF, the operator can click "Capture" on the dashboard, scan
+a QR code on their phone, and snap photos of each signed roster page.
+When the operator taps Done, capture bundles the photos into a PDF and
+fires its `onFinalize` callback. The dashboard's
+`makeCaptureFinalize(dir)` routes any session with
+`workflow: "oath-signature"` straight into `runPaperOathPrepare` — the
+same code path the file-upload "Run" flow uses, just with the PDF
+arriving from `.tracker/uploads/<sessionId>.pdf` instead of a multipart
+form.
+
 ## Dashboard "Run" button (paper-roster prep)
 
 Mirrors emergency-contact's prep flow. The operator uploads a scanned
@@ -149,23 +162,17 @@ prep row in pending/running as failed (the OCR + eid-lookup polling
 lives in the dashboard's Node process, so a backend restart leaves any
 in-flight prep row orphaned).
 
-EID-lookup item-id prefix is `oprep-` (vs emergency-contact's `prep-`),
-so the two prep flows can run concurrently without seeing each other's
-completion events when watching the same eid-lookup JSONL.
+EID-lookup item-id prefix is `oath-prep-` (vs emergency-contact's
+`ec-prep-`), so the two prep flows can run concurrently without seeing
+each other's completion events when watching the same eid-lookup JSONL.
 
-### Cross-workflow imports
+### Shared roster + match primitives
 
-`prepare.ts` imports from emergency-contact:
-
-- `src/workflows/emergency-contact/roster-loader.ts` — `findLatestRoster`,
-  `loadRoster` (xlsx → `RosterRow[]` with EID + name + optional address).
-- `src/workflows/emergency-contact/match.ts` — `matchAgainstRoster`
-  (per-name fuzzy scoring with the same 0.85 auto-accept threshold).
-
-These modules originally lived in `src/utils/` and were co-located into
-emergency-contact when it was their only consumer. With oath-signature
-becoming the second consumer, cross-workflow imports are pragmatic. If a
-third consumer arrives, promote them to a shared `src/match/` module.
+`prepare.ts` imports `findLatestRoster`, `loadRoster`, and
+`matchAgainstRoster` from `src/match/` — a shared module that holds
+roster xlsx loading, name matching (with Levenshtein), and US address
+normalization. emergency-contact also consumes it. See `src/match/index.ts`
+for the full export surface.
 
 ## Gotchas
 
@@ -197,7 +204,7 @@ third consumer arrives, promote them to a shared `src/match/` module.
   rosterMode is fixed (always xlsx in `.tracker/rosters/` or `src/data/` —
   the SharePoint onboarding spreadsheet); unsigned rows surface as
   deselected so the operator can spot OCR misreads of the signature
-  column; eid-lookup itemId prefix is `oprep-` (so concurrent
+  column; eid-lookup itemId prefix is `oath-prep-` (so concurrent
   emergency-contact + oath-signature prep flows don't collide on the
   shared eid-lookup JSONL); kernel input is `{emplId, date?}` per
   `OathSignatureInputSchema`. Cross-workflow imports of

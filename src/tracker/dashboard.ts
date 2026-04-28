@@ -506,9 +506,7 @@ const failureAlertCooldown = new Map<string, number>();
 // once at module load and served as plain text for every /capture/:token
 // request — the token only matters to the JS inside the page, which
 // extracts it from location.pathname and uses it to call the API
-// endpoints. onFinalize is a no-op stub today; oath paper-mode will
-// register a real callback via a per-workflow registry lookup once
-// `feature/oath-dual-mode` lands.
+// endpoints.
 
 const captureStore: CaptureSessionStore = createSessionStore();
 const CAPTURE_PHOTOS_DIR = ".tracker/captures";
@@ -527,9 +525,45 @@ function getCaptureMobileHtml(): string {
   }
   return captureMobileHtmlCache;
 }
-const captureNoopFinalize = async (): Promise<void> => {
-  /* TODO: register per-workflow finalize callbacks once oath paper-mode lands */
-};
+
+/**
+ * Per-workflow finalize dispatcher. Once the capture module bundles the
+ * PDF and sets `session.pdfPath`, route the finalized session to the
+ * right downstream pipeline based on `session.workflow`. Unknown
+ * workflows log a warn and otherwise no-op.
+ *
+ * Adding a new consumer: import its prepare function, add a case here,
+ * and update `src/capture/CLAUDE.md`.
+ */
+function makeCaptureFinalize(trackerDir: string) {
+  return async (session: import("../capture/sessions.js").CaptureSession): Promise<void> => {
+    if (!session.pdfPath) {
+      log.warn(`[capture] finalize fired without a pdfPath (sessionId=${session.sessionId})`);
+      return;
+    }
+    if (session.workflow === "oath-signature") {
+      const { runPaperOathPrepare } = await import(
+        "../workflows/oath-signature/prepare.js"
+      );
+      const rosterDirs = [
+        resolve(process.cwd(), ".tracker/rosters"),
+        resolve(process.cwd(), "src/data"),
+      ];
+      const rosterDir = rosterDirs.find((d) => existsSync(d)) ?? rosterDirs[0];
+      await runPaperOathPrepare({
+        pdfPath: session.pdfPath,
+        pdfOriginalName: `capture-${session.sessionId.slice(0, 8)}.pdf`,
+        rosterDir,
+        uploadsDir: resolve(process.cwd(), CAPTURE_UPLOADS_DIR),
+        trackerDir,
+      });
+      return;
+    }
+    log.warn(
+      `[capture] no finalize handler for workflow="${session.workflow}" — PDF saved at ${session.pdfPath}`,
+    );
+  };
+}
 
 /**
  * Test helper — clears the cooldown map so tests can re-run scans without
@@ -2811,7 +2845,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
           store: captureStore,
           lanIp: pickLanIp(),
           port,
-          onFinalize: captureNoopFinalize,
+          onFinalize: makeCaptureFinalize(dir),
         },
       );
       writeJson(result.status, result.body);

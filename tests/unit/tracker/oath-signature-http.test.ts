@@ -46,7 +46,7 @@ describe("sweepStuckOathPrepRows", () => {
   afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 
   it("marks pending and running prep rows as failed", () => {
-    const id = "oprep-1";
+    const id = "oath-prep-1";
     const runId = "run-1";
     trackEvent(
       {
@@ -74,7 +74,7 @@ describe("sweepStuckOathPrepRows", () => {
       {
         workflow: "oath-signature",
         timestamp: new Date().toISOString(),
-        id: "oprep-2",
+        id: "oath-prep-2",
         runId: "run-2",
         status: "done",
         data: { mode: "prepare", pdfPath: "/tmp/y.pdf" },
@@ -151,7 +151,7 @@ describe("handleOathApproveBatch", () => {
   afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 
   function emitPrepRow(runId: string): string {
-    const id = `oprep-${dateLocal()}-${runId.slice(0, 8)}`;
+    const id = `oath-prep-${dateLocal()}-${runId.slice(0, 8)}`;
     trackEvent(
       {
         workflow: "oath-signature",
@@ -233,7 +233,7 @@ describe("handleOathDiscardPrepare", () => {
 
   it("emits a failed/discarded row when prep is in progress", async () => {
     const runId = "run-discard";
-    const id = `oprep-${dateLocal()}-${runId.slice(0, 8)}`;
+    const id = `oath-prep-${dateLocal()}-${runId.slice(0, 8)}`;
     trackEvent(
       {
         workflow: "oath-signature",
@@ -256,7 +256,7 @@ describe("handleOathDiscardPrepare", () => {
 
   it("refuses to discard an already-terminal row", async () => {
     const runId = "run-already-done";
-    const id = `oprep-${dateLocal()}-${runId.slice(0, 8)}`;
+    const id = `oath-prep-${dateLocal()}-${runId.slice(0, 8)}`;
     trackEvent(
       {
         workflow: "oath-signature",
@@ -274,7 +274,7 @@ describe("handleOathDiscardPrepare", () => {
 
   it("preserves the uploaded PDF when the path is missing on disk (best-effort)", async () => {
     const runId = "run-discard-missing-pdf";
-    const id = `oprep-${dateLocal()}-${runId.slice(0, 8)}`;
+    const id = `oath-prep-${dateLocal()}-${runId.slice(0, 8)}`;
     trackEvent(
       {
         workflow: "oath-signature",
