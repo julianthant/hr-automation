@@ -31,20 +31,30 @@ export type Employee = z.infer<typeof EmployeeSchema>;
 
 // ── Emergency contact (the actual input to UCPath) ────────
 
-export const EmergencyContactSchema = z.object({
-  name: z.string().min(1),
-  /** Raw relationship text from the form (e.g. "Mom", "Dad", "Parent"). Mapped to UCPath dropdown at runtime. */
-  relationship: z.string().min(1),
-  /** Always true per form conventions — single emergency contact per record. */
-  primary: z.boolean().default(true),
-  /** Computed during extraction by comparing contact address to employee home address. */
-  sameAddressAsEmployee: z.boolean(),
-  /** Present only when sameAddressAsEmployee is false. */
-  address: AddressSchema.nullable().optional(),
-  cellPhone: z.string().nullable().optional(),
-  homePhone: z.string().nullable().optional(),
-  workPhone: z.string().nullable().optional(),
-});
+export const EmergencyContactSchema = z
+  .object({
+    name: z.string().min(1),
+    /** Raw relationship text from the form (e.g. "Mom", "Dad", "Parent"). Mapped to UCPath dropdown at runtime. */
+    relationship: z.string().min(1),
+    /** Always true per form conventions — single emergency contact per record. */
+    primary: z.boolean().default(true),
+    /** Computed during extraction by comparing contact address to employee home address. */
+    sameAddressAsEmployee: z.boolean(),
+    /** Present only when sameAddressAsEmployee is false. */
+    address: AddressSchema.nullable().optional(),
+    cellPhone: z.string().nullable().optional(),
+    homePhone: z.string().nullable().optional(),
+    workPhone: z.string().nullable().optional(),
+  })
+  // When the contact has no address on the form, force same-as-employee=true
+  // so UCPath gets the employee's address rather than no address at all.
+  // Geonmoo Lee's blank-address case (2026-04-27 batch) was the trigger.
+  .transform((c) => {
+    if (c.sameAddressAsEmployee === false && (c.address === null || c.address === undefined)) {
+      return { ...c, sameAddressAsEmployee: true };
+    }
+    return c;
+  });
 export type EmergencyContact = z.infer<typeof EmergencyContactSchema>;
 
 // ── Record + batch ─────────────────────────────────────────
