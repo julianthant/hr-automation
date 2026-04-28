@@ -29,6 +29,7 @@ import {
 import { log } from "../utils/log.js";
 import { errorMessage } from "../utils/errors.js";
 import { runPaperOathPrepare } from "../workflows/oath-signature/prepare.js";
+import { runDigitalOathPrepare } from "../workflows/oath-signature/digital-prepare.js";
 import {
   OathPrepareRowDataSchema,
   OathPreviewRecordSchema,
@@ -112,6 +113,64 @@ export async function handleOathPrepareUpload(
     log.error(`[handleOathPrepareUpload] runPaperOathPrepare threw: ${errorMessage(err)}`);
   });
   return { ok: true, parentRunId, pdfPath };
+}
+
+// ─── POST /api/oath-signature/digital-prepare ───────────
+
+export interface OathDigitalPrepareHttpInput {
+  emplIds: unknown;
+  label?: string;
+}
+
+export interface OathDigitalPrepareHttpResult {
+  ok: boolean;
+  parentRunId?: string;
+  error?: string;
+}
+
+let _digitalPrepareForTests: typeof runDigitalOathPrepare | undefined;
+/** @internal — tests can replace `runDigitalOathPrepare` with a stub. */
+export function __setOathDigitalPrepareForTests(
+  fn: typeof runDigitalOathPrepare | undefined,
+): void {
+  _digitalPrepareForTests = fn;
+}
+
+/**
+ * Validate the EID list (5+ digits each, deduped) and fire-and-forget
+ * `runDigitalOathPrepare`. Returns synchronously with the parentRunId
+ * the operator can use to find the resulting prep row in the dashboard.
+ */
+export async function handleOathDigitalPrepare(
+  input: OathDigitalPrepareHttpInput,
+  dir: string,
+): Promise<OathDigitalPrepareHttpResult> {
+  if (!Array.isArray(input.emplIds) || input.emplIds.length === 0) {
+    return { ok: false, error: "emplIds must be a non-empty array" };
+  }
+  const emplIds: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of input.emplIds) {
+    const v = String(raw ?? "").trim();
+    if (!/^\d{5,}$/.test(v)) {
+      return { ok: false, error: `invalid EID: ${JSON.stringify(raw)}` };
+    }
+    if (seen.has(v)) continue;
+    seen.add(v);
+    emplIds.push(v);
+  }
+
+  const fn = _digitalPrepareForTests ?? runDigitalOathPrepare;
+  const parentRunId = randomUUID();
+  void fn({
+    emplIds,
+    label: input.label ? String(input.label).slice(0, 80) : undefined,
+    trackerDir: dir,
+    runId: parentRunId,
+  }).catch((err) => {
+    log.error(`[handleOathDigitalPrepare] runDigitalOathPrepare threw: ${errorMessage(err)}`);
+  });
+  return { ok: true, parentRunId };
 }
 
 // ─── POST /api/oath-signature/approve-batch ─────────────

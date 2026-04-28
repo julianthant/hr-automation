@@ -107,54 +107,41 @@ Single guard (tracker-side idempotency removed 2026-04-23):
   profile is the source of truth; a retry against the same EID converges
   correctly without a tracker-side cache.
 
-## Digital-mode lookup (deferred — needs live CRM mapping)
+## Digital-mode lookup (CRM onboarding history)
 
-The original 3-feature plan included a digital path: instead of a paper
-roster, the operator pastes a list of EIDs and the workflow looks up
-each oath signature date in CRM's "Show Onboarding History" view. The
-date sample format (per the operator):
+Alternate prep path: instead of a paper roster, the operator pastes a
+list of EIDs and the workflow pulls each EID's oath signature date out
+of CRM's onboarding-history audit log. Same `OathPrepareRowData`
+schema, same `OathPreviewRow` UI for review + approve as paper mode.
 
 ```
-4/27/2026 1:26 PM    Wendy Chen    ProcessStageText    Witness Ceremony Oath Created    Witness Ceremony Oath New Hire Signed
+TopBar Digital button (oath-signature)
+  → modal: textarea, paste EIDs (one per line)
+  → POST /api/oath-signature/digital-prepare { emplIds }
+    → runDigitalOathPrepare in src/workflows/oath-signature/digital-prepare.ts:
+      - synchronous: writes pending tracker row → CRM browser launches
+      - synchronous: loginToACTCrm (1 Duo)
+      - per EID: lookupOathSignatureDate(page, emplId) →
+        - GET /hr/ONB_SearchOnboardings?q=<EID>           (search returns 1 row)
+        - extract record id from first result link's href
+        - GET /hr/ONB_ShowOnboardingHistory?id=<RECORD_ID> (deep link, no button click)
+        - find row whose New Value is "Witness Ceremony Oath New Hire Signed"
+        - format date "M/D/YYYY h:mm AM/PM" → "MM/DD/YYYY"
+      - terminal status: done (writes per-EID OathPreviewRecord into data.records)
+  → OathPreviewRow renders the prep row in QueuePanel
+  → Approve fans out N kernel queue items via the same /api/oath-signature/approve-batch
 ```
 
-The row to find is the one whose final column reads
-`Witness Ceremony Oath New Hire Signed`; the first cell is the
-`MM/DD/YYYY` date the workflow needs.
+Selectors live in `src/systems/crm/selectors.ts` under the
+`onboardingHistory` namespace (`historyRows`, `rowCells`,
+`firstResultLink`); the `lookupOathSignatureDate(page, emplId)` helper
+in `src/systems/crm/onboarding-history.ts` is verified live against
+EID 10873611 (Jasmine Ochoa) as of 2026-04-28.
 
-**Status: backend NOT shipped.** The `runPaperOathPrepare` flow handles
-the paper case; for the digital case we need:
-
-1. Live CRM playwright-cli session against a known EID (e.g. 10873611,
-   Jasmine Ochoa) to map:
-   - The path from CRM landing → View Onboarding Record (search by EID,
-     or whatever the actual nav is — current `searchByEmail` uses
-     `ONB_SearchOnboardings?q=<email>`; whether `?q=<eid>` works is
-     unverified)
-   - The "Show Onboarding History" button selector (likely
-     `getByRole("button", { name: /show onboarding history/i })`)
-     plus its target — does it open a modal, a new tab, or expand
-     in place?
-   - The history table row format and the date cell selector
-2. Register selectors in `src/systems/crm/selectors.ts` under a new
-   `onboardingHistory` namespace + bump `// verified` dates
-3. Implement `lookupOathSignatureDate(page, emplId)` in
-   `src/systems/crm/onboarding-history.ts` that returns the date
-   string or `null`
-4. Implement `runDigitalOathPrepare(emplIds, options)` that:
-   - Launches a CRM kernel session via the existing `loginToACTCrm` flow
-     (1 Duo)
-   - For each EID: `lookupOathSignatureDate` → push an
-     `OathPreviewRecord` with `matchState: "matched"`,
-     `matchSource: "form"` (already-known EID), `dateSigned: <date>`
-   - Reuses the same `OathPrepareRowData` schema → reuses the same
-     `OathPreviewRow` UI for review/approve
-5. HTTP endpoint `POST /api/oath-signature/digital-prepare` and a
-   `TopBarDigitalPrepareButton` next to the Capture button
-6. CLI: `npm run oath-signature:digital <emplId> [emplId ...]`
-
-The shared schema + UI mean approval / fan-out is already wired —
-digital-mode plugs in at the prepare phase only.
+EIDs whose CRM record exists but has no `Witness Ceremony Oath New Hire
+Signed` row land as `matchState: "unresolved"` + `selected: false` so
+the operator can see them in the preview, manually edit the date if
+they have it, and re-toggle the checkbox to approve.
 
 ## Capture integration (mobile-photo entry)
 

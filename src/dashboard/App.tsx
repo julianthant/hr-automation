@@ -15,6 +15,7 @@ import { WorkflowRail } from "./components/WorkflowRail";
 import { QuickRunPanel } from "./components/QuickRunPanel";
 import { TopBarRunButton } from "./components/TopBarRunButton";
 import { TopBarCaptureButton } from "./components/TopBarCaptureButton";
+import { TopBarDigitalOathButton } from "./components/TopBarDigitalOathButton";
 import { parsePrepareRowData } from "./components/preview-types";
 import { dateLocal } from "./lib/utils";
 
@@ -192,10 +193,13 @@ export default function App() {
               />
             )}
             {workflow === "oath-signature" && (
-              <TopBarCaptureButton
-                workflow={workflow}
-                contextHint="Photo each signed roster page, then tap Done"
-              />
+              <>
+                <TopBarCaptureButton
+                  workflow={workflow}
+                  contextHint="Photo each signed roster page, then tap Done"
+                />
+                <TopBarDigitalOathButton />
+              </>
             )}
           </div>
         }
