@@ -33,6 +33,7 @@ function EndDaemonButton({ workflow }: { workflow: string }) {
         processesKilled?: number;
         browsersKilled?: number;
         queuedCancelled?: number;
+        phantomsCleared?: number;
         error?: string;
       };
       if (!res.ok || !json.ok) {
@@ -43,15 +44,22 @@ function EndDaemonButton({ workflow }: { workflow: string }) {
       const procs = json.processesKilled ?? 0;
       const browsers = json.browsersKilled ?? 0;
       const queued = json.queuedCancelled ?? 0;
+      const phantoms = json.phantomsCleared ?? 0;
       const total = json.stopped ?? daemons + procs;
       const parts: string[] = [];
       if (daemons > 0) parts.push(`${daemons} daemon${daemons === 1 ? "" : "s"}`);
       if (procs > 0) parts.push(`${procs} process${procs === 1 ? "" : "es"}`);
       if (browsers > 0) parts.push(`${browsers} browser${browsers === 1 ? "" : "s"}`);
       if (queued > 0) parts.push(`${queued} queued item${queued === 1 ? "" : "s"}`);
+      if (phantoms > 0) parts.push(`${phantoms} phantom${phantoms === 1 ? "" : "s"}`);
       const detail = parts.length > 0 ? parts.join(" + ") : "nothing alive";
-      if (total === 0 && queued === 0 && browsers === 0) {
+      if (total === 0 && queued === 0 && browsers === 0 && phantoms === 0) {
         toast.warning(`Nothing to stop — no alive ${workflow} daemons, processes, browsers, or queued items`, { id: toastId });
+      } else if (total === 0 && queued === 0 && browsers === 0 && phantoms > 0) {
+        toast.success(
+          `Cleared ${phantoms} stale ${workflow} session${phantoms === 1 ? "" : "s"} from the panel (no live process found)`,
+          { id: toastId },
+        );
       } else {
         toast.success(
           force

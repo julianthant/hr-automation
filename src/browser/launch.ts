@@ -58,8 +58,13 @@ export async function gotoWithRetry(
 export interface LaunchOptions {
   /** Persistent session directory. When set, uses launchPersistentContext() to reuse login state. */
   sessionDir?: string;
-  /** Viewport dimensions (default: 1920x1080). */
-  viewport?: { width: number; height: number };
+  /**
+   * Viewport dimensions. Default `null` — the page viewport tracks the OS window
+   * size, so content renders at the visible window's dimensions and native
+   * scrollbars appear on overflow. Pass an explicit `{ width, height }` only
+   * when a workflow needs a fixed render size regardless of window size.
+   */
+  viewport?: { width: number; height: number } | null;
   /** Extra Chromium args (e.g. --window-position). */
   args?: string[];
   /** Accept downloads (default: false). */
@@ -77,7 +82,7 @@ export async function launchBrowser(options: LaunchOptions = {}): Promise<{
   context: BrowserContext;
   page: Page;
 }> {
-  const viewport = options.viewport ?? { width: 1920, height: 1080 };
+  const viewport = options.viewport === undefined ? null : options.viewport;
 
   if (options.sessionDir) {
     log.step(`Launching browser (persistent session: ${options.sessionDir})...`);

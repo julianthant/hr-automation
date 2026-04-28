@@ -25,6 +25,7 @@ import {
 import type { DaemonLockfile } from './daemon-types.js'
 import { emitItemStart, emitItemComplete } from '../tracker/session-events.js'
 import { trackEvent } from '../tracker/jsonl.js'
+import { buildTrackerDataForInput } from './enqueue-dispatch.js'
 
 export interface DaemonOpts {
   trackerDir?: string
@@ -471,17 +472,13 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
               /* best-effort — queue event append; tracker row below is the user-visible signal */
             }
             try {
-              const data: Record<string, string> =
-                item.input && typeof item.input === 'object'
-                  ? Object.fromEntries(
-                      Object.entries(item.input as Record<string, unknown>)
-                        .filter(([, v]) => v !== undefined && v !== null)
-                        .map(([k, v]) => [
-                          k,
-                          typeof v === 'object' ? JSON.stringify(v) : String(v),
-                        ]),
-                    )
-                  : {}
+              // Reuse the same data-shape helper that `onPreEmitPending`
+              // uses so prefilledData (edit-and-resume) gets hoisted onto
+              // top-level keys. Without this, the failed row's `data` would
+              // override the pending row's hoisted fields with `docId` +
+              // an opaque `prefilledData` JSON blob, hiding the user's
+              // edits in the dashboard detail grid.
+              const data = buildTrackerDataForInput(item.input)
               trackEvent(
                 {
                   workflow: wf.config.name,
