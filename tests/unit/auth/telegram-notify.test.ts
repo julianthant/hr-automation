@@ -137,3 +137,107 @@ describe("formatAuthEventMessage", () => {
     assert.match(msg, /oath &amp; signature/);
   });
 });
+
+describe("createTelegramNotifier — HTTP request shape", () => {
+  it("POSTs to the right Telegram bot endpoint", async () => {
+    const { calls, fetchFn } = makeRecorder();
+    const notify = createTelegramNotifier({
+      fetchFn,
+      tokenValue: "111:AAA",
+      chatIdValue: "987",
+    });
+    await notify(sampleEvent);
+    assert.equal(calls[0].url, "https://api.telegram.org/bot111:AAA/sendMessage");
+    assert.equal(calls[0].init?.method, "POST");
+  });
+
+  it("uses HTML parse_mode and includes chat_id + text in body", async () => {
+    const { calls, fetchFn } = makeRecorder();
+    const notify = createTelegramNotifier({
+      fetchFn,
+      tokenValue: "111:AAA",
+      chatIdValue: "987",
+    });
+    await notify(sampleEvent);
+    const body = JSON.parse(String(calls[0].init?.body));
+    assert.equal(body.chat_id, "987");
+    assert.equal(body.parse_mode, "HTML");
+    assert.match(body.text, /UCPath/);
+  });
+
+  it("sends Content-Type: application/json", async () => {
+    const { calls, fetchFn } = makeRecorder();
+    const notify = createTelegramNotifier({
+      fetchFn,
+      tokenValue: "111:AAA",
+      chatIdValue: "987",
+    });
+    await notify(sampleEvent);
+    const headers = calls[0].init?.headers as Record<string, string>;
+    assert.equal(headers["Content-Type"], "application/json");
+  });
+});
+
+describe("createTelegramNotifier — error swallowing", () => {
+  it("does not throw when fetchFn rejects (network error)", async () => {
+    const failing: FetchFn = async () => {
+      throw new Error("ECONNREFUSED");
+    };
+    const notify = createTelegramNotifier({
+      fetchFn: failing,
+      tokenValue: "111:AAA",
+      chatIdValue: "987",
+    });
+    await assert.doesNotReject(notify(sampleEvent));
+  });
+
+  it("does not throw on HTTP 401 (invalid token)", async () => {
+    const fail401: FetchFn = async () =>
+      new Response('{"ok":false,"error_code":401}', { status: 401 });
+    const notify = createTelegramNotifier({
+      fetchFn: fail401,
+      tokenValue: "111:AAA",
+      chatIdValue: "987",
+    });
+    await assert.doesNotReject(notify(sampleEvent));
+  });
+
+  it("does not throw on HTTP 429 (rate limited)", async () => {
+    const fail429: FetchFn = async () =>
+      new Response('{"ok":false,"error_code":429}', { status: 429 });
+    const notify = createTelegramNotifier({
+      fetchFn: fail429,
+      tokenValue: "111:AAA",
+      chatIdValue: "987",
+    });
+    await assert.doesNotReject(notify(sampleEvent));
+  });
+
+  it("does not throw when AbortSignal fires (slow fetch)", async () => {
+    // Wait for the abort signal then translate to a thrown error the way
+    // real `fetch` does on AbortSignal.timeout. Real production timeout is
+    // 5s — for the test we override to 50ms via a custom fetchFn that
+    // honors the signal but cuts out fast.
+    const slow: FetchFn = async (_url, init) => {
+      await new Promise<void>((_resolve, reject) => {
+        const sig = init?.signal;
+        if (sig) {
+          if (sig.aborted) {
+            reject(new Error("aborted"));
+            return;
+          }
+          sig.addEventListener("abort", () => reject(new Error("aborted")));
+          // Don't add a fallback timer — let the real AbortSignal.timeout
+          // (5s) fire. Test deliberately exercises the timeout path.
+        }
+      });
+      throw new Error("unreachable");
+    };
+    const notify = createTelegramNotifier({
+      fetchFn: slow,
+      tokenValue: "111:AAA",
+      chatIdValue: "987",
+    });
+    await assert.doesNotReject(notify(sampleEvent));
+  });
+});
