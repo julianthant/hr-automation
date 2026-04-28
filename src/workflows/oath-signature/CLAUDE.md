@@ -107,6 +107,55 @@ Single guard (tracker-side idempotency removed 2026-04-23):
   profile is the source of truth; a retry against the same EID converges
   correctly without a tracker-side cache.
 
+## Digital-mode lookup (deferred — needs live CRM mapping)
+
+The original 3-feature plan included a digital path: instead of a paper
+roster, the operator pastes a list of EIDs and the workflow looks up
+each oath signature date in CRM's "Show Onboarding History" view. The
+date sample format (per the operator):
+
+```
+4/27/2026 1:26 PM    Wendy Chen    ProcessStageText    Witness Ceremony Oath Created    Witness Ceremony Oath New Hire Signed
+```
+
+The row to find is the one whose final column reads
+`Witness Ceremony Oath New Hire Signed`; the first cell is the
+`MM/DD/YYYY` date the workflow needs.
+
+**Status: backend NOT shipped.** The `runPaperOathPrepare` flow handles
+the paper case; for the digital case we need:
+
+1. Live CRM playwright-cli session against a known EID (e.g. 10873611,
+   Jasmine Ochoa) to map:
+   - The path from CRM landing → View Onboarding Record (search by EID,
+     or whatever the actual nav is — current `searchByEmail` uses
+     `ONB_SearchOnboardings?q=<email>`; whether `?q=<eid>` works is
+     unverified)
+   - The "Show Onboarding History" button selector (likely
+     `getByRole("button", { name: /show onboarding history/i })`)
+     plus its target — does it open a modal, a new tab, or expand
+     in place?
+   - The history table row format and the date cell selector
+2. Register selectors in `src/systems/crm/selectors.ts` under a new
+   `onboardingHistory` namespace + bump `// verified` dates
+3. Implement `lookupOathSignatureDate(page, emplId)` in
+   `src/systems/crm/onboarding-history.ts` that returns the date
+   string or `null`
+4. Implement `runDigitalOathPrepare(emplIds, options)` that:
+   - Launches a CRM kernel session via the existing `loginToACTCrm` flow
+     (1 Duo)
+   - For each EID: `lookupOathSignatureDate` → push an
+     `OathPreviewRecord` with `matchState: "matched"`,
+     `matchSource: "form"` (already-known EID), `dateSigned: <date>`
+   - Reuses the same `OathPrepareRowData` schema → reuses the same
+     `OathPreviewRow` UI for review/approve
+5. HTTP endpoint `POST /api/oath-signature/digital-prepare` and a
+   `TopBarDigitalPrepareButton` next to the Capture button
+6. CLI: `npm run oath-signature:digital <emplId> [emplId ...]`
+
+The shared schema + UI mean approval / fan-out is already wired —
+digital-mode plugs in at the prepare phase only.
+
 ## Capture integration (mobile-photo entry)
 
 `src/capture/` is the alternate entry point: instead of uploading a
