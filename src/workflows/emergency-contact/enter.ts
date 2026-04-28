@@ -113,8 +113,12 @@ export function buildEmergencyContactPlan(
   );
 
   // 5. Same Address as Employee + manual-address fallback.
+  // Treat (sameAddressAsEmployee=false, address=null) as same-address — the
+  // schema transform normally rewrites this, but the guard here is defense
+  // in depth for any caller that bypasses Zod.
+  const wantsSameAddress = contact.sameAddressAsEmployee || !contact.address;
   plan.add(
-    contact.sameAddressAsEmployee
+    wantsSameAddress
       ? 'Check "Same Address as Employee"'
       : 'Uncheck "Same Address as Employee" and enter manual address',
     async () => {
@@ -123,15 +127,22 @@ export function buildEmergencyContactPlan(
         .first();
       const checked = await sameAddrCb.isChecked({ timeout: 5_000 }).catch(() => false);
 
-      if (contact.sameAddressAsEmployee) {
+      if (wantsSameAddress) {
         if (!checked) await sameAddrCb.check({ timeout: 5_000 });
         await page.waitForTimeout(1_500);
+        if (!contact.sameAddressAsEmployee && !contact.address) {
+          log.step(
+            "sameAddressAsEmployee=false + address=null — defensive fallback to same-as-employee",
+          );
+        }
         return;
       }
 
       if (checked) await sameAddrCb.uncheck({ timeout: 5_000 });
       await page.waitForTimeout(1_500);
 
+      // Unreachable in practice (wantsSameAddress is true when address is null),
+      // but kept as a final safety net.
       if (!contact.address) {
         log.step("sameAddressAsEmployee=false but no address in YAML — leaving blank");
         return;
