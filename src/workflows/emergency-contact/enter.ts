@@ -6,11 +6,21 @@ import {
   readExistingContactNames,
 } from "../../systems/ucpath/personal-data.js";
 import { mapRelationship } from "./config.js";
+import { levenshteinDistance } from "./levenshtein.js";
 import type { EmergencyContactRecord } from "./schema.js";
 
 export interface EmergencyContactContext {
   /** Employee name as discovered on the UCPath page. */
   employeeName: string;
+}
+
+export interface ContactMatch {
+  /** The existing contact's name as it appears on the UCPath record. */
+  name: string;
+  /** Levenshtein distance on normalized names. 0 = exact, > 2 = no match. */
+  distance: number;
+  /** True iff distance === 0. */
+  isExact: boolean;
 }
 
 function normalizeNameForCompare(s: string): string {
@@ -22,20 +32,48 @@ function normalizeNameForCompare(s: string): string {
 }
 
 /**
- * Check whether the batch's target contact is already saved on this employee's
- * record. Used as a pre-flight duplicate guard in workflow.ts — if this returns
- * a non-null string, the workflow skips the record entirely (no ActionPlan
- * execution, no dashboard "failed" noise).
+ * Pure matcher — finds the closest fuzzy match for a target name within a
+ * list of existing contact names. Uses Levenshtein on normalized forms.
+ * Returns null if no candidate is within distance 2.
+ *
+ * Distance 0 = exact (typically "skip — already current").
+ * Distance 1-2 = fuzzy (typically "demote existing primary, add new as primary").
+ * > 2 = treat as no match.
+ */
+export function pickBestContactMatch(
+  existingNames: readonly string[],
+  targetName: string,
+): ContactMatch | null {
+  const targetNorm = normalizeNameForCompare(targetName);
+  let best: ContactMatch | null = null;
+  for (const candidate of existingNames) {
+    const norm = normalizeNameForCompare(candidate);
+    const distance = levenshteinDistance(norm, targetNorm);
+    if (distance > 2) continue;
+    if (!best || distance < best.distance) {
+      best = { name: candidate, distance, isExact: distance === 0 };
+    }
+  }
+  return best;
+}
+
+/**
+ * UCPath-side wrapper — reads existing contact names off the page, then
+ * delegates to pickBestContactMatch.
+ *
+ * Returns:
+ *   - `null` when no existing contact is within fuzzy-match distance.
+ *   - `{ name, distance: 0, isExact: true }` for an exact match (skip).
+ *   - `{ name, distance: 1|2, isExact: false }` for a fuzzy match
+ *     (workflow should demote the existing primary and add new as primary).
  */
 export async function findExistingContactDuplicate(
   page: Page,
   targetName: string,
-): Promise<string | null> {
+): Promise<ContactMatch | null> {
   const existing = await readExistingContactNames(page);
   log.step(`Existing contacts on record: [${existing.join(" | ") || "none"}]`);
-  const targetNorm = normalizeNameForCompare(targetName);
-  const match = existing.find((n) => normalizeNameForCompare(n) === targetNorm);
-  return match ?? null;
+  return pickBestContactMatch(existing, targetName);
 }
 
 /**

@@ -1258,6 +1258,24 @@ export const emergencyContact = {
    */
   contactNameInputs: (page: Page): Locator =>
     page.getByRole("textbox", { name: "Contact Name" }),
+
+  /**
+   * Every Primary Contact checkbox on the editor — one per row, in
+   * document order, parallel to `contactNameInputs`. Used by
+   * `demoteExistingContact` to uncheck the primary on a fuzzy-matched
+   * historical contact (e.g. "Tomako Langley" demoted in favor of
+   * the correctly-spelled "Tomoko Longley"). verified 2026-04-28
+   * @tags primary, contact, checkbox, emergency-contact, demote
+   */
+  primaryContactCheckboxes: (page: Page): Locator =>
+    page.getByRole("checkbox", { name: "Primary Contact" }),
+
+  /**
+   * Save button at the bottom of the editor. verified 2026-04-14
+   * @tags save, button, emergency-contact
+   */
+  saveButton: (page: Page): Locator =>
+    page.getByRole("button", { name: "Save", exact: true }).first(),
 };
 
 // ─── Person Profiles → Oath Signature (standalone deep-link URL) ──────────

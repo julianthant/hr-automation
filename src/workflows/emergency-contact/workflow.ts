@@ -5,7 +5,10 @@ import { defineWorkflow, runWorkflowBatch } from "../../core/index.js";
 import { loginToUCPath } from "../../auth/login.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 import { TransactionError } from "../../systems/ucpath/types.js";
-import { navigateToEmergencyContact } from "../../systems/ucpath/personal-data.js";
+import {
+  navigateToEmergencyContact,
+  demoteExistingContact,
+} from "../../systems/ucpath/personal-data.js";
 import { downloadSharePointFile } from "../sharepoint-download/index.js";
 import { verifyBatchAgainstRoster } from "./roster-verify.js";
 import {
@@ -100,18 +103,33 @@ export const emergencyContactWorkflow = defineWorkflow({
         ctx.updateData({ employeeName: discoveredCtx.employeeName });
       }
 
-      // Duplicate guard (pre-plan). If the contact already exists, signal
-      // the outer handler to skip the plan entirely — avoids log spam + data
-      // changes. Early-return here returns the skip metadata so the outer
-      // handler can short-circuit without firing the fill-form / save steps.
+      // Duplicate guard (pre-plan). Returns ContactMatch | null:
+      //   - null: no match within distance 2 → add normally.
+      //   - isExact: existing record is already current → skip the plan.
+      //   - fuzzy (distance 1-2): likely historical typo of the same person →
+      //     demote the existing primary, then add new as primary.
       const existing = await findExistingContactDuplicate(page, record.emergencyContact.name);
-      if (existing) {
+      if (existing && existing.isExact) {
         ctx.updateData({
           skipped: "true",
-          skipReason: `Contact "${existing}" already exists`,
+          skipReason: `Contact "${existing.name}" already exists (exact match)`,
         });
-        log.success(`Skipping — "${existing}" already present on this employee's record`);
+        log.success(`Skipping — "${existing.name}" already present on this employee's record`);
         return true;
+      }
+      if (existing && !existing.isExact) {
+        // Fuzzy match — demote the existing row and continue with normal add.
+        log.step(
+          `Fuzzy duplicate "${existing.name}" (distance ${existing.distance}) — demoting and adding new as primary.`,
+        );
+        await demoteExistingContact(page, existing.name);
+        // After save+return, navigate back into the editor for this employee
+        // so the subsequent fill-form step starts from the right place.
+        await navigateToEmergencyContact(page, record.employee.employeeId);
+        ctx.updateData({
+          fuzzyDemote: "true",
+          fuzzyDemoteName: existing.name,
+        });
       }
       return false;
     });
