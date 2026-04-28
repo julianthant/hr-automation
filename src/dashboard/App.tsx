@@ -7,12 +7,14 @@ import { LogPanel } from "./components/LogPanel";
 import { SessionPanel } from "./components/SessionPanel";
 import { useEntries } from "./components/hooks/useEntries";
 import { usePreflight } from "./components/hooks/usePreflight";
+import { useTelegramToasts } from "./components/hooks/useTelegramToasts";
 import { useWorkflow, autoLabel } from "./workflows-context";
 import { resolveEntryName } from "./components/entry-display";
 import type { SearchResultRow } from "./components/types";
 import { WorkflowRail } from "./components/WorkflowRail";
 import { QuickRunPanel } from "./components/QuickRunPanel";
 import { TopBarRunButton } from "./components/TopBarRunButton";
+import { TopBarCaptureButton } from "./components/TopBarCaptureButton";
 import { parsePrepareRowData } from "./components/preview-types";
 import { dateLocal } from "./lib/utils";
 
@@ -52,6 +54,7 @@ export default function App() {
 
   // Pre-flight check on mount
   usePreflight();
+  useTelegramToasts();
 
   // Sync state to URL so refresh preserves selection
   useEffect(() => {
@@ -186,6 +189,12 @@ export default function App() {
                       parsePrepareRowData(e.data) !== null,
                   ).length
                 }
+              />
+            )}
+            {workflow === "oath-signature" && (
+              <TopBarCaptureButton
+                workflow={workflow}
+                contextHint="Photo each signed roster page, then tap Done"
               />
             )}
           </div>
