@@ -82,7 +82,7 @@ function readTrackerLines(trackerDir: string): TrackerLine[] {
 describe("runPrepare — happy path (form-EID only)", () => {
   let tmp: string, trackerDir: string, rosterDir: string, uploadsDir: string, pdfPath: string;
   beforeEach(async () => {
-    tmp = mkdtempSync(join(tmpdir(), "prep-"));
+    tmp = mkdtempSync(join(tmpdir(), "ec-prep-"));
     trackerDir = join(tmp, "tracker");
     rosterDir = join(tmp, "data");
     uploadsDir = join(tmp, "uploads");
@@ -131,7 +131,7 @@ describe("runPrepare — happy path (form-EID only)", () => {
 describe("runPrepare — roster name match", () => {
   let tmp: string, trackerDir: string, rosterDir: string, uploadsDir: string, pdfPath: string;
   beforeEach(async () => {
-    tmp = mkdtempSync(join(tmpdir(), "prep-"));
+    tmp = mkdtempSync(join(tmpdir(), "ec-prep-"));
     trackerDir = join(tmp, "tracker");
     rosterDir = join(tmp, "data");
     uploadsDir = join(tmp, "uploads");
@@ -179,7 +179,7 @@ describe("runPrepare — roster name match", () => {
 describe("runPrepare — eid-lookup fallback", () => {
   let tmp: string, trackerDir: string, rosterDir: string, uploadsDir: string, pdfPath: string;
   beforeEach(async () => {
-    tmp = mkdtempSync(join(tmpdir(), "prep-"));
+    tmp = mkdtempSync(join(tmpdir(), "ec-prep-"));
     trackerDir = join(tmp, "tracker");
     rosterDir = join(tmp, "data");
     uploadsDir = join(tmp, "uploads");
@@ -206,7 +206,7 @@ describe("runPrepare — eid-lookup fallback", () => {
       // Simulate eid-lookup daemon writing a done row asynchronously.
       setTimeout(() => {
         const eidFile = join(trackerDir, `eid-lookup-${dateLocal()}.jsonl`);
-        const itemId = `prep-${parentRunId}-r${inputs[0].__prepIndex}`;
+        const itemId = `ec-prep-${parentRunId}-r${inputs[0].__prepIndex}`;
         const row = {
           workflow: "eid-lookup",
           timestamp: new Date().toISOString(),
@@ -251,7 +251,7 @@ describe("runPrepare — eid-lookup fallback", () => {
     __setEidLookupEnqueueForTests(async (inputs, parentRunId) => {
       setTimeout(() => {
         const eidFile = join(trackerDir, `eid-lookup-${dateLocal()}.jsonl`);
-        const itemId = `prep-${parentRunId}-r${inputs[0].__prepIndex}`;
+        const itemId = `ec-prep-${parentRunId}-r${inputs[0].__prepIndex}`;
         const row = {
           workflow: "eid-lookup",
           timestamp: new Date().toISOString(),
@@ -286,7 +286,7 @@ describe("runPrepare — eid-lookup fallback", () => {
 describe("runPrepare — error paths", () => {
   let tmp: string, trackerDir: string, rosterDir: string, uploadsDir: string, pdfPath: string;
   beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), "prep-"));
+    tmp = mkdtempSync(join(tmpdir(), "ec-prep-"));
     trackerDir = join(tmp, "tracker");
     rosterDir = join(tmp, "empty-data"); // intentionally empty
     uploadsDir = join(tmp, "uploads");

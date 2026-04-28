@@ -221,7 +221,7 @@ describe("runPaperOathPrepare — eid-lookup fallback", () => {
       enqueueCalled = true;
       setTimeout(() => {
         const eidFile = join(trackerDir, `eid-lookup-${dateLocal()}.jsonl`);
-        const itemId = `oprep-${parentRunId}-r${inputs[0].__prepIndex}`;
+        const itemId = `oath-prep-${parentRunId}-r${inputs[0].__prepIndex}`;
         const row = {
           workflow: "eid-lookup",
           timestamp: new Date().toISOString(),
@@ -265,7 +265,7 @@ describe("runPaperOathPrepare — eid-lookup fallback", () => {
     __setEidLookupEnqueueForTests(async (inputs, parentRunId) => {
       setTimeout(() => {
         const eidFile = join(trackerDir, `eid-lookup-${dateLocal()}.jsonl`);
-        const itemId = `oprep-${parentRunId}-r${inputs[0].__prepIndex}`;
+        const itemId = `oath-prep-${parentRunId}-r${inputs[0].__prepIndex}`;
         const row = {
           workflow: "eid-lookup",
           timestamp: new Date().toISOString(),

@@ -73,7 +73,7 @@ describe("sweepStuckPrepRows", () => {
   afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 
   it("marks pending and running prep rows as failed", () => {
-    const id = "prep-1";
+    const id = "ec-prep-1";
     const runId = "run-1";
     trackEvent(
       {
@@ -101,7 +101,7 @@ describe("sweepStuckPrepRows", () => {
       {
         workflow: "emergency-contact",
         timestamp: new Date().toISOString(),
-        id: "prep-2",
+        id: "ec-prep-2",
         runId: "run-2",
         status: "done",
         data: { mode: "prepare", pdfPath: "/tmp/y.pdf" },
@@ -130,7 +130,7 @@ describe("sweepStuckPrepRows", () => {
 describe("handlePrepareUpload", () => {
   let tmp: string;
   beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), "prep-up-"));
+    tmp = mkdtempSync(join(tmpdir(), "ec-prep-up-"));
   });
   afterEach(() => {
     __setUploadsDirForTests(undefined);
@@ -192,7 +192,7 @@ describe("handleApproveBatch", () => {
   afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 
   function emitPrepRow(runId: string): string {
-    const id = `prep-${dateLocal()}-${runId.slice(0, 8)}`;
+    const id = `ec-prep-${dateLocal()}-${runId.slice(0, 8)}`;
     trackEvent(
       {
         workflow: "emergency-contact",
@@ -253,7 +253,7 @@ describe("handleDiscardPrepare", () => {
 
   it("emits a failed/discarded row when prep is in progress", async () => {
     const runId = "run-discard";
-    const id = `prep-${dateLocal()}-${runId.slice(0, 8)}`;
+    const id = `ec-prep-${dateLocal()}-${runId.slice(0, 8)}`;
     trackEvent(
       {
         workflow: "emergency-contact",
@@ -276,7 +276,7 @@ describe("handleDiscardPrepare", () => {
 
   it("refuses to discard an already-terminal row", async () => {
     const runId = "run-already-done";
-    const id = `prep-${dateLocal()}-${runId.slice(0, 8)}`;
+    const id = `ec-prep-${dateLocal()}-${runId.slice(0, 8)}`;
     trackEvent(
       {
         workflow: "emergency-contact",

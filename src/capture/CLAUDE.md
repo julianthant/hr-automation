@@ -80,7 +80,7 @@ The phone never learns the sessionId; the dashboard never echoes the token after
 - **Sessions are in-memory** — restarting the dashboard loses all open sessions. There's no persistence today; if you add it later, the hook is the dashboard startup function next to the existing tracker cleanup calls.
 - **`onFinalize` is fire-and-forget**: HTTP returns 200 immediately, the bundle runs in the background. If the bundle or `onFinalize` throws, the session goes `discarded` and the photos stay on disk for forensics.
 - **Token leak** is the primary security risk. Mitigations: 16-char random tokens (96-bit entropy, unguessable), 15-min idle expiry, no token re-issue on expiry. Not an external-facing tool — LAN-only by design; operator's WiFi is the boundary.
-- **`onFinalize` is a no-op today** in `src/tracker/dashboard.ts` (`captureNoopFinalize`). Feature 4 (`feature/oath-dual-mode`) replaces it with a per-workflow registry lookup so oath paper-mode receives the bundled PDF and runs `runPaperOathPrepare`.
+- **`onFinalize` dispatch lives in `src/tracker/dashboard.ts`** (`makeCaptureFinalize`). It branches on `session.workflow` and routes the bundled PDF to the appropriate downstream prepare flow. Today: `oath-signature` → `runPaperOathPrepare`. Unknown workflows log a warn and leave the PDF on disk for manual handling. To add a new consumer: import its prepare function and add a case to the dispatcher.
 
 ## Test recipe
 
