@@ -175,8 +175,52 @@ All selectors live inside the PeopleSoft iframe returned by `getContentFrame(pag
 
 **Important**: no "Mother"/"Father"/"Mom"/"Dad" options. All parental relationships map to **Parent**. Brother/Sister → **Sibling**. Grandma/Grandpa → **Grand Parent**. Aunt/Uncle/Cousin → **Other Relative**.
 
+## Dashboard "Run" button (self-service prep)
+
+As of 2026-04-28 the dashboard exposes a self-service prep flow that lets the operator OCR a scanned PDF, review/edit each parsed record, then approve them as N kernel queue items — no batch YAML, no manual transcription.
+
+```
+TopBar Run button (emergency-contact only)
+  → RunModal (PDF upload + roster picker)
+  → POST /api/emergency-contact/prepare (multipart, fire-and-forget)
+    → runPrepare() in src/workflows/emergency-contact/prepare.ts:
+      - synchronous: writes pending tracker row → loads roster → OCR via src/ocr/
+      - synchronous: per-record match (form-EID > roster name match >= 0.85)
+      - async: enqueue eid-lookup daemon for unmatched records
+        + watches eid-lookup JSONL for completions, patches records progressively
+      - terminal status: done (writes the records list to data.records)
+  → PreviewRow renders at the top of QueuePanel (parsed from data.mode === "prepare")
+  → User reviews/edits records inline (per-record edit form persisted to localStorage)
+  → POST /api/emergency-contact/approve-batch:
+    - validates each PreviewRecord, strips preview-only fields
+    - runs through enqueueFromHttp → ensureDaemonsAndEnqueue (auto-spawn if needed)
+    - marks prep row done with step="approved"
+  → N child queue rows fan out, daemon claims them one at a time
+```
+
+The prep phase **bypasses the kernel** — `runPrepare` writes tracker rows directly via `trackEvent`. There is **no second workflow name**: the prep parent and its child rows all carry `workflow: "emergency-contact"`. The discriminator is `data.mode === "prepare"` on the parent vs. absent on the children.
+
+Dashboard restart sweep: `sweepStuckPrepRows(dir)` runs at startDashboard time and marks any prep row in transient state (pending/running) as failed with a "Dashboard restarted while prepare was in progress — please re-upload" error. Implemented in `src/tracker/emergency-contact-http.ts`. The HTTP endpoints + restart sweep live in that same module so dashboard.ts route bodies stay short.
+
+Frontend components (all under `src/dashboard/components/`):
+- `TopBarRunButton.tsx` — primary CTA, scoped to workflow === "emergency-contact"
+- `RunModal.tsx` — Radix Dialog with PDF dropzone + roster radio picker; XHR upload with progress
+- `PreviewRow.tsx` — pinned at top of QueuePanel for any `data.mode === "prepare"` entry
+- `PreviewRecordRow.tsx` — per-record summary + match badge + inline edit toggle
+- `PreviewRecordEditForm.tsx` — inline expanded edit form (no nested modal)
+- `preview-types.ts` — TypeScript mirrors of the backend Zod schemas (no runtime Zod in the bundle)
+
+Backend endpoints (all in `src/tracker/dashboard.ts`, handlers in `src/tracker/emergency-contact-http.ts`):
+- `GET  /api/rosters` — lists xlsx files in `.tracker/rosters/` and `src/data/`, newest first
+- `POST /api/emergency-contact/prepare` — multipart/form-data; fire-and-forgets `runPrepare` and returns `{ok, parentRunId, pdfPath}` synchronously (the pending tracker row is written before runPrepare's first await)
+- `POST /api/emergency-contact/approve-batch` — JSON; expands the user's `PreviewRecord[]` into N kernel inputs via `enqueueFromHttp`, marks prep row `done` step `approved`
+- `POST /api/emergency-contact/discard-prepare` — JSON; emits `failed` step `discarded`, best-effort unlinks the uploaded PDF
+
+Per-record edits are mirrored to localStorage at `ec-prep-edits:<parentRunId>` so a reload restores in-progress edits. Cleared on Approve / Discard.
+
 ## Lessons Learned
 
+- **2026-04-28: OCR-to-Approve self-service flow shipped.** New `src/ocr/` primitive (Gemini multi-key + 7-provider fallback rotation, file-cached, schema-bound) generalizes the OCR concern across future workflows. Prep phase deliberately bypasses the kernel — the parent prep row carries records inline as `data.records` and only fans out to kernel items on Approve, so the dashboard sees one preview row → N child rows. Single workflow name throughout (`emergency-contact`); the `data.mode === "prepare"` discriminator distinguishes parent from children. Async EID resolution chain: prep handler enqueues into eid-lookup daemon with prep-prefixed itemIds (`prep-<parentRunId>-r<index>`), watches the eid-lookup JSONL via `fs.watch` + 200ms polling fallback, patches the parent row's records progressively. Restart sweep in the dashboard's startup path marks stuck prep rows as failed (the OCR + eid-lookup polling lives in the dashboard's Node process, so a backend restart leaves any in-flight prep row orphaned). Three bugs ship in the same arc: fuzzy duplicate detection (Levenshtein ≤ 2 on normalized names) demotes the existing UCPath emergency contact's Primary Contact rather than skipping the new add (Leo Longley's case); same-address-when-null at the schema level via `EmergencyContactSchema.transform()` (Geonmoo Lee's blank-address case); dashboard `updateData` populates emplId / contactName / relationship / contactPhone / contactAddress at the top of the handler so the detail grid never shows "field declared but never populated". Full design + plan in `docs/superpowers/specs/2026-04-27-emergency-contact-run-button-ocr-design.md` and `docs/superpowers/plans/2026-04-27-emergency-contact-run-button-ocr-plan.md`.
 - **2026-04-17: Migrated to kernel.** `runEmergencyContact` is a CLI adapter over `runWorkflowBatch(emergencyContactWorkflow, records, { onPreEmitPending })`. Dry-run bypasses the kernel (no browser); preflight (roster download + verify) still runs in the CLI adapter BEFORE `runWorkflowBatch` launches browsers. Don't reintroduce raw `launchBrowser` / `withTrackedWorkflow` calls in the handler — those live in `src/core/`. `onPreEmitPending` paired with pre-generated runId (kernel debt #1, commit 4e89687) avoids duplicate `pending` rows. **Live run pending user verification** — UCPath Duo can't be approved this session, so only dry-run + tests validate this migration. **Add-New flow still deferred** — `NoExistingContactError` from `navigateToEmergencyContact` now surfaces as a per-record `failed` via the kernel's `withTrackedWorkflow` wrapping (same as before); a separate plan will add the Add-New UCPath navigation path.
 - **2026-04-17: Co-located `roster-verify.ts` + `sharepoint-download.ts`.** Both modules moved from `src/utils/` into `src/workflows/emergency-contact/` — they had exactly one consumer each. The `src/utils/` location implied broader reuse that never materialized. Dev-script consumers (`src/scripts/verify-batch-against-roster.ts`, `src/scripts/download-sharepoint-roster.ts`) now import across workflow boundary; that's fine for dev-only scripts.
 - **2026-04-22: `sharepoint-download.ts` promoted out of this directory** into `src/workflows/sharepoint-download/` once the dashboard queue-header button made it cross-cutting (every workflow can trigger the download, not just emergency-contact). The pre-flight `runPreflight()` and the dev CLI wrapper both still import `downloadSharePointFile` directly (bypassing the kernel — preflight already runs inside this workflow's kernel run, and nesting would double-emit tracker rows). Same afternoon, sharepoint-download was promoted to a full kernel workflow so dashboard clicks get per-run logs + queue rows + session-panel boxes — see `src/workflows/sharepoint-download/CLAUDE.md`.
