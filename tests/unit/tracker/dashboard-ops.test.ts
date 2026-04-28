@@ -14,6 +14,7 @@ import { join } from "path";
 import { trackEvent } from "../../../src/tracker/jsonl.js";
 import {
   findEntryInput,
+  findLatestEntryData,
   buildCancelQueuedHandler,
   buildQueueBumpHandler,
   readQueueDepth,
@@ -154,6 +155,99 @@ describe("findEntryInput", () => {
     const result = findEntryInput("separations", "3930", "u-1", tmp);
     assert.ok("input" in result);
     assert.equal((result.input as { v: string }).v, "first");
+  });
+});
+
+describe("findLatestEntryData", () => {
+  it("merges fields across rows so a later reduced-data row can't drop earlier ones", () => {
+    // First row: full extraction data including rawTerminationType.
+    trackEvent(
+      {
+        workflow: "separations",
+        timestamp: "2026-04-27T10:00:00.000Z",
+        id: "X",
+        runId: "u-1",
+        status: "running",
+        data: { name: "Le, J", eid: "EID1", rawTerminationType: "No Reason Given" },
+      },
+      tmp,
+    );
+    // Second row: synthetic cancel-queued / save-data row that only carries
+    // the editable subset. Without merge-across-rows, this would clobber
+    // rawTerminationType for the next edit-and-resume.
+    trackEvent(
+      {
+        workflow: "separations",
+        timestamp: "2026-04-27T11:00:00.000Z",
+        id: "X",
+        runId: "u-1",
+        status: "failed",
+        step: "cancelled",
+        data: { name: "Le, J", eid: "EID1" },
+      },
+      tmp,
+    );
+    const merged = findLatestEntryData("separations", "X", tmp);
+    assert.deepEqual(merged, { name: "Le, J", eid: "EID1", rawTerminationType: "No Reason Given" });
+  });
+
+  it("excludes kernel-internal keys (__name, __id, instance)", () => {
+    trackEvent(
+      {
+        workflow: "separations",
+        timestamp: "2026-04-27T10:00:00.000Z",
+        id: "X",
+        runId: "u-1",
+        status: "done",
+        data: { name: "Le, J", __name: "Le, J", __id: "X", instance: "Separation 1" },
+      },
+      tmp,
+    );
+    assert.deepEqual(findLatestEntryData("separations", "X", tmp), { name: "Le, J" });
+  });
+
+  it("returns empty object when no rows have data", () => {
+    trackEvent(
+      {
+        workflow: "separations",
+        timestamp: "2026-04-27T10:00:00.000Z",
+        id: "X",
+        runId: "u-1",
+        status: "failed",
+        error: "x",
+      },
+      tmp,
+    );
+    assert.deepEqual(findLatestEntryData("separations", "X", tmp), {});
+  });
+
+  it("ignores empty-string values when merging", () => {
+    // Done rows often emit empty strings for missing fields (see the doc 3936
+    // run #1 "done" row, which had transactionNumber:"" because the txn # was
+    // never extracted). The merge must not let "" replace a real value.
+    trackEvent(
+      {
+        workflow: "separations",
+        timestamp: "2026-04-27T10:00:00.000Z",
+        id: "X",
+        runId: "u-1",
+        status: "running",
+        data: { transactionNumber: "T002109055" },
+      },
+      tmp,
+    );
+    trackEvent(
+      {
+        workflow: "separations",
+        timestamp: "2026-04-27T10:01:00.000Z",
+        id: "X",
+        runId: "u-1",
+        status: "done",
+        data: { transactionNumber: "" },
+      },
+      tmp,
+    );
+    assert.deepEqual(findLatestEntryData("separations", "X", tmp), { transactionNumber: "T002109055" });
   });
 });
 

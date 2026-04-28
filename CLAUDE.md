@@ -212,7 +212,7 @@ All production workflows are kernel-based as of 2026-04-17. No `defineDashboardM
 - `systems: SystemConfig[]` — one per external system. `{ id, login, sessionDir?, resetUrl? }`. `login` must throw on failure.
 - `steps: readonly string[] as const` — declared step names. `ctx.step`/`markStep` are type-narrowed against this tuple.
 - `schema: ZodType<TData>` — validated before the handler runs.
-- `authChain: "sequential" | "interleaved"` — sequential waits for each Duo before the next; interleaved auths #1 blocking then chains #2+ in background while the handler starts. Default: interleaved for >1 system, sequential for 1.
+- `authChain: "sequential" | "interleaved" | "parallel-staggered"` — sequential waits for each Duo before the next; interleaved auths #1 blocking then chains #2+ in background while the handler starts; parallel-staggered fires every system's submit click `staggerMs` apart (default 5000ms) so all Duos pend on the user's phone simultaneously and approve order is user-determined. Default: interleaved for >1 system, sequential for 1.
 - `authSteps?: boolean` — default `true`. When `false`, the kernel does NOT auto-prepend `auth:<id>` step names from `systems`. Set to `false` for workflows that already declare their own auth step names (e.g. onboarding's `crm-auth`, `ucpath-auth`).
 - `tiling: "auto" | "single" | "side-by-side"` — CDP-based window tiling.
 - `batch?: { mode: "sequential" | "pool", poolSize?, betweenItems?, preEmitPending? }` — plumbed by `runWorkflowBatch`. `pool` mode uses `runWorkflowPool` (each worker gets its own Session — one Duo per worker).

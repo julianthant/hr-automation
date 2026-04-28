@@ -31,7 +31,6 @@ const FILTER_TABS: {
 }[] = [
   { key: "all", label: "All", categories: [] },
   { key: "errors", label: "Errors", categories: ["error"] },
-  { key: "auth", label: "Auth", categories: ["auth"] },
   { key: "fill", label: "Fill", categories: ["fill"] },
   { key: "navigate", label: "Navigate", categories: ["navigate"] },
   { key: "extract", label: "Extract", categories: ["extract"] },
