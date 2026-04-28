@@ -84,15 +84,39 @@ export const emergencyContactWorkflow = defineWorkflow({
   // the pending state onward. The handler only refreshes employeeName after
   // the iframe extraction succeeds.
   detailFields: [
-    { key: "employeeName", label: "Employee" },
-    { key: "emplId", label: "Empl ID" },
-    { key: "contactName", label: "Contact" },
-    { key: "relationship", label: "Relationship" },
+    { key: "employeeName", label: "Employee", editable: true },
+    { key: "emplId", label: "Empl ID", editable: true },
+    { key: "contactName", label: "Contact", editable: true },
+    { key: "relationship", label: "Relationship", editable: true },
+    { key: "contactPhone", label: "Contact Phone", editable: true },
+    { key: "contactAddress", label: "Contact Address", editable: true },
   ],
   getName: (d) => d.employeeName ?? "",
   getId: (d) => d.emplId ?? "",
   handler: async (ctx, record) => {
     const page = await ctx.page("ucpath");
+
+    // Populate dashboard fields synchronously from the input so the kernel's
+    // post-handler check stops warning about declared-but-unpopulated fields.
+    // onPreEmitPending writes these to the *pending* row; this writes them
+    // to subsequent running rows' data via the ctx merge.
+    {
+      const c = record.emergencyContact;
+      const phoneSummary = c.cellPhone || c.homePhone || c.workPhone || "";
+      const addrSummary = c.address
+        ? [c.address.street, c.address.city, c.address.state, c.address.zip]
+            .filter((s): s is string => Boolean(s))
+            .join(", ")
+        : "(same as employee)";
+      ctx.updateData({
+        emplId: record.employee.employeeId,
+        employeeName: record.employee.name,
+        contactName: c.name,
+        relationship: c.relationship,
+        contactPhone: phoneSummary,
+        contactAddress: addrSummary,
+      });
+    }
 
     const skipped = await ctx.step("navigation", async () => {
       await navigateToEmergencyContact(page, record.employee.employeeId);
