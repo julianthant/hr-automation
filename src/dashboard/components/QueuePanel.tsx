@@ -4,9 +4,17 @@ import { StatPills } from "./StatPills";
 import { EntryItem } from "./EntryItem";
 import { EmptyState } from "./EmptyState";
 import { PreviewRow } from "./PreviewRow";
+import { OathPreviewRow } from "./OathPreviewRow";
 import type { TrackerEntry } from "./types";
 import { resolveEntryName } from "./entry-display";
-import { parsePrepareRowData } from "./preview-types";
+/**
+ * Workflow-agnostic detector — both emergency-contact and oath-signature
+ * stamp `mode: "prepare"` on parent prep rows. The dispatcher below picks
+ * the right preview component based on workflow name.
+ */
+function isPrepareRow(e: TrackerEntry): boolean {
+  return e.data?.mode === "prepare";
+}
 
 interface QueuePanelProps {
   entries: TrackerEntry[];
@@ -41,8 +49,7 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
   const previewEntries = useMemo(
     () =>
       entries.filter((e) => {
-        const data = parsePrepareRowData(e.data);
-        if (!data) return false;
+        if (!isPrepareRow(e)) return false;
         if (e.status === "done" && e.step === "approved") return false;
         if (e.status === "failed" && e.step === "discarded") return false;
         return true;
@@ -54,7 +61,7 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
     // Exclude prep rows from the regular list — they render via PreviewRow
     // above. Whether or not the prep row was filtered out by approve/discard
     // above, it should never double-render here.
-    let result = entries.filter((e) => parsePrepareRowData(e.data) === null);
+    let result = entries.filter((e) => !isPrepareRow(e));
     if (statusFilter) {
       result = result.filter((e) =>
         statusFilter === "pending" ? e.status === "pending" || e.status === "skipped" : e.status === statusFilter,
@@ -114,9 +121,13 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
         {/* Pinned: emergency-contact preview rows. Sit above the scrollable
             list. They're tall when expanded, but the parent is itself
             scrollable so the list can scroll past them. */}
-        {previewEntries.map((e) => (
-          <PreviewRow key={`prep-${e.runId ?? e.id}`} entry={e} />
-        ))}
+        {previewEntries.map((e) =>
+          e.workflow === "oath-signature" ? (
+            <OathPreviewRow key={`oath-prep-${e.runId ?? e.id}`} entry={e} />
+          ) : (
+            <PreviewRow key={`prep-${e.runId ?? e.id}`} entry={e} />
+          ),
+        )}
         {loading ? (
           <div className="space-y-0">
             {Array.from({ length: 6 }).map((_, i) => (

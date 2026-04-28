@@ -8,10 +8,18 @@
 // be set. Either missing → silent no-op (so unconfigured operators aren't
 // blocked).
 //
+// On a successful POST to Telegram, emits a `telegram_sent` session event
+// so the dashboard can surface a toast in the operator's browser. This
+// event is fire-and-forget too — failure to write to sessions.jsonl
+// doesn't fail the notification.
+//
 // Design constraints:
 //   * MUST NOT throw. Any error path is swallowed.
 //   * MUST NOT block the caller meaningfully. Hard 5s fetch timeout.
 //   * Fire-and-forget — caller doesn't await.
+
+import { emitSessionEvent } from "../tracker/session-events.js";
+import { getLogWorkflow } from "../utils/log.js";
 
 export type AuthEventKind =
   | "duo-waiting"
@@ -71,12 +79,31 @@ export function createTelegramNotifier(
         parse_mode: "HTML",
       });
       const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
-      await fetchFn(url, {
+      const res = await fetchFn(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body,
         signal,
       });
+      // Surface in the dashboard only on actual API success — a 4xx/5xx
+      // means the operator did not get a message, so a toast claiming we
+      // sent one would be misleading.
+      if (res.ok) {
+        try {
+          emitSessionEvent({
+            type: "telegram_sent",
+            workflowInstance: ev.workflow || getLogWorkflow() || "unknown",
+            data: {
+              kind: ev.kind,
+              systemLabel: ev.systemLabel,
+              workflow: ev.workflow,
+              ...(ev.detail ? { detail: ev.detail } : {}),
+            },
+          });
+        } catch {
+          // Telemetry is best-effort.
+        }
+      }
     } catch {
       // Swallow — auth notification failure must never fail a workflow.
     }

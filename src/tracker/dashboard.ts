@@ -1755,6 +1755,56 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       return;
     }
 
+    // ─── Telegram-sent SSE ────────────────────────────────
+    //
+    // Streams every `telegram_sent` session event (delta semantics — first
+    // tick replays history, subsequent ticks send only new entries) so the
+    // frontend can toast each notification. Cross-workflow / no filter:
+    // any operator running any workflow on this dashboard's machine sees
+    // the same toasts, which matches the expected single-operator setup.
+    if (url.pathname === "/events/telegram") {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        "Access-Control-Allow-Origin": "*",
+      });
+      let sentCount = 0;
+      let firstTick = true;
+      const send = () => {
+        const sessionsPath = getSessionsFilePath(dir);
+        const events: SessionEvent[] = [];
+        try {
+          if (existsSync(sessionsPath)) {
+            const raw = readFileSync(sessionsPath, "utf-8");
+            for (const line of raw.split("\n")) {
+              if (!line) continue;
+              try {
+                const ev = JSON.parse(line) as SessionEvent;
+                if (ev.type === "telegram_sent") events.push(ev);
+              } catch {
+                // skip
+              }
+            }
+          }
+        } catch {
+          // Any read failure → empty list; next tick recovers.
+        }
+        if (firstTick) {
+          res.write(`data: ${JSON.stringify(events)}\n\n`);
+          sentCount = events.length;
+          firstTick = false;
+        } else if (events.length > sentCount) {
+          res.write(`data: ${JSON.stringify(events.slice(sentCount))}\n\n`);
+          sentCount = events.length;
+        }
+      };
+      send();
+      const interval = setInterval(send, 1_000);
+      req.on("close", () => clearInterval(interval));
+      return;
+    }
+
     if (url.pathname === "/events/sessions") {
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
