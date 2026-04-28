@@ -87,7 +87,12 @@ export function exportSchemas(outDir: string): ExportResult[] {
 
   const results: ExportResult[] = [];
   for (const entry of SCHEMA_REGISTRY) {
-    const jsonSchema = toJSONSchema(entry.schema);
+    // unrepresentable: "any" lets schemas with `.transform()` (e.g.
+    // emergency-contact's same-address-when-null) export cleanly — the
+    // transform output becomes a permissive `{}` in the JSON Schema, which
+    // matches our intent (the transform is post-parse semantics, not a
+    // structural constraint).
+    const jsonSchema = toJSONSchema(entry.schema, { unrepresentable: "any" });
     const outputPath = path.join(outDir, `${entry.workflowName}.schema.json`);
     writeFileSync(outputPath, JSON.stringify(jsonSchema, null, 2) + "\n", "utf-8");
     results.push({ workflowName: entry.workflowName, outputPath });
