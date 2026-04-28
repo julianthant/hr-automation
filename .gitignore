@@ -69,3 +69,4 @@ Thumbs.db
 # Scratch files (chat references, not meant to be committed)
 /image.png
 /notes.md
+.ocr-cache/
