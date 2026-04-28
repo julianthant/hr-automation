@@ -1,11 +1,12 @@
 import { cn } from "@/lib/utils";
-import { CheckCircle2, AlertTriangle, Loader2, Clock, CircleSlash, X } from "lucide-react";
+import { CheckCircle2, AlertTriangle, Loader2, Clock, CircleSlash, X, Ban } from "lucide-react";
 import type { ComponentType, SVGProps } from "react";
 import type { TrackerEntry } from "./types";
 import { resolveEntryName } from "./entry-display";
 import { useElapsed, formatDuration } from "./hooks/useElapsed";
 import { RetryButton } from "./RetryButton";
 import { QueueItemControls } from "./QueueItemControls";
+import { CancelRunningButton } from "./CancelRunningButton";
 
 // Bento-card row. Each entry is a tonal `bg-card` panel with rounded
 // corners, an internal divider splitting the header zone (name + status
@@ -44,6 +45,16 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
     iconColor: "text-destructive",
     label: "Failed",
   },
+  // Distinct from generic `failed` — surfaced via `step === "cancelled"`.
+  // Renders amber (matches the warning/cancel intent) so the user can tell at
+  // a glance which failures are intentional cancellations vs unintended bugs.
+  cancelled: {
+    badge: "bg-[#fbbf24]/12 text-[#fbbf24] border border-[#fbbf24]/40",
+    icon: Ban,
+    iconClass: "",
+    iconColor: "text-[#fbbf24]",
+    label: "Cancelled",
+  },
   pending: {
     badge: "bg-[#fbbf24]/12 text-[#fbbf24] border border-[#fbbf24]/30",
     icon: Clock,
@@ -68,11 +79,20 @@ interface EntryItemProps {
 
 export function EntryItem({ entry, selected, onClick }: EntryItemProps) {
   const name = resolveEntryName(entry);
+  // `step === "cancelled"` overrides the generic `failed` status so the row
+  // renders amber/Ban instead of red/AlertTriangle. The data model is still
+  // `status: "failed"` (one tracker enum, no schema change) — `step` is the
+  // discriminator. Kernel writes step="cancelled" via Stepper.step's pre-emit
+  // when the daemon's cancel flag is set; cancel-queued's handler does the
+  // same on a queued item.
+  const isCancelled = entry.status === "failed" && entry.step === "cancelled";
   const isRunning = entry.status === "running";
-  const isFailed = entry.status === "failed";
+  const isFailed = entry.status === "failed" && !isCancelled;
   const isDone = entry.status === "done";
   const isPending = entry.status === "pending";
-  const cfg = STATUS_CONFIG[entry.status] ?? STATUS_CONFIG.pending;
+  const cfg = isCancelled
+    ? STATUS_CONFIG.cancelled
+    : STATUS_CONFIG[entry.status] ?? STATUS_CONFIG.pending;
   const StatusIcon = cfg.icon;
 
   const firstTs = entry.firstLogTs || entry.startTimestamp || entry.timestamp;
@@ -187,10 +207,18 @@ export function EntryItem({ entry, selected, onClick }: EntryItemProps) {
           {(isDone || isFailed) && duration && (
             <span className="tabular-nums flex-shrink-0">{duration}</span>
           )}
-          {isFailed && (
+          {(isFailed || isCancelled) && (
             <RetryButton
               workflow={entry.workflow}
               id={entry.id}
+              className="flex-shrink-0 ml-1"
+            />
+          )}
+          {isRunning && entry.runId && (
+            <CancelRunningButton
+              workflow={entry.workflow}
+              id={entry.id}
+              runId={entry.runId}
               className="flex-shrink-0 ml-1"
             />
           )}
