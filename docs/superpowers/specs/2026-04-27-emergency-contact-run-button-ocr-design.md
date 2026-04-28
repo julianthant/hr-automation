@@ -226,11 +226,16 @@ Per `src/workflows/CLAUDE.md` recipe:
 
 ### 6. Bug fixes
 
-**Fuzzy duplicate detection** (`enter.ts` `findExistingContactDuplicate`):
-- Currently: `normalizeNameForCompare` lowercases + strips non-alpha; comparison is strict equality.
-- Bug found 2026-04-27: Leo Longley's existing contact "Tomako Langley" (likely a historical typo for the same person, "Tomoko Longley") was NOT caught — a duplicate was created on his UCPath record.
-- Fix: switch to **Levenshtein distance ≤ 2** on normalized names. This catches "Tomako" vs "Tomoko" (1 sub) and "Langley" vs "Longley" (1 sub), total 2.
-- Manual remediation: the user must inspect Leo's record in UCPath and delete the duplicate.
+**Fuzzy duplicate detection + demote-existing** (`enter.ts`):
+- Currently: `findExistingContactDuplicate` does strict normalized-equality and the workflow SKIPS adding when a match is found. This missed the "Tomako Langley" vs "Tomoko Longley" historical-typo case on Leo Longley (2026-04-27) and created a duplicate.
+- Fix is two-part:
+  1. **Detection**: Levenshtein distance ≤ 2 on normalized names. Returns `{ name, distance, isExact }`.
+  2. **Action by match type**:
+     - `distance === 0` (exact match): **skip** (current behavior — assume the form just reflects what's already there).
+     - `0 < distance ≤ 2` (fuzzy match, likely historical typo of same person): **demote the existing contact** by unchecking its Primary Contact checkbox, then proceed to add the new contact as primary. This preserves history while making the correctly-spelled, current record the primary.
+     - `distance > 2`: no match, add new normally.
+- New helper needed: `demoteExistingContact(page, existingName)` — drill into the matching row, uncheck Primary Contact, save, return.
+- Manual remediation for Leo's already-created duplicate: re-run the workflow on EID 10874572 with the new logic. The new run will see two existing contacts ("Tomako Langley" + "Tomoko Longley"), the new YAML's "Tomoko Longley" matches the second exactly (distance 0 → skip), and the first is left untouched. User then manually unchecks Primary on "Tomako Langley" in UCPath, OR we run a one-off remediation script.
 
 **Same-address-when-blank** (`enter.ts` step 5):
 - Currently: `if (!contact.address) { log.step("...leaving blank"); return; }` — leaves the box unchecked AND no address.
