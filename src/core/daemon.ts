@@ -213,13 +213,31 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         res.writeHead(200, { 'content-type': 'application/json' })
         res.end('{"ok":true}')
         if (force) {
-          // Soft-stop flags don't interrupt a blocking Session.launch (Duo
-          // auth, browser launch retries). Give the response 50ms to flush
-          // then hard-exit so the wedged daemon + its Playwright children
-          // really die. The OS reaps orphaned Chromium processes via SIGHUP
-          // when the parent exits, and the lockfile's `isPidAlive` check
-          // will report the daemon as dead on the next discovery pass.
-          setTimeout(() => process.exit(1), 50)
+          // Force-stop chrome SIGTERM + 2s grace + SIGKILL via the
+          // tracked PIDs (Session.killChromeHard). Replaces the old
+          // `setTimeout(50ms, exit)` which left chromium subprocesses
+          // adopted by init (`ppid === 1`) — leading to the "8 chrome
+          // windows after retry" pile-up. After the chrome kill we
+          // exit; lockfile unlink / outer finally still run via the
+          // process exit handler chain.
+          ;(async (): Promise<void> => {
+            // 50ms grace so the HTTP response fully flushes to the caller
+            // before we tear chrome down.
+            await new Promise((r) => setTimeout(r, 50))
+            try {
+              if (activeSession) {
+                await activeSession.killChromeHard(2_000)
+              }
+            } catch (err) {
+              log.warn(
+                `[Daemon ${wf.config.name}/${instanceId}] killChromeHard error: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              )
+            } finally {
+              process.exit(1)
+            }
+          })().catch(() => process.exit(1))
         }
       })
       return
@@ -503,6 +521,10 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           } catch {
             /* best-effort */
           }
+          // Clear the /status reference so a request that races between
+          // session close and lockfile unlink doesn't see a stale Session
+          // and try to read its (now-empty) chromePids.
+          activeSession = null
         }
       },
     )
@@ -581,7 +603,26 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           const nowIso = new Date().toISOString()
           const failError =
             'Daemon stopped before this item could be processed (browsers closed).'
+          // Re-read the queue state right before iterating so a concurrent
+          // /api/cancel-queued (which also writes a `failed` queue event +
+          // a tracker row with step="cancelled") wins the race: items that
+          // the user just cancelled are no longer in `freshState.queued`,
+          // so we skip them and their cancel reason is preserved on the
+          // dashboard. Without this, the daemon-stop reason ("Daemon
+          // stopped before this item could be processed") would overwrite
+          // the user's "cancelled" intent — which the user explicitly
+          // flagged as a bug ("the queue doesn't cancel").
+          const freshState = await readQueueState(wf.config.name, trackerDir).catch(
+            () => state,
+          )
+          const stillQueued = new Set(freshState.queued.map((q) => q.id))
           for (const item of state.queued) {
+            if (!stillQueued.has(item.id)) {
+              // Concurrent cancel-queued already terminated this item.
+              // Don't overwrite — the cancel handler's tracker row stays
+              // as the latest authoritative status.
+              continue
+            }
             const runId = item.runId ?? randomUUID()
             try {
               await markItemFailed(wf.config.name, item.id, failError, runId, trackerDir)

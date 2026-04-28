@@ -2838,6 +2838,73 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/cancel-running") {
+      // Cancel-running: route to the daemon currently processing the
+      // named item. Read the queue state, find the latest claim event
+      // for the item, look up that daemon's port via findAliveDaemons,
+      // then proxy a POST /cancel-current. Returns:
+      //   200 — daemon accepted (cancel will materialize at next step)
+      //   409 — itemId/runId mismatch on the daemon (claim rotated)
+      //   410 — no claim event for this item, or claiming daemon dead
+      const parsed = await readJsonBody();
+      if (!parsed.ok) return writeJson(400, { ok: false, error: parsed.error });
+      const workflow = String(parsed.body.workflow ?? "");
+      const itemId = String(parsed.body.id ?? "");
+      const runId = String(parsed.body.runId ?? "");
+      if (!workflow || !itemId || !runId) {
+        return writeJson(400, {
+          ok: false,
+          error: "workflow, id, runId are required",
+        });
+      }
+      try {
+        const state = await readQueueState(workflow, dir);
+        const claimed = state.claimed.find((q) => q.id === itemId);
+        if (!claimed || claimed.claimedBy === undefined) {
+          return writeJson(410, {
+            ok: false,
+            error:
+              "item not currently claimed by any daemon — likely already finished or never claimed",
+          });
+        }
+        const aliveDaemons = await findAliveDaemons(workflow, dir);
+        const owner = aliveDaemons.find((d) => d.instanceId === claimed.claimedBy);
+        if (!owner) {
+          return writeJson(410, {
+            ok: false,
+            error: `claiming daemon (${claimed.claimedBy}) is no longer alive`,
+          });
+        }
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 5_000);
+        try {
+          const upstream = await fetch(`http://127.0.0.1:${owner.port}/cancel-current`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ itemId, runId }),
+            signal: ctrl.signal,
+          });
+          clearTimeout(t);
+          const text = await upstream.text();
+          let body: Record<string, unknown> = {};
+          try {
+            body = text ? JSON.parse(text) : {};
+          } catch {
+            body = { ok: false, error: text || "malformed daemon response" };
+          }
+          writeJson(upstream.status, body);
+        } finally {
+          clearTimeout(t);
+        }
+      } catch (err) {
+        writeJson(502, {
+          ok: false,
+          error: `cancel-current proxy failed: ${errorMessage(err)}`,
+        });
+      }
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/queue/bump") {
       const parsed = await readJsonBody();
       if (!parsed.ok) return writeJson(400, { ok: false, error: parsed.error });
