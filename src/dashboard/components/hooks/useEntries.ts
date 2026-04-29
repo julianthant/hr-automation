@@ -15,6 +15,7 @@ interface UseEntriesResult {
   entriesKey: string;
   workflows: string[];
   wfCounts: Record<string, number>;
+  failureCounts: Record<string, number>;
   connected: boolean;
   loading: boolean;
 }
@@ -28,6 +29,7 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
   const [entriesKey, setEntriesKey] = useState("");
   const [workflows, setWorkflows] = useState<string[]>([]);
   const [wfCounts, setWfCounts] = useState<Record<string, number>>({});
+  const [failureCounts, setFailureCounts] = useState<Record<string, number>>({});
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const prevHashRef = useRef("");
@@ -53,7 +55,7 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
 
     es.onmessage = (e) => {
       try {
-        const { entries: raw, workflows: wfs, wfCounts: counts }: { entries: TrackerEntry[]; workflows: string[]; wfCounts?: Record<string, number> } = JSON.parse(e.data);
+        const { entries: raw, workflows: wfs, wfCounts: counts, failureCounts: fcounts }: { entries: TrackerEntry[]; workflows: string[]; wfCounts?: Record<string, number>; failureCounts?: Record<string, number> } = JSON.parse(e.data);
 
         setLoading(false);
 
@@ -66,6 +68,7 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
         // hash was the bug that made date switches show "0 / 0 / 0".
         setWorkflows(wfs || []);
         if (counts) setWfCounts(counts);
+        setFailureCounts(fcounts ?? {});
 
         // Skip if data hasn't changed (prevent unnecessary re-renders)
         const hash = JSON.stringify(raw.map((r) => `${r.id}:${r.status}:${r.step}:${r.timestamp}:${JSON.stringify(r.data)}:${(r as any).lastLogMessage || ""}`));
@@ -103,6 +106,7 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
         setEntriesKey(`${workflow}|${date}`);
         setWorkflows(wfs || []);
         if (counts) setWfCounts(counts);
+        setFailureCounts(fcounts ?? {});
       } catch {
         // ignore malformed
       }
@@ -119,5 +123,5 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
     };
   }, [workflow, date]);
 
-  return { entries, entriesKey, workflows, wfCounts, connected, loading };
+  return { entries, entriesKey, workflows, wfCounts, failureCounts, connected, loading };
 }
