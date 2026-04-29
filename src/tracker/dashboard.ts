@@ -1561,6 +1561,33 @@ export function computeStepDurations(
 }
 
 /**
+ * Count distinct ids whose latest run's latest entry is `failed`.
+ * Pure helper so the navbar failure-bell badge can be unit-tested
+ * independent of the SSE handler.
+ */
+export function computeFailureCounts(entries: TrackerEntry[]): number {
+  // Aggregate by (id, runId) → latest entry per run.
+  const latestPerRun = new Map<string, TrackerEntry>();
+  for (const e of entries) {
+    const runId = e.runId || `${e.id}#1`;
+    const key = `${e.id}::${runId}`;
+    const prev = latestPerRun.get(key);
+    if (!prev || e.timestamp >= prev.timestamp) latestPerRun.set(key, e);
+  }
+  // For each id, find the latest run.
+  const latestRunPerId = new Map<string, TrackerEntry>();
+  for (const e of latestPerRun.values()) {
+    const prev = latestRunPerId.get(e.id);
+    if (!prev || e.timestamp >= prev.timestamp) latestRunPerId.set(e.id, e);
+  }
+  let count = 0;
+  for (const e of latestRunPerId.values()) {
+    if (e.status === "failed") count++;
+  }
+  return count;
+}
+
+/**
  * Summary of a run's timeline derived from its tracker JSONL history.
  * `earliestTrackerTs` is the single source of truth for "when did this run
  * start" — it matches the anchor `computeStepDurations` uses, so the header
@@ -2178,13 +2205,15 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         // — which only reads today's file — would show 0 when viewing a past
         // date, even if that date had real activity.
         const wfCounts: Record<string, number> = {};
+        const failureCounts: Record<string, number> = {};
         const targetDate = date || today;
         for (const w of workflows) {
           const all = readEntriesForDate(w, targetDate, dir);
-          const ids = new Set(all.map((e) => e.id));
-          wfCounts[w] = ids.size;
+          wfCounts[w] = new Set(all.map((e) => e.id)).size;
+          const n = computeFailureCounts(all);
+          if (n > 0) failureCounts[w] = n;
         }
-        res.write(`data: ${JSON.stringify({ entries: enriched, workflows, wfCounts })}\n\n`);
+        res.write(`data: ${JSON.stringify({ entries: enriched, workflows, wfCounts, failureCounts })}\n\n`);
 
         // After each poll, scan for repeated-failure patterns. Fire-and-forget
         // — the SSE response doesn't wait on it, and scanFailurePatterns
