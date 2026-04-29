@@ -13,7 +13,7 @@ import { useCaptureToasts } from "./components/hooks/useCaptureToasts";
 import { resolveActionToastsForEntry } from "./components/hooks/useActionToasts";
 import { useWorkflow, autoLabel } from "./workflows-context";
 import { resolveEntryName } from "./components/entry-display";
-import type { SearchResultRow, PreviewInboxRow } from "./components/types";
+import type { SearchResultRow, PreviewInboxRow, FailureRow } from "./components/types";
 import { WorkflowRail } from "./components/WorkflowRail";
 import { QuickRunPanel } from "./components/QuickRunPanel";
 import { TopBarRunButton } from "./components/TopBarRunButton";
@@ -67,7 +67,7 @@ export default function App() {
   }, [workflow, selectedId, date]);
 
   // SSE entries
-  const { entries, entriesKey, workflows, wfCounts, connected, loading } = useEntries(workflow, date);
+  const { entries, entriesKey, workflows, wfCounts, failureCounts, connected, loading } = useEntries(workflow, date);
 
   // Fetch available dates when workflow changes. The selected date is
   // preserved across workflow switches — operators want to stay on the date
@@ -166,6 +166,12 @@ export default function App() {
     setSelectedId(row.id);
   }, [workflow, date, handleWorkflowChange]);
 
+  const handleFailureSelect = useCallback((row: FailureRow) => {
+    if (row.workflow !== workflow) handleWorkflowChange(row.workflow);
+    if (row.date !== date) setDate(row.date);
+    setSelectedId(row.id);
+  }, [workflow, date, handleWorkflowChange]);
+
   // Entry counts per workflow from backend SSE (accurate across all workflows)
   const entryCounts = wfCounts;
 
@@ -199,6 +205,8 @@ export default function App() {
         availableDates={availableDates}
         onSearchSelect={handleSearchSelect}
         onPreviewSelect={handlePreviewSelect}
+        onFailureSelect={handleFailureSelect}
+        failureCounts={failureCounts ?? {}}
       />
       <div className="flex flex-1 overflow-hidden">
         <WorkflowRail
