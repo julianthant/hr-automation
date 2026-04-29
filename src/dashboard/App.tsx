@@ -191,26 +191,7 @@ export default function App() {
         date={date}
         onDateChange={setDate}
         availableDates={availableDates}
-        connected={connected}
         onSearchSelect={handleSearchSelect}
-        queueZoneContent={
-          <div className="flex items-center gap-2">
-            <QuickRunPanel workflow={workflow} failedIds={failedIds} />
-            {workflow === "emergency-contact" && (
-              <TopBarRunButton
-                busyCount={
-                  entries.filter(
-                    (e) =>
-                      (e.status === "pending" || e.status === "running") &&
-                      parsePrepareRowData(e.data) !== null,
-                  ).length
-                }
-              />
-            )}
-            <TopBarCaptureButton workflow={workflow} />
-            {workflow === "oath-signature" && <TopBarDigitalOathButton />}
-          </div>
-        }
       />
       <div className="flex flex-1 overflow-hidden">
         <WorkflowRail
@@ -225,6 +206,24 @@ export default function App() {
           selectedId={selectedId}
           onSelect={setSelectedId}
           loading={loading}
+          runControlsSlot={
+            <>
+              <QuickRunPanel workflow={workflow} failedIds={failedIds} />
+              {workflow === "emergency-contact" && (
+                <TopBarRunButton
+                  busyCount={
+                    entries.filter(
+                      (e) =>
+                        (e.status === "pending" || e.status === "running") &&
+                        parsePrepareRowData(e.data) !== null,
+                    ).length
+                  }
+                />
+              )}
+              <TopBarCaptureButton workflow={workflow} />
+              {workflow === "oath-signature" && <TopBarDigitalOathButton />}
+            </>
+          }
         />
         <LogPanel
           entry={selectedEntry}
@@ -232,7 +231,7 @@ export default function App() {
           date={date}
         />
       </div>
-      <TerminalDrawer />
+      <TerminalDrawer connected={connected} />
     </div>
     </TerminalDrawerProvider>
     </TooltipProvider>

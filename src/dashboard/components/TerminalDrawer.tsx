@@ -1,7 +1,15 @@
+import { Terminal as TerminalIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useClock } from "./hooks/useClock";
 import { useSessions } from "./hooks/useSessions";
 import { useTerminalDrawer } from "./hooks/useTerminalDrawer";
+import { LiveIndicator } from "./LiveIndicator";
 import { WorkflowBox } from "./WorkflowBox";
+
+interface TerminalDrawerProps {
+  /** SSE-backend connection state, surfaced as the right-edge Live pill. */
+  connected: boolean;
+}
 
 /**
  * Bottom-docked drawer that replaces the right-rail SessionPanel. The bar
@@ -12,11 +20,16 @@ import { WorkflowBox } from "./WorkflowBox";
  * instance count. Open: 260px tall — the bar plus a horizontal scroller of
  * `WorkflowBox` cards (one per active workflow instance).
  *
+ * Right edge of the bar tiles with LogPanel + LogStream's `pr-6` so the
+ * Live pill / clock land at the same X as the date nav and Auto-scroll
+ * button on the right side of the dashboard.
+ *
  * Filter logic mirrors the legacy SessionPanel: only workflows whose process
  * is alive (or crashed-on-launch) AND whose batch hasn't ended.
  */
-export function TerminalDrawer() {
+export function TerminalDrawer({ connected }: TerminalDrawerProps) {
   const { open, toggle } = useTerminalDrawer();
+  const clock = useClock();
   const { state } = useSessions();
 
   // Mirrors SessionPanel filter: keep crashed-on-launch instances even
@@ -42,30 +55,41 @@ export function TerminalDrawer() {
         transition: "height 180ms cubic-bezier(0.16, 1, 0.3, 1)",
       }}
     >
-      {/* Bar — clickable surface, full width. Chevron flips on toggle. */}
+      {/* Bar — clickable surface, full width. Chevron flips on toggle.
+           A top border in the accent colour visually separates the bar from
+           the main dashboard content above, and a subtle bg tint distinguishes
+           it from the drawer body below. */}
       <button
         type="button"
         onClick={toggle}
         aria-expanded={open}
         aria-controls="terminal-drawer-body"
         className={cn(
-          "h-9 w-full flex items-center justify-between px-4",
-          "font-mono text-[12px] text-muted-foreground",
-          "hover:bg-accent/50 transition-colors",
-          "outline-none focus-visible:bg-accent/50",
+          "h-9 w-full flex items-center justify-between pl-4 pr-6",
+          "border-accent-foreground/40",
+          open ? "border-b" : "border-t",
+          "text-[12px] text-muted-foreground",
+          "hover:bg-white/5 transition-colors",
+          "outline-none focus-visible:bg-white/5",
           "select-none cursor-pointer",
           "flex-shrink-0",
         )}
       >
         <span className="flex items-center gap-3 min-w-0">
-          <span className="w-2.5 text-center text-foreground" aria-hidden>
-            {open ? "▾" : "▸"}
-          </span>
-          <span className="text-foreground font-medium tracking-wide">session</span>
+          <TerminalIcon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" strokeWidth={2} />
+          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">session</span>
           <CountBadge count={count} />
         </span>
-        {/* Right side intentionally empty — the bar IS the toggle. */}
-        <span aria-hidden />
+        {/* Right edge: Live pill, then the clock. Live sits before the
+            clock so the operator's eye lands on connection state first
+            when scanning the screen's bottom-right corner — the clock is
+            ambient and only checked on demand. */}
+        <span className="flex items-center gap-3 flex-shrink-0">
+          <LiveIndicator connected={connected} />
+          <span className="font-mono text-[12px] text-muted-foreground font-medium tabular-nums leading-none">
+            {clock}
+          </span>
+        </span>
       </button>
 
       {/* Body — horizontal strip of WorkflowBox cards. Border-t intentionally

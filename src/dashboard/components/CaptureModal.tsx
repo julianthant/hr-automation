@@ -1249,7 +1249,7 @@ function CtaButton({ variant, className, children, style, ...rest }: CtaButtonPr
     variant === "primary"
       ? {
           backgroundColor: "var(--capture-success)",
-          color: "#03110A",
+          color: "hsl(150 80% 5%)",
         }
       : {
           backgroundColor: "transparent",
