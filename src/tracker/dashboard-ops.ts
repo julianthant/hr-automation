@@ -12,7 +12,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import { mkdir, rmdir } from "fs/promises";
 import { setTimeout as delay } from "timers/promises";
 import { request as httpRequest } from "http";
-import { readEntries, trackEvent, type TrackerEntry } from "./jsonl.js";
+import { readEntries, readEntriesForDate, listDatesForWorkflow, trackEvent, type TrackerEntry } from "./jsonl.js";
 import {
   findAliveDaemons,
   spawnDaemon,
@@ -697,6 +697,133 @@ export async function resolveDaemonLogPath(
 }
 
 /** Per-workflow queue depth — count of `state === "queued"` items. */
+// ─────────────────────────────────────────────────────────────────────────
+// Find prior runs by data-field key (EditDataTab "Copy from prior" lookup)
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Shape returned to the dashboard from `/api/find-prior-by-key`. Only the
+ * fields the EditDataTab needs to render the prior-runs list and copy
+ * data — full TrackerEntry includes runtime-internal noise we don't want
+ * to ship over the wire.
+ */
+export interface PriorEntrySummary {
+  id: string;
+  runId?: string;
+  status: string;
+  step?: string;
+  timestamp: string;
+  date: string;
+  data: Record<string, string>;
+}
+
+export interface FindPriorByKeyRequest {
+  workflow: string;
+  keyField: string;
+  keyValue: string;
+  /** Caller's current entry id — excluded from the result so the form
+   *  doesn't suggest copying from itself. */
+  excludeId?: string;
+  /** Lookback window in days. Defaults to 90 to cover the typical fiscal
+   *  quarter; capped at 365 to bound the file scan. */
+  days?: number;
+}
+
+/**
+ * Find prior tracker entries for `workflow` whose `data[keyField]` equals
+ * `keyValue` and whose `id` differs from `excludeId`. Scans up to `days`
+ * days back, dedupes by `id` (keeps the latest entry per id), and returns
+ * `PriorEntrySummary[]` sorted newest first.
+ *
+ * Designed for the dashboard's "Copy from prior run" affordance in
+ * `EditDataTab` — the workflow declares a `matchKey` (e.g. `"eid"` for
+ * separations) and the EditDataTab calls this endpoint to surface other
+ * runs that share the same matching identifier so the operator can pull
+ * their data forward into the current edit form.
+ *
+ * Filters:
+ *   - Skips entries whose `data[keyField]` is empty or unset.
+ *   - Skips entries whose `id` matches `excludeId` (case-sensitive — the
+ *     dashboard always passes the canonical id).
+ *   - Skips terminal-cancelled entries (`status: "failed", step: "cancelled"`)
+ *     and discarded prep rows (`step: "discarded"`) — those carry no
+ *     useful extracted data.
+ */
+export function findPriorEntriesByKey(
+  workflow: string,
+  keyField: string,
+  keyValue: string,
+  excludeId: string | undefined,
+  dir: string,
+  opts: { days?: number } = {},
+): PriorEntrySummary[] {
+  const days = Math.max(1, Math.min(opts.days ?? 90, 365));
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  const cutoffMs = cutoff.getTime();
+  const wantedValue = keyValue.trim();
+  if (!wantedValue) return [];
+
+  const allDates = listDatesForWorkflow(workflow, dir);
+  // listDatesForWorkflow returns YYYY-MM-DD strings sorted desc; only walk
+  // the last `days` worth so we don't scan years of history when the
+  // operator only cares about the recent quarter.
+  const recentDates = allDates.filter((d) => {
+    const t = new Date(d + "T00:00:00").getTime();
+    return Number.isFinite(t) && t >= cutoffMs;
+  });
+
+  // id → latest entry seen (across all dates).
+  const latestById = new Map<string, { entry: TrackerEntry; date: string }>();
+
+  for (const date of recentDates) {
+    const entries = readEntriesForDate(workflow, date, dir);
+    for (const e of entries) {
+      const value = e.data?.[keyField];
+      if (!value || String(value).trim() !== wantedValue) continue;
+      if (excludeId && e.id === excludeId) continue;
+      // Filter out terminal-cancelled / discarded synthetics — they carry
+      // no extracted data worth copying.
+      if (e.status === "failed" && (e.step === "cancelled" || e.step === "discarded")) continue;
+      const prev = latestById.get(e.id);
+      if (!prev || prev.entry.timestamp < e.timestamp) {
+        latestById.set(e.id, { entry: e, date });
+      }
+    }
+  }
+
+  return [...latestById.values()]
+    .sort((a, b) => (a.entry.timestamp < b.entry.timestamp ? 1 : -1))
+    .map(({ entry, date }) => ({
+      id: entry.id,
+      runId: entry.runId,
+      status: entry.status,
+      step: entry.step,
+      timestamp: entry.timestamp,
+      date,
+      data: { ...(entry.data ?? {}) },
+    }));
+}
+
+export function buildFindPriorByKeyHandler(dir: string) {
+  return (
+    req: FindPriorByKeyRequest,
+  ): { ok: true; entries: PriorEntrySummary[] } | { ok: false; error: string } => {
+    if (!req.workflow || !req.keyField || !req.keyValue) {
+      return { ok: false, error: "workflow, keyField, and keyValue are required" };
+    }
+    const entries = findPriorEntriesByKey(
+      req.workflow,
+      req.keyField,
+      req.keyValue,
+      req.excludeId,
+      dir,
+      { days: req.days },
+    );
+    return { ok: true, entries };
+  };
+}
+
 export function readQueueDepth(workflow: string, dir: string): number {
   const path = queueFilePath(workflow, dir);
   if (!existsSync(path)) return 0;

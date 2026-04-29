@@ -218,6 +218,13 @@ export const separationsWorkflow = defineWorkflow({
     mode: "sequential",
     betweenItems: ["reset-browsers"],
   },
+  // EID is the dashboard's "Copy from prior run" lookup key. When an
+  // operator opens the Edit Data tab on a row whose `data.eid` is
+  // populated, the EditDataTab surfaces past separations runs sharing
+  // that EID (across different doc IDs) so the operator can pull the
+  // earlier run's extracted/edited values forward instead of typing
+  // them again.
+  matchKey: "eid",
   detailFields: [
     { key: "name",              label: "Employee",        editable: true                          },
     { key: "eid",               label: "EID",             editable: true                          },
