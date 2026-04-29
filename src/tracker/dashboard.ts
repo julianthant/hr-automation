@@ -1241,6 +1241,17 @@ export interface PreviewInboxRow {
   recordCount?: number;
 }
 
+/** One row in the failure-bell popover. Returned by GET /api/failures. */
+export interface FailureRow {
+  workflow: string;
+  id: string;
+  runId: string;
+  summary: string;
+  error: string;
+  ts: string;
+  date: string;
+}
+
 /**
  * Narrow reader-bundle shape the search handler depends on. Lets tests inject
  * in-memory fixtures instead of touching disk — matches the factory style used
