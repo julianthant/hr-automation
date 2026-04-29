@@ -5,7 +5,8 @@ import { cn, dateLocal } from "@/lib/utils";
 import { Popover, PopoverTrigger, PopoverContent } from "./ui/popover";
 import { Calendar } from "./ui/calendar";
 import { SearchBar } from "./SearchBar";
-import type { SearchResultRow } from "./types";
+import { ApprovalInbox } from "./ApprovalInbox";
+import type { SearchResultRow, PreviewInboxRow } from "./types";
 
 interface TopBarProps {
   date: string;
@@ -22,6 +23,8 @@ interface TopBarProps {
    * for switching workflow/date/selectedId accordingly.
    */
   onSearchSelect?: (row: SearchResultRow) => void;
+  /** Fired when an approval-inbox row is clicked. */
+  onPreviewSelect?: (row: PreviewInboxRow) => void;
 }
 
 /**
@@ -46,6 +49,7 @@ export function TopBar({
   date, onDateChange, availableDates,
   rightSlot,
   onSearchSelect,
+  onPreviewSelect,
 }: TopBarProps) {
   void availableDates;
 
@@ -97,6 +101,12 @@ export function TopBar({
 
       {/* ── Date navigator + rightSlot — right edge ────────────── */}
       <div className="flex items-center gap-1 justify-self-end">
+        {onPreviewSelect && (
+          <>
+            <ApprovalInbox onSelect={onPreviewSelect} />
+            <span aria-hidden className="w-2.5 inline-block" />
+          </>
+        )}
         <button
           onClick={() => navigateDay(-1)}
           aria-label="Previous day"
