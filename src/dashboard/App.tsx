@@ -13,7 +13,7 @@ import { useCaptureToasts } from "./components/hooks/useCaptureToasts";
 import { resolveActionToastsForEntry } from "./components/hooks/useActionToasts";
 import { useWorkflow, autoLabel } from "./workflows-context";
 import { resolveEntryName } from "./components/entry-display";
-import type { SearchResultRow } from "./components/types";
+import type { SearchResultRow, PreviewInboxRow } from "./components/types";
 import { WorkflowRail } from "./components/WorkflowRail";
 import { QuickRunPanel } from "./components/QuickRunPanel";
 import { TopBarRunButton } from "./components/TopBarRunButton";
@@ -160,6 +160,12 @@ export default function App() {
     setSelectedId(row.id);
   }, [workflow, date]);
 
+  const handlePreviewSelect = useCallback((row: PreviewInboxRow) => {
+    if (row.workflow !== workflow) handleWorkflowChange(row.workflow);
+    if (row.date !== date) setDate(row.date);
+    setSelectedId(row.id);
+  }, [workflow, date, handleWorkflowChange]);
+
   // Entry counts per workflow from backend SSE (accurate across all workflows)
   const entryCounts = wfCounts;
 
@@ -192,6 +198,7 @@ export default function App() {
         onDateChange={setDate}
         availableDates={availableDates}
         onSearchSelect={handleSearchSelect}
+        onPreviewSelect={handlePreviewSelect}
       />
       <div className="flex flex-1 overflow-hidden">
         <WorkflowRail
