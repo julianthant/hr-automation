@@ -254,22 +254,100 @@ describe("handleOathDiscardPrepare", () => {
     assert.equal(last.step, "discarded");
   });
 
-  it("refuses to discard an already-terminal row", async () => {
-    const runId = "run-already-done";
-    const id = `oath-prep-${dateLocal()}-${runId.slice(0, 8)}`;
+  it("refuses to discard an already-resolved row (approved or already-discarded)", async () => {
+    // step: "approved" — operator already fanned out the kernel items
+    const approvedRunId = "run-already-approved";
     trackEvent(
       {
         workflow: "oath-signature",
         timestamp: new Date().toISOString(),
-        id,
-        runId,
+        id: `oath-prep-${dateLocal()}-${approvedRunId.slice(0, 8)}`,
+        runId: approvedRunId,
         status: "done",
+        step: "approved",
         data: { mode: "prepare", pdfPath: "/tmp/x.pdf" },
       },
       tmp,
     );
+    const a = await handleOathDiscardPrepare({ parentRunId: approvedRunId }, tmp);
+    assert.equal(a.ok, false);
+
+    // step: "discarded" — duplicate click on a stale view
+    const discardedRunId = "run-already-discarded";
+    trackEvent(
+      {
+        workflow: "oath-signature",
+        timestamp: new Date().toISOString(),
+        id: `oath-prep-${dateLocal()}-${discardedRunId.slice(0, 8)}`,
+        runId: discardedRunId,
+        status: "failed",
+        step: "discarded",
+        data: { mode: "prepare", pdfPath: "/tmp/y.pdf" },
+      },
+      tmp,
+    );
+    const d = await handleOathDiscardPrepare({ parentRunId: discardedRunId }, tmp);
+    assert.equal(d.ok, false);
+  });
+
+  it("allows discarding a failed-from-restart row so the operator can clear it", async () => {
+    // The sweep marks orphaned prep rows as failed/interrupted on dashboard
+    // startup. The operator must be able to dismiss them — otherwise the
+    // failed row sticks on the dashboard forever.
+    const runId = "run-stuck-failed";
+    trackEvent(
+      {
+        workflow: "oath-signature",
+        timestamp: new Date().toISOString(),
+        id: `oath-prep-${dateLocal()}-${runId.slice(0, 8)}`,
+        runId,
+        status: "failed",
+        step: "interrupted",
+        data: { mode: "prepare", pdfPath: "/tmp/x.pdf" },
+        error: "Dashboard restarted while prepare was in progress — please re-upload",
+      },
+      tmp,
+    );
     const r = await handleOathDiscardPrepare({ parentRunId: runId }, tmp);
-    assert.equal(r.ok, false);
+    assert.equal(r.ok, true);
+    const lines = readLines(tmp);
+    const last = lines[lines.length - 1];
+    assert.equal(last.status, "failed");
+    assert.equal(last.step, "discarded");
+  });
+
+  it("finds prep rows in earlier-date tracker files and writes the discard line back into that file", async () => {
+    // Reproduces the user-facing bug: prep row was created on a previous
+    // local-day, lives in `oath-signature-<earlier>.jsonl`, but the operator
+    // is discarding it today. The handler must scan across date files AND
+    // emit the resolution line into the same file (so the dashboard's
+    // per-date SSE reflects the new state when viewing the original date).
+    const earlier = "2099-01-01";
+    const runId = "run-on-earlier-day";
+    const id = `oath-prep-${earlier}-${runId.slice(0, 8)}`;
+    const earlierFile = join(tmp, `oath-signature-${earlier}.jsonl`);
+    writeFileSync(
+      earlierFile,
+      JSON.stringify({
+        workflow: "oath-signature",
+        timestamp: `${earlier}T12:00:00.000Z`,
+        id,
+        runId,
+        status: "failed",
+        step: "interrupted",
+        data: { mode: "prepare", pdfPath: "/tmp/cross-date.pdf" },
+        error: "Dashboard restarted while prepare was in progress — please re-upload",
+      }) + "\n",
+    );
+    const r = await handleOathDiscardPrepare({ parentRunId: runId }, tmp);
+    assert.equal(r.ok, true);
+    // Resolution line must land in the prep row's date file, not today's.
+    const earlierLines = readFileSync(earlierFile, "utf-8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as TrackerLine);
+    const discardLine = earlierLines.find((l) => l.runId === runId && l.step === "discarded");
+    assert.ok(discardLine, "discard line should be appended to the prep row's date file");
+    // Today's file should remain empty (no resolution leakage).
+    const todayFile = join(tmp, `oath-signature-${dateLocal()}.jsonl`);
+    assert.equal(existsSync(todayFile), false, "no entry should be written to today's file");
   });
 
   it("preserves the uploaded PDF when the path is missing on disk (best-effort)", async () => {

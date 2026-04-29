@@ -1336,8 +1336,14 @@ export function buildSearchHandler(deps: SearchDeps) {
 
     // Latest-per-id aggregation. Key: `${workflow}::${id}`. Multiple runs
     // for the same id collapse into one row whose runId/status reflect
-    // the most recent attempt.
-    const byId = new Map<string, { row: SearchResultRow; ts: string }>();
+    // the most recent attempt. We carry the underlying entry so we can
+    // post-filter resolved prep rows after the fold (they shouldn't show
+    // up as recent results — the operator already approved or discarded
+    // them).
+    const byId = new Map<
+      string,
+      { row: SearchResultRow; ts: string; entry: TrackerEntry }
+    >();
 
     const matches = (entry: TrackerEntry): boolean => {
       if (entry.id.toLowerCase().includes(query)) return true;
@@ -1368,6 +1374,7 @@ export function buildSearchHandler(deps: SearchDeps) {
           if (!prev || e.timestamp >= prev.ts) {
             byId.set(key, {
               ts: e.timestamp,
+              entry: e,
               row: {
                 workflow: wf,
                 id: e.id,
@@ -1383,7 +1390,12 @@ export function buildSearchHandler(deps: SearchDeps) {
       }
     }
 
+    // Resolved prep rows (operator approved or discarded) shouldn't surface
+    // in search — they're audit-only at that point. Mirrors the frontend's
+    // `isResolvedPrepRow` predicate in QueuePanel via `isResolvedPrepEntry`
+    // (defined further down in this file).
     return [...byId.values()]
+      .filter((x) => !isResolvedPrepEntry(x.entry))
       .sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0))
       .slice(0, limit)
       .map((x) => x.row);
@@ -1489,6 +1501,10 @@ export function buildFailuresHandler(deps: FailuresDeps) {
       }
       for (const e of latestRunPerId.values()) {
         if (e.status !== "failed") continue;
+        // Resolved prep rows (operator-discarded) shouldn't surface as
+        // failures — they're audit-only at that point. Mirrors the
+        // QueuePanel's `isResolvedPrepRow` predicate.
+        if (isResolvedPrepEntry(e)) continue;
         failures.push({
           workflow: wf,
           id: e.id,
@@ -1507,6 +1523,19 @@ export function buildFailuresHandler(deps: FailuresDeps) {
 
 function isPrepEntry(e: TrackerEntry): boolean {
   return e.data?.mode === "prepare";
+}
+
+/**
+ * Mirrors `isResolvedPrepRow` in `src/dashboard/components/QueuePanel.tsx`.
+ * A prep row in its terminal-resolved state — operator approved or
+ * discarded — should not surface in any cross-workflow aggregator (search,
+ * failure bell, queue counts).
+ */
+function isResolvedPrepEntry(e: TrackerEntry): boolean {
+  if (!isPrepEntry(e)) return false;
+  if (e.status === "done" && e.step === "approved") return true;
+  if (e.status === "failed" && e.step === "discarded") return true;
+  return false;
 }
 
 function isReadyForReview(latest: TrackerEntry): boolean {
@@ -1632,7 +1661,11 @@ export function computeFailureCounts(entries: TrackerEntry[]): number {
   }
   let count = 0;
   for (const e of latestRunPerId.values()) {
-    if (e.status === "failed") count++;
+    if (e.status !== "failed") continue;
+    // Discarded prep rows (`failed`+`discarded`) are operator-resolved and
+    // shouldn't inflate the navbar failure-bell badge.
+    if (isResolvedPrepEntry(e)) continue;
+    count++;
   }
   return count;
 }

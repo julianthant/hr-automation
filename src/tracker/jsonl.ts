@@ -153,6 +153,23 @@ function getLogPath(workflow: string, dir: string): string {
   return join(dir, `${workflow}-${dateLocal()}.jsonl`);
 }
 
+/**
+ * Append a tracker entry to a *specific* date file (instead of today's).
+ * Used by the prep-row HTTP handlers (approve / discard) so resolution
+ * lines land in the same file as the row's existing history — otherwise
+ * the dashboard's per-date SSE never sees them when the operator resolves
+ * a row created on a previous local day.
+ */
+export function trackEventForDate(
+  entry: TrackerEntry,
+  date: string,
+  dir: string = DEFAULT_DIR,
+): void {
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const logPath = join(dir, `${entry.workflow}-${date}.jsonl`);
+  appendFileSync(logPath, JSON.stringify(entry) + "\n");
+}
+
 export function trackEvent(entry: TrackerEntry, dir: string = DEFAULT_DIR): void {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const logPath = getLogPath(entry.workflow, dir);
