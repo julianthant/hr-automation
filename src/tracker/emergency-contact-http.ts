@@ -26,7 +26,9 @@ import { randomUUID } from "node:crypto";
 
 import {
   dateLocal,
+  listDatesForWorkflow,
   readEntries,
+  readEntriesForDate,
   trackEvent,
   type TrackerEntry,
 } from "./jsonl.js";
@@ -43,6 +45,30 @@ import { ROSTERS_DIR } from "../workflows/emergency-contact/config.js";
 import { enqueueFromHttp } from "../core/enqueue-dispatch.js";
 
 const WORKFLOW = "emergency-contact";
+
+/**
+ * Find the latest tracker entry for a prep row across every available date
+ * file. `readEntries(WORKFLOW, dir)` only reads today's local-date file —
+ * which misses prep rows created late on the previous local day (operator
+ * uploaded at 5pm PDT, returned the next morning to discard/approve). The
+ * sweep at startup also leaves them in the previous day's file. We scan
+ * every date returned by `listDatesForWorkflow` so the lookup is robust
+ * regardless of when the row was first written.
+ */
+function findLatestPrepRow(
+  parentRunId: string,
+  dir: string,
+): TrackerEntry | null {
+  let latest: TrackerEntry | null = null;
+  for (const date of listDatesForWorkflow(WORKFLOW, dir)) {
+    for (const e of readEntriesForDate(WORKFLOW, date, dir)) {
+      if (e.runId !== parentRunId) continue;
+      if (!e.data || typeof e.data !== "object" || e.data.mode !== "prepare") continue;
+      if (!latest || latest.timestamp < e.timestamp) latest = e;
+    }
+  }
+  return latest;
+}
 
 /**
  * Dirs we'll consult when listing rosters. Both are relative to cwd. The
@@ -247,14 +273,7 @@ export async function handleApproveBatch(
   }
 
   // ── Find the prep row this approve corresponds to
-  const entries = readEntries(WORKFLOW, dir);
-  const prepRow = entries.find(
-    (e) =>
-      e.runId === input.parentRunId &&
-      e.data &&
-      typeof e.data === "object" &&
-      e.data.mode === "prepare",
-  );
+  const prepRow = findLatestPrepRow(input.parentRunId, dir);
   if (!prepRow) {
     return { ok: false, error: `no prepare row found for parentRunId=${input.parentRunId}` };
   }
@@ -374,25 +393,18 @@ export async function handleDiscardPrepare(
   if (!input.parentRunId || typeof input.parentRunId !== "string") {
     return { ok: false, error: "parentRunId is required" };
   }
-  const entries = readEntries(WORKFLOW, dir);
-  const prepRow = entries.find(
-    (e) =>
-      e.runId === input.parentRunId &&
-      e.data &&
-      typeof e.data === "object" &&
-      e.data.mode === "prepare",
-  );
+  const prepRow = findLatestPrepRow(input.parentRunId, dir);
   if (!prepRow) {
     return { ok: false, error: `no prepare row found for parentRunId=${input.parentRunId}` };
   }
-  // Don't allow discarding an already-terminal row — duplicates a discard
-  // through the UI button on a stale view, and we'd otherwise emit a
-  // shadow `failed` entry for an already-done batch.
-  if (prepRow.status === "done" || prepRow.status === "failed") {
-    return {
-      ok: false,
-      error: `prepare row is already ${prepRow.status}; nothing to discard`,
-    };
+  // Only block if the row is *already resolved* (approved or discarded).
+  // Failed-from-restart rows must remain discardable so the operator can
+  // clear them off the dashboard.
+  if (prepRow.status === "done" && prepRow.step === "approved") {
+    return { ok: false, error: "prepare row is already approved; nothing to discard" };
+  }
+  if (prepRow.status === "failed" && prepRow.step === "discarded") {
+    return { ok: false, error: "prepare row is already discarded; nothing to discard" };
   }
 
   const pdfPath = typeof prepRow.data?.pdfPath === "string" ? prepRow.data.pdfPath : "";
