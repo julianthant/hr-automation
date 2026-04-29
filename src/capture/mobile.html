@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#020617">
+  <meta name="theme-color" content="#0d0907">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Capture</title>
@@ -13,33 +13,36 @@
   <link rel="preload" as="script" href="/capture-assets/heic2any.min.js">
   <style>
     /* Tokens — mirror the dashboard's --capture-* palette so the surfaces
-       feel like one product. Hex matches docs/superpowers/specs/2026-04-28-capture-redesign-visual-direction.md §1.2 verbatim. */
+       feel like one product. Realigned 2026-04-29 to derive from the warm
+       dark theme used throughout the rest of the dashboard (was the cool
+       slate #020617 → #334155 ladder). Phones see the same warm-brown
+       palette as the operator does on their laptop. */
     :root {
-      --bg-page: #020617;
-      --bg-modal: #0F172A;
-      --bg-raised: #1E293B;
-      --bg-raised-hi: #334155;
-      --border: #334155;
-      --border-subtle: #1E293B;
+      --bg-page: hsl(15 20% 3.9%);
+      --bg-modal: hsl(15 11% 7%);
+      --bg-raised: hsl(15 16% 9.4%);
+      --bg-raised-hi: hsl(27 35% 12%);
+      --border: hsl(25 17% 18%);
+      --border-subtle: hsl(25 17% 13%);
 
-      --fg-primary: #F8FAFC;
-      --fg-secondary: #CBD5E1;
-      --fg-muted: #94A3B8;
-      --fg-faint: #64748B;
+      --fg-primary: hsl(24 21% 86%);
+      --fg-secondary: hsl(25 9% 65%);
+      --fg-muted: hsl(22 7% 45%);
+      --fg-faint: hsl(25 14% 30%);
 
-      --success: #22C55E;
-      --success-fg: #4ADE80;
-      --success-bg: rgba(34, 197, 94, 0.18);
+      --success: hsl(142 60% 45%);
+      --success-fg: hsl(142 60% 60%);
+      --success-bg: hsl(142 60% 45% / 0.16);
 
-      --warn: #F59E0B;
-      --warn-fg: #FBBF24;
-      --warn-bg: rgba(245, 158, 11, 0.18);
+      --warn: hsl(38 92% 50%);
+      --warn-fg: hsl(38 92% 65%);
+      --warn-bg: hsl(38 92% 50% / 0.14);
 
-      --error: #EF4444;
-      --error-fg: #F87171;
-      --error-bg: rgba(239, 68, 68, 0.18);
+      --error: hsl(0 84% 60%);
+      --error-fg: hsl(0 84% 70%);
+      --error-bg: hsl(0 84% 60% / 0.16);
 
-      --focus-ring: #22D3EE;
+      --focus-ring: hsl(29 41% 58%);
 
       --ease-enter:  cubic-bezier(0.16, 1, 0.3, 1);
       --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -71,7 +74,7 @@
       gap: 12px;
       padding: 12px 16px;
       min-height: 56px;
-      background: rgba(15, 23, 42, 0.95);
+      background: hsl(15 11% 7% / 0.95);
       backdrop-filter: saturate(180%) blur(8px);
       -webkit-backdrop-filter: saturate(180%) blur(8px);
       border-bottom: 1px solid var(--border-subtle);
@@ -151,7 +154,7 @@
       content: "blank page";
       position: absolute; inset: 0;
       display: grid; place-items: center;
-      color: #475569; font-size: 12px; font-weight: 600;
+      color: hsl(25 14% 30%); font-size: 12px; font-weight: 600;
       text-transform: uppercase; letter-spacing: 0.06em;
     }
 
@@ -172,7 +175,7 @@
       font-size: 13px;
       font-weight: 700;
       tabular-nums: 1;
-      background: rgba(2, 6, 23, 0.65);
+      background: hsl(15 11% 7% / 0.7);
       color: var(--fg-primary);
       pointer-events: none;
     }
@@ -183,13 +186,13 @@
       padding: 2px 6px; border-radius: 4px;
       letter-spacing: 0.02em; font-weight: 600;
     }
-    .tile .badge.uploaded { background: rgba(34, 197, 94, 0.85); color: #03110A; }
-    .tile .badge.pending { background: rgba(15, 23, 42, 0.85); color: var(--fg-muted); }
-    .tile .badge.failed { background: rgba(239, 68, 68, 0.9); color: #FFFFFF; }
-    .tile .badge.converting { background: rgba(245, 158, 11, 0.85); color: #1F1300; }
+    .tile .badge.uploaded { background: hsl(142 60% 45% / 0.85); color: hsl(150 80% 5%); }
+    .tile .badge.pending { background: hsl(15 11% 7% / 0.85); color: var(--fg-muted); }
+    .tile .badge.failed { background: hsl(0 84% 60% / 0.9); color: hsl(0 0% 100%); }
+    .tile .badge.converting { background: hsl(38 92% 50% / 0.85); color: hsl(30 100% 7%); }
     .tile .badge.blur {
       top: 6px; right: 6px;
-      background: rgba(245, 158, 11, 0.92); color: #1F1300;
+      background: hsl(38 92% 50% / 0.92); color: hsl(30 100% 7%);
       font-family: inherit; font-size: 10px;
       padding: 2px 6px; border-radius: 4px;
       letter-spacing: 0.04em; font-weight: 700; text-transform: uppercase;
@@ -197,7 +200,7 @@
 
     .add-tile {
       aspect-ratio: 3 / 4;
-      border: 2px dashed rgba(148, 163, 184, 0.35);
+      border: 2px dashed hsl(25 14% 30% / 0.7);
       border-radius: 8px;
       background: transparent;
       color: var(--fg-muted);
@@ -241,11 +244,11 @@
     .btn-secondary:active { background: var(--bg-raised-hi); }
     .btn-primary {
       background: var(--success);
-      color: #03110A;
+      color: hsl(150 80% 5%);
       font-size: 17px; font-weight: 700;
       min-height: 52px;
     }
-    .btn-primary:active { background: #16A34A; }
+    .btn-primary:active { background: hsl(142 65% 38%); }
     .btn-primary:disabled, .btn-secondary:disabled {
       opacity: 0.45; cursor: not-allowed;
     }
@@ -262,7 +265,7 @@
     /* ── Action sheet (long-press menu) ────────────────────────── */
     .scrim {
       position: fixed; inset: 0; z-index: 50;
-      background: rgba(2, 6, 23, 0.78);
+      background: hsl(15 11% 4% / 0.78);
       display: none;
       animation: scrim-in 180ms var(--ease-enter) both;
     }
@@ -322,7 +325,7 @@
       width: 44px; height: 44px;
       border-radius: 50%;
       border: 0;
-      background: rgba(15, 23, 42, 0.85);
+      background: hsl(15 11% 7% / 0.85);
       color: var(--fg-primary);
       cursor: pointer;
       display: grid; place-items: center;
@@ -357,7 +360,7 @@
       animation: pop 480ms var(--ease-bounce) both;
       margin-bottom: 20px;
     }
-    .success-icon svg { width: 40px; height: 40px; color: #03110A; }
+    .success-icon svg { width: 40px; height: 40px; color: hsl(150 80% 5%); }
     .success-screen h2 { margin: 0 0 8px; font-size: 22px; font-weight: 700; }
     .success-screen p { margin: 0; color: var(--fg-muted); font-size: 14px; }
     @keyframes pop {
