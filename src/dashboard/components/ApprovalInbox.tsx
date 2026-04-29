@@ -14,7 +14,7 @@ export interface ApprovalInboxProps {
  * Navbar inbox button. Amber badge shows count of preview rows ready
  * for review across all workflows. Click → popover lists them; clicking
  * a row delegates to `onSelect` (App.tsx wires this to the same handler
- * the SearchBar / palette use, switching workflow + date + selectedId).
+ * the command palette uses — switching workflow + date + selectedId).
  */
 export function ApprovalInbox({ onSelect }: ApprovalInboxProps) {
   const [open, setOpen] = useState(false);

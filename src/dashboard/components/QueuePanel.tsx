@@ -15,6 +15,19 @@ function isPrepareRow(e: TrackerEntry): boolean {
   return e.data?.mode === "prepare";
 }
 
+/**
+ * A prep row in its terminal-resolved state: the operator has either
+ * approved (fanned out child queue items) or discarded it. Both lists below
+ * filter these out — keeping them in the StatPills source as well prevents
+ * phantom counts (e.g. "3 ALL / 1 visible row" after two prior discards).
+ */
+function isResolvedPrepRow(e: TrackerEntry): boolean {
+  if (!isPrepareRow(e)) return false;
+  if (e.status === "done" && e.step === "approved") return true;
+  if (e.status === "failed" && e.step === "discarded") return true;
+  return false;
+}
+
 interface QueuePanelProps {
   entries: TrackerEntry[];
   workflow: string;
@@ -54,40 +67,40 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading, r
   void workflow;
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
+  // Resolved prep rows (approved/discarded) are treated as fully retired —
+  // gone from the lists AND from the StatPills counts. Without this filter,
+  // discarding a row leaves it hidden but still counted ("3 ALL / 1 visible").
+  const visibleEntries = useMemo(
+    () => entries.filter((e) => !isResolvedPrepRow(e)),
+    [entries],
+  );
+
   // Prep rows are split out so they can render at the top of the panel
   // regardless of search/filter. The user always wants to see "what's
   // currently being prepared" — hiding it behind a status filter would be
-  // surprising. Filter out terminal-and-already-approved (step="approved")
-  // prep rows so the panel doesn't accumulate stale review affordances.
+  // surprising.
   const previewEntries = useMemo(
-    () =>
-      entries.filter((e) => {
-        if (!isPrepareRow(e)) return false;
-        if (e.status === "done" && e.step === "approved") return false;
-        if (e.status === "failed" && e.step === "discarded") return false;
-        return true;
-      }),
-    [entries],
+    () => visibleEntries.filter(isPrepareRow),
+    [visibleEntries],
   );
 
   const filtered = useMemo(() => {
     // Exclude prep rows from the regular list — they render via PreviewRow
-    // above. Whether or not the prep row was filtered out by approve/discard
-    // above, it should never double-render here.
-    let result = entries.filter((e) => !isPrepareRow(e));
+    // above.
+    let result = visibleEntries.filter((e) => !isPrepareRow(e));
     if (statusFilter) {
       result = result.filter((e) =>
         statusFilter === "pending" ? e.status === "pending" || e.status === "skipped" : e.status === statusFilter,
       );
     }
     return result;
-  }, [entries, statusFilter]);
+  }, [visibleEntries, statusFilter]);
 
   return (
     <div className="w-[300px] min-[1440px]:w-[380px] 2xl:w-[460px] flex-shrink-0 flex flex-col bg-background">
       {/* ── Status filter strip — top of panel ── */}
       <div className="h-[69.5px] flex items-center px-3 min-[1440px]:px-4 py-2 border-b border-border bg-card/60 flex-shrink-0">
-        <StatPills entries={entries} activeFilter={statusFilter} onFilter={setStatusFilter} />
+        <StatPills entries={visibleEntries} activeFilter={statusFilter} onFilter={setStatusFilter} />
       </div>
 
       {/* ── Entry list ── */}

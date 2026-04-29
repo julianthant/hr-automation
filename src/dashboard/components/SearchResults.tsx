@@ -10,7 +10,7 @@ interface SearchResultsProps {
   /**
    * When true, drops the `absolute top-full … z-50` wrapper so the component
    * can be embedded inside a parent popover (e.g. CommandPalette) without
-   * double-wrapping. Defaults to false (standalone / SearchBar usage).
+   * double-wrapping. Defaults to false (standalone usage).
    */
   embedded?: boolean;
   /** Which row index is currently keyboard-active. Applies `bg-accent` to that row. */
@@ -44,7 +44,7 @@ function shortTime(iso: string): string {
 }
 
 /**
- * Dropdown of search matches, docked directly under the SearchBar input.
+ * Dropdown of search matches, embedded inside the CommandPalette popover.
  * Surfaces the workflow label, status pill, summary line, and timestamp —
  * all in the same type scale the queue panel uses (sm for names, mono for
  * IDs / timestamps).
