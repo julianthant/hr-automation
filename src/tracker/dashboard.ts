@@ -1279,9 +1279,10 @@ export function buildSearchSummary(entry: TrackerEntry): string {
  * case-insensitively, and returns the top `limit` matches sorted by lastTs
  * desc.
  *
- * Entries are aggregated per (workflow, id, runId) — only the latest status
- * per run survives into the result list. This keeps the dropdown tight
- * without losing retry history (each retry has its own runId).
+ * Entries are aggregated per (workflow, id) — only the latest entry across
+ * all runs for that id survives into the result list. The result row's
+ * `runId` and `status` reflect the most recent run, so the dropdown shows
+ * one row per doc/email/emplId pointing at the last attempt.
  *
  * Deps are injected so unit tests can feed in-memory JSONL fixtures without
  * hitting disk.
@@ -1307,8 +1308,10 @@ export function buildSearchHandler(deps: SearchDeps) {
     cutoff.setDate(cutoff.getDate() - (days - 1));
     const cutoffStr = dateLocal(cutoff);
 
-    // Latest-per-run aggregation. Key: `${workflow}::${id}::${runId}`
-    const byRun = new Map<string, { row: SearchResultRow; ts: string }>();
+    // Latest-per-id aggregation. Key: `${workflow}::${id}`. Multiple runs
+    // for the same id collapse into one row whose runId/status reflect
+    // the most recent attempt.
+    const byId = new Map<string, { row: SearchResultRow; ts: string }>();
 
     const matches = (entry: TrackerEntry): boolean => {
       if (entry.id.toLowerCase().includes(query)) return true;
@@ -1331,13 +1334,13 @@ export function buildSearchHandler(deps: SearchDeps) {
         for (const e of entries) {
           if (!matches(e)) continue;
           const runId = e.runId || `${e.id}#1`;
-          const key = `${wf}::${e.id}::${runId}`;
-          const prev = byRun.get(key);
-          // Keep the latest status for this run. Ties by timestamp break
-          // toward the first-seen — append-only JSONL guarantees later
-          // entries reflect the newest status.
+          const key = `${wf}::${e.id}`;
+          const prev = byId.get(key);
+          // Keep the latest entry for this id across all runs. Ties by
+          // timestamp break toward the first-seen — append-only JSONL
+          // guarantees later entries reflect the newest state.
           if (!prev || e.timestamp >= prev.ts) {
-            byRun.set(key, {
+            byId.set(key, {
               ts: e.timestamp,
               row: {
                 workflow: wf,
@@ -1354,7 +1357,7 @@ export function buildSearchHandler(deps: SearchDeps) {
       }
     }
 
-    return [...byRun.values()]
+    return [...byId.values()]
       .sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0))
       .slice(0, limit)
       .map((x) => x.row);
