@@ -160,7 +160,10 @@ describe("buildSearchHandler", () => {
     assert.equal(rows[0].lastTs, "2026-04-15T09:02:00.000Z");
   });
 
-  it("keeps separate rows per runId (retries stay visible)", () => {
+  it("collapses retries for the same id into one row showing the latest run", () => {
+    // Two runs for the same id (a failed #1, then a successful retry #2).
+    // The dropdown should show one row per id, reflecting the latest run's
+    // runId + status — duplicates per-doc clutter the dropdown otherwise.
     const bucket = {
       onboarding: {
         "2026-04-15": [
@@ -170,11 +173,10 @@ describe("buildSearchHandler", () => {
       },
     };
     const rows = buildSearchHandler(makeDeps(bucket))("jane");
-    assert.equal(rows.length, 2);
-    assert.equal(rows[0].runId, "jane@ucsd.edu#2"); // newest first
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].runId, "jane@ucsd.edu#2");
     assert.equal(rows[0].status, "done");
-    assert.equal(rows[1].runId, "jane@ucsd.edu#1");
-    assert.equal(rows[1].status, "failed");
+    assert.equal(rows[0].lastTs, "2026-04-15T09:30:00.000Z");
   });
 
   it("respects the days window (excludes older dates)", () => {
