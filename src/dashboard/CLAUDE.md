@@ -17,7 +17,7 @@ App.tsx
 ├── TopBar.tsx
 │   ├── Workflow dropdown (shadcn Select → popover with name + count)
 │   ├── Date navigation (arrow buttons + shadcn Popover + Calendar)
-│   ├── CommandPalette.tsx (⌘K — embedded SearchResults + > command syntax; replaces SearchBar)
+│   ├── SearchBar.tsx (cross-workflow tracker entry search → SearchResults.tsx)
 │   ├── ApprovalInbox.tsx (amber badge — preview rows ready for review across workflows)
 │   ├── FailureBell.tsx (red badge — failed entries on the active date across workflows)
 │   ├── Live indicator (green dot pill)
@@ -176,7 +176,6 @@ Current consumption:
 | `useElapsed(startTime)` | `EntryItem`, `LogPanel` | Live "1m 22s" counter for running entries |
 | `usePreflight()` | `App.tsx` | Fetches `/api/preflight` on mount, fires sonner toast |
 | `usePreviewInbox(paused?)` | `ApprovalInbox` | 5 s poll of `/api/preview-inbox`. `paused` is set true while the popover is open to avoid re-renders that close the menu. |
-| `useCommandPalette()` | `CommandPalette` | Global ⌘K + Esc handlers; returns `{ open, setOpen, query, setQuery }`. |
 
 ## Log Icon Mapping (lucide-react)
 
@@ -233,7 +232,7 @@ The dashboard now auto-adapts — no frontend changes needed. When a new workflo
 
 ## Lessons Learned
 
-- **2026-04-29: Navbar add-ons — palette + inbox + bell.** TopBar grew three new affordances. The legacy `SearchBar.tsx` was deleted; cross-workflow search now lives inside `CommandPalette.tsx` (⌘K, embedded `<SearchResults embedded />` plus a `> token args` command syntax with five commands: `spawn`, `stop`, `retry`, `goto`, `jump`). `commandCtx` is built once in `App.tsx` (`useMemo`) and threaded through `TopBar` → `CommandPaletteSlot`; `failedIds` is exposed as `() => failedIds` so handlers always read the latest snapshot without re-memoizing. **Universal preview-row "ready for review" rule** (deliberate replacement of the per-workflow discriminator table that drafts went through): `data.mode === "prepare" && status === "done" && step !== "approved" && step !== "discarded"`. `ApprovalInbox` polls `/api/preview-inbox` every 5 s but pauses while its own popover is open (otherwise the re-render closes the menu). `FailureBell` uses two data sources by design: the badge count comes from `failureCounts` on the `/events` SSE payload (zero extra HTTP), but the popover *list* is lazy-fetched from `/api/failures` only on open — same date-scoping logic, full row payload only when needed. Both endpoints dedupe to **latest run per `(workflow, id)`** — the same two-pass aggregation pattern the search-results dedup fix shipped earlier on 2026-04-29. `SearchResults` now takes `embedded?: boolean`, `activeRowIndex?: number`, `onMouseEnterRow?` props — `embedded` drops the `absolute top-full z-50` wrapper for popover usage; the active-row props are required for keyboard ↑/↓ visual feedback inside the palette (without them, `useCommandPalette`'s active-index state had no way to highlight the matching row). Bundle: 1,104.59 kB raw / 243.17 kB gzip (was 1,031 kB / 227 kB before this work; +73 kB raw / +16 kB gzip for the three components + their hooks).
+- **2026-04-29: Navbar add-ons — inbox + bell (palette reverted).** TopBar grew two new affordances: `ApprovalInbox` (amber badge popover) and `FailureBell` (red badge popover). A `CommandPalette` (⌘K, `> token args` syntax) was built and shipped alongside as a SearchBar replacement, but the operator decided the command syntax wasn't wanted and it was reverted the same day — `SearchBar.tsx` is restored at its pre-deletion shape and the palette directory + `useCommandPalette` hook are gone. **Universal preview-row "ready for review" rule** (replaces the per-workflow discriminator table the spec drafts went through): `data.mode === "prepare" && status === "done" && step !== "approved" && step !== "discarded"`. `ApprovalInbox` polls `/api/preview-inbox` every 5 s but pauses while its own popover is open (otherwise the re-render closes the menu). `FailureBell` uses two data sources by design: the badge count comes from `failureCounts` on the `/events` SSE payload (zero extra HTTP), but the popover *list* is lazy-fetched from `/api/failures` only on open — same date-scoping logic, full row payload only when needed. Both endpoints dedupe to **latest run per `(workflow, id)`** — the same two-pass aggregation pattern the search-results dedup fix shipped earlier on 2026-04-29. Bundle: 1,099.12 kB raw / 241.72 kB gzip (was 1,031 kB / 227 kB pre-add-ons; +68 kB raw / +14 kB gzip for the two components + their backend wiring).
 - **2026-04-29: Search-results dedup — `(workflow, id)` not `(workflow, id, runId)`.** The `/api/search` backend was keying by `(workflow, id, runId)`, so re-running a failed item produced two rows in the cross-workflow search dropdown. Fix: collapse by `(workflow, id)` and keep the highest-runId entry (which is also the latest). The same two-pass aggregation pattern is now used in `buildPreviewInboxHandler` and `buildFailuresHandler`.
 - **2026-04-28: Emergency-contact PreviewRow is parent-of-N.** A new row shape lives at the top of the QueuePanel for any tracker entry with `data.mode === "prepare"`. Pinned above the regular entry list (rendered outside the search/filter pipeline so it stays visible regardless of the operator's status filter). Two states: in-progress (4-stage progress strip + Discard) and ready-for-review (records summary + Review & approve that expands an inline list of `PreviewRecordRow`s). Approve fans out N kernel queue items via `enqueueFromHttp` — the prep row itself is marked `done` step `approved` and filtered out of the panel after that. Per-record edits are mirrored to `localStorage["ec-prep-edits:<parentRunId>"]` so a reload restores in-progress edits; cleared on Approve / Discard. The edit form is **inline** (not a nested modal) — stacking modals on top of the review list would break spatial context. Frontend bundles types from `preview-types.ts` (plain TS interfaces, not Zod) so Zod's runtime stays out of the bundle; validation lives server-side. New shadcn primitives added: `ui/dialog.tsx` (Radix Dialog) + `ui/checkbox.tsx` (Radix Checkbox). Bundle now 1031 KB raw / 227 KB gzip (was 907 KB raw / ~210 KB gzip); the +30 KB gzip is mostly Radix Dialog runtime.
 - **2026-04-10: Logs flash and disappear** — Race condition between initial `/api/logs` fetch and SSE `/events/logs` stream. Both return overlapping data, and when SSE reconnects or runId changes, `setRawLogs([])` clears state before new data arrives. Fix: make SSE the sole data source — backend sends full history on first tick, frontend replaces state on first message and appends on subsequent ones. No separate initial fetch needed.
@@ -279,17 +278,15 @@ src/dashboard/
     TopBar.tsx, QueuePanel.tsx, EntryItem.tsx, LogPanel.tsx
     StepPipeline.tsx, LogStream.tsx, LogLine.tsx, StatPills.tsx
     RunSelector.tsx, EmptyState.tsx
-    SearchResults.tsx (embedded in CommandPalette popover)
+    SearchBar.tsx, SearchResults.tsx
     ApprovalInbox.tsx, FailureBell.tsx (TopBar navbar add-ons)
-    command-palette/
-      CommandPalette.tsx, commands.ts (⌘K palette + 5 commands: spawn/stop/retry/goto/jump)
     ScreenshotsPanel.tsx, ScreenshotCard.tsx, ScreenshotLightbox.tsx
     SessionPanel.tsx, WorkflowBox.tsx, BrowserChip.tsx, SelectorWarningsPanel.tsx
     entry-display.ts (resolveEntryName / resolveEntryId)
     types.ts (TrackerEntry, LogEntry, RunInfo, AuthState, BrowserState, PreviewInboxRow, FailureRow, etc.)
     hooks/
       useClock.ts, useEntries.ts, useLogs.ts, useElapsed.ts
-      usePreflight.ts, useSessions.ts, usePreviewInbox.ts, useCommandPalette.ts
+      usePreflight.ts, useSessions.ts, usePreviewInbox.ts
     ui/  # local shadcn-style primitives + HeroUI Calendar wrapper
       calendar.tsx, dropdown-menu.tsx, popover.tsx
   lib/utils.ts               # cn() — class merge helper
