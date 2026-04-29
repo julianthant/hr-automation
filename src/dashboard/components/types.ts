@@ -80,6 +80,26 @@ export interface SearchResultRow {
 }
 
 /**
+ * One row in the navbar approval inbox. The inbox surfaces preview-row
+ * tracker entries that are "ready for review" — see
+ * docs/superpowers/specs/2026-04-29-navbar-add-ons-design.md for the
+ * universal discriminator rule.
+ */
+export interface PreviewInboxRow {
+  workflow: string;
+  id: string;
+  runId: string;
+  /** Display name — typically the original PDF filename. */
+  summary: string;
+  /** ISO timestamp of the latest tracker entry for this row. */
+  ts: string;
+  /** Tracker date (YYYY-MM-DD) so the dashboard can deep-link. */
+  date: string;
+  /** Optional record-count hint (emergency-contact prep parent rows have it). */
+  recordCount?: number;
+}
+
+/**
  * Format a millisecond count as a short, dashboard-friendly label.
  * `<1s` when under a second, `Ns` under a minute, `Nm Ss` under an hour, else `Nh Mm`.
  */

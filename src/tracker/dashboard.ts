@@ -1226,6 +1226,21 @@ export interface SearchResultRow {
   summary: string;
 }
 
+/** One row in the navbar approval inbox. See frontend types.ts for the full JSDoc. */
+export interface PreviewInboxRow {
+  workflow: string;
+  id: string;
+  runId: string;
+  /** Display name — typically the original PDF filename. */
+  summary: string;
+  /** ISO timestamp of the latest tracker entry for this row. */
+  ts: string;
+  /** Tracker date (YYYY-MM-DD) so the dashboard can deep-link. */
+  date: string;
+  /** Optional record-count hint (emergency-contact prep parent rows have it). */
+  recordCount?: number;
+}
+
 /**
  * Narrow reader-bundle shape the search handler depends on. Lets tests inject
  * in-memory fixtures instead of touching disk — matches the factory style used
