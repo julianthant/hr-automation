@@ -15,20 +15,13 @@ import type { TrackerEntry, RunInfo } from "./types";
 import { formatTrackerValue, isMonospaceKey } from "./types";
 import { useWorkflow } from "../workflows-context";
 import { resolveEntryName } from "./entry-display";
+import { statusBadgeClass } from "./status-styles";
 
 interface LogPanelProps {
   entry: TrackerEntry | null;
   workflow: string;
   date: string;
 }
-
-const badgeStyles: Record<string, string> = {
-  running: "bg-primary/15 text-primary",
-  done: "bg-[#4ade80]/12 text-[#4ade80]",
-  failed: "bg-destructive/12 text-destructive",
-  pending: "bg-[#fbbf24]/12 text-[#fbbf24]",
-  skipped: "bg-secondary text-muted-foreground",
-};
 
 // Special virtual keys the generic detail renderer recognizes. These come
 // from the entry's timestamp metadata rather than tracker data, so the
@@ -111,7 +104,7 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
 
   if (!entry) {
     return (
-      <div className="flex-1 flex flex-col bg-card border-r border-border">
+      <div className="flex-1 flex flex-col bg-card">
         <EmptyState
           icon={TerminalSquare}
           title="Select an entry"
@@ -152,9 +145,9 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
   const showSkeleton = logsLoading && logs.length === 0;
 
   return (
-    <div className="flex-1 flex flex-col bg-card min-w-0 min-h-0 overflow-hidden border-r border-border">
+    <div className="flex-1 flex flex-col bg-card min-w-0 min-h-0 overflow-hidden">
       {/* Header — height matches QueuePanel search + DuoPanel title */}
-      <div className="h-[60px] flex items-center justify-between px-6 border-b border-border flex-shrink-0">
+      <div className="h-[69.5px] flex items-center justify-between px-6 border-b border-border flex-shrink-0">
         <div className="flex items-center gap-3.5">
           {showSkeleton ? (
             <>
@@ -164,7 +157,7 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
           ) : (
             <>
               <span className="font-bold text-lg">{name || entry.id}</span>
-              <span className={cn("text-[10px] font-semibold px-2.5 py-0.5 rounded-xl uppercase tracking-wide font-mono", badgeStyles[runStatus])}>
+              <span className={cn("text-[10px] font-semibold px-2.5 py-0.5 rounded-xl uppercase tracking-wide font-mono", statusBadgeClass(runStatus))}>
                 {runStatus}
               </span>
               {name && <span className="font-mono text-[13px] text-muted-foreground">{entry.id}</span>}

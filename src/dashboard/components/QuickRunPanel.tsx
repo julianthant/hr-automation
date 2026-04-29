@@ -127,7 +127,7 @@ export function QuickRunPanel({ workflow, failedIds }: QuickRunPanelProps) {
   return (
     <form
       onSubmit={onSubmit}
-      className="flex items-center gap-2 w-full min-w-0"
+      className="flex items-center gap-2 flex-1 min-w-0"
     >
       <div
         className={cn(

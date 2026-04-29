@@ -175,11 +175,12 @@ export function LogStream({ logs, events = [], loading, screenshotsSlot, editDat
         )}
       </div>
 
-      {/* Footer — h-[41px] so its top border aligns with SelectorHealth
-          header on the right rail across the column gap. Hidden when a
-          non-log slot tab (screenshots / edit-data) owns the panel —
-          the streaming/auto-scroll affordances aren't relevant there. */}
-      <div className={cn("h-[41px] flex items-center justify-between px-6 text-[12px] text-muted-foreground flex-shrink-0", (tab?.source === "screenshots" || tab?.source === "edit-data") && "hidden")}>
+      {/* Footer — h-12 matches QueuePanel's run-controls footer height so
+          the two panels' bottom edges tile cleanly across the column gap.
+          Hidden when a non-log slot tab (screenshots / edit-data) owns
+          the panel — the streaming/auto-scroll affordances aren't
+          relevant there. */}
+      <div className={cn("h-12 flex items-center justify-between px-6 text-[12px] text-muted-foreground flex-shrink-0", (tab?.source === "screenshots" || tab?.source === "edit-data") && "hidden")}>
         <div className="flex items-center gap-2 leading-none">
           <span className="relative flex items-center justify-center w-[7px] h-[7px]">
             <span className="absolute inset-0 rounded-full bg-primary/50 animate-ping" />

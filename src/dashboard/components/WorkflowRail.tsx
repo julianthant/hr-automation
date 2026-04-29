@@ -69,7 +69,7 @@ export function WorkflowRail({
   return (
     <nav
       aria-label="Workflows"
-      className="w-[200px] flex-shrink-0 border-r border-border bg-card flex flex-col"
+      className="w-[200px] flex-shrink-0 bg-card flex flex-col"
     >
       <div className="flex-1 overflow-y-auto py-3">
         {displayGroups.map((group, idx) => (

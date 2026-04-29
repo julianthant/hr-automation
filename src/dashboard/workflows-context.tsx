@@ -14,6 +14,14 @@ export interface WorkflowMetadata {
    *                                (still shown in Edit Data when editable).
    */
   detailFields: Array<{ key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean }>
+  /**
+   * Field key used by the EditDataTab's "Copy from prior run" lookup.
+   * When set (e.g. `"eid"` for separations), the EditDataTab surfaces a
+   * "Find prior" button when the current entry has a populated value at
+   * `data[matchKey]`, letting the operator pull a previous run's data
+   * forward instead of re-typing it.
+   */
+  matchKey?: string
 }
 
 const WorkflowsContext = createContext<WorkflowMetadata[] | null>(null)

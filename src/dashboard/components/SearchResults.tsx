@@ -1,21 +1,13 @@
 import { cn } from "@/lib/utils";
 import { useWorkflows, autoLabel } from "../workflows-context";
 import type { SearchResultRow } from "./types";
+import { statusBadgeClass } from "./status-styles";
 
 interface SearchResultsProps {
   rows: SearchResultRow[];
   query: string;
   onPick: (row: SearchResultRow) => void;
 }
-
-// Pill colours mirror EntryItem's `badgeStyles` — same tokens, same weights.
-const badgeStyles: Record<string, string> = {
-  running: "bg-primary/15 text-primary",
-  done: "bg-[#4ade80]/12 text-[#4ade80]",
-  failed: "bg-destructive/12 text-destructive",
-  pending: "bg-[#fbbf24]/12 text-[#fbbf24]",
-  skipped: "bg-secondary text-muted-foreground",
-};
 
 /** Compact date — matches the TopBar calendar-popover formatting. */
 function shortDate(date: string): string {
@@ -87,7 +79,7 @@ export function SearchResults({ rows, query, onPick }: SearchResultsProps) {
               <span
                 className={cn(
                   "text-[10px] font-semibold px-2 py-0.5 rounded-xl uppercase tracking-wide font-mono flex-shrink-0",
-                  badgeStyles[row.status] ?? "bg-secondary text-muted-foreground",
+                  statusBadgeClass(row.status) || "bg-secondary text-muted-foreground",
                 )}
               >
                 {row.status}

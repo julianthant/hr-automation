@@ -74,7 +74,7 @@ export function CapturePhotoLightbox({
       aria-label={`Photo ${photo.index + 1} preview`}
       onClick={onClose}
       className="fixed inset-0 z-[60] flex items-center justify-center"
-      style={{ backgroundColor: "rgba(2, 6, 23, 0.92)" }}
+      style={{ backgroundColor: "hsl(15 11% 4% / 0.92)" }}
     >
       {/* Close X */}
       <button

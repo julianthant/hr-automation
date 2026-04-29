@@ -115,7 +115,7 @@ export function CapturePhotoTile({
       <span
         className="absolute left-1.5 top-1.5 rounded-sm px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums"
         style={{
-          backgroundColor: "rgba(15, 23, 42, 0.7)",
+          backgroundColor: "hsl(15 11% 7% / 0.72)",
           color: "var(--capture-fg-primary)",
         }}
         aria-hidden
@@ -129,8 +129,8 @@ export function CapturePhotoTile({
           key={flashKey}
           className="capture-anim-blur-flash absolute right-1.5 top-1.5 inline-flex items-center gap-0.5 rounded-sm px-1.5 py-0.5 font-sans text-[10px] font-semibold uppercase"
           style={{
-            backgroundColor: "rgba(245, 158, 11, 0.9)",
-            color: "#1F1300",
+            backgroundColor: "var(--capture-warn)",
+            color: "hsl(30 100% 7%)",
           }}
         >
           <AlertTriangle aria-hidden className="h-3 w-3" />
@@ -157,7 +157,7 @@ export function CapturePhotoTile({
                 "focus-visible:outline-none focus-visible:ring-2",
               )}
               style={{
-                backgroundColor: "rgba(15, 23, 42, 0.85)",
+                backgroundColor: "hsl(15 11% 7% / 0.85)",
                 color: "var(--capture-fg-primary)",
                 ["--tw-ring-color" as string]: "var(--capture-focus-ring)",
               }}

@@ -239,52 +239,61 @@
 }
 
 /* ========================================================================
-   Capture redesign tokens — see
-   docs/superpowers/specs/2026-04-28-capture-redesign-visual-direction.md
+   Capture surface tokens
    ========================================================================
-   Tokens are explicit hex (not HSL) because the capture surface is a
-   self-contained dark-mode component that holds its visual identity even
-   if the surrounding dashboard ever supports a light theme. The dashboard
-   is dark by default today; these tokens stay in :root so they're picked
-   up regardless of which class gates the theme. */
+   Realigned 2026-04-29 to derive from the dashboard's warm-dark theme
+   tokens instead of the previous self-contained cool slate (#020617 etc.).
+   The capture modal now inherits the same surface tones as the rest of
+   the dashboard — operators see one cohesive aesthetic rather than the
+   modal feeling like a transplant from another product. Semantic colors
+   (success/warn/error) keep their canonical meanings but are tuned to
+   sit comfortably alongside the warm-dark palette: warmer reds, slightly
+   desaturated greens, and an amber that matches the dashboard's primary.
+
+   The HSL component values mirror the dashboard's `.dark` block above —
+   small tweaks (a deeper raised-hi, a slightly stronger border-strong)
+   keep elevation legible inside the modal. */
 :root {
   /* Surfaces */
-  --capture-bg-page: #020617;
-  --capture-bg-modal: #0F172A;
-  --capture-bg-raised: #1E293B;
-  --capture-bg-raised-hi: #334155;
-  --capture-border-subtle: #1E293B;
-  --capture-border-strong: #334155;
+  --capture-bg-page: hsl(15 20% 3.9%);
+  --capture-bg-modal: hsl(15 11% 7%);
+  --capture-bg-raised: hsl(15 16% 9.4%);
+  --capture-bg-raised-hi: hsl(27 35% 12%);
+  --capture-border-subtle: hsl(25 17% 13%);
+  --capture-border-strong: hsl(25 17% 18%);
 
   /* Text */
-  --capture-fg-primary: #F8FAFC;
-  --capture-fg-secondary: #CBD5E1;
-  --capture-fg-muted: #94A3B8;
-  --capture-fg-faint: #64748B;
+  --capture-fg-primary: hsl(24 21% 86%);
+  --capture-fg-secondary: hsl(25 9% 65%);
+  --capture-fg-muted: hsl(22 7% 45%);
+  --capture-fg-faint: hsl(25 14% 30%);
 
-  /* Semantic — Success */
-  --capture-success: #22C55E;
-  --capture-success-hover: #16A34A;
-  --capture-success-fg: #4ADE80;
-  --capture-success-bg: rgba(34, 197, 94, 0.15);
-  --capture-success-border: rgba(34, 197, 94, 0.40);
+  /* Semantic — Success (kept canonical green; slightly desaturated to
+     sit in the warm palette without screaming) */
+  --capture-success: hsl(142 60% 45%);
+  --capture-success-hover: hsl(142 65% 38%);
+  --capture-success-fg: hsl(142 60% 60%);
+  --capture-success-bg: hsl(142 60% 45% / 0.13);
+  --capture-success-border: hsl(142 60% 45% / 0.36);
 
-  /* Semantic — Warning */
-  --capture-warn: #F59E0B;
-  --capture-warn-fg: #FBBF24;
-  --capture-warn-bg: rgba(245, 158, 11, 0.12);
-  --capture-warn-border: rgba(245, 158, 11, 0.40);
+  /* Semantic — Warning (amber — coincides with the dashboard's primary
+     hue family, so warning surfaces feel native) */
+  --capture-warn: hsl(38 92% 50%);
+  --capture-warn-fg: hsl(38 92% 65%);
+  --capture-warn-bg: hsl(38 92% 50% / 0.10);
+  --capture-warn-border: hsl(38 92% 50% / 0.36);
 
-  /* Semantic — Error */
-  --capture-error: #EF4444;
-  --capture-error-fg: #F87171;
-  --capture-error-bg: rgba(239, 68, 68, 0.15);
-  --capture-error-border: rgba(239, 68, 68, 0.40);
+  /* Semantic — Error (warm red, matches `--destructive` from .dark) */
+  --capture-error: hsl(0 84% 60%);
+  --capture-error-fg: hsl(0 84% 70%);
+  --capture-error-bg: hsl(0 84% 60% / 0.13);
+  --capture-error-border: hsl(0 84% 60% / 0.36);
 
-  /* Focus + glow */
-  --capture-focus-ring: #22D3EE;
-  --capture-glow-success: 0 0 12px rgba(34, 197, 94, 0.35);
-  --capture-glow-error: 0 0 12px rgba(239, 68, 68, 0.35);
+  /* Focus + glow — matches the dashboard's primary ring so keyboard
+     focus inside the modal looks identical to focus elsewhere. */
+  --capture-focus-ring: hsl(29 41% 58%);
+  --capture-glow-success: 0 0 12px hsl(142 60% 45% / 0.30);
+  --capture-glow-error: 0 0 12px hsl(0 84% 60% / 0.32);
 
   /* Easings */
   --cap-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);

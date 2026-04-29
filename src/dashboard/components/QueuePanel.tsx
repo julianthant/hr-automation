@@ -1,12 +1,11 @@
-import { useState, useMemo } from "react";
-import { Search, Inbox, X } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
+import { Inbox } from "lucide-react";
 import { StatPills } from "./StatPills";
 import { EntryItem } from "./EntryItem";
 import { EmptyState } from "./EmptyState";
 import { PreviewRow } from "./PreviewRow";
 import { OathPreviewRow } from "./OathPreviewRow";
 import type { TrackerEntry } from "./types";
-import { resolveEntryName } from "./entry-display";
 /**
  * Workflow-agnostic detector — both emergency-contact and oath-signature
  * stamp `mode: "prepare"` on parent prep rows. The dispatcher below picks
@@ -22,23 +21,37 @@ interface QueuePanelProps {
   selectedId: string | null;
   onSelect: (id: string) => void;
   loading: boolean;
+  /**
+   * Optional cluster of run controls (QuickRunPanel + Capture / Oath /
+   * Run buttons) rendered in the panel's bottom footer, mirroring the
+   * LogStream's "Streaming · N entries" footer on the right side. The
+   * cluster is right-aligned within the footer when its contents are
+   * narrower than the panel; QuickRunPanel's input naturally fills the
+   * leading space when present.
+   */
+  runControlsSlot?: ReactNode;
 }
 
 /**
- * QueuePanel
- *  - Header card (one cohesive unit, no internal divider): search input on
- *    top, status filter strip below.
- *  - Entry-count divider row: "N entries" — visually matches the LogPanel's
- *    StepPipeline row across the gap so horizontal dividers align.
- *  - Scrollable entry list.
+ * QueuePanel — left column of the main split.
  *
- * Header height is sized to make its bottom border land at the same Y as the
- * LogPanel's StepPipeline border on the right, so the two halves of the
- * dashboard read as one continuous grid.
+ *   [ Status filter strip ]    ← top of panel; tab-like pills
+ *   [ Entry list ]             ← scrollable
+ *   [ Run controls footer ]    ← matches LogStream footer height
+ *
+ * The cross-workflow search lives in the TopBar (centered) — there is no
+ * panel-internal search input. The previous "Search by name, email, or
+ * ID…" affordance was a near-duplicate of TopBar's `SearchBar`; folding
+ * the two together removes a redundant control and gives the entry list
+ * more vertical real estate.
+ *
+ * Border treatment: the panel's right divider is gone (the `bg-card`
+ * neighbours visually separate themselves via tone alone). The footer's
+ * top border keeps the run controls visually distinct from the scrollable
+ * list above.
  */
-export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }: QueuePanelProps) {
+export function QueuePanel({ entries, workflow, selectedId, onSelect, loading, runControlsSlot }: QueuePanelProps) {
   void workflow;
-  const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
   // Prep rows are split out so they can render at the top of the panel
@@ -67,57 +80,18 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
         statusFilter === "pending" ? e.status === "pending" || e.status === "skipped" : e.status === statusFilter,
       );
     }
-    if (search) {
-      const q = search.toLowerCase();
-      result = result.filter((e) => {
-        const name = resolveEntryName(e).toLowerCase();
-        return e.id.toLowerCase().includes(q) || name.includes(q);
-      });
-    }
     return result;
-  }, [entries, statusFilter, search]);
+  }, [entries, statusFilter]);
 
   return (
-    <div className="w-[300px] min-[1440px]:w-[380px] 2xl:w-[460px] flex-shrink-0 border-r border-border flex flex-col bg-background">
-      {/* ── Search row — h-[60px] matches the LogPanel header height so
-            the divider below the search lands at the same Y as the divider
-            below the LogPanel header ("name + status badge" row). The
-            quick-run input + SharePoint download dropdown both live in the
-            TopBar's queue zone (mounted by App.tsx via QuickRunPanel), so
-            this row is search-only. ── */}
-      <div className="h-[60px] flex items-center gap-2 px-3 border-b border-border bg-card flex-shrink-0">
-        <div className="flex items-center gap-2 bg-secondary border border-border rounded-lg h-8 px-3 flex-1 min-w-0 focus-within:border-primary transition-colors">
-          <Search aria-hidden className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-          <input
-            type="text"
-            placeholder="Search by name, email, or ID…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            aria-label="Search queue"
-            className="flex-1 bg-transparent border-none outline-none text-foreground text-[13px] font-sans placeholder:text-muted-foreground min-w-0"
-          />
-          {search && (
-            <button
-              type="button"
-              onClick={() => setSearch("")}
-              aria-label="Clear search"
-              className="flex-shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer transition-colors"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* ── Status filter strip — h-[69.5px] makes the section's bottom
-            border land exactly at the LogPanel's email-row border across
-            the column gap (search 60 + pills 69.5 = panel-top + 129.5). ── */}
+    <div className="w-[300px] min-[1440px]:w-[380px] 2xl:w-[460px] flex-shrink-0 flex flex-col bg-background">
+      {/* ── Status filter strip — top of panel ── */}
       <div className="h-[69.5px] flex items-center px-3 min-[1440px]:px-4 py-2 border-b border-border bg-card/60 flex-shrink-0">
         <StatPills entries={entries} activeFilter={statusFilter} onFilter={setStatusFilter} />
       </div>
 
       {/* ── Entry list ── */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto border-b border-border">
         {/* Pinned: emergency-contact preview rows. Sit above the scrollable
             list. They're tall when expanded, but the parent is itself
             scrollable so the list can scroll past them. */}
@@ -158,6 +132,20 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading }:
           ))
         )}
       </div>
+
+      {/* ── Run controls footer — h-12 mirrors the LogStream footer's
+            height + padding so the bottom edges of the two panels' footers
+            tile cleanly. Right-stuck cluster: QuickRunPanel (input + Play
+            + Retry-all) when wired for the workflow, plus per-workflow
+            Capture / Run / Oath buttons. `justify-end` makes the buttons
+            hug the right edge for workflows where QuickRunPanel returns
+            null (e.g. emergency-contact); when QuickRunPanel renders, its
+            form's `flex-1 min-w-0` expands to fill the leading space. ── */}
+      {runControlsSlot && (
+        <div className="h-12 flex items-center gap-2 px-3 min-[1440px]:px-4 bg-card/40 flex-shrink-0 justify-end">
+          {runControlsSlot}
+        </div>
+      )}
     </div>
   );
 }
