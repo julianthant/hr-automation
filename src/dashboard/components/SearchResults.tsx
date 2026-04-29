@@ -7,6 +7,12 @@ interface SearchResultsProps {
   rows: SearchResultRow[];
   query: string;
   onPick: (row: SearchResultRow) => void;
+  /**
+   * When true, drops the `absolute top-full … z-50` wrapper so the component
+   * can be embedded inside a parent popover (e.g. CommandPalette) without
+   * double-wrapping. Defaults to false (standalone / SearchBar usage).
+   */
+  embedded?: boolean;
 }
 
 /** Compact date — matches the TopBar calendar-popover formatting. */
@@ -39,14 +45,18 @@ function shortTime(iso: string): string {
  * all in the same type scale the queue panel uses (sm for names, mono for
  * IDs / timestamps).
  */
-export function SearchResults({ rows, query, onPick }: SearchResultsProps) {
+export function SearchResults({ rows, query, onPick, embedded = false }: SearchResultsProps) {
   const registered = useWorkflows();
   const labelFor = (wf: string): string =>
     registered.find((r) => r.name === wf)?.label ?? autoLabel(wf);
 
+  const wrapperClass = embedded
+    ? "overflow-hidden"
+    : "absolute top-full left-0 right-0 mt-1.5 min-w-[440px] bg-popover border border-border rounded-lg shadow-md z-50 overflow-hidden";
+
   if (rows.length === 0) {
     return (
-      <div className="absolute top-full left-0 right-0 mt-1.5 min-w-[440px] bg-popover border border-border rounded-lg shadow-md z-50 overflow-hidden">
+      <div className={wrapperClass}>
         <div className="px-4 py-6 text-center">
           <div className="text-sm text-foreground font-medium">No matches</div>
           <div className="text-xs text-muted-foreground mt-1">
@@ -59,7 +69,7 @@ export function SearchResults({ rows, query, onPick }: SearchResultsProps) {
   }
 
   return (
-    <div className="absolute top-full left-0 right-0 mt-1.5 min-w-[440px] bg-popover border border-border rounded-lg shadow-md z-50 overflow-hidden">
+    <div className={wrapperClass}>
       <div className="max-h-[380px] overflow-y-auto">
         {rows.map((row) => (
           <button
