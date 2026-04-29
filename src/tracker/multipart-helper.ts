@@ -87,8 +87,13 @@ function parsePartHeaders(headerBuf: Buffer): Record<string, string> {
  * Example: `form-data; name="pdf"; filename="scan.pdf"` → `name` → `pdf`.
  * Tolerates both quoted and unquoted forms.
  */
+const DISPOSITION_PARAM_CACHE = new Map<string, RegExp>();
 function getDispositionParam(disposition: string, key: string): string | undefined {
-  const re = new RegExp(`${key}="([^"]*)"|${key}=([^;\\s]+)`, "i");
+  let re = DISPOSITION_PARAM_CACHE.get(key);
+  if (!re) {
+    re = new RegExp(`${key}="([^"]*)"|${key}=([^;\\s]+)`, "i");
+    DISPOSITION_PARAM_CACHE.set(key, re);
+  }
   const m = disposition.match(re);
   if (!m) return undefined;
   return m[1] ?? m[2];

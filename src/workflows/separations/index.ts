@@ -4,7 +4,6 @@
 // module load — no `defineDashboardMetadata` call needed.
 
 export { separationsWorkflow, runSeparation, runSeparationBatch, runSeparationCli } from "./workflow.js";
-export type { SeparationOptions } from "./workflow.js";
 export type { SeparationData } from "./schema.js";
 export {
   computeTerminationEffDate,

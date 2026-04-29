@@ -10,6 +10,7 @@ import {
   loadRoster,
   matchAgainstRoster,
   compareUsAddresses,
+  normalizeEid,
 } from "../../match/index.js";
 import {
   OcrOutputSchema,
@@ -170,10 +171,11 @@ export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
     );
 
     const records: PreviewRecord[] = ocrResult.data.map((r): PreviewRecord => {
-      const existingEid = r.employee.employeeId?.trim();
+      const existingEid = normalizeEid(r.employee.employeeId);
       if (existingEid) {
         return {
           ...r,
+          employee: { ...r.employee, employeeId: existingEid },
           matchState: "matched",
           matchSource: "form",
           matchConfidence: 1.0,
@@ -247,14 +249,17 @@ export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
     PrepareRowDataSchema.parse(finalData); // throws if invariants broken
 
     // ── 6. If all records have a terminal matchState, write done now.
-    const anyPending = records.some((r) => r.matchState === "lookup-pending");
-    if (!anyPending) {
+    let pendingCount = 0;
+    for (const r of records) {
+      if (r.matchState === "lookup-pending") pendingCount += 1;
+    }
+    if (pendingCount === 0) {
       writeTracker("done", finalData);
       log.success(`[prepare] All ${records.length} record(s) matched without eid-lookup`);
     } else {
       writeTracker("running", finalData, "eid-lookup");
       log.step(
-        `[prepare] ${records.filter((r) => r.matchState === "lookup-pending").length} record(s) need eid-lookup — kicking off async`,
+        `[prepare] ${pendingCount} record(s) need eid-lookup — kicking off async`,
       );
       // Fire async; HTTP handler returns immediately after this function returns.
       void resolveEidsAsync(runId, id, finalData, trackerDir).catch((err) => {

@@ -617,7 +617,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
 export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
   wf: RegisteredWorkflow<TData, TSteps>,
   items: TData[],
-  opts: RunOpts & { dryRun?: boolean } = {},
+  opts: RunOpts = {},
 ): Promise<BatchResult> {
   const batch = wf.config.batch
   if (batch?.mode === 'pool') {

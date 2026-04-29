@@ -232,16 +232,21 @@ export async function runPaperOathPrepare(
     OathPrepareRowDataSchema.parse(finalData);
 
     // ── 5. Done now if no records need eid-lookup; else kick off async
-    const anyPending = records.some((r) => r.matchState === "lookup-pending");
-    if (!anyPending) {
+    let pendingCount = 0;
+    let approvableCount = 0;
+    for (const r of records) {
+      if (r.matchState === "lookup-pending") pendingCount += 1;
+      if (r.selected) approvableCount += 1;
+    }
+    if (pendingCount === 0) {
       writeTracker("done", finalData);
       log.success(
-        `[oath-prep] All ${records.filter((r) => r.selected).length} approvable record(s) matched without eid-lookup`,
+        `[oath-prep] All ${approvableCount} approvable record(s) matched without eid-lookup`,
       );
     } else {
       writeTracker("running", finalData, "eid-lookup");
       log.step(
-        `[oath-prep] ${records.filter((r) => r.matchState === "lookup-pending").length} record(s) need eid-lookup — kicking off async`,
+        `[oath-prep] ${pendingCount} record(s) need eid-lookup — kicking off async`,
       );
       void resolveEidsAsync(runId, id, finalData, trackerDir).catch((err) => {
         log.warn(`[oath-prep] resolveEidsAsync threw: ${errorMessage(err)}`);

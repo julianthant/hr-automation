@@ -7,7 +7,6 @@ export {
   runOathSignatureCli,
   oathSignatureWorkflow,
 } from "./workflow.js";
-export type { OathSignatureOptions } from "./workflow.js";
 export {
   OathOcrOutputSchema,
   OathPrepareRowDataSchema,

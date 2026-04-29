@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import ExcelJS from "exceljs";
 import { log } from "../../utils/log.js";
+import { normalizeEid } from "../../match/index.js";
 import type { EmergencyContactBatch } from "./schema.js";
 
 export interface RosterMismatch {
@@ -37,11 +38,6 @@ function namesMatch(a: string, b: string): boolean {
   const bw = new Set(normalizeName(b).split(" ").filter((w) => w.length >= 3));
   for (const w of aw) if (bw.has(w)) return true;
   return false;
-}
-
-function normalizeEid(raw: unknown): string {
-  const s = String(raw ?? "").trim();
-  return s.replace(/[^\d]/g, "");
 }
 
 // ── Header column resolution (shared between xlsx + csv) ──

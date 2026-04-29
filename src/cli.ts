@@ -5,14 +5,13 @@ import { errorMessage } from "./utils/errors.js";
 import { launchBrowser } from "./browser/launch.js";
 import { loginToUCPath, loginToACTCrm } from "./auth/login.js";
 import type { AuthResult } from "./auth/types.js";
-import { runOnboarding, runOnboardingCli, runParallel, runOnboardingPositional } from "./workflows/onboarding/index.js";
-import { runWorkStudy, runWorkStudyCli, WorkStudyInputSchema } from "./workflows/work-study/index.js";
-import { runEmergencyContact, runEmergencyContactCli } from "./workflows/emergency-contact/index.js";
+import { runOnboardingCli } from "./workflows/onboarding/index.js";
+import { runWorkStudyCli, WorkStudyInputSchema } from "./workflows/work-study/index.js";
+import { runEmergencyContactCli } from "./workflows/emergency-contact/index.js";
 import { runParallelKronos, DEFAULT_WORKERS } from "./workflows/old-kronos-reports/index.js";
-import { runSeparation, runSeparationBatch, runSeparationCli } from "./workflows/separations/index.js";
-import { runEidLookup, runEidLookupCli } from "./workflows/eid-lookup/index.js";
+import { runSeparationCli } from "./workflows/separations/index.js";
+import { runEidLookupCli } from "./workflows/eid-lookup/index.js";
 import {
-  runOathSignature,
   runOathSignatureCli,
   OathSignatureInputSchema,
 } from "./workflows/oath-signature/index.js";
@@ -87,40 +86,21 @@ program
 
 // ─── onboarding ───
 //
-// Daemon mode by default — enqueues to an alive onboarding daemon (or spawns
-// one) so CRM + UCPath sessions stay warm across batches. Legacy paths remain
-// via explicit flags:
-//   onboarding <email> [<email>...]     → daemon-mode enqueue (default)
-//   onboarding <email> [...] --direct   → legacy in-process path
-//                                          (single mode for N=1, pool mode for N>1)
-//   onboarding --batch                   → reads batch.yaml, legacy pool mode
-//   onboarding --dry-run <email>         → CRM-only preview (no daemon)
-// -n, --new and -p, --parallel <N> are daemon-only.
+// Daemon mode — enqueues to an alive onboarding daemon (or spawns one) so
+// CRM + UCPath sessions stay warm across batches.
 
 program
   .command("onboarding")
   .description(
     "Onboard one or more employees: extract from CRM, search UCPath, create transaction. " +
-      "Daemon mode by default — sessions persist across invocations (no re-Duo). " +
-      "--batch reads src/workflows/onboarding/batch.yaml (forces --direct).",
+      "Daemon mode — sessions persist across invocations (no re-Duo).",
   )
-  .argument("[emails...]", "Employee email(s) — omit when using --batch")
-  .option("--dry-run", "Preview actions without creating transactions (forces --direct)")
-  .option("--batch", "Read emails from src/workflows/onboarding/batch.yaml (forces --direct)")
-  .option("--workers <N>", "Pool size override (--direct mode only; --batch: worker count)", parseInt)
+  .argument("<emails...>", "Employee email(s)")
   .option("-n, --new", "Force spawn of a brand-new daemon (ignores alive ones for dispatch)")
   .option("-p, --parallel <N>", "Fan out across N daemons (reuses up to N alive; spawns the rest)", parseInt)
-  .option("--direct", "Run in legacy in-process mode (no daemon; re-Duos every invocation)")
   .action(async (
     emails: string[],
-    options: {
-      dryRun?: boolean;
-      batch?: boolean;
-      workers?: number;
-      new?: boolean;
-      parallel?: number;
-      direct?: boolean;
-    },
+    options: { new?: boolean; parallel?: number },
   ) => {
     try {
       validateEnv();
@@ -128,16 +108,8 @@ program
       process.exit(1);
     }
 
-    if (options.batch && emails.length > 0) {
-      log.error("Cannot combine --batch with positional emails. Pick one.");
-      process.exit(1);
-    }
-    if (!options.batch && emails.length === 0) {
-      log.error("Provide at least one email, or use --batch to read from batch.yaml.");
-      process.exit(1);
-    }
-    if (options.workers !== undefined && (options.workers < 1 || !Number.isFinite(options.workers))) {
-      log.error("--workers must be a positive integer.");
+    if (emails.length === 0) {
+      log.error("Provide at least one email.");
       process.exit(1);
     }
     if (options.parallel !== undefined && (options.parallel < 1 || !Number.isFinite(options.parallel))) {
@@ -145,40 +117,8 @@ program
       process.exit(1);
     }
 
-    // Daemon mode is incompatible with --batch (reads batch.yaml in-process)
-    // and --dry-run (short-circuits before launching a browser). Route both
-    // to the legacy in-process path, with an announcing log line when the
-    // override is implicit (user didn't pass --direct explicitly).
-    const mustDirect = options.direct === true || options.batch === true || options.dryRun === true;
-
     try {
-      if (mustDirect) {
-        if (!options.direct && options.batch) {
-          log.step("[onboarding] --batch forces --direct mode (reads batch.yaml in-process)");
-        } else if (!options.direct && options.dryRun) {
-          log.step("[onboarding] --dry-run forces --direct mode (CRM-only preview; no daemon)");
-        }
-
-        if (options.batch) {
-          await runParallel(options.workers ?? 4, { dryRun: options.dryRun });
-          return;
-        }
-        if (emails.length === 1) {
-          await runOnboarding(emails[0], { dryRun: options.dryRun });
-          return;
-        }
-        await runOnboardingPositional(emails, {
-          dryRun: options.dryRun,
-          poolSize: options.workers,
-        });
-        return;
-      }
-
-      await runOnboardingCli(emails, {
-        dryRun: options.dryRun,
-        new: options.new,
-        parallel: options.parallel,
-      });
+      await runOnboardingCli(emails, { new: options.new, parallel: options.parallel });
     } catch (error) {
       log.error(`Onboarding failed: ${errorMessage(error)}`);
       process.exit(1);
@@ -189,17 +129,15 @@ program
 
 program
   .command("work-study")
-  .description("Work study: update position pool via PayPath Actions. Daemon-mode by default — enqueues to an alive daemon or spawns one. Use --direct for the legacy in-process single-item path.")
+  .description("Work study: update position pool via PayPath Actions. Daemon-mode — enqueues to an alive daemon or spawns one.")
   .argument("<emplId>", "Employee ID (e.g. 10862930)")
   .argument("<effectiveDate>", "Effective date in MM/DD/YYYY format")
-  .option("--dry-run", "Preview actions without submitting")
-  .option("--direct", "Bypass daemon mode and run in-process (legacy — blocks on auth each run)")
   .option("-n, --new", "Spawn an additional daemon even if others are alive")
   .option("-p, --parallel <count>", "Ensure N daemons are alive", (v) => parseInt(v, 10))
   .action(async (
     emplId: string,
     effectiveDate: string,
-    options: { dryRun?: boolean; direct?: boolean; new?: boolean; parallel?: number },
+    options: { new?: boolean; parallel?: number },
   ) => {
     try {
       validateEnv();
@@ -211,11 +149,6 @@ program
     if (!parsed.success) {
       log.error(`Invalid input: ${parsed.error.issues.map((i) => i.message).join(", ")}`);
       process.exit(1);
-    }
-
-    if (options.direct || options.dryRun) {
-      await runWorkStudy(parsed.data, { dryRun: options.dryRun });
-      return;
     }
 
     try {
@@ -233,21 +166,17 @@ program
 
 program
   .command("emergency-contact")
-  .description("Fill Emergency Contact in UCPath for every record in a batch YAML (daemon mode by default)")
+  .description("Fill Emergency Contact in UCPath for every record in a batch YAML (daemon mode)")
   .argument("<batchYaml>", "Path to batch YAML (e.g. .tracker/emergency-contact/batch-YYYY-MM-DD.yml)")
-  .option("--dry-run", "Preview records without touching UCPath")
   .option("--roster-url <url>", "SharePoint URL of roster xlsx — downloaded + used for pre-flight verification")
   .option("--roster-path <path>", "Local roster xlsx for pre-flight verification (skip download)")
   .option("--ignore-roster-mismatch", "Continue even if roster verification reports mismatches")
-  .option("--direct", "Bypass daemon mode; run the legacy in-process batch")
   .option("-n, --new", "Spawn an additional daemon even if others are alive")
   .option("-p, --parallel <count>", "Ensure at least N daemons are alive before enqueueing", parseInt)
   .action(async (batchYaml: string, options: {
-    dryRun?: boolean;
     rosterUrl?: string;
     rosterPath?: string;
     ignoreRosterMismatch?: boolean;
-    direct?: boolean;
     new?: boolean;
     parallel?: number;
   }) => {
@@ -257,23 +186,14 @@ program
       process.exit(1);
     }
 
-    const shared = {
-      dryRun: options.dryRun,
-      rosterUrl: options.rosterUrl,
-      rosterPath: options.rosterPath,
-      ignoreRosterMismatch: options.ignoreRosterMismatch,
-    };
-
     try {
-      if (options.direct || options.dryRun) {
-        await runEmergencyContact(batchYaml, shared);
-      } else {
-        await runEmergencyContactCli(batchYaml, {
-          ...shared,
-          new: options.new,
-          parallel: options.parallel,
-        });
-      }
+      await runEmergencyContactCli(batchYaml, {
+        rosterUrl: options.rosterUrl,
+        rosterPath: options.rosterPath,
+        ignoreRosterMismatch: options.ignoreRosterMismatch,
+        new: options.new,
+        parallel: options.parallel,
+      });
     } catch (err) {
       log.error(`Emergency Contact batch failed: ${errorMessage(err)}`);
       process.exit(1);
@@ -286,12 +206,10 @@ program
   .command("kronos")
   .description("Download Time Detail PDF reports from UKG for employees in batch.yaml")
   .option("--workers <N>", "Number of parallel workers", parseInt)
-  .option("--dry-run", "Preview employee list without downloading")
   .option("--start-date <date>", "Start date (M/DD/YYYY)")
   .option("--end-date <date>", "End date (M/DD/YYYY)")
   .action(async (options: {
     workers?: number;
-    dryRun?: boolean;
     startDate?: string;
     endDate?: string;
   }) => {
@@ -309,7 +227,6 @@ program
 
     try {
       await runParallelKronos(workers, {
-        dryRun: options.dryRun,
         startDate: options.startDate,
         endDate: options.endDate,
       });
@@ -324,15 +241,13 @@ program
 program
   .command("separation")
   .alias("separations")
-  .description("Process employee separation(s): Kuali → Kronos → UCPath. Daemon-mode by default — enqueues docIds to an alive daemon or spawns one. Use --direct for the legacy in-process batch path.")
+  .description("Process employee separation(s): Kuali → Kronos → UCPath. Daemon-mode — enqueues docIds to an alive daemon or spawns one.")
   .argument("<docIds...>", "Kuali document number(s) (e.g. 3508 or 3881 3882 3883 3884)")
-  .option("--dry-run", "Extract data only, don't fill forms")
-  .option("--direct", "Bypass daemon mode and run in-process (legacy — reopens browsers + re-auths every invocation)")
   .option("-n, --new", "Spawn an additional daemon even if others are alive")
   .option("-p, --parallel <count>", "Ensure N daemons are alive", (v) => parseInt(v, 10))
   .action(async (
     docIds: string[],
-    options: { dryRun?: boolean; direct?: boolean; new?: boolean; parallel?: number },
+    options: { new?: boolean; parallel?: number },
   ) => {
     try {
       validateEnv();
@@ -340,35 +255,8 @@ program
       process.exit(1);
     }
 
-    if (options.direct) {
-      if (docIds.length === 1) {
-        try {
-          await runSeparation(docIds[0], { dryRun: options.dryRun });
-          log.success(`Separation complete for doc #${docIds[0]}`);
-        } catch (error) {
-          log.error(`Separation workflow failed: ${errorMessage(error)}`);
-          process.exit(1);
-        }
-        return;
-      }
-      log.step(`Batch mode (direct): ${docIds.length} separations — ${docIds.join(", ")}`);
-      try {
-        const result = await runSeparationBatch(docIds, { dryRun: options.dryRun });
-        log.success(`Batch complete: ${result.succeeded}/${result.total} succeeded`);
-        if (result.failed > 0) process.exit(1);
-      } catch (error) {
-        log.error(`Separation batch failed: ${errorMessage(error)}`);
-        process.exit(1);
-      }
-      return;
-    }
-
     try {
-      await runSeparationCli(docIds, {
-        dryRun: options.dryRun,
-        new: options.new,
-        parallel: options.parallel,
-      });
+      await runSeparationCli(docIds, { new: options.new, parallel: options.parallel });
     } catch (error) {
       log.error(`Separation dispatch failed: ${errorMessage(error)}`);
       process.exit(1);
@@ -382,21 +270,16 @@ program
   .alias("oath")
   .description(
     "Add a new Oath Signature Date to the UCPath Person Profile for one or " +
-      "more EIDs. Daemon-mode by default — enqueues each EID to an alive daemon " +
-      "(or spawns one). --direct bypasses the daemon for a single EID (legacy in-process).",
+      "more EIDs. Daemon-mode — enqueues each EID to an alive daemon (or spawns one).",
   )
   .argument("<emplIds...>", "One or more employee IDs (e.g. 10873075 10862930)")
   .option("--date <MM/DD/YYYY>", "Override the signature date (default: UCPath prefills today)")
-  .option("--dry-run", "Preview actions without touching UCPath (forces --direct, single EID only)")
-  .option("--direct", "Bypass daemon mode and run in-process (single EID only)")
   .option("-n, --new", "Force spawn of a brand-new daemon (ignores alive ones for dispatch)")
   .option("-p, --parallel <N>", "Fan out across N daemons (reuses up to N alive; spawns the rest)", parseInt)
   .action(async (
     emplIds: string[],
     options: {
       date?: string;
-      dryRun?: boolean;
-      direct?: boolean;
       new?: boolean;
       parallel?: number;
     },
@@ -429,21 +312,6 @@ program
       inputs.push(parsed.data);
     }
 
-    // --direct / --dry-run are single-EID only — the in-process path doesn't
-    // loop. Multi-EID callers should use the default daemon mode.
-    const mustDirect = options.direct === true || options.dryRun === true;
-    if (mustDirect) {
-      if (inputs.length > 1) {
-        log.error(
-          "--direct / --dry-run support only one EID at a time. " +
-            "Use the default daemon mode for multi-EID runs.",
-        );
-        process.exit(1);
-      }
-      await runOathSignature(inputs[0], { dryRun: options.dryRun });
-      return;
-    }
-
     try {
       await runOathSignatureCli(inputs, {
         new: options.new,
@@ -459,69 +327,25 @@ program
 
 program
   .command("eid-lookup")
-  .description("Look up Employee IDs by name via Person Organizational Summary (UCPath + CRM cross-verify by default). Daemon mode: keeps UCPath+CRM sessions alive across batches (no re-Duo).")
+  .description("Look up Employee IDs by name via Person Organizational Summary (UCPath + CRM cross-verify). Daemon-mode — keeps UCPath+CRM sessions alive across batches (no re-Duo).")
   .argument("<names...>", 'One or more names in "Last, First Middle" format')
-  .option("--workers <N>", "Number of parallel browser tabs (legacy --direct mode only; default: min(names.length, 4))", parseInt)
-  .option("--no-crm", "Skip CRM cross-verification (UCPath only) — forces --direct mode")
-  .option("--i9", "Also look up who signed Section 2 in I-9 Complete — forces --direct mode")
-  .option("-d, --dry-run", "Preview the planned name list without launching a browser")
   .option("-n, --new", "Force spawn of a brand-new daemon (ignores alive ones for dispatch)")
   .option("-p, --parallel <N>", "Fan out across N daemons (reuses up to N alive; spawns the rest)", parseInt)
-  .option("--direct", "Run in legacy in-process mode (no daemon, re-Duos every invocation)")
   .action(async (
     names: string[],
-    options: {
-      workers?: number;
-      crm?: boolean;
-      i9?: boolean;
-      dryRun?: boolean;
-      new?: boolean;
-      parallel?: number;
-      direct?: boolean;
-    },
+    options: { new?: boolean; parallel?: number },
   ) => {
     try {
       validateEnv();
     } catch {
       process.exit(1);
     }
-    if (options.workers !== undefined && (options.workers < 1 || !Number.isFinite(options.workers))) {
-      log.error("--workers must be a positive integer.");
-      process.exit(1);
-    }
     if (options.parallel !== undefined && (options.parallel < 1 || !Number.isFinite(options.parallel))) {
       log.error("--parallel must be a positive integer.");
       process.exit(1);
     }
-    // Commander's --no-crm flag surfaces as `options.crm === false`; default true.
-    const useCrm = options.crm !== false;
-    const useI9 = options.i9 === true;
 
-    // Daemon mode supports only the default variant (UCPath + CRM, no I-9).
-    // Any variant-changing flag (--no-crm, --i9) OR explicit --direct routes
-    // to the legacy in-process path.
-    const mustDirect = options.direct === true || !useCrm || useI9;
-
-    if (mustDirect) {
-      if (!options.direct && (!useCrm || useI9)) {
-        log.step(
-          `[eid-lookup] --${!useCrm ? "no-crm" : "i9"} forces --direct mode (daemon supports only the default CRM-on variant)`,
-        );
-      }
-      await runEidLookup(names, {
-        workers: options.workers,
-        useCrm,
-        useI9,
-        dryRun: options.dryRun,
-      });
-      return;
-    }
-
-    await runEidLookupCli(names, {
-      dryRun: options.dryRun,
-      new: options.new,
-      parallel: options.parallel,
-    });
+    await runEidLookupCli(names, { new: options.new, parallel: options.parallel });
   });
 
 // ─── dashboard ───
@@ -583,57 +407,7 @@ program
     await exportToExcel(workflow, opts.output);
   });
 
-// ─── daemon lifecycle (applies to any daemon-mode workflow) ───
-
-const DAEMON_WORKFLOWS = [
-  "separations",
-  "work-study",
-  "oath-signature",
-  "eid-lookup",
-  "onboarding",
-  "emergency-contact",
-] as const;
-
-program
-  .command("daemon-status [workflow]")
-  .description("Show alive daemons + queue state. Without [workflow] lists every daemon-enabled workflow.")
-  .action(async (workflow?: string) => {
-    const { findAliveDaemons, readQueueState } = await import("./core/index.js");
-    const workflows = workflow ? [workflow] : [...DAEMON_WORKFLOWS];
-    for (const wf of workflows) {
-      const alive = await findAliveDaemons(wf);
-      const state = await readQueueState(wf).catch(() => null);
-      console.log(`\n[${wf}]`);
-      if (alive.length === 0) console.log("  no alive daemons");
-      for (const d of alive) {
-        // Best-effort phase probe via /status — lets users see whether a
-        // daemon is stuck in `authenticating` (Duo not clearing) vs `idle`
-        // vs `processing`. 1s timeout so a hung daemon doesn't block status.
-        let phase: string = "?";
-        try {
-          const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 1_000);
-          const res = await fetch(`http://127.0.0.1:${d.port}/status`, { signal: ctrl.signal });
-          clearTimeout(timer);
-          if (res.ok) {
-            const body = (await res.json()) as { phase?: string; inFlight?: string | null };
-            phase = body.phase ?? "?";
-            if (body.inFlight) phase += `(${body.inFlight})`;
-          }
-        } catch {
-          phase = "unreachable";
-        }
-        console.log(
-          `  ${d.instanceId}  pid=${d.pid}  port=${d.port}  phase=${phase}  startedAt=${d.startedAt}`,
-        );
-      }
-      if (state) {
-        console.log(
-          `  queue: queued=${state.queued.length} claimed=${state.claimed.length} done=${state.done.length} failed=${state.failed.length}`,
-        );
-      }
-    }
-  });
+// ─── daemon lifecycle (stop only) ───
 
 program
   .command("daemon-stop <workflow>")
@@ -643,33 +417,6 @@ program
     const { stopDaemons } = await import("./core/index.js");
     const n = await stopDaemons(workflow, !!opts.force);
     console.log(`Sent stop to ${n} daemon(s) for '${workflow}'.`);
-  });
-
-program
-  .command("daemon-attach <workflow>")
-  .description("Tail logs of every alive daemon for a workflow. Ctrl+C detaches; daemons keep running.")
-  .action(async (workflow: string) => {
-    const { findAliveDaemons, daemonsDir } = await import("./core/index.js");
-    const alive = await findAliveDaemons(workflow);
-    if (alive.length === 0) {
-      console.log(`No alive daemons for '${workflow}'.`);
-      return;
-    }
-    const { spawn } = await import("node:child_process");
-    const { existsSync, readdirSync } = await import("node:fs");
-    const { join } = await import("node:path");
-    const dir = daemonsDir();
-    if (!existsSync(dir)) {
-      console.log("no .tracker/daemons dir");
-      return;
-    }
-    const logs = readdirSync(dir).filter((f) => f.startsWith(`${workflow}-`) && f.endsWith(".log"));
-    if (logs.length === 0) {
-      console.log(`no log files in ${dir}`);
-      return;
-    }
-    const tail = spawn("tail", ["-f", ...logs.map((l) => join(dir, l))], { stdio: "inherit" });
-    tail.on("exit", () => process.exit(0));
   });
 
 program.parse();

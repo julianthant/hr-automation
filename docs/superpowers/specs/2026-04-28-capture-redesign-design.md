@@ -126,18 +126,33 @@ Append-only log at `.tracker/capture-{YYYY-MM-DD}.jsonl`. One JSON object per li
 
 | `type` | Payload | Emitted from |
 |---|---|---|
-| `session_created` | `{ workflow, contextHint?, token, expiresAt, lanUrl, shortcode }` | `handleStart` |
-| `phone_connected` | `{ userAgent, ip }` | `handleManifest` (first hit) |
-| `photo_added` | `{ photoIndex, filename, sizeBytes, mime, blurScore?, blurFlagged }` | `handleUpload` |
-| `photo_removed` | `{ photoIndex, source: "phone" \| "dashboard" }` | `handleDeletePhoto` |
-| `photo_replaced` | `{ photoIndex, oldFilename, newFilename, blurScore?, blurFlagged }` | `handleReplacePhoto` (new) |
-| `extended` | `{ newExpiresAt, byMs }` | `handleExtend` (new) |
-| `finalize_requested` | `{ photoCount }` | `handleFinalize` |
-| `pdf_built` | `{ pdfPath, pageCount, sizeBytes }` | post-bundle |
-| `finalized` | `{ pdfPath, durationMs, finalizeHandlerOk, parentRunId? }` | post-onFinalize |
+| `session_created` | `{ workflow, contextHint?, expiresAt }` (+ optional `lanUrl, shortcode`) | store `create()` |
+| `phone_connected` | `{ userAgent?, ip? }` | `handleManifest` (first hit) |
+| `photo_added` | `PhotoSummary` (the full new photo: `{ index, filename, sizeBytes, mime, uploadedAt, blurScore?, blurFlagged? }`) | `handleUpload` |
+| `photo_removed` | `{ photoIndex, source: "phone" \| "dashboard" \| "system" }` | `handleDeletePhoto` |
+| `photo_replaced` | `{ photoIndex, oldFilename, newFilename, blurScore?, blurFlagged }` | `handleReplacePhoto` |
+| `photos_reordered` | `{ fromIndex, toIndex, order: number[] }` (positions) | `handleReorder` |
+| `extended` | `{ byMs, newExpiresAt }` | `handleExtend` |
+| `finalize_requested` | `{ photoCount }` | store `setState("finalizing")` |
+| `pdf_built` | `{ pdfPath }` (+ optional `pageCount, sizeBytes`) | post-bundle |
+| `finalized` | `{ pdfPath, finalizeHandlerOk }` (+ optional `durationMs, parentRunId`) | store `setState("finalized")` |
 | `finalize_failed` | `{ error, stage: "bundle" \| "handler" }` | error path |
-| `discarded` | `{ reason?, source: "operator" \| "phone" \| "system" }` | `handleDiscard` |
-| `expired` | — | sweep tick |
+| `discarded` | `{ reason?, source: "operator" \| "phone" \| "system" }` | store `setState("discarded")` |
+| `expired` | — | sweep tick / `setState("expired")` |
+
+#### `session_created` payload invariant (gap-4 amendment)
+
+`session_created` MUST carry every field needed to reconstruct a fresh
+`CaptureSessionInfo` without a follow-up snapshot round-trip — namely
+`{ workflow, contextHint?, expiresAt }`. The reducer in
+`useCaptureSession.ts` defaults `state: "open"`, `phoneConnectedAt: null`,
+`photos: []`, and `createdAt: ev.ts`. Optional `lanUrl, shortcode` may be
+added for observers that want to render the QR/shortcode of an already-
+existing session, but they are NOT required for reconstruction.
+
+`token` is NEVER echoed in any SSE event (see "Contracts & invariants" →
+"Token never echoed in SSE"). The operator gets the token exactly once,
+in the response to `POST /api/capture/start`.
 
 ### Boot replay
 
@@ -159,17 +174,20 @@ Replay cost is milliseconds for typical volumes (≤100 sessions/day × ~10 even
 | Method | Path | Status | Body / Result |
 |---|---|---|---|
 | POST | `/api/capture/start` | unchanged | `{ workflow, contextHint? }` → `{ ok, sessionId, token, captureUrl, qrSvg, shortcode, expiresAt }` |
-| GET | `/api/capture/manifest/:token` | unchanged | → `{ ok, state, photos: PhotoSummary[], contextHint, expiresAt }` (note: was photo count; now array — see PhotoSummary below) |
-| POST | `/api/capture/upload?token=` | unchanged | multipart file → `{ ok, photoIndex, totalPhotos, blurScore?, blurFlagged? }` |
-| POST | `/api/capture/replace-photo` | **new** | `{ token, index }` + multipart → `{ ok, blurScore?, blurFlagged? }` |
-| POST | `/api/capture/delete-photo` | unchanged | `{ token, index }` → `{ ok, totalPhotos }` |
+| GET | `/api/capture/manifest/:token` | unchanged | → `{ ok, state, photos: PhotoSummary[], workflow, contextHint, expiresAt }` (was photo count; now array — see PhotoSummary below; also marks the phone as connected on first hit) |
+| POST | `/api/capture/upload?token=` | unchanged | multipart `file` → `{ ok, photoIndex, totalPhotos, blurScore?, blurFlagged? }` |
+| GET | `/api/capture/photos/:sessionId/:index` | **new** | streams the JPG/PNG/HEIC bytes for a stable photo id; `Cache-Control: no-cache, must-revalidate`; 404 if the session/photo isn't found or sessionId fails the UUID-shape regex (path-traversal guard) |
+| POST | `/api/capture/replace-photo` | **new** | multipart with text fields `token`, `index` (stable photo id), optional `blurScore`, plus file part `file` → `{ ok, blurScore?, blurFlagged? }`. Old file is preserved on disk (timestamp-suffixed filename) for forensics. |
+| POST | `/api/capture/reorder` | **new** | `{ token, fromIndex, toIndex }` (POSITIONS, not stable ids) → `{ ok, order: number[] }` (the new array order, photos identified by stable index) |
+| POST | `/api/capture/delete-photo` | unchanged | `{ token, index }` (stable photo id) → `{ ok, totalPhotos }` |
 | POST | `/api/capture/finalize` | unchanged | `{ token }` → `{ ok, sessionId }` (fire-and-forget bundling) |
 | POST | `/api/capture/discard` | unchanged | `{ sessionId, reason? }` → `{ ok }` |
 | GET | `/api/capture/sessions` | preserved (deprecation) | → `CaptureSessionInfo[]` (kept one release for backcompat; modal uses SSE) |
 | GET | `/api/capture/sessions/stream` | **new** | SSE: `session-list` (snapshot) + `session-event` (each mutation) + `heartbeat` (15 s) |
-| POST | `/api/capture/extend` | **new** | `{ sessionId, byMs? }` → `{ ok, newExpiresAt }` |
-| POST | `/api/capture/validate` | **new** | `{ sessionId }` → `{ ok, warnings, blockers }` (calls registered `validate` hook) |
+| POST | `/api/capture/extend` | **new** | `{ sessionId, byMs? }` → `{ ok, newExpiresAt }`. `byMs` defaults to **5 × 60 × 1_000** (5 minutes) when omitted; values must be positive finite numbers. |
+| POST | `/api/capture/validate` | **new** | `{ sessionId }` → `{ ok, warnings?, blockers? }` (default rules: empty-session blocker; >50 photo + >80 MB warnings — workflows can register richer rules later) |
 | GET | `/api/capture/registry` | **new** | → `{ [workflow]: { label, contextHints? } }` (frontend metadata only; finalize stays server-side) |
+| GET | `/capture-assets/heic2any.min.js` | **new** | streams `node_modules/heic2any/dist/heic2any.min.js` so the phone-side polyfill works on air-gapped LANs (no CDN call). 502 if the package isn't installed. |
 
 ### SSE channel
 

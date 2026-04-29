@@ -4,6 +4,7 @@ export {
   normalizeUsAddress,
   compareUsAddresses,
   matchAgainstRoster,
+  normalizeEid,
 } from "./match.js";
 export type {
   NameMatchResult,

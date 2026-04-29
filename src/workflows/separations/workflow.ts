@@ -788,44 +788,13 @@ export const separationsWorkflow = defineWorkflow({
   },
 });
 
-export interface SeparationOptions {
-  dryRun?: boolean;
-}
-
 /**
- * Print a pipeline preview for dry-run mode. No browser launch; no Kuali
- * extraction. Matches the other kernel workflows' dry-run semantics.
- */
-function previewSeparationPipeline(docId: string): void {
-  log.step("=== DRY RUN MODE ===");
-  log.step(`Would process separation for doc #${docId}`);
-  log.step("Planned step pipeline:");
-  log.step("  1. launching (4 browsers: Kuali, Old Kronos, New Kronos, UCPath)");
-  log.step("  2. authenticating (interleaved — Duo #1..#4)");
-  log.step("  3. kuali-extraction");
-  log.step("  4. kronos-search (parallel: Old Kronos + New Kronos + UCPath Job Summary + Kuali timekeeper)");
-  log.step("  5. ucpath-job-summary (Kuali term date + dept/payroll fill)");
-  log.step("  6. ucpath-transaction (Smart HR UC_VOL_TERM or UC_INVOL_TERM)");
-  log.step("  7. kuali-finalization (transaction number write-back + save)");
-  log.success("Dry run complete — no browsers launched");
-}
-
-/**
- * CLI adapter for single-doc separation runs.
- *
- * Dry-run bypasses the kernel entirely (no browser). Real runs delegate to
+ * CLI adapter for single-doc separation runs. Delegates to
  * `runWorkflow(separationsWorkflow, { docId })` which owns browser launch, the
  * interleaved auth chain, step emission, screenshot-on-failure, and SIGINT
  * cleanup.
  */
-export async function runSeparation(
-  docId: string,
-  options: SeparationOptions = {},
-): Promise<void> {
-  if (options.dryRun) {
-    previewSeparationPipeline(docId);
-    return;
-  }
+export async function runSeparation(docId: string): Promise<void> {
   const sessionDir = getProcessIsolatedSessionDir(PATHS.ukgSessionSep);
   try {
     await runWorkflow(separationsWorkflow, { docId });
@@ -837,8 +806,7 @@ export async function runSeparation(
 /**
  * CLI adapter for multi-doc batch runs.
  *
- * Dry-run bypasses the kernel and previews each docId's pipeline.
- * Real runs delegate to `runWorkflowBatch` sequential mode — the kernel launches
+ * Delegates to `runWorkflowBatch` sequential mode — the kernel launches
  * browsers once, runs the auth chain once, and reuses the same 4 browsers for
  * every doc, calling `session.reset(id)` between docs.
  *
@@ -848,13 +816,7 @@ export async function runSeparation(
  */
 export async function runSeparationBatch(
   docIds: string[],
-  options: SeparationOptions = {},
 ): Promise<{ total: number; succeeded: number; failed: number }> {
-  if (options.dryRun) {
-    for (const docId of docIds) previewSeparationPipeline(docId);
-    return { total: docIds.length, succeeded: docIds.length, failed: 0 };
-  }
-
   const sessionDir = getProcessIsolatedSessionDir(PATHS.ukgSessionSep);
   const now = new Date().toISOString();
   const items = docIds.map((id) => ({ docId: id }));
@@ -892,15 +854,11 @@ export async function runSeparationBatch(
  */
 export async function runSeparationCli(
   docIds: string[],
-  options: { dryRun?: boolean; new?: boolean; parallel?: number } = {},
+  options: { new?: boolean; parallel?: number } = {},
 ): Promise<void> {
   if (docIds.length === 0) {
     log.error("runSeparationCli: no doc IDs provided");
     process.exitCode = 1;
-    return;
-  }
-  if (options.dryRun) {
-    for (const docId of docIds) previewSeparationPipeline(docId);
     return;
   }
   const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");

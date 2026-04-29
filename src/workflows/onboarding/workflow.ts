@@ -1,5 +1,3 @@
-import type { Page } from "playwright";
-import { launchBrowser } from "../../browser/launch.js";
 import { log } from "../../utils/log.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 import { errorMessage, classifyPlaywrightError } from "../../utils/errors.js";
@@ -23,12 +21,7 @@ import type { EmployeeData } from "./schema.js";
 import { buildTransactionPlan } from "./enter.js";
 import { TEMPLATE_ID } from "./config.js";
 import { buildDownloadPath, downloadCrmDocuments } from "./download.js";
-import { retryStep } from "./retry.js";
 import { z } from "zod/v4";
-
-export interface OnboardingOptions {
-  dryRun?: boolean;
-}
 
 /** Input schema for the onboarding kernel workflow. `email` is the only CLI-supplied field. */
 const OnboardingInputSchema = z.object({
@@ -421,26 +414,15 @@ export const onboardingWorkflow = defineWorkflow({
 
 /**
  * CLI adapter for `npm run onboarding <email>` (single-email path).
- *
- * Routing:
- * - If `dryRun` → imperative CRM-only preview (see `runOnboardingDryRun` below).
- * - Otherwise → kernel via `runWorkflow(onboardingWorkflow, { email })`.
+ * Delegates to the kernel via `runWorkflow(onboardingWorkflow, { email })`.
  *
  * Pool-mode variants live in sibling files:
  * - `./positional.ts` (`runOnboardingPositional`) — positional CLI emails.
- * - `./parallel.ts` (`runParallel`) — reads `batch.yaml`.
  *
  * Both delegate straight to `runWorkflowBatch(onboardingWorkflow, ...)` —
  * no adapter indirection through this function.
  */
-export async function runOnboarding(
-  email: string,
-  options: OnboardingOptions = {},
-): Promise<void> {
-  if (options.dryRun) {
-    return runOnboardingDryRun(email);
-  }
-
+export async function runOnboarding(email: string): Promise<void> {
   await runWorkflow(onboardingWorkflow, { email });
   log.success("Onboarding transaction completed successfully");
 }
@@ -463,32 +445,16 @@ export async function runOnboarding(
  * them identically to pool workers, with the added benefit that the
  * daemons survive the batch.
  *
- * Constraints:
- *   - `--dry-run` still bypasses daemon mode entirely (CRM-only preview,
- *     no spawn, no enqueue).
- *   - `--batch` (reads batch.yaml) routes through `runParallel` / `--direct`
- *     because the daemon adapter takes emails positionally. If you want
- *     daemon-mode batch processing, pass the emails explicitly on the
- *     CLI — `npm run onboarding a@uc b@uc c@uc` fans across alive daemons
- *     via the shared queue.
+ * Pass emails explicitly on the CLI — `npm run onboarding a@uc b@uc c@uc`
+ * fans across alive daemons via the shared queue.
  */
 export async function runOnboardingCli(
   emails: string[],
-  options: { dryRun?: boolean; new?: boolean; parallel?: number } = {},
+  options: { new?: boolean; parallel?: number } = {},
 ): Promise<void> {
   if (emails.length === 0) {
     log.error("runOnboardingCli: no emails provided");
     process.exitCode = 1;
-    return;
-  }
-
-  if (options.dryRun) {
-    // Daemon can't share a single CRM browser across N dry-run previews
-    // without launching the full session — fall back to the sequential
-    // imperative dry-run that `runOnboarding` already owns.
-    for (const email of emails) {
-      await runOnboardingDryRun(email);
-    }
     return;
   }
 
@@ -521,51 +487,3 @@ export async function runOnboardingCli(
   );
 }
 
-/**
- * Single-browser imperative dry-run: CRM auth + extraction + plan preview, no UCPath/I9.
- *
- * Mirrors the old dryRun short-circuit semantics without launching unnecessary browsers.
- */
-async function runOnboardingDryRun(email: string): Promise<void> {
-  log.step("=== DRY RUN MODE ===");
-  const { page: crmPage } = await launchBrowser();
-  try {
-    await retryStep(
-      "CRM authentication",
-      async () => {
-        const ok = await loginToACTCrm(crmPage);
-        if (!ok) throw new Error("loginToACTCrm returned false");
-      },
-      { attempts: 2, backoffMs: 3_000 },
-    );
-
-    await retryStep(
-      "CRM search",
-      async () => {
-        log.step(`Searching for ${email}...`);
-        await searchByEmail(crmPage, email);
-      },
-      { attempts: 3 },
-    );
-    await retryStep("CRM select latest result", () => selectLatestResult(crmPage), { attempts: 3 });
-    const recordFields = await retryStep("CRM record-page extraction", () => extractRecordPageFields(crmPage), { attempts: 2 });
-    await retryStep("Navigate to UCPath Entry Sheet", () => navigateToSection(crmPage, "UCPath Entry Sheet"), { attempts: 2 });
-
-    const rawData = await retryStep("Extract employee data", () => extractRawFields(crmPage), { attempts: 2 });
-    let data: EmployeeData;
-    try {
-      data = validateEmployeeData(rawData);
-    } catch (e) {
-      throw new ExtractionError(`Schema validation failed: ${errorMessage(e)}`);
-    }
-    if (recordFields.departmentNumber) data = { ...data, departmentNumber: recordFields.departmentNumber };
-    if (recordFields.recruitmentNumber) data = { ...data, recruitmentNumber: recordFields.recruitmentNumber };
-
-    const plan = buildTransactionPlan(data, null as unknown as Page, "DRY_RUN");
-    plan.preview();
-    log.success("Dry run complete — no changes made to UCPath or I9");
-  } catch (err) {
-    log.error(`Dry run failed: ${errorMessage(err)}`);
-    throw err;
-  }
-}

@@ -8,18 +8,12 @@ import { onboardingWorkflow } from "./workflow.js";
  * Run onboarding for N emails in pool mode. Pool size defaults to min(N, 4),
  * overridable via `opts.poolSize` (wired to the `--workers N` CLI flag).
  *
- * Unlike `runParallel` (which reads `batch.yaml`), this takes emails directly
- * from the CLI: `npm run onboarding <email1> <email2> ...`.
+ * Takes emails directly from the CLI: `npm run onboarding <email1> <email2> ...`.
  */
 export async function runOnboardingPositional(
   emails: string[],
-  opts: { dryRun?: boolean; poolSize?: number } = {},
+  opts: { poolSize?: number } = {},
 ): Promise<void> {
-  if (opts.dryRun) {
-    log.step(`Dry run: would onboard ${emails.length} email(s): ${emails.join(", ")}`);
-    return;
-  }
-
   const poolSize = opts.poolSize ?? Math.min(emails.length, 4);
   const now = new Date().toISOString();
   const items = emails.map((email) => ({ email }));

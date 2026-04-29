@@ -9,10 +9,6 @@ import { loginToUCPath } from "../../auth/login.js";
 import { buildOathSignaturePlan, type OathSignatureContext } from "./enter.js";
 import { OathSignatureInputSchema, type OathSignatureInput } from "./schema.js";
 
-export interface OathSignatureOptions {
-  dryRun?: boolean;
-}
-
 const WORKFLOW = "oath-signature";
 const oathSignatureSteps = ["ucpath-auth", "transaction"] as const;
 
@@ -92,23 +88,11 @@ export const oathSignatureWorkflow = defineWorkflow({
 });
 
 /**
- * CLI adapter for legacy in-process / --dry-run runs. Single EID only —
- * multi-EID in-process batches aren't supported here (daemon mode covers
- * that case). Use `--direct` from the CLI to reach this path.
+ * CLI adapter for legacy in-process runs. Single EID only — multi-EID
+ * in-process batches aren't supported here (daemon mode covers that case).
+ * Use `--direct` from the CLI to reach this path.
  */
-export async function runOathSignature(
-  input: OathSignatureInput,
-  options: OathSignatureOptions = {},
-): Promise<void> {
-  if (options.dryRun) {
-    const oathCtx: OathSignatureContext = { employeeName: "", alreadyHasOath: false };
-    const plan = buildOathSignaturePlan(input, null as never, oathCtx);
-    log.step("=== DRY RUN MODE ===");
-    plan.preview();
-    log.success("Dry run complete -- no changes made to UCPath");
-    return;
-  }
-
+export async function runOathSignature(input: OathSignatureInput): Promise<void> {
   try {
     await runWorkflow(oathSignatureWorkflow, input);
     log.success("Oath signature workflow completed");

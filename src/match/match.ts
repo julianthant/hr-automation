@@ -245,3 +245,13 @@ export function matchAgainstRoster(
     .sort((a, b) => b.score - a.score);
   return { candidates: scored, bestScore: scored[0]?.score ?? 0 };
 }
+
+/**
+ * Coerce arbitrary input (OCR output, form fields, etc.) into a clean
+ * digit-only EID string. Strips whitespace, leading/embedded non-digits
+ * (e.g. `"A10877384"` → `"10877384"`, `"10877384."` → `"10877384"`).
+ * Returns `""` for null/undefined/non-stringy input.
+ */
+export function normalizeEid(raw: unknown): string {
+  return String(raw ?? "").replace(/[^\d]/g, "");
+}
