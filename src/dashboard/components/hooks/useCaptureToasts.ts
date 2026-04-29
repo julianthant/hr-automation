@@ -12,15 +12,25 @@ import type { CaptureSessionEvent } from "../capture-types";
  * Two suppression rules so toasts don't double up with the modal's own
  * inline UI:
  *
- *   1. The first SSE message is treated as history replay (the server
- *      pushes a snapshot on connect); we drop the lastEvent that arrives
- *      with it. Same pattern as useTelegramToasts.
- *
- *   2. When the capture modal mounts, it calls
+ *   1. Modal-ownership: when the capture modal mounts, it calls
  *      `setSessionOwnedByModal(sessionId, true)` so this hook ignores
- *      photo_added events for THAT session (the modal already shows them
- *      live in the thumbnail mirror). Terminal events (finalized /
- *      failed / expired) still fire — those are post-close notifications.
+ *      photo_added / expired events for THAT session (the modal already
+ *      surfaces them inline). Terminal handoff events (finalized /
+ *      finalize_failed) still fire — those are post-close notifications.
+ *
+ *   2. Per-event timestamp dedupe (`lastSeenTsRef`): the backend's
+ *      session-event SSE stream doesn't currently replay individual
+ *      events on reconnect (only the `session-list` snapshot is
+ *      re-broadcast), but the watermark is cheap insurance against
+ *      future backend changes. Any event with `ts <= lastSeen` is
+ *      treated as a replay and skipped silently.
+ *
+ * Note: the previous `firstEventRef` defence was unconditional — it
+ * dropped the very first session-event of every connection regardless
+ * of provenance. That silently swallowed legitimate live events when
+ * the dashboard was opened mid-capture. The dedupe-by-timestamp scheme
+ * supersedes it: replays are filtered by their (already-seen) ts, while
+ * live events pass through unconditionally.
  */
 
 const ownedSessionIds = new Set<string>();
@@ -37,13 +47,16 @@ interface CaptureToastsOptions {
 }
 
 export function useCaptureToasts(opts: CaptureToastsOptions = {}): void {
-  const firstEventRef = useRef(true);
   const labelFn = opts.workflowLabel ?? ((w) => w);
-
   // Stash workflow → label for events whose own payload doesn't carry the
   // workflow name. session_created carries it; photo events carry only the
   // sessionId. We learn the mapping when session_created arrives.
   const workflowBySessionRef = useRef<Map<string, string>>(new Map());
+  // High-water mark of event timestamps (epoch ms) seen by THIS hook
+  // lifetime. Filters duplicates from any reconnect snapshot replay
+  // (defensive — the current backend doesn't replay individual events,
+  // but the cost of one numeric compare per event is trivial).
+  const lastSeenTsRef = useRef<number>(0);
 
   useEffect(() => {
     const es = new EventSource("/api/capture/sessions/stream");
@@ -75,11 +88,9 @@ export function useCaptureToasts(opts: CaptureToastsOptions = {}): void {
         if (wf) remember(ev.sessionId, wf);
       }
 
-      // Skip the first event — it's the snapshot's tail, not a live mutation.
-      if (firstEventRef.current) {
-        firstEventRef.current = false;
-        return;
-      }
+      // Replay-safe dedupe — skip any event we've already considered.
+      if (ev.ts && ev.ts <= lastSeenTsRef.current) return;
+      if (ev.ts) lastSeenTsRef.current = ev.ts;
 
       const isOwned = ownedSessionIds.has(ev.sessionId);
       const workflow = workflowBySessionRef.current.get(ev.sessionId) ?? "capture";

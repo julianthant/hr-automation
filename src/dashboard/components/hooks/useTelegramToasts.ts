@@ -5,15 +5,29 @@ import { toast } from "sonner";
  * Subscribe to /events/telegram and fire a sonner toast for each new
  * `telegram_sent` session event.
  *
- * Delta semantics: the SSE backend replays the full history on first
- * tick (so a refresh of the dashboard doesn't dump every Telegram
- * message ever sent), but the hook deliberately tags the first tick
- * with `firstTickRef` so we DON'T toast historical events on mount.
- * Only events that arrive AFTER the first message become toasts —
- * matches "live event stream" semantics rather than "replay log".
+ * Reconnect-safe semantics. The backend's SSE handler keeps per-connection
+ * state (`firstTick` + `sentCount`) — so when EventSource auto-reconnects
+ * after a network blip or sleep+wake the backend re-sends the full
+ * history as if it were the first tick. The frontend would otherwise see
+ * those historical events as deltas and re-toast every Duo prompt the
+ * operator already saw. Two layers of defence:
+ *
+ *   1. `initializedRef` — distinguishes the first tick of THIS hook's
+ *      lifetime (intentional history; never toast) from subsequent ticks
+ *      (potentially live).
+ *   2. `lastSeenTsRef` — monotonic high-water mark across ALL ticks. Any
+ *      event with `ts <= lastSeenTs` is skipped, even if a reconnect
+ *      replays the snapshot. Initial load primes lastSeenTs from the
+ *      snapshot's tail, so live ticks naturally drop history.
+ *
+ * The watermark is timestamp-only — no event-id field exists in the
+ * tracker, but events are written by `appendFileSync` in monotonic order
+ * within a single process. Cross-process clock skew on shared filesystems
+ * is not a concern here (single dashboard instance per machine).
  */
 export function useTelegramToasts(): void {
-  const firstTickRef = useRef(true);
+  const initializedRef = useRef(false);
+  const lastSeenTsRef = useRef<string>("");
 
   useEffect(() => {
     const es = new EventSource("/events/telegram");
@@ -25,13 +39,21 @@ export function useTelegramToasts(): void {
       } catch {
         return;
       }
-      if (firstTickRef.current) {
-        // Backend replays history on connect — discard so a dashboard
-        // refresh doesn't avalanche toasts.
-        firstTickRef.current = false;
+      // First tick of THIS hook lifetime — history replay. Prime the
+      // watermark and stay silent. (Backend's first-tick batch is the
+      // entire history; events arrive in chronological order, so the
+      // last entry is the latest.)
+      if (!initializedRef.current) {
+        initializedRef.current = true;
+        if (events.length > 0) {
+          lastSeenTsRef.current = events[events.length - 1].timestamp;
+        }
         return;
       }
+      // Subsequent ticks. Could be a real delta OR a reconnect snapshot
+      // replay; the watermark filter handles both uniformly.
       for (const ev of events) {
+        if (!ev.timestamp || ev.timestamp <= lastSeenTsRef.current) continue;
         const kind = ev.data?.kind ?? "duo-waiting";
         const systemLabel = ev.data?.systemLabel ?? "auth";
         const workflow = ev.data?.workflow ?? "";
@@ -51,6 +73,7 @@ export function useTelegramToasts(): void {
         fn(`${ICONS[kind] ?? "📨"} ${TITLES[kind] ?? "Telegram sent"}`, {
           description: workflow ? `${systemLabel} · ${workflow}` : systemLabel,
         });
+        lastSeenTsRef.current = ev.timestamp;
       }
     };
 
