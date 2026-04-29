@@ -6,7 +6,8 @@ import { Popover, PopoverTrigger, PopoverContent } from "./ui/popover";
 import { Calendar } from "./ui/calendar";
 import { SearchBar } from "./SearchBar";
 import { ApprovalInbox } from "./ApprovalInbox";
-import type { SearchResultRow, PreviewInboxRow } from "./types";
+import { FailureBell } from "./FailureBell";
+import type { SearchResultRow, PreviewInboxRow, FailureRow } from "./types";
 
 interface TopBarProps {
   date: string;
@@ -25,6 +26,10 @@ interface TopBarProps {
   onSearchSelect?: (row: SearchResultRow) => void;
   /** Fired when an approval-inbox row is clicked. */
   onPreviewSelect?: (row: PreviewInboxRow) => void;
+  /** Fired when a failure-bell row is clicked. */
+  onFailureSelect?: (row: FailureRow) => void;
+  /** Per-workflow failure counts for the navbar bell badge. */
+  failureCounts?: Record<string, number>;
 }
 
 /**
@@ -50,6 +55,8 @@ export function TopBar({
   rightSlot,
   onSearchSelect,
   onPreviewSelect,
+  onFailureSelect,
+  failureCounts,
 }: TopBarProps) {
   void availableDates;
 
@@ -101,11 +108,16 @@ export function TopBar({
 
       {/* ── Date navigator + rightSlot — right edge ────────────── */}
       <div className="flex items-center gap-1 justify-self-end">
-        {onPreviewSelect && (
-          <>
-            <ApprovalInbox onSelect={onPreviewSelect} />
-            <span aria-hidden className="w-2.5 inline-block" />
-          </>
+        {onPreviewSelect && <ApprovalInbox onSelect={onPreviewSelect} />}
+        {onFailureSelect && failureCounts && (
+          <FailureBell
+            failureCounts={failureCounts}
+            date={date}
+            onSelect={onFailureSelect}
+          />
+        )}
+        {(onPreviewSelect || onFailureSelect) && (
+          <span aria-hidden className="w-2.5 inline-block" />
         )}
         <button
           onClick={() => navigateDay(-1)}
