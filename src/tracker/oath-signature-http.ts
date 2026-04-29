@@ -26,6 +26,7 @@ import {
   readEntries,
   readEntriesForDate,
   trackEvent,
+  trackEventForDate,
   type TrackerEntry,
 } from "./jsonl.js";
 import { log } from "../utils/log.js";
@@ -51,20 +52,25 @@ const WORKFLOW = "oath-signature";
  * sweep at startup also leaves them in the previous day's file. We scan
  * every date returned by `listDatesForWorkflow` so the lookup is robust
  * regardless of when the row was first written.
+ *
+ * Returns the matching `date` along with the entry so callers can write
+ * resolution lines (approve/discard) into the same file as the row's
+ * existing history — otherwise the dashboard's per-date SSE doesn't pick
+ * the new state up when viewing the prep row's original date.
  */
 function findLatestPrepRow(
   parentRunId: string,
   dir: string,
-): TrackerEntry | null {
-  let latest: TrackerEntry | null = null;
+): { entry: TrackerEntry; date: string } | null {
+  let best: { entry: TrackerEntry; date: string } | null = null;
   for (const date of listDatesForWorkflow(WORKFLOW, dir)) {
     for (const e of readEntriesForDate(WORKFLOW, date, dir)) {
       if (e.runId !== parentRunId) continue;
       if (!e.data || typeof e.data !== "object" || e.data.mode !== "prepare") continue;
-      if (!latest || latest.timestamp < e.timestamp) latest = e;
+      if (!best || best.entry.timestamp < e.timestamp) best = { entry: e, date };
     }
   }
-  return latest;
+  return best;
 }
 
 let _uploadsDirForTests: string | undefined;
@@ -243,10 +249,11 @@ export async function handleOathApproveBatch(
     previewRecords.push(parsed.data);
   }
 
-  const prepRow = findLatestPrepRow(input.parentRunId, dir);
-  if (!prepRow) {
+  const found = findLatestPrepRow(input.parentRunId, dir);
+  if (!found) {
     return { ok: false, error: `no prepare row found for parentRunId=${input.parentRunId}` };
   }
+  const { entry: prepRow, date: prepRowDate } = found;
 
   const approvable: OathPreviewRecord[] = [];
   const skipped: Array<{ index: number; reason: string }> = [];
@@ -301,7 +308,7 @@ export async function handleOathApproveBatch(
     records: previewRecords,
   });
   const finalData = parsedPrev.success ? parsedPrev.data : prepRow.data;
-  trackEvent(
+  trackEventForDate(
     {
       workflow: WORKFLOW,
       timestamp: new Date().toISOString(),
@@ -311,6 +318,7 @@ export async function handleOathApproveBatch(
       step: "approved",
       data: flattenForData(finalData as Record<string, unknown>),
     },
+    prepRowDate,
     dir,
   );
 
@@ -341,10 +349,11 @@ export async function handleOathDiscardPrepare(
   if (!input.parentRunId || typeof input.parentRunId !== "string") {
     return { ok: false, error: "parentRunId is required" };
   }
-  const prepRow = findLatestPrepRow(input.parentRunId, dir);
-  if (!prepRow) {
+  const found = findLatestPrepRow(input.parentRunId, dir);
+  if (!found) {
     return { ok: false, error: `no prepare row found for parentRunId=${input.parentRunId}` };
   }
+  const { entry: prepRow, date: prepRowDate } = found;
   // Only block if the row is *already resolved* (approved or discarded).
   // Failed-from-restart rows must remain discardable so the operator can
   // clear them off the dashboard.
@@ -363,7 +372,7 @@ export async function handleOathDiscardPrepare(
       // Best-effort — file may already be gone.
     }
   }
-  trackEvent(
+  trackEventForDate(
     {
       workflow: WORKFLOW,
       timestamp: new Date().toISOString(),
@@ -374,6 +383,7 @@ export async function handleOathDiscardPrepare(
       data: prepRow.data,
       error: input.reason ?? "discarded by user",
     },
+    prepRowDate,
     dir,
   );
   return { ok: true, parentRunId: input.parentRunId };
