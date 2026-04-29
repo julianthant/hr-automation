@@ -203,6 +203,8 @@ export function CommandPalette({ open, setOpen, onSelect, ctx }: CommandPaletteP
                 rows={historyRows}
                 query={query.trim()}
                 embedded
+                activeRowIndex={activeIndex - cmdSuggestions.length}
+                onMouseEnterRow={(i) => setActiveIndex(cmdSuggestions.length + i)}
                 onPick={(row) => {
                   onSelect(row);
                   setOpen(false);
