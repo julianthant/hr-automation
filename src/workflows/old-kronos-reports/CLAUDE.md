@@ -2,7 +2,7 @@
 
 Downloads Time Detail PDF reports from Old Kronos (UKG) for multiple employees in parallel; validates downloaded PDFs; tracks status in an Excel tracker.
 
-**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflowBatch` (pool mode, `preEmitPending: true`, `poolSize: 4`). The kernel owns browser launch, UKG auth, per-employee tracker entries, SIGINT cleanup, and worker-queue fan-out. The CLI adapter `runParallelKronos` in `parallel.ts` owns the pre-kernel phases: batch YAML load, dry-run short-circuit, mutex setup, and a `launchFn` that assigns a unique `ukg_session_workerN` sessionDir per worker (UKG uses Playwright persistent contexts — workers sharing one sessionDir would collide on the lock).
+**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflowBatch` (pool mode, `preEmitPending: true`, `poolSize: 4`). The kernel owns browser launch, UKG auth, per-employee tracker entries, SIGINT cleanup, and worker-queue fan-out. The CLI adapter `runParallelKronos` in `parallel.ts` owns the pre-kernel phases: batch YAML load, mutex setup, and a `launchFn` that assigns a unique `ukg_session_workerN` sessionDir per worker (UKG uses Playwright persistent contexts — workers sharing one sessionDir would collide on the lock).
 
 ## What this workflow does
 
@@ -23,7 +23,7 @@ This workflow touches one system: **old-kronos** (UKG, Genies iframe).
 - `validate.ts` — PDF validation: non-zero size, "No Data Returned" substring, name/ID extraction (regex `/^(.+?)\s+ID:\s*(\d+)/`), expected-employee match.
 - `tracker.ts` — `kronos-tracker.xlsx` writer (Excel-only; JSONL events handled by the kernel). Preserved per `src/workflows/CLAUDE.md` grandfather clause.
 - `workflow.ts` — Kernel definition (`kronosReportsWorkflow`). Handler runs `searching → extracting → downloading` per employee. Module-scoped runtime (`setKronosRuntime` / `clearKronosRuntime`) holds the tracker mutex, report-lock mutex, date range, and reports dir — they can't ride on Zod-validated TData. A `WeakSet<Page>` tracks which worker pages have had the date range set so we only `setDateRange` once per worker. Also exports a `runKronosForEmployee` helper that preserves the pre-migration per-employee control flow for external callers / debugging (not invoked by the kernel handler).
-- `parallel.ts` — CLI adapter (`runParallelKronos`). Loads batch YAML, dry-runs, initializes module runtime, builds a per-worker `launchFn` closure that increments a counter and assigns `${SESSION_DIR}_workerN` to each worker's Playwright persistent context, delegates to `runWorkflowBatch(kronosReportsWorkflow, items, { poolSize, launchFn, onPreEmitPending, deriveItemId })`, and cleans up session dirs after. `loadBatchFile` is exported for testing.
+- `parallel.ts` — CLI adapter (`runParallelKronos`). Loads batch YAML, initializes module runtime, builds a per-worker `launchFn` closure that increments a counter and assigns `${SESSION_DIR}_workerN` to each worker's Playwright persistent context, delegates to `runWorkflowBatch(kronosReportsWorkflow, items, { poolSize, launchFn, onPreEmitPending, deriveItemId })`, and cleans up session dirs after. `loadBatchFile` is exported for testing.
 - `index.ts` — Barrel exports. **No `defineDashboardMetadata` call** — `defineWorkflow` auto-registers the dashboard metadata from the kernel definition.
 - `batch.yaml` — Input list of employee IDs (5+ digit numeric strings, one per line).
 
@@ -46,10 +46,9 @@ This workflow touches one system: **old-kronos** (UKG, Genies iframe).
 ## Data Flow
 
 ```
-CLI: npm run kronos [-- --workers N] [--start-date ... --end-date ...]
+CLI: npm run kronos [-- --start-date ... --end-date ...]
   → runParallelKronos (CLI adapter)
     → loadBatchFile (Zod validate each ID)
-    → if --dry-run: log planned employee list + workers + date range, exit 0
     → else:
       → mkdirSync REPORTS_DIR
       → setKronosRuntime({ trackerMutex, reportMutex, startDate, endDate, reportsDir, writeTracker })
@@ -82,9 +81,9 @@ CLI: npm run kronos [-- --workers N] [--start-date ... --end-date ...]
 - **`ctx.retry` (per-worker)**: 2 attempts × 3s linear backoff around the Reports flow. Replaces the old inline 2-attempt loop.
 - **Dead-worker handling**: the kernel's worker catches per-item errors, records `failed`, and moves to the next queue item. Consecutive-error shutoff is dropped (the kernel's per-item `withTrackedWorkflow` handles classification and isolation).
 
-## `--workers N` override
+## Worker count
 
-`RunOpts.poolSize` (added in the same commit as this migration) lets CLI callers override `wf.config.batch.poolSize` at runtime. CLI flag: `--workers N` on the `kronos` command in `src/cli.ts`. Default when unset: `4` (the workflow config default). Passed as `{ poolSize: actualWorkers }` through `runWorkflowBatch`.
+Default pool size: `4` (from `wf.config.batch.poolSize`). `RunOpts.poolSize` can override it if `runWorkflowBatch` is called programmatically. The `--workers N` CLI flag was removed 2026-04-28; to change the default, edit `DEFAULT_WORKERS` in `config.ts`.
 
 ## Gotchas
 

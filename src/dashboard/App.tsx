@@ -4,7 +4,8 @@ import { TooltipProvider } from "./components/ui/tooltip";
 import { TopBar } from "./components/TopBar";
 import { QueuePanel } from "./components/QueuePanel";
 import { LogPanel } from "./components/LogPanel";
-import { SessionPanel } from "./components/SessionPanel";
+import { TerminalDrawer } from "./components/TerminalDrawer";
+import { TerminalDrawerProvider } from "./components/hooks/useTerminalDrawer";
 import { useEntries } from "./components/hooks/useEntries";
 import { usePreflight } from "./components/hooks/usePreflight";
 import { useTelegramToasts } from "./components/hooks/useTelegramToasts";
@@ -174,6 +175,7 @@ export default function App() {
 
   return (
     <TooltipProvider delayDuration={150} skipDelayDuration={300}>
+    <TerminalDrawerProvider>
     <div className="flex flex-col h-screen">
       <Toaster
         position="bottom-right"
@@ -229,9 +231,10 @@ export default function App() {
           workflow={workflow}
           date={date}
         />
-        <SessionPanel />
       </div>
+      <TerminalDrawer />
     </div>
+    </TerminalDrawerProvider>
     </TooltipProvider>
   );
 }

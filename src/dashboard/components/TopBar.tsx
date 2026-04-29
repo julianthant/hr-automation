@@ -1,8 +1,10 @@
-import { ChevronLeft, ChevronRight, Monitor } from "lucide-react";
+import { ChevronLeft, ChevronRight, Terminal as TerminalIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useClock } from "./hooks/useClock";
+import { useTerminalDrawer } from "./hooks/useTerminalDrawer";
 import { cn, dateLocal } from "@/lib/utils";
 import { Popover, PopoverTrigger, PopoverContent } from "./ui/popover";
+import { Tooltip, TooltipTrigger, TooltipContent } from "./ui/tooltip";
 import { Calendar } from "./ui/calendar";
 import { SearchBar } from "./SearchBar";
 import type { SearchResultRow } from "./types";
@@ -20,9 +22,9 @@ interface TopBarProps {
    */
   queueZoneContent?: ReactNode;
   /**
-   * Optional slot rendered at the far end of the SESSION zone, to the right
-   * of the clock. Reserved for a future workflow launcher; the topbar stays
-   * focused on navigation regardless of what mounts here.
+   * Optional slot rendered at the far end of the stream zone, to the right
+   * of the clock + terminal toggle. Reserved for a future workflow launcher;
+   * the topbar stays focused on navigation regardless of what mounts here.
    */
   rightSlot?: ReactNode;
   /**
@@ -33,15 +35,17 @@ interface TopBarProps {
 }
 
 /**
- * Four-zone navbar that mirrors the panel split below it. Column widths
- * match WorkflowRail (200) + QueuePanel + SessionPanel exactly, so the
- * vertical dividers in the navbar line up pixel-for-pixel with the panel
- * column boundaries.
+ * Three-zone navbar that mirrors the panel split below it. Column widths
+ * match WorkflowRail (200) + QueuePanel exactly, so the vertical dividers
+ * line up pixel-for-pixel with the panel column boundaries.
  *
- *   BRAND zone   ↦ scopes WorkflowRail   (Triton HR brand)
+ *   BRAND zone   ↦ scopes WorkflowRail   (RRSS HR brand + live pill)
  *   QUEUE zone   ↦ scopes QueuePanel     (QuickRunPanel when wired, else blank)
- *   STREAM zone  ↦ scopes LogPanel       (date nav · cross-workflow search)
- *   SESSION zone ↦ scopes SessionPanel   (live indicator · clock · rightSlot)
+ *   STREAM zone  ↦ scopes LogPanel       (search · date nav · clock · drawer toggle · rightSlot)
+ *
+ * The former SESSION zone is gone — its content lives in the bottom
+ * `TerminalDrawer` now. The terminal-icon button at the end of the
+ * STREAM zone toggles that drawer.
  */
 export function TopBar({
   date, onDateChange, availableDates,
@@ -51,6 +55,7 @@ export function TopBar({
   onSearchSelect,
 }: TopBarProps) {
   const clock = useClock();
+  const { open: drawerOpen, toggle: toggleDrawer } = useTerminalDrawer();
   void availableDates;
 
   const dateObj = new Date(date + "T00:00:00");
@@ -77,12 +82,13 @@ export function TopBar({
   return (
     <div
       className={cn(
-        // Grid widths match WorkflowRail (200) + QueuePanel + SessionPanel
-        // pixel-for-pixel so vertical dividers line up with panel boundaries.
+        // Grid widths match WorkflowRail (200) + QueuePanel pixel-for-pixel
+        // so vertical dividers line up with panel boundaries below. The
+        // STREAM zone (1fr) covers the rest, scoping LogPanel.
         "grid border-b border-border bg-card flex-shrink-0",
-        "grid-cols-[200px_300px_1fr_200px]",
-        "min-[1440px]:grid-cols-[200px_380px_1fr_240px]",
-        "2xl:grid-cols-[200px_460px_1fr_280px]",
+        "grid-cols-[200px_300px_1fr]",
+        "min-[1440px]:grid-cols-[200px_380px_1fr]",
+        "2xl:grid-cols-[200px_460px_1fr]",
       )}
     >
       {/* ── BRAND zone — scopes WorkflowRail. Hosts the live-connection
@@ -90,7 +96,7 @@ export function TopBar({
             operator sees in the navbar's reading order. ── */}
       <div className="flex items-center justify-between gap-2 px-4 py-2 border-r border-border min-w-0">
         <span className="text-[16px] font-bold tracking-tight whitespace-nowrap leading-none">
-          Triton HR
+          RRSS HR
         </span>
         <div
           role="status"
@@ -120,18 +126,18 @@ export function TopBar({
         {queueZoneContent}
       </div>
 
-      {/* ── STREAM zone — scopes LogPanel ───────────────────── */}
-      <div className="flex items-center gap-3 px-6 py-2 border-r border-border min-w-0">
-        {/* Search — fills the full width of the stream zone up to the
-             date navigator. Picking a result swaps the LogPanel below. */}
+      {/* ── STREAM zone — scopes LogPanel. Hosts search + date nav and,
+            at the right edge, the clock + drawer toggle button (terminal
+            icon) that opens/closes the bottom session drawer. ── */}
+      <div className="flex items-center gap-3 px-6 py-2 min-w-0">
+        {/* Search — fills the available width up to the date cluster. */}
         {onSearchSelect && (
           <div className="flex-1 min-w-0">
             <SearchBar onSelect={onSearchSelect} />
           </div>
         )}
 
-        {/* Date navigator — right-aligned inside the stream zone. Picks
-             which day's entries the stream shows. */}
+        {/* Date navigator. */}
         <div className="flex items-center gap-1 flex-shrink-0">
           <button
             onClick={() => navigateDay(-1)}
@@ -163,26 +169,40 @@ export function TopBar({
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
-      </div>
 
-      {/* ── SESSION zone — scopes SessionPanel. Hosts the SESSIONS label
-            (formerly inside SessionPanel's own 60px header) so the panel
-            below can start directly with content + sit flush with the
-            QueuePanel + LogPanel content rows. Every child uses
-            `leading-none` so flex `items-center` aligns geometric centers
-            without line-height padding throwing baselines off. ── */}
-      <div className="flex items-center justify-between gap-2 px-4 py-2 min-w-0">
-        <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-semibold text-muted-foreground min-w-0 leading-none">
-          <Monitor aria-hidden className="w-3.5 h-3.5 flex-shrink-0" />
-          <span className="truncate leading-none">Sessions</span>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <span className="font-mono text-[12px] text-muted-foreground font-medium tabular-nums leading-none hidden min-[1440px]:inline">
-            {clock}
-          </span>
+        <span className="font-mono text-[12px] text-muted-foreground font-medium tabular-nums leading-none hidden min-[1440px]:inline flex-shrink-0">
+          {clock}
+        </span>
 
-          {rightSlot}
-        </div>
+        {/* Terminal-icon button — toggles the bottom session drawer. Active
+            state mirrors `useTerminalDrawer().open` so the button reads
+            "pressed" while the drawer is up. Keyboard shortcut (⌃J / ⌘J)
+            is registered globally inside the drawer hook. */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={toggleDrawer}
+              aria-expanded={drawerOpen}
+              aria-controls="terminal-drawer"
+              aria-label="Toggle session drawer"
+              className={cn(
+                "h-8 w-8 rounded-md border bg-secondary flex items-center justify-center cursor-pointer transition-colors flex-shrink-0",
+                "outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                drawerOpen
+                  ? "bg-accent text-accent-foreground border-accent-foreground/40"
+                  : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+              )}
+            >
+              <TerminalIcon className="w-4 h-4" strokeWidth={2} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>
+            Toggle session drawer (⌃J)
+          </TooltipContent>
+        </Tooltip>
+
+        {rightSlot}
       </div>
     </div>
   );

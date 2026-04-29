@@ -4,8 +4,7 @@ Add a new **Oath Signature Date** row to a UCPath Person Profile for one or
 more employees.
 
 **Kernel-based + daemon-mode.** Declared via `defineWorkflow` in `workflow.ts`
-and executed through `src/core/runWorkflow` (single-item, `--direct`) or
-enqueued to a daemon via `ensureDaemonsAndEnqueue` (default). Supports N EIDs
+and enqueued to a daemon via `ensureDaemonsAndEnqueue` (default). Supports N EIDs
 per invocation — each becomes its own queue item so a single daemon processes
 them sequentially, and `--parallel K` fans out across K daemons.
 
@@ -91,10 +90,8 @@ CLI: npm run oath-signature <emplId...> [--date MM/DD/YYYY]   (daemon — defaul
           • dupe-protection: skip add/save if the existing-oath sentinel
             is absent on profile load (live-page probe)
 
-CLI: npm run oath-signature:direct <emplId> [--date MM/DD/YYYY]   (legacy in-process)
-  → runOathSignature — single EID only
-    → if --dry-run: ActionPlan.preview() — prints the 8-step plan, no browser
-    → else: runWorkflow(oathSignatureWorkflow, input)
+In-process path (tests/scripts — call runOathSignature directly):
+  → runWorkflow(oathSignatureWorkflow, input)
 ```
 
 ## Dupe-protection

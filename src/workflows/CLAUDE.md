@@ -28,7 +28,7 @@ Add the workflow's step list to the "Step Tracking Per Workflow" table in root `
 
 ## CLI Integration
 
-Add a Commander subcommand to `src/cli.ts` invoking your workflow's CLI adapter. Add both normal and `:dry` variants to `package.json`.
+Add a Commander subcommand to `src/cli.ts` invoking your workflow's CLI adapter. Add the normal and `:stop` scripts to `package.json`.
 
 ## Daemon-mode conversion template
 
@@ -40,12 +40,8 @@ Converting a workflow is mechanical — five edits:
    ```ts
    export async function runXxxCli(
      // ...workflow-specific args...
-     options: { dryRun?: boolean; new?: boolean; parallel?: number } = {},
+     options: { new?: boolean; parallel?: number } = {},
    ): Promise<void> {
-     if (options.dryRun) {
-       // preview path — no daemon, no Duo
-       return;
-     }
      const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
      const inputs = [/* ...build typed WorkflowInput[]... */];
      await ensureDaemonsAndEnqueue(xxxWorkflow, inputs, {
@@ -54,11 +50,11 @@ Converting a workflow is mechanical — five edits:
      });
    }
    ```
-   Do **not** remove the existing `runXxx` / `runXxxBatch` functions — they stay for in-process use (`--direct` flag, tests, composed workflows that spawn workflows from inside their handler).
+   Do **not** remove the existing `runXxx` / `runXxxBatch` functions — they stay for in-process use (tests, composed workflows that spawn workflows from inside their handler).
 2. **Re-export `runXxxCli` from the workflow's `index.ts`** barrel so the CLI and `cli-daemon.ts` can import it.
 3. **Register the workflow in `src/cli-daemon.ts`**'s `WORKFLOWS` map (lazy-import loader). The daemon process exec's `tsx src/cli-daemon.ts <workflow>` — this map is how it finds the `defineWorkflow` result.
-4. **Update the workflow's Commander subcommand in `src/cli.ts`** to call `runXxxCli` by default, expose `-n, --new` and `-p, --parallel <count>` options, and keep a `--direct` flag that invokes the legacy in-process `runXxx` / `runXxxBatch` path for tests / scripts / composed pipelines.
-5. **Add `npm run <workflow>:status` / `:stop` / `:attach` scripts** in `package.json` (they're thin wrappers over `daemon-status`, `daemon-stop`, `daemon-attach` from `src/cli.ts`).
+4. **Update the workflow's Commander subcommand in `src/cli.ts`** to call `runXxxCli` by default and expose `-n, --new` and `-p, --parallel <count>` options.
+5. **Add `npm run <workflow>:stop` script** in `package.json` (thin wrapper over `daemon-stop` from `src/cli.ts`).
 
 Workflows where daemon mode is **not** appropriate (do NOT convert):
 - **Non-CLI workflows** like `sharepoint-download` (dashboard button, fire-and-forget `runWorkflow`) — daemon mode solves "avoid re-Duo on repeated CLI runs," which doesn't apply when the dashboard holds one long-lived session.
@@ -66,9 +62,9 @@ Workflows where daemon mode is **not** appropriate (do NOT convert):
 
 Currently converted: `separations`, `work-study`, `eid-lookup`, `onboarding`, `oath-signature`, `emergency-contact`. Pending: `old-kronos-reports`. No behavior change intended — daemon mode wraps the same `runOneItem` kernel primitive, so per-item tracker output is byte-identical to the legacy path.
 
-**Emergency-contact note** — the CLI adapter reads YAML + runs roster preflight in-process (before any daemon work), then enqueues each `EmergencyContactRecord` as a separate queue item. `--dry-run` bypasses the daemon entirely. Pass a custom `deriveItemId` to `ensureDaemonsAndEnqueue` because the EID is nested under `input.employee.employeeId` and the composite `p{NN}-{emplId}` id shape is what the legacy path already writes.
+**Emergency-contact note** — the CLI adapter reads YAML + runs roster preflight in-process (before any daemon work), then enqueues each `EmergencyContactRecord` as a separate queue item. Pass a custom `deriveItemId` to `ensureDaemonsAndEnqueue` because the EID is nested under `input.employee.employeeId` and the composite `p{NN}-{emplId}` id shape is what the legacy path already writes.
 
-**Onboarding note** — one alive daemon = one single-worker session with 3 browsers (CRM + UCPath + I9) and 2 Duos (I9 is SSO no-2FA). Heaviest per-daemon cost of any converted workflow, but biggest savings per repeat invocation (CRM Duo alone is ~30-60s). The workflow's `batch.mode: "pool"` is orthogonal: it governs `runWorkflowBatch` fan-out in the legacy `--direct` path. Daemon-mode parallelism comes from running N daemons (`-p N`), each a single worker claiming off the shared queue. `--dry-run` and `--batch` both auto-force `--direct` (dry-run skips the full session launch; batch.yaml is read in-process).
+**Onboarding note** — one alive daemon = one single-worker session with 3 browsers (CRM + UCPath + I9) and 2 Duos (I9 is SSO no-2FA). Heaviest per-daemon cost of any converted workflow, but biggest savings per repeat invocation (CRM Duo alone is ~30-60s). Daemon-mode parallelism comes from running N daemons (`-p N`), each a single worker claiming off the shared queue.
 
 ## Edit-data opt-in recipe
 
@@ -142,7 +138,7 @@ their `detailFields` non-editable.
 
 | Workflow | CLI | Systems | Kernel? | Parallelism |
 |---|---|---|---|---|
-| onboarding | `npm run onboarding` (positional emails; `--batch` reads batch.yaml; `:dry` for preview) | CRM, UCPath, I9 | Yes | Single mode for one email; pool mode (N workers, kernel) via `runWorkflowBatch` for multi |
+| onboarding | `npm run onboarding` (positional emails → daemon queue) | CRM, UCPath, I9 | Yes | Single-worker daemon per spawn; N daemons via `-p N` for parallelism |
 | separations | `npm run separation` | Kuali, Old Kronos, New Kronos, UCPath | Yes (sequential batch via runWorkflowBatch) | 4 tiled browsers, interleaved auth, ctx.parallel for Phase-1 4-way fan-out |
 | eid-lookup | `tsx src/cli.ts eid-lookup` | UCPath + optional CRM | Yes | N tabs in one shared context (runWorkerPool in handler) |
 | old-kronos-reports | `npm run kronos` | UKG | Yes | Pool mode (N workers, kernel) |

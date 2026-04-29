@@ -252,6 +252,10 @@ export interface WorkflowInstanceState {
   instance: string;
   /** Kebab-case workflow name resolved from the instance label (e.g. "Separation 1" → "separations"). null when unrecognised. */
   workflow: string | null;
+  /** ISO-8601 timestamp of the latest workflow_start event for this instance.
+   * Surfaced to the dashboard's terminal drawer so cards can render a live
+   * elapsed counter. Re-runs under the same instance overwrite this. */
+  startedAt?: string;
   active: boolean;
   /** True while the spawning Node process (and therefore its Playwright browsers) is still alive. */
   pidAlive: boolean;
@@ -296,6 +300,7 @@ export function rebuildSessionState(dir?: string): SessionState {
       wfMap.set(inst, {
         instance: inst,
         workflow: workflowNameFromInstance(inst),
+        startedAt: e.timestamp,
         active: true,
         pidAlive: true,
         currentItemId: null,

@@ -220,6 +220,24 @@
   animation: duo-glow 2s ease-in-out infinite;
 }
 
+/* Stop-confirm pulse — fires on the WorkflowBox `× kill` pill when the
+   user is in the 4-second force-stop confirm window. Subtle outer ring
+   pulse rather than a flashy color cycle so it reads as "armed" not
+   "alarming". Pairs with the destructive-tinted bg + border on the pill. */
+@keyframes stop-confirm {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(0 84% 60% / 0); }
+  50%      { box-shadow: 0 0 0 3px hsl(0 84% 60% / 0.18); }
+}
+.animate-stop-confirm {
+  animation: stop-confirm 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-duo-glow,
+  .animate-stop-confirm,
+  .terminal-drawer { animation: none !important; transition: none !important; }
+}
+
 /* ========================================================================
    Capture redesign tokens — see
    docs/superpowers/specs/2026-04-28-capture-redesign-visual-direction.md
