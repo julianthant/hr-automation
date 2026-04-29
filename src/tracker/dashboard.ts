@@ -1379,6 +1379,96 @@ export function buildSearchHandler(deps: SearchDeps) {
   };
 }
 
+export interface PreviewInboxDeps {
+  listWorkflows: () => string[];
+  listDates: (workflow: string) => string[];
+  readEntriesForDate: (workflow: string, date: string) => TrackerEntry[];
+}
+
+const PREVIEW_INBOX_DAYS = 7;
+
+/**
+ * Cross-workflow approval-inbox handler. Surfaces preview-row tracker
+ * entries (`data.mode === "prepare"`) whose latest entry has reached
+ * `done` status without being approved or discarded.
+ *
+ * Discriminator (universal — any workflow that adopts the `data.mode === "prepare"`
+ * parent-row pattern is automatically picked up):
+ *   - `data.mode === "prepare"` (any entry in the run carries this)
+ *   - latest entry's `status === "done"`
+ *   - latest entry's `step !== "approved"` AND `step !== "discarded"`
+ *
+ * Scans the last 7 days. Sorts newest first.
+ */
+export function buildPreviewInboxHandler(deps: PreviewInboxDeps) {
+  return (): PreviewInboxRow[] => {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - (PREVIEW_INBOX_DAYS - 1));
+    const cutoffStr = dateLocal(cutoff);
+
+    // Aggregate by (workflow, id, runId). Keep the latest entry per key.
+    type Bucket = { latest: TrackerEntry; date: string };
+    const byRun = new Map<string, Bucket>();
+
+    for (const wf of deps.listWorkflows()) {
+      for (const date of deps.listDates(wf)) {
+        if (date < cutoffStr) continue;
+        for (const e of deps.readEntriesForDate(wf, date)) {
+          if (!isPrepEntry(e)) continue;
+          const runId = e.runId || `${e.id}#1`;
+          const key = `${wf}::${e.id}::${runId}`;
+          const prev = byRun.get(key);
+          if (!prev || e.timestamp >= prev.latest.timestamp) {
+            byRun.set(key, { latest: e, date });
+          }
+        }
+      }
+    }
+
+    const rows: PreviewInboxRow[] = [];
+    for (const { latest, date } of byRun.values()) {
+      if (!isReadyForReview(latest)) continue;
+      rows.push({
+        workflow: latest.workflow,
+        id: latest.id,
+        runId: latest.runId || `${latest.id}#1`,
+        summary: previewSummary(latest),
+        ts: latest.timestamp,
+        date,
+        recordCount: countRecords(latest),
+      });
+    }
+
+    rows.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
+    return rows;
+  };
+}
+
+function isPrepEntry(e: TrackerEntry): boolean {
+  return e.data?.mode === "prepare";
+}
+
+function isReadyForReview(latest: TrackerEntry): boolean {
+  if (latest.status !== "done") return false;
+  if (latest.step === "approved" || latest.step === "discarded") return false;
+  return true;
+}
+
+function previewSummary(e: TrackerEntry): string {
+  return e.data?.pdfOriginalName || e.id;
+}
+
+function countRecords(e: TrackerEntry): number | undefined {
+  const raw = e.data?.records;
+  if (!raw) return undefined;
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return Array.isArray(parsed) ? parsed.length : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Compute per-step durations (ms) for a single (itemId, runId) pair.
  *
