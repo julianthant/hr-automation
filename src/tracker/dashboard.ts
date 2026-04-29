@@ -40,6 +40,7 @@ import {
 import {
   buildRetryHandler,
   buildRetryBulkHandler,
+  buildFindPriorByKeyHandler,
   buildRunWithDataHandler,
   buildSaveDataHandler,
   buildCancelQueuedHandler,
@@ -2823,6 +2824,29 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         workflow: String(parsed.body.workflow ?? ""),
         id: String(parsed.body.id ?? ""),
         data,
+      });
+      writeJson(result.ok ? 200 : 400, result);
+      return;
+    }
+
+    // ─── EditDataTab "Copy from prior run" lookup ─────────────
+    // Returns prior tracker entries for `workflow` whose `data[keyField]`
+    // matches `keyValue` (e.g. same EID across two separation doc IDs),
+    // sorted newest first. The dashboard's EditDataTab uses this to offer
+    // the operator a "copy these values" affordance when filling out a
+    // new run for an employee who's been processed before.
+    if (req.method === "GET" && url.pathname === "/api/find-prior-by-key") {
+      const wf = url.searchParams.get("workflow") ?? "";
+      const keyField = url.searchParams.get("keyField") ?? "";
+      const keyValue = url.searchParams.get("keyValue") ?? "";
+      const excludeId = url.searchParams.get("excludeId") ?? undefined;
+      const days = Number.parseInt(url.searchParams.get("days") ?? "", 10);
+      const result = buildFindPriorByKeyHandler(dir)({
+        workflow: wf,
+        keyField,
+        keyValue,
+        excludeId,
+        days: Number.isFinite(days) ? days : undefined,
       });
       writeJson(result.ok ? 200 : 400, result);
       return;

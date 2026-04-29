@@ -113,6 +113,19 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
    */
   detailFields?: Array<DetailField<TData>>
   /**
+   * Data-field key used by the dashboard's "Copy from prior run" affordance
+   * in EditDataTab. When set (e.g. `"eid"` for separations, `"email"` for
+   * onboarding), the EditDataTab shows a "Find prior" button when the
+   * current entry has a populated `data[matchKey]`. Clicking surfaces past
+   * runs of the SAME workflow that share the same `data[matchKey]` value
+   * but a different itemId, and lets the operator copy that prior run's
+   * data into the current edit form. Designed for the "two doc IDs, one
+   * employee" pattern: the second separation form for the same person can
+   * pull the first's extracted/edited values forward instead of being
+   * filled from scratch.
+   */
+  matchKey?: string
+  /**
    * Derive a display name from accumulated tracker data (already stringified
    * `Record<string, string>`). Called server-side on each emit; result lands
    * in `data.__name` for the dashboard to read.
@@ -225,6 +238,11 @@ export interface WorkflowMetadata {
    * match the default (false + true respectively).
    */
   detailFields: Array<{ key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean }>
+  /**
+   * Data-field key for the dashboard's "Copy from prior run" lookup in
+   * EditDataTab. See `WorkflowConfig.matchKey` for the full contract.
+   */
+  matchKey?: string
 }
 
 export interface RegisteredWorkflow<TData, TSteps extends readonly string[]> {
