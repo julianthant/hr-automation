@@ -1455,6 +1455,56 @@ export function buildPreviewInboxHandler(deps: PreviewInboxDeps) {
   };
 }
 
+export interface FailuresDeps {
+  listWorkflows: () => string[];
+  readEntriesForDate: (workflow: string, date: string) => TrackerEntry[];
+}
+
+const FAILURES_LIMIT = 50;
+
+/**
+ * Returns failed tracker entries for a given date across all workflows.
+ * Latest run per id wins (so a retry that succeeded won't appear in the
+ * failure list). Sorted newest first, capped at FAILURES_LIMIT rows.
+ */
+export function buildFailuresHandler(deps: FailuresDeps) {
+  return (opts: { date: string; limit?: number }): FailureRow[] => {
+    const limit = opts.limit && opts.limit > 0 ? Math.floor(opts.limit) : FAILURES_LIMIT;
+    const failures: FailureRow[] = [];
+    for (const wf of deps.listWorkflows()) {
+      const all = deps.readEntriesForDate(wf, opts.date);
+      // Aggregate by (id, runId) → latest entry per run.
+      const latestPerRun = new Map<string, TrackerEntry>();
+      for (const e of all) {
+        const runId = e.runId || `${e.id}#1`;
+        const key = `${e.id}::${runId}`;
+        const prev = latestPerRun.get(key);
+        if (!prev || e.timestamp >= prev.timestamp) latestPerRun.set(key, e);
+      }
+      // Per id, keep the latest run.
+      const latestRunPerId = new Map<string, TrackerEntry>();
+      for (const e of latestPerRun.values()) {
+        const prev = latestRunPerId.get(e.id);
+        if (!prev || e.timestamp >= prev.timestamp) latestRunPerId.set(e.id, e);
+      }
+      for (const e of latestRunPerId.values()) {
+        if (e.status !== "failed") continue;
+        failures.push({
+          workflow: wf,
+          id: e.id,
+          runId: e.runId || `${e.id}#1`,
+          summary: buildSearchSummary(e),
+          error: e.error || "Unknown error",
+          ts: e.timestamp,
+          date: opts.date,
+        });
+      }
+    }
+    failures.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
+    return failures.slice(0, limit);
+  };
+}
+
 function isPrepEntry(e: TrackerEntry): boolean {
   return e.data?.mode === "prepare";
 }
@@ -2335,6 +2385,27 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
           readEntriesForDate: (wf, date) => readEntriesForDate(wf, date, dir),
         });
         const rows = handler();
+        res.end(JSON.stringify(rows));
+      } catch {
+        res.end(JSON.stringify([]));
+      }
+      return;
+    }
+
+    if (url.pathname === "/api/failures") {
+      const dateParam = url.searchParams.get("date");
+      if (!dateParam || !/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+        res.writeHead(400, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+        res.end(JSON.stringify({ error: "Missing or invalid `date` query param (expected YYYY-MM-DD)" }));
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      try {
+        const handler = buildFailuresHandler({
+          listWorkflows: () => listWorkflows(dir),
+          readEntriesForDate: (wf, date) => readEntriesForDate(wf, date, dir),
+        });
+        const rows = handler({ date: dateParam });
         res.end(JSON.stringify(rows));
       } catch {
         res.end(JSON.stringify([]));
