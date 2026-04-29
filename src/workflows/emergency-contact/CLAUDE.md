@@ -2,7 +2,7 @@
 
 Fills the Emergency Contact form in UCPath HR Tasks → Personal Data Related for every record in a batch YAML. Fully autonomous after verification: you verify the YAML once (pre-extracted by Claude reading the handwritten PDF), then the workflow runs unattended for all records.
 
-**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflowBatch` (sequential mode, `preEmitPending: true`, `betweenItems: ["reset-browsers"]`). The kernel owns browser launch, UCPath auth, per-record tracker entries, SIGINT cleanup. The CLI adapter `runEmergencyContact` owns pre-kernel phases: YAML load, dry-run short-circuit, optional SharePoint roster download + verify. **Add-New contact flow (when the target employee has zero existing emergency contacts) is NOT YET IMPLEMENTED** — `navigateToEmergencyContact` throws `NoExistingContactError`, the kernel records the record as `failed`, batch continues.
+**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflowBatch` (sequential mode, `preEmitPending: true`, `betweenItems: ["reset-browsers"]`). The kernel owns browser launch, UCPath auth, per-record tracker entries, SIGINT cleanup. The CLI adapter `runEmergencyContact` owns pre-kernel phases: YAML load, optional SharePoint roster download + verify. **Add-New contact flow (when the target employee has zero existing emergency contacts) is NOT YET IMPLEMENTED** — `navigateToEmergencyContact` throws `NoExistingContactError`, the kernel records the record as `failed`, batch continues.
 
 ## Selector intelligence
 
@@ -20,7 +20,7 @@ This workflow touches one system: **ucpath** (HR Tasks → Personal Data Related
 - `roster-verify.ts` — Loads an xlsx/csv roster and verifies each batch record's EID + name exists. Co-located with its only consumer (moved from `src/utils/`).
 - Roster + name/address matching primitives live in [`src/match/`](../../match/) — `findLatestRoster`, `loadRoster`, `matchAgainstRoster`, `compareUsAddresses`, `levenshteinDistance`. Shared with `oath-signature/prepare.ts` (moved out of this directory 2026-04-28 once the second consumer landed).
 - SharePoint download lives in its own sibling workflow: [`src/workflows/sharepoint-download/`](../sharepoint-download/). Use `import { downloadSharePointFile } from "../sharepoint-download/index.js"`. (Moved out of this directory 2026-04-22 once the dashboard roster-download button made it cross-cutting.)
-- `workflow.ts` — Kernel definition (`emergencyContactWorkflow`) + CLI adapter (`runEmergencyContact`). Dry-run branch bypasses the kernel (no browser launch; logs each record's planned action).
+- `workflow.ts` — Kernel definition (`emergencyContactWorkflow`) + CLI adapter (`runEmergencyContact`).
 - `fixtures/test-batch.yaml` — Minimal 2-record fixture with fake EIDs for dry-run smoke testing.
 - `index.ts` — Barrel exports.
 
@@ -44,10 +44,8 @@ No `tracker.ts` — dashboard JSONL only (see `src/workflows/CLAUDE.md`).
 CLI: npm run emergency-contact <batchYaml>
   → runEmergencyContact (CLI adapter)
     → loadBatch (Zod validate whole file)
-    → if --dry-run: log each record, exit 0 (no browser)
-    → else:
-      → runPreflight: optional SharePoint download + verify EIDs/names
-      → runWorkflowBatch(emergencyContactWorkflow, batch.records, {
+    → runPreflight: optional SharePoint download + verify EIDs/names
+    → runWorkflowBatch(emergencyContactWorkflow, batch.records, {
           onPreEmitPending: (record, runId) => trackEvent(pending, data)
         })
         → Kernel Session.launch: 1 browser, UCPath auth (Duo ×1)

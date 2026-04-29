@@ -2,7 +2,7 @@
 
 Multi-system employee termination: extracts data from Kuali Build, searches Old & New Kronos for timesheets, creates the UCPath termination transaction, fetches Job Summary, and fills Kuali finalization fields.
 
-**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflow` (single-doc) or `src/core/runWorkflowBatch` (multi-doc sequential mode). The kernel owns browser launch, auth-chain orchestration, per-doc tracker entries, SIGINT cleanup, and screenshot-on-failure. The CLI adapters `runSeparation` and `runSeparationBatch` handle dry-run (which bypasses the kernel entirely — no browser) and forward real runs to the kernel. The **daemon-mode adapter** `runSeparationCli` (added 2026-04-22) is what `npm run separation` actually invokes: it enqueues one or more `{docId}` items to any alive separation daemon (or spawns one) via `ensureDaemonsAndEnqueue`.
+**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflow` (single-doc) or `src/core/runWorkflowBatch` (multi-doc sequential mode). The kernel owns browser launch, auth-chain orchestration, per-doc tracker entries, SIGINT cleanup, and screenshot-on-failure. The **daemon-mode adapter** `runSeparationCli` is what `npm run separation` actually invokes: it enqueues one or more `{docId}` items to any alive separation daemon (or spawns one) via `ensureDaemonsAndEnqueue`. `runSeparation` and `runSeparationBatch` are preserved for in-process use (tests, scripts).
 
 ## What this workflow does
 
@@ -30,9 +30,8 @@ This workflow touches four systems: **kuali**, **ucpath**, **old-kronos**, **new
 
 - `schema.ts` — `SeparationData` Zod schema + helpers (`computeTerminationEffDate`, `buildTerminationComments`, `mapReasonCode`, `getInitials`, `buildDateChangeComments`, `resolveKronosDates`, `computeKronosDateRange`)
 - `config.ts` — URLs, template IDs (`UC_VOL_TERM`, `UC_INVOL_TERM`), 2560x1440 tiling dimensions
-- `workflow.ts` — Kernel definition (`separationsWorkflow`) + CLI adapters (`runSeparation`, `runSeparationBatch`, `runSeparationCli`). Dry-run branch bypasses the kernel (no browser launch; prints pipeline preview). `runSeparationCli` is the daemon-mode entry used by `npm run separation` — it validates via `SeparationInputSchema`, honors `--dry-run`, and otherwise forwards to `ensureDaemonsAndEnqueue(separationsWorkflow, docIds.map(docId => ({docId})), { new, parallel })`.
+- `workflow.ts` — Kernel definition (`separationsWorkflow`) + CLI adapters (`runSeparation`, `runSeparationBatch`, `runSeparationCli`). `runSeparationCli` is the daemon-mode entry used by `npm run separation` — validates via `SeparationInputSchema` and forwards to `ensureDaemonsAndEnqueue(separationsWorkflow, docIds.map(docId => ({docId})), { new, parallel })`. `runSeparation` / `runSeparationBatch` are in-process paths for tests/scripts.
 - `index.ts` — Barrel exports (no `defineDashboardMetadata` — `defineWorkflow` self-registers)
-- `explore-kronos.ts` — Dev script (selector discovery)
 - `KRONOS-SELECTORS.md` — Historical selector notes from the Kronos mapping session
 
 ## Kernel Config
@@ -52,43 +51,33 @@ This workflow touches four systems: **kuali**, **ucpath**, **old-kronos**, **new
 ```
 CLI: npm run separation <docId> [<docId2> ...]           (daemon mode — default)
   → runSeparationCli — daemon-mode CLI adapter
-    → if --dry-run: previewSeparationPipeline(docId) — prints 7-step plan, exits 0 (no browser, no daemon)
-    → else: ensureDaemonsAndEnqueue(separationsWorkflow, inputs, { new, parallel })
+    → ensureDaemonsAndEnqueue(separationsWorkflow, inputs, { new, parallel })
       - Discovers alive daemons via .tracker/daemons/separations-*.lock.json + /whoami liveness
       - Spawns N additional daemons via computeSpawnPlan(aliveCount, flags) — Duo once per new daemon
       - Validates every input with SeparationInputSchema (input-time), fails fast if invalid
       - Appends `enqueue` events to .tracker/daemons/separations.queue.jsonl
       - POST /wake to every alive daemon; daemons race to claim via fs.mkdir mutex
 
-CLI: npm run separation:direct <docId> [<docId2> ...]    (legacy in-process path)
-  → runSeparation (single) / runSeparationBatch (multi) — CLI adapters
-    → if --dry-run: previewSeparationPipeline(docId) — prints 7-step plan, exits 0 (no browser)
-    → else (single): runWorkflow(separationsWorkflow, { docId })
-    → else (batch): runWorkflowBatch(separationsWorkflow, items, {
-        deriveItemId: (item) => item.docId,
-        onPreEmitPending: (item, runId) => trackEvent({ pending }),
-      })
-      → Kernel Session.launch: 4 browsers, interleaved auth chain (Duo ×4)
-      → For each doc (sequential, browsers reused):
-        - Kernel emits `pending` via onPreEmitPending (batch mode)
-        - withTrackedWorkflow wraps the handler, reuses pre-emitted runId
-        - Handler: markStep("launching") + markStep("authenticating")
-                   (kernel already handled browser launch + auth)
-        - Step "kuali-extraction" → openActionList + clickDocument + extractSeparationData
-                                  + updateData({ name, eid })
-        - Step "kronos-search" → ctx.parallel({ oldK, newK, jobSummary, kualiTimekeeper })
-          - Each task: await ctx.page(system) (blocks on that Duo), then do work
-          - Returns PromiseSettledResult per key — handler reads fulfilled values,
-            logs rejected reasons; Kronos failure → Kuali dates win
-        - Resolve Kronos dates (Kronos overrides Kuali when they differ)
-        - Update Kuali lastDayWorked + separationDate if resolved dates changed
-        - Step "ucpath-job-summary" → fill Kuali term eff date + dept/payroll
-        - Step "ucpath-transaction" → Smart HR UC_VOL_TERM or UC_INVOL_TERM
-          - In batch mode: nav UCPath back to Smart HR after transaction
-        - Step "kuali-finalization" → fill txn number + date-change comments + save
-        - Final updateData (transaction number, dept info, Kronos found flags)
-      → Between docs: session.reset(id) for each system (resetUrl navigation)
-      → Batch result: succeeded / failed / errors
+In-process path (tests/scripts — use runSeparation / runSeparationBatch directly):
+  → runWorkflow(separationsWorkflow, { docId })   [single]
+  → runWorkflowBatch(separationsWorkflow, items, { deriveItemId, onPreEmitPending })   [multi]
+    → Kernel Session.launch: 4 browsers, interleaved auth chain (Duo ×4)
+    → For each doc (sequential, browsers reused):
+      - withTrackedWorkflow wraps the handler, reuses pre-emitted runId
+      - Step "kuali-extraction" → openActionList + clickDocument + extractSeparationData
+                                + updateData({ name, eid })
+      - Step "kronos-search" → ctx.parallel({ oldK, newK, jobSummary, kualiTimekeeper })
+        - Each task: await ctx.page(system) (blocks on that Duo), then do work
+        - Returns PromiseSettledResult per key — handler reads fulfilled values,
+          logs rejected reasons; Kronos failure → Kuali dates win
+      - Resolve Kronos dates (Kronos overrides Kuali when they differ)
+      - Update Kuali lastDayWorked + separationDate if resolved dates changed
+      - Step "ucpath-job-summary" → fill Kuali term eff date + dept/payroll
+      - Step "ucpath-transaction" → Smart HR UC_VOL_TERM or UC_INVOL_TERM
+      - Step "kuali-finalization" → fill txn number + date-change comments + save
+      - Final updateData (transaction number, dept info, Kronos found flags)
+    → Between docs: session.reset(id) for each system (resetUrl navigation)
+    → Batch result: succeeded / failed / errors
 ```
 
 ## Interleaved auth pattern
@@ -135,9 +124,7 @@ Screen 2560x1440. `Session.launch` with `tiling: "auto"` detects actual screen d
 - **Kronos log disambiguation** — every Kronos log message says `[Old Kronos]` or `[New Kronos]` so the dashboard doesn't show ambiguous lines.
 - **Persistent UKG session** — `~/ukg_session_sep` (set on `old-kronos` system's `sessionDir`).
 - **Drill-in selector**: `PTS_CFG_CL_RSLT_PTS_DRILLIN$40$$IMG${rowIndex}` — row index must be exact.
-- **Dry-run bypasses the kernel** — no browser launch, no Kuali extraction; prints a 7-step pipeline preview and exits 0. Useful for CI smoke tests with fake docIds.
 - **Batch mode**: `runSeparationBatch(docIds)` wraps `runWorkflowBatch(separationsWorkflow, items, { deriveItemId, onPreEmitPending })` — emits `pending` per docId before auth begins so the dashboard populates the queue; `session.reset(id)` runs between docs for all 4 systems.
-- `explore-kronos.ts` is a dev tool, not a production workflow.
 
 ## Timing reference (rough, for regressions)
 

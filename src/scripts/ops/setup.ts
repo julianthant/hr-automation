@@ -337,46 +337,75 @@ interface TelegramUpdate {
  * Fetch /getUpdates and return the chat_id of the most recent message. Used
  * once during setup; afterwards the chat_id lives in .env. `fetchFn` is
  * injectable for tests.
+ *
+ * When `retries` > 0 (the default during interactive setup), polls Telegram
+ * every `retryIntervalMs` until an update arrives or attempts are exhausted.
+ * This avoids the race condition where the user sends a message but Telegram
+ * hasn't propagated the update by the time we call getUpdates.
  */
 export async function discoverChatId(
   token: string,
-  opts: { fetchFn?: typeof fetch } = {},
+  opts: {
+    fetchFn?: typeof fetch;
+    retries?: number;
+    retryIntervalMs?: number;
+    onRetry?: (attempt: number, total: number) => void;
+  } = {},
 ): Promise<ChatIdDiscovery> {
   const fetchFn = opts.fetchFn ?? fetch;
-  try {
-    const url = `https://api.telegram.org/bot${token}/getUpdates`;
-    const res = await fetchFn(url, {
-      method: "GET",
-      signal: AbortSignal.timeout(5_000),
-    });
-    const body = (await res.json()) as {
-      ok?: boolean;
-      result?: TelegramUpdate[];
-    };
-    if (!body.ok || !Array.isArray(body.result)) {
-      return { ok: false, reason: "Telegram /getUpdates returned non-ok" };
-    }
-    const updates = body.result;
-    if (updates.length === 0) {
-      return {
-        ok: false,
-        reason:
-          "no updates yet — message your bot once on Telegram, then re-run setup",
+  const maxAttempts = (opts.retries ?? 0) + 1; // 1 = no retry (legacy behavior)
+  const intervalMs = opts.retryIntervalMs ?? 3_000;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const url = `https://api.telegram.org/bot${token}/getUpdates`;
+      const res = await fetchFn(url, {
+        method: "GET",
+        signal: AbortSignal.timeout(5_000),
+      });
+      const body = (await res.json()) as {
+        ok?: boolean;
+        result?: TelegramUpdate[];
       };
+      if (!body.ok || !Array.isArray(body.result)) {
+        return { ok: false, reason: "Telegram /getUpdates returned non-ok" };
+      }
+      const updates = body.result;
+      if (updates.length === 0) {
+        // If we have retries left, wait and try again.
+        if (attempt < maxAttempts) {
+          opts.onRetry?.(attempt, maxAttempts);
+          await new Promise((r) => setTimeout(r, intervalMs));
+          continue;
+        }
+        return {
+          ok: false,
+          reason:
+            "no updates yet — message your bot once on Telegram, then re-run setup",
+        };
+      }
+      // Most recent update is last in the array per Telegram's getUpdates docs.
+      const latest = updates[updates.length - 1];
+      const id = latest.message?.chat?.id;
+      if (id === undefined || id === null) {
+        return {
+          ok: false,
+          reason: "latest update has no message.chat.id (was it a channel post?)",
+        };
+      }
+      return { ok: true, chatId: String(id) };
+    } catch (err) {
+      // On network errors during retries, keep trying.
+      if (attempt < maxAttempts) {
+        opts.onRetry?.(attempt, maxAttempts);
+        await new Promise((r) => setTimeout(r, intervalMs));
+        continue;
+      }
+      return { ok: false, reason: (err as Error).message };
     }
-    // Most recent update is last in the array per Telegram's getUpdates docs.
-    const latest = updates[updates.length - 1];
-    const id = latest.message?.chat?.id;
-    if (id === undefined || id === null) {
-      return {
-        ok: false,
-        reason: "latest update has no message.chat.id (was it a channel post?)",
-      };
-    }
-    return { ok: true, chatId: String(id) };
-  } catch (err) {
-    return { ok: false, reason: (err as Error).message };
   }
+  // Should be unreachable, but TypeScript needs the return.
+  return { ok: false, reason: "exhausted all retry attempts" };
 }
 
 /**
@@ -561,8 +590,15 @@ export async function runTelegramSetup(cwd: string = process.cwd()): Promise<num
   console.log("  • Send any text message to the bot (e.g. 'hi').");
   console.log("");
   await prompt("Press enter once you've messaged the bot: ");
+  console.log("  Polling Telegram for your message (up to 30 s)...");
 
-  const chatRes = await discoverChatId(token);
+  const chatRes = await discoverChatId(token, {
+    retries: 9, // 10 total attempts, ~30 s
+    retryIntervalMs: 3_000,
+    onRetry: (attempt, total) => {
+      process.stdout.write(`  Attempt ${attempt}/${total} — no updates yet, retrying...\n`);
+    },
+  });
   if (!chatRes.ok) {
     console.log(pc.red(`  Failed: ${chatRes.reason}`));
     return 1;

@@ -198,6 +198,11 @@ export interface WorkflowInstanceState {
   instance: string;
   /** Kebab-case workflow name resolved from the instance label (e.g. "Separation 1" → "separations"). null when unrecognised. */
   workflow: string | null;
+  /** ISO-8601 timestamp of the latest workflow_start event for this instance.
+   * Used by the terminal-drawer cards to render a live elapsed counter via
+   * `useElapsed`. Re-runs under the same instance overwrite this with the
+   * newest start so the timer reflects the current run, not the original. */
+  startedAt?: string;
   active: boolean;
   /** True while the spawning Node process (and therefore its Playwright browsers) is still alive. */
   pidAlive: boolean;

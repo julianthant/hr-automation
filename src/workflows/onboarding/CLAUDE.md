@@ -2,15 +2,9 @@
 
 Automates full UC employee hiring: extracts data from ACT CRM, validates with Zod, searches UCPath for duplicates, searches I9 before creating a profile, creates Smart HR transactions.
 
-**Kernel-based (daemon + pool + single).** As of 2026-04-22, CLI default is **daemon mode** via `runOnboardingCli` → `ensureDaemonsAndEnqueue(onboardingWorkflow, [{email}, ...])`. Each alive daemon is one long-lived single-worker Session (3 browsers: CRM + UCPath + I9; 2 Duos since I9 is SSO no-2FA) that claims emails off the shared queue `.tracker/daemons/onboarding.queue.jsonl` via an atomic `fs.mkdir` mutex. Multiple alive daemons race for items — that's how parallelism works in daemon mode (no re-Duo between items). For N-way throughput, start N daemons with `-p N`.
+**Kernel-based (daemon mode default).** CLI is `npm run onboarding <email> [<email> ...]` → `runOnboardingCli` → `ensureDaemonsAndEnqueue(onboardingWorkflow, [{email}, ...])`. Each alive daemon is one long-lived single-worker Session (3 browsers: CRM + UCPath + I9; 2 Duos since I9 is SSO no-2FA) that claims emails off the shared queue `.tracker/daemons/onboarding.queue.jsonl` via an atomic `fs.mkdir` mutex. Multiple alive daemons race for items — that's how parallelism works in daemon mode (no re-Duo between items). For N-way throughput, start N daemons with `-p N`.
 
-Legacy in-process paths are preserved via `--direct`:
-- `--dry-run` → `runOnboardingDryRun` (CRM only, imperative — auto-forces `--direct`)
-- `--batch` → `runParallel` reads `batch.yaml`, pool mode (auto-forces `--direct`)
-- N positional emails under `--direct` → `runOnboardingPositional` (kernel pool, N Sessions, 2N Duos)
-- 1 positional email under `--direct` → `runOnboarding` → `runWorkflow(onboardingWorkflow, {email})`
-
-The kernel owns browser launch, auth chain, per-item `withTrackedWorkflow` wrapping, SIGINT cleanup, screenshot on failure. Daemon mode wraps the same `runOneItem` primitive — per-item tracker output is byte-identical to `--direct` single mode.
+The kernel owns browser launch, auth chain, per-item `withTrackedWorkflow` wrapping, SIGINT cleanup, screenshot on failure. Daemon mode wraps the same `runOneItem` primitive — per-item tracker output is byte-identical to single-mode `runWorkflow`.
 
 ## Selector intelligence
 
@@ -33,10 +27,8 @@ This workflow touches three systems: **crm**, **ucpath**, **i9**.
 - `enter.ts` — Builds `ActionPlan` for the 14-step Smart HR transaction (personal data, job data, comments, save/submit)
 - `config.ts` — Constants: `UC_FULL_HIRE` template, `UCHRLY` comp rate code, `JOB_END_DATE` sourced from `ANNUAL_DATES.jobEndDate` (override via `ANNUAL_DATES_END` env var)
 - `download.ts` — Fetches CRM record PDFs (Doc 1 + Doc 3) directly from iDocs document server URL. Saves to `~/Downloads/onboarding/{Last, First Middle} EID/`
-- `retry.ts` — `retryStep(name, fn, opts)` helper: linear backoff, per-attempt error logs, throws `RetryStepError` after exhausting attempts. Used only by the dry-run branch in `workflow.ts` (no `ctx` available there). Kernel-side callsites use `ctx.retry` instead
-- `workflow.ts` — Kernel definition (`onboardingWorkflow`) + CLI adapters: `runOnboarding` (legacy single, `--direct`), `runOnboardingCli` (daemon-mode default — wraps `ensureDaemonsAndEnqueue`). Handler runs 5 phases across CRM / UCPath / I9 with `ctx.step` wrapping. Dry-run branch bypasses kernel (CRM only); daemon-mode dry-run falls back to the same per-email sequential dry-run
-- `parallel.ts` — CLI adapter for `--batch` mode (`runParallel`). Loads `batch.yaml` email list and delegates to `runWorkflowBatch(onboardingWorkflow, items, { poolSize, deriveItemId, onPreEmitPending })` — kernel owns workers, auth, fan-out
-- `positional.ts` — CLI adapter for positional multi-email mode (`runOnboardingPositional`). Takes emails directly from the CLI (no batch file) and delegates to `runWorkflowBatch` with `poolSize = opts.poolSize ?? min(N, 4)`
+- `workflow.ts` — Kernel definition (`onboardingWorkflow`) + CLI adapters: `runOnboarding` (in-process single — for tests/scripts), `runOnboardingCli` (daemon-mode default — wraps `ensureDaemonsAndEnqueue`). Handler runs 5 phases across CRM / UCPath / I9 with `ctx.step` wrapping.
+- `positional.ts` — CLI adapter for in-process multi-email mode (`runOnboardingPositional`). Takes emails directly and delegates to `runWorkflowBatch` with `poolSize = min(N, 4)`. Used internally; not wired to the default CLI path.
 - `index.ts` — Barrel exports
 
 ## Kernel Config
@@ -46,65 +38,43 @@ This workflow touches three systems: **crm**, **ucpath**, **i9**.
 | `systems` | `[crm, ucpath, i9]` — each wraps its login fn to throw on false | 3 independent auth systems |
 | `steps` | `["crm-auth", "extraction", "pdf-download", "ucpath-auth", "person-search", "i9-creation", "transaction"] as const` | Registered to the dashboard registry at `defineWorkflow` time |
 | `authChain` | `"sequential"` | CRM work happens before UCPath auth; sequential avoids wasting Duo prompts on systems we might not reach (rehire case). I9 auth has no Duo (SSO without 2FA) so 2 Duos per run/worker, not 3. |
-| `batch` | `{ mode: "pool", poolSize: 4, preEmitPending: true }` | Enables `runWorkflowBatch(onboardingWorkflow, items)` to run through `runWorkflowPool` (N workers, shared queue). `poolSize: 4` is the default; the CLI's `--workers N` overrides via `RunOpts.poolSize`. Single-mode `runWorkflow` ignores `batch`. |
+| `batch` | `{ mode: "pool", poolSize: 4, preEmitPending: true }` | Enables `runWorkflowBatch(onboardingWorkflow, items)` to run through `runWorkflowPool` (N workers, shared queue). Used by `runOnboardingPositional` (in-process multi-email path). Single-mode `runWorkflow` ignores `batch`. |
 | `tiling` | `"auto"` (kernel picks for multi-system) | 3 browsers tiled then fullscreened; bringToFront per system during auth |
 | `detailFields` | labeled (Employee, Email, Dept #, Position #, Wage, Eff Date, I9 Profile) + `getName`/`getId` resolvers | Rich detail panel populated via `ctx.updateData(...)` across the 5 phases |
 
 ## Data Flow
 
-**Single mode:**
+**Daemon mode (default):**
 ```
-CLI: npm run onboarding <email>
-  → runOnboarding (CLI adapter)
-    → if --dry-run: runOnboardingDryRun (CRM only, imperative)
-    → else: runWorkflow(onboardingWorkflow, { email })
-      → Kernel Session.launch: 3 browsers, sequential auth chain (2 Duos: CRM + UCPath; I9 SSO no-Duo)
-      → Handler phase 1 "crm-auth" + CRM search + "extraction" + updateData
-      → Handler phase 2 "pdf-download" (non-fatal)
-      → Handler phase 3 "ucpath-auth" + "person-search"
-        → rehire? return early with status: "Rehire"
-      → Handler phase 4 "i9-creation"
-        → search I9 by SSN first; create only if not found
-      → Handler phase 5 "transaction" → executes ActionPlan → status: "Done"
+CLI: npm run onboarding <email> [<email2> ...]
+  → runOnboardingCli (daemon-mode CLI adapter)
+    → ensureDaemonsAndEnqueue(onboardingWorkflow, [{email}, ...], { new, parallel })
+      - Discovers alive daemons via .tracker/daemons/onboarding-*.lock.json + /whoami liveness
+      - Spawns N additional daemons per computeSpawnPlan — Duo once per new daemon (CRM + UCPath)
+      - Appends enqueue events to .tracker/daemons/onboarding.queue.jsonl
+      - POST /wake to every alive daemon; daemons race to claim via fs.mkdir mutex
+      - Each daemon runs the handler below in a loop (one Session, Duos once, reused)
 ```
 
-**Pool mode — positional emails:**
+**Handler (runs inside each daemon's loop, or via `runOnboarding` for tests):**
 ```
-CLI: npm run onboarding <email1> <email2> ...
-  → runOnboardingPositional(emails, { poolSize?: opts.workers }) (CLI adapter)
-    → runWorkflowBatch(onboardingWorkflow, items, { poolSize: opts.workers ?? min(N, 4), deriveItemId: i => i.email, onPreEmitPending })
-```
-
-**Pool mode — batch.yaml file:**
-```
-CLI: npm run onboarding:batch -- --workers <N>
-  → runParallel(N) (CLI adapter)
-    → loadBatchFile → emails: string[]
-    → runWorkflowBatch(onboardingWorkflow, items, { poolSize: N, deriveItemId: i => i.email, onPreEmitPending })
-      → kernel registers pending rows for every email (dashboard shows full queue)
-      → kernel launches min(N, emails.length) Sessions in parallel
-      → each Session auths CRM → UCPath → I9 sequentially (2 Duos each)
-      → workers pull emails from the shared queue; each item runs the same handler
-        under withLogContext + withTrackedWorkflow wrapping
-      → kernel closes all Sessions at the end; batch result = { total, succeeded, failed, errors }
+runWorkflow(onboardingWorkflow, { email })
+  → Kernel Session.launch: 3 browsers, sequential auth chain (2 Duos: CRM + UCPath; I9 SSO no-Duo)
+  → Handler phase 1 "crm-auth" + CRM search + "extraction" + updateData
+  → Handler phase 2 "pdf-download" (non-fatal)
+  → Handler phase 3 "ucpath-auth" + "person-search"
+    → rehire? return early with status: "Rehire"
+  → Handler phase 4 "i9-creation"
+    → search I9 by SSN first; create only if not found
+  → Handler phase 5 "transaction" → executes ActionPlan → status: "Done"
 ```
 
 ## Daemon Mode Notes
 
 - **One daemon = one worker, 2 Duos once.** A daemon holds 3 browsers + a Session across invocations. First launch costs CRM Duo + UCPath Duo (≈1-2 min); every subsequent email skips both. Biggest wall-clock savings of any converted workflow.
-- **Parallelism = N daemons, not pool mode.** The workflow's `batch: { mode: "pool", poolSize: 4 }` only governs the legacy `--direct` path (used by `--batch` and positional `--direct`). Under daemon mode, each daemon is a single-worker process; the shared queue + atomic claim mutex distribute items. Run `npm run onboarding a@uc b@uc c@uc -- -p 3` to spawn 3 daemons the first time, or combine: `-p 1` first (cheap), then `-n` on later invocations to add capacity on demand.
-- **Flags that auto-force `--direct`:**
-  - `--dry-run` — short-circuits CRM-only before launching the full session. Not worth warming a daemon for.
-  - `--batch` — reads `batch.yaml` in-process. If you want daemon-mode batch processing, pass emails positionally.
-  An announcing log line fires when the override is implicit (e.g. `[onboarding] --batch forces --direct mode`).
+- **Parallelism = N daemons.** The workflow's `batch: { mode: "pool", poolSize: 4 }` only governs in-process `runOnboardingPositional` (tests/scripts). Under daemon mode, each daemon is a single-worker process; the shared queue + atomic claim mutex distribute items. Run `npm run onboarding a@uc b@uc c@uc -- -p 3` to spawn 3 daemons the first time, or combine: `-p 1` first (cheap), then `-n` on later invocations to add capacity on demand.
 - **Rehire short-circuit still works.** Daemon handler is the same `onboardingWorkflow` handler; rehire detection in the `person-search` step returns early with `status: "Rehire"` before I-9/transaction. The daemon stays alive for the next email.
-- **Tracker byte-parity.** Per-item JSONL emissions are identical between daemon mode and `--direct` single mode — the daemon calls `runOneItem` under `withBatchLifecycle({ ownSigint: false })`, so instance/run IDs, `authTimings`, and step entries all flow through the same code path.
-
-## Parallel Mode Notes (`--direct` path only)
-
-- **2 Duos per worker, not 3**: I9 uses UCSD SSO without 2FA. Only CRM + UCPath trigger Duo prompts. With `poolSize = 4`, the user approves **8 Duos total** during worker startup (4 workers × 2 Duos each). The kernel's `Session.launch` stages these per-worker; `bringToFront()` surfaces the active tab before each Duo.
-- **Dry-run is single-mode only**: `runParallel` with `options.dryRun = true` logs a warning and returns; `runOnboardingPositional` with `dryRun` just logs the email list. The real-run imperative CRM-only dry-run lives in `workflow.ts`'s `runOnboardingDryRun` and fires from the single-email branch of the `onboarding` CLI command (`npm run onboarding:dry <email>`).
-- **Per-worker browser cleanup**: the kernel's Session owns browser teardown per worker via `session.close()` in `runWorkflowPool`'s `finally` block. Previously `parallel.ts` explicitly "left browsers open for observability"; now all worker browsers close after the batch finishes (same as any kernel workflow).
+- **Tracker byte-parity.** Per-item JSONL emissions are identical between daemon mode and in-process single mode — the daemon calls `runOneItem` under `withBatchLifecycle({ ownSigint: false })`, so instance/run IDs, `authTimings`, and step entries all flow through the same code path.
 
 ## Gotchas
 
@@ -169,5 +139,5 @@ Visualforce table layout — `<tr>` with `<th class="labelCol">` label followed 
 - **2026-04-16: Auth — 500ms settle delay after SSO credential fill.** Submit fires before the form JS registers values otherwise.
 - **2026-04-16: Kernel — auth retry on Duo timeout.** `Session.launch` refreshes the page and retries login up to 3 attempts on auth failure.
 - **2026-04-16: Kernel — `bringToFront()` before each system's login.** Multi-browser tiling hides background tabs; the active one must surface before the user approves Duo.
-- **2026-04-17: Kernel handler migrated from `retryStep` to `ctx.retry`.** Inside the kernel `handler`, every `retryStep("name", fn, opts)` call now uses `ctx.retry(fn, opts)`. The step name arg is redundant (outer `ctx.step(...)` already announces it to logs + dashboard), and `logPrefix` has no equivalent (per-attempt error logs are no longer prefixed; they were redundant inside `ctx.step` anyway). `ctx.retry` rethrows the underlying error verbatim on exhaustion — the transaction-step catch block no longer checks `instanceof RetryStepError`, just `TransactionError` + generic fallback via `errorMessage()`. `retry.ts` + `index.ts`'s `retryStep` re-export stay in place for the dry-run branch in `workflow.ts`, which is imperative (no `ctx`).
+- **2026-04-17: Kernel handler migrated from `retryStep` to `ctx.retry`.** Inside the kernel `handler`, every `retryStep("name", fn, opts)` call now uses `ctx.retry(fn, opts)`. The step name arg is redundant (outer `ctx.step(...)` already announces it to logs + dashboard), and `logPrefix` has no equivalent (per-attempt error logs are no longer prefixed; they were redundant inside `ctx.step` anyway). `ctx.retry` rethrows the underlying error verbatim on exhaustion — the transaction-step catch block no longer checks `instanceof RetryStepError`, just `TransactionError` + generic fallback via `errorMessage()`. Note: `retry.ts` and `retryStep` were subsequently removed along with the dry-run branch (2026-04-28); use `ctx.retry` for all retry needs.
 - **2026-04-22: Converted to daemon mode.** `runOnboardingCli` adapter + registration in `src/cli-daemon.ts` WORKFLOWS map. CLI default is now daemon-mode enqueue; legacy paths reachable via `--direct` (positional single/pool) or forced via `--dry-run` / `--batch` (auto-force). Heaviest per-daemon cost of any converted workflow (3 browsers, 2 Duos) but biggest re-Duo savings per subsequent email. Daemon parallelism is via N alive daemons (`-p N`) racing for the shared queue — orthogonal to `batch.mode: "pool"` which still drives the legacy `--direct --batch` path. `onboarding`, `separations`, `work-study`, `eid-lookup` are the converted set as of this date.

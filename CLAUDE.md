@@ -7,62 +7,32 @@ UCPath HR automation for UCSD. Playwright-driven onboarding, separations, EID lo
 ```bash
 # Onboarding (daemon mode by default — see "Daemon mode" below)
 npm run onboarding <email> [<email> ...]     # Enqueue to an alive daemon or spawn one (CRM + UCPath + I9 warm)
-npm run onboarding:dry <email>               # Dry-run (CRM extract only, no UCPath — forces --direct)
-npm run onboarding:batch -- --workers <N>    # Read emails from src/workflows/onboarding/batch.yaml (forces --direct)
-npm run onboarding:direct <email>            # Legacy in-process path (reopens 3 browsers + re-Duo every run)
-npm run onboarding:status                    # Show alive daemons + queue depth
 npm run onboarding:stop                      # Soft-stop all daemons
-npm run onboarding:attach                    # Tail daemon logs
 npm run extract <email>                      # Extract employee data from CRM only
 
 # Separations (daemon mode by default — see "Daemon mode" below)
 npm run separation <docId> [docId ...] # Enqueue to an alive daemon or spawn one
-npm run separation:dry <docId>         # Dry-run (extract + log only; no daemon)
-npm run separation:direct <docId>      # Legacy in-process path (reopens browsers + re-Duo every run)
-npm run separation:status              # Show alive daemons + queue depth
 npm run separation:stop                # Soft-stop all daemons (drain in-flight)
-npm run separation:attach              # Tail daemon logs (Ctrl+C detaches)
 
 # Kronos Reports
 npm run kronos                         # Download Time Detail PDFs (4 workers, kernel pool mode)
-npm run kronos:dry                     # Dry-run (preview employee list)
-npm run kronos -- --workers 8          # Custom worker count
 
 # Work Study (daemon mode by default — see "Daemon mode" below)
 npm run work-study <emplId> <date>     # Enqueue to an alive daemon or spawn one
-npm run work-study:dry <emplId> <date> # Dry-run (preview ActionPlan only; no daemon)
-npm run work-study:direct <emplId> <date> # Legacy in-process path (one UCPath Duo per run)
-npm run work-study:status              # Show alive daemons + queue depth
 npm run work-study:stop                # Soft-stop all daemons
-npm run work-study:attach              # Tail daemon logs
-npm run daemons:status                 # Status across every daemon-enabled workflow
 
 # Emergency Contact (daemon mode by default — see "Daemon mode" below)
 npm run emergency-contact <batchYaml>      # Load YAML → preflight → enqueue each record to an alive daemon
-npm run emergency-contact:dry <batchYaml>  # Preview records (no browser, no daemon)
-npm run emergency-contact:direct <batchYaml> # Legacy in-process path (one UCPath Duo per run)
-npm run emergency-contact:status           # Show alive daemons + queue depth
 npm run emergency-contact:stop             # Soft-stop all daemons
-npm run emergency-contact:attach           # Tail daemon logs
 # Flags: --roster-url "<sp-url>" | --roster-path <xlsx> | --ignore-roster-mismatch | -p <N> | -n
 
 # EID Lookup (daemon mode by default — see "Daemon mode" below)
-npm run eid-lookup "Last, First Middle"          # Enqueue to an alive daemon or spawn one (CRM-on default)
-npm run eid-lookup:dry "Last, First Middle"      # Dry-run: normalize + dedupe + print (no daemon)
-npm run eid-lookup:direct -- "Last, First"       # Legacy in-process path (forces fresh Duo)
-npm run eid-lookup -- --no-crm "Last, First"     # UCPath-only → auto-forces --direct
-npm run eid-lookup -- --i9 "Last, First"         # +I-9 Section 2 signer → auto-forces --direct
-npm run eid-lookup:status                        # Show alive daemons + queue depth
-npm run eid-lookup:stop                          # Soft-stop all daemons
-npm run eid-lookup:attach                        # Tail the first alive daemon's log
+npm run eid-lookup "Last, First Middle"    # Enqueue to an alive daemon or spawn one (CRM-on variant)
+npm run eid-lookup:stop                    # Soft-stop all daemons
 
 # Oath Signature (daemon mode by default — see "Daemon mode" below)
 npm run oath-signature <emplId> [emplId ...]     # Enqueue to an alive daemon or spawn one (UCPath only)
-npm run oath-signature:dry <emplId>              # Dry-run: print ActionPlan preview, no browser
-npm run oath-signature:direct <emplId>           # Legacy in-process path (one UCPath Duo per run)
-npm run oath-signature:status                    # Show alive daemons + queue depth
 npm run oath-signature:stop                      # Soft-stop all daemons
-npm run oath-signature:attach                    # Tail daemon logs
 
 # Dashboard (separate terminal — auto-updates as workflows run)
 npm run dashboard            # SSE backend (:3838) + Vite dev (:5173) — open http://localhost:5173
@@ -75,7 +45,6 @@ npm run clean:tracker -- --days 30 --dir .tracker  # Custom age + dir
 npm run test-login                                 # Smoke test UCPath + CRM auth
 npm run setup                                      # First-use environment validation wizard
 npm run schemas:export                             # Write each workflow's Zod input schema as JSON Schema
-npm run new:workflow -- <name> [--systems a,b]     # Scaffold a new kernel workflow
 npm run selectors:catalog                          # Regenerate per-system SELECTORS.md from selectors.ts
 npm run selector:search "<intent>"                 # Fuzzy search across SELECTORS.md + LESSONS.md
 npm run typecheck                                  # Type-check src/
@@ -112,7 +81,7 @@ src/
     work-study/        # Kernel. UCPath PayPath work-study update.
     emergency-contact/ # Kernel (batch, preEmitPending). UCPath Emergency Contact fill.
     eid-lookup/        # Kernel. Person Org Summary lookup + optional CRM cross-verify.
-    onboarding/        # Kernel (single + pool mode). CRM → UCPath + I9. Parallel mode via runWorkflowBatch.
+    onboarding/        # Kernel (single mode). CRM → UCPath + I9. Daemon mode for repeated runs.
     separations/       # Kernel (4 systems, interleaved auth, sequential batch via runWorkflowBatch).
     old-kronos-reports/# Kernel (pool mode, N workers, per-worker sessionDir via opts.launchFn).
   auth/                # Per-system login flows + duo-poll + sso-fields (shared).
@@ -198,7 +167,7 @@ export async function runMyWorkflow(input: MyInput) {
 }
 ```
 
-Run `npm run new:workflow -- my-workflow --systems ucpath,crm` to scaffold the five canonical files. The generated `CLAUDE.md` links the per-system `LESSONS.md` + `SELECTORS.md` for each declared system and embeds the "Before mapping a new selector" boilerplate so the loop is self-bootstrapping. Then add a Commander subcommand in `src/cli.ts`, add npm scripts to `package.json`, fill in the schema + handler, and that's the whole story — no dashboard registry edits needed.
+Add a Commander subcommand in `src/cli.ts`, add npm scripts to `package.json`, fill in the schema + handler, and that's the whole story — no dashboard registry edits needed. (The `npm run new:workflow` scaffolder was removed; scaffold manually from the minimal example above.)
 
 See `src/workflows/work-study/` for a clean one-system example, `src/workflows/emergency-contact/` for batch-mode with `preEmitPending`, `src/workflows/onboarding/` for multi-system sequential auth + pool-mode parallel, `src/workflows/old-kronos-reports/` for pool-mode with per-worker sessionDir injection, and `src/workflows/eid-lookup/` for `shared-context-pool` mode (N per-item tabs fanning out from a single Duo auth per system).
 
@@ -249,17 +218,13 @@ Kernel workflows exposed on the CLI (`npm run separation <ids>`, `npm run work-s
 Flags (on `separation`, `work-study`, `eid-lookup`, `onboarding`):
 - `-n, --new` — spawn one **additional** daemon even if others are alive.
 - `-p, --parallel <N>` — ensure ≥N daemons are alive before enqueueing (spawns `max(0, N - alive)`).
-- `--dry-run` — preview in-process; no daemon spawned.
-- `--direct` — bypass daemon mode, run the legacy in-process `runWorkflow` / `runWorkflowBatch` path.
 
-`eid-lookup` has two extra variant flags (`--no-crm`, `--i9`) that change the systems list; those combos are incompatible with a long-lived daemon's fixed session and **auto-force `--direct`** (with an announcing log line). The daemon hard-wires the default CRM-on variant (`eidLookupCrmWorkflow`).
+`eid-lookup` daemon hard-wires the default CRM-on variant (`eidLookupCrmWorkflow`). If a different variant is ever needed, add a separate daemon shape.
 
-`onboarding` has two flags that auto-force `--direct`: `--dry-run` (CRM-only preview, short-circuits before launching the full 3-browser session) and `--batch` (reads `batch.yaml` in-process — if you want daemon-mode batch processing, pass emails positionally: `npm run onboarding a@uc b@uc c@uc` fans across alive daemons via the shared queue). The daemon itself runs the standard `onboardingWorkflow` (CRM + UCPath + I9, 2 Duos per session since I9 is SSO no-2FA). For throughput, start N daemons with `-p N`.
+`onboarding` daemon runs the standard `onboardingWorkflow` (CRM + UCPath + I9, 2 Duos per session since I9 is SSO no-2FA). For throughput, start N daemons with `-p N`. Pass multiple emails positionally to fan them across alive daemons via the shared queue.
 
 Lifecycle commands (converted workflows: `separations`, `work-study`, `eid-lookup`, `onboarding`, `oath-signature`, `emergency-contact`):
-- `npm run daemons:status` (or `:status` per workflow) — alive daemons + queue depth.
 - `npm run <workflow>:stop` — soft-stop (drain in-flight, re-queue). Use `-- --force` to mark in-flight as failed and exit immediately.
-- `npm run <workflow>:attach` — tail daemon log files. Ctrl+C detaches; daemons keep running.
 
 Converting a new workflow to daemon mode is mechanical — see `src/workflows/CLAUDE.md#daemon-mode-conversion-template`. Implementation: `src/core/daemon-{types,registry,queue,client}.ts` + `src/core/daemon.ts` (main loop) + `src/cli-daemon.ts` (entry). Full design doc: `docs/superpowers/specs/2026-04-22-workflow-daemon-mode-design.md`.
 
@@ -321,7 +286,7 @@ Three artifacts per system support adding new workflows without re-mapping selec
 
 - **`src/systems/<sys>/SELECTORS.md`** — auto-generated catalog of every selector this system exports. Each entry has the FQN (e.g. `smartHR.tab.personalData`), one-line summary from JSDoc, `@tags`, and a clickable line ref into `selectors.ts`. Regenerate after any selectors.ts change with `npm run selectors:catalog`. Committed so future Claude sessions see the catalog without running anything. A unit test (`tests/unit/scripts/selectors-catalog.test.ts`) gates drift — PRs that change selectors without regenerating fail there.
 - **`src/systems/<sys>/LESSONS.md`** — append-only structured lessons. Required subsections per H2: `**Tried:**`, `**Failed because:**`, `**Fix:**`, `**Tags:**` (plus optional `**Selector:**` and `**References:**`). `tests/unit/scripts/lessons-format.test.ts` enforces the shape. When you discover a non-obvious selector failure, append a lesson here so the next session doesn't relearn it.
-- **`src/systems/<sys>/common-intents.txt`** — hand-curated 5-10 typical intents per system. The `npm run new:workflow --systems X` scaffolder reads these and seeds the generated workflow's CLAUDE.md with example `selector:search` invocations.
+- **`src/systems/<sys>/common-intents.txt`** — hand-curated 5-10 typical intents per system. Useful reference when authoring a new workflow's CLAUDE.md `selector:search` examples.
 
 The fuzzy search:
 
@@ -352,7 +317,7 @@ Current step tracking per workflow. Steps prefixed with `auth:` are auto-prepend
 |---|---|
 | onboarding | crm-auth → extraction → pdf-download → ucpath-auth → person-search → i9-creation → transaction (workflow opts out of auto-prepend; declares its own `*-auth` steps) |
 | separations | auth:kuali → auth:old-kronos → auth:new-kronos → auth:ucpath → kuali-extraction → kronos-search → ucpath-job-summary → ucpath-transaction → kuali-finalization (auth steps kernel-prepended) |
-| eid-lookup | auth:ucpath → auth:crm → searching → cross-verification (daemon mode default; shared-context-pool in `--direct`). One row per name. |
+| eid-lookup | auth:ucpath → auth:crm → searching → cross-verification (daemon mode only; `eidLookupCrmWorkflow`). One row per name. |
 | kronos-reports | auth:old-kronos → searching → extracting → downloading |
 | work-study | ucpath-auth → transaction (opts out of auto-prepend) |
 | emergency-contact | auth:ucpath → navigation → fill-form → save |
