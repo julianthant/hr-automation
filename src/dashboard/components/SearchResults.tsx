@@ -13,6 +13,10 @@ interface SearchResultsProps {
    * double-wrapping. Defaults to false (standalone / SearchBar usage).
    */
   embedded?: boolean;
+  /** Which row index is currently keyboard-active. Applies `bg-accent` to that row. */
+  activeRowIndex?: number;
+  /** Called when the user hovers a row, with the row's index. */
+  onMouseEnterRow?: (rowIndex: number) => void;
 }
 
 /** Compact date — matches the TopBar calendar-popover formatting. */
@@ -45,7 +49,7 @@ function shortTime(iso: string): string {
  * all in the same type scale the queue panel uses (sm for names, mono for
  * IDs / timestamps).
  */
-export function SearchResults({ rows, query, onPick, embedded = false }: SearchResultsProps) {
+export function SearchResults({ rows, query, onPick, embedded = false, activeRowIndex, onMouseEnterRow }: SearchResultsProps) {
   const registered = useWorkflows();
   const labelFor = (wf: string): string =>
     registered.find((r) => r.name === wf)?.label ?? autoLabel(wf);
@@ -71,14 +75,16 @@ export function SearchResults({ rows, query, onPick, embedded = false }: SearchR
   return (
     <div className={wrapperClass}>
       <div className="max-h-[380px] overflow-y-auto">
-        {rows.map((row) => (
+        {rows.map((row, i) => (
           <button
             key={`${row.workflow}::${row.id}::${row.runId}`}
             type="button"
             onClick={() => onPick(row)}
+            onMouseEnter={() => onMouseEnterRow?.(i)}
             className={cn(
               "w-full text-left px-3.5 py-2.5 cursor-pointer transition-colors border-b border-border last:border-b-0",
               "hover:bg-accent focus-visible:bg-accent outline-none",
+              i === activeRowIndex && "bg-accent",
             )}
           >
             {/* Row 1: workflow label + status pill */}
