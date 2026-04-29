@@ -2286,6 +2286,22 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       return;
     }
 
+    if (url.pathname === "/api/preview-inbox") {
+      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      try {
+        const handler = buildPreviewInboxHandler({
+          listWorkflows: () => listWorkflows(dir),
+          listDates: (wf) => listDatesForWorkflow(wf, dir),
+          readEntriesForDate: (wf, date) => readEntriesForDate(wf, date, dir),
+        });
+        const rows = handler();
+        res.end(JSON.stringify(rows));
+      } catch {
+        res.end(JSON.stringify([]));
+      }
+      return;
+    }
+
     if (url.pathname === "/api/selector-warnings") {
       const daysParam = url.searchParams.get("days");
       const parsed = daysParam ? Number.parseInt(daysParam, 10) : 7;
