@@ -100,6 +100,27 @@ export interface PreviewInboxRow {
 }
 
 /**
+ * One row in the failure-bell popover. Returned by GET /api/failures.
+ */
+export interface FailureRow {
+  workflow: string;
+  id: string;
+  runId: string;
+  summary: string;
+  error: string;
+  ts: string;
+  date: string;
+}
+
+/**
+ * Augment the existing /events SSE payload with failureCounts.
+ * The field is optional so older backends still parse cleanly during dev.
+ */
+export interface EntriesEventPayloadFailureCounts {
+  failureCounts?: Record<string, number>;
+}
+
+/**
  * Format a millisecond count as a short, dashboard-friendly label.
  * `<1s` when under a second, `Ns` under a minute, `Nm Ss` under an hour, else `Nh Mm`.
  */
