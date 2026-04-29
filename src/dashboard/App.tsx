@@ -21,7 +21,6 @@ import { TopBarCaptureButton } from "./components/TopBarCaptureButton";
 import { TopBarDigitalOathButton } from "./components/TopBarDigitalOathButton";
 import { parsePrepareRowData } from "./components/preview-types";
 import { dateLocal } from "./lib/utils";
-import type { CommandRunCtx } from "./components/command-palette/commands";
 
 /** Read initial state from URL search params so refresh preserves selection */
 function readUrlState() {
@@ -186,14 +185,6 @@ export default function App() {
     [entries],
   );
 
-  const commandCtx = useMemo<CommandRunCtx>(() => ({
-    workflows,
-    activeWorkflow: workflow,
-    setWorkflow: handleWorkflowChange,
-    setDate,
-    failedIds: () => failedIds,
-  }), [workflows, workflow, handleWorkflowChange, failedIds, setDate]);
-
   return (
     <TooltipProvider delayDuration={150} skipDelayDuration={300}>
     <TerminalDrawerProvider>
@@ -216,7 +207,6 @@ export default function App() {
         onPreviewSelect={handlePreviewSelect}
         onFailureSelect={handleFailureSelect}
         failureCounts={failureCounts ?? {}}
-        commandCtx={commandCtx}
       />
       <div className="flex flex-1 overflow-hidden">
         <WorkflowRail

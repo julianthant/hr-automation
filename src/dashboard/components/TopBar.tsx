@@ -4,9 +4,7 @@ import type { ReactNode } from "react";
 import { cn, dateLocal } from "@/lib/utils";
 import { Popover, PopoverTrigger, PopoverContent } from "./ui/popover";
 import { Calendar } from "./ui/calendar";
-import { CommandPalette } from "./command-palette/CommandPalette";
-import { useCommandPalette } from "./hooks/useCommandPalette";
-import type { CommandRunCtx } from "./command-palette/commands";
+import { SearchBar } from "./SearchBar";
 import { ApprovalInbox } from "./ApprovalInbox";
 import { FailureBell } from "./FailureBell";
 import type { SearchResultRow, PreviewInboxRow, FailureRow } from "./types";
@@ -32,8 +30,6 @@ interface TopBarProps {
   onFailureSelect?: (row: FailureRow) => void;
   /** Per-workflow failure counts for the navbar bell badge. */
   failureCounts?: Record<string, number>;
-  /** Context object passed to the CommandPalette for running commands. */
-  commandCtx?: CommandRunCtx;
 }
 
 /**
@@ -61,7 +57,6 @@ export function TopBar({
   onPreviewSelect,
   onFailureSelect,
   failureCounts,
-  commandCtx,
 }: TopBarProps) {
   void availableDates;
 
@@ -103,11 +98,10 @@ export function TopBar({
       </div>
 
       {/* ── Search — centered ──────────────────────────────────── */}
-      {onSearchSelect && commandCtx ? (
-        <CommandPaletteSlot
-          onSelect={onSearchSelect}
-          commandCtx={commandCtx}
-        />
+      {onSearchSelect ? (
+        <div className="w-[420px] max-w-[40vw]">
+          <SearchBar onSelect={onSearchSelect} />
+        </div>
       ) : (
         <div />
       )}
@@ -158,23 +152,5 @@ export function TopBar({
         {rightSlot}
       </div>
     </div>
-  );
-}
-
-function CommandPaletteSlot({
-  onSelect,
-  commandCtx,
-}: {
-  onSelect: (row: SearchResultRow) => void;
-  commandCtx: CommandRunCtx;
-}) {
-  const { open, setOpen } = useCommandPalette();
-  return (
-    <CommandPalette
-      open={open}
-      setOpen={setOpen}
-      onSelect={onSelect}
-      ctx={commandCtx}
-    />
   );
 }

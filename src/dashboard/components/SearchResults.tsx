@@ -7,16 +7,6 @@ interface SearchResultsProps {
   rows: SearchResultRow[];
   query: string;
   onPick: (row: SearchResultRow) => void;
-  /**
-   * When true, drops the `absolute top-full … z-50` wrapper so the component
-   * can be embedded inside a parent popover (e.g. CommandPalette) without
-   * double-wrapping. Defaults to false (standalone usage).
-   */
-  embedded?: boolean;
-  /** Which row index is currently keyboard-active. Applies `bg-accent` to that row. */
-  activeRowIndex?: number;
-  /** Called when the user hovers a row, with the row's index. */
-  onMouseEnterRow?: (rowIndex: number) => void;
 }
 
 /** Compact date — matches the TopBar calendar-popover formatting. */
@@ -44,19 +34,17 @@ function shortTime(iso: string): string {
 }
 
 /**
- * Dropdown of search matches, embedded inside the CommandPalette popover.
+ * Dropdown of search matches, docked directly under the SearchBar input.
  * Surfaces the workflow label, status pill, summary line, and timestamp —
  * all in the same type scale the queue panel uses (sm for names, mono for
  * IDs / timestamps).
  */
-export function SearchResults({ rows, query, onPick, embedded = false, activeRowIndex, onMouseEnterRow }: SearchResultsProps) {
+export function SearchResults({ rows, query, onPick }: SearchResultsProps) {
   const registered = useWorkflows();
   const labelFor = (wf: string): string =>
     registered.find((r) => r.name === wf)?.label ?? autoLabel(wf);
 
-  const wrapperClass = embedded
-    ? "overflow-hidden"
-    : "absolute top-full left-0 right-0 mt-1.5 min-w-[440px] bg-popover border border-border rounded-lg shadow-md z-50 overflow-hidden";
+  const wrapperClass = "absolute top-full left-0 right-0 mt-1.5 min-w-[440px] bg-popover border border-border rounded-lg shadow-md z-50 overflow-hidden";
 
   if (rows.length === 0) {
     return (
@@ -75,16 +63,14 @@ export function SearchResults({ rows, query, onPick, embedded = false, activeRow
   return (
     <div className={wrapperClass}>
       <div className="max-h-[380px] overflow-y-auto">
-        {rows.map((row, i) => (
+        {rows.map((row) => (
           <button
             key={`${row.workflow}::${row.id}::${row.runId}`}
             type="button"
             onClick={() => onPick(row)}
-            onMouseEnter={() => onMouseEnterRow?.(i)}
             className={cn(
               "w-full text-left px-3.5 py-2.5 cursor-pointer transition-colors border-b border-border last:border-b-0",
               "hover:bg-accent focus-visible:bg-accent outline-none",
-              i === activeRowIndex && "bg-accent",
             )}
           >
             {/* Row 1: workflow label + status pill */}
