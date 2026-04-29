@@ -192,7 +192,7 @@ export default function App() {
     setWorkflow: handleWorkflowChange,
     setDate,
     failedIds: () => failedIds,
-  }), [workflows, workflow, handleWorkflowChange, failedIds]);
+  }), [workflows, workflow, handleWorkflowChange, failedIds, setDate]);
 
   return (
     <TooltipProvider delayDuration={150} skipDelayDuration={300}>
