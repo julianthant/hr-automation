@@ -22,8 +22,6 @@ import type { EmergencyContactBatch, EmergencyContactRecord } from "./schema.js"
 import { ROSTERS_DIR } from "./config.js";
 
 export interface EmergencyContactOptions {
-  /** Preview each record's fill plan without touching UCPath. */
-  dryRun?: boolean;
   /** If provided, download the roster from SharePoint and verify EIDs/names before running. */
   rosterUrl?: string;
   /** If provided, use this local roster xlsx instead of downloading. */
@@ -202,22 +200,6 @@ export async function runEmergencyContact(
   const batch = loadBatch(batchYaml);
   log.step(`Loaded batch "${batch.batchName}" — ${batch.records.length} records`);
 
-  if (options.dryRun) {
-    log.step("=== DRY RUN MODE ===");
-    for (const record of batch.records) {
-      log.step(
-        `[page ${record.sourcePage}] EID ${record.employee.employeeId} — ${record.employee.name} | ` +
-          `contact="${record.emergencyContact.name}" rel="${record.emergencyContact.relationship}" ` +
-          `sameAddr=${record.emergencyContact.sameAddressAsEmployee}`,
-      );
-      if (record.notes.length > 0) {
-        for (const note of record.notes) log.step(`  NOTE: ${note}`);
-      }
-    }
-    log.success("Dry run complete — no changes made to UCPath");
-    return;
-  }
-
   await runPreflight(batch, options);
 
   const now = new Date().toISOString();
@@ -286,22 +268,6 @@ export async function runEmergencyContactCli(
 ): Promise<void> {
   const batch = loadBatch(batchYaml);
   log.step(`Loaded batch "${batch.batchName}" — ${batch.records.length} records`);
-
-  if (options.dryRun) {
-    log.step("=== DRY RUN MODE ===");
-    for (const record of batch.records) {
-      log.step(
-        `[page ${record.sourcePage}] EID ${record.employee.employeeId} — ${record.employee.name} | ` +
-          `contact="${record.emergencyContact.name}" rel="${record.emergencyContact.relationship}" ` +
-          `sameAddr=${record.emergencyContact.sameAddressAsEmployee}`,
-      );
-      if (record.notes.length > 0) {
-        for (const note of record.notes) log.step(`  NOTE: ${note}`);
-      }
-    }
-    log.success("Dry run complete — no changes made to UCPath");
-    return;
-  }
 
   await runPreflight(batch, options);
 

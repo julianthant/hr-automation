@@ -8,8 +8,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Capture</title>
   <!-- HEIC → JPEG client-side polyfill, loaded lazily on first iOS HEIC pick.
-       jsdelivr serves a fixed semver so we don't pull a moving target. -->
-  <link rel="preload" as="script" href="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js">
+       Served from the dashboard host so the LAN works air-gapped. The
+       dashboard route resolves through node_modules/heic2any@0.0.4. -->
+  <link rel="preload" as="script" href="/capture-assets/heic2any.min.js">
   <style>
     /* Tokens — mirror the dashboard's --capture-* palette so the surfaces
        feel like one product. Hex matches docs/superpowers/specs/2026-04-28-capture-redesign-visual-direction.md §1.2 verbatim. */
@@ -866,7 +867,7 @@
     if (typeof window.heic2any === "function") return Promise.resolve(window.heic2any);
     heicLoaderPromise = new Promise(function (resolve, reject) {
       var script = document.createElement("script");
-      script.src = "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js";
+      script.src = "/capture-assets/heic2any.min.js";
       script.async = true;
       script.onload = function () { resolve(window.heic2any); };
       script.onerror = function () { reject(new Error("Couldn't load HEIC converter")); };

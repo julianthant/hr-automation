@@ -35,13 +35,9 @@ export type SeparationData = z.infer<typeof SeparationDataSchema>;
  * Compute the termination effective date (separation date + 1 day).
  */
 export function computeTerminationEffDate(separationDate: string): string {
-  const [month, day, year] = separationDate.split("/").map(Number);
-  const date = new Date(year, month - 1, day);
+  const date = parseDate(separationDate);
   date.setDate(date.getDate() + 1);
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const yyyy = date.getFullYear();
-  return `${mm}/${dd}/${yyyy}`;
+  return formatMmDdYyyy(date);
 }
 
 /**
@@ -144,6 +140,15 @@ function parseDate(dateStr: string): Date {
 }
 
 /**
+ * Format a Date as zero-padded MM/DD/YYYY (matching the Kuali / UCPath wire format).
+ */
+function formatMmDdYyyy(d: Date): string {
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${mm}/${dd}/${d.getFullYear()}`;
+}
+
+/**
  * Compare Kronos timecard dates and Kuali dates to determine the correct
  * Last Day Worked and Separation Date.
  *
@@ -215,13 +220,7 @@ export function computeKronosDateRange(
   const end = new Date(later);
   end.setMonth(end.getMonth() + 1);
 
-  const fmt = (d: Date) => {
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${mm}/${dd}/${d.getFullYear()}`;
-  };
-
-  return { startDate: fmt(start), endDate: fmt(end) };
+  return { startDate: formatMmDdYyyy(start), endDate: formatMmDdYyyy(end) };
 }
 
 /**
@@ -263,9 +262,8 @@ export function validateLastDayWorked(
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   if (supplied.getTime() > today.getTime()) {
-    const todayStr = `${String(today.getMonth() + 1).padStart(2, "0")}/${String(today.getDate()).padStart(2, "0")}/${today.getFullYear()}`;
     throw new Error(
-      `${fieldLabel} cannot be in the future: got "${dateStr}" (today is ${todayStr}). Employee is not yet eligible for separation.`,
+      `${fieldLabel} cannot be in the future: got "${dateStr}" (today is ${formatMmDdYyyy(today)}). Employee is not yet eligible for separation.`,
     );
   }
 }

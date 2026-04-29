@@ -1,5 +1,6 @@
 import { createServer, type Server } from "http";
 import { readFileSync, existsSync, unlinkSync, statSync, readdirSync, createReadStream, watchFile, unwatchFile } from "fs";
+import { readFile as readFileAsync, stat as statAsync } from "fs/promises";
 import { join, resolve, sep } from "path";
 import {
   readEntries,
@@ -1812,26 +1813,24 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       let sentCount = 0;
       let firstTick = true;
 
-      const send = () => {
+      const send = async () => {
         // Read session events tolerantly — skip malformed lines instead of
         // letting a bad JSON line break the whole poll cycle. `readSessionEvents`
         // does a strict JSON.parse, so we inline a best-effort reader here.
         const sessionsPath = getSessionsFilePath(dir);
         const allEvents: SessionEvent[] = [];
         try {
-          if (existsSync(sessionsPath)) {
-            const raw = readFileSync(sessionsPath, "utf-8");
-            for (const line of raw.split("\n")) {
-              if (!line) continue;
-              try {
-                allEvents.push(JSON.parse(line) as SessionEvent);
-              } catch {
-                // Skip unparseable JSONL lines without derailing the stream.
-              }
+          const raw = await readFileAsync(sessionsPath, "utf-8");
+          for (const line of raw.split("\n")) {
+            if (!line) continue;
+            try {
+              allEvents.push(JSON.parse(line) as SessionEvent);
+            } catch {
+              // Skip unparseable JSONL lines without derailing the stream.
             }
           }
         } catch {
-          // Any read failure → empty list; next tick may recover.
+          // ENOENT or other read failure → empty list; next tick may recover.
         }
 
         let trackerEntries: TrackerEntry[] = [];
@@ -1858,8 +1857,8 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         }
       };
 
-      send();
-      const interval = setInterval(send, 500);
+      void send();
+      const interval = setInterval(() => void send(), 500);
       req.on("close", () => clearInterval(interval));
       return;
     }
@@ -1880,24 +1879,22 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       });
       let sentCount = 0;
       let firstTick = true;
-      const send = () => {
+      const send = async () => {
         const sessionsPath = getSessionsFilePath(dir);
         const events: SessionEvent[] = [];
         try {
-          if (existsSync(sessionsPath)) {
-            const raw = readFileSync(sessionsPath, "utf-8");
-            for (const line of raw.split("\n")) {
-              if (!line) continue;
-              try {
-                const ev = JSON.parse(line) as SessionEvent;
-                if (ev.type === "telegram_sent") events.push(ev);
-              } catch {
-                // skip
-              }
+          const raw = await readFileAsync(sessionsPath, "utf-8");
+          for (const line of raw.split("\n")) {
+            if (!line) continue;
+            try {
+              const ev = JSON.parse(line) as SessionEvent;
+              if (ev.type === "telegram_sent") events.push(ev);
+            } catch {
+              // skip
             }
           }
         } catch {
-          // Any read failure → empty list; next tick recovers.
+          // ENOENT or other read failure → empty list; next tick recovers.
         }
         if (firstTick) {
           res.write(`data: ${JSON.stringify(events)}\n\n`);
@@ -1908,8 +1905,8 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
           sentCount = events.length;
         }
       };
-      send();
-      const interval = setInterval(send, 1_000);
+      void send();
+      const interval = setInterval(() => void send(), 1_000);
       req.on("close", () => clearInterval(interval));
       return;
     }
@@ -2198,7 +2195,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         return;
       }
       try {
-        const size = statSync(resolved).size;
+        const size = (await statAsync(resolved)).size;
         res.writeHead(200, {
           "Content-Type": "image/png",
           "Content-Length": size,
@@ -3085,6 +3082,10 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
           store: captureStore,
           lanIp: pickLanIp(),
           port,
+          // Phone can't always reach the laptop's LAN IP (Tailscale-only,
+          // CGNAT, separate WiFi). Set CAPTURE_PUBLIC_URL to a tunnel
+          // origin (cloudflared / ngrok) to override the QR target.
+          publicUrl: process.env.CAPTURE_PUBLIC_URL || undefined,
           onFinalize: makeCaptureFinalize(dir),
         },
       );
@@ -3148,7 +3149,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     if (req.method === "POST" && url.pathname === "/api/capture/delete-photo") {
       const parsed = await readJsonBody(4096);
       if (!parsed.ok) return writeJson(400, { ok: false, error: parsed.error });
-      const result = handleCaptureDeletePhoto(
+      const result = await handleCaptureDeletePhoto(
         {
           token: String(parsed.body.token ?? ""),
           index: Number(parsed.body.index),
@@ -3240,16 +3241,18 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       // names that could contain `..`. The store-resolved lookup is the
       // authoritative source.
       const filePath = join(CAPTURE_PHOTOS_DIR, sessionIdRaw, photo.filename);
-      if (!existsSync(filePath)) {
+      let photoStat;
+      try {
+        photoStat = await statAsync(filePath);
+      } catch {
         res.writeHead(404);
         res.end();
         return;
       }
-      const stat = statSync(filePath);
       res.writeHead(200, {
         "Content-Type": photo.mime,
         "Cache-Control": "no-cache, must-revalidate",
-        "Content-Length": String(stat.size),
+        "Content-Length": String(photoStat.size),
       });
       createReadStream(filePath).pipe(res);
       return;

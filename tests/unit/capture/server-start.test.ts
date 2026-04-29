@@ -43,4 +43,40 @@ describe("handleStart", () => {
     );
     assert.equal(r.status, 503);
   });
+
+  it("uses publicUrl override and ignores lanIp:port when both present", async () => {
+    const store = createSessionStore();
+    const r = await handleStart(
+      { workflow: "oath-signature" },
+      {
+        store,
+        lanIp: "192.168.1.50",
+        port: 3838,
+        publicUrl: "https://abc.trycloudflare.com",
+        onFinalize,
+      },
+    );
+    assert.equal(r.status, 200);
+    const body = r.body as { captureUrl: string };
+    assert.match(body.captureUrl, /^https:\/\/abc\.trycloudflare\.com\/capture\//);
+    assert.ok(!body.captureUrl.includes("192.168.1.50"));
+    assert.ok(!body.captureUrl.includes(":3838"));
+  });
+
+  it("publicUrl alone is enough — no lanIp needed", async () => {
+    const store = createSessionStore();
+    const r = await handleStart(
+      { workflow: "oath-signature" },
+      {
+        store,
+        lanIp: undefined,
+        port: 3838,
+        publicUrl: "https://abc.trycloudflare.com/",
+        onFinalize,
+      },
+    );
+    assert.equal(r.status, 200);
+    const body = r.body as { captureUrl: string };
+    assert.match(body.captureUrl, /^https:\/\/abc\.trycloudflare\.com\/capture\//);
+  });
 });

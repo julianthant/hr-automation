@@ -60,38 +60,25 @@ export async function loadBatchFile(): Promise<string[]> {
  * (pool mode). Owns the pre-kernel phases:
  *
  *   1. Load + validate batch YAML.
- *   2. Dry-run short-circuit: log planned employee list + workers + date range,
- *      exit 0 without launching any browsers.
- *   3. Ensure reports dir exists.
- *   4. Initialize module-scoped runtime (tracker mutex, report-lock mutex,
+ *   2. Ensure reports dir exists.
+ *   3. Initialize module-scoped runtime (tracker mutex, report-lock mutex,
  *      date range, reports dir) so the kernel handler can read them.
- *   5. Build a per-worker `launchFn` that picks a unique `ukg_session_workerN`
+ *   4. Build a per-worker `launchFn` that picks a unique `ukg_session_workerN`
  *      sessionDir per worker — UKG uses Playwright's persistent-context mode,
  *      so two workers sharing one sessionDir would collide on the lock.
- *   6. Delegate to `runWorkflowBatch(kronosReportsWorkflow, items, { poolSize,
+ *   5. Delegate to `runWorkflowBatch(kronosReportsWorkflow, items, { poolSize,
  *      launchFn, onPreEmitPending, deriveItemId })`.
- *   7. Clean up per-worker session dirs after the batch resolves.
+ *   6. Clean up per-worker session dirs after the batch resolves.
  */
 export async function runParallelKronos(
   workerCount: number,
-  options: { dryRun?: boolean; startDate?: string; endDate?: string } = {},
+  options: { startDate?: string; endDate?: string } = {},
 ): Promise<void> {
   const employeeIds = await loadBatchFile();
   log.step(`Loaded ${employeeIds.length} employee ID(s) from batch file`);
 
   const startDate = options.startDate ?? DEFAULT_START_DATE;
   const endDate = options.endDate ?? DEFAULT_END_DATE;
-
-  if (options.dryRun) {
-    log.step("=== DRY RUN MODE ===");
-    log.step(`Would process ${employeeIds.length} employees with ${workerCount} workers`);
-    log.step(`Date range: ${startDate} - ${endDate}`);
-    for (const id of employeeIds) {
-      log.step(`  Employee: ${id}`);
-    }
-    log.success("Dry run complete — no reports downloaded");
-    return;
-  }
 
   if (!existsSync(REPORTS_DIR)) mkdirSync(REPORTS_DIR, { recursive: true });
 

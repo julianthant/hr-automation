@@ -10,5 +10,9 @@ export async function qrSvgFor(url: string): Promise<string> {
     type: "svg",
     margin: 1,
     errorCorrectionLevel: "M",
+    // Without `width`, the qrcode lib emits an SVG carrying only viewBox.
+    // In the CaptureModal that collapses to 0×0 because the wrapper
+    // doesn't size flex children. Force width/height attrs on the root.
+    width: 200,
   });
 }

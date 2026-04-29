@@ -10,17 +10,13 @@ import { buildWorkStudyPlan, type WorkStudyContext } from "./enter.js";
 import { WorkStudyInputSchema, type WorkStudyInput } from "./schema.js";
 import { updateWorkStudyTracker } from "./tracker.js";
 
-export interface WorkStudyOptions {
-  dryRun?: boolean;
-}
-
 const workStudySteps = ["ucpath-auth", "transaction"] as const;
 
 /**
  * Kernel definition for the work-study PayPath workflow.
  *
  * Exports a RegisteredWorkflow. Run it via `runWorkflow(workStudyWorkflow, input)`
- * or invoke the CLI adapter `runWorkStudy` below (which handles dry-run + failure
+ * or invoke the CLI adapter `runWorkStudy` below (which handles failure-path
  * tracker writes).
  */
 export const workStudyWorkflow = defineWorkflow({
@@ -90,22 +86,10 @@ export const workStudyWorkflow = defineWorkflow({
 });
 
 /**
- * CLI adapter. Handles --dry-run (preview only, no browser) and failure-path
- * Excel tracker writes. Real runs delegate to the kernel.
+ * CLI adapter. Handles failure-path Excel tracker writes. Real runs delegate
+ * to the kernel.
  */
-export async function runWorkStudy(
-  input: WorkStudyInput,
-  options: WorkStudyOptions = {},
-): Promise<void> {
-  if (options.dryRun) {
-    const wsCtx: WorkStudyContext = { employeeName: "" };
-    const plan = buildWorkStudyPlan(input, null as never, wsCtx);
-    log.step("=== DRY RUN MODE ===");
-    plan.preview();
-    log.success("Dry run complete -- no changes made to UCPath");
-    return;
-  }
-
+export async function runWorkStudy(input: WorkStudyInput): Promise<void> {
   try {
     await runWorkflow(workStudyWorkflow, input);
     log.success("Work study transaction completed successfully");

@@ -1,4 +1,5 @@
-import { mkdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { rmSync } from "node:fs";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { CaptureSession, CaptureSessionStore } from "./sessions.js";
@@ -65,10 +66,17 @@ export interface HandleStartInput {
 
 export interface HandleStartContext {
   store: CaptureSessionStore;
-  /** LAN IP for the QR URL. Undefined → 503. */
+  /** LAN IP for the QR URL. Undefined + no `publicUrl` → 503. */
   lanIp: string | undefined;
   /** Server port, e.g. 3838. */
   port: number;
+  /**
+   * Optional full origin (e.g. `https://abc.trycloudflare.com`) that overrides
+   * `http://${lanIp}:${port}` for the capture URL. Use for tunneled dev or
+   * deployments where the phone can't reach the laptop's LAN IP.
+   * Trailing slash is tolerated. Wins over `lanIp` when both are present.
+   */
+  publicUrl?: string;
   /**
    * Called once after photo upload completes and the user finalizes. The
    * handler bundles the PDF + invokes this callback in the background; HTTP
@@ -84,13 +92,27 @@ export async function handleStart(
   if (!input.workflow || typeof input.workflow !== "string") {
     return { status: 400, body: { ok: false, error: "workflow is required" } };
   }
-  if (!ctx.lanIp) {
+  if (ctx.publicUrl && !/^https?:\/\//i.test(ctx.publicUrl)) {
+    return {
+      status: 503,
+      body: {
+        ok: false,
+        error: `CAPTURE_PUBLIC_URL must start with http:// or https:// (got "${ctx.publicUrl}")`,
+      },
+    };
+  }
+  const baseUrl = ctx.publicUrl
+    ? ctx.publicUrl.replace(/\/+$/, "")
+    : ctx.lanIp
+      ? `http://${ctx.lanIp}:${ctx.port}`
+      : null;
+  if (!baseUrl) {
     return {
       status: 503,
       body: {
         ok: false,
         error:
-          "no LAN IPv4 detected — dashboard host is offline or not on a network",
+          "no LAN IPv4 detected — set CAPTURE_PUBLIC_URL to a tunnel/public origin or connect to a network",
       },
     };
   }
@@ -101,7 +123,7 @@ export async function handleStart(
     onFinalize: ctx.onFinalize,
   });
 
-  const captureUrl = `http://${ctx.lanIp}:${ctx.port}/capture/${session.token}`;
+  const captureUrl = `${baseUrl}/capture/${session.token}`;
   const qrSvg = await qrSvgFor(captureUrl);
   const shortcode = genShortcode();
 
@@ -192,7 +214,7 @@ export async function handleUpload(
   }
 
   const dir = join(ctx.photosDir, session.sessionId);
-  mkdirSync(dir, { recursive: true });
+  await mkdir(dir, { recursive: true });
   // Read mime from the original name so the served file later carries
   // the right Content-Type. Phone may send heic; we keep the upload
   // exact and let the phone's polyfill convert before the bundle step.
@@ -203,7 +225,7 @@ export async function handleUpload(
   const provisionalIndex = session.photos.length;
   const filename = `${String(provisionalIndex).padStart(3, "0")}${ext}`;
   const fullPath = join(dir, filename);
-  writeFileSync(fullPath, input.bytes);
+  await writeFile(fullPath, input.bytes);
 
   const blurFlagged =
     typeof input.blurScore === "number" ? input.blurScore < 80 : undefined;
@@ -218,7 +240,7 @@ export async function handleUpload(
   if (!photo) {
     // Race: session went terminal between getByToken and addPhoto. Roll
     // back the file so we don't leave an orphan.
-    try { unlinkSync(fullPath); } catch { /* best-effort */ }
+    await unlink(fullPath).catch(() => {});
     return {
       status: 409,
       body: { ok: false, error: "session no longer open" },
@@ -247,10 +269,10 @@ export interface HandleDeletePhotoInput {
   index: number;
 }
 
-export function handleDeletePhoto(
+export async function handleDeletePhoto(
   input: HandleDeletePhotoInput,
   ctx: HandleUploadContext,
-): RouteResult {
+): Promise<RouteResult> {
   const session = ctx.store.getByToken(input.token);
   if (!session) {
     return { status: 404, body: { ok: false, error: "session not found" } };
@@ -262,11 +284,7 @@ export function handleDeletePhoto(
   if (!removed) {
     return { status: 400, body: { ok: false, error: "index out of range" } };
   }
-  try {
-    unlinkSync(join(ctx.photosDir, session.sessionId, removed.filename));
-  } catch {
-    /* best-effort */
-  }
+  await unlink(join(ctx.photosDir, session.sessionId, removed.filename)).catch(() => {});
   return {
     status: 200,
     body: { ok: true, totalPhotos: session.photos.length },
@@ -320,7 +338,7 @@ export async function handleReplacePhoto(
   }
 
   const dir = join(ctx.photosDir, session.sessionId);
-  mkdirSync(dir, { recursive: true });
+  await mkdir(dir, { recursive: true });
   const mime = mimeFromExt(input.originalName);
   const ext = extFromMime(mime, ".jpg");
   // Stable id + timestamp keeps the new file distinct from the old one.
@@ -329,7 +347,7 @@ export async function handleReplacePhoto(
   // an orphaned old copy.
   const filename = `${String(input.index).padStart(3, "0")}-${Date.now()}${ext}`;
   const fullPath = join(dir, filename);
-  writeFileSync(fullPath, input.bytes);
+  await writeFile(fullPath, input.bytes);
 
   const blurFlagged =
     typeof input.blurScore === "number" ? input.blurScore < 80 : undefined;
@@ -342,7 +360,7 @@ export async function handleReplacePhoto(
   });
 
   if (!result) {
-    try { unlinkSync(fullPath); } catch { /* best-effort */ }
+    await unlink(fullPath).catch(() => {});
     return {
       status: 409,
       body: { ok: false, error: "session no longer open" },

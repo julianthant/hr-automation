@@ -45,7 +45,7 @@ UKG uses deeply nested iframes:
 ## Download Strategy (Dual-Track)
 
 1. **Primary**: Playwright download event listener on page and context
-2. **Fallback**: Filesystem diff — snapshots `C:\Users\juzaw\Downloads` and `reportsDir` before/after clicking View Report, finds new `.pdf` files
+2. **Fallback**: Filesystem diff — snapshots `PATHS.downloadsDir` (`~/Downloads` via `os.homedir()`) and `reportsDir` before/after clicking View Report, finds new `.pdf` files
 
 ## Gotchas
 
@@ -56,7 +56,7 @@ UKG uses deeply nested iframes:
 - `reportLock` mutex serializes report navigation across parallel workers
 - Frame names may vary — multiple fallback strategies everywhere
 - JS evaluation (`clickInFrames`, `jsClickText`) used extensively because Playwright selectors are unreliable in nested frames
-- Hardcoded download path: `C:\Users\juzaw\Downloads` for filesystem fallback
+- Filesystem-fallback download path comes from `PATHS.downloadsDir` (`os.homedir() + "/Downloads"`); machine-portable
 - `mkdirSync(".auth/")` called at module level for screenshot directory
 - **Session expiry on refresh**: If a page refresh causes redirect to SSO login, `getGeniesIframe` detects this and calls `loginToUKG()` to re-authenticate automatically (requires Duo MFA approval)
 
