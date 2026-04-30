@@ -1,461 +1,319 @@
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import {
-  AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
   FileText,
-  ListChecks,
   Loader2,
   X as XIcon,
+  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "./types";
-import {
-  parsePrepareRowData,
-  type PreviewRecord,
-  type PrepareRowData,
-} from "./preview-types";
-import { PreviewRecordRow } from "./PreviewRecordRow";
+import { parsePrepareRowData } from "./preview-types";
+import { parseOathPrepareRowData } from "./oath-preview-types";
 
 /**
- * The "preview" parent row for an emergency-contact prep batch. Lives at the
- * top of the QueuePanel above the regular list. Two states:
+ * Unified bento prep row for the QueuePanel. Replaces the separate
+ * `PreviewRow` (EC) + `OathPreviewRow` (oath) shapes — same visual
+ * language, just different data parsers + endpoint URLs.
  *
- *  1. In progress (entry.status pending/running): shows a stage progress
- *     strip (loading-roster → ocr → matching → eid-lookup) and a Discard
- *     button. No records list.
+ * Click anywhere on the card body → opens the right-pane PrepReviewPane
+ * (handled by `onOpenReview`). Foot action buttons stop propagation
+ * so they don't fire the body click.
  *
- *  2. Ready for review (entry.status running step!=eid-lookup with all
- *     records terminal, OR done before approve): shows a records summary
- *     line + Review & approve button. Clicking Review expands an inline
- *     records list with per-row checkboxes + edit forms; the user clicks
- *     Approve to fan out to daemon kernel items.
- *
- * Persistence: per-record edits are mirrored to localStorage keyed by
- * `ec-prep-edits:<runId>` so a reload restores in-progress edits.
+ * Visual: matches EntryItem's bento shape with a 3-px left accent bar
+ * keyed to state (preparing/ready/reviewing/failed).
  */
 export interface PreviewRowProps {
   entry: TrackerEntry;
+  isReviewing: boolean;
+  onOpenReview: (runId: string) => void;
 }
 
-const STAGE_KEYS = ["loading-roster", "ocr", "matching", "eid-lookup"] as const;
-const STAGE_LABELS: Record<(typeof STAGE_KEYS)[number], string> = {
-  "loading-roster": "Loading roster",
-  ocr: "OCR",
-  matching: "Matching",
-  "eid-lookup": "EID lookup",
-};
+const STAGES = [
+  { key: "loading-roster", label: "Roster" },
+  { key: "ocr", label: "OCR" },
+  { key: "matching", label: "Match" },
+  { key: "eid-lookup", label: "EID lookup" },
+  { key: "verify", label: "Verify" },
+] as const;
 
-export function PreviewRow({ entry }: PreviewRowProps) {
-  const data = useMemo(() => parsePrepareRowData(entry.data), [entry.data]);
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+interface DerivedState {
+  stateKey: "preparing" | "ready" | "reviewing" | "failed";
+  Icon: LucideIcon;
+  iconClass: string;
+  iconColor: string;
+  badge: string;
+  badgeText: string;
+  accent: string;
+}
 
-  // Load any locally-saved edits and merge over server records.
-  const [localEdits, setLocalEdits] = useState<Record<number, PreviewRecord>>(() => {
-    if (typeof window === "undefined") return {};
-    try {
-      const raw = window.localStorage.getItem(`ec-prep-edits:${entry.runId ?? entry.id}`);
-      return raw ? (JSON.parse(raw) as Record<number, PreviewRecord>) : {};
-    } catch {
-      return {};
-    }
-  });
-
-  // Merge incoming server data with local edits, treating local edits as
-  // overrides per-record by index.
-  const records = useMemo<PreviewRecord[]>(() => {
-    if (!data) return [];
-    return data.records.map((r, i) => localEdits[i] ?? r);
-  }, [data, localEdits]);
-
-  // Persist edits whenever they change.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const key = `ec-prep-edits:${entry.runId ?? entry.id}`;
-    if (Object.keys(localEdits).length === 0) {
-      window.localStorage.removeItem(key);
-      return;
-    }
-    try {
-      window.localStorage.setItem(key, JSON.stringify(localEdits));
-    } catch {
-      /* quota / private mode — ignore */
-    }
-  }, [localEdits, entry.runId, entry.id]);
+export function PreviewRow({ entry, isReviewing, onOpenReview }: PreviewRowProps) {
+  const isOath = entry.workflow === "oath-signature";
+  const data = isOath
+    ? parseOathPrepareRowData(entry.data)
+    : parsePrepareRowData(entry.data);
+  const [discarding, setDiscarding] = useState(false);
 
   if (!data) return null;
+  const runId = entry.runId ?? entry.id;
+  const state = deriveState(entry, isReviewing);
 
-  const isFailed = entry.status === "failed";
-  const isDone = entry.status === "done";
-  const allTerminal = records.every(
+  const recordCount = data.records.length;
+  const verifiedCount = data.records.filter(
     (r) =>
-      r.matchState === "matched" ||
-      r.matchState === "resolved" ||
-      r.matchState === "unresolved",
-  );
-  const readyForReview = !isFailed && allTerminal && records.length > 0;
-  const inProgress = !isFailed && !readyForReview;
-
-  const accentColor = isFailed ? "bg-destructive" : readyForReview ? "bg-warning" : "bg-primary";
-
-  // Selected count among approvable records.
-  const selectedCount = records.filter(
-    (r) =>
-      r.selected && (r.matchState === "matched" || r.matchState === "resolved"),
+      (r.matchState === "matched" || r.matchState === "resolved") &&
+      r.documentType !== "unknown" &&
+      (!r.verification || r.verification.state === "verified"),
   ).length;
+  const needsReviewCount = data.records.filter(
+    (r) =>
+      r.documentType !== "unknown" &&
+      ((r.verification && r.verification.state !== "verified") ||
+        (r.matchState !== "matched" && r.matchState !== "resolved")),
+  ).length;
+  const toRemoveCount = data.records.filter((r) => r.documentType === "unknown")
+    .length;
 
-  function setRecord(i: number, next: PreviewRecord): void {
-    setLocalEdits((prev) => ({ ...prev, [i]: next }));
-  }
-
-  function toggleSelectAllApprovable(checked: boolean): void {
-    setLocalEdits((prev) => {
-      const out = { ...prev };
-      records.forEach((r, i) => {
-        if (r.matchState === "matched" || r.matchState === "resolved") {
-          out[i] = { ...(out[i] ?? r), selected: checked };
-        }
-      });
-      return out;
-    });
-  }
-
-  async function handleApprove(): Promise<void> {
-    if (submitting || !data) return;
-    setSubmitting(true);
-    const pdfName = data.pdfOriginalName;
-    try {
-      const resp = await fetch("/api/emergency-contact/approve-batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          parentRunId: entry.runId,
-          records,
-        }),
-      });
-      const body = (await resp.json()) as { ok: boolean; enqueued?: number; error?: string };
-      if (!resp.ok || !body.ok) {
-        toast.error("Couldn't approve batch", { description: body.error ?? "Server error" });
-        setSubmitting(false);
-        return;
-      }
-      toast.success(
-        `Queued ${body.enqueued ?? selectedCount} record${(body.enqueued ?? selectedCount) === 1 ? "" : "s"}`,
-        { description: pdfName },
-      );
-      // Clear local edits — backend now owns the records on the prep row.
-      window.localStorage.removeItem(`ec-prep-edits:${entry.runId ?? entry.id}`);
-      setLocalEdits({});
-      setReviewOpen(false);
-    } catch (err) {
-      toast.error("Couldn't approve batch", {
-        description: err instanceof Error ? err.message : "Network error",
-      });
-      setSubmitting(false);
-    }
-  }
+  const subline = renderSubline(state.stateKey, entry, data, {
+    verifiedCount,
+    needsReviewCount,
+    toRemoveCount,
+    recordCount,
+  });
 
   async function handleDiscard(): Promise<void> {
-    if (submitting) return;
-    if (!window.confirm("Discard this preparation? The PDF will be deleted.")) return;
-    setSubmitting(true);
+    if (discarding) return;
+    setDiscarding(true);
+    const url = isOath
+      ? "/api/oath-signature/discard-prepare"
+      : "/api/emergency-contact/discard-prepare";
     try {
-      const resp = await fetch("/api/emergency-contact/discard-prepare", {
+      const resp = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          parentRunId: entry.runId,
-          reason: "User clicked discard",
-        }),
+        body: JSON.stringify({ parentRunId: runId, reason: "User clicked discard" }),
       });
-      const body = (await resp.json()) as { ok: boolean; error?: string };
+      const body = (await resp.json()) as { ok?: boolean; error?: string };
       if (!resp.ok || !body.ok) {
-        toast.error("Couldn't discard preparation", { description: body.error ?? "Server error" });
-        setSubmitting(false);
+        toast.error("Couldn't discard prep row", {
+          description: body.error ?? "Server error",
+        });
+        setDiscarding(false);
         return;
       }
-      toast.success("Preparation discarded");
-      window.localStorage.removeItem(`ec-prep-edits:${entry.runId ?? entry.id}`);
-      setLocalEdits({});
+      toast.success("Discarded prep row");
+      const key = isOath ? `oath-prep-edits:${runId}` : `ec-prep-edits:${runId}`;
+      window.localStorage.removeItem(key);
     } catch (err) {
-      toast.error("Couldn't discard preparation", {
+      toast.error("Couldn't discard prep row", {
         description: err instanceof Error ? err.message : "Network error",
       });
-      setSubmitting(false);
+      setDiscarding(false);
     }
   }
+
+  const clickable = state.stateKey === "ready" || state.stateKey === "reviewing";
 
   return (
     <div
-      className={cn(
-        "relative rounded-md border border-border bg-card mx-2 mt-2 px-3 py-2.5",
-        "before:content-[''] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:rounded-l-md",
-        accentColor && `before:${accentColor}`,
-      )}
-      style={{
-        // Tailwind dynamic class doesn't work for `before:bg-*` pseudo-class
-        // backgrounds; wire via CSS custom property + inline style instead.
-        ["--accent" as never]: undefined,
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : -1}
+      aria-pressed={isReviewing}
+      onClick={() => clickable && onOpenReview(runId)}
+      onKeyDown={(e) => {
+        if (!clickable) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpenReview(runId);
+        }
       }}
+      className={cn(
+        "group relative flex flex-col rounded-md border border-border bg-card transition-shadow",
+        clickable && "cursor-pointer hover:shadow-md hover:border-primary/40",
+        isReviewing && "ring-2 ring-primary",
+      )}
     >
-      <span
-        aria-hidden
+      {/* 3-px accent bar */}
+      <div
         className={cn(
-          "absolute left-0 top-0 bottom-0 w-1 rounded-l-md",
-          accentColor,
+          "absolute left-0 top-0 h-full w-[3px] rounded-l-md",
+          state.accent,
         )}
+        aria-hidden
       />
-      {/* Header row */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <FileText aria-hidden className="h-4 w-4 text-muted-foreground shrink-0" />
-          <span className="text-sm font-medium truncate" title={data.pdfOriginalName}>
-            {data.pdfOriginalName || "(unknown PDF)"}
-          </span>
-          <span className="text-xs text-muted-foreground font-mono shrink-0">
-            · {records.length} record{records.length === 1 ? "" : "s"}
+
+      {/* Head zone */}
+      <div className="flex items-center justify-between gap-2 px-3 pl-4 pt-2.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <state.Icon
+            className={cn("h-3.5 w-3.5 shrink-0", state.iconClass, state.iconColor)}
+            aria-hidden
+          />
+          <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="truncate text-sm font-medium">
+            {data.pdfOriginalName || "Prep upload"}
           </span>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
-          {readyForReview && !reviewOpen && (
-            <button
-              type="button"
-              onClick={() => setReviewOpen(true)}
-              disabled={submitting || isDone}
-              className={cn(
-                "h-7 px-2.5 inline-flex items-center gap-1.5 rounded-md text-xs font-medium",
-                "bg-primary text-primary-foreground border border-primary",
-                "hover:bg-primary/90 hover:border-primary/90",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1",
-                "disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer",
-              )}
-            >
-              <ListChecks aria-hidden className="h-3 w-3" />
-              Review &amp; approve
-            </button>
+        <span
+          className={cn(
+            "rounded-md border px-1.5 py-px font-mono text-[10px] uppercase",
+            state.badge,
           )}
+        >
+          {state.badgeText}
+        </span>
+      </div>
+
+      {subline && (
+        <div className="px-4 pb-1 pt-0.5 text-xs text-muted-foreground">{subline}</div>
+      )}
+
+      {/* Foot zone */}
+      <div className="mt-1 flex items-center justify-between gap-2 border-t border-border px-3 pb-2 pl-4 pt-1.5">
+        <span className="font-mono text-[10px] text-muted-foreground">
+          {formatTime(entry.timestamp)} · prep#{shortRun(runId)}
+        </span>
+        <div className="flex items-center gap-2">
+          <span className="rounded-md bg-secondary px-1.5 py-px font-mono text-[10px] text-muted-foreground">
+            {recordCount} rec
+          </span>
           <button
-            type="button"
-            onClick={handleDiscard}
-            disabled={submitting || isDone}
-            aria-label="Discard preparation"
-            title="Discard preparation"
+            onClick={(e) => {
+              e.stopPropagation();
+              void handleDiscard();
+            }}
+            disabled={discarding}
             className={cn(
-              "h-7 w-7 inline-flex items-center justify-center rounded-md",
-              "text-muted-foreground hover:bg-destructive/10 hover:text-destructive",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              "disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer",
+              "inline-flex h-6 items-center gap-1 rounded-md border border-border px-1.5 text-[11px] text-muted-foreground hover:bg-muted",
+              "disabled:cursor-not-allowed disabled:opacity-50",
             )}
+            title="Discard this prep row"
           >
-            <XIcon aria-hidden className="h-3.5 w-3.5" />
+            <XIcon className="h-3 w-3" /> Discard
           </button>
         </div>
       </div>
+    </div>
+  );
+}
 
-      {/* Body */}
-      {inProgress && (
-        <div className="mt-2 space-y-1.5">
-          <StageStrip data={data} entryStep={entry.step} />
-          <div className="text-xs font-mono text-muted-foreground truncate">
-            {currentSubstep(entry, data)}
-          </div>
-        </div>
-      )}
+function deriveState(entry: TrackerEntry, isReviewing: boolean): DerivedState {
+  const failed = entry.status === "failed";
+  const done = entry.status === "done";
+  if (failed) {
+    return {
+      stateKey: "failed",
+      Icon: AlertTriangle,
+      iconClass: "",
+      iconColor: "text-destructive",
+      badge: "bg-destructive/10 text-destructive border-destructive/40",
+      badgeText: "Failed",
+      accent: "bg-destructive",
+    };
+  }
+  if (isReviewing) {
+    return {
+      stateKey: "reviewing",
+      Icon: CheckCircle2,
+      iconClass: "",
+      iconColor: "text-primary",
+      badge: "bg-primary/10 text-primary border-primary/30",
+      badgeText: "Reviewing",
+      accent: "bg-primary",
+    };
+  }
+  if (done) {
+    return {
+      stateKey: "ready",
+      Icon: Clock,
+      iconClass: "",
+      iconColor: "text-warning",
+      badge: "bg-warning/10 text-warning border-warning/40",
+      badgeText: "Ready",
+      accent: "bg-warning",
+    };
+  }
+  return {
+    stateKey: "preparing",
+    Icon: Loader2,
+    iconClass: "animate-spin motion-reduce:animate-none",
+    iconColor: "text-primary",
+    badge: "bg-primary/10 text-primary border-primary/30",
+    badgeText: stageBadge(entry.step),
+    accent: "bg-primary",
+  };
+}
 
-      {readyForReview && !reviewOpen && (
-        <div className="mt-1.5 space-y-0.5">
-          <div className="text-sm">
-            <strong className="font-semibold">{records.length}</strong>{" "}
-            <span className="text-muted-foreground">records ·</span>{" "}
-            <span className="text-success">{stateCount(records, ["matched", "resolved"])} matched</span>
-            {stateCount(records, ["unresolved"]) > 0 && (
-              <>
-                {" "}
-                <span className="text-muted-foreground">·</span>{" "}
-                <span className="text-destructive">
-                  {stateCount(records, ["unresolved"])} need review
-                </span>
-              </>
+function stageBadge(step: string | undefined): string {
+  if (!step) return "Preparing…";
+  const stage = STAGES.find((s) => s.key === step);
+  return stage ? `${stage.label} · running` : step;
+}
+
+function renderSubline(
+  stateKey: DerivedState["stateKey"],
+  entry: TrackerEntry,
+  _data: { records: unknown[] },
+  counts: {
+    verifiedCount: number;
+    needsReviewCount: number;
+    toRemoveCount: number;
+    recordCount: number;
+  },
+): React.ReactNode {
+  if (stateKey === "failed") {
+    return (
+      <span className="text-destructive">
+        {entry.error ?? "Prep failed — see logs"}
+      </span>
+    );
+  }
+  if (stateKey === "preparing") {
+    const currentIdx = STAGES.findIndex((s) => s.key === entry.step);
+    return (
+      <div className="flex items-center gap-1.5 font-mono text-[10px]">
+        {STAGES.map((s, i) => (
+          <span
+            key={s.key}
+            className={cn(
+              "rounded px-1.5 py-px",
+              currentIdx === i
+                ? "bg-primary/15 text-primary"
+                : i < currentIdx
+                  ? "text-success"
+                  : "text-muted-foreground",
             )}
-          </div>
-          <div className="text-xs text-muted-foreground font-mono truncate">
-            Roster: {data.rosterPath}
-            {data.ocrProvider && ` · OCR: ${data.ocrProvider}`}
-            {data.ocrCached ? " · cached" : ""}
-          </div>
-        </div>
-      )}
-
-      {isFailed && (
-        <div className="mt-1.5 flex items-start gap-1.5 text-xs text-destructive">
-          <AlertCircle aria-hidden className="h-3 w-3 mt-0.5 shrink-0" />
-          <span className="font-mono break-words">
-            {entry.error || "Preparation failed."}
+          >
+            {s.label}
           </span>
-        </div>
-      )}
-
-      {/* Expanded review */}
-      {reviewOpen && readyForReview && (
-        <div className="mt-2.5 border-t border-border pt-2.5">
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                className="h-4 w-4 cursor-pointer accent-primary"
-                checked={
-                  selectedCount > 0 &&
-                  selectedCount ===
-                    records.filter(
-                      (r) =>
-                        r.matchState === "matched" || r.matchState === "resolved",
-                    ).length
-                }
-                ref={(el) => {
-                  if (!el) return;
-                  const approvable = records.filter(
-                    (r) =>
-                      r.matchState === "matched" || r.matchState === "resolved",
-                  ).length;
-                  el.indeterminate =
-                    selectedCount > 0 && selectedCount < approvable;
-                }}
-                onChange={(e) => toggleSelectAllApprovable(e.target.checked)}
-              />
-              <span className="text-xs text-muted-foreground font-mono">
-                {selectedCount} of{" "}
-                {records.filter(
-                  (r) => r.matchState === "matched" || r.matchState === "resolved",
-                ).length}{" "}
-                selected
-              </span>
-            </label>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setReviewOpen(false)}
-                disabled={submitting}
-                className={cn(
-                  "h-7 px-2.5 text-xs font-medium rounded-md cursor-pointer",
-                  "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  "disabled:opacity-50 disabled:cursor-not-allowed",
-                )}
-              >
-                Cancel review
-              </button>
-              <button
-                type="button"
-                onClick={handleApprove}
-                disabled={submitting || selectedCount === 0}
-                className={cn(
-                  "h-7 px-2.5 inline-flex items-center gap-1.5 rounded-md text-xs font-medium",
-                  "bg-primary text-primary-foreground border border-primary",
-                  "hover:bg-primary/90",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1",
-                  "disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer",
-                )}
-              >
-                {submitting && (
-                  <Loader2
-                    aria-hidden
-                    className="h-3 w-3 animate-spin motion-reduce:animate-none"
-                  />
-                )}
-                Approve {selectedCount}
-              </button>
-            </div>
-          </div>
-          <div className="max-h-[60vh] overflow-y-auto -mx-3 divide-y divide-border">
-            {records.map((r, i) => (
-              <PreviewRecordRow
-                key={`${r.sourcePage}-${r.employee.name}-${i}`}
-                record={r}
-                onChange={(next) => setRecord(i, next)}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+        ))}
+      </div>
+    );
+  }
+  // ready or reviewing → counts summary
+  const parts: string[] = [];
+  parts.push(`${counts.verifiedCount} verified`);
+  if (counts.needsReviewCount > 0) parts.push(`${counts.needsReviewCount} needs review`);
+  if (counts.toRemoveCount > 0) parts.push(`${counts.toRemoveCount} to remove`);
+  return <span>{parts.join(" · ")}</span>;
 }
 
-function currentSubstep(entry: TrackerEntry, data: PrepareRowData): string {
-  if (entry.status === "running" && entry.step === "loading-roster") {
-    return `Loading ${data.rosterPath || "roster"}…`;
+function formatTime(ts: string): string {
+  try {
+    const d = new Date(ts);
+    return d.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return ts.slice(11, 16);
   }
-  if (entry.status === "running" && entry.step === "ocr") {
-    return data.ocrProvider
-      ? `OCR · ${data.ocrProvider}${data.ocrAttempts ? ` · attempt ${data.ocrAttempts}` : ""}`
-      : "OCR in progress…";
-  }
-  if (entry.status === "running" && entry.step === "matching") {
-    return `Matching ${data.records.length} record${data.records.length === 1 ? "" : "s"} against the roster…`;
-  }
-  if (entry.status === "running" && entry.step === "eid-lookup") {
-    const pending = data.records.filter(
-      (r) => r.matchState === "lookup-pending" || r.matchState === "lookup-running",
-    ).length;
-    return pending > 0
-      ? `Looking up ${pending} missing EID${pending === 1 ? "" : "s"}…`
-      : "Finalizing eid-lookup results…";
-  }
-  if (entry.status === "pending") return "Queued — starting up…";
-  return entry.lastLogMessage || entry.step || "";
 }
 
-function stateCount(records: PreviewRecord[], states: string[]): number {
-  return records.filter((r) => states.includes(r.matchState)).length;
-}
-
-function StageStrip({
-  data,
-  entryStep,
-}: {
-  data: PrepareRowData;
-  entryStep?: string;
-}) {
-  // Determine which stage is active / completed.
-  const stageIndex = STAGE_KEYS.findIndex((k) => k === entryStep);
-  return (
-    <div className="flex items-center gap-1.5">
-      {STAGE_KEYS.map((stage, i) => {
-        const isActive = stageIndex === i;
-        const isComplete = stageIndex > i;
-        const isPending = !isActive && !isComplete;
-        // Special case: if we're in eid-lookup but no records actually need
-        // it, treat the eid-lookup dot as "complete" not "active" so the
-        // visual matches reality.
-        const eidNeeded = data.records.some(
-          (r) => r.matchState === "lookup-pending" || r.matchState === "lookup-running",
-        );
-        const isReallyActive = isActive && (stage !== "eid-lookup" || eidNeeded);
-
-        return (
-          <div key={stage} className="flex items-center gap-1.5 flex-1 last:flex-none">
-            <div
-              title={STAGE_LABELS[stage]}
-              aria-label={`${STAGE_LABELS[stage]} — ${isComplete ? "done" : isReallyActive ? "in progress" : "pending"}`}
-              className={cn(
-                "h-2 w-2 rounded-full shrink-0 transition-colors",
-                isComplete && "bg-success",
-                isReallyActive && "bg-primary ring-2 ring-primary/30 motion-safe:animate-pulse",
-                isPending && "bg-muted border border-border",
-                isActive && !isReallyActive && "bg-success",
-              )}
-            />
-            {i < STAGE_KEYS.length - 1 && (
-              <div
-                aria-hidden
-                className={cn(
-                  "flex-1 h-px",
-                  isComplete ? "bg-success" : "bg-border",
-                )}
-              />
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
+function shortRun(runId: string): string {
+  // Use last 4 chars; runIds are typically UUIDs or `<id>#N`
+  return runId.slice(-4);
 }
