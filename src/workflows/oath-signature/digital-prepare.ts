@@ -1,40 +1,42 @@
-import { randomUUID } from "node:crypto";
-import { dateLocal, trackEvent } from "../../tracker/jsonl.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
-import { OathPrepareRowDataSchema, type OathPrepareRowData, type OathPreviewRecord } from "./preview-schema.js";
+import type { OathSignatureInput } from "./schema.js";
 
-const WORKFLOW = "oath-signature";
-
+/**
+ * Digital-mode oath signature flow.
+ *
+ * Pre-2026-04-29 this wrote a `mode: "prepare"` parent row mirroring the
+ * paper flow (so the operator could review/edit the looked-up dates
+ * before approving). That added review ceremony for what is functionally
+ * a kernel batch — every record is already an EID + a CRM-of-record
+ * date. The prep/review pattern was overkill.
+ *
+ * As of 2026-04-29 (P4.1) digital-mode bypasses prep entirely:
+ *   1. Launch CRM, authenticate (1 Duo).
+ *   2. For each pasted EID: lookup the "Witness Ceremony Oath New Hire
+ *      Signed" row in onboarding history.
+ *   3. Enqueue `{emplId, date: foundDate ?? undefined}` directly into
+ *      the oath-signature daemon queue. No prep row, no review pane —
+ *      the per-EID kernel rows show up in the queue immediately.
+ *   4. EIDs whose CRM history doesn't have the row still enqueue with
+ *      `date: undefined` (the kernel today-prefills).
+ */
 export interface DigitalOathPrepareInput {
   /** EIDs to look up. */
   emplIds: string[];
-  /** Free-text label for the prep row's pdfOriginalName slot — operator-visible. */
-  label?: string;
-  trackerDir?: string;
-  /** Externally-supplied runId so the HTTP handler can return it synchronously. */
-  runId?: string;
 }
 
 export interface DigitalOathPrepareOutput {
-  runId: string;
-  parentRunId: string;
+  enqueued: number;
+  lookupFailures: number;
 }
 
-/**
- * One-EID lookup result. `dateMmDdYyyy` is null when CRM doesn't have a
- * "Witness Ceremony Oath New Hire Signed" row yet — the operator can
- * still approve manually-edited dates from the preview.
- */
+/** @internal — test escape hatch. Replaces the lookup with a stub. */
 export interface DigitalLookupResult {
   emplId: string;
   dateMmDdYyyy: string | null;
-  /** Friendly name from CRM if discovered; falls back to the EID. */
-  displayName?: string;
-  /** Free-form error string if the lookup itself failed (vs. found-no-row). */
   error?: string;
 }
-
 export type DigitalLookupFn = (
   emplIds: string[],
 ) => Promise<DigitalLookupResult[]>;
@@ -46,147 +48,58 @@ export function __setDigitalLookupForTests(fn: DigitalLookupFn | undefined): voi
   _lookupFn = fn;
 }
 
-/**
- * Run a CRM-session lookup of oath-signature dates for one or more EIDs
- * and write a `data.mode === "prepare"` tracker row mirroring the paper
- * flow. The same `OathPreviewRow` UI renders both modes; approve fans
- * out into the kernel oath-signature daemon with the looked-up dates.
- *
- * Status transitions:
- *   pending → running(crm-auth) → running(lookup) → done
- *
- * Failed lookups get `matchState: "unresolved"` with a warning so the
- * operator sees them in the review list and can re-search or skip.
- */
+type EnqueueFn = (inputs: OathSignatureInput[]) => Promise<void>;
+let _enqueueFn: EnqueueFn | undefined;
+
+/** @internal — test escape hatch for the daemon-enqueue side. */
+export function __setDigitalEnqueueForTests(fn: EnqueueFn | undefined): void {
+  _enqueueFn = fn;
+}
+
 export async function runDigitalOathPrepare(
   input: DigitalOathPrepareInput,
 ): Promise<DigitalOathPrepareOutput> {
-  const runId = input.runId ?? randomUUID();
-  const id = `oath-prep-${dateLocal()}-${runId.slice(0, 8)}`;
-  const trackerDir = input.trackerDir;
-  const label = input.label ?? `digital-${dateLocal()}-${input.emplIds.length}eid`;
+  if (input.emplIds.length === 0) {
+    log.warn("[oath-digital] No EIDs supplied — nothing to enqueue");
+    return { enqueued: 0, lookupFailures: 0 };
+  }
 
-  const writeTracker = (
-    status: "pending" | "running" | "done" | "failed",
-    data: Partial<OathPrepareRowData>,
-    step?: string,
-    error?: string,
-  ): void => {
-    trackEvent(
-      {
-        workflow: WORKFLOW,
-        timestamp: new Date().toISOString(),
-        id,
-        runId,
-        status,
-        ...(step ? { step } : {}),
-        data: flattenForData(data),
-        ...(error ? { error } : {}),
-      },
-      trackerDir,
-    );
-  };
+  const lookup = _lookupFn ?? defaultDigitalLookup;
+  let lookupFailures = 0;
+  let lookupResults: DigitalLookupResult[];
+  try {
+    lookupResults = await lookup(input.emplIds);
+  } catch (err) {
+    log.error(`[oath-digital] CRM lookup batch failed: ${errorMessage(err)}`);
+    // Fall back: enqueue every EID with no date and let the kernel
+    // today-prefill. The operator gets a row per EID either way.
+    lookupResults = input.emplIds.map((emplId) => ({
+      emplId,
+      dateMmDdYyyy: null,
+      error: errorMessage(err),
+    }));
+    lookupFailures = input.emplIds.length;
+  }
 
-  writeTracker("pending", {
-    mode: "prepare",
-    pdfPath: "",
-    pdfOriginalName: label,
-    rosterPath: "(digital lookup — CRM onboarding history)",
-    records: [],
+  const inputs: OathSignatureInput[] = lookupResults.map((r) => {
+    if (r.error) lookupFailures += 1;
+    return r.dateMmDdYyyy
+      ? { emplId: r.emplId, date: r.dateMmDdYyyy }
+      : { emplId: r.emplId };
   });
 
-  if (input.emplIds.length === 0) {
-    writeTracker(
-      "failed",
-      {
-        mode: "prepare",
-        pdfPath: "",
-        pdfOriginalName: label,
-        rosterPath: "(digital lookup — CRM onboarding history)",
-        records: [],
-      },
-      undefined,
-      "No EIDs supplied",
-    );
-    return { runId, parentRunId: runId };
-  }
-
-  try {
-    writeTracker("running", { rosterPath: "(digital lookup — CRM onboarding history)" }, "crm-auth");
-    const fn = _lookupFn ?? defaultDigitalLookup;
-    writeTracker("running", { rosterPath: "(digital lookup — CRM onboarding history)" }, "lookup");
-    const results = await fn(input.emplIds);
-    log.step(`[oath-digital] CRM lookup returned ${results.length} result(s)`);
-
-    const records: OathPreviewRecord[] = results.map((r, i): OathPreviewRecord => {
-      const printedName = r.displayName?.trim() || r.emplId;
-      if (r.error || !r.dateMmDdYyyy) {
-        return {
-          sourcePage: 1,
-          rowIndex: i,
-          printedName,
-          employeeSigned: true,
-          officerSigned: null,
-          dateSigned: null,
-          notes: [],
-          employeeId: r.emplId,
-          matchState: "unresolved",
-          documentType: "expected",
-          originallyMissing: [],
-          warnings: r.error
-            ? [`CRM lookup failed: ${r.error}`]
-            : ["No 'Witness Ceremony Oath New Hire Signed' row found in CRM history"],
-          selected: false,
-        };
-      }
-      return {
-        sourcePage: 1,
-        rowIndex: i,
-        printedName,
-        employeeSigned: true,
-        officerSigned: null,
-        dateSigned: r.dateMmDdYyyy,
-        notes: [],
-        employeeId: r.emplId,
-        matchState: "matched",
-        matchSource: "roster", // EID came from input + date from form-of-record (CRM)
-        matchConfidence: 1.0,
-        documentType: "expected",
-        originallyMissing: [],
-        warnings: [],
-        selected: true,
-      };
-    });
-
-    const finalData: OathPrepareRowData = {
-      mode: "prepare",
-      pdfPath: "",
-      pdfOriginalName: label,
-      rosterPath: "(digital lookup — CRM onboarding history)",
-      records,
-    };
-    OathPrepareRowDataSchema.parse(finalData);
-    writeTracker("done", finalData);
-    log.success(`[oath-digital] Prepared ${records.filter((r) => r.selected).length}/${records.length} record(s) for review`);
-    return { runId, parentRunId: runId };
-  } catch (err) {
-    writeTracker(
-      "failed",
-      {
-        mode: "prepare",
-        pdfPath: "",
-        pdfOriginalName: label,
-        rosterPath: "(digital lookup — CRM onboarding history)",
-        records: [],
-      },
-      undefined,
-      errorMessage(err),
-    );
-    return { runId, parentRunId: runId };
-  }
+  const enqueue = _enqueueFn ?? defaultEnqueue;
+  await enqueue(inputs);
+  log.success(
+    `[oath-digital] Enqueued ${inputs.length} EID${inputs.length === 1 ? "" : "s"}` +
+      (lookupFailures > 0
+        ? ` (${lookupFailures} CRM lookup failure${lookupFailures === 1 ? "" : "s"} — those rows enqueued without a date so the kernel today-prefills)`
+        : ""),
+  );
+  return { enqueued: inputs.length, lookupFailures };
 }
 
-// ─── Production lookup ─────────────────────────────────────
+// ─── Production lookup + enqueue ───────────────────────────
 
 async function defaultDigitalLookup(
   emplIds: string[],
@@ -205,8 +118,7 @@ async function defaultDigitalLookup(
     for (const emplId of emplIds) {
       try {
         const date = await lookupOathSignatureDate(page, emplId);
-        const displayName = await readNameFromRecordPage(page).catch(() => undefined);
-        out.push({ emplId, dateMmDdYyyy: date, displayName });
+        out.push({ emplId, dateMmDdYyyy: date });
       } catch (err) {
         out.push({
           emplId,
@@ -232,38 +144,8 @@ async function defaultDigitalLookup(
   }
 }
 
-/**
- * After `lookupOathSignatureDate` finishes for a given EID, the page is
- * left on `/hr/ONB_ShowOnboardingHistory?id=...` whose H2 reads
- * "Onboarding History for <First Last>". Pull that name so the preview
- * row shows a human-friendly label instead of just the EID.
- */
-async function readNameFromRecordPage(page: import("playwright").Page): Promise<string | undefined> {
-  const heading = await page
-    .locator("h2.mainTitle") // allow-inline-selector — `<h2 class="mainTitle">` is a Visualforce-generic page-title element used across CRM screens; not a workflow-specific anchor
-    .first()
-    .textContent()
-    .catch(() => null);
-  if (!heading) return undefined;
-  const m = heading.match(/Onboarding History for\s+(.+)$/i);
-  return m ? m[1].trim() : undefined;
-}
-
-// ─── Helpers ───────────────────────────────────────────────
-
-function flattenForData(d: Partial<OathPrepareRowData>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(d)) {
-    if (v === undefined || v === null) continue;
-    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
-      out[k] = String(v);
-    } else {
-      try {
-        out[k] = JSON.stringify(v);
-      } catch {
-        out[k] = String(v);
-      }
-    }
-  }
-  return out;
+async function defaultEnqueue(inputs: OathSignatureInput[]): Promise<void> {
+  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
+  const { oathSignatureWorkflow } = await import("./index.js");
+  await ensureDaemonsAndEnqueue(oathSignatureWorkflow, inputs, {});
 }
