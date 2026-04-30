@@ -4,7 +4,6 @@ import { StatPills } from "./StatPills";
 import { EntryItem } from "./EntryItem";
 import { EmptyState } from "./EmptyState";
 import { PreviewRow } from "./PreviewRow";
-import { OathPreviewRow } from "./OathPreviewRow";
 import type { TrackerEntry } from "./types";
 import { isPrepareRow, isResolvedPrepRow } from "./preview-types";
 
@@ -13,6 +12,10 @@ interface QueuePanelProps {
   workflow: string;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** Run-id of the prep row currently open in the right-pane review. */
+  reviewingPrepId?: string | null;
+  /** Open the right-pane review for this prep row. */
+  onOpenReview?: (runId: string) => void;
   loading: boolean;
   /**
    * Optional cluster of run controls (QuickRunPanel + Capture / Oath /
@@ -43,7 +46,16 @@ interface QueuePanelProps {
  * top border keeps the run controls visually distinct from the scrollable
  * list above.
  */
-export function QueuePanel({ entries, workflow, selectedId, onSelect, loading, runControlsSlot }: QueuePanelProps) {
+export function QueuePanel({
+  entries,
+  workflow,
+  selectedId,
+  onSelect,
+  reviewingPrepId,
+  onOpenReview,
+  loading,
+  runControlsSlot,
+}: QueuePanelProps) {
   void workflow;
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
@@ -88,13 +100,17 @@ export function QueuePanel({ entries, workflow, selectedId, onSelect, loading, r
         {/* Pinned: emergency-contact preview rows. Sit above the scrollable
             list. They're tall when expanded, but the parent is itself
             scrollable so the list can scroll past them. */}
-        {previewEntries.map((e) =>
-          e.workflow === "oath-signature" ? (
-            <OathPreviewRow key={`oath-prep-${e.runId ?? e.id}`} entry={e} />
-          ) : (
-            <PreviewRow key={`prep-${e.runId ?? e.id}`} entry={e} />
-          ),
-        )}
+        {previewEntries.map((e) => {
+          const runId = e.runId ?? e.id;
+          return (
+            <PreviewRow
+              key={`prep-${runId}`}
+              entry={e}
+              isReviewing={reviewingPrepId === runId}
+              onOpenReview={(rid) => onOpenReview?.(rid)}
+            />
+          );
+        })}
         {loading ? (
           <div className="space-y-0">
             {Array.from({ length: 6 }).map((_, i) => (
