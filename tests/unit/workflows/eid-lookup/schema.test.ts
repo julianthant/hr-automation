@@ -1,6 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeName } from "../../../../src/workflows/eid-lookup/schema.js";
+import {
+  normalizeName,
+  EidLookupItemSchema,
+  EidLookupNameInputSchema,
+  EidLookupEidInputSchema,
+  isEidInput,
+} from "../../../../src/workflows/eid-lookup/schema.js";
 
 describe("normalizeName", () => {
   it("title-cases all-lowercase input", () => {
@@ -45,5 +51,52 @@ describe("normalizeName", () => {
   it("returns input unchanged if only last name given", () => {
     assert.equal(normalizeName("smith,"), "smith,");
     assert.equal(normalizeName(",john"), ",john");
+  });
+});
+
+describe("EidLookupItemSchema (discriminated union)", () => {
+  it("EidLookupNameInputSchema accepts a name string", () => {
+    const parsed = EidLookupNameInputSchema.parse({ name: "Person 1717" });
+    assert.equal(parsed.name, "Person 1717");
+  });
+
+  it("EidLookupNameInputSchema rejects empty name", () => {
+    assert.throws(() => EidLookupNameInputSchema.parse({ name: "" }));
+  });
+
+  it("EidLookupEidInputSchema accepts a 5+ digit Empl ID", () => {
+    const parsed = EidLookupEidInputSchema.parse({ emplId: "10001516" });
+    assert.equal(parsed.emplId, "10001516");
+  });
+
+  it("EidLookupEidInputSchema rejects non-numeric Empl ID", () => {
+    assert.throws(() => EidLookupEidInputSchema.parse({ emplId: "abc" }));
+  });
+
+  it("EidLookupEidInputSchema rejects too-short Empl ID", () => {
+    assert.throws(() => EidLookupEidInputSchema.parse({ emplId: "1234" }));
+  });
+
+  it("EidLookupItemSchema accepts both shapes via union", () => {
+    EidLookupItemSchema.parse({ name: "Smith, Bob" });
+    EidLookupItemSchema.parse({ emplId: "10812990" });
+  });
+
+  it("isEidInput discriminates the union", () => {
+    assert.equal(isEidInput({ name: "Smith, Bob" }), false);
+    assert.equal(isEidInput({ emplId: "10001516" }), true);
+  });
+
+  it("keepNonHdh flag carries through both shapes", () => {
+    const n = EidLookupNameInputSchema.parse({
+      name: "Person 1717",
+      keepNonHdh: true,
+    });
+    const e = EidLookupEidInputSchema.parse({
+      emplId: "10001516",
+      keepNonHdh: true,
+    });
+    assert.equal(n.keepNonHdh, true);
+    assert.equal(e.keepNonHdh, true);
   });
 });

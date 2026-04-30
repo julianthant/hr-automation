@@ -13,9 +13,14 @@ import { trackEvent } from "../../tracker/jsonl.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath, loginToACTCrm } from "../../auth/login.js";
-import { searchByName, parseNameInput, type EidResult } from "./search.js";
+import { searchByName, searchByEid, parseNameInput, type EidResult } from "./search.js";
 import { searchCrmByName, datesWithinDays } from "./crm-search.js";
-import { EidLookupItemSchema, normalizeName, type EidLookupItem } from "./schema.js";
+import {
+  EidLookupItemSchema,
+  isEidInput,
+  normalizeName,
+  type EidLookupItem,
+} from "./schema.js";
 
 export interface LookupResult {
   name: string;
@@ -27,18 +32,64 @@ export interface LookupResult {
 const stepsCrm = ["searching", "cross-verification"] as const;
 
 /**
- * Perform the UCPath SDCMP/HDH search for one name and stamp the result
- * fields onto the tracker entry's data. Returns the raw results so the
- * CRM step can cross-reference them.
+ * Perform the UCPath search for one item and stamp the result fields
+ * onto the tracker entry's data. Branches on the input shape:
+ *
+ *  - `{ name }`   — multi-strategy SDCMP/HDH search, returns up to N
+ *                   candidate rows (callers may cross-verify against CRM)
+ *  - `{ emplId }` — direct Empl ID search, single result; used by the
+ *                   prep-flow verification path
+ *
+ * After either branch resolves to a detail page, captures a screenshot
+ * via `ctx.screenshot({ kind: "form", label: "person-org-summary" })`
+ * and stamps the resulting filename onto the tracker row's
+ * `personOrgScreenshot` data field — the prep watcher reads it from
+ * the eid-lookup JSONL to populate `verification.screenshotFilename`.
+ *
+ * Returns the raw results so the CRM step can cross-reference them
+ * (CRM cross-verification is skipped for EID-input items — the prep
+ * flow doesn't need it).
  */
 async function searchingStep<TSteps extends readonly string[]>(
   ctx: Ctx<TSteps, EidLookupItem>,
   input: EidLookupItem,
 ): Promise<EidResult[]> {
   const page = await ctx.page("ucpath");
+
+  if (isEidInput(input)) {
+    let result: EidResult | null;
+    try {
+      result = await searchByEid(page, input.emplId);
+    } catch (err) {
+      log.error(`searchByEid failed for "${input.emplId}": ${errorMessage(err)}`);
+      ctx.updateData({ emplId: input.emplId, hrStatus: "Error" });
+      throw err;
+    }
+    if (!result) {
+      log.step(`No detail page for EID ${input.emplId}`);
+      ctx.updateData({ emplId: input.emplId, hrStatus: "Not found" });
+      return [];
+    }
+    log.success(
+      `EID ${result.emplId} resolved → ${result.name} | ${result.department ?? "?"} | ${result.hrStatus}`,
+    );
+    ctx.updateData({
+      searchName: result.name,
+      emplId: result.emplId,
+      department: result.department ?? "",
+      hrStatus: result.hrStatus,
+      jobTitle: result.jobCodeDescription ?? "",
+    });
+    await captureAndStampScreenshot(ctx);
+    return [result];
+  }
+
+  // Name-search path
   let result: Awaited<ReturnType<typeof searchByName>>;
   try {
-    result = await searchByName(page, input.name);
+    result = await searchByName(page, input.name, {
+      keepNonHdh: input.keepNonHdh,
+    });
   } catch (err) {
     log.error(`Search failed for "${input.name}": ${errorMessage(err)}`);
     ctx.updateData({ emplId: "Error" });
@@ -56,9 +107,38 @@ async function searchingStep<TSteps extends readonly string[]>(
   ctx.updateData({
     emplId: first.emplId,
     department: first.department ?? "",
+    hrStatus: first.hrStatus,
     jobTitle: first.jobCodeDescription ?? "",
   });
+  await captureAndStampScreenshot(ctx);
   return result.sdcmpResults;
+}
+
+/**
+ * Capture the current Person Org Summary detail page and stamp the
+ * resulting screenshot filename into the tracker row's data so the
+ * prep watcher can find it. Best-effort — failures to screenshot are
+ * logged and don't break the search step.
+ */
+async function captureAndStampScreenshot<TSteps extends readonly string[]>(
+  ctx: Ctx<TSteps, EidLookupItem>,
+): Promise<void> {
+  try {
+    const cap = await ctx.screenshot({
+      kind: "form",
+      label: "person-org-summary",
+    });
+    if (cap.files && cap.files.length > 0) {
+      // Take the basename — matches how `/screenshots/<filename>` resolves.
+      const fullPath = cap.files[0].path;
+      const filename = fullPath.split("/").pop() ?? fullPath;
+      ctx.updateData({ personOrgScreenshot: filename });
+    }
+  } catch (err) {
+    log.warn(
+      `Person Org screenshot failed: ${errorMessage(err)} — verification result will lack screenshotFilename`,
+    );
+  }
 }
 
 /**
@@ -74,6 +154,10 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
   input: EidLookupItem,
   sdcmp: EidResult[],
 ): Promise<void> {
+  // CRM cross-verification is name-based; EID-input items skip this step
+  // entirely (the handler gates on isEidInput before scheduling it).
+  if (isEidInput(input)) return;
+
   const crmPage = await ctx.page("crm");
 
   let parsed: ReturnType<typeof parseNameInput>;
@@ -183,10 +267,22 @@ export const eidLookupCrmWorkflow = defineWorkflow({
   ],
   getName: (d) => d.searchName ?? "",
   getId: (d) => d.searchName ?? "",
-  initialData: (input) => ({ searchName: input.name }),
+  initialData: (input) =>
+    isEidInput(input)
+      ? { searchName: input.emplId, emplId: input.emplId }
+      : { searchName: input.name },
   handler: async (ctx: Ctx<typeof stepsCrm, EidLookupItem>, input) => {
-    ctx.updateData({ searchName: input.name });
+    if (!isEidInput(input)) {
+      ctx.updateData({ searchName: input.name });
+    }
     const sdcmp = await ctx.step("searching", async () => searchingStep(ctx, input));
+    if (isEidInput(input)) {
+      // Prep-flow verification path doesn't need CRM cross-check —
+      // mark cross-verification as skipped to keep the dashboard
+      // pipeline tidy.
+      ctx.skipStep?.("cross-verification");
+      return;
+    }
     await ctx.step("cross-verification", async () => {
       await crossVerificationStep(ctx, input, sdcmp);
     });
@@ -272,7 +368,10 @@ export async function runEidLookupCli(
       // runId here is the pre-assigned one from `enqueueItems`, so the
       // eventual running/done rows pair 1:1.
       onPreEmitPending: (item, runId) => {
-        const n = item.name;
+        // CLI adapter only enqueues `{ name }` items, but the workflow
+        // schema accepts the union — narrow to the name shape we just
+        // constructed at line `inputs.map((name) => ({ name }))`.
+        const n = "name" in item ? item.name : item.emplId;
         trackEvent({
           workflow: "eid-lookup",
           timestamp: now,

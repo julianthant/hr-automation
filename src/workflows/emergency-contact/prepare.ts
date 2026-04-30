@@ -12,6 +12,7 @@ import {
   compareUsAddresses,
   normalizeEid,
 } from "../../match/index.js";
+import type { EidLookupItem } from "../eid-lookup/schema.js";
 import {
   OcrOutputSchema,
   PrepareRowDataSchema,
@@ -377,16 +378,19 @@ async function resolveEidsAsync(
     } else {
       const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
       const { eidLookupCrmWorkflow } = await import("../eid-lookup/index.js");
-      // The eid-lookup schema is z.object({ name }). Strip __prepIndex when
-      // sending; recover the index from the deriveItemId output instead.
-      const enqueueInputs = lookupInputs.map(({ name }) => ({ name }));
+      // eid-lookup accepts a union of {name} or {emplId}. Prep flow uses the
+      // {name} variant for unmatched-name lookups; strip __prepIndex when
+      // sending and recover the index from the deriveItemId output instead.
+      const enqueueInputs: EidLookupItem[] = lookupInputs.map(({ name }) => ({
+        name,
+      }));
       await ensureDaemonsAndEnqueue(
         eidLookupCrmWorkflow,
         enqueueInputs,
         {},
         {
-          deriveItemId: (input: { name: string }) => {
-            const target = input.name;
+          deriveItemId: (input: EidLookupItem) => {
+            const target = "name" in input ? input.name : input.emplId;
             const found = lookupInputs.find((x) => x.name === target);
             const idx = found?.__prepIndex ?? 0;
             return `ec-prep-${runId}-r${idx}`;

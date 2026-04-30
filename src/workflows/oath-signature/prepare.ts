@@ -16,6 +16,7 @@ import {
   type OathPrepareRowData,
   type OathPreviewRecord,
 } from "./preview-schema.js";
+import type { EidLookupItem } from "../eid-lookup/schema.js";
 
 const WORKFLOW = "oath-signature";
 
@@ -364,14 +365,16 @@ async function resolveEidsAsync(
     } else {
       const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
       const { eidLookupCrmWorkflow } = await import("../eid-lookup/index.js");
-      const enqueueInputs = lookupInputs.map(({ name }) => ({ name }));
+      const enqueueInputs: EidLookupItem[] = lookupInputs.map(({ name }) => ({
+        name,
+      }));
       await ensureDaemonsAndEnqueue(
         eidLookupCrmWorkflow,
         enqueueInputs,
         {},
         {
-          deriveItemId: (input: { name: string }) => {
-            const target = input.name;
+          deriveItemId: (input: EidLookupItem) => {
+            const target = "name" in input ? input.name : input.emplId;
             const found = lookupInputs.find((x) => x.name === target);
             const idx = found?.__prepIndex ?? 0;
             return `oath-prep-${runId}-r${idx}`;
