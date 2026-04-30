@@ -20,7 +20,7 @@
  * `prepare-row.ts` then.
  */
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { writeFile, unlink } from "node:fs/promises";
+import { writeFile, unlink, rm as fsRm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -378,6 +378,10 @@ export async function handleApproveBatch(
     dir,
   );
 
+  // ── Best-effort cleanup of the per-run uploads dir (PDF page renders,
+  // etc.). Failures are logged but never block the approve.
+  await cleanupUploadsDir(input.parentRunId);
+
   return {
     ok: true,
     enqueued: kernelInputs.length,
@@ -447,7 +451,27 @@ export async function handleDiscardPrepare(
     prepRowDate,
     dir,
   );
+
+  // Best-effort uploads-dir cleanup mirrors the approve path.
+  await cleanupUploadsDir(input.parentRunId);
+
   return { ok: true, parentRunId: input.parentRunId };
+}
+
+/**
+ * Recursively remove `.tracker/uploads/<parentRunId>/`. Used by both the
+ * approve and discard paths to drop per-run page renders and any other
+ * cached artifacts. Failures are logged at warn level and never thrown
+ * — the caller is mid-success and shouldn't fail because of cleanup.
+ */
+async function cleanupUploadsDir(parentRunId: string): Promise<void> {
+  const uploadsDir = join(".tracker", "uploads", parentRunId);
+  try {
+    await fsRm(uploadsDir, { recursive: true, force: true });
+    log.step(`Cleaned up prep uploads for ${parentRunId}`);
+  } catch (err) {
+    log.warn(`Failed to clean up prep uploads for ${parentRunId}: ${errorMessage(err)}`);
+  }
 }
 
 // ─── Dashboard restart sweep ─────────────────────────────

@@ -65,6 +65,7 @@ import {
   listRosters,
   sweepStuckPrepRows,
 } from "./emergency-contact-http.js";
+import { sweepOrphanUploadDirs } from "../scripts/ops/clean-tracker.js";
 import {
   handleOathPrepareUpload,
   handleOathApproveBatch,
@@ -1873,6 +1874,14 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       }
     } catch (err) {
       log.step(`Oath prep-row sweep skipped: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
+      const removed = sweepOrphanUploadDirs(dir);
+      if (removed > 0) {
+        log.step(`Removed ${removed} orphan upload dir${removed === 1 ? "" : "s"} from ${dir}/uploads`);
+      }
+    } catch (err) {
+      log.step(`Orphan upload-dir sweep skipped: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
