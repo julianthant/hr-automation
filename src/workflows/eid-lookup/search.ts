@@ -624,6 +624,7 @@ async function searchOnce(
 export async function searchByName(
   page: Page,
   nameInput: string,
+  options: { keepNonHdh?: boolean } = {},
 ): Promise<{
   found: boolean;
   sdcmpResults: EidResult[];
@@ -671,28 +672,95 @@ export async function searchByName(
   // If we found SDCMP candidates, drill into each to populate department
   // details, then apply the HDH dept whitelist. SDCMP is a coarse BU filter;
   // the final "accepted" bit is department-level (see `isAcceptedDept`).
-  let hdhResults: EidResult[] = [];
+  //
+  // When `options.keepNonHdh` is true (prep-flow verification path), we
+  // KEEP non-HDH results so the orchestrator can flag them as "non-hdh"
+  // for the operator to review. CLI invocations leave the flag off and
+  // the existing rejection behavior applies.
+  let returnedResults: EidResult[] = [];
   if (sdcmpResults.length > 0) {
     log.step(`Drilling into ${sdcmpResults.length} SDCMP candidate(s) for department details...`);
     await populateDepartments(page, frame, sdcmpResults);
-    hdhResults = sdcmpResults.filter((r) => isAcceptedDept(r.department));
-    const rejected = sdcmpResults.filter((r) => !isAcceptedDept(r.department));
-    if (rejected.length > 0) {
-      const summary = rejected
-        .map((r) => `EID ${r.emplId} (${r.department ?? "<no dept>"})`)
-        .join(", ");
-      log.step(`Filtered out ${rejected.length} non-HDH SDCMP result(s): ${summary}`);
-    }
-    if (hdhResults.length > 0) {
-      log.success(`${hdhResults.length} HDH-accepted result(s) after dept filter`);
+    if (options.keepNonHdh) {
+      returnedResults = sdcmpResults;
+      log.step(
+        `keepNonHdh: returning all ${sdcmpResults.length} SDCMP candidate(s) (HDH filter bypassed for verification)`,
+      );
     } else {
-      log.step(`0 HDH-accepted result(s) — all ${sdcmpResults.length} SDCMP candidate(s) rejected by dept filter`);
+      returnedResults = sdcmpResults.filter((r) => isAcceptedDept(r.department));
+      const rejected = sdcmpResults.filter((r) => !isAcceptedDept(r.department));
+      if (rejected.length > 0) {
+        const summary = rejected
+          .map((r) => `EID ${r.emplId} (${r.department ?? "<no dept>"})`)
+          .join(", ");
+        log.step(`Filtered out ${rejected.length} non-HDH SDCMP result(s): ${summary}`);
+      }
+      if (returnedResults.length > 0) {
+        log.success(`${returnedResults.length} HDH-accepted result(s) after dept filter`);
+      } else {
+        log.step(`0 HDH-accepted result(s) — all ${sdcmpResults.length} SDCMP candidate(s) rejected by dept filter`);
+      }
     }
   }
 
   return {
-    found: hdhResults.length > 0,
-    sdcmpResults: hdhResults,
+    found: returnedResults.length > 0,
+    sdcmpResults: returnedResults,
     allAttempts,
   };
+}
+
+/**
+ * Search Person Organizational Summary by Empl ID. Single-result navigation:
+ * PeopleSoft jumps straight to the detail page when EID search returns one
+ * match (which is the common case — EIDs are unique).
+ *
+ * Returns the same EidResult shape as searchByName, populated from the
+ * detail page. Returns null if the detail page didn't render (no record,
+ * stale form, or selector miss).
+ *
+ * Unlike searchByName, this function does NOT apply the HDH dept filter —
+ * the prep-flow verification path needs the raw result so it can surface
+ * non-HDH employees as flagged-but-visible. Callers that want the HDH
+ * filter (none today, since EID-input is prep-flow-only) can apply
+ * `isAcceptedDept(result.department)` themselves.
+ */
+export async function searchByEid(
+  page: Page,
+  emplId: string,
+): Promise<EidResult | null> {
+  log.step(`Person Org Summary search by EID: ${emplId}`);
+  const frame = await navigateToPersonOrgSummary(page);
+
+  // Clear the name fields (search form often retains values across iterations)
+  // and fill the Empl ID textbox. PeopleSoft's Person Org Summary search form
+  // exposes Empl ID alongside Last Name / Name.
+  try {
+    await frame.getByRole("textbox", { name: "Last Name" }).fill("", { timeout: 5_000 });
+  } catch {
+    // Form may have re-rendered; carry on.
+  }
+  try {
+    await frame.getByRole("textbox", { name: "Name", exact: true }).fill("", { timeout: 5_000 });
+  } catch {
+    /* same */
+  }
+
+  const emplIdInput = frame.getByRole("textbox", { name: /Empl(?:oyee)?\s*ID/i });
+  await emplIdInput.fill("", { timeout: 10_000 }).catch(() => {});
+  await emplIdInput.fill(emplId, { timeout: 10_000 });
+
+  await frame.locator(`#${SEARCH_BTN_ID}`).click({ timeout: 10_000 });
+  await page.waitForTimeout(3_000);
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  await waitForPeopleSoftProcessing(frame);
+
+  // PeopleSoft auto-redirects to the detail page when 1 result. Extract.
+  const result = await extractSingleResultDetail(frame);
+  if (!result) {
+    log.warn(`searchByEid: no detail page rendered for EID ${emplId}`);
+    return null;
+  }
+  log.success(`searchByEid: resolved EID ${emplId} → ${result.name}`);
+  return { ...result, emplId };
 }
