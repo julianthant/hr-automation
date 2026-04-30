@@ -1,15 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
-  Camera,
   CheckCircle2,
-  Clock,
-  Copy,
   Loader2,
   RefreshCw,
-  Smartphone,
-  Wifi,
-  WifiOff,
   XOctagon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -433,12 +427,27 @@ export function CaptureModal({
             info={info}
             validation={validation}
             arrivedIndex={arrivedIndex}
+            retrying={retrying}
+            finalizeDisabled={
+              effectiveState !== "open" ||
+              validating ||
+              (validation?.blockers?.length ?? 0) > 0 ||
+              (info?.photos.length ?? 0) === 0
+            }
+            photoCount={info?.photos.length ?? 0}
+            extending={extending}
+            now={now}
             onPhotoView={(idx) => {
               if (!info) return;
               const arr = info.photos.findIndex((p) => p.index === idx);
               setLightboxIndex(arr);
             }}
             onPhotoDelete={(idx) => handleDeletePhoto(idx)}
+            onFinalize={handleFinalize}
+            onRetryHandoff={handleRetryHandoff}
+            onDiscard={handleDiscard}
+            onCloseAndStartNew={() => onOpenChange(false)}
+            onExtend={handleExtend}
           />
         </div>
       </DialogContent>
@@ -634,82 +643,6 @@ function ErrorPanel({ message, onRetry }: { message: string; onRetry: () => void
   );
 }
 
-function PhoneStatusPill({
-  state,
-  phoneConnected,
-  photoCount,
-  sseConnected,
-}: {
-  state: CaptureState;
-  phoneConnected: boolean;
-  photoCount: number;
-  sseConnected: boolean;
-}) {
-  if (isTerminal(state)) return null;
-
-  const tone = pillToneForState(state, phoneConnected);
-  const pulse = state === "open" && phoneConnected && photoCount === 0;
-  const Icon =
-    !sseConnected ? WifiOff
-      : state === "finalizing" ? Loader2
-      : phoneConnected ? Wifi
-      : Smartphone;
-
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      className={cn(
-        "flex items-center gap-2 rounded-md px-2.5 py-1.5",
-        pulse && "capture-anim-connected-pulse",
-      )}
-      style={{
-        backgroundColor: tone.bg,
-        color: tone.fg,
-        borderLeft: `2px solid ${tone.border}`,
-      }}
-    >
-      <Icon
-        aria-hidden
-        className={cn("h-4 w-4", state === "finalizing" && "animate-spin")}
-      />
-      <span className="font-sans text-xs">
-        {!sseConnected
-          ? "Reconnecting…"
-          : state === "finalizing"
-            ? "Bundling photos…"
-            : phoneConnected
-              ? photoCount === 0
-                ? "Phone connected · awaiting photos"
-                : `Phone connected · ${photoCount} photo${photoCount === 1 ? "" : "s"}`
-              : "Waiting for phone to scan QR"}
-      </span>
-    </div>
-  );
-}
-
-function pillToneForState(state: CaptureState, phoneConnected: boolean) {
-  if (state === "finalizing") {
-    return {
-      bg: "var(--capture-warn-bg)",
-      fg: "var(--capture-warn-fg)",
-      border: "var(--capture-warn)",
-    };
-  }
-  if (phoneConnected) {
-    return {
-      bg: "var(--capture-success-bg)",
-      fg: "var(--capture-success-fg)",
-      border: "var(--capture-success)",
-    };
-  }
-  return {
-    bg: "var(--capture-bg-raised)",
-    fg: "var(--capture-fg-muted)",
-    border: "var(--capture-border-strong)",
-  };
-}
-
 function ActionRow({
   state,
   retrying,
@@ -729,55 +662,45 @@ function ActionRow({
   onDiscard: () => void;
   onCloseAndStartNew: () => void;
 }) {
+  void photoCount; // reserved for a future "Finalize · N" UI if it returns.
   if (state === "open") {
     return (
-      <div className="flex gap-2">
+      <div className="grid grid-cols-4 gap-2.5">
         <CtaButton
           variant="primary"
           onClick={onFinalize}
           disabled={finalizeDisabled}
-          className="flex-1"
+          style={{ gridColumn: "span 3" }}
         >
-          <CheckCircle2 aria-hidden className="h-3.5 w-3.5" />
           Finalize
-          {photoCount > 0 && (
-            <span className="font-mono tabular-nums">· {photoCount}</span>
-          )}
         </CtaButton>
-        <CtaButton variant="outline" onClick={onDiscard}>
+        <CtaButton variant="outline" onClick={onDiscard} style={{ gridColumn: "span 1" }}>
           Discard
         </CtaButton>
       </div>
     );
   }
   if (state === "finalizing") {
-    return (
-      <div className="flex flex-col gap-2">
-        <FinalizingBar />
-      </div>
-    );
+    return <FinalizingBar />;
   }
   if (state === "finalized") {
     return (
       <div
         className="flex flex-col gap-1.5 rounded-md p-3"
         style={{
-          backgroundColor: "var(--capture-success-bg)",
-          borderLeft: "2px solid var(--capture-success)",
-          boxShadow: "var(--capture-glow-success)",
+          border: "1px solid var(--capture-border-subtle)",
+          borderLeft: "2px solid var(--capture-border-cta-strong)",
+          backgroundColor: "transparent",
         }}
       >
         <div
-          className="capture-anim-success-pop flex items-center gap-1.5 font-sans text-[11px] uppercase tracking-wider"
-          style={{ color: "var(--capture-success-fg)" }}
+          className="flex items-center gap-1.5 text-[9.5px] uppercase tracking-[0.10em] font-medium"
+          style={{ color: "var(--capture-fg-secondary)" }}
         >
           <CheckCircle2 aria-hidden className="h-4 w-4" />
           Done · sent to handler
         </div>
-        <span
-          className="font-mono text-xs"
-          style={{ color: "var(--capture-fg-muted)" }}
-        >
+        <span className="font-mono text-xs" style={{ color: "var(--capture-fg-muted)" }}>
           Closing automatically…
         </span>
       </div>
@@ -785,8 +708,13 @@ function ActionRow({
   }
   if (state === "finalize_failed") {
     return (
-      <div className="flex flex-col gap-2">
-        <CtaButton variant="primary" onClick={onRetryHandoff} disabled={retrying}>
+      <div className="grid grid-cols-4 gap-2.5">
+        <CtaButton
+          variant="primary"
+          onClick={onRetryHandoff}
+          disabled={retrying}
+          style={{ gridColumn: "span 3" }}
+        >
           {retrying ? (
             <Loader2 aria-hidden className="h-3.5 w-3.5 animate-spin" />
           ) : (
@@ -794,7 +722,7 @@ function ActionRow({
           )}
           Retry handoff
         </CtaButton>
-        <CtaButton variant="outline" onClick={onDiscard}>
+        <CtaButton variant="outline" onClick={onDiscard} style={{ gridColumn: "span 1" }}>
           Discard
         </CtaButton>
       </div>
@@ -802,8 +730,12 @@ function ActionRow({
   }
   if (state === "expired" || state === "discarded") {
     return (
-      <div className="flex gap-2">
-        <CtaButton variant="primary" onClick={onCloseAndStartNew} className="flex-1">
+      <div className="grid grid-cols-4 gap-2.5">
+        <CtaButton
+          variant="primary"
+          onClick={onCloseAndStartNew}
+          style={{ gridColumn: "span 4" }}
+        >
           Close
         </CtaButton>
       </div>
@@ -815,15 +747,18 @@ function ActionRow({
 function FinalizingBar() {
   return (
     <div
-      className="relative h-1.5 overflow-hidden rounded-full"
-      style={{ backgroundColor: "var(--capture-bg-raised)" }}
+      className="relative h-[1.5px] w-full overflow-hidden rounded-full"
+      style={{ backgroundColor: "var(--capture-border-subtle)" }}
       role="progressbar"
       aria-label="Bundling photos"
       aria-busy="true"
     >
       <div
-        className="capture-anim-finalizing-bar absolute inset-y-0 left-0 w-1/2 rounded-full"
-        style={{ backgroundColor: "var(--capture-warn)" }}
+        className="absolute inset-y-0 left-0 w-1/2 rounded-full"
+        style={{
+          backgroundColor: "var(--capture-fg-body)",
+          animation: "finalizing-strip 1.6s var(--cap-ease-smooth) infinite",
+        }}
       />
     </div>
   );
@@ -854,34 +789,40 @@ function ExpiryFooter({
 
   return (
     <div
-      className="flex items-center justify-center gap-2 pt-1 font-mono text-[11px] tabular-nums"
-      style={{ color: "var(--capture-fg-muted)" }}
+      className="flex items-center justify-between text-[11.5px] pt-3.5"
+      style={{
+        borderTop: "1px solid var(--capture-border-subtle)",
+        color: "var(--capture-fg-muted)",
+      }}
     >
-      <Clock aria-hidden className="h-3 w-3" />
-      <span
-        className={cn(
-          "transition-colors",
-          warning && "capture-anim-expiry-warn",
-          critical && "capture-anim-expiry-critical",
-        )}
-      >
-        {mm}:{ss}
+      <span className="flex items-center gap-2">
+        <span
+          className={cn(
+            "font-mono tabular-nums transition-colors",
+            warning && "capture-anim-expiry-warn",
+            critical && "capture-anim-expiry-critical",
+          )}
+          style={{ color: "var(--capture-fg-secondary)" }}
+        >
+          {mm}:{ss}
+        </span>
+        <span>remaining</span>
       </span>
-      <span style={{ color: "var(--capture-fg-faint)" }}>·</span>
       <button
         type="button"
         onClick={onExtend}
         disabled={extending}
-        className="font-sans text-[11px] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 disabled:opacity-50"
+        className="font-sans text-[11.5px] cursor-pointer hover:underline focus-visible:outline-none focus-visible:ring-2 disabled:opacity-50"
         style={{
           color: "var(--capture-fg-secondary)",
+          backgroundColor: "transparent",
+          border: 0,
+          padding: 0,
           ["--tw-ring-color" as string]: "var(--capture-focus-ring)",
         }}
       >
-        {extending ? "extending…" : "extend"}
+        {extending ? "extending…" : "Extend"}
       </button>
-      {/* Hidden invariant: original expiresAt informs default — referenced
-          for debugging/audit but not displayed. */}
       <span className="sr-only">Original expiry: {new Date(expiresAt).toLocaleTimeString()}</span>
     </div>
   );
@@ -897,8 +838,18 @@ interface RightColumnProps {
   info: CaptureSessionInfo | null;
   validation: CaptureValidation | null;
   arrivedIndex: number | null;
+  retrying: boolean;
+  finalizeDisabled: boolean;
+  photoCount: number;
+  extending: boolean;
+  now: number;
   onPhotoView: (photoIndex: number) => void;
   onPhotoDelete: (photoIndex: number) => void;
+  onFinalize: () => void;
+  onRetryHandoff: () => void;
+  onDiscard: () => void;
+  onCloseAndStartNew: () => void;
+  onExtend: () => void;
 }
 
 function RightColumn({
@@ -907,8 +858,18 @@ function RightColumn({
   info,
   validation,
   arrivedIndex,
+  retrying,
+  finalizeDisabled,
+  photoCount,
+  extending,
+  now,
   onPhotoView,
   onPhotoDelete,
+  onFinalize,
+  onRetryHandoff,
+  onDiscard,
+  onCloseAndStartNew,
+  onExtend,
 }: RightColumnProps) {
   if (state === "starting" || state === "error") {
     return (
@@ -921,117 +882,96 @@ function RightColumn({
   const photos = info?.photos ?? [];
   const blurFlaggedCount = photos.filter((p) => p.blurFlagged).length;
   const sessionTerminal = isTerminal(state);
+  const phoneConnected = info?.phoneConnectedAt != null;
 
   return (
-    <div className="flex flex-col gap-3">
-      {/* Header strip */}
-      <div className="flex items-baseline justify-between gap-2">
+    <div className="flex flex-col gap-[22px]">
+      {/* STATUS */}
+      <div>
         <div
-          className="flex items-center gap-2 font-sans text-[11px] uppercase tracking-wider"
+          className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-1"
           style={{ color: "var(--capture-fg-faint)" }}
+        >
+          Status
+        </div>
+        <div
+          className="flex items-center gap-2.5 py-1 text-[12px]"
+          style={{ color: "var(--capture-fg-secondary)" }}
           aria-live="polite"
         >
-          <span style={{ color: "var(--capture-fg-muted)" }}>Live photos</span>
           <span
-            className="font-mono text-[11px] tabular-nums"
-            style={{ color: "var(--capture-fg-primary)" }}
-          >
-            · {photos.length}
-          </span>
-          <StatePill state={state} />
-        </div>
-        {photos.length > 0 && !sessionTerminal && (
-          <span
-            className="font-sans text-[10px]"
-            style={{ color: "var(--capture-fg-faint)" }}
-          >
-            click ✕ to delete
-          </span>
-        )}
-      </div>
-
-      {/* Grid */}
-      <div className="grid grid-cols-4 gap-3">
-        {photos.map((p) => (
-          <CapturePhotoTile
-            key={`${p.index}-${p.uploadedAt}`}
-            photo={p}
-            imageSrc={started ? photoSrc(started.sessionId, p.index) : ""}
-            onView={() => onPhotoView(p.index)}
-            onDelete={sessionTerminal ? undefined : () => onPhotoDelete(p.index)}
-            justArrived={p.index === arrivedIndex}
-            disabled={sessionTerminal}
+            className="inline-block h-[5px] w-[5px] rounded-full shrink-0"
+            style={{ backgroundColor: "var(--capture-fg-secondary)" }}
+            aria-hidden
           />
-        ))}
-        {!sessionTerminal && photos.length < 4 && (
-          <PlaceholderTile />
-        )}
+          <span>{describeStatus(state, phoneConnected, photos.length)}</span>
+        </div>
       </div>
 
-      {/* Validation banner */}
+      {/* PHOTOS */}
+      <div>
+        <div
+          className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2"
+          style={{ color: "var(--capture-fg-faint)" }}
+        >
+          Live photos · <span className="font-mono tabular-nums" style={{ color: "var(--capture-fg-secondary)" }}>{photos.length}</span>
+        </div>
+        <div className="grid grid-cols-4 gap-2.5">
+          {photos.map((p) => (
+            <CapturePhotoTile
+              key={`${p.index}-${p.uploadedAt}`}
+              photo={p}
+              imageSrc={started ? photoSrc(started.sessionId, p.index) : ""}
+              onView={() => onPhotoView(p.index)}
+              onDelete={sessionTerminal ? undefined : () => onPhotoDelete(p.index)}
+              justArrived={p.index === arrivedIndex}
+              disabled={sessionTerminal}
+            />
+          ))}
+          {!sessionTerminal && photos.length < 4 && <PlaceholderTile />}
+        </div>
+      </div>
+
       <ValidationBanner
         validation={validation}
         blurFlaggedCount={blurFlaggedCount}
         photoCount={photos.length}
         active={state === "open"}
       />
+
+      <ActionRow
+        state={state}
+        retrying={retrying}
+        finalizeDisabled={finalizeDisabled}
+        photoCount={photoCount}
+        onFinalize={onFinalize}
+        onRetryHandoff={onRetryHandoff}
+        onDiscard={onDiscard}
+        onCloseAndStartNew={onCloseAndStartNew}
+      />
+
+      <ExpiryFooter
+        expiresAt={started?.expiresAt ?? 0}
+        currentExpiresAt={info?.expiresAt ?? started?.expiresAt ?? 0}
+        now={now}
+        extending={extending}
+        onExtend={onExtend}
+        terminal={isTerminal(state)}
+      />
     </div>
   );
-}
-
-function StatePill({ state }: { state: CaptureState }) {
-  const { label, bg, fg } = statePillTone(state);
-  return (
-    <span
-      className="ml-2 inline-block rounded-sm px-1.5 py-0.5 font-sans text-[10px] font-bold uppercase"
-      style={{
-        backgroundColor: bg,
-        color: fg,
-        letterSpacing: "0.06em",
-        transition: "background-color 200ms var(--cap-ease-smooth), color 200ms var(--cap-ease-smooth)",
-      }}
-      aria-live="polite"
-    >
-      {label}
-    </span>
-  );
-}
-
-function statePillTone(state: CaptureState) {
-  switch (state) {
-    case "starting":
-      return { label: "Starting", bg: "var(--capture-bg-raised)", fg: "var(--capture-fg-secondary)" };
-    case "error":
-      return { label: "Error", bg: "var(--capture-error-bg)", fg: "var(--capture-error-fg)" };
-    case "open":
-      return { label: "Open", bg: "var(--capture-success-bg)", fg: "var(--capture-success-fg)" };
-    case "finalizing":
-      return { label: "Finalizing…", bg: "var(--capture-warn-bg)", fg: "var(--capture-warn-fg)" };
-    case "finalized":
-      return { label: "Done", bg: "var(--capture-success-bg)", fg: "var(--capture-success-fg)" };
-    case "finalize_failed":
-      return { label: "Handoff failed", bg: "var(--capture-error-bg)", fg: "var(--capture-error-fg)" };
-    case "discarded":
-      return { label: "Discarded", bg: "var(--capture-bg-raised)", fg: "var(--capture-fg-muted)" };
-    case "expired":
-      return { label: "Expired", bg: "var(--capture-bg-raised)", fg: "var(--capture-fg-muted)" };
-  }
 }
 
 function PlaceholderTile() {
   return (
     <div
-      className="flex aspect-[3/4] items-center justify-center rounded-md font-sans text-[11px]"
+      className="aspect-[3/4] rounded-md"
       style={{
-        borderWidth: 1.5,
-        borderStyle: "dashed",
-        borderColor: "var(--capture-border-strong)",
-        color: "var(--capture-fg-faint)",
+        border: "1px solid var(--capture-border-subtle)",
+        backgroundColor: "transparent",
       }}
       aria-hidden
-    >
-      awaiting…
-    </div>
+    />
   );
 }
 
@@ -1047,34 +987,29 @@ function ValidationBanner({
   active: boolean;
 }) {
   if (!active) return null;
-
   const blockers = validation?.blockers ?? [];
   const warnings = validation?.warnings ?? [];
 
-  // Server-side blockers first.
   if (blockers.length > 0) {
     return (
       <div
         role="alert"
         className="flex items-start gap-2 rounded-md p-3"
         style={{
-          backgroundColor: "var(--capture-error-bg)",
+          border: "1px solid var(--capture-border-subtle)",
           borderLeft: "2px solid var(--capture-error)",
+          backgroundColor: "transparent",
         }}
       >
-        <XOctagon
-          aria-hidden
-          className="mt-0.5 h-4 w-4 shrink-0"
-          style={{ color: "var(--capture-error-fg)" }}
-        />
+        <XOctagon aria-hidden className="mt-0.5 h-4 w-4 shrink-0" style={{ color: "var(--capture-fg-muted)" }} />
         <div className="flex flex-col gap-0.5">
           <span
-            className="font-sans text-[11px] uppercase tracking-wider"
-            style={{ color: "var(--capture-error-fg)" }}
+            className="text-[9.5px] uppercase tracking-[0.10em] font-medium"
+            style={{ color: "var(--capture-fg-muted)" }}
           >
             Can't finalize
           </span>
-          <span className="font-sans text-[13px]" style={{ color: "var(--capture-fg-secondary)" }}>
+          <span className="font-sans text-[13px]" style={{ color: "var(--capture-fg-body)" }}>
             {blockers.join(" · ")}
           </span>
         </div>
@@ -1085,12 +1020,9 @@ function ValidationBanner({
   const allWarnings = [
     ...warnings,
     ...(blurFlaggedCount > 0
-      ? [
-          `${blurFlaggedCount} photo${blurFlaggedCount === 1 ? "" : "s"} flagged as blurry — review before finalizing`,
-        ]
+      ? [`${blurFlaggedCount} photo${blurFlaggedCount === 1 ? "" : "s"} flagged as blurry — review before finalizing`]
       : []),
   ];
-
   if (allWarnings.length === 0 || photoCount === 0) return null;
 
   return (
@@ -1099,26 +1031,20 @@ function ValidationBanner({
       aria-live="polite"
       className="flex items-start gap-2 rounded-md p-3"
       style={{
-        backgroundColor: "var(--capture-warn-bg)",
+        border: "1px solid var(--capture-border-subtle)",
         borderLeft: "2px solid var(--capture-warn)",
+        backgroundColor: "transparent",
       }}
     >
-      <AlertTriangle
-        aria-hidden
-        className="mt-0.5 h-4 w-4 shrink-0"
-        style={{ color: "var(--capture-warn-fg)" }}
-      />
+      <AlertTriangle aria-hidden className="mt-0.5 h-4 w-4 shrink-0" style={{ color: "var(--capture-warn)" }} />
       <div className="flex flex-col gap-0.5">
         <span
-          className="font-sans text-[11px] uppercase tracking-wider"
-          style={{ color: "var(--capture-warn-fg)" }}
+          className="text-[9.5px] uppercase tracking-[0.10em] font-medium"
+          style={{ color: "var(--capture-fg-muted)" }}
         >
           Heads up
         </span>
-        <ul
-          className="font-sans text-[13px] leading-relaxed"
-          style={{ color: "var(--capture-fg-secondary)" }}
-        >
+        <ul className="font-sans text-[13px] leading-relaxed" style={{ color: "var(--capture-fg-body)" }}>
           {allWarnings.map((w, i) => (
             <li key={i}>· {w}</li>
           ))}
@@ -1138,49 +1064,57 @@ interface CtaButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 function CtaButton({ variant, className, children, style, ...rest }: CtaButtonProps) {
+  const isPrimary = variant === "primary";
   const base = cn(
-    "inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 font-sans text-[13px] transition-colors",
+    "inline-flex items-center justify-center gap-1.5 rounded-[7px] px-3.5 py-2.5 font-sans text-[12.5px] font-medium",
+    "border transition-colors",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
-    "disabled:cursor-not-allowed disabled:opacity-50",
+    "disabled:cursor-not-allowed",
     "cursor-pointer",
-    variant === "primary" ? "font-semibold" : "font-medium",
     className,
   );
-  const variantStyle =
-    variant === "primary"
-      ? {
-          backgroundColor: "var(--capture-success)",
-          color: "hsl(150 80% 5%)",
-        }
-      : {
-          backgroundColor: "transparent",
-          color: "var(--capture-fg-secondary)",
-          borderColor: "var(--capture-border-strong)",
-          borderWidth: 1,
-        };
+  const variantStyle = isPrimary
+    ? {
+        backgroundColor: "transparent",
+        color: "var(--capture-fg-primary)",
+        borderColor: "var(--capture-border-cta)",
+      }
+    : {
+        backgroundColor: "transparent",
+        color: "var(--capture-fg-muted)",
+        borderColor: "var(--capture-border-subtle)",
+      };
+  const disabledStyle = rest.disabled
+    ? {
+        color: "var(--capture-fg-faint)",
+        borderColor: "var(--capture-border-subtle)",
+        cursor: "not-allowed" as const,
+      }
+    : {};
   return (
     <button
       {...rest}
       className={base}
       style={{
         ...variantStyle,
+        ...disabledStyle,
         ["--tw-ring-color" as string]: "var(--capture-focus-ring)",
         ["--tw-ring-offset-color" as string]: "var(--capture-bg-modal)",
         ...style,
       }}
       onMouseOver={(e) => {
-        if (variant === "primary") {
-          (e.currentTarget as HTMLButtonElement).style.backgroundColor = "var(--capture-success-hover)";
-        } else {
-          (e.currentTarget as HTMLButtonElement).style.backgroundColor = "var(--capture-bg-raised)";
+        if (!rest.disabled) {
+          (e.currentTarget as HTMLButtonElement).style.borderColor = isPrimary
+            ? "var(--capture-border-cta-strong)"
+            : "var(--capture-border-cta)";
         }
         rest.onMouseOver?.(e);
       }}
       onMouseOut={(e) => {
-        if (variant === "primary") {
-          (e.currentTarget as HTMLButtonElement).style.backgroundColor = "var(--capture-success)";
-        } else {
-          (e.currentTarget as HTMLButtonElement).style.backgroundColor = "transparent";
+        if (!rest.disabled) {
+          (e.currentTarget as HTMLButtonElement).style.borderColor = isPrimary
+            ? "var(--capture-border-cta)"
+            : "var(--capture-border-subtle)";
         }
         rest.onMouseOut?.(e);
       }}
@@ -1201,6 +1135,3 @@ function isTerminal(state: CaptureState): boolean {
   );
 }
 
-// Suppress unused-import warnings — Camera is exported alongside icons in
-// case a future variant needs the camera glyph (e.g. "no photos yet" empty state).
-void Camera;
