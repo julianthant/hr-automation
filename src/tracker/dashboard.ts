@@ -2292,7 +2292,20 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         const targetDate = date || today;
         for (const w of workflows) {
           const all = readEntriesForDate(w, targetDate, dir);
-          wfCounts[w] = new Set(all.map((e) => e.id)).size;
+          // Dedupe by id and exclude resolved prep rows (operator-approved
+          // or operator-discarded) so the sidebar badge stays in sync with
+          // QueuePanel's visible-entries filter.
+          const latestById = new Map<string, TrackerEntry>();
+          for (const e of all) {
+            const prev = latestById.get(e.id);
+            if (!prev || prev.timestamp <= e.timestamp) latestById.set(e.id, e);
+          }
+          let count = 0;
+          for (const e of latestById.values()) {
+            if (isResolvedPrepEntry(e)) continue;
+            count++;
+          }
+          wfCounts[w] = count;
           const n = computeFailureCounts(all);
           if (n > 0) failureCounts[w] = n;
         }

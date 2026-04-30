@@ -98,6 +98,10 @@ export const QUICK_RUN_REGISTRY: Record<string, QuickRunConfig> = {
     placeholder: 'Enter names, semicolon-separated (e.g. Smith, John; Doe, Jane)',
     parseInput: parseSemicolonSeparated("name"),
   },
+  "oath-signature": {
+    placeholder: "Enter EIDs, comma-separated (e.g. 10873611, 10873075)",
+    parseInput: parseCommaSeparated("emplId"),
+  },
 };
 
 export function getQuickRunConfig(workflow: string): QuickRunConfig | undefined {

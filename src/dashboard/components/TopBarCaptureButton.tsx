@@ -38,8 +38,7 @@ export function TopBarCaptureButton({ workflow, contextHint }: TopBarCaptureButt
         aria-label={registration.label}
         title={registration.label}
         className={cn(
-          "h-8 px-3 inline-flex items-center gap-1.5 rounded-lg",
-          "text-sm font-medium",
+          "h-8 w-8 flex items-center justify-center rounded-lg",
           "bg-secondary text-foreground border border-border",
           "hover:bg-accent",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1",
@@ -47,7 +46,6 @@ export function TopBarCaptureButton({ workflow, contextHint }: TopBarCaptureButt
         )}
       >
         <Camera aria-hidden className="h-3.5 w-3.5" />
-        <span>{registration.label}</span>
       </button>
       <CaptureModal
         open={open}
