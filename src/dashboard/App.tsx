@@ -259,7 +259,9 @@ export default function App() {
         {reviewingPrepId &&
           (() => {
             const prepEntry = entries.find(
-              (e) => (e.runId ?? e.id) === reviewingPrepId,
+              (e) =>
+                (e.runId ?? e.id) === reviewingPrepId &&
+                e.data?.mode === "prepare",
             );
             return prepEntry ? (
               <PrepReviewPane

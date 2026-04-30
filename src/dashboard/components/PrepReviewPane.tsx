@@ -86,6 +86,37 @@ export function PrepReviewPane({ entry, onClose }: PrepReviewPaneProps) {
     recordCount: records.length,
   });
 
+  // IntersectionObserver: track which pair is currently most-visible in the
+  // scroll viewport and report it to usePrepCursor for localStorage
+  // persistence. Replaces an earlier onMouseEnter wiring that only fired
+  // when the operator actively hovered — keyboard / trackpad / scrollbar
+  // scrolling all silently failed to update the cursor under that scheme.
+  useEffect(() => {
+    const root = containerRef.current;
+    if (!root) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        let bestRatio = 0;
+        let bestIndex: number | null = null;
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          if (e.intersectionRatio > bestRatio) {
+            bestRatio = e.intersectionRatio;
+            const attr = (e.target as HTMLElement).dataset.pairIndex;
+            if (attr) bestIndex = Number(attr);
+          }
+        }
+        if (bestIndex !== null && Number.isFinite(bestIndex)) {
+          onPairVisible(bestIndex);
+        }
+      },
+      { root, threshold: [0.25, 0.5, 0.75, 1] },
+    );
+    const targets = root.querySelectorAll<HTMLElement>("[data-pair-index]");
+    targets.forEach((t) => observer.observe(t));
+    return () => observer.disconnect();
+  }, [containerRef, onPairVisible, records.length]);
+
   // Group records by sourcePage (preserve original-input ordering inside each group)
   const grouped = useMemo(() => {
     const map = new Map<number, Array<{ record: AnyPreviewRecord; originalIndex: number }>>();
@@ -198,7 +229,6 @@ export function PrepReviewPane({ entry, onClose }: PrepReviewPaneProps) {
               <div
                 key={page}
                 data-pair-index={originalIndex}
-                onMouseEnter={() => onPairVisible(originalIndex)}
               >
                 <PrepReviewPair
                   workflow={entry.workflow as "emergency-contact" | "oath-signature"}
@@ -219,7 +249,6 @@ export function PrepReviewPane({ entry, onClose }: PrepReviewPaneProps) {
             <div
               key={originalIndex}
               data-pair-index={originalIndex}
-              onMouseEnter={() => onPairVisible(originalIndex)}
             >
               {renderFormCard({
                 record,
@@ -249,9 +278,11 @@ export function PrepReviewPane({ entry, onClose }: PrepReviewPaneProps) {
 function isApprovable(record: AnyPreviewRecord): boolean {
   const matchOk = record.matchState === "matched" || record.matchState === "resolved";
   const notUnknown = record.documentType !== "unknown";
-  // Verification is best-effort — when stage 5 hasn't run we don't gate on
-  // it. Once it lands, only `verified` qualifies.
-  const verifyOk = record.verification ? record.verification.state === "verified" : true;
+  // Strict gate: verification must have run AND landed on `verified`. An
+  // absent verification means stage 5 (Person Org Summary lookup) hasn't
+  // completed for this record yet — keep it out of the approve fan-out
+  // until it has, so we never enqueue an unverified employee.
+  const verifyOk = record.verification?.state === "verified";
   return matchOk && notUnknown && verifyOk;
 }
 

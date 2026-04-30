@@ -161,6 +161,7 @@ export function parsePrepareRowData(
     pdfOriginalName: rawData.pdfOriginalName ?? "",
     rosterMode: rawData.rosterMode === "download" ? "download" : "existing",
     rosterPath: rawData.rosterPath ?? "",
+    pageImagesDir: rawData.pageImagesDir || undefined,
     records,
     ocrProvider: rawData.ocrProvider,
     ocrAttempts: rawData.ocrAttempts ? Number(rawData.ocrAttempts) : undefined,
