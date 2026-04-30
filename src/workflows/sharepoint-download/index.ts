@@ -23,6 +23,7 @@ export {
   buildSharePointRosterDownloadHandler,
   buildSharePointListHandler,
   isDownloadInFlight,
+  getSharePointDownloadStatus,
   _resetInFlightForTests,
 } from "./handler.js";
 export type {

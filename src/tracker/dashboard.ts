@@ -56,6 +56,7 @@ import { notify } from "./notify.js";
 import {
   buildSharePointRosterDownloadHandler,
   buildSharePointListHandler,
+  getSharePointDownloadStatus,
 } from "../workflows/sharepoint-download/index.js";
 import {
   handlePrepareUpload,
@@ -2473,6 +2474,51 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/prep/pdf-page") {
+      const wf = url.searchParams.get("workflow") ?? "";
+      const parentRunId = url.searchParams.get("parentRunId") ?? "";
+      const page = parseInt(url.searchParams.get("page") ?? "0", 10);
+
+      if (!/^[a-z0-9-]+$/.test(wf) || wf.length > 64) {
+        res.writeHead(400, { "Access-Control-Allow-Origin": "*" });
+        res.end("invalid workflow");
+        return;
+      }
+      if (!/^[A-Za-z0-9._@#-]+$/.test(parentRunId) || parentRunId.length > 256) {
+        res.writeHead(400, { "Access-Control-Allow-Origin": "*" });
+        res.end("invalid parentRunId");
+        return;
+      }
+      if (!Number.isFinite(page) || page < 1 || page > 9999) {
+        res.writeHead(400, { "Access-Control-Allow-Origin": "*" });
+        res.end("invalid page");
+        return;
+      }
+
+      const filename = `page-${String(page).padStart(2, "0")}.png`;
+      const safeBase = resolve(process.cwd(), ".tracker", "uploads", parentRunId);
+      const safePath = resolve(safeBase, filename);
+      if (!safePath.startsWith(safeBase + sep)) {
+        res.writeHead(400, { "Access-Control-Allow-Origin": "*" });
+        res.end("path traversal");
+        return;
+      }
+      try {
+        const stat = await statAsync(safePath);
+        res.writeHead(200, {
+          "Content-Type": "image/png",
+          "Content-Length": stat.size,
+          "Cache-Control": "public, max-age=86400",
+          "Access-Control-Allow-Origin": "*",
+        });
+        createReadStream(safePath).pipe(res);
+      } catch {
+        res.writeHead(404, { "Access-Control-Allow-Origin": "*" });
+        res.end("not found");
+      }
+      return;
+    }
+
     if (url.pathname.startsWith("/screenshots/")) {
       const filename = decodeURIComponent(url.pathname.slice("/screenshots/".length));
       const resolved = resolveScreenshotPath(filename);
@@ -2507,6 +2553,18 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         "Access-Control-Allow-Origin": "*",
       });
       res.end(JSON.stringify(list));
+      return;
+    }
+
+    if (
+      req.method === "GET" &&
+      url.pathname === "/api/sharepoint-download/status"
+    ) {
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(JSON.stringify(getSharePointDownloadStatus()));
       return;
     }
 
