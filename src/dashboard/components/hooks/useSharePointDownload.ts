@@ -3,7 +3,14 @@ import { useCallback, useState } from "react";
 export interface DownloadStatus {
   inFlight: boolean;
   inFlightId: string | null;
-  lastCompletion: { id: string; ts: string; ok: boolean; error?: string } | null;
+  lastCompletion: {
+    id: string;
+    ts: string;
+    ok: boolean;
+    path?: string;
+    filename?: string;
+    error?: string;
+  } | null;
 }
 
 /**
@@ -56,17 +63,12 @@ export function useSharePointDownload(specId: string) {
             setDownloading(false);
             return null;
           }
-          // Path is the saved file — backend response shape includes it
-          // on completion.
-          const successPath = ((): string => {
-            // The /run handler returns 202 immediately and doesn't have
-            // the path yet. The status endpoint's lastCompletion only
-            // carries id/ts/ok/error. To get the path, read the saved
-            // path off the run handler's response if it lands. For now
-            // return a sentinel — callers re-fetch /api/rosters to pick
-            // up the freshly-downloaded file.
-            return "(see /api/rosters)";
-          })();
+          // The /api/sharepoint-download/status endpoint surfaces the
+          // saved path on lastCompletion (handler picks it up from the
+          // workflow's module-level slot after runWorkflow returns).
+          // Fall back to /api/rosters if it's missing (older backend or
+          // a handler bug) — callers can still re-fetch the listing.
+          const successPath = completion.path ?? "(see /api/rosters)";
           setResultPath(successPath);
           setDownloading(false);
           return successPath;

@@ -23,6 +23,7 @@ import { runWorkflow } from "../../core/index.js";
 import {
   sharepointDownloadWorkflow,
   _setPendingLandingUrl,
+  _takeLastDownloadResult,
 } from "./workflow.js";
 import {
   SHAREPOINT_DOWNLOADS,
@@ -84,7 +85,14 @@ export interface SharePointDownloadListItem {
 let rosterDownloadInFlight = false;
 let inFlightId: string | null = null;
 let lastCompletion:
-  | { id: string; ts: string; ok: boolean; error?: string }
+  | {
+      id: string;
+      ts: string;
+      ok: boolean;
+      path?: string;
+      filename?: string;
+      error?: string;
+    }
   | null = null;
 
 /** Test-only hook: reset the in-flight lock between test cases. */
@@ -93,6 +101,8 @@ export function _resetInFlightForTests(): void {
   inFlightId = null;
   lastCompletion = null;
   _setPendingLandingUrl(null);
+  // Drain any stale download result the workflow may have left behind.
+  _takeLastDownloadResult();
 }
 
 /** Test-only: peek at the lock state. */
@@ -113,7 +123,14 @@ export function isDownloadInFlight(): boolean {
 export function getSharePointDownloadStatus(): {
   inFlight: boolean;
   inFlightId: string | null;
-  lastCompletion: { id: string; ts: string; ok: boolean; error?: string } | null;
+  lastCompletion: {
+    id: string;
+    ts: string;
+    ok: boolean;
+    path?: string;
+    filename?: string;
+    error?: string;
+  } | null;
 } {
   return { inFlight: rosterDownloadInFlight, inFlightId, lastCompletion };
 }
@@ -239,14 +256,24 @@ export function buildSharePointRosterDownloadHandler(
           outDir,
         });
         log.success(`SharePoint download complete (${spec.id})`);
+        // Pick up the saved path/filename the workflow stashed in its
+        // module-level slot (see workflow.ts `_takeLastDownloadResult`).
+        // `take` clears the slot so a future failed run can't surface a
+        // stale path.
+        const downloadResult = _takeLastDownloadResult();
         lastCompletion = {
           id: spec.id,
           ts: new Date().toISOString(),
           ok: true,
+          path: downloadResult?.path,
+          filename: downloadResult?.filename,
         };
       } catch (e) {
         const err = errorMessage(e);
         log.error(`SharePoint download failed (${spec.id}): ${err}`);
+        // Drain the slot even on failure — a partial run might still have
+        // written a path before throwing.
+        _takeLastDownloadResult();
         lastCompletion = {
           id: spec.id,
           ts: new Date().toISOString(),

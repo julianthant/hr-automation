@@ -57,6 +57,27 @@ export function _setPendingLandingUrl(url: string | null): void {
   pendingLandingUrl = url;
 }
 
+/**
+ * Module-level "last completed download" result. Set by the handler step
+ * after `saveAs` succeeds; consumed by the HTTP handler's `.finally` block
+ * via `_takeLastDownloadResult()` so the status endpoint can surface the
+ * actual saved path to polling clients (e.g. `useSharePointDownload`).
+ *
+ * Single-slot is safe under the same in-flight lock (`rosterDownloadInFlight`
+ * in handler.ts) that protects `pendingLandingUrl`. The `take`-style read
+ * clears the slot so a stale path can't leak across runs if a future
+ * caller forgets to set it.
+ */
+let lastDownloadResult: { path: string; filename: string } | null = null;
+export function _takeLastDownloadResult(): {
+  path: string;
+  filename: string;
+} | null {
+  const result = lastDownloadResult;
+  lastDownloadResult = null;
+  return result;
+}
+
 async function sharepointLogin(page: Page, instance?: string): Promise<void> {
   if (!pendingLandingUrl) {
     throw new Error(
@@ -128,6 +149,9 @@ export const sharepointDownloadWorkflow: RegisteredWorkflow<
       const outDir = input.outDir ?? "src/data";
       const { path: saved, filename } = await captureExcelDownload(page, outDir);
       ctx.updateData({ filename, path: saved });
+      // Stash the result for the HTTP handler to pick up (see
+      // _takeLastDownloadResult docs above).
+      lastDownloadResult = { path: saved, filename };
     });
   },
 });
