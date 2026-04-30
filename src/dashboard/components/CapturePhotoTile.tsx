@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, X } from "lucide-react";
+import { X } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { CapturePhotoSummary } from "./capture-types";
@@ -73,26 +73,21 @@ export function CapturePhotoTile({
       }}
       className={cn(
         "group relative aspect-[3/4] overflow-hidden rounded-md",
-        "border transition-shadow",
+        "transition-shadow",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
-        photo.blurFlagged ? "border-transparent" : "border-[var(--capture-border-strong)]",
-        !disabled && "cursor-pointer hover:shadow-lg",
+        !disabled && "cursor-pointer hover:shadow-md",
         disabled && "opacity-60 cursor-not-allowed",
-        justArrived && !photo.blurFlagged && "capture-anim-thumb-enter",
-        photo.blurFlagged && "capture-anim-thumb-enter",
+        justArrived && "capture-anim-thumb-enter",
       )}
       style={{
         backgroundColor: "var(--capture-bg-raised)",
         outlineColor: photo.blurFlagged ? "var(--capture-warn)" : "transparent",
-        outlineWidth: photo.blurFlagged ? 2 : 0,
+        outlineWidth: photo.blurFlagged ? 1 : 0,
         outlineStyle: "solid",
-        outlineOffset: -2,
-        // CSS focus-visible ring color
+        outlineOffset: -1,
         ["--tw-ring-color" as string]: "var(--capture-focus-ring)",
       }}
     >
-      {/* Image — tolerates 404 (e.g. before the photo file lands on disk
-          or after a delete races with state). */}
       {!imageError ? (
         <img
           src={imageSrc}
@@ -111,34 +106,18 @@ export function CapturePhotoTile({
         </div>
       )}
 
-      {/* Index badge */}
-      <span
-        className="absolute left-1.5 top-1.5 rounded-sm px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums"
-        style={{
-          backgroundColor: "hsl(15 11% 7% / 0.72)",
-          color: "var(--capture-fg-primary)",
-        }}
-        aria-hidden
-      >
-        {photo.index + 1}
-      </span>
-
-      {/* Blur badge — color + icon + word per visual direction §1.2 */}
+      {/* Blur label — text-only mono caps, flashes once on transition. */}
       {photo.blurFlagged && (
         <span
           key={flashKey}
-          className="capture-anim-blur-flash absolute right-1.5 top-1.5 inline-flex items-center gap-0.5 rounded-sm px-1.5 py-0.5 font-sans text-[10px] font-semibold uppercase"
-          style={{
-            backgroundColor: "var(--capture-warn)",
-            color: "hsl(30 100% 7%)",
-          }}
+          className="capture-anim-blur-flash absolute right-1.5 bottom-1.5 font-sans text-[9px] uppercase tracking-[0.08em] font-medium"
+          style={{ color: "var(--capture-warn)" }}
         >
-          <AlertTriangle aria-hidden className="h-3 w-3" />
-          blur
+          blurry
         </span>
       )}
 
-      {/* Hover/focus delete overlay */}
+      {/* Hover/focus delete overlay — outlined ghost circle. */}
       {onDelete && !disabled && (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -151,14 +130,15 @@ export function CapturePhotoTile({
               }}
               tabIndex={0}
               className={cn(
-                "absolute right-1 bottom-1 inline-flex h-7 w-7 items-center justify-center rounded-full",
+                "absolute right-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-full",
                 "opacity-0 transition-opacity duration-150",
                 "group-hover:opacity-100 focus-visible:opacity-100",
                 "focus-visible:outline-none focus-visible:ring-2",
               )}
               style={{
-                backgroundColor: "hsl(15 11% 7% / 0.85)",
-                color: "var(--capture-fg-primary)",
+                backgroundColor: "var(--capture-bg-modal)",
+                color: "var(--capture-fg-secondary)",
+                border: "1px solid var(--capture-border-strong)",
                 ["--tw-ring-color" as string]: "var(--capture-focus-ring)",
               }}
             >
