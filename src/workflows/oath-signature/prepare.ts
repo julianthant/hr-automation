@@ -19,6 +19,39 @@ import {
 
 const WORKFLOW = "oath-signature";
 
+const OATH_OCR_PROMPT = `You are an OCR system. Extract structured data from the attached PDF.
+
+The PDF is a stack of paper oath signature documents in one of three formats — each page is one of:
+- "signin"  — multi-row sign-in sheet (many records per page)
+- "upay585" — single-form per page, UPAY585 (1997, includes Patent Acknowledgment)
+- "upay586" — single-form per page, UPAY586 (2015 DocuSign, oath only)
+- "unknown" — blank, irrelevant, or doesn't match any of the above
+
+For each page you process:
+
+1. Classify the document type. Map "signin" / "upay585" / "upay586" to \`documentType: "expected"\`; "unknown" → \`documentType: "unknown"\`.
+
+2. For each record extract:
+   - printedName (always)
+   - employeeId if visible on the form
+   - dateSigned if visible
+   - employeeSigned: whether the employee/officer signature line is filled (a scribble counts; an empty box doesn't)
+   - officerSigned: whether the authorized-official / witness signature is filled. For sign-in sheets that only have a single signature column, set \`officerSigned\` to null. For UPAY585/UPAY586, false when the column is empty.
+
+3. After extraction, report which expected fields were BLANK or ILLEGIBLE on the paper:
+   - printedName (always expected)
+   - dateSigned (only for signed records)
+   - employeeSigned (if false, treat the missing employee signature as a blank field worth flagging)
+   - officerSigned (if false on a UPAY585/UPAY586, flag it; if null on a signin, do not flag)
+
+   Add the names of any blank/illegible expected fields to \`originallyMissing\` on each record.
+
+Field-level rules:
+- One record per signer (multi-row sign-in sheets emit multiple records per page; single-form pages emit one).
+- For handwritten text, use your best transcription. If a field is illegible, set it to null and add it to \`originallyMissing\`.
+- dateSigned should be transcribed as it appears on the paper (typical formats: MM/DD/YYYY or M/D/YY).
+- Output ONLY valid JSON matching the schema. No commentary.`;
+
 /** Auto-accept threshold for roster name match. Below → eid-lookup. */
 const ROSTER_AUTO_ACCEPT = 0.85;
 
@@ -156,6 +189,7 @@ export async function runPaperOathPrepare(
     const ocrResult = await ocrFn({
       pdfPath: input.pdfPath,
       schema: OathOcrOutputSchema,
+      prompt: OATH_OCR_PROMPT,
       schemaName: "oath-roster-batch",
     });
     log.step(
