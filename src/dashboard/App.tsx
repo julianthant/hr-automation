@@ -4,6 +4,7 @@ import { TooltipProvider } from "./components/ui/tooltip";
 import { TopBar } from "./components/TopBar";
 import { QueuePanel } from "./components/QueuePanel";
 import { LogPanel } from "./components/LogPanel";
+import { PrepReviewPane } from "./components/PrepReviewPane";
 import { TerminalDrawer } from "./components/TerminalDrawer";
 import { TerminalDrawerProvider } from "./components/hooks/useTerminalDrawer";
 import { useEntries } from "./components/hooks/useEntries";
@@ -46,6 +47,7 @@ export default function App() {
   const initial = useMemo(readUrlState, []);
   const [workflow, setWorkflow] = useState(initial.workflow);
   const [selectedId, setSelectedId] = useState<string | null>(initial.selectedId);
+  const [reviewingPrepId, setReviewingPrepId] = useState<string | null>(null);
   const [date, setDate] = useState(initial.date);
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   // Status map for the currently-watched (workflow, date). Reset whenever
@@ -224,7 +226,14 @@ export default function App() {
           entries={entries}
           workflow={workflow}
           selectedId={selectedId}
-          onSelect={setSelectedId}
+          onSelect={(id) => {
+            // Selecting another queue entry exits review mode (preserving
+            // localStorage edits per spec — only Approve / Discard wipe).
+            setReviewingPrepId(null);
+            setSelectedId(id);
+          }}
+          reviewingPrepId={reviewingPrepId}
+          onOpenReview={(runId) => setReviewingPrepId(runId)}
           loading={loading}
           runControlsSlot={
             <>
@@ -245,11 +254,23 @@ export default function App() {
             </>
           }
         />
-        <LogPanel
-          entry={selectedEntry}
-          workflow={workflow}
-          date={date}
-        />
+        {reviewingPrepId &&
+          (() => {
+            const prepEntry = entries.find(
+              (e) => (e.runId ?? e.id) === reviewingPrepId,
+            );
+            return prepEntry ? (
+              <PrepReviewPane
+                entry={prepEntry}
+                onClose={() => setReviewingPrepId(null)}
+              />
+            ) : (
+              <LogPanel entry={selectedEntry} workflow={workflow} date={date} />
+            );
+          })()}
+        {!reviewingPrepId && (
+          <LogPanel entry={selectedEntry} workflow={workflow} date={date} />
+        )}
       </div>
       <TerminalDrawer connected={connected} />
     </div>
