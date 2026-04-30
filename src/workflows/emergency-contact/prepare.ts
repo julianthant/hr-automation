@@ -2,9 +2,12 @@ import { existsSync, mkdirSync, readFileSync, statSync, watch as fsWatch } from 
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { ocrDocument, type OcrRequest, type OcrResult } from "../../ocr/index.js";
+import { renderPdfPagesToPngs } from "../../ocr/render-pages.js";
 import { dateLocal, trackEvent } from "../../tracker/jsonl.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
+import { isAcceptedDept } from "../eid-lookup/search.js";
+import type { Verification } from "./preview-schema.js";
 import {
   findLatestRoster,
   loadRoster,
@@ -92,8 +95,18 @@ export function __setOcrForTests(fn: OcrFn | undefined): void {
   _ocrFn = fn;
 }
 
+/**
+ * Test stub signature for the eid-lookup enqueue. Each input carries the
+ * orchestrator-stamped `__itemId` so the test can write back JSONL rows
+ * keyed by the same id the watcher is looking for. Input-shape union:
+ *   - `{ name }`   — Path A (stage 4: unmatched-name lookup, prefix `ec-prep-`)
+ *   - `{ emplId }` — Path B (stage 5: verification-only, prefix `ec-verify-`)
+ */
+type EnqueueItem =
+  | { name: string; __prepIndex: number; __itemId: string }
+  | { emplId: string; __prepIndex: number; __itemId: string };
 type EidLookupEnqueueFn = (
-  inputs: Array<{ name: string; __prepIndex: number }>,
+  inputs: EnqueueItem[],
   parentRunId: string,
 ) => Promise<void>;
 let _eidLookupEnqueueFn: EidLookupEnqueueFn | undefined;
@@ -272,6 +285,22 @@ export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
       }
     }
 
+    // ── 4b. Render PDF pages for the dashboard preview pane (best-effort).
+    let pageImagesDir: string | undefined;
+    try {
+      const targetDir = join(input.uploadsDir, runId);
+      const pageFilenames = await renderPdfPagesToPngs(input.pdfPath, targetDir);
+      if (pageFilenames.length > 0) {
+        // Persist a path relative to .tracker so the dashboard endpoint
+        // can resolve it (`<cwd>/.tracker/uploads/<runId>/page-NN.png`).
+        pageImagesDir = targetDir;
+        log.step(`[prepare] Rendered ${pageFilenames.length} page preview(s) → ${pageImagesDir}`);
+      }
+    } catch (err) {
+      // renderPdfPagesToPngs already swallows errors; this is double-safety.
+      log.warn(`[prepare] Page render skipped: ${errorMessage(err)}`);
+    }
+
     // ── 5. Build the final data object
     const finalData: PrepareRowData = {
       mode: "prepare",
@@ -279,6 +308,7 @@ export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
       pdfOriginalName: input.pdfOriginalName,
       rosterMode: input.rosterMode,
       rosterPath: rosterRef.filename,
+      pageImagesDir,
       records,
       ocrProvider: ocrResult.provider,
       ocrAttempts: ocrResult.attempts,
@@ -286,20 +316,27 @@ export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
     };
     PrepareRowDataSchema.parse(finalData); // throws if invariants broken
 
-    // ── 6. If all records have a terminal matchState, write done now.
-    let pendingCount = 0;
+    // ── 6. Plan stages 4 (eid-lookup) + 5 (verification).
+    let pendingNameCount = 0;
+    let pendingVerifyCount = 0;
     for (const r of records) {
-      if (r.matchState === "lookup-pending") pendingCount += 1;
+      if (r.matchState === "lookup-pending") {
+        pendingNameCount += 1;
+      } else if (
+        r.employee.employeeId &&
+        (r.matchState === "matched" || r.matchState === "resolved")
+      ) {
+        pendingVerifyCount += 1;
+      }
     }
-    if (pendingCount === 0) {
+    if (pendingNameCount === 0 && pendingVerifyCount === 0) {
       writeTracker("done", finalData);
-      log.success(`[prepare] All ${records.length} record(s) matched without eid-lookup`);
+      log.success(`[prepare] All ${records.length} record(s) terminal without eid-lookup`);
     } else {
       writeTracker("running", finalData, "eid-lookup");
       log.step(
-        `[prepare] ${pendingCount} record(s) need eid-lookup — kicking off async`,
+        `[prepare] ${pendingNameCount} name lookup(s) + ${pendingVerifyCount} verify(s) — kicking off async`,
       );
-      // Fire async; HTTP handler returns immediately after this function returns.
       void resolveEidsAsync(runId, id, finalData, trackerDir).catch((err) => {
         log.warn(`[prepare] resolveEidsAsync threw: ${errorMessage(err)}`);
       });
@@ -332,10 +369,20 @@ async function resolveEidsAsync(
   data: PrepareRowData,
   trackerDir?: string,
 ): Promise<void> {
-  const pending = data.records
+  // Path A — records that need name-search (also produces verification side-effect)
+  const pendingName = data.records
     .map((r, i) => ({ r, i }))
     .filter(({ r }) => r.matchState === "lookup-pending");
-  if (pending.length === 0) return;
+  // Path B — records with an EID that need a dedicated verification call
+  const pendingVerify = data.records
+    .map((r, i) => ({ r, i }))
+    .filter(
+      ({ r }) =>
+        Boolean(r.employee.employeeId) &&
+        (r.matchState === "matched" || r.matchState === "resolved"),
+    );
+
+  if (pendingName.length === 0 && pendingVerify.length === 0) return;
 
   const writeRunningEidLookup = (): void => {
     trackEvent(
@@ -366,41 +413,55 @@ async function resolveEidsAsync(
     );
   };
 
-  // ── Enqueue eid-lookup items (one per pending record).
-  const lookupInputs = pending.map(({ r, i }) => ({
-    name: r.employee.name,
-    __prepIndex: i,
-  }));
+  // ── Build the combined enqueue list (Path A: ec-prep-, Path B: ec-verify-).
+  const enqueueItems: EnqueueItem[] = [
+    ...pendingName.map(({ r, i }) => ({
+      name: r.employee.name,
+      __prepIndex: i,
+      __itemId: `ec-prep-${runId}-r${i}`,
+    })),
+    ...pendingVerify.map(({ r, i }) => ({
+      emplId: r.employee.employeeId,
+      __prepIndex: i,
+      __itemId: `ec-verify-${runId}-r${i}`,
+    })),
+  ];
 
   try {
     if (_eidLookupEnqueueFn) {
-      await _eidLookupEnqueueFn(lookupInputs, runId);
+      await _eidLookupEnqueueFn(enqueueItems, runId);
     } else {
       const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
       const { eidLookupCrmWorkflow } = await import("../eid-lookup/index.js");
-      // eid-lookup accepts a union of {name} or {emplId}. Prep flow uses the
-      // {name} variant for unmatched-name lookups; strip __prepIndex when
-      // sending and recover the index from the deriveItemId output instead.
-      const enqueueInputs: EidLookupItem[] = lookupInputs.map(({ name }) => ({
-        name,
-      }));
+      const enqueueInputs: EidLookupItem[] = enqueueItems.map((item) =>
+        "name" in item ? { name: item.name } : { emplId: item.emplId, keepNonHdh: true },
+      );
       await ensureDaemonsAndEnqueue(
         eidLookupCrmWorkflow,
         enqueueInputs,
         {},
         {
           deriveItemId: (input: EidLookupItem) => {
-            const target = "name" in input ? input.name : input.emplId;
-            const found = lookupInputs.find((x) => x.name === target);
-            const idx = found?.__prepIndex ?? 0;
-            return `ec-prep-${runId}-r${idx}`;
+            // Match the input back to its enqueue item to recover the
+            // pre-computed __itemId. Both shapes are unique under a
+            // single batch so equality on the variant key is sufficient.
+            if ("name" in input) {
+              const found = enqueueItems.find(
+                (x) => "name" in x && x.name === input.name,
+              );
+              return found?.__itemId ?? `ec-prep-${runId}-r0`;
+            }
+            const found = enqueueItems.find(
+              (x) => "emplId" in x && x.emplId === input.emplId,
+            );
+            return found?.__itemId ?? `ec-verify-${runId}-r0`;
           },
         },
       );
     }
   } catch (err) {
     log.warn(`[prepare] eid-lookup enqueue failed: ${errorMessage(err)} — marking remaining as unresolved`);
-    for (const { i } of pending) {
+    for (const { i } of pendingName) {
       data.records[i].matchState = "unresolved";
       data.records[i].warnings.push(`eid-lookup unavailable: ${errorMessage(err)}`);
     }
@@ -408,15 +469,16 @@ async function resolveEidsAsync(
     return;
   }
 
-  // Mark records as lookup-running.
-  for (const { i } of pending) {
+  // Mark name-lookup records as lookup-running.
+  for (const { i } of pendingName) {
     data.records[i].matchState = "lookup-running";
   }
   writeRunningEidLookup();
 
-  // ── Subscribe to eid-lookup tracker JSONL for completions.
+  // ── Subscribe to eid-lookup tracker JSONL for completions of either prefix.
   const eidLookupFile = join(trackerDir ?? ".tracker", `eid-lookup-${dateLocal()}.jsonl`);
-  const expectedIds = new Set(pending.map(({ i }) => `ec-prep-${runId}-r${i}`));
+  const expectedIds = new Set(enqueueItems.map((x) => x.__itemId));
+  const totalExpected = expectedIds.size;
   let resolvedCount = 0;
   let lastSize = 0;
 
@@ -438,7 +500,16 @@ async function resolveEidsAsync(
     const lines = raw.split("\n").filter(Boolean);
     let progressed = false;
     for (const line of lines) {
-      let entry: { id?: string; status?: string; data?: { emplId?: string } };
+      let entry: {
+        id?: string;
+        status?: string;
+        data?: {
+          emplId?: string;
+          hrStatus?: string;
+          department?: string;
+          personOrgScreenshot?: string;
+        };
+      };
       try {
         entry = JSON.parse(line);
       } catch {
@@ -446,29 +517,51 @@ async function resolveEidsAsync(
       }
       if (!entry.id || !expectedIds.has(entry.id)) continue;
       if (entry.status !== "done" && entry.status !== "failed") continue;
+
+      const isVerify = entry.id.startsWith(`ec-verify-${runId}-`);
       const idx = Number(entry.id.split("-r").pop());
       if (!Number.isFinite(idx)) continue;
       const rec = data.records[idx];
-      if (!rec || (rec.matchState !== "lookup-pending" && rec.matchState !== "lookup-running")) continue;
+      if (!rec) continue;
 
       const eid = (entry.data?.emplId ?? "").trim();
       const looksLikeEid = /^\d{5,}$/.test(eid);
-      if (entry.status === "done" && looksLikeEid) {
-        rec.employee.employeeId = eid;
-        rec.matchState = "resolved";
-        rec.matchSource = "eid-lookup";
-      } else {
-        rec.matchState = "unresolved";
-        rec.warnings.push(
-          `eid-lookup ${entry.status === "done" ? `returned "${eid || "no result"}"` : "failed"}`,
-        );
+
+      if (!isVerify) {
+        // Path A: name-lookup result. Patch matchState + EID + verification.
+        if (rec.matchState !== "lookup-pending" && rec.matchState !== "lookup-running") continue;
+        if (entry.status === "done" && looksLikeEid) {
+          rec.employee.employeeId = eid;
+          rec.matchState = "resolved";
+          rec.matchSource = "eid-lookup";
+        } else {
+          rec.matchState = "unresolved";
+          rec.warnings.push(
+            `eid-lookup ${entry.status === "done" ? `returned "${eid || "no result"}"` : "failed"}`,
+          );
+        }
       }
+
+      // Verification: applies to both Path A (side-effect of name search) and
+      // Path B (dedicated EID-input call). Computed from the same JSONL row.
+      const v = computeVerification({
+        hrStatus: entry.data?.hrStatus,
+        department: entry.data?.department,
+        personOrgScreenshot: entry.data?.personOrgScreenshot,
+      });
+      rec.verification = v;
+      if (v.state !== "verified") {
+        rec.selected = false;
+      }
+      // Don't double-count if a record's prep AND verify both fire (impossible
+      // by construction — a record is in exactly one bucket — but defend).
+      expectedIds.delete(entry.id);
       resolvedCount += 1;
       progressed = true;
     }
     lastSize = cur.size;
     if (progressed) writeRunningEidLookup();
-    if (resolvedCount >= pending.length) {
+    if (resolvedCount >= totalExpected) {
       finalize();
     }
   };
@@ -477,8 +570,9 @@ async function resolveEidsAsync(
   const finalize = (): void => {
     if (finalized) return;
     finalized = true;
-    // Mark anything still hanging as unresolved.
-    for (const { i } of pending) {
+    // Mark anything still hanging as unresolved (Path A only — Path B
+    // verifies don't change matchState, only verification).
+    for (const { i } of pendingName) {
       const r = data.records[i];
       if (r.matchState === "lookup-pending" || r.matchState === "lookup-running") {
         r.matchState = "unresolved";
@@ -501,7 +595,7 @@ async function resolveEidsAsync(
       lastSize = 0;
     }
     checkFile();
-    if (resolvedCount < pending.length) {
+    if (resolvedCount < totalExpected) {
       try {
         watcher = fsWatch(eidLookupFile, { persistent: false }, () => checkFile());
       } catch {
@@ -532,6 +626,55 @@ async function resolveEidsAsync(
 }
 
 // ─── Helpers ──────────────────────────────────────────────
+
+/**
+ * Pure transform from an eid-lookup result row's data fields into a
+ * `Verification` discriminator. State semantics:
+ *   verified       — hrStatus === "Active" AND department in HDH whitelist
+ *   inactive       — hrStatus !== "Active"
+ *   non-hdh        — hrStatus === "Active" AND department not HDH
+ *   lookup-failed  — no hrStatus on the row (eid-lookup returned nothing)
+ *
+ * Exported for unit tests.
+ */
+export function computeVerification(d: {
+  hrStatus?: string;
+  department?: string;
+  personOrgScreenshot?: string;
+}): Verification {
+  const checkedAt = new Date().toISOString();
+  if (!d.hrStatus) {
+    return { state: "lookup-failed", error: "no result", checkedAt };
+  }
+  const active = d.hrStatus === "Active";
+  const hdh = isAcceptedDept(d.department ?? null);
+  const screenshotFilename = d.personOrgScreenshot ?? "";
+  if (!active) {
+    return {
+      state: "inactive",
+      hrStatus: d.hrStatus,
+      department: d.department,
+      screenshotFilename,
+      checkedAt,
+    };
+  }
+  if (!hdh) {
+    return {
+      state: "non-hdh",
+      hrStatus: d.hrStatus,
+      department: d.department ?? "",
+      screenshotFilename,
+      checkedAt,
+    };
+  }
+  return {
+    state: "verified",
+    hrStatus: d.hrStatus,
+    department: d.department ?? "",
+    screenshotFilename,
+    checkedAt,
+  };
+}
 
 function flattenForData(d: Partial<PrepareRowData>): Record<string, string> {
   const out: Record<string, string> = {};

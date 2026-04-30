@@ -103,6 +103,29 @@ describe("runPaperOathPrepare — happy path (roster name match)", () => {
   it("writes pending → loading-roster → ocr → matching → done with roster-matched record", async () => {
     __setOcrForTests((async () =>
       fakeOcrResult([makeRow("Alice Adams", true, 0, "04/27/2026")])) as never);
+    __setEidLookupEnqueueForTests(async (inputs, _parentRunId) => {
+      setTimeout(() => {
+        const eidFile = join(trackerDir, `eid-lookup-${dateLocal()}.jsonl`);
+        for (const input of inputs as Array<{ __itemId: string }>) {
+          appendFileSync(
+            eidFile,
+            JSON.stringify({
+              workflow: "eid-lookup",
+              timestamp: new Date().toISOString(),
+              id: input.__itemId,
+              runId: input.__itemId,
+              status: "done",
+              data: {
+                emplId: "10001",
+                hrStatus: "Active",
+                department: "HOUSING/DINING/HOSPITALITY",
+                personOrgScreenshot: "shot.png",
+              },
+            }) + "\n",
+          );
+        }
+      }, 30);
+    });
 
     const out = await runPaperOathPrepare({
       pdfPath,
@@ -113,6 +136,7 @@ describe("runPaperOathPrepare — happy path (roster name match)", () => {
     });
 
     assert.equal(out.runId, out.parentRunId);
+    await new Promise((r) => setTimeout(r, 1000));
     const lines = readTrackerLines(trackerDir);
     const statuses = lines.map((l) => `${l.status}${l.step ? `(${l.step})` : ""}`);
     assert.ok(statuses.includes("pending"));
@@ -165,6 +189,31 @@ describe("runPaperOathPrepare — unsigned rows are extracted but not selected",
         makeRow("Alice Adams", true, 0, "04/27/2026"),
         makeRow("Bob Beam", false, 1, null),
       ])) as never);
+    // Alice is matched and triggers Path B verify; Bob is unsigned and
+    // doesn't enqueue at all. Simulate Alice's verification completion.
+    __setEidLookupEnqueueForTests(async (inputs, _parentRunId) => {
+      setTimeout(() => {
+        const eidFile = join(trackerDir, `eid-lookup-${dateLocal()}.jsonl`);
+        for (const input of inputs as Array<{ __itemId: string }>) {
+          appendFileSync(
+            eidFile,
+            JSON.stringify({
+              workflow: "eid-lookup",
+              timestamp: new Date().toISOString(),
+              id: input.__itemId,
+              runId: input.__itemId,
+              status: "done",
+              data: {
+                emplId: "10001",
+                hrStatus: "Active",
+                department: "HOUSING/DINING/HOSPITALITY",
+                personOrgScreenshot: "shot.png",
+              },
+            }) + "\n",
+          );
+        }
+      }, 30);
+    });
 
     await runPaperOathPrepare({
       pdfPath,
@@ -173,6 +222,7 @@ describe("runPaperOathPrepare — unsigned rows are extracted but not selected",
       uploadsDir,
       trackerDir,
     });
+    await new Promise((r) => setTimeout(r, 1000));
 
     const lines = readTrackerLines(trackerDir);
     const last = lines[lines.length - 1];
