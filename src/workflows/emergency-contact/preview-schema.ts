@@ -34,6 +34,13 @@ const PermissiveRecordSchema = z.object({
   employee: PermissiveEmployeeSchema,
   emergencyContact: EmergencyContactSchema,
   notes: z.array(z.string()).default([]),
+  // Stage-2 OCR-pass fields populated by the LLM (see prompt addition
+  // in src/workflows/emergency-contact/prepare.ts). The OCR prompt
+  // explicitly instructs the model to classify each page as
+  // "expected" or "unknown" and to list any expected fields blank /
+  // illegible on the paper. Defaults preserve old fixtures.
+  documentType: z.enum(["expected", "unknown"]).default("expected"),
+  originallyMissing: z.array(z.string()).default([]),
 });
 
 /**

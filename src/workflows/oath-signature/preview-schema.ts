@@ -33,6 +33,13 @@ export const OathRosterOcrRecordSchema = z.object({
       return trimmed.length === 0 ? null : trimmed;
     }),
   notes: z.array(z.string()).default([]),
+  // Stage-2 OCR-pass fields populated by the LLM (see prompt addition
+  // in src/workflows/oath-signature/prepare.ts). documentType maps the
+  // four oath formats (signin / upay585 / upay586 / unknown) into the
+  // workflow-frontend "expected" or "unknown" buckets. Defaults
+  // preserve old fixtures.
+  documentType: z.enum(["expected", "unknown"]).default("expected"),
+  originallyMissing: z.array(z.string()).default([]),
 });
 export type OathRosterOcrRecord = z.infer<typeof OathRosterOcrRecordSchema>;
 

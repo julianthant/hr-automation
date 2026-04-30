@@ -22,6 +22,36 @@ import type { EmergencyContactRecord } from "./schema.js";
 
 const WORKFLOW = "emergency-contact";
 
+const EC_OCR_PROMPT = `You are an OCR system. Extract structured data from the attached PDF.
+
+The PDF is a stack of UCSD R&R Emergency Contact Information forms — one form per page (occasionally a page may not be a form at all). For each page produce one record.
+
+For each page you process:
+
+1. Classify the document type:
+   - "expected" if the page is a UCSD R&R Emergency Contact Information form
+   - "unknown" if the page is blank, a different form, a scan artifact, or anything that doesn't match the expected template
+
+2. After extracting fields, also report which expected fields were BLANK or ILLEGIBLE on the paper.
+   The expected fields for this form are:
+     - employee.name
+     - employee.employeeId
+     - emergencyContact.name
+     - emergencyContact.relationship
+     - emergencyContact.address
+     - emergencyContact.cellPhone, homePhone, workPhone (any one is sufficient — list none of these as missing if at least one is filled)
+
+   Add the names of any blank/illegible expected fields to a \`originallyMissing\` array on the record.
+   The match phase will fill values from the roster; the operator needs the list to know which to write back on the physical paper.
+
+Field-level rules:
+- Extract every record visible in the PDF; produce one entry per page.
+- For handwritten text, use your best transcription. If a field is illegible, set it to null where the schema allows AND add the field path to \`originallyMissing\`.
+- Phone numbers should be normalized to "(XXX) XXX-XXXX" format when the digits are clear.
+- Addresses: keep US format. Pull out street, city, state (2-letter), and ZIP into separate fields if the schema requests them.
+- Do not invent data. If a field is blank on the form, return null (or omit per schema) and list the field in \`originallyMissing\`.
+- Output ONLY valid JSON matching the schema. No commentary.`;
+
 /** Auto-accept threshold for roster name match. Records below land in lookup-pending. */
 const ROSTER_AUTO_ACCEPT = 0.85;
 
@@ -152,6 +182,7 @@ export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
     const ocrResult = await ocrFn({
       pdfPath: input.pdfPath,
       schema: OcrOutputSchema,
+      prompt: EC_OCR_PROMPT,
       schemaName: "emergency-contact-batch",
     });
     log.step(
