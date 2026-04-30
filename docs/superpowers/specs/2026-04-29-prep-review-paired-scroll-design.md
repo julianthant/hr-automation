@@ -89,7 +89,7 @@ Each PDF page is sent to an OCR provider with a workflow-specific prompt. Curren
 - "Classify each page as `expected` (matches a known form template for this workflow) or `unknown` (blank page, irrelevant document, scan artifact). Return `documentType` per record."
 - "For each field that should appear on this form but is blank/unreadable on the paper, add the field name to `originallyMissing`. The match phase will populate values via the roster; the operator needs the list to know which fields to write on the physical paper."
 
-**Provider strategy.** The user has many API keys; the OCR module already supports multi-provider rotation. Use the highest-quality vision model available per call (Gemini 2.5 Pro / Claude Opus 4.7 / GPT-5 vision — whichever is configured), with rotation on failure. No need to manually pick per task — the rotation already prefers higher-quality providers and falls back. Document this in `src/ocr/CLAUDE.md`.
+**Provider strategy.** The user has many API keys; the OCR module already supports multi-provider rotation. Use the highest-quality vision model available per call (Gemini 2.5 Pro), with rotation on failure. No need to manually pick per task — the rotation already prefers higher-quality providers and falls back. Document this in `src/ocr/CLAUDE.md`.
 
 ### 3.4 Stage 3 — Match (algorithmic + LLM disambiguation)
 

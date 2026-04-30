@@ -178,11 +178,13 @@ export async function runPaperOathPrepare(
       // Unsigned row: skip matching, deselect, keep in the preview for
       // operator visibility (catches OCR misreads of the signed/unsigned
       // column).
-      if (!r.signed) {
+      if (!r.employeeSigned) {
         return {
           ...r,
           employeeId: "",
           matchState: "extracted",
+          documentType: "expected",
+          originallyMissing: [],
           selected: false,
           warnings: [],
         };
@@ -197,6 +199,8 @@ export async function runPaperOathPrepare(
           matchSource: "roster",
           matchConfidence: top.score,
           rosterCandidates: result.candidates.slice(0, 3),
+          documentType: "expected",
+          originallyMissing: [],
           selected: true,
           warnings:
             top.score < 1.0
@@ -210,6 +214,8 @@ export async function runPaperOathPrepare(
         employeeId: "",
         matchState: "lookup-pending",
         rosterCandidates: result.candidates.slice(0, 3),
+        documentType: "expected",
+        originallyMissing: [],
         selected: true,
         warnings:
           result.candidates.length > 0

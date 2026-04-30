@@ -1,4 +1,6 @@
 import { z } from "zod/v4";
+import { VerificationSchema } from "../emergency-contact/preview-schema.js";
+export type { Verification } from "../emergency-contact/preview-schema.js";
 
 // ─── OCR-pass record (one row of a paper roster) ──────────
 //
@@ -9,15 +11,18 @@ import { z } from "zod/v4";
 // roster match phase fills it from the SharePoint xlsx) and notes are
 // for any uncertainty flags the LLM wants to surface.
 //
-// `signed` is the LLM's call on whether the signature column is filled
-// (a scribble counts; an empty box doesn't). The match phase only
-// attempts to resolve names whose `signed === true`.
+// `employeeSigned` / `officerSigned` replace the old `signed` flag.
+// employeeSigned: whether the employee/officer signature line is
+// filled. officerSigned: whether the authorized-official / witness
+// signature is filled. For sign-in sheets that only have an employee
+// signature column, officerSigned is `null`.
 
 export const OathRosterOcrRecordSchema = z.object({
   sourcePage: z.number().int().positive(),
   rowIndex: z.number().int().nonnegative(),
   printedName: z.string().min(1),
-  signed: z.boolean(),
+  employeeSigned: z.boolean(),
+  officerSigned: z.boolean().nullable().optional(),
   dateSigned: z
     .string()
     .nullable()
@@ -55,7 +60,7 @@ export type MatchState = z.infer<typeof MatchStateSchema>;
 export const OathPreviewRecordSchema = OathRosterOcrRecordSchema.extend({
   employeeId: z.string(),
   matchState: MatchStateSchema,
-  matchSource: z.enum(["roster", "eid-lookup"]).optional(),
+  matchSource: z.enum(["roster", "eid-lookup", "llm"]).optional(),
   matchConfidence: z.number().min(0).max(1).optional(),
   rosterCandidates: z
     .array(
@@ -66,6 +71,9 @@ export const OathPreviewRecordSchema = OathRosterOcrRecordSchema.extend({
       }),
     )
     .optional(),
+  documentType: z.enum(["expected", "unknown"]).default("expected"),
+  originallyMissing: z.array(z.string()).default([]),
+  verification: VerificationSchema.optional(),
   selected: z.boolean(),
   warnings: z.array(z.string()),
 });
@@ -78,6 +86,7 @@ export const OathPrepareRowDataSchema = z.object({
   pdfPath: z.string(),
   pdfOriginalName: z.string(),
   rosterPath: z.string(),
+  pageImagesDir: z.string().optional(),
   records: z.array(OathPreviewRecordSchema),
   ocrProvider: z.string().optional(),
   ocrAttempts: z.number().int().nonnegative().optional(),

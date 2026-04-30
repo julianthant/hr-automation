@@ -14,10 +14,10 @@ describe("OathRosterOcrRecordSchema", () => {
       sourcePage: 1,
       rowIndex: 0,
       printedName: "Jane Doe",
-      signed: true,
+      employeeSigned: true,
     });
     assert.equal(r.printedName, "Jane Doe");
-    assert.equal(r.signed, true);
+    assert.equal(r.employeeSigned, true);
     assert.equal(r.dateSigned, null);
     assert.deepEqual(r.notes, []);
   });
@@ -27,9 +27,9 @@ describe("OathRosterOcrRecordSchema", () => {
       sourcePage: 2,
       rowIndex: 5,
       printedName: "John Q. Public",
-      signed: false,
+      employeeSigned: false,
     });
-    assert.equal(r.signed, false);
+    assert.equal(r.employeeSigned, false);
   });
 
   it("normalizes dateSigned: trims and accepts MM/DD/YYYY-style strings as-is", () => {
@@ -37,7 +37,7 @@ describe("OathRosterOcrRecordSchema", () => {
       sourcePage: 1,
       rowIndex: 1,
       printedName: "Alice",
-      signed: true,
+      employeeSigned: true,
       dateSigned: "  04/27/2026  ",
     });
     assert.equal(r.dateSigned, "04/27/2026");
@@ -48,7 +48,7 @@ describe("OathRosterOcrRecordSchema", () => {
       sourcePage: 1,
       rowIndex: 0,
       printedName: "Bob",
-      signed: true,
+      employeeSigned: true,
       dateSigned: "",
     });
     assert.equal(r.dateSigned, null);
@@ -59,7 +59,7 @@ describe("OathRosterOcrRecordSchema", () => {
       sourcePage: 1,
       rowIndex: 0,
       printedName: "",
-      signed: true,
+      employeeSigned: true,
     });
     assert.equal(result.success, false);
   });
@@ -70,7 +70,7 @@ describe("OathRosterOcrRecordSchema", () => {
         sourcePage: 0,
         rowIndex: 0,
         printedName: "x",
-        signed: false,
+        employeeSigned: false,
       }).success,
       false,
     );
@@ -79,7 +79,7 @@ describe("OathRosterOcrRecordSchema", () => {
         sourcePage: -1,
         rowIndex: 0,
         printedName: "x",
-        signed: false,
+        employeeSigned: false,
       }).success,
       false,
     );
@@ -91,7 +91,7 @@ describe("OathRosterOcrRecordSchema", () => {
         sourcePage: 1,
         rowIndex: -1,
         printedName: "x",
-        signed: false,
+        employeeSigned: false,
       }).success,
       false,
     );
@@ -101,8 +101,8 @@ describe("OathRosterOcrRecordSchema", () => {
 describe("OathOcrOutputSchema", () => {
   it("is an array of records", () => {
     const arr = OathOcrOutputSchema.parse([
-      { sourcePage: 1, rowIndex: 0, printedName: "A", signed: true },
-      { sourcePage: 1, rowIndex: 1, printedName: "B", signed: false },
+      { sourcePage: 1, rowIndex: 0, printedName: "A", employeeSigned: true },
+      { sourcePage: 1, rowIndex: 1, printedName: "B", employeeSigned: false },
     ]);
     assert.equal(arr.length, 2);
   });
@@ -138,7 +138,7 @@ describe("OathPreviewRecordSchema", () => {
       sourcePage: 1,
       rowIndex: 0,
       printedName: "Jane Doe",
-      signed: true,
+      employeeSigned: true,
       dateSigned: "04/27/2026",
       employeeId: "10873611",
       matchState: "matched",
@@ -157,7 +157,7 @@ describe("OathPreviewRecordSchema", () => {
       sourcePage: 1,
       rowIndex: 2,
       printedName: "Unknown Person",
-      signed: true,
+      employeeSigned: true,
       employeeId: "",
       matchState: "lookup-pending",
       rosterCandidates: [],
@@ -173,7 +173,7 @@ describe("OathPreviewRecordSchema", () => {
       sourcePage: 1,
       rowIndex: 0,
       printedName: "Y",
-      signed: true,
+      employeeSigned: true,
       employeeId: "10000000",
       matchState: "resolved",
     });
@@ -185,7 +185,7 @@ describe("OathPreviewRecordSchema", () => {
       sourcePage: 1,
       rowIndex: 0,
       printedName: "Y",
-      signed: true,
+      employeeSigned: true,
       employeeId: "1",
       matchState: "matched",
       matchConfidence: 1.5,
@@ -219,7 +219,7 @@ describe("OathPrepareRowDataSchema", () => {
           sourcePage: 1,
           rowIndex: 0,
           printedName: "Jane",
-          signed: true,
+          employeeSigned: true,
           employeeId: "10000000",
           matchState: "matched",
           matchSource: "roster",

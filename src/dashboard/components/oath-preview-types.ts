@@ -12,13 +12,17 @@ export type OathMatchState =
   | "resolved"
   | "unresolved";
 
-export type OathMatchSource = "roster" | "eid-lookup";
+export type OathMatchSource = "roster" | "eid-lookup" | "llm";
+
+export type { Verification } from "./preview-types";
+import type { Verification } from "./preview-types";
 
 export interface OathPreviewRecord {
   sourcePage: number;
   rowIndex: number;
   printedName: string;
-  signed: boolean;
+  employeeSigned: boolean;
+  officerSigned?: boolean | null;
   dateSigned: string | null;
   notes: string[];
   employeeId: string;
@@ -26,6 +30,9 @@ export interface OathPreviewRecord {
   matchSource?: OathMatchSource;
   matchConfidence?: number;
   rosterCandidates?: Array<{ eid: string; name: string; score: number }>;
+  documentType?: "expected" | "unknown";
+  originallyMissing?: string[];
+  verification?: Verification;
   selected: boolean;
   warnings: string[];
 }
@@ -35,6 +42,7 @@ export interface OathPrepareRowData {
   pdfPath: string;
   pdfOriginalName: string;
   rosterPath: string;
+  pageImagesDir?: string;
   records: OathPreviewRecord[];
   ocrProvider?: string;
   ocrAttempts?: number;

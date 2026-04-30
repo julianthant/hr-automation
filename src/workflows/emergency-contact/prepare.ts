@@ -179,6 +179,8 @@ export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
           matchState: "matched",
           matchSource: "form",
           matchConfidence: 1.0,
+          documentType: "expected",
+          originallyMissing: [],
           selected: true,
           warnings: [],
         };
@@ -193,6 +195,8 @@ export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
           matchSource: "roster",
           matchConfidence: top.score,
           rosterCandidates: result.candidates.slice(0, 3),
+          documentType: "expected",
+          originallyMissing: [],
           selected: true,
           warnings:
             top.score < 1.0
@@ -205,6 +209,8 @@ export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
         ...r,
         matchState: "lookup-pending",
         rosterCandidates: result.candidates.slice(0, 3),
+        documentType: "expected",
+        originallyMissing: [],
         selected: true,
         warnings:
           result.candidates.length > 0

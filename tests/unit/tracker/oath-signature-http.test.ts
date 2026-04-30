@@ -377,7 +377,7 @@ function makeRec(name: string, eid = "", matchState: string = "matched"): unknow
     sourcePage: 1,
     rowIndex: 0,
     printedName: name,
-    signed: true,
+    employeeSigned: true,
     dateSigned: "04/27/2026",
     notes: [],
     employeeId: eid,

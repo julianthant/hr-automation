@@ -59,9 +59,47 @@ export const MatchStateSchema = z.enum([
 ]);
 export type MatchState = z.infer<typeof MatchStateSchema>;
 
+// ─── Verification (cross-workflow) ────────────────────────
+//
+// Populated by stage 5 of the OCR + Roster Method (Person Org Summary
+// verification via the eid-lookup daemon). State semantics:
+//   verified       — active employee in HDH dept
+//   inactive       — employee found but hrStatus != "Active"
+//   non-hdh        — employee active but department not in HDH whitelist
+//   lookup-failed  — Person Org Summary search returned nothing or errored
+export const VerificationSchema = z.discriminatedUnion("state", [
+  z.object({
+    state: z.literal("verified"),
+    hrStatus: z.string(),
+    department: z.string(),
+    screenshotFilename: z.string(),
+    checkedAt: z.string(),
+  }),
+  z.object({
+    state: z.literal("inactive"),
+    hrStatus: z.string(),
+    department: z.string().optional(),
+    screenshotFilename: z.string(),
+    checkedAt: z.string(),
+  }),
+  z.object({
+    state: z.literal("non-hdh"),
+    hrStatus: z.string(),
+    department: z.string(),
+    screenshotFilename: z.string(),
+    checkedAt: z.string(),
+  }),
+  z.object({
+    state: z.literal("lookup-failed"),
+    error: z.string(),
+    checkedAt: z.string(),
+  }),
+]);
+export type Verification = z.infer<typeof VerificationSchema>;
+
 export const PreviewRecordSchema = PermissiveRecordSchema.extend({
   matchState: MatchStateSchema,
-  matchSource: z.enum(["form", "roster", "eid-lookup"]).optional(),
+  matchSource: z.enum(["form", "roster", "eid-lookup", "llm"]).optional(),
   matchConfidence: z.number().min(0).max(1).optional(),
   rosterCandidates: z
     .array(
@@ -73,6 +111,9 @@ export const PreviewRecordSchema = PermissiveRecordSchema.extend({
     )
     .optional(),
   addressMatch: z.enum(["match", "differ", "missing"]).optional(),
+  documentType: z.enum(["expected", "unknown"]).default("expected"),
+  originallyMissing: z.array(z.string()).default([]),
+  verification: VerificationSchema.optional(),
   selected: z.boolean(),
   warnings: z.array(z.string()),
 });
@@ -84,6 +125,7 @@ export const PrepareRowDataSchema = z.object({
   pdfOriginalName: z.string(),
   rosterMode: z.enum(["download", "existing"]),
   rosterPath: z.string(),
+  pageImagesDir: z.string().optional(),
   records: z.array(PreviewRecordSchema),
   ocrProvider: z.string().optional(),
   ocrAttempts: z.number().int().nonnegative().optional(),
