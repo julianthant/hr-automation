@@ -101,6 +101,32 @@ describe("runPrepare — happy path (form-EID only)", () => {
 
   it("writes pending → loading-roster → ocr → matching → done with all records matched", async () => {
     __setOcrForTests((async () => fakeOcrResult([makeRecord("Alice Adams", "10001")])) as never);
+    // Path B: the matched record now triggers a verify-only eid-lookup
+    // enqueue. Simulate the daemon writing a `verified` JSONL row so the
+    // orchestrator can finalize as "done".
+    __setEidLookupEnqueueForTests(async (inputs, _parentRunId) => {
+      setTimeout(() => {
+        const eidFile = join(trackerDir, `eid-lookup-${dateLocal()}.jsonl`);
+        for (const input of inputs as Array<{ __itemId: string }>) {
+          appendFileSync(
+            eidFile,
+            JSON.stringify({
+              workflow: "eid-lookup",
+              timestamp: new Date().toISOString(),
+              id: input.__itemId,
+              runId: input.__itemId,
+              status: "done",
+              data: {
+                emplId: "10001",
+                hrStatus: "Active",
+                department: "HOUSING/DINING/HOSPITALITY",
+                personOrgScreenshot: "shot.png",
+              },
+            }) + "\n",
+          );
+        }
+      }, 30);
+    });
 
     const out = await runPrepare({
       pdfPath,
@@ -112,6 +138,7 @@ describe("runPrepare — happy path (form-EID only)", () => {
     });
 
     assert.equal(out.runId, out.parentRunId);
+    await new Promise((r) => setTimeout(r, 1000));
 
     const lines = readTrackerLines(trackerDir);
     const statuses = lines.map((l) => `${l.status}${l.step ? `(${l.step})` : ""}`);
@@ -151,6 +178,31 @@ describe("runPrepare — roster name match", () => {
 
   it("matches by name when EID is missing on the OCR record", async () => {
     __setOcrForTests((async () => fakeOcrResult([makeRecord("Alice Adams", "")])) as never);
+    // Path B verify enqueue: the roster-matched record triggers a verify-
+    // only lookup. Stub it with an Active/HDH completion.
+    __setEidLookupEnqueueForTests(async (inputs, _parentRunId) => {
+      setTimeout(() => {
+        const eidFile = join(trackerDir, `eid-lookup-${dateLocal()}.jsonl`);
+        for (const input of inputs as Array<{ __itemId: string }>) {
+          appendFileSync(
+            eidFile,
+            JSON.stringify({
+              workflow: "eid-lookup",
+              timestamp: new Date().toISOString(),
+              id: input.__itemId,
+              runId: input.__itemId,
+              status: "done",
+              data: {
+                emplId: "10001",
+                hrStatus: "Active",
+                department: "HOUSING/DINING/HOSPITALITY",
+                personOrgScreenshot: "shot.png",
+              },
+            }) + "\n",
+          );
+        }
+      }, 30);
+    });
 
     await runPrepare({
       pdfPath,
@@ -160,6 +212,7 @@ describe("runPrepare — roster name match", () => {
       uploadsDir,
       trackerDir,
     });
+    await new Promise((r) => setTimeout(r, 1000));
 
     const lines = readTrackerLines(trackerDir);
     const last = lines[lines.length - 1];
