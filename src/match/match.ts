@@ -255,3 +255,98 @@ export function matchAgainstRoster(
 export function normalizeEid(raw: unknown): string {
   return String(raw ?? "").replace(/[^\d]/g, "");
 }
+
+// ─── Hybrid roster match: algorithmic + LLM disambiguation ─
+
+export interface DisambiguatorInput {
+  query: string;
+  candidates: Array<{ eid: string; name: string; score: number }>;
+}
+
+export interface DisambiguatorResult {
+  eid: string | null;
+  confidence: number;
+}
+
+export interface MatchOptions {
+  /** Algorithmic-score floor for auto-accept (default 0.85). */
+  acceptThreshold?: number;
+  /** Algorithmic-score floor for sending to LLM disambiguation (default 0.50). */
+  disambiguateThreshold?: number;
+  /**
+   * Override the disambiguation function. Defaults to `disambiguateMatch`
+   * from `src/ocr/disambiguate.ts` (Gemini text-only call). Tests pass a
+   * stub here so they don't hit the network.
+   */
+  disambiguator?: (input: DisambiguatorInput) => Promise<DisambiguatorResult>;
+}
+
+export interface AsyncMatchResult {
+  eid: string | null;
+  confidence: number;
+  source: "roster" | "llm";
+  candidates: RosterMatchResult["candidates"];
+}
+
+/**
+ * Hybrid name → EID match:
+ *   - score >= acceptThreshold (0.85) → accept algorithmically (source: "roster")
+ *   - disambiguateThreshold <= score < acceptThreshold → LLM disambiguation
+ *     (source: "llm" if the LLM returns an EID; "roster" + null EID otherwise)
+ *   - score < disambiguateThreshold → unresolved (eid: null, source: "roster")
+ *
+ * The LLM disambiguator sees the top 5 candidates plus the OCR'd query.
+ * Caller is expected to fall back to eid-lookup when this returns null.
+ */
+export async function matchAgainstRosterAsync(
+  query: string,
+  roster: readonly RosterRow[],
+  opts: MatchOptions = {},
+): Promise<AsyncMatchResult> {
+  const accept = opts.acceptThreshold ?? 0.85;
+  const llmFloor = opts.disambiguateThreshold ?? 0.5;
+
+  const ranked = matchAgainstRoster(roster, query);
+
+  if (ranked.candidates.length === 0 || ranked.bestScore < llmFloor) {
+    return {
+      eid: null,
+      confidence: 0,
+      source: "roster",
+      candidates: ranked.candidates,
+    };
+  }
+  if (ranked.bestScore >= accept) {
+    return {
+      eid: ranked.candidates[0].eid,
+      confidence: ranked.bestScore,
+      source: "roster",
+      candidates: ranked.candidates,
+    };
+  }
+
+  const disambiguate = opts.disambiguator ?? (await loadDefaultDisambiguator());
+  const top5 = ranked.candidates.slice(0, 5).map((c) => ({
+    eid: c.eid,
+    name: c.name,
+    score: c.score,
+  }));
+  const result = await disambiguate({ query, candidates: top5 });
+  return {
+    eid: result.eid,
+    confidence: result.confidence,
+    source: result.eid ? "llm" : "roster",
+    candidates: ranked.candidates,
+  };
+}
+
+/**
+ * Lazy import to avoid pulling the Gemini SDK into callers that supply
+ * their own disambiguator (notably tests).
+ */
+async function loadDefaultDisambiguator(): Promise<
+  (input: DisambiguatorInput) => Promise<DisambiguatorResult>
+> {
+  const mod = await import("../ocr/disambiguate.js");
+  return mod.disambiguateMatch;
+}
