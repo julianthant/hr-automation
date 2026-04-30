@@ -6,27 +6,7 @@ import { EmptyState } from "./EmptyState";
 import { PreviewRow } from "./PreviewRow";
 import { OathPreviewRow } from "./OathPreviewRow";
 import type { TrackerEntry } from "./types";
-/**
- * Workflow-agnostic detector — both emergency-contact and oath-signature
- * stamp `mode: "prepare"` on parent prep rows. The dispatcher below picks
- * the right preview component based on workflow name.
- */
-function isPrepareRow(e: TrackerEntry): boolean {
-  return e.data?.mode === "prepare";
-}
-
-/**
- * A prep row in its terminal-resolved state: the operator has either
- * approved (fanned out child queue items) or discarded it. Both lists below
- * filter these out — keeping them in the StatPills source as well prevents
- * phantom counts (e.g. "3 ALL / 1 visible row" after two prior discards).
- */
-function isResolvedPrepRow(e: TrackerEntry): boolean {
-  if (!isPrepareRow(e)) return false;
-  if (e.status === "done" && e.step === "approved") return true;
-  if (e.status === "failed" && e.step === "discarded") return true;
-  return false;
-}
+import { isPrepareRow, isResolvedPrepRow } from "./preview-types";
 
 interface QueuePanelProps {
   entries: TrackerEntry[];

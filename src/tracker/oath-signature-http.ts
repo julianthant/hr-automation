@@ -45,32 +45,40 @@ import { enqueueFromHttp } from "../core/enqueue-dispatch.js";
 const WORKFLOW = "oath-signature";
 
 /**
- * Find the latest tracker entry for a prep row across every available date
- * file. `readEntries(WORKFLOW, dir)` only reads today's local-date file —
- * which misses prep rows created late on the previous local day (operator
- * uploaded at 5pm PDT, returned the next morning to discard/approve). The
- * sweep at startup also leaves them in the previous day's file. We scan
- * every date returned by `listDatesForWorkflow` so the lookup is robust
- * regardless of when the row was first written.
+ * Locate a prep row across every available date file. Returns the latest
+ * entry (used for status checks) along with `homeDate` — the date file
+ * that holds the row's earliest entry. Resolution lines (approve/discard)
+ * are written into `homeDate` so the dashboard's per-date SSE always picks
+ * up the new state when the operator is viewing the date the prep row was
+ * born on (typically the only place they encounter the row).
  *
- * Returns the matching `date` along with the entry so callers can write
- * resolution lines (approve/discard) into the same file as the row's
- * existing history — otherwise the dashboard's per-date SSE doesn't pick
- * the new state up when viewing the prep row's original date.
+ * `readEntries(WORKFLOW, dir)` alone would only consult today's local-date
+ * file — which misses prep rows created late on the previous local day,
+ * those whose history was split across midnight by an in-flight prep, and
+ * any stale orphan-resolution lines left in the wrong file by an earlier
+ * version of this code. Scanning every date returned by
+ * `listDatesForWorkflow` makes the lookup robust to all three.
  */
-function findLatestPrepRow(
+function findPrepRow(
   parentRunId: string,
   dir: string,
-): { entry: TrackerEntry; date: string } | null {
-  let best: { entry: TrackerEntry; date: string } | null = null;
+): { latest: TrackerEntry; homeDate: string } | null {
+  let latest: TrackerEntry | null = null;
+  let homeDate: string | null = null;
+  let earliestTs: string | null = null;
   for (const date of listDatesForWorkflow(WORKFLOW, dir)) {
     for (const e of readEntriesForDate(WORKFLOW, date, dir)) {
       if (e.runId !== parentRunId) continue;
       if (!e.data || typeof e.data !== "object" || e.data.mode !== "prepare") continue;
-      if (!best || best.entry.timestamp < e.timestamp) best = { entry: e, date };
+      if (!latest || latest.timestamp < e.timestamp) latest = e;
+      if (!earliestTs || e.timestamp < earliestTs) {
+        earliestTs = e.timestamp;
+        homeDate = date;
+      }
     }
   }
-  return best;
+  if (!latest || !homeDate) return null;
+  return { latest, homeDate };
 }
 
 let _uploadsDirForTests: string | undefined;
@@ -249,11 +257,11 @@ export async function handleOathApproveBatch(
     previewRecords.push(parsed.data);
   }
 
-  const found = findLatestPrepRow(input.parentRunId, dir);
+  const found = findPrepRow(input.parentRunId, dir);
   if (!found) {
     return { ok: false, error: `no prepare row found for parentRunId=${input.parentRunId}` };
   }
-  const { entry: prepRow, date: prepRowDate } = found;
+  const { latest: prepRow, homeDate: prepRowDate } = found;
 
   const approvable: OathPreviewRecord[] = [];
   const skipped: Array<{ index: number; reason: string }> = [];
@@ -349,11 +357,11 @@ export async function handleOathDiscardPrepare(
   if (!input.parentRunId || typeof input.parentRunId !== "string") {
     return { ok: false, error: "parentRunId is required" };
   }
-  const found = findLatestPrepRow(input.parentRunId, dir);
+  const found = findPrepRow(input.parentRunId, dir);
   if (!found) {
     return { ok: false, error: `no prepare row found for parentRunId=${input.parentRunId}` };
   }
-  const { entry: prepRow, date: prepRowDate } = found;
+  const { latest: prepRow, homeDate: prepRowDate } = found;
   // Only block if the row is *already resolved* (approved or discarded).
   // Failed-from-restart rows must remain discardable so the operator can
   // clear them off the dashboard.

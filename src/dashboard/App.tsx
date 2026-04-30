@@ -16,10 +16,10 @@ import { resolveEntryName } from "./components/entry-display";
 import type { SearchResultRow, PreviewInboxRow, FailureRow } from "./components/types";
 import { WorkflowRail } from "./components/WorkflowRail";
 import { QuickRunPanel } from "./components/QuickRunPanel";
+import { RetryAllButton } from "./components/RetryAllButton";
 import { TopBarRunButton } from "./components/TopBarRunButton";
 import { TopBarCaptureButton } from "./components/TopBarCaptureButton";
-import { TopBarDigitalOathButton } from "./components/TopBarDigitalOathButton";
-import { parsePrepareRowData } from "./components/preview-types";
+import { parsePrepareRowData, isResolvedPrepRow } from "./components/preview-types";
 import { dateLocal } from "./lib/utils";
 
 /** Read initial state from URL search params so refresh preserves selection */
@@ -177,11 +177,16 @@ export default function App() {
 
   const selectedEntry = entries.find((e) => e.id === selectedId) || null;
 
-  // Failed IDs across the current workflow + date — feeds QuickRunPanel's
-  // retry-all button. Workflow-scoped (not filter-scoped) since QuickRunPanel
-  // now lives in the TopBar and is read as a workflow-level action.
+  // Failed IDs across the current workflow + date — feeds RetryAllButton.
+  // Excludes operator-discarded prep rows via `isResolvedPrepRow` so retry-bulk
+  // doesn't try to re-enqueue rows whose `data.mode === "prepare"` (no valid
+  // emplId/docId for schema validation). Mirrors `computeFailureCounts` on the
+  // backend — same predicate drives FailureBell badge + WorkflowRail counts.
   const failedIds = useMemo(
-    () => entries.filter((e) => e.status === "failed").map((e) => e.id),
+    () =>
+      entries
+        .filter((e) => e.status === "failed" && !isResolvedPrepRow(e))
+        .map((e) => e.id),
     [entries],
   );
 
@@ -223,7 +228,7 @@ export default function App() {
           loading={loading}
           runControlsSlot={
             <>
-              <QuickRunPanel workflow={workflow} failedIds={failedIds} />
+              <QuickRunPanel workflow={workflow} />
               {workflow === "emergency-contact" && (
                 <TopBarRunButton
                   busyCount={
@@ -235,8 +240,8 @@ export default function App() {
                   }
                 />
               )}
+              <RetryAllButton workflow={workflow} failedIds={failedIds} />
               <TopBarCaptureButton workflow={workflow} />
-              {workflow === "oath-signature" && <TopBarDigitalOathButton />}
             </>
           }
         />

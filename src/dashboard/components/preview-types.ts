@@ -78,6 +78,36 @@ export interface PrepareRowData {
 }
 
 /**
+ * Workflow-agnostic predicate — both emergency-contact and oath-signature
+ * stamp `mode: "prepare"` on parent prep rows.
+ */
+export function isPrepareRow(e: { data?: Record<string, string> }): boolean {
+  return e.data?.mode === "prepare";
+}
+
+/**
+ * A prep row in its terminal-resolved state: the operator has either
+ * approved (fanned out child queue items) or discarded it. Mirrors
+ * `isResolvedPrepEntry` in `src/tracker/dashboard.ts` — kept in lockstep
+ * so frontend and backend agree on which rows count as "still
+ * actionable" vs "operator-resolved." Used by:
+ *   - QueuePanel — filters from the visible queue + StatPills
+ *   - App.tsx `failedIds` — filters from RetryAllButton's count + targets
+ *     so discarded prep rows don't get re-enqueued via /api/retry-bulk
+ *     (they have `data.mode === "prepare"`, no schema-valid emplId/docId)
+ */
+export function isResolvedPrepRow(e: {
+  status: string;
+  step?: string;
+  data?: Record<string, string>;
+}): boolean {
+  if (!isPrepareRow(e)) return false;
+  if (e.status === "done" && e.step === "approved") return true;
+  if (e.status === "failed" && e.step === "discarded") return true;
+  return false;
+}
+
+/**
  * Pull a `PrepareRowData` out of a tracker entry's `data` field. Returns
  * `null` when the entry isn't a prep row (no `mode === "prepare"`) or the
  * records JSON doesn't parse. The dashboard SSE flattens `records` to a
