@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, statSync, watch as fsWatch } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { ocrDocument, type OcrRequest, type OcrResult } from "../../ocr/index.js";
-import { renderPdfPagesToPngs } from "../../ocr/render-pages.js";
+import type { OcrRequest, OcrResult } from "../../ocr/index.js";
+import { runOcrPipeline } from "../../ocr/pipeline.js";
 import { dateLocal, trackEvent } from "../../tracker/jsonl.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
@@ -18,6 +18,7 @@ import {
 import type { EidLookupItem } from "../eid-lookup/schema.js";
 import {
   OcrOutputSchema,
+  PermissiveRecordSchema,
   PrepareRowDataSchema,
   type PreviewRecord,
   type PrepareRowData,
@@ -191,13 +192,24 @@ export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
     log.step(`[prepare] Loaded roster ${rosterRef.filename} (${roster.length} rows)`);
 
     // ── 2. Run OCR
+    //
+    // Two-tier: when a multi-provider key pool is available the pipeline
+    // renders the PDF to per-page PNGs and fans every page across every
+    // configured key in parallel (Gemini + Mistral + Groq + Sambanova),
+    // delivering wall-clock ~= ceil(pages / pool.length) round-trips.
+    // When the pool is empty OR per-page success is < 50%, it falls back
+    // to the legacy whole-PDF `ocrDocument` (cached single-Gemini call).
+    // Either path returns the same `OcrResult<T[]>` shape.
     writeTracker("running", { rosterPath: rosterRef.filename }, "ocr");
-    const ocrFn = _ocrFn ?? (ocrDocument as OcrFn);
-    const ocrResult = await ocrFn({
+    const pageImagesTargetDir = join(input.uploadsDir, runId);
+    const ocrResult = await runOcrPipeline({
       pdfPath: input.pdfPath,
-      schema: OcrOutputSchema,
+      pageImagesDir: pageImagesTargetDir,
+      recordSchema: PermissiveRecordSchema,
+      arraySchema: OcrOutputSchema,
       prompt: EC_OCR_PROMPT,
       schemaName: "emergency-contact-batch",
+      ocrFnOverride: _ocrFn,
     });
     log.step(
       `[prepare] OCR returned ${ocrResult.data.length} record(s) (provider=${ocrResult.provider}, attempts=${ocrResult.attempts}, cached=${ocrResult.cached})`,
@@ -285,20 +297,13 @@ export async function runPrepare(input: PrepareInput): Promise<PrepareOutput> {
       }
     }
 
-    // ── 4b. Render PDF pages for the dashboard preview pane (best-effort).
-    let pageImagesDir: string | undefined;
-    try {
-      const targetDir = join(input.uploadsDir, runId);
-      const pageFilenames = await renderPdfPagesToPngs(input.pdfPath, targetDir);
-      if (pageFilenames.length > 0) {
-        // Persist a path relative to .tracker so the dashboard endpoint
-        // can resolve it (`<cwd>/.tracker/uploads/<runId>/page-NN.png`).
-        pageImagesDir = targetDir;
-        log.step(`[prepare] Rendered ${pageFilenames.length} page preview(s) → ${pageImagesDir}`);
-      }
-    } catch (err) {
-      // renderPdfPagesToPngs already swallows errors; this is double-safety.
-      log.warn(`[prepare] Page render skipped: ${errorMessage(err)}`);
+    // ── 4b. Page images: the OCR pipeline already rendered them when it
+    // took the per-page path (so the dashboard's PDF preview is wired up
+    // for free). On the whole-PDF fallback path `pageImagesDir` is empty
+    // and the preview tile silently falls back to its 404 placeholder.
+    const pageImagesDir = ocrResult.pageImagesDir || undefined;
+    if (pageImagesDir) {
+      log.step(`[prepare] Page previews available at ${pageImagesDir}`);
     }
 
     // ── 5. Build the final data object
