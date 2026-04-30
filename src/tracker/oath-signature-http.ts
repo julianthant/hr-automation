@@ -164,7 +164,8 @@ export interface OathDigitalPrepareHttpInput {
 
 export interface OathDigitalPrepareHttpResult {
   ok: boolean;
-  parentRunId?: string;
+  enqueued?: number;
+  lookupFailures?: number;
   error?: string;
 }
 
@@ -177,13 +178,15 @@ export function __setOathDigitalPrepareForTests(
 }
 
 /**
- * Validate the EID list (5+ digits each, deduped) and fire-and-forget
- * `runDigitalOathPrepare`. Returns synchronously with the parentRunId
- * the operator can use to find the resulting prep row in the dashboard.
+ * Validate the EID list (5+ digits each, deduped) and synchronously
+ * await `runDigitalOathPrepare` — which now skips the prep-row pattern
+ * and enqueues `{emplId, date?}` items directly into the oath-signature
+ * daemon. Returns the count enqueued + how many CRM lookups failed
+ * (those still enqueued without a date so the kernel today-prefills).
  */
 export async function handleOathDigitalPrepare(
   input: OathDigitalPrepareHttpInput,
-  dir: string,
+  _dir: string,
 ): Promise<OathDigitalPrepareHttpResult> {
   if (!Array.isArray(input.emplIds) || input.emplIds.length === 0) {
     return { ok: false, error: "emplIds must be a non-empty array" };
@@ -201,16 +204,19 @@ export async function handleOathDigitalPrepare(
   }
 
   const fn = _digitalPrepareForTests ?? runDigitalOathPrepare;
-  const parentRunId = randomUUID();
-  void fn({
-    emplIds,
-    label: input.label ? String(input.label).slice(0, 80) : undefined,
-    trackerDir: dir,
-    runId: parentRunId,
-  }).catch((err) => {
-    log.error(`[handleOathDigitalPrepare] runDigitalOathPrepare threw: ${errorMessage(err)}`);
-  });
-  return { ok: true, parentRunId };
+  try {
+    const result = await fn({ emplIds });
+    return {
+      ok: true,
+      enqueued: result.enqueued,
+      lookupFailures: result.lookupFailures,
+    };
+  } catch (err) {
+    log.error(
+      `[handleOathDigitalPrepare] runDigitalOathPrepare threw: ${errorMessage(err)}`,
+    );
+    return { ok: false, error: errorMessage(err) };
+  }
 }
 
 // ─── POST /api/oath-signature/approve-batch ─────────────
