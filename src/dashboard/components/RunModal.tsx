@@ -187,8 +187,8 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden p-0 sm:max-w-[640px] gap-0">
-        <DialogHeader className="grid gap-3 px-[38px] pt-[36px] pb-0 space-y-0">
+      <DialogContent hideClose className="overflow-hidden p-0 sm:max-w-[640px] gap-0">
+        <DialogHeader className="relative grid gap-3 px-[38px] pt-[36px] pb-0 space-y-0 border-b-0">
           <div
             className="grid items-start gap-6"
             style={{ gridTemplateColumns: "minmax(0, 1fr) auto" }}
@@ -201,10 +201,25 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
                 Upload a scanned PDF. We&apos;ll OCR it, match against the roster, then approve before queuing.
               </DialogDescription>
             </div>
-            <code className="font-mono text-[11px] whitespace-nowrap pt-[5px] text-muted-foreground/70">
+            <code className="font-mono text-[11px] whitespace-nowrap pt-[5px] pr-9 text-muted-foreground/70">
               emergency-contact
             </code>
           </div>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={() => !submitting && onOpenChange(false)}
+            disabled={submitting}
+            className={cn(
+              "absolute right-[14px] top-[14px] inline-flex h-7 w-7 items-center justify-center rounded-md",
+              "border border-transparent bg-transparent text-muted-foreground transition-colors",
+              "hover:border-border hover:text-foreground",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              "disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer",
+            )}
+          >
+            <X aria-hidden className="h-3.5 w-3.5" />
+          </button>
           <hr aria-hidden className="m-0 border-0 border-t border-border/60" />
         </DialogHeader>
 

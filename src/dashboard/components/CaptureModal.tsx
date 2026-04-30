@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Loader2,
   RefreshCw,
+  X,
   XOctagon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -67,12 +68,6 @@ interface StartedSession {
 
 const photoSrc = (sessionId: string, index: number) =>
   `/api/capture/photos/${encodeURIComponent(sessionId)}/${index}`;
-
-/** Render the raw shortcode as `XX·XXX...` for visual rhythm in the modal. */
-function formatShortcode(s: string): string {
-  if (s.length <= 3) return s;
-  return `${s.slice(0, 2)}·${s.slice(2)}`;
-}
 
 function describeStatus(state: CaptureState, phoneConnected: boolean, photoCount: number): string {
   if (state === "finalizing") return "Bundling photos for handoff…";
@@ -383,6 +378,7 @@ export function CaptureModal({
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(true) : handleClose())}>
       <DialogContent
+        hideClose
         className="overflow-hidden p-0 sm:max-w-[760px] gap-0"
         // Override shadcn's default surface so capture tokens take over.
         style={{
@@ -406,6 +402,7 @@ export function CaptureModal({
           workflow={workflow}
           workflowLabel={workflowLabel}
           contextHint={info?.contextHint ?? contextHint}
+          onClose={handleClose}
         />
         <div
           className="grid gap-9 px-[38px] pb-[26px] pt-[28px]"
@@ -476,13 +473,15 @@ interface ModalChromeProps {
   workflow: string;
   workflowLabel?: string;
   contextHint?: string;
+  onClose: () => void;
 }
 
-function ModalChrome({ state, workflow, workflowLabel, contextHint }: ModalChromeProps) {
+function ModalChrome({ state, workflow, workflowLabel, contextHint, onClose }: ModalChromeProps) {
   void state; // accent rail removed — state-driven color is gone in C system
-  const tag = contextHint ?? workflowLabel ?? workflow;
+  void workflowLabel;
+  void contextHint;
   return (
-    <DialogHeader className="grid gap-3 px-[38px] pt-[36px] pb-0 space-y-0">
+    <DialogHeader className="relative grid gap-3 px-[38px] pt-[36px] pb-0 space-y-0 border-b-0">
       <div
         className="grid items-start gap-6"
         style={{ gridTemplateColumns: "minmax(0, 1fr) auto" }}
@@ -502,12 +501,34 @@ function ModalChrome({ state, workflow, workflowLabel, contextHint }: ModalChrom
           </DialogDescription>
         </div>
         <code
-          className="font-mono text-[11px] whitespace-nowrap pt-[5px]"
+          className="font-mono text-[11px] whitespace-nowrap pt-[5px] pr-9"
           style={{ color: "var(--capture-fg-faint)" }}
         >
-          {tag}
+          {workflow}
         </code>
       </div>
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        className="absolute right-[14px] top-[14px] inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2"
+        style={{
+          backgroundColor: "transparent",
+          color: "var(--capture-fg-muted)",
+          border: "1px solid transparent",
+          ["--tw-ring-color" as string]: "var(--capture-focus-ring)",
+        }}
+        onMouseOver={(e) => {
+          e.currentTarget.style.borderColor = "var(--capture-border-strong)";
+          e.currentTarget.style.color = "var(--capture-fg-secondary)";
+        }}
+        onMouseOut={(e) => {
+          e.currentTarget.style.borderColor = "transparent";
+          e.currentTarget.style.color = "var(--capture-fg-muted)";
+        }}
+      >
+        <X className="h-3.5 w-3.5" aria-hidden />
+      </button>
       <hr
         aria-hidden
         className="m-0 border-0"
@@ -542,15 +563,17 @@ function LeftColumn({
 
   return (
     <div className="flex flex-col items-center gap-4">
-      {/* QR — server-generated SVG; we control the input. */}
+      {/* QR — server-generated SVG; we control the input.
+          Inner SVG ships with width=200; the [&>svg] selector forces it
+          to fit the 192px frame regardless of the baked-in attributes. */}
       <div
-        className="rounded-[10px] p-[14px]"
+        className="rounded-[10px] p-[14px] [&>svg]:block [&>svg]:h-full [&>svg]:w-full"
         style={{ backgroundColor: "#FFFFFF", width: 192, height: 192 }}
         aria-label="QR code for capture URL"
         dangerouslySetInnerHTML={{ __html: started.qrSvg }}
       />
 
-      {/* Shortcode */}
+      {/* Shortcode — manual fallback if the QR can't be scanned. */}
       <div
         className="font-mono text-[28px] font-light"
         style={{
@@ -560,7 +583,7 @@ function LeftColumn({
         }}
         aria-label={`Manual entry shortcode ${started.shortcode}`}
       >
-        {formatShortcode(started.shortcode)}
+        {started.shortcode}
       </div>
 
       {/* URL field */}
@@ -928,7 +951,10 @@ function RightColumn({
               disabled={sessionTerminal}
             />
           ))}
-          {!sessionTerminal && photos.length < 4 && <PlaceholderTile />}
+          {!sessionTerminal &&
+            Array.from({ length: Math.max(0, 4 - photos.length) }).map((_, i) => (
+              <PlaceholderTile key={`ph-${i}`} />
+            ))}
         </div>
       </div>
 
