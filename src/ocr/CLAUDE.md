@@ -4,12 +4,34 @@ Generic, schema-bound OCR primitive. Used by emergency-contact's prepare
 phase; reusable by future workflows that need to extract structured data
 from PDFs (or other documents the providers support).
 
+Two execution paths share the same `OcrResult<T[]>` contract:
+
+1. **Per-page parallel** (`pipeline.ts` → `per-page.ts`) — when a multi-
+   provider key pool is configured, the PDF is split into per-page
+   PNGs and every page is dispatched in parallel across all available
+   keys (Gemini + Mistral + Groq + Sambanova). Default path for the
+   prep workflows (emergency-contact + oath-signature).
+2. **Whole-PDF cached** (`index.ts` → `ocrDocument`) — single Gemini
+   call with the full PDF as inline `application/pdf`. Cache-keyed
+   on PDF bytes + schema. Used as the fallback when per-page success
+   < 50% or no pool keys are configured.
+
 ## Files
 
-- `index.ts` — public `ocrDocument<T>()` orchestrator.
+- `pipeline.ts` — `runOcrPipeline()` — picks per-page vs whole-PDF and
+  unifies the result. The single entry point prep workflows should use.
+- `per-page.ts` — `runOcrPerPage()` — fans pre-rendered PNGs across the
+  multi-provider pool with round-robin dispatch + per-page failover.
+- `per-page-pool.ts` — `buildVisionPool()` reads env vars and returns
+  a flat `PoolKey[]` of every available vision-capable key across
+  Gemini / Mistral / Groq / Sambanova. Pool composition is dynamic.
+- `render-pages.ts` — `renderPdfPagesToPngs()` — `pdf-to-img` wrapper.
+  Returns `[]` on render failure (caller falls back).
+- `index.ts` — public `ocrDocument<T>()` whole-PDF orchestrator.
 - `types.ts` — `OcrRequest`, `OcrResult`, `OcrProvider`, error classes.
 - `cache.ts` — file cache at `.ocr-cache/{sha256}.json`.
-- `rotation.ts` — per-key state machine + persisted state.
+- `rotation.ts` — per-key state machine + persisted state (used by
+  the whole-PDF path; per-page path has its own simpler retry loop).
 - `prompts.ts` — schema → Gemini prompt template.
 - `providers/gemini.ts` — Gemini 2.5 Flash multi-modal call.
 
@@ -53,10 +75,30 @@ Detection rules (Gemini error message patterns):
 
 ## Providers
 
-Currently: Gemini only. Cross-provider fallback (Mistral, OpenRouter,
-Groq, Cerebras, Cohere, Sambanova) is deferred — to add a provider,
-implement `OcrProvider` and register it in `index.ts`'s `getProvider()`
-selector.
+**Whole-PDF path** (`index.ts` / `OcrProvider` interface): Gemini only.
+Adding a second whole-PDF provider would mean implementing `OcrProvider`
+and registering in `index.ts`'s `getProvider()` selector — currently
+deferred (no caller needs cross-provider whole-PDF fallback).
+
+**Per-page path** (`per-page-pool.ts`): all four configured. Each
+provider contributes one or more keys based on env vars set:
+
+| Provider | Env var prefix | Default model | Override env |
+|---|---|---|---|
+| Gemini    | `GEMINI_API_KEY` (+`GEMINI_API_KEY2..6`)       | `gemini-2.5-flash`                              | `OCR_GEMINI_MODEL`     |
+| Mistral   | `MISTRAL_API_KEY` (+`MISTRAL_API_KEY2..N`)     | `pixtral-12b-2409`                              | `OCR_MISTRAL_MODEL`    |
+| Groq      | `GROQ_API_KEY` (+`GROQ_API_KEY2..N`)           | `meta-llama/llama-4-scout-17b-16e-instruct`     | `OCR_GROQ_MODEL`       |
+| Sambanova | `SAMBANOVA_API_KEY` (+`SAMBANOVA_API_KEY2..N`) | `Llama-3.2-90B-Vision-Instruct`                 | `OCR_SAMBANOVA_MODEL`  |
+
+Pool size = sum of all set keys across all providers. The per-page
+driver dispatches `pages.length` work items with concurrency capped at
+`min(pool.length, OCR_PAGE_CONCURRENCY ?? pool.length)`. Per-page
+failover walks `OCR_PER_PAGE_MAX_RETRIES` (default 2) alternate keys
+before marking the page failed; `pipeline.ts` then drops to the
+whole-PDF path if `< 50%` of pages succeeded.
+
+Cohere is the only key in the env that has no vision-capable model
+exposed — it's intentionally not in the pool.
 
 ## Test recipe
 

@@ -29,7 +29,7 @@ const PermissiveEmployeeSchema = z.object({
   cellPhone: z.string().nullable().optional(),
 });
 
-const PermissiveRecordSchema = z.object({
+export const PermissiveRecordSchema = z.object({
   sourcePage: z.number().int().positive(),
   employee: PermissiveEmployeeSchema,
   emergencyContact: EmergencyContactSchema,

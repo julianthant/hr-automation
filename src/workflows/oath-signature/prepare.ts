@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, statSync, watch as fsWatch } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { ocrDocument, type OcrRequest, type OcrResult } from "../../ocr/index.js";
-import { renderPdfPagesToPngs } from "../../ocr/render-pages.js";
+import type { OcrRequest, OcrResult } from "../../ocr/index.js";
+import { runOcrPipeline } from "../../ocr/pipeline.js";
 import { dateLocal, trackEvent } from "../../tracker/jsonl.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
@@ -15,6 +15,7 @@ import {
 } from "../../match/index.js";
 import {
   OathOcrOutputSchema,
+  OathRosterOcrRecordSchema,
   OathPrepareRowDataSchema,
   type OathPrepareRowData,
   type OathPreviewRecord,
@@ -191,13 +192,21 @@ export async function runPaperOathPrepare(
     log.step(`[oath-prep] Loaded roster ${rosterRef.filename} (${roster.length} rows)`);
 
     // ── 2. Run OCR
+    //
+    // Same two-tier shape as emergency-contact's prep: per-page parallel
+    // across the multi-provider key pool when available, whole-PDF
+    // fallback otherwise. See `src/ocr/pipeline.ts` for the threshold +
+    // fallback logic.
     writeTracker("running", { rosterPath: rosterRef.filename }, "ocr");
-    const ocrFn = _ocrFn ?? (ocrDocument as OcrFn);
-    const ocrResult = await ocrFn({
+    const pageImagesTargetDir = join(input.uploadsDir, runId);
+    const ocrResult = await runOcrPipeline({
       pdfPath: input.pdfPath,
-      schema: OathOcrOutputSchema,
+      pageImagesDir: pageImagesTargetDir,
+      recordSchema: OathRosterOcrRecordSchema,
+      arraySchema: OathOcrOutputSchema,
       prompt: OATH_OCR_PROMPT,
       schemaName: "oath-roster-batch",
+      ocrFnOverride: _ocrFn,
     });
     log.step(
       `[oath-prep] OCR returned ${ocrResult.data.length} record(s) (provider=${ocrResult.provider}, attempts=${ocrResult.attempts}, cached=${ocrResult.cached})`,
@@ -265,19 +274,12 @@ export async function runPaperOathPrepare(
       };
     });
 
-    // ── 3b. Render PDF pages for the dashboard preview pane (best-effort).
-    let pageImagesDir: string | undefined;
-    try {
-      const targetDir = join(input.uploadsDir, runId);
-      const pageFilenames = await renderPdfPagesToPngs(input.pdfPath, targetDir);
-      if (pageFilenames.length > 0) {
-        pageImagesDir = targetDir;
-        log.step(
-          `[oath-prep] Rendered ${pageFilenames.length} page preview(s) → ${pageImagesDir}`,
-        );
-      }
-    } catch (err) {
-      log.warn(`[oath-prep] Page render skipped: ${errorMessage(err)}`);
+    // ── 3b. Page images: the OCR pipeline already rendered them when
+    // it took the per-page path. Whole-PDF fallback returns "" and the
+    // dashboard's preview tile silently drops to its 404 placeholder.
+    const pageImagesDir = ocrResult.pageImagesDir || undefined;
+    if (pageImagesDir) {
+      log.step(`[oath-prep] Page previews available at ${pageImagesDir}`);
     }
 
     // ── 4. Build the final data object

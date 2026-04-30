@@ -17,7 +17,7 @@ test("runOcrPerPage preserves page order under out-of-order completion", async (
     completionOrder.push(pageNum);
     return {
       json: [{ name: `page-${pageNum}-record` }],
-      keyIndex: 1,
+      poolKeyId: "test-1",
     };
   });
   try {
@@ -49,7 +49,7 @@ test("runOcrPerPage preserves page order under out-of-order completion", async (
 test("runOcrPerPage records per-page failure without aborting the batch", async () => {
   __setPerPageCallForTests(async ({ pageNum }) => {
     if (pageNum === 2) throw new Error("simulated 429 rate limit");
-    return { json: [{ name: `page-${pageNum}` }], keyIndex: 1 };
+    return { json: [{ name: `page-${pageNum}` }], poolKeyId: "test-1" };
   });
   try {
     const out = await runOcrPerPage({
@@ -77,7 +77,7 @@ test("runOcrPerPage filters records that fail schema validation", async () => {
         { name: `valid-${pageNum}` },
         { not_name: "invalid" }, // wrong shape
       ],
-      keyIndex: 1,
+      poolKeyId: "test-1",
     };
   });
   try {
