@@ -1,6 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { DUO_POLL_INTERVAL_MS, type DuoPollOptions } from "../../../src/auth/duo-poll.js";
+import {
+  DUO_POLL_INTERVAL_MS,
+  DUO_PRE_CHECK_MS,
+  DUO_PRE_CHECK_INTERVAL_MS,
+  type DuoPollOptions,
+} from "../../../src/auth/duo-poll.js";
 
 describe("DuoPollOptions interface", () => {
   it("accepts string successUrlMatch", () => {
@@ -100,10 +105,43 @@ describe("DuoPollOptions interface", () => {
     const opts: DuoPollOptions = { successUrlMatch: "kualibuild" };
     assert.equal(opts.pollIntervalMs, undefined);
   });
+
+  it("accepts optional preCheckMs override", () => {
+    const opts: DuoPollOptions = {
+      successUrlMatch: "kualibuild",
+      preCheckMs: 0,
+    };
+    assert.equal(opts.preCheckMs, 0);
+  });
+
+  it("accepts optional preCheckIntervalMs override", () => {
+    const opts: DuoPollOptions = {
+      successUrlMatch: "kualibuild",
+      preCheckIntervalMs: 50,
+    };
+    assert.equal(opts.preCheckIntervalMs, 50);
+  });
+
+  it("preCheckMs and preCheckIntervalMs are optional", () => {
+    const opts: DuoPollOptions = { successUrlMatch: "kualibuild" };
+    assert.equal(opts.preCheckMs, undefined);
+    assert.equal(opts.preCheckIntervalMs, undefined);
+  });
 });
 
 describe("DUO_POLL_INTERVAL_MS constant", () => {
   it("is fixed at 5000ms — matches the 2026-04-28 cluster A spec", () => {
     assert.equal(DUO_POLL_INTERVAL_MS, 5_000);
+  });
+});
+
+describe("DUO_PRE_CHECK_MS constant", () => {
+  it("is 2000ms — covers the cached-trust SAML redirect window", () => {
+    assert.equal(DUO_PRE_CHECK_MS, 2_000);
+  });
+
+  it("DUO_PRE_CHECK_INTERVAL_MS is 500ms — finer than the main poll cadence", () => {
+    assert.equal(DUO_PRE_CHECK_INTERVAL_MS, 500);
+    assert.ok(DUO_PRE_CHECK_INTERVAL_MS < DUO_POLL_INTERVAL_MS);
   });
 });
