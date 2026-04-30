@@ -6,12 +6,108 @@
 //   npm run clean:tracker -- --no-screenshots       # tracker only
 //   npm run clean:tracker -- --screenshots-only     # screenshots only
 
+import { existsSync, readdirSync, rmSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import {
   cleanOldTrackerFiles,
   cleanOldScreenshots,
   DEFAULT_DIR,
 } from "../../tracker/jsonl.js";
 import { log } from "../../utils/log.js";
+
+/**
+ * Sweep `.tracker/uploads/` for parentRunId-named subdirectories that
+ * are not referenced by any prep row in the tracker JSONL files. Returns
+ * the count removed.
+ *
+ * A "live" parentRunId is any runId appearing on a `data.mode === "prepare"`
+ * tracker entry across emergency-contact and oath-signature workflows. Anything
+ * else under `uploads/` is orphan disk debris (e.g. crashed runs that never
+ * recorded a tracker row, or debris from a prior schema). Removed
+ * recursively.
+ *
+ * Errors during enumeration / deletion are logged at warn and don't
+ * throw — startup must never fail because of disk hygiene.
+ */
+export function sweepOrphanUploadDirs(dir: string): number {
+  const uploadsRoot = join(dir, "uploads");
+  if (!existsSync(uploadsRoot)) return 0;
+  let removed = 0;
+  let knownRunIds: Set<string>;
+  try {
+    knownRunIds = readPrepRunIds(dir);
+  } catch (err) {
+    log.warn(
+      `sweepOrphanUploadDirs: failed to read prep tracker rows: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 0;
+  }
+  let entries: string[];
+  try {
+    entries = readdirSync(uploadsRoot, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name);
+  } catch {
+    return 0;
+  }
+  for (const name of entries) {
+    if (knownRunIds.has(name)) continue;
+    try {
+      rmSync(join(uploadsRoot, name), { recursive: true, force: true });
+      removed += 1;
+    } catch (err) {
+      log.warn(
+        `sweepOrphanUploadDirs: failed to remove ${name}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  return removed;
+}
+
+/**
+ * Read every `runId` that appears on a `data.mode === "prepare"` tracker
+ * entry across the two prep-using workflows. Used by the orphan-upload
+ * sweep to decide which `.tracker/uploads/<runId>/` dirs are still live.
+ */
+function readPrepRunIds(dir: string): Set<string> {
+  const runIds = new Set<string>();
+  if (!existsSync(dir)) return runIds;
+  let files: string[];
+  try {
+    files = readdirSync(dir).filter(
+      (f) =>
+        (f.startsWith("emergency-contact-") || f.startsWith("oath-signature-")) &&
+        f.endsWith(".jsonl") &&
+        !f.endsWith("-logs.jsonl"),
+    );
+  } catch {
+    return runIds;
+  }
+  for (const file of files) {
+    let raw: string;
+    try {
+      raw = readFileSync(join(dir, file), "utf-8");
+    } catch {
+      continue;
+    }
+    for (const line of raw.split("\n")) {
+      if (!line) continue;
+      try {
+        const entry = JSON.parse(line) as {
+          runId?: string;
+          data?: { mode?: string };
+        };
+        if (entry.data?.mode === "prepare" && entry.runId) {
+          runIds.add(entry.runId);
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  return runIds;
+}
 
 export const DEFAULT_SCREENSHOTS_DIR = ".screenshots";
 
@@ -100,11 +196,20 @@ export function cleanTrackerMain(argv: string[] = process.argv.slice(2)): {
   }
   let trackerDeleted = 0;
   let screenshotsDeleted = 0;
+  let uploadsRemoved = 0;
   if (cleanTracker) {
     trackerDeleted = cleanOldTrackerFiles(days, dir);
     log.success(
       `Deleted ${trackerDeleted} stale tracker file${trackerDeleted === 1 ? "" : "s"} (older than ${days} day${days === 1 ? "" : "s"}) from ${dir}`
     );
+    // Orphan upload-dir sweep runs alongside the tracker prune — same
+    // working-directory assumption, same target.
+    uploadsRemoved = sweepOrphanUploadDirs(dir);
+    if (uploadsRemoved > 0) {
+      log.success(
+        `Removed ${uploadsRemoved} orphan upload dir${uploadsRemoved === 1 ? "" : "s"} from ${dir}/uploads`
+      );
+    }
   }
   if (cleanScreenshots) {
     screenshotsDeleted = cleanOldScreenshots(days, screenshotsDir);

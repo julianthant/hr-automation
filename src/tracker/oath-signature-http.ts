@@ -16,7 +16,7 @@
  * `src/data/`, prepare picks the newest).
  */
 import { existsSync, mkdirSync } from "node:fs";
-import { writeFile, unlink } from "node:fs/promises";
+import { writeFile, unlink, rm as fsRm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -330,6 +330,9 @@ export async function handleOathApproveBatch(
     dir,
   );
 
+  // Best-effort cleanup of the per-run uploads dir (page renders).
+  await cleanupOathUploadsDir(input.parentRunId);
+
   return {
     ok: true,
     enqueued: kernelInputs.length,
@@ -394,7 +397,25 @@ export async function handleOathDiscardPrepare(
     prepRowDate,
     dir,
   );
+
+  await cleanupOathUploadsDir(input.parentRunId);
+
   return { ok: true, parentRunId: input.parentRunId };
+}
+
+/**
+ * Recursively remove `.tracker/uploads/<parentRunId>/`. Mirrors the
+ * emergency-contact cleanup path. Best-effort — failures are logged
+ * and never block the operator's success path.
+ */
+async function cleanupOathUploadsDir(parentRunId: string): Promise<void> {
+  const uploadsDir = join(".tracker", "uploads", parentRunId);
+  try {
+    await fsRm(uploadsDir, { recursive: true, force: true });
+    log.step(`Cleaned up oath prep uploads for ${parentRunId}`);
+  } catch (err) {
+    log.warn(`Failed to clean up oath prep uploads for ${parentRunId}: ${errorMessage(err)}`);
+  }
 }
 
 // ─── Dashboard restart sweep ─────────────────────────────
