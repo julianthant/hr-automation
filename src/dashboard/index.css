@@ -191,6 +191,16 @@
   }
 }
 
+@layer components {
+  /* Shared input style for the prep review pane forms (EcReviewForm,
+     OathReviewForm). Tighter than the search input — these grids are
+     dense and the operator scans many fields per record. */
+  .form-input {
+    @apply h-8 w-full rounded-md border border-border bg-secondary px-2.5 text-sm text-foreground;
+    @apply outline-none focus:border-primary;
+  }
+}
+
 /* HeroUI Calendar dark mode fixes
    HeroUI uses --accent for interactive (today, selected) and --muted for subdued text.
    Our shadcn theme uses these differently, so we scope overrides to the calendar. */
