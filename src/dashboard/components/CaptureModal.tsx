@@ -372,11 +372,11 @@ export function CaptureModal({
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(true) : handleClose())}>
       <DialogContent
-        className="overflow-hidden p-0 sm:max-w-[760px]"
+        className="overflow-hidden p-0 sm:max-w-[760px] gap-0"
         // Override shadcn's default surface so capture tokens take over.
         style={{
           backgroundColor: "var(--capture-bg-modal)",
-          borderColor: "var(--capture-border-strong)",
+          borderColor: "var(--capture-border-subtle)",
           color: "var(--capture-fg-primary)",
         }}
         onEscapeKeyDown={(e) => {
@@ -397,8 +397,8 @@ export function CaptureModal({
           contextHint={info?.contextHint ?? contextHint}
         />
         <div
-          className="grid gap-5 p-6 pt-3"
-          style={{ gridTemplateColumns: "240px 1fr" }}
+          className="grid gap-9 px-[38px] pb-[26px] pt-[28px]"
+          style={{ gridTemplateColumns: "192px 1fr", alignItems: "start" }}
         >
           {/* ───────── Left column ───────── */}
           <LeftColumn
@@ -464,63 +464,42 @@ interface ModalChromeProps {
 }
 
 function ModalChrome({ state, workflow, workflowLabel, contextHint }: ModalChromeProps) {
-  const accent = chromAccentColor(state);
+  void state; // accent rail removed — state-driven color is gone in C system
+  const tag = contextHint ?? workflowLabel ?? workflow;
   return (
-    <>
-      {/* Top accent rail */}
+    <DialogHeader className="grid gap-3 px-[38px] pt-[36px] pb-0 space-y-0">
       <div
-        aria-hidden
-        className="h-[3px] w-full transition-colors"
-        style={{
-          backgroundColor: accent ?? "transparent",
-          transitionDuration: "200ms",
-          transitionTimingFunction: "var(--cap-ease-smooth)",
-        }}
-      />
-      <DialogHeader className="px-6 pt-5">
-        <DialogTitle className="flex items-center gap-2 text-base font-semibold">
-          <Smartphone aria-hidden className="h-4 w-4" />
-          <span style={{ color: "var(--capture-fg-primary)" }}>
+        className="grid items-start gap-6"
+        style={{ gridTemplateColumns: "minmax(0, 1fr) auto" }}
+      >
+        <div className="flex flex-col gap-1.5" style={{ maxWidth: 360 }}>
+          <DialogTitle
+            className="text-[15px] font-normal tracking-[-0.005em]"
+            style={{ color: "var(--capture-fg-primary)" }}
+          >
             Capture session
-            <span className="px-1" style={{ color: "var(--capture-fg-faint)" }}>
-              ·
-            </span>
-            <span className="font-mono text-sm" style={{ color: "var(--capture-fg-secondary)" }}>
-              {workflowLabel ?? workflow}
-            </span>
-            {contextHint && (
-              <>
-                <span className="px-1" style={{ color: "var(--capture-fg-faint)" }}>
-                  ·
-                </span>
-                <span className="text-sm" style={{ color: "var(--capture-fg-secondary)" }}>
-                  {contextHint}
-                </span>
-              </>
-            )}
-          </span>
-        </DialogTitle>
-        <DialogDescription style={{ color: "var(--capture-fg-muted)" }}>
-          Scan the QR with your phone, capture pages, then tap Done. Photos
-          mirror here in real time.
-        </DialogDescription>
-      </DialogHeader>
-    </>
+          </DialogTitle>
+          <DialogDescription
+            className="text-[12px] leading-[1.55]"
+            style={{ color: "var(--capture-fg-muted)" }}
+          >
+            Scan the QR with your phone, capture pages, then tap Done.
+          </DialogDescription>
+        </div>
+        <code
+          className="font-mono text-[11px] whitespace-nowrap pt-[5px]"
+          style={{ color: "var(--capture-fg-faint)" }}
+        >
+          {tag}
+        </code>
+      </div>
+      <hr
+        aria-hidden
+        className="m-0 border-0"
+        style={{ borderTop: "1px solid var(--capture-border-subtle)" }}
+      />
+    </DialogHeader>
   );
-}
-
-function chromAccentColor(state: CaptureState): string | null {
-  switch (state) {
-    case "error":
-    case "finalize_failed":
-      return "var(--capture-error)";
-    case "finalizing":
-      return "var(--capture-warn)";
-    case "finalized":
-      return "var(--capture-success)";
-    default:
-      return null;
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
