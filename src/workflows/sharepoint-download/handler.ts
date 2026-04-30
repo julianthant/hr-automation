@@ -82,16 +82,40 @@ export interface SharePointDownloadListItem {
  * for the same phone-tap resource.
  */
 let rosterDownloadInFlight = false;
+let inFlightId: string | null = null;
+let lastCompletion:
+  | { id: string; ts: string; ok: boolean; error?: string }
+  | null = null;
 
 /** Test-only hook: reset the in-flight lock between test cases. */
 export function _resetInFlightForTests(): void {
   rosterDownloadInFlight = false;
+  inFlightId = null;
+  lastCompletion = null;
   _setPendingLandingUrl(null);
 }
 
 /** Test-only: peek at the lock state. */
 export function isDownloadInFlight(): boolean {
   return rosterDownloadInFlight;
+}
+
+/**
+ * Snapshot of the current download state for poll-while-uploading
+ * consumers (e.g. `RunModal`'s "Download new from SharePoint" radio).
+ *
+ * `inFlight` flips on click and back off in the run promise's `finally`
+ * block. `lastCompletion` records the most recent done/failed run with
+ * its id, ISO timestamp, and an `ok` flag — callers that started a
+ * specific id can match `lastCompletion.id === <my id>` to detect their
+ * own run finishing.
+ */
+export function getSharePointDownloadStatus(): {
+  inFlight: boolean;
+  inFlightId: string | null;
+  lastCompletion: { id: string; ts: string; ok: boolean; error?: string } | null;
+} {
+  return { inFlight: rosterDownloadInFlight, inFlightId, lastCompletion };
 }
 
 /**
@@ -202,6 +226,7 @@ export function buildSharePointRosterDownloadHandler(
     // `systems[].login` will read. Both cleared in the fire-and-forget
     // promise's `.finally()` regardless of outcome.
     rosterDownloadInFlight = true;
+    inFlightId = spec.id;
     const outDir = resolveOutDir(spec, defaultOutDir);
     _setPendingLandingUrl(url);
 
@@ -214,11 +239,24 @@ export function buildSharePointRosterDownloadHandler(
           outDir,
         });
         log.success(`SharePoint download complete (${spec.id})`);
+        lastCompletion = {
+          id: spec.id,
+          ts: new Date().toISOString(),
+          ok: true,
+        };
       } catch (e) {
-        log.error(`SharePoint download failed (${spec.id}): ${errorMessage(e)}`);
+        const err = errorMessage(e);
+        log.error(`SharePoint download failed (${spec.id}): ${err}`);
+        lastCompletion = {
+          id: spec.id,
+          ts: new Date().toISOString(),
+          ok: false,
+          error: err,
+        };
       } finally {
         _setPendingLandingUrl(null);
         rosterDownloadInFlight = false;
+        inFlightId = null;
       }
     })();
     // Detach — fire-and-forget. The catch above should handle all errors,
