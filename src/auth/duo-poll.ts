@@ -44,6 +44,22 @@ function emitTelegram(
 export const DUO_POLL_INTERVAL_MS = 5_000;
 
 /**
+ * Pre-announce grace window. Before firing the Telegram + voice cue + waiting
+ * log, briefly check whether the page has already transitioned to the success
+ * URL. When Duo's "Yes, this is my device" trust token is cached, the SAML
+ * chain redirects straight through without pushing to Duo Mobile — in that
+ * case we don't want to ping the operator about a Duo prompt that didn't
+ * happen.
+ *
+ * 2000ms covers the typical SAML-redirect-with-cached-trust path observed
+ * in production. Cached trust usually settles in well under a second; the
+ * 2s headroom catches slow-network variants without delaying real Duo
+ * notifications meaningfully.
+ */
+export const DUO_PRE_CHECK_MS = 2_000;
+export const DUO_PRE_CHECK_INTERVAL_MS = 500;
+
+/**
  * Options for polling Duo MFA approval.
  */
 export interface DuoPollOptions {
@@ -58,6 +74,23 @@ export interface DuoPollOptions {
    * (5000ms). Tests pass smaller values; production should leave unset.
    */
   pollIntervalMs?: number;
+
+  /**
+   * Override the pre-announce grace window in milliseconds. Default:
+   * `DUO_PRE_CHECK_MS` (2000ms). During this window the loop only checks
+   * for an already-matched success URL — if found, the Telegram + voice
+   * cue + waiting log are skipped entirely (cached Duo trust path). Set
+   * to 0 to disable the pre-check and notify immediately as the legacy
+   * behavior did. Tests use small values for fast asserts.
+   */
+  preCheckMs?: number;
+
+  /**
+   * Override the pre-check poll cadence in milliseconds. Default:
+   * `DUO_PRE_CHECK_INTERVAL_MS` (500ms). Independent from the main
+   * `pollIntervalMs` so the pre-check can sample more aggressively.
+   */
+  preCheckIntervalMs?: number;
 
   /**
    * Determines whether the current URL indicates successful authentication.
@@ -119,6 +152,8 @@ export async function pollDuoApproval(
   const { timeoutSeconds = 180, successUrlMatch, successCheck, postApproval, recovery, systemLabel } = options;
   const pollIntervalMs = options.pollIntervalMs ?? DUO_POLL_INTERVAL_MS;
   const pollIntervalSec = pollIntervalMs / 1000;
+  const preCheckMs = options.preCheckMs ?? DUO_PRE_CHECK_MS;
+  const preCheckIntervalMs = options.preCheckIntervalMs ?? DUO_PRE_CHECK_INTERVAL_MS;
 
   const urlMatches = (url: string): boolean => {
     if (typeof successUrlMatch === "string") {
@@ -127,6 +162,38 @@ export async function pollDuoApproval(
     return successUrlMatch(url);
   };
 
+  // Pre-check phase: if Duo's "Yes, this is my device" trust token is
+  // cached, the SAML chain redirects through to the success URL without
+  // pushing to Duo Mobile. We don't want to fire a Telegram + voice cue
+  // claiming a Duo prompt was sent in that case.
+  //
+  // Silent loop — only check the success condition; skip recovery, the
+  // tryAgain button, the trust button, and the Stale-Request guard
+  // (those only matter once a real Duo iframe is present, which means
+  // the URL won't match success and pre-check will time out anyway).
+  if (preCheckMs > 0) {
+    const preCheckDeadline = Date.now() + preCheckMs;
+    while (Date.now() < preCheckDeadline) {
+      try {
+        if (urlMatches(page.url())) {
+          const verified =
+            !successCheck || (await successCheck(page).catch(() => false));
+          if (verified) {
+            log.step(`Duo skipped (cached trust) | URL: ${page.url()}`);
+            if (postApproval) await postApproval(page);
+            return true;
+          }
+        }
+      } catch {
+        // Page may be navigating — swallow and retry.
+      }
+      await page.waitForTimeout(preCheckIntervalMs);
+    }
+  }
+
+  // Pre-check elapsed without an auto-success → a real Duo push is
+  // pending. Announce now.
+  //
   // Best-effort voice cue — opt-in via HR_AUTOMATION_VOICE_CUES=1 + macOS.
   // Fires once before the polling loop begins so the operator hears a cue if
   // they're not looking at the terminal. Never blocks; never throws.
