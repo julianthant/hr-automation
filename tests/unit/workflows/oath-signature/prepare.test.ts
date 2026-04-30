@@ -34,7 +34,7 @@ async function writeRoster(
 
 function makeRow(
   printedName: string,
-  signed: boolean,
+  employeeSigned: boolean,
   rowIndex = 0,
   dateSigned: string | null = null,
 ): OathRosterOcrRecord {
@@ -42,7 +42,8 @@ function makeRow(
     sourcePage: 1,
     rowIndex,
     printedName,
-    signed,
+    employeeSigned,
+    officerSigned: null,
     dateSigned,
     notes: [],
   };

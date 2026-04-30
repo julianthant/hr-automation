@@ -15,9 +15,34 @@ export type MatchState =
   | "resolved"
   | "unresolved";
 
-export type MatchSource = "form" | "roster" | "eid-lookup";
+export type MatchSource = "form" | "roster" | "eid-lookup" | "llm";
 
 export type AddressMatch = "match" | "differ" | "missing";
+
+// ─── Verification (cross-workflow, mirror of backend Zod schema) ─────────
+export type Verification =
+  | {
+      state: "verified";
+      hrStatus: string;
+      department: string;
+      screenshotFilename: string;
+      checkedAt: string;
+    }
+  | {
+      state: "inactive";
+      hrStatus: string;
+      department?: string;
+      screenshotFilename: string;
+      checkedAt: string;
+    }
+  | {
+      state: "non-hdh";
+      hrStatus: string;
+      department: string;
+      screenshotFilename: string;
+      checkedAt: string;
+    }
+  | { state: "lookup-failed"; error: string; checkedAt: string };
 
 export interface Address {
   street: string;
@@ -61,6 +86,9 @@ export interface PreviewRecord {
   matchConfidence?: number;
   rosterCandidates?: Array<{ eid: string; name: string; score: number }>;
   addressMatch?: AddressMatch;
+  documentType?: "expected" | "unknown";
+  originallyMissing?: string[];
+  verification?: Verification;
   selected: boolean;
   warnings: string[];
 }
@@ -71,6 +99,7 @@ export interface PrepareRowData {
   pdfOriginalName: string;
   rosterMode: "download" | "existing";
   rosterPath: string;
+  pageImagesDir?: string;
   records: PreviewRecord[];
   ocrProvider?: string;
   ocrAttempts?: number;

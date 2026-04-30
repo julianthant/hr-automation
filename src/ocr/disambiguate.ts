@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { log } from "../utils/log.js";
 
 export interface DisambiguateInput {
@@ -13,8 +13,7 @@ export interface DisambiguateResult {
 }
 
 /**
- * Build the prompt sent to Claude for disambiguation.
- * Exported for testing.
+ * Build the prompt sent to the LLM for disambiguation. Exported for testing.
  */
 export function buildDisambiguationPrompt(input: DisambiguateInput): string {
   const candidateList = input.candidates
@@ -70,38 +69,69 @@ export function parseDisambiguationResponse(text: string): DisambiguateResult {
   }
 }
 
+function getGeminiKeys(): string[] {
+  const keys: string[] = [];
+  for (const name of [
+    "GEMINI_API_KEY",
+    "GEMINI_API_KEY2",
+    "GEMINI_API_KEY3",
+    "GEMINI_API_KEY4",
+    "GEMINI_API_KEY5",
+    "GEMINI_API_KEY6",
+  ]) {
+    const v = process.env[name];
+    if (v && v.trim()) keys.push(v.trim());
+  }
+  return keys;
+}
+
 /**
- * Send a disambiguation request to Claude. Returns null EID on any
- * failure (network, API error, parse error). Caller should fall back
- * to algorithmic match (which already produced a "borderline" winner)
- * or treat the record as unresolved.
+ * Send a disambiguation request to Gemini. Returns null EID on any
+ * failure (no keys, network, API error, parse error). Caller should
+ * fall back to algorithmic match (which already produced a "borderline"
+ * winner) or treat the record as unresolved.
+ *
+ * Uses the same `GEMINI_API_KEY*` pool as the OCR module. Walks keys
+ * sequentially on transient errors; gives up after the first parse
+ * success or when all keys have failed.
  */
 export async function disambiguateMatch(
   input: DisambiguateInput,
 ): Promise<DisambiguateResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    log.warn("disambiguateMatch: ANTHROPIC_API_KEY not set, skipping LLM call");
-    return { eid: null, confidence: 0 };
-  }
-  try {
-    const client = new Anthropic({ apiKey });
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 100,
-      messages: [
-        { role: "user", content: buildDisambiguationPrompt(input) },
-      ],
-    });
-    const text = response.content
-      .filter((b): b is Anthropic.TextBlock => b.type === "text")
-      .map((b) => b.text)
-      .join("");
-    return parseDisambiguationResponse(text);
-  } catch (err) {
+  const keys = getGeminiKeys();
+  if (keys.length === 0) {
     log.warn(
-      `disambiguateMatch failed: ${err instanceof Error ? err.message : String(err)}`,
+      "disambiguateMatch: no GEMINI_API_KEY* configured, skipping LLM call",
     );
     return { eid: null, confidence: 0 };
   }
+  const prompt = buildDisambiguationPrompt(input);
+  let lastError: unknown;
+  for (const key of keys) {
+    try {
+      const genai = new GoogleGenerativeAI(key);
+      const model = genai.getGenerativeModel({
+        model: "gemini-2.5-flash",
+        generationConfig: { responseMimeType: "application/json" },
+      });
+      const raw = (await model.generateContent([{ text: prompt }])) as {
+        response: { text(): string };
+      };
+      const text = raw.response.text();
+      return parseDisambiguationResponse(text);
+    } catch (err) {
+      lastError = err;
+      const message = err instanceof Error ? err.message : String(err);
+      // Auth / quota errors won't recover by retrying — log once and bail.
+      if (/401|unauthor|invalid\s*api\s*key/i.test(message)) {
+        log.warn(`disambiguateMatch: auth error on Gemini key — ${message}`);
+        break;
+      }
+      // For rate-limit / quota / transient, try the next key.
+    }
+  }
+  log.warn(
+    `disambiguateMatch failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
+  );
+  return { eid: null, confidence: 0 };
 }

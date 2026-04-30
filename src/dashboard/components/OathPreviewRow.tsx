@@ -418,7 +418,7 @@ function OathRecordRow({
           </label>
           <span className="text-[10px] text-muted-foreground font-mono">
             page {record.sourcePage}
-            {record.signed ? "" : " · unsigned"}
+            {record.employeeSigned ? "" : " · unsigned"}
           </span>
         </div>
         {record.warnings.length > 0 && (

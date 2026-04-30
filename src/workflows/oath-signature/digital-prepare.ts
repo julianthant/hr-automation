@@ -125,11 +125,14 @@ export async function runDigitalOathPrepare(
           sourcePage: 1,
           rowIndex: i,
           printedName,
-          signed: true,
+          employeeSigned: true,
+          officerSigned: null,
           dateSigned: null,
           notes: [],
           employeeId: r.emplId,
           matchState: "unresolved",
+          documentType: "expected",
+          originallyMissing: [],
           warnings: r.error
             ? [`CRM lookup failed: ${r.error}`]
             : ["No 'Witness Ceremony Oath New Hire Signed' row found in CRM history"],
@@ -140,13 +143,16 @@ export async function runDigitalOathPrepare(
         sourcePage: 1,
         rowIndex: i,
         printedName,
-        signed: true,
+        employeeSigned: true,
+        officerSigned: null,
         dateSigned: r.dateMmDdYyyy,
         notes: [],
         employeeId: r.emplId,
         matchState: "matched",
         matchSource: "roster", // EID came from input + date from form-of-record (CRM)
         matchConfidence: 1.0,
+        documentType: "expected",
+        originallyMissing: [],
         warnings: [],
         selected: true,
       };
