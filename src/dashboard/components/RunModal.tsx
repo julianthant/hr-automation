@@ -187,169 +187,109 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Run Emergency Contact</DialogTitle>
-          <DialogDescription>
-            Upload a scanned PDF. We&apos;ll OCR it, match against the roster, then let you
-            approve before queuing.
-          </DialogDescription>
+      <DialogContent className="overflow-hidden p-0 sm:max-w-[640px] gap-0">
+        <DialogHeader className="grid gap-3 px-[38px] pt-[36px] pb-0 space-y-0">
+          <div
+            className="grid items-start gap-6"
+            style={{ gridTemplateColumns: "minmax(0, 1fr) auto" }}
+          >
+            <div className="flex flex-col gap-1.5" style={{ maxWidth: 360 }}>
+              <DialogTitle className="text-[15px] font-normal tracking-[-0.005em]">
+                Run Emergency Contact
+              </DialogTitle>
+              <DialogDescription className="text-[12px] leading-[1.55] text-muted-foreground">
+                Upload a scanned PDF. We&apos;ll OCR it, match against the roster, then approve before queuing.
+              </DialogDescription>
+            </div>
+            <code className="font-mono text-[11px] whitespace-nowrap pt-[5px] text-muted-foreground/70">
+              emergency-contact
+            </code>
+          </div>
+          <hr aria-hidden className="m-0 border-0 border-t border-border/60" />
         </DialogHeader>
 
-        <div className="px-5 py-5 space-y-5">
-          {/* Dropzone */}
-          {!file ? (
-            <label
-              ref={dropRef}
-              htmlFor="ec-pdf-input"
-              onDragOver={(e) => {
-                e.preventDefault();
-                dropRef.current?.classList.add("bg-primary/5", "border-primary");
-              }}
-              onDragLeave={() => {
-                dropRef.current?.classList.remove("bg-primary/5", "border-primary");
-              }}
-              onDrop={handleDrop}
-              className={cn(
-                "flex flex-col items-center justify-center gap-2",
-                "rounded-md border-2 border-dashed border-border bg-muted/20",
-                "px-6 py-8 cursor-pointer transition-colors",
-                "hover:bg-muted/40 hover:border-primary/50",
-                "focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 ring-offset-card",
-              )}
-            >
-              <input
-                ref={fileInputRef}
-                id="ec-pdf-input"
-                type="file"
-                accept="application/pdf,.pdf"
-                className="sr-only"
-                onChange={(e) => handleFileSelect(e.target.files?.[0] ?? null)}
+        <div className="px-[38px] pt-[24px] pb-0 space-y-6">
+          <section>
+            <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground/70">
+              {file ? "PDF" : "Upload"}
+            </div>
+            {!file ? (
+              <Dropzone
+                fileInputRef={fileInputRef}
+                dropRef={dropRef}
+                onDrop={handleDrop}
+                onPick={(p) => handleFileSelect(p)}
               />
-              <UploadCloud aria-hidden className="h-7 w-7 text-muted-foreground" />
-              <div className="text-sm text-foreground">
-                Drag PDF here or click to browse
-              </div>
-              <div className="text-xs text-muted-foreground font-mono">
-                PDF only · max 50MB
-              </div>
-            </label>
-          ) : progress !== null && submitting ? (
-            <div className="rounded-md border border-border bg-muted/30 px-4 py-3 space-y-2">
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="text-sm truncate">{file.name}</span>
-                <span className="text-xs font-mono text-muted-foreground">{progress}%</span>
-              </div>
-              <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary transition-all motion-reduce:transition-none"
-                  style={{ width: `${progress}%` }}
-                  aria-hidden
-                />
-              </div>
-              <div
-                className="text-xs text-muted-foreground"
-                aria-live="polite"
-                role="status"
-              >
-                Uploading {formatBytes((file.size * progress) / 100)} of {formatBytes(file.size)}…
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-md border border-border bg-muted/30 px-4 py-3 flex items-center gap-3">
-              <FileText aria-hidden className="h-4 w-4 text-muted-foreground shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm truncate">{file.name}</div>
-                <div className="text-xs text-muted-foreground font-mono">
-                  {formatBytes(file.size)}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setFile(null)}
-                aria-label="Remove file"
-                title="Remove file"
-                className={cn(
-                  "h-7 w-7 inline-flex items-center justify-center rounded-md",
-                  "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  "cursor-pointer",
-                )}
-              >
-                <X aria-hidden className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )}
+            ) : progress !== null && submitting ? (
+              <UploadProgress fileName={file.name} fileSize={file.size} progress={progress} />
+            ) : (
+              <FileRow file={file} onRemove={() => setFile(null)} />
+            )}
+          </section>
 
-          {/* Roster picker */}
-          <div className="space-y-2">
-            <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
+          <section>
+            <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-1 text-muted-foreground/70">
               Roster
             </div>
-            <RosterOption
-              checked={rosterMode === "existing"}
-              disabled={!hasRoster || submitting}
-              onSelect={() => setRosterMode("existing")}
-              label="Use latest roster"
-              hint={
-                hasRoster && latestRoster
-                  ? `Latest: ${latestRoster.filename} · ${formatBytes(latestRoster.bytes)}`
-                  : "No roster on disk — pick the other option to fetch one."
-              }
-            />
-            <RosterOption
-              checked={rosterMode === "download"}
-              disabled={submitting}
-              onSelect={() => setRosterMode("download")}
-              label="Download fresh from SharePoint"
-              hint={
-                sharePoint.downloading
-                  ? "Downloading roster from SharePoint…"
-                  : sharePoint.error
-                    ? `Error: ${sharePoint.error}`
-                    : "Adds ~20s but guarantees current data."
-              }
-            />
-          </div>
+            <div>
+              <RosterRow
+                checked={rosterMode === "existing"}
+                disabled={!hasRoster || submitting}
+                onSelect={() => setRosterMode("existing")}
+                label="Use latest roster"
+                hint={
+                  hasRoster && latestRoster
+                    ? `Latest: ${latestRoster.filename} · ${formatBytes(latestRoster.bytes)}`
+                    : "No roster on disk — pick the other option to fetch one."
+                }
+              />
+              <RosterRow
+                checked={rosterMode === "download"}
+                disabled={submitting}
+                onSelect={() => setRosterMode("download")}
+                label="Download fresh from SharePoint"
+                hint={
+                  sharePoint.downloading
+                    ? "Downloading roster from SharePoint…"
+                    : sharePoint.error
+                      ? `Error: ${sharePoint.error}`
+                      : "Adds ~20s but guarantees current data."
+                }
+                last
+              />
+            </div>
+          </section>
 
           {error && (
             <div
               role="alert"
               aria-live="polite"
-              className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              className="flex items-start gap-2 rounded-md p-3"
+              style={{
+                border: "1px solid var(--border)",
+                borderLeft: "2px solid hsl(0 50% 56%)",
+                backgroundColor: "transparent",
+              }}
             >
-              <AlertCircle aria-hidden className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-              <span>{error}</span>
+              <AlertCircle aria-hidden className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
+              <span className="text-[13px] text-foreground">{error}</span>
             </div>
           )}
         </div>
 
-        <DialogFooter>
-          <button
-            type="button"
-            onClick={() => onOpenChange(false)}
-            disabled={submitting}
-            className={cn(
-              "h-8 px-3 inline-flex items-center justify-center rounded-md",
-              "text-sm font-medium text-muted-foreground",
-              "hover:bg-muted hover:text-foreground",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-              "disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer",
-            )}
-          >
-            Cancel
-          </button>
+        <DialogFooter className="grid grid-cols-4 gap-2.5 border-t border-border/60 px-[38px] py-[18px] mt-[24px]">
           <button
             type="button"
             onClick={handleSubmit}
             disabled={!file || submitting}
             className={cn(
-              "h-8 px-3 inline-flex items-center gap-1.5 rounded-md",
-              "text-sm font-medium",
-              "bg-primary text-primary-foreground border border-primary",
-              "hover:bg-primary/90 hover:border-primary/90",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1",
-              "disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer",
+              "col-span-3 inline-flex items-center justify-center gap-1.5 rounded-[7px] px-3.5 py-2.5",
+              "text-[12.5px] font-medium",
+              "border border-border bg-transparent text-foreground",
+              "hover:border-foreground/50",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+              "disabled:cursor-not-allowed disabled:text-muted-foreground/40 disabled:border-border/60",
+              "cursor-pointer",
             )}
           >
             {submitting && progress !== null && progress < 100 ? (
@@ -366,45 +306,217 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
               "Run"
             )}
           </button>
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            disabled={submitting}
+            className={cn(
+              "col-span-1 inline-flex items-center justify-center rounded-[7px] px-3 py-2.5",
+              "text-[12.5px] font-medium",
+              "border border-border/60 bg-transparent text-muted-foreground",
+              "hover:border-border hover:text-foreground",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+              "disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer",
+            )}
+          >
+            Cancel
+          </button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-function RosterOption({
+function Dropzone({
+  fileInputRef,
+  dropRef,
+  onDrop,
+  onPick,
+}: {
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  dropRef: React.RefObject<HTMLLabelElement | null>;
+  onDrop: (e: React.DragEvent<HTMLLabelElement>) => void;
+  onPick: (file: File | null) => void;
+}) {
+  void fileInputRef; // hidden input is selected by id; ref kept for parity with prior api
+  return (
+    <label
+      ref={dropRef}
+      htmlFor="ec-pdf-input"
+      onDragOver={(e) => {
+        e.preventDefault();
+        dropRef.current?.classList.add("bg-muted/30");
+      }}
+      onDragLeave={() => {
+        dropRef.current?.classList.remove("bg-muted/30");
+      }}
+      onDrop={onDrop}
+      className={cn(
+        "flex flex-col items-center justify-center gap-2.5",
+        "rounded-[10px] border border-dashed border-border/80 bg-transparent",
+        "px-6 py-9 cursor-pointer transition-colors",
+        "hover:bg-muted/30 hover:border-border",
+        "focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1 ring-offset-card",
+      )}
+    >
+      <input
+        id="ec-pdf-input"
+        type="file"
+        accept="application/pdf,.pdf"
+        className="sr-only"
+        onChange={(e) => onPick(e.target.files?.[0] ?? null)}
+      />
+      <span
+        className="inline-flex items-center justify-center rounded-full"
+        style={{
+          width: 38,
+          height: 38,
+          border: "1px solid var(--border)",
+          color: "var(--muted-foreground)",
+        }}
+      >
+        <UploadCloud aria-hidden className="h-4 w-4" />
+      </span>
+      <div className="text-[13px] text-foreground/90">Drag PDF here, or click to browse</div>
+      <div className="text-[10.5px] text-muted-foreground/70 font-mono tracking-wide">
+        PDF only · max 50 MB
+      </div>
+    </label>
+  );
+}
+
+function FileRow({ file, onRemove }: { file: File; onRemove: () => void }) {
+  return (
+    <div
+      className="flex items-center gap-3.5 rounded-[10px] px-4 py-3.5"
+      style={{ border: "1px solid var(--border)", backgroundColor: "var(--muted)" }}
+    >
+      <span
+        className="inline-flex items-center justify-center rounded-md shrink-0"
+        style={{
+          width: 32,
+          height: 32,
+          backgroundColor: "var(--background)",
+          border: "1px solid var(--border)",
+          color: "var(--foreground)",
+        }}
+      >
+        <FileText aria-hidden className="h-4 w-4" />
+      </span>
+      <div className="flex-1 min-w-0 grid gap-0.5">
+        <div className="text-[13px] truncate text-foreground">{file.name}</div>
+        <div className="text-[10.5px] text-muted-foreground/70 font-mono">
+          {formatBytes(file.size)}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label="Remove file"
+        title="Remove file"
+        className={cn(
+          "h-7 w-7 inline-flex items-center justify-center rounded-md",
+          "text-muted-foreground hover:bg-muted hover:text-foreground",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "cursor-pointer",
+        )}
+      >
+        <X aria-hidden className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+function UploadProgress({
+  fileName,
+  fileSize,
+  progress,
+}: {
+  fileName: string;
+  fileSize: number;
+  progress: number;
+}) {
+  return (
+    <div
+      className="rounded-[10px] px-4 py-3.5 space-y-2"
+      style={{ border: "1px solid var(--border)", backgroundColor: "var(--muted)" }}
+    >
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[13px] truncate">{fileName}</span>
+        <span className="text-[11px] font-mono text-muted-foreground/80">{progress}%</span>
+      </div>
+      <div
+        className="h-[1.5px] w-full overflow-hidden rounded-full"
+        style={{ backgroundColor: "var(--border)" }}
+      >
+        <div
+          className="h-full transition-[width] motion-reduce:transition-none"
+          style={{ width: `${progress}%`, backgroundColor: "var(--foreground)" }}
+          aria-hidden
+        />
+      </div>
+      <div
+        className="text-[11px] text-muted-foreground/80"
+        aria-live="polite"
+        role="status"
+      >
+        Uploading {formatBytes((fileSize * progress) / 100)} of {formatBytes(fileSize)}…
+      </div>
+    </div>
+  );
+}
+
+function RosterRow({
   checked,
   disabled,
   onSelect,
   label,
   hint,
+  last,
 }: {
   checked: boolean;
   disabled: boolean;
   onSelect: () => void;
   label: string;
   hint: string;
+  last?: boolean;
 }) {
   return (
     <label
       className={cn(
-        "flex items-start gap-3 rounded-md border px-3 py-2.5 cursor-pointer transition-colors",
-        checked
-          ? "border-primary bg-primary/5"
-          : "border-border hover:bg-muted/40",
+        "flex items-start gap-3.5 px-3.5 py-3 cursor-pointer transition-colors",
+        !last && "border-b border-border/60",
+        checked ? "bg-muted/40" : "hover:bg-muted/20",
         disabled && "opacity-50 cursor-not-allowed",
       )}
     >
+      <span
+        className="mt-1 inline-flex items-center justify-center shrink-0 relative"
+        style={{
+          width: 14,
+          height: 14,
+          borderRadius: "50%",
+          border: "1px solid var(--border)",
+        }}
+        aria-hidden
+      >
+        {checked && (
+          <span
+            className="block rounded-full"
+            style={{ width: 6, height: 6, backgroundColor: "var(--foreground)" }}
+          />
+        )}
+      </span>
       <input
         type="radio"
-        className="mt-1 cursor-pointer disabled:cursor-not-allowed accent-primary"
+        className="sr-only"
         checked={checked}
         disabled={disabled}
         onChange={() => !disabled && onSelect()}
       />
       <div className="flex-1 min-w-0">
-        <div className="text-sm text-foreground">{label}</div>
-        <div className="text-xs text-muted-foreground font-mono mt-0.5 truncate">{hint}</div>
+        <div className="text-[12.5px] text-foreground">{label}</div>
+        <div className="text-[10.5px] text-muted-foreground/70 font-mono mt-0.5 truncate">{hint}</div>
       </div>
     </label>
   );
