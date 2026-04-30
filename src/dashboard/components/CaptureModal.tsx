@@ -74,6 +74,23 @@ interface StartedSession {
 const photoSrc = (sessionId: string, index: number) =>
   `/api/capture/photos/${encodeURIComponent(sessionId)}/${index}`;
 
+/** Render the raw shortcode as `XX·XXX...` for visual rhythm in the modal. */
+function formatShortcode(s: string): string {
+  if (s.length <= 3) return s;
+  return `${s.slice(0, 2)}·${s.slice(2)}`;
+}
+
+function describeStatus(state: CaptureState, phoneConnected: boolean, photoCount: number): string {
+  if (state === "finalizing") return "Bundling photos for handoff…";
+  if (state === "finalized") return "Sent to handler. Closing automatically…";
+  if (state === "finalize_failed") return "Couldn't send to handler.";
+  if (state === "expired") return "Session expired.";
+  if (state === "discarded") return "Session discarded.";
+  if (!phoneConnected) return "Waiting for phone to scan QR.";
+  if (photoCount === 0) return "Phone connected — awaiting photos.";
+  return `Phone connected — ${photoCount} photo${photoCount === 1 ? "" : "s"} received.`;
+}
+
 export function CaptureModal({
   open,
   onOpenChange,
@@ -405,18 +422,7 @@ export function CaptureModal({
             state={effectiveState}
             started={started}
             error={error}
-            info={info}
-            now={now}
-            sseConnected={sseConnected}
-            validation={validation}
-            validating={validating}
-            retrying={retrying}
-            extending={extending}
             onCopy={handleCopy}
-            onFinalize={handleFinalize}
-            onRetryHandoff={handleRetryHandoff}
-            onDiscard={handleDiscard}
-            onExtend={handleExtend}
             onCloseAndStartNew={() => onOpenChange(false)}
           />
 
@@ -510,18 +516,7 @@ interface LeftColumnProps {
   state: CaptureState;
   started: StartedSession | null;
   error: string | null;
-  info: CaptureSessionInfo | null;
-  now: number;
-  sseConnected: boolean;
-  validation: CaptureValidation | null;
-  validating: boolean;
-  retrying: boolean;
-  extending: boolean;
   onCopy: () => void;
-  onFinalize: () => void;
-  onRetryHandoff: () => void;
-  onDiscard: () => void;
-  onExtend: () => void;
   onCloseAndStartNew: () => void;
 }
 
@@ -529,153 +524,81 @@ function LeftColumn({
   state,
   started,
   error,
-  info,
-  now,
-  sseConnected,
-  validation,
-  validating,
-  retrying,
-  extending,
   onCopy,
-  onFinalize,
-  onRetryHandoff,
-  onDiscard,
-  onExtend,
   onCloseAndStartNew,
 }: LeftColumnProps) {
   if (state === "starting") return <StartingPanel />;
   if (state === "error") return <ErrorPanel message={error ?? "Couldn't start"} onRetry={onCloseAndStartNew} />;
   if (!started) return null;
 
-  const phoneConnected = info?.phoneConnectedAt != null;
-  const photoCount = info?.photos.length ?? 0;
-  const blockers = validation?.blockers ?? [];
-  const finalizeDisabled =
-    state !== "open" || validating || blockers.length > 0 || photoCount === 0;
-
   return (
-    <div className="flex flex-col gap-3">
-      {/* QR card */}
+    <div className="flex flex-col items-center gap-4">
+      {/* QR — server-generated SVG; we control the input. */}
       <div
-        className="mx-auto rounded-md p-3"
-        style={{ backgroundColor: "#FFFFFF" }}
+        className="rounded-[10px] p-[14px]"
+        style={{ backgroundColor: "#FFFFFF", width: 192, height: 192 }}
         aria-label="QR code for capture URL"
-        // dangerouslySetInnerHTML is acceptable: qrSvg is server-generated
-        // SVG (we control the input), not user input.
         dangerouslySetInnerHTML={{ __html: started.qrSvg }}
       />
+
+      {/* Shortcode */}
       <div
-        className="text-center font-sans text-[11px]"
-        style={{ color: "var(--capture-fg-muted)" }}
+        className="font-mono text-[28px] font-light"
+        style={{
+          color: "var(--capture-fg-primary)",
+          letterSpacing: "0.14em",
+          lineHeight: 1.1,
+        }}
+        aria-label={`Manual entry shortcode ${started.shortcode}`}
       >
-        Scan with phone camera
+        {formatShortcode(started.shortcode)}
       </div>
 
-      {/* URL row */}
-      <div className="flex flex-col gap-1">
-        <span
-          className="font-sans text-[11px] uppercase tracking-wider"
+      {/* URL field */}
+      <div className="w-full">
+        <div
+          className="text-center font-sans text-[9.5px] uppercase tracking-[0.10em] mb-1.5 font-medium"
           style={{ color: "var(--capture-fg-faint)" }}
         >
           URL
-        </span>
+        </div>
         <div
-          className="flex items-center gap-2 rounded-md px-2 py-1.5"
-          style={{
-            backgroundColor: "var(--capture-bg-raised)",
-            borderColor: "var(--capture-border-subtle)",
-            borderWidth: 1,
-          }}
+          className="flex items-baseline gap-3 py-2"
+          style={{ borderBottom: "1px solid var(--capture-border-subtle)" }}
         >
           <code
-            className="flex-1 truncate font-mono text-[12px]"
-            style={{ color: "var(--capture-fg-secondary)" }}
+            className="flex-1 truncate font-mono text-[11.5px]"
+            style={{ color: "var(--capture-fg-body)" }}
             title={started.captureUrl}
           >
             {started.captureUrl}
           </code>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-label="Copy URL"
-                onClick={onCopy}
-                className="rounded p-1 transition-colors focus-visible:outline-none focus-visible:ring-2"
-                style={{
-                  color: "var(--capture-fg-muted)",
-                  ["--tw-ring-color" as string]: "var(--capture-focus-ring)",
-                }}
-              >
-                <Copy aria-hidden className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Copy URL</TooltipContent>
-          </Tooltip>
+          <button
+            type="button"
+            aria-label="Copy URL"
+            onClick={onCopy}
+            className="font-sans text-[10px] cursor-pointer hover:underline focus-visible:outline-none focus-visible:ring-2"
+            style={{
+              color: "var(--capture-fg-muted)",
+              backgroundColor: "transparent",
+              border: 0,
+              padding: 0,
+              ["--tw-ring-color" as string]: "var(--capture-focus-ring)",
+            }}
+          >
+            Copy
+          </button>
         </div>
       </div>
-
-      {/* Shortcode */}
-      <div className="flex items-baseline gap-2">
-        <span
-          className="font-sans text-[11px] uppercase tracking-wider"
-          style={{ color: "var(--capture-fg-faint)" }}
-        >
-          Shortcode
-        </span>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span
-              className="font-mono text-base font-bold"
-              style={{
-                color: "var(--capture-fg-primary)",
-                letterSpacing: "0.08em",
-              }}
-            >
-              {started.shortcode}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>Manual entry fallback if QR scan fails</TooltipContent>
-        </Tooltip>
-      </div>
-
-      {/* Phone status pill */}
-      <PhoneStatusPill
-        state={state}
-        phoneConnected={phoneConnected}
-        photoCount={photoCount}
-        sseConnected={sseConnected}
-      />
-
-      {/* Action row */}
-      <ActionRow
-        state={state}
-        retrying={retrying}
-        finalizeDisabled={finalizeDisabled}
-        photoCount={photoCount}
-        onFinalize={onFinalize}
-        onRetryHandoff={onRetryHandoff}
-        onDiscard={onDiscard}
-        onCloseAndStartNew={onCloseAndStartNew}
-      />
-
-      {/* Expiry */}
-      <ExpiryFooter
-        expiresAt={started.expiresAt}
-        currentExpiresAt={info?.expiresAt ?? started.expiresAt}
-        now={now}
-        extending={extending}
-        onExtend={onExtend}
-        terminal={isTerminal(state)}
-      />
     </div>
   );
 }
 
 function StartingPanel() {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 py-12">
+    <div className="flex w-full flex-col items-center justify-center gap-3 py-12">
       <Loader2 aria-hidden className="h-6 w-6 animate-spin" style={{ color: "var(--capture-fg-muted)" }} />
-      <span className="font-sans text-sm" style={{ color: "var(--capture-fg-muted)" }}>
+      <span className="font-sans text-[12px]" style={{ color: "var(--capture-fg-muted)" }}>
         Generating QR code…
       </span>
     </div>
@@ -686,28 +609,27 @@ function ErrorPanel({ message, onRetry }: { message: string; onRetry: () => void
   return (
     <div
       role="alert"
-      className="flex flex-col gap-3 rounded-md p-3"
+      className="flex w-full flex-col gap-3 rounded-md p-3"
       style={{
-        backgroundColor: "var(--capture-error-bg)",
+        border: "1px solid var(--capture-border-subtle)",
         borderLeft: "2px solid var(--capture-error)",
+        backgroundColor: "transparent",
       }}
     >
-      <div className="flex items-center gap-1.5 font-sans text-[11px] uppercase tracking-wider" style={{ color: "var(--capture-error-fg)" }}>
+      <div
+        className="flex items-center gap-1.5 font-sans text-[9.5px] uppercase tracking-[0.10em] font-medium"
+        style={{ color: "var(--capture-fg-muted)" }}
+      >
         <XOctagon aria-hidden className="h-3.5 w-3.5" />
         Error
       </div>
-      <code
-        className="font-mono text-xs leading-relaxed"
-        style={{ color: "var(--capture-fg-secondary)" }}
-      >
+      <code className="font-mono text-xs leading-relaxed" style={{ color: "var(--capture-fg-body)" }}>
         {message}
       </code>
-      <div className="flex gap-2">
-        <CtaButton variant="primary" onClick={onRetry}>
-          <RefreshCw aria-hidden className="h-3.5 w-3.5" />
-          Close
-        </CtaButton>
-      </div>
+      <CtaButton variant="primary" onClick={onRetry}>
+        <RefreshCw aria-hidden className="h-3.5 w-3.5" />
+        Close
+      </CtaButton>
     </div>
   );
 }
