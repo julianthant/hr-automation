@@ -38,6 +38,7 @@
     "test": "tsx --test 'tests/**/*.test.ts'"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.91.1",
     "@google/generative-ai": "^0.24.1",
     "@heroui/calendar": "^2.2.32",
     "@heroui/react": "^3.0.2",
