@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0d0907">
+  <meta name="theme-color" content="#0e0e10">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Capture</title>
@@ -18,31 +18,26 @@
        slate #020617 → #334155 ladder). Phones see the same warm-brown
        palette as the operator does on their laptop. */
     :root {
-      --bg-page: hsl(15 20% 3.9%);
-      --bg-modal: hsl(15 11% 7%);
-      --bg-raised: hsl(15 16% 9.4%);
-      --bg-raised-hi: hsl(27 35% 12%);
-      --border: hsl(25 17% 18%);
-      --border-subtle: hsl(25 17% 13%);
+      --bg-page: #050507;
+      --bg-modal: #0e0e10;
+      --bg-raised: #131316;
+      --bg-raised-hi: #1c1c1f;
+      --border: #232325;
+      --border-subtle: #1f1f21;
+      --border-strong: #2c2c2e;
+      --border-cta: #4a4a4c;
+      --border-cta-strong: #6a6a6c;
 
-      --fg-primary: hsl(24 21% 86%);
-      --fg-secondary: hsl(25 9% 65%);
-      --fg-muted: hsl(22 7% 45%);
-      --fg-faint: hsl(25 14% 30%);
+      --fg-primary: #f5f5f7;
+      --fg-secondary: #c8c8cb;
+      --fg-body: #d0d0d3;
+      --fg-muted: #8a8a8c;
+      --fg-faint: #6e6e72;
 
-      --success: hsl(142 60% 45%);
-      --success-fg: hsl(142 60% 60%);
-      --success-bg: hsl(142 60% 45% / 0.16);
+      --warn: #d4a64a;
+      --error: #d4544a;
 
-      --warn: hsl(38 92% 50%);
-      --warn-fg: hsl(38 92% 65%);
-      --warn-bg: hsl(38 92% 50% / 0.14);
-
-      --error: hsl(0 84% 60%);
-      --error-fg: hsl(0 84% 70%);
-      --error-bg: hsl(0 84% 60% / 0.16);
-
-      --focus-ring: hsl(29 41% 58%);
+      --focus-ring: #6a6a6c;
 
       --ease-enter:  cubic-bezier(0.16, 1, 0.3, 1);
       --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -70,78 +65,108 @@
     /* ── Sticky header ─────────────────────────────────────────── */
     header.bar {
       position: sticky; top: 0; z-index: 10;
-      display: flex; justify-content: space-between; align-items: center;
+      display: grid;
+      grid-template-columns: 1fr auto;
       gap: 12px;
-      padding: 12px 16px;
-      min-height: 56px;
-      background: hsl(15 11% 7% / 0.95);
+      align-items: start;
+      padding: 26px 18px 14px;
+      background: rgba(14, 14, 16, 0.95);
       backdrop-filter: saturate(180%) blur(8px);
       -webkit-backdrop-filter: saturate(180%) blur(8px);
-      border-bottom: 1px solid var(--border-subtle);
+      border-bottom: 1px solid var(--border);
     }
-    .title { font-size: 16px; font-weight: 600; line-height: 1.2; min-width: 0; }
-    .title small {
-      display: block; font-size: 12px; font-weight: 400;
-      color: var(--fg-muted); margin-top: 2px;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    .title { display: grid; gap: 4px; min-width: 0; }
+    .title h1 {
+      margin: 0;
+      font-size: 17px;
+      font-weight: 400;
+      line-height: 1.2;
+      letter-spacing: -0.005em;
+      color: var(--fg-primary);
+    }
+    .title .photo-count {
+      font-size: 10px;
+      color: var(--fg-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.10em;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-feature-settings: 'tnum';
     }
     .pill {
       display: inline-flex; align-items: center; gap: 6px;
-      padding: 4px 10px; border-radius: 999px;
-      font-size: 11px; font-weight: 700;
-      letter-spacing: 0.04em; text-transform: uppercase;
-      transition: background-color 200ms var(--ease-smooth), color 200ms var(--ease-smooth);
+      padding-top: 4px;
+      font-size: 10px;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      font-weight: 500;
+      color: var(--fg-secondary);
     }
     .pill .dot {
-      width: 6px; height: 6px; border-radius: 50%;
+      width: 5px; height: 5px; border-radius: 50%;
+      background: var(--fg-secondary);
       display: inline-block; flex-shrink: 0;
     }
-    .pill.connected { background: var(--success-bg); color: var(--success-fg); }
-    .pill.connected .dot { background: var(--success); }
-    .pill.reconnecting { background: var(--error-bg); color: var(--error-fg); }
-    .pill.reconnecting .dot { background: var(--error); animation: blink 1s linear infinite; }
-    .pill.session-closed { background: var(--bg-raised); color: var(--fg-muted); }
+    .pill.reconnecting { color: var(--fg-muted); }
+    .pill.reconnecting .dot {
+      background: var(--fg-muted);
+      animation: blink 1.1s linear infinite;
+    }
+    .pill.session-closed { color: var(--fg-muted); }
     .pill.session-closed .dot { background: var(--fg-muted); }
 
     @keyframes blink { 50% { opacity: 0.35; } }
 
     /* ── Main scrollable area ─────────────────────────────────── */
     main {
-      padding: 12px 16px 80px;
+      padding: 16px 18px 80px;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
     }
-    .substrip {
-      display: flex; justify-content: space-between; align-items: baseline;
-      font-size: 13px; margin-bottom: 12px; color: var(--fg-muted);
-    }
-    .substrip strong { color: var(--fg-primary); font-weight: 600; }
-    .substrip .saved { font-size: 12px; color: var(--success-fg); }
-    .substrip .saved.dim { color: var(--fg-faint); }
 
     .grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 12px;
+      gap: 10px;
       align-items: start;
+    }
+
+    .empty-state {
+      display: none;
+      flex-direction: column; align-items: center; justify-content: center;
+      gap: 14px;
+      padding: 56px 24px 24px;
+      text-align: center;
+    }
+    .empty-state.visible { display: flex; }
+    .empty-state .icon-wrap {
+      width: 56px; height: 56px;
+      border-radius: 50%;
+      border: 1px solid var(--border-strong);
+      display: grid; place-items: center;
+      color: var(--fg-faint);
+    }
+    .empty-state h2 {
+      margin: 0;
+      font-size: 14px; font-weight: 400; color: var(--fg-body);
+    }
+    .empty-state p {
+      margin: 0; font-size: 11.5px; color: var(--fg-muted);
+      line-height: 1.5; max-width: 220px;
     }
 
     .tile {
       aspect-ratio: 3 / 4;
       position: relative;
-      background: var(--bg-raised);
-      border: 1px solid var(--border);
-      border-radius: 8px;
+      background: linear-gradient(135deg, #181819 0%, #131314 100%);
+      border-radius: 6px;
       overflow: hidden;
       animation: tile-in 320ms var(--ease-bounce) both;
       transition: transform 180ms var(--ease-smooth);
       cursor: pointer;
     }
     .tile.blur-flagged {
-      border-color: transparent;
-      outline: 2px solid var(--warn);
-      outline-offset: -2px;
-      animation: tile-in 320ms var(--ease-bounce) both, blur-flash 800ms var(--ease-smooth) 1;
+      outline: 1px solid var(--warn);
+      outline-offset: -1px;
     }
     .tile.dragging { transform: scale(1.04); z-index: 5; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
     .tile.drag-other { opacity: 0.6; }
@@ -151,121 +176,109 @@
     }
     .tile.blank { background: #FFFFFF; }
     .tile.blank::after {
-      content: "blank page";
+      content: "BLANK PAGE";
       position: absolute; inset: 0;
       display: grid; place-items: center;
-      color: hsl(25 14% 30%); font-size: 12px; font-weight: 600;
-      text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--fg-faint); font-size: 9px;
+      text-transform: uppercase; letter-spacing: 0.10em; font-weight: 500;
     }
+    .tile.pending { opacity: 0.55; }
 
     @keyframes tile-in {
-      from { opacity: 0; transform: translateY(-4px) scale(0.92); }
+      from { opacity: 0; transform: translateY(-4px) scale(0.94); }
       to   { opacity: 1; transform: translateY(0) scale(1); }
     }
     @keyframes blur-flash {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
-      50%      { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.55); }
+      0%, 100% { box-shadow: 0 0 0 0 rgba(212, 166, 74, 0); }
+      50%      { box-shadow: 0 0 0 6px rgba(212, 166, 74, 0.40); }
     }
 
-    .tile .badge {
+    .tile .idx {
       position: absolute;
-      padding: 2px 7px;
-      border-radius: 6px;
+      bottom: 6px; left: 8px;
       font-family: ui-monospace, "SF Mono", Menlo, monospace;
-      font-size: 13px;
-      font-weight: 700;
-      tabular-nums: 1;
-      background: hsl(15 11% 7% / 0.7);
-      color: var(--fg-primary);
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--fg-secondary);
+      font-feature-settings: 'tnum';
       pointer-events: none;
     }
-    .tile .badge.idx { top: 6px; left: 8px; }
-    .tile .badge.status {
-      bottom: 6px; left: 6px;
-      font-family: inherit; font-size: 11px;
-      padding: 2px 6px; border-radius: 4px;
-      letter-spacing: 0.02em; font-weight: 600;
+    .tile .status {
+      position: absolute;
+      bottom: 6px; right: 8px;
+      font-size: 9px;
+      color: var(--fg-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 500;
+      pointer-events: none;
     }
-    .tile .badge.uploaded { background: hsl(142 60% 45% / 0.85); color: hsl(150 80% 5%); }
-    .tile .badge.pending { background: hsl(15 11% 7% / 0.85); color: var(--fg-muted); }
-    .tile .badge.failed { background: hsl(0 84% 60% / 0.9); color: hsl(0 0% 100%); }
-    .tile .badge.converting { background: hsl(38 92% 50% / 0.85); color: hsl(30 100% 7%); }
-    .tile .badge.blur {
-      top: 6px; right: 6px;
-      background: hsl(38 92% 50% / 0.92); color: hsl(30 100% 7%);
-      font-family: inherit; font-size: 10px;
-      padding: 2px 6px; border-radius: 4px;
-      letter-spacing: 0.04em; font-weight: 700; text-transform: uppercase;
-    }
+    .tile.blur-flagged .status { color: var(--warn); }
 
     .add-tile {
       aspect-ratio: 3 / 4;
-      border: 2px dashed hsl(25 14% 30% / 0.7);
-      border-radius: 8px;
+      border: 1px dashed var(--border-strong);
+      border-radius: 6px;
       background: transparent;
-      color: var(--fg-muted);
-      font-size: 28px; font-weight: 200; line-height: 1;
+      color: var(--fg-faint);
       display: grid; place-items: center;
       cursor: pointer;
       transition: border-color 180ms var(--ease-smooth), color 180ms var(--ease-smooth);
     }
-    .add-tile span { font-size: 12px; margin-left: 6px; font-weight: 500; }
+    .add-tile .glyph { display: grid; place-items: center; gap: 2px; }
+    .add-tile .plus { font-size: 24px; line-height: 1; font-weight: 200; }
+    .add-tile .label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; }
     .add-tile:focus-visible {
-      outline: 2px solid var(--focus-ring);
+      outline: 1px solid var(--focus-ring);
       outline-offset: 2px;
     }
 
     /* ── Sticky footer ─────────────────────────────────────────── */
     footer.actions {
       position: sticky; bottom: 0; z-index: 10;
-      padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
-      background: rgba(15, 23, 42, 0.95);
+      padding: 12px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+      background: rgba(14, 14, 16, 0.95);
       backdrop-filter: saturate(180%) blur(8px);
       -webkit-backdrop-filter: saturate(180%) blur(8px);
-      border-top: 1px solid var(--border-subtle);
-      display: flex; flex-direction: column; gap: 8px;
+      border-top: 1px solid var(--border);
+      display: grid; gap: 8px;
+    }
+    .add-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
     }
     .btn {
-      display: flex; justify-content: center; align-items: center;
-      gap: 8px;
       width: 100%;
-      min-height: 44px;
-      padding: 12px 16px;
-      border: 0;
-      border-radius: 12px;
-      font-size: 16px; font-weight: 600;
+      padding: 9px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 500;
+      border: 1px solid var(--border-cta);
+      background: transparent;
+      color: var(--fg-body);
+      text-align: center;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
       cursor: pointer;
-      transition: background 180ms var(--ease-smooth), opacity 180ms;
+      transition: border-color 180ms var(--ease-smooth), color 180ms var(--ease-smooth);
     }
-    .btn-secondary {
-      background: var(--bg-raised);
+    .btn-primary {
+      border-color: var(--border-cta-strong);
       color: var(--fg-primary);
     }
-    .btn-secondary:active { background: var(--bg-raised-hi); }
-    .btn-primary {
-      background: var(--success);
-      color: hsl(150 80% 5%);
-      font-size: 17px; font-weight: 700;
-      min-height: 52px;
-    }
-    .btn-primary:active { background: hsl(142 65% 38%); }
-    .btn-primary:disabled, .btn-secondary:disabled {
-      opacity: 0.45; cursor: not-allowed;
-    }
-    .btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-    .helper {
-      font-size: 12px;
+    .btn:disabled {
+      border-color: var(--border);
       color: var(--fg-faint);
-      text-align: center;
-      line-height: 1.4;
+      cursor: not-allowed;
     }
+    .btn:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: 2px; }
 
     input[type=file] { position: absolute; left: -9999px; }
 
     /* ── Action sheet (long-press menu) ────────────────────────── */
     .scrim {
       position: fixed; inset: 0; z-index: 50;
-      background: hsl(15 11% 4% / 0.78);
+      background: rgba(5, 5, 7, 0.78);
       display: none;
       animation: scrim-in 180ms var(--ease-enter) both;
     }
@@ -299,7 +312,7 @@
     }
     .sheet-row:last-child { border-bottom: 0; }
     .sheet-row:active { background: var(--bg-raised); }
-    .sheet-row.danger { color: var(--error-fg); }
+    .sheet-row.danger { color: var(--error); }
     .sheet-row svg { flex-shrink: 0; }
     .sheet-cancel {
       margin-top: 8px;
@@ -325,7 +338,7 @@
       width: 44px; height: 44px;
       border-radius: 50%;
       border: 0;
-      background: hsl(15 11% 7% / 0.85);
+      background: rgba(14, 14, 16, 0.85);
       color: var(--fg-primary);
       cursor: pointer;
       display: grid; place-items: center;
@@ -340,33 +353,35 @@
       font-size: 14px;
       line-height: 1.4;
       display: flex; align-items: flex-start; gap: 8px;
+      background: transparent;
+      border: 1px solid var(--border);
     }
-    .banner.error { background: var(--error-bg); color: var(--error-fg); border-left: 3px solid var(--error); }
-    .banner.warn { background: var(--warn-bg); color: var(--warn-fg); border-left: 3px solid var(--warn); }
-    .banner.info { background: var(--bg-raised); color: var(--fg-secondary); }
+    .banner.error { border-left: 2px solid var(--error); color: var(--fg-body); }
+    .banner.warn { border-left: 2px solid var(--warn); color: var(--fg-body); }
+    .banner.info { color: var(--fg-secondary); }
 
     .success-screen {
       display: none;
       flex-direction: column; align-items: center; justify-content: center;
+      gap: 16px;
       padding: 48px 24px;
       text-align: center;
+      animation: fade-in 260ms var(--ease-enter) both;
     }
     .success-screen.visible { display: flex; }
     .success-icon {
-      width: 72px; height: 72px;
+      width: 56px; height: 56px;
       border-radius: 50%;
-      background: var(--success);
+      border: 1px solid var(--border-cta);
       display: grid; place-items: center;
-      animation: pop 480ms var(--ease-bounce) both;
-      margin-bottom: 20px;
+      color: var(--fg-primary);
     }
-    .success-icon svg { width: 40px; height: 40px; color: hsl(150 80% 5%); }
-    .success-screen h2 { margin: 0 0 8px; font-size: 22px; font-weight: 700; }
-    .success-screen p { margin: 0; color: var(--fg-muted); font-size: 14px; }
-    @keyframes pop {
-      from { opacity: 0; transform: scale(0.6); }
-      60% { opacity: 1; transform: scale(1.12); }
-      to { opacity: 1; transform: scale(1); }
+    .success-icon svg { width: 24px; height: 24px; }
+    .success-screen h2 { margin: 0 0 4px; font-size: 17px; font-weight: 400; color: var(--fg-primary); }
+    .success-screen p { margin: 0; color: var(--fg-muted); font-size: 11.5px; line-height: 1.5; max-width: 220px; }
+    @keyframes fade-in {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
     /* ── Reduced motion fallback ───────────────────────────────── */
@@ -384,52 +399,65 @@
 <div class="app">
   <header class="bar" role="banner">
     <div class="title">
-      <span id="workflow-label">Capture</span>
-      <small id="context-hint"></small>
+      <h1 id="page-title">Capture</h1>
+      <span class="photo-count"><span id="photo-count">0</span> <span id="photo-count-noun">photos</span></span>
     </div>
-    <span class="pill connected" id="conn-pill" role="status" aria-live="polite">
+    <span class="pill" id="conn-pill" role="status" aria-live="polite">
       <span class="dot" aria-hidden="true"></span>
       <span id="conn-text">Connected</span>
     </span>
   </header>
 
   <main id="main">
-    <div class="substrip">
-      <span><strong id="photo-count">0</strong> <span id="photo-count-noun">photos</span></span>
-      <span class="saved dim" id="saved-status">auto-saved locally</span>
-    </div>
-
     <div id="banner-host" aria-live="polite"></div>
+
+    <div class="empty-state" id="empty-state">
+      <div class="icon-wrap" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"></path>
+          <circle cx="12" cy="13" r="4"></circle>
+        </svg>
+      </div>
+      <h2>Add the first photo</h2>
+      <p>Take pages with your camera, or pick existing scans from your photo library.</p>
+    </div>
 
     <div class="grid" id="grid" role="list"></div>
 
     <div class="success-screen" id="success" role="status">
       <div class="success-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="20 6 9 17 4 12"></polyline>
         </svg>
       </div>
       <h2>Sent for processing</h2>
-      <p>You can close this tab.</p>
+      <p>Your laptop has the photos. You can close this tab.</p>
     </div>
   </main>
 
   <footer class="actions" id="footer">
-    <label for="picker" class="btn btn-secondary" id="take-btn">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"></path>
-        <circle cx="12" cy="13" r="4"></circle>
-      </svg>
-      Take photo
-    </label>
-    <input type="file" id="picker" accept="image/*,image/heic,image/heif" capture="environment">
+    <div class="add-row">
+      <label for="picker-camera" class="btn" id="take-btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"></path>
+          <circle cx="12" cy="13" r="4"></circle>
+        </svg>
+        Camera
+      </label>
+      <input type="file" id="picker-camera" accept="image/*,image/heic,image/heif" capture="environment">
+      <label for="picker-gallery" class="btn" id="gallery-btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+          <circle cx="8.5" cy="8.5" r="1.5"></circle>
+          <polyline points="21 15 16 10 5 21"></polyline>
+        </svg>
+        Gallery
+      </label>
+      <input type="file" id="picker-gallery" accept="image/*,image/heic,image/heif" multiple>
+    </div>
     <button class="btn btn-primary" id="done-btn" disabled>
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <polyline points="20 6 9 17 4 12"></polyline>
-      </svg>
       <span id="done-label">Done</span>
     </button>
-    <p class="helper">Long-press a photo for retake · mark blank · delete</p>
   </footer>
 </div>
 
@@ -487,19 +515,20 @@
 
   // ─── DOM refs ───────────────────────────────────────────────────────
   var els = {
-    workflowLabel: document.getElementById("workflow-label"),
-    contextHint: document.getElementById("context-hint"),
-    connPill: document.getElementById("conn-pill"),
-    connText: document.getElementById("conn-text"),
+    pageTitle: document.getElementById("page-title"),
     photoCount: document.getElementById("photo-count"),
     photoCountNoun: document.getElementById("photo-count-noun"),
-    savedStatus: document.getElementById("saved-status"),
+    connPill: document.getElementById("conn-pill"),
+    connText: document.getElementById("conn-text"),
     bannerHost: document.getElementById("banner-host"),
+    emptyState: document.getElementById("empty-state"),
     grid: document.getElementById("grid"),
     success: document.getElementById("success"),
     footer: document.getElementById("footer"),
-    picker: document.getElementById("picker"),
+    pickerCamera: document.getElementById("picker-camera"),
+    pickerGallery: document.getElementById("picker-gallery"),
     takeBtn: document.getElementById("take-btn"),
+    galleryBtn: document.getElementById("gallery-btn"),
     doneBtn: document.getElementById("done-btn"),
     doneLabel: document.getElementById("done-label"),
     sheet: document.getElementById("sheet"),
@@ -560,9 +589,8 @@
 
   // ─── Connection state ───────────────────────────────────────────────
   function setConnection(s) {
-    els.connPill.classList.remove("connected", "reconnecting", "session-closed");
+    els.connPill.classList.remove("reconnecting", "session-closed");
     if (s === "connected") {
-      els.connPill.classList.add("connected");
       els.connText.textContent = "Connected";
     } else if (s === "reconnecting") {
       els.connPill.classList.add("reconnecting");
@@ -611,8 +639,9 @@
         setConnection("connected");
         state.sessionState = m.state || "open";
         state.contextHint = m.contextHint || "";
-        if (state.contextHint) els.contextHint.textContent = state.contextHint;
-        if (m.workflow) els.workflowLabel.textContent = m.workflow;
+        // Workflow tag and context hint are no longer rendered on the phone —
+        // the operator already knows what they queued. State is captured so
+        // upload paths can include it if the server ever needs it back.
 
         // Server is the source of truth for photos. Drop local-only entries
         // whose upload never landed.
@@ -669,7 +698,10 @@
   function disableEverything() {
     els.takeBtn.style.pointerEvents = "none";
     els.takeBtn.style.opacity = "0.45";
-    els.picker.disabled = true;
+    els.galleryBtn.style.pointerEvents = "none";
+    els.galleryBtn.style.opacity = "0.45";
+    els.pickerCamera.disabled = true;
+    els.pickerGallery.disabled = true;
     els.doneBtn.disabled = true;
   }
 
@@ -679,32 +711,31 @@
     els.photoCount.textContent = String(n);
     els.photoCountNoun.textContent = n === 1 ? "photo" : "photos";
 
-    var anyPending = state.photos.some(function (p) { return p.status !== "uploaded"; });
-    els.savedStatus.textContent = anyPending ? "uploading…" : "auto-saved locally";
-    els.savedStatus.classList.toggle("dim", !anyPending);
-
     var uploadedCount = state.photos.filter(function (p) { return p.status === "uploaded"; }).length;
-    els.doneLabel.textContent = uploadedCount > 0
-      ? "Done · upload " + uploadedCount
-      : "Done";
+    els.doneLabel.textContent = "Done";
     els.doneBtn.disabled = uploadedCount === 0 || state.sessionState !== "open";
+
+    // Empty state shows when no photos and the session is still open.
+    var showEmpty = n === 0 && state.sessionState === "open";
+    els.emptyState.classList.toggle("visible", showEmpty);
+    els.grid.style.display = showEmpty ? "none" : "grid";
 
     // Render tiles
     els.grid.innerHTML = "";
-    state.photos.forEach(function (p, i) {
+    state.photos.forEach(function (p) {
       els.grid.appendChild(buildTile(p));
     });
 
-    // Trailing "+ Add" placeholder
-    if (state.sessionState === "open") {
+    // Trailing "+ Add" placeholder — opens the camera by default.
+    if (state.sessionState === "open" && n > 0) {
       var add = document.createElement("button");
       add.type = "button";
       add.className = "add-tile";
       add.setAttribute("aria-label", "Add photo");
-      add.innerHTML = '<span style="font-size:24px;font-weight:300">＋</span><span>Add</span>';
+      add.innerHTML = '<span class="glyph"><span class="plus">+</span><span class="label">add</span></span>';
       add.addEventListener("click", function () {
         state.pickerMode = "add";
-        els.picker.click();
+        els.pickerCamera.click();
       });
       els.grid.appendChild(add);
     }
@@ -712,7 +743,11 @@
 
   function buildTile(p) {
     var tile = document.createElement("div");
-    tile.className = "tile" + (p.blurFlagged ? " blur-flagged" : "") + (p.blank ? " blank" : "");
+    var pending = p.status !== "uploaded";
+    tile.className = "tile"
+      + (p.blurFlagged ? " blur-flagged" : "")
+      + (p.blank ? " blank" : "")
+      + (pending ? " pending" : "");
     tile.setAttribute("role", "listitem");
     tile.setAttribute("data-index", String(p.index));
     tile.setAttribute("aria-label", "Photo " + (p.index + 1) + (p.blurFlagged ? " (flagged blurry)" : ""));
@@ -725,31 +760,21 @@
       tile.appendChild(img);
     }
 
-    var idxBadge = document.createElement("span");
-    idxBadge.className = "badge idx";
-    idxBadge.textContent = String(p.index + 1);
-    tile.appendChild(idxBadge);
+    var idx = document.createElement("span");
+    idx.className = "idx";
+    idx.textContent = String(p.index + 1);
+    tile.appendChild(idx);
 
-    if (p.status !== "uploaded") {
+    var statusLabel = p.blurFlagged ? "blurry"
+      : p.status === "uploading" ? "uploading"
+      : p.status === "failed" ? "retry"
+      : p.status === "converting" ? "converting"
+      : null;
+    if (statusLabel) {
       var s = document.createElement("span");
-      s.className = "badge status " + (p.status === "uploading" ? "pending" : p.status === "failed" ? "failed" : p.status === "converting" ? "converting" : "pending");
-      s.textContent = p.status === "uploading" ? "↗ uploading…"
-        : p.status === "failed" ? "✕ retry"
-        : p.status === "converting" ? "→ converting"
-        : "queued";
+      s.className = "status";
+      s.textContent = statusLabel;
       tile.appendChild(s);
-    } else if (!p.blurFlagged) {
-      var ok = document.createElement("span");
-      ok.className = "badge status uploaded";
-      ok.textContent = "✓";
-      tile.appendChild(ok);
-    }
-
-    if (p.blurFlagged) {
-      var b = document.createElement("span");
-      b.className = "badge blur";
-      b.textContent = "⚠ blur";
-      tile.appendChild(b);
     }
 
     // Tap = lightbox preview. Long-press = action sheet.
@@ -815,7 +840,7 @@
     closeSheet();
     if (idx == null) return;
     state.pickerMode = "retake-" + idx;
-    els.picker.click();
+    els.pickerCamera.click();
   });
 
   els.sheetMarkBlank.addEventListener("click", function () {
@@ -1192,24 +1217,41 @@
         });
       }
       els.success.classList.add("visible");
-      document.querySelector("main .substrip").style.display = "none";
+      els.emptyState.classList.remove("visible");
       els.grid.style.display = "none";
       els.footer.style.display = "none";
       clearManifest();
       if (navigator.vibrate) navigator.vibrate([10, 60, 10]);
     }).catch(function (err) {
       els.doneBtn.disabled = false;
-      els.doneLabel.textContent = "Done · upload";
+      els.doneLabel.textContent = "Done";
       showBanner("error", "Finalize failed: " + (err && err.message ? err.message : "unknown"));
     });
   });
 
   // ─── Picker wiring ─────────────────────────────────────────────────
-  els.picker.addEventListener("change", function (e) {
-    var file = e.target.files && e.target.files[0];
-    if (!file) return;
-    pickedFile(file);
-    e.target.value = ""; // allow same-file reselection
+  // Two file inputs: Camera passes capture="environment"; Gallery omits
+  // it (and accepts multiple) so iOS Safari shows the Photo Library.
+  // Both flow through handleFiles().
+  function handleFiles(files) {
+    if (!files || files.length === 0) return;
+    var mode = state.pickerMode;
+    if (mode && mode.indexOf("retake-") === 0) {
+      // Retake consumes one file. Drop any extras.
+      pickedFile(files[0]);
+      return;
+    }
+    for (var i = 0; i < files.length; i++) pickedFile(files[i]);
+  }
+
+  els.pickerCamera.addEventListener("change", function (e) {
+    handleFiles(e.target.files);
+    e.target.value = "";
+  });
+  els.pickerGallery.addEventListener("change", function (e) {
+    state.pickerMode = "add"; // gallery never retakes
+    handleFiles(e.target.files);
+    e.target.value = "";
   });
 
   // ─── Boot ──────────────────────────────────────────────────────────
