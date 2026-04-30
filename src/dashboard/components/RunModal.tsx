@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useSharePointDownload } from "./hooks/useSharePointDownload";
 import { cn } from "@/lib/utils";
 
 /**
@@ -42,6 +43,7 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropRef = useRef<HTMLLabelElement>(null);
+  const sharePoint = useSharePointDownload("ONBOARDING_ROSTER");
 
   // Fetch rosters on open. Refresh every time the modal opens so a
   // SharePoint download that finished while the modal was closed is
@@ -107,9 +109,31 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
     setProgress(0);
     setError(null);
 
+    // If the operator picked "Download fresh from SharePoint", fire the
+    // download FIRST and wait for it to complete before uploading the
+    // PDF. Re-fetch /api/rosters afterward so the next prep run sees the
+    // freshly-saved file.
+    if (rosterMode === "download") {
+      const path = await sharePoint.start();
+      if (!path) {
+        setError(sharePoint.error ?? "SharePoint download failed");
+        setSubmitting(false);
+        return;
+      }
+      try {
+        const r = await fetch("/api/rosters");
+        if (r.ok) setRosters((await r.json()) as RosterListing[]);
+      } catch {
+        /* re-fetch is best-effort */
+      }
+    }
+
     const fd = new FormData();
     fd.append("pdf", file, file.name);
-    fd.append("rosterMode", rosterMode);
+    // The backend's prep flow uses the latest roster on disk regardless
+    // of rosterMode. We pass "existing" here so the parent row records
+    // the chosen mode honestly (the download already happened above).
+    fd.append("rosterMode", rosterMode === "download" ? "existing" : rosterMode);
 
     // Use XHR so we get progress events. Fetch's upload progress is still
     // not widely supported across browsers as of 2026.
@@ -278,7 +302,13 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
               disabled={submitting}
               onSelect={() => setRosterMode("download")}
               label="Download fresh from SharePoint"
-              hint="Adds ~20s but guarantees current data."
+              hint={
+                sharePoint.downloading
+                  ? "Downloading roster from SharePoint…"
+                  : sharePoint.error
+                    ? `Error: ${sharePoint.error}`
+                    : "Adds ~20s but guarantees current data."
+              }
             />
           </div>
 
