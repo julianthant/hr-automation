@@ -121,4 +121,4 @@ __setProviderForTests(fake);
 
 ## Lessons Learned
 
-(empty — module is new as of 2026-04-28)
+- **2026-05-01: Per-page is the only auto path.** `runOcrPipeline` no longer falls back to whole-PDF on partial failure (`<50%` ratio branch removed). Failed pages propagate up via `pages[]` in the result; the orchestrator surfaces them as `data.failedPages` on the awaiting-approval row. Whole-PDF lives in `runOcrWholePdf` and is only reached via the operator-initiated `/api/ocr/reocr-whole-pdf` endpoint. Retry-page is a single-page mini-orchestrator at `src/workflows/ocr/retry-page.ts`. Records carry `sourcePage`; the dashboard's `OcrReviewPane` interleaves successful page groups with `FailedPageCard` instances sorted by page number, with a manual `Re-OCR whole PDF` confirm-dialog escape hatch in the header that wipes per-record edits + replaces records.

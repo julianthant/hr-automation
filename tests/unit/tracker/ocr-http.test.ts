@@ -213,7 +213,7 @@ test("buildOcrReocrWholePdfHandler replaces records and clears failedPages", asy
     const handler = buildOcrReocrWholePdfHandler({
       trackerDir: dir,
       _emitOverride: (e) => writtenEntries.push(e),
-      _wholePdfOverride: async () => ({
+      _wholePdfOverride: (async () => ({
         data: [{
           sourcePage: 1, rowIndex: 0,
           printedName: "Carla", employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
@@ -222,7 +222,11 @@ test("buildOcrReocrWholePdfHandler replaces records and clears failedPages", asy
         provider: "whole-pdf-stub",
         attempts: 1,
         cached: false,
-      }),
+        pageCount: 1,
+        keyIndex: 1,
+        durationMs: 0,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      })) as any,
       _loadRosterOverride: async () => [{ eid: "10000003", name: "Carla" }],
       _watchChildRunsOverride: async () => [],
       _enqueueEidLookupOverride: async () => {},
@@ -269,7 +273,7 @@ test("buildOcrReocrWholePdfHandler assigns distinct itemIds to eid-lookup fan-ou
     const handler = buildOcrReocrWholePdfHandler({
       trackerDir: dir,
       _emitOverride: () => {},
-      _wholePdfOverride: async () => ({
+      _wholePdfOverride: (async () => ({
         data: [
           { sourcePage: 1, rowIndex: 0, printedName: "Alice One",
             employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
@@ -281,7 +285,11 @@ test("buildOcrReocrWholePdfHandler assigns distinct itemIds to eid-lookup fan-ou
         provider: "whole-pdf-stub",
         attempts: 1,
         cached: false,
-      }),
+        pageCount: 2,
+        keyIndex: 1,
+        durationMs: 0,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      })) as any,
       _loadRosterOverride: async () => [],
       _watchChildRunsOverride: async () => [],
       _enqueueEidLookupOverride: async (items) => {

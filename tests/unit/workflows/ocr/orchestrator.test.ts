@@ -233,7 +233,7 @@ test("orchestrator surfaces failedPages and pageStatusSummary on awaiting-approv
     (e) => (e.status === "running" || e.status === "done") && e.step === "awaiting-approval",
   );
   assert.ok(approval, "awaiting-approval entry written");
-  const failedPages = JSON.parse(approval!.data!.failedPages ?? "[]") as Array<{ page: number }>;
+  const failedPages = JSON.parse(approval!.data!.failedPages ?? "[]") as Array<{ page: number; attempts: number }>;
   assert.equal(failedPages.length, 1, "one failed page");
   assert.equal(failedPages[0].page, 2);
   assert.equal(failedPages[0].attempts, 1);
