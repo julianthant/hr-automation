@@ -174,9 +174,11 @@ All selectors live inside the PeopleSoft iframe returned by `getContentFrame(pag
 
 **Important**: no "Mother"/"Father"/"Mom"/"Dad" options. All parental relationships map to **Parent**. Brother/Sister → **Sibling**. Grandma/Grandpa → **Grand Parent**. Aunt/Uncle/Cousin → **Other Relative**.
 
-## Dashboard "Run" button (self-service prep)
+## Dashboard "Run" button (OCR prep — 2026-05-01)
 
-As of 2026-04-28 the dashboard exposes a self-service prep flow that lets the operator OCR a scanned PDF, review/edit each parsed record, then approve them as N kernel queue items — no batch YAML, no manual transcription.
+As of 2026-05-01 the prep flow lives entirely in the `ocr` workflow (`src/workflows/ocr/`). The operator selects the `ocr` workflow in the TopBar, picks "Emergency contact" as form type, uploads a PDF. See `src/workflows/ocr/CLAUDE.md` for the full flow. The `prepare.ts`, `preview-schema.ts`, and `src/tracker/emergency-contact-http.ts` files were deleted in this migration.
+
+**Legacy note (2026-04-28 — now superseded):** the original self-service flow was:
 
 ```
 TopBar Run button (emergency-contact only)
