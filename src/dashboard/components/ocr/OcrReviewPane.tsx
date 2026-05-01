@@ -43,7 +43,11 @@ export function OcrReviewPane({ entry, onClose }: PrepReviewPaneProps) {
     [entry.data, isOath],
   );
   const baseRecords = useMemo(() => data?.records ?? [], [data]);
-  const storageKey = isOath ? `oath-prep-edits:${runId}` : `ec-prep-edits:${runId}`;
+  // OCR workflow uses session-scoped key (persists across reuploads).
+  // Legacy EC/oath-signature prep rows keep their runId-scoped keys.
+  const storageKey = entry.workflow === "ocr"
+    ? `ocr-edits:${entry.id}`
+    : (isOath ? `oath-prep-edits:${runId}` : `ec-prep-edits:${runId}`);
 
   const [localEdits, setLocalEdits] = useState<Record<number, AnyPreviewRecord>>(
     () => {
