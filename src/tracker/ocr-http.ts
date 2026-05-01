@@ -14,6 +14,7 @@ import { errorMessage } from "../utils/errors.js";
 import { log } from "../utils/log.js";
 import { listFormTypes, getFormSpec, type FormTypeListing } from "../workflows/ocr/form-registry.js";
 import { runOcrOrchestrator, type OcrOrchestratorOpts } from "../workflows/ocr/orchestrator.js";
+import { runOcrRetryPage, RetryPageError } from "../workflows/ocr/retry-page.js";
 import { isAcceptedDept } from "../workflows/eid-lookup/search.js";
 import type { ChildOutcome, WatchChildRunsOpts } from "./watch-child-runs.js";
 import type { OcrRequest, OcrResult } from "../ocr/index.js";
@@ -345,13 +346,11 @@ export function buildOcrRetryPageHandler(opts: RetryPageHandlerOpts = {}) {
     activeRowKeys.add(key);
     try {
       const fn = opts.runRetryPageOverride ?? (async (i, o) => {
-        const { runOcrRetryPage } = await import("../workflows/ocr/retry-page.js");
         return runOcrRetryPage(i, { trackerDir: o.trackerDir });
       });
       const result = await fn(input, { trackerDir });
       return { status: 200, body: { ok: true, page: result.page, recordsAdded: result.recordsAdded, stillFailed: result.stillFailed } };
     } catch (err) {
-      const { RetryPageError } = await import("../workflows/ocr/retry-page.js");
       if (err instanceof RetryPageError) {
         const status: 400 | 404 | 409 | 410 =
           err.code === "row-not-found" ? 404 :
@@ -470,7 +469,16 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
               : { emplId: extractEidLocal(e.record), keepNonHdh: true },
           );
           await ensureDaemonsAndEnqueue(eidLookupCrmWorkflow, inputs as never, {}, {
-            deriveItemId: () => enqueueItems[0]?.itemId ?? `ocr-whole-fallback-${input.runId}`,
+            deriveItemId: (inp: { name?: string; emplId?: string }) => {
+              const matched = enqueueItems.find((e) => {
+                if ("name" in inp && inp.name)
+                  return spec.carryForwardKey(e.record as never) === inp.name;
+                if ("emplId" in inp && inp.emplId)
+                  return extractEidLocal(e.record) === inp.emplId;
+                return false;
+              });
+              return matched?.itemId ?? `ocr-whole-fallback-${input.runId}`;
+            },
           });
         }
 

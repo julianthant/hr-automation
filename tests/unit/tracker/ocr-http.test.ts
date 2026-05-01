@@ -9,6 +9,7 @@ import {
   buildOcrApproveHandler,
   buildOcrDiscardHandler,
   buildOcrForceResearchHandler,
+  buildOcrReocrWholePdfHandler,
   sweepStuckOcrRows,
   _resetSessionLockForTests,
 } from "../../../src/tracker/ocr-http.js";
@@ -233,6 +234,65 @@ test("buildOcrReocrWholePdfHandler replaces records and clears failedPages", asy
     assert.ok(approval);
     const failedPages = JSON.parse(approval!.data!.failedPages ?? "[]") as unknown[];
     assert.equal(failedPages.length, 0, "failedPages cleared");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("buildOcrReocrWholePdfHandler assigns distinct itemIds to eid-lookup fan-out", async () => {
+  const dir = join(tmpdir(), `ocr-http-reocr-fanout-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  try {
+    const ocrFile = join(dir, `ocr-${dateLocalForTest()}.jsonl`);
+    writeFileSync(ocrFile, JSON.stringify({
+      workflow: "ocr",
+      id: "s-fanout",
+      runId: "r-fanout",
+      status: "done",
+      step: "awaiting-approval",
+      timestamp: "2026-05-01T00:00:00Z",
+      data: {
+        formType: "oath",
+        pdfPath: "/tmp/fake.pdf",
+        pdfOriginalName: "fake.pdf",
+        sessionId: "s-fanout",
+        records: JSON.stringify([]),
+        failedPages: JSON.stringify([]),
+        pageStatusSummary: JSON.stringify({ total: 0, succeeded: 0, failed: 0 }),
+      },
+    }) + "\n", "utf-8");
+
+    const { buildOcrReocrWholePdfHandler, _resetSessionLockForTests } = await import("../../../src/tracker/ocr-http.js");
+    _resetSessionLockForTests();
+
+    const captured: Array<{ name?: string; emplId?: string; itemId: string }> = [];
+    const handler = buildOcrReocrWholePdfHandler({
+      trackerDir: dir,
+      _emitOverride: () => {},
+      _wholePdfOverride: async () => ({
+        data: [
+          { sourcePage: 1, rowIndex: 0, printedName: "Alice One",
+            employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+            notes: [], documentType: "expected", originallyMissing: [] },
+          { sourcePage: 2, rowIndex: 0, printedName: "Bob Two",
+            employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+            notes: [], documentType: "expected", originallyMissing: [] },
+        ],
+        provider: "whole-pdf-stub",
+        attempts: 1,
+        cached: false,
+      }),
+      _loadRosterOverride: async () => [],
+      _watchChildRunsOverride: async () => [],
+      _enqueueEidLookupOverride: async (items) => {
+        for (const it of items) captured.push(it);
+      },
+    });
+
+    await handler({ sessionId: "s-fanout", runId: "r-fanout" });
+    assert.equal(captured.length, 2, "two records each enqueued");
+    const ids = captured.map((c) => c.itemId);
+    assert.equal(new Set(ids).size, 2, "itemIds must be distinct");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
