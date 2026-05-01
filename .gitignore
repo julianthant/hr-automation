@@ -70,3 +70,4 @@ Thumbs.db
 /image.png
 /notes.md
 .ocr-cache/
+.worktrees/
