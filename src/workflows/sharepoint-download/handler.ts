@@ -193,7 +193,7 @@ function resolveOutDir(
  */
 export function buildSharePointRosterDownloadHandler(
   options: RosterDownloadHandlerOptions = {},
-): (input: { id?: string }) => Promise<RosterDownloadResponse> {
+): (input: { id?: string; parentRunId?: string }) => Promise<RosterDownloadResponse> {
   const defaultOutDir = options.outDir ?? resolve(process.cwd(), "src/data");
   const runWorkflowImpl = options.runWorkflowFn ?? runWorkflow;
   const getEnv = options.getEnv ?? ((name: string) => process.env[name]);
@@ -254,6 +254,7 @@ export function buildSharePointRosterDownloadHandler(
           label: spec.label,
           url,
           outDir,
+          ...(input.parentRunId ? { parentRunId: input.parentRunId } : {}),
         });
         log.success(`SharePoint download complete (${spec.id})`);
         // Pick up the saved path/filename the workflow stashed in its

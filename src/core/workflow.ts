@@ -610,6 +610,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
         dir: opts.trackerDir,
         initialData: stringifyMap(seedData),
         ...(inputForRow ? { input: inputForRow } : {}),
+        ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
       },
     )
   }, opts.trackerDir)
