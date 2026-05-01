@@ -10,6 +10,7 @@ export interface TrackerEntry {
   timestamp: string;
   id: string;
   runId?: string;
+  parentRunId?: string;
   status: "pending" | "running" | "done" | "failed" | "skipped";
   step?: string;
   data?: Record<string, string>;
