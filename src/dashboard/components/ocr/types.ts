@@ -90,6 +90,20 @@ export interface PreviewRecord {
   warnings: string[];
 }
 
+export interface FailedPage {
+  page: number;
+  error: string;
+  attemptedKeys: string[];
+  pageImagePath: string;
+  attempts: number;
+}
+
+export interface PageStatusSummary {
+  total: number;
+  succeeded: number;
+  failed: number;
+}
+
 export interface PrepareRowData {
   mode: "prepare";
   pdfPath: string;
@@ -101,6 +115,8 @@ export interface PrepareRowData {
   ocrProvider?: string;
   ocrAttempts?: number;
   ocrCached?: boolean;
+  failedPages?: FailedPage[];
+  pageStatusSummary?: PageStatusSummary;
 }
 
 /**
@@ -152,6 +168,20 @@ export function parsePrepareRowData(
   } catch {
     return null;
   }
+  let failedPages: FailedPage[] | undefined;
+  try {
+    if (typeof rawData.failedPages === "string") {
+      const parsed = JSON.parse(rawData.failedPages);
+      if (Array.isArray(parsed)) failedPages = parsed as FailedPage[];
+    }
+  } catch { /* tolerate */ }
+  let pageStatusSummary: PageStatusSummary | undefined;
+  try {
+    if (typeof rawData.pageStatusSummary === "string") {
+      const parsed = JSON.parse(rawData.pageStatusSummary);
+      if (parsed && typeof parsed.total === "number") pageStatusSummary = parsed as PageStatusSummary;
+    }
+  } catch { /* tolerate */ }
   return {
     mode: "prepare",
     pdfPath: rawData.pdfPath ?? "",
@@ -163,6 +193,8 @@ export function parsePrepareRowData(
     ocrProvider: rawData.ocrProvider,
     ocrAttempts: rawData.ocrAttempts ? Number(rawData.ocrAttempts) : undefined,
     ocrCached: rawData.ocrCached === "true",
+    failedPages,
+    pageStatusSummary,
   };
 }
 
@@ -234,6 +266,8 @@ export interface OathPrepareRowData {
   ocrProvider?: string;
   ocrAttempts?: number;
   ocrCached?: boolean;
+  failedPages?: FailedPage[];
+  pageStatusSummary?: PageStatusSummary;
 }
 
 export function parseOathPrepareRowData(
@@ -248,6 +282,20 @@ export function parseOathPrepareRowData(
   } catch {
     return null;
   }
+  let failedPages: FailedPage[] | undefined;
+  try {
+    if (typeof rawData.failedPages === "string") {
+      const parsed = JSON.parse(rawData.failedPages);
+      if (Array.isArray(parsed)) failedPages = parsed as FailedPage[];
+    }
+  } catch { /* tolerate */ }
+  let pageStatusSummary: PageStatusSummary | undefined;
+  try {
+    if (typeof rawData.pageStatusSummary === "string") {
+      const parsed = JSON.parse(rawData.pageStatusSummary);
+      if (parsed && typeof parsed.total === "number") pageStatusSummary = parsed as PageStatusSummary;
+    }
+  } catch { /* tolerate */ }
   return {
     mode: "prepare",
     pdfPath: rawData.pdfPath ?? "",
@@ -258,5 +306,7 @@ export function parseOathPrepareRowData(
     ocrProvider: rawData.ocrProvider,
     ocrAttempts: rawData.ocrAttempts ? Number(rawData.ocrAttempts) : undefined,
     ocrCached: rawData.ocrCached === "true",
+    failedPages,
+    pageStatusSummary,
   };
 }
