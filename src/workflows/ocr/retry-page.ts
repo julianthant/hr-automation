@@ -125,7 +125,8 @@ export async function runOcrRetryPage(
         attempts: 1,
       });
     }
-    emitRow({ row, records, failedPages: newFailedPages, summary, emit, parentRunId: row.parentRunId, sessionId: input.sessionId, runId: input.runId, formType, pdfOriginalName: row.data?.pdfOriginalName as unknown as string ?? "" });
+    const rosterPathForFailed = (row.data?.rosterPath as unknown as string | undefined) ?? "";
+    emitRow({ row, records, failedPages: newFailedPages, summary, emit, parentRunId: row.parentRunId, sessionId: input.sessionId, runId: input.runId, formType, pdfOriginalName: row.data?.pdfOriginalName as unknown as string ?? "", rosterPath: rosterPathForFailed });
     return { ok: true, page: input.pageNum, recordsAdded: 0, stillFailed: true };
   }
 
@@ -209,7 +210,7 @@ export async function runOcrRetryPage(
   // 7. Recompute summary.
   const updatedSummary = {
     total: summary.total,
-    succeeded: summary.total - updatedFailedPages.length,
+    succeeded: Math.max(0, summary.total - updatedFailedPages.length),
     failed: updatedFailedPages.length,
   };
 
@@ -224,6 +225,7 @@ export async function runOcrRetryPage(
     runId: input.runId,
     formType,
     pdfOriginalName: row.data?.pdfOriginalName as unknown as string ?? "",
+    rosterPath,
   });
 
   return { ok: true, page: input.pageNum, recordsAdded: newRecords.length, stillFailed: false };
@@ -329,12 +331,14 @@ function emitRow(args: {
   runId: string;
   formType: string;
   pdfOriginalName: string;
+  rosterPath: string;
 }): void {
   const verifiedCount = countVerified(args.records);
   const data = flattenForData({
     formType: args.formType,
     pdfOriginalName: args.pdfOriginalName,
     sessionId: args.sessionId,
+    rosterPath: args.rosterPath,
     ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
     recordCount: args.records.length,
     verifiedCount,
