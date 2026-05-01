@@ -125,8 +125,11 @@ describe("pickPreviewChildren", () => {
 });
 
 describe("computeBatchElapsed", () => {
-  it("returns null when no children have firstLogTs", () => {
-    assert.equal(computeBatchElapsed([child({})]), null);
+  it("returns null when no child has any usable timestamp", () => {
+    assert.equal(
+      computeBatchElapsed([child({ timestamp: "", firstLogTs: undefined, lastLogTs: undefined })]),
+      null,
+    );
   });
 
   it("uses the earliest firstLogTs as start and latest lastLogTs as end", () => {
