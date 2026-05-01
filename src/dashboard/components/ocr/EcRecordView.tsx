@@ -1,4 +1,4 @@
-import { Pencil } from "lucide-react";
+import { Pencil, RotateCw } from "lucide-react";
 import type { ReactNode } from "react";
 import type { PreviewRecord } from "./types";
 import { RELATIONSHIP_OPTIONS } from "./types";
@@ -6,6 +6,8 @@ import { RELATIONSHIP_OPTIONS } from "./types";
 export interface EcRecordViewProps {
   record: PreviewRecord;
   onChange: (next: PreviewRecord) => void;
+  onForceResearch?: (record: PreviewRecord) => void;
+  isResearching?: boolean;
 }
 
 const FIELD_LABELS = {
@@ -63,7 +65,7 @@ function Field({
  * Supervisor, work/personal email, employee home address) are dropped
  * here even though they remain in the data layer for diagnostics.
  */
-export function EcRecordView({ record, onChange }: EcRecordViewProps) {
+export function EcRecordView({ record, onChange, onForceResearch, isResearching }: EcRecordViewProps) {
   const sameAddress = record.emergencyContact.sameAddressAsEmployee;
   const address = record.emergencyContact.address ?? null;
 
@@ -84,6 +86,19 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
 
   return (
     <div className="flex flex-col gap-3">
+      {onForceResearch && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => onForceResearch(record)}
+            disabled={isResearching}
+            title="Re-run eid-lookup for this record"
+            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted disabled:opacity-50"
+          >
+            <RotateCw className="h-3 w-3" aria-hidden />
+          </button>
+        </div>
+      )}
       <Field
         label={FIELD_LABELS.employeeName}
         missing={isMissing(record, "employee.name")}
