@@ -3,7 +3,7 @@ import { Inbox } from "lucide-react";
 import { StatPills } from "./StatPills";
 import { EntryItem } from "./EntryItem";
 import { EmptyState } from "./EmptyState";
-import { PreviewRow } from "./PreviewRow";
+import { OcrQueueRow } from "./ocr/OcrQueueRow";
 import type { TrackerEntry } from "./types";
 import { isPrepareRow, isResolvedPrepRow } from "./preview-types";
 
@@ -103,7 +103,7 @@ export function QueuePanel({
         {previewEntries.map((e) => {
           const runId = e.runId ?? e.id;
           return (
-            <PreviewRow
+            <OcrQueueRow
               key={`prep-${runId}`}
               entry={e}
               isReviewing={reviewingPrepId === runId}

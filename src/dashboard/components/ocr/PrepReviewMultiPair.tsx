@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { PdfPagePreview } from "./PdfPagePreview";
+import { PdfPagePreview } from "../PdfPagePreview";
 
 export interface PrepReviewMultiPairProps {
   workflow: "emergency-contact" | "oath-signature";

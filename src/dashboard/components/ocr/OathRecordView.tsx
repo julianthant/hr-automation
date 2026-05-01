@@ -1,8 +1,8 @@
 import { Pencil } from "lucide-react";
 import type { ReactNode } from "react";
-import type { OathPreviewRecord } from "./oath-preview-types";
+import type { OathPreviewRecord } from "../oath-preview-types";
 
-export interface OathReviewFormProps {
+export interface OathRecordViewProps {
   record: OathPreviewRecord;
   onChange: (next: OathPreviewRecord) => void;
 }
@@ -46,7 +46,7 @@ function Field({
  * have `officerSigned: null` — we hide the field rather than show
  * Yes/No/N/A so the form scans cleanly for the 90% case.
  */
-export function OathReviewForm({ record, onChange }: OathReviewFormProps) {
+export function OathRecordView({ record, onChange }: OathRecordViewProps) {
   const officerApplicable =
     record.officerSigned !== null && record.officerSigned !== undefined;
 
