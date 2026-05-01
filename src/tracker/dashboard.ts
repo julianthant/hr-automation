@@ -66,6 +66,8 @@ import {
   buildOcrApproveHandler,
   buildOcrDiscardHandler,
   buildOcrForceResearchHandler,
+  buildOcrRetryPageHandler,
+  buildOcrReocrWholePdfHandler,
   sweepStuckOcrRows,
 } from "./ocr-http.js";
 import {
@@ -1902,6 +1904,8 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
   const ocrApproveHandler       = buildOcrApproveHandler({ trackerDir: dir });
   const ocrDiscardHandler       = buildOcrDiscardHandler({ trackerDir: dir });
   const ocrForceResearchHandler = buildOcrForceResearchHandler({ trackerDir: dir });
+  const ocrRetryPageHandler     = buildOcrRetryPageHandler({ trackerDir: dir });
+  const ocrReocrWholePdfHandler = buildOcrReocrWholePdfHandler({ trackerDir: dir });
 
   /** Standard JSON response helper. */
   const sendJson = (res: import("http").ServerResponse, status: number, body: unknown): void => {
@@ -3011,6 +3015,8 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     //   POST /api/ocr/approve-batch   → fan out reviewed records to downstream daemons
     //   POST /api/ocr/discard-prepare → cancel a pending OCR row
     //   POST /api/ocr/force-research  → re-run eid-lookup for selected records
+    //   POST /api/ocr/retry-page      → re-OCR a single failed page
+    //   POST /api/ocr/reocr-whole-pdf → re-OCR the entire PDF for a session
 
     if (req.method === "GET" && url.pathname === "/api/ocr/forms") {
       try {
@@ -3092,6 +3098,29 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         recordIndices: Array.isArray(parsedBody.body.recordIndices)
           ? parsedBody.body.recordIndices.map(Number)
           : [],
+      });
+      writeJson(result.status, result.body);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/ocr/retry-page") {
+      const parsedBody = await readJsonBody(4096);
+      if (!parsedBody.ok) return writeJson(400, { ok: false, error: parsedBody.error });
+      const result = await ocrRetryPageHandler({
+        sessionId: String(parsedBody.body.sessionId ?? ""),
+        runId: String(parsedBody.body.runId ?? ""),
+        pageNum: Number(parsedBody.body.pageNum ?? 0),
+      });
+      writeJson(result.status, result.body);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/ocr/reocr-whole-pdf") {
+      const parsedBody = await readJsonBody(4096);
+      if (!parsedBody.ok) return writeJson(400, { ok: false, error: parsedBody.error });
+      const result = await ocrReocrWholePdfHandler({
+        sessionId: String(parsedBody.body.sessionId ?? ""),
+        runId: String(parsedBody.body.runId ?? ""),
       });
       writeJson(result.status, result.body);
       return;
