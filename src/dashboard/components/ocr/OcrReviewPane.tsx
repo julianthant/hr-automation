@@ -1,25 +1,25 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, FileText, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import type { TrackerEntry } from "./types";
+import type { TrackerEntry } from "../types";
 import {
   parsePrepareRowData,
   type PreviewRecord,
   type Verification,
-} from "./preview-types";
+} from "../preview-types";
 import {
   parseOathPrepareRowData,
   type OathPreviewRecord,
-} from "./oath-preview-types";
+} from "../oath-preview-types";
 import { PrepReviewPair } from "./PrepReviewPair";
 import { PrepReviewMultiPair } from "./PrepReviewMultiPair";
 import { PrepReviewFormCard } from "./PrepReviewFormCard";
-import { EcReviewForm } from "./EcReviewForm";
-import { OathReviewForm } from "./OathReviewForm";
-import { usePrepCursor } from "./hooks/usePrepCursor";
+import { EcRecordView } from "./EcRecordView";
+import { OathRecordView } from "./OathRecordView";
+import { usePrepCursor } from "../hooks/usePrepCursor";
 import { cn } from "@/lib/utils";
 
-export interface PrepReviewPaneProps {
+export interface OcrReviewPaneProps {
   entry: TrackerEntry;
   onClose: () => void;
 }
@@ -35,7 +35,7 @@ type AnyPreviewRecord = PreviewRecord | OathPreviewRecord;
  * Closing the pane (Back arrow, Cancel, or selecting another queue
  * entry) preserves localStorage edits — Approve / Discard clear them.
  */
-export function PrepReviewPane({ entry, onClose }: PrepReviewPaneProps) {
+export function OcrReviewPane({ entry, onClose }: PrepReviewPaneProps) {
   const isOath = entry.workflow === "oath-signature";
   const runId = entry.runId ?? entry.id;
   const data = useMemo(
@@ -377,12 +377,12 @@ function renderFormCard(args: {
       }
     >
       {args.isOath ? (
-        <OathReviewForm
+        <OathRecordView
           record={r as OathPreviewRecord}
           onChange={(next) => args.onChange(next)}
         />
       ) : (
-        <EcReviewForm
+        <EcRecordView
           record={r as PreviewRecord}
           onChange={(next) => args.onChange(next)}
         />

@@ -10,9 +10,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import type { TrackerEntry } from "./types";
-import { parsePrepareRowData } from "./preview-types";
-import { parseOathPrepareRowData } from "./oath-preview-types";
+import type { TrackerEntry } from "../types";
+import { parsePrepareRowData } from "../preview-types";
+import { parseOathPrepareRowData } from "../oath-preview-types";
 
 /**
  * Unified bento prep row for the QueuePanel. Replaces the separate
@@ -26,7 +26,7 @@ import { parseOathPrepareRowData } from "./oath-preview-types";
  * Visual: matches EntryItem's bento shape with a 3-px left accent bar
  * keyed to state (preparing/ready/reviewing/failed).
  */
-export interface PreviewRowProps {
+export interface OcrQueueRowProps {
   entry: TrackerEntry;
   isReviewing: boolean;
   onOpenReview: (runId: string) => void;
@@ -50,7 +50,7 @@ interface DerivedState {
   accent: string;
 }
 
-export function PreviewRow({ entry, isReviewing, onOpenReview }: PreviewRowProps) {
+export function OcrQueueRow({ entry, isReviewing, onOpenReview }: PreviewRowProps) {
   const isOath = entry.workflow === "oath-signature";
   const data = isOath
     ? parseOathPrepareRowData(entry.data)

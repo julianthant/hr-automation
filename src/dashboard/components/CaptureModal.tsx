@@ -404,48 +404,101 @@ export function CaptureModal({
           contextHint={info?.contextHint ?? contextHint}
           onClose={handleClose}
         />
-        <div
-          className="grid gap-9 px-[38px] pb-[26px] pt-[28px]"
-          style={{ gridTemplateColumns: "192px 1fr", alignItems: "start" }}
-        >
-          {/* ───────── Left column ───────── */}
-          <LeftColumn
-            state={effectiveState}
-            started={started}
-            error={error}
-            onCopy={handleCopy}
-            onCloseAndStartNew={() => onOpenChange(false)}
-          />
+        <div className="px-[38px] pt-[28px]">
+          {/* ───────── Two-column main content ───────── */}
+          <div
+            className="grid gap-9"
+            style={{ gridTemplateColumns: "192px 1fr", alignItems: "start" }}
+          >
+            <LeftColumn
+              state={effectiveState}
+              started={started}
+              error={error}
+              onCopy={handleCopy}
+              onCloseAndStartNew={() => onOpenChange(false)}
+            />
 
-          {/* ───────── Right column ───────── */}
-          <RightColumn
-            state={effectiveState}
-            started={started}
-            info={info}
-            validation={validation}
-            arrivedIndex={arrivedIndex}
-            retrying={retrying}
-            finalizeDisabled={
-              effectiveState !== "open" ||
-              validating ||
-              (validation?.blockers?.length ?? 0) > 0 ||
-              (info?.photos.length ?? 0) === 0
-            }
-            photoCount={info?.photos.length ?? 0}
-            extending={extending}
-            now={now}
-            onPhotoView={(idx) => {
-              if (!info) return;
-              const arr = info.photos.findIndex((p) => p.index === idx);
-              setLightboxIndex(arr);
-            }}
-            onPhotoDelete={(idx) => handleDeletePhoto(idx)}
-            onFinalize={handleFinalize}
-            onRetryHandoff={handleRetryHandoff}
-            onDiscard={handleDiscard}
-            onCloseAndStartNew={() => onOpenChange(false)}
-            onExtend={handleExtend}
-          />
+            <RightColumn
+              state={effectiveState}
+              started={started}
+              info={info}
+              validation={validation}
+              arrivedIndex={arrivedIndex}
+              retrying={retrying}
+              finalizeDisabled={
+                effectiveState !== "open" ||
+                validating ||
+                (validation?.blockers?.length ?? 0) > 0 ||
+                (info?.photos.length ?? 0) === 0
+              }
+              photoCount={info?.photos.length ?? 0}
+              onPhotoView={(idx) => {
+                if (!info) return;
+                const arr = info.photos.findIndex((p) => p.index === idx);
+                setLightboxIndex(arr);
+              }}
+              onPhotoDelete={(idx) => handleDeletePhoto(idx)}
+              onFinalize={handleFinalize}
+              onRetryHandoff={handleRetryHandoff}
+              onDiscard={handleDiscard}
+              onCloseAndStartNew={() => onOpenChange(false)}
+            />
+          </div>
+
+          {/* ───────── Shared bottom row: URL (left) + Expiry (right) ───────── */}
+          {started && (
+            <div
+              className="grid gap-9 mt-4 pb-[26px]"
+              style={{ gridTemplateColumns: "192px 1fr", alignItems: "center" }}
+            >
+              {/* URL field */}
+              <div className="w-full">
+                <div
+                  className="text-center font-sans text-[9.5px] uppercase tracking-[0.10em] mb-1.5 font-medium"
+                  style={{ color: "var(--capture-fg-faint)" }}
+                >
+                  URL
+                </div>
+                <div
+                  className="flex items-baseline gap-3 py-2"
+                  style={{ borderBottom: "1px solid var(--capture-border-subtle)" }}
+                >
+                  <code
+                    className="flex-1 truncate font-mono text-[11.5px]"
+                    style={{ color: "var(--capture-fg-body)" }}
+                    title={started.captureUrl}
+                  >
+                    {started.captureUrl}
+                  </code>
+                  <button
+                    type="button"
+                    aria-label="Copy URL"
+                    onClick={handleCopy}
+                    className="font-sans text-[10px] cursor-pointer hover:underline focus-visible:outline-none focus-visible:ring-2"
+                    style={{
+                      color: "var(--capture-fg-muted)",
+                      backgroundColor: "transparent",
+                      border: 0,
+                      padding: 0,
+                      ["--tw-ring-color" as string]: "var(--capture-focus-ring)",
+                    }}
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+
+              {/* Expiry footer */}
+              <ExpiryFooter
+                expiresAt={started.expiresAt}
+                currentExpiresAt={info?.expiresAt ?? started.expiresAt}
+                now={now}
+                extending={extending}
+                onExtend={handleExtend}
+                terminal={isTerminal(effectiveState)}
+              />
+            </div>
+          )}
         </div>
       </DialogContent>
 
@@ -574,43 +627,6 @@ function LeftColumn({
         aria-label={`Manual entry shortcode ${started.shortcode}`}
       >
         {started.shortcode}
-      </div>
-
-      {/* URL field */}
-      <div className="w-full">
-        <div
-          className="text-center font-sans text-[9.5px] uppercase tracking-[0.10em] mb-1.5 font-medium"
-          style={{ color: "var(--capture-fg-faint)" }}
-        >
-          URL
-        </div>
-        <div
-          className="flex items-baseline gap-3 py-2"
-          style={{ borderBottom: "1px solid var(--capture-border-subtle)" }}
-        >
-          <code
-            className="flex-1 truncate font-mono text-[11.5px]"
-            style={{ color: "var(--capture-fg-body)" }}
-            title={started.captureUrl}
-          >
-            {started.captureUrl}
-          </code>
-          <button
-            type="button"
-            aria-label="Copy URL"
-            onClick={onCopy}
-            className="font-sans text-[10px] cursor-pointer hover:underline focus-visible:outline-none focus-visible:ring-2"
-            style={{
-              color: "var(--capture-fg-muted)",
-              backgroundColor: "transparent",
-              border: 0,
-              padding: 0,
-              ["--tw-ring-color" as string]: "var(--capture-focus-ring)",
-            }}
-          >
-            Copy
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -854,15 +870,12 @@ interface RightColumnProps {
   retrying: boolean;
   finalizeDisabled: boolean;
   photoCount: number;
-  extending: boolean;
-  now: number;
   onPhotoView: (photoIndex: number) => void;
   onPhotoDelete: (photoIndex: number) => void;
   onFinalize: () => void;
   onRetryHandoff: () => void;
   onDiscard: () => void;
   onCloseAndStartNew: () => void;
-  onExtend: () => void;
 }
 
 function RightColumn({
@@ -874,15 +887,12 @@ function RightColumn({
   retrying,
   finalizeDisabled,
   photoCount,
-  extending,
-  now,
   onPhotoView,
   onPhotoDelete,
   onFinalize,
   onRetryHandoff,
   onDiscard,
   onCloseAndStartNew,
-  onExtend,
 }: RightColumnProps) {
   if (state === "starting" || state === "error") {
     return (
@@ -964,15 +974,6 @@ function RightColumn({
         onRetryHandoff={onRetryHandoff}
         onDiscard={onDiscard}
         onCloseAndStartNew={onCloseAndStartNew}
-      />
-
-      <ExpiryFooter
-        expiresAt={started?.expiresAt ?? 0}
-        currentExpiresAt={info?.expiresAt ?? started?.expiresAt ?? 0}
-        now={now}
-        extending={extending}
-        onExtend={onExtend}
-        terminal={isTerminal(state)}
       />
     </div>
   );

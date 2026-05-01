@@ -1,9 +1,9 @@
 import { Pencil } from "lucide-react";
 import type { ReactNode } from "react";
-import type { PreviewRecord } from "./preview-types";
-import { RELATIONSHIP_OPTIONS } from "./preview-types";
+import type { PreviewRecord } from "../preview-types";
+import { RELATIONSHIP_OPTIONS } from "../preview-types";
 
-export interface EcReviewFormProps {
+export interface EcRecordViewProps {
   record: PreviewRecord;
   onChange: (next: PreviewRecord) => void;
 }
@@ -63,7 +63,7 @@ function Field({
  * Supervisor, work/personal email, employee home address) are dropped
  * here even though they remain in the data layer for diagnostics.
  */
-export function EcReviewForm({ record, onChange }: EcReviewFormProps) {
+export function EcRecordView({ record, onChange }: EcRecordViewProps) {
   const sameAddress = record.emergencyContact.sameAddressAsEmployee;
   const address = record.emergencyContact.address ?? null;
 
