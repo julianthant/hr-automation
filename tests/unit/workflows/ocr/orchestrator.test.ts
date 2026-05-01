@@ -169,3 +169,67 @@ test("rosterMode=download delegates to sharepoint-download via watchChildRuns", 
   assert.equal(watchWorkflow, "sharepoint-download", "should have watched sharepoint-download");
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("orchestrator surfaces failedPages and pageStatusSummary on awaiting-approval", async () => {
+  const { dir, rosterPath } = setup();
+  const writtenEntries: object[] = [];
+
+  await runOcrOrchestrator(
+    {
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      formType: "oath",
+      sessionId: "session-fp-1",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-fp-1",
+      trackerDir: dir,
+      _emitOverride: (entry) => writtenEntries.push(entry),
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          sourcePage: 1, rowIndex: 0,
+          printedName: "Liam Kustenbauder",
+          employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        provider: "stub",
+        attempts: 3,
+        cached: false,
+        pages: [
+          { page: 1, success: true, attemptedKeys: ["gemini-1"], poolKeyId: "gemini-1" },
+          { page: 2, success: false, error: "rate limit", attemptedKeys: ["gemini-1", "mistral-1"] },
+          { page: 3, success: true, attemptedKeys: ["groq-1"], poolKeyId: "groq-1" },
+        ],
+      }),
+      _loadRosterOverride: async () => [
+        { eid: "10000001", name: "Liam Kustenbauder" },
+      ],
+      _enqueueEidLookupOverride: async () => { /* no-op */ },
+      _watchChildRunsOverride: async () => [
+        {
+          workflow: "eid-lookup",
+          itemId: "ocr-oath-run-fp-1-r0",
+          runId: "verify-1",
+          status: "done" as const,
+          data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: "10000001" },
+        },
+      ],
+    },
+  );
+
+  const approval = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
+    (e) => (e.status === "running" || e.status === "done") && e.step === "awaiting-approval",
+  );
+  assert.ok(approval, "awaiting-approval entry written");
+  const failedPages = JSON.parse(approval!.data!.failedPages ?? "[]") as Array<{ page: number }>;
+  assert.equal(failedPages.length, 1, "one failed page");
+  assert.equal(failedPages[0].page, 2);
+  const summary = JSON.parse(approval!.data!.pageStatusSummary ?? "{}") as {
+    total: number; succeeded: number; failed: number;
+  };
+  assert.deepEqual(summary, { total: 3, succeeded: 2, failed: 1 });
+
+  rmSync(dir, { recursive: true, force: true });
+});

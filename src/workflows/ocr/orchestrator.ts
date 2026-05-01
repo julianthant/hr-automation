@@ -12,7 +12,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ZodType } from "zod/v4";
-import { ocrDocument as realOcrDocument } from "../../ocr/index.js";
 import { loadRoster as realLoadRoster } from "../../match/index.js";
 import type { RosterRow as MatchRosterRow } from "../../match/match.js";
 import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/watch-child-runs.js";
@@ -33,6 +32,13 @@ interface OcrPipelineResult {
   provider: string;
   attempts: number;
   cached: boolean;
+  pages?: Array<{
+    page: number;
+    success: boolean;
+    error?: string;
+    attemptedKeys: string[];
+    poolKeyId?: string;
+  }>;
 }
 
 export interface OcrOrchestratorOpts {
@@ -51,6 +57,7 @@ export interface OcrOrchestratorOpts {
     pdfPath: string;
     formType: string;
     spec: AnyOcrFormSpec;
+    sessionId: string;
   }) => Promise<OcrPipelineResult>;
   _loadRosterOverride?: (path: string) => Promise<MatchRosterRow[]>;
   _watchChildRunsOverride?: (opts: WatchChildRunsOpts) => Promise<ChildOutcome[]>;
@@ -79,10 +86,14 @@ export async function runOcrOrchestrator(
   const loadRosterFn = opts._loadRosterOverride ?? realLoadRoster;
   const watchChildren = opts._watchChildRunsOverride ?? realWatchChildRuns;
 
-  const runOcr = opts._ocrPipelineOverride ?? (async ({ pdfPath, spec: s }: { pdfPath: string; formType: string; spec: AnyOcrFormSpec }) => {
-    const result = await realOcrDocument({
+  const runOcr = opts._ocrPipelineOverride ?? (async ({ pdfPath, spec: s, sessionId }: { pdfPath: string; formType: string; spec: AnyOcrFormSpec; sessionId: string }) => {
+    const { runOcrPipeline } = await import("../../ocr/pipeline.js");
+    const pageImagesDir = join(trackerDir ?? ".tracker", "page-images", sessionId);
+    const result = await runOcrPipeline({
       pdfPath,
-      schema: s.ocrArraySchema as ZodType<unknown[]>,
+      pageImagesDir,
+      recordSchema: s.ocrRecordSchema as ZodType<unknown>,
+      arraySchema: s.ocrArraySchema as ZodType<unknown[]>,
       schemaName: s.schemaName,
       prompt: s.prompt,
     });
@@ -91,6 +102,7 @@ export async function runOcrOrchestrator(
       provider: result.provider,
       attempts: result.attempts,
       cached: result.cached,
+      pages: result.pages,
     };
   });
 
@@ -174,7 +186,30 @@ export async function runOcrOrchestrator(
       pdfPath: input.pdfPath,
       formType: input.formType,
       spec,
+      sessionId: input.sessionId,
     });
+
+    // Build per-page status summary from OCR result
+    const pages = ocrResult.pages ?? [];
+    const failedPages = pages
+      .filter((p) => !p.success)
+      .map((p) => ({
+        page: p.page,
+        error: p.error ?? "unknown error",
+        attemptedKeys: p.attemptedKeys,
+        pageImagePath: join(
+          trackerDir ?? ".tracker",
+          "page-images",
+          input.sessionId,
+          `page-${String(p.page).padStart(2, "0")}.png`,
+        ),
+        attempts: p.attemptedKeys.length || 1,
+      }));
+    const pageStatusSummary = {
+      total: pages.length,
+      succeeded: pages.filter((p) => p.success).length,
+      failed: failedPages.length,
+    };
 
     // 3. Match
     writeTracker(
@@ -289,6 +324,8 @@ export async function runOcrOrchestrator(
       recordCount: records.length,
       verifiedCount,
       records,
+      failedPages,
+      pageStatusSummary,
     }, "awaiting-approval");
     writeTracker("done", {
       formType: input.formType,
@@ -298,6 +335,8 @@ export async function runOcrOrchestrator(
       recordCount: records.length,
       verifiedCount,
       records,
+      failedPages,
+      pageStatusSummary,
     }, "awaiting-approval");
   } catch (err) {
     writeTracker("failed", { formType: input.formType, sessionId: input.sessionId }, undefined, errorMessage(err));
