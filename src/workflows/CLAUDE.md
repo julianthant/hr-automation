@@ -146,6 +146,11 @@ their `detailFields` non-editable.
 | emergency-contact | `npm run emergency-contact` | UCPath | Yes (batch, `preEmitPending`) | Single browser, one record at a time |
 | oath-signature | `npm run oath-signature <emplId...>` | UCPath | Yes (daemon-mode by default; sequential batch + `preEmitPending`) | Single browser; N daemons via `-p N` |
 | sharepoint-download | _Dashboard button_ (fire-and-forget) / `tsx src/workflows/emergency-contact/scripts/download-roster.ts` (non-kernel CLI) | SharePoint | Yes (single-item, module-level URL injection) | Single (headed browser, gated by Duo) |
+| ocr | _Dashboard Run button_ (HTTP only — no CLI, no daemon) | _none_ | Yes (`systems: []`, `authSteps: false`) | In-process (single fire-and-forget via `/api/ocr/prepare`) |
+
+### `ocr` — notable shape
+
+The only workflow with `systems: []` and `authSteps: false`. No browsers, no Duo. Runs in the dashboard's Node process via fire-and-forget `runWorkflow` called from `/api/ocr/prepare`. The thin kernel handler delegates entirely to `runOcrOrchestrator` which owns its own tracker emissions (the kernel's per-step machinery doesn't model "wait for user approval mid-handler"). NOT in `WORKFLOW_LOADERS` — spawning an OCR daemon is a bug. See `src/workflows/ocr/CLAUDE.md` for form-type spec contract, carry-forward, and force-research.
 
 ### `sharepoint-download` — notable shape
 

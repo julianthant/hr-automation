@@ -8,6 +8,8 @@ and enqueued to a daemon via `ensureDaemonsAndEnqueue` (default). Supports N EID
 per invocation — each becomes its own queue item so a single daemon processes
 them sequentially, and `--parallel K` fans out across K daemons.
 
+**OCR prep:** the paper-roster prep flow (operator uploads PDF → OCR → preview → approve) lives in the OCR workflow (`src/workflows/ocr/`). When operator approves an OCR row with formType=oath, it fans out per-EID kernel queue items to this workflow's daemon. See `src/workflows/oath-signature/ocr-form.ts` for the per-form spec (schemas + match logic). `prepare.ts` and `preview-schema.ts` were deleted 2026-05-01 as part of the OCR migration.
+
 ## What this workflow does
 
 Given one or more EIDs (plus an optional `--date MM/DD/YYYY`), for each EID:
