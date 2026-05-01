@@ -23,6 +23,7 @@ import { getFormSpec } from "./form-registry.js";
 import { applyCarryForward } from "./carry-forward.js";
 import type { AnyOcrFormSpec, RosterRow as OcrRosterRow } from "./types.js";
 import type { OcrInput } from "./schema.js";
+import { runOcrPipeline } from "../../ocr/pipeline.js";
 
 const WORKFLOW = "ocr";
 
@@ -87,7 +88,6 @@ export async function runOcrOrchestrator(
   const watchChildren = opts._watchChildRunsOverride ?? realWatchChildRuns;
 
   const runOcr = opts._ocrPipelineOverride ?? (async ({ pdfPath, spec: s, sessionId }: { pdfPath: string; formType: string; spec: AnyOcrFormSpec; sessionId: string }) => {
-    const { runOcrPipeline } = await import("../../ocr/pipeline.js");
     const pageImagesDir = join(trackerDir ?? ".tracker", "page-images", sessionId);
     const result = await runOcrPipeline({
       pdfPath,
@@ -203,7 +203,7 @@ export async function runOcrOrchestrator(
           input.sessionId,
           `page-${String(p.page).padStart(2, "0")}.png`,
         ),
-        attempts: p.attemptedKeys.length || 1,
+        attempts: 1,
       }));
     const pageStatusSummary = {
       total: pages.length,
