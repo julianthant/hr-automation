@@ -125,3 +125,47 @@ test("orchestrator with previousRunId carries forward v1 EIDs", async () => {
   assert.equal(watchCalled, false, "watchChildRuns should not be called when carry-forward fully resolves");
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("rosterMode=download delegates to sharepoint-download via watchChildRuns", async () => {
+  const { dir, uploadsDir } = setup();
+  let watchWorkflow = "";
+
+  await runOcrOrchestrator(
+    {
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      formType: "oath",
+      sessionId: "session-sp",
+      rosterMode: "download",
+      // no rosterPath — should be resolved from SharePoint
+    },
+    {
+      runId: "run-sp",
+      trackerDir: dir,
+      _emitOverride: () => {},
+      _ocrPipelineOverride: async () => ({
+        data: [],
+        provider: "stub", attempts: 1, cached: false,
+      }),
+      _loadRosterOverride: async () => [],
+      _skipSharepointDispatch: true,
+      _watchChildRunsOverride: async (opts) => {
+        watchWorkflow = opts.workflow;
+        if (opts.workflow === "sharepoint-download") {
+          return [{
+            workflow: "sharepoint-download",
+            itemId: opts.expectedItemIds[0] ?? "onboarding",
+            runId: "sp-run",
+            status: "done" as const,
+            data: { path: "/tmp/roster.xlsx" },
+          }];
+        }
+        return [];
+      },
+      _enqueueEidLookupOverride: async () => {},
+    },
+  );
+
+  assert.equal(watchWorkflow, "sharepoint-download", "should have watched sharepoint-download");
+  rmSync(dir, { recursive: true, force: true });
+});
