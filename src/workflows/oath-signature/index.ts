@@ -7,22 +7,20 @@ export {
   runOathSignatureCli,
   oathSignatureWorkflow,
 } from "./workflow.js";
-export {
-  OathOcrOutputSchema,
-  OathPrepareRowDataSchema,
-  OathPreviewRecordSchema,
-  OathRosterOcrRecordSchema,
-  MatchStateSchema,
-} from "./preview-schema.js";
-export type {
-  MatchState,
-  OathOcrOutput,
-  OathPrepareRowData,
-  OathPreviewRecord,
-  OathRosterOcrRecord,
-} from "./preview-schema.js";
 export { runPaperOathPrepare } from "./prepare.js";
 export type { PaperOathPrepareInput, PaperOathPrepareOutput } from "./prepare.js";
 export { oathOcrFormSpec } from "./ocr-form.js";
-export { VerificationSchema } from "./ocr-form.js";
-export type { Verification } from "./ocr-form.js";
+export {
+  OathRosterOcrRecordSchema,
+  OathOcrOutputSchema,
+  OathPreviewRecordSchema,
+  MatchStateSchema,
+  VerificationSchema,
+} from "./ocr-form.js";
+export type {
+  OathRosterOcrRecord,
+  OathOcrOutput,
+  OathPreviewRecord,
+  MatchState,
+  Verification,
+} from "./ocr-form.js";
