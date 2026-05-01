@@ -25,8 +25,6 @@ export interface OcrPipelineInput<T> {
   _renderOverride?: (pdfPath: string, pageImagesDir: string) => Promise<string[]>;
   /** Test escape: inject a fake pool. */
   _poolOverride?: PoolKey[];
-  /** Test escape: replace the whole-PDF helper (used by `runOcrWholePdf`). */
-  _wholePdfOverride?: <U>(req: OcrRequest<U>) => Promise<OcrResult<U>>;
 }
 
 export interface OcrPipelineResult<T> {
@@ -84,7 +82,7 @@ export async function runOcrPipeline<T>(
       success: p.success,
       error: p.error,
       attemptedKeys: p.poolKeyId ? [p.poolKeyId] : [],
-      poolKeyId: p.success ? p.poolKeyId : undefined,
+      poolKeyId: p.poolKeyId,
     })),
   };
 }

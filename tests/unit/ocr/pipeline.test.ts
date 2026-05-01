@@ -58,9 +58,8 @@ test("runOcrPipeline returns per-page status with success and failure flags", as
   }
 });
 
-test("runOcrPipeline does NOT auto-fall-back to whole-PDF on partial failure", async () => {
+test("runOcrPipeline returns all-failed result instead of falling back to whole-PDF", async () => {
   const { pdfPath, pageImagesDir, cleanup } = makeTmpPdfDir();
-  let wholePdfCalled = false;
   __setPerPageCallForTests(async () => {
     throw new Error("everything throttled");
   });
@@ -76,14 +75,12 @@ test("runOcrPipeline does NOT auto-fall-back to whole-PDF on partial failure", a
       _poolOverride: [
         { id: "test-1", providerId: "gemini", keyIndex: 1, callOcr: async () => ({}) },
       ],
-      _wholePdfOverride: async () => {
-        wholePdfCalled = true;
-        return { data: [], provider: "whole-pdf-stub", attempts: 1, cached: false };
-      },
     });
-    assert.equal(wholePdfCalled, false, "whole-PDF fallback must not be invoked");
     assert.equal(result.data.length, 0);
+    assert.equal(result.pages.length, 2);
     assert.equal(result.pages.every((p) => !p.success), true);
+    // Failed pages still carry the last-tried key (poolKeyId), not stripped:
+    assert.equal(result.pages[0].poolKeyId, "test-1");
   } finally {
     __setPerPageCallForTests(undefined);
     cleanup();
