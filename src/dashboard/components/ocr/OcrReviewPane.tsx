@@ -252,6 +252,7 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
               sessionId={sessionId}
               runId={runId}
               storageKey={storageKey}
+              onSuccess={() => setLocalEdits({})}
             />
           )}
           <button
@@ -361,7 +362,7 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
   );
 }
 
-function ReocrWholePdfButton({ sessionId, runId, storageKey }: { sessionId: string; runId: string; storageKey: string }) {
+function ReocrWholePdfButton({ sessionId, runId, storageKey, onSuccess }: { sessionId: string; runId: string; storageKey: string; onSuccess: () => void }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -381,6 +382,7 @@ function ReocrWholePdfButton({ sessionId, runId, storageKey }: { sessionId: stri
           description: `${body.recordCount} record${body.recordCount === 1 ? "" : "s"} extracted`,
         });
         window.localStorage.removeItem(storageKey);
+        onSuccess();
         setOpen(false);
       }
     } catch (err) {
