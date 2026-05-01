@@ -150,6 +150,34 @@ export function isResolvedPrepRow(e: {
 }
 
 /**
+ * A prep row whose operator-resolved state is "approved" — children have been
+ * fanned out into the downstream workflow's queue. Drives `ParentChildRow`
+ * rendering in the QueuePanel.
+ */
+export function isApprovedPrepRow(e: {
+  status: string;
+  step?: string;
+  data?: Record<string, string>;
+}): boolean {
+  if (!isPrepareRow(e)) return false;
+  return e.status === "done" && e.step === "approved";
+}
+
+/**
+ * A prep row the operator discarded. Filtered out of the QueuePanel entirely.
+ * Distinct from a genuinely-failed prep row (e.g. OCR error), which stays
+ * visible as an `OcrQueueRow` so the operator can retry.
+ */
+export function isDiscardedPrepRow(e: {
+  status: string;
+  step?: string;
+  data?: Record<string, string>;
+}): boolean {
+  if (!isPrepareRow(e)) return false;
+  return e.status === "failed" && e.step === "discarded";
+}
+
+/**
  * Pull a `PrepareRowData` out of a tracker entry's `data` field. Returns
  * `null` when the entry isn't a prep row (no `mode === "prepare"`) or the
  * records JSON doesn't parse. The dashboard SSE flattens `records` to a
