@@ -10,7 +10,6 @@ import {
   isPrepareRow,
   isApprovedPrepRow,
   isDiscardedPrepRow,
-  parsePrepareRowData,
 } from "./ocr/types";
 
 interface QueuePanelProps {
@@ -166,7 +165,14 @@ export function QueuePanel({
   return (
     <div className="w-[300px] min-[1440px]:w-[380px] 2xl:w-[460px] flex-shrink-0 flex flex-col bg-background">
       {drilledParent ? (
-        <DrilledHeader parent={drilledParent} onBack={() => onDrillOut?.()} />
+        <DrilledHeader
+          parent={drilledParent}
+          onBack={() => onDrillOut?.()}
+          onOpenReview={() => {
+            const runId = drilledParent.runId ?? drilledParent.id;
+            onOpenReview?.(runId);
+          }}
+        />
       ) : (
         <div className="h-[69.5px] flex items-center px-3 min-[1440px]:px-4 py-2 border-b border-border bg-card/60 flex-shrink-0">
           <StatPills
@@ -266,12 +272,13 @@ export function QueuePanel({
 function DrilledHeader({
   parent,
   onBack,
+  onOpenReview,
 }: {
   parent: TrackerEntry;
   onBack: () => void;
+  onOpenReview: () => void;
 }) {
-  const data = parsePrepareRowData(parent.data);
-  const filename = data?.pdfOriginalName || "Prep batch";
+  const filename = parent.data?.pdfOriginalName || "Prep batch";
   const runId = parent.runId ?? parent.id;
   const time = formatPrepHeaderTime(parent.timestamp);
   return (
@@ -289,8 +296,16 @@ function DrilledHeader({
           {filename}
         </span>
       </div>
-      <div className="text-[10px] font-mono text-muted-foreground pl-1">
-        Approved {time} · prep#{runId.slice(-4)}
+      <div className="text-[10px] font-mono text-muted-foreground pl-1 flex items-center gap-1.5">
+        <span>Approved {time} · prep#{runId.slice(-4)}</span>
+        <span className="text-muted-foreground/50">·</span>
+        <button
+          type="button"
+          onClick={onOpenReview}
+          className="text-primary hover:text-primary/80 underline-offset-2 hover:underline transition-colors"
+        >
+          Open prep review
+        </button>
       </div>
     </div>
   );

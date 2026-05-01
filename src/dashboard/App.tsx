@@ -156,6 +156,11 @@ export default function App() {
     setDrilledBatchRunId(null);
   }, []);
 
+  const handleDateChange = useCallback((d: string) => {
+    setDate(d);
+    setDrilledBatchRunId(null);
+  }, []);
+
   // Cross-date search → deep-link to the matching (workflow, date, id).
   // Each setter triggers the URL-sync effect; useEntries re-subscribes when
   // workflow/date change, and LogPanel picks up the new selectedId. No extra
@@ -163,21 +168,21 @@ export default function App() {
   // will surface the entry once entries for that bucket arrive.
   const handleSearchSelect = useCallback((row: SearchResultRow) => {
     if (row.workflow !== workflow) handleWorkflowChange(row.workflow);
-    if (row.date !== date) setDate(row.date);
+    if (row.date !== date) handleDateChange(row.date);
     setSelectedId(row.id);
-  }, [workflow, date, handleWorkflowChange]);
+  }, [workflow, date, handleWorkflowChange, handleDateChange]);
 
   const handlePreviewSelect = useCallback((row: PreviewInboxRow) => {
     if (row.workflow !== workflow) handleWorkflowChange(row.workflow);
-    if (row.date !== date) setDate(row.date);
+    if (row.date !== date) handleDateChange(row.date);
     setSelectedId(row.id);
-  }, [workflow, date, handleWorkflowChange]);
+  }, [workflow, date, handleWorkflowChange, handleDateChange]);
 
   const handleFailureSelect = useCallback((row: FailureRow) => {
     if (row.workflow !== workflow) handleWorkflowChange(row.workflow);
-    if (row.date !== date) setDate(row.date);
+    if (row.date !== date) handleDateChange(row.date);
     setSelectedId(row.id);
-  }, [workflow, date, handleWorkflowChange]);
+  }, [workflow, date, handleWorkflowChange, handleDateChange]);
 
   // Entry counts per workflow from backend SSE (accurate across all workflows)
   const entryCounts = wfCounts;
@@ -213,7 +218,7 @@ export default function App() {
       />
       <TopBar
         date={date}
-        onDateChange={setDate}
+        onDateChange={handleDateChange}
         availableDates={availableDates}
         onSearchSelect={handleSearchSelect}
         onPreviewSelect={handlePreviewSelect}
