@@ -672,6 +672,34 @@ UCPath workflow (no live UCPath in CI either).
 - **Specifically-typeahead suggestion-list selector.** TBD on first live
   run for the same reason.
 
+## Interaction with concurrent specs
+
+### `2026-05-01-ocr-per-page-retry-design.md`
+
+The two specs are independently mergeable. Both touch
+`src/tracker/ocr-http.ts` but in disjoint functions: per-page retry
+adds new endpoint handlers (`/api/ocr/retry-page`,
+`/api/ocr/reocr-whole-pdf`) plus a per-row mutex map; this spec
+modifies `buildOcrApproveHandler` to forward `parentRunId` and write
+`fannedOutItemIds` to the post-approve entry. Different tracker
+entries: per-page retry adds `data.failedPages` +
+`data.pageStatusSummary` on the **awaiting-approval** entry; this
+spec adds `data.fannedOutItemIds` on the **`step="approved"`** entry.
+
+**Behavioral interaction**: per-page retry's "approve with pages
+still failing is allowed" semantics flow through cleanly. If the
+operator approves an OCR run where some pages failed, the fan-out
+contains fewer signers, and oath-upload's `wait-signatures` watches
+that smaller set. No oath-upload-side awareness needed — failed
+pages are invisible to the parent.
+
+**Build order**: either spec can ship first. If per-page retry ships
+first, existing OCR rows gain `failedPages` data that oath-upload
+ignores. If this spec ships first, per-page retry's
+awaiting-approval write naturally preserves `parentRunId` because
+the orchestrator's `writeTracker` already spreads `input.parentRunId`
+into every emit.
+
 ## Estimated cost
 
 | Area | LOC | Notes |
