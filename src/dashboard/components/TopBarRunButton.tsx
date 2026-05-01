@@ -3,30 +3,26 @@ import { Play } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RunModal } from "./RunModal";
 
-/**
- * "Run" CTA in the TopBar's queue zone, scoped to the emergency-contact
- * workflow. Triggers the upload modal; the modal owns submission state.
- *
- * `busyCount` shows a small numeric badge if N prep rows are still in
- * progress; the operator CAN start a second prep concurrently, so we don't
- * disable the button.
- */
+const RUN_ENABLED_WORKFLOWS = ["ocr", "emergency-contact"];
+
 export interface TopBarRunButtonProps {
+  activeWorkflow: string;
   busyCount?: number;
 }
 
-export function TopBarRunButton({ busyCount = 0 }: TopBarRunButtonProps) {
+export function TopBarRunButton({ activeWorkflow, busyCount = 0 }: TopBarRunButtonProps) {
   const [open, setOpen] = useState(false);
+  if (!RUN_ENABLED_WORKFLOWS.includes(activeWorkflow)) return null;
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        aria-label="Run emergency contact prep"
+        aria-label={`Run ${activeWorkflow}`}
         title={
           busyCount > 0
             ? `${busyCount} prepare in progress — click to start another`
-            : "Run emergency contact"
+            : `Run ${activeWorkflow}`
         }
         className={cn(
           "h-8 px-3 inline-flex items-center gap-1.5 rounded-lg",
@@ -50,7 +46,7 @@ export function TopBarRunButton({ busyCount = 0 }: TopBarRunButtonProps) {
           <span className="text-xs font-mono opacity-80">· {busyCount}</span>
         )}
       </button>
-      <RunModal open={open} onOpenChange={setOpen} />
+      <RunModal open={open} onOpenChange={setOpen} workflow={activeWorkflow} />
     </>
   );
 }
