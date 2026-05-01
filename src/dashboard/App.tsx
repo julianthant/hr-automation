@@ -49,6 +49,7 @@ export default function App() {
   const [workflow, setWorkflow] = useState(initial.workflow);
   const [selectedId, setSelectedId] = useState<string | null>(initial.selectedId);
   const [reviewingPrepId, setReviewingPrepId] = useState<string | null>(null);
+  const [drilledBatchRunId, setDrilledBatchRunId] = useState<string | null>(null);
   const [runModalOpen, setRunModalOpen] = useState(false);
   const [runModalReuploadFor, setRunModalReuploadFor] = useState<{ sessionId: string; previousRunId: string } | undefined>(undefined);
   const [date, setDate] = useState(initial.date);
@@ -152,6 +153,7 @@ export default function App() {
   const handleWorkflowChange = useCallback((wf: string) => {
     setWorkflow(wf);
     setSelectedId(null);
+    setDrilledBatchRunId(null);
   }, []);
 
   // Cross-date search → deep-link to the matching (workflow, date, id).
@@ -240,6 +242,18 @@ export default function App() {
           onReupload={(reuploadFor) => {
             setRunModalReuploadFor(reuploadFor);
             setRunModalOpen(true);
+          }}
+          drilledBatchRunId={drilledBatchRunId}
+          onDrillIn={(parentRunId) => {
+            // Drilling exits any open prep review and clears any selected child —
+            // the user explicitly switched contexts. Also clear status filter so the
+            // drilled view starts in a clean "show everything in this batch" state.
+            setReviewingPrepId(null);
+            setSelectedId(null);
+            setDrilledBatchRunId(parentRunId);
+          }}
+          onDrillOut={() => {
+            setDrilledBatchRunId(null);
           }}
           loading={loading}
           runControlsSlot={
