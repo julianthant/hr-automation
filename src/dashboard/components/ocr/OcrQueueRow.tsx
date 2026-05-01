@@ -5,6 +5,7 @@ import {
   Clock,
   FileText,
   Loader2,
+  UploadCloud,
   X as XIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -30,6 +31,8 @@ export interface OcrQueueRowProps {
   entry: TrackerEntry;
   isReviewing: boolean;
   onOpenReview: (runId: string) => void;
+  /** Called when operator clicks Reupload — opens RunModal in reupload mode. */
+  onReupload?: (reuploadFor: { sessionId: string; previousRunId: string }) => void;
 }
 
 const STAGES = [
@@ -50,7 +53,7 @@ interface DerivedState {
   accent: string;
 }
 
-export function OcrQueueRow({ entry, isReviewing, onOpenReview }: PreviewRowProps) {
+export function OcrQueueRow({ entry, isReviewing, onOpenReview, onReupload }: OcrQueueRowProps) {
   const isOath = entry.workflow === "oath-signature";
   const data = isOath
     ? parseOathPrepareRowData(entry.data)
@@ -180,6 +183,22 @@ export function OcrQueueRow({ entry, isReviewing, onOpenReview }: PreviewRowProp
           <span className="rounded-md bg-secondary px-1.5 py-px font-mono text-[10px] text-muted-foreground">
             {recordCount} rec
           </span>
+          {onReupload && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onReupload({ sessionId: entry.id, previousRunId: entry.runId ?? entry.id });
+              }}
+              disabled={discarding}
+              className={cn(
+                "inline-flex h-6 items-center gap-1 rounded-md border border-border px-1.5 text-[11px] text-muted-foreground hover:bg-muted",
+                "disabled:cursor-not-allowed disabled:opacity-50",
+              )}
+              title="Re-upload corrected PDF — carries forward resolved EIDs from this run"
+            >
+              <UploadCloud className="h-3 w-3" /> Reupload
+            </button>
+          )}
           <button
             onClick={(e) => {
               e.stopPropagation();

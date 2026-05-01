@@ -21,6 +21,7 @@ import { RetryAllButton } from "./components/RetryAllButton";
 import { TopBarRunButton } from "./components/TopBarRunButton";
 import { TopBarCaptureButton } from "./components/TopBarCaptureButton";
 import { parsePrepareRowData, isResolvedPrepRow } from "./components/ocr/types";
+import { RunModal } from "./components/RunModal";
 import { dateLocal } from "./lib/utils";
 
 /** Read initial state from URL search params so refresh preserves selection */
@@ -48,6 +49,8 @@ export default function App() {
   const [workflow, setWorkflow] = useState(initial.workflow);
   const [selectedId, setSelectedId] = useState<string | null>(initial.selectedId);
   const [reviewingPrepId, setReviewingPrepId] = useState<string | null>(null);
+  const [runModalOpen, setRunModalOpen] = useState(false);
+  const [runModalReuploadFor, setRunModalReuploadFor] = useState<{ sessionId: string; previousRunId: string } | undefined>(undefined);
   const [date, setDate] = useState(initial.date);
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   // Status map for the currently-watched (workflow, date). Reset whenever
@@ -234,6 +237,10 @@ export default function App() {
           }}
           reviewingPrepId={reviewingPrepId}
           onOpenReview={(runId) => setReviewingPrepId(runId)}
+          onReupload={(reuploadFor) => {
+            setRunModalReuploadFor(reuploadFor);
+            setRunModalOpen(true);
+          }}
           loading={loading}
           runControlsSlot={
             <>
@@ -274,6 +281,16 @@ export default function App() {
         )}
       </div>
       <TerminalDrawer connected={connected} />
+      {/* Reupload RunModal — opened by OcrQueueRow's Reupload button */}
+      <RunModal
+        open={runModalOpen}
+        onOpenChange={(open) => {
+          setRunModalOpen(open);
+          if (!open) setRunModalReuploadFor(undefined);
+        }}
+        workflow="ocr"
+        reuploadFor={runModalReuploadFor}
+      />
     </div>
     </TerminalDrawerProvider>
     </TooltipProvider>

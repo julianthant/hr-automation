@@ -16,6 +16,8 @@ interface QueuePanelProps {
   reviewingPrepId?: string | null;
   /** Open the right-pane review for this prep row. */
   onOpenReview?: (runId: string) => void;
+  /** Open RunModal in reupload mode for the given OCR session. */
+  onReupload?: (reuploadFor: { sessionId: string; previousRunId: string }) => void;
   loading: boolean;
   /**
    * Optional cluster of run controls (QuickRunPanel + Capture / Oath /
@@ -53,6 +55,7 @@ export function QueuePanel({
   onSelect,
   reviewingPrepId,
   onOpenReview,
+  onReupload,
   loading,
   runControlsSlot,
 }: QueuePanelProps) {
@@ -108,6 +111,7 @@ export function QueuePanel({
               entry={e}
               isReviewing={reviewingPrepId === runId}
               onOpenReview={(rid) => onOpenReview?.(rid)}
+              onReupload={onReupload}
             />
           );
         })}
