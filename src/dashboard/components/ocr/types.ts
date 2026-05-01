@@ -1,10 +1,7 @@
 /**
- * Frontend-side types for the emergency-contact preview row + record list.
- * These mirror the backend schemas in
- * `src/workflows/emergency-contact/preview-schema.ts` but are kept as plain
- * TypeScript interfaces (not Zod) so the frontend bundle doesn't pull in
- * Zod's runtime. Validation happens server-side; the frontend just renders
- * what the SSE/`/api/entries` payload returns.
+ * Frontend mirrors of OCR's per-form schemas. No runtime Zod here — these
+ * are TypeScript types only, so the dashboard bundle stays slim. Validation
+ * lives server-side in src/workflows/{oath-signature,emergency-contact}/ocr-form.ts.
  */
 
 export type MatchState =
@@ -194,3 +191,72 @@ export const RELATIONSHIP_OPTIONS: string[] = [
   "Contact if Detained/Arrested",
   "Other",
 ];
+
+// ─── Oath-signature types (was oath-preview-types.ts) ──────────────
+
+export type OathMatchState =
+  | "extracted"
+  | "matched"
+  | "lookup-pending"
+  | "lookup-running"
+  | "resolved"
+  | "unresolved";
+
+export type OathMatchSource = "roster" | "eid-lookup" | "llm";
+
+export interface OathPreviewRecord {
+  sourcePage: number;
+  rowIndex: number;
+  printedName: string;
+  employeeSigned: boolean;
+  officerSigned?: boolean | null;
+  dateSigned: string | null;
+  notes: string[];
+  employeeId: string;
+  matchState: OathMatchState;
+  matchSource?: OathMatchSource;
+  matchConfidence?: number;
+  rosterCandidates?: Array<{ eid: string; name: string; score: number }>;
+  documentType?: "expected" | "unknown";
+  originallyMissing?: string[];
+  verification?: Verification;
+  selected: boolean;
+  warnings: string[];
+}
+
+export interface OathPrepareRowData {
+  mode: "prepare";
+  pdfPath: string;
+  pdfOriginalName: string;
+  rosterPath: string;
+  pageImagesDir?: string;
+  records: OathPreviewRecord[];
+  ocrProvider?: string;
+  ocrAttempts?: number;
+  ocrCached?: boolean;
+}
+
+export function parseOathPrepareRowData(
+  rawData: Record<string, string> | undefined,
+): OathPrepareRowData | null {
+  if (!rawData) return null;
+  if (rawData.mode !== "prepare") return null;
+  let records: OathPreviewRecord[] = [];
+  try {
+    const parsed = JSON.parse(rawData.records ?? "[]");
+    if (Array.isArray(parsed)) records = parsed as OathPreviewRecord[];
+  } catch {
+    return null;
+  }
+  return {
+    mode: "prepare",
+    pdfPath: rawData.pdfPath ?? "",
+    pdfOriginalName: rawData.pdfOriginalName ?? "",
+    rosterPath: rawData.rosterPath ?? "",
+    pageImagesDir: rawData.pageImagesDir || undefined,
+    records,
+    ocrProvider: rawData.ocrProvider,
+    ocrAttempts: rawData.ocrAttempts ? Number(rawData.ocrAttempts) : undefined,
+    ocrCached: rawData.ocrCached === "true",
+  };
+}

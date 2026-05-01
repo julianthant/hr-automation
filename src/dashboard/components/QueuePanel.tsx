@@ -5,7 +5,7 @@ import { EntryItem } from "./EntryItem";
 import { EmptyState } from "./EmptyState";
 import { OcrQueueRow } from "./ocr/OcrQueueRow";
 import type { TrackerEntry } from "./types";
-import { isPrepareRow, isResolvedPrepRow } from "./preview-types";
+import { isPrepareRow, isResolvedPrepRow } from "./ocr/types";
 
 interface QueuePanelProps {
   entries: TrackerEntry[];

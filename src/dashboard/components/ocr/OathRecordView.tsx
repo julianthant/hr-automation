@@ -1,6 +1,6 @@
 import { Pencil } from "lucide-react";
 import type { ReactNode } from "react";
-import type { OathPreviewRecord } from "../oath-preview-types";
+import type { OathPreviewRecord } from "./types";
 
 export interface OathRecordViewProps {
   record: OathPreviewRecord;

@@ -11,8 +11,8 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "../types";
-import { parsePrepareRowData } from "../preview-types";
-import { parseOathPrepareRowData } from "../oath-preview-types";
+import { parsePrepareRowData } from "./types";
+import { parseOathPrepareRowData } from "./types";
 
 /**
  * Unified bento prep row for the QueuePanel. Replaces the separate

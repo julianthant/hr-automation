@@ -1,7 +1,7 @@
 import { Pencil } from "lucide-react";
 import type { ReactNode } from "react";
-import type { PreviewRecord } from "../preview-types";
-import { RELATIONSHIP_OPTIONS } from "../preview-types";
+import type { PreviewRecord } from "./types";
+import { RELATIONSHIP_OPTIONS } from "./types";
 
 export interface EcRecordViewProps {
   record: PreviewRecord;
