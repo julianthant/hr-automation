@@ -65,6 +65,16 @@ test("orchestrator emits pending → loading-roster → ocr → matching → don
   assert.ok(steps.some((s) => s.includes("ocr")), `steps: ${steps.join(", ")}`);
   assert.ok(steps.some((s) => s.includes("matching")), `steps: ${steps.join(", ")}`);
   assert.ok(steps.some((s) => s === "running/awaiting-approval" || s === "done/awaiting-approval"), `steps: ${steps.join(", ")}`);
+
+  const approval = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
+    (e) => (e.status === "running" || e.status === "done") && e.step === "awaiting-approval",
+  );
+  assert.ok(approval);
+  const summary = JSON.parse(approval!.data!.pageStatusSummary ?? "{}");
+  assert.deepEqual(summary, { total: 0, succeeded: 0, failed: 0 });
+  const failedPages = JSON.parse(approval!.data!.failedPages ?? "[]");
+  assert.deepEqual(failedPages, []);
+
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -199,7 +209,7 @@ test("orchestrator surfaces failedPages and pageStatusSummary on awaiting-approv
         cached: false,
         pages: [
           { page: 1, success: true, attemptedKeys: ["gemini-1"], poolKeyId: "gemini-1" },
-          { page: 2, success: false, error: "rate limit", attemptedKeys: ["gemini-1", "mistral-1"] },
+          { page: 2, success: false, error: "rate limit", attemptedKeys: ["mistral-1"] },
           { page: 3, success: true, attemptedKeys: ["groq-1"], poolKeyId: "groq-1" },
         ],
       }),
@@ -226,6 +236,7 @@ test("orchestrator surfaces failedPages and pageStatusSummary on awaiting-approv
   const failedPages = JSON.parse(approval!.data!.failedPages ?? "[]") as Array<{ page: number }>;
   assert.equal(failedPages.length, 1, "one failed page");
   assert.equal(failedPages[0].page, 2);
+  assert.equal(failedPages[0].attempts, 1);
   const summary = JSON.parse(approval!.data!.pageStatusSummary ?? "{}") as {
     total: number; succeeded: number; failed: number;
   };
