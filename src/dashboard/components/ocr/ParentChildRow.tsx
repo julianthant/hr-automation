@@ -3,7 +3,6 @@ import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "../types";
 import { useElapsed, formatDuration } from "../hooks/useElapsed";
-import { parsePrepareRowData } from "./types";
 import {
   aggregateBatchCounts,
   pickPreviewChildren,
@@ -45,7 +44,6 @@ export function ParentChildRow({
   isDrilled,
   onDrillIn,
 }: ParentChildRowProps) {
-  const data = parsePrepareRowData(parent.data);
   const counts = aggregateBatchCounts(childEntries);
   const accent = resolveBatchAccent(counts);
   const previewKids = pickPreviewChildren(childEntries, PREVIEW_KIDS);
@@ -64,7 +62,7 @@ export function ParentChildRow({
     : "";
 
   const runId = parent.runId ?? parent.id;
-  const filename = data?.pdfOriginalName || "Prep batch";
+  const filename = parent.data?.pdfOriginalName || "Prep batch";
   const prepTime = formatTime(parent.timestamp);
 
   const segs = computeProgressSegments(counts);
