@@ -9,7 +9,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useSharePointDownload } from "./hooks/useSharePointDownload";
 import { cn } from "@/lib/utils";
 
 /**
@@ -29,12 +28,23 @@ interface RosterListing {
   modifiedAt: string;
 }
 
+interface FormTypeOption {
+  formType: string;
+  label: string;
+  description: string;
+  rosterMode: "required" | "optional";
+}
+
 interface RunModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Active workflow — determines submit endpoint + shows form-type picker for OCR. */
+  workflow?: string;
+  /** When set, the modal is in "reupload" mode for the given session. */
+  reuploadFor?: { sessionId: string; previousRunId: string };
 }
 
-export function RunModal({ open, onOpenChange }: RunModalProps) {
+export function RunModal({ open, onOpenChange, workflow = "emergency-contact", reuploadFor }: RunModalProps) {
   const [file, setFile] = useState<File | null>(null);
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [rosterMode, setRosterMode] = useState<"download" | "existing">("existing");
@@ -42,9 +52,10 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [formType, setFormType] = useState<string | null>(null);
+  const [formOptions, setFormOptions] = useState<FormTypeOption[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropRef = useRef<HTMLLabelElement>(null);
-  const sharePoint = useSharePointDownload("ONBOARDING_ROSTER");
 
   // Best-effort PDF page count via pdf-lib. Lazy-imported on first pick
   // so the chunk is split out of the main bundle. Spec §4.3: falls back
@@ -97,6 +108,23 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
     };
   }, [open]);
 
+  // Fetch form types when modal opens for OCR.
+  useEffect(() => {
+    if (!open || workflow !== "ocr") return;
+    let cancelled = false;
+    fetch("/api/ocr/forms")
+      .then(async (r) => {
+        if (r.ok) {
+          const list = (await r.json()) as FormTypeOption[];
+          if (cancelled) return;
+          setFormOptions(list);
+          if (!formType && list.length > 0) setFormType(list[0].formType);
+        }
+      })
+      .catch(() => {/* tolerate */});
+    return () => { cancelled = true; };
+  }, [open, workflow]);
+
   // Reset form state on close.
   useEffect(() => {
     if (open) return;
@@ -131,43 +159,35 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
 
   async function handleSubmit(): Promise<void> {
     if (!file || submitting) return;
+    if (workflow === "ocr" && !formType) return;
     setSubmitting(true);
     setProgress(0);
     setError(null);
 
-    // If the operator picked "Download fresh from SharePoint", fire the
-    // download FIRST and wait for it to complete before uploading the
-    // PDF. Re-fetch /api/rosters afterward so the next prep run sees the
-    // freshly-saved file.
-    if (rosterMode === "download") {
-      const path = await sharePoint.start();
-      if (!path) {
-        setError(sharePoint.error ?? "SharePoint download failed");
-        setSubmitting(false);
-        return;
-      }
-      try {
-        const r = await fetch("/api/rosters");
-        if (r.ok) setRosters((await r.json()) as RosterListing[]);
-      } catch {
-        /* re-fetch is best-effort */
-      }
-    }
-
     const fd = new FormData();
     fd.append("pdf", file, file.name);
-    // The backend's prep flow uses the latest roster on disk regardless
-    // of rosterMode. We pass "existing" here so the parent row records
-    // the chosen mode honestly (the download already happened above).
-    fd.append("rosterMode", rosterMode === "download" ? "existing" : rosterMode);
+    fd.append("rosterMode", rosterMode);
+    if (workflow === "ocr" && formType) fd.append("formType", formType);
+    if (reuploadFor) {
+      fd.append("sessionId", reuploadFor.sessionId);
+      fd.append("previousRunId", reuploadFor.previousRunId);
+    }
+
+    // Determine submit URL.
+    let submitUrl: string;
+    if (workflow === "ocr") {
+      submitUrl = reuploadFor ? "/api/ocr/reupload" : "/api/ocr/prepare";
+    } else {
+      submitUrl = "/api/emergency-contact/prepare";
+    }
 
     // Use XHR so we get progress events. Fetch's upload progress is still
     // not widely supported across browsers as of 2026.
     try {
-      const result = await new Promise<{ ok: boolean; parentRunId?: string; error?: string }>(
+      const result = await new Promise<{ ok: boolean; parentRunId?: string; sessionId?: string; runId?: string; error?: string }>(
         (resolve, reject) => {
           const xhr = new XMLHttpRequest();
-          xhr.open("POST", "/api/emergency-contact/prepare");
+          xhr.open("POST", submitUrl);
           xhr.upload.addEventListener("progress", (ev) => {
             if (ev.lengthComputable) {
               setProgress(Math.round((ev.loaded / ev.total) * 100));
@@ -231,10 +251,12 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
         <DialogHeader className="relative grid gap-3 px-[38px] pt-[36px] pb-0 space-y-0 border-b-0">
           <div className="flex flex-col gap-1.5" style={{ maxWidth: 360 }}>
             <DialogTitle className="text-[15px] font-normal tracking-[-0.005em]">
-              Run Emergency Contact
+              {workflow === "ocr" ? "OCR — Prepare" : "Run Emergency Contact"}
             </DialogTitle>
             <DialogDescription className="text-[12px] leading-[1.55] text-muted-foreground">
-              Upload a scanned PDF. We&apos;ll OCR it, match against the roster, then approve before queuing.
+              {reuploadFor
+                ? "Upload a corrected PDF — resolved EIDs from the previous run carry forward."
+                : "Upload a scanned PDF. We’ll OCR it, match against the roster, then approve before queuing."}
             </DialogDescription>
           </div>
           <button
@@ -256,6 +278,30 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
         </DialogHeader>
 
         <div className="px-[38px] pt-[24px] pb-0 space-y-6">
+          {workflow === "ocr" && !reuploadFor && formOptions.length > 0 && (
+            <section>
+              <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground/70">
+                Form type
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {formOptions.map((opt) => (
+                  <label key={opt.formType} className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="formType"
+                      value={opt.formType}
+                      checked={formType === opt.formType}
+                      onChange={() => setFormType(opt.formType)}
+                      disabled={submitting}
+                      className="accent-primary"
+                    />
+                    <span className="text-[13px] font-medium">{opt.label}</span>
+                    <span className="text-[11px] text-muted-foreground">{opt.description}</span>
+                  </label>
+                ))}
+              </div>
+            </section>
+          )}
           <section>
             <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground/70">
               PDF
@@ -295,13 +341,7 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
                 disabled={submitting}
                 onSelect={() => setRosterMode("download")}
                 label="Download fresh from SharePoint"
-                hint={
-                  sharePoint.downloading
-                    ? "Downloading roster from SharePoint…"
-                    : sharePoint.error
-                      ? `Error: ${sharePoint.error}`
-                      : "Adds ~20s but guarantees current data."
-                }
+                hint="The OCR orchestrator will handle the download automatically."
                 last
               />
             </div>

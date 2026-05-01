@@ -238,17 +238,16 @@ export default function App() {
           runControlsSlot={
             <>
               <QuickRunPanel workflow={workflow} />
-              {workflow === "emergency-contact" && (
-                <TopBarRunButton
-                  busyCount={
-                    entries.filter(
-                      (e) =>
-                        (e.status === "pending" || e.status === "running") &&
-                        parsePrepareRowData(e.data) !== null,
-                    ).length
-                  }
-                />
-              )}
+              <TopBarRunButton
+                activeWorkflow={workflow}
+                busyCount={
+                  entries.filter(
+                    (e) =>
+                      (e.status === "pending" || e.status === "running") &&
+                      parsePrepareRowData(e.data) !== null,
+                  ).length
+                }
+              />
               <RetryAllButton workflow={workflow} failedIds={failedIds} />
               <TopBarCaptureButton workflow={workflow} />
             </>
