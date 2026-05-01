@@ -665,27 +665,53 @@ function makeCaptureFinalize(trackerDir: string) {
       log.warn(`[capture] finalize fired without a pdfPath (sessionId=${session.sessionId})`);
       return;
     }
+
+    let formType: string;
     if (session.workflow === "oath-signature") {
-      const { runPaperOathPrepare } = await import(
-        "../workflows/oath-signature/prepare.js"
+      formType = "oath";
+    } else if (session.workflow === "emergency-contact") {
+      formType = "emergency-contact";
+    } else if (session.workflow === "ocr" && session.formType) {
+      formType = session.formType;
+    } else {
+      log.warn(
+        `[capture] no finalize handler for workflow="${session.workflow}" — PDF saved at ${session.pdfPath}`,
       );
-      const rosterDirs = [
-        resolve(process.cwd(), ".tracker/rosters"),
-        resolve(process.cwd(), "src/data"),
-      ];
-      const rosterDir = rosterDirs.find((d) => existsSync(d)) ?? rosterDirs[0];
-      await runPaperOathPrepare({
-        pdfPath: session.pdfPath,
-        pdfOriginalName: `capture-${session.sessionId.slice(0, 8)}.pdf`,
-        rosterDir,
-        uploadsDir: resolve(process.cwd(), CAPTURE_UPLOADS_DIR),
-        trackerDir,
-      });
       return;
     }
-    log.warn(
-      `[capture] no finalize handler for workflow="${session.workflow}" — PDF saved at ${session.pdfPath}`,
-    );
+
+    // POST to /api/ocr/prepare — same multipart shape RunModal uses.
+    const pdfBytes = readFileSync(session.pdfPath);
+    const { buildOcrPrepareHandler } = await import("./ocr-http.js");
+    const handler = buildOcrPrepareHandler({ trackerDir });
+    const rosterDirs = [
+      resolve(process.cwd(), ".tracker/rosters"),
+      resolve(process.cwd(), "src/data"),
+    ];
+    const rosterDir = rosterDirs.find((d) => existsSync(d)) ?? rosterDirs[0];
+    // Find the first xlsx roster file.
+    let rosterPath: string | undefined;
+    try {
+      const { readdirSync } = await import("node:fs");
+      const files = readdirSync(rosterDir).filter((f) => f.endsWith(".xlsx"));
+      if (files.length > 0) {
+        rosterPath = resolve(rosterDir, files.sort().at(-1)!);
+      }
+    } catch { /* tolerate */ }
+
+    const pdfOriginalName = `capture-${session.sessionId.slice(0, 8)}.pdf`;
+    const result = await handler({
+      pdfPath: session.pdfPath,
+      pdfOriginalName,
+      formType,
+      rosterMode: rosterPath ? "existing" : "download",
+      rosterPath,
+      sessionId: session.sessionId,
+    });
+    if (result.status !== 202) {
+      log.warn(`[capture] ocr prepare failed (status ${result.status}): ${JSON.stringify(result.body)}`);
+    }
+    void pdfBytes;
   };
 }
 

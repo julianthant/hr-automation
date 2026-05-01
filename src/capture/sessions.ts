@@ -39,6 +39,8 @@ export interface CaptureSession {
   sessionId: string;
   token: string;
   workflow: string;
+  /** When workflow === "ocr", specifies the form type (e.g. "oath", "emergency-contact"). */
+  formType?: string;
   contextHint?: string;
   createdAt: number;
   /**
