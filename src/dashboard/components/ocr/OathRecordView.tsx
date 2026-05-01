@@ -1,10 +1,12 @@
-import { Pencil } from "lucide-react";
+import { Pencil, RotateCw } from "lucide-react";
 import type { ReactNode } from "react";
 import type { OathPreviewRecord } from "./types";
 
 export interface OathRecordViewProps {
   record: OathPreviewRecord;
   onChange: (next: OathPreviewRecord) => void;
+  onForceResearch?: (record: OathPreviewRecord) => void;
+  isResearching?: boolean;
 }
 
 function isMissing(record: OathPreviewRecord, fieldKey: string): boolean {
@@ -46,12 +48,25 @@ function Field({
  * have `officerSigned: null` — we hide the field rather than show
  * Yes/No/N/A so the form scans cleanly for the 90% case.
  */
-export function OathRecordView({ record, onChange }: OathRecordViewProps) {
+export function OathRecordView({ record, onChange, onForceResearch, isResearching }: OathRecordViewProps) {
   const officerApplicable =
     record.officerSigned !== null && record.officerSigned !== undefined;
 
   return (
     <div className="flex flex-col gap-3">
+      {onForceResearch && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => onForceResearch(record)}
+            disabled={isResearching}
+            title="Re-run eid-lookup for this record"
+            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted disabled:opacity-50"
+          >
+            <RotateCw className="h-3 w-3" aria-hidden />
+          </button>
+        </div>
+      )}
       <Field label="Empl ID" missing={isMissing(record, "employeeId")}>
         <input
           type="text"

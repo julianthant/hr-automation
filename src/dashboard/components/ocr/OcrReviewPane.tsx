@@ -56,6 +56,7 @@ export function OcrReviewPane({ entry, onClose }: PrepReviewPaneProps) {
     },
   );
   const [submitting, setSubmitting] = useState(false);
+  const [researchingIndices, setResearchingIndices] = useState<Set<number>>(new Set());
 
   // Persist edits — debounced via React's state batching is enough here.
   useEffect(() => {
@@ -135,6 +136,25 @@ export function OcrReviewPane({ entry, onClose }: PrepReviewPaneProps) {
   );
   const selectedCount = approvableRecords.filter((r) => r.selected).length;
   const summary = describeSummary(records);
+
+  async function handleForceResearch(indices: number[]) {
+    setResearchingIndices(new Set(indices));
+    try {
+      const r = await fetch("/api/ocr/force-research", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: entry.id, runId, recordIndices: indices }),
+      });
+      if (!r.ok) {
+        const body = await r.json() as { error?: string };
+        toast.error("Re-research failed", { description: body.error });
+      } else {
+        toast.success("Re-research started");
+      }
+    } finally {
+      setResearchingIndices(new Set());
+    }
+  }
 
   async function handleApprove() {
     if (submitting) return;
@@ -219,6 +239,25 @@ export function OcrReviewPane({ entry, onClose }: PrepReviewPaneProps) {
           </button>
         </div>
       </div>
+
+      {/* Force-research toolbar (only for OCR workflow) */}
+      {entry.workflow === "ocr" && (
+        <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border/60 bg-secondary/10">
+          <button
+            type="button"
+            disabled={researchingIndices.size > 0 || records.length === 0}
+            onClick={() => handleForceResearch(records.map((_, i) => i))}
+            className="inline-flex h-6 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            ↻ Re-research all
+          </button>
+          {researchingIndices.size > 0 && (
+            <span className="text-[11px] text-muted-foreground">
+              Researching {researchingIndices.size} record{researchingIndices.size !== 1 ? "s" : ""}…
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Scroll body */}
       <div ref={containerRef} className="flex-1 overflow-y-auto bg-secondary/30">
