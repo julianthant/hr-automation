@@ -1531,7 +1531,11 @@ export function buildFailuresHandler(deps: FailuresDeps) {
 }
 
 function isPrepEntry(e: TrackerEntry): boolean {
-  return e.data?.mode === "prepare";
+  // Legacy EC/oath-signature prep rows (data.mode === "prepare").
+  if (e.data?.mode === "prepare") return true;
+  // New OCR workflow rows (workflow === "ocr").
+  if (e.workflow === "ocr") return true;
+  return false;
 }
 
 /**
@@ -1548,6 +1552,11 @@ function isResolvedPrepEntry(e: TrackerEntry): boolean {
 }
 
 function isReadyForReview(latest: TrackerEntry): boolean {
+  // OCR workflow: ready when done + step=awaiting-approval.
+  if (latest.workflow === "ocr") {
+    return latest.status === "done" && latest.step === "awaiting-approval";
+  }
+  // Legacy EC/oath-signature prep rows.
   if (latest.status !== "done") return false;
   if (latest.step === "approved" || latest.step === "discarded") return false;
   return true;

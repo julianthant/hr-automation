@@ -21,6 +21,8 @@ interface LogPanelProps {
   entry: TrackerEntry | null;
   workflow: string;
   date: string;
+  /** Cross-workflow entries for child-run detection. Optional — if absent, child section is hidden. */
+  allEntries?: TrackerEntry[];
 }
 
 // Special virtual keys the generic detail renderer recognizes. These come
@@ -28,10 +30,15 @@ interface LogPanelProps {
 // type-aware formatter can't handle them — we branch on the key.
 const COMPUTED_KEYS = new Set(["__started", "__elapsed"]);
 
-export function LogPanel({ entry, workflow, date }: LogPanelProps) {
+export function LogPanel({ entry, workflow, date, allEntries }: LogPanelProps) {
   const [runs, setRuns] = useState<RunInfo[]>([]);
   const [activeRunId, setActiveRunId] = useState<string | null>(entry?.runId || null);
   const registered = useWorkflow(workflow);
+
+  // Compute child entries (other entries where parentRunId === this run's runId).
+  const childEntries: TrackerEntry[] = entry?.runId && allEntries
+    ? allEntries.filter((e) => e.parentRunId === entry.runId && e.id !== entry.id)
+    : [];
   const steps = registered?.steps ?? [];
   const detailFields = registered?.detailFields ?? [];
 
@@ -227,6 +234,34 @@ export function LogPanel({ entry, workflow, date }: LogPanelProps) {
           stepDurations={activeRun?.stepDurations ?? entry?.stepDurations}
           entry={entry ?? undefined}
         />
+      )}
+
+      {childEntries.length > 0 && (
+        <section className="mb-3 rounded-md border border-border p-3 mx-0">
+          <h3 className="mb-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+            Delegated runs ({childEntries.length})
+          </h3>
+          <ul className="space-y-1">
+            {childEntries.map((c) => (
+              <li
+                key={`${c.workflow}#${c.id}#${c.runId}`}
+                className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground"
+              >
+                <span className="font-medium text-foreground/80">{c.workflow}</span>
+                <span className="truncate">{c.id}</span>
+                <span className={cn(
+                  "ml-auto px-1.5 py-px rounded text-[10px]",
+                  c.status === "done" && "bg-success/10 text-success",
+                  c.status === "failed" && "bg-destructive/10 text-destructive",
+                  c.status === "running" && "bg-primary/10 text-primary",
+                  c.status === "pending" && "bg-warning/10 text-warning",
+                )}>
+                  {c.status}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       <LogStream
