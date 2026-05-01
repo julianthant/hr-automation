@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   isApprovedPrepRow,
   isDiscardedPrepRow,
+  isResolvedPrepRow,
 } from "../../../../src/dashboard/components/ocr/types.js";
 
 describe("isApprovedPrepRow", () => {
@@ -88,6 +89,52 @@ describe("isDiscardedPrepRow", () => {
         status: "failed",
         step: "ocr",
         data: { mode: "prepare" },
+      }),
+      false,
+    );
+  });
+});
+
+describe("isResolvedPrepRow", () => {
+  it("returns true for approved prep rows", () => {
+    assert.equal(
+      isResolvedPrepRow({
+        status: "done",
+        step: "approved",
+        data: { mode: "prepare" },
+      }),
+      true,
+    );
+  });
+
+  it("returns true for discarded prep rows", () => {
+    assert.equal(
+      isResolvedPrepRow({
+        status: "failed",
+        step: "discarded",
+        data: { mode: "prepare" },
+      }),
+      true,
+    );
+  });
+
+  it("returns false for in-flight prep rows", () => {
+    assert.equal(
+      isResolvedPrepRow({
+        status: "running",
+        step: "ocr",
+        data: { mode: "prepare" },
+      }),
+      false,
+    );
+  });
+
+  it("returns false when not a prep row", () => {
+    assert.equal(
+      isResolvedPrepRow({
+        status: "done",
+        step: "approved",
+        data: {},
       }),
       false,
     );
