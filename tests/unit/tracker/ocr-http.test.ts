@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { mkdirSync, rmSync, readFileSync, existsSync, appendFileSync } from "node:fs";
+import { mkdirSync, rmSync, readFileSync, existsSync, appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -129,3 +129,116 @@ test("sweepStuckOcrRows marks running rows failed", () => {
   assert.match(last.error, /Dashboard restarted/);
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("buildOcrRetryPageHandler rejects concurrent retries on the same row", async () => {
+  const dir = join(tmpdir(), `ocr-http-mutex-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  try {
+    const { buildOcrRetryPageHandler, _resetSessionLockForTests } = await import("../../../src/tracker/ocr-http.js");
+    _resetSessionLockForTests();
+
+    let inFlightResolve: () => void;
+    const inFlight = new Promise<void>((r) => { inFlightResolve = r; });
+    const handler = buildOcrRetryPageHandler({
+      trackerDir: dir,
+      runRetryPageOverride: async () => {
+        await inFlight;
+        return { ok: true, page: 1, recordsAdded: 0, stillFailed: false };
+      },
+    });
+
+    const first = handler({ sessionId: "s1", runId: "r1", pageNum: 1 });
+    const second = await handler({ sessionId: "s1", runId: "r1", pageNum: 1 });
+    assert.equal(second.status, 409);
+    assert.match(JSON.stringify(second.body), /already in progress/i);
+
+    inFlightResolve!();
+    const firstResolved = await first;
+    assert.equal(firstResolved.status, 200);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("buildOcrRetryPageHandler maps RetryPageError codes to HTTP statuses", async () => {
+  const dir = join(tmpdir(), `ocr-http-err-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  try {
+    const { buildOcrRetryPageHandler, _resetSessionLockForTests } = await import("../../../src/tracker/ocr-http.js");
+    const { RetryPageError } = await import("../../../src/workflows/ocr/retry-page.js");
+    _resetSessionLockForTests();
+
+    const handler = buildOcrRetryPageHandler({
+      trackerDir: dir,
+      runRetryPageOverride: async () => {
+        throw new RetryPageError("image-missing", "page image expired");
+      },
+    });
+    const r = await handler({ sessionId: "s2", runId: "r2", pageNum: 1 });
+    assert.equal(r.status, 410);
+    assert.match(JSON.stringify(r.body), /expired/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("buildOcrReocrWholePdfHandler replaces records and clears failedPages", async () => {
+  const dir = join(tmpdir(), `ocr-http-whole-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  try {
+    const ocrFile = join(dir, `ocr-${dateLocalForTest()}.jsonl`);
+    writeFileSync(ocrFile, JSON.stringify({
+      workflow: "ocr",
+      id: "s3",
+      runId: "r3",
+      status: "done",
+      step: "awaiting-approval",
+      timestamp: "2026-05-01T00:00:00Z",
+      data: {
+        formType: "oath",
+        pdfPath: "/tmp/fake.pdf",
+        pdfOriginalName: "fake.pdf",
+        sessionId: "s3",
+        records: JSON.stringify([]),
+        failedPages: JSON.stringify([{ page: 1, error: "x", attemptedKeys: [], pageImagePath: "/tmp/p1.png", attempts: 1 }]),
+        pageStatusSummary: JSON.stringify({ total: 1, succeeded: 0, failed: 1 }),
+      },
+    }) + "\n", "utf-8");
+
+    const { buildOcrReocrWholePdfHandler, _resetSessionLockForTests } = await import("../../../src/tracker/ocr-http.js");
+    _resetSessionLockForTests();
+
+    const writtenEntries: object[] = [];
+    const handler = buildOcrReocrWholePdfHandler({
+      trackerDir: dir,
+      _emitOverride: (e) => writtenEntries.push(e),
+      _wholePdfOverride: async () => ({
+        data: [{
+          sourcePage: 1, rowIndex: 0,
+          printedName: "Carla", employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        provider: "whole-pdf-stub",
+        attempts: 1,
+        cached: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000003", name: "Carla" }],
+      _watchChildRunsOverride: async () => [],
+      _enqueueEidLookupOverride: async () => {},
+    });
+    const r = await handler({ sessionId: "s3", runId: "r3" });
+    assert.equal(r.status, 200);
+    const approval = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>)
+      .find((e) => (e.status === "running" || e.status === "done") && e.step === "awaiting-approval");
+    assert.ok(approval);
+    const failedPages = JSON.parse(approval!.data!.failedPages ?? "[]") as unknown[];
+    assert.equal(failedPages.length, 0, "failedPages cleared");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function dateLocalForTest(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
