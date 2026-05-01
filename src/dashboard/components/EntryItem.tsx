@@ -200,14 +200,6 @@ export function EntryItem({ entry, selected, onClick }: EntryItemProps) {
               {emplId || eid}
             </span>
           )}
-          {entry.parentRunId && (
-            <span
-              className="inline-flex items-center gap-1 rounded-md border border-border px-1.5 py-px font-mono text-[10px] text-muted-foreground flex-shrink-0"
-              title={`Delegated from parent run ${entry.parentRunId}`}
-            >
-              ↗ from parent
-            </span>
-          )}
           <span className="flex-1" />
           {isRunning && elapsed && (
             <span className="text-primary tabular-nums flex-shrink-0">{elapsed}</span>
