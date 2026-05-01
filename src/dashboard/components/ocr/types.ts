@@ -143,10 +143,7 @@ export function isResolvedPrepRow(e: {
   step?: string;
   data?: Record<string, string>;
 }): boolean {
-  if (!isPrepareRow(e)) return false;
-  if (e.status === "done" && e.step === "approved") return true;
-  if (e.status === "failed" && e.step === "discarded") return true;
-  return false;
+  return isApprovedPrepRow(e) || isDiscardedPrepRow(e);
 }
 
 /**
