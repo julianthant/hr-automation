@@ -291,6 +291,12 @@ export interface WithTrackedWorkflowOpts {
   input?: Record<string, unknown>;
   /** Override tracker directory — defaults to DEFAULT_DIR (`.tracker`). Mainly for test isolation. */
   dir?: string;
+  /**
+   * When set, every TrackerEntry emitted by this run carries `parentRunId`.
+   * Used by delegated child workflows (e.g. sharepoint-download spawned by
+   * the OCR orchestrator) so the dashboard can render parent→child pills.
+   */
+  parentRunId?: string;
 }
 
 export async function withTrackedWorkflow<T>(
@@ -364,6 +370,7 @@ export async function withTrackedWorkflow<T>(
       timestamp: ts(),
       id,
       runId,
+      ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
       status,
       data,
       ...(Object.keys(typedData).length > 0 ? { typedData } : {}),

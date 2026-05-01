@@ -17,6 +17,7 @@ export const SharePointDownloadInputSchema = z.object({
   label: z.string().min(1, "label must not be empty"),
   url: z.string().url("url must be a valid URL"),
   outDir: z.string().optional(),
+  parentRunId: z.string().optional(),
 });
 
 export type SharePointDownloadInput = z.infer<typeof SharePointDownloadInputSchema>;

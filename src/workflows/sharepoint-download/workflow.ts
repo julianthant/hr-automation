@@ -127,7 +127,11 @@ export const sharepointDownloadWorkflow: RegisteredWorkflow<
     // Seed the dashboard row with the human-readable label immediately so
     // the queue doesn't flash a blank name while auth runs. `path` and
     // `filename` are filled in below after `saveAs`.
-    ctx.updateData({ id: input.id, label: input.label });
+    ctx.updateData({
+      id: input.id,
+      label: input.label,
+      ...(input.parentRunId ? { parentRunId: input.parentRunId } : {}),
+    });
 
     const page = await ctx.page("sharepoint");
 

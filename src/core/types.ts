@@ -288,6 +288,8 @@ export interface RunOpts {
    * Ignored outside of pool-mode batch runs.
    */
   poolSize?: number
+  /** When set, every TrackerEntry emitted for this run carries `parentRunId`. */
+  parentRunId?: string
 }
 
 // Placeholder types — fully defined in Phase 2 (Task 7). Keep in sync.
