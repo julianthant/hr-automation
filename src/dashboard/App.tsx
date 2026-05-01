@@ -162,10 +162,10 @@ export default function App() {
   // fetch logic needed here — the existing SSE stream for that workflow/date
   // will surface the entry once entries for that bucket arrive.
   const handleSearchSelect = useCallback((row: SearchResultRow) => {
-    if (row.workflow !== workflow) setWorkflow(row.workflow);
+    if (row.workflow !== workflow) handleWorkflowChange(row.workflow);
     if (row.date !== date) setDate(row.date);
     setSelectedId(row.id);
-  }, [workflow, date]);
+  }, [workflow, date, handleWorkflowChange]);
 
   const handlePreviewSelect = useCallback((row: PreviewInboxRow) => {
     if (row.workflow !== workflow) handleWorkflowChange(row.workflow);
@@ -246,8 +246,7 @@ export default function App() {
           drilledBatchRunId={drilledBatchRunId}
           onDrillIn={(parentRunId) => {
             // Drilling exits any open prep review and clears any selected child —
-            // the user explicitly switched contexts. Also clear status filter so the
-            // drilled view starts in a clean "show everything in this batch" state.
+            // the user explicitly switched contexts.
             setReviewingPrepId(null);
             setSelectedId(null);
             setDrilledBatchRunId(parentRunId);
