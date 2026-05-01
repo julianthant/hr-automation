@@ -7,8 +7,7 @@ export {
   runOathSignatureCli,
   oathSignatureWorkflow,
 } from "./workflow.js";
-export { runPaperOathPrepare } from "./prepare.js";
-export type { PaperOathPrepareInput, PaperOathPrepareOutput } from "./prepare.js";
+
 export { oathOcrFormSpec } from "./ocr-form.js";
 export {
   OathRosterOcrRecordSchema,

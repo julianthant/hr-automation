@@ -58,20 +58,7 @@ import {
   buildSharePointListHandler,
   getSharePointDownloadStatus,
 } from "../workflows/sharepoint-download/index.js";
-import {
-  handlePrepareUpload,
-  handleApproveBatch,
-  handleDiscardPrepare,
-  listRosters,
-  sweepStuckPrepRows,
-} from "./emergency-contact-http.js";
 import { sweepOrphanUploadDirs } from "../scripts/ops/clean-tracker.js";
-import {
-  handleOathPrepareUpload,
-  handleOathApproveBatch,
-  handleOathDiscardPrepare,
-  sweepStuckOathPrepRows,
-} from "./oath-signature-http.js";
 import { readMultipart } from "./multipart-helper.js";
 import {
   buildOcrFormsHandler,
@@ -681,7 +668,6 @@ function makeCaptureFinalize(trackerDir: string) {
     }
 
     // POST to /api/ocr/prepare — same multipart shape RunModal uses.
-    const pdfBytes = readFileSync(session.pdfPath);
     const { buildOcrPrepareHandler } = await import("./ocr-http.js");
     const handler = buildOcrPrepareHandler({ trackerDir });
     const rosterDirs = [
@@ -711,7 +697,6 @@ function makeCaptureFinalize(trackerDir: string) {
     if (result.status !== 202) {
       log.warn(`[capture] ocr prepare failed (status ${result.status}): ${JSON.stringify(result.body)}`);
     }
-    void pdfBytes;
   };
 }
 
@@ -1896,27 +1881,6 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     } catch (err) {
       log.step(`Screenshot startup prune skipped: ${err instanceof Error ? err.message : String(err)}`);
     }
-    // Sweep emergency-contact prep rows that were left in transient state by
-    // a previous dashboard process — the OCR + eid-lookup pipeline lives in
-    // this Node process, so a backend restart leaves any in-flight prep row
-    // orphaned. Idempotent: only emits on rows whose latest status is
-    // pending/running.
-    try {
-      const swept = sweepStuckPrepRows(dir);
-      if (swept > 0) {
-        log.step(`Marked ${swept} stuck emergency-contact prepare row${swept === 1 ? "" : "s"} as failed`);
-      }
-    } catch (err) {
-      log.step(`Prep-row sweep skipped: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    try {
-      const sweptOath = sweepStuckOathPrepRows(dir);
-      if (sweptOath > 0) {
-        log.step(`Marked ${sweptOath} stuck oath-signature prepare row${sweptOath === 1 ? "" : "s"} as failed`);
-      }
-    } catch (err) {
-      log.step(`Oath prep-row sweep skipped: ${err instanceof Error ? err.message : String(err)}`);
-    }
     try {
       sweepStuckOcrRows(dir);
     } catch (err) {
@@ -3039,124 +3003,6 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       });
       res.end(JSON.stringify(body));
     };
-
-    // ─── Emergency-contact "Run" button endpoints ───────────────
-    //
-    // Four routes power the dashboard's TopBar Run flow:
-    //   POST /api/emergency-contact/prepare        → multipart PDF upload, kicks off OCR
-    //   POST /api/emergency-contact/approve-batch  → fan out reviewed records to daemons
-    //   POST /api/emergency-contact/discard-prepare → cancel a pending prep row
-    //   GET  /api/rosters                          → list available xlsx rosters
-    //
-    // Each handler lives in `emergency-contact-http.ts` so route bodies
-    // here stay short and the handlers can be unit-tested.
-
-    if (req.method === "GET" && url.pathname === "/api/rosters") {
-      try {
-        writeJson(200, listRosters());
-      } catch (e) {
-        writeJson(500, { ok: false, error: errorMessage(e) });
-      }
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/emergency-contact/prepare") {
-      // 50MB cap is comfortably above a typical scanned 8-page PDF (~3-10MB)
-      // while keeping a runaway upload from swamping the SSE server.
-      const mp = await readMultipart(req, 50 * 1024 * 1024);
-      if (!mp.ok) return writeJson(400, { ok: false, error: mp.error });
-      const file = mp.parsed.files["pdf"];
-      const rosterMode = mp.parsed.fields["rosterMode"]?.trim();
-      if (!file) return writeJson(400, { ok: false, error: "missing 'pdf' file part" });
-      if (rosterMode !== "download" && rosterMode !== "existing") {
-        return writeJson(400, { ok: false, error: "rosterMode must be 'download' or 'existing'" });
-      }
-      const result = await handlePrepareUpload(
-        { pdfBytes: file.data, pdfOriginalName: file.filename, rosterMode },
-        dir,
-      );
-      writeJson(result.ok ? 202 : 400, result);
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/emergency-contact/approve-batch") {
-      // 1 MB cap — preview record JSON is small (~1-2KB per record × N records).
-      // 1 MB comfortably handles a 200-record batch without enabling abuse.
-      const parsedBody = await readJsonBody(1024 * 1024);
-      if (!parsedBody.ok) return writeJson(400, { ok: false, error: parsedBody.error });
-      const result = await handleApproveBatch(
-        {
-          parentRunId: String(parsedBody.body.parentRunId ?? ""),
-          records: Array.isArray(parsedBody.body.records) ? parsedBody.body.records : [],
-        },
-        dir,
-      );
-      writeJson(result.ok ? 202 : 400, result);
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/emergency-contact/discard-prepare") {
-      const parsedBody = await readJsonBody(4096);
-      if (!parsedBody.ok) return writeJson(400, { ok: false, error: parsedBody.error });
-      const result = await handleDiscardPrepare(
-        {
-          parentRunId: String(parsedBody.body.parentRunId ?? ""),
-          reason: parsedBody.body.reason ? String(parsedBody.body.reason) : undefined,
-        },
-        dir,
-      );
-      writeJson(result.ok ? 200 : 400, result);
-      return;
-    }
-
-    // ─── Oath-signature paper-roster prep endpoints ───────────
-    //
-    // Same shape as emergency-contact's prep flow (parent prep row →
-    // OCR → roster match → user review → approve fans out to N kernel
-    // queue items). No `rosterMode` field — paper rosters always match
-    // against the SharePoint onboarding xlsx in `.tracker/rosters/` or
-    // `src/data/`. Handlers live in `oath-signature-http.ts`.
-
-    if (req.method === "POST" && url.pathname === "/api/oath-signature/prepare") {
-      const mp = await readMultipart(req, 50 * 1024 * 1024);
-      if (!mp.ok) return writeJson(400, { ok: false, error: mp.error });
-      const file = mp.parsed.files["pdf"];
-      if (!file) return writeJson(400, { ok: false, error: "missing 'pdf' file part" });
-      const result = await handleOathPrepareUpload(
-        { pdfBytes: file.data, pdfOriginalName: file.filename },
-        dir,
-      );
-      writeJson(result.ok ? 202 : 400, result);
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/oath-signature/approve-batch") {
-      const parsedBody = await readJsonBody(1024 * 1024);
-      if (!parsedBody.ok) return writeJson(400, { ok: false, error: parsedBody.error });
-      const result = await handleOathApproveBatch(
-        {
-          parentRunId: String(parsedBody.body.parentRunId ?? ""),
-          records: Array.isArray(parsedBody.body.records) ? parsedBody.body.records : [],
-        },
-        dir,
-      );
-      writeJson(result.ok ? 202 : 400, result);
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/oath-signature/discard-prepare") {
-      const parsedBody = await readJsonBody(4096);
-      if (!parsedBody.ok) return writeJson(400, { ok: false, error: parsedBody.error });
-      const result = await handleOathDiscardPrepare(
-        {
-          parentRunId: String(parsedBody.body.parentRunId ?? ""),
-          reason: parsedBody.body.reason ? String(parsedBody.body.reason) : undefined,
-        },
-        dir,
-      );
-      writeJson(result.ok ? 200 : 400, result);
-      return;
-    }
 
     // ─── OCR endpoints ─────────────────────────────────────────
     //   GET  /api/ocr/forms           → form-type registry listing
