@@ -176,7 +176,7 @@ export function ParentChildRow({
             <span
               className={cn(
                 "tabular-nums flex-shrink-0",
-                elapsed?.frozen ? "" : "text-primary",
+                elapsed.frozen ? "" : "text-primary",
               )}
             >
               {elapsedLabel}
