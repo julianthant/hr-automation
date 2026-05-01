@@ -23,3 +23,6 @@ export type {
 } from "./preview-schema.js";
 export { runPaperOathPrepare } from "./prepare.js";
 export type { PaperOathPrepareInput, PaperOathPrepareOutput } from "./prepare.js";
+export { oathOcrFormSpec } from "./ocr-form.js";
+export { VerificationSchema } from "./ocr-form.js";
+export type { Verification } from "./ocr-form.js";
