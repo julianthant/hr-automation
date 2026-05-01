@@ -25,7 +25,7 @@ test("matchRecord: form-EID present → matched (form-eid first)", () => {
 test("matchRecord: no form-EID, high roster name match → matched (roster)", () => {
   const ocr = {
     sourcePage: 2,
-    employee: { name: "Maria Garcia", employeeId: null },
+    employee: { name: "Maria Garcia", employeeId: "" },
     emergencyContact: { name: "Sara Garcia", relationship: "Sister", primary: true, sameAddressAsEmployee: true, cellPhone: "(555) 123-4567" },
     notes: [], documentType: "expected" as const, originallyMissing: [],
   };
@@ -38,7 +38,7 @@ test("matchRecord: no form-EID, high roster name match → matched (roster)", ()
 test("matchRecord: no form-EID, no roster match → lookup-pending", () => {
   const ocr = {
     sourcePage: 3,
-    employee: { name: "Unknown Person", employeeId: null },
+    employee: { name: "Unknown Person", employeeId: "" },
     emergencyContact: { name: "Other Person", relationship: "Friend", primary: true, sameAddressAsEmployee: true, cellPhone: "(555) 999-0000" },
     notes: [], documentType: "expected" as const, originallyMissing: [],
   };

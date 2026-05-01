@@ -334,6 +334,7 @@ Implementation details live in `src/dashboard/CLAUDE.md` (frontend) and `src/tra
 
 These items appear in plans/improvements docs but were not shipped in 2026-04-18's selector-intelligence + runner-removal pass. They'll be picked up in a later session.
 
+- **OCR per-page retry shipped (2026-05-01).** `runOcrPipeline` no longer auto-falls-back to whole-PDF; failed pages surface as `data.failedPages` on the awaiting-approval row. Operator can click `Retry page` per failure (POST `/api/ocr/retry-page`) or `Re-OCR whole PDF` (POST `/api/ocr/reocr-whole-pdf`). Per-row mutex in `src/tracker/ocr-http.ts` serializes concurrent retries on the same row. Spec: `docs/superpowers/specs/2026-05-01-ocr-per-page-retry-design.md`. Plan: `docs/superpowers/plans/2026-05-01-ocr-per-page-retry-plan.md`.
 - **Replacement workflow launcher.** ✅ Shipped 2026-04-22 as **daemon mode** — see the "Daemon mode (persistent workflow processes)" section above. CLI invocations of `separation` / `work-study` now enqueue to long-lived daemons instead of spawning a fresh process + re-Duo per run. `TopBar`'s `rightSlot` prop is still preserved for a future in-dashboard UI mount (dashboard-side queue viz / enqueue button is a follow-up).
 - **Bundle size code-split** (handoff §1.8). Bundle is 906.74 KB after runner removal (down from 940.65 KB).
 - **ESLint rule for selectors** (handoff §8.3). The `tests/unit/systems/inline-selectors.test.ts` guard still enforces "no inline selectors outside `selectors.ts`" — promotion to ESLint is editor-time-feedback only.
