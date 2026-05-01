@@ -57,6 +57,8 @@ export interface OcrOrchestratorOpts {
   _enqueueEidLookupOverride?: (
     items: Array<{ name?: string; emplId?: string; itemId: string }>,
   ) => Promise<void>;
+  /** Skip the actual runWorkflow(sharepointDownload...) call (tests only). */
+  _skipSharepointDispatch?: boolean;
 }
 
 export async function runOcrOrchestrator(
@@ -122,15 +124,52 @@ export async function runOcrOrchestrator(
   });
 
   try {
-    // 1. Loading-roster
-    writeTracker("running", { formType: input.formType, rosterPath: input.rosterPath ?? "" }, "loading-roster");
-    if (!input.rosterPath) {
-      throw new Error("OCR: rosterPath is required (caller should have resolved it before kernel call)");
+    // 1. Loading-roster (supports rosterMode=download via SharePoint delegation)
+    writeTracker("running", { formType: input.formType, rosterMode: input.rosterMode }, "loading-roster");
+
+    let resolvedRosterPath = input.rosterPath;
+
+    if (input.rosterMode === "download") {
+      const { runWorkflow } = await import("../../core/index.js");
+      const { sharepointDownloadWorkflow } = await import("../sharepoint-download/index.js");
+      const { SHAREPOINT_DOWNLOADS } = await import("../sharepoint-download/registry.js");
+      const spec0 = SHAREPOINT_DOWNLOADS[0];
+      if (!spec0) throw new Error("OCR: no SharePoint download spec registered");
+      const url = (process.env[spec0.envVar] ?? "").trim();
+      if (!url && !opts._skipSharepointDispatch) {
+        throw new Error(`OCR rosterMode=download but ${spec0.envVar} env var is unset`);
+      }
+      if (!opts._skipSharepointDispatch) {
+        void runWorkflow(sharepointDownloadWorkflow, {
+          id: spec0.id,
+          label: spec0.label,
+          url,
+          parentRunId: runId,
+        }).catch((err) => log.warn(`[ocr] sharepoint download crashed: ${errorMessage(err)}`));
+      }
+
+      const outcomes = await watchChildren({
+        workflow: "sharepoint-download",
+        expectedItemIds: [spec0.id],
+        trackerDir,
+        date,
+        timeoutMs: 5 * 60_000,
+      });
+      const result = outcomes[0];
+      if (!result || result.status !== "done") {
+        throw new Error(`SharePoint download failed: ${result?.error ?? "unknown error"}`);
+      }
+      resolvedRosterPath = (result.data?.path ?? "").trim();
+      if (!resolvedRosterPath) throw new Error("SharePoint download finished without saving a path");
     }
-    const roster = (await loadRosterFn(input.rosterPath)) as OcrRosterRow[];
+
+    if (!resolvedRosterPath) {
+      throw new Error("OCR: no roster path resolved");
+    }
+    const roster = (await loadRosterFn(resolvedRosterPath)) as OcrRosterRow[];
 
     // 2. OCR
-    writeTracker("running", { formType: input.formType, rosterPath: input.rosterPath }, "ocr");
+    writeTracker("running", { formType: input.formType, rosterPath: resolvedRosterPath }, "ocr");
     const ocrResult = await runOcr({
       pdfPath: input.pdfPath,
       formType: input.formType,
@@ -142,7 +181,7 @@ export async function runOcrOrchestrator(
       "running",
       {
         formType: input.formType,
-        rosterPath: input.rosterPath,
+        rosterPath: resolvedRosterPath,
         ocrProvider: ocrResult.provider,
         ocrAttempts: ocrResult.attempts,
         ocrCached: ocrResult.cached,
