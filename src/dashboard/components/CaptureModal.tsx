@@ -478,34 +478,24 @@ interface ModalChromeProps {
 
 function ModalChrome({ state, workflow, workflowLabel, contextHint, onClose }: ModalChromeProps) {
   void state; // accent rail removed — state-driven color is gone in C system
+  void workflow;
   void workflowLabel;
   void contextHint;
   return (
     <DialogHeader className="relative grid gap-3 px-[38px] pt-[36px] pb-0 space-y-0 border-b-0">
-      <div
-        className="grid items-start gap-6"
-        style={{ gridTemplateColumns: "minmax(0, 1fr) auto" }}
-      >
-        <div className="flex flex-col gap-1.5" style={{ maxWidth: 360 }}>
-          <DialogTitle
-            className="text-[15px] font-normal tracking-[-0.005em]"
-            style={{ color: "var(--capture-fg-primary)" }}
-          >
-            Capture session
-          </DialogTitle>
-          <DialogDescription
-            className="text-[12px] leading-[1.55]"
-            style={{ color: "var(--capture-fg-muted)" }}
-          >
-            Scan the QR with your phone, capture pages, then tap Done.
-          </DialogDescription>
-        </div>
-        <code
-          className="font-mono text-[11px] whitespace-nowrap pt-[5px] pr-9"
-          style={{ color: "var(--capture-fg-faint)" }}
+      <div className="flex flex-col gap-1.5" style={{ maxWidth: 360 }}>
+        <DialogTitle
+          className="text-[15px] font-normal tracking-[-0.005em]"
+          style={{ color: "var(--capture-fg-primary)" }}
         >
-          {workflow}
-        </code>
+          Capture session
+        </DialogTitle>
+        <DialogDescription
+          className="text-[12px] leading-[1.55]"
+          style={{ color: "var(--capture-fg-muted)" }}
+        >
+          Scan the QR with your phone, capture pages, then tap Done.
+        </DialogDescription>
       </div>
       <button
         type="button"
@@ -994,7 +984,7 @@ function PlaceholderTile() {
       className="aspect-[3/4] rounded-md"
       style={{
         border: "1px solid var(--capture-border-subtle)",
-        backgroundColor: "transparent",
+        background: "linear-gradient(135deg, #181819 0%, #131314 100%)",
       }}
       aria-hidden
     />
@@ -1016,7 +1006,11 @@ function ValidationBanner({
   const blockers = validation?.blockers ?? [];
   const warnings = validation?.warnings ?? [];
 
-  if (blockers.length > 0) {
+  // Suppress the "Can't finalize" banner before any photos arrive — the
+  // disabled Finalize button + "awaiting photos" status row already
+  // convey the constraint, and a red-bordered alert at session start
+  // reads as an error the operator must fix.
+  if (blockers.length > 0 && photoCount > 0) {
     return (
       <div
         role="alert"

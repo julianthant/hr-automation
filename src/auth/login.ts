@@ -95,6 +95,7 @@ export async function ucpathSubmitAndWaitForDuo(page: Page, instance?: string): 
   const duoOptions = {
     successUrlMatch: (url: string) =>
       url.includes("universityofcalifornia.edu") && !url.includes("duosecurity"),
+    systemLabel: "UCPath",
   };
   const approved = instance
     ? await requestDuoApproval(page, { ...duoOptions, system: "UCPath", instance })
@@ -227,6 +228,7 @@ export async function loginToACTCrm(page: Page, instance?: string): Promise<bool
     successUrlMatch: (url: string) =>
       (url.includes("act-crm.my.site.com") || url.includes("crm.ucsd.edu")) &&
       !url.includes("login"),
+    systemLabel: "CRM",
   };
   const approved = instance
     ? await requestDuoApproval(page, { ...duoOptions, system: "CRM", instance })
@@ -305,6 +307,7 @@ export async function ukgSubmitAndWaitForDuo(page: Page, instance?: string): Pro
     successUrlMatch: () => true,
     successCheck: async (p: Page) =>
       (await p.locator("text=Manage My Department").count()) > 0,
+    systemLabel: "OldKronos",
   };
   const approved = instance
     ? await requestDuoApproval(page, { ...duoOptions, system: "OldKronos", instance })
@@ -407,6 +410,7 @@ export async function kualiSubmitAndWaitForDuo(
         await p.waitForTimeout(3_000);
       }
     },
+    systemLabel: "Kuali",
   };
   const approved = instance
     ? await requestDuoApproval(page, { ...duoOptions, system: "Kuali", instance })
@@ -498,6 +502,7 @@ export async function newKronosSubmitAndWaitForDuo(
         await p.waitForTimeout(3_000);
       }
     },
+    systemLabel: "NewKronos",
   };
   const approved = instance
     ? await requestDuoApproval(page, { ...duoOptions, system: "NewKronos", instance })

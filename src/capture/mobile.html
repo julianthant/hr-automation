@@ -60,6 +60,21 @@
       display: grid;
       grid-template-rows: auto 1fr auto;
       min-height: 100dvh;
+      /* Cap the entire phone-shaped layout so previewing this URL on
+         a wide laptop/iPad window (where operators sometimes debug or
+         demo) doesn't stretch the 2-col photo grid into 500px-wide
+         tiles. On phones (≤ 520px viewport) this is a no-op. On wider
+         screens the phone shape centers on the page background. */
+      max-width: 520px;
+      margin: 0 auto;
+      width: 100%;
+      box-shadow: 0 0 0 1px var(--border);
+    }
+    /* On wide viewports (desktop / iPad preview) we don't need to fill
+       the screen — content just sits flush with the footer instead of
+       leaving dead space between the last photo and the action row. */
+    @media (min-width: 521px) {
+      .app { min-height: auto; }
     }
 
     /* ── Sticky header ─────────────────────────────────────────── */
@@ -626,7 +641,7 @@
           if (r.status === 404 || r.status === 410) {
             state.sessionState = "expired";
             setConnection("expired");
-            showBanner("error", "Session not found or expired. Start a new capture from the dashboard.");
+            // No banner — the EXPIRED pill in the header is enough.
             disableEverything();
             return null;
           }
@@ -689,7 +704,7 @@
     } else if (s === "discarded") {
       showBanner("warn", "This session was closed from the dashboard.");
     } else if (s === "expired") {
-      showBanner("error", "Session expired. Start a new capture from the dashboard.");
+      // No banner — the EXPIRED pill in the header is enough.
     } else if (s === "finalizing") {
       showBanner("info", "Bundling photos for processing…");
     }

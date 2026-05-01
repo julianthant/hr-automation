@@ -34,11 +34,18 @@ export async function requestDuoApproval(
   });
 
   try {
-    // Pass the queue's system label through so duo-poll.ts's voice-cue hook
-    // (HR_AUTOMATION_VOICE_CUES=1) says "Duo for <system>" when polling starts.
-    // Plain `pollDuoApproval` falls back to "system" when unset — direct
-    // callers (non-queued) keep working without change.
-    return await pollDuoApproval(page, { ...options, systemLabel: options.system });
+    // Pass the queue's system label + instance through so duo-poll.ts's
+    // voice-cue hook (HR_AUTOMATION_VOICE_CUES=1) says "Duo for <system>"
+    // when polling starts, AND so the `telegram_sent` session event
+    // emitted by the Telegram notifier records the real workflow instance
+    // label (e.g. "Oath Signature 1") in `workflowInstance`. Plain
+    // `pollDuoApproval` falls back to "system" / workflow-name when unset
+    // — direct callers (non-queued) keep working without change.
+    return await pollDuoApproval(page, {
+      ...options,
+      systemLabel: options.system,
+      instance: options.instance,
+    });
   } finally {
     log.step(`[Duo Queue] Complete: ${options.system} for ${options.instance}`);
     emitSessionEvent({

@@ -66,57 +66,8 @@ export const sectionNav = {
       .or(page.getByRole("tab", { name: new RegExp(sectionName, "i") })),
 };
 
-// ─── Onboarding History (/hr/ONB_ShowOnboardingHistory?id=...) ─────────────
-//
-// The history page is a Visualforce page with a single `<table class="list">`
-// of audit-log rows. Each row has 5 `<td class="dataCell">` columns:
-//   0 Date        — "M/D/YYYY h:mm AM/PM" (no leading zeros)
-//   1 Created By
-//   2 Field       — "ProcessStageText" for state transitions
-//   3 Old Value
-//   4 New Value
-//
-// We pick the row whose New Value is "Witness Ceremony Oath New Hire Signed"
-// — that's the moment the new hire signed the oath. Old Value would be the
-// previous state ("Witness Ceremony Oath Created") and Date is the timestamp
-// the workflow needs.
-//
-// Search by EID at /hr/ONB_SearchOnboardings?q=<EID> works (same endpoint
-// the email search uses; the `q=` param is value-agnostic). The first row's
-// link href is `/hr/ONB_ViewOnboarding?id=<RECORD_ID>`. The history page
-// then takes that same RECORD_ID — no button click needed (the live mapping
-// session showed `/hr/ONB_ShowOnboardingHistory?id=<RECORD_ID>` is a stable
-// deep link).
-
-export const onboardingHistory = {
-  /**
-   * Every history row in the audit-log table on the ONB_ShowOnboardingHistory
-   * page. verified 2026-04-28
-   * @tags onboarding, history, audit, log, row, crm
-   */
-  historyRows: (page: Page): Locator => page.locator("table.list tr.dataRow"),
-
-  /**
-   * The cells inside a single history row — 5 columns: Date, Created By,
-   * Field, Old Value, New Value. verified 2026-04-28
-   * @tags onboarding, history, audit, cell, td, crm
-   */
-  rowCells: (row: Locator): Locator => row.locator("td.dataCell"),
-
-  /**
-   * The single result row on the search page after navigating to
-   * `/hr/ONB_SearchOnboardings?q=<EID>` — its first `<a>` link has the
-   * record-page URL `/hr/ONB_ViewOnboarding?id=<RECORD_ID>` we need to
-   * reach the history page. verified 2026-04-28
-   * @tags onboarding, search, result, link, record-id, crm
-   */
-  firstResultLink: (page: Page): Locator =>
-    page.locator("table tbody tr").first().locator("a").first(),
-};
-
 export const crmSelectors = {
   search,
   record,
   sectionNav,
-  onboardingHistory,
 };

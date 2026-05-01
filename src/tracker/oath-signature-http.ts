@@ -32,7 +32,6 @@ import {
 import { log } from "../utils/log.js";
 import { errorMessage } from "../utils/errors.js";
 import { runPaperOathPrepare } from "../workflows/oath-signature/prepare.js";
-import { runDigitalOathPrepare } from "../workflows/oath-signature/digital-prepare.js";
 import {
   OathPrepareRowDataSchema,
   OathPreviewRecordSchema,
@@ -153,70 +152,6 @@ export async function handleOathPrepareUpload(
     log.error(`[handleOathPrepareUpload] runPaperOathPrepare threw: ${errorMessage(err)}`);
   });
   return { ok: true, parentRunId, pdfPath };
-}
-
-// ─── POST /api/oath-signature/digital-prepare ───────────
-
-export interface OathDigitalPrepareHttpInput {
-  emplIds: unknown;
-  label?: string;
-}
-
-export interface OathDigitalPrepareHttpResult {
-  ok: boolean;
-  enqueued?: number;
-  lookupFailures?: number;
-  error?: string;
-}
-
-let _digitalPrepareForTests: typeof runDigitalOathPrepare | undefined;
-/** @internal — tests can replace `runDigitalOathPrepare` with a stub. */
-export function __setOathDigitalPrepareForTests(
-  fn: typeof runDigitalOathPrepare | undefined,
-): void {
-  _digitalPrepareForTests = fn;
-}
-
-/**
- * Validate the EID list (5+ digits each, deduped) and synchronously
- * await `runDigitalOathPrepare` — which now skips the prep-row pattern
- * and enqueues `{emplId, date?}` items directly into the oath-signature
- * daemon. Returns the count enqueued + how many CRM lookups failed
- * (those still enqueued without a date so the kernel today-prefills).
- */
-export async function handleOathDigitalPrepare(
-  input: OathDigitalPrepareHttpInput,
-  _dir: string,
-): Promise<OathDigitalPrepareHttpResult> {
-  if (!Array.isArray(input.emplIds) || input.emplIds.length === 0) {
-    return { ok: false, error: "emplIds must be a non-empty array" };
-  }
-  const emplIds: string[] = [];
-  const seen = new Set<string>();
-  for (const raw of input.emplIds) {
-    const v = String(raw ?? "").trim();
-    if (!/^\d{5,}$/.test(v)) {
-      return { ok: false, error: `invalid EID: ${JSON.stringify(raw)}` };
-    }
-    if (seen.has(v)) continue;
-    seen.add(v);
-    emplIds.push(v);
-  }
-
-  const fn = _digitalPrepareForTests ?? runDigitalOathPrepare;
-  try {
-    const result = await fn({ emplIds });
-    return {
-      ok: true,
-      enqueued: result.enqueued,
-      lookupFailures: result.lookupFailures,
-    };
-  } catch (err) {
-    log.error(
-      `[handleOathDigitalPrepare] runDigitalOathPrepare threw: ${errorMessage(err)}`,
-    );
-    return { ok: false, error: errorMessage(err) };
-  }
 }
 
 // ─── POST /api/oath-signature/approve-batch ─────────────

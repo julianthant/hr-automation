@@ -70,7 +70,6 @@ import {
   handleOathPrepareUpload,
   handleOathApproveBatch,
   handleOathDiscardPrepare,
-  handleOathDigitalPrepare,
   sweepStuckOathPrepRows,
 } from "./oath-signature-http.js";
 import { readMultipart } from "./multipart-helper.js";
@@ -3083,20 +3082,6 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         {
           parentRunId: String(parsedBody.body.parentRunId ?? ""),
           records: Array.isArray(parsedBody.body.records) ? parsedBody.body.records : [],
-        },
-        dir,
-      );
-      writeJson(result.ok ? 202 : 400, result);
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/oath-signature/digital-prepare") {
-      const parsedBody = await readJsonBody(64 * 1024);
-      if (!parsedBody.ok) return writeJson(400, { ok: false, error: parsedBody.error });
-      const result = await handleOathDigitalPrepare(
-        {
-          emplIds: parsedBody.body.emplIds,
-          label: parsedBody.body.label ? String(parsedBody.body.label) : undefined,
         },
         dir,
       );
