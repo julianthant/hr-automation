@@ -1,16 +1,27 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, FileText, Loader2 } from "lucide-react";
+import { ArrowLeft, FileText, FileScan, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import type { TrackerEntry } from "../types";
 import {
   parsePrepareRowData,
   type PreviewRecord,
   type Verification,
+  type FailedPage,
 } from "./types";
 import {
   parseOathPrepareRowData,
   type OathPreviewRecord,
 } from "./types";
+import { FailedPageCard } from "./FailedPageCard";
 import { PrepReviewPair } from "./PrepReviewPair";
 import { PrepReviewMultiPair } from "./PrepReviewMultiPair";
 import { PrepReviewFormCard } from "./PrepReviewFormCard";
@@ -35,8 +46,9 @@ type AnyPreviewRecord = PreviewRecord | OathPreviewRecord;
  * Closing the pane (Back arrow, Cancel, or selecting another queue
  * entry) preserves localStorage edits — Approve / Discard clear them.
  */
-export function OcrReviewPane({ entry, onClose }: PrepReviewPaneProps) {
+export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
   const isOath = entry.workflow === "oath-signature";
+  const sessionId = entry.id;
   const runId = entry.runId ?? entry.id;
   const data = useMemo(
     () => (isOath ? parseOathPrepareRowData(entry.data) : parsePrepareRowData(entry.data)),
@@ -122,24 +134,35 @@ export function OcrReviewPane({ entry, onClose }: PrepReviewPaneProps) {
     return () => observer.disconnect();
   }, [containerRef, onPairVisible, records.length]);
 
-  // Group records by sourcePage (preserve original-input ordering inside each group)
-  const grouped = useMemo(() => {
-    const map = new Map<number, Array<{ record: AnyPreviewRecord; originalIndex: number }>>();
+  // Group records by sourcePage, interleaved with failed pages, sorted by page number.
+  type PageRender =
+    | { kind: "records"; page: number; group: Array<{ record: AnyPreviewRecord; originalIndex: number }> }
+    | { kind: "failed"; page: number; failedPage: FailedPage };
+
+  const failedPages = data?.failedPages ?? [];
+
+  const renderList = useMemo<PageRender[]>(() => {
+    const recordsByPage = new Map<number, Array<{ record: AnyPreviewRecord; originalIndex: number }>>();
     records.forEach((r, originalIndex) => {
       const page = (r as { sourcePage: number }).sourcePage;
-      if (!map.has(page)) map.set(page, []);
-      map.get(page)!.push({ record: r, originalIndex });
+      if (!recordsByPage.has(page)) recordsByPage.set(page, []);
+      recordsByPage.get(page)!.push({ record: r, originalIndex });
     });
-    return Array.from(map.entries()).sort(([a], [b]) => a - b);
-  }, [records]);
+    const list: PageRender[] = [];
+    for (const [page, group] of recordsByPage) list.push({ kind: "records", page, group });
+    for (const fp of failedPages) list.push({ kind: "failed", page: fp.page, failedPage: fp });
+    list.sort((a, b) => a.page - b.page);
+    return list;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [records, failedPages]);
 
-  const totalPages = grouped.length;
+  const totalPages = data?.pageStatusSummary?.total ?? renderList.length;
   const approvableRecords = useMemo(
     () => records.filter((r) => isApprovable(r)),
     [records],
   );
   const selectedCount = approvableRecords.filter((r) => r.selected).length;
-  const summary = describeSummary(records);
+  const summary = describeSummary(records, failedPages.length);
 
   async function handleForceResearch(indices: number[]) {
     setResearchingIndices(new Set(indices));
@@ -224,6 +247,13 @@ export function OcrReviewPane({ entry, onClose }: PrepReviewPaneProps) {
         </div>
         <div className="flex items-center gap-3">
           <span className="font-mono text-xs text-muted-foreground">{summary}</span>
+          {failedPages.length > 0 && (
+            <ReocrWholePdfButton
+              sessionId={sessionId}
+              runId={runId}
+              storageKey={storageKey}
+            />
+          )}
           <button
             onClick={onClose}
             className="h-7 rounded-md border border-border px-3 text-xs text-muted-foreground hover:bg-muted"
@@ -265,7 +295,20 @@ export function OcrReviewPane({ entry, onClose }: PrepReviewPaneProps) {
 
       {/* Scroll body */}
       <div ref={containerRef} className="flex-1 overflow-y-auto bg-secondary/30">
-        {grouped.map(([page, group]) => {
+        {renderList.map((renderEntry) => {
+          if (renderEntry.kind === "failed") {
+            return (
+              <FailedPageCard
+                key={`failed-${renderEntry.page}`}
+                failedPage={renderEntry.failedPage}
+                totalPages={totalPages}
+                sessionId={sessionId}
+                runId={runId}
+              />
+            );
+          }
+          // records branch — preserve IntersectionObserver data-pair-index instrumentation
+          const { page, group } = renderEntry;
           if (group.length === 1) {
             const { record, originalIndex } = group[0];
             return (
@@ -318,6 +361,78 @@ export function OcrReviewPane({ entry, onClose }: PrepReviewPaneProps) {
   );
 }
 
+function ReocrWholePdfButton({ sessionId, runId, storageKey }: { sessionId: string; runId: string; storageKey: string }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function handleConfirm() {
+    setBusy(true);
+    try {
+      const r = await fetch("/api/ocr/reocr-whole-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, runId }),
+      });
+      const body = await r.json() as { ok: boolean; recordCount?: number; error?: string };
+      if (!r.ok || !body.ok) {
+        toast.error("Re-OCR failed", { description: body.error ?? `HTTP ${r.status}` });
+      } else {
+        toast.success("Re-OCR complete", {
+          description: `${body.recordCount} record${body.recordCount === 1 ? "" : "s"} extracted`,
+        });
+        window.localStorage.removeItem(storageKey);
+        setOpen(false);
+      }
+    } catch (err) {
+      toast.error("Re-OCR failed", { description: err instanceof Error ? err.message : "Network error" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-3 text-xs text-muted-foreground hover:bg-muted"
+        >
+          <FileScan className="h-3 w-3" />
+          Re-OCR whole PDF
+        </button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Re-OCR the whole PDF?</DialogTitle>
+          <DialogDescription>
+            This sends the full PDF to Gemini in one call and replaces the records on this row.
+            All per-record edits will be discarded. Use only when many pages have failed and per-page retry isn't recovering.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            disabled={busy}
+            className="h-8 rounded-md border border-border px-3 text-xs text-muted-foreground hover:bg-muted"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleConfirm}
+            disabled={busy}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-primary bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+          >
+            {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+            {busy ? "Re-running…" : "Re-OCR whole PDF"}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function isApprovable(record: AnyPreviewRecord): boolean {
   const matchOk = record.matchState === "matched" || record.matchState === "resolved";
   const notUnknown = record.documentType !== "unknown";
@@ -329,28 +444,20 @@ function isApprovable(record: AnyPreviewRecord): boolean {
   return matchOk && notUnknown && verifyOk;
 }
 
-function describeSummary(records: AnyPreviewRecord[]): string {
+function describeSummary(records: AnyPreviewRecord[], failedPageCount = 0): string {
   let verified = 0;
   let needsReview = 0;
   let toRemove = 0;
   for (const r of records) {
-    if (r.documentType === "unknown") {
-      toRemove += 1;
-      continue;
-    }
-    if (r.verification && r.verification.state !== "verified") {
-      needsReview += 1;
-      continue;
-    }
-    if (r.matchState !== "matched" && r.matchState !== "resolved") {
-      needsReview += 1;
-      continue;
-    }
+    if (r.documentType === "unknown") { toRemove += 1; continue; }
+    if (r.verification && r.verification.state !== "verified") { needsReview += 1; continue; }
+    if (r.matchState !== "matched" && r.matchState !== "resolved") { needsReview += 1; continue; }
     verified += 1;
   }
   const parts: string[] = [`${verified} verified`];
   if (needsReview > 0) parts.push(`${needsReview} needs review`);
   if (toRemove > 0) parts.push(`${toRemove} to remove`);
+  if (failedPageCount > 0) parts.push(`${failedPageCount} page${failedPageCount === 1 ? "" : "s"} failed`);
   return parts.join(" · ");
 }
 
