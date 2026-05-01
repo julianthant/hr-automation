@@ -74,6 +74,14 @@ import {
 } from "./oath-signature-http.js";
 import { readMultipart } from "./multipart-helper.js";
 import {
+  buildOcrFormsHandler,
+  buildOcrPrepareHandler,
+  buildOcrApproveHandler,
+  buildOcrDiscardHandler,
+  buildOcrForceResearchHandler,
+  sweepStuckOcrRows,
+} from "./ocr-http.js";
+import {
   createSessionStore,
   handleStart as handleCaptureStart,
   handleManifest as handleCaptureManifest,
@@ -1875,6 +1883,11 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       log.step(`Oath prep-row sweep skipped: ${err instanceof Error ? err.message : String(err)}`);
     }
     try {
+      sweepStuckOcrRows(dir);
+    } catch (err) {
+      log.step(`OCR sweep skipped: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
       const removed = sweepOrphanUploadDirs(dir);
       if (removed > 0) {
         log.step(`Removed ${removed} orphan upload dir${removed === 1 ? "" : "s"} from ${dir}/uploads`);
@@ -1883,6 +1896,13 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       log.step(`Orphan upload-dir sweep skipped: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+
+  // ─── OCR handler instances (created once with dir) ──────────
+  const ocrFormsHandler         = buildOcrFormsHandler();
+  const ocrPrepareHandler       = buildOcrPrepareHandler({ trackerDir: dir });
+  const ocrApproveHandler       = buildOcrApproveHandler({ trackerDir: dir });
+  const ocrDiscardHandler       = buildOcrDiscardHandler({ trackerDir: dir });
+  const ocrForceResearchHandler = buildOcrForceResearchHandler({ trackerDir: dir });
 
   /** Standard JSON response helper. */
   const sendJson = (res: import("http").ServerResponse, status: number, body: unknown): void => {
@@ -3100,6 +3120,99 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         dir,
       );
       writeJson(result.ok ? 200 : 400, result);
+      return;
+    }
+
+    // ─── OCR endpoints ─────────────────────────────────────────
+    //   GET  /api/ocr/forms           → form-type registry listing
+    //   POST /api/ocr/prepare         → multipart PDF upload, kicks off OCR
+    //   POST /api/ocr/reupload        → same as prepare but marks previous run superseded
+    //   POST /api/ocr/approve-batch   → fan out reviewed records to downstream daemons
+    //   POST /api/ocr/discard-prepare → cancel a pending OCR row
+    //   POST /api/ocr/force-research  → re-run eid-lookup for selected records
+
+    if (req.method === "GET" && url.pathname === "/api/ocr/forms") {
+      try {
+        writeJson(200, ocrFormsHandler());
+      } catch (e) {
+        writeJson(500, { ok: false, error: errorMessage(e) });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && (url.pathname === "/api/ocr/prepare" || url.pathname === "/api/ocr/reupload")) {
+      const isReupload = url.pathname === "/api/ocr/reupload";
+      const mp = await readMultipart(req, 50 * 1024 * 1024);
+      if (!mp.ok) return writeJson(400, { ok: false, error: mp.error });
+      const file = mp.parsed.files["pdf"];
+      if (!file) return writeJson(400, { ok: false, error: "missing 'pdf' file part" });
+
+      // Save PDF to uploads dir.
+      const { mkdirSync, writeFileSync } = await import("node:fs");
+      const { join: pathJoin } = await import("node:path");
+      const { randomUUID } = await import("node:crypto");
+      const uploadsDir = pathJoin(dir, "uploads");
+      mkdirSync(uploadsDir, { recursive: true });
+      const pdfFilename = `${randomUUID()}.pdf`;
+      const pdfPath = pathJoin(uploadsDir, pdfFilename);
+      writeFileSync(pdfPath, file.data);
+
+      const fields = mp.parsed.fields;
+      const formType = fields["formType"]?.trim() ?? "";
+      const rosterMode = (fields["rosterMode"]?.trim() ?? "existing") as "existing" | "download";
+      const rosterPath = fields["rosterPath"]?.trim() || undefined;
+      const sessionId = fields["sessionId"]?.trim() || undefined;
+      const previousRunId = fields["previousRunId"]?.trim() || undefined;
+
+      const result = await ocrPrepareHandler({
+        pdfPath,
+        pdfOriginalName: file.filename ?? pdfFilename,
+        formType,
+        rosterMode,
+        rosterPath,
+        sessionId,
+        previousRunId,
+        isReupload,
+      });
+      writeJson(result.status, result.body);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/ocr/approve-batch") {
+      const parsedBody = await readJsonBody(1024 * 1024);
+      if (!parsedBody.ok) return writeJson(400, { ok: false, error: parsedBody.error });
+      const result = await ocrApproveHandler({
+        sessionId: String(parsedBody.body.sessionId ?? ""),
+        runId: String(parsedBody.body.runId ?? ""),
+        records: Array.isArray(parsedBody.body.records) ? parsedBody.body.records : [],
+      });
+      writeJson(result.status, result.body);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/ocr/discard-prepare") {
+      const parsedBody = await readJsonBody(4096);
+      if (!parsedBody.ok) return writeJson(400, { ok: false, error: parsedBody.error });
+      const result = await ocrDiscardHandler({
+        sessionId: String(parsedBody.body.sessionId ?? ""),
+        runId: String(parsedBody.body.runId ?? ""),
+        reason: parsedBody.body.reason ? String(parsedBody.body.reason) : undefined,
+      });
+      writeJson(result.status, result.body);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/ocr/force-research") {
+      const parsedBody = await readJsonBody(4096);
+      if (!parsedBody.ok) return writeJson(400, { ok: false, error: parsedBody.error });
+      const result = await ocrForceResearchHandler({
+        sessionId: String(parsedBody.body.sessionId ?? ""),
+        runId: String(parsedBody.body.runId ?? ""),
+        recordIndices: Array.isArray(parsedBody.body.recordIndices)
+          ? parsedBody.body.recordIndices.map(Number)
+          : [],
+      });
+      writeJson(result.status, result.body);
       return;
     }
 
