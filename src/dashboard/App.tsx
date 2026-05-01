@@ -4,7 +4,7 @@ import { TooltipProvider } from "./components/ui/tooltip";
 import { TopBar } from "./components/TopBar";
 import { QueuePanel } from "./components/QueuePanel";
 import { LogPanel } from "./components/LogPanel";
-import { PrepReviewPane } from "./components/PrepReviewPane";
+import { OcrReviewPane } from "./components/ocr/OcrReviewPane";
 import { TerminalDrawer } from "./components/TerminalDrawer";
 import { TerminalDrawerProvider } from "./components/hooks/useTerminalDrawer";
 import { useEntries } from "./components/hooks/useEntries";
@@ -20,7 +20,7 @@ import { QuickRunPanel } from "./components/QuickRunPanel";
 import { RetryAllButton } from "./components/RetryAllButton";
 import { TopBarRunButton } from "./components/TopBarRunButton";
 import { TopBarCaptureButton } from "./components/TopBarCaptureButton";
-import { parsePrepareRowData, isResolvedPrepRow } from "./components/preview-types";
+import { parsePrepareRowData, isResolvedPrepRow } from "./components/ocr/types";
 import { dateLocal } from "./lib/utils";
 
 /** Read initial state from URL search params so refresh preserves selection */
@@ -262,7 +262,7 @@ export default function App() {
                 e.data?.mode === "prepare",
             );
             return prepEntry ? (
-              <PrepReviewPane
+              <OcrReviewPane
                 entry={prepEntry}
                 onClose={() => setReviewingPrepId(null)}
               />

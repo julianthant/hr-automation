@@ -6,11 +6,11 @@ import {
   parsePrepareRowData,
   type PreviewRecord,
   type Verification,
-} from "../preview-types";
+} from "./types";
 import {
   parseOathPrepareRowData,
   type OathPreviewRecord,
-} from "../oath-preview-types";
+} from "./types";
 import { PrepReviewPair } from "./PrepReviewPair";
 import { PrepReviewMultiPair } from "./PrepReviewMultiPair";
 import { PrepReviewFormCard } from "./PrepReviewFormCard";
