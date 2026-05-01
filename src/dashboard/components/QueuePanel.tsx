@@ -204,7 +204,7 @@ export function QueuePanel({
                   key={`pcr-${runId}`}
                   parent={e}
                   childEntries={childrenByParentRun.get(runId) ?? []}
-                  isDrilled={false}
+                  isDrilled={drilledBatchRunId === runId}
                   onDrillIn={(rid) => onDrillIn?.(rid)}
                 />
               );
@@ -273,10 +273,7 @@ function DrilledHeader({
   const data = parsePrepareRowData(parent.data);
   const filename = data?.pdfOriginalName || "Prep batch";
   const runId = parent.runId ?? parent.id;
-  const time = new Date(parent.timestamp).toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  const time = formatPrepHeaderTime(parent.timestamp);
   return (
     <div className="h-[69.5px] flex flex-col justify-center px-3 min-[1440px]:px-4 border-b border-border bg-card/60 flex-shrink-0 gap-1">
       <div className="flex items-center gap-2 min-w-0">
@@ -297,4 +294,14 @@ function DrilledHeader({
       </div>
     </div>
   );
+}
+
+function formatPrepHeaderTime(ts: string): string {
+  try {
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return ts.slice(11, 16);
+    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  } catch {
+    return ts.slice(11, 16);
+  }
 }
