@@ -104,41 +104,6 @@ Single guard (tracker-side idempotency removed 2026-04-23):
   profile is the source of truth; a retry against the same EID converges
   correctly without a tracker-side cache.
 
-## Digital-mode lookup (CRM onboarding history)
-
-Alternate prep path: instead of a paper roster + review, the operator
-pastes a list of EIDs and the workflow pulls each EID's oath signature
-date out of CRM's onboarding-history audit log AND enqueues each one
-directly as a child kernel row — no prep parent row, no review pane.
-Bypasses the OCR + roster + review pipeline entirely.
-
-```
-TopBar Digital button (oath-signature)
-  → modal: textarea, paste EIDs (one per line)
-  → POST /api/oath-signature/digital-prepare { emplIds }
-    → runDigitalOathPrepare in src/workflows/oath-signature/digital-prepare.ts:
-      - CRM browser launches + login (1 Duo)
-      - per EID: lookupOathSignatureDate(page, emplId) →
-        - GET /hr/ONB_SearchOnboardings?q=<EID>           (search returns 1 row)
-        - extract record id from first result link's href
-        - GET /hr/ONB_ShowOnboardingHistory?id=<RECORD_ID> (deep link, no button click)
-        - find row whose New Value is "Witness Ceremony Oath New Hire Signed"
-        - format date "M/D/YYYY h:mm AM/PM" → "MM/DD/YYYY"
-      - immediately ensureDaemonsAndEnqueue({ emplId, date? }) — each EID
-        becomes its own child kernel queue row (no prep parent row)
-      - returns { enqueued, lookupFailures } summary to the HTTP caller
-  → No OathPreviewRow / review step — child rows appear directly in QueuePanel
-    and the daemon picks them off the shared queue as it would any other
-    kernel input. Lookup failures still enqueue (date undefined → UCPath
-    today-prefills on the detail form).
-```
-
-Selectors live in `src/systems/crm/selectors.ts` under the
-`onboardingHistory` namespace (`historyRows`, `rowCells`,
-`firstResultLink`); the `lookupOathSignatureDate(page, emplId)` helper
-in `src/systems/crm/onboarding-history.ts` is verified live against
-EID 10873611 (Jasmine Ochoa) as of 2026-04-28.
-
 ## Capture integration (mobile-photo entry)
 
 `src/capture/` is the alternate entry point: instead of uploading a

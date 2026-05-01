@@ -37,6 +37,10 @@ export interface AuthEvent {
   runId?: string;
   /** Optional free-form line appended after the standard fields. */
   detail?: string;
+  /** Optional workflow instance label (e.g. "Oath Signature 1"). When set,
+   * recorded as the `telegram_sent` session event's `workflowInstance`;
+   * otherwise falls back to the workflow name. */
+  instance?: string;
 }
 
 export type FetchFn = (
@@ -53,6 +57,10 @@ export interface CreateTelegramNotifierOptions {
   tokenValue?: string;
   /** Env value for TELEGRAM_CHAT_ID — falsy disables the notifier. */
   chatIdValue?: string;
+  /** Override the directory for `telegram_sent` session-event writes.
+   * Defaults to the tracker DEFAULT_DIR. Tests pass a tmpdir so a 200-OK
+   * recorder fetchFn doesn't pollute `.tracker/sessions.jsonl`. */
+  dir?: string;
 }
 
 /**
@@ -66,6 +74,7 @@ export function createTelegramNotifier(
   const fetchFn = opts.fetchFn ?? (globalThis.fetch as FetchFn);
   const tokenValue = opts.tokenValue;
   const chatIdValue = opts.chatIdValue;
+  const dir = opts.dir;
 
   return async function notifyAuthEvent(ev: AuthEvent): Promise<void> {
     try {
@@ -90,16 +99,20 @@ export function createTelegramNotifier(
       // sent one would be misleading.
       if (res.ok) {
         try {
-          emitSessionEvent({
-            type: "telegram_sent",
-            workflowInstance: ev.workflow || getLogWorkflow() || "unknown",
-            data: {
-              kind: ev.kind,
-              systemLabel: ev.systemLabel,
-              workflow: ev.workflow,
-              ...(ev.detail ? { detail: ev.detail } : {}),
+          emitSessionEvent(
+            {
+              type: "telegram_sent",
+              workflowInstance:
+                ev.instance || ev.workflow || getLogWorkflow() || "unknown",
+              data: {
+                kind: ev.kind,
+                systemLabel: ev.systemLabel,
+                workflow: ev.workflow,
+                ...(ev.detail ? { detail: ev.detail } : {}),
+              },
             },
-          });
+            dir,
+          );
         } catch {
           // Telemetry is best-effort.
         }

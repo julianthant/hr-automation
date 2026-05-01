@@ -36,6 +36,7 @@ interface RunModalProps {
 
 export function RunModal({ open, onOpenChange }: RunModalProps) {
   const [file, setFile] = useState<File | null>(null);
+  const [pageCount, setPageCount] = useState<number | null>(null);
   const [rosterMode, setRosterMode] = useState<"download" | "existing">("existing");
   const [rosters, setRosters] = useState<RosterListing[] | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -44,6 +45,30 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropRef = useRef<HTMLLabelElement>(null);
   const sharePoint = useSharePointDownload("ONBOARDING_ROSTER");
+
+  // Best-effort PDF page count via pdf-lib. Lazy-imported on first pick
+  // so the chunk is split out of the main bundle. Spec §4.3: falls back
+  // to bytes-only when unknown.
+  useEffect(() => {
+    if (!file) {
+      setPageCount(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const buf = await file.arrayBuffer();
+        const { PDFDocument } = await import("pdf-lib");
+        const doc = await PDFDocument.load(buf, { ignoreEncryption: true });
+        if (!cancelled) setPageCount(doc.getPageCount());
+      } catch {
+        if (!cancelled) setPageCount(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [file]);
 
   // Fetch rosters on open. Refresh every time the modal opens so a
   // SharePoint download that finished while the modal was closed is
@@ -76,6 +101,7 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
   useEffect(() => {
     if (open) return;
     setFile(null);
+    setPageCount(null);
     setSubmitting(false);
     setProgress(null);
     setError(null);
@@ -187,23 +213,29 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent hideClose className="overflow-hidden p-0 sm:max-w-[640px] gap-0">
+      <DialogContent
+        hideClose
+        className="overflow-hidden p-0 sm:max-w-[640px] gap-0"
+        style={
+          {
+            "--background": "var(--capture-bg-page)",
+            "--card": "var(--capture-bg-modal)",
+            "--muted": "var(--capture-bg-raised)",
+            "--border": "var(--capture-border-subtle)",
+            "--foreground": "var(--capture-fg-primary)",
+            "--muted-foreground": "var(--capture-fg-muted)",
+            "--ring": "var(--capture-focus-ring)",
+          } as React.CSSProperties
+        }
+      >
         <DialogHeader className="relative grid gap-3 px-[38px] pt-[36px] pb-0 space-y-0 border-b-0">
-          <div
-            className="grid items-start gap-6"
-            style={{ gridTemplateColumns: "minmax(0, 1fr) auto" }}
-          >
-            <div className="flex flex-col gap-1.5" style={{ maxWidth: 360 }}>
-              <DialogTitle className="text-[15px] font-normal tracking-[-0.005em]">
-                Run Emergency Contact
-              </DialogTitle>
-              <DialogDescription className="text-[12px] leading-[1.55] text-muted-foreground">
-                Upload a scanned PDF. We&apos;ll OCR it, match against the roster, then approve before queuing.
-              </DialogDescription>
-            </div>
-            <code className="font-mono text-[11px] whitespace-nowrap pt-[5px] pr-9 text-muted-foreground/70">
-              emergency-contact
-            </code>
+          <div className="flex flex-col gap-1.5" style={{ maxWidth: 360 }}>
+            <DialogTitle className="text-[15px] font-normal tracking-[-0.005em]">
+              Run Emergency Contact
+            </DialogTitle>
+            <DialogDescription className="text-[12px] leading-[1.55] text-muted-foreground">
+              Upload a scanned PDF. We&apos;ll OCR it, match against the roster, then approve before queuing.
+            </DialogDescription>
           </div>
           <button
             type="button"
@@ -214,7 +246,7 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
               "absolute right-[14px] top-[14px] inline-flex h-7 w-7 items-center justify-center rounded-md",
               "border border-transparent bg-transparent text-muted-foreground transition-colors",
               "hover:border-border hover:text-foreground",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border",
               "disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer",
             )}
           >
@@ -226,7 +258,7 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
         <div className="px-[38px] pt-[24px] pb-0 space-y-6">
           <section>
             <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground/70">
-              {file ? "PDF" : "Upload"}
+              PDF
             </div>
             {!file ? (
               <Dropzone
@@ -238,7 +270,7 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
             ) : progress !== null && submitting ? (
               <UploadProgress fileName={file.name} fileSize={file.size} progress={progress} />
             ) : (
-              <FileRow file={file} onRemove={() => setFile(null)} />
+              <FileRow file={file} pageCount={pageCount} onRemove={() => setFile(null)} />
             )}
           </section>
 
@@ -282,7 +314,7 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
               className="flex items-start gap-2 rounded-md p-3"
               style={{
                 border: "1px solid var(--border)",
-                borderLeft: "2px solid hsl(0 50% 56%)",
+                borderLeft: "2px solid var(--capture-error)",
                 backgroundColor: "transparent",
               }}
             >
@@ -300,12 +332,30 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
             className={cn(
               "col-span-3 inline-flex items-center justify-center gap-1.5 rounded-[7px] px-3.5 py-2.5",
               "text-[12.5px] font-medium",
-              "border border-border bg-transparent text-foreground",
-              "hover:border-foreground/50",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-              "disabled:cursor-not-allowed disabled:text-muted-foreground/40 disabled:border-border/60",
+              "bg-transparent transition-colors",
+              "border",
+              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border",
+              "disabled:cursor-not-allowed",
               "cursor-pointer",
             )}
+            style={{
+              borderColor: !file || submitting
+                ? "var(--capture-border-subtle)"
+                : "var(--capture-border-cta)",
+              color: !file || submitting
+                ? "var(--capture-fg-faint)"
+                : "var(--capture-fg-primary)",
+            }}
+            onMouseOver={(e) => {
+              if (!(!file || submitting)) {
+                e.currentTarget.style.borderColor = "var(--capture-border-cta-strong)";
+              }
+            }}
+            onMouseOut={(e) => {
+              if (!(!file || submitting)) {
+                e.currentTarget.style.borderColor = "var(--capture-border-cta)";
+              }
+            }}
           >
             {submitting && progress !== null && progress < 100 ? (
               <>
@@ -328,11 +378,25 @@ export function RunModal({ open, onOpenChange }: RunModalProps) {
             className={cn(
               "col-span-1 inline-flex items-center justify-center rounded-[7px] px-3 py-2.5",
               "text-[12.5px] font-medium",
-              "border border-border/60 bg-transparent text-muted-foreground",
-              "hover:border-border hover:text-foreground",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+              "bg-transparent transition-colors",
+              "border",
+              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border",
               "disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer",
             )}
+            style={{
+              borderColor: "var(--capture-border-subtle)",
+              color: "var(--capture-fg-muted)",
+            }}
+            onMouseOver={(e) => {
+              if (!submitting) {
+                e.currentTarget.style.borderColor = "var(--capture-border-cta)";
+              }
+            }}
+            onMouseOut={(e) => {
+              if (!submitting) {
+                e.currentTarget.style.borderColor = "var(--capture-border-subtle)";
+              }
+            }}
           >
             Cancel
           </button>
@@ -400,7 +464,19 @@ function Dropzone({
   );
 }
 
-function FileRow({ file, onRemove }: { file: File; onRemove: () => void }) {
+function FileRow({
+  file,
+  pageCount,
+  onRemove,
+}: {
+  file: File;
+  pageCount: number | null;
+  onRemove: () => void;
+}) {
+  const meta =
+    pageCount != null
+      ? `${formatBytes(file.size)} · ${pageCount} page${pageCount === 1 ? "" : "s"}`
+      : formatBytes(file.size);
   return (
     <div
       className="flex items-center gap-3.5 rounded-[10px] px-4 py-3.5"
@@ -421,7 +497,7 @@ function FileRow({ file, onRemove }: { file: File; onRemove: () => void }) {
       <div className="flex-1 min-w-0 grid gap-0.5">
         <div className="text-[13px] truncate text-foreground">{file.name}</div>
         <div className="text-[10.5px] text-muted-foreground/70 font-mono">
-          {formatBytes(file.size)}
+          {meta}
         </div>
       </div>
       <button
@@ -432,7 +508,7 @@ function FileRow({ file, onRemove }: { file: File; onRemove: () => void }) {
         className={cn(
           "h-7 w-7 inline-flex items-center justify-center rounded-md",
           "text-muted-foreground hover:bg-muted hover:text-foreground",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border",
           "cursor-pointer",
         )}
       >

@@ -19,7 +19,6 @@ import { WorkflowRail } from "./components/WorkflowRail";
 import { QuickRunPanel } from "./components/QuickRunPanel";
 import { RetryAllButton } from "./components/RetryAllButton";
 import { TopBarRunButton } from "./components/TopBarRunButton";
-import { TopBarDigitalOathButton } from "./components/TopBarDigitalOathButton";
 import { TopBarCaptureButton } from "./components/TopBarCaptureButton";
 import { parsePrepareRowData, isResolvedPrepRow } from "./components/preview-types";
 import { dateLocal } from "./lib/utils";
@@ -250,7 +249,6 @@ export default function App() {
                   }
                 />
               )}
-              {workflow === "oath-signature" && <TopBarDigitalOathButton />}
               <RetryAllButton workflow={workflow} failedIds={failedIds} />
               <TopBarCaptureButton workflow={workflow} />
             </>

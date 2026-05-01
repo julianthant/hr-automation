@@ -1,5 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   createTelegramNotifier,
   formatAuthEventMessage,
@@ -20,6 +23,18 @@ function makeRecorder(): {
       return new Response('{"ok":true,"result":{}}', { status: 200 });
     },
   };
+}
+
+/**
+ * Per-test scratch dir so the `telegram_sent` session events emitted on a
+ * 200-OK response from the recorder fetchFn don't leak into the project's
+ * real `.tracker/sessions.jsonl`. Without this, every `npm test` run was
+ * dropping 4 fake events into production telemetry — the dashboard's
+ * `/events/telegram` SSE saw them as live deltas during long-lived viewing
+ * sessions.
+ */
+function freshTrackerDir(): string {
+  return mkdtempSync(join(tmpdir(), "telegram-notify-test-"));
 }
 
 const sampleEvent: AuthEvent = {
@@ -69,6 +84,7 @@ describe("createTelegramNotifier — env-var gating", () => {
       fetchFn,
       tokenValue: "111:AAA",
       chatIdValue: "987654321",
+      dir: freshTrackerDir(),
     });
     await notify(sampleEvent);
     assert.equal(calls.length, 1);
@@ -146,6 +162,7 @@ describe("createTelegramNotifier — HTTP request shape", () => {
       fetchFn,
       tokenValue: "111:AAA",
       chatIdValue: "987",
+      dir: freshTrackerDir(),
     });
     await notify(sampleEvent);
     assert.equal(calls[0].url, "https://api.telegram.org/bot111:AAA/sendMessage");
@@ -158,6 +175,7 @@ describe("createTelegramNotifier — HTTP request shape", () => {
       fetchFn,
       tokenValue: "111:AAA",
       chatIdValue: "987",
+      dir: freshTrackerDir(),
     });
     await notify(sampleEvent);
     const body = JSON.parse(String(calls[0].init?.body));
@@ -172,6 +190,7 @@ describe("createTelegramNotifier — HTTP request shape", () => {
       fetchFn,
       tokenValue: "111:AAA",
       chatIdValue: "987",
+      dir: freshTrackerDir(),
     });
     await notify(sampleEvent);
     const headers = calls[0].init?.headers as Record<string, string>;
@@ -240,6 +259,57 @@ describe("createTelegramNotifier — error swallowing", () => {
       chatIdValue: "987",
     });
     await assert.doesNotReject(notify(sampleEvent));
+  });
+});
+
+describe("createTelegramNotifier — session-event routing (`dir` + `instance`)", () => {
+  it("writes the `telegram_sent` session event to the supplied dir, not DEFAULT_DIR", async () => {
+    const { fetchFn } = makeRecorder();
+    const dir = freshTrackerDir();
+    const notify = createTelegramNotifier({
+      fetchFn,
+      tokenValue: "111:AAA",
+      chatIdValue: "987",
+      dir,
+    });
+    await notify(sampleEvent);
+    const { readFileSync, existsSync } = await import("node:fs");
+    const path = join(dir, "sessions.jsonl");
+    assert.ok(existsSync(path), "sessions.jsonl should exist in supplied dir");
+    const lines = readFileSync(path, "utf-8").split("\n").filter(Boolean);
+    assert.equal(lines.length, 1);
+    const event = JSON.parse(lines[0]);
+    assert.equal(event.type, "telegram_sent");
+  });
+
+  it("falls back to workflow name in workflowInstance when ev.instance is unset", async () => {
+    const { fetchFn } = makeRecorder();
+    const dir = freshTrackerDir();
+    const notify = createTelegramNotifier({
+      fetchFn,
+      tokenValue: "111:AAA",
+      chatIdValue: "987",
+      dir,
+    });
+    await notify(sampleEvent);
+    const { readFileSync } = await import("node:fs");
+    const event = JSON.parse(readFileSync(join(dir, "sessions.jsonl"), "utf-8").trim());
+    assert.equal(event.workflowInstance, "oath-signature");
+  });
+
+  it("uses ev.instance for workflowInstance when set", async () => {
+    const { fetchFn } = makeRecorder();
+    const dir = freshTrackerDir();
+    const notify = createTelegramNotifier({
+      fetchFn,
+      tokenValue: "111:AAA",
+      chatIdValue: "987",
+      dir,
+    });
+    await notify({ ...sampleEvent, instance: "Oath Signature 1" });
+    const { readFileSync } = await import("node:fs");
+    const event = JSON.parse(readFileSync(join(dir, "sessions.jsonl"), "utf-8").trim());
+    assert.equal(event.workflowInstance, "Oath Signature 1");
   });
 });
 

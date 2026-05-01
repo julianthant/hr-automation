@@ -15,6 +15,7 @@ function emitTelegram(
   kind: AuthEventKind,
   systemLabel: string,
   detail?: string,
+  instance?: string,
 ): void {
   const workflow = getLogWorkflow() ?? "(unknown)";
   const runId = getLogRunId();
@@ -24,6 +25,7 @@ function emitTelegram(
     workflow,
     ...(runId ? { runId } : {}),
     ...(detail ? { detail } : {}),
+    ...(instance ? { instance } : {}),
   }).catch(() => {
     /* notifyAuthEvent already swallows; this is belt-and-suspenders */
   });
@@ -123,6 +125,14 @@ export interface DuoPollOptions {
    * polling loop starts. Silently ignored when unset or on non-darwin.
    */
   systemLabel?: string;
+
+  /**
+   * Optional workflow instance label (e.g. "Oath Signature 1"). Forwarded
+   * to the Telegram notifier so the emitted `telegram_sent` session event's
+   * `workflowInstance` field matches every other session event. Falls back
+   * to the workflow name when unset.
+   */
+  instance?: string;
 }
 
 /**
@@ -149,7 +159,7 @@ export async function pollDuoApproval(
   page: Page,
   options: DuoPollOptions,
 ): Promise<boolean> {
-  const { timeoutSeconds = 180, successUrlMatch, successCheck, postApproval, recovery, systemLabel } = options;
+  const { timeoutSeconds = 180, successUrlMatch, successCheck, postApproval, recovery, systemLabel, instance } = options;
   const pollIntervalMs = options.pollIntervalMs ?? DUO_POLL_INTERVAL_MS;
   const pollIntervalSec = pollIntervalMs / 1000;
   const preCheckMs = options.preCheckMs ?? DUO_PRE_CHECK_MS;
@@ -201,7 +211,7 @@ export async function pollDuoApproval(
 
   // Best-effort Telegram DM. Activated when TELEGRAM_BOT_TOKEN +
   // TELEGRAM_CHAT_ID are set; otherwise no-op.
-  emitTelegram("duo-waiting", systemLabel ?? "system", "Approve on your phone");
+  emitTelegram("duo-waiting", systemLabel ?? "system", "Approve on your phone", instance);
 
   log.waiting("Waiting for Duo approval (approve on your phone)...");
 
@@ -220,7 +230,7 @@ export async function pollDuoApproval(
         log.step("Duo push timed out — clicking Try Again...");
         await tryAgainBtn.first().click({ timeout: 5_000 });
         log.waiting("Duo push resent — approve on your phone...");
-        emitTelegram("duo-resent", systemLabel ?? "system", "Push resent");
+        emitTelegram("duo-resent", systemLabel ?? "system", "Push resent", instance);
         await page.waitForTimeout(pollIntervalMs);
         continue;
       }
@@ -266,7 +276,7 @@ export async function pollDuoApproval(
         }
 
         log.step(`Duo approved | URL: ${page.url()}`);
-        emitTelegram("duo-approved", systemLabel ?? "system");
+        emitTelegram("duo-approved", systemLabel ?? "system", undefined, instance);
 
         // Run post-approval hook if provided
         if (postApproval) {
@@ -283,6 +293,6 @@ export async function pollDuoApproval(
   }
 
   log.error("Duo approval timed out");
-  emitTelegram("duo-timeout", systemLabel ?? "system");
+  emitTelegram("duo-timeout", systemLabel ?? "system", undefined, instance);
   return false;
 }
