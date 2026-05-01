@@ -87,18 +87,17 @@ export function computeBatchElapsed(
   let allTerminal = children.length > 0;
   for (const c of children) {
     const startSrc = c.firstLogTs ?? c.timestamp;
-    const endSrc = c.lastLogTs;
+    const endSrc = c.lastLogTs ?? c.timestamp;
+    if (startSrc) {
+      const t = Date.parse(startSrc);
+      if (Number.isFinite(t)) {
+        startMs = Math.min(startMs, t);
+        any = true;
+      }
+    }
     if (endSrc) {
       const t = Date.parse(endSrc);
-      if (Number.isFinite(t)) {
-        endMs = Math.max(endMs, t);
-        any = true;
-        // Only count start when this child has an end (has been processed)
-        if (startSrc) {
-          const ts = Date.parse(startSrc);
-          if (Number.isFinite(ts)) startMs = Math.min(startMs, ts);
-        }
-      }
+      if (Number.isFinite(t)) endMs = Math.max(endMs, t);
     }
     if (
       c.status !== "done" &&
