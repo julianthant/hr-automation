@@ -10,6 +10,7 @@ import {
   isPrepareRow,
   isApprovedPrepRow,
   isDiscardedPrepRow,
+  parsePrepareRowData,
 } from "./ocr/types";
 
 interface QueuePanelProps {
@@ -23,6 +24,12 @@ interface QueuePanelProps {
   onOpenReview?: (runId: string) => void;
   /** Open RunModal in reupload mode for the given OCR session. */
   onReupload?: (reuploadFor: { sessionId: string; previousRunId: string }) => void;
+  /** RunId of the approved prep row currently drilled-into. null = main queue view. */
+  drilledBatchRunId?: string | null;
+  /** Open the drilled batch view for the given parent runId. */
+  onDrillIn?: (parentRunId: string) => void;
+  /** Exit drilled batch view back to the main queue. */
+  onDrillOut?: () => void;
   loading: boolean;
   /**
    * Optional cluster of run controls (QuickRunPanel + Capture / Oath /
@@ -61,6 +68,9 @@ export function QueuePanel({
   reviewingPrepId,
   onOpenReview,
   onReupload,
+  drilledBatchRunId,
+  onDrillIn,
+  onDrillOut,
   loading,
   runControlsSlot,
 }: QueuePanelProps) {
@@ -108,6 +118,22 @@ export function QueuePanel({
     return map;
   }, [visibleEntries]);
 
+  const drilledParent = useMemo(
+    () =>
+      drilledBatchRunId
+        ? approvedPrepEntries.find(
+            (e) => (e.runId ?? e.id) === drilledBatchRunId,
+          ) ?? null
+        : null,
+    [drilledBatchRunId, approvedPrepEntries],
+  );
+
+  const drilledChildren = useMemo(
+    () =>
+      drilledBatchRunId ? childrenByParentRun.get(drilledBatchRunId) ?? [] : [],
+    [drilledBatchRunId, childrenByParentRun],
+  );
+
   /**
    * Set of parent runIds that are currently rendered as ParentChildRow above
    * the regular list. Children of these parents are folded INTO the parent
@@ -139,86 +165,136 @@ export function QueuePanel({
 
   return (
     <div className="w-[300px] min-[1440px]:w-[380px] 2xl:w-[460px] flex-shrink-0 flex flex-col bg-background">
-      {/* ── Status filter strip — top of panel ── */}
-      <div className="h-[69.5px] flex items-center px-3 min-[1440px]:px-4 py-2 border-b border-border bg-card/60 flex-shrink-0">
-        <StatPills entries={visibleEntries} activeFilter={statusFilter} onFilter={setStatusFilter} />
-      </div>
-
-      {/* ── Entry list ── */}
-      <div className="flex-1 overflow-y-auto border-b border-border">
-        {/* Pinned: approved prep rows render as ParentChildRow batch summaries. */}
-        {approvedPrepEntries.map((e) => {
-          const runId = e.runId ?? e.id;
-          return (
-            <ParentChildRow
-              key={`pcr-${runId}`}
-              parent={e}
-              childEntries={childrenByParentRun.get(runId) ?? []}
-              isDrilled={false}
-              onDrillIn={() => {
-                /* Task 5 wires this. */
-              }}
-            />
-          );
-        })}
-
-        {/* Pinned: in-flight prep rows (preparing/ready/reviewing/failed-non-discarded). */}
-        {inFlightPrepEntries.map((e) => {
-          const runId = e.runId ?? e.id;
-          return (
-            <OcrQueueRow
-              key={`prep-${runId}`}
-              entry={e}
-              isReviewing={reviewingPrepId === runId}
-              onOpenReview={(rid) => onOpenReview?.(rid)}
-              onReupload={onReupload}
-            />
-          );
-        })}
-        {loading ? (
-          <div className="space-y-0">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="px-5 py-3.5 border-b border-border">
-                <div className="flex justify-between mb-2">
-                  <div className="h-4 w-32 rounded bg-muted animate-pulse" />
-                  <div className="h-4 w-16 rounded bg-muted animate-pulse" />
-                </div>
-                <div className="h-3 w-48 rounded bg-muted animate-pulse mt-1" />
-                <div className="h-3 w-24 rounded bg-muted animate-pulse mt-2" />
-              </div>
-            ))}
-          </div>
-        ) : filtered.length === 0 ? (
-          <EmptyState
-            icon={Inbox}
-            title="No entries yet"
-            description="Data will appear here as workflows run"
+      {drilledParent ? (
+        <DrilledHeader parent={drilledParent} onBack={() => onDrillOut?.()} />
+      ) : (
+        <div className="h-[69.5px] flex items-center px-3 min-[1440px]:px-4 py-2 border-b border-border bg-card/60 flex-shrink-0">
+          <StatPills
+            entries={visibleEntries}
+            activeFilter={statusFilter}
+            onFilter={setStatusFilter}
           />
-        ) : (
-          filtered.map((entry) => (
-            <EntryItem
-              key={entry.id}
-              entry={entry}
-              selected={selectedId === entry.id}
-              onClick={() => onSelect(entry.id)}
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto border-b border-border">
+        {drilledParent ? (
+          drilledChildren.length === 0 ? (
+            <EmptyState
+              icon={Inbox}
+              title="No children yet"
+              description="Children will appear here as the workflow processes them"
             />
-          ))
+          ) : (
+            drilledChildren.map((entry) => (
+              <EntryItem
+                key={entry.id}
+                entry={entry}
+                selected={selectedId === entry.id}
+                onClick={() => onSelect(entry.id)}
+              />
+            ))
+          )
+        ) : (
+          <>
+            {approvedPrepEntries.map((e) => {
+              const runId = e.runId ?? e.id;
+              return (
+                <ParentChildRow
+                  key={`pcr-${runId}`}
+                  parent={e}
+                  childEntries={childrenByParentRun.get(runId) ?? []}
+                  isDrilled={false}
+                  onDrillIn={(rid) => onDrillIn?.(rid)}
+                />
+              );
+            })}
+            {inFlightPrepEntries.map((e) => {
+              const runId = e.runId ?? e.id;
+              return (
+                <OcrQueueRow
+                  key={`prep-${runId}`}
+                  entry={e}
+                  isReviewing={reviewingPrepId === runId}
+                  onOpenReview={(rid) => onOpenReview?.(rid)}
+                  onReupload={onReupload}
+                />
+              );
+            })}
+            {loading ? (
+              <div className="space-y-0">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="px-5 py-3.5 border-b border-border">
+                    <div className="flex justify-between mb-2">
+                      <div className="h-4 w-32 rounded bg-muted animate-pulse" />
+                      <div className="h-4 w-16 rounded bg-muted animate-pulse" />
+                    </div>
+                    <div className="h-3 w-48 rounded bg-muted animate-pulse mt-1" />
+                    <div className="h-3 w-24 rounded bg-muted animate-pulse mt-2" />
+                  </div>
+                ))}
+              </div>
+            ) : filtered.length === 0 ? (
+              <EmptyState
+                icon={Inbox}
+                title="No entries yet"
+                description="Data will appear here as workflows run"
+              />
+            ) : (
+              filtered.map((entry) => (
+                <EntryItem
+                  key={entry.id}
+                  entry={entry}
+                  selected={selectedId === entry.id}
+                  onClick={() => onSelect(entry.id)}
+                />
+              ))
+            )}
+          </>
         )}
       </div>
 
-      {/* ── Run controls footer — h-12 mirrors the LogStream footer's
-            height + padding so the bottom edges of the two panels' footers
-            tile cleanly. Right-stuck cluster: QuickRunPanel (input + Play
-            + Retry-all) when wired for the workflow, plus per-workflow
-            Capture / Run / Oath buttons. `justify-end` makes the buttons
-            hug the right edge for workflows where QuickRunPanel returns
-            null (e.g. emergency-contact); when QuickRunPanel renders, its
-            form's `flex-1 min-w-0` expands to fill the leading space. ── */}
       {runControlsSlot && (
         <div className="h-12 flex items-center gap-2 px-3 min-[1440px]:px-4 bg-card/40 flex-shrink-0 justify-end">
           {runControlsSlot}
         </div>
       )}
+    </div>
+  );
+}
+
+function DrilledHeader({
+  parent,
+  onBack,
+}: {
+  parent: TrackerEntry;
+  onBack: () => void;
+}) {
+  const data = parsePrepareRowData(parent.data);
+  const filename = data?.pdfOriginalName || "Prep batch";
+  const runId = parent.runId ?? parent.id;
+  const time = new Date(parent.timestamp).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return (
+    <div className="h-[69.5px] flex flex-col justify-center px-3 min-[1440px]:px-4 border-b border-border bg-card/60 flex-shrink-0 gap-1">
+      <div className="flex items-center gap-2 min-w-0">
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex items-center gap-1 rounded-md border border-border bg-secondary/40 px-2 py-1 text-[11px] text-foreground hover:bg-secondary/70 flex-shrink-0"
+        >
+          ← Queue
+        </button>
+        <span className="text-muted-foreground/60">/</span>
+        <span className="font-semibold text-[13px] text-foreground truncate min-w-0 flex-1">
+          {filename}
+        </span>
+      </div>
+      <div className="text-[10px] font-mono text-muted-foreground pl-1">
+        Approved {time} · prep#{runId.slice(-4)}
+      </div>
     </div>
   );
 }
