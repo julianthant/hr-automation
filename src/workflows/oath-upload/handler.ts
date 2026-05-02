@@ -1,9 +1,12 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Ctx } from "../../core/types.js";
 import { runWorkflow } from "../../core/index.js";
 import { ocrWorkflow } from "../ocr/index.js";
 import { watchChildRuns } from "../../tracker/watch-child-runs.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
+import { dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
 import {
   fillHrInquiryForm,
   submitAndCaptureTicketNumber,
@@ -63,42 +66,53 @@ export async function oathUploadHandler(
   const ocrSessionId = `oath-upload-${ctx.runId}-ocr`;
   ctx.updateData({ ocrSessionId });
 
-  await ctx.step("delegate-ocr", async () => {
-    if (opts._runOcrOverride) {
-      await opts._runOcrOverride(input, ocrSessionId, ctx.runId);
-      return;
-    }
-    // Fire-and-forget — OCR runs as a child workflow in the same process,
-    // but we don't await it here. The next step (wait-ocr-approval) blocks
-    // until the operator approves on the dashboard.
-    void runWorkflow(ocrWorkflow, {
-      pdfPath: input.pdfPath,
-      pdfOriginalName: input.pdfOriginalName,
-      formType: "oath",
-      sessionId: ocrSessionId,
-      rosterMode: "download",
-      parentRunId: ctx.runId,
-    } as never).catch((err) =>
-      log.warn(`[oath-upload] OCR child crashed: ${errorMessage(err)}`),
-    );
-  });
-
   let fannedOutItemIds: string[] = [];
-  await ctx.step("wait-ocr-approval", async () => {
-    const fn = opts._waitForOcrApprovalOverride ?? waitForOcrApproval;
-    const r = await fn({
-      sessionId: ocrSessionId,
-      trackerDir,
-      timeoutMs: SEVEN_DAYS_MS,
-      abortIfRowState: {
-        workflow: "oath-upload",
-        id: input.sessionId,
-        step: "cancel-requested",
-      },
-    });
-    fannedOutItemIds = r.fannedOutItemIds;
+  const priorApproval = readPriorOcrApproval(ocrSessionId, trackerDir);
+  if (priorApproval) {
+    log.step(
+      `[oath-upload] recovery: prior approved OCR found for ${ocrSessionId}; skipping delegate-ocr + wait-ocr-approval`,
+    );
+    ctx.skipStep("delegate-ocr");
+    ctx.skipStep("wait-ocr-approval");
+    fannedOutItemIds = priorApproval.fannedOutItemIds;
     ctx.updateData({ signerCount: String(fannedOutItemIds.length) });
-  });
+  } else {
+    await ctx.step("delegate-ocr", async () => {
+      if (opts._runOcrOverride) {
+        await opts._runOcrOverride(input, ocrSessionId, ctx.runId);
+        return;
+      }
+      // Fire-and-forget — OCR runs as a child workflow in the same process,
+      // but we don't await it here. The next step (wait-ocr-approval) blocks
+      // until the operator approves on the dashboard.
+      void runWorkflow(ocrWorkflow, {
+        pdfPath: input.pdfPath,
+        pdfOriginalName: input.pdfOriginalName,
+        formType: "oath",
+        sessionId: ocrSessionId,
+        rosterMode: "download",
+        parentRunId: ctx.runId,
+      } as never).catch((err) =>
+        log.warn(`[oath-upload] OCR child crashed: ${errorMessage(err)}`),
+      );
+    });
+
+    await ctx.step("wait-ocr-approval", async () => {
+      const fn = opts._waitForOcrApprovalOverride ?? waitForOcrApproval;
+      const r = await fn({
+        sessionId: ocrSessionId,
+        trackerDir,
+        timeoutMs: SEVEN_DAYS_MS,
+        abortIfRowState: {
+          workflow: "oath-upload",
+          id: input.sessionId,
+          step: "cancel-requested",
+        },
+      });
+      fannedOutItemIds = r.fannedOutItemIds;
+      ctx.updateData({ signerCount: String(fannedOutItemIds.length) });
+    });
+  }
 
   ctx.markStep("delegate-signatures");
 
@@ -142,4 +156,36 @@ export async function oathUploadHandler(
       status: "filed",
     });
   });
+}
+
+function readPriorOcrApproval(
+  ocrSessionId: string,
+  trackerDir: string | undefined,
+): { fannedOutItemIds: string[] } | null {
+  const dir = trackerDir ?? ".tracker";
+  const file = join(dir, `ocr-${dateLocal()}.jsonl`);
+  if (!existsSync(file)) return null;
+  const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      const e = JSON.parse(lines[i]) as TrackerEntry;
+      if (
+        e.id === ocrSessionId &&
+        e.step === "approved" &&
+        typeof e.data?.fannedOutItemIds === "string"
+      ) {
+        try {
+          const ids = JSON.parse(e.data.fannedOutItemIds);
+          if (Array.isArray(ids) && ids.every((s) => typeof s === "string")) {
+            return { fannedOutItemIds: ids as string[] };
+          }
+        } catch {
+          /* tolerate malformed payload */
+        }
+      }
+    } catch {
+      /* tolerate malformed line */
+    }
+  }
+  return null;
 }
