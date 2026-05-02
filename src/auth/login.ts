@@ -7,6 +7,8 @@ import { UKG_URL } from "../config.js";
 import { fillSsoCredentials, clickSsoSubmit, isSsoFormReady } from "./sso-fields.js";
 import { gotoWithRetry } from "../browser/launch.js";
 import { debugScreenshot } from "../utils/screenshot.js";
+import { hrInquiry } from "../systems/servicenow/selectors.js";
+import { HR_INQUIRY_FORM_URL } from "../systems/servicenow/navigate.js";
 
 /**
  * Authenticate to UCPath through UCSD Shibboleth SSO with Duo MFA.
@@ -524,4 +526,94 @@ export async function loginToNewKronos(page: Page, instance?: string): Promise<b
   if (prep === "already_logged_in") return true;
   if (!prep) return false;
   return await newKronosSubmitAndWaitForDuo(page, instance);
+}
+
+/**
+ * Authenticate to UCSD's HR Employee Center on support.ucsd.edu (ServiceNow).
+ *
+ * Flow: Navigate to the HR Inquiry deep-link → SAML redirects to TritON
+ * (`a5.ucsd.edu`) → fill UCSD SSO credentials → submit → poll Duo via
+ * `requestDuoApproval` → return on landing back on the form.
+ *
+ * Reuses the existing UCPATH_USER_ID/UCPATH_PASSWORD env vars — UCSD SSO
+ * is the same realm as UCPath/Kuali/Kronos.
+ *
+ * @returns true on success, false on failure (kernel's loginWithRetry handles retries)
+ */
+export async function loginToServiceNow(
+  page: Page,
+  instance?: string,
+): Promise<boolean> {
+  log.step("Navigating to support.ucsd.edu HR Inquiry form...");
+  await page.goto(HR_INQUIRY_FORM_URL, { waitUntil: "domcontentloaded", timeout: 15_000 });
+
+  // Already authenticated? Subject textbox visible → skip the SSO dance.
+  if (
+    await hrInquiry
+      .subjectInput(page)
+      .isVisible({ timeout: 2_000 })
+      .catch(() => false)
+  ) {
+    log.success("ServiceNow already authenticated");
+    return true;
+  }
+
+  // Otherwise we're on the TritON SSO page (or a redirect chain leading to it).
+  // Wait for the SSO form to appear if a redirect is still in flight.
+  if (!(await isSsoFormReady(page))) {
+    // Best-effort wait — let any in-flight redirect settle.
+    await page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => {});
+    if (!(await isSsoFormReady(page))) {
+      log.warn(`[Auth: servicenow] SSO form not ready; URL=${page.url()}`);
+      return false;
+    }
+  }
+
+  try {
+    await fillSsoCredentials(page);
+    await clickSsoSubmit(page);
+  } catch (err) {
+    log.warn(
+      `[Auth: servicenow] SSO field fill failed: ${err instanceof Error ? err.message : err}`,
+    );
+    return false;
+  }
+  log.step(`After ServiceNow SSO submit | URL: ${page.url()}`);
+
+  // Duo approval. Success criteria: back on support.ucsd.edu AND the
+  // HR Inquiry form's Subject textbox is visible (so we know we landed
+  // on the correct form, not some other ServiceNow redirect target).
+  const duoOptions = {
+    timeoutSeconds: 300,
+    successUrlMatch: (url: string) =>
+      url.includes("support.ucsd.edu") && !url.includes("duosecurity"),
+    successCheck: async (p: Page) =>
+      hrInquiry.subjectInput(p).isVisible({ timeout: 5_000 }).catch(() => false),
+    systemLabel: "ServiceNow",
+  };
+
+  const approved = instance
+    ? await requestDuoApproval(page, { ...duoOptions, system: "ServiceNow", instance })
+    : await pollDuoApproval(page, duoOptions);
+
+  if (!approved) {
+    log.warn("[Auth: servicenow] Duo approval failed/timed out");
+    return false;
+  }
+
+  // Final landing verification — sanity check that we're really on the form.
+  if (
+    !(await hrInquiry
+      .subjectInput(page)
+      .isVisible({ timeout: 5_000 })
+      .catch(() => false))
+  ) {
+    log.warn(
+      `[Auth: servicenow] post-Duo landing verification failed; URL=${page.url()}`,
+    );
+    return false;
+  }
+
+  log.success("ServiceNow authenticated");
+  return true;
 }
