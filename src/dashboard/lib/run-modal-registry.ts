@@ -59,6 +59,14 @@ export interface RunModalConfig {
   sections: RunModalSections;
   /** Sonner toast emitted on a successful submit. */
   buildSuccessToast: (resp: RunModalSubmitResponse, file: File) => RunModalToast;
+  /**
+   * If set, the workflow's run modal locks the OCR `formType` to this value
+   * — picker is hidden, the field is force-injected on submit. Used so
+   * `emergency-contact` and `oath-signature` can each surface a dedicated
+   * Run button that delegates to the shared `/api/ocr/prepare` endpoint
+   * without making the operator pick the form type a second time.
+   */
+  lockedFormType?: string;
 }
 
 export const RUN_MODAL_REGISTRY: Record<string, RunModalConfig> = {
@@ -68,8 +76,25 @@ export const RUN_MODAL_REGISTRY: Record<string, RunModalConfig> = {
       reuploadFor
         ? "Upload a corrected PDF — resolved EIDs from the previous run carry forward."
         : "Upload a scanned PDF. We’ll OCR it, match against the roster, then approve before queuing.",
-    submitUrl: () => "/api/emergency-contact/prepare",
+    submitUrl: ({ reuploadFor }) =>
+      reuploadFor ? "/api/ocr/reupload" : "/api/ocr/prepare",
     sections: { roster: true },
+    lockedFormType: "emergency-contact",
+    buildSuccessToast: (_resp, file) => ({
+      title: "Preparation started",
+      description: file.name,
+    }),
+  },
+  "oath-signature": {
+    title: () => "Run Oath Signature",
+    description: ({ reuploadFor }) =>
+      reuploadFor
+        ? "Upload a corrected oath PDF — resolved EIDs from the previous run carry forward."
+        : "Upload a scanned oath PDF. We’ll OCR it, match against the roster, then approve before queuing oath-signature for each match.",
+    submitUrl: ({ reuploadFor }) =>
+      reuploadFor ? "/api/ocr/reupload" : "/api/ocr/prepare",
+    sections: { roster: true },
+    lockedFormType: "oath",
     buildSuccessToast: (_resp, file) => ({
       title: "Preparation started",
       description: file.name,

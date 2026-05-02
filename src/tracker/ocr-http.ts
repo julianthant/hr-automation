@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { trackEvent, dateLocal, type TrackerEntry } from "./jsonl.js";
 import { errorMessage } from "../utils/errors.js";
-import { log } from "../utils/log.js";
+import { log, withLogContext, setLogRunId } from "../utils/log.js";
 import { listFormTypes, getFormSpec, type FormTypeListing } from "../workflows/ocr/form-registry.js";
 import { runOcrOrchestrator, type OcrOrchestratorOpts } from "../workflows/ocr/orchestrator.js";
 import { runOcrRetryPage, RetryPageError } from "../workflows/ocr/retry-page.js";
@@ -126,18 +126,25 @@ export function buildOcrPrepareHandler(
 
     void (async () => {
       try {
-        await runOrch(
-          {
-            pdfPath: input.pdfPath,
-            pdfOriginalName: input.pdfOriginalName,
-            formType: input.formType,
-            sessionId,
-            rosterPath: input.rosterPath,
-            rosterMode: input.rosterMode,
-            previousRunId: input.previousRunId,
-          },
-          { runId, trackerDir },
-        );
+        // Wrap in withLogContext so log.* calls inside the orchestrator land
+        // in `.tracker/ocr-{date}-logs.jsonl` with workflow/itemId/runId set.
+        // setLogRunId stamps runId into the AsyncLocalStorage context the same
+        // way withTrackedWorkflow does for kernel workflows.
+        await withLogContext(WORKFLOW, sessionId, async () => {
+          setLogRunId(runId);
+          await runOrch(
+            {
+              pdfPath: input.pdfPath,
+              pdfOriginalName: input.pdfOriginalName,
+              formType: input.formType,
+              sessionId,
+              rosterPath: input.rosterPath,
+              rosterMode: input.rosterMode,
+              previousRunId: input.previousRunId,
+            },
+            { runId, trackerDir },
+          );
+        }, trackerDir);
       } catch (err) {
         log.error(`[ocr-http] orchestrator threw: ${errorMessage(err)}`);
       } finally {
