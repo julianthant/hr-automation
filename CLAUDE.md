@@ -34,6 +34,10 @@ npm run eid-lookup:stop                    # Soft-stop all daemons
 npm run oath-signature <emplId> [emplId ...]     # Enqueue to an alive daemon or spawn one (UCPath only)
 npm run oath-signature:stop                      # Soft-stop all daemons
 
+# Oath Upload (daemon mode by default — see "Daemon mode" below)
+npm run oath-upload <pdfPath> [pdfPath ...]      # Upload paper-oath PDF; OCR → fan out signatures → file HR ticket
+npm run oath-upload:stop                         # Soft-stop all daemons
+
 # Dashboard (separate terminal — auto-updates as workflows run)
 npm run dashboard            # SSE backend (:3838) + Vite dev (:5173) — open http://localhost:5173
 npm run dashboard:prod       # Serve pre-built dashboard from SSE only
@@ -77,6 +81,7 @@ src/
     kuali/             # Kuali Build separation form extract + fill
     new-kronos/        # WFD/Dayforce employee search + timecard
     old-kronos/        # UKG Kronos search + Time Detail report download
+    servicenow/        # support.ucsd.edu HR Inquiry form (oath-upload tickets)
   workflows/           # Composed workflows — each is defineWorkflow(...) + CLI adapter
     work-study/        # Kernel. UCPath PayPath work-study update.
     emergency-contact/ # Kernel (batch, preEmitPending). UCPath Emergency Contact fill.
@@ -84,6 +89,7 @@ src/
     onboarding/        # Kernel (single mode). CRM → UCPath + I9. Daemon mode for repeated runs.
     separations/       # Kernel (4 systems, interleaved auth, sequential batch via runWorkflowBatch).
     old-kronos-reports/# Kernel (pool mode, N workers, per-worker sessionDir via opts.launchFn).
+    oath-upload/       # Kernel + daemon-mode. ServiceNow + delegated OCR + delegated oath-signature.
   auth/                # Per-system login flows + duo-poll + sso-fields (shared).
   browser/             # launchBrowser, tiling math. Kernel-internal.
   tracker/             # JSONL append + SSE dashboard server + Excel export.
@@ -322,6 +328,7 @@ Current step tracking per workflow. Steps prefixed with `auth:` are auto-prepend
 | work-study | ucpath-auth → transaction (opts out of auto-prepend) |
 | emergency-contact | auth:ucpath → navigation → fill-form → save |
 | oath-signature | ucpath-auth → transaction (opts out of auto-prepend) |
+| oath-upload | servicenow-auth → delegate-ocr → wait-ocr-approval → delegate-signatures → wait-signatures → open-hr-form → fill-form → submit (workflow opts out of auto-prepend; declares `servicenow-auth` itself) |
 | ocr | loading-roster → ocr → matching → eid-lookup → verification → awaiting-approval |
 
 As of 2026-04-18, the dashboard is **observation-only**. The previous "⚡ RUN" drawer + `RunnerLauncher` button + `SchemaForm` + `runner-recents` localStorage helper + the backend `buildSpawnHandler`/`buildCancelHandler`/`buildActiveRunsHandler`/`buildWorkflowSchemaHandler` factories + the child-process registry were all removed. Workflows are launched via the npm scripts above (or whatever replacement launcher the user wires up later — out of scope for this pass). Live session monitoring (`SessionPanel`), selector-warning aggregation (`SelectorWarningsPanel`), screenshot browsing (`ScreenshotsPanel` — replaced the inline `FailureDrillDown` on 2026-04-21), step-timing chips (`StepPipeline`), and cross-workflow search (`SearchBar`) all keep working — they read kernel-emitted events from `src/tracker/jsonl.ts`, independent of any launcher.
