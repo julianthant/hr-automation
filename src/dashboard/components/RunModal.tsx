@@ -60,12 +60,20 @@ interface RunModalProps {
   lockedFormType?: string;
 }
 
-export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedFormType }: RunModalProps) {
+export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedFormType: lockedFormTypeProp }: RunModalProps) {
   const config = getRunModalConfig(workflow);
+  // Per-workflow registry can lock the form type so the modal hides the
+  // picker and force-injects the value on submit. The prop variant is the
+  // QuickRunPanel path; both feed the same `effectiveLockedFormType`.
+  const effectiveLockedFormType = lockedFormTypeProp ?? config?.lockedFormType;
   const showRoster = config?.sections.roster ?? false;
-  const showFormType = config?.sections.formType ?? false;
+  // When the registry locks the form type, the OCR backend still needs the
+  // formType field on the FormData — flip the section flag on so submit
+  // sends it, but the picker UI is hidden via the `effectiveLockedFormType`
+  // gate further down.
+  const showFormType = (config?.sections.formType ?? false) || Boolean(effectiveLockedFormType);
   const showDuplicateCheck = config?.sections.duplicateCheck ?? false;
-  const ctx = { reuploadFor, lockedFormType };
+  const ctx = { reuploadFor, lockedFormType: effectiveLockedFormType };
 
   const [file, setFile] = useState<File | null>(null);
   const [pageCount, setPageCount] = useState<number | null>(null);
@@ -74,13 +82,13 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
   const [submitting, setSubmitting] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [formType, setFormType] = useState<string | null>(lockedFormType ?? null);
+  const [formType, setFormType] = useState<string | null>(effectiveLockedFormType ?? null);
   const [formOptions, setFormOptions] = useState<FormTypeOption[]>([]);
   const [priorRuns, setPriorRuns] = useState<PriorRunSummary[]>([]);
 
   useEffect(() => {
-    if (open && lockedFormType) setFormType(lockedFormType);
-  }, [open, lockedFormType]);
+    if (open && effectiveLockedFormType) setFormType(effectiveLockedFormType);
+  }, [open, effectiveLockedFormType]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropRef = useRef<HTMLLabelElement>(null);
 
@@ -169,10 +177,10 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
   }, [file, showDuplicateCheck]);
 
   // Fetch form types when modal opens for workflows that show the
-  // form-type picker. Skip when lockedFormType is set — caller already
-  // picked it.
+  // form-type picker. Skip when the form type is locked (registry or prop)
+  // — caller already picked it.
   useEffect(() => {
-    if (!open || !showFormType || lockedFormType) return;
+    if (!open || !showFormType || effectiveLockedFormType) return;
     let cancelled = false;
     fetch("/api/ocr/forms")
       .then(async (r) => {
@@ -185,7 +193,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
       })
       .catch(() => {/* tolerate */});
     return () => { cancelled = true; };
-  }, [open, showFormType, lockedFormType]);
+  }, [open, showFormType, effectiveLockedFormType]);
 
   // Reset form state on close.
   useEffect(() => {
@@ -335,7 +343,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
         </DialogHeader>
 
         <div className="px-[38px] pt-[24px] pb-0 space-y-6">
-          {showFormType && !lockedFormType && !reuploadFor && formOptions.length > 0 && (
+          {showFormType && !effectiveLockedFormType && !reuploadFor && formOptions.length > 0 && (
             <section>
               <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground/70">
                 Form type

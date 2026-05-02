@@ -136,6 +136,7 @@ export async function runOcrOrchestrator(
   });
 
   try {
+    log.step(`[ocr] starting prep (formType=${input.formType}, rosterMode=${input.rosterMode}, sessionId=${id})`);
     // 1. Loading-roster (supports rosterMode=download via SharePoint delegation)
     writeTracker("running", { formType: input.formType, rosterMode: input.rosterMode }, "loading-roster");
 
@@ -143,7 +144,7 @@ export async function runOcrOrchestrator(
 
     if (input.rosterMode === "download") {
       const { runWorkflow } = await import("../../core/index.js");
-      const { sharepointDownloadWorkflow } = await import("../sharepoint-download/index.js");
+      const { sharepointDownloadWorkflow, _setPendingLandingUrl } = await import("../sharepoint-download/index.js");
       const { SHAREPOINT_DOWNLOADS } = await import("../sharepoint-download/registry.js");
       const spec0 = SHAREPOINT_DOWNLOADS[0];
       if (!spec0) throw new Error("OCR: no SharePoint download spec registered");
@@ -151,18 +152,33 @@ export async function runOcrOrchestrator(
       if (!url && !opts._skipSharepointDispatch) {
         throw new Error(`OCR rosterMode=download but ${spec0.envVar} env var is unset`);
       }
+      // Unique itemId per OCR run so watchChildren doesn't pick up a stale
+      // sharepoint-download `done` row from earlier in the day, and so the
+      // dashboard nests this child run cleanly under the parent OCR row.
+      const childItemId = `ocr-sp-${runId}`;
       if (!opts._skipSharepointDispatch) {
-        void runWorkflow(sharepointDownloadWorkflow, {
-          id: spec0.id,
-          label: spec0.label,
-          url,
-          parentRunId: runId,
-        }).catch((err) => log.warn(`[ocr] sharepoint download crashed: ${errorMessage(err)}`));
+        log.step(`[ocr] delegating sharepoint-download for "${spec0.label}" (childItemId=${childItemId})`);
+        // sharepoint-download's kernel `systems[].login` reads the URL from a
+        // module-level mutable because the kernel's SystemConfig.login signature
+        // can't pass `input` through. Seed it before firing runWorkflow.
+        _setPendingLandingUrl(url);
+        void runWorkflow(
+          sharepointDownloadWorkflow,
+          {
+            id: spec0.id,
+            label: spec0.label,
+            url,
+            parentRunId: runId,
+          },
+          { itemId: childItemId },
+        )
+          .catch((err) => log.warn(`[ocr] sharepoint download crashed: ${errorMessage(err)}`))
+          .finally(() => _setPendingLandingUrl(null));
       }
 
       const outcomes = await watchChildren({
         workflow: "sharepoint-download",
-        expectedItemIds: [spec0.id],
+        expectedItemIds: [childItemId],
         trackerDir,
         date,
         timeoutMs: 5 * 60_000,
@@ -173,6 +189,7 @@ export async function runOcrOrchestrator(
       }
       resolvedRosterPath = (result.data?.path ?? "").trim();
       if (!resolvedRosterPath) throw new Error("SharePoint download finished without saving a path");
+      log.success(`[ocr] roster downloaded: ${resolvedRosterPath}`);
     }
 
     if (!resolvedRosterPath) {
@@ -181,6 +198,7 @@ export async function runOcrOrchestrator(
     const roster = (await loadRosterFn(resolvedRosterPath)) as OcrRosterRow[];
 
     // 2. OCR
+    log.step(`[ocr] running OCR pipeline against ${input.pdfOriginalName}`);
     writeTracker("running", { formType: input.formType, rosterPath: resolvedRosterPath }, "ocr");
     const ocrResult = await runOcr({
       pdfPath: input.pdfPath,
@@ -188,6 +206,7 @@ export async function runOcrOrchestrator(
       spec,
       sessionId: input.sessionId,
     });
+    log.success(`[ocr] OCR complete (provider=${ocrResult.provider}, attempts=${ocrResult.attempts}, records=${(ocrResult.data as unknown[]).length})`);
 
     // Build per-page status summary from OCR result
     const pages = ocrResult.pages ?? [];
@@ -212,6 +231,7 @@ export async function runOcrOrchestrator(
     };
 
     // 3. Match
+    log.step(`[ocr] matching ${(ocrResult.data as unknown[]).length} OCR record(s) against roster`);
     writeTracker(
       "running",
       {
@@ -245,6 +265,7 @@ export async function runOcrOrchestrator(
     });
 
     if (lookupTargets.length > 0) {
+      log.step(`[ocr] enqueuing ${lookupTargets.length} eid-lookup(s) for unmatched/verify-needed records`);
       writeTracker("running", { recordCount: records.length, pendingLookup: lookupTargets.length }, "eid-lookup");
 
       const enqueueItems = lookupTargets.map((t) => {
@@ -313,9 +334,11 @@ export async function runOcrOrchestrator(
 
     // 5. Verification marker
     const verifiedCount = countVerified(records, spec);
+    log.step(`[ocr] verification: ${verifiedCount}/${records.length} records verified`);
     writeTracker("running", { recordCount: records.length, verifiedCount }, "verification");
 
     // 6. Awaiting-approval
+    log.success(`[ocr] preparation complete — awaiting operator approval (${records.length} record(s), ${verifiedCount} verified)`);
     writeTracker("running", {
       formType: input.formType,
       pdfOriginalName: input.pdfOriginalName,
