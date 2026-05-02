@@ -31,7 +31,7 @@ const GROUPS: Group[] = [
   { label: "Separations", members: ["separations"] },
   { label: "Work Study", members: ["work-study"] },
   { label: "Timekeeping", members: ["kronos-reports"] },
-  { label: "Utils", members: ["eid-lookup", "sharepoint-download"] },
+  { label: "Utils", members: ["ocr", "eid-lookup", "sharepoint-download"] },
 ];
 
 /**
