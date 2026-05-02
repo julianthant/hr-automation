@@ -447,6 +447,7 @@ program
       import("./workflows/emergency-contact/index.js"),
       import("./workflows/old-kronos-reports/index.js"),
       import("./workflows/oath-signature/index.js"),
+      import("./workflows/ocr/index.js"),
     ]);
 
     const { startDashboard } = await import("./tracker/dashboard.js");

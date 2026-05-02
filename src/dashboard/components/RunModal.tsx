@@ -303,7 +303,6 @@ export function RunModal({ open, onOpenChange, workflow = "emergency-contact", r
                       className="accent-primary"
                     />
                     <span className="text-[13px] font-medium">{opt.label}</span>
-                    <span className="text-[11px] text-muted-foreground">{opt.description}</span>
                   </label>
                 ))}
               </div>
