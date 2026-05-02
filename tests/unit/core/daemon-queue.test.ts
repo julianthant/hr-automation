@@ -295,3 +295,46 @@ test('full cycle: enqueue → claim → done (latest-event-per-id fold)', async 
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('enqueueItems threads parentRunId through to QueueItem.parentRunId', async () => {
+  const dir = TMP()
+  try {
+    const parentRunId = 'parent-run-abc-1234'
+    await enqueueItems(
+      'wf-parent',
+      [{ x: 1 }],
+      () => 'item-1',
+      dir,
+      undefined,
+      [parentRunId],
+    )
+    const state = await readQueueState('wf-parent', dir)
+    assert.equal(state.queued.length, 1)
+    assert.equal(state.queued[0].parentRunId, parentRunId)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('enqueueItems omits parentRunId when not provided (back-compat)', async () => {
+  const dir = TMP()
+  try {
+    await enqueueItems('wf-noparent', [{}], () => 'a', dir)
+    const state = await readQueueState('wf-noparent', dir)
+    assert.equal(state.queued[0].parentRunId, undefined)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('enqueueItems throws when preAssignedParentRunIds length mismatches inputs', async () => {
+  const dir = TMP()
+  try {
+    await assert.rejects(
+      enqueueItems('wf-mm', [{ x: 1 }, { x: 2 }], (_, i) => ['a', 'b'][i], dir, undefined, ['only-one']),
+      /preAssignedParentRunIds length 1 does not match inputs length 2/,
+    )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
