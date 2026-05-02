@@ -71,6 +71,13 @@ import {
   sweepStuckOcrRows,
 } from "./ocr-http.js";
 import {
+  buildOathUploadDuplicateCheckHandler,
+  buildOathUploadStartHandler,
+  buildOathUploadCancelHandler,
+  sweepStuckOathUploadRows,
+  saveUploadedPdf,
+} from "./oath-upload-http.js";
+import {
   createSessionStore,
   handleStart as handleCaptureStart,
   handleManifest as handleCaptureManifest,
@@ -1889,6 +1896,11 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       log.step(`OCR sweep skipped: ${err instanceof Error ? err.message : String(err)}`);
     }
     try {
+      sweepStuckOathUploadRows(dir);
+    } catch (err) {
+      log.step(`oath-upload sweep skipped: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
       const removed = sweepOrphanUploadDirs(dir);
       if (removed > 0) {
         log.step(`Removed ${removed} orphan upload dir${removed === 1 ? "" : "s"} from ${dir}/uploads`);
@@ -1906,6 +1918,11 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
   const ocrForceResearchHandler = buildOcrForceResearchHandler({ trackerDir: dir });
   const ocrRetryPageHandler     = buildOcrRetryPageHandler({ trackerDir: dir });
   const ocrReocrWholePdfHandler = buildOcrReocrWholePdfHandler({ trackerDir: dir });
+
+  // ─── Oath-upload handler instances (created once with dir) ──────────
+  const oathUploadDupCheckHandler = buildOathUploadDuplicateCheckHandler({ trackerDir: dir });
+  const oathUploadStartHandler    = buildOathUploadStartHandler({ trackerDir: dir });
+  const oathUploadCancelHandler   = buildOathUploadCancelHandler({ trackerDir: dir });
 
   /** Standard JSON response helper. */
   const sendJson = (res: import("http").ServerResponse, status: number, body: unknown): void => {
@@ -3123,6 +3140,49 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         runId: String(parsedBody.body.runId ?? ""),
       });
       writeJson(result.status, result.body);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/oath-upload/check-duplicate") {
+      const hash = url.searchParams.get("hash") ?? "";
+      const lookbackDays = url.searchParams.get("lookbackDays")
+        ? Number(url.searchParams.get("lookbackDays"))
+        : undefined;
+      const r = await oathUploadDupCheckHandler({ hash, lookbackDays });
+      writeJson(r.status, r.body);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/oath-upload/cancel") {
+      const parsed = await readJsonBody(4096);
+      if (!parsed.ok) return writeJson(400, { ok: false, error: parsed.error });
+      const r = await oathUploadCancelHandler({
+        sessionId: String(parsed.body.sessionId ?? ""),
+        runId: parsed.body.runId ? String(parsed.body.runId) : undefined,
+        reason: parsed.body.reason ? String(parsed.body.reason) : undefined,
+      });
+      writeJson(r.status, r.body);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/oath-upload/start") {
+      const mp = await readMultipart(req, 50 * 1024 * 1024);
+      if (!mp.ok) return writeJson(400, { ok: false, error: mp.error });
+      const file = mp.parsed.files["pdf"];
+      if (!file) return writeJson(400, { ok: false, error: "missing 'pdf' file part" });
+
+      const pdfPath = await saveUploadedPdf(file.data, file.filename ?? "upload.pdf", dir);
+      const { createHash } = await import("node:crypto");
+      const pdfHash = createHash("sha256").update(file.data).digest("hex");
+      const sessionId = mp.parsed.fields["sessionId"]?.trim() || undefined;
+
+      const r = await oathUploadStartHandler({
+        pdfPath,
+        pdfOriginalName: file.filename ?? "upload.pdf",
+        pdfHash,
+        sessionId,
+      });
+      writeJson(r.status, r.body);
       return;
     }
 
