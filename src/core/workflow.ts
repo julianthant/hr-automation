@@ -131,6 +131,12 @@ export interface RunOneItemOpts<TData, TSteps extends readonly string[]> {
    * legacy behavior verbatim.
    */
   isCancelRequested?: () => boolean
+  /**
+   * When set, every TrackerEntry emitted for this item carries `parentRunId`.
+   * Forwarded from the queue item's `parentRunId` field by the daemon's claim
+   * loop so delegation children link back to their OCR parent run.
+   */
+  parentRunId?: string
 }
 
 /**
@@ -245,6 +251,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
         status: 'pending',
         data: enriched,
         ...(inputForRow ? { input: inputForRow } : {}),
+        ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
       },
       trackerDir,
     )
@@ -327,6 +334,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
           // (callerPreEmits=false above). When the caller pre-emitted, the
           // input is already on that row — no need to re-stamp.
           ...(callerPreEmits ? {} : (inputForRow ? { input: inputForRow } : {})),
+          ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
         },
       )
     }, trackerDir)
