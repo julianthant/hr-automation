@@ -22,7 +22,11 @@ import type { RegisteredWorkflow } from './types.js'
  * tighten to 0 grace — every queue-file entry now has a registered daemon
  * by construction.
  */
-export type OnPreEmitPending<TData> = (input: TData, runId: string) => void
+export type OnPreEmitPending<TData> = (
+  input: TData,
+  runId: string,
+  parentRunId?: string,
+) => void
 
 /**
  * Optional caller-provided callback fired once per input when pre-emit
@@ -171,7 +175,7 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
   if (onPreEmitPending) {
     for (let i = 0; i < inputs.length; i++) {
       try {
-        onPreEmitPending(inputs[i], runIds[i])
+        onPreEmitPending(inputs[i], runIds[i], parentRunId)
       } catch (err) {
         log.warn(
           `ensureDaemonsAndEnqueue: onPreEmitPending threw for '${ids[i]}': ${
