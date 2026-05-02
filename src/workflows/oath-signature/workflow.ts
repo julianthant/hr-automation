@@ -131,12 +131,13 @@ export async function runOathSignatureCli(
     inputs,
     { new: options.new, parallel: options.parallel },
     {
-      onPreEmitPending: (item, runId) => {
+      onPreEmitPending: (item, runId, parentRunId) => {
         trackEvent({
           workflow: WORKFLOW,
           timestamp: now,
           id: item.emplId,
           runId,
+          ...(parentRunId ? { parentRunId } : {}),
           status: "pending",
           data: {
             emplId: item.emplId,
