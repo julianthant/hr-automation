@@ -171,3 +171,105 @@ test('ensureDaemonsAndEnqueue: 1 live stub daemon → spawnCount=0, items enqueu
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('ensureDaemonsAndEnqueue: forwards parentRunId opt onto every queued item', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-client-parent-'))
+  try {
+    const { createServer } = await import('node:http')
+    const server = createServer((req, res) => {
+      if (req.url === '/whoami' && req.method === 'GET') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ workflow: 'parent-wf', instanceId: 'pwf-01', pid: process.pid, version: 1 }))
+        return
+      }
+      if (req.url === '/wake' && req.method === 'POST') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end('{"ok":true}')
+        return
+      }
+      res.writeHead(404); res.end()
+    })
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
+    const addr = server.address()
+    const port = typeof addr === 'object' && addr ? addr.port : 0
+
+    const { writeLockfile, lockfilePath, ensureDaemonsDir } = await import('../../../src/core/daemon-registry.js')
+    ensureDaemonsDir(dir)
+    const lp = lockfilePath('parent-wf', 'pwf-01', dir)
+    writeLockfile(
+      { workflow: 'parent-wf', instanceId: 'pwf-01', pid: process.pid, port, startedAt: new Date().toISOString(), hostname: 'host', version: 1 },
+      lp,
+    )
+
+    const wf = defineWorkflow({
+      name: 'parent-wf',
+      schema: z.object({ id: z.string() }),
+      steps: ['a'],
+      systems: [],
+      authSteps: false,
+      handler: async () => {},
+    })
+
+    const parentRunId = 'parent-test-abc'
+    await ensureDaemonsAndEnqueue(
+      wf,
+      [{ id: 'a' }, { id: 'b' }],
+      {},
+      { trackerDir: dir, quiet: true, parentRunId },
+    )
+
+    const state = await readQueueState('parent-wf', dir)
+    assert.equal(state.queued.length, 2)
+    assert.equal(state.queued[0].parentRunId, parentRunId)
+    assert.equal(state.queued[1].parentRunId, parentRunId)
+
+    await new Promise<void>((r) => server.close(() => r()))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('ensureDaemonsAndEnqueue: omits parentRunId when not in opts (back-compat)', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-client-noparent-'))
+  try {
+    const { createServer } = await import('node:http')
+    const server = createServer((req, res) => {
+      if (req.url === '/whoami' && req.method === 'GET') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ workflow: 'noparent-wf', instanceId: 'np-01', pid: process.pid, version: 1 }))
+        return
+      }
+      if (req.url === '/wake' && req.method === 'POST') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end('{"ok":true}')
+        return
+      }
+      res.writeHead(404); res.end()
+    })
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
+    const addr = server.address()
+    const port = typeof addr === 'object' && addr ? addr.port : 0
+    const { writeLockfile, lockfilePath, ensureDaemonsDir } = await import('../../../src/core/daemon-registry.js')
+    ensureDaemonsDir(dir)
+    writeLockfile(
+      { workflow: 'noparent-wf', instanceId: 'np-01', pid: process.pid, port, startedAt: new Date().toISOString(), hostname: 'host', version: 1 },
+      lockfilePath('noparent-wf', 'np-01', dir),
+    )
+    const wf = defineWorkflow({
+      name: 'noparent-wf',
+      schema: z.object({ id: z.string() }),
+      steps: ['a'],
+      systems: [],
+      authSteps: false,
+      handler: async () => {},
+    })
+    await ensureDaemonsAndEnqueue(wf, [{ id: 'a' }], {}, { trackerDir: dir, quiet: true })
+    const state = await readQueueState('noparent-wf', dir)
+    assert.equal(state.queued[0].parentRunId, undefined)
+    await new Promise<void>((r) => server.close(() => r()))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

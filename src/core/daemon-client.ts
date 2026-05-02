@@ -109,9 +109,18 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
      * and the `runId`-pairing anchor for `onPreEmitPending`.
      */
     deriveItemId?: (input: TData) => string
+    /**
+     * Optional parent runId for delegation. When set, every queued item is
+     * stamped with this parentRunId (single value fanned across all inputs),
+     * so the daemon-side claim path forwards it into runOneItem and the
+     * resulting tracker rows carry parentRunId. Used by delegation parents
+     * (e.g. OCR's approve handler when fanning out oath-signature children
+     * of an oath-upload parent).
+     */
+    parentRunId?: string
   } = {},
 ): Promise<EnqueueResult> {
-  const { trackerDir, quiet, onPreEmitPending, onPreEmitFailed } = opts
+  const { trackerDir, quiet, onPreEmitPending, onPreEmitFailed, parentRunId } = opts
 
   if (inputs.length === 0) {
     throw new Error('ensureDaemonsAndEnqueue: inputs[] must not be empty')
@@ -261,6 +270,7 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
       idFn,
       trackerDir,
       runIds,
+      parentRunId ? inputs.map(() => parentRunId) : undefined,
     )
 
     if (!quiet) {
