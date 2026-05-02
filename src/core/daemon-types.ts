@@ -51,6 +51,15 @@ export type QueueEvent =
        * row at enqueue time without risking two rows per item.
        */
       runId?: string
+      /**
+       * Optional parent runId for delegation. When set, every TrackerEntry
+       * emitted for this item carries `parentRunId` so the dashboard can
+       * nest this row under its parent in the LogPanel "Delegated runs"
+       * section. Set by callers that enqueue a child run (e.g. OCR's
+       * approve handler when fanning out oath-signature children of an
+       * oath-upload parent).
+       */
+      parentRunId?: string
     }
   | {
       type: 'claim'
@@ -91,6 +100,8 @@ export interface QueueItem {
   completedAt?: string
   failedAt?: string
   runId?: string
+  /** Forwarded from the `enqueue` event for delegation parents. */
+  parentRunId?: string
   error?: string
 }
 
