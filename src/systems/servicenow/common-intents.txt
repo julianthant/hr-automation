@@ -1,0 +1,9 @@
+fill subject of HR inquiry form
+fill description of HR inquiry form
+pick "Specifically" topic on HR inquiry form
+pick "Category" on HR inquiry form
+attach file to HR inquiry form
+submit HR inquiry form
+verify on HR inquiry form
+log in to support.ucsd.edu via UCSD SSO + Duo
+read HR ticket number after submit
