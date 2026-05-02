@@ -72,6 +72,7 @@ export async function readQueueState(workflow: string, trackerDir?: string): Pro
         // time to pair with an onPreEmitPending callback). `claimNextItem`
         // reads this and reuses it in the claim event.
         runId: ev.runId,
+        ...(ev.parentRunId ? { parentRunId: ev.parentRunId } : {}),
       })
     } else if (ev.type === 'claim') {
       const existing = byId.get(ev.id)
@@ -136,6 +137,10 @@ export async function readQueueState(workflow: string, trackerDir?: string): Pro
  * `onPreEmitPending` callback BEFORE spawn — the same runId then rides
  * through to the queue file's enqueue event). Length must match `inputs`.
  * If omitted, one fresh UUID is generated per input (legacy behavior).
+ *
+ * `preAssignedParentRunIds`: parallel array; when set, each item's enqueue
+ * event carries that `parentRunId` for delegation children (e.g. OCR
+ * Approve fanning out oath-signature items that each reference the OCR run).
  */
 export async function enqueueItems<T>(
   workflow: string,
@@ -143,6 +148,7 @@ export async function enqueueItems<T>(
   idFn: (input: T, index: number) => string,
   trackerDir?: string,
   preAssignedRunIds?: ReadonlyArray<UUID>,
+  preAssignedParentRunIds?: ReadonlyArray<string | undefined>,
 ): Promise<Array<{ id: string; position: number; runId: UUID }>> {
   if (inputs.length === 0) return []
   if (preAssignedRunIds && preAssignedRunIds.length !== inputs.length) {
@@ -150,11 +156,17 @@ export async function enqueueItems<T>(
       `enqueueItems: preAssignedRunIds length ${preAssignedRunIds.length} does not match inputs length ${inputs.length}`,
     )
   }
+  if (preAssignedParentRunIds && preAssignedParentRunIds.length !== inputs.length) {
+    throw new Error(
+      `enqueueItems: preAssignedParentRunIds length ${preAssignedParentRunIds.length} does not match inputs length ${inputs.length}`,
+    )
+  }
   const enqueuedBy = `cli-${process.pid}`
   const assigned: Array<{ id: string; runId: UUID }> = []
   for (let i = 0; i < inputs.length; i++) {
     const id = idFn(inputs[i], i)
     const runId = preAssignedRunIds?.[i] ?? randomUUID()
+    const parentRunId = preAssignedParentRunIds?.[i]
     assigned.push({ id, runId })
     appendEvent(
       workflow,
@@ -166,6 +178,7 @@ export async function enqueueItems<T>(
         enqueuedAt: nowIso(),
         enqueuedBy,
         runId,
+        ...(parentRunId ? { parentRunId } : {}),
       },
       trackerDir,
     )
