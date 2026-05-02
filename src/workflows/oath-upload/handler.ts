@@ -90,7 +90,8 @@ export async function oathUploadHandler(
         pdfOriginalName: input.pdfOriginalName,
         formType: "oath",
         sessionId: ocrSessionId,
-        rosterMode: "download",
+        rosterMode: input.rosterMode,
+        rosterPath: input.rosterPath,
         parentRunId: ctx.runId,
       } as never).catch((err) =>
         log.warn(`[oath-upload] OCR child crashed: ${errorMessage(err)}`),

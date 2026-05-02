@@ -7,15 +7,6 @@ import {
   KeyRound,
   Loader2,
   Hourglass,
-  Users,
-  UserMinus,
-  Search,
-  Briefcase,
-  Phone,
-  ClipboardSignature,
-  FileText,
-  Workflow,
-  type LucideIcon,
 } from "lucide-react";
 import type { AuthState, WorkflowInstanceState } from "./types";
 import { formatStepName } from "./types";
@@ -23,21 +14,7 @@ import { useElapsed } from "./hooks/useElapsed";
 import { useTerminalDrawer } from "./hooks/useTerminalDrawer";
 import { useQueueDepth } from "./hooks/useQueueDepth";
 import { useWorkflow } from "../workflows-context";
-
-/* ----------------------------------------------------------------------
- * Workflow → lucide icon. Kept inline (not a shared registry) because
- * the rail uses category groups and doesn't render icons inline; the
- * drawer cards are the only consumer right now.
- * -------------------------------------------------------------------- */
-const WORKFLOW_ICON: Record<string, LucideIcon> = {
-  onboarding: Users,
-  separations: UserMinus,
-  "eid-lookup": Search,
-  "work-study": Briefcase,
-  "emergency-contact": Phone,
-  "oath-signature": ClipboardSignature,
-  "kronos-reports": FileText,
-};
+import { getWorkflowIcon } from "@/lib/workflow-icons";
 
 /* ----------------------------------------------------------------------
  * Auth-state visual tokens. Single source of truth for every system tile
@@ -324,9 +301,9 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
           ? "text-muted-foreground"
           : "text-[#60a5fa]";
 
-  // Workflow icon — same lucide set the user knows from the rail's
-  // category groupings, but instance-level here.
-  const Icon = workflowName ? WORKFLOW_ICON[workflowName] ?? Workflow : Workflow;
+  // Workflow icon — resolved from the registry's `iconName` declaration,
+  // with a generic `Workflow` fallback + console.warn for missing entries.
+  const Icon = getWorkflowIcon(meta?.iconName);
 
   // Queue depth for this workflow (per-workflow scope; shows aggregate
   // queue not just this daemon's slice — fine for at-a-glance signal).

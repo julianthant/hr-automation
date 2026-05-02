@@ -2,8 +2,7 @@ import { useState } from "react";
 import { Play } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RunModal } from "./RunModal";
-
-const RUN_ENABLED_WORKFLOWS = ["ocr", "emergency-contact"];
+import { isRunModalEnabled } from "@/lib/run-modal-registry";
 
 export interface TopBarRunButtonProps {
   activeWorkflow: string;
@@ -12,7 +11,7 @@ export interface TopBarRunButtonProps {
 
 export function TopBarRunButton({ activeWorkflow, busyCount = 0 }: TopBarRunButtonProps) {
   const [open, setOpen] = useState(false);
-  if (!RUN_ENABLED_WORKFLOWS.includes(activeWorkflow)) return null;
+  if (!isRunModalEnabled(activeWorkflow)) return null;
   return (
     <>
       <button

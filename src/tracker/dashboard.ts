@@ -3176,11 +3176,32 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       const pdfHash = createHash("sha256").update(file.data).digest("hex");
       const sessionId = mp.parsed.fields["sessionId"]?.trim() || undefined;
 
+      // Roster: modal sends `rosterMode`; if "existing", resolve the latest
+      // xlsx on disk to a `rosterPath` (same lookup as the capture flow).
+      const rosterMode = (mp.parsed.fields["rosterMode"]?.trim() ?? "download") as "existing" | "download";
+      let rosterPath: string | undefined;
+      if (rosterMode === "existing") {
+        const rosterDirs = [
+          resolve(process.cwd(), ".tracker/rosters"),
+          resolve(process.cwd(), "src/data"),
+        ];
+        const rosterDir = rosterDirs.find((d) => existsSync(d)) ?? rosterDirs[0];
+        try {
+          const { readdirSync } = await import("node:fs");
+          const files = readdirSync(rosterDir).filter((f) => f.endsWith(".xlsx"));
+          if (files.length > 0) {
+            rosterPath = resolve(rosterDir, files.sort().at(-1)!);
+          }
+        } catch { /* tolerate */ }
+      }
+
       const r = await oathUploadStartHandler({
         pdfPath,
         pdfOriginalName: file.filename ?? "upload.pdf",
         pdfHash,
         sessionId,
+        rosterMode,
+        rosterPath,
       });
       writeJson(r.status, r.body);
       return;

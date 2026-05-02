@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { useWorkflows, autoLabel } from "../workflows-context";
+import { useWorkflows, autoLabel, type WorkflowMetadata } from "../workflows-context";
 import { useQueueDepth } from "./hooks/useQueueDepth";
 
 interface WorkflowRailProps {
@@ -17,22 +17,23 @@ interface Group {
 }
 
 /**
- * Display groups + ordering for the rail. Source of truth for what shows
- * in the panel and in what order — both within a group (member order) and
- * between groups (array order). New workflows that aren't in any `members`
- * list automatically fall into a final "Other" group so a missing entry
- * here doesn't hide a workflow.
+ * Preferred display order for category groups in the rail. Categories not
+ * listed here are appended in the order they're first seen. Members within
+ * each group preserve their order of registration in `useWorkflows()`.
+ *
+ * Workflows that omit `category` in `defineWorkflow` fall into the trailing
+ * "Other" group automatically, so a missing declaration never hides a
+ * workflow — just downgrades its placement.
  */
-const GROUPS: Group[] = [
-  {
-    label: "Onboarding",
-    members: ["onboarding", "emergency-contact", "oath-signature"],
-  },
-  { label: "Separations", members: ["separations"] },
-  { label: "Work Study", members: ["work-study"] },
-  { label: "Timekeeping", members: ["kronos-reports"] },
-  { label: "Utils", members: ["ocr", "eid-lookup", "sharepoint-download"] },
+const PREFERRED_CATEGORY_ORDER: readonly string[] = [
+  "Onboarding",
+  "Separations",
+  "Work Study",
+  "Timekeeping",
+  "Utils",
 ];
+
+const OTHER_GROUP = "Other";
 
 /**
  * Vertical workflow selector — Variant C ("Status") with category groupings.
@@ -56,14 +57,7 @@ export function WorkflowRail({
     registered.find((r) => r.name === wf)?.label ?? autoLabel(wf);
 
   const displayGroups = useMemo<Group[]>(() => {
-    const knownMembers = new Set(GROUPS.flatMap((g) => g.members));
-    const seen = new Set<string>();
-    for (const r of registered) seen.add(r.name);
-    for (const w of workflows) seen.add(w);
-    const extras: string[] = [];
-    for (const wf of seen) if (!knownMembers.has(wf)) extras.push(wf);
-    if (extras.length === 0) return GROUPS;
-    return [...GROUPS, { label: "Other", members: extras }];
+    return computeDisplayGroups({ registered, seen: workflows });
   }, [registered, workflows]);
 
   return (
@@ -151,4 +145,64 @@ export function WorkflowRail({
       </div>
     </nav>
   );
+}
+
+/**
+ * Build the rendered group list from the registry + the SSE-discovered set.
+ * Pure helper, exported indirectly via tests if ever needed.
+ *
+ * - Each registered workflow's `category` (declared in `defineWorkflow`) bins
+ *   it into a group; missing categories bin into "Other".
+ * - SSE-discovered workflows that aren't in the registry yet (race during
+ *   first paint) also bin into "Other" so they never disappear.
+ * - Group order: every entry in `PREFERRED_CATEGORY_ORDER` (including those
+ *   with zero members today, dropped at render), followed by any newly-seen
+ *   categories in first-seen order, with "Other" always last.
+ * - Member order within a group: registration order from `useWorkflows()`,
+ *   then any SSE-only names appended at the end.
+ */
+function computeDisplayGroups(args: {
+  registered: WorkflowMetadata[];
+  seen: string[];
+}): Group[] {
+  const { registered, seen } = args;
+  const byCategory = new Map<string, string[]>();
+  const sawOrder: string[] = [];
+
+  const ensure = (cat: string): string[] => {
+    let arr = byCategory.get(cat);
+    if (!arr) {
+      arr = [];
+      byCategory.set(cat, arr);
+      sawOrder.push(cat);
+    }
+    return arr;
+  };
+
+  for (const r of registered) {
+    const cat = r.category ?? OTHER_GROUP;
+    ensure(cat).push(r.name);
+  }
+
+  const inRegistry = new Set(registered.map((r) => r.name));
+  for (const name of seen) {
+    if (inRegistry.has(name)) continue;
+    ensure(OTHER_GROUP).push(name);
+  }
+
+  const orderedCats: string[] = [];
+  for (const cat of PREFERRED_CATEGORY_ORDER) {
+    if (byCategory.has(cat)) orderedCats.push(cat);
+  }
+  for (const cat of sawOrder) {
+    if (cat === OTHER_GROUP) continue;
+    if (PREFERRED_CATEGORY_ORDER.includes(cat)) continue;
+    orderedCats.push(cat);
+  }
+  if (byCategory.has(OTHER_GROUP)) orderedCats.push(OTHER_GROUP);
+
+  return orderedCats.map((label) => ({
+    label,
+    members: byCategory.get(label) ?? [],
+  }));
 }

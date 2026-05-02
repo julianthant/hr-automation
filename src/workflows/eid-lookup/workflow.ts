@@ -238,6 +238,8 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
 export const eidLookupCrmWorkflow = defineWorkflow({
   name: "eid-lookup",
   label: "EID Lookup",
+  category: "Utils",
+  iconName: "Search",
   systems: [
     {
       id: "ucpath",

@@ -59,6 +59,8 @@ function recordItemId(r: EmergencyContactRecord): string {
 export const emergencyContactWorkflow = defineWorkflow({
   name: WORKFLOW,
   label: "Emergency Contact",
+  category: "Onboarding",
+  iconName: "Phone",
   systems: [
     {
       id: "ucpath",

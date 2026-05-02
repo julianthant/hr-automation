@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import { PdfPagePreview } from "../PdfPagePreview";
 
 export interface PrepReviewPairProps {
-  workflow: "emergency-contact" | "oath-signature";
+  /** Workflow name passed through to the PdfPagePreview backend route. */
+  workflow: string;
   parentRunId: string;
   page: number;
   formCard: ReactNode;

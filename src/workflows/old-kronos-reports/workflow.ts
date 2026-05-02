@@ -291,6 +291,8 @@ async function validateAndRecordTracker(
 export const kronosReportsWorkflow = defineWorkflow({
   name: "kronos-reports",
   label: "Kronos Reports",
+  category: "Timekeeping",
+  iconName: "FileText",
   systems: [
     {
       id: "old-kronos",

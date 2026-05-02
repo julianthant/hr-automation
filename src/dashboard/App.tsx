@@ -12,7 +12,7 @@ import { usePreflight } from "./components/hooks/usePreflight";
 import { useTelegramToasts } from "./components/hooks/useTelegramToasts";
 import { useCaptureToasts } from "./components/hooks/useCaptureToasts";
 import { resolveActionToastsForEntry } from "./components/hooks/useActionToasts";
-import { useWorkflow, autoLabel } from "./workflows-context";
+import { useWorkflow, useWorkflows, autoLabel } from "./workflows-context";
 import { resolveEntryName } from "./components/entry-display";
 import type { SearchResultRow, PreviewInboxRow, FailureRow } from "./components/types";
 import { WorkflowRail } from "./components/WorkflowRail";
@@ -24,11 +24,16 @@ import { parsePrepareRowData, isResolvedPrepRow } from "./components/ocr/types";
 import { RunModal } from "./components/RunModal";
 import { dateLocal } from "./lib/utils";
 
+/** Default workflow when ?wf= is missing or unknown. Must always exist
+ *  in the registry; if it doesn't, we fall through to the first registered
+ *  workflow so the dashboard never lands on an empty pane. */
+const DEFAULT_WORKFLOW = "onboarding";
+
 /** Read initial state from URL search params so refresh preserves selection */
 function readUrlState() {
   const params = new URLSearchParams(window.location.search);
   return {
-    workflow: params.get("wf") || "onboarding",
+    workflow: params.get("wf") || DEFAULT_WORKFLOW,
     selectedId: params.get("id") || null,
     date: params.get("date") || dateLocal(),
   };
@@ -66,6 +71,34 @@ export default function App() {
   usePreflight();
   useTelegramToasts();
   useCaptureToasts();
+
+  // Fail-loud on unknown workflow in `?wf=`. Once the registry has loaded,
+  // if the URL workflow isn't a known name, warn and reset to the default
+  // (or to the first registered workflow if the default itself is missing).
+  // A loaded registry is signalled by `registered.length > 0` — the
+  // provider blocks render until /api/workflow-definitions returns, so
+  // an empty array would mean "intentionally none registered."
+  const registered = useWorkflows();
+  useEffect(() => {
+    if (registered.length === 0) return;
+    const known = registered.some((r) => r.name === workflow);
+    if (known) return;
+    const fallback =
+      registered.find((r) => r.name === DEFAULT_WORKFLOW)?.name ??
+      registered[0]?.name;
+    if (!fallback || fallback === workflow) return;
+    console.warn(
+      `[dashboard] Unknown workflow "${workflow}" in ?wf= URL param. ` +
+        `Falling back to "${fallback}". Known workflows: ${registered
+          .map((r) => r.name)
+          .join(", ")}.`,
+    );
+    toast.warning(`Unknown workflow "${workflow}"`, {
+      description: `URL ?wf= didn't match any registered workflow. Showing ${fallback}.`,
+      duration: 6000,
+    });
+    setWorkflow(fallback);
+  }, [registered, workflow]);
 
   // Sync state to URL so refresh preserves selection
   useEffect(() => {

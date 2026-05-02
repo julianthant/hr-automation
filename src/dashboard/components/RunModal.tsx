@@ -10,17 +10,26 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { OathUploadRunModal } from "./oath-upload";
+import { DuplicateBanner } from "./oath-upload";
+import type { PriorRunSummary } from "./types";
+import { getRunModalConfig, type RunModalSubmitResponse } from "@/lib/run-modal-registry";
+
+async function sha256OfFile(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  const hashBuf = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(hashBuf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
 
 /**
- * Modal for the emergency-contact "Run" flow. Two inputs:
- *   1. PDF (drag-drop or click-to-browse)
- *   2. Roster mode — use latest local roster, or download a fresh one.
+ * File-upload "Run" modal — drives every workflow whose Run affordance
+ * uploads a PDF (emergency-contact, ocr, oath-upload as of writing).
  *
- * On submit: POST multipart/form-data to /api/emergency-contact/prepare,
- * which fire-and-forgets `runPrepare` and returns `{ok, parentRunId}`.
- * The dashboard's normal SSE loop picks up the prep tracker row and the
- * QueuePanel renders it via PreviewRow.
+ * Per-workflow behavior (title, description, submit URL, which sections
+ * to render, success-toast shape) is declared in
+ * `src/dashboard/lib/run-modal-registry.ts`. Adding a new file-upload
+ * workflow needs only an entry there — this component does not change.
  */
 interface RosterListing {
   filename: string;
@@ -39,18 +48,24 @@ interface FormTypeOption {
 interface RunModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Active workflow — determines submit endpoint + shows form-type picker for OCR. */
-  workflow?: string;
+  /** Active workflow — must be a key of `RUN_MODAL_REGISTRY`. */
+  workflow: string;
   /** When set, the modal is in "reupload" mode for the given session. */
   reuploadFor?: { sessionId: string; previousRunId: string };
+  /**
+   * When set with `workflow="ocr"`: pre-selects the formType, hides the
+   * form-type chooser, and skips the `/api/ocr/forms` fetch. Used by the
+   * oath-signature QuickRunPanel to open the modal preset to oath.
+   */
+  lockedFormType?: string;
 }
 
-export function RunModal({ open, onOpenChange, workflow = "emergency-contact", reuploadFor }: RunModalProps) {
-  // Workflow-specific dispatch. oath-upload has its own minimal modal
-  // (PDF + duplicate banner only — no form-type chooser, no roster mode).
-  if (workflow === "oath-upload") {
-    return <OathUploadRunModal open={open} onOpenChange={onOpenChange} />;
-  }
+export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedFormType }: RunModalProps) {
+  const config = getRunModalConfig(workflow);
+  const showRoster = config?.sections.roster ?? false;
+  const showFormType = config?.sections.formType ?? false;
+  const showDuplicateCheck = config?.sections.duplicateCheck ?? false;
+  const ctx = { reuploadFor, lockedFormType };
 
   const [file, setFile] = useState<File | null>(null);
   const [pageCount, setPageCount] = useState<number | null>(null);
@@ -59,8 +74,13 @@ export function RunModal({ open, onOpenChange, workflow = "emergency-contact", r
   const [submitting, setSubmitting] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [formType, setFormType] = useState<string | null>(null);
+  const [formType, setFormType] = useState<string | null>(lockedFormType ?? null);
   const [formOptions, setFormOptions] = useState<FormTypeOption[]>([]);
+  const [priorRuns, setPriorRuns] = useState<PriorRunSummary[]>([]);
+
+  useEffect(() => {
+    if (open && lockedFormType) setFormType(lockedFormType);
+  }, [open, lockedFormType]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropRef = useRef<HTMLLabelElement>(null);
 
@@ -88,11 +108,11 @@ export function RunModal({ open, onOpenChange, workflow = "emergency-contact", r
     };
   }, [file]);
 
-  // Fetch rosters on open. Refresh every time the modal opens so a
-  // SharePoint download that finished while the modal was closed is
-  // reflected.
+  // Fetch rosters on open for workflows that opt into the roster section.
+  // Refresh every time the modal opens so a SharePoint download that
+  // finished while the modal was closed is reflected.
   useEffect(() => {
-    if (!open) return;
+    if (!open || !showRoster) return;
     let cancelled = false;
     (async () => {
       try {
@@ -103,7 +123,7 @@ export function RunModal({ open, onOpenChange, workflow = "emergency-contact", r
         setRosters(data);
         // Auto-flip to download if no roster is on disk.
         if (data.length === 0) setRosterMode("download");
-      } catch (err) {
+      } catch {
         if (!cancelled) {
           setRosters([]);
           setRosterMode("download");
@@ -113,11 +133,46 @@ export function RunModal({ open, onOpenChange, workflow = "emergency-contact", r
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, showRoster]);
 
-  // Fetch form types when modal opens for OCR.
+  // Duplicate-check effect — hash the PDF and ask the server whether
+  // we've seen it before. Best-effort: failures surface as an inline error
+  // but don't block submit (the operator may genuinely want to re-run).
   useEffect(() => {
-    if (!open || workflow !== "ocr") return;
+    if (!showDuplicateCheck || !file) {
+      setPriorRuns([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const hash = await sha256OfFile(file);
+        const r = await fetch(
+          `/api/oath-upload/check-duplicate?hash=${encodeURIComponent(hash)}`,
+        );
+        const j = (await r.json()) as
+          | { ok: true; priorRuns: PriorRunSummary[] }
+          | { ok: false; error: string };
+        if (cancelled) return;
+        if (j.ok) setPriorRuns(j.priorRuns ?? []);
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            `Duplicate check failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [file, showDuplicateCheck]);
+
+  // Fetch form types when modal opens for workflows that show the
+  // form-type picker. Skip when lockedFormType is set — caller already
+  // picked it.
+  useEffect(() => {
+    if (!open || !showFormType || lockedFormType) return;
     let cancelled = false;
     fetch("/api/ocr/forms")
       .then(async (r) => {
@@ -130,7 +185,7 @@ export function RunModal({ open, onOpenChange, workflow = "emergency-contact", r
       })
       .catch(() => {/* tolerate */});
     return () => { cancelled = true; };
-  }, [open, workflow]);
+  }, [open, showFormType, lockedFormType]);
 
   // Reset form state on close.
   useEffect(() => {
@@ -140,7 +195,15 @@ export function RunModal({ open, onOpenChange, workflow = "emergency-contact", r
     setSubmitting(false);
     setProgress(null);
     setError(null);
+    setPriorRuns([]);
   }, [open]);
+
+  if (!config) {
+    if (open && typeof console !== "undefined") {
+      console.error(`RunModal: unknown workflow "${workflow}" — register it in run-modal-registry.ts.`);
+    }
+    return null;
+  }
 
   function handleFileSelect(picked: File | null): void {
     setError(null);
@@ -165,33 +228,27 @@ export function RunModal({ open, onOpenChange, workflow = "emergency-contact", r
   }
 
   async function handleSubmit(): Promise<void> {
-    if (!file || submitting) return;
-    if (workflow === "ocr" && !formType) return;
+    if (!config || !file || submitting) return;
+    if (showFormType && !formType) return;
     setSubmitting(true);
     setProgress(0);
     setError(null);
 
     const fd = new FormData();
     fd.append("pdf", file, file.name);
-    fd.append("rosterMode", rosterMode);
-    if (workflow === "ocr" && formType) fd.append("formType", formType);
+    if (showRoster) fd.append("rosterMode", rosterMode);
+    if (showFormType && formType) fd.append("formType", formType);
     if (reuploadFor) {
       fd.append("sessionId", reuploadFor.sessionId);
       fd.append("previousRunId", reuploadFor.previousRunId);
     }
 
-    // Determine submit URL.
-    let submitUrl: string;
-    if (workflow === "ocr") {
-      submitUrl = reuploadFor ? "/api/ocr/reupload" : "/api/ocr/prepare";
-    } else {
-      submitUrl = "/api/emergency-contact/prepare";
-    }
+    const submitUrl = config.submitUrl(ctx);
 
     // Use XHR so we get progress events. Fetch's upload progress is still
     // not widely supported across browsers as of 2026.
     try {
-      const result = await new Promise<{ ok: boolean; parentRunId?: string; sessionId?: string; runId?: string; error?: string }>(
+      const result = await new Promise<RunModalSubmitResponse>(
         (resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open("POST", submitUrl);
@@ -202,11 +259,7 @@ export function RunModal({ open, onOpenChange, workflow = "emergency-contact", r
           });
           xhr.addEventListener("load", () => {
             try {
-              const body = JSON.parse(xhr.responseText) as {
-                ok: boolean;
-                parentRunId?: string;
-                error?: string;
-              };
+              const body = JSON.parse(xhr.responseText) as RunModalSubmitResponse;
               resolve(body);
             } catch {
               reject(new Error(`Server returned non-JSON (status ${xhr.status})`));
@@ -223,9 +276,8 @@ export function RunModal({ open, onOpenChange, workflow = "emergency-contact", r
         setSubmitting(false);
         return;
       }
-      toast.success("Preparation started", {
-        description: file.name,
-      });
+      const t = config.buildSuccessToast(result, file);
+      toast.success(t.title, t.description ? { description: t.description } : undefined);
       onOpenChange(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -258,12 +310,10 @@ export function RunModal({ open, onOpenChange, workflow = "emergency-contact", r
         <DialogHeader className="relative grid gap-3 px-[38px] pt-[36px] pb-0 space-y-0 border-b-0">
           <div className="flex flex-col gap-1.5" style={{ maxWidth: 360 }}>
             <DialogTitle className="text-[15px] font-normal tracking-[-0.005em]">
-              {workflow === "ocr" ? "OCR — Prepare" : "Run Emergency Contact"}
+              {config.title(ctx)}
             </DialogTitle>
             <DialogDescription className="text-[12px] leading-[1.55] text-muted-foreground">
-              {reuploadFor
-                ? "Upload a corrected PDF — resolved EIDs from the previous run carry forward."
-                : "Upload a scanned PDF. We’ll OCR it, match against the roster, then approve before queuing."}
+              {config.description(ctx)}
             </DialogDescription>
           </div>
           <button
@@ -285,7 +335,7 @@ export function RunModal({ open, onOpenChange, workflow = "emergency-contact", r
         </DialogHeader>
 
         <div className="px-[38px] pt-[24px] pb-0 space-y-6">
-          {workflow === "ocr" && !reuploadFor && formOptions.length > 0 && (
+          {showFormType && !lockedFormType && !reuploadFor && formOptions.length > 0 && (
             <section>
               <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground/70">
                 Form type
@@ -326,32 +376,38 @@ export function RunModal({ open, onOpenChange, workflow = "emergency-contact", r
             )}
           </section>
 
-          <section>
-            <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-1 text-muted-foreground/70">
-              Roster
-            </div>
-            <div>
-              <RosterRow
-                checked={rosterMode === "existing"}
-                disabled={!hasRoster || submitting}
-                onSelect={() => setRosterMode("existing")}
-                label="Use latest roster"
-                hint={
-                  hasRoster && latestRoster
-                    ? `Latest: ${latestRoster.filename} · ${formatBytes(latestRoster.bytes)}`
-                    : "No roster on disk — pick the other option to fetch one."
-                }
-              />
-              <RosterRow
-                checked={rosterMode === "download"}
-                disabled={submitting}
-                onSelect={() => setRosterMode("download")}
-                label="Download fresh from SharePoint"
-                hint="The OCR orchestrator will handle the download automatically."
-                last
-              />
-            </div>
-          </section>
+          {showRoster && (
+            <section>
+              <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-1 text-muted-foreground/70">
+                Roster
+              </div>
+              <div>
+                <RosterRow
+                  checked={rosterMode === "existing"}
+                  disabled={!hasRoster || submitting}
+                  onSelect={() => setRosterMode("existing")}
+                  label="Use latest roster"
+                  hint={
+                    hasRoster && latestRoster
+                      ? `Latest: ${latestRoster.filename} · ${formatBytes(latestRoster.bytes)}`
+                      : "No roster on disk — pick the other option to fetch one."
+                  }
+                />
+                <RosterRow
+                  checked={rosterMode === "download"}
+                  disabled={submitting}
+                  onSelect={() => setRosterMode("download")}
+                  label="Download fresh from SharePoint"
+                  hint="The OCR orchestrator will handle the download automatically."
+                  last
+                />
+              </div>
+            </section>
+          )}
+
+          {showDuplicateCheck && priorRuns.length > 0 && (
+            <DuplicateBanner priorRuns={priorRuns} />
+          )}
 
           {error && (
             <div

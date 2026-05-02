@@ -11,6 +11,8 @@ const WORKFLOW = "oath-upload";
 export const oathUploadWorkflow = defineWorkflow({
   name: WORKFLOW,
   label: "Oath Upload",
+  category: "Onboarding",
+  iconName: "UploadCloud",
   systems: [
     {
       id: "servicenow",

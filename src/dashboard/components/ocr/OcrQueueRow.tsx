@@ -12,8 +12,10 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "../types";
-import { parsePrepareRowData } from "./types";
-import { parseOathPrepareRowData } from "./types";
+import {
+  getOcrDownstream,
+  hasOcrDownstream,
+} from "@/lib/ocr-downstream-registry";
 
 /**
  * Unified bento prep row for the QueuePanel. Replaces the separate
@@ -54,14 +56,15 @@ interface DerivedState {
 }
 
 export function OcrQueueRow({ entry, isReviewing, onOpenReview, onReupload }: OcrQueueRowProps) {
-  const isOath = entry.workflow === "oath-signature";
-  const data = isOath
-    ? parseOathPrepareRowData(entry.data)
-    : parsePrepareRowData(entry.data);
+  const cfg = hasOcrDownstream(entry.workflow)
+    ? getOcrDownstream(entry.workflow)
+    : null;
+  const data = cfg?.parseRow(entry.data) ?? null;
   const [discarding, setDiscarding] = useState(false);
 
-  if (!data) return null;
+  if (!cfg || !data) return null;
   const runId = entry.runId ?? entry.id;
+  const sessionId = entry.id;
   const state = deriveState(entry, isReviewing);
 
   const recordCount = data.records.length;
@@ -88,13 +91,10 @@ export function OcrQueueRow({ entry, isReviewing, onOpenReview, onReupload }: Oc
   });
 
   async function handleDiscard(): Promise<void> {
-    if (discarding) return;
+    if (discarding || !cfg) return;
     setDiscarding(true);
-    const url = isOath
-      ? "/api/oath-signature/discard-prepare"
-      : "/api/emergency-contact/discard-prepare";
     try {
-      const resp = await fetch(url, {
+      const resp = await fetch(cfg.discardUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ parentRunId: runId, reason: "User clicked discard" }),
@@ -108,8 +108,7 @@ export function OcrQueueRow({ entry, isReviewing, onOpenReview, onReupload }: Oc
         return;
       }
       toast.success("Discarded prep row");
-      const key = isOath ? `oath-prep-edits:${runId}` : `ec-prep-edits:${runId}`;
-      window.localStorage.removeItem(key);
+      window.localStorage.removeItem(cfg.editsKey({ sessionId, runId }));
     } catch (err) {
       toast.error("Couldn't discard prep row", {
         description: err instanceof Error ? err.message : "Network error",

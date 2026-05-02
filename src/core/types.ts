@@ -93,6 +93,23 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   version?: string
   /** Human-readable workflow label for the dashboard (e.g. "Onboarding"). */
   label?: string
+  /**
+   * Display category for the dashboard's `WorkflowRail` grouping
+   * (e.g. "Onboarding", "Separations", "Utils"). Workflows with the same
+   * category render under one group header. Workflows that omit this field
+   * fall into the rail's "Other" group. The rail orders categories via a
+   * frontend-side preferred-order list (alphabetical for unknowns), so adding
+   * a new category here is a one-line declaration with no rail edits required.
+   */
+  category?: string
+  /**
+   * Lucide-react icon name (e.g. "Users", "UserMinus", "Search") for the
+   * dashboard's `WorkflowBox` session card. Resolved against a small static
+   * import map on the frontend; missing names fall back to the generic
+   * `Workflow` icon and log a `console.warn` in dev. Adding a workflow with
+   * an unfamiliar icon requires one entry in `lib/workflow-icons.ts`.
+   */
+  iconName?: string
   systems: SystemConfig[]
   steps: TSteps
   schema: ZodType<TData>
@@ -230,6 +247,10 @@ export interface WorkflowMetadata {
   name: string
   /** Human-readable workflow label for the dashboard (auto-derived from `name` when absent). */
   label: string
+  /** Dashboard-rail grouping (e.g. "Onboarding"). Absent → workflow lands in the rail's "Other" group. */
+  category?: string
+  /** Lucide-react icon name for `WorkflowBox`. Absent → frontend falls back to the generic `Workflow` icon. */
+  iconName?: string
   steps: readonly string[]
   systems: string[]
   /**

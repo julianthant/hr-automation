@@ -12,15 +12,11 @@ import {
 } from "@/components/ui/dialog";
 import type { TrackerEntry } from "../types";
 import {
-  parsePrepareRowData,
   type PreviewRecord,
   type Verification,
   type FailedPage,
 } from "./types";
-import {
-  parseOathPrepareRowData,
-  type OathPreviewRecord,
-} from "./types";
+import { type OathPreviewRecord } from "./types";
 import { FailedPageCard } from "./FailedPageCard";
 import { PrepReviewPair } from "./PrepReviewPair";
 import { PrepReviewMultiPair } from "./PrepReviewMultiPair";
@@ -28,6 +24,13 @@ import { PrepReviewFormCard } from "./PrepReviewFormCard";
 import { EcRecordView } from "./EcRecordView";
 import { OathRecordView } from "./OathRecordView";
 import { usePrepCursor } from "../hooks/usePrepCursor";
+import {
+  getOcrDownstream,
+  hasOcrDownstream,
+  setOcrDownstreamRenderer,
+  type AnyOcrPreviewRecord,
+  type OcrDownstreamConfig as OcrDownstreamConfigType,
+} from "@/lib/ocr-downstream-registry";
 import { cn } from "@/lib/utils";
 
 export interface OcrReviewPaneProps {
@@ -35,7 +38,29 @@ export interface OcrReviewPaneProps {
   onClose: () => void;
 }
 
-type AnyPreviewRecord = PreviewRecord | OathPreviewRecord;
+type AnyPreviewRecord = AnyOcrPreviewRecord;
+
+// Wire the per-record editor renderers into the registry once at module
+// load. Done here (not in the registry file) so the registry stays a plain
+// `.ts` and avoids a circular dep on `components/ocr/`.
+setOcrDownstreamRenderer("ocr", ({ record, onChange }) => (
+  <EcRecordView
+    record={record as PreviewRecord}
+    onChange={(next) => onChange(next)}
+  />
+));
+setOcrDownstreamRenderer("emergency-contact", ({ record, onChange }) => (
+  <EcRecordView
+    record={record as PreviewRecord}
+    onChange={(next) => onChange(next)}
+  />
+));
+setOcrDownstreamRenderer("oath-signature", ({ record, onChange }) => (
+  <OathRecordView
+    record={record as OathPreviewRecord}
+    onChange={(next) => onChange(next)}
+  />
+));
 
 /**
  * Replaces the LogPanel for the active prep row. Owns the header
@@ -47,19 +72,17 @@ type AnyPreviewRecord = PreviewRecord | OathPreviewRecord;
  * entry) preserves localStorage edits — Approve / Discard clear them.
  */
 export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
-  const isOath = entry.workflow === "oath-signature";
   const sessionId = entry.id;
   const runId = entry.runId ?? entry.id;
+  const cfg = hasOcrDownstream(entry.workflow)
+    ? getOcrDownstream(entry.workflow)
+    : null;
   const data = useMemo(
-    () => (isOath ? parseOathPrepareRowData(entry.data) : parsePrepareRowData(entry.data)),
-    [entry.data, isOath],
+    () => cfg?.parseRow(entry.data) ?? null,
+    [entry.data, cfg],
   );
   const baseRecords = useMemo(() => data?.records ?? [], [data]);
-  // OCR workflow uses session-scoped key (persists across reuploads).
-  // Legacy EC/oath-signature prep rows keep their runId-scoped keys.
-  const storageKey = entry.workflow === "ocr"
-    ? `ocr-edits:${entry.id}`
-    : (isOath ? `oath-prep-edits:${runId}` : `ec-prep-edits:${runId}`);
+  const storageKey = cfg ? cfg.editsKey({ sessionId, runId }) : "";
 
   const [localEdits, setLocalEdits] = useState<Record<number, AnyPreviewRecord>>(
     () => {
@@ -96,10 +119,10 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
     setLocalEdits((prev) => ({ ...prev, [index]: next }));
   };
 
+  const cursorKey = cfg ? cfg.cursorKey({ sessionId, runId }) : "";
   const { containerRef, onPairVisible, clear: clearCursor } = usePrepCursor({
-    workflow: entry.workflow as "emergency-contact" | "oath-signature",
-    runId,
-    enabled: true,
+    storageKey: cursorKey,
+    enabled: cfg !== null,
     recordCount: records.length,
   });
 
@@ -184,13 +207,10 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
   }
 
   async function handleApprove() {
-    if (submitting) return;
+    if (submitting || !cfg) return;
     setSubmitting(true);
-    const approveUrl = isOath
-      ? "/api/oath-signature/approve-batch"
-      : "/api/emergency-contact/approve-batch";
     try {
-      const resp = await fetch(approveUrl, {
+      const resp = await fetch(cfg.approveUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ parentRunId: runId, records }),
@@ -217,6 +237,13 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
     }
   }
 
+  if (!cfg) {
+    return (
+      <div className="flex flex-1 items-center justify-center text-muted-foreground">
+        No OCR review config registered for workflow="{entry.workflow}".
+      </div>
+    );
+  }
   if (!data) {
     return (
       <div className="flex flex-1 items-center justify-center text-muted-foreground">
@@ -275,8 +302,8 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
         </div>
       </div>
 
-      {/* Force-research toolbar (only for OCR workflow) */}
-      {entry.workflow === "ocr" && (
+      {/* Force-research toolbar (registry-gated; OCR is the only workflow that opts in today). */}
+      {cfg.supportsForceResearch && (
         <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border/60 bg-secondary/10">
           <button
             type="button"
@@ -318,12 +345,12 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
                 data-pair-index={originalIndex}
               >
                 <PrepReviewPair
-                  workflow={entry.workflow as "emergency-contact" | "oath-signature"}
+                  workflow={entry.workflow}
                   parentRunId={runId}
                   page={page}
                   formCard={renderFormCard({
                     record,
-                    isOath,
+                    cfg,
                     totalPages,
                     onChange: (next) => setRecord(originalIndex, next),
                   })}
@@ -339,7 +366,7 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
             >
               {renderFormCard({
                 record,
-                isOath,
+                cfg,
                 totalPages,
                 rowOnPage: rowIdx + 1,
                 totalRowsOnPage: group.length,
@@ -350,7 +377,7 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
           return (
             <PrepReviewMultiPair
               key={page}
-              workflow={entry.workflow as "emergency-contact" | "oath-signature"}
+              workflow={entry.workflow}
               parentRunId={runId}
               page={page}
               formCards={cards}
@@ -465,7 +492,7 @@ function describeSummary(records: AnyPreviewRecord[], failedPageCount = 0): stri
 
 function renderFormCard(args: {
   record: AnyPreviewRecord;
-  isOath: boolean;
+  cfg: OcrDownstreamConfigType;
   totalPages: number;
   rowOnPage?: number;
   totalRowsOnPage?: number;
@@ -476,9 +503,7 @@ function renderFormCard(args: {
   const pageLocation = args.totalRowsOnPage
     ? `Page ${sourcePage} of ${args.totalPages}, Row ${args.rowOnPage} of ${args.totalRowsOnPage} in pile`
     : `Page ${sourcePage} of ${args.totalPages} in pile`;
-  const recordName = args.isOath
-    ? (r as OathPreviewRecord).printedName || "(no name)"
-    : (r as PreviewRecord).employee.name || "(no name)";
+  const recordName = args.cfg.recordName(r);
 
   const matchStateBadge = (
     <span className="rounded-md border border-border bg-secondary px-1.5 py-px font-mono text-[10px] uppercase">
@@ -502,7 +527,7 @@ function renderFormCard(args: {
     r.verification && r.verification.state !== "verified"
       ? renderVerificationBanner(r.verification)
       : undefined;
-  const signatureBanner = renderOathSignatureBanner(r, args.isOath);
+  const signatureBanner = renderOathSignatureBanner(r, args.cfg.hasSignature);
 
   return (
     <PrepReviewFormCard
@@ -510,7 +535,7 @@ function renderFormCard(args: {
       recordName={recordName}
       matchStateBadge={matchStateBadge}
       verificationBadge={verificationBadge}
-      signatureBadge={renderSignatureBadge(r, args.isOath)}
+      signatureBadge={renderSignatureBadge(r, args.cfg.hasSignature)}
       documentTypeBadge={
         isUnknown ? (
           <span className="rounded-md border border-destructive/40 bg-destructive/10 px-1.5 py-px font-mono text-[10px] uppercase text-destructive">
@@ -528,17 +553,10 @@ function renderFormCard(args: {
         args.onChange({ ...r, selected: next } as AnyPreviewRecord)
       }
     >
-      {args.isOath ? (
-        <OathRecordView
-          record={r as OathPreviewRecord}
-          onChange={(next) => args.onChange(next)}
-        />
-      ) : (
-        <EcRecordView
-          record={r as PreviewRecord}
-          onChange={(next) => args.onChange(next)}
-        />
-      )}
+      {args.cfg.renderEditor({
+        record: r,
+        onChange: (next) => args.onChange(next),
+      })}
     </PrepReviewFormCard>
   );
 }
@@ -601,8 +619,8 @@ function renderVerificationBanner(v: Verification): ReactNode {
   );
 }
 
-function renderSignatureBadge(r: AnyPreviewRecord, isOath: boolean): ReactNode {
-  if (!isOath) return undefined;
+function renderSignatureBadge(r: AnyPreviewRecord, hasSignature: boolean): ReactNode {
+  if (!hasSignature) return undefined;
   const oath = r as OathPreviewRecord;
   if (oath.employeeSigned === false) {
     return (
@@ -623,9 +641,9 @@ function renderSignatureBadge(r: AnyPreviewRecord, isOath: boolean): ReactNode {
 
 function renderOathSignatureBanner(
   r: AnyPreviewRecord,
-  isOath: boolean,
+  hasSignature: boolean,
 ): ReactNode {
-  if (!isOath) return undefined;
+  if (!hasSignature) return undefined;
   const oath = r as OathPreviewRecord;
   if (oath.employeeSigned === false) {
     return <span>Signature missing — employee did not sign.</span>;

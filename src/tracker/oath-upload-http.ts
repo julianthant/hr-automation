@@ -61,6 +61,10 @@ export interface StartInput {
   pdfOriginalName: string;
   pdfHash: string;
   sessionId?: string;
+  /** Roster source for the delegated OCR step. Defaults to "download". */
+  rosterMode?: "existing" | "download";
+  /** Required when `rosterMode === "existing"`. Resolved by the route from disk. */
+  rosterPath?: string;
 }
 export interface StartResponse {
   status: 202 | 400 | 500;
@@ -94,6 +98,13 @@ export function buildOathUploadStartHandler(
     if (!/^[0-9a-f]{64}$/.test(input.pdfHash ?? "")) {
       return { status: 400, body: { ok: false, error: "invalid pdfHash" } };
     }
+    const rosterMode = input.rosterMode ?? "download";
+    if (rosterMode === "existing" && !input.rosterPath) {
+      return {
+        status: 400,
+        body: { ok: false, error: 'rosterMode="existing" requires rosterPath' },
+      };
+    }
     const sessionId = input.sessionId ?? randomUUID();
     void runCli([
       {
@@ -101,6 +112,8 @@ export function buildOathUploadStartHandler(
         pdfOriginalName: input.pdfOriginalName,
         sessionId,
         pdfHash: input.pdfHash,
+        rosterMode,
+        rosterPath: input.rosterPath,
       },
     ]).catch((err) =>
       log.error(`[oath-upload-http] runOathUploadCli threw: ${errorMessage(err)}`),
