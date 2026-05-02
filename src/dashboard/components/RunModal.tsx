@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { OathUploadRunModal } from "./oath-upload";
 
 /**
  * Modal for the emergency-contact "Run" flow. Two inputs:
@@ -45,6 +46,12 @@ interface RunModalProps {
 }
 
 export function RunModal({ open, onOpenChange, workflow = "emergency-contact", reuploadFor }: RunModalProps) {
+  // Workflow-specific dispatch. oath-upload has its own minimal modal
+  // (PDF + duplicate banner only — no form-type chooser, no roster mode).
+  if (workflow === "oath-upload") {
+    return <OathUploadRunModal open={open} onOpenChange={onOpenChange} />;
+  }
+
   const [file, setFile] = useState<File | null>(null);
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [rosterMode, setRosterMode] = useState<"download" | "existing">("existing");
