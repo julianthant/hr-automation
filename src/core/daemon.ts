@@ -444,6 +444,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 authTimings: itemAuthTimings,
                 isCancelRequested: () =>
                   cancelTarget?.itemId === item.id && cancelTarget?.runId === runId,
+                ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
               })
               emitItemComplete(instance, item.id, trackerDir)
               markTerminated(runId)

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
@@ -10,6 +10,7 @@ import { runWorkflowDaemon } from '../../../src/core/daemon.js'
 import { Session } from '../../../src/core/session.js'
 import { enqueueItems, readQueueState } from '../../../src/core/daemon-queue.js'
 import { findAliveDaemons } from '../../../src/core/daemon-registry.js'
+import { dateLocal } from '../../../src/tracker/jsonl.js'
 
 // Fake Session that has no browsers — works fine because our test workflow
 // uses `systems: []` so nothing calls `page()` / `healthCheck()`.
@@ -330,6 +331,71 @@ test('runWorkflowDaemon: self-heals lockfile when externally deleted', async () 
     await runPromise
 
     assert.equal(existsSync(lockPath), false, 'lockfile removed on graceful stop')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('runWorkflowDaemon: forwards QueueItem.parentRunId into runOneItem so tracker rows carry it', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-parent-'))
+  try {
+    const wf = defineWorkflow({
+      name: 'dint-parent',
+      schema: z.object({ id: z.string() }),
+      steps: ['run'],
+      systems: [],
+      authSteps: false,
+      getId: (d) => (d as { id: string }).id,
+      handler: async (ctx, _data) => {
+        await ctx.step('run', async () => {
+          // empty
+        })
+      },
+    })
+
+    const parentRunId = 'parent-from-test-12345'
+    await enqueueItems<{ id: string }>(
+      'dint-parent',
+      [{ id: 'child-1' }],
+      (d) => d.id,
+      dir,
+      undefined,
+      [parentRunId],
+    )
+
+    const runPromise = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: stubLaunch(),
+      idleTimeoutMs: 200,
+    })
+    const { port } = await waitForDaemon('dint-parent', dir)
+
+    await waitFor(async () => {
+      const st = await readQueueState('dint-parent', dir)
+      return st.done.length === 1
+    }, 10_000)
+
+    // Verify tracker JSONL rows for this item carry parentRunId.
+    const date = dateLocal()
+    const jsonlPath = join(dir, `dint-parent-${date}.jsonl`)
+    const raw = readFileSync(jsonlPath, 'utf-8')
+    const rows = raw
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as { id?: string; parentRunId?: string })
+    const childRows = rows.filter((r) => r.id === 'child-1')
+    assert.ok(childRows.length >= 1, 'expected at least one tracker row for child-1')
+    for (const r of childRows) {
+      assert.equal(r.parentRunId, parentRunId, `tracker row for child-1 missing parentRunId: ${JSON.stringify(r)}`)
+    }
+
+    await fetch(`http://127.0.0.1:${port}/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    await runPromise
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
