@@ -341,6 +341,23 @@ export function formatStepName(step: string): string {
     .replace(/\b\w+/g, (w) => STEP_ABBREVIATIONS[w.toLowerCase()] || w.charAt(0).toUpperCase() + w.slice(1));
 }
 
+// ── Oath Upload Types ─────────────────────────────────────
+
+/**
+ * Summary of a prior run that processed the same PDF hash.
+ * Returned by GET /api/oath-upload/check-duplicate and rendered
+ * in the DuplicateBanner when the operator re-uploads a known PDF.
+ */
+export interface PriorRunSummary {
+  sessionId: string;
+  runId: string;
+  startedAt: string;
+  terminalStep: string;
+  status: string;
+  ticketNumber?: string;
+  pdfOriginalName: string;
+}
+
 export type LogCategory = "fill" | "navigate" | "extract" | "search" | "select" | "auth" | "download" | "success" | "error" | "waiting" | "step" | "debug";
 
 export function getLogCategory(level: string, message: string): LogCategory {
