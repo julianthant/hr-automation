@@ -310,3 +310,163 @@ function dateLocalForTest(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+
+// ─── buildOcrApproveHandler: parentRunId forwarding + fannedOutItemIds ────────
+
+test("buildOcrApproveHandler forwards parentRunId to ensureDaemonsAndEnqueueOverride and stamps post-approve entry", async () => {
+  const dir = join(tmpdir(), `ocr-approve-parent-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  try {
+    // Pre-write an OCR awaiting-approval tracker entry with parentRunId
+    const ocrFile = join(dir, `ocr-${dateLocalForTest()}.jsonl`);
+    writeFileSync(ocrFile, JSON.stringify({
+      workflow: "ocr",
+      id: "session-approve-1",
+      runId: "run-approve-1",
+      status: "done",
+      step: "awaiting-approval",
+      timestamp: "2026-05-01T00:00:00Z",
+      parentRunId: "oath-upload-run-1",
+      data: {
+        formType: "oath",
+        pdfPath: "/tmp/fake.pdf",
+        pdfOriginalName: "fake.pdf",
+        sessionId: "session-approve-1",
+        records: JSON.stringify([]),
+      },
+    }) + "\n", "utf-8");
+
+    // Spy that captures args
+    let capturedSpyArgs: unknown[] | undefined;
+    const spy = async (...args: unknown[]) => {
+      capturedSpyArgs = args;
+    };
+
+    const handler = buildOcrApproveHandler({
+      trackerDir: dir,
+      ensureDaemonsAndEnqueueOverride: spy as Parameters<typeof buildOcrApproveHandler>[0]["ensureDaemonsAndEnqueueOverride"],
+    });
+
+    const records = [
+      {
+        employeeId: "10000001",
+        printedName: "Alice One",
+        selected: true,
+        matchState: "matched",
+        employeeSigned: true,
+        officerSigned: true,
+        dateSigned: "05/01/2026",
+        sourcePage: 1,
+        rowIndex: 0,
+      },
+      {
+        employeeId: "10000002",
+        printedName: "Bob Two",
+        selected: true,
+        matchState: "matched",
+        employeeSigned: true,
+        officerSigned: true,
+        dateSigned: "05/01/2026",
+        sourcePage: 2,
+        rowIndex: 0,
+      },
+    ];
+
+    const resp = await handler({
+      sessionId: "session-approve-1",
+      runId: "run-approve-1",
+      records,
+    });
+
+    assert.equal(resp.status, 200, `Expected 200 but got ${resp.status}: ${JSON.stringify(resp.body)}`);
+    assert.ok((resp.body as { ok: boolean }).ok);
+
+    // Assert spy was called with 4th arg = { parentRunId: 'oath-upload-run-1' }
+    assert.ok(capturedSpyArgs, "spy should have been called");
+    assert.deepEqual(capturedSpyArgs![3], { parentRunId: "oath-upload-run-1" });
+
+    // Read back the post-approve JSONL entry
+    const lines = readFileSync(ocrFile, "utf-8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const approvedEntry = lines.find((e: { step?: string }) => e.step === "approved");
+    assert.ok(approvedEntry, "post-approve entry should exist");
+    assert.equal(approvedEntry.parentRunId, "oath-upload-run-1", "post-approve entry should carry parentRunId");
+    assert.ok(approvedEntry.data?.fannedOutItemIds, "post-approve entry should have fannedOutItemIds");
+    const parsedIds = JSON.parse(approvedEntry.data.fannedOutItemIds as string) as string[];
+    assert.equal(parsedIds.length, 2, "fannedOutItemIds should have 2 elements");
+    assert.equal(typeof parsedIds[0], "string");
+    assert.equal(typeof parsedIds[1], "string");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("buildOcrApproveHandler back-compat: no parentRunId on OCR row → spy called with undefined 4th arg, entry has no parentRunId but still has fannedOutItemIds", async () => {
+  const dir = join(tmpdir(), `ocr-approve-noparent-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  try {
+    // Pre-write an OCR awaiting-approval entry WITHOUT parentRunId
+    const ocrFile = join(dir, `ocr-${dateLocalForTest()}.jsonl`);
+    writeFileSync(ocrFile, JSON.stringify({
+      workflow: "ocr",
+      id: "session-approve-2",
+      runId: "run-approve-2",
+      status: "done",
+      step: "awaiting-approval",
+      timestamp: "2026-05-01T00:00:00Z",
+      data: {
+        formType: "oath",
+        pdfPath: "/tmp/fake2.pdf",
+        pdfOriginalName: "fake2.pdf",
+        sessionId: "session-approve-2",
+        records: JSON.stringify([]),
+      },
+    }) + "\n", "utf-8");
+
+    let capturedSpyArgs: unknown[] | undefined;
+    const spy = async (...args: unknown[]) => {
+      capturedSpyArgs = args;
+    };
+
+    const handler = buildOcrApproveHandler({
+      trackerDir: dir,
+      ensureDaemonsAndEnqueueOverride: spy as Parameters<typeof buildOcrApproveHandler>[0]["ensureDaemonsAndEnqueueOverride"],
+    });
+
+    const records = [
+      {
+        employeeId: "10000003",
+        printedName: "Carol Three",
+        selected: true,
+        matchState: "matched",
+        employeeSigned: true,
+        officerSigned: true,
+        dateSigned: "05/01/2026",
+        sourcePage: 1,
+        rowIndex: 0,
+      },
+    ];
+
+    const resp = await handler({
+      sessionId: "session-approve-2",
+      runId: "run-approve-2",
+      records,
+    });
+
+    assert.equal(resp.status, 200, `Expected 200 but got ${resp.status}: ${JSON.stringify(resp.body)}`);
+
+    // 4th arg should be undefined when no parentRunId
+    assert.ok(capturedSpyArgs, "spy should have been called");
+    assert.equal(capturedSpyArgs![3], undefined, "4th arg should be undefined when no parentRunId");
+
+    // Read back the post-approve JSONL entry
+    const lines = readFileSync(ocrFile, "utf-8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const approvedEntry = lines.find((e: { step?: string }) => e.step === "approved");
+    assert.ok(approvedEntry, "post-approve entry should exist");
+    assert.equal(approvedEntry.parentRunId, undefined, "post-approve entry should NOT have parentRunId");
+    assert.ok(approvedEntry.data?.fannedOutItemIds, "post-approve entry should still have fannedOutItemIds");
+    const parsedIds = JSON.parse(approvedEntry.data.fannedOutItemIds as string) as string[];
+    assert.equal(parsedIds.length, 1, "fannedOutItemIds should have 1 element");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
