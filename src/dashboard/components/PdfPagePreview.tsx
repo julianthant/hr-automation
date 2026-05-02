@@ -3,7 +3,8 @@ import { FileX } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface PdfPagePreviewProps {
-  workflow: "emergency-contact" | "oath-signature";
+  /** Workflow name forwarded to the `/api/prep/pdf-page` query. */
+  workflow: string;
   parentRunId: string;
   /** 1-indexed page number. */
   page: number;

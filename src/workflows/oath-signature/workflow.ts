@@ -27,6 +27,8 @@ const oathSignatureSteps = ["ucpath-auth", "transaction"] as const;
 export const oathSignatureWorkflow = defineWorkflow({
   name: WORKFLOW,
   label: "Oath Signature",
+  category: "Onboarding",
+  iconName: "ClipboardSignature",
   systems: [
     {
       id: "ucpath",

@@ -41,6 +41,18 @@ export interface QuickRunConfig {
    * verbatim in the toast.
    */
   parseInput: (raw: string) => QuickRunParseResult;
+  /**
+   * Optional: when set, clicking Run with an empty text box opens a
+   * RunModal instead of being a no-op. Use for workflows whose Run
+   * affordance has both a quick-input path (typed IDs) and a
+   * file-upload path (e.g. PDF → OCR → fan-out).
+   */
+  runEmptyAction?: {
+    /** Pass-through to RunModal's `workflow` prop. */
+    modalWorkflow: string;
+    /** When `modalWorkflow === "ocr"`, pre-selects formType and hides the chooser. */
+    lockedFormType?: string;
+  };
 }
 
 /**
@@ -50,7 +62,10 @@ export interface QuickRunConfig {
  * oath-signature (`emplId`) — any workflow whose Zod schema has exactly
  * one required string field AND whose values never contain commas.
  */
-export function parseCommaSeparated(fieldName: string) {
+export function parseCommaSeparated(
+  fieldName: string,
+  validate?: { regex: RegExp; message: string },
+) {
   return (raw: string): QuickRunParseResult => {
     const pieces = raw
       .split(",")
@@ -58,6 +73,13 @@ export function parseCommaSeparated(fieldName: string) {
       .filter(Boolean);
     if (pieces.length === 0) {
       return { ok: false, error: `Enter at least one ${fieldName}` };
+    }
+    if (validate) {
+      for (const v of pieces) {
+        if (!validate.regex.test(v)) {
+          return { ok: false, error: `${validate.message}: "${v}"` };
+        }
+      }
     }
     return {
       ok: true,
@@ -100,7 +122,11 @@ export const QUICK_RUN_REGISTRY: Record<string, QuickRunConfig> = {
   },
   "oath-signature": {
     placeholder: "Enter EIDs, comma-separated (e.g. 10873611, 10873075)",
-    parseInput: parseCommaSeparated("emplId"),
+    parseInput: parseCommaSeparated("emplId", {
+      regex: /^\d{5,}$/,
+      message: "EID must be numeric (5+ digits)",
+    }),
+    runEmptyAction: { modalWorkflow: "ocr", lockedFormType: "oath" },
   },
 };
 

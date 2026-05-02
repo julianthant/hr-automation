@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useRef } from "react";
 
 export interface UsePrepCursorOpts {
-  workflow: "emergency-contact" | "oath-signature";
-  runId: string;
+  /**
+   * localStorage key under which the cursor index is persisted. Caller
+   * derives this via the OCR downstream registry's `cursorKey(...)` so
+   * scope (per-run vs per-session) and prefix vary by workflow without
+   * this hook needing to know about workflow names.
+   */
+  storageKey: string;
   /** Set false to short-circuit storage reads/writes (e.g. when the pane is closed). */
   enabled: boolean;
   /** Total record count, used to clamp restored cursor positions. */
@@ -10,9 +15,9 @@ export interface UsePrepCursorOpts {
 }
 
 /**
- * Persists the topmost-visible pair index in localStorage keyed by
- * `{ec|oath}-prep-cursor:<runId>` so re-entering the review pane
- * restores the operator's scroll position without requiring URL state.
+ * Persists the topmost-visible pair index in localStorage under the
+ * caller-provided `storageKey` so re-entering the review pane restores
+ * the operator's scroll position without requiring URL state.
  *
  * Returns:
  *   - `containerRef`     — attach to the scroll container
@@ -23,11 +28,11 @@ export interface UsePrepCursorOpts {
  *                          Discard / explicit cancel)
  */
 export function usePrepCursor(opts: UsePrepCursorOpts) {
-  const storageKey = `${opts.workflow === "oath-signature" ? "oath" : "ec"}-prep-cursor:${opts.runId}`;
+  const { storageKey } = opts;
   const debounceRef = useRef<number | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // Restore on mount + when the runId changes
+  // Restore on mount + when the storageKey changes
   useEffect(() => {
     if (!opts.enabled || opts.recordCount === 0) return;
     const stored = window.localStorage.getItem(storageKey);

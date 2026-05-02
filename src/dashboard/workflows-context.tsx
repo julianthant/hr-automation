@@ -4,6 +4,18 @@ export interface WorkflowMetadata {
   name: string
   /** Human-readable label (server-derived from `defineWorkflow.label` or auto-title-cased name). */
   label: string
+  /**
+   * Display category for `WorkflowRail` grouping (e.g. "Onboarding", "Utils").
+   * Absent → the workflow lands in the rail's "Other" group. Source:
+   * `defineWorkflow({ category: "..." })`.
+   */
+  category?: string
+  /**
+   * Lucide-react icon name for the workflow's `WorkflowBox` session card.
+   * Absent → the frontend's icon registry falls back to the generic `Workflow`
+   * icon and logs a warning. Source: `defineWorkflow({ iconName: "..." })`.
+   */
+  iconName?: string
   steps: string[]
   systems: string[]
   /**

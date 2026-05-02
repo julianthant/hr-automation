@@ -3,6 +3,7 @@ import { Play, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { getQuickRunConfig } from "@/lib/quick-run-registry";
+import { RunModal } from "./RunModal";
 
 interface QuickRunPanelProps {
   workflow: string;
@@ -30,12 +31,19 @@ export function QuickRunPanel({ workflow }: QuickRunPanelProps) {
   const config = getQuickRunConfig(workflow);
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
 
   if (!config) return null;
 
   async function submit() {
     if (submitting) return;
     if (!config) return;
+    if (value.trim().length === 0) {
+      if (config.runEmptyAction) {
+        setModalOpen(true);
+      }
+      return;
+    }
     const parsed = config.parseInput(value);
     if (!parsed.ok) {
       toast.error("Invalid input", { description: parsed.error });
@@ -81,7 +89,7 @@ export function QuickRunPanel({ workflow }: QuickRunPanelProps) {
     void submit();
   }
 
-  const runDisabled = submitting || value.trim().length === 0;
+  const runDisabled = submitting || (value.trim().length === 0 && !config.runEmptyAction);
 
   return (
     <form
@@ -123,6 +131,14 @@ export function QuickRunPanel({ workflow }: QuickRunPanelProps) {
           <Play aria-hidden className="w-3.5 h-3.5" />
         )}
       </button>
+      {config.runEmptyAction && (
+        <RunModal
+          open={modalOpen}
+          onOpenChange={setModalOpen}
+          workflow={config.runEmptyAction.modalWorkflow}
+          lockedFormType={config.runEmptyAction.lockedFormType}
+        />
+      )}
     </form>
   );
 }

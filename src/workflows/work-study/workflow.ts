@@ -22,6 +22,8 @@ const workStudySteps = ["ucpath-auth", "transaction"] as const;
 export const workStudyWorkflow = defineWorkflow({
   name: "work-study",
   label: "Work Study",
+  category: "Work Study",
+  iconName: "Briefcase",
   systems: [
     {
       id: "ucpath",

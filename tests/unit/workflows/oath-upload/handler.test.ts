@@ -41,6 +41,7 @@ test("oathUploadHandler: walks delegate-ocr → wait-ocr-approval → wait-signa
       pdfOriginalName: "test.pdf",
       sessionId: "session-1",
       pdfHash: "a".repeat(64),
+      rosterMode: "download",
     }, {
       trackerDir: dir,
       _runOcrOverride: async () => { runOcrCalled = true; },
@@ -134,6 +135,7 @@ test("oathUploadHandler: skips delegate-ocr + wait-ocr-approval when prior appro
       pdfOriginalName: "x.pdf",
       sessionId: "session-X",
       pdfHash: "a".repeat(64),
+      rosterMode: "download",
     }, {
       trackerDir: dir,
       _runOcrOverride: async () => { runOcrCalled = true; },

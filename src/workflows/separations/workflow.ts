@@ -161,6 +161,8 @@ export function resolveJobSummaryResult(
 export const separationsWorkflow = defineWorkflow({
   name: "separations",
   label: "Separations",
+  category: "Separations",
+  iconName: "UserMinus",
   systems: [
     {
       id: "kuali",

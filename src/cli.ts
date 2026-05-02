@@ -369,6 +369,8 @@ program
       pdfOriginalName: string;
       sessionId: string;
       pdfHash: string;
+      rosterMode: "existing" | "download";
+      rosterPath?: string;
     }> = [];
     for (const p of pdfPaths) {
       if (!existsSync(p)) {
@@ -382,6 +384,9 @@ program
           pdfOriginalName: basename(p),
           sessionId: randomUUID(),
           pdfHash: hash,
+          // CLI defaults to fresh SharePoint download; dashboard modal lets the
+          // operator pick "use latest local" instead.
+          rosterMode: "download",
         });
       } catch (err) {
         log.error(`Failed to hash ${p}: ${errorMessage(err)}`);
@@ -447,6 +452,7 @@ program
       import("./workflows/emergency-contact/index.js"),
       import("./workflows/old-kronos-reports/index.js"),
       import("./workflows/oath-signature/index.js"),
+      import("./workflows/oath-upload/index.js"),
       import("./workflows/ocr/index.js"),
     ]);
 

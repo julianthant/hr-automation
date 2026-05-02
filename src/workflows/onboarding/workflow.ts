@@ -57,6 +57,8 @@ const onboardingSteps = [
 export const onboardingWorkflow = defineWorkflow({
   name: "onboarding",
   label: "Onboarding",
+  category: "Onboarding",
+  iconName: "Users",
   systems: [
     {
       id: "crm",

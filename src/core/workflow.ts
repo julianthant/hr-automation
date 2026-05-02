@@ -427,6 +427,8 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
     steps: effectiveSteps,
     systems: config.systems.map((s) => s.id),
     detailFields: (config.detailFields ?? []).map(normalizeDetailField),
+    ...(config.category ? { category: config.category } : {}),
+    ...(config.iconName ? { iconName: config.iconName } : {}),
     ...(config.matchKey ? { matchKey: config.matchKey } : {}),
   }
   register(metadata)

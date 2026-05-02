@@ -15,6 +15,8 @@ const ocrSteps = [
 export const ocrWorkflow = defineWorkflow({
   name: "ocr",
   label: "OCR",
+  category: "Utils",
+  iconName: "FileScan",
   systems: [],
   authSteps: false,
   steps: ocrSteps,

@@ -12,6 +12,7 @@ import {
   buildOcrReocrWholePdfHandler,
   sweepStuckOcrRows,
   _resetSessionLockForTests,
+  type ApproveHandlerOpts,
 } from "../../../src/tracker/ocr-http.js";
 
 function setup(): string {
@@ -344,7 +345,7 @@ test("buildOcrApproveHandler forwards parentRunId to ensureDaemonsAndEnqueueOver
 
     const handler = buildOcrApproveHandler({
       trackerDir: dir,
-      ensureDaemonsAndEnqueueOverride: spy as Parameters<typeof buildOcrApproveHandler>[0]["ensureDaemonsAndEnqueueOverride"],
+      ensureDaemonsAndEnqueueOverride: spy as ApproveHandlerOpts["ensureDaemonsAndEnqueueOverride"],
     });
 
     const records = [
@@ -429,7 +430,7 @@ test("buildOcrApproveHandler back-compat: no parentRunId on OCR row → spy call
 
     const handler = buildOcrApproveHandler({
       trackerDir: dir,
-      ensureDaemonsAndEnqueueOverride: spy as Parameters<typeof buildOcrApproveHandler>[0]["ensureDaemonsAndEnqueueOverride"],
+      ensureDaemonsAndEnqueueOverride: spy as ApproveHandlerOpts["ensureDaemonsAndEnqueueOverride"],
     });
 
     const records = [

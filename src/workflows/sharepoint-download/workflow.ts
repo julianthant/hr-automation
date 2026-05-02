@@ -105,6 +105,8 @@ export const sharepointDownloadWorkflow: RegisteredWorkflow<
 > = defineWorkflow({
   name: "sharepoint-download",
   label: "SharePoint Download",
+  category: "Utils",
+  iconName: "Download",
   systems: [
     {
       id: "sharepoint",
