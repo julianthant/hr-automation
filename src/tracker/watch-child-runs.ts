@@ -36,6 +36,19 @@ export interface WatchChildRunsOpts {
   isTerminal?: (entry: TrackerEntry) => boolean;
   /** Fired as each expected item terminates, with the remaining count. */
   onProgress?: (outcome: ChildOutcome, remaining: number) => void;
+  /**
+   * If set, the watcher polls the latest entry on `(workflow, id)` and
+   * aborts the watch when that entry's `step` matches. Used for
+   * dashboard-driven soft-cancel: an HTTP cancel handler writes a
+   * sentinel running entry on the parent's own row, and the watcher
+   * (running in the daemon process) sees it and rejects so the handler
+   * can unwind.
+   */
+  abortIfRowState?: {
+    workflow: string;
+    id: string;
+    step: string;
+  };
 }
 
 const DEFAULT_TIMEOUT_MS = 60 * 60_000;
@@ -110,8 +123,35 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
       }
     };
 
+    const checkAbort = (): void => {
+      if (finalized) return;
+      if (!opts.abortIfRowState) return;
+      const abortFile = join(
+        dir,
+        `${opts.abortIfRowState.workflow}-${date}.jsonl`,
+      );
+      if (!existsSync(abortFile)) return;
+      let raw;
+      try { raw = readFileSync(abortFile, "utf-8"); } catch { return; }
+      const lines = raw.split("\n").filter(Boolean);
+      for (let i = lines.length - 1; i >= 0; i--) {
+        let entry: TrackerEntry;
+        try { entry = JSON.parse(lines[i]); } catch { continue; }
+        if (entry.id !== opts.abortIfRowState.id) continue;
+        if (entry.step === opts.abortIfRowState.step) {
+          cleanup();
+          reject(new Error(
+            `watchChildRuns aborted by parent row state (${opts.abortIfRowState.workflow}/${opts.abortIfRowState.id} step="${opts.abortIfRowState.step}")`,
+          ));
+        }
+        return;
+      }
+    };
+
     // Initial pass — file may already have terminal entries.
     checkFile();
+    if (finalized) return;
+    checkAbort();          // NEW — abort immediately if sentinel already present
     if (finalized) return;
 
     // fs.watch on the file (best effort).
@@ -127,6 +167,7 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
     // Poll fallback — also handles the "file doesn't exist yet" case.
     pollHandle = setInterval(() => {
       checkFile();
+      checkAbort();        // NEW
       // Re-arm watcher once the file appears.
       if (!watcher && existsSync(file)) {
         try {

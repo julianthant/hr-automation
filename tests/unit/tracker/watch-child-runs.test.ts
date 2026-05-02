@@ -190,3 +190,76 @@ test("survives when target file doesn't exist initially", async () => {
   assert.equal(outcomes.length, 1);
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("abortIfRowState: rejects when parent row reaches the sentinel step", async () => {
+  const dir = setupTrackerDir();
+  const date = "2026-05-01";
+  const parentFile = join(dir, `oath-upload-${date}.jsonl`);
+
+  // Pre-write a non-sentinel running entry so the file exists.
+  writeEntry(parentFile, {
+    workflow: "oath-upload", id: "parent-1", runId: "p1",
+    status: "running", step: "loading-roster", timestamp: new Date().toISOString(),
+  });
+
+  const promise = watchChildRuns({
+    workflow: "eid-lookup",
+    expectedItemIds: ["never-comes"],
+    trackerDir: dir,
+    date,
+    timeoutMs: 30_000,
+    abortIfRowState: { workflow: "oath-upload", id: "parent-1", step: "cancel-requested" },
+  });
+
+  // After ~250ms append the cancel sentinel — watcher should catch it on the next poll.
+  setTimeout(() => {
+    writeEntry(parentFile, {
+      workflow: "oath-upload", id: "parent-1", runId: "p1",
+      status: "running", step: "cancel-requested", timestamp: new Date().toISOString(),
+    });
+  }, 250);
+
+  await assert.rejects(
+    () => promise,
+    (err: Error) => {
+      assert.ok(/aborted by parent row state/.test(err.message), `unexpected message: ${err.message}`);
+      assert.ok(err.message.includes("oath-upload"), `missing workflow in message: ${err.message}`);
+      assert.ok(err.message.includes("parent-1"), `missing id in message: ${err.message}`);
+      assert.ok(err.message.includes("cancel-requested"), `missing step in message: ${err.message}`);
+      return true;
+    },
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("abortIfRowState: rejects immediately when sentinel is pre-written before watch starts", async () => {
+  const dir = setupTrackerDir();
+  const date = "2026-05-01";
+  const parentFile = join(dir, `oath-upload-${date}.jsonl`);
+
+  // Pre-write the cancel sentinel BEFORE calling watchChildRuns.
+  writeEntry(parentFile, {
+    workflow: "oath-upload", id: "parent-2", runId: "p2",
+    status: "running", step: "cancel-requested", timestamp: new Date().toISOString(),
+  });
+
+  const start = Date.now();
+  await assert.rejects(
+    () => watchChildRuns({
+      workflow: "eid-lookup",
+      expectedItemIds: ["never-comes"],
+      trackerDir: dir,
+      date,
+      timeoutMs: 30_000,
+      abortIfRowState: { workflow: "oath-upload", id: "parent-2", step: "cancel-requested" },
+    }),
+    (err: Error) => {
+      assert.ok(/aborted by parent row state/.test(err.message), `unexpected message: ${err.message}`);
+      return true;
+    },
+  );
+  const elapsed = Date.now() - start;
+  // Should abort during the initial synchronous check — well under 100ms.
+  assert.ok(elapsed < 100, `expected immediate abort but took ${elapsed}ms`);
+  rmSync(dir, { recursive: true, force: true });
+});
