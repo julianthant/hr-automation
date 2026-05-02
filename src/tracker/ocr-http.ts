@@ -168,6 +168,7 @@ export interface ApproveHandlerOpts {
     workflow: string,
     inputs: unknown[],
     deriveItemId: (input: unknown, idx: number) => string,
+    opts?: { parentRunId?: string },
   ) => Promise<void>;
 }
 
@@ -188,6 +189,8 @@ export function buildOcrApproveHandler(
       return { status: 400, body: { ok: false, error: `Unknown formType "${formType}"` } };
     }
 
+    const parentRunId = readParentRunId(input.sessionId, trackerDir);
+
     const fannedOut: Array<{ workflow: string; itemId: string }> = [];
     const enqueueInputs: unknown[] = [];
     const itemIds: string[] = [];
@@ -201,7 +204,12 @@ export function buildOcrApproveHandler(
 
     try {
       if (opts.ensureDaemonsAndEnqueueOverride) {
-        await opts.ensureDaemonsAndEnqueueOverride(spec.approveTo.workflow, enqueueInputs, (_inp, idx) => itemIds[idx]);
+        await opts.ensureDaemonsAndEnqueueOverride(
+          spec.approveTo.workflow,
+          enqueueInputs,
+          (_inp, idx) => itemIds[idx],
+          parentRunId ? { parentRunId } : undefined,
+        );
       } else {
         const { ensureDaemonsAndEnqueue } = await import("../core/daemon-client.js");
         const { loadWorkflow } = await import("../core/workflow-loaders.js");
@@ -218,6 +226,7 @@ export function buildOcrApproveHandler(
           {},
           {
             deriveItemId: (inp: unknown) => inputToItemId.get(JSON.stringify(inp)) ?? `ocr-fallback-${input.runId}-r0`,
+            ...(parentRunId ? { parentRunId } : {}),
           },
         );
       }
@@ -231,9 +240,13 @@ export function buildOcrApproveHandler(
         timestamp: new Date().toISOString(),
         id: input.sessionId,
         runId: input.runId,
+        ...(parentRunId ? { parentRunId } : {}),
         status: "done",
         step: "approved",
-        data: { fannedOutCount: String(fannedOut.length) },
+        data: {
+          fannedOutCount: String(fannedOut.length),
+          fannedOutItemIds: JSON.stringify(itemIds),
+        },
       },
       trackerDir,
     );
@@ -619,6 +632,22 @@ function readFormType(sessionId: string, trackerDir: string | undefined): string
     } catch { /* tolerate */ }
   }
   return null;
+}
+
+function readParentRunId(sessionId: string, trackerDir: string | undefined): string | undefined {
+  const date = dateLocal();
+  const file = join(trackerDir ?? ".tracker", `ocr-${date}.jsonl`);
+  if (!existsSync(file)) return undefined;
+  const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      const e = JSON.parse(lines[i]) as TrackerEntry;
+      if (e.id === sessionId && typeof e.parentRunId === "string" && e.parentRunId.length > 0) {
+        return e.parentRunId;
+      }
+    } catch { /* tolerate malformed lines */ }
+  }
+  return undefined;
 }
 
 function extractEidLocal(record: unknown): string {
