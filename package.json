@@ -17,6 +17,8 @@
     "work-study:stop": "tsx --env-file=.env src/cli.ts daemon-stop work-study",
     "oath-signature": "tsx --env-file=.env src/cli.ts oath-signature",
     "oath-signature:stop": "tsx --env-file=.env src/cli.ts daemon-stop oath-signature",
+    "oath-upload": "tsx --env-file=.env src/cli.ts oath-upload",
+    "oath-upload:stop": "tsx --env-file=.env src/cli.ts daemon-stop oath-upload",
     "eid-lookup": "tsx --env-file=.env src/cli.ts eid-lookup",
     "eid-lookup:stop": "tsx --env-file=.env src/cli.ts daemon-stop eid-lookup",
     "kronos": "tsx --env-file=.env src/cli.ts kronos",

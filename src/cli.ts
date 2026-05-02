@@ -15,6 +15,10 @@ import {
   runOathSignatureCli,
   OathSignatureInputSchema,
 } from "./workflows/oath-signature/index.js";
+import {
+  runOathUploadCli,
+  sha256OfFile,
+} from "./workflows/oath-upload/index.js";
 import { exportToExcel } from "./tracker/export-excel.js";
 
 const program = new Command();
@@ -319,6 +323,79 @@ program
       });
     } catch (err) {
       log.error(`Oath Signature dispatch failed: ${errorMessage(err)}`);
+      process.exit(1);
+    }
+  });
+
+// ─── oath-upload ───
+
+program
+  .command("oath-upload")
+  .description(
+    "Upload a paper-oath PDF; OCRs it, fans out N oath-signature transactions, " +
+      "then files an HR Inquiry ticket on support.ucsd.edu. Daemon-mode — " +
+      "amortizes ServiceNow Duo across uploads.",
+  )
+  .argument("<pdfPaths...>", "One or more PDF file paths")
+  .option("-n, --new", "Force spawn of a brand-new daemon (ignores alive ones for dispatch)")
+  .option("-p, --parallel <N>", "Fan out across N daemons (reuses up to N alive; spawns the rest)", parseInt)
+  .action(async (
+    pdfPaths: string[],
+    options: { new?: boolean; parallel?: number },
+  ) => {
+    try {
+      validateEnv();
+    } catch {
+      process.exit(1);
+    }
+
+    if (pdfPaths.length === 0) {
+      log.error("Provide at least one PDF path.");
+      process.exit(1);
+    }
+    if (options.parallel !== undefined && (options.parallel < 1 || !Number.isFinite(options.parallel))) {
+      log.error("--parallel must be a positive integer.");
+      process.exit(1);
+    }
+
+    const { existsSync } = await import("node:fs");
+    const { basename } = await import("node:path");
+    const { randomUUID } = await import("node:crypto");
+
+    // Validate every path up front (existence + readable) and pre-hash so a
+    // malformed tail doesn't fire ServiceNow Duo prompts.
+    const inputs: Array<{
+      pdfPath: string;
+      pdfOriginalName: string;
+      sessionId: string;
+      pdfHash: string;
+    }> = [];
+    for (const p of pdfPaths) {
+      if (!existsSync(p)) {
+        log.error(`PDF not found: ${p}`);
+        process.exit(1);
+      }
+      try {
+        const hash = await sha256OfFile(p);
+        inputs.push({
+          pdfPath: p,
+          pdfOriginalName: basename(p),
+          sessionId: randomUUID(),
+          pdfHash: hash,
+        });
+      } catch (err) {
+        log.error(`Failed to hash ${p}: ${errorMessage(err)}`);
+        process.exit(1);
+      }
+    }
+
+    try {
+      await runOathUploadCli(inputs, {
+        new: options.new,
+        parallel: options.parallel,
+      });
+    } catch (err) {
+      log.error(`Oath Upload dispatch failed: ${errorMessage(err)}`);
       process.exit(1);
     }
   });
