@@ -87,7 +87,7 @@ export async function runOcrOrchestrator(
   const loadRosterFn = opts._loadRosterOverride ?? realLoadRoster;
   const watchChildren = opts._watchChildRunsOverride ?? realWatchChildRuns;
 
-  const runOcr = opts._ocrPipelineOverride ?? (async ({ pdfPath, spec: s, sessionId }: { pdfPath: string; formType: string; spec: AnyOcrFormSpec; sessionId: string }) => {
+  const runOcr = opts._ocrPipelineOverride ?? (async ({ pdfPath, spec: s, sessionId, preRenderedPages }: { pdfPath: string; formType: string; spec: AnyOcrFormSpec; sessionId: string; preRenderedPages?: string[] }) => {
     // Page images go to .tracker/page-images/<sessionId>/ — sessionId is
     // the stable key the OCR HTTP layer mints when the operator uploads
     // the PDF. PdfPagePreview passes this value; do NOT use runId here
@@ -100,6 +100,10 @@ export async function runOcrOrchestrator(
       arraySchema: s.ocrArraySchema as ZodType<unknown[]>,
       schemaName: s.schemaName,
       prompt: s.prompt,
+      // Skip re-rendering when we already rendered to seed placeholders.
+      ...(preRenderedPages
+        ? { _renderOverride: async () => preRenderedPages }
+        : {}),
     });
     return {
       data: result.data as unknown[],
@@ -213,14 +217,67 @@ export async function runOcrOrchestrator(
     }
     const roster = (await loadRosterFn(resolvedRosterPath)) as OcrRosterRow[];
 
+    // 1b. Pre-render PDF pages so we know page count + can show the page
+    // image in the Preview tab before OCR finishes.
+    log.step(`[ocr] pre-rendering PDF pages so the Preview tab populates immediately`);
+    const pageImagesDir = join(trackerDir ?? ".tracker", "page-images", input.sessionId);
+    const { renderPdfPagesToPngs } = await import("../../ocr/render-pages.js");
+    const preRenderedPages = await renderPdfPagesToPngs(input.pdfPath, pageImagesDir);
+    const knownPageCount = preRenderedPages.length;
+    log.success(`[ocr] rendered ${knownPageCount} page(s) — Preview tab now shows blank inputs ready to fill in`);
+
+    // Snapshot helper: emits an awaiting-approval-shape entry with the
+    // current `records` array. Called at every phase transition so the
+    // Preview tab updates progressively as OCR / matching / disambig /
+    // eid-lookup / verification each complete.
+    const emitSnapshot = (
+      records: unknown[],
+      step: string,
+      status: TrackerEntry["status"],
+      extras: Record<string, unknown> = {},
+    ): void => {
+      const verifiedCount = countVerified(records, spec);
+      writeTracker(status, {
+        formType: input.formType,
+        pdfOriginalName: input.pdfOriginalName,
+        sessionId: input.sessionId,
+        ...(input.parentRunId ? { parentRunId: input.parentRunId } : {}),
+        recordCount: records.length,
+        verifiedCount,
+        records,
+        ...extras,
+      }, step);
+    };
+
+    // Seed the Preview tab with one blank record per page so the operator
+    // sees the page image + empty inputs immediately. As OCR finishes,
+    // these are replaced with real extracted records.
+    const placeholderRecords: unknown[] = Array.from({ length: knownPageCount }, (_, i) => ({
+      sourcePage: i + 1,
+      rowIndex: 0,
+      printedName: "",
+      employeeId: "",
+      employeeSigned: true,
+      officerSigned: null,
+      dateSigned: null,
+      notes: [],
+      documentType: "expected",
+      originallyMissing: [],
+      matchState: "lookup-pending",
+      matchSource: "manual",
+      selected: false,
+      warnings: ["Loading… OCR running"],
+    }));
+    emitSnapshot(placeholderRecords, "ocr", "running", { rosterPath: resolvedRosterPath });
+
     // 2. OCR
     log.step(`[ocr] running OCR pipeline against ${input.pdfOriginalName}`);
-    writeTracker("running", { formType: input.formType, rosterPath: resolvedRosterPath }, "ocr");
     const ocrResult = await runOcr({
       pdfPath: input.pdfPath,
       formType: input.formType,
       spec,
       sessionId: input.sessionId,
+      preRenderedPages,
     });
     log.success(`[ocr] OCR complete (provider=${ocrResult.provider}, attempts=${ocrResult.attempts}, records=${(ocrResult.data as unknown[]).length})`);
     // Per-record extraction summary so operator can see exactly what came
@@ -271,19 +328,20 @@ export async function runOcrOrchestrator(
       .map((p) => p.page)
       .sort((a, b) => a - b);
 
+    // Snapshot the OCR-extracted records → Preview shows extracted
+    // names/dates BEFORE matching runs.
+    emitSnapshot(ocrResult.data as unknown[], "matching", "running", {
+      rosterPath: resolvedRosterPath,
+      ocrProvider: ocrResult.provider,
+      ocrAttempts: ocrResult.attempts,
+      ocrCached: ocrResult.cached,
+      failedPages,
+      emptyPages,
+      pageStatusSummary,
+    });
+
     // 3. Match
     log.step(`[ocr] matching ${(ocrResult.data as unknown[]).length} OCR record(s) against roster`);
-    writeTracker(
-      "running",
-      {
-        formType: input.formType,
-        rosterPath: resolvedRosterPath,
-        ocrProvider: ocrResult.provider,
-        ocrAttempts: ocrResult.attempts,
-        ocrCached: ocrResult.cached,
-      },
-      "matching",
-    );
     log.step(`[ocr] roster has ${roster.length} row(s) loaded from ${resolvedRosterPath.split("/").pop()}`);
     let records = await Promise.all(
       (ocrResult.data as unknown[]).map((r) =>
@@ -296,6 +354,13 @@ export async function runOcrOrchestrator(
       const conf = typeof rec.matchConfidence === "number" ? ` conf=${rec.matchConfidence.toFixed(2)}` : "";
       const candCount = rec.rosterCandidates?.length ?? 0;
       log.step(`[ocr] match ${i + 1}/${records.length}: state=${rec.matchState} source=${rec.matchSource ?? "(none)"} eid=${rec.employeeId || "(none)"}${conf} candidates=${candCount}`);
+    });
+    // Snapshot post-matching: badges + EIDs (where roster auto-accepted)
+    // appear in the Preview tab.
+    emitSnapshot(records, "disambiguating", "running", {
+      failedPages,
+      emptyPages,
+      pageStatusSummary,
     });
 
     // 3b. Carry-forward (if reupload)
@@ -422,35 +487,67 @@ export async function runOcrOrchestrator(
         );
       }
 
-      // Watch for terminations.
-      const outcomes = await watchChildren({
-        workflow: "eid-lookup",
-        expectedItemIds: enqueueItems.map((e) => e.itemId),
-        trackerDir,
-        date,
-        timeoutMs: opts.eidLookupTimeoutMs ?? 60 * 60_000,
-      }).catch((err) => {
-        log.warn(`[ocr] watchChildRuns timed out: ${errorMessage(err)}`);
-        return [] as ChildOutcome[];
+      // Don't block: dispatch eid-lookup, snapshot the current pending
+      // records into awaiting-approval, then return. A background watcher
+      // patches each record as the eid-lookup daemon publishes outcomes.
+      // This unblocks the operator immediately — they can review the
+      // records the LLM extracted while UCPath lookup runs in parallel.
+      log.success(`[ocr] eid-lookup dispatched to daemon — OCR workflow returning, results will patch records as they arrive`);
+      // Snapshot WITH lookup-pending markers so Preview shows the pending state.
+      emitSnapshot(records, "eid-lookup", "running", {
+        failedPages,
+        emptyPages,
+        pageStatusSummary,
       });
 
-      // Patch records from outcomes.
-      const outcomesByItemId = new Map(outcomes.map((o) => [o.itemId, o]));
-      for (const enq of enqueueItems) {
-        const outcome = outcomesByItemId.get(enq.itemId);
-        const idx = enq.index;
-        if (!outcome) {
-          patchUnresolved(records, idx, spec);
-          continue;
+      // Background watcher: lives past the orchestrator's return. As each
+      // eid-lookup daemon outcome lands, patch the matching record and
+      // re-emit the awaiting-approval row so the operator sees the EID +
+      // verification badge populate live in the Preview tab.
+      void (async () => {
+        try {
+          const outcomes = await watchChildren({
+            workflow: "eid-lookup",
+            expectedItemIds: enqueueItems.map((e) => e.itemId),
+            trackerDir,
+            date,
+            timeoutMs: opts.eidLookupTimeoutMs ?? 60 * 60_000,
+            onProgress: (outcome, remaining) => {
+              const enq = enqueueItems.find((e) => e.itemId === outcome.itemId);
+              if (!enq) return;
+              patchFromOutcome(records, enq.index, outcome, enq.kind, spec);
+              log.step(`[ocr/bg] eid-lookup outcome for rec ${enq.index + 1}: kind=${enq.kind} status=${outcome.status} → record patched (${remaining} remaining)`);
+              emitSnapshot(records, "awaiting-approval", "running", {
+                failedPages,
+                emptyPages,
+                pageStatusSummary,
+              });
+            },
+          });
+          // Mark any items that never got a terminal outcome as unresolved.
+          const seen = new Set(outcomes.map((o) => o.itemId));
+          for (const enq of enqueueItems) {
+            if (!seen.has(enq.itemId)) patchUnresolved(records, enq.index, spec);
+          }
+          const verifiedCount = countVerified(records, spec);
+          log.success(`[ocr/bg] eid-lookup watch complete — ${outcomes.length}/${enqueueItems.length} records resolved, ${verifiedCount} verified`);
+          emitSnapshot(records, "awaiting-approval", "done", {
+            failedPages,
+            emptyPages,
+            pageStatusSummary,
+          });
+        } catch (err) {
+          log.warn(`[ocr/bg] eid-lookup watcher errored: ${errorMessage(err)}`);
         }
-        patchFromOutcome(records, idx, outcome, enq.kind, spec);
-      }
+      })();
     }
 
-    // 5. Verification marker
+    // 5. Verification marker (synthetic — actual verification happens
+    // asynchronously inside the eid-lookup daemon). We emit the breakdown
+    // of currently-known verifications so the operator can see what state
+    // each record is in right now (more rows may verify in the background
+    // as eid-lookup outcomes arrive).
     const verifiedCount = countVerified(records, spec);
-    // Per-record verification breakdown so the operator can see WHY each
-    // row landed where it did before clicking through to the preview pane.
     const verifiedBreakdown: Record<string, number> = {};
     records.forEach((r) => {
       const v = (r as { verification?: { state?: string } }).verification;
@@ -458,35 +555,28 @@ export async function runOcrOrchestrator(
       verifiedBreakdown[state] = (verifiedBreakdown[state] ?? 0) + 1;
     });
     const breakdownStr = Object.entries(verifiedBreakdown).map(([k, n]) => `${k}=${n}`).join(" ");
-    log.step(`[ocr] verification: ${verifiedCount}/${records.length} records verified — breakdown: ${breakdownStr}`);
-    writeTracker("running", { recordCount: records.length, verifiedCount }, "verification");
+    log.step(`[ocr] verification: ${verifiedCount}/${records.length} records verified now — breakdown: ${breakdownStr} (more may verify in background as eid-lookup completes)`);
+    emitSnapshot(records, "verification", "running", {
+      failedPages,
+      emptyPages,
+      pageStatusSummary,
+    });
 
-    // 6. Awaiting-approval
-    log.success(`[ocr] preparation complete — awaiting operator approval (${records.length} record(s), ${verifiedCount} verified)`);
-    writeTracker("running", {
-      formType: input.formType,
-      pdfOriginalName: input.pdfOriginalName,
-      sessionId: input.sessionId,
-      ...(input.parentRunId ? { parentRunId: input.parentRunId } : {}),
-      recordCount: records.length,
-      verifiedCount,
-      records,
+    // 6. Awaiting-approval — workflow returns here even if eid-lookup is
+    // still running in the background. The operator can start reviewing
+    // immediately; lookup outcomes will patch records into this row's
+    // tracker entries as they arrive.
+    log.success(`[ocr] preparation complete — awaiting operator approval (${records.length} record(s), ${verifiedCount} verified now)`);
+    emitSnapshot(records, "awaiting-approval", "running", {
       failedPages,
       emptyPages,
       pageStatusSummary,
-    }, "awaiting-approval");
-    writeTracker("done", {
-      formType: input.formType,
-      pdfOriginalName: input.pdfOriginalName,
-      sessionId: input.sessionId,
-      ...(input.parentRunId ? { parentRunId: input.parentRunId } : {}),
-      recordCount: records.length,
-      verifiedCount,
-      records,
+    });
+    emitSnapshot(records, "awaiting-approval", "done", {
       failedPages,
       emptyPages,
       pageStatusSummary,
-    }, "awaiting-approval");
+    });
   } catch (err) {
     writeTracker("failed", { formType: input.formType, sessionId: input.sessionId }, undefined, errorMessage(err));
     throw err;
