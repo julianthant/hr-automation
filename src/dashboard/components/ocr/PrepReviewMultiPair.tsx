@@ -1,3 +1,4 @@
+import { Plus } from "lucide-react";
 import type { ReactNode } from "react";
 import { PdfPagePreview } from "../PdfPagePreview";
 
@@ -7,6 +8,8 @@ export interface PrepReviewMultiPairProps {
   parentRunId: string;
   page: number;
   formCards: ReactNode[];
+  /** Optional: when provided, renders an "Add row to this page" footer button. */
+  onAddRow?: (page: number) => void;
 }
 
 /**
@@ -15,16 +18,17 @@ export interface PrepReviewMultiPairProps {
  * scrolls through the row stack so they keep visual context for which
  * page they're on.
  *
- * No active-row highlight on the form stack (per spec: "no active
- * highlight"). The page-location chip on each card already says
- * "Page N, Row M of K in pile" — that's enough for the operator to
- * count down to the right row on the physical paper.
+ * The footer button (when onAddRow is provided) lets the operator
+ * synthesize a blank row for cases where OCR extracted N-1 of N rows on
+ * the page — they spot the missing one against the always-visible page
+ * image and click to add a manual entry.
  */
 export function PrepReviewMultiPair({
   workflow,
   parentRunId,
   page,
   formCards,
+  onAddRow,
 }: PrepReviewMultiPairProps) {
   return (
     <div className="grid grid-cols-2 gap-4 border-b border-border p-4">
@@ -35,6 +39,16 @@ export function PrepReviewMultiPair({
         {formCards.map((card, i) => (
           <div key={i}>{card}</div>
         ))}
+        {onAddRow && (
+          <button
+            type="button"
+            onClick={() => onAddRow(page)}
+            className="inline-flex h-7 w-fit items-center gap-1.5 self-start rounded-md border border-dashed border-border px-3 text-xs text-muted-foreground hover:bg-muted"
+          >
+            <Plus className="h-3 w-3" />
+            Add row to this page
+          </button>
+        )}
       </div>
     </div>
   );
