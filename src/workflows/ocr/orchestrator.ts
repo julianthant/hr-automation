@@ -119,7 +119,9 @@ export async function runOcrOrchestrator(
     // only carries the fields each phase changes). __name is intentionally
     // not stamped — the dashboard derives the queue-row label as
     // "<workflow label> <ordinal>" so OCR rows render as "OCR 1", "OCR 2".
-    const flat = flattenForData(data);
+    // mode: "prepare" makes the dashboard render this row as OcrQueueRow
+    // (clickable to open OcrReviewPane) instead of a plain EntryItem.
+    const flat = flattenForData({ ...data, mode: "prepare" });
     flat.__id = input.sessionId ?? "";
     emit({
       workflow: WORKFLOW,
