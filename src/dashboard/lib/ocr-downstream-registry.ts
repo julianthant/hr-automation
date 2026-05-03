@@ -77,6 +77,28 @@ export function hasOcrDownstream(workflow: string): boolean {
 }
 
 /**
+ * Resolve the right per-form config for an OCR-workflow tracker row.
+ * The OCR workflow hosts multiple form types (oath, emergency-contact);
+ * the records on a row are shaped per `data.formType`, so we route to
+ * oath-signature's or emergency-contact's parser+renderer accordingly.
+ * Force-research is OCR-workflow-only — overlay it onto the resolved
+ * per-form config so the toolbar still appears.
+ */
+export function resolveOcrConfigForEntry(entry: {
+  workflow: string;
+  data?: Record<string, string>;
+}): OcrDownstreamConfig | null {
+  if (entry.workflow !== "ocr") {
+    return hasOcrDownstream(entry.workflow) ? getOcrDownstream(entry.workflow) : null;
+  }
+  const formType = entry.data?.formType;
+  const key = formType === "oath" ? "oath-signature" : "emergency-contact";
+  if (!hasOcrDownstream(key)) return null;
+  const base = getOcrDownstream(key);
+  return { ...base, supportsForceResearch: true };
+}
+
+/**
  * Wire a per-record editor view into a previously-registered config.
  * Called once at module load from `OcrReviewPane.tsx` so this file stays
  * import-free of TSX and avoids a circular dep on `components/ocr/`.
