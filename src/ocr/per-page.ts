@@ -168,21 +168,32 @@ export async function runOcrPerPage<T>(
   );
 
   // Schema-validate each record from each successful page; drop invalids.
-  // sourcePage is runner-authoritative — the LLM only sees one page at a
-  // time and has no concept of absolute page number. We inject it before
-  // safeParse so schemas that declare `sourcePage` as required (oath,
-  // emergency-contact) validate; schemas that don't (the test fixture)
-  // strip it via Zod's default object behavior, and the spread below
-  // re-adds it. Either way, r.page is the source of truth.
+  // Three fields are injected before `safeParse`:
+  //   - rowIndex (default = array index): sign-in sheets have many rows; LLM
+  //     occasionally drops the field on single-record pages
+  //   - employeeSigned (default = true): worst case operator deselects in the
+  //     preview pane
+  //   - sourcePage (runner-authoritative): the LLM sees one page at a time
+  //     and has no concept of absolute page number; we override whatever it
+  //     sent so r.page is always the source of truth
+  // Spread order: defaults first, LLM record next (overwrites the defaults
+  // for rowIndex/employeeSigned), sourcePage last (always wins). Schemas
+  // that don't declare these fields silently strip them via Zod's default
+  // object behavior.
   const records: Array<T & { sourcePage: number }> = [];
   for (const r of results) {
     if (!r.success || !r.rawRecords) continue;
-    for (const rec of r.rawRecords) {
-      const withPage =
+    for (const [idx, rec] of r.rawRecords.entries()) {
+      const withInjects =
         rec && typeof rec === "object"
-          ? { ...(rec as Record<string, unknown>), sourcePage: r.page }
+          ? {
+              rowIndex: idx,
+              employeeSigned: true,
+              ...(rec as Record<string, unknown>),
+              sourcePage: r.page,
+            }
           : rec;
-      const parsed = req.schema.safeParse(withPage);
+      const parsed = req.schema.safeParse(withInjects);
       if (!parsed.success) {
         log.warn(
           `runOcrPerPage page ${r.page} record dropped (schema): ${parsed.error.issues
