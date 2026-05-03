@@ -349,6 +349,10 @@ export default function App() {
                   <OcrReviewPane
                     entry={selectedEntry}
                     onClose={() => setReviewingPrepId(null)}
+                    onReupload={(reuploadFor) => {
+                      setRunModalReuploadFor(reuploadFor);
+                      setRunModalOpen(true);
+                    }}
                   />
                 ) : undefined
               }

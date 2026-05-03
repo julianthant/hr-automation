@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, FileText, FileScan, Loader2 } from "lucide-react";
+import { FileText, FileScan, Loader2, UploadCloud, X as XIcon } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -36,7 +36,10 @@ import { cn } from "@/lib/utils";
 
 export interface OcrReviewPaneProps {
   entry: TrackerEntry;
+  /** Operator dismissed the pane (only used by the legacy back-button path). */
   onClose: () => void;
+  /** Open the reupload modal carrying forward this row's resolved EIDs. */
+  onReupload?: (args: { sessionId: string; previousRunId: string }) => void;
 }
 
 type AnyPreviewRecord = AnyOcrPreviewRecord;
@@ -72,7 +75,7 @@ setOcrDownstreamRenderer("oath-signature", ({ record, onChange }) => (
  * Closing the pane (Back arrow, Cancel, or selecting another queue
  * entry) preserves localStorage edits — Approve / Discard clear them.
  */
-export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
+export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps) {
   const sessionId = entry.id;
   const runId = entry.runId ?? entry.id;
   const cfg = resolveOcrConfigForEntry(entry);
@@ -94,8 +97,33 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
     },
   );
   const [submitting, setSubmitting] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
   const [researchingIndices, setResearchingIndices] = useState<Set<number>>(new Set());
   const [markedBlankPages, setMarkedBlankPages] = useState<Set<number>>(new Set());
+
+  async function handleDiscard(): Promise<void> {
+    if (!cfg) return;
+    if (!window.confirm("Discard this prep row? Per-record edits will be lost.")) return;
+    setDiscarding(true);
+    try {
+      const r = await fetch(cfg.discardUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parentRunId: runId }),
+      });
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({})) as { error?: string };
+        toast.error("Couldn't discard", { description: body.error ?? `HTTP ${r.status}` });
+      } else {
+        toast.success("Discarded");
+        window.localStorage.removeItem(storageKey);
+      }
+    } catch (err) {
+      toast.error("Couldn't discard", { description: err instanceof Error ? err.message : "Network error" });
+    } finally {
+      setDiscarding(false);
+    }
+  }
 
   // Persist edits — debounced via React's state batching is enough here.
   useEffect(() => {
@@ -291,13 +319,6 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
       {/* Header */}
       <div className="flex items-center justify-between gap-3 border-b border-border bg-card p-3">
         <div className="flex min-w-0 items-center gap-2.5">
-          <button
-            onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted"
-            aria-label="Back"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-          </button>
           <FileText className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
           <span className="truncate text-sm font-semibold">
             {data.pdfOriginalName || "Prep review"}
@@ -316,15 +337,32 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
               onSuccess={() => setLocalEdits({})}
             />
           )}
+          {onReupload && (
+            <button
+              type="button"
+              onClick={() =>
+                onReupload({ sessionId: entry.id, previousRunId: entry.runId ?? entry.id })
+              }
+              disabled={submitting || discarding}
+              title="Re-upload corrected PDF — carries forward resolved EIDs from this run"
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-3 text-xs text-muted-foreground hover:bg-muted disabled:opacity-50"
+            >
+              <UploadCloud className="h-3 w-3" /> Reupload
+            </button>
+          )}
           <button
-            onClick={onClose}
-            className="h-7 rounded-md border border-border px-3 text-xs text-muted-foreground hover:bg-muted"
+            type="button"
+            onClick={() => void handleDiscard()}
+            disabled={submitting || discarding}
+            title="Discard this prep row"
+            className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-3 text-xs text-muted-foreground hover:bg-muted disabled:opacity-50"
           >
-            Cancel
+            {discarding ? <Loader2 className="h-3 w-3 animate-spin" /> : <XIcon className="h-3 w-3" />}
+            Discard
           </button>
           <button
             onClick={handleApprove}
-            disabled={submitting || selectedCount === 0}
+            disabled={submitting || discarding || selectedCount === 0}
             className={cn(
               "inline-flex h-7 items-center gap-1.5 rounded-md border border-primary bg-primary px-3 text-xs font-semibold text-primary-foreground",
               "disabled:cursor-not-allowed disabled:opacity-50",
@@ -373,7 +411,7 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
             return (
               <div key={`empty-${renderEntry.page}`} className="grid grid-cols-2 gap-4 border-b border-border p-4">
                 <div className="self-start">
-                  <PdfPagePreview workflow={entry.workflow} parentRunId={runId} page={renderEntry.page} />
+                  <PdfPagePreview workflow={entry.workflow} parentRunId={sessionId} page={renderEntry.page} />
                 </div>
                 <div>
                   <EmptyPagePlaceholder
@@ -398,7 +436,7 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
               >
                 <PrepReviewPair
                   workflow={entry.workflow}
-                  parentRunId={runId}
+                  parentRunId={sessionId}
                   page={page}
                   formCard={renderFormCard({
                     record,
@@ -430,7 +468,7 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
             <PrepReviewMultiPair
               key={page}
               workflow={entry.workflow}
-              parentRunId={runId}
+              parentRunId={sessionId}
               page={page}
               formCards={cards}
               onAddRow={addBlankRow}

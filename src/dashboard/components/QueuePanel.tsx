@@ -3,11 +3,9 @@ import { Inbox } from "lucide-react";
 import { StatPills } from "./StatPills";
 import { EntryItem } from "./EntryItem";
 import { EmptyState } from "./EmptyState";
-import { OcrQueueRow } from "./ocr/OcrQueueRow";
 import { ParentChildRow } from "./ocr/ParentChildRow";
 import type { TrackerEntry } from "./types";
 import {
-  isPrepareRow,
   isApprovedPrepRow,
   isDiscardedPrepRow,
 } from "./ocr/types";
@@ -91,14 +89,6 @@ export function QueuePanel({
   // regardless of search/filter. The user always wants to see "what's
   // currently being prepared" — hiding it behind a status filter would be
   // surprising.
-  const inFlightPrepEntries = useMemo(
-    () =>
-      visibleEntries.filter(
-        (e) => isPrepareRow(e) && !isApprovedPrepRow(e),
-      ),
-    [visibleEntries],
-  );
-
   const approvedPrepEntries = useMemo(
     () => visibleEntries.filter(isApprovedPrepRow),
     [visibleEntries],
@@ -152,7 +142,10 @@ export function QueuePanel({
   const filtered = useMemo(() => {
     let result = visibleEntries.filter(
       (e) =>
-        !isPrepareRow(e) &&
+        // Prep rows now render as regular EntryItem in the main list — only
+        // approved-prep parents (which become ParentChildRow above) and
+        // children-of-approved-parents (folded into the parent) are excluded.
+        !isApprovedPrepRow(e) &&
         !(e.parentRunId && approvedParentRunIds.has(e.parentRunId)),
     );
     if (statusFilter) {
@@ -219,18 +212,10 @@ export function QueuePanel({
                 />
               );
             })}
-            {inFlightPrepEntries.map((e) => {
-              const runId = e.runId ?? e.id;
-              return (
-                <OcrQueueRow
-                  key={`prep-${runId}`}
-                  entry={e}
-                  isReviewing={reviewingPrepId === runId}
-                  onOpenReview={(rid) => onOpenReview?.(rid)}
-                  onReupload={onReupload}
-                />
-              );
-            })}
+            {/* Prep rows render as regular EntryItem (same size + behavior
+                as other workflow rows). The only differentiator is the
+                Preview tab inside LogPanel, gated on data.mode === "prepare".
+                Reupload + Discard live in OcrReviewPane's header. */}
             {loading ? (
               <div className="space-y-0">
                 {Array.from({ length: 6 }).map((_, i) => (
