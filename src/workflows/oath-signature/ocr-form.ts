@@ -86,7 +86,7 @@ export type MatchState = z.infer<typeof MatchStateSchema>;
 export const OathPreviewRecordSchema = OathRosterOcrRecordSchema.extend({
   employeeId: z.string(),
   matchState: MatchStateSchema,
-  matchSource: z.enum(["roster", "eid-lookup", "llm"]).optional(),
+  matchSource: z.enum(["roster", "eid-lookup", "llm", "form-eid", "manual"]).optional(),
   matchConfidence: z.number().min(0).max(1).optional(),
   rosterCandidates: z
     .array(
@@ -154,7 +154,7 @@ export const oathOcrFormSpec: OcrFormSpec<
     if (!record.employeeSigned) {
       return {
         ...record,
-        employeeId: "",
+        employeeId: (record.employeeId ?? "").trim(),
         matchState: "extracted",
         documentType: "expected",
         originallyMissing: [],
@@ -162,6 +162,38 @@ export const oathOcrFormSpec: OcrFormSpec<
         warnings: [],
       };
     }
+
+    // Form-EID short-circuit: when the LLM extracted an EID from the page
+    // (UPAY585/586 has an "Employee ID" field), trust the structured value
+    // over the handwritten name. Roster-exact match → auto-accept; no roster
+    // match → flag for eid-lookup-by-EID (verify-only branch).
+    const formEid = (record.employeeId ?? "").trim();
+    if (formEid.length > 0) {
+      const rosterHit = roster.find((row) => row.eid === formEid);
+      if (rosterHit) {
+        return {
+          ...record,
+          employeeId: formEid,
+          matchState: "matched",
+          matchSource: "form-eid",
+          documentType: "expected",
+          originallyMissing: [],
+          selected: true,
+          warnings: [],
+        };
+      }
+      return {
+        ...record,
+        employeeId: formEid,
+        matchState: "lookup-pending",
+        matchSource: "form-eid",
+        documentType: "expected",
+        originallyMissing: [],
+        selected: true,
+        warnings: [`EID ${formEid} extracted from form but not in roster — verifying`],
+      };
+    }
+
     const result = matchAgainstRoster(roster, record.printedName);
     if (result.bestScore >= ROSTER_AUTO_ACCEPT && result.candidates[0].eid) {
       const top = result.candidates[0];
@@ -203,7 +235,11 @@ export const oathOcrFormSpec: OcrFormSpec<
 
   needsLookup(record): LookupKind {
     if (record.matchState === "extracted") return null;
-    if (record.matchState === "lookup-pending") return "name";
+    if (record.matchState === "lookup-pending") {
+      // form-eid lookup-pending → we know the EID, just need to verify it
+      if (record.matchSource === "form-eid") return "verify-only";
+      return "name";
+    }
     if (record.matchState === "matched" && record.employeeId) {
       if (record.verification) return null;
       return "verify";
