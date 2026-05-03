@@ -128,7 +128,10 @@ Field-level rules:
 - dateSigned should be transcribed as it appears on the paper (typical formats: MM/DD/YYYY or M/D/YY).
 - Output ONLY valid JSON matching the schema. No commentary.`;
 
-const ROSTER_AUTO_ACCEPT = 0.85;
+const NAME_AUTO_ACCEPT = 0.95;
+const NAME_AUTO_ACCEPT_GAP = 0.10;
+const NAME_DISAMBIG_FLOOR = 0.40;
+const LLM_HIGH_CONFIDENCE = 0.6;
 
 function normalizeName(n: string): string {
   return n.trim().toLowerCase().replace(/\s+/g, " ");
@@ -194,37 +197,67 @@ export const oathOcrFormSpec: OcrFormSpec<
       };
     }
 
-    const result = matchAgainstRoster(roster, record.printedName);
-    if (result.bestScore >= ROSTER_AUTO_ACCEPT && result.candidates[0].eid) {
-      const top = result.candidates[0];
+    // Name-resolution chain:
+    //   - Top score >= NAME_AUTO_ACCEPT (0.95) with no close second → auto-accept
+    //     (matchSource: "roster")
+    //   - Top score in [NAME_DISAMBIG_FLOOR, NAME_AUTO_ACCEPT) OR close second →
+    //     mark lookup-pending; orchestrator's disambiguating phase runs the LLM
+    //     and applyDisambiguation patches the record
+    //   - Top score < NAME_DISAMBIG_FLOOR (0.40) / no candidates → manual
+    //     fall-through (matchSource: "manual"); eid-lookup-by-name still runs
+    //     as a backstop downstream
+    const ranked = matchAgainstRoster(roster, record.printedName);
+    const top = ranked.candidates[0];
+    const second = ranked.candidates[1];
+    const topCandidates = ranked.candidates.slice(0, 5);
+
+    if (!top || top.score < NAME_DISAMBIG_FLOOR) {
+      return {
+        ...record,
+        employeeId: "",
+        matchState: "lookup-pending",
+        matchSource: "manual",
+        rosterCandidates: topCandidates,
+        documentType: "expected",
+        originallyMissing: [],
+        selected: true,
+        warnings:
+          ranked.candidates.length > 0
+            ? [`Best roster score ${top.score.toFixed(2)} < ${NAME_DISAMBIG_FLOOR} — manual review`]
+            : ["No roster match — manual review"],
+      };
+    }
+
+    const closeSecond = second && top.score - second.score < NAME_AUTO_ACCEPT_GAP;
+    if (top.score >= NAME_AUTO_ACCEPT && !closeSecond && top.eid) {
       return {
         ...record,
         employeeId: top.eid,
         matchState: "matched",
         matchSource: "roster",
         matchConfidence: top.score,
-        rosterCandidates: result.candidates.slice(0, 3),
+        rosterCandidates: topCandidates,
         documentType: "expected",
         originallyMissing: [],
         selected: true,
-        warnings:
-          top.score < 1.0
-            ? [`Roster fuzzy-matched "${top.name}" (score ${top.score.toFixed(2)})`]
-            : [],
+        warnings: top.score < 1.0
+          ? [`Roster matched "${top.name}" (score ${top.score.toFixed(2)})`]
+          : [],
       };
     }
+
+    // Ambiguous: defer to the orchestrator's disambiguating phase.
     return {
       ...record,
       employeeId: "",
       matchState: "lookup-pending",
-      rosterCandidates: result.candidates.slice(0, 3),
+      rosterCandidates: topCandidates,
       documentType: "expected",
       originallyMissing: [],
       selected: true,
-      warnings:
-        result.candidates.length > 0
-          ? [`Best roster score ${result.bestScore.toFixed(2)} < ${ROSTER_AUTO_ACCEPT} — needs eid-lookup`]
-          : ["No roster match — falling back to eid-lookup"],
+      warnings: closeSecond
+        ? [`Top score ${top.score.toFixed(2)} but close second ${second!.score.toFixed(2)} — disambiguating`]
+        : [`Top score ${top.score.toFixed(2)} in disambiguation band — disambiguating`],
     };
   },
 
