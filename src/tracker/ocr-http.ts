@@ -455,7 +455,9 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
       const loadRosterFn = opts._loadRosterOverride ?? realLoadRoster;
       const roster = rosterPath ? (await loadRosterFn(rosterPath) as unknown[]) : [];
 
-      let records = (ocrResult.data as unknown[]).map((r) => spec.matchRecord({ record: r, roster: roster as never }));
+      let records = await Promise.all(
+        (ocrResult.data as unknown[]).map((r) => spec.matchRecord({ record: r, roster: roster as never })),
+      );
 
       // Eid-lookup fan-out (mirror the orchestrator's lookup phase)
       const lookupTargets: Array<{ rec: unknown; index: number; kind: "name" | "verify" }> = [];

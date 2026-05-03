@@ -126,7 +126,7 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
   ocrArraySchema: OcrOutputSchema,
   schemaName: "emergency-contact-batch",
 
-  matchRecord({ record, roster }): PreviewRecord {
+  async matchRecord({ record, roster }): Promise<PreviewRecord> {
     // Stage 1: form-EID. If the operator transcribed an EID on the paper,
     // trust it (subject to verification later).
     const formEid = normalizeEid(record.employee.employeeId);
@@ -191,6 +191,11 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
           ? [`Best roster score ${result.bestScore.toFixed(2)} < ${ROSTER_AUTO_ACCEPT} — needs eid-lookup`]
           : ["No roster match — falling back to eid-lookup"],
     };
+  },
+
+  applyDisambiguation({ record }): PreviewRecord {
+    // EC currently uses sync algorithmic matching only.
+    return record;
   },
 
   needsLookup(record): LookupKind {

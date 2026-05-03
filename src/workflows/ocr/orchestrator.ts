@@ -253,8 +253,10 @@ export async function runOcrOrchestrator(
       },
       "matching",
     );
-    let records = (ocrResult.data as unknown[]).map((r) =>
-      spec.matchRecord({ record: r, roster }),
+    let records = await Promise.all(
+      (ocrResult.data as unknown[]).map((r) =>
+        spec.matchRecord({ record: r, roster }),
+      ),
     );
 
     // 3b. Carry-forward (if reupload)

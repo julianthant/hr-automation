@@ -150,7 +150,7 @@ export const oathOcrFormSpec: OcrFormSpec<
   ocrArraySchema: OathOcrOutputSchema,
   schemaName: "oath-roster-batch",
 
-  matchRecord({ record, roster }): OathPreviewRecord {
+  async matchRecord({ record, roster }): Promise<OathPreviewRecord> {
     if (!record.employeeSigned) {
       return {
         ...record,
@@ -194,6 +194,11 @@ export const oathOcrFormSpec: OcrFormSpec<
           ? [`Best roster score ${result.bestScore.toFixed(2)} < ${ROSTER_AUTO_ACCEPT} — needs eid-lookup`]
           : ["No roster match — falling back to eid-lookup"],
     };
+  },
+
+  applyDisambiguation({ record }): OathPreviewRecord {
+    // Real implementation lands in Task 6 — stub keeps the spec compilable.
+    return record;
   },
 
   needsLookup(record): LookupKind {

@@ -21,7 +21,7 @@ export interface RosterRow {
   // spec.matchRecord which decides what to read.)
 }
 
-export type LookupKind = "name" | "verify" | null;
+export type LookupKind = "name" | "verify" | "verify-only" | null;
 
 export interface OcrFormSpec<TOcr, TPreview, TFanOut> {
   /** Stable id matching the form-type picker value. e.g. "oath", "emergency-contact". */
@@ -45,8 +45,19 @@ export interface OcrFormSpec<TOcr, TPreview, TFanOut> {
   /** Cache key segment fed into OCR's content cache. */
   schemaName: string;
 
-  /** Pure: take an OCR record + roster, return the preview record + initial matchState. */
-  matchRecord(input: { record: TOcr; roster: RosterRow[] }): TPreview;
+  /** Take an OCR record + roster, return the preview record + initial matchState. May call an LLM disambiguator (async). */
+  matchRecord(input: { record: TOcr; roster: RosterRow[] }): Promise<TPreview>;
+
+  /**
+   * Patch a preview record with the result of post-match LLM disambiguation.
+   * Called by the orchestrator's `disambiguating` phase only when matchRecord
+   * left the record in `lookup-pending` state with disambiguation candidates.
+   * Specs that don't disambiguate may return the record unchanged.
+   */
+  applyDisambiguation(input: {
+    record: TPreview;
+    result: { eid: string | null; confidence: number };
+  }): TPreview;
 
   /** Whether this preview record needs an eid-lookup pass. */
   needsLookup(record: TPreview): LookupKind;

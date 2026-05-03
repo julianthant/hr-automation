@@ -8,72 +8,72 @@ const roster: RosterRow[] = [
   { eid: "10005678", name: "James Wong" },
 ];
 
-test("matchRecord: form-EID present → matched (form-eid first)", () => {
+test("matchRecord: form-EID present → matched (form-eid first)", async () => {
   const ocr = {
     sourcePage: 1,
     employee: { name: "Maria Garcia", employeeId: "10001234" },
     emergencyContact: { name: "Sara Garcia", relationship: "Sister", primary: true, sameAddressAsEmployee: true, cellPhone: "(555) 123-4567" },
     notes: [], documentType: "expected" as const, originallyMissing: [],
   };
-  const preview = emergencyContactOcrFormSpec.matchRecord({ record: ocr, roster });
+  const preview = await emergencyContactOcrFormSpec.matchRecord({ record: ocr, roster });
   assert.equal(preview.matchState, "matched");
   assert.equal(preview.matchSource, "form");
   assert.equal(preview.employee.employeeId, "10001234");
   assert.equal(preview.selected, true);
 });
 
-test("matchRecord: no form-EID, high roster name match → matched (roster)", () => {
+test("matchRecord: no form-EID, high roster name match → matched (roster)", async () => {
   const ocr = {
     sourcePage: 2,
     employee: { name: "Maria Garcia", employeeId: "" },
     emergencyContact: { name: "Sara Garcia", relationship: "Sister", primary: true, sameAddressAsEmployee: true, cellPhone: "(555) 123-4567" },
     notes: [], documentType: "expected" as const, originallyMissing: [],
   };
-  const preview = emergencyContactOcrFormSpec.matchRecord({ record: ocr, roster });
+  const preview = await emergencyContactOcrFormSpec.matchRecord({ record: ocr, roster });
   assert.equal(preview.matchState, "matched");
   assert.equal(preview.matchSource, "roster");
   assert.equal(preview.employee.employeeId, "10001234");
 });
 
-test("matchRecord: no form-EID, no roster match → lookup-pending", () => {
+test("matchRecord: no form-EID, no roster match → lookup-pending", async () => {
   const ocr = {
     sourcePage: 3,
     employee: { name: "Unknown Person", employeeId: "" },
     emergencyContact: { name: "Other Person", relationship: "Friend", primary: true, sameAddressAsEmployee: true, cellPhone: "(555) 999-0000" },
     notes: [], documentType: "expected" as const, originallyMissing: [],
   };
-  const preview = emergencyContactOcrFormSpec.matchRecord({ record: ocr, roster });
+  const preview = await emergencyContactOcrFormSpec.matchRecord({ record: ocr, roster });
   assert.equal(preview.matchState, "lookup-pending");
   assert.equal(preview.employee.employeeId, "");
 });
 
-test("needsLookup: matched-via-form → 'verify'", () => {
+test("needsLookup: matched-via-form → 'verify'", async () => {
   const r = { matchState: "matched", matchSource: "form", employee: { employeeId: "10001234" } } as any;
   assert.equal(emergencyContactOcrFormSpec.needsLookup(r), "verify");
 });
 
-test("needsLookup: matched-via-roster → 'verify'", () => {
+test("needsLookup: matched-via-roster → 'verify'", async () => {
   const r = { matchState: "matched", matchSource: "roster", employee: { employeeId: "10001234" } } as any;
   assert.equal(emergencyContactOcrFormSpec.needsLookup(r), "verify");
 });
 
-test("needsLookup: lookup-pending → 'name'", () => {
+test("needsLookup: lookup-pending → 'name'", async () => {
   const r = { matchState: "lookup-pending", employee: { employeeId: "" } } as any;
   assert.equal(emergencyContactOcrFormSpec.needsLookup(r), "name");
 });
 
-test("needsLookup: matched + verification already present → null", () => {
+test("needsLookup: matched + verification already present → null", async () => {
   const r = { matchState: "matched", employee: { employeeId: "10001234" }, verification: { state: "verified" } } as any;
   assert.equal(emergencyContactOcrFormSpec.needsLookup(r), null);
 });
 
-test("carryForwardKey uses employee name normalized", () => {
+test("carryForwardKey uses employee name normalized", async () => {
   const r1 = { employee: { name: "  Maria GARCIA  " } } as any;
   const r2 = { employee: { name: "maria garcia" } } as any;
   assert.equal(emergencyContactOcrFormSpec.carryForwardKey(r1), emergencyContactOcrFormSpec.carryForwardKey(r2));
 });
 
-test("approveTo.deriveInput returns RecordSchema-compatible shape", () => {
+test("approveTo.deriveInput returns RecordSchema-compatible shape", async () => {
   const r = {
     sourcePage: 1,
     employee: { name: "Maria Garcia", employeeId: "10001234" },
@@ -85,7 +85,7 @@ test("approveTo.deriveInput returns RecordSchema-compatible shape", () => {
   assert.equal(input.emergencyContact.name, "Sara Garcia");
 });
 
-test("approveTo.deriveItemId: deterministic", () => {
+test("approveTo.deriveItemId: deterministic", async () => {
   const r = { sourcePage: 5, employee: { employeeId: "10001234" } } as any;
   const id = emergencyContactOcrFormSpec.approveTo.deriveItemId(r, "parent-xyz", 2);
   assert.match(id, /^ocr-ec-/);
