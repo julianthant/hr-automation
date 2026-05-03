@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import type { ReactNode } from "react";
 import { TerminalSquare } from "lucide-react";
 import { StepPipeline } from "./StepPipeline";
 import { LogStream } from "./LogStream";
@@ -25,6 +26,12 @@ interface LogPanelProps {
   allEntries?: TrackerEntry[];
   /** Per-entry "<base> <ordinal>" labels from `buildDisplayNameMap`. */
   displayNames?: Map<string, string>;
+  /** Default-active LogStream tab (e.g. "preview" when opening from an OcrQueueRow click). */
+  defaultTab?: string;
+  /** Optional preview content for the LogStream's Preview tab (e.g. OcrReviewPane body). */
+  previewSlot?: ReactNode;
+  /** Whether the Preview tab is shown. */
+  previewAvailable?: boolean;
 }
 
 // Special virtual keys the generic detail renderer recognizes. These come
@@ -32,10 +39,14 @@ interface LogPanelProps {
 // type-aware formatter can't handle them — we branch on the key.
 const COMPUTED_KEYS = new Set(["__started", "__elapsed"]);
 
-export function LogPanel({ entry, workflow, date, allEntries, displayNames }: LogPanelProps) {
+export function LogPanel({ entry, workflow, date, allEntries, displayNames, defaultTab, previewSlot, previewAvailable }: LogPanelProps) {
   const [runs, setRuns] = useState<RunInfo[]>([]);
   const [activeRunId, setActiveRunId] = useState<string | null>(entry?.runId || null);
   const registered = useWorkflow(workflow);
+  const [maximized, setMaximized] = useState(false);
+  // Reset maximized whenever we switch to a different entry — operator's
+  // intent for "fullscreen the tab" is per-row, not session-wide.
+  useEffect(() => { setMaximized(false); }, [entry?.id, entry?.runId]);
 
   // Compute child entries (other entries where parentRunId === this run's runId).
   const childEntries: TrackerEntry[] = entry?.runId && allEntries
@@ -166,6 +177,9 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames }: Lo
 
   return (
     <div className="flex-1 flex flex-col bg-card min-w-0 min-h-0 overflow-hidden">
+      {/* Header + detail grid + step pipeline are hidden when the operator
+          maximizes a tab so the tab content takes the full LogPanel height. */}
+      {!maximized && (<>
       {/* Header — height matches QueuePanel search + DuoPanel title */}
       <div className="h-[69.5px] flex items-center justify-between px-6 border-b border-border flex-shrink-0">
         <div className="flex items-center gap-3.5">
@@ -249,7 +263,9 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames }: Lo
         />
       )}
 
-      {childEntries.length > 0 && (
+      </>)}
+
+      {!maximized && childEntries.length > 0 && (
         <section className="mb-3 rounded-md border border-border p-3 mx-0">
           <h3 className="mb-2 text-[11px] uppercase tracking-wider text-muted-foreground">
             Delegated runs ({childEntries.length})
@@ -298,6 +314,11 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames }: Lo
             date={date}
           />
         }
+        previewSlot={previewSlot}
+        previewAvailable={previewAvailable}
+        initialTab={defaultTab}
+        maximized={maximized}
+        onToggleMaximize={() => setMaximized((v) => !v)}
       />
     </div>
   );

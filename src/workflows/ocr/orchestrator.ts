@@ -88,7 +88,10 @@ export async function runOcrOrchestrator(
   const watchChildren = opts._watchChildRunsOverride ?? realWatchChildRuns;
 
   const runOcr = opts._ocrPipelineOverride ?? (async ({ pdfPath, spec: s, sessionId }: { pdfPath: string; formType: string; spec: AnyOcrFormSpec; sessionId: string }) => {
-    const pageImagesDir = join(trackerDir ?? ".tracker", "page-images", sessionId);
+    // Keyed by runId (not sessionId) so the dashboard's PdfPagePreview can
+    // find the page images via its parentRunId={runId} URL parameter.
+    void sessionId;
+    const pageImagesDir = join(trackerDir ?? ".tracker", "page-images", runId);
     const result = await runOcrPipeline({
       pdfPath,
       pageImagesDir,
@@ -231,7 +234,7 @@ export async function runOcrOrchestrator(
         pageImagePath: join(
           trackerDir ?? ".tracker",
           "page-images",
-          input.sessionId,
+          runId,
           `page-${String(p.page).padStart(2, "0")}.png`,
         ),
         attempts: 1,
