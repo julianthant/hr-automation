@@ -93,3 +93,114 @@ test("runOcrPerPage filters records that fail schema validation", async () => {
     __setPerPageCallForTests(undefined);
   }
 });
+
+test("runOcrPerPage synthesizes rowIndex from array position when LLM omits it", async () => {
+  __setPerPageCallForTests(async () => ({
+    json: [
+      { name: "first" },                    // rowIndex omitted
+      { name: "second", rowIndex: 99 },     // LLM-supplied wins
+      { name: "third" },                    // rowIndex omitted
+    ],
+    poolKeyId: "test-1",
+  }));
+  try {
+    const Schema = z.object({
+      sourcePage: z.number(),
+      rowIndex: z.number().int().nonnegative(),
+      name: z.string(),
+    });
+    const out = await runOcrPerPage({
+      pagesAsImages: ["page-01.png"],
+      pageImagesDir: "/tmp/ignored",
+      prompt: "test",
+      schema: Schema,
+    });
+    assert.equal(out.records.length, 3);
+    assert.equal(out.records[0].rowIndex, 0, "first record gets rowIndex 0");
+    assert.equal(out.records[1].rowIndex, 99, "LLM-supplied rowIndex wins over default");
+    assert.equal(out.records[2].rowIndex, 2, "third record gets rowIndex 2");
+  } finally {
+    __setPerPageCallForTests(undefined);
+  }
+});
+
+test("runOcrPerPage preserves LLM-supplied employeeSigned: false over the default", async () => {
+  __setPerPageCallForTests(async () => ({
+    json: [
+      { name: "signed", employeeSigned: true },
+      { name: "unsigned", employeeSigned: false },
+      { name: "omitted" },
+    ],
+    poolKeyId: "test-1",
+  }));
+  try {
+    const Schema = z.object({
+      sourcePage: z.number(),
+      name: z.string(),
+      employeeSigned: z.boolean(),
+    });
+    const out = await runOcrPerPage({
+      pagesAsImages: ["page-01.png"],
+      pageImagesDir: "/tmp/ignored",
+      prompt: "test",
+      schema: Schema,
+    });
+    assert.equal(out.records.length, 3);
+    assert.equal(out.records[0].employeeSigned, true);
+    assert.equal(out.records[1].employeeSigned, false, "LLM-supplied false beats default true");
+    assert.equal(out.records[2].employeeSigned, true, "default applies when omitted");
+  } finally {
+    __setPerPageCallForTests(undefined);
+  }
+});
+
+test("runOcrPerPage defaults employeeSigned to true when LLM omits it", async () => {
+  __setPerPageCallForTests(async () => ({
+    json: [{ name: "x" }],
+    poolKeyId: "test-1",
+  }));
+  try {
+    const Schema = z.object({
+      sourcePage: z.number(),
+      name: z.string(),
+      employeeSigned: z.boolean(),
+    });
+    const out = await runOcrPerPage({
+      pagesAsImages: ["page-01.png"],
+      pageImagesDir: "/tmp/ignored",
+      prompt: "test",
+      schema: Schema,
+    });
+    assert.equal(out.records.length, 1);
+    assert.equal(out.records[0].employeeSigned, true, "default is true when LLM omits");
+  } finally {
+    __setPerPageCallForTests(undefined);
+  }
+});
+
+test("runOcrPerPage still drops records that fail schema even with defaults", async () => {
+  __setPerPageCallForTests(async () => ({
+    json: [
+      { name: "ok" },
+      "not an object",          // truly garbage
+      { wrongShape: true },     // missing required `name`
+    ],
+    poolKeyId: "test-1",
+  }));
+  try {
+    const Schema = z.object({
+      sourcePage: z.number(),
+      name: z.string(),
+    });
+    const out = await runOcrPerPage({
+      pagesAsImages: ["page-01.png"],
+      pageImagesDir: "/tmp/ignored",
+      prompt: "test",
+      schema: Schema,
+    });
+    assert.equal(out.records.length, 1, "only the valid record survives");
+    assert.equal(out.records[0].name, "ok");
+  } finally {
+    __setPerPageCallForTests(undefined);
+  }
+});
