@@ -17,6 +17,7 @@ test("ocrWorkflow declares expected steps", () => {
     "loading-roster",
     "ocr",
     "matching",
+    "disambiguating",
     "eid-lookup",
     "verification",
     "awaiting-approval",

@@ -133,13 +133,15 @@ export async function runOcrRetryPage(
   // 3. Match new records against the roster.
   const rosterPath = (row.data?.rosterPath as unknown as string | undefined) ?? "";
   const roster = rosterPath ? ((await loadRosterFn(rosterPath)) as OcrRosterRow[]) : [];
-  let newRecords = ocr.records.map((r) => spec.matchRecord({ record: r, roster }));
+  let newRecords = await Promise.all(
+    ocr.records.map((r) => spec.matchRecord({ record: r, roster })),
+  );
 
   // 4. Eid-lookup for new records that need it.
-  const lookupTargets: Array<{ rec: unknown; localIndex: number; kind: "name" | "verify" }> = [];
+  const lookupTargets: Array<{ rec: unknown; localIndex: number; kind: "name" | "verify" | "verify-only" }> = [];
   newRecords.forEach((rec, localIndex) => {
     const kind = spec.needsLookup(rec);
-    if (kind === "name" || kind === "verify") {
+    if (kind === "name" || kind === "verify" || kind === "verify-only") {
       lookupTargets.push({ rec, localIndex, kind });
     }
   });
@@ -403,7 +405,7 @@ function patchUnresolved(records: unknown[], idx: number): void {
   }
 }
 
-function patchFromOutcome(records: unknown[], idx: number, outcome: ChildOutcome, kind: "name" | "verify"): void {
+function patchFromOutcome(records: unknown[], idx: number, outcome: ChildOutcome, kind: "name" | "verify" | "verify-only"): void {
   const rec = records[idx] as Record<string, unknown>;
   const eid = (outcome.data?.emplId ?? "").trim();
   const looksLikeEid = /^\d{5,}$/.test(eid);
