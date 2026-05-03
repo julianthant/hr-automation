@@ -153,7 +153,9 @@ export const sharepointDownloadWorkflow: RegisteredWorkflow<
     // the Download event, saveAs into outDir.
     await ctx.step("download", async () => {
       const outDir = input.outDir ?? "src/data";
-      const { path: saved, filename } = await captureExcelDownload(page, outDir);
+      const { path: saved, filename } = await captureExcelDownload(page, outDir, {
+        filenameBase: input.filenameBase,
+      });
       ctx.updateData({ filename, path: saved });
       // Stash the result for the HTTP handler to pick up (see
       // _takeLastDownloadResult docs above).

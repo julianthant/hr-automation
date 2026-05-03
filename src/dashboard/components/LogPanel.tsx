@@ -23,6 +23,8 @@ interface LogPanelProps {
   date: string;
   /** Cross-workflow entries for child-run detection. Optional — if absent, child section is hidden. */
   allEntries?: TrackerEntry[];
+  /** Per-entry "<base> <ordinal>" labels from `buildDisplayNameMap`. */
+  displayNames?: Map<string, string>;
 }
 
 // Special virtual keys the generic detail renderer recognizes. These come
@@ -30,7 +32,7 @@ interface LogPanelProps {
 // type-aware formatter can't handle them — we branch on the key.
 const COMPUTED_KEYS = new Set(["__started", "__elapsed"]);
 
-export function LogPanel({ entry, workflow, date, allEntries }: LogPanelProps) {
+export function LogPanel({ entry, workflow, date, allEntries, displayNames }: LogPanelProps) {
   const [runs, setRuns] = useState<RunInfo[]>([]);
   const [activeRunId, setActiveRunId] = useState<string | null>(entry?.runId || null);
   const registered = useWorkflow(workflow);
@@ -86,10 +88,21 @@ export function LogPanel({ entry, workflow, date, allEntries }: LogPanelProps) {
   const { logs, loading: logsLoading } = useLogs(workflow, entry?.id || null, activeRunId, date);
   const { events } = useRunEvents(workflow, entry?.id || null, activeRunId, date);
 
-  // Derive step/status from active run (not the globally deduped entry)
+  // Derive step/status from active run when viewing a HISTORICAL run via the
+  // RunSelector. For the LIVE run (activeRun matches the SSE-delivered entry's
+  // runId) prefer the SSE entry — `/api/runs` is polled every 2s only while
+  // entry.status is running/pending, so the moment SSE flips status to done
+  // the polling stops and `activeRun.step` freezes at whatever step the LAST
+  // poll captured. For fast workflows (e.g. OCR with 0 records) that's the
+  // first step, leaving the timeline stuck even though the entry is terminal.
   const activeRun = runs.find((r) => r.runId === activeRunId);
-  const runStatus = activeRun?.status || entry?.status || "pending";
-  const runStep = activeRun?.step || null;
+  const isViewingLiveRun = !activeRunId || activeRunId === entry?.runId;
+  const runStatus = isViewingLiveRun
+    ? (entry?.status || activeRun?.status || "pending")
+    : (activeRun?.status || entry?.status || "pending");
+  const runStep = isViewingLiveRun
+    ? (entry?.step || activeRun?.step || null)
+    : (activeRun?.step || null);
 
   // Prefer the per-run timestamps on the selected RunInfo; fall back to the
   // deduped entry's fields so the live (latest) run keeps working even
@@ -121,7 +134,7 @@ export function LogPanel({ entry, workflow, date, allEntries }: LogPanelProps) {
     );
   }
 
-  const name = resolveEntryName(entry);
+  const name = resolveEntryName(entry, displayNames);
   const displayTs = firstTs || entry.timestamp;
   const startTime = displayTs
     ? new Date(displayTs).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" })

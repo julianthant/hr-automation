@@ -47,7 +47,19 @@ interface CaptureToastsOptions {
 }
 
 export function useCaptureToasts(opts: CaptureToastsOptions = {}): void {
-  const labelFn = opts.workflowLabel ?? ((w) => w);
+  // `labelFn` lives in a ref so we can read the latest version inside the
+  // SSE handlers without listing it as a useEffect dep. Without this, the
+  // default `(w) => w` (or any inline `workflowLabel` from the caller) is
+  // a fresh function reference every render, which would tear down and
+  // re-create the EventSource on each parent re-render. Under SSE-driven
+  // App-level re-renders that loop runs ~1×/sec and leaks active EventSource
+  // connections (close() drains async; some leak); after a few minutes the
+  // browser's HTTP/1.1 connection pool is saturated and screenshot/image
+  // fetches stall indefinitely. Verified 2026-05-02 with 510 leaked SSE
+  // connections blocking the SharePoint screenshots panel.
+  const labelFnRef = useRef(opts.workflowLabel ?? ((w: string) => w));
+  labelFnRef.current = opts.workflowLabel ?? ((w: string) => w);
+
   // Stash workflow → label for events whose own payload doesn't carry the
   // workflow name. session_created carries it; photo events carry only the
   // sessionId. We learn the mapping when session_created arrives.
@@ -94,7 +106,7 @@ export function useCaptureToasts(opts: CaptureToastsOptions = {}): void {
 
       const isOwned = ownedSessionIds.has(ev.sessionId);
       const workflow = workflowBySessionRef.current.get(ev.sessionId) ?? "capture";
-      const label = labelFn(workflow);
+      const label = labelFnRef.current(workflow);
 
       switch (ev.type) {
         case "photo_added": {
@@ -171,5 +183,7 @@ export function useCaptureToasts(opts: CaptureToastsOptions = {}): void {
       es.removeEventListener("heartbeat", onHeartbeat);
       es.close();
     };
-  }, [labelFn]);
+    // Empty deps: the EventSource is created once on mount and torn down
+    // on unmount. `labelFn` is read live via `labelFnRef`.
+  }, []);
 }

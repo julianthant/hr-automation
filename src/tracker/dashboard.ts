@@ -32,6 +32,7 @@ import { PATHS } from "../config.js";
 import { stopDaemons } from "../core/daemon-client.js";
 import { findAliveDaemons } from "../core/daemon-registry.js";
 import { readQueueState, markItemFailed } from "../core/daemon-queue.js";
+import { cancelInProcessRun } from "../core/in-process-runs.js";
 import {
   enqueueFromHttp,
   validateEnqueueRequest,
@@ -59,6 +60,7 @@ import {
   getSharePointDownloadStatus,
 } from "../workflows/sharepoint-download/index.js";
 import { sweepOrphanUploadDirs } from "../scripts/ops/clean-tracker.js";
+import { listRosters } from "../match/roster-loader.js";
 import { readMultipart } from "./multipart-helper.js";
 import {
   buildOcrFormsHandler,
@@ -2522,6 +2524,28 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/rosters") {
+      const rosterDirs = [
+        resolve(process.cwd(), ".tracker/rosters"),
+        resolve(process.cwd(), "src/data"),
+      ];
+      const merged = rosterDirs.flatMap((d) => listRosters(d));
+      merged.sort((a, b) => b.mtimeMs - a.mtimeMs);
+      const rows = merged.map((r) => ({
+        filename: r.filename,
+        path: r.path,
+        bytes: r.sizeBytes,
+        modifiedAt: new Date(r.mtimeMs).toISOString(),
+      }));
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "no-store",
+      });
+      res.end(JSON.stringify(rows));
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/api/prep/pdf-page") {
       const wf = url.searchParams.get("workflow") ?? "";
       const parentRunId = url.searchParams.get("parentRunId") ?? "";
@@ -3302,13 +3326,28 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     }
 
     if (req.method === "POST" && url.pathname === "/api/cancel-running") {
-      // Cancel-running: route to the daemon currently processing the
-      // named item. Read the queue state, find the latest claim event
-      // for the item, look up that daemon's port via findAliveDaemons,
-      // then proxy a POST /cancel-current. Returns:
-      //   200 — daemon accepted (cancel will materialize at next step)
-      //   409 — itemId/runId mismatch on the daemon (claim rotated)
-      //   410 — no claim event for this item, or claiming daemon dead
+      // Cancel-running has two paths:
+      //
+      //   1. Daemon-mode workflows (separations, work-study, eid-lookup,
+      //      onboarding, oath-signature, emergency-contact, oath-upload):
+      //      route to the daemon currently processing the named item via the
+      //      shared queue's claim record + the daemon's `/cancel-current`
+      //      HTTP endpoint. Cooperative cancel — fires at the next
+      //      `ctx.step(...)` boundary.
+      //
+      //   2. In-process kernel runs (sharepoint-download, ocr): the
+      //      dashboard launched these via fire-and-forget `runWorkflow(...)`
+      //      INSIDE its own Node process — there is no daemon, no queue
+      //      claim. Fall back to the in-process registry (populated by
+      //      `runWorkflow`'s onReady hook) and hard-kill chromium. This
+      //      unblocks runs stuck in `Session.launch` / `pollDuoApproval`,
+      //      which the cooperative-cancel path can never reach (the
+      //      handler hasn't started yet).
+      //
+      // Returns:
+      //   200 — accepted (daemon proxy 200 OR in-process hard-kill fired)
+      //   409 — itemId/runId mismatch on a daemon (claim rotated)
+      //   410 — no daemon claim AND not registered in-process
       const parsed = await readJsonBody();
       if (!parsed.ok) return writeJson(400, { ok: false, error: parsed.error });
       const workflow = String(parsed.body.workflow ?? "");
@@ -3324,10 +3363,22 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         const state = await readQueueState(workflow, dir);
         const claimed = state.claimed.find((q) => q.id === itemId);
         if (!claimed || claimed.claimedBy === undefined) {
+          // No daemon claim — try the in-process registry. Sharepoint /
+          // ocr / any future fire-and-forget in-process kernel run lands
+          // here.
+          const inProcess = await cancelInProcessRun({ workflow, itemId, runId });
+          if (inProcess.ok) {
+            return writeJson(200, {
+              ok: true,
+              accepted: true,
+              mode: "in-process",
+              alreadyCancelled: inProcess.alreadyCancelled,
+            });
+          }
           return writeJson(410, {
             ok: false,
             error:
-              "item not currently claimed by any daemon — likely already finished or never claimed",
+              "item not currently claimed by any daemon and no in-process run registered — likely already finished or never started",
           });
         }
         const aliveDaemons = await findAliveDaemons(workflow, dir);

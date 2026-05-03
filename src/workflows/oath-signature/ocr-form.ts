@@ -117,11 +117,12 @@ The PDF is a stack of paper oath signature documents in one of three formats —
 
 For each page you process:
 1. Classify document type. Map "signin"/"upay585"/"upay586" to documentType: "expected"; "unknown" → documentType: "unknown".
-2. For each record extract: printedName (always); employeeId if visible; dateSigned if visible; employeeSigned: whether the employee/officer signature line is filled (a scribble counts; an empty box doesn't); officerSigned: whether the authorized-official / witness signature is filled. For sign-in sheets that only have a single signature column, set officerSigned to null. For UPAY585/UPAY586, false when the column is empty.
+2. For each record extract: rowIndex (0-indexed position on the page, starting from 0 for the first record); printedName (always); employeeId if visible; dateSigned if visible; employeeSigned: whether the employee/officer signature line is filled (a scribble counts; an empty box doesn't); officerSigned: whether the authorized-official / witness signature is filled. For sign-in sheets that only have a single signature column, set officerSigned to null. For UPAY585/UPAY586, false when the column is empty.
 3. After extraction, list which expected fields were BLANK or ILLEGIBLE on the paper in originallyMissing on each record.
 
 Field-level rules:
 - One record per signer. Multi-row sign-in sheets emit multiple records per page; single-form pages emit one.
+- rowIndex must be included for every record and must be a non-negative integer starting at 0.
 - For handwritten text, use your best transcription. If a field is illegible, set it to null and add it to originallyMissing.
 - dateSigned should be transcribed as it appears on the paper (typical formats: MM/DD/YYYY or M/D/YY).
 - Output ONLY valid JSON matching the schema. No commentary.`;
@@ -161,7 +162,7 @@ export const oathOcrFormSpec: OcrFormSpec<
       };
     }
     const result = matchAgainstRoster(roster, record.printedName);
-    if (result.bestScore >= ROSTER_AUTO_ACCEPT) {
+    if (result.bestScore >= ROSTER_AUTO_ACCEPT && result.candidates[0].eid) {
       const top = result.candidates[0];
       return {
         ...record,

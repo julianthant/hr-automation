@@ -49,6 +49,15 @@ export interface SharePointDownloadSpec {
    * codebase already looks (e.g. a workflow-specific fixture dir).
    */
   outDir?: string;
+  /**
+   * Optional saved-filename prefix. When set, the downloaded file is named
+   * `<filenameBase>-<YYYY-MM-DDTHH-MM-SS>.<ext>` instead of the default
+   * `<stamp>-<suggested-by-sharepoint>.xlsx`. Use it when downstream code
+   * (e.g. the dashboard's `/api/rosters` listing) keys off filename and
+   * benefits from a stable, recognizable prefix. Leave unset to keep the
+   * current "preserve SharePoint's suggested name" behavior.
+   */
+  filenameBase?: string;
 }
 
 /**
@@ -64,6 +73,7 @@ export const SHAREPOINT_DOWNLOADS: readonly SharePointDownloadSpec[] = [
     label: "Onboarding Roster",
     description: "New-hire spreadsheet used by onboarding + emergency-contact",
     envVar: "ONBOARDING_ROSTER_URL",
+    filenameBase: "OnboardingRoster",
   },
 ] as const;
 

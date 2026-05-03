@@ -49,6 +49,12 @@ export {
 } from './daemon-client.js'
 export { runWorkflowDaemon } from './daemon.js'
 export type { DaemonOpts } from './daemon.js'
+export {
+  registerInProcessRun,
+  unregisterInProcessRun,
+  cancelInProcessRun,
+} from './in-process-runs.js'
+export type { InProcessRunIdent, CancelInProcessRunResult } from './in-process-runs.js'
 export type {
   DaemonLockfile,
   Daemon,

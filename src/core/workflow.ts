@@ -13,6 +13,7 @@ import { runWorkflowPool } from './pool.js'
 import { runWorkflowSharedContextPool } from './shared-context-pool.js'
 import { withBatchLifecycle } from './batch-lifecycle.js'
 import { makeAuthObserver } from '../tracker/auth-observer.js'
+import { registerInProcessRun, unregisterInProcessRun } from './in-process-runs.js'
 
 /**
  * Coerce an arbitrary key → unknown map into the `Record<string, string>`
@@ -524,51 +525,68 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
       emitSkipped,
     })
 
-    const session = await Session.launch(wf.config.systems, {
-      authChain: wf.config.authChain,
-      launchFn: opts.launchFn,
-      observer,
-      onReady: (sess) => onSessionReady?.(sess, runId, stepper, opts.trackerDir),
-    })
-
-    const ctx = makeCtx<TSteps, TData>({
-      session,
-      stepper,
-      isBatch: false,
-      runId,
-      workflow: wf.config.name,
-      itemId: String(itemId),
-      emitScreenshotEvent: (ev) => emitScreenshotEvent(ev, { dir: opts.trackerDir }),
-    })
-    stepper.setScreenshotFn(ctx.screenshot)
-
-    let sigintHandler: (() => void) | null = null
-    if (installSigint) {
-      sigintHandler = () => {
-        try {
-          const step = stepper.getCurrentStep() ?? 'sigint'
-          setStep(`${step}:failed:interrupted`)
-        } catch { /* best-effort */ }
-        // Fire-and-forget kill — we're exiting regardless.
-        session.killChrome().catch(() => {})
-        process.exit(1)
-      }
-      process.on('SIGINT', sigintHandler)
-    }
-
+    // Register for in-process cancellation BEFORE auth starts. `onReady`
+    // fires synchronously after Session construction and before any browser
+    // launches, so the dashboard's `/api/cancel-running` endpoint can find
+    // this run and hard-kill chromium even while it's stuck waiting on Duo.
+    // Unregistration lives in an outer try/finally so a `Session.launch`
+    // throw (auth-failure-after-3-retries, browser launch failure) still
+    // cleans up. See `src/core/in-process-runs.ts`.
+    const cancelIdent = { workflow: wf.config.name, itemId: String(itemId), runId }
+    let cancelRegistered = false
     try {
+      const session = await Session.launch(wf.config.systems, {
+        authChain: wf.config.authChain,
+        launchFn: opts.launchFn,
+        observer,
+        onReady: (sess) => {
+          registerInProcessRun(cancelIdent, sess)
+          cancelRegistered = true
+          onSessionReady?.(sess, runId, stepper, opts.trackerDir)
+        },
+      })
+
+      const ctx = makeCtx<TSteps, TData>({
+        session,
+        stepper,
+        isBatch: false,
+        runId,
+        workflow: wf.config.name,
+        itemId: String(itemId),
+        emitScreenshotEvent: (ev) => emitScreenshotEvent(ev, { dir: opts.trackerDir }),
+      })
+      stepper.setScreenshotFn(ctx.screenshot)
+
+      let sigintHandler: (() => void) | null = null
+      if (installSigint) {
+        sigintHandler = () => {
+          try {
+            const step = stepper.getCurrentStep() ?? 'sigint'
+            setStep(`${step}:failed:interrupted`)
+          } catch { /* best-effort */ }
+          // Fire-and-forget kill — we're exiting regardless.
+          session.killChrome().catch(() => {})
+          process.exit(1)
+        }
+        process.on('SIGINT', sigintHandler)
+      }
+
       try {
-        if (prefilled) ctx.updateData(prefilled as Partial<TData & Record<string, unknown>>)
-        await wf.config.handler(ctx, handlerInput)
-      } catch (err) {
-        // Same screenshot-on-handler-throw hoist as runOneItem (see the
-        // two other call sites). Best-effort; original throw always wins.
-        try { await ctx.screenshot({ kind: 'error', label: 'handler-throw' }) } catch { /* best-effort */ }
-        throw err
+        try {
+          if (prefilled) ctx.updateData(prefilled as Partial<TData & Record<string, unknown>>)
+          await wf.config.handler(ctx, handlerInput)
+        } catch (err) {
+          // Same screenshot-on-handler-throw hoist as runOneItem (see the
+          // two other call sites). Best-effort; original throw always wins.
+          try { await ctx.screenshot({ kind: 'error', label: 'handler-throw' }) } catch { /* best-effort */ }
+          throw err
+        }
+      } finally {
+        if (sigintHandler) process.off('SIGINT', sigintHandler)
+        await session.close()
       }
     } finally {
-      if (sigintHandler) process.off('SIGINT', sigintHandler)
-      await session.close()
+      if (cancelRegistered) unregisterInProcessRun(cancelIdent)
     }
   }
 

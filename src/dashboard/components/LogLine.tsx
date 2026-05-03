@@ -94,10 +94,18 @@ const EVENT_VISUAL: Record<RunEvent["type"], { glyph: string; color: string }> =
   item_complete:    { glyph: "▩", color: "#6b7280" },
   step_change:      { glyph: "→", color: "#6b7280" },
   screenshot:       { glyph: "⬛", color: "#a78bfa" },
+  telegram_sent:    { glyph: "✉", color: "#0ea5e9" },
 };
 
+// Fallback for any event type the backend ships before the frontend registers
+// it — must not crash the LogPanel. Backend session-event types are a moving
+// target (e.g. telegram_sent landed before this map was updated), and a
+// runtime undefined-lookup unmounts the whole tree because EventLine has no
+// error boundary above it.
+const UNKNOWN_EVENT_VISUAL = { glyph: "·", color: "#6b7280" } as const;
+
 function EventLine({ event }: { event: RunEvent }) {
-  const v = EVENT_VISUAL[event.type];
+  const v = EVENT_VISUAL[event.type] ?? UNKNOWN_EVENT_VISUAL;
   // Match LogLine's timestamp format + column geometry so Events + regular
   // log lines line up vertically in the stream (same px-6, min-w-[72px],
   // 14px icon, gap-3.5, font-mono text-[13px]).

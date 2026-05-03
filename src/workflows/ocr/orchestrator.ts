@@ -112,6 +112,15 @@ export async function runOcrOrchestrator(
     step?: string,
     error?: string,
   ): void => {
+    // Stamp __id so the dashboard's resolveEntryId surfaces a stable handle
+    // on every row. Kernel runWorkflow computes this via getId; this
+    // orchestrator writes via trackEvent directly so we replicate it here,
+    // sourced from the closed-over input (not the per-emit data dict, which
+    // only carries the fields each phase changes). __name is intentionally
+    // not stamped — the dashboard derives the queue-row label as
+    // "<workflow label> <ordinal>" so OCR rows render as "OCR 1", "OCR 2".
+    const flat = flattenForData(data);
+    flat.__id = input.sessionId ?? "";
     emit({
       workflow: WORKFLOW,
       timestamp: new Date().toISOString(),
@@ -120,7 +129,7 @@ export async function runOcrOrchestrator(
       ...(input.parentRunId ? { parentRunId: input.parentRunId } : {}),
       status,
       ...(step ? { step } : {}),
-      data: flattenForData(data),
+      data: flat,
       ...(error ? { error } : {}),
     });
   };
@@ -168,6 +177,7 @@ export async function runOcrOrchestrator(
             id: spec0.id,
             label: spec0.label,
             url,
+            ...(spec0.filenameBase ? { filenameBase: spec0.filenameBase } : {}),
             parentRunId: runId,
           },
           { itemId: childItemId },

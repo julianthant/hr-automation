@@ -281,7 +281,8 @@ export type RunEventType =
   | "duo_request" | "duo_start" | "duo_complete" | "duo_timeout"
   | "item_start" | "item_complete"
   | "step_change"
-  | "screenshot";
+  | "screenshot"
+  | "telegram_sent";
 
 export interface RunEvent {
   type: RunEventType;

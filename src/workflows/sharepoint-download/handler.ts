@@ -254,6 +254,7 @@ export function buildSharePointRosterDownloadHandler(
           label: spec.label,
           url,
           outDir,
+          ...(spec.filenameBase ? { filenameBase: spec.filenameBase } : {}),
           ...(input.parentRunId ? { parentRunId: input.parentRunId } : {}),
         });
         log.success(`SharePoint download complete (${spec.id})`);

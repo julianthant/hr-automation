@@ -73,12 +73,14 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
 
 interface EntryItemProps {
   entry: TrackerEntry;
+  /** Per-entry "<base> <ordinal>" labels from `buildDisplayNameMap`. */
+  displayNames?: Map<string, string>;
   selected: boolean;
   onClick: () => void;
 }
 
-export function EntryItem({ entry, selected, onClick }: EntryItemProps) {
-  const name = resolveEntryName(entry);
+export function EntryItem({ entry, displayNames, selected, onClick }: EntryItemProps) {
+  const name = resolveEntryName(entry, displayNames);
   // `step === "cancelled"` overrides the generic `failed` status so the row
   // renders amber/Ban instead of red/AlertTriangle. The data model is still
   // `status: "failed"` (one tracker enum, no schema change) — `step` is the

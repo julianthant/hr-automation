@@ -195,7 +195,9 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
     return () => { cancelled = true; };
   }, [open, showFormType, effectiveLockedFormType]);
 
-  // Reset form state on close.
+  // Reset form state on close. Rosters reset to null (not []) so the next
+  // open re-fires the fetch and the hint reads "Loading rosters…" instead of
+  // a stale "No roster on disk" from the previous mount.
   useEffect(() => {
     if (open) return;
     setFile(null);
@@ -204,6 +206,8 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
     setProgress(null);
     setError(null);
     setPriorRuns([]);
+    setRosters(null);
+    setRosterMode("existing");
   }, [open]);
 
   if (!config) {
@@ -244,7 +248,12 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
 
     const fd = new FormData();
     fd.append("pdf", file, file.name);
-    if (showRoster) fd.append("rosterMode", rosterMode);
+    if (showRoster) {
+      fd.append("rosterMode", rosterMode);
+      if (rosterMode === "existing" && latestRoster) {
+        fd.append("rosterPath", latestRoster.path);
+      }
+    }
     if (showFormType && formType) fd.append("formType", formType);
     if (reuploadFor) {
       fd.append("sessionId", reuploadFor.sessionId);
@@ -398,7 +407,9 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
                   hint={
                     hasRoster && latestRoster
                       ? `Latest: ${latestRoster.filename} · ${formatBytes(latestRoster.bytes)}`
-                      : "No roster on disk — pick the other option to fetch one."
+                      : rosters === null
+                        ? "Loading rosters…"
+                        : "No roster on disk — pick the other option to fetch one."
                   }
                 />
                 <RosterRow
