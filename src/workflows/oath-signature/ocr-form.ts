@@ -46,9 +46,10 @@ export type Verification = z.infer<typeof VerificationSchema>;
 
 export const OathRosterOcrRecordSchema = z.object({
   sourcePage: z.number().int().positive(),
-  rowIndex: z.number().int().nonnegative(),
+  rowIndex: z.number().int().nonnegative().optional(),
   printedName: z.string().min(1),
-  employeeSigned: z.boolean(),
+  employeeId: z.string().nullable().optional(),
+  employeeSigned: z.boolean().optional(),
   officerSigned: z.boolean().nullable().optional(),
   dateSigned: z
     .string()
