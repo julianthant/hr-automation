@@ -54,7 +54,6 @@ export function PdfPagePreview({
       <img
         src={src}
         alt={`PDF page ${page}`}
-        loading="lazy"
         onLoad={() => setState("ok")}
         onError={() => setState("error")}
         className={cn("h-full w-full object-contain", state !== "ok" && "opacity-0")}
