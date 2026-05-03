@@ -2631,7 +2631,9 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       res.writeHead(200, {
         "Content-Type": "image/png",
         "Content-Length": foundSize,
-        "Cache-Control": "public, max-age=86400",
+        // Immutable: parentRunId scopes the URL per-upload, so the bytes
+        // never change. The browser caches forever and never re-validates.
+        "Cache-Control": "public, max-age=31536000, immutable",
         "Access-Control-Allow-Origin": "*",
       });
       createReadStream(foundPath).pipe(res);

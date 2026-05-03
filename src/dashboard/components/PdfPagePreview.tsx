@@ -74,16 +74,11 @@ export function PdfPagePreview({
         key={src}
         src={src}
         alt={`PDF page ${page}`}
-        onLoad={() => {
-          // eslint-disable-next-line no-console
-          console.log("[PdfPagePreview] loaded", src);
-          setState("ok");
-        }}
-        onError={(e) => {
-          // eslint-disable-next-line no-console
-          console.warn("[PdfPagePreview] error loading", src, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight);
-          setState("error");
-        }}
+        decoding="async"
+        // @ts-expect-error fetchpriority is a valid HTML attribute but React types lag.
+        fetchpriority="high"
+        onLoad={() => setState("ok")}
+        onError={() => setState("error")}
         className={cn("h-full w-full object-contain", state !== "ok" && "opacity-0")}
       />
     </div>
