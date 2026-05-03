@@ -7,6 +7,7 @@ const ocrSteps = [
   "loading-roster",
   "ocr",
   "matching",
+  "disambiguating",
   "eid-lookup",
   "verification",
   "awaiting-approval",
