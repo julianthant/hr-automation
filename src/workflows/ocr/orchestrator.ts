@@ -386,7 +386,9 @@ export async function runOcrOrchestrator(
 
     if (disambigTargets.length > 0) {
       log.step(`[ocr] disambiguating ${disambigTargets.length} ambiguous record(s) via LLM (others: ${records.length - disambigTargets.length} skipped — already matched, manual, or no candidates)`);
-      writeTracker("running", { recordCount: records.length, ambiguousCount: disambigTargets.length }, "disambiguating");
+      // Snapshot WITH records so the Preview tab keeps showing them
+      // while disambiguation runs in the background.
+      emitSnapshot(records, "disambiguating", "running", { failedPages, emptyPages, pageStatusSummary });
 
       const { disambiguateMatch } = await import("../../ocr/disambiguate.js");
       const concurrencyEnv = Number.parseInt(process.env.OCR_DISAMBIG_CONCURRENCY ?? "", 10);
@@ -420,7 +422,7 @@ export async function runOcrOrchestrator(
       });
     } else {
       log.step(`[ocr] disambiguating skipped — 0 ambiguous records (all ${records.length} either matched, manual, or no candidates above 0.40)`);
-      writeTracker("running", { recordCount: records.length, ambiguousCount: 0 }, "disambiguating");
+      emitSnapshot(records, "disambiguating", "running", { failedPages, emptyPages, pageStatusSummary });
     }
 
     // 4. Eid-lookup fan-out + watch
@@ -446,7 +448,9 @@ export async function runOcrOrchestrator(
         const inputDesc = t.kind === "name" ? `name="${extractName(t.rec, spec)}"` : `eid=${extractEid(t.rec, spec)}`;
         log.step(`[ocr] lookup target rec ${t.index + 1}: kind=${t.kind} ${inputDesc}`);
       });
-      writeTracker("running", { recordCount: records.length, pendingLookup: lookupTargets.length }, "eid-lookup");
+      // Snapshot WITH records so the Preview keeps showing the matched
+      // rows while eid-lookup fans out in the background.
+      emitSnapshot(records, "eid-lookup", "running", { failedPages, emptyPages, pageStatusSummary });
 
       const enqueueItems = lookupTargets.map((t) => {
         const itemId = `ocr-${spec.formType === "oath" ? "oath" : "ec"}-${runId}-r${t.index}`;
