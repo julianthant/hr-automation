@@ -143,9 +143,13 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
         warnings: [],
       };
     }
-    // Stage 2: roster match by name.
+    // Stage 2: roster match by name. Auto-accept only when the matched
+    // roster row carries a UCPath EID — when the SharePoint roster has
+    // no UCPath ID for that person yet (column blank or absent), fall
+    // through to the eid-lookup branch so the downstream daemon resolves
+    // the EID instead of trusting an empty string.
     const result = matchAgainstRoster(roster, record.employee.name);
-    if (result.bestScore >= ROSTER_AUTO_ACCEPT) {
+    if (result.bestScore >= ROSTER_AUTO_ACCEPT && result.candidates[0].eid) {
       const top = result.candidates[0];
       const rosterRow = roster.find((r) => r.eid === top.eid);
       const addressMatch =

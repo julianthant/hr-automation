@@ -135,28 +135,62 @@ export async function loginToSharePoint(
   // depending on the target service:
   //   - `a5.ucsd.edu` (Shibboleth IdP) for UCPath / CRM / Kuali / Kronos.
   //   - `ad-wfs-aws.ucsd.edu/adfs/ls/` (ADFS) for SharePoint / OneDrive.
-  // The ADFS form has different field names (`UserName` / `Password`), so
-  // the Shibboleth `fillSsoCredentials` helper can't cover it. Detect both.
+  // The AAD post-email redirect chain is async — a snapshot URL check
+  // can race the redirect to ADFS and silently skip auth, leaving the
+  // user stranded on the login form when downstream steps run. Wait
+  // until the chain settles on a recognizable terminal before deciding.
+  const isSuccessUrl = (u: string): boolean =>
+    u.includes("sharepoint.com") ||
+    u.includes("office.com") ||
+    u.includes("login.microsoftonline.com/kmsi") ||
+    u.includes("login.microsoftonline.com/login.srf");
+
+  log.step("Waiting for SSO redirect chain to settle...");
+  const settled = await page
+    .waitForURL(
+      (u) => {
+        const s = u.toString();
+        return (
+          s.includes("a5.ucsd.edu") ||
+          s.includes("ad-wfs-aws.ucsd.edu") ||
+          s.includes("/adfs/ls") ||
+          s.includes("duosecurity.com") ||
+          isSuccessUrl(s)
+        );
+      },
+      { timeout: 30_000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+
   const currentUrl = page.url();
-  const onShibboleth =
-    currentUrl.includes("a5.ucsd.edu") ||
-    (await page.locator('input[name="j_username"]').count()) > 0;
+  if (!settled) {
+    log.warn(
+      `SSO redirect chain did not settle within 30s — current URL: ${currentUrl.slice(0, 120)}`,
+    );
+  }
+
+  const onShibboleth = currentUrl.includes("a5.ucsd.edu");
   const onAdfs =
     currentUrl.includes("ad-wfs-aws.ucsd.edu") ||
-    currentUrl.includes("/adfs/ls") ||
-    (await page.locator('input[name="UserName"]').count()) > 0;
+    currentUrl.includes("/adfs/ls");
 
-  const needsSso = onShibboleth || onAdfs;
+  if (onShibboleth) {
+    log.step("UCSD Shibboleth SSO detected — filling credentials...");
+    await fillSsoCredentials(page);
+    await clickSsoSubmit(page);
+  } else if (onAdfs) {
+    await handleAdfsLogin(page);
+  }
 
-  if (needsSso) {
-    if (onShibboleth) {
-      log.step("UCSD Shibboleth SSO detected — filling credentials...");
-      await fillSsoCredentials(page);
-      await clickSsoSubmit(page);
-    } else {
-      await handleAdfsLogin(page);
-    }
-
+  // Run Duo polling whenever we aren't already at a recognized success URL.
+  // Covers four paths: SSO→Duo (post-fill), cached-SSO→Duo (page bypassed
+  // the form and landed straight at Duo), Duo-only re-auth (success cookies
+  // expired but creds cached), and the cached-trust pass-through (handled
+  // inside pollDuoApproval's 2s pre-check window). Skipping this when
+  // `needsSso=false && !isSuccessUrl` was the bug behind the 2026-05-02
+  // false-positive auth completion.
+  if (!isSuccessUrl(page.url())) {
     // When called from a kernel workflow we have an `instance` and route
     // through the Duo queue so the Sessions rail's Duo chip lights up and
     // the operator sees a row in the Duo tray. Without an instance (CLI
@@ -164,11 +198,7 @@ export async function loginToSharePoint(
     // dashboard to surface into anyway.
     const duoOptions = {
       systemLabel: "SharePoint",
-      successUrlMatch: (u: string) =>
-        u.includes("sharepoint.com") ||
-        u.includes("office.com") ||
-        u.includes("login.microsoftonline.com/kmsi") ||
-        u.includes("login.microsoftonline.com/login.srf"),
+      successUrlMatch: isSuccessUrl,
       timeoutSeconds: duoTimeoutSeconds,
     };
     const approved = opts.instance
@@ -183,11 +213,22 @@ export async function loginToSharePoint(
       throw new Error("Duo approval timed out during SharePoint login");
     }
   } else {
-    log.step("No SSO redirect — possibly already authenticated via cached cookies");
+    log.step("Already on success URL — skipping Duo poll");
   }
 
   await page.waitForTimeout(3_000);
   await dismissStaySignedIn(page);
+
+  // Final guard — fail loud if anything bounced us off the success path
+  // (account picker, MFA loop, error page). Without this, an upstream URL
+  // anomaly silently flows into the handler's `navigate` step and surfaces
+  // as a confusing "Expected SharePoint/Office URL after login" error
+  // attributed to the wrong step.
+  if (!isSuccessUrl(page.url())) {
+    throw new Error(
+      `SharePoint authentication did not reach a success URL — final URL: ${page.url().slice(0, 120)}`,
+    );
+  }
 }
 
 /**
@@ -251,7 +292,7 @@ export async function clickExcelDownloadMenu(page: Page): Promise<boolean> {
 export async function captureExcelDownload(
   page: Page,
   outDir: string,
-  opts: { downloadTimeoutSeconds?: number } = {},
+  opts: { downloadTimeoutSeconds?: number; filenameBase?: string } = {},
 ): Promise<{ path: string; filename: string }> {
   const downloadTimeoutSeconds = opts.downloadTimeoutSeconds ?? 300;
 
@@ -295,7 +336,15 @@ export async function captureExcelDownload(
 
   const suggested = result.suggestedFilename();
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const filename = `${stamp}-${suggested}`;
+  let filename: string;
+  if (opts.filenameBase) {
+    // Preserve SharePoint's extension (almost always .xlsx, but defensive).
+    const dotIdx = suggested.lastIndexOf(".");
+    const ext = dotIdx >= 0 ? suggested.slice(dotIdx) : ".xlsx";
+    filename = `${opts.filenameBase}-${stamp}${ext}`;
+  } else {
+    filename = `${stamp}-${suggested}`;
+  }
   const outPath = path.resolve(outDir, filename);
   await result.saveAs(outPath);
   log.success(`Saved: ${outPath}`);

@@ -18,6 +18,8 @@ export const SharePointDownloadInputSchema = z.object({
   url: z.string().url("url must be a valid URL"),
   outDir: z.string().optional(),
   parentRunId: z.string().optional(),
+  /** Optional saved-filename prefix; see `SharePointDownloadSpec.filenameBase`. */
+  filenameBase: z.string().optional(),
 });
 
 export type SharePointDownloadInput = z.infer<typeof SharePointDownloadInputSchema>;

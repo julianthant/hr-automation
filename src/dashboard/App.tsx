@@ -13,7 +13,7 @@ import { useTelegramToasts } from "./components/hooks/useTelegramToasts";
 import { useCaptureToasts } from "./components/hooks/useCaptureToasts";
 import { resolveActionToastsForEntry } from "./components/hooks/useActionToasts";
 import { useWorkflow, useWorkflows, autoLabel } from "./workflows-context";
-import { resolveEntryName } from "./components/entry-display";
+import { resolveEntryName, buildDisplayNameMap } from "./components/entry-display";
 import type { SearchResultRow, PreviewInboxRow, FailureRow } from "./components/types";
 import { WorkflowRail } from "./components/WorkflowRail";
 import { QuickRunPanel } from "./components/QuickRunPanel";
@@ -125,6 +125,15 @@ export default function App() {
   const meta = useWorkflow(workflow);
   const wfLabel = meta?.label ?? autoLabel(workflow);
 
+  // Per-entry "<base> <ordinal>" labels for the queue / log header / toasts.
+  // Recomputed whenever entries or the workflow's label change so a row's
+  // ordinal stays stable as more rows arrive (the map is keyed by entry id;
+  // older rows keep their #1, the newest gets #N).
+  const displayNames = useMemo(
+    () => buildDisplayNameMap(entries, wfLabel),
+    [entries, wfLabel],
+  );
+
   // Toast on completion/failure for LIVE transitions only — i.e. an entry
   // whose status changed while the user was continuously watching the
   // current (workflow, date). Two safeguards prevent stale-data toasts:
@@ -156,7 +165,7 @@ export default function App() {
       // an existing toast id with a specific message; the generic toast
       // below fires a separate notification for the user's awareness.
       resolveActionToastsForEntry(entry);
-      const name = resolveEntryName(entry);
+      const name = resolveEntryName(entry, displayNames);
       const isCancelled = entry.status === "failed" && entry.step === "cancelled";
       if (entry.status === "done") {
         toast.success(`${name} completed`, {
@@ -174,7 +183,7 @@ export default function App() {
         });
       }
     }
-  }, [entries, entriesKey, wfLabel, workflow, date]);
+  }, [entries, entriesKey, wfLabel, workflow, date, displayNames]);
 
   // Update document title
   useEffect(() => {
@@ -268,6 +277,7 @@ export default function App() {
         <QueuePanel
           entries={entries}
           workflow={workflow}
+          displayNames={displayNames}
           selectedId={selectedId}
           onSelect={(id) => {
             // Selecting another queue entry exits review mode (preserving
@@ -324,11 +334,11 @@ export default function App() {
                 onClose={() => setReviewingPrepId(null)}
               />
             ) : (
-              <LogPanel entry={selectedEntry} workflow={workflow} date={date} />
+              <LogPanel entry={selectedEntry} workflow={workflow} date={date} displayNames={displayNames} />
             );
           })()}
         {!reviewingPrepId && (
-          <LogPanel entry={selectedEntry} workflow={workflow} date={date} />
+          <LogPanel entry={selectedEntry} workflow={workflow} date={date} displayNames={displayNames} />
         )}
       </div>
       <TerminalDrawer connected={connected} />

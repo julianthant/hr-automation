@@ -15,6 +15,8 @@ import {
 interface QueuePanelProps {
   entries: TrackerEntry[];
   workflow: string;
+  /** Per-entry "<base> <ordinal>" labels from `buildDisplayNameMap`. */
+  displayNames?: Map<string, string>;
   selectedId: string | null;
   onSelect: (id: string) => void;
   /** Run-id of the prep row currently open in the right-pane review. */
@@ -62,6 +64,7 @@ interface QueuePanelProps {
 export function QueuePanel({
   entries,
   workflow,
+  displayNames,
   selectedId,
   onSelect,
   reviewingPrepId,
@@ -196,6 +199,7 @@ export function QueuePanel({
               <EntryItem
                 key={entry.id}
                 entry={entry}
+                displayNames={displayNames}
                 selected={selectedId === entry.id}
                 onClick={() => onSelect(entry.id)}
               />
@@ -251,6 +255,7 @@ export function QueuePanel({
                 <EntryItem
                   key={entry.id}
                   entry={entry}
+                  displayNames={displayNames}
                   selected={selectedId === entry.id}
                   onClick={() => onSelect(entry.id)}
                 />
