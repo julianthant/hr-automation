@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FileX, Loader2, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +17,9 @@ export interface PdfPagePreviewProps {
  * silent loading/error). White background so the actual page render
  * (typically dark text on white paper) is clearly distinguishable
  * from the dark dashboard chrome around it.
+ *
+ * The parentRunId already changes per OCR run so caching is naturally
+ * scoped per upload — no extra cache-buster needed.
  */
 export function PdfPagePreview({
   workflow,
@@ -26,6 +29,8 @@ export function PdfPagePreview({
 }: PdfPagePreviewProps) {
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
   const src = `/api/prep/pdf-page?workflow=${encodeURIComponent(workflow)}&parentRunId=${encodeURIComponent(parentRunId)}&page=${page}`;
+  // Reset state whenever the src changes (different row / different page).
+  useEffect(() => { setState("loading"); }, [src]);
   return (
     <div
       className={cn(
@@ -66,10 +71,19 @@ export function PdfPagePreview({
         </div>
       )}
       <img
+        key={src}
         src={src}
         alt={`PDF page ${page}`}
-        onLoad={() => setState("ok")}
-        onError={() => setState("error")}
+        onLoad={() => {
+          // eslint-disable-next-line no-console
+          console.log("[PdfPagePreview] loaded", src);
+          setState("ok");
+        }}
+        onError={(e) => {
+          // eslint-disable-next-line no-console
+          console.warn("[PdfPagePreview] error loading", src, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight);
+          setState("error");
+        }}
         className={cn("h-full w-full object-contain", state !== "ok" && "opacity-0")}
       />
     </div>
