@@ -7,6 +7,7 @@
  */
 import { z } from "zod/v4";
 import { matchAgainstRoster } from "../../match/index.js";
+import { log } from "../../utils/log.js";
 import type { OcrFormSpec, RosterRow, LookupKind } from "../ocr/types.js";
 import type { OathSignatureInput } from "./schema.js";
 
@@ -124,7 +125,8 @@ For each page you process:
 Field-level rules:
 - One record per signer. Multi-row sign-in sheets emit multiple records per page; single-form pages emit one.
 - rowIndex must be included for every record and must be a non-negative integer starting at 0.
-- For handwritten text, use your best transcription. If a field is illegible, set it to null and add it to originallyMissing.
+- For handwritten text, ALWAYS attempt a best-guess transcription — even if uncertain about specific letters, give your best read of the visible writing. Only set a field to null if the field on the form is genuinely BLANK (no writing at all). Faint, smudged, or hard-to-read writing should still be transcribed (mark uncertain characters with your best guess, not null).
+- printedName: speak the name out loud as you read it; this is the most important field. Always attempt a transcription if there is ANY writing on the printed-name line.
 - dateSigned should be transcribed as it appears on the paper (typical formats: MM/DD/YYYY or M/D/YY).
 - Output ONLY valid JSON matching the schema. No commentary.`;
 
@@ -154,11 +156,15 @@ export const oathOcrFormSpec: OcrFormSpec<
   schemaName: "oath-roster-batch",
 
   async matchRecord({ record, roster }): Promise<OathPreviewRecord> {
+    const printedName = (record.printedName ?? "").trim();
+    const formEidRaw = (record.employeeId ?? "").trim();
+    log.step(`[oath/match] page ${record.sourcePage} row ${record.rowIndex ?? "?"}: name="${printedName || "(empty)"}" eid="${formEidRaw || "(empty)"}" signed=${record.employeeSigned} doc=${record.documentType ?? "expected"}`);
+
     // Empty printedName + no form-EID means the LLM gave us nothing usable.
     // Surface as a manual record so the operator sees it in the preview pane
     // (with the page image visible) and can type from the source.
-    const printedName = (record.printedName ?? "").trim();
-    if (!printedName && !(record.employeeId ?? "").trim()) {
+    if (!printedName && !formEidRaw) {
+      log.step(`[oath/match] → manual: LLM returned no name + no EID; operator must fill from page image`);
       return {
         ...record,
         printedName: "",
@@ -173,6 +179,7 @@ export const oathOcrFormSpec: OcrFormSpec<
     }
 
     if (!record.employeeSigned) {
+      log.step(`[oath/match] → extracted (deselected): row not signed, kept for visibility but not approvable`);
       return {
         ...record,
         employeeId: (record.employeeId ?? "").trim(),
@@ -188,10 +195,11 @@ export const oathOcrFormSpec: OcrFormSpec<
     // (UPAY585/586 has an "Employee ID" field), trust the structured value
     // over the handwritten name. Roster-exact match → auto-accept; no roster
     // match → flag for eid-lookup-by-EID (verify-only branch).
-    const formEid = (record.employeeId ?? "").trim();
+    const formEid = formEidRaw;
     if (formEid.length > 0) {
       const rosterHit = roster.find((row) => row.eid === formEid);
       if (rosterHit) {
+        log.step(`[oath/match] → form-eid matched: EID ${formEid} found on roster as "${rosterHit.name}"`);
         return {
           ...record,
           employeeId: formEid,
@@ -203,6 +211,7 @@ export const oathOcrFormSpec: OcrFormSpec<
           warnings: [],
         };
       }
+      log.step(`[oath/match] → form-eid pending verify: EID ${formEid} not on roster, will eid-lookup-by-EID`);
       return {
         ...record,
         employeeId: formEid,
@@ -228,8 +237,10 @@ export const oathOcrFormSpec: OcrFormSpec<
     const top = ranked.candidates[0];
     const second = ranked.candidates[1];
     const topCandidates = ranked.candidates.slice(0, 5);
+    log.step(`[oath/match] roster scan: ${ranked.candidates.length} candidates above threshold; top="${top?.name ?? "(none)"}" score=${top?.score.toFixed(2) ?? "—"}; second="${second?.name ?? "(none)"}" score=${second?.score.toFixed(2) ?? "—"}`);
 
     if (!top || top.score < NAME_DISAMBIG_FLOOR) {
+      log.step(`[oath/match] → manual: best score ${top?.score.toFixed(2) ?? "0"} < ${NAME_DISAMBIG_FLOOR} disambig floor`);
       return {
         ...record,
         employeeId: "",
@@ -248,6 +259,7 @@ export const oathOcrFormSpec: OcrFormSpec<
 
     const closeSecond = second && top.score - second.score < NAME_AUTO_ACCEPT_GAP;
     if (top.score >= NAME_AUTO_ACCEPT && !closeSecond && top.eid) {
+      log.step(`[oath/match] → roster auto-accept: "${top.name}" eid=${top.eid} score=${top.score.toFixed(2)}`);
       return {
         ...record,
         employeeId: top.eid,
@@ -265,6 +277,10 @@ export const oathOcrFormSpec: OcrFormSpec<
     }
 
     // Ambiguous: defer to the orchestrator's disambiguating phase.
+    const reason = closeSecond
+      ? `top ${top.score.toFixed(2)} too close to second ${second!.score.toFixed(2)} (gap < ${NAME_AUTO_ACCEPT_GAP})`
+      : `top ${top.score.toFixed(2)} in [${NAME_DISAMBIG_FLOOR}, ${NAME_AUTO_ACCEPT}) disambig band`;
+    log.step(`[oath/match] → lookup-pending (will disambiguate via LLM): ${reason}`);
     return {
       ...record,
       employeeId: "",

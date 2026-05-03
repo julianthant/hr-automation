@@ -14,6 +14,7 @@
  */
 import fs from "node:fs/promises";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { log } from "../utils/log.js";
 
 export interface PoolKey {
   /** Stable id for logging — e.g. `"gemini-1"`, `"mistral-2"`. */
@@ -48,19 +49,38 @@ async function callGemini(
   imagePath: string,
   prompt: string,
 ): Promise<unknown> {
+  // gemini-3-flash-preview is Google's newest multimodal model (per
+  // googleapis/python-genai/codegen_instructions.md, "use gemini-3-flash-preview
+  // for general text and multimodal tasks"). Best vision OCR quality
+  // available with usable quota. Override via OCR_GEMINI_MODEL env, e.g.:
+  //   OCR_GEMINI_MODEL=gemini-2.5-flash       (older but stable)
+  //   OCR_GEMINI_MODEL=gemini-2.5-flash-lite  (low latency / high volume)
+  //   OCR_GEMINI_MODEL=gemini-3-pro-preview   (highest quality, slower)
+  const modelName = process.env.OCR_GEMINI_MODEL ?? "gemini-3-flash-preview";
+  log.step(`[ocr/gemini] sending page ${imagePath.split("/").pop()} → model=${modelName}, prompt=${prompt.length}c, image=${(await fs.stat(imagePath)).size}B`);
   const png = await fs.readFile(imagePath);
   const genai = new GoogleGenerativeAI(apiKey);
   const model = genai.getGenerativeModel({
-    model: process.env.OCR_GEMINI_MODEL ?? "gemini-2.5-flash",
+    model: modelName,
     generationConfig: { responseMimeType: "application/json" },
   });
-  const raw = (await model.generateContent([
+  // Stream so each chunk lands in the dashboard's Events tab as it arrives.
+  // Operators can see the model's output building up in real time.
+  const stream = (await model.generateContentStream([
     { text: prompt },
-    {
-      inlineData: { mimeType: "image/png", data: png.toString("base64") },
-    },
-  ])) as { response: { text(): string } };
-  return parseJsonLoose(raw.response.text());
+    { inlineData: { mimeType: "image/png", data: png.toString("base64") } },
+  ])) as { stream: AsyncIterable<{ text(): string }>; response: Promise<{ text(): string }> };
+  let full = "";
+  let chunkCount = 0;
+  for await (const chunk of stream.stream) {
+    const piece = chunk.text();
+    if (!piece) continue;
+    full += piece;
+    chunkCount += 1;
+    log.step(`[ocr/gemini] chunk ${chunkCount} (+${piece.length}c, total ${full.length}c): ${piece.slice(0, 120).replace(/\n/g, " ")}`);
+  }
+  log.success(`[ocr/gemini] response complete (${chunkCount} chunks, ${full.length}c) — raw: ${full.slice(0, 400).replace(/\n/g, " ")}${full.length > 400 ? "…" : ""}`);
+  return parseJsonLoose(full);
 }
 
 async function callOpenAICompatVision(args: {
