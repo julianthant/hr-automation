@@ -13,6 +13,8 @@ import { cn } from "@/lib/utils";
 import { DuplicateBanner } from "./oath-upload";
 import type { PriorRunSummary } from "./types";
 import { getRunModalConfig, type RunModalSubmitResponse } from "@/lib/run-modal-registry";
+import { useRosters, refreshRosters, type RosterListing } from "./hooks/useRosters";
+import { useFormTypes, refreshFormTypes, type FormTypeOption } from "./hooks/useFormTypes";
 
 async function sha256OfFile(file: File): Promise<string> {
   const buf = await file.arrayBuffer();
@@ -31,20 +33,6 @@ async function sha256OfFile(file: File): Promise<string> {
  * `src/dashboard/lib/run-modal-registry.ts`. Adding a new file-upload
  * workflow needs only an entry there — this component does not change.
  */
-interface RosterListing {
-  filename: string;
-  path: string;
-  bytes: number;
-  modifiedAt: string;
-}
-
-interface FormTypeOption {
-  formType: string;
-  label: string;
-  description: string;
-  rosterMode: "required" | "optional";
-}
-
 interface RunModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -78,12 +66,13 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
   const [file, setFile] = useState<File | null>(null);
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [rosterMode, setRosterMode] = useState<"download" | "existing">("existing");
-  const [rosters, setRosters] = useState<RosterListing[] | null>(null);
+  const rosters = useRosters();
   const [submitting, setSubmitting] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [formType, setFormType] = useState<string | null>(effectiveLockedFormType ?? null);
-  const [formOptions, setFormOptions] = useState<FormTypeOption[]>([]);
+  const formOptionsCache = useFormTypes();
+  const formOptions: FormTypeOption[] = formOptionsCache ?? [];
   const [priorRuns, setPriorRuns] = useState<PriorRunSummary[]>([]);
 
   useEffect(() => {
@@ -116,32 +105,19 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
     };
   }, [file]);
 
-  // Fetch rosters on open for workflows that opt into the roster section.
-  // Refresh every time the modal opens so a SharePoint download that
-  // finished while the modal was closed is reflected.
+  // Refresh rosters cache each time the modal opens so a SharePoint download
+  // that finished while the modal was closed is reflected. The cache hook
+  // (`useRosters`) already serves any pre-warmed data instantly — this is
+  // belt-and-braces for staleness.
   useEffect(() => {
     if (!open || !showRoster) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const resp = await fetch("/api/rosters");
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = (await resp.json()) as RosterListing[];
-        if (cancelled) return;
-        setRosters(data);
-        // Auto-flip to download if no roster is on disk.
-        if (data.length === 0) setRosterMode("download");
-      } catch {
-        if (!cancelled) {
-          setRosters([]);
-          setRosterMode("download");
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    refreshRosters();
   }, [open, showRoster]);
+
+  // Auto-flip to "download" mode when the listing comes back empty.
+  useEffect(() => {
+    if (rosters && rosters.length === 0) setRosterMode("download");
+  }, [rosters]);
 
   // Duplicate-check effect — hash the PDF and ask the server whether
   // we've seen it before. Best-effort: failures surface as an inline error
@@ -176,28 +152,24 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
     };
   }, [file, showDuplicateCheck]);
 
-  // Fetch form types when modal opens for workflows that show the
-  // form-type picker. Skip when the form type is locked (registry or prop)
-  // — caller already picked it.
+  // Refresh form-types cache each time the modal opens so a backend update
+  // (rare) is reflected. The hook (`useFormTypes`) already serves any
+  // pre-warmed data instantly — this is belt-and-braces for staleness.
   useEffect(() => {
     if (!open || !showFormType || effectiveLockedFormType) return;
-    let cancelled = false;
-    fetch("/api/ocr/forms")
-      .then(async (r) => {
-        if (r.ok) {
-          const list = (await r.json()) as FormTypeOption[];
-          if (cancelled) return;
-          setFormOptions(list);
-          if (!formType && list.length > 0) setFormType(list[0].formType);
-        }
-      })
-      .catch(() => {/* tolerate */});
-    return () => { cancelled = true; };
+    refreshFormTypes();
   }, [open, showFormType, effectiveLockedFormType]);
 
-  // Reset form state on close. Rosters reset to null (not []) so the next
-  // open re-fires the fetch and the hint reads "Loading rosters…" instead of
-  // a stale "No roster on disk" from the previous mount.
+  // Default-select the first form type once options arrive (and no caller
+  // already locked one). Tracks `formOptions` so a late cache fill still
+  // populates the radio.
+  useEffect(() => {
+    if (formType || effectiveLockedFormType) return;
+    if (formOptions.length > 0) setFormType(formOptions[0].formType);
+  }, [formOptions, formType, effectiveLockedFormType]);
+
+  // Reset form state on close. Rosters cache is module-global (see
+  // useRosters) so we don't reset it here — it's reused across opens.
   useEffect(() => {
     if (open) return;
     setFile(null);
@@ -206,7 +178,6 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
     setProgress(null);
     setError(null);
     setPriorRuns([]);
-    setRosters(null);
     setRosterMode("existing");
   }, [open]);
 
@@ -262,13 +233,26 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
 
     const submitUrl = config.submitUrl(ctx);
 
+    // Route uploads to the dashboard's dedicated upload port (3839 by
+    // default — see `uploadPort` in `startDashboard`). Different port =
+    // different browser origin = separate HTTP/1.1 connection pool, so
+    // a multi-second upload never competes with the dashboard's ~6
+    // long-lived SSE streams for Chrome's 6-connection-per-origin
+    // budget. CORS is wildcard on the backend; cross-origin POST works
+    // without preflight gymnastics. Same behavior in dev (page on
+    // :5173) and prod (page on :3838) — both reroute to :3839.
+    const fullSubmitUrl =
+      typeof window !== "undefined"
+        ? `${window.location.protocol}//${window.location.hostname}:3839${submitUrl}`
+        : submitUrl;
+
     // Use XHR so we get progress events. Fetch's upload progress is still
     // not widely supported across browsers as of 2026.
     try {
       const result = await new Promise<RunModalSubmitResponse>(
         (resolve, reject) => {
           const xhr = new XMLHttpRequest();
-          xhr.open("POST", submitUrl);
+          xhr.open("POST", fullSubmitUrl);
           xhr.upload.addEventListener("progress", (ev) => {
             if (ev.lengthComputable) {
               setProgress(Math.round((ev.loaded / ev.total) * 100));

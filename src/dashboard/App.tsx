@@ -9,6 +9,8 @@ import { TerminalDrawer } from "./components/TerminalDrawer";
 import { TerminalDrawerProvider } from "./components/hooks/useTerminalDrawer";
 import { useEntries } from "./components/hooks/useEntries";
 import { usePreflight } from "./components/hooks/usePreflight";
+import { prefetchRosters } from "./components/hooks/useRosters";
+import { prefetchFormTypes } from "./components/hooks/useFormTypes";
 import { useTelegramToasts } from "./components/hooks/useTelegramToasts";
 import { useCaptureToasts } from "./components/hooks/useCaptureToasts";
 import { resolveActionToastsForEntry } from "./components/hooks/useActionToasts";
@@ -71,6 +73,13 @@ export default function App() {
   usePreflight();
   useTelegramToasts();
   useCaptureToasts();
+
+  // Prime caches at app boot so the Run modal's first paint already has
+  // the rosters listing AND the form-type picker — no fetch-blank frame.
+  useEffect(() => {
+    prefetchRosters();
+    prefetchFormTypes();
+  }, []);
 
   // Fail-loud on unknown workflow in `?wf=`. Once the registry has loaded,
   // if the URL workflow isn't a known name, warn and reset to the default

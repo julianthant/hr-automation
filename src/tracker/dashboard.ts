@@ -1825,6 +1825,14 @@ export interface StartDashboardOptions {
   cleanMaxAgeDays?: number;
   /** Override tracker dir — mainly for test isolation. Defaults to DEFAULT_DIR. */
   dir?: string;
+  /**
+   * Secondary listener port dedicated to multipart upload routes. Uses a
+   * different origin from `port` so the browser keeps a separate HTTP/1.1
+   * connection pool — uploads never compete with SSE streams for slots.
+   * Defaults to `port + 1` (3839 when `port=3838`). Pass `null` to
+   * disable. Tests using `port: 0` get `null` automatically.
+   */
+  uploadPort?: number | null;
 }
 
 /**
@@ -1838,6 +1846,10 @@ export interface CreateDashboardServerOptions {
   dir?: string;
   noClean?: boolean;
   cleanMaxAgeDays?: number;
+  /** Same semantics as `StartDashboardOptions.uploadPort`. Default: omitted
+   *  (tests don't get a second listener — they don't exercise the
+   *  upload-vs-SSE concurrency path). */
+  uploadPort?: number | null;
 }
 
 export function startDashboard(
@@ -1846,9 +1858,15 @@ export function startDashboard(
   opts: StartDashboardOptions = {}
 ): void {
   if (server) return;
+  // Default the upload listener to `port + 1` (3839 when port=3838) so a
+  // single `npm run dashboard` invocation gets the upload-isolation
+  // benefit out of the box. Caller can pass `null` to opt out.
+  const uploadPort =
+    opts.uploadPort === undefined ? port + 1 : opts.uploadPort;
   server = createDashboardServer({
     workflow,
     port,
+    uploadPort,
     dir: opts.dir,
     noClean: opts.noClean,
     cleanMaxAgeDays: opts.cleanMaxAgeDays,
@@ -1937,7 +1955,14 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     res.end(JSON.stringify(body));
   };
 
-  const localServer: Server = createServer(async (req, res) => {
+  // Hoisted so a second `http.Server` (the upload listener on `uploadPort`)
+  // can share the exact same routing closure without copy-paste. Keeping
+  // both servers on a single closure means new endpoints automatically
+  // work on both ports.
+  const requestListener = async (
+    req: import("http").IncomingMessage,
+    res: import("http").ServerResponse,
+  ): Promise<void> => {
     const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 
     // CORS preflight — kept for any future POST endpoints.
@@ -3922,7 +3947,9 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     // No HTML served — use Vite dev server (port 5173) for the UI
     res.writeHead(404);
     res.end();
-  });
+  };
+
+  const localServer: Server = createServer(requestListener);
 
   localServer.on("error", (err: NodeJS.ErrnoException) => {
     if (err.code === "EADDRINUSE") {
@@ -3940,6 +3967,39 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       log.step(`Live dashboard: http://localhost:${boundPort}`);
     }
   });
+
+  // Secondary listener — same handler, dedicated port. The browser sees
+  // `localhost:<port>` and `localhost:<uploadPort>` as different origins,
+  // so XHR uploads to `uploadPort` get their own HTTP/1.1 connection
+  // pool. This isolates uploads (which can hold a connection for
+  // seconds while transmitting the body) from the dashboard's ~6
+  // long-lived SSE streams that would otherwise saturate Chrome's
+  // 6-connection-per-origin limit and block uploads at 0%.
+  if (opts.uploadPort != null) {
+    const uploadServer: Server = createServer(requestListener);
+    uploadServer.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE") {
+        log.step(
+          `Upload port ${opts.uploadPort} in use — uploads will fall back to main port (may queue behind SSE)`,
+        );
+      }
+    });
+    uploadServer.listen(opts.uploadPort, () => {
+      if (opts.uploadPort !== 0) {
+        log.step(`Upload listener: http://localhost:${opts.uploadPort}`);
+      }
+    });
+    // Bind the upload server's lifetime to the main server so a single
+    // `server.close()` tears both down. close() is best-effort here —
+    // tests already use the main server for assertions.
+    localServer.on("close", () => {
+      try {
+        uploadServer.close();
+      } catch {
+        /* best-effort */
+      }
+    });
+  }
 
   return localServer;
 }
