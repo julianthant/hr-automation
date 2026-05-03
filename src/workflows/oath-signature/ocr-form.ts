@@ -109,7 +109,7 @@ export type OathPreviewRecord = z.infer<typeof OathPreviewRecordSchema>;
 
 // ─── Prompt + match logic ───────────────────────────────────
 
-const OATH_OCR_PROMPT = `You are an OCR system. Extract structured data from the attached PDF.
+const OATH_OCR_PROMPT = `You are an OCR system. Extract structured data from the attached PDF page.
 
 The PDF is a stack of paper oath signature documents in one of three formats — each page is one of:
 - "signin"  — multi-row sign-in sheet (many records per page)
@@ -117,18 +117,27 @@ The PDF is a stack of paper oath signature documents in one of three formats —
 - "upay586" — single-form per page, UPAY586 (2015 DocuSign, oath only)
 - "unknown" — blank, irrelevant, or doesn't match any of the above
 
-For each page you process:
-1. Classify document type. Map "signin"/"upay585"/"upay586" to documentType: "expected"; "unknown" → documentType: "unknown".
-2. For each record extract: rowIndex (0-indexed position on the page, starting from 0 for the first record); printedName (always); employeeId if visible; dateSigned if visible; employeeSigned: whether the employee/officer signature line is filled (a scribble counts; an empty box doesn't); officerSigned: whether the authorized-official / witness signature is filled. For sign-in sheets that only have a single signature column, set officerSigned to null. For UPAY585/UPAY586, false when the column is empty.
-3. After extraction, list which expected fields were BLANK or ILLEGIBLE on the paper in originallyMissing on each record.
+OUTPUT SHAPE (CRITICAL — must be a FLAT JSON ARRAY at the top level):
 
-Field-level rules:
-- One record per signer. Multi-row sign-in sheets emit multiple records per page; single-form pages emit one.
-- rowIndex must be included for every record and must be a non-negative integer starting at 0.
-- For handwritten text, ALWAYS attempt a best-guess transcription — even if uncertain about specific letters, give your best read of the visible writing. Only set a field to null if the field on the form is genuinely BLANK (no writing at all). Faint, smudged, or hard-to-read writing should still be transcribed (mark uncertain characters with your best guess, not null).
-- printedName: speak the name out loud as you read it; this is the most important field. Always attempt a transcription if there is ANY writing on the printed-name line.
-- dateSigned should be transcribed as it appears on the paper (typical formats: MM/DD/YYYY or M/D/YY).
-- Output ONLY valid JSON matching the schema. No commentary.`;
+\`\`\`json
+[
+  { "rowIndex": 0, "printedName": "Doe, Jane, A", "employeeId": "10000001", "dateSigned": "4-23-26", "employeeSigned": true, "officerSigned": true, "documentType": "expected", "originallyMissing": [] }
+]
+\`\`\`
+
+Do NOT wrap records in a page object. Do NOT nest under "records" or "data" keys. The top-level value MUST be a JSON array. Each element is exactly one record. Multi-row sign-in sheets emit multiple array elements; single-form pages (UPAY585/UPAY586) emit exactly one element.
+
+For each record extract these fields:
+- rowIndex: 0-indexed position on the page, starting from 0 for the first record
+- printedName: the printed/handwritten name on the form. ALWAYS attempt a best-guess transcription — speak the name out loud as you read it. Only set null if the field is genuinely BLANK (no writing at all). Faint or hard-to-read writing should still be transcribed.
+- employeeId: digits in the "Employee ID" field. Null if blank.
+- dateSigned: the date signed (typical formats: MM/DD/YYYY, M/D/YY, M-D-YY). Null if blank.
+- employeeSigned: true if the employee signature line has any writing/scribble. False for an empty box. For sign-in sheets with one signature column, set true if the row's signature box is filled.
+- officerSigned: true if the authorized-officer / witness signature is filled. Null for sign-in sheets with one signature column. False for UPAY585/UPAY586 when empty.
+- documentType: "expected" for signin/upay585/upay586. "unknown" for blank, garbage, or non-form pages.
+- originallyMissing: array of field names that were genuinely BLANK on the paper (not just hard to read). Use [] when nothing was missing.
+
+Output ONLY the valid JSON array. No commentary, no markdown fences, no wrapper object.`;
 
 const NAME_AUTO_ACCEPT = 0.95;
 const NAME_AUTO_ACCEPT_GAP = 0.10;

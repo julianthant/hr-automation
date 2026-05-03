@@ -168,6 +168,23 @@ export async function runOcrPerPage<T>(
   );
 
   // Schema-validate each record from each successful page; drop invalids.
+  // Some models (notably Gemini 3) sometimes wrap records in a per-page
+  // object: `[{pageNumber, documentType, records: [...]}]` instead of the
+  // flat `[{...}, {...}]` we asked for. Unwrap before validation so the
+  // schema doesn't strip the actual record fields.
+  for (const r of results) {
+    if (!r.success || !r.rawRecords) continue;
+    r.rawRecords = r.rawRecords.flatMap((rec) => {
+      if (rec && typeof rec === "object" && Array.isArray((rec as { records?: unknown }).records)) {
+        return (rec as { records: unknown[] }).records;
+      }
+      if (rec && typeof rec === "object" && Array.isArray((rec as { data?: unknown }).data)) {
+        return (rec as { data: unknown[] }).data;
+      }
+      return [rec];
+    });
+  }
+
   // Three fields are injected before `safeParse`:
   //   - rowIndex (default = array index): sign-in sheets have many rows; LLM
   //     occasionally drops the field on single-record pages
