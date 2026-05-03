@@ -689,13 +689,23 @@ export function buildDaemonsListHandler(dir: string) {
     const workflows = workflow
       ? [workflow]
       : (() => {
-          // Discover every workflow with a daemons/<wf>-*.lock.json by reading the daemons dir.
+          // Discover every workflow with a live lockfile by reading the
+          // workflow field from each lockfile's contents. The previous
+          // filename-regex approach captured workflow names wrong when the
+          // workflow itself had a hyphen (e.g. "eid-lookup-eid-db32.lock.json"
+          // matched workflow="eid-lookup-eid" because randomInstanceId emits
+          // "<3-letter-prefix>-<4-hex>" and the regex required pure hex
+          // for instanceId, so it greedily ate one segment too many).
+          // Reading the lockfile content avoids the ambiguity entirely.
           const d = daemonsDir(dir);
           if (!existsSync(d)) return [];
           const names = new Set<string>();
           for (const file of readdirSync(d)) {
-            const m = /^([^-]+(?:-[^-]+)*)-([a-f0-9]+)\.lock\.json$/.exec(file);
-            if (m) names.add(m[1]);
+            if (!file.endsWith(".lock.json") || file.includes(".lock.json.tmp")) continue;
+            try {
+              const lock = JSON.parse(readFileSync(join(d, file), "utf-8")) as { workflow?: string };
+              if (typeof lock.workflow === "string") names.add(lock.workflow);
+            } catch { /* ignore unreadable / malformed */ }
           }
           return [...names];
         })();
