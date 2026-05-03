@@ -261,9 +261,43 @@ export const oathOcrFormSpec: OcrFormSpec<
     };
   },
 
-  applyDisambiguation({ record }): OathPreviewRecord {
-    // Real implementation lands in Task 6 — stub keeps the spec compilable.
-    return record;
+  applyDisambiguation({ record, result }): OathPreviewRecord {
+    if (result.eid === null || result.eid.length === 0) {
+      // LLM said "none of these" — operator must intervene.
+      return {
+        ...record,
+        employeeId: "",
+        matchState: "lookup-pending",
+        matchSource: "manual",
+        warnings: [
+          ...(record.warnings ?? []),
+          "LLM disambiguation: no candidate matched — manual review",
+        ],
+      };
+    }
+
+    if (result.confidence < LLM_HIGH_CONFIDENCE) {
+      return {
+        ...record,
+        employeeId: result.eid,
+        matchState: "lookup-pending",
+        matchSource: "llm",
+        matchConfidence: result.confidence,
+        warnings: [
+          ...(record.warnings ?? []),
+          `LLM picked EID ${result.eid} but low confidence (${result.confidence.toFixed(2)}) — review`,
+        ],
+      };
+    }
+
+    return {
+      ...record,
+      employeeId: result.eid,
+      matchState: "matched",
+      matchSource: "llm",
+      matchConfidence: result.confidence,
+      warnings: record.warnings ?? [],
+    };
   },
 
   needsLookup(record): LookupKind {
