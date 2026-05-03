@@ -323,6 +323,10 @@ export const oathOcrFormSpec: OcrFormSpec<
     if (record.matchState === "lookup-pending") {
       // form-eid lookup-pending → we know the EID, just need to verify it
       if (record.matchSource === "form-eid") return "verify-only";
+      // manual = LLM extracted nothing usable; no auto-lookup possible
+      // (would dispatch eid-lookup with empty name and fail name.min(1)).
+      // Operator will fill the EID directly in the preview pane.
+      if (record.matchSource === "manual") return null;
       return "name";
     }
     if (record.matchState === "matched" && record.employeeId) {

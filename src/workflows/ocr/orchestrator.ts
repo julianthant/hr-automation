@@ -340,6 +340,11 @@ export async function runOcrOrchestrator(
     records.forEach((rec, index) => {
       const kind = spec.needsLookup(rec);
       if (kind === "name" || kind === "verify" || kind === "verify-only") {
+        // Defense: skip records that lack the input the dispatch needs (an
+        // empty name would fail eid-lookup's name.min(1) schema). The spec's
+        // needsLookup should already filter these out — this is a backstop.
+        if (kind === "name" && !extractName(rec, spec).trim()) return;
+        if ((kind === "verify" || kind === "verify-only") && !extractEid(rec, spec).trim()) return;
         lookupTargets.push({ rec, index, kind });
       }
     });
