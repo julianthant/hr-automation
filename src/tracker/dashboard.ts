@@ -2593,26 +2593,48 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       }
 
       const filename = `page-${String(page).padStart(2, "0")}.png`;
-      const safeBase = resolve(process.cwd(), ".tracker", "uploads", parentRunId);
-      const safePath = resolve(safeBase, filename);
-      if (!safePath.startsWith(safeBase + sep)) {
+      // Two known locations for page images:
+      //   - Legacy emergency-contact prep:  .tracker/uploads/<parentRunId>/
+      //   - OCR workflow orchestrator:      .tracker/page-images/<sessionId>/
+      // The frontend passes parentRunId, but for OCR-workflow rows the
+      // sessionId (also passed via parentRunId param for compatibility) keys
+      // the page-images dir. Try uploads first, fall back to page-images.
+      const candidates = [
+        resolve(process.cwd(), ".tracker", "uploads", parentRunId, filename),
+        resolve(process.cwd(), ".tracker", "page-images", parentRunId, filename),
+      ];
+      const safeBaseUploads = resolve(process.cwd(), ".tracker", "uploads", parentRunId);
+      const safeBasePageImages = resolve(process.cwd(), ".tracker", "page-images", parentRunId);
+      if (
+        !candidates[0].startsWith(safeBaseUploads + sep) ||
+        !candidates[1].startsWith(safeBasePageImages + sep)
+      ) {
         res.writeHead(400, { "Access-Control-Allow-Origin": "*" });
         res.end("path traversal");
         return;
       }
-      try {
-        const stat = await statAsync(safePath);
-        res.writeHead(200, {
-          "Content-Type": "image/png",
-          "Content-Length": stat.size,
-          "Cache-Control": "public, max-age=86400",
-          "Access-Control-Allow-Origin": "*",
-        });
-        createReadStream(safePath).pipe(res);
-      } catch {
+      let foundPath: string | null = null;
+      let foundSize = 0;
+      for (const p of candidates) {
+        try {
+          const stat = await statAsync(p);
+          foundPath = p;
+          foundSize = stat.size;
+          break;
+        } catch { /* try next */ }
+      }
+      if (!foundPath) {
         res.writeHead(404, { "Access-Control-Allow-Origin": "*" });
         res.end("not found");
+        return;
       }
+      res.writeHead(200, {
+        "Content-Type": "image/png",
+        "Content-Length": foundSize,
+        "Cache-Control": "public, max-age=86400",
+        "Access-Control-Allow-Origin": "*",
+      });
+      createReadStream(foundPath).pipe(res);
       return;
     }
 

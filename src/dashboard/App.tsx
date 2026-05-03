@@ -330,25 +330,32 @@ export default function App() {
             </>
           }
         />
-        {reviewingPrepId &&
-          (() => {
-            const prepEntry = entries.find(
-              (e) =>
-                (e.runId ?? e.id) === reviewingPrepId &&
-                e.data?.mode === "prepare",
-            );
-            return prepEntry ? (
-              <OcrReviewPane
-                entry={prepEntry}
-                onClose={() => setReviewingPrepId(null)}
-              />
-            ) : (
-              <LogPanel entry={selectedEntry} workflow={workflow} date={date} displayNames={displayNames} />
-            );
-          })()}
-        {!reviewingPrepId && (
-          <LogPanel entry={selectedEntry} workflow={workflow} date={date} displayNames={displayNames} />
-        )}
+        {(() => {
+          // Preview now lives as a tab inside LogPanel. When a prep row is
+          // selected (or operator clicks "Open review" on an OcrQueueRow),
+          // we make the Preview tab available and switch to it by default.
+          const isPrepEntry = selectedEntry?.data?.mode === "prepare";
+          const wantsPreview =
+            isPrepEntry && (reviewingPrepId === (selectedEntry?.runId ?? selectedEntry?.id) || true);
+          return (
+            <LogPanel
+              entry={selectedEntry}
+              workflow={workflow}
+              date={date}
+              displayNames={displayNames}
+              previewAvailable={isPrepEntry}
+              previewSlot={
+                isPrepEntry && selectedEntry ? (
+                  <OcrReviewPane
+                    entry={selectedEntry}
+                    onClose={() => setReviewingPrepId(null)}
+                  />
+                ) : undefined
+              }
+              defaultTab={wantsPreview && reviewingPrepId ? "preview" : undefined}
+            />
+          );
+        })()}
       </div>
       <TerminalDrawer connected={connected} />
       {/* Reupload RunModal — opened by OcrQueueRow's Reupload button */}

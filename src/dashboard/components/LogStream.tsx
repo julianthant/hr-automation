@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { Maximize2, Minimize2 } from "lucide-react";
 import { LogLine } from "./LogLine";
 import type { CollapsedLogEntry } from "./hooks/useLogs";
 import type { LogCategory, RunEvent } from "./types";
@@ -21,13 +22,25 @@ interface LogStreamProps {
   editDataSlot?: ReactNode;
   /** Whether the workflow has any editable fields — gates the Edit Data tab. */
   editDataAvailable?: boolean;
+  /** Rendered in place of the log list when the Preview tab is active. */
+  previewSlot?: ReactNode;
+  /** Whether this row has a previewable payload — gates the Preview tab. */
+  previewAvailable?: boolean;
+  /** Default-active when first mounted — used to deep-link into Preview from another row. */
+  initialTab?: string;
+  /**
+   * Maximize state lifted to parent so LogPanel can hide the detail header
+   * + step pipeline when the operator wants the tab content fullscreen.
+   */
+  maximized?: boolean;
+  onToggleMaximize?: () => void;
 }
 
 const FILTER_TABS: {
   key: string;
   label: string;
   categories: LogCategory[];
-  source?: "events" | "screenshots" | "edit-data";
+  source?: "events" | "screenshots" | "edit-data" | "preview";
 }[] = [
   { key: "all", label: "All", categories: [] },
   { key: "errors", label: "Errors", categories: ["error"] },
@@ -36,6 +49,7 @@ const FILTER_TABS: {
   { key: "extract", label: "Extract", categories: ["extract"] },
   { key: "events", label: "Events", categories: [], source: "events" },
   { key: "screenshots", label: "Screenshots", categories: [], source: "screenshots" },
+  { key: "preview", label: "Preview", categories: [], source: "preview" },
   { key: "edit-data", label: "Edit Data", categories: [], source: "edit-data" },
 ];
 
@@ -43,8 +57,25 @@ type DisplayItem =
   | { kind: "log"; entry: CollapsedLogEntry }
   | { kind: "event"; entry: RunEvent };
 
-export function LogStream({ logs, events = [], loading, screenshotsSlot, editDataSlot, editDataAvailable }: LogStreamProps) {
-  const [filter, setFilter] = useState("all");
+export function LogStream({
+  logs,
+  events = [],
+  loading,
+  screenshotsSlot,
+  editDataSlot,
+  editDataAvailable,
+  previewSlot,
+  previewAvailable,
+  initialTab,
+  maximized,
+  onToggleMaximize,
+}: LogStreamProps) {
+  const [filter, setFilter] = useState(initialTab ?? "all");
+  // When parent flips initialTab (e.g. opening review from a queue-row click),
+  // adopt the new tab. Operator can still switch away after.
+  useEffect(() => {
+    if (initialTab) setFilter(initialTab);
+  }, [initialTab]);
   const [autoScroll, setAutoScroll] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const prevLenRef = useRef(0);
@@ -95,11 +126,17 @@ export function LogStream({ logs, events = [], loading, screenshotsSlot, editDat
     toast.success("Copied to clipboard", { duration: 1500 });
   };
 
+  const visibleTabs = FILTER_TABS.filter(
+    (t) =>
+      (t.key !== "edit-data" || editDataAvailable) &&
+      (t.key !== "preview" || previewAvailable),
+  );
+
   return (
     <>
-      {/* Filter tabs */}
+      {/* Filter tabs + maximize toggle */}
       <div className="flex items-center gap-0.5 px-6 py-2 border-b border-border flex-shrink-0">
-        {FILTER_TABS.filter((t) => t.key !== "edit-data" || editDataAvailable).map((tab) => (
+        {visibleTabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setFilter(tab.key)}
@@ -112,7 +149,33 @@ export function LogStream({ logs, events = [], loading, screenshotsSlot, editDat
             {tab.label}
           </button>
         ))}
+        {onToggleMaximize && (
+          <button
+            type="button"
+            onClick={onToggleMaximize}
+            aria-pressed={maximized}
+            title={maximized ? "Exit fullscreen" : "Maximize tab content"}
+            className={cn(
+              "ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md cursor-pointer transition-colors",
+              "text-muted-foreground hover:text-foreground hover:bg-secondary",
+              maximized && "text-foreground bg-accent",
+            )}
+          >
+            {maximized ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+          </button>
+        )}
       </div>
+
+      {/* Preview slot — shown when Preview tab is active */}
+      {tab?.source === "preview" && (
+        <div className="flex-1 overflow-y-auto border-b border-border">
+          {previewSlot ?? (
+            <div className="px-6 py-4 text-sm text-muted-foreground">
+              Preview is unavailable for this row.
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Screenshots slot — shown when Screenshots tab is active */}
       {tab?.source === "screenshots" && (
@@ -137,7 +200,7 @@ export function LogStream({ logs, events = [], loading, screenshotsSlot, editDat
       )}
 
       {/* Log lines — hidden when Screenshots or Edit Data tab is active */}
-      <div ref={scrollRef} className={cn("flex-1 overflow-y-auto py-3 border-b border-border", (tab?.source === "screenshots" || tab?.source === "edit-data") && "hidden")}>
+      <div ref={scrollRef} className={cn("flex-1 overflow-y-auto py-3 border-b border-border", (tab?.source === "screenshots" || tab?.source === "edit-data" || tab?.source === "preview") && "hidden")}>
         {loading && displayed.length === 0 ? (
           <div className="space-y-[6px] px-6 py-3">
             {Array.from({ length: 12 }).map((_, i) => (
@@ -180,7 +243,7 @@ export function LogStream({ logs, events = [], loading, screenshotsSlot, editDat
           Hidden when a non-log slot tab (screenshots / edit-data) owns
           the panel — the streaming/auto-scroll affordances aren't
           relevant there. */}
-      <div className={cn("h-12 flex items-center justify-between px-6 text-[12px] text-muted-foreground flex-shrink-0", (tab?.source === "screenshots" || tab?.source === "edit-data") && "hidden")}>
+      <div className={cn("h-12 flex items-center justify-between px-6 text-[12px] text-muted-foreground flex-shrink-0", (tab?.source === "screenshots" || tab?.source === "edit-data" || tab?.source === "preview") && "hidden")}>
         <div className="flex items-center gap-2 leading-none">
           <span className="relative flex items-center justify-center w-[7px] h-[7px]">
             <span className="absolute inset-0 rounded-full bg-primary/50 animate-ping" />
