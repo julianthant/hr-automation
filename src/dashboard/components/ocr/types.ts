@@ -12,7 +12,7 @@ export type MatchState =
   | "resolved"
   | "unresolved";
 
-export type MatchSource = "form" | "roster" | "eid-lookup" | "llm";
+export type MatchSource = "form" | "roster" | "eid-lookup" | "llm" | "form-eid" | "manual";
 
 export type AddressMatch = "match" | "differ" | "missing";
 
@@ -116,6 +116,7 @@ export interface PrepareRowData {
   ocrAttempts?: number;
   ocrCached?: boolean;
   failedPages?: FailedPage[];
+  emptyPages?: number[];
   pageStatusSummary?: PageStatusSummary;
 }
 
@@ -207,6 +208,13 @@ export function parsePrepareRowData(
       if (parsed && typeof parsed.total === "number") pageStatusSummary = parsed as PageStatusSummary;
     }
   } catch { /* tolerate */ }
+  let emptyPages: number[] | undefined;
+  try {
+    if (typeof rawData.emptyPages === "string") {
+      const parsed = JSON.parse(rawData.emptyPages);
+      if (Array.isArray(parsed)) emptyPages = parsed.filter((n) => typeof n === "number");
+    }
+  } catch { /* tolerate — pre-feature row */ }
   return {
     mode: "prepare",
     pdfPath: rawData.pdfPath ?? "",
@@ -219,6 +227,7 @@ export function parsePrepareRowData(
     ocrAttempts: rawData.ocrAttempts ? Number(rawData.ocrAttempts) : undefined,
     ocrCached: rawData.ocrCached === "true",
     failedPages,
+    emptyPages,
     pageStatusSummary,
   };
 }
@@ -292,6 +301,7 @@ export interface OathPrepareRowData {
   ocrAttempts?: number;
   ocrCached?: boolean;
   failedPages?: FailedPage[];
+  emptyPages?: number[];
   pageStatusSummary?: PageStatusSummary;
 }
 
@@ -321,6 +331,13 @@ export function parseOathPrepareRowData(
       if (parsed && typeof parsed.total === "number") pageStatusSummary = parsed as PageStatusSummary;
     }
   } catch { /* tolerate */ }
+  let emptyPages: number[] | undefined;
+  try {
+    if (typeof rawData.emptyPages === "string") {
+      const parsed = JSON.parse(rawData.emptyPages);
+      if (Array.isArray(parsed)) emptyPages = parsed.filter((n) => typeof n === "number");
+    }
+  } catch { /* tolerate — pre-feature row */ }
   return {
     mode: "prepare",
     pdfPath: rawData.pdfPath ?? "",
@@ -332,6 +349,7 @@ export function parseOathPrepareRowData(
     ocrAttempts: rawData.ocrAttempts ? Number(rawData.ocrAttempts) : undefined,
     ocrCached: rawData.ocrCached === "true",
     failedPages,
+    emptyPages,
     pageStatusSummary,
   };
 }
