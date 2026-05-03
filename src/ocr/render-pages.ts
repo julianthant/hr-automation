@@ -18,7 +18,11 @@ export async function renderPdfPagesToPngs(
     await fs.mkdir(outDir, { recursive: true });
     const pdfBuffer = await fs.readFile(pdfPath);
     const { pdf } = await import("pdf-to-img");
-    const document = await pdf(pdfBuffer, { scale: 1.5 });
+    // scale=1.0 gives ~310KB PNGs (vs ~697KB at 1.5x) — ~2.3x faster to
+     // serve + decode in the browser. Operator-side OCR review can still
+     // read the page; the LLM extraction was already going to handwriting-
+     // accuracy limits at 1.5x.
+    const document = await pdf(pdfBuffer, { scale: 1.0 });
     const filenames: string[] = [];
     let i = 1;
     for await (const image of document) {
