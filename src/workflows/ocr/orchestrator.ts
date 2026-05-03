@@ -223,6 +223,19 @@ export async function runOcrOrchestrator(
       sessionId: input.sessionId,
     });
     log.success(`[ocr] OCR complete (provider=${ocrResult.provider}, attempts=${ocrResult.attempts}, records=${(ocrResult.data as unknown[]).length})`);
+    // Per-record extraction summary so operator can see exactly what came
+    // out of the LLM before any matching/disambiguation runs on top.
+    (ocrResult.data as Array<Record<string, unknown>>).forEach((rec, i) => {
+      const name = String(rec.printedName ?? "").trim() || "(empty)";
+      const eid = String(rec.employeeId ?? "").trim() || "(none)";
+      const date = String(rec.dateSigned ?? "").trim() || "(none)";
+      const signed = rec.employeeSigned === true ? "✓" : rec.employeeSigned === false ? "✗" : "?";
+      const docType = String(rec.documentType ?? "expected");
+      const missing = Array.isArray(rec.originallyMissing) && rec.originallyMissing.length > 0
+        ? ` missing=[${(rec.originallyMissing as string[]).join(",")}]`
+        : "";
+      log.step(`[ocr] record ${i + 1}/${(ocrResult.data as unknown[]).length}: name="${name}" eid=${eid} date=${date} signed=${signed} type=${docType}${missing}`);
+    });
 
     // Build per-page status summary from OCR result
     const pages = ocrResult.pages ?? [];
@@ -271,11 +284,19 @@ export async function runOcrOrchestrator(
       },
       "matching",
     );
+    log.step(`[ocr] roster has ${roster.length} row(s) loaded from ${resolvedRosterPath.split("/").pop()}`);
     let records = await Promise.all(
       (ocrResult.data as unknown[]).map((r) =>
         spec.matchRecord({ record: r, roster }),
       ),
     );
+    // Per-record match outcome summary.
+    records.forEach((r, i) => {
+      const rec = r as { matchState?: string; matchSource?: string; employeeId?: string; printedName?: string; matchConfidence?: number; rosterCandidates?: Array<{ score: number }> };
+      const conf = typeof rec.matchConfidence === "number" ? ` conf=${rec.matchConfidence.toFixed(2)}` : "";
+      const candCount = rec.rosterCandidates?.length ?? 0;
+      log.step(`[ocr] match ${i + 1}/${records.length}: state=${rec.matchState} source=${rec.matchSource ?? "(none)"} eid=${rec.employeeId || "(none)"}${conf} candidates=${candCount}`);
+    });
 
     // 3b. Carry-forward (if reupload)
     if (input.previousRunId) {
@@ -299,7 +320,7 @@ export async function runOcrOrchestrator(
     });
 
     if (disambigTargets.length > 0) {
-      log.step(`[ocr] disambiguating ${disambigTargets.length} ambiguous record(s) via LLM`);
+      log.step(`[ocr] disambiguating ${disambigTargets.length} ambiguous record(s) via LLM (others: ${records.length - disambigTargets.length} skipped — already matched, manual, or no candidates)`);
       writeTracker("running", { recordCount: records.length, ambiguousCount: disambigTargets.length }, "disambiguating");
 
       const { disambiguateMatch } = await import("../../ocr/disambiguate.js");
@@ -333,6 +354,7 @@ export async function runOcrOrchestrator(
         });
       });
     } else {
+      log.step(`[ocr] disambiguating skipped — 0 ambiguous records (all ${records.length} either matched, manual, or no candidates above 0.40)`);
       writeTracker("running", { recordCount: records.length, ambiguousCount: 0 }, "disambiguating");
     }
 
@@ -354,7 +376,11 @@ export async function runOcrOrchestrator(
     });
 
     if (lookupTargets.length > 0) {
-      log.step(`[ocr] enqueuing ${lookupTargets.length} eid-lookup(s) for unmatched/verify-needed records`);
+      log.step(`[ocr] enqueuing ${lookupTargets.length} eid-lookup(s) for unmatched/verify-needed records (skipped ${records.length - lookupTargets.length} — already resolved, no name/EID, or manual)`);
+      lookupTargets.forEach((t) => {
+        const inputDesc = t.kind === "name" ? `name="${extractName(t.rec, spec)}"` : `eid=${extractEid(t.rec, spec)}`;
+        log.step(`[ocr] lookup target rec ${t.index + 1}: kind=${t.kind} ${inputDesc}`);
+      });
       writeTracker("running", { recordCount: records.length, pendingLookup: lookupTargets.length }, "eid-lookup");
 
       const enqueueItems = lookupTargets.map((t) => {
@@ -423,7 +449,16 @@ export async function runOcrOrchestrator(
 
     // 5. Verification marker
     const verifiedCount = countVerified(records, spec);
-    log.step(`[ocr] verification: ${verifiedCount}/${records.length} records verified`);
+    // Per-record verification breakdown so the operator can see WHY each
+    // row landed where it did before clicking through to the preview pane.
+    const verifiedBreakdown: Record<string, number> = {};
+    records.forEach((r) => {
+      const v = (r as { verification?: { state?: string } }).verification;
+      const state = v?.state ?? "unverified";
+      verifiedBreakdown[state] = (verifiedBreakdown[state] ?? 0) + 1;
+    });
+    const breakdownStr = Object.entries(verifiedBreakdown).map(([k, n]) => `${k}=${n}`).join(" ");
+    log.step(`[ocr] verification: ${verifiedCount}/${records.length} records verified — breakdown: ${breakdownStr}`);
     writeTracker("running", { recordCount: records.length, verifiedCount }, "verification");
 
     // 6. Awaiting-approval
