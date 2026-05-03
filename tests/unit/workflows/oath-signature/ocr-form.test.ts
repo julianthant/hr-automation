@@ -9,7 +9,7 @@ const roster: RosterRow[] = [
   { eid: "10000003", name: "Sarah Chen" },
 ];
 
-test("matchRecord: signed row with high-confidence roster name → matched", () => {
+test("matchRecord: signed row with high-confidence roster name → matched", async () => {
   const ocr = {
     sourcePage: 1, rowIndex: 0,
     printedName: "Liam Kustenbauder",
@@ -17,14 +17,14 @@ test("matchRecord: signed row with high-confidence roster name → matched", () 
     dateSigned: "05/01/2026",
     notes: [], documentType: "expected" as const, originallyMissing: [],
   };
-  const preview = oathOcrFormSpec.matchRecord({ record: ocr, roster });
+  const preview = await oathOcrFormSpec.matchRecord({ record: ocr, roster });
   assert.equal(preview.matchState, "matched");
   assert.equal(preview.employeeId, "10000001");
   assert.equal(preview.selected, true);
   assert.equal(preview.matchSource, "roster");
 });
 
-test("matchRecord: unsigned row → extracted, deselected, no employeeId", () => {
+test("matchRecord: unsigned row → extracted, deselected, no employeeId", async () => {
   const ocr = {
     sourcePage: 1, rowIndex: 1,
     printedName: "Some Person",
@@ -32,13 +32,13 @@ test("matchRecord: unsigned row → extracted, deselected, no employeeId", () =>
     dateSigned: null,
     notes: [], documentType: "expected" as const, originallyMissing: [],
   };
-  const preview = oathOcrFormSpec.matchRecord({ record: ocr, roster });
+  const preview = await oathOcrFormSpec.matchRecord({ record: ocr, roster });
   assert.equal(preview.matchState, "extracted");
   assert.equal(preview.employeeId, "");
   assert.equal(preview.selected, false);
 });
 
-test("matchRecord: signed row with no roster match → lookup-pending", () => {
+test("matchRecord: signed row with no roster match → lookup-pending", async () => {
   const ocr = {
     sourcePage: 1, rowIndex: 2,
     printedName: "Unknown Person Notroster",
@@ -46,38 +46,38 @@ test("matchRecord: signed row with no roster match → lookup-pending", () => {
     dateSigned: "05/01/2026",
     notes: [], documentType: "expected" as const, originallyMissing: [],
   };
-  const preview = oathOcrFormSpec.matchRecord({ record: ocr, roster });
+  const preview = await oathOcrFormSpec.matchRecord({ record: ocr, roster });
   assert.equal(preview.matchState, "lookup-pending");
   assert.equal(preview.employeeId, "");
 });
 
-test("needsLookup: lookup-pending → 'name'", () => {
+test("needsLookup: lookup-pending → 'name'", async () => {
   const r = { matchState: "lookup-pending", employeeId: "" } as any;
   assert.equal(oathOcrFormSpec.needsLookup(r), "name");
 });
 
-test("needsLookup: matched with eid → 'verify'", () => {
+test("needsLookup: matched with eid → 'verify'", async () => {
   const r = { matchState: "matched", employeeId: "10000001" } as any;
   assert.equal(oathOcrFormSpec.needsLookup(r), "verify");
 });
 
-test("needsLookup: extracted (unsigned) → null", () => {
+test("needsLookup: extracted (unsigned) → null", async () => {
   const r = { matchState: "extracted", employeeId: "" } as any;
   assert.equal(oathOcrFormSpec.needsLookup(r), null);
 });
 
-test("needsLookup: resolved with eid → null (already done)", () => {
+test("needsLookup: resolved with eid → null (already done)", async () => {
   const r = { matchState: "resolved", employeeId: "10000001" } as any;
   assert.equal(oathOcrFormSpec.needsLookup(r), null);
 });
 
-test("carryForwardKey normalizes name", () => {
+test("carryForwardKey normalizes name", async () => {
   const r1 = { printedName: "  Liam Kustenbauder  " } as any;
   const r2 = { printedName: "liam kustenbauder" } as any;
   assert.equal(oathOcrFormSpec.carryForwardKey(r1), oathOcrFormSpec.carryForwardKey(r2));
 });
 
-test("applyCarryForward inherits resolved EID + verification + selection", () => {
+test("applyCarryForward inherits resolved EID + verification + selection", async () => {
   const v1 = {
     employeeId: "10000001",
     matchState: "resolved" as const,
@@ -98,7 +98,7 @@ test("applyCarryForward inherits resolved EID + verification + selection", () =>
   assert.deepEqual(merged.verification?.state, "verified");
 });
 
-test("approveTo.deriveInput: matched record → OathSignatureInput shape", () => {
+test("approveTo.deriveInput: matched record → OathSignatureInput shape", async () => {
   const r = {
     employeeId: "10000001",
     dateSigned: "05/01/2026",
@@ -108,7 +108,7 @@ test("approveTo.deriveInput: matched record → OathSignatureInput shape", () =>
   assert.equal(input.date, "05/01/2026");
 });
 
-test("approveTo.deriveItemId: deterministic shape", () => {
+test("approveTo.deriveItemId: deterministic shape", async () => {
   const r = {} as any;
   const id = oathOcrFormSpec.approveTo.deriveItemId(r, "parent-run-xyz", 3);
   assert.match(id, /^ocr-oath-/);
