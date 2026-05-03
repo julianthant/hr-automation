@@ -47,7 +47,7 @@ export type Verification = z.infer<typeof VerificationSchema>;
 export const OathRosterOcrRecordSchema = z.object({
   sourcePage: z.number().int().positive(),
   rowIndex: z.number().int().nonnegative().optional(),
-  printedName: z.string().min(1),
+  printedName: z.string().optional(),
   employeeId: z.string().nullable().optional(),
   employeeSigned: z.boolean().optional(),
   officerSigned: z.boolean().nullable().optional(),
@@ -154,6 +154,24 @@ export const oathOcrFormSpec: OcrFormSpec<
   schemaName: "oath-roster-batch",
 
   async matchRecord({ record, roster }): Promise<OathPreviewRecord> {
+    // Empty printedName + no form-EID means the LLM gave us nothing usable.
+    // Surface as a manual record so the operator sees it in the preview pane
+    // (with the page image visible) and can type from the source.
+    const printedName = (record.printedName ?? "").trim();
+    if (!printedName && !(record.employeeId ?? "").trim()) {
+      return {
+        ...record,
+        printedName: "",
+        employeeId: "",
+        matchState: "lookup-pending",
+        matchSource: "manual",
+        documentType: record.documentType ?? "expected",
+        originallyMissing: ["printedName"],
+        selected: false,
+        warnings: ["LLM extracted no name from this page — type from the page image on the left"],
+      };
+    }
+
     if (!record.employeeSigned) {
       return {
         ...record,
@@ -206,7 +224,7 @@ export const oathOcrFormSpec: OcrFormSpec<
     //   - Top score < NAME_DISAMBIG_FLOOR (0.40) / no candidates → manual
     //     fall-through (matchSource: "manual"); eid-lookup-by-name still runs
     //     as a backstop downstream
-    const ranked = matchAgainstRoster(roster, record.printedName);
+    const ranked = matchAgainstRoster(roster, record.printedName ?? "");
     const top = ranked.candidates[0];
     const second = ranked.candidates[1];
     const topCandidates = ranked.candidates.slice(0, 5);
@@ -317,7 +335,7 @@ export const oathOcrFormSpec: OcrFormSpec<
   },
 
   carryForwardKey(record): string {
-    return normalizeName(record.printedName);
+    return normalizeName(record.printedName ?? "");
   },
 
   applyCarryForward({ v2, v1 }): OathPreviewRecord {

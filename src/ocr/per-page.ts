@@ -195,11 +195,18 @@ export async function runOcrPerPage<T>(
           : rec;
       const parsed = req.schema.safeParse(withInjects);
       if (!parsed.success) {
+        const rawJson = (() => {
+          try {
+            return JSON.stringify(rec);
+          } catch {
+            return String(rec);
+          }
+        })();
         log.warn(
           `runOcrPerPage page ${r.page} record dropped (schema): ${parsed.error.issues
             .slice(0, 1)
             .map((i) => i.message)
-            .join("; ")}`,
+            .join("; ")} — raw: ${rawJson.slice(0, 300)}`,
         );
         continue;
       }
