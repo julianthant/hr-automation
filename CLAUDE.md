@@ -329,7 +329,7 @@ Current step tracking per workflow. Steps prefixed with `auth:` are auto-prepend
 | emergency-contact | auth:ucpath → navigation → fill-form → save |
 | oath-signature | ucpath-auth → transaction (opts out of auto-prepend) |
 | oath-upload | servicenow-auth → delegate-ocr → wait-ocr-approval → delegate-signatures → wait-signatures → open-hr-form → fill-form → submit (workflow opts out of auto-prepend; declares `servicenow-auth` itself) |
-| ocr | loading-roster → ocr → matching → eid-lookup → verification → awaiting-approval |
+| ocr | loading-roster → ocr → matching → disambiguating → eid-lookup → verification → awaiting-approval |
 
 As of 2026-04-18, the dashboard is **observation-only**. The previous "⚡ RUN" drawer + `RunnerLauncher` button + `SchemaForm` + `runner-recents` localStorage helper + the backend `buildSpawnHandler`/`buildCancelHandler`/`buildActiveRunsHandler`/`buildWorkflowSchemaHandler` factories + the child-process registry were all removed. Workflows are launched via the npm scripts above (or whatever replacement launcher the user wires up later — out of scope for this pass). Live session monitoring (`SessionPanel`), selector-warning aggregation (`SelectorWarningsPanel`), screenshot browsing (`ScreenshotsPanel` — replaced the inline `FailureDrillDown` on 2026-04-21), step-timing chips (`StepPipeline`), and cross-workflow search (`SearchBar`) all keep working — they read kernel-emitted events from `src/tracker/jsonl.ts`, independent of any launcher.
 
