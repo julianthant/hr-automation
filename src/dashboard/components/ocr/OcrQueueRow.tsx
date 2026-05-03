@@ -12,10 +12,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "../types";
-import {
-  getOcrDownstream,
-  hasOcrDownstream,
-} from "@/lib/ocr-downstream-registry";
+import { resolveOcrConfigForEntry } from "@/lib/ocr-downstream-registry";
 
 /**
  * Unified bento prep row for the QueuePanel. Replaces the separate
@@ -56,9 +53,7 @@ interface DerivedState {
 }
 
 export function OcrQueueRow({ entry, isReviewing, onOpenReview, onReupload }: OcrQueueRowProps) {
-  const cfg = hasOcrDownstream(entry.workflow)
-    ? getOcrDownstream(entry.workflow)
-    : null;
+  const cfg = resolveOcrConfigForEntry(entry);
   const data = cfg?.parseRow(entry.data) ?? null;
   const [discarding, setDiscarding] = useState(false);
 

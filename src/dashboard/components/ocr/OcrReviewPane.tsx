@@ -27,8 +27,7 @@ import { OathRecordView } from "./OathRecordView";
 import { PdfPagePreview } from "../PdfPagePreview";
 import { usePrepCursor } from "../hooks/usePrepCursor";
 import {
-  getOcrDownstream,
-  hasOcrDownstream,
+  resolveOcrConfigForEntry,
   setOcrDownstreamRenderer,
   type AnyOcrPreviewRecord,
   type OcrDownstreamConfig as OcrDownstreamConfigType,
@@ -76,9 +75,7 @@ setOcrDownstreamRenderer("oath-signature", ({ record, onChange }) => (
 export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
   const sessionId = entry.id;
   const runId = entry.runId ?? entry.id;
-  const cfg = hasOcrDownstream(entry.workflow)
-    ? getOcrDownstream(entry.workflow)
-    : null;
+  const cfg = resolveOcrConfigForEntry(entry);
   const data = useMemo(
     () => cfg?.parseRow(entry.data) ?? null,
     [entry.data, cfg],
