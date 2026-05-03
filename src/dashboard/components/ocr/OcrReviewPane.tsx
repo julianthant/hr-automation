@@ -21,8 +21,10 @@ import { FailedPageCard } from "./FailedPageCard";
 import { PrepReviewPair } from "./PrepReviewPair";
 import { PrepReviewMultiPair } from "./PrepReviewMultiPair";
 import { PrepReviewFormCard } from "./PrepReviewFormCard";
+import { EmptyPagePlaceholder } from "./EmptyPagePlaceholder";
 import { EcRecordView } from "./EcRecordView";
 import { OathRecordView } from "./OathRecordView";
+import { PdfPagePreview } from "../PdfPagePreview";
 import { usePrepCursor } from "../hooks/usePrepCursor";
 import {
   getOcrDownstream,
@@ -96,6 +98,7 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
   );
   const [submitting, setSubmitting] = useState(false);
   const [researchingIndices, setResearchingIndices] = useState<Set<number>>(new Set());
+  const [markedBlankPages, setMarkedBlankPages] = useState<Set<number>>(new Set());
 
   // Persist edits — debounced via React's state batching is enough here.
   useEffect(() => {
@@ -160,9 +163,11 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
   // Group records by sourcePage, interleaved with failed pages, sorted by page number.
   type PageRender =
     | { kind: "records"; page: number; group: Array<{ record: AnyPreviewRecord; originalIndex: number }> }
-    | { kind: "failed"; page: number; failedPage: FailedPage };
+    | { kind: "failed"; page: number; failedPage: FailedPage }
+    | { kind: "empty"; page: number };
 
   const failedPages = data?.failedPages ?? [];
+  const emptyPages = data?.emptyPages ?? [];
 
   const renderList = useMemo<PageRender[]>(() => {
     const recordsByPage = new Map<number, Array<{ record: AnyPreviewRecord; originalIndex: number }>>();
@@ -174,10 +179,17 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
     const list: PageRender[] = [];
     for (const [page, group] of recordsByPage) list.push({ kind: "records", page, group });
     for (const fp of failedPages) list.push({ kind: "failed", page: fp.page, failedPage: fp });
+    // Empty pages: orchestrator's emptyPages is "OCR succeeded, 0 records".
+    // Skip if the operator added a manual row for that page or marked blank.
+    for (const p of emptyPages) {
+      if (recordsByPage.has(p)) continue;
+      if (markedBlankPages.has(p)) continue;
+      list.push({ kind: "empty", page: p });
+    }
     list.sort((a, b) => a.page - b.page);
     return list;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [records, failedPages]);
+  }, [records, failedPages, emptyPages, markedBlankPages]);
 
   const totalPages = data?.pageStatusSummary?.total ?? renderList.length;
   const approvableRecords = useMemo(
@@ -204,6 +216,31 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
     } finally {
       setResearchingIndices(new Set());
     }
+  }
+
+  function addBlankRow(page: number): void {
+    if (!cfg) return;
+    // Synthesize a blank record matching the workflow's preview shape. The
+    // matchSource "manual" + selected: false keeps it out of approve fan-out
+    // until the operator types an EID.
+    const nextRecords = [...records];
+    const blank = {
+      sourcePage: page,
+      rowIndex: nextRecords.filter((r) => (r as { sourcePage: number }).sourcePage === page).length,
+      printedName: "",
+      employeeId: "",
+      matchState: "lookup-pending",
+      matchSource: "manual",
+      selected: false,
+      employeeSigned: true,
+      officerSigned: null,
+      dateSigned: null,
+      notes: [],
+      documentType: "expected",
+      originallyMissing: [],
+      warnings: [],
+    } as unknown as AnyPreviewRecord;
+    setLocalEdits((prev) => ({ ...prev, [nextRecords.length]: blank }));
   }
 
   async function handleApprove() {
@@ -335,6 +372,24 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
               />
             );
           }
+          if (renderEntry.kind === "empty") {
+            return (
+              <div key={`empty-${renderEntry.page}`} className="grid grid-cols-2 gap-4 border-b border-border p-4">
+                <div className="self-start">
+                  <PdfPagePreview workflow={entry.workflow} parentRunId={runId} page={renderEntry.page} />
+                </div>
+                <div>
+                  <EmptyPagePlaceholder
+                    page={renderEntry.page}
+                    totalPages={totalPages}
+                    onAddRow={() => addBlankRow(renderEntry.page)}
+                    onMarkBlank={() => setMarkedBlankPages((prev) => new Set(prev).add(renderEntry.page))}
+                    marked={markedBlankPages.has(renderEntry.page)}
+                  />
+                </div>
+              </div>
+            );
+          }
           // records branch — preserve IntersectionObserver data-pair-index instrumentation
           const { page, group } = renderEntry;
           if (group.length === 1) {
@@ -381,6 +436,7 @@ export function OcrReviewPane({ entry, onClose }: OcrReviewPaneProps) {
               parentRunId={runId}
               page={page}
               formCards={cards}
+              onAddRow={addBlankRow}
             />
           );
         })}
@@ -470,7 +526,15 @@ function isApprovable(record: AnyPreviewRecord): boolean {
   // completed for this record yet — keep it out of the approve fan-out
   // until it has, so we never enqueue an unverified employee.
   const verifyOk = record.verification?.state === "verified";
-  return matchOk && notUnknown && verifyOk;
+  // Tighten: when selected, require a non-empty 5+ digit EID. Blocks
+  // approving a manually-added row before the operator types an EID.
+  const eid = String(
+    (record as { employeeId?: string; employee?: { employeeId?: string } }).employeeId
+      ?? (record as { employee?: { employeeId?: string } }).employee?.employeeId
+      ?? "",
+  ).trim();
+  const eidOk = !record.selected || /^\d{5,}$/.test(eid);
+  return matchOk && notUnknown && verifyOk && eidOk;
 }
 
 function describeSummary(records: AnyPreviewRecord[], failedPageCount = 0): string {
