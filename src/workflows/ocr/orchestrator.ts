@@ -240,6 +240,18 @@ export async function runOcrOrchestrator(
       failed: failedPages.length,
     };
 
+    // Compute empty pages: pages OCR succeeded on but produced zero records.
+    // The dashboard's OcrReviewPane renders an EmptyPagePlaceholder for each
+    // (page image visible on the left, "Add row manually" button on the right).
+    const recordsByPage = new Set<number>();
+    for (const r of (ocrResult.data as Array<{ sourcePage?: number }>)) {
+      if (typeof r.sourcePage === "number") recordsByPage.add(r.sourcePage);
+    }
+    const emptyPages = pages
+      .filter((p) => p.success && !recordsByPage.has(p.page))
+      .map((p) => p.page)
+      .sort((a, b) => a - b);
+
     // 3. Match
     log.step(`[ocr] matching ${(ocrResult.data as unknown[]).length} OCR record(s) against roster`);
     writeTracker(
@@ -267,11 +279,65 @@ export async function runOcrOrchestrator(
       }
     }
 
+    // 3c. Disambiguating — for each record left as lookup-pending with
+    // disambiguation-eligible candidates, run the LLM disambiguator.
+    // Records flagged matchSource form-eid or manual skip this phase
+    // (form-eid → eid-lookup-by-EID; manual → eid-lookup-by-name backstop).
+    const disambigTargets: Array<{ index: number; rec: { rosterCandidates?: Array<{ eid: string; name: string; score: number }>; printedName?: string; matchState?: string; matchSource?: string } }> = [];
+    records.forEach((rec, index) => {
+      const r = rec as { matchState?: string; matchSource?: string; rosterCandidates?: Array<{ eid: string; name: string; score: number }>; printedName?: string };
+      if (r.matchState !== "lookup-pending") return;
+      if (r.matchSource === "form-eid" || r.matchSource === "manual") return;
+      if (!r.rosterCandidates || r.rosterCandidates.length === 0) return;
+      disambigTargets.push({ index, rec: r });
+    });
+
+    if (disambigTargets.length > 0) {
+      log.step(`[ocr] disambiguating ${disambigTargets.length} ambiguous record(s) via LLM`);
+      writeTracker("running", { recordCount: records.length, ambiguousCount: disambigTargets.length }, "disambiguating");
+
+      const { disambiguateMatch } = await import("../../ocr/disambiguate.js");
+      const concurrencyEnv = Number.parseInt(process.env.OCR_DISAMBIG_CONCURRENCY ?? "", 10);
+      const concurrency = Number.isFinite(concurrencyEnv) && concurrencyEnv > 0 ? concurrencyEnv : 4;
+
+      const results: Array<{ eid: string | null; confidence: number }> = new Array(disambigTargets.length);
+      let nextIdx = 0;
+      const workers = Array.from({ length: Math.min(concurrency, disambigTargets.length) }, async () => {
+        while (true) {
+          const i = nextIdx++;
+          if (i >= disambigTargets.length) return;
+          const t = disambigTargets[i];
+          try {
+            results[i] = await disambiguateMatch({
+              query: t.rec.printedName ?? "",
+              candidates: t.rec.rosterCandidates!.slice(0, 5),
+            });
+          } catch (err) {
+            log.warn(`[ocr] disambiguate failed for record ${t.index}: ${errorMessage(err)}`);
+            results[i] = { eid: null, confidence: 0 };
+          }
+        }
+      });
+      await Promise.all(workers);
+
+      disambigTargets.forEach((t, i) => {
+        records[t.index] = spec.applyDisambiguation({
+          record: records[t.index] as never,
+          result: results[i],
+        });
+      });
+    } else {
+      writeTracker("running", { recordCount: records.length, ambiguousCount: 0 }, "disambiguating");
+    }
+
     // 4. Eid-lookup fan-out + watch
-    const lookupTargets: Array<{ rec: unknown; index: number; kind: "name" | "verify" }> = [];
+    // "name"        → lookup by printed name (CRM cross-verify path)
+    // "verify"      → lookup by roster-derived EID (verify it's active in HDH)
+    // "verify-only" → lookup by form-extracted EID (same as verify, different provenance)
+    const lookupTargets: Array<{ rec: unknown; index: number; kind: "name" | "verify" | "verify-only" }> = [];
     records.forEach((rec, index) => {
       const kind = spec.needsLookup(rec);
-      if (kind === "name" || kind === "verify") {
+      if (kind === "name" || kind === "verify" || kind === "verify-only") {
         lookupTargets.push({ rec, index, kind });
       }
     });
@@ -360,6 +426,7 @@ export async function runOcrOrchestrator(
       verifiedCount,
       records,
       failedPages,
+      emptyPages,
       pageStatusSummary,
     }, "awaiting-approval");
     writeTracker("done", {
@@ -371,6 +438,7 @@ export async function runOcrOrchestrator(
       verifiedCount,
       records,
       failedPages,
+      emptyPages,
       pageStatusSummary,
     }, "awaiting-approval");
   } catch (err) {
@@ -447,7 +515,7 @@ function patchFromOutcome(
   records: unknown[],
   idx: number,
   outcome: ChildOutcome,
-  kind: "name" | "verify",
+  kind: "name" | "verify" | "verify-only",
   _spec: AnyOcrFormSpec,
 ): void {
   const rec = records[idx] as Record<string, unknown>;
