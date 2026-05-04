@@ -1560,6 +1560,7 @@ function isPrepEntry(e: TrackerEntry): boolean {
   return false;
 }
 
+
 /**
  * Mirrors `isResolvedPrepRow` in `src/dashboard/components/QueuePanel.tsx`.
  * A prep row in its terminal-resolved state — operator approved or
@@ -3140,6 +3141,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       const rosterPath = fields["rosterPath"]?.trim() || undefined;
       const sessionId = fields["sessionId"]?.trim() || undefined;
       const previousRunId = fields["previousRunId"]?.trim() || undefined;
+      const originWorkflow = fields["originWorkflow"]?.trim() || undefined;
 
       const result = await ocrPrepareHandler({
         pdfPath,
@@ -3150,6 +3152,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
         sessionId,
         previousRunId,
         isReupload,
+        originWorkflow,
       });
       writeJson(result.status, result.body);
       return;

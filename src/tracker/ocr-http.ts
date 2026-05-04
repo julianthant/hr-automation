@@ -9,7 +9,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { trackEvent, dateLocal, type TrackerEntry } from "./jsonl.js";
+import { trackEvent, dateLocal, appendLogEntry, type TrackerEntry } from "./jsonl.js";
 import { errorMessage } from "../utils/errors.js";
 import { log, withLogContext, setLogRunId } from "../utils/log.js";
 import { listFormTypes, getFormSpec, type FormTypeListing } from "../workflows/ocr/form-registry.js";
@@ -55,12 +55,25 @@ export interface PrepareInput {
   sessionId?: string;
   previousRunId?: string;
   isReupload?: boolean;
+  /**
+   * Workflow that originated this OCR upload. When set to a non-`"ocr"`
+   * value (e.g. `"oath-signature"`, `"emergency-contact"`), the prepare
+   * handler synthesizes a parent tracker row in that workflow + appends
+   * a few high-level log lines so the operator sees prep work in their
+   * own queue. The OCR row gets `parentRunId` set to the parent row's
+   * runId, so post-approval fan-out items inherit the same parentRunId
+   * and nest under the parent in the dashboard.
+   *
+   * When `"ocr"` (or omitted) the OCR row is standalone — running OCR
+   * just to inspect the result, no downstream side effects.
+   */
+  originWorkflow?: string;
 }
 
 export interface PrepareResponse {
   status: 202 | 400 | 409 | 500;
   body:
-    | { ok: true; sessionId: string; runId: string }
+    | { ok: true; sessionId: string; runId: string; parentRunId?: string }
     | { ok: false; error: string };
 }
 
@@ -110,6 +123,30 @@ export function buildOcrPrepareHandler(
 
     const runId = randomUUID();
 
+    // Synthesize a parent row in the origin workflow when the upload came
+    // from a downstream workflow's run modal (oath-signature /
+    // emergency-contact). Operator sees the row in their own queue with the
+    // standard LogPanel UI and a few simple log entries. The OCR row links
+    // back via parentRunId, and post-approval fan-out items inherit the
+    // same parentRunId so they nest under this parent automatically.
+    const origin = input.originWorkflow && input.originWorkflow !== WORKFLOW
+      ? input.originWorkflow
+      : null;
+    let parentRunId: string | undefined;
+    if (origin) {
+      parentRunId = randomUUID();
+      const parentItemId = `ocr-prep-${sessionId}`;
+      writeOriginParentPending({
+        originWorkflow: origin,
+        parentItemId,
+        parentRunId,
+        pdfOriginalName: input.pdfOriginalName,
+        ocrSessionId: sessionId,
+        ocrRunId: runId,
+        trackerDir,
+      });
+    }
+
     if (input.isReupload && input.previousRunId) {
       trackEvent(
         {
@@ -141,6 +178,7 @@ export function buildOcrPrepareHandler(
               rosterPath: input.rosterPath,
               rosterMode: input.rosterMode,
               previousRunId: input.previousRunId,
+              ...(parentRunId ? { parentRunId } : {}),
             },
             { runId, trackerDir },
           );
@@ -152,8 +190,141 @@ export function buildOcrPrepareHandler(
       }
     })();
 
-    return { status: 202, body: { ok: true, sessionId, runId } };
+    return {
+      status: 202,
+      body: { ok: true, sessionId, runId, ...(parentRunId ? { parentRunId } : {}) },
+    };
   };
+}
+
+/**
+ * Emit the initial parent-row tracker entry + 2 log lines for an upload
+ * originating from a downstream workflow's run modal. Two-event chain
+ * (`pending` → `running`) is what `withTrackedWorkflow` would emit for a
+ * kernel item; we synthesize the same shape so the dashboard's enrichment +
+ * step-duration computation works on this row identically.
+ */
+function writeOriginParentPending(args: {
+  originWorkflow: string;
+  parentItemId: string;
+  parentRunId: string;
+  pdfOriginalName: string;
+  ocrSessionId: string;
+  ocrRunId: string;
+  trackerDir?: string;
+}): void {
+  const ts = new Date().toISOString();
+  // mode: "prepare" hooks the parent into the existing prep-row machinery
+  // so post-approval the row is auto-extracted from the regular queue and
+  // folded into a ParentChildRow with its kernel children (which inherit
+  // parentRunId from the OCR fan-out path). Pre-approval the row renders
+  // as a standard EntryItem in the queue.
+  const baseData: Record<string, string> = {
+    __name: `OCR Prep · ${args.pdfOriginalName}`,
+    __id: args.parentItemId,
+    mode: "prepare",
+    pdfOriginalName: args.pdfOriginalName,
+    ocrSessionId: args.ocrSessionId,
+    ocrRunId: args.ocrRunId,
+  };
+  trackEvent(
+    {
+      workflow: args.originWorkflow,
+      timestamp: ts,
+      id: args.parentItemId,
+      runId: args.parentRunId,
+      status: "pending",
+      data: baseData,
+    },
+    args.trackerDir,
+  );
+  trackEvent(
+    {
+      workflow: args.originWorkflow,
+      timestamp: ts,
+      id: args.parentItemId,
+      runId: args.parentRunId,
+      status: "running",
+      // Step name aligns with `oath-signature` workflow's first declared
+      // step ("ocr") so the StepPipeline highlights it as the live step on
+      // the parent row. Kernel daemon items emit `markStep("ocr")` at the
+      // top of their handler so they show OCR as completed.
+      step: "ocr",
+      data: baseData,
+    },
+    args.trackerDir,
+  );
+  appendLogEntry(
+    {
+      workflow: args.originWorkflow,
+      itemId: args.parentItemId,
+      runId: args.parentRunId,
+      level: "step",
+      message: `Uploaded "${args.pdfOriginalName}" — preparing for OCR.`,
+      ts,
+    },
+    args.trackerDir,
+  );
+  appendLogEntry(
+    {
+      workflow: args.originWorkflow,
+      itemId: args.parentItemId,
+      runId: args.parentRunId,
+      level: "step",
+      message: `Delegated to OCR (sessionId=${args.ocrSessionId.slice(0, 8)}…). Open the OCR queue to follow live progress.`,
+      ts,
+    },
+    args.trackerDir,
+  );
+  appendLogEntry(
+    {
+      workflow: args.originWorkflow,
+      itemId: args.parentItemId,
+      runId: args.parentRunId,
+      level: "waiting",
+      message: "Awaiting OCR approval. Once approved in the OCR queue, this row will fan out automatically.",
+      ts,
+    },
+    args.trackerDir,
+  );
+}
+
+/**
+ * Emit the terminal step transition on the origin parent row when OCR is
+ * approved. After this fires, the kernel daemon items (children with the
+ * same parentRunId) take over and surface as their own queue rows.
+ */
+function writeOriginParentApproved(args: {
+  originWorkflow: string;
+  parentItemId: string;
+  parentRunId: string;
+  fannedOutCount: number;
+  trackerDir?: string;
+}): void {
+  const ts = new Date().toISOString();
+  trackEvent(
+    {
+      workflow: args.originWorkflow,
+      timestamp: ts,
+      id: args.parentItemId,
+      runId: args.parentRunId,
+      status: "done",
+      step: "approved",
+      data: { fannedOutCount: String(args.fannedOutCount) },
+    },
+    args.trackerDir,
+  );
+  appendLogEntry(
+    {
+      workflow: args.originWorkflow,
+      itemId: args.parentItemId,
+      runId: args.parentRunId,
+      level: "success",
+      message: `Approved · ${args.fannedOutCount} record${args.fannedOutCount === 1 ? "" : "s"} fanned out to the daemon.`,
+      ts,
+    },
+    args.trackerDir,
+  );
 }
 
 // ─── POST /api/ocr/approve-batch ─────────────────────────────
@@ -198,10 +369,14 @@ export function buildOcrApproveHandler(
 
     const parentRunId = readParentRunId(input.sessionId, trackerDir);
 
+    // Only fan out records the operator selected in the preview pane.
+    // Unsigned rows / unverified rows / unknown-doc rows are kept in the
+    // tracker payload for context but should never become daemon work.
     const fannedOut: Array<{ workflow: string; itemId: string }> = [];
     const enqueueInputs: unknown[] = [];
     const itemIds: string[] = [];
     input.records.forEach((rec, index) => {
+      if (!isSelectedRecord(rec)) return;
       const fanInput = spec.approveTo.deriveInput(rec as never);
       const itemId = spec.approveTo.deriveItemId(rec as never, input.runId, index);
       enqueueInputs.push(fanInput);
@@ -209,38 +384,21 @@ export function buildOcrApproveHandler(
       fannedOut.push({ workflow: spec.approveTo.workflow, itemId });
     });
 
-    try {
-      if (opts.ensureDaemonsAndEnqueueOverride) {
-        await opts.ensureDaemonsAndEnqueueOverride(
-          spec.approveTo.workflow,
-          enqueueInputs,
-          (_inp, idx) => itemIds[idx],
-          parentRunId ? { parentRunId } : undefined,
-        );
-      } else {
-        const { ensureDaemonsAndEnqueue } = await import("../core/daemon-client.js");
-        const { loadWorkflow } = await import("../core/workflow-loaders.js");
-        const childWf = await loadWorkflow(spec.approveTo.workflow);
-        if (!childWf) {
-          return { status: 500, body: { ok: false, error: `Unknown approveTo workflow "${spec.approveTo.workflow}"` } };
-        }
-        const inputToItemId = new Map(
-          enqueueInputs.map((inp, idx) => [JSON.stringify(inp), itemIds[idx] ?? `ocr-fallback-${input.runId}-r${idx}`])
-        );
-        await ensureDaemonsAndEnqueue(
-          childWf,
-          enqueueInputs as never,
-          {},
-          {
-            deriveItemId: (inp: unknown) => inputToItemId.get(JSON.stringify(inp)) ?? `ocr-fallback-${input.runId}-r0`,
-            ...(parentRunId ? { parentRunId } : {}),
-          },
-        );
-      }
-    } catch (err) {
-      return { status: 500, body: { ok: false, error: errorMessage(err) } };
+    if (enqueueInputs.length === 0) {
+      return {
+        status: 400,
+        body: { ok: false, error: "No selected records to approve" },
+      };
     }
 
+    // Mark the OCR row + parent row "approved" SYNCHRONOUSLY before kicking
+    // off the daemon dispatch. The dispatch can take minutes (cold-start
+    // daemon spawn = up to 5min for Duo + browser launch); blocking the
+    // approve POST on it caused the dashboard's loading toast to spin
+    // forever. Now the operator sees instant confirmation that the records
+    // were accepted, and the daemon spawn / enqueue runs in the background.
+    // Failures during dispatch surface as `failed step=approve-failed` on
+    // the OCR row + a fresh log line on the parent.
     trackEvent(
       {
         workflow: WORKFLOW,
@@ -257,6 +415,94 @@ export function buildOcrApproveHandler(
       },
       trackerDir,
     );
+    if (parentRunId) {
+      writeOriginParentApproved({
+        originWorkflow: spec.approveTo.workflow,
+        parentItemId: `ocr-prep-${input.sessionId}`,
+        parentRunId,
+        fannedOutCount: fannedOut.length,
+        trackerDir,
+      });
+    }
+
+    void (async () => {
+      try {
+        if (opts.ensureDaemonsAndEnqueueOverride) {
+          await opts.ensureDaemonsAndEnqueueOverride(
+            spec.approveTo.workflow,
+            enqueueInputs,
+            (_inp, idx) => itemIds[idx],
+            parentRunId ? { parentRunId } : undefined,
+          );
+        } else {
+          const { ensureDaemonsAndEnqueue } = await import("../core/daemon-client.js");
+          const { loadWorkflow } = await import("../core/workflow-loaders.js");
+          const childWf = await loadWorkflow(spec.approveTo.workflow);
+          if (!childWf) {
+            log.error(
+              `[ocr-http] approve-batch: unknown approveTo workflow "${spec.approveTo.workflow}" — items not enqueued`,
+            );
+            return;
+          }
+          const inputToItemId = new Map(
+            enqueueInputs.map((inp, idx) => [JSON.stringify(inp), itemIds[idx] ?? `ocr-fallback-${input.runId}-r${idx}`])
+          );
+          await ensureDaemonsAndEnqueue(
+            childWf,
+            enqueueInputs as never,
+            {},
+            {
+              deriveItemId: (inp: unknown) => inputToItemId.get(JSON.stringify(inp)) ?? `ocr-fallback-${input.runId}-r0`,
+              ...(parentRunId ? { parentRunId } : {}),
+            },
+          );
+        }
+      } catch (err) {
+        const msg = errorMessage(err);
+        log.error(`[ocr-http] approve-batch dispatch failed: ${msg}`);
+        // Surface the failure on both rows so the operator notices.
+        trackEvent(
+          {
+            workflow: WORKFLOW,
+            timestamp: new Date().toISOString(),
+            id: input.sessionId,
+            runId: input.runId,
+            ...(parentRunId ? { parentRunId } : {}),
+            status: "failed",
+            step: "approve-failed",
+            error: msg,
+          },
+          trackerDir,
+        );
+        if (parentRunId) {
+          const ts = new Date().toISOString();
+          const parentItemId = `ocr-prep-${input.sessionId}`;
+          trackEvent(
+            {
+              workflow: spec.approveTo.workflow,
+              timestamp: ts,
+              id: parentItemId,
+              runId: parentRunId,
+              status: "failed",
+              step: "approve-failed",
+              error: msg,
+            },
+            trackerDir,
+          );
+          appendLogEntry(
+            {
+              workflow: spec.approveTo.workflow,
+              itemId: parentItemId,
+              runId: parentRunId,
+              level: "error",
+              message: `Approve dispatch failed — daemon spawn or enqueue errored: ${msg}`,
+              ts,
+            },
+            trackerDir,
+          );
+        }
+      }
+    })();
 
     return { status: 200, body: { ok: true, fannedOut } };
   };
@@ -293,6 +539,42 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
       },
       opts.trackerDir,
     );
+    // If this OCR session was started from a downstream workflow's run
+    // modal, mirror the discard onto the parent row so it doesn't sit at
+    // "delegated-to-ocr running" indefinitely. Parent's downstream
+    // workflow is derived from formType → spec.approveTo.workflow.
+    const parentRunId = readParentRunId(input.sessionId, opts.trackerDir);
+    if (parentRunId) {
+      const formType = readFormType(input.sessionId, opts.trackerDir);
+      const spec = formType ? getFormSpec(formType) : null;
+      if (spec) {
+        const ts = new Date().toISOString();
+        const parentItemId = `ocr-prep-${input.sessionId}`;
+        trackEvent(
+          {
+            workflow: spec.approveTo.workflow,
+            timestamp: ts,
+            id: parentItemId,
+            runId: parentRunId,
+            status: "failed",
+            step: "discarded",
+            ...(input.reason ? { error: input.reason } : {}),
+          },
+          opts.trackerDir,
+        );
+        appendLogEntry(
+          {
+            workflow: spec.approveTo.workflow,
+            itemId: parentItemId,
+            runId: parentRunId,
+            level: "error",
+            message: `Discarded · ${input.reason ?? "operator discarded the OCR prep row"}`,
+            ts,
+          },
+          opts.trackerDir,
+        );
+      }
+    }
     return { status: 200, body: { ok: true } };
   };
 }
@@ -540,7 +822,12 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
             personOrgScreenshot: outcome.data?.personOrgScreenshot,
           });
           rec.verification = v;
-          if (v.state !== "verified") rec.selected = false;
+          // Match `isApprovable` in OcrReviewPane: only auto-deselect on a
+          // hard "don't process" verification. Soft `lookup-failed` keeps
+          // selection — operator decides from the warning banner.
+          if (v.state === "inactive" || v.state === "non-hdh") {
+            rec.selected = false;
+          }
         }
       }
 
@@ -657,6 +944,11 @@ function readParentRunId(sessionId: string, trackerDir: string | undefined): str
     } catch { /* tolerate malformed lines */ }
   }
   return undefined;
+}
+
+function isSelectedRecord(record: unknown): boolean {
+  if (!record || typeof record !== "object") return false;
+  return (record as { selected?: unknown }).selected === true;
 }
 
 function extractEidLocal(record: unknown): string {

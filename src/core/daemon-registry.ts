@@ -192,6 +192,7 @@ export async function findAliveDaemons(workflow: string, trackerDir?: string): P
       workflow: lock.workflow,
       instanceId: lock.instanceId,
       pid: lock.pid,
+      ...(lock.parentPid ? { parentPid: lock.parentPid } : {}),
       port: lock.port,
       startedAt: lock.startedAt,
       lockfilePath: path,
@@ -297,10 +298,12 @@ export async function spawnDaemon(workflow: string, trackerDir?: string): Promis
   const env = { ...process.env }
   if (trackerDir) env.HRAUTO_TRACKER_DIR = resolve(trackerDir)
 
-  // Spawn tsx directly (not via `npx tsx`) so child.pid matches the daemon
-  // process's pid. npx wraps tsx in a shell, so `child.pid` would be the
-  // shell's pid — which never matches the lockfile and would make the
-  // findAliveDaemons match below time out after 5 minutes.
+  // tsx 4+ re-execs itself with `--import` to mount the loader, so
+  // spawn(TSX_BIN, ...) returns the wrapper's pid (e.g. 99304) while the
+  // actual daemon code runs in a child node process whose `process.pid` is
+  // different (e.g. 99305). Match on EITHER pid OR parentPid so the
+  // wrapper's child.pid pairs with the daemon's recorded `process.ppid`.
+  // (Pre-2026-05-04 lockfiles lack parentPid; those still match on pid.)
   const child: ChildProcess = spawn(TSX_BIN, ['src/cli-daemon.ts', workflow], {
     detached: true,
     stdio: ['ignore', logFd, logFd],
@@ -316,7 +319,9 @@ export async function spawnDaemon(workflow: string, trackerDir?: string): Promis
       )
     }
     const candidates = await findAliveDaemons(workflow, trackerDir)
-    const ours = candidates.find((d) => d.pid === child.pid)
+    const ours = candidates.find(
+      (d) => d.pid === child.pid || d.parentPid === child.pid,
+    )
     if (ours) return ours
     await delay(500)
   }

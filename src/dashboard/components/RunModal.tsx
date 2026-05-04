@@ -230,6 +230,13 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
       fd.append("sessionId", reuploadFor.sessionId);
       fd.append("previousRunId", reuploadFor.previousRunId);
     }
+    // Tell the backend which workflow originated this upload. When the
+    // operator opens the run modal from the OCR queue → originWorkflow="ocr"
+    // and the row is standalone (no parent in any other workflow). When the
+    // operator opens it from oath-signature/emergency-contact → the OCR
+    // backend synthesizes a parent row in that workflow + threads parentRunId
+    // into the OCR row so post-approval fan-out items nest under the parent.
+    if (workflow !== "ocr") fd.append("originWorkflow", workflow);
 
     const submitUrl = config.submitUrl(ctx);
 

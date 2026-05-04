@@ -122,15 +122,18 @@ export async function runOcrOrchestrator(
   ): void => {
     // Stamp __id so the dashboard's resolveEntryId surfaces a stable handle
     // on every row. Kernel runWorkflow computes this via getId; this
-    // orchestrator writes via trackEvent directly so we replicate it here,
-    // sourced from the closed-over input (not the per-emit data dict, which
-    // only carries the fields each phase changes). __name is intentionally
-    // not stamped — the dashboard derives the queue-row label as
-    // "<workflow label> <ordinal>" so OCR rows render as "OCR 1", "OCR 2".
-    // mode: "prepare" makes the dashboard render this row as OcrQueueRow
-    // (clickable to open OcrReviewPane) instead of a plain EntryItem.
+    // orchestrator writes via trackEvent directly so we replicate it here.
+    // Stamp __name = "OCR" too, because cross-workflow injection now
+    // surfaces these rows in oath-signature / emergency-contact queues
+    // where the workflow-label fallback in `buildDisplayNameMap` would
+    // otherwise label them with the downstream workflow's name. Hardcoding
+    // "OCR" keeps the row labeled "OCR 1" / "OCR 2" no matter which queue
+    // surfaces it.
+    // mode: "prepare" makes the dashboard render this row with the
+    // preview-tab affordance (gated on workflow === "ocr").
     const flat = flattenForData({ ...data, mode: "prepare" });
     flat.__id = input.sessionId ?? "";
+    flat.__name = "OCR";
     emit({
       workflow: WORKFLOW,
       timestamp: new Date().toISOString(),
@@ -685,7 +688,11 @@ function patchFromOutcome(
     personOrgScreenshot: outcome.data?.personOrgScreenshot,
   });
   rec.verification = v;
-  if (v.state !== "verified") {
+  // Only auto-deselect on a HARD "don't process" verification. Soft fails
+  // (`lookup-failed`) leave the record selected — operator can decide based
+  // on the warning banner whether to dispatch. Mirrors `isApprovable` in
+  // OcrReviewPane: lookup-failed is approvable; inactive/non-hdh isn't.
+  if (v.state === "inactive" || v.state === "non-hdh") {
     rec.selected = false;
   }
 }

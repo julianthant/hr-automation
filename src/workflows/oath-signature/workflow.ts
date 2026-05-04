@@ -10,7 +10,12 @@ import { buildOathSignaturePlan, type OathSignatureContext } from "./enter.js";
 import { OathSignatureInputSchema, type OathSignatureInput } from "./schema.js";
 
 const WORKFLOW = "oath-signature";
-const oathSignatureSteps = ["ucpath-auth", "transaction"] as const;
+// "ocr" leads the pipeline because every oath-signature item comes from an
+// OCR-prep upload (the Run modal in this workflow always delegates to OCR
+// first). For the prep parent row this is the live step until the operator
+// approves; for kernel daemon items it's emitted as a completed marker so
+// the timeline shows the full uploaded → OCR → UCPath → transaction story.
+const oathSignatureSteps = ["ocr", "ucpath-auth", "transaction"] as const;
 
 /**
  * Kernel definition for the Oath Signature workflow.
@@ -59,6 +64,12 @@ export const oathSignatureWorkflow = defineWorkflow({
 
     ctx.updateData({ emplId: input.emplId, ...(input.date ? { date: input.date } : {}) });
 
+    // Synthetic "ocr" marker — every oath-signature item originates from an
+    // OCR-prep upload + operator approval, so emit a completed-step beat so
+    // the dashboard timeline reads `ocr ✓ → ucpath-auth → transaction`. The
+    // step does no work; the work happened in the parent OCR row before
+    // this kernel item was ever queued.
+    ctx.markStep("ocr");
     ctx.markStep("ucpath-auth");
     const page = await ctx.page("ucpath");
 

@@ -391,9 +391,10 @@ export const oathOcrFormSpec: OcrFormSpec<
   approveTo: {
     workflow: "oath-signature",
     deriveInput(record): OathSignatureInput {
+      const normalizedDate = normalizeOathDate(record.dateSigned ?? null);
       return {
         emplId: record.employeeId,
-        ...(record.dateSigned ? { date: record.dateSigned } : {}),
+        ...(normalizedDate ? { date: normalizedDate } : {}),
       };
     },
     deriveItemId(_record, parentRunId, index): string {
@@ -404,3 +405,35 @@ export const oathOcrFormSpec: OcrFormSpec<
   recordRendererId: "OathRecordView",
   rosterMode: "required",
 };
+
+/**
+ * Coerce an LLM-extracted handwritten date into the MM/DD/YYYY shape that
+ * `OathSignatureInputSchema` requires (and that PeopleSoft's date textbox
+ * accepts). Tolerates `/` and `-` separators, 1- or 2-digit month/day, and
+ * 2- or 4-digit years (2-digit years assumed 2000–2099). Returns `null` for
+ * inputs that don't parse — the caller drops the field and the workflow
+ * falls back to UCPath's today-prefill on the form.
+ *
+ * Examples:
+ *   "4-23-26"      → "04/23/2026"
+ *   "4/23/2026"    → "04/23/2026"
+ *   "04/23/2026"   → "04/23/2026"
+ *   "12-9-25"      → "12/09/2025"
+ *   ""             → null
+ *   "next tuesday" → null
+ */
+export function normalizeOathDate(raw: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  const m = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2}|\d{4})$/);
+  if (!m) return null;
+  const month = Number.parseInt(m[1], 10);
+  const day = Number.parseInt(m[2], 10);
+  const yearRaw = Number.parseInt(m[3], 10);
+  if (!(month >= 1 && month <= 12)) return null;
+  if (!(day >= 1 && day <= 31)) return null;
+  const year = m[3].length === 2 ? 2000 + yearRaw : yearRaw;
+  if (year < 1900 || year > 2999) return null;
+  return `${String(month).padStart(2, "0")}/${String(day).padStart(2, "0")}/${year}`;
+}
