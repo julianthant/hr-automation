@@ -221,6 +221,7 @@ export function EntryItem({ entry, displayNames, selected, onClick }: EntryItemP
               workflow={entry.workflow}
               id={entry.id}
               runId={entry.runId}
+              entry={entry}
               className="flex-shrink-0 ml-1"
             />
           )}

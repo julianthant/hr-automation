@@ -109,7 +109,7 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
       const r = await fetch(cfg.discardUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parentRunId: runId }),
+        body: JSON.stringify({ sessionId, runId }),
       });
       if (!r.ok) {
         const body = await r.json().catch(() => ({})) as { error?: string };
@@ -222,7 +222,24 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
     [records],
   );
   const selectedCount = approvableRecords.filter((r) => r.selected).length;
+  // How many approvable records aren't yet selected — drives the "Select
+  // all" affordance. Records that aren't approvable (inactive / non-hdh /
+  // unmatched / no EID) are intentionally excluded so this never auto-
+  // selects something the operator can't dispatch.
+  const unselectedApprovableCount = approvableRecords.length - selectedCount;
   const summary = describeSummary(records, failedPages.length);
+
+  function selectAllApprovable(): void {
+    setLocalEdits((prev) => {
+      const next = { ...prev };
+      records.forEach((r, idx) => {
+        if (!isApprovable(r)) return;
+        if (r.selected) return;
+        next[idx] = { ...r, selected: true } as AnyPreviewRecord;
+      });
+      return next;
+    });
+  }
 
   async function handleForceResearch(indices: number[]) {
     setResearchingIndices(new Set(indices));
@@ -275,9 +292,14 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
       const resp = await fetch(cfg.approveUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parentRunId: runId, records }),
+        body: JSON.stringify({ sessionId, runId, records }),
       });
-      const body = (await resp.json()) as { ok?: boolean; error?: string; enqueued?: number };
+      const body = (await resp.json()) as {
+        ok?: boolean;
+        error?: string;
+        enqueued?: number;
+        fannedOut?: Array<{ workflow: string; itemId: string }>;
+      };
       if (!resp.ok || !body.ok) {
         toast.error("Couldn't approve batch", {
           description: body.error ?? "Server error",
@@ -285,8 +307,9 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
         setSubmitting(false);
         return;
       }
+      const queued = body.enqueued ?? body.fannedOut?.length ?? selectedCount;
       toast.success(
-        `Queued ${body.enqueued ?? selectedCount} record${(body.enqueued ?? selectedCount) === 1 ? "" : "s"}`,
+        `Queued ${queued} record${queued === 1 ? "" : "s"}`,
       );
       clearCursor();
       window.localStorage.removeItem(storageKey);
@@ -360,6 +383,17 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
             {discarding ? <Loader2 className="h-3 w-3 animate-spin" /> : <XIcon className="h-3 w-3" />}
             Discard
           </button>
+          {unselectedApprovableCount > 0 && (
+            <button
+              type="button"
+              onClick={selectAllApprovable}
+              disabled={submitting || discarding}
+              title="Select every approvable record (matched/resolved with a valid EID, not inactive/non-HDH)"
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-3 text-xs text-muted-foreground hover:bg-muted disabled:opacity-50"
+            >
+              Select all ({unselectedApprovableCount})
+            </button>
+          )}
           <button
             onClick={handleApprove}
             disabled={submitting || discarding || selectedCount === 0}
@@ -556,11 +590,14 @@ function ReocrWholePdfButton({ sessionId, runId, storageKey, onSuccess }: { sess
 function isApprovable(record: AnyPreviewRecord): boolean {
   const matchOk = record.matchState === "matched" || record.matchState === "resolved";
   const notUnknown = record.documentType !== "unknown";
-  // Strict gate: verification must have run AND landed on `verified`. An
-  // absent verification means stage 5 (Person Org Summary lookup) hasn't
-  // completed for this record yet — keep it out of the approve fan-out
-  // until it has, so we never enqueue an unverified employee.
-  const verifyOk = record.verification?.state === "verified";
+  // Verification gate: only HARD-block states that mean "definitely don't
+  // process" — `inactive` (employee terminated) and `non-hdh` (wrong dept).
+  // `lookup-failed` (Person Org Summary returned nothing) and absent-yet
+  // states fall through as approvable, with the warning banner still
+  // visible so the operator sees and acknowledges the issue. An EID resolved
+  // by eid-lookup is enough signal to dispatch — verification is auxiliary.
+  const v = record.verification?.state;
+  const verifyOk = v !== "inactive" && v !== "non-hdh";
   // Tighten: when selected, require a non-empty 5+ digit EID. Blocks
   // approving a manually-added row before the operator types an EID.
   const eid = String(

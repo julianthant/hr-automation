@@ -12,6 +12,14 @@ export interface DaemonLockfile {
   /** Short random hex per daemon, e.g. "sep-4a8e". Distinct per process. */
   instanceId: string
   pid: number
+  /**
+   * `process.ppid` at the time the daemon wrote the lockfile. Recorded so
+   * `spawnDaemon` can correlate a freshly-spawned `child.pid` (which may be
+   * the tsx wrapper's PID, not the actual loader process's) back to the
+   * registered daemon. Optional for backwards compatibility with daemons
+   * that wrote their lockfile before this field existed.
+   */
+  parentPid?: number
   /** HTTP listener port (from `server.address()`). */
   port: number
   startedAt: string
@@ -27,6 +35,8 @@ export interface Daemon {
   workflow: string
   instanceId: string
   pid: number
+  /** Forwarded from `DaemonLockfile.parentPid` when present. */
+  parentPid?: number
   port: number
   startedAt: string
   lockfilePath: string

@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import { computeCacheKey, readCache, writeCache } from "./cache.js";
-import { computeSchemaJsonHash, PROMPT_VERSION } from "./prompts.js";
 import { KeyRotation } from "./rotation.js";
 import { GeminiProvider } from "./providers/gemini.js";
 import {
@@ -15,12 +12,22 @@ import {
 export type { OcrRequest, OcrResult, OcrProvider };
 export { OcrAllKeysExhaustedError, OcrValidationError, OcrProviderError };
 
+// Gemini OCR results are intentionally never cached — every call to
+// ocrDocument re-runs the model. Operators have repeatedly needed to
+// re-extract from the same PDF after the model improved or a prompt
+// changed; a cache hit silently bypassed both. Page images rendered
+// by `renderPdfPagesToPngs` are still kept on disk under
+// `.tracker/page-images/<sessionId>/` so the Preview tab loads
+// instantly on row reopen — only the LLM output is uncached.
+//
+// `_cacheDir` is retained because `KeyRotation` persists per-key
+// throttle/quota state into it across runs.
 const DEFAULT_CACHE_DIR = ".ocr-cache";
 
 let _cacheDir: string | undefined;
 let _provider: OcrProvider | undefined;
 
-/** @internal — test escape hatch. */
+/** @internal — test escape hatch (used by KeyRotation state file location). */
 export function __setCacheDirForTests(dir: string | undefined): void {
   _cacheDir = dir;
 }
@@ -56,35 +63,21 @@ function getGeminiKeys(): string[] {
 const MAX_VALIDATION_RETRIES = 1; // 1 retry = 2 total attempts
 
 /**
- * Run OCR on a PDF, validate the result against a Zod schema, and
- * cache the typed output.
+ * Run OCR on a PDF and validate the result against a Zod schema.
  *
- * Cache hit returns immediately. Cache miss enters a key-rotation
- * loop: each provider error is classified into rate-limit /
- * quota-exhausted / auth / transient and the affected key is marked
- * accordingly. Schema validation failure retries once with the error
- * fed back as a prompt hint, then throws OcrValidationError.
+ * Every call hits Gemini fresh — there is no result cache (see the
+ * file-level note above). Enters a key-rotation loop: each provider
+ * error is classified into rate-limit / quota-exhausted / auth /
+ * transient and the affected key is marked accordingly. Schema
+ * validation failure retries once with the error fed back as a prompt
+ * hint, then throws OcrValidationError.
  *
  * Throws:
  *   - OcrAllKeysExhaustedError when every key is unusable.
  *   - OcrValidationError after MAX_VALIDATION_RETRIES + 1 attempts.
  */
 export async function ocrDocument<T>(req: OcrRequest<T>): Promise<OcrResult<T>> {
-  const pdfBytes = readFileSync(req.pdfPath);
-  const cacheKey = computeCacheKey({
-    pdfBytes,
-    schemaName: req.schemaName,
-    schemaJsonHash: computeSchemaJsonHash(req.schema),
-    promptVersion: PROMPT_VERSION,
-  });
-  const cacheDir = getCacheDir();
-
-  if (!req.bustCache) {
-    const cached = readCache<T>(cacheDir, cacheKey);
-    if (cached) {
-      return { ...cached, cached: true };
-    }
-  }
+  const cacheDir = getCacheDir(); // KeyRotation persists per-key state here.
 
   const provider = getProvider();
   const keys = provider.id === "gemini" ? getGeminiKeys() : [];
@@ -146,7 +139,6 @@ export async function ocrDocument<T>(req: OcrRequest<T>): Promise<OcrResult<T>> 
         attempts: totalAttempts,
         cached: false,
       };
-      writeCache(cacheDir, cacheKey, result);
       rotation.markSuccess(key);
       rotation.flush();
       return result;

@@ -125,10 +125,18 @@ const noopRenderer: OcrDownstreamConfig["renderEditor"] = () => null;
  * downstream is hardcoded to emergency-contact) but with session-scoped
  * edits storage so the operator's edits survive a row reupload.
  */
+// All approve/discard requests now hit the unified `/api/ocr/*` endpoints.
+// The legacy per-workflow routes (`/api/emergency-contact/*`,
+// `/api/oath-signature/*`) were removed 2026-05-01 in the OCR consolidation;
+// the OCR backend dispatches to the right downstream daemon based on the
+// row's `data.formType`.
+const OCR_APPROVE_URL = "/api/ocr/approve-batch";
+const OCR_DISCARD_URL = "/api/ocr/discard-prepare";
+
 registerOcrDownstream("ocr", {
   parseRow: parsePrepareRowData,
-  approveUrl: "/api/emergency-contact/approve-batch",
-  discardUrl: "/api/emergency-contact/discard-prepare",
+  approveUrl: OCR_APPROVE_URL,
+  discardUrl: OCR_DISCARD_URL,
   editsKey: ({ sessionId }) => `ocr-edits:${sessionId}`,
   cursorKey: ({ runId }) => `ec-prep-cursor:${runId}`,
   hasSignature: false,
@@ -139,8 +147,8 @@ registerOcrDownstream("ocr", {
 
 registerOcrDownstream("emergency-contact", {
   parseRow: parsePrepareRowData,
-  approveUrl: "/api/emergency-contact/approve-batch",
-  discardUrl: "/api/emergency-contact/discard-prepare",
+  approveUrl: OCR_APPROVE_URL,
+  discardUrl: OCR_DISCARD_URL,
   editsKey: ({ runId }) => `ec-prep-edits:${runId}`,
   cursorKey: ({ runId }) => `ec-prep-cursor:${runId}`,
   hasSignature: false,
@@ -151,8 +159,8 @@ registerOcrDownstream("emergency-contact", {
 
 registerOcrDownstream("oath-signature", {
   parseRow: parseOathPrepareRowData,
-  approveUrl: "/api/oath-signature/approve-batch",
-  discardUrl: "/api/oath-signature/discard-prepare",
+  approveUrl: OCR_APPROVE_URL,
+  discardUrl: OCR_DISCARD_URL,
   editsKey: ({ runId }) => `oath-prep-edits:${runId}`,
   cursorKey: ({ runId }) => `oath-prep-cursor:${runId}`,
   hasSignature: true,

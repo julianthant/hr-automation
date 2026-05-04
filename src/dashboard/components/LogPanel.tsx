@@ -65,8 +65,9 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, defa
     // Set runId from entry immediately so useLogs doesn't fire with null first
     setActiveRunId((prev) => prev || entry.runId || null);
 
+    const runsWorkflow = entry.workflow ?? workflow;
     const fetchRuns = () => {
-      fetch(`/api/runs?workflow=${encodeURIComponent(workflow)}&id=${encodeURIComponent(entry.id)}&date=${encodeURIComponent(date)}`)
+      fetch(`/api/runs?workflow=${encodeURIComponent(runsWorkflow)}&id=${encodeURIComponent(entry.id)}&date=${encodeURIComponent(date)}`)
         .then((r) => r.json())
         .then((data: RunInfo[]) => {
           setRuns((prev) => {
@@ -94,10 +95,15 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, defa
     const isLive = entry.status === "running" || entry.status === "pending";
     const interval = isLive ? setInterval(fetchRuns, 2_000) : undefined;
     return () => { if (interval) clearInterval(interval); };
-  }, [entry?.id, entry?.runId, entry?.status, workflow, date]);
+  }, [entry?.id, entry?.runId, entry?.status, entry?.workflow, workflow, date]);
 
-  const { logs, loading: logsLoading } = useLogs(workflow, entry?.id || null, activeRunId, date);
-  const { events } = useRunEvents(workflow, entry?.id || null, activeRunId, date);
+  // Use the entry's own workflow when present (cross-workflow rows: OCR
+  // prep rows surface in oath-signature/emergency-contact queues, but
+  // their logs live in ocr-logs.jsonl). Falls back to the topbar workflow
+  // when no entry is selected (skeleton state).
+  const logSourceWorkflow = entry?.workflow ?? workflow;
+  const { logs, loading: logsLoading } = useLogs(logSourceWorkflow, entry?.id || null, activeRunId, date);
+  const { events } = useRunEvents(logSourceWorkflow, entry?.id || null, activeRunId, date);
 
   // Derive step/status from active run when viewing a HISTORICAL run via the
   // RunSelector. For the LIVE run (activeRun matches the SSE-delivered entry's
@@ -323,3 +329,4 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, defa
     </div>
   );
 }
+

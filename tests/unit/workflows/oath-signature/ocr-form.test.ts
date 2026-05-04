@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { oathOcrFormSpec } from "../../../../src/workflows/oath-signature/ocr-form.js";
+import { oathOcrFormSpec, normalizeOathDate } from "../../../../src/workflows/oath-signature/ocr-form.js";
 import type { RosterRow } from "../../../../src/workflows/ocr/types.js";
 
 const roster: RosterRow[] = [
@@ -114,4 +114,53 @@ test("approveTo.deriveItemId: deterministic shape", async () => {
   assert.match(id, /^ocr-oath-/);
   assert.match(id, /parent-run-xyz/);
   assert.match(id, /r3$/);
+});
+
+test("normalizeOathDate: handwritten formats coerce to MM/DD/YYYY", () => {
+  // 2-digit year + dash separators (the case that triggered the user's
+  // validation error: OCR extracted "4-23-26" off the form).
+  assert.equal(normalizeOathDate("4-23-26"), "04/23/2026");
+  assert.equal(normalizeOathDate("12-9-25"), "12/09/2025");
+  // Slash separators, mixed-width components.
+  assert.equal(normalizeOathDate("4/23/2026"), "04/23/2026");
+  assert.equal(normalizeOathDate("04/23/2026"), "04/23/2026");
+  assert.equal(normalizeOathDate("4/23/26"), "04/23/2026");
+  // Already-canonical input is a no-op.
+  assert.equal(normalizeOathDate("01/01/2027"), "01/01/2027");
+  // Whitespace is tolerated.
+  assert.equal(normalizeOathDate("  4/23/2026  "), "04/23/2026");
+});
+
+test("normalizeOathDate: invalid or absent input returns null", () => {
+  assert.equal(normalizeOathDate(null), null);
+  assert.equal(normalizeOathDate(""), null);
+  assert.equal(normalizeOathDate("   "), null);
+  assert.equal(normalizeOathDate("next tuesday"), null);
+  // Out-of-range month/day get rejected so we never send PeopleSoft garbage.
+  assert.equal(normalizeOathDate("13/05/2026"), null);
+  assert.equal(normalizeOathDate("4/32/2026"), null);
+  // Mixed separators inside a single date are rejected.
+  assert.equal(normalizeOathDate("4-23/2026"), "04/23/2026"); // [-] then [/] both allowed at each position
+  // Extra components are rejected.
+  assert.equal(normalizeOathDate("4-23-2026-extra"), null);
+});
+
+test("approveTo.deriveInput: 2-digit-year handwritten dateSigned normalizes", () => {
+  const r = {
+    employeeId: "10000001",
+    dateSigned: "4-23-26",
+  } as any;
+  const input = oathOcrFormSpec.approveTo.deriveInput(r);
+  assert.equal(input.emplId, "10000001");
+  assert.equal(input.date, "04/23/2026");
+});
+
+test("approveTo.deriveInput: unparseable date is dropped (workflow falls back to today)", () => {
+  const r = {
+    employeeId: "10000001",
+    dateSigned: "next tuesday",
+  } as any;
+  const input = oathOcrFormSpec.approveTo.deriveInput(r);
+  assert.equal(input.emplId, "10000001");
+  assert.equal(input.date, undefined);
 });

@@ -261,6 +261,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     workflow: wf.config.name,
     instanceId,
     pid: process.pid,
+    parentPid: process.ppid,
     port,
     startedAt: new Date().toISOString(),
     hostname: hostname(),

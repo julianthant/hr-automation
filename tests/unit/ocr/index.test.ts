@@ -70,7 +70,9 @@ describe("ocrDocument — happy path", () => {
     assert.equal(r.provider, "gemini");
   });
 
-  it("hits the cache on second call (cached: true)", async () => {
+  it("re-calls the provider on every invocation (no result cache)", async () => {
+    // OCR result caching was removed — operators need fresh Gemini output
+    // every time, so identical inputs must round-trip through the model.
     let callCount = 0;
     const fake: OcrProvider = {
       id: "gemini",
@@ -82,22 +84,7 @@ describe("ocrDocument — happy path", () => {
     __setProviderForTests(fake);
     await ocrDocument({ pdfPath, schema: Sample, schemaName: "Person" });
     const r2 = await ocrDocument({ pdfPath, schema: Sample, schemaName: "Person" });
-    assert.equal(r2.cached, true);
-    assert.equal(callCount, 1);
-  });
-
-  it("respects bustCache: true", async () => {
-    let callCount = 0;
-    const fake: OcrProvider = {
-      id: "gemini",
-      call: async () => {
-        callCount += 1;
-        return happyResult([{ name: "Alice", age: 30 }]);
-      },
-    };
-    __setProviderForTests(fake);
-    await ocrDocument({ pdfPath, schema: Sample, schemaName: "Person" });
-    await ocrDocument({ pdfPath, schema: Sample, schemaName: "Person", bustCache: true });
+    assert.equal(r2.cached, false);
     assert.equal(callCount, 2);
   });
 });

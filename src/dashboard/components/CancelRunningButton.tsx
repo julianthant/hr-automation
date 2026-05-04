@@ -4,11 +4,16 @@ import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { clearActionToast, registerActionToast } from "./hooks/useActionToasts";
+import type { TrackerEntry } from "./types";
 
 interface CancelRunningButtonProps {
   workflow: string;
   id: string;
   runId: string;
+  /** Tracker entry — used to detect prep-parent rows that need OCR discard
+   *  routing instead of the kernel cancel-running path. Optional for legacy
+   *  callers that don't have the entry handy (kernel daemon items only). */
+  entry?: TrackerEntry;
   className?: string;
 }
 
@@ -26,10 +31,62 @@ interface CancelRunningButtonProps {
  * cancel-queued pattern) — destructive but recoverable, since the kernel
  * marks the item failed (retryable).
  */
-export function CancelRunningButton({ workflow, id, runId, className }: CancelRunningButtonProps) {
+export function CancelRunningButton({ workflow, id, runId, entry, className }: CancelRunningButtonProps) {
   const [pending, setPending] = useState(false);
 
+  // OCR-prep parent rows live in the downstream workflow's queue but aren't
+  // daemon-claimed — they're tracker-only proxies for the OCR session. The
+  // /api/cancel-running endpoint would 4xx with "not claimed by any daemon".
+  // Route to /api/ocr/discard-prepare with the OCR session info from data;
+  // the discard handler mirrors `failed step=discarded` back onto this row.
+  const ocrPrep =
+    entry?.data?.mode === "prepare"
+      && typeof entry.data.ocrSessionId === "string"
+      && typeof entry.data.ocrRunId === "string"
+      ? { ocrSessionId: entry.data.ocrSessionId, ocrRunId: entry.data.ocrRunId }
+      : null;
+
   const fire = async () => {
+    if (ocrPrep) return fireOcrDiscard();
+    return fireKernelCancel();
+  };
+
+  const fireOcrDiscard = async () => {
+    if (!ocrPrep) return;
+    setPending(true);
+    const t = toast.loading(`Discarding OCR prep ${id}…`, {
+      description: "Cancelling the OCR session and removing this row from the queue.",
+    });
+    try {
+      const res = await fetch("/api/ocr/discard-prepare", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: ocrPrep.ocrSessionId,
+          runId: ocrPrep.ocrRunId,
+          reason: `Cancelled from ${workflow} queue`,
+        }),
+      });
+      const body = (await res.json()) as { ok?: boolean; error?: string };
+      if (res.ok && body.ok) {
+        toast.success("OCR prep discarded", { id: t });
+      } else {
+        toast.error("Couldn't discard OCR prep", {
+          id: t,
+          description: body.error ?? `HTTP ${res.status}`,
+        });
+      }
+    } catch (err) {
+      toast.error("Couldn't discard OCR prep", {
+        id: t,
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const fireKernelCancel = async () => {
     setPending(true);
     // Loading toast is held open until the entries SSE observes a terminal
     // status for (workflow, id, runId). The kind="cancel-running" entry in
@@ -96,6 +153,16 @@ export function CancelRunningButton({ workflow, id, runId, className }: CancelRu
   const onClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (pending) return;
+    if (ocrPrep) {
+      toast(`Discard OCR prep ${id}?`, {
+        description:
+          "Cancels the OCR session for this PDF. You can re-upload to start over.",
+        action: { label: "Discard prep", onClick: () => void fire() },
+        cancel: { label: "Keep running", onClick: () => {} },
+        duration: 8_000,
+      });
+      return;
+    }
     toast(`Cancel running ${id}?`, {
       description:
         "The current item will fail at the next step. The daemon stays alive and picks up the next item.",

@@ -331,10 +331,13 @@ export default function App() {
           }
         />
         {(() => {
-          // Preview now lives as a tab inside LogPanel. When a prep row is
-          // selected (or operator clicks "Open review" on an OcrQueueRow),
-          // we make the Preview tab available and switch to it by default.
-          const isPrepEntry = selectedEntry?.data?.mode === "prepare";
+          // Preview lives as a tab inside the LogPanel and is OCR-only.
+          // Downstream workflows (oath-signature, emergency-contact) get
+          // their own kernel queue rows after Approve and must NOT show the
+          // preview tab — only the OCR parent row owns the preview UI.
+          const isPrepEntry =
+            selectedEntry?.workflow === "ocr" &&
+            selectedEntry?.data?.mode === "prepare";
           const wantsPreview =
             isPrepEntry && (reviewingPrepId === (selectedEntry?.runId ?? selectedEntry?.id) || true);
           return (
