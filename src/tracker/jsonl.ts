@@ -526,7 +526,11 @@ export async function withTrackedWorkflow<T>(
     return result;
   } catch (e) {
     const error = classifyError(e);
-    log.error(error);
+    if (e instanceof Error && e.name === "CancelledError") {
+      log.warn(error);
+    } else {
+      log.error(error);
+    }
     emit("failed", { error, ...(lastStep ? { step: lastStep } : {}) });
     if (!opts.preAssignedInstance) emitWorkflowEnd(instanceName, "failed", dir);
     throw e;

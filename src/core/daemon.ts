@@ -214,6 +214,60 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
       })
       return
     }
+    if (req.method === 'POST' && url === '/force-current') {
+      let body = ''
+      req.on('data', (c) => {
+        body += c
+      })
+      req.on('end', () => {
+        let parsed: { itemId?: unknown; runId?: unknown } = {}
+        try {
+          parsed = body ? (JSON.parse(body) as { itemId?: unknown; runId?: unknown }) : {}
+        } catch {
+          /* malformed body — fall through to 400 below */
+        }
+        if (typeof parsed.itemId !== 'string' || typeof parsed.runId !== 'string') {
+          res.writeHead(400, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'itemId and runId are required strings' }))
+          return
+        }
+        const reqItemId = parsed.itemId
+        const reqRunId = parsed.runId
+        if (!inFlight || inFlight.itemId !== reqItemId || inFlight.runId !== reqRunId) {
+          res.writeHead(409, { 'content-type': 'application/json' })
+          res.end(
+            JSON.stringify({
+              ok: false,
+              error: 'no matching in-flight item — already finished or claim has rotated',
+            }),
+          )
+          return
+        }
+        cancelTarget = { itemId: reqItemId, runId: reqRunId }
+        forceShutdown = true
+        drainOnlyShutdown = false
+        shuttingDown = true
+        workerStore?.markWorkerStatus({ workerId: instanceId, status: 'draining', phase: 'draining' })
+        shutdownResolve?.()
+        wakeResolve?.()
+        log.warn(
+          `[Daemon ${wf.config.name}/${instanceId}] force-current accepted for item=${reqItemId} runId=${reqRunId}`,
+        )
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, accepted: true }))
+        ;(async (): Promise<void> => {
+          await new Promise((r) => setTimeout(r, 50))
+          if (activeSession) await activeSession.killChromeHard(2_000)
+        })().catch((err) => {
+          log.warn(
+            `[Daemon ${wf.config.name}/${instanceId}] force-current killChromeHard error: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          )
+        })
+      })
+      return
+    }
     if (req.method === 'POST' && url === '/stop') {
       let body = ''
       req.on('data', (c) => {
@@ -413,6 +467,27 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         workerStore.acknowledgeCommand(command.commandId, instanceId)
         cancelTarget = { itemId: inFlight.itemId, runId: inFlight.runId }
         workerStore.completeCommand(command.commandId)
+        return
+      }
+      if (command.commandType === 'force_stop_task') {
+        if (
+          !inFlight ||
+          (command.targetTaskId && command.targetTaskId !== inFlight.taskId) ||
+          (command.targetAttemptId && command.targetAttemptId !== inFlight.attemptId)
+        ) {
+          workerStore.failCommand(command.commandId, 'task not in flight on this worker')
+          return
+        }
+        workerStore.acknowledgeCommand(command.commandId, instanceId)
+        cancelTarget = { itemId: inFlight.itemId, runId: inFlight.runId }
+        forceShutdown = true
+        drainOnlyShutdown = false
+        shuttingDown = true
+        workerStore.markWorkerStatus({ workerId: instanceId, status: 'draining', phase: 'draining' })
+        shutdownResolve?.()
+        wakeResolve?.()
+        workerStore.completeCommand(command.commandId)
+        if (activeSession) await activeSession.killChromeHard(2_000)
         return
       }
       if (command.commandType === 'drain_worker') {
@@ -656,6 +731,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
               })
               emitItemComplete(instance, item.id, trackerDir)
               markTerminated(runId)
+              const taskStateAfterRun = item.taskId ? taskStore.getTask(item.taskId)?.state : null
               if (r.ok) {
                 await markItemDone(wf.config.name, item.id, runId, trackerDir)
                 if (item.taskId) {
@@ -664,13 +740,28 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                     childState: 'done',
                   })
                 }
-              } else if (r.kind === 'cancelled') {
-                await markItemCancelled(wf.config.name, item.id, r.error, runId, trackerDir)
+              } else if (r.kind === 'cancelled' || taskStateAfterRun === 'cancelled') {
+                const cancelError = r.kind === 'cancelled' ? r.error : 'cancelled by user from dashboard'
+                await markItemCancelled(wf.config.name, item.id, cancelError, runId, trackerDir)
                 if (item.taskId) {
                   taskStore.markDependencyFromChildTerminal({
                     childTaskId: item.taskId,
                     childState: 'cancelled',
                   })
+                }
+                if (r.kind !== 'cancelled') {
+                  trackEvent(
+                    {
+                      workflow: wf.config.name,
+                      timestamp: new Date().toISOString(),
+                      id: item.id,
+                      runId,
+                      status: 'failed',
+                      step: 'cancelled',
+                      error: cancelError,
+                    },
+                    trackerDir,
+                  )
                 }
               } else {
                 await markItemFailed(wf.config.name, item.id, r.error, runId, trackerDir)
@@ -783,8 +874,21 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
       // see assignments inside the async body callback (different closure),
       // so without the local + cast it narrows `inFlight` to `null` here
       // even though the body may have set it.
-      const inFlightSnapshot = inFlight as { itemId: string; runId: string } | null
+      const inFlightSnapshot = inFlight as {
+        itemId: string
+        runId: string
+        taskId?: string
+        attemptId?: string
+      } | null
       if (inFlightSnapshot) {
+        const existingTask = inFlightSnapshot.taskId ? taskStore.getTask(inFlightSnapshot.taskId) : null
+        if (
+          existingTask?.state === 'cancelled' ||
+          existingTask?.state === 'done' ||
+          existingTask?.state === 'failed'
+        ) {
+          inFlight = null
+        } else {
         // 2026-04-28 Cluster A: every shutdown path is force semantics.
         // Mark in-flight failed in BOTH the queue and the tracker — never
         // re-queue. Per user direction: "I don't want graceful. I don't
@@ -820,6 +924,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           /* best-effort */
         }
         inFlight = null
+        }
       }
 
       const otherAlive = (await findAliveDaemons(wf.config.name, trackerDir))
@@ -856,6 +961,12 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
             const runId = item.runId ?? randomUUID()
             try {
               await markItemFailed(wf.config.name, item.id, failError, runId, trackerDir)
+              if (item.taskId) {
+                taskStore.markDependencyFromChildTerminal({
+                  childTaskId: item.taskId,
+                  childState: 'failed',
+                })
+              }
             } catch {
               /* best-effort — queue event append; tracker row below is the user-visible signal */
             }

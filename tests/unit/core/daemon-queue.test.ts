@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, appendFileSync, mkdirSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { UUID } from 'node:crypto'
 import {
   enqueueItems,
   claimNextItem,
@@ -16,6 +17,7 @@ import {
 } from '../../../src/core/daemon-queue.js'
 import { openControlDb } from '../../../src/core/control-db.js'
 import { createTaskStore } from '../../../src/core/task-store.js'
+import { createOcrEidLookupDependencyBatch } from '../../../src/tracker/tasks/store.js'
 
 const TMP = (): string => mkdtempSync(join(tmpdir(), 'daemon-q-'))
 
@@ -417,6 +419,66 @@ test('enqueueItems throws when preAssignedParentRunIds length mismatches inputs'
       enqueueItems('wf-mm', [{ x: 1 }, { x: 2 }], (_, i) => ['a', 'b'][i], dir, undefined, ['only-one']),
       /preAssignedParentRunIds length 1 does not match inputs length 2/,
     )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('SQLite enqueue adopts OCR dependency-precreated EID child task rows', async () => {
+  const dir = TMP()
+  const childRunId = '11111111-1111-4111-8111-111111111111' as UUID
+  try {
+    createOcrEidLookupDependencyBatch({
+      trackerDir: dir,
+      parent: {
+        workflow: 'ocr',
+        itemId: 'ocr-session-1',
+        runId: 'ocr-run-1',
+        formType: 'oath',
+      },
+      children: [{
+        workflow: 'eid-lookup',
+        itemId: 'ocr-oath-ocr-run-1-r0',
+        runId: childRunId,
+        recordIndex: 0,
+        lookupKind: 'name',
+        formType: 'oath',
+      }],
+      now: '2026-05-05T12:00:00.000Z',
+    })
+
+    const enqueued = await enqueueItems(
+      'eid-lookup',
+      [{ name: 'Barahona Martell, Carlos, D' }],
+      () => 'ocr-oath-ocr-run-1-r0',
+      dir,
+      [childRunId],
+      ['ocr-run-1'],
+    )
+
+    assert.equal(enqueued.length, 1)
+    assert.ok(enqueued[0].taskId)
+    assert.ok(enqueued[0].attemptId)
+    assert.equal(enqueued[0].runId, childRunId)
+
+    let state = await readQueueState('eid-lookup', dir)
+    assert.equal(state.queued.length, 1)
+    assert.equal(state.queued[0].id, 'ocr-oath-ocr-run-1-r0')
+    assert.deepEqual(state.queued[0].input, { name: 'Barahona Martell, Carlos, D' })
+    assert.equal(state.queued[0].runId, childRunId)
+    assert.equal(state.queued[0].parentRunId, 'ocr-run-1')
+
+    await markItemFailed(
+      'eid-lookup',
+      'ocr-oath-ocr-run-1-r0',
+      'No alive daemon available to process this item. Start a daemon and retry.',
+      childRunId,
+      dir,
+    )
+    state = await readQueueState('eid-lookup', dir)
+    assert.equal(state.queued.length, 0)
+    assert.equal(state.failed.length, 1)
+    assert.equal(state.failed[0].id, 'ocr-oath-ocr-run-1-r0')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

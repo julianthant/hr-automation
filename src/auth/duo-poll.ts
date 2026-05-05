@@ -31,6 +31,49 @@ function emitTelegram(
   });
 }
 
+export function extractDuoVerificationCode(text: string): string | undefined {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const marker = normalized.search(/enter code in duo mobile/i);
+  if (marker < 0) return undefined;
+  return normalized.slice(marker).match(/\b(\d{4,8})\b/)?.[1];
+}
+
+export function buildDuoWaitingDetail(code: string | undefined): string {
+  return code ? `Enter Duo code ${code} in Duo Mobile` : "Approve on your phone";
+}
+
+export function buildDuoResentDetail(
+  currentCode: string | undefined,
+  previousCode: string | undefined,
+): string {
+  const code = currentCode?.trim() || previousCode?.trim();
+  return code ? buildDuoWaitingDetail(code) : "Push resent";
+}
+
+async function readDuoVerificationCode(page: Page): Promise<string | undefined> {
+  const bodyText = await page.locator("body").innerText({ timeout: 1_000 }).catch(() => "");
+  return extractDuoVerificationCode(bodyText);
+}
+
+async function readDuoVerificationCodeAfterResend(
+  page: Page,
+  previousCode: string | undefined,
+): Promise<string | undefined> {
+  const deadline = Date.now() + 3_000;
+  let lastVisibleCode: string | undefined;
+
+  while (Date.now() < deadline) {
+    const code = await readDuoVerificationCode(page);
+    if (code) {
+      lastVisibleCode = code;
+      if (!previousCode || code !== previousCode) return code;
+    }
+    await page.waitForTimeout(250);
+  }
+
+  return lastVisibleCode;
+}
+
 /**
  * Fixed Duo poll cadence. Replaces the prior 2-second cadence.
  *
@@ -211,9 +254,15 @@ export async function pollDuoApproval(
 
   // Best-effort Telegram DM. Activated when TELEGRAM_BOT_TOKEN +
   // TELEGRAM_CHAT_ID are set; otherwise no-op.
-  emitTelegram("duo-waiting", systemLabel ?? "system", "Approve on your phone", instance);
+  const initialDuoCode = await readDuoVerificationCode(page);
+  let lastDuoCode = initialDuoCode;
+  emitTelegram("duo-waiting", systemLabel ?? "system", buildDuoWaitingDetail(initialDuoCode), instance);
 
-  log.waiting("Waiting for Duo approval (approve on your phone)...");
+  log.waiting(
+    initialDuoCode
+      ? `Waiting for Duo approval (enter code ${initialDuoCode} in Duo Mobile)...`
+      : "Waiting for Duo approval (approve on your phone)...",
+  );
 
   for (let elapsed = 0; elapsed < timeoutSeconds; elapsed += pollIntervalSec) {
     try {
@@ -229,8 +278,21 @@ export async function pollDuoApproval(
       if ((await tryAgainBtn.count()) > 0) {
         log.step("Duo push timed out — clicking Try Again...");
         await tryAgainBtn.first().click({ timeout: 5_000 });
-        log.waiting("Duo push resent — approve on your phone...");
-        emitTelegram("duo-resent", systemLabel ?? "system", "Push resent", instance);
+        const resentDuoCode = await readDuoVerificationCodeAfterResend(page, lastDuoCode);
+        const codeForResend = resentDuoCode?.trim() || lastDuoCode;
+        const resentDetail = buildDuoResentDetail(resentDuoCode, lastDuoCode);
+        lastDuoCode = codeForResend;
+        log.waiting(
+          codeForResend
+            ? `Duo prompt resent — enter code ${codeForResend} in Duo Mobile...`
+            : "Duo push resent — approve on your phone...",
+        );
+        emitTelegram(
+          "duo-resent",
+          systemLabel ?? "system",
+          resentDetail,
+          instance,
+        );
         await page.waitForTimeout(pollIntervalMs);
         continue;
       }

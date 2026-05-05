@@ -14,7 +14,8 @@
  * workflow-specific backend wiring.
  */
 import { loadWorkflow } from "./workflow-loaders.js";
-import { splitPrefilled } from "./workflow.js";
+import type { RegisteredWorkflow } from "./types.js";
+import { buildInitialTrackerData, splitPrefilled } from "./workflow.js";
 import { trackEvent } from "../tracker/jsonl.js";
 import { log } from "../utils/log.js";
 
@@ -108,6 +109,31 @@ export function buildTrackerDataForInput(input: unknown): Record<string, string>
 }
 
 /**
+ * Full pending-row data for dashboard-sourced enqueue requests. This layers
+ * the generic serialized input with the same workflow hooks the kernel uses
+ * for in-process/batch pending rows (`initialData`, `operatorSubject`,
+ * `getName`, and `getId`), so the UI path does not lose stable labels while
+ * auth is still waiting.
+ */
+export function buildHttpPendingData<TData, TSteps extends readonly string[]>(
+  wf: RegisteredWorkflow<TData, TSteps>,
+  input: unknown,
+): Record<string, string> {
+  const baseData = buildTrackerDataForInput(input);
+  const { cleaned } = splitPrefilled(input);
+  const handlerInput = wf.config.schema.parse(cleaned);
+  const data = {
+    ...baseData,
+    ...buildInitialTrackerData(wf, handlerInput),
+  };
+  const name = wf.config.getName?.(data);
+  if (name) data.__name = name;
+  const id = wf.config.getId?.(data);
+  if (id) data.__id = id;
+  return data;
+}
+
+/**
  * Validate + enqueue HTTP-sourced inputs. Thin wrapper over
  * `ensureDaemonsAndEnqueue` — returns `{ok:false, error}` on any failure
  * so the HTTP handler can map to an appropriate status code.
@@ -149,6 +175,12 @@ export async function enqueueFromHttp(
 
   const { ensureDaemonsAndEnqueue } = await import("./daemon-client.js");
   const now = new Date().toISOString();
+  const deriveItemId = wf.config.deriveItemId
+    ? (item: unknown) => {
+        const { cleaned } = splitPrefilled(item);
+        return wf.config.deriveItemId?.(cleaned) ?? "";
+      }
+    : undefined;
 
   try {
     await ensureDaemonsAndEnqueue(
@@ -157,8 +189,9 @@ export async function enqueueFromHttp(
       {},
       {
         trackerDir,
+        ...(deriveItemId ? { deriveItemId } : {}),
         onPreEmitPending: (item, runId, _parentRunId, itemId) => {
-          const data = buildTrackerDataForInput(item);
+          const data = buildHttpPendingData(wf, item);
           const id = itemId;
           // Persist the original input verbatim on the pending row so the
           // dashboard's retry / edit-and-resume features can reconstruct
@@ -189,7 +222,7 @@ export async function enqueueFromHttp(
           // becoming a ghost. Use the same data-shape helper as the
           // pending emit so prefilledData (edit-and-resume) values stay
           // visible on the failed row.
-          const data = buildTrackerDataForInput(item);
+          const data = buildHttpPendingData(wf, item);
           const id = itemId;
           trackEvent(
             {

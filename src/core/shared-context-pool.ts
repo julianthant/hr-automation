@@ -42,7 +42,7 @@ export async function runWorkflowSharedContextPool<TData, TSteps extends readonl
     }
   })
 
-  const itemIdFn = opts.deriveItemId ?? ((item: unknown) => deriveItemId(item, randomUUID()))
+  const itemIdFn = opts.deriveItemId ?? wf.config.deriveItemId ?? ((item: unknown) => deriveItemId(item, randomUUID()))
   const perItem: PoolItem<TData>[] = items.map((item) => ({
     item,
     itemId: itemIdFn(item),

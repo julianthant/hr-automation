@@ -10,7 +10,7 @@ import {
   readSessionEvents,
   getSessionsFilePath,
 } from "../../../src/tracker/session-events.js";
-import { rebuildSessionState } from "../../../src/tracker/dashboard.js";
+import { filterLiveSessionState, rebuildSessionState } from "../../../src/tracker/dashboard.js";
 
 function tempDir(): string {
   const d = join(tmpdir(), `sessions-test-${randomUUID()}`);
@@ -73,6 +73,42 @@ describe("rebuildSessionState — workflows", () => {
     emitSessionEvent({ type: "workflow_end", workflowInstance: "Sep 1" }, dir);
     const state = rebuildSessionState(dir);
     assert.equal(state.workflows[0].active, false);
+  });
+
+  it("live session filter drops ended workflows with no live process or recent launch crash", () => {
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "Sep 1" }, dir);
+    emitSessionEvent({ type: "session_create", workflowInstance: "Sep 1", sessionId: "S1" }, dir);
+    emitSessionEvent({
+      type: "browser_launch",
+      workflowInstance: "Sep 1",
+      sessionId: "S1",
+      browserId: "b1",
+      system: "Kuali",
+    }, dir);
+    emitSessionEvent({ type: "workflow_end", workflowInstance: "Sep 1", finalStatus: "done" }, dir);
+
+    const live = filterLiveSessionState(rebuildSessionState(dir));
+
+    assert.equal(live.workflows.length, 0);
+  });
+
+  it("live session filter drops ended workflows even if the old pid has been reused", () => {
+    const live = filterLiveSessionState({
+      workflows: [{
+        instance: "Kronos 1",
+        workflow: "kronos-reports",
+        active: false,
+        pidAlive: true,
+        currentItemId: null,
+        itemInFlight: false,
+        currentStep: null,
+        finalStatus: "done",
+        sessions: [],
+      }],
+      duoQueue: [],
+    });
+
+    assert.equal(live.workflows.length, 0);
   });
 
   it("attaches sessions and browsers to the workflow", () => {

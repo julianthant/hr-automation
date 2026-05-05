@@ -63,25 +63,21 @@ function AuthIcon({ state, className }: { state: AuthState; className?: string }
 /**
  * Mono-pill stop button. Matches the elapsed-time pill family (same
  * height, mono font, same border radius) so the right-stack reads as one
- * visual unit. Two-click confirm: first click → soft-stop POST, second
- * click within 4s → force-stop POST. Mirrors the legacy EndDaemonButton's
- * server contract (`/api/daemon/stop`) so any wiring outside this
- * component keeps working.
+ * visual unit. A click sends force-stop semantics immediately so stopped
+ * daemons, browser processes, stale sessions, and queued rows clear in one
+ * action.
  */
 function StopPill({ workflow, instance }: { workflow: string; instance: string }) {
   const [sending, setSending] = useState(false);
-  const [confirmForce, setConfirmForce] = useState(false);
 
-  const postStop = async (force: boolean) => {
+  const postStop = async () => {
     setSending(true);
-    const toastId = toast.loading(
-      force ? `Force-stopping ${workflow}…` : `Stopping ${workflow}…`,
-    );
+    const toastId = toast.loading(`Stopping ${workflow}…`);
     try {
       const res = await fetch("/api/daemon/stop", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ workflow, force }),
+        body: JSON.stringify({ workflow, force: true }),
       });
       const json = (await res.json()) as {
         ok: boolean;
@@ -118,18 +114,7 @@ function StopPill({ workflow, instance }: { workflow: string; instance: string }
           { id: toastId },
         );
       } else {
-        toast.success(
-          force
-            ? `Force-stop sent — ${detail} cleared`
-            : `Soft-stop sent — ${detail} will drain and exit`,
-          { id: toastId },
-        );
-      }
-      if (!force) {
-        setConfirmForce(true);
-        setTimeout(() => setConfirmForce(false), 4_000);
-      } else {
-        setConfirmForce(false);
+        toast.success(`Stop sent — ${detail} cleared`, { id: toastId });
       }
     } catch (err) {
       toast.error(`Couldn't stop ${workflow}`, { id: toastId, description: (err as Error).message });
@@ -138,10 +123,7 @@ function StopPill({ workflow, instance }: { workflow: string; instance: string }
     }
   };
 
-  const label = confirmForce ? "kill" : "stop";
-  const title = confirmForce
-    ? `Click again to hard-kill the ${workflow} daemon (abandons in-flight work)`
-    : `Soft-stop the ${workflow} daemon (drain in-flight then exit)`;
+  const title = `Stop the ${workflow} daemon now`;
 
   return (
     <button
@@ -149,7 +131,7 @@ function StopPill({ workflow, instance }: { workflow: string; instance: string }
       disabled={sending}
       onClick={(e) => {
         e.stopPropagation();
-        void postStop(confirmForce);
+        void postStop();
       }}
       title={title}
       aria-label={title}
@@ -161,9 +143,6 @@ function StopPill({ workflow, instance }: { workflow: string; instance: string }
         // Default: hairline destructive outline, no fill
         "border-[hsl(0_84%_60%/0.30)] text-[hsl(0_84%_70%/0.85)] bg-transparent",
         "hover:bg-[hsl(0_84%_60%/0.12)] hover:text-[hsl(0_84%_75%)] hover:border-[hsl(0_84%_60%/0.55)]",
-        // Confirm-force state: filled + ring pulse
-        confirmForce &&
-          "bg-[hsl(0_84%_60%/0.12)] text-[hsl(0_84%_78%)] border-[hsl(0_84%_60%/0.55)] animate-stop-confirm",
         sending && "opacity-60 cursor-wait",
       )}
     >
@@ -172,7 +151,7 @@ function StopPill({ workflow, instance }: { workflow: string; instance: string }
       ) : (
         <span aria-hidden className="text-[11px] leading-none opacity-90">×</span>
       )}
-      {label}
+      stop
     </button>
   );
 }

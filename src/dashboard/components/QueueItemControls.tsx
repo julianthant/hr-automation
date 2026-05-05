@@ -14,11 +14,8 @@ interface QueueItemControlsProps {
 
 /**
  * Cancel (×) + Bump (▲) icon buttons for pending queue rows.
- * Cancel uses a sonner action-toast as a lightweight confirm step
- * (rather than dragging in a full AlertDialog primitive that the
- * component library doesn't yet ship). 409s from the backend are
- * surfaced as warnings — the daemon claimed the item between the
- * user's click and the backend lock.
+ * 409s from the backend are surfaced as warnings — the daemon claimed the
+ * item between the user's click and the backend lock.
  */
 export function QueueItemControls({ workflow, id, runId, subject, className }: QueueItemControlsProps) {
   const [pending, setPending] = useState<"cancel" | "bump" | null>(null);
@@ -62,17 +59,7 @@ export function QueueItemControls({ workflow, id, runId, subject, className }: Q
   const onCancelClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (pending) return;
-    // Lightweight confirm via toast.action — destructive but recoverable
-    // (cancellation creates a `failed` row that can itself be retried).
-    toast(`Cancel ${label}?`, {
-      description: "Removes the item from the queue. Can be retried later.",
-      action: {
-        label: "Cancel item",
-        onClick: () => post("/api/cancel-queued", "cancel"),
-      },
-      cancel: { label: "Keep", onClick: () => {} },
-      duration: 8_000,
-    });
+    void post("/api/cancel-queued", "cancel");
   };
 
   const onBumpClick = (e: React.MouseEvent) => {

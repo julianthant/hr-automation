@@ -9,6 +9,7 @@ import {
   isApprovedPrepRow,
   isDiscardedPrepRow,
 } from "./ocr/types";
+import { entryMatchesStatusFilter } from "./queue-status";
 
 interface QueuePanelProps {
   entries: TrackerEntry[];
@@ -149,11 +150,7 @@ export function QueuePanel({
         !(e.parentRunId && approvedParentRunIds.has(e.parentRunId)),
     );
     if (statusFilter) {
-      result = result.filter((e) =>
-        statusFilter === "pending"
-          ? e.status === "pending" || e.status === "skipped"
-          : e.status === statusFilter,
-      );
+      result = result.filter((e) => entryMatchesStatusFilter(e, statusFilter));
     }
     return result;
   }, [visibleEntries, statusFilter, approvedParentRunIds]);

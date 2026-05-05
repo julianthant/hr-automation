@@ -321,7 +321,17 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
             emitScreenshotEvent: (ev) => emitScreenshotEvent(ev, { dir: trackerDir }),
           })
           stepper.setScreenshotFn(ctx.screenshot)
-          if (args.preHandler) await args.preHandler()
+          if (args.preHandler) {
+            try {
+              await args.preHandler()
+            } catch (err) {
+              if (args.isCancelRequested?.()) {
+                setStep('cancelled')
+                throw new CancelledError('force-stop')
+              }
+              throw err
+            }
+          }
           if (prefilled) ctx.updateData(prefilled as Partial<TData & Record<string, unknown>>)
           try {
             await wf.config.handler(ctx, handlerInput)
@@ -331,6 +341,10 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
             // the daemon's claim loop. Rethrow so the outer catch in
             // runOneItem surfaces the kind discriminator.
             if (err instanceof CancelledError) throw err
+            if (args.isCancelRequested?.()) {
+              setStep('cancelled')
+              throw new CancelledError('force-stop')
+            }
             // Covers throws that escape ctx.step (e.g. separations'
             // resolveJobSummaryResult unwrap or the post-step
             // submittedWithoutTxnNumber guard). Stepper.step already
@@ -598,8 +612,8 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
     throw new Error(`validation error: ${err instanceof Error ? err.message : String(err)}`)
   }
 
-  // 2. Derive itemId from common id fields, fall back to UUID.
-  const itemId = opts.itemId ?? deriveItemId(handlerInput, randomUUID())
+  // 2. Derive itemId from workflow-specific/common id fields, fall back to UUID.
+  const itemId = opts.itemId ?? wf.config.deriveItemId?.(handlerInput) ?? deriveItemId(handlerInput, randomUUID())
 
   const run = async (
     setStep: (s: string) => void,
@@ -809,7 +823,7 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
   // If the caller provides `deriveItemId`, use it — lets workflows like
   // emergency-contact produce `p{NN}-{emplId}`-shaped ids that `onPreEmitPending`
   // and the handler's withTrackedWorkflow both use.
-  const itemIdFn = opts.deriveItemId ?? ((item) => deriveItemId(item, randomUUID()))
+  const itemIdFn = opts.deriveItemId ?? wf.config.deriveItemId ?? ((item) => deriveItemId(item, randomUUID()))
   const perItem = items.map((item) => ({
     item,
     itemId: itemIdFn(item),

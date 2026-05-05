@@ -282,10 +282,11 @@ export const eidLookupCrmWorkflow = defineWorkflow({
   initialData: (input) =>
     isEidInput(input)
       ? { searchName: input.emplId, emplId: input.emplId }
-      : { searchName: input.name },
+      : { searchName: normalizeName(input.name) },
+  deriveItemId: deriveEidLookupItemId,
   handler: async (ctx: Ctx<typeof stepsCrm, EidLookupItem>, input) => {
     if (!isEidInput(input)) {
-      ctx.updateData({ searchName: input.name });
+      ctx.updateData({ searchName: normalizeName(input.name) });
     }
     const sdcmp = await ctx.step("searching", async () => searchingStep(ctx, input));
     if (isEidInput(input)) {
@@ -332,6 +333,10 @@ export function prepareNames(names: string[]): string[] {
   return dedupeNames(names.map((n) => normalizeName(n)));
 }
 
+export function deriveEidLookupItemId(input: EidLookupItem): string {
+  return isEidInput(input) ? input.emplId : normalizeName(input.name);
+}
+
 /**
  * Daemon-mode CLI adapter for `npm run eid-lookup <names...>`.
  *
@@ -374,6 +379,7 @@ export async function runEidLookupCli(
       parallel: options.parallel,
     },
     {
+      deriveItemId: deriveEidLookupItemId,
       // Match the existing `runEidLookupBatch` pre-emit payload so the
       // dashboard queue panel shows the same `{searchName, __name, __id}`
       // shape whether the user runs the daemon CLI or `--direct`. The

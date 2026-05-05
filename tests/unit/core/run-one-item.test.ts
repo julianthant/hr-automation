@@ -108,3 +108,49 @@ test('runOneItem: without authTimings, no synthetic auth entries are emitted', a
   const authEntries = entries.filter((e: any) => typeof e.step === 'string' && e.step.startsWith('auth:'))
   assert.equal(authEntries.length, 0, 'no synthetic auth entries without authTimings')
 })
+
+test('runOneItem: force-stop requested during a Playwright failure records cancellation, not browser crash', async () => {
+  const dir = TMP()
+  let cancelRequested = false
+  const wf = defineWorkflow({
+    name: 'force-cancel-test',
+    systems: [{ id: 'ucpath', login: async () => {} }],
+    steps: ['searching'] as const,
+    schema: z.object({ n: z.string() }),
+    authSteps: false,
+    handler: async (ctx) => {
+      await ctx.step('searching', async () => {
+        cancelRequested = true
+        throw new Error('Browser closed unexpectedly')
+      })
+    },
+  })
+
+  const session = Session.forTesting({
+    systems: wf.config.systems,
+    browsers: new Map(),
+    readyPromises: new Map([['ucpath', Promise.resolve()]]),
+  })
+
+  const result = await runOneItem({
+    wf,
+    session,
+    item: { n: 'x' },
+    itemId: 'x',
+    runId: 'run-force-cancel',
+    trackerDir: dir,
+    callerPreEmits: false,
+    preAssignedInstance: 'Force Cancel Test 1',
+    isCancelRequested: () => cancelRequested,
+  })
+
+  assert.deepEqual(result, {
+    ok: false,
+    kind: 'cancelled',
+    error: "Cancelled by user before step 'force-stop'",
+  })
+  const entries = readTracker(dir, 'force-cancel-test')
+  const failed = entries.find((e: any) => e.status === 'failed')
+  assert.equal(failed?.step, 'cancelled')
+  assert.equal(failed?.error, "Cancelled by user before step 'force-stop'")
+})
