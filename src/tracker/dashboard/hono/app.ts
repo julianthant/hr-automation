@@ -1,89 +1,45 @@
-import { createReadStream, existsSync, statSync } from "node:fs";
-import { basename } from "node:path";
 import { Hono } from "hono";
-import type Database from "better-sqlite3";
 
-import { getRegisteredFile } from "../../files.js";
-import { getCachedPage } from "../../pdf-cache.js";
-import { queryEntriesPayload, queryProjectionHealth, queryRunsForItem } from "../../state/queries.js";
-import { buildTaskDependenciesHandler } from "../../tasks/http.js";
+import type { DashboardHonoDeps } from "./context.js";
+import { preflightResponse } from "./responses.js";
+import { registerBaseRoutes } from "./routes/base.js";
+import { registerCaptureRoutes } from "./routes/capture.js";
+import { registerDaemonStopRoute } from "./routes/daemon-stop.js";
+import { registerEnqueueRoute } from "./routes/enqueue.js";
+import { registerEventRoutes } from "./routes/events.js";
+import { registerFileRoutes } from "./routes/files.js";
+import { registerOathUploadRoutes } from "./routes/oath-upload.js";
+import { registerOcrRoutes } from "./routes/ocr.js";
+import { registerOpsRoutes } from "./routes/ops.js";
+import { registerProjectionRoutes } from "./routes/projection.js";
+import { registerScreenshotRoutes } from "./routes/screenshots.js";
+import { registerSearchRoutes } from "./routes/search.js";
+import { registerSharePointRoutes } from "./routes/sharepoint.js";
+import { registerStaticRoutes } from "./routes/static.js";
+import { registerTaskRoutes } from "./routes/tasks.js";
 
-export interface DashboardHonoDeps {
-  dir: string;
-  stateDb: Database.Database;
-}
+export type { DashboardHonoDeps } from "./context.js";
 
 export function createDashboardHonoApp(deps: DashboardHonoDeps): Hono {
   const app = new Hono();
-  const taskDependenciesHandler = buildTaskDependenciesHandler({ trackerDir: deps.dir });
 
-  app.get("/api/v2/projection/health", (c) => {
-    return c.json(queryProjectionHealth(deps.stateDb, deps.dir));
-  });
+  app.options("*", () => preflightResponse());
 
-  app.get("/api/v2/entries", (c) => {
-    const workflow = c.req.query("workflow") ?? "onboarding";
-    const date = c.req.query("date") ?? new Date().toISOString().slice(0, 10);
-    return c.json(queryEntriesPayload(deps.stateDb, { workflow, date }));
-  });
-
-  app.get("/api/v2/runs", (c) => {
-    const workflow = c.req.query("workflow") ?? "";
-    const itemId = c.req.query("id") ?? "";
-    const date = c.req.query("date") ?? new Date().toISOString().slice(0, 10);
-    if (!workflow || !itemId) {
-      return c.json({ ok: false, error: "workflow and id are required" }, 400);
-    }
-    return c.json(queryRunsForItem(deps.stateDb, { workflow, itemId, date }));
-  });
-
-  app.get("/api/task-dependencies", async (c) => {
-    const result = await taskDependenciesHandler({ parentRunId: c.req.query("parentRunId") });
-    return c.json(result.body, result.status);
-  });
-
-  app.get("/api/files/:fileId/download", (c) => {
-    const file = getRegisteredFile(deps.stateDb, c.req.param("fileId"));
-    if (!file || !existsSync(file.storagePath)) return c.text("not found", 404);
-    const stat = statSync(file.storagePath);
-    return new Response(createReadStream(file.storagePath) as unknown as BodyInit, {
-      headers: {
-        "Content-Type": file.mimeType,
-        "Content-Length": String(stat.size),
-        "Content-Disposition": `attachment; filename="${basename(file.originalName).replace(/"/g, "")}"`,
-        "Cache-Control": "no-store",
-      },
-    });
-  });
-
-  app.get("/api/files/:fileId/original", (c) => {
-    const file = getRegisteredFile(deps.stateDb, c.req.param("fileId"));
-    if (!file || !existsSync(file.storagePath)) return c.text("not found", 404);
-    const stat = statSync(file.storagePath);
-    return new Response(createReadStream(file.storagePath) as unknown as BodyInit, {
-      headers: {
-        "Content-Type": file.mimeType,
-        "Content-Length": String(stat.size),
-        "Cache-Control": "no-store",
-      },
-    });
-  });
-
-  app.get("/api/files/:fileId/pages/:page", (c) => {
-    const page = Number(c.req.param("page"));
-    const cached = getCachedPage(deps.stateDb, c.req.param("fileId"), page);
-    if (!cached || cached.status !== "ready" || !cached.imagePath || !existsSync(cached.imagePath)) {
-      return c.text("not found", 404);
-    }
-    const stat = statSync(cached.imagePath);
-    return new Response(createReadStream(cached.imagePath) as unknown as BodyInit, {
-      headers: {
-        "Content-Type": cached.mimeType ?? "image/png",
-        "Content-Length": String(stat.size),
-        "Cache-Control": "public, max-age=31536000, immutable",
-      },
-    });
-  });
+  registerProjectionRoutes(app, deps);
+  registerFileRoutes(app, deps);
+  registerTaskRoutes(app, deps);
+  registerBaseRoutes(app, deps);
+  registerSearchRoutes(app, deps);
+  registerScreenshotRoutes(app, deps);
+  registerSharePointRoutes(app);
+  registerEnqueueRoute(app, deps);
+  registerDaemonStopRoute(app, deps);
+  registerOpsRoutes(app, deps);
+  registerOcrRoutes(app, deps);
+  registerOathUploadRoutes(app, deps);
+  registerCaptureRoutes(app, deps);
+  registerEventRoutes(app, deps);
+  registerStaticRoutes(app, deps);
 
   return app;
 }

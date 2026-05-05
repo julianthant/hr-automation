@@ -105,7 +105,7 @@ export function readSessionEvents(dir: string = DEFAULT_DIR): SessionEvent[] {
 // logs. Without this, tests that pass `trackerDir: TMP_DIR` for their
 // per-workflow JSONL would still leak `workflow_start`/`step_change`/etc.
 // into the real `.tracker/sessions.jsonl` and pollute the dashboard's
-// SessionPanel with dead test instances.
+// dashboard session drawer with dead test instances.
 
 export function emitWorkflowStart(instance: string, dir?: string): void {
   emitSessionEvent({ type: "workflow_start", workflowInstance: instance }, dir);

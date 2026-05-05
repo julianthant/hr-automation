@@ -132,8 +132,8 @@ export async function enqueueFromHttp(
   for (const input of inputs) {
     // Strip the kernel-level prefilledData channel before validating so
     // strict()-mode workflow schemas don't reject it as unknown. The
-    // channel rides through to the daemon via the queue file (input is
-    // serialized verbatim) and the kernel re-strips at handler-invocation
+    // channel rides through to the daemon via the SQLite task input (also
+    // mirrored in JSONL audit) and the kernel re-strips at handler-invocation
     // time — see splitPrefilled in src/core/workflow.ts.
     const { cleaned } = splitPrefilled(input);
     const result = wf.config.schema.safeParse(cleaned);

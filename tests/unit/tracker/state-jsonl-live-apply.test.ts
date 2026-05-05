@@ -88,16 +88,16 @@ test("emitSessionEvent applies session events when the projection DB exists", ()
       workflowInstance: "Onboarding 1",
       runId: "run-1",
     }, dir);
-    const row = db.prepare("SELECT event_type, workflow_instance, run_id FROM session_events").get() as {
+    const row = db.prepare("SELECT tracker_date, event_type, workflow_instance, run_id FROM session_events").get() as {
+      tracker_date: string;
       event_type: string;
       workflow_instance: string;
       run_id: string;
     };
-    assert.deepEqual(row, {
-      event_type: "workflow_start",
-      workflow_instance: "Onboarding 1",
-      run_id: "run-1",
-    });
+    assert.equal(row.event_type, "workflow_start");
+    assert.equal(row.workflow_instance, "Onboarding 1");
+    assert.equal(row.run_id, "run-1");
+    assert.match(row.tracker_date, /^\d{4}-\d{2}-\d{2}$/);
   } finally {
     closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });

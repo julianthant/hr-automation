@@ -445,13 +445,13 @@ export async function runOnboarding(email: string): Promise<void> {
  * which is how `runWorkflowBatch` → `runWorkflowPool` (legacy `--direct`
  * path + `--batch` flag) fans a batch across N workers. Daemon mode is
  * orthogonal: each alive daemon is one long-lived single-worker Session
- * claiming items off the shared queue. For throughput, start N daemons
- * with `-p N` — the shared `fs.mkdir` claim mutex distributes items across
- * them identically to pool workers, with the added benefit that the
- * daemons survive the batch.
+ * claiming items off the shared SQLite tasks queue. For throughput, start
+ * N daemons with `-p N`; the atomic SQLite claim transaction distributes
+ * items across them identically to pool workers, with the added benefit
+ * that the daemons survive the batch.
  *
  * Pass emails explicitly on the CLI — `npm run onboarding a@uc b@uc c@uc`
- * fans across alive daemons via the shared queue.
+ * fans across alive daemons via the shared SQLite tasks queue.
  */
 export async function runOnboardingCli(
   emails: string[],

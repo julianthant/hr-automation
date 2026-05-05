@@ -40,7 +40,7 @@ npm run oath-upload:stop                         # Soft-stop all daemons
 
 # Dashboard (separate terminal — auto-updates as workflows run)
 npm run dashboard            # SSE backend (:3838) + Vite dev (:5173) — open http://localhost:5173
-npm run dashboard:prod       # Serve pre-built dashboard from SSE only
+npm run dashboard:prod       # Serve pre-built dashboard from the Hono dashboard server
 
 # Export / Utilities
 tsx --env-file=.env src/cli.ts export <workflow>   # Dump JSONL tracker to xlsx
@@ -378,7 +378,7 @@ Current step tracking per workflow. Steps prefixed with `auth:` are auto-prepend
 | oath-upload | servicenow-auth → delegate-ocr → wait-ocr-approval → delegate-signatures → wait-signatures → open-hr-form → fill-form → submit (workflow opts out of auto-prepend; declares `servicenow-auth` itself) |
 | ocr | loading-roster → ocr → matching → disambiguating → eid-lookup → verification → awaiting-approval |
 
-As of 2026-04-18, the dashboard is **observation-only**. The previous "⚡ RUN" drawer + `RunnerLauncher` button + `SchemaForm` + `runner-recents` localStorage helper + the backend `buildSpawnHandler`/`buildCancelHandler`/`buildActiveRunsHandler`/`buildWorkflowSchemaHandler` factories + the child-process registry were all removed. Workflows are launched via the npm scripts above (or whatever replacement launcher the user wires up later — out of scope for this pass). Live session monitoring (`SessionPanel`), selector-warning aggregation (`SelectorWarningsPanel`), screenshot browsing (`ScreenshotsPanel` — replaced the inline `FailureDrillDown` on 2026-04-21), step-timing chips (`StepPipeline`), and cross-workflow search (`SearchBar`) all keep working — they read kernel-emitted events from `src/tracker/jsonl.ts`, independent of any launcher.
+As of 2026-04-18, the dashboard is **observation-only**. The previous "⚡ RUN" drawer + `RunnerLauncher` button + `SchemaForm` + `runner-recents` localStorage helper + the backend `buildSpawnHandler`/`buildCancelHandler`/`buildActiveRunsHandler`/`buildWorkflowSchemaHandler` factories + the child-process registry were all removed. Workflows are launched via the npm scripts above (or whatever replacement launcher the user wires up later — out of scope for this pass). Live session monitoring (`TerminalDrawer`), selector-warning aggregation (`SelectorWarningsPanel`), screenshot browsing (`ScreenshotsPanel` — replaced the inline `FailureDrillDown` on 2026-04-21), step-timing chips (`StepPipeline`), and cross-workflow search (`SearchBar`) all keep working — they read kernel-emitted events from `src/tracker/jsonl.ts`, independent of any launcher.
 
 **OCR workflow + delegation primitive (2026-05-01).** The operator selects the `ocr` workflow (Run button appears), picks a form type (oath / emergency-contact), uploads a PDF. The dashboard backend runs OCR via `src/ocr/`, matches against the roster, enqueues eid-lookup for unmatched rows. When all rows reach a terminal match state the row shows `step=awaiting-approval` in the QueuePanel; the operator reviews/edits per-row data inline, clicks Approve to fan out N kernel queue items to the downstream daemon (oath-signature or emergency-contact). SharePoint roster download delegates as a child workflow (`parentRunId` links the child row back). Reupload carries forward resolved EIDs from the previous run. Implementation: `src/workflows/ocr/`, `src/tracker/ocr-http.ts`, `src/dashboard/components/ocr/`, `src/tracker/watch-child-runs.ts`.
 
@@ -495,7 +495,7 @@ These patterns existed pre-kernel and are intentionally removed. Do not reintrod
 <claude-mem-context>
 # Memory Context
 
-# [hr-automation] recent context, 2026-05-04 7:36pm PDT
+# [hr-automation] recent context, 2026-05-04 10:20pm PDT
 
 No previous sessions found.
 </claude-mem-context>

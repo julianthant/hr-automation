@@ -8,18 +8,18 @@ import type { RegisteredWorkflow } from './types.js'
 
 /**
  * Optional caller-provided callback fired once per input IMMEDIATELY at the
- * top of `ensureDaemonsAndEnqueue`, BEFORE any spawn or queue-file write.
+ * top of `ensureDaemonsAndEnqueue`, BEFORE any spawn or task enqueue.
  * Lets CLI adapters / HTTP handlers emit a `pending` tracker row per item
  * so the dashboard's queue panel populates instantly (in <100ms) — even
  * during the 5-10s lockfile-registration window of a fresh daemon spawn.
  *
- * The runId passed here is pre-assigned (UUID v4) and is forwarded to the
- * queue file's `enqueue` event verbatim, so downstream `claim`/`running`/
- * `done`/`failed` events pair 1:1 with this pre-emitted row.
+ * The runId passed here is pre-assigned (UUID v4) and is written into the
+ * SQLite task attempt plus JSONL enqueue audit, so downstream
+ * `claim`/`running`/`done`/`failed` events pair 1:1 with this pre-emitted row.
  *
  * Pre-emit timing changed 2026-04-28 (Cluster A spec). Prior versions
  * fired this AFTER queue write; the reorder is what lets the orphan sweep
- * tighten to 0 grace — every queue-file entry now has a registered daemon
+ * tighten to 0 grace — every queued task now has a registered daemon
  * by construction.
  */
 export type OnPreEmitPending<TData> = (
@@ -71,8 +71,8 @@ export function computeSpawnPlan(aliveCount: number, flags: DaemonFlags): number
  * The ONE function every daemon-mode CLI adapter calls.
  *
  * Discovers alive daemons, validates inputs, spawns additional daemons as
- * dictated by flags, appends enqueue events to the shared queue, and wakes
- * every alive daemon via `POST /wake`.
+ * dictated by flags, writes SQLite task rows plus JSONL audit events, and
+ * wakes every alive daemon via `POST /wake`.
  *
  * Spawn math (final rule):
  *   const desired = flags.parallel ?? 1
@@ -98,7 +98,7 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
     quiet?: boolean
     /**
      * Caller-provided hook fired per item IMMEDIATELY at the top of this
-     * function, BEFORE any spawn or queue-file write. Lets CLI adapters /
+     * function, BEFORE any spawn or task enqueue. Lets CLI adapters /
      * HTTP handlers emit a `pending` tracker row so the dashboard queue panel
      * populates within ~100ms — even during a 5-10s spawn-lockfile window.
      * Exceptions thrown by this callback are caught and logged so a bad
@@ -107,15 +107,15 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
     onPreEmitPending?: OnPreEmitPending<TData>
     /**
      * Caller-provided hook fired per item when pre-emit succeeded but spawn
-     * (or queue-write) subsequently failed. Lets the caller mark the
+     * (or task enqueue) subsequently failed. Lets the caller mark the
      * stranded `pending` tracker row as `failed` so the dashboard doesn't
      * show ghost entries.
      */
     onPreEmitFailed?: OnPreEmitFailed<TData>
     /**
      * Batch-level hook fired after stable itemIds/runIds are assigned and
-     * before pre-emitting pending rows, spawning daemons, or writing queue
-     * events. If this throws, no queue event is written.
+     * before pre-emitting pending rows, spawning daemons, or writing task
+     * rows. If this throws, no task row or queue audit event is written.
      */
     onPreparedItems?: (items: Array<PreparedDaemonEnqueueItem<TData>>) => void | Promise<void>
     /**
@@ -171,14 +171,14 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
   //      a SIGKILLed predecessor)
   //   4. Spawn new daemons (await lockfile registration, ~5-10s)
   //   5. Wake every alive daemon (now includes spawned ones)
-  //   6. Append items to queue file — ONLY after a daemon is registered,
+  //   6. Write SQLite task rows + JSONL enqueue audit — ONLY after a daemon is registered,
   //      so the orphan sweep can be aggressive (5s/0-grace) without
   //      false-positives during a spawn-in-flight window.
   //
   // Failure handling: if step 4 throws, we fire onPreEmitFailed for
   // every pre-emitted runId so the caller can mark the stranded
-  // `pending` tracker rows as `failed`. The queue file is never touched
-  // on this path → the orphan sweep doesn't see anything to fail.
+  // `pending` tracker rows as `failed`. No task row or queue audit event is
+  // written on this path → the orphan sweep doesn't see anything to fail.
   // ---------------------------------------------------------------------
 
   // Step 1: pre-assign runIds. Generated synchronously so step 2 has them.
@@ -212,7 +212,7 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
   }
 
   // From here, any thrown error MUST notify onPreEmitFailed so the caller
-  // can mark the pending rows as failed (no queue-file entry exists yet).
+	  // can mark the pending rows as failed (no task row exists yet).
   const handleSpawnFailure = (err: unknown): never => {
     const message = err instanceof Error ? err.message : String(err)
     if (onPreEmitFailed) {
@@ -290,7 +290,7 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
       ),
     )
 
-    // Step 6: write queue file. Now safe — at least one daemon is registered
+	    // Step 6: write task rows + queue audit. Now safe — at least one daemon is registered
     // for this workflow, so the orphan sweep won't false-positive on these
     // items in the spawn-in-flight window.
     // Use the pre-computed ids[] rather than idFn directly — idFn's fallback

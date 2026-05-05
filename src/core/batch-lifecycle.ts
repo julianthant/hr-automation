@@ -42,7 +42,7 @@ export interface BatchObserverHandle {
  *      auth attempt.
  *   2. Emits `auth_start` / `auth_complete` / `auth_failed` / `browser_launch`
  *      session events attributed to `instance` + `sessionId`, so the dashboard
- *      SessionPanel shows the pool/batch instance lighting up as it authenticates.
+ *      session drawer shows the pool/batch instance lighting up as it authenticates.
  *
  * Note: `SessionObserver.onBrowserLaunch` emits the session event but has no
  * timing component — the observer only pairs auth lifecycles.
@@ -61,7 +61,7 @@ export function createBatchObserver(
   // Pool mode passes worker-scoped sessionIds (`w0`, `w1`, …) that are NOT
   // pre-registered by `withBatchLifecycle` (which only emits `session_create`
   // for the default batch sessionId `'1'` at line 165). Without a matching
-  // `session_create`, the SessionPanel's `rebuildSessionState` attaches
+  // `session_create`, `rebuildSessionState` attaches
   // browsers to a phantom session. Lazy-emit it on first `onBrowserLaunch`
   // so per-worker sessions show up correctly. Suppress for `'1'` because the
   // batch-level pre-emit already covered that case.

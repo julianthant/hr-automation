@@ -26,6 +26,8 @@ function cacheDir(trackerDir: string, fileId: string): string {
   return join(trackerDir, "pdf-cache", fileId);
 }
 
+const inFlightRenders = new Map<string, Promise<CachedPage[]>>();
+
 function pageNumberFromFilename(filename: string): number | null {
   const m = /^page-(\d+)\.png$/.exec(filename);
   if (!m) return null;
@@ -34,6 +36,22 @@ function pageNumberFromFilename(filename: string): number | null {
 }
 
 export async function ensurePdfPageCache(
+  db: Database.Database,
+  opts: EnsurePdfPageCacheOpts,
+): Promise<CachedPage[]> {
+  const key = `${opts.trackerDir}\0${opts.fileId}\0${opts.pdfPath}`;
+  const inFlight = inFlightRenders.get(key);
+  if (inFlight) return inFlight;
+  const promise = ensurePdfPageCacheInner(db, opts);
+  inFlightRenders.set(key, promise);
+  try {
+    return await promise;
+  } finally {
+    inFlightRenders.delete(key);
+  }
+}
+
+async function ensurePdfPageCacheInner(
   db: Database.Database,
   opts: EnsurePdfPageCacheOpts,
 ): Promise<CachedPage[]> {

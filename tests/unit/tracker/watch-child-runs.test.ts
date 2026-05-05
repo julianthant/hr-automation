@@ -84,6 +84,38 @@ test("uses SQLite task rows when all expected child tasks exist", async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("closes SQLite watcher connection after terminal outcomes", async () => {
+  const dir = setupTrackerDir();
+  let reopenedStore: ReturnType<typeof createTaskStore> | null = null;
+  try {
+    const seedStore = createTaskStore(openControlDb({ trackerDir: dir }));
+    const [task] = seedStore.enqueueTasks({
+      workflow: "oath-signature",
+      inputs: [{ emplId: "10000004" }],
+      deriveItemId: (input) => input.emplId,
+      runIds: ["sig-run-d"],
+    });
+    seedStore.markTaskDone({ taskId: task.taskId, attemptId: task.attemptId });
+    seedStore.close();
+
+    const outcomes = await watchChildRuns({
+      workflow: "oath-signature",
+      expectedItemIds: ["10000004"],
+      trackerDir: dir,
+      timeoutMs: 1000,
+    });
+    assert.equal(outcomes.length, 1);
+
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    reopenedStore = createTaskStore(openControlDb({ trackerDir: dir }));
+    assert.deepEqual(reopenedStore.listTasksForWorkflow("oath-signature"), []);
+  } finally {
+    reopenedStore?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("SQLite child failure with block_parent rejects for operator intervention", async () => {
   const dir = setupTrackerDir();
   const taskStore = createTaskStore(openControlDb({ trackerDir: dir }));

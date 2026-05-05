@@ -83,7 +83,7 @@ Currently converted: `separations`, `work-study`, `eid-lookup`, `onboarding`, `o
 
 **Emergency-contact note** — the CLI adapter reads YAML + runs roster preflight in-process (before any daemon work), then enqueues each `EmergencyContactRecord` as a separate queue item. Pass a custom `deriveItemId` to `ensureDaemonsAndEnqueue` because the EID is nested under `input.employee.employeeId` and the composite `p{NN}-{emplId}` id shape is what the legacy path already writes.
 
-**Onboarding note** — one alive daemon = one single-worker session with 3 browsers (CRM + UCPath + I9) and 2 Duos (I9 is SSO no-2FA). Heaviest per-daemon cost of any converted workflow, but biggest savings per repeat invocation (CRM Duo alone is ~30-60s). Daemon-mode parallelism comes from running N daemons (`-p N`), each a single worker claiming off the shared queue.
+**Onboarding note** — one alive daemon = one single-worker session with 3 browsers (CRM + UCPath + I9) and 2 Duos (I9 is SSO no-2FA). Heaviest per-daemon cost of any converted workflow, but biggest savings per repeat invocation (CRM Duo alone is ~30-60s). Daemon-mode parallelism comes from running N daemons (`-p N`), each a single worker claiming off the shared SQLite tasks queue.
 
 ## Edit-data opt-in recipe
 

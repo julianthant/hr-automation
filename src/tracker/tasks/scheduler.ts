@@ -110,32 +110,7 @@ export async function runDependencySchedulerTick(
         ? "satisfied"
         : "failed";
       const childTaskStatus = childRun.status === "failed" ? "failed" : "done";
-
-      markDependencyTerminal(opts.store, {
-        dependencyId: dep.id,
-        status: terminalStatus,
-        result: {
-          workflow: childRun.workflow,
-          itemId: childRun.id,
-          runId: childRun.runId,
-          status: childRun.status,
-          data: childRun.data ?? {},
-          error: childRun.error,
-        },
-        now,
-      });
-      updateTaskStatus(opts.store, {
-        taskId: dep.child.id,
-        status: childTaskStatus,
-        now,
-      });
-      updateAttemptStatus(opts.store, {
-        taskId: dep.child.id,
-        runId: dep.child.runId,
-        status: childTaskStatus,
-        now,
-      });
-      result.dependenciesResolved += 1;
+      let continuationApplied = false;
 
       if (dep.kind === "ocr-eid-lookup") {
         const parentRun = await projection.getLatestParentRun({
@@ -143,26 +118,63 @@ export async function runDependencySchedulerTick(
           itemId: dep.parent.itemId,
           runId: dep.parent.runId,
         });
-        if (parentRun) {
-          await applyOcrEidLookupContinuation({
-            store: opts.store,
-            dependency: dep,
-            parentRun,
-            childRun,
-            now,
-            emitTracker,
-          });
-          result.continuationsApplied += 1;
+        if (!parentRun) {
+          result.errors.push(
+            `OCR continuation skipped for dependency ${dep.id}: parent run ${dep.parent.runId ?? dep.parent.itemId} not found in projection`,
+          );
+          continue;
         }
+        const continuation = await applyOcrEidLookupContinuation({
+          store: opts.store,
+          dependency: dep,
+          parentRun,
+          childRun,
+          now,
+          emitTracker,
+        });
+        if (!continuation.ok) {
+          result.errors.push(`OCR continuation skipped for dependency ${dep.id}: ${continuation.reason}`);
+          continue;
+        }
+        continuationApplied = true;
       }
 
-      if (allDependenciesTerminal(opts.store, dep.parent.id)) {
-        updateTaskStatus(opts.store, {
-          taskId: dep.parent.id,
-          status: "awaiting_child_results",
+      const markResolved = opts.store.db.transaction(() => {
+        markDependencyTerminal(opts.store, {
+          dependencyId: dep.id,
+          status: terminalStatus,
+          result: {
+            workflow: childRun.workflow,
+            itemId: childRun.id,
+            runId: childRun.runId,
+            status: childRun.status,
+            data: childRun.data ?? {},
+            error: childRun.error,
+          },
           now,
         });
-      }
+        updateTaskStatus(opts.store, {
+          taskId: dep.child.id,
+          status: childTaskStatus,
+          now,
+        });
+        updateAttemptStatus(opts.store, {
+          taskId: dep.child.id,
+          runId: dep.child.runId,
+          status: childTaskStatus,
+          now,
+        });
+        if (allDependenciesTerminal(opts.store, dep.parent.id)) {
+          updateTaskStatus(opts.store, {
+            taskId: dep.parent.id,
+            status: "awaiting_child_results",
+            now,
+          });
+        }
+      });
+      markResolved();
+      result.dependenciesResolved += 1;
+      if (continuationApplied) result.continuationsApplied += 1;
     } catch (err) {
       result.errors.push(err instanceof Error ? err.message : String(err));
     }

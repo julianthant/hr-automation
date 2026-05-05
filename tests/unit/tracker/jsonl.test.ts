@@ -11,6 +11,7 @@ import {
   withTrackedWorkflow,
   type TrackerEntry,
 } from "../../../src/tracker/jsonl.js";
+import { log, withLogContext } from "../../../src/utils/log.js";
 
 const TEST_DIR = ".tracker-test";
 
@@ -152,6 +153,22 @@ describe("appendLogEntry PII pass-through (redaction disabled)", () => {
     );
     const got = readLogEntries("scrub2", undefined, TEST_DIR);
     assert.equal(got[0].message, "DOB 01/15/1992 didn't validate");
+  });
+
+  it("captures debug entries in JSONL even when console debug output is disabled", async () => {
+    await withLogContext(
+      "debug-flow",
+      "item-1",
+      async () => {
+        log.debug("selector probe detail");
+      },
+      TEST_DIR,
+    );
+
+    const got = readLogEntries("debug-flow", "item-1", TEST_DIR);
+    assert.equal(got.length, 1);
+    assert.equal(got[0].level, "debug");
+    assert.equal(got[0].message, "selector probe detail");
   });
 });
 

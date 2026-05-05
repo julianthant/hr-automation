@@ -7,6 +7,13 @@ import { useDaemons, type DaemonInfo } from "./hooks/useDaemons";
 import { useWorkflows, autoLabel } from "../workflows-context";
 import { DaemonRow } from "./DaemonRow";
 
+interface DaemonGroupsProps {
+  daemons: DaemonInfo[];
+  onRefresh: () => void;
+  className?: string;
+  emptyText?: string;
+}
+
 /**
  * Top section of the right rail: groups alive daemons by workflow and
  * surfaces spawn/stop affordances per group. Renders nothing when no
@@ -15,7 +22,10 @@ import { DaemonRow } from "./DaemonRow";
  */
 export function DaemonsSection() {
   const { daemons, refresh } = useDaemons();
+  return <DaemonGroups daemons={daemons} onRefresh={refresh} />;
+}
 
+export function DaemonGroups({ daemons, onRefresh, className, emptyText }: DaemonGroupsProps) {
   const grouped = useMemo(() => {
     const byWorkflow = new Map<string, DaemonInfo[]>();
     for (const d of daemons) {
@@ -26,12 +36,18 @@ export function DaemonsSection() {
     return byWorkflow;
   }, [daemons]);
 
-  if (grouped.size === 0) return null;
+  if (grouped.size === 0) {
+    return emptyText ? (
+      <div className={cn("text-[11px] text-muted-foreground px-1.5 py-2", className)}>
+        {emptyText}
+      </div>
+    ) : null;
+  }
 
   return (
-    <div className="space-y-3 mb-3">
+    <div className={cn("space-y-3 mb-3", className)}>
       {[...grouped.entries()].map(([workflow, list]) => (
-        <DaemonGroup key={workflow} workflow={workflow} daemons={list} onRefresh={refresh} />
+        <DaemonGroup key={workflow} workflow={workflow} daemons={list} onRefresh={onRefresh} />
       ))}
     </div>
   );

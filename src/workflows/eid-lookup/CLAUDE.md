@@ -55,8 +55,8 @@ CLI: npm run eid-lookup "Last, First Middle" [...] [--new] [--parallel N]
       - Discovers alive daemons via .tracker/daemons/eid-lookup-*.lock.json + /whoami liveness
       - Spawns N additional daemons via computeSpawnPlan(aliveCount, flags) — Duo once per new daemon (UCPath + CRM)
       - Validates every input with EidLookupItemSchema, fails fast if invalid
-      - Appends `enqueue` events to .tracker/daemons/eid-lookup.queue.jsonl
-      - POST /wake to every alive daemon; daemons race to claim via fs.mkdir mutex
+      - Inserts SQLite task rows and appends `enqueue` audit events to .tracker/daemons/eid-lookup.queue.jsonl
+      - POST /wake to every alive daemon; daemons race to claim via atomic SQLite transaction
       - Each daemon runs items sequentially under shared-context-pool semantics
 ```
 
@@ -79,7 +79,7 @@ CLI: npm run eid-lookup "Last, First Middle" [...] [--new] [--parallel N]
 - Workflow name: `eid-lookup`
 - Steps (per-item): `auth:ucpath` → `auth:crm` → `searching` → `cross-verification`.
   - `authSteps: true` → the kernel prepends per-system `auth:<systemId>` step labels to the visible pipeline. Actual auth timing is **captured once per batch** by a `SessionObserver` wired via `withBatchLifecycle`, then injected into each item's tracker rows as synthetic pre-handler `running` entries with the real `onAuthStart` timestamp. The pool runs auth ONCE but every per-item row tiles exactly to elapsed with accurate per-system durations.
-- **Batch instance:** Every item in a batch shares a single workflow instance (e.g. `EID Lookup 1`). `runWorkflowSharedContextPool` emits exactly one `workflow_start` + one `workflow_end(done|failed)` per CLI invocation. The dashboard's SessionPanel therefore shows ONE row per batch, not N.
+- **Batch instance:** Every item in a batch shares a single workflow instance (e.g. `EID Lookup 1`). `runWorkflowSharedContextPool` emits exactly one `workflow_start` + one `workflow_end(done|failed)` per CLI invocation. The dashboard session drawer therefore shows ONE row per batch, not N.
 - Detail fields: `searchName, emplId, department, crmMatch`.
 - Item ID on the dashboard = the searched name (deduped). `__name` / `__id` seeded on the initial pending row via `onPreEmitPending` so the row reads correctly before `searching` runs.
 

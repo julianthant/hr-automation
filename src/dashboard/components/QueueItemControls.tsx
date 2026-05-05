@@ -33,7 +33,7 @@ export function QueueItemControls({ workflow, id, runId, subject, className }: Q
       const res = await fetch(path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(action === "cancel" && runId ? { workflow, id, runId } : { workflow, id }),
+        body: JSON.stringify(runId ? { workflow, id, runId } : { workflow, id }),
       });
       const body = (await res.json()) as { ok: boolean; error?: string };
       if (body.ok) {

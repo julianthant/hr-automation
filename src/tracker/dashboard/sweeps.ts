@@ -62,10 +62,10 @@ export async function scanFailurePatterns(): Promise<void> {
  * Grace period before treating a queued-with-no-alive-daemons item as truly
  * orphaned. As of 2026-04-28 (Cluster A spec), the grace is **0 ms**.
  *
- * Rationale: `ensureDaemonsAndEnqueue` was reordered so the queue file is
- * only appended AFTER `spawnDaemon` returns (lockfile registered). Therefore
- * every item in the queue file has a registered daemon by construction;
- * "queue file has items + 0 alive daemons" can only happen if that daemon
+ * Rationale: `ensureDaemonsAndEnqueue` was reordered so SQLite task rows are
+ * only inserted AFTER `spawnDaemon` returns (lockfile registered). Therefore
+ * every queued task has a registered daemon by construction;
+ * "queued task + 0 alive daemons" can only happen if that daemon
  * died after writing. Failing the items immediately matches the user's
  * "if the daemon dies, fail all queued ones" rule.
  *
@@ -78,7 +78,7 @@ const ORPHAN_QUEUE_GRACE_MS = 0;
 
 /**
  * Safety net: detect queued items whose workflow has zero alive daemons,
- * mark them failed in both the queue and the tracker so the dashboard's
+ * mark them failed in both the SQLite queue and the tracker so the dashboard's
  * pending rows don't stick when the daemon's own teardown cleanup didn't run
  * (force-kill, OS crash, daemon process killed without graceful exit).
  *
@@ -88,8 +88,8 @@ const ORPHAN_QUEUE_GRACE_MS = 0;
  * `state.queued.length === 0` for that id.
  *
  * **Grace = 0 (2026-04-28)**: with the spawn-then-enqueue reorder in
- * `ensureDaemonsAndEnqueue`, the queue file is only appended after a daemon
- * lockfile is registered. Any item present in queue + 0 alive daemons is a
+ * `ensureDaemonsAndEnqueue`, task rows are only inserted after a daemon
+ * lockfile is registered. Any queued task + 0 alive daemons is a
  * genuine orphan, not a spawn-in-flight race. Failing immediately matches
  * the "daemon dies -> fail queued" rule. The legacy 5-minute grace was
  * removed because the spawn-to-lockfile window is now closed by ordering.

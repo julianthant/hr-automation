@@ -401,7 +401,7 @@ export async function withTrackedWorkflow<T>(
   // as the tracker writes — without this, tests passing `trackerDir: TMP_DIR`
   // for entry/log isolation would still leak workflow_start/step_change/etc.
   // into the real `.tracker/sessions.jsonl` and clutter the operator's
-  // SessionPanel with dead test workflow instances.
+  // session drawer with dead test workflow instances.
   const instanceName = opts.preAssignedInstance ?? generateInstanceName(workflow, dir);
   if (!opts.preAssignedInstance) emitWorkflowStart(instanceName, dir);
   // Store instance name in tracker data so EntryItem can show it
@@ -482,7 +482,7 @@ export async function withTrackedWorkflow<T>(
   // emitSkipped: announce a bypassed step. Writes a single `skipped` tracker
   // row with the step name. Updates lastStep so a later terminal failure
   // attributes correctly. No corresponding emitStepChange — the dashboard
-  // SessionPanel's "current step" tracking treats skipped as a no-op
+  // session drawer "current step" tracking treats skipped as a no-op
   // advance for live state (the session-events stream covers running steps).
   const emitSkippedFn = (step: string) => {
     lastStep = step

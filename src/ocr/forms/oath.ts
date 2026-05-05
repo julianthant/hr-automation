@@ -8,6 +8,7 @@
 import { z } from "zod/v4";
 import { matchAgainstRoster } from "../../match/index.js";
 import { log } from "../../utils/log.js";
+import { normalizePersonNameForCompare } from "../../domain/identity/person-name.js";
 import type { OcrFormSpec, RosterRow, LookupKind } from "../../workflows/ocr/types.js";
 import type { OathSignatureInput } from "../../workflows/oath-signature/schema.js";
 import { MatchStateSchema, VerificationSchema, type MatchState, type Verification } from "./shared.js";
@@ -100,10 +101,6 @@ const NAME_AUTO_ACCEPT = 0.95;
 const NAME_AUTO_ACCEPT_GAP = 0.10;
 const NAME_DISAMBIG_FLOOR = 0.40;
 const LLM_HIGH_CONFIDENCE = 0.6;
-
-function normalizeName(n: string): string {
-  return n.trim().toLowerCase().replace(/\s+/g, " ");
-}
 
 // ─── Spec implementation ────────────────────────────────────
 
@@ -324,7 +321,7 @@ export const oathOcrFormSpec: OcrFormSpec<
   },
 
   carryForwardKey(record): string {
-    return normalizeName(record.printedName ?? "");
+    return normalizePersonNameForCompare(record.printedName ?? "");
   },
 
   applyCarryForward({ v2, v1 }): OathPreviewRecord {

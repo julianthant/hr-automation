@@ -74,3 +74,40 @@ test("rebuildProjectionForDate is idempotent and skips malformed lines", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("rebuildProjectionForDate only clears session events for the rebuilt date", () => {
+  const dir = tmpTracker();
+  try {
+    appendFileSync(join(dir, "sessions.jsonl"), JSON.stringify({
+      type: "workflow_start",
+      timestamp: "2026-05-03T20:00:00.000Z",
+      pid: 1,
+      workflowInstance: "Yesterday 1",
+      runId: "run-yesterday",
+    }) + "\n");
+    appendFileSync(join(dir, "sessions.jsonl"), JSON.stringify({
+      type: "workflow_start",
+      timestamp: "2026-05-04T20:00:00.000Z",
+      pid: 1,
+      workflowInstance: "Today 1",
+      runId: "run-today",
+    }) + "\n");
+
+    const db = openStateDb(dir);
+    rebuildProjectionForDate(db, { dir, date: "2026-05-03" });
+    rebuildProjectionForDate(db, { dir, date: "2026-05-04" });
+
+    const rows = db.prepare(`
+      SELECT tracker_date, workflow_instance
+      FROM session_events
+      ORDER BY tracker_date ASC
+    `).all() as Array<{ tracker_date: string; workflow_instance: string }>;
+    assert.deepEqual(rows, [
+      { tracker_date: "2026-05-03", workflow_instance: "Yesterday 1" },
+      { tracker_date: "2026-05-04", workflow_instance: "Today 1" },
+    ]);
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -4,9 +4,10 @@ import { mkdtempSync, rmSync, appendFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createServer, type Server } from "http";
+import { getRequestListener } from "@hono/node-server";
 import { createDashboardServer } from "../../../src/tracker/dashboard.js";
-import { createDashboardRequestListener } from "../../../src/tracker/dashboard/routes/index.js";
-import { createEventsRoute } from "../../../src/tracker/dashboard/routes/events.js";
+import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
+import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
 
 function appendEvent(dir: string, event: object): void {
   appendFileSync(join(dir, "sessions.jsonl"), JSON.stringify(event) + "\n");
@@ -60,6 +61,7 @@ describe("/events/run-events SSE", () => {
   afterEach(async () => {
     server.closeAllConnections?.();
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    closeStateDbForTests(tmp);
     if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -128,10 +130,14 @@ describe("/events SSE JSONL fallback", () => {
         status: "running",
         step: "extraction",
       }) + "\n");
-      const listener = createDashboardRequestListener(
-        { workflow: "onboarding", port: 0, dir: tmp, projectionReady: false },
-        [createEventsRoute()],
-      );
+      const app = createDashboardHonoApp({
+        workflow: "onboarding",
+        port: 0,
+        dir: tmp,
+        stateDb: openStateDb(tmp),
+        projectionReady: false,
+      });
+      const listener = getRequestListener(app.fetch);
       const server = createServer(listener);
       await new Promise<void>((resolve) => server.listen(0, resolve));
       try {
@@ -150,6 +156,7 @@ describe("/events SSE JSONL fallback", () => {
         await new Promise<void>((resolve) => server.close(() => resolve()));
       }
     } finally {
+      closeStateDbForTests(tmp);
       if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
     }
   });

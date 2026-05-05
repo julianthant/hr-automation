@@ -258,7 +258,7 @@ export async function runEmergencyContact(
  *
  * One invocation reads the whole batch YAML, runs roster preflight in-process
  * (before any daemon work), then enqueues each record 1:1 to the shared
- * `.tracker/daemons/emergency-contact.queue.jsonl`. Whichever alive daemon
+ * SQLite tasks queue and appends JSONL queue audit. Whichever alive daemon
  * finishes its current record first claims the next; `--parallel K` fans
  * out across K daemons (K × UCPath Duo on fresh spawn).
  *

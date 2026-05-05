@@ -5,6 +5,7 @@ import {
   hidePeopleSoftModalMask,
   readExistingContactNames,
 } from "../../systems/ucpath/personal-data.js";
+import { normalizePersonNameForCompare } from "../../domain/identity/person-name.js";
 import { mapRelationship } from "./config.js";
 import { levenshteinDistance } from "../../match/index.js";
 import type { EmergencyContactRecord } from "./schema.js";
@@ -23,14 +24,6 @@ export interface ContactMatch {
   isExact: boolean;
 }
 
-function normalizeNameForCompare(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z\s]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 /**
  * Pure matcher — finds the closest fuzzy match for a target name within a
  * list of existing contact names. Uses Levenshtein on normalized forms.
@@ -44,10 +37,10 @@ export function pickBestContactMatch(
   existingNames: readonly string[],
   targetName: string,
 ): ContactMatch | null {
-  const targetNorm = normalizeNameForCompare(targetName);
+  const targetNorm = normalizePersonNameForCompare(targetName, { lettersOnly: true });
   let best: ContactMatch | null = null;
   for (const candidate of existingNames) {
-    const norm = normalizeNameForCompare(candidate);
+    const norm = normalizePersonNameForCompare(candidate, { lettersOnly: true });
     const distance = levenshteinDistance(norm, targetNorm);
     if (distance > 2) continue;
     if (!best || distance < best.distance) {
@@ -263,4 +256,3 @@ export async function extractEmployeeName(
     // Best-effort
   }
 }
-

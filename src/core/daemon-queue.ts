@@ -531,10 +531,11 @@ export async function unclaimItem(
   itemId: string,
   reason: 'recovered' | 'sigint-soft' | 'voluntary',
   trackerDir?: string,
+  runId?: string,
 ): Promise<void> {
   if (queueBackend() === 'jsonl') return legacyUnclaimItem(workflow, itemId, reason, trackerDir)
   const store = openQueueTaskStore(trackerDir)
-  const task = store.findTaskByIdentity({ workflow, itemId })
+  const task = store.findTaskByIdentity({ workflow, itemId, ...(runId ? { runId } : {}) })
   if (task) store.returnTaskToQueued({ taskId: task.taskId })
   appendEvent(workflow, { type: 'unclaim', id: itemId, reason, ts: nowIso() }, trackerDir)
 }
