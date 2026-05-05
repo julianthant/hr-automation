@@ -6,6 +6,8 @@ import { classifyError } from "../utils/errors.js";
 import { maskSsn, maskDob, redactPii } from "../utils/pii.js";
 import { PATHS } from "../config.js";
 import type { StructuredLogEvent } from "../domain/log-events.js";
+import { appendJsonlWithSource } from "./state/jsonl-source.js";
+import { applyLogEntryLive, applySessionEventLive, applyTrackerEntryLive } from "./state/runtime.js";
 import {
   generateInstanceName,
   emitWorkflowStart,
@@ -49,13 +51,17 @@ function getLogFilePath(workflow: string, dir: string): string {
 }
 
 export function appendLogEntry(entry: LogEntry, dir: string = DEFAULT_DIR): void {
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const logPath = getLogFilePath(entry.workflow, dir);
   // Scrub free-form PII (SSN, DOB) from the message before it hits disk.
   // Errors like `Error: SSN 123-45-6789 not found in I9` get normalized to
   // `Error: SSN ***-**-**** not found in I9` automatically.
   const scrubbed: LogEntry = { ...entry, message: redactPii(entry.message) };
-  appendFileSync(logPath, JSON.stringify(scrubbed) + "\n");
+  const source = appendJsonlWithSource(logPath, scrubbed, {
+    sourceKind: "log",
+    workflow: scrubbed.workflow,
+    trackerDate: dateLocal(new Date(scrubbed.ts)),
+  });
+  applyLogEntryLive(scrubbed, source, dir);
 }
 
 // Cache parsed JSONL by file path — avoids re-parsing on every SSE tick.
@@ -167,15 +173,23 @@ export function trackEventForDate(
   date: string,
   dir: string = DEFAULT_DIR,
 ): void {
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const logPath = join(dir, `${entry.workflow}-${date}.jsonl`);
-  appendFileSync(logPath, JSON.stringify(entry) + "\n");
+  const source = appendJsonlWithSource(logPath, entry, {
+    sourceKind: "tracker",
+    workflow: entry.workflow,
+    trackerDate: date,
+  });
+  applyTrackerEntryLive(entry, source, dir);
 }
 
 export function trackEvent(entry: TrackerEntry, dir: string = DEFAULT_DIR): void {
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const logPath = getLogPath(entry.workflow, dir);
-  appendFileSync(logPath, JSON.stringify(entry) + "\n");
+  const source = appendJsonlWithSource(logPath, entry, {
+    sourceKind: "tracker",
+    workflow: entry.workflow,
+    trackerDate: dateLocal(),
+  });
+  applyTrackerEntryLive(entry, source, dir);
 }
 
 /** Keys whose values are always masked as SSN. */
@@ -714,6 +728,9 @@ export function emitScreenshotEvent(
   opts?: { dir?: string },
 ): void {
   const dir = opts?.dir ?? DEFAULT_DIR;
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  appendFileSync(getSessionsFilePath(dir), JSON.stringify(event) + "\n");
+  const source = appendJsonlWithSource(getSessionsFilePath(dir), event, {
+    sourceKind: "session",
+    trackerDate: event.timestamp.slice(0, 10),
+  });
+  applySessionEventLive(event, source, dir);
 }

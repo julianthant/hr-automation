@@ -123,6 +123,23 @@ export async function downloadCrmDocuments(
     const savedName = `Doc${idx + 1}-${filename}`;
     const savedPath = join(folderPath, savedName);
     await writeFile(savedPath, body);
+    try {
+      const { openStateDb, isStateDbReady } = await import("../../tracker/state/db.js");
+      const { registerLocalFile } = await import("../../tracker/files.js");
+      const trackerDir = ".tracker";
+      if (isStateDbReady(trackerDir)) {
+        registerLocalFile(openStateDb(trackerDir), {
+          kind: "pdf",
+          mimeType: "application/pdf",
+          path: savedPath,
+          originalName: savedName,
+          source: "crm-idocs-download",
+          workflow: "onboarding",
+        });
+      }
+    } catch {
+      // File registry is best-effort; PDF download success remains non-fatal.
+    }
     log.step(msg(`Document ${idx + 1} saved: ${savedPath} (${body.length} bytes)`));
     saved.push({ index: idx, filename: savedName, path: savedPath, bytes: body.length });
   }

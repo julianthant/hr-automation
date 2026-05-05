@@ -87,12 +87,17 @@ export async function runOcrRetryPage(
   const summary = parsePageSummary(row.data) ?? { total: 0, succeeded: 0, failed: 0 };
 
   const failedEntry = failedPages.find((fp) => fp.page === input.pageNum);
-  const pageImagePath = failedEntry?.pageImagePath ?? join(
+  const pdfFileId = row.data?.pdfFileId as unknown as string | undefined;
+  const legacyPageImagePath = join(
     trackerDir ?? ".tracker",
     "page-images",
     input.sessionId,
     `page-${String(input.pageNum).padStart(2, "0")}.png`,
   );
+  const filePageImagePath = pdfFileId
+    ? join(trackerDir ?? ".tracker", "pdf-cache", pdfFileId, `page-${String(input.pageNum).padStart(3, "0")}.png`)
+    : null;
+  const pageImagePath = filePageImagePath ?? failedEntry?.pageImagePath ?? legacyPageImagePath;
 
   if (!opts._ocrPageOverride && !existsSync(pageImagePath)) {
     throw new RetryPageError("image-missing", `Page image expired at ${pageImagePath}`);
@@ -112,6 +117,7 @@ export async function runOcrRetryPage(
             attempts: fp.attempts + 1,
             error: ocr.error ?? fp.error,
             attemptedKeys: ocr.attemptedKeys ?? fp.attemptedKeys,
+            pageImagePath,
           }
         : fp,
     );
@@ -126,7 +132,7 @@ export async function runOcrRetryPage(
       });
     }
     const rosterPathForFailed = (row.data?.rosterPath as unknown as string | undefined) ?? "";
-    emitRow({ row, records, failedPages: newFailedPages, summary, emit, parentRunId: row.parentRunId, sessionId: input.sessionId, runId: input.runId, formType, pdfOriginalName: row.data?.pdfOriginalName as unknown as string ?? "", rosterPath: rosterPathForFailed });
+    emitRow({ row, records, failedPages: newFailedPages, summary, emit, parentRunId: row.parentRunId, sessionId: input.sessionId, runId: input.runId, formType, pdfOriginalName: row.data?.pdfOriginalName as unknown as string ?? "", rosterPath: rosterPathForFailed, pdfFileId });
     return { ok: true, page: input.pageNum, recordsAdded: 0, stillFailed: true };
   }
 
@@ -228,6 +234,7 @@ export async function runOcrRetryPage(
     formType,
     pdfOriginalName: row.data?.pdfOriginalName as unknown as string ?? "",
     rosterPath,
+    pdfFileId,
   });
 
   return { ok: true, page: input.pageNum, recordsAdded: newRecords.length, stillFailed: false };
@@ -334,11 +341,13 @@ function emitRow(args: {
   formType: string;
   pdfOriginalName: string;
   rosterPath: string;
+  pdfFileId?: string;
 }): void {
   const verifiedCount = countVerified(args.records);
   const data = flattenForData({
     formType: args.formType,
     pdfOriginalName: args.pdfOriginalName,
+    ...(args.pdfFileId ? { pdfFileId: args.pdfFileId } : {}),
     sessionId: args.sessionId,
     rosterPath: args.rosterPath,
     ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),

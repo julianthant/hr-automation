@@ -11,6 +11,7 @@ export type AnyOcrPreviewRecord = PreviewRecord | OathPreviewRecord;
 export interface ParsedOcrPrepareRow {
   records: ReadonlyArray<AnyOcrPreviewRecord>;
   pdfOriginalName?: string;
+  pdfFileId?: string;
 }
 
 /**

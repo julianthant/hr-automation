@@ -3,8 +3,10 @@ import { strict as assert } from "node:assert";
 import { mkdtempSync, rmSync, appendFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import type { Server } from "http";
+import { createServer, type Server } from "http";
 import { createDashboardServer } from "../../../src/tracker/dashboard.js";
+import { createDashboardRequestListener } from "../../../src/tracker/dashboard/routes/index.js";
+import { createEventsRoute } from "../../../src/tracker/dashboard/routes/events.js";
 
 function appendEvent(dir: string, event: object): void {
   appendFileSync(join(dir, "sessions.jsonl"), JSON.stringify(event) + "\n");
@@ -110,5 +112,45 @@ describe("/events/run-events SSE", () => {
     const allEvents = messages.flatMap((m) => JSON.parse(m));
     assert.equal(allEvents.length, 2);
     assert.deepEqual(allEvents.map((e: { type: string }) => e.type), ["workflow_start", "auth_complete"]);
+  });
+});
+
+describe("/events SSE JSONL fallback", () => {
+  it("keeps the JSONL-derived shape when projection is disabled", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "events-jsonl-fallback-"));
+    const date = "2026-04-19";
+    try {
+      appendFileSync(join(tmp, `onboarding-${date}.jsonl`), JSON.stringify({
+        workflow: "onboarding",
+        timestamp: "2026-04-19T10:00:00Z",
+        id: "alice@example.com",
+        runId: "run-1",
+        status: "running",
+        step: "extraction",
+      }) + "\n");
+      const listener = createDashboardRequestListener(
+        { workflow: "onboarding", port: 0, dir: tmp, projectionReady: false },
+        [createEventsRoute()],
+      );
+      const server = createServer(listener);
+      await new Promise<void>((resolve) => server.listen(0, resolve));
+      try {
+        const port = (server.address() as { port: number }).port;
+        const messages = await collectSSE(
+          `http://localhost:${port}/events?workflow=onboarding&date=${date}`,
+          { stopAfter: 1, timeoutMs: 1500 },
+        );
+        assert.ok(messages[0], "expected one SSE payload");
+        const payload = JSON.parse(messages[0]);
+        assert.equal(Array.isArray(payload.entries), true);
+        assert.equal(payload.source, undefined);
+        assert.equal(payload.entries[0].id, "alice@example.com");
+      } finally {
+        server.closeAllConnections?.();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    } finally {
+      if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

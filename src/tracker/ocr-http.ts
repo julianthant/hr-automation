@@ -49,6 +49,7 @@ export function buildOcrFormsHandler(): () => FormTypeListing[] {
 export interface PrepareInput {
   pdfPath: string;
   pdfOriginalName: string;
+  pdfFileId?: string;
   formType: string;
   rosterMode: "existing" | "download";
   rosterPath?: string;
@@ -143,6 +144,7 @@ export function buildOcrPrepareHandler(
         pdfOriginalName: input.pdfOriginalName,
         ocrSessionId: sessionId,
         ocrRunId: runId,
+        pdfFileId: input.pdfFileId,
         trackerDir,
       });
     }
@@ -173,6 +175,7 @@ export function buildOcrPrepareHandler(
             {
               pdfPath: input.pdfPath,
               pdfOriginalName: input.pdfOriginalName,
+              pdfFileId: input.pdfFileId,
               formType: input.formType,
               sessionId,
               rosterPath: input.rosterPath,
@@ -211,6 +214,7 @@ function writeOriginParentPending(args: {
   pdfOriginalName: string;
   ocrSessionId: string;
   ocrRunId: string;
+  pdfFileId?: string;
   trackerDir?: string;
 }): void {
   const ts = new Date().toISOString();
@@ -224,6 +228,7 @@ function writeOriginParentPending(args: {
     __id: args.parentItemId,
     mode: "prepare",
     pdfOriginalName: args.pdfOriginalName,
+    ...(args.pdfFileId ? { pdfFileId: args.pdfFileId } : {}),
     ocrSessionId: args.ocrSessionId,
     ocrRunId: args.ocrRunId,
   };

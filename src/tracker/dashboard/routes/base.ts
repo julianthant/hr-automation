@@ -25,6 +25,8 @@ import {
   pickLater,
   type StepDurationEntry,
 } from "../run-timelines.js";
+import { queryRunsForItem } from "../../state/queries.js";
+import { log } from "../../../utils/log.js";
 
 export function buildWorkflowsHandler(): () => WorkflowMetadata[] {
   return () => getAllRegisteredWorkflows();
@@ -113,6 +115,16 @@ export function createBaseRoutes(): DashboardRoute {
       const wf = url.searchParams.get("workflow") ?? workflow;
       const id = url.searchParams.get("id") ?? "";
       const date = url.searchParams.get("date") ?? undefined;
+
+      if (ctx.projectionReady && ctx.stateDb && date) {
+        try {
+          const runs = queryRunsForItem(ctx.stateDb, { workflow: wf, itemId: id, date });
+          writeJson(res, 200, runs);
+          return true;
+        } catch (err) {
+          log.warn(`SQLite /api/runs fallback to JSONL: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
 
       // Attach per-run step durations, a single timeline span (covers both
       // the synthetic auth tracker entries and the handler's log lines), and

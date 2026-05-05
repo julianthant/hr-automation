@@ -29,10 +29,8 @@ import {
 import { isResolvedPrepEntry } from "../prep-rows.js";
 import { computeFailureCounts } from "../failures.js";
 import { buildScreenshotsHandler } from "../screenshots.js";
-import {
-  scanFailurePatterns,
-  scanOrphanedQueueItems,
-} from "../sweeps.js";
+import { queryEntriesPayload } from "../../state/queries.js";
+import { log } from "../../../utils/log.js";
 
 export function createEventsRoute(): DashboardRoute {
   return async (_req, res, url, ctx) => {
@@ -204,6 +202,19 @@ export function createEventsRoute(): DashboardRoute {
       const today = dateLocal();
       writeSseHeaders(res);
       const send = () => {
+        if (ctx.projectionReady && ctx.stateDb) {
+          try {
+            const payload = queryEntriesPayload(ctx.stateDb, {
+              workflow: wf,
+              date: date || today,
+            });
+            res.write(`data: ${JSON.stringify(payload)}\n\n`);
+            return;
+          } catch (err) {
+            log.warn(`SQLite /events fallback to JSONL: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+
         // `raw` holds every JSONL record for this workflow/date, including the
         // pending/running/done/failed chain per (itemId, runId). We need the
         // full chain for stepDurations; useEntries dedupes to the latest per id
@@ -341,16 +352,6 @@ export function createEventsRoute(): DashboardRoute {
         }
         res.write(`data: ${JSON.stringify({ entries: enriched, workflows, wfCounts, failureCounts })}\n\n`);
 
-        // After each poll, scan for repeated-failure patterns. Fire-and-forget
-        // - the SSE response doesn't wait on it, and scanFailurePatterns
-        // swallows its own errors so a notification glitch can't derail the
-        // cycle.
-        void scanFailurePatterns();
-        // Safety net for queued items whose daemon died without running its
-        // own orphan-queue cleanup (force-kill, OS crash). Marks them failed
-        // so pending rows don't stick. Idempotent + cheap when queues are
-        // empty.
-        void scanOrphanedQueueItems(dir);
       };
       send();
       const interval = setInterval(send, 1_000);

@@ -1,7 +1,9 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "fs";
+import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { DEFAULT_DIR, dateLocal } from "./jsonl.js";
 import { getLogRunId } from "../utils/log.js";
+import { appendJsonlWithSource } from "./state/jsonl-source.js";
+import { applySessionEventLive } from "./state/runtime.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -73,7 +75,6 @@ export function emitSessionEvent(
   event: Omit<SessionEvent, "timestamp" | "pid">,
   dir: string = DEFAULT_DIR,
 ): void {
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const runId = event.runId ?? getLogRunId();
   const full: SessionEvent = {
     ...event,
@@ -81,7 +82,11 @@ export function emitSessionEvent(
     timestamp: new Date().toISOString(),
     pid: process.pid,
   };
-  appendFileSync(getSessionsFilePath(dir), JSON.stringify(full) + "\n");
+  const source = appendJsonlWithSource(getSessionsFilePath(dir), full, {
+    sourceKind: "session",
+    trackerDate: full.timestamp.slice(0, 10),
+  });
+  applySessionEventLive(full, source, dir);
 }
 
 export function readSessionEvents(dir: string = DEFAULT_DIR): SessionEvent[] {
