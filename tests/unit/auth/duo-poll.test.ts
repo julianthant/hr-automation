@@ -7,6 +7,8 @@ import {
   buildDuoResentDetail,
   buildDuoWaitingDetail,
   extractDuoVerificationCode,
+  pollDuoApproval,
+  readDuoVerificationCodeWhenVisible,
   type DuoPollOptions,
 } from "../../../src/auth/duo-poll.js";
 
@@ -186,5 +188,64 @@ describe("Duo verification code helpers", () => {
 
   it("keeps the short push resent detail when no Duo code has ever been visible", () => {
     assert.equal(buildDuoResentDetail(undefined, undefined), "Push resent");
+  });
+
+  it("waits briefly for the initial Duo code before building the first Telegram message", async () => {
+    let reads = 0;
+    const page = {
+      locator: () => ({
+        innerText: async () => {
+          reads += 1;
+          return reads < 3
+            ? "UC San Diego\nEnter code in Duo Mobile"
+            : "UC San Diego\nEnter code in Duo Mobile\n0203\nSent to \"iOS\" (•••-•••-9464)";
+        },
+      }),
+      waitForTimeout: async () => {},
+    } as unknown as import("playwright").Page;
+
+    const code = await readDuoVerificationCodeWhenVisible(page, {
+      timeoutMs: 500,
+      intervalMs: 25,
+    });
+
+    assert.equal(code, "0203");
+    assert.equal(buildDuoWaitingDetail(code), "Enter Duo code 0203 in Duo Mobile");
+  });
+
+  it("aborts an in-progress Duo poll instead of waiting for the poll cadence", async () => {
+    const controller = new AbortController();
+    const emptyLocator = {
+      count: async () => 0,
+      first() { return this; },
+      or() { return this; },
+      click: async () => {},
+      innerText: async () => "UC San Diego\nEnter code in Duo Mobile",
+    };
+    const page = {
+      url: () => "https://api-prod.duosecurity.com/frame",
+      locator: () => emptyLocator,
+      getByRole: () => emptyLocator,
+      getByText: () => emptyLocator,
+      waitForTimeout: async () => {
+        controller.abort(new Error("stop requested during Duo"));
+        await new Promise(() => {});
+      },
+    } as unknown as import("playwright").Page;
+
+    await assert.rejects(
+      () => Promise.race([
+        pollDuoApproval(page, {
+          successUrlMatch: "done",
+          timeoutSeconds: 60,
+          preCheckMs: 0,
+          initialCodeWaitMs: 0,
+          pollIntervalMs: 5_000,
+          abortSignal: controller.signal,
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Duo poll did not abort")), 250)),
+      ]),
+      /stop requested during Duo|aborted/i,
+    );
   });
 });

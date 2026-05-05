@@ -23,7 +23,7 @@ export async function requestDuoApproval(
     duoRequestId: requestId,
   });
 
-  await waitForDuoTurn(requestId, options.instance, options.system);
+  await waitForDuoTurn(requestId, options.instance, options.system, options.abortSignal);
 
   log.step(`[Duo Queue] Active: ${options.system} for ${options.instance}`);
   emitSessionEvent({
@@ -61,9 +61,11 @@ async function waitForDuoTurn(
   requestId: string,
   instance: string,
   system: string,
+  abortSignal?: AbortSignal,
 ): Promise<void> {
   let logged = false;
   while (true) {
+    throwIfDuoQueueAborted(abortSignal);
     const events = readSessionEvents();
     const duoEvents = events.filter(
       (e) => e.type === "duo_request" || e.type === "duo_complete" || e.type === "duo_timeout",
@@ -103,8 +105,38 @@ async function waitForDuoTurn(
       logged = true;
     }
 
-    await new Promise((r) => setTimeout(r, 500));
+    await waitForDuoQueue(500, abortSignal);
   }
+}
+
+function duoQueueAbortReason(signal: AbortSignal): Error {
+  const reason = signal.reason;
+  if (reason instanceof Error) return reason;
+  return new Error(reason ? String(reason) : "Duo queue wait aborted");
+}
+
+function throwIfDuoQueueAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw duoQueueAbortReason(signal);
+}
+
+function waitForDuoQueue(ms: number, abortSignal?: AbortSignal): Promise<void> {
+  if (!abortSignal) return new Promise((r) => setTimeout(r, ms));
+  if (abortSignal.aborted) return Promise.reject(duoQueueAbortReason(abortSignal));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      cleanup();
+      reject(duoQueueAbortReason(abortSignal));
+    };
+    const cleanup = (): void => {
+      abortSignal.removeEventListener("abort", onAbort);
+    };
+    abortSignal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function isProcessAlive(pid: number): boolean {

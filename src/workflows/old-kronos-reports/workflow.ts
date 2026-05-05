@@ -297,8 +297,8 @@ export const kronosReportsWorkflow = defineWorkflow({
   systems: [
     {
       id: "old-kronos",
-      login: async (page, instance) => {
-        const ok = await loginToUKG(page, instance);
+      login: async (page, instance, context) => {
+        const ok = await loginToUKG(page, instance, context?.abortSignal);
         if (!ok) throw new Error("UKG authentication failed");
       },
       // sessionDir intentionally omitted here — parallel.ts injects a per-worker

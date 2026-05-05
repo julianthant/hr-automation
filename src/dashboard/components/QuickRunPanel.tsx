@@ -65,7 +65,7 @@ export function QuickRunPanel({ workflow }: QuickRunPanelProps) {
         const n = body.enqueued ?? parsed.inputs.length;
         toast.success(`Added ${n} ${n === 1 ? "item" : "items"} to ${workflow}`, {
           description:
-            "If no worker was running, one is starting — approve Duo in the new browser window.",
+            "If no session was running, one is starting — approve Duo in the new browser window.",
           duration: 6000,
         });
         setValue("");

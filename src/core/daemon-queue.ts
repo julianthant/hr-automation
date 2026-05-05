@@ -378,7 +378,17 @@ export async function readQueueState(workflow: string, trackerDir?: string): Pro
   if (queueBackend() === 'jsonl') return legacyReadQueueState(workflow, trackerDir)
   const store = openQueueTaskStore(trackerDir)
   const state: QueueState = { queued: [], claimed: [], done: [], failed: [] }
-  for (const task of store.listTasksForWorkflow(workflow)) {
+  const rows = store.db.prepare(`
+    SELECT id
+    FROM tasks
+    WHERE workflow = ?
+      AND task_kind = 'workflow_item'
+      AND source = 'daemon'
+    ORDER BY COALESCE(enqueued_at, created_at) ASC, rowid ASC
+  `).all(workflow) as Array<{ id: string }>
+  for (const row of rows) {
+    const task = store.getTask(row.id)
+    if (!task) continue
     const item = taskToQueueItem(task)
     state[item.state].push(item)
   }

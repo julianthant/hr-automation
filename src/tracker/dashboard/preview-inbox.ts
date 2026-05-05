@@ -40,7 +40,7 @@ const PREVIEW_INBOX_DAYS = 7;
 export function buildPreviewInboxHandler(deps: PreviewInboxDeps) {
   return (): PreviewInboxRow[] => {
     const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - (PREVIEW_INBOX_DAYS - 1));
+    cutoff.setDate(cutoff.getDate() - PREVIEW_INBOX_DAYS);
     const cutoffStr = dateLocal(cutoff);
 
     // Aggregate by (workflow, id, runId). Keep the latest entry per key.

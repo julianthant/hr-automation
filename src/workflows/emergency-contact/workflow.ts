@@ -65,8 +65,8 @@ export const emergencyContactWorkflow = defineWorkflow({
   systems: [
     {
       id: "ucpath",
-      login: async (page, instance) => {
-        const ok = await loginToUCPath(page, instance);
+      login: async (page, instance, context) => {
+        const ok = await loginToUCPath(page, instance, context?.abortSignal);
         if (!ok) throw new Error("UCPath authentication failed");
       },
     },

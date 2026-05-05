@@ -447,6 +447,12 @@ test('SQLite enqueue adopts OCR dependency-precreated EID child task rows', asyn
       now: '2026-05-05T12:00:00.000Z',
     })
 
+    const parentState = await readQueueState('ocr', dir)
+    assert.equal(parentState.queued.length, 0)
+    assert.equal(parentState.claimed.length, 0)
+    assert.equal(parentState.done.length, 0)
+    assert.equal(parentState.failed.length, 0)
+
     const enqueued = await enqueueItems(
       'eid-lookup',
       [{ name: 'Barahona Martell, Carlos, D' }],

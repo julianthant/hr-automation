@@ -54,6 +54,11 @@ export interface LaunchOpts {
    * needs a Session reference (e.g. to build a real ScreenshotFn).
    */
   onReady?: (session: Session) => void
+  /**
+   * Abort an in-progress browser launch/authentication chain. Used by
+   * daemon stop paths so a Duo wait does not keep the worker alive.
+   */
+  abortSignal?: AbortSignal
 }
 
 interface LaunchOneOpts {
@@ -89,6 +94,7 @@ export class Session {
   static async launch(systems: SystemConfig[], opts: LaunchOpts = {}): Promise<Session> {
     const authChain = opts.authChain ?? (systems.length > 1 ? 'interleaved' : 'sequential')
     const launchOne = opts.launchFn ?? defaultLaunchOne
+    const abortSignal = opts.abortSignal
 
     // Construct the Session with empty maps first so onReady can wire observers
     // that need a Session reference (e.g. to build a real ScreenshotFn) BEFORE
@@ -97,14 +103,16 @@ export class Session {
     const readyPromises = new Map<string, Promise<void>>()
     const session = new Session({ systems, browsers, readyPromises })
     opts.onReady?.(session)
+    throwIfAborted(abortSignal)
 
     // Launch all browsers in parallel. Windows land wherever Chromium drops
     // them — tiling was removed 2026-04-23 once Playwright's default window
     // placement proved fine for the small (≤4) browser counts we actually use.
-    const slots = await Promise.all(
+    const slots = await raceAbort(Promise.all(
       systems.map((s) => launchOne({ system: s })),
-    )
+    ), abortSignal)
     systems.forEach((s, i) => browsers.set(s.id, slots[i]))
+    throwIfAborted(abortSignal)
 
     // Fire onBrowserLaunch for each system. browserId === systemId today
     // (one browser per system); if that changes later, mint UUIDs here.
@@ -128,27 +136,31 @@ export class Session {
     const toPrepare = systems.filter((s) => typeof s.prepareLogin === 'function')
     if (toPrepare.length > 0) {
       log.step(`[Session] Prepare-login in parallel for ${toPrepare.length} system(s): ${toPrepare.map((s) => s.id).join(', ')}`)
-      await Promise.allSettled(
+      await raceAbort(Promise.allSettled(
         toPrepare.map(async (s) => {
           const slot = browsers.get(s.id)
           if (!slot) return
           try {
+            throwIfAborted(abortSignal)
             await s.prepareLogin!(slot.page)
           } catch (err) {
+            if (abortSignal?.aborted) throw abortReason(abortSignal)
             log.warn(`[Session: ${s.id}] prepareLogin failed — login phase will re-prepare: ${errorMessage(err)}`)
           }
         }),
-      )
+      ), abortSignal)
     }
 
     if (authChain === 'sequential') {
       for (const s of systems) {
+        throwIfAborted(abortSignal)
         const slot = browsers.get(s.id)!
         await slot.page.bringToFront()
         opts.observer?.onAuthStart?.(s.id, s.id)
         await loginWithRetry(
           s, slot.page, opts.observer?.instance,
           () => opts.observer?.onAuthFailed?.(s.id, s.id),
+          abortSignal,
         )
         opts.observer?.onAuthComplete?.(s.id, s.id)
       }
@@ -169,16 +181,19 @@ export class Session {
         const sys = systems[i]
         const slot = browsers.get(sys.id)!
         const p = (async () => {
+          throwIfAborted(abortSignal)
           // Each system fires `i * STAGGER_MS` after t=0. System 0 fires
           // immediately; system 1 after STAGGER_MS; system 2 after 2*STAGGER_MS;
           // etc. This accumulates so concurrent Duos arrive evenly spaced
           // on the user's phone, not back-to-back per IIFE.
-          if (i > 0) await new Promise((resolve) => setTimeout(resolve, i * STAGGER_MS))
+          if (i > 0) await abortableDelay(i * STAGGER_MS, abortSignal)
+          throwIfAborted(abortSignal)
           await slot.page.bringToFront()
           opts.observer?.onAuthStart?.(sys.id, sys.id)
           await loginWithRetry(
             sys, slot.page, opts.observer?.instance,
             () => opts.observer?.onAuthFailed?.(sys.id, sys.id),
+            abortSignal,
           )
           opts.observer?.onAuthComplete?.(sys.id, sys.id)
         })()
@@ -197,12 +212,14 @@ export class Session {
       void Promise.allSettled(submitPromises)
     } else {
       // Interleaved: auth system[0] blocking; chain the rest in background.
+      throwIfAborted(abortSignal)
       const firstSlot = browsers.get(systems[0].id)!
       await firstSlot.page.bringToFront()
       opts.observer?.onAuthStart?.(systems[0].id, systems[0].id)
       await loginWithRetry(
         systems[0], firstSlot.page, opts.observer?.instance,
         () => opts.observer?.onAuthFailed?.(systems[0].id, systems[0].id),
+        abortSignal,
       )
       opts.observer?.onAuthComplete?.(systems[0].id, systems[0].id)
       readyPromises.set(systems[0].id, Promise.resolve())
@@ -214,11 +231,13 @@ export class Session {
         // Each chain step ignores predecessor failure so one bad auth doesn't block the next.
         const p = prev
           .catch(() => {})
+          .then(() => { throwIfAborted(abortSignal) })
           .then(() => slot.page.bringToFront())
           .then(() => { opts.observer?.onAuthStart?.(sys.id, sys.id) })
           .then(() => loginWithRetry(
             sys, slot.page, opts.observer?.instance,
             () => opts.observer?.onAuthFailed?.(sys.id, sys.id),
+            abortSignal,
           ))
           .then(() => { opts.observer?.onAuthComplete?.(sys.id, sys.id) })
         // Prevent unhandled rejection warnings if nobody consumes this promise.
@@ -623,30 +642,96 @@ async function defaultLaunchOne(opts: LaunchOneOpts): Promise<SystemSlot> {
 
 const AUTH_MAX_ATTEMPTS = 3;
 
+function abortReason(signal: AbortSignal): Error {
+  const reason = signal.reason
+  if (reason instanceof Error) return reason
+  return new Error(reason ? String(reason) : 'operation aborted')
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortReason(signal)
+}
+
+function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise
+  if (signal.aborted) {
+    promise.catch(() => {})
+    return Promise.reject(abortReason(signal))
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      cleanup()
+      reject(abortReason(signal))
+    }
+    const cleanup = (): void => {
+      signal.removeEventListener('abort', onAbort)
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        cleanup()
+        resolve(value)
+      },
+      (err) => {
+        cleanup()
+        reject(err)
+      },
+    )
+  })
+}
+
+function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    return new Promise((resolve) => setTimeout(resolve, ms))
+  }
+  if (signal.aborted) return Promise.reject(abortReason(signal))
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup()
+      resolve()
+    }, ms)
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      cleanup()
+      reject(abortReason(signal))
+    }
+    const cleanup = (): void => {
+      signal.removeEventListener('abort', onAbort)
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 async function loginWithRetry(
   system: SystemConfig,
   page: Page,
   instance?: string,
   onFailed?: () => void,
+  abortSignal?: AbortSignal,
 ): Promise<void> {
   let lastError: string | undefined
   for (let attempt = 1; attempt <= AUTH_MAX_ATTEMPTS; attempt++) {
+    throwIfAborted(abortSignal)
     if (attempt > 1) {
       log.warn(`[Auth: ${system.id}] Retrying (attempt ${attempt}/${AUTH_MAX_ATTEMPTS}) — previous error: ${lastError ?? '<none>'}`)
     } else {
       log.step(`[Auth: ${system.id}] Starting login (attempt ${attempt}/${AUTH_MAX_ATTEMPTS})`)
     }
     try {
-      await system.login(page, instance)
+      await raceAbort(system.login(page, instance, { abortSignal }), abortSignal)
       if (attempt > 1) {
         log.success(`[Auth: ${system.id}] Recovered on attempt ${attempt}`)
       }
       return
     } catch (err) {
+      if (abortSignal?.aborted) throw abortReason(abortSignal)
       lastError = errorMessage(err)
       if (attempt < AUTH_MAX_ATTEMPTS) {
-        await page.goto('about:blank').catch(() => {})
-        await page.waitForTimeout(1_000)
+        await raceAbort(page.goto('about:blank'), abortSignal).catch((gotoErr) => {
+          if (abortSignal?.aborted) throw abortReason(abortSignal)
+          log.warn(`[Auth: ${system.id}] reset to about:blank failed before retry: ${errorMessage(gotoErr)}`)
+        })
+        await abortableDelay(1_000, abortSignal)
       } else {
         onFailed?.()
         throw err

@@ -187,7 +187,7 @@ export function trackEvent(entry: TrackerEntry, dir: string = DEFAULT_DIR): void
   const source = appendJsonlWithSource(logPath, entry, {
     sourceKind: "tracker",
     workflow: entry.workflow,
-    trackerDate: dateLocal(),
+    trackerDate: dateLocal(new Date(entry.timestamp)),
   });
   applyTrackerEntryLive(entry, source, dir);
 }

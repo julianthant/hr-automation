@@ -78,7 +78,11 @@ export async function ucpathNavigateAndFill(page: Page): Promise<boolean> {
  * (Shibboleth token expired while we waited for earlier Duos), re-runs
  * ucpathNavigateAndFill() once before submitting.
  */
-export async function ucpathSubmitAndWaitForDuo(page: Page, instance?: string): Promise<boolean> {
+export async function ucpathSubmitAndWaitForDuo(
+  page: Page,
+  instance?: string,
+  abortSignal?: AbortSignal,
+): Promise<boolean> {
   if (!(await isSsoFormReady(page))) {
     log.warn("UCPath SSO form gone stale — re-preparing before submit");
     const ok = await ucpathNavigateAndFill(page);
@@ -98,6 +102,7 @@ export async function ucpathSubmitAndWaitForDuo(page: Page, instance?: string): 
     successUrlMatch: (url: string) =>
       url.includes("universityofcalifornia.edu") && !url.includes("duosecurity"),
     systemLabel: "UCPath",
+    abortSignal,
   };
   const approved = instance
     ? await requestDuoApproval(page, { ...duoOptions, system: "UCPath", instance })
@@ -143,10 +148,14 @@ export async function ucpathSubmitAndWaitForDuo(page: Page, instance?: string): 
  * All-in-one wrapper for workflows that don't use the parallel-prepare
  * optimization — just composes navigateAndFill + submitAndWaitForDuo.
  */
-export async function loginToUCPath(page: Page, instance?: string): Promise<boolean> {
+export async function loginToUCPath(
+  page: Page,
+  instance?: string,
+  abortSignal?: AbortSignal,
+): Promise<boolean> {
   const filled = await ucpathNavigateAndFill(page);
   if (!filled) return false;
-  return await ucpathSubmitAndWaitForDuo(page, instance);
+  return await ucpathSubmitAndWaitForDuo(page, instance, abortSignal);
 }
 
 /**
@@ -162,7 +171,11 @@ export async function loginToUCPath(page: Page, instance?: string): Promise<bool
  * "Login" in its text, causing getByRole("button", { name: "LOGIN" }) to match it
  * instead of the actual form submit button. Fix: target button[name="_eventId_proceed"].
  */
-export async function loginToACTCrm(page: Page, instance?: string): Promise<boolean> {
+export async function loginToACTCrm(
+  page: Page,
+  instance?: string,
+  abortSignal?: AbortSignal,
+): Promise<boolean> {
   log.step("Navigating to ACT CRM onboarding portal...");
   await page.goto("https://crm.ucsd.edu/hr", {
     waitUntil: "domcontentloaded",
@@ -231,6 +244,7 @@ export async function loginToACTCrm(page: Page, instance?: string): Promise<bool
       (url.includes("act-crm.my.site.com") || url.includes("crm.ucsd.edu")) &&
       !url.includes("login"),
     systemLabel: "CRM",
+    abortSignal,
   };
   const approved = instance
     ? await requestDuoApproval(page, { ...duoOptions, system: "CRM", instance })
@@ -258,11 +272,15 @@ export async function loginToACTCrm(page: Page, instance?: string): Promise<bool
  * @param page - Playwright page instance (from persistent context)
  * @returns true if authenticated (or already was), false on failure
  */
-export async function loginToUKG(page: Page, instance?: string): Promise<boolean> {
+export async function loginToUKG(
+  page: Page,
+  instance?: string,
+  abortSignal?: AbortSignal,
+): Promise<boolean> {
   const filled = await ukgNavigateAndFill(page);
   if (filled === "already_logged_in") return true;
   if (!filled) return false;
-  return await ukgSubmitAndWaitForDuo(page, instance);
+  return await ukgSubmitAndWaitForDuo(page, instance, abortSignal);
 }
 
 /**
@@ -301,7 +319,11 @@ export async function ukgNavigateAndFill(page: Page): Promise<boolean | "already
  * Click the login button and wait for Duo MFA approval.
  * Call after ukgNavigateAndFill() has filled credentials.
  */
-export async function ukgSubmitAndWaitForDuo(page: Page, instance?: string): Promise<boolean> {
+export async function ukgSubmitAndWaitForDuo(
+  page: Page,
+  instance?: string,
+  abortSignal?: AbortSignal,
+): Promise<boolean> {
   await page.locator('button[name="_eventId_proceed"]').click({ timeout: 5_000 });
   log.step("Credentials submitted — waiting for Duo MFA...");
 
@@ -310,6 +332,7 @@ export async function ukgSubmitAndWaitForDuo(page: Page, instance?: string): Pro
     successCheck: async (p: Page) =>
       (await p.locator("text=Manage My Department").count()) > 0,
     systemLabel: "OldKronos",
+    abortSignal,
   };
   const approved = instance
     ? await requestDuoApproval(page, { ...duoOptions, system: "OldKronos", instance })
@@ -375,6 +398,7 @@ export async function kualiSubmitAndWaitForDuo(
   page: Page,
   url: string,
   instance?: string,
+  abortSignal?: AbortSignal,
 ): Promise<boolean> {
   if (page.url().includes("kualibuild")) {
     log.success("Kuali Build authenticated (auto-login detected before submit)");
@@ -413,6 +437,7 @@ export async function kualiSubmitAndWaitForDuo(
       }
     },
     systemLabel: "Kuali",
+    abortSignal,
   };
   const approved = instance
     ? await requestDuoApproval(page, { ...duoOptions, system: "Kuali", instance })
@@ -429,11 +454,16 @@ export async function kualiSubmitAndWaitForDuo(
 /**
  * All-in-one wrapper preserving the legacy callsite contract.
  */
-export async function loginToKuali(page: Page, url: string, instance?: string): Promise<boolean> {
+export async function loginToKuali(
+  page: Page,
+  url: string,
+  instance?: string,
+  abortSignal?: AbortSignal,
+): Promise<boolean> {
   const prep = await kualiNavigateAndFill(page, url);
   if (prep === "already_logged_in") return true;
   if (!prep) return false;
-  return await kualiSubmitAndWaitForDuo(page, url, instance);
+  return await kualiSubmitAndWaitForDuo(page, url, instance, abortSignal);
 }
 
 /**
@@ -480,6 +510,7 @@ export async function newKronosNavigateAndFill(
 export async function newKronosSubmitAndWaitForDuo(
   page: Page,
   instance?: string,
+  abortSignal?: AbortSignal,
 ): Promise<boolean> {
   if (page.url().includes("mykronos.com/wfd")) {
     log.success("New Kronos (WFD) authenticated (auto-login detected before submit)");
@@ -505,6 +536,7 @@ export async function newKronosSubmitAndWaitForDuo(
       }
     },
     systemLabel: "NewKronos",
+    abortSignal,
   };
   const approved = instance
     ? await requestDuoApproval(page, { ...duoOptions, system: "NewKronos", instance })
@@ -521,11 +553,15 @@ export async function newKronosSubmitAndWaitForDuo(
 /**
  * All-in-one wrapper preserving the legacy callsite contract.
  */
-export async function loginToNewKronos(page: Page, instance?: string): Promise<boolean> {
+export async function loginToNewKronos(
+  page: Page,
+  instance?: string,
+  abortSignal?: AbortSignal,
+): Promise<boolean> {
   const prep = await newKronosNavigateAndFill(page);
   if (prep === "already_logged_in") return true;
   if (!prep) return false;
-  return await newKronosSubmitAndWaitForDuo(page, instance);
+  return await newKronosSubmitAndWaitForDuo(page, instance, abortSignal);
 }
 
 /**
@@ -543,6 +579,7 @@ export async function loginToNewKronos(page: Page, instance?: string): Promise<b
 export async function loginToServiceNow(
   page: Page,
   instance?: string,
+  abortSignal?: AbortSignal,
 ): Promise<boolean> {
   log.step("Navigating to support.ucsd.edu HR Inquiry form...");
   await page.goto(HR_INQUIRY_FORM_URL, { waitUntil: "domcontentloaded", timeout: 15_000 });
@@ -590,6 +627,7 @@ export async function loginToServiceNow(
     successCheck: async (p: Page) =>
       hrInquiry.subjectInput(p).isVisible({ timeout: 5_000 }).catch(() => false),
     systemLabel: "ServiceNow",
+    abortSignal,
   };
 
   const approved = instance

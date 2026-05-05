@@ -100,14 +100,14 @@ function StopPill({ workflow, instance }: { workflow: string; instance: string }
       const phantoms = json.phantomsCleared ?? 0;
       const total = json.stopped ?? daemons + procs;
       const parts: string[] = [];
-      if (daemons > 0) parts.push(`${daemons} worker${daemons === 1 ? "" : "s"}`);
+      if (daemons > 0) parts.push(`${daemons} session${daemons === 1 ? "" : "s"}`);
       if (procs > 0) parts.push(`${procs} process${procs === 1 ? "" : "es"}`);
       if (browsers > 0) parts.push(`${browsers} browser${browsers === 1 ? "" : "s"}`);
       if (queued > 0) parts.push(`${queued} queued item${queued === 1 ? "" : "s"}`);
       if (phantoms > 0) parts.push(`${phantoms} stale session${phantoms === 1 ? "" : "s"}`);
       const detail = parts.length > 0 ? parts.join(" + ") : "nothing alive";
       if (total === 0 && queued === 0 && browsers === 0 && phantoms === 0) {
-        toast.warning(`Nothing to stop — no active ${workflow} workers, processes, browsers, or queued items`, { id: toastId });
+        toast.warning(`Nothing to stop — no active ${workflow} sessions, processes, browsers, or queued items`, { id: toastId });
       } else if (total === 0 && queued === 0 && browsers === 0 && phantoms > 0) {
         toast.success(
           `Cleared ${phantoms} stale ${workflow} session${phantoms === 1 ? "" : "s"} from the panel`,

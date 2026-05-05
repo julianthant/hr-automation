@@ -121,7 +121,11 @@ async function handleAdfsLogin(page: Page): Promise<void> {
 export async function loginToSharePoint(
   page: Page,
   landingUrl: string,
-  opts: { duoTimeoutSeconds?: number; instance?: string } = {},
+  opts: {
+    duoTimeoutSeconds?: number;
+    instance?: string;
+    abortSignal?: AbortSignal;
+  } = {},
 ): Promise<void> {
   const duoTimeoutSeconds = opts.duoTimeoutSeconds ?? 180;
 
@@ -200,6 +204,7 @@ export async function loginToSharePoint(
       systemLabel: "SharePoint",
       successUrlMatch: isSuccessUrl,
       timeoutSeconds: duoTimeoutSeconds,
+      abortSignal: opts.abortSignal,
     };
     const approved = opts.instance
       ? await requestDuoApproval(page, {
