@@ -20,6 +20,10 @@ export { runWorkflowSharedContextPool } from './shared-context-pool.js'
 export { Session } from './session.js'
 export { Stepper } from './stepper.js'
 export { makeCtx } from './ctx.js'
+export * from './control-db.js'
+export * from './control-schema.js'
+export * from './task-store.js'
+export * from './worker-store.js'
 export {
   daemonsDir,
   lockfilePath,

@@ -12,11 +12,20 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync
 import { tmpdir } from "os";
 import { join } from "path";
 import { trackEvent } from "../../../src/tracker/jsonl.js";
+import { openControlDb } from "../../../src/core/control-db.js";
+import { createTaskStore } from "../../../src/core/task-store.js";
+import { createWorkerStore } from "../../../src/core/worker-store.js";
 import {
   findEntryInput,
   findLatestEntryData,
   buildCancelQueuedHandler,
+  buildCancelRunningHandler,
+  buildDrainWorkerHandler,
+  buildForceStopTaskHandler,
+  buildKillBrowserHandler,
   buildQueueBumpHandler,
+  buildStopWorkerHandler,
+  buildRetryHandler,
   readQueueDepth,
 } from "../../../src/tracker/dashboard-ops.js";
 import { queueFilePath } from "../../../src/core/daemon-queue.js";
@@ -156,6 +165,32 @@ describe("findEntryInput", () => {
     assert.ok("input" in result);
     assert.equal((result.input as { v: string }).v, "first");
   });
+
+  it("prefers SQLite task input by runId before tracker fallback", () => {
+    const store = createTaskStore(openControlDb({ trackerDir: tmp }));
+    const [task] = store.enqueueTasks({
+      workflow: "separations",
+      inputs: [{ docId: "3930", source: "sqlite" }],
+      deriveItemId: (input) => input.docId,
+      runIds: ["sqlite-run-1"],
+    });
+    assert.equal(task.runId, "sqlite-run-1");
+    trackEvent(
+      {
+        workflow: "separations",
+        timestamp: "2026-04-24T12:00:00.000Z",
+        id: "3930",
+        runId: "sqlite-run-1",
+        status: "pending",
+        data: {},
+        input: { docId: "3930", source: "tracker" },
+      },
+      tmp,
+    );
+
+    const result = findEntryInput("separations", "3930", "sqlite-run-1", tmp);
+    assert.deepEqual(result, { input: { docId: "3930", source: "sqlite" } });
+  });
 });
 
 describe("findLatestEntryData", () => {
@@ -252,6 +287,69 @@ describe("findLatestEntryData", () => {
 });
 
 describe("buildCancelQueuedHandler", () => {
+  it("cancels a queued SQLite task and writes a completed cancel_task command", async () => {
+    const control = openControlDb({ trackerDir: tmp });
+    const taskStore = createTaskStore(control);
+    const workerStore = createWorkerStore(control);
+    const [enqueued] = taskStore.enqueueTasks({
+      workflow: "separations",
+      inputs: [{ docId: "3930" }],
+      deriveItemId: (input) => input.docId,
+      runIds: ["sqlite-run-queued"],
+    });
+
+    const result = await buildCancelQueuedHandler(tmp)({
+      workflow: "separations",
+      id: "3930",
+      runId: "sqlite-run-queued",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(taskStore.getTask(enqueued.taskId)?.state, "cancelled");
+    assert.equal(taskStore.getAttempt(enqueued.attemptId)?.state, "cancelled");
+    const commands = workerStore.db.prepare("SELECT * FROM worker_commands").all() as Array<{
+      command_type: string;
+      state: string;
+      target_task_id: string;
+    }>;
+    assert.equal(commands.length, 1);
+    assert.equal(commands[0].command_type, "cancel_task");
+    assert.equal(commands[0].state, "completed");
+    assert.equal(commands[0].target_task_id, enqueued.taskId);
+    const queueAudit = readFileSync(queueFilePath("separations", tmp), "utf8");
+    assert.ok(queueAudit.includes('"type":"failed"'));
+    assert.ok(queueAudit.includes("cancelled by user from dashboard"));
+    workerStore.close();
+  });
+
+  it("returns 409 when a SQLite task is already running", async () => {
+    const control = openControlDb({ trackerDir: tmp });
+    const taskStore = createTaskStore(control);
+    const [enqueued] = taskStore.enqueueTasks({
+      workflow: "separations",
+      inputs: [{ docId: "3931" }],
+      deriveItemId: (input) => input.docId,
+      runIds: ["sqlite-run-running"],
+    });
+    const claimed = taskStore.claimNextTask({ workflow: "separations", workerId: "sep-worker" });
+    assert.ok(claimed);
+    taskStore.markTaskRunning({
+      taskId: enqueued.taskId,
+      attemptId: enqueued.attemptId,
+      workerId: "sep-worker",
+    });
+
+    const result = await buildCancelQueuedHandler(tmp)({
+      workflow: "separations",
+      id: "3931",
+      runId: "sqlite-run-running",
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal((result as { status?: number }).status, 409);
+    taskStore.close();
+  });
+
   it("appends a synthetic failed event for a queued item + writes a tracker row", async () => {
     const path = queueFilePath("separations", tmp);
     mkdirSync(join(tmp, "daemons"), { recursive: true });
@@ -299,6 +397,196 @@ describe("buildCancelQueuedHandler", () => {
     const result = await handler({ workflow: "separations", id: "3930" });
     assert.equal(result.ok, false);
     assert.equal((result as { status?: number }).status, 409);
+  });
+});
+
+describe("buildCancelRunningHandler", () => {
+  it("queues cancel_task for the owning worker and marks the task cancel_requested", async () => {
+    const control = openControlDb({ trackerDir: tmp });
+    const taskStore = createTaskStore(control);
+    const workerStore = createWorkerStore(control);
+    workerStore.registerWorker({
+      workerId: "sep-worker",
+      workflow: "separations",
+      kind: "daemon",
+      pid: 12345,
+      hostname: "test-host",
+      phase: "processing",
+    });
+    const [enqueued] = taskStore.enqueueTasks({
+      workflow: "separations",
+      inputs: [{ docId: "4000" }],
+      deriveItemId: (input) => input.docId,
+      runIds: ["run-cancel-running"],
+    });
+    const claimed = taskStore.claimNextTask({ workflow: "separations", workerId: "sep-worker" });
+    assert.ok(claimed);
+    taskStore.markTaskRunning({
+      taskId: enqueued.taskId,
+      attemptId: enqueued.attemptId,
+      workerId: "sep-worker",
+    });
+
+    const result = await buildCancelRunningHandler(tmp)({
+      workflow: "separations",
+      id: "4000",
+      runId: "run-cancel-running",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.mode, "worker-command");
+    assert.equal(taskStore.getTask(enqueued.taskId)?.state, "cancel_requested");
+    assert.equal(taskStore.getAttempt(enqueued.attemptId)?.state, "cancel_requested");
+    const command = workerStore.getCommand(result.commandId);
+    assert.equal(command?.commandType, "cancel_task");
+    assert.equal(command?.state, "queued");
+    assert.equal(command?.targetWorkerId, "sep-worker");
+    assert.equal(command?.targetTaskId, enqueued.taskId);
+    assert.equal(command?.targetAttemptId, enqueued.attemptId);
+    workerStore.close();
+  });
+});
+
+describe("dashboard worker command helpers", () => {
+  it("force-stops a task by writing force_stop_task and kill_browser commands", async () => {
+    const control = openControlDb({ trackerDir: tmp });
+    const taskStore = createTaskStore(control);
+    const workerStore = createWorkerStore(control);
+    workerStore.registerWorker({
+      workerId: "sep-worker",
+      workflow: "separations",
+      kind: "daemon",
+      pid: 12345,
+      hostname: "test-host",
+      phase: "processing",
+    });
+    const [enqueued] = taskStore.enqueueTasks({
+      workflow: "separations",
+      inputs: [{ docId: "5000" }],
+      deriveItemId: (input) => input.docId,
+      runIds: ["run-force-stop"],
+    });
+    taskStore.claimNextTask({ workflow: "separations", workerId: "sep-worker" });
+    taskStore.markTaskRunning({
+      taskId: enqueued.taskId,
+      attemptId: enqueued.attemptId,
+      workerId: "sep-worker",
+    });
+    const browser = workerStore.upsertBrowserProcess({
+      workerId: "sep-worker",
+      workflow: "separations",
+      taskId: enqueued.taskId,
+      attemptId: enqueued.attemptId,
+      systemId: "ucpath",
+      browserId: "ucpath",
+      pid: 987654,
+    });
+
+    const result = await buildForceStopTaskHandler(tmp)({
+      workflow: "separations",
+      id: "5000",
+      runId: "run-force-stop",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.killCommands.length, 1);
+    assert.equal(workerStore.getCommand(result.commandId)?.commandType, "force_stop_task");
+    assert.equal(workerStore.getCommand(result.commandId)?.state, "completed");
+    const killCommand = workerStore.getCommand(result.killCommands[0]);
+    assert.equal(killCommand?.commandType, "kill_browser");
+    assert.equal(killCommand?.state, "queued");
+    assert.equal(killCommand?.targetBrowserProcessId, browser.browserProcessId);
+    assert.equal(workerStore.findBrowserProcessById(browser.browserProcessId)?.status, "kill_requested");
+    workerStore.close();
+  });
+
+  it("kill-browser targets a single browser process", async () => {
+    const control = openControlDb({ trackerDir: tmp });
+    const workerStore = createWorkerStore(control);
+    workerStore.registerWorker({
+      workerId: "sep-worker",
+      workflow: "separations",
+      kind: "daemon",
+      pid: 12345,
+      hostname: "test-host",
+      phase: "processing",
+    });
+    const browser = workerStore.upsertBrowserProcess({
+      workerId: "sep-worker",
+      workflow: "separations",
+      systemId: "ucpath",
+      browserId: "ucpath",
+      pid: 987655,
+    });
+
+    const result = await buildKillBrowserHandler(tmp)({ browserProcessId: browser.browserProcessId });
+
+    assert.equal(result.ok, true);
+    assert.equal(workerStore.getCommand(result.commandId)?.commandType, "kill_browser");
+    assert.equal(workerStore.findBrowserProcessById(browser.browserProcessId)?.status, "kill_requested");
+    workerStore.close();
+  });
+
+  it("stop and drain worker write queued worker commands", async () => {
+    const control = openControlDb({ trackerDir: tmp });
+    const workerStore = createWorkerStore(control);
+    workerStore.registerWorker({
+      workerId: "sep-worker",
+      workflow: "separations",
+      kind: "daemon",
+      pid: 12345,
+      hostname: "test-host",
+      phase: "idle",
+    });
+
+    const stop = await buildStopWorkerHandler(tmp)({ workerId: "sep-worker" });
+    const drain = await buildDrainWorkerHandler(tmp)({ workerId: "sep-worker" });
+
+    assert.equal(stop.ok, true);
+    assert.equal(drain.ok, true);
+    assert.equal(workerStore.getCommand(stop.commandId)?.commandType, "stop_worker");
+    assert.equal(workerStore.getCommand(stop.commandId)?.state, "queued");
+    assert.equal(workerStore.getCommand(drain.commandId)?.commandType, "drain_worker");
+    assert.equal(workerStore.getCommand(drain.commandId)?.state, "queued");
+    workerStore.close();
+  });
+});
+
+describe("buildRetryHandler SQLite lineage", () => {
+  it("writes a completed retry_task command and creates the next attempt", async () => {
+    const control = openControlDb({ trackerDir: tmp });
+    const taskStore = createTaskStore(control);
+    const workerStore = createWorkerStore(control);
+    const [enqueued] = taskStore.enqueueTasks({
+      workflow: "separations",
+      inputs: [{ docId: "6000" }],
+      deriveItemId: (input) => input.docId,
+      runIds: ["run-failed"],
+    });
+    taskStore.claimNextTask({ workflow: "separations", workerId: "sep-worker" });
+    taskStore.markTaskFailed({
+      taskId: enqueued.taskId,
+      attemptId: enqueued.attemptId,
+      error: "boom",
+    });
+
+    const result = await buildRetryHandler(tmp)({
+      workflow: "separations",
+      id: "6000",
+      runId: "run-failed",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(taskStore.listAttemptsForTask(enqueued.taskId).length, 2);
+    assert.equal(taskStore.getTask(enqueued.taskId)?.state, "queued");
+    const commands = workerStore.db.prepare("SELECT * FROM worker_commands WHERE command_type = 'retry_task'").all() as Array<{
+      state: string;
+      target_task_id: string;
+    }>;
+    assert.equal(commands.length, 1);
+    assert.equal(commands[0].state, "completed");
+    assert.equal(commands[0].target_task_id, enqueued.taskId);
+    workerStore.close();
   });
 });
 
@@ -371,6 +659,19 @@ describe("buildQueueBumpHandler", () => {
 });
 
 describe("readQueueDepth", () => {
+  it("counts queued SQLite tasks", () => {
+    const store = createTaskStore(openControlDb({ trackerDir: tmp }));
+    const [a, b] = store.enqueueTasks({
+      workflow: "separations",
+      inputs: [{ docId: "a" }, { docId: "b" }],
+      deriveItemId: (input) => input.docId,
+    });
+    store.markTaskCancelled({ taskId: b.taskId, attemptId: b.attemptId, reason: "not needed" });
+    assert.equal(readQueueDepth("separations", tmp), 1);
+    assert.equal(store.getTask(a.taskId)?.state, "queued");
+    store.close();
+  });
+
   it("counts only items in the queued state", () => {
     const path = queueFilePath("separations", tmp);
     mkdirSync(join(tmp, "daemons"), { recursive: true });

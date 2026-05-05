@@ -260,8 +260,10 @@ Dupe-protection: the kernel provides no tracker-side idempotency cache or step-c
 Kernel workflows exposed on the CLI (`npm run separation <ids>`, `npm run work-study <emplId> <date>`, `npm run eid-lookup <names...>`, `npm run onboarding <emails...>`) default to **daemon mode**:
 
 - **First invocation with no alive daemon** → spawns one detached daemon (`tsx src/cli-daemon.ts <workflow>`), waits for auth (Duo once), enqueues the item. Daemon stays alive after processing.
-- **Subsequent invocations** → append to the shared queue (`.tracker/daemons/{workflow}.queue.jsonl`) and `POST /wake` every alive daemon. No re-Duo.
-- **Multi-daemon dispatch**: all alive daemons for a workflow race to claim the next queued row via an atomic `fs.mkdir` mutex. Whichever daemon finishes its current item first grabs the next — dynamic load balancing without a coordinator.
+- **Subsequent invocations** → enqueue tasks in SQLite, append the same queue event to `.tracker/daemons/{workflow}.queue.jsonl` as audit/history, and `POST /wake` every alive daemon. No re-Duo.
+- **Multi-daemon dispatch**: all alive daemons for a workflow race to claim the next SQLite `tasks` row in one transaction. Whichever daemon finishes its current item first grabs the next — dynamic load balancing without a coordinator.
+- **Cutover fallback**: `HRAUTO_QUEUE_BACKEND=jsonl` temporarily restores the old queue JSONL authority for migration/debugging. Default behavior is SQLite authority; JSONL queue/control writes are audit output only. Daemon lockfiles remain a liveness fallback while workers/heartbeats settle.
+- **Dashboard controls**: cancel, retry, drain, stop, and browser-kill actions write `worker_commands` rows. Browser kills target recorded `browser_processes.pid` rows, not every Chromium process on the machine.
 - **Keepalive**: every 15 min idle, each daemon runs `session.healthCheck(system)` per system so SAML/Duo sessions don't silently expire between items.
 
 Flags (on `separation`, `work-study`, `eid-lookup`, `onboarding`):
@@ -276,6 +278,8 @@ Lifecycle commands (converted workflows: `separations`, `work-study`, `eid-looku
 - `npm run <workflow>:stop` — soft-stop (drain in-flight, re-queue). Use `-- --force` to mark in-flight as failed and exit immediately.
 
 Converting a new workflow to daemon mode is mechanical — see `src/workflows/AGENTS.md#daemon-mode-conversion-template`. Implementation: `src/core/daemon-{types,registry,queue,client}.ts` + `src/core/daemon.ts` (main loop) + `src/cli-daemon.ts` (entry). Full design doc: `docs/superpowers/specs/2026-04-22-workflow-daemon-mode-design.md`.
+
+When changing queue/control behavior, update SQLite state and JSONL audit together. SQLite is live truth; JSONL is audit/history. Never add a dashboard control that only mutates process-local state.
 
 ## Environment
 
@@ -377,6 +381,8 @@ Current step tracking per workflow. Steps prefixed with `auth:` are auto-prepend
 As of 2026-04-18, the dashboard is **observation-only**. The previous "⚡ RUN" drawer + `RunnerLauncher` button + `SchemaForm` + `runner-recents` localStorage helper + the backend `buildSpawnHandler`/`buildCancelHandler`/`buildActiveRunsHandler`/`buildWorkflowSchemaHandler` factories + the child-process registry were all removed. Workflows are launched via the npm scripts above (or whatever replacement launcher the user wires up later — out of scope for this pass). Live session monitoring (`SessionPanel`), selector-warning aggregation (`SelectorWarningsPanel`), screenshot browsing (`ScreenshotsPanel` — replaced the inline `FailureDrillDown` on 2026-04-21), step-timing chips (`StepPipeline`), and cross-workflow search (`SearchBar`) all keep working — they read kernel-emitted events from `src/tracker/jsonl.ts`, independent of any launcher.
 
 **OCR workflow + delegation primitive (2026-05-01).** The operator selects the `ocr` workflow (Run button appears), picks a form type (oath / emergency-contact), uploads a PDF. The dashboard backend runs OCR via `src/ocr/`, matches against the roster, enqueues eid-lookup for unmatched rows. When all rows reach a terminal match state the row shows `step=awaiting-approval` in the QueuePanel; the operator reviews/edits per-row data inline, clicks Approve to fan out N kernel queue items to the downstream daemon (oath-signature or emergency-contact). SharePoint roster download delegates as a child workflow (`parentRunId` links the child row back). Reupload carries forward resolved EIDs from the previous run. Implementation: `src/workflows/ocr/`, `src/tracker/ocr-http.ts`, `src/dashboard/components/ocr/`, `src/tracker/watch-child-runs.ts`.
+
+**SQLite task dependencies cutover (2026-05-04).** OCR's initial `eid-lookup` delegation now records parent/child task rows in SQLite and lets the dependency scheduler patch OCR records from projected child run state. `watchChildRuns` remains as fallback and still owns non-migrated waits such as force-research, whole-PDF re-OCR, SharePoint roster wait, oath-upload OCR approval, and downstream signature waits.
 
 Implementation details live in `src/dashboard/AGENTS.md` (frontend) and `src/tracker/AGENTS.md` (backend).
 
@@ -489,7 +495,7 @@ These patterns existed pre-kernel and are intentionally removed. Do not reintrod
 <claude-mem-context>
 # Memory Context
 
-# [hr-automation] recent context, 2026-05-04 6:05pm PDT
+# [hr-automation] recent context, 2026-05-04 7:36pm PDT
 
 No previous sessions found.
 </claude-mem-context>

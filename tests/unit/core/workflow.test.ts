@@ -6,6 +6,9 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { defineWorkflow, runWorkflow } from '../../../src/core/workflow.js'
 import { getAll, getByName, clear } from '../../../src/core/registry.js'
+import { openControlDb } from '../../../src/core/control-db.js'
+import { createTaskStore } from '../../../src/core/task-store.js'
+import { createWorkerStore } from '../../../src/core/worker-store.js'
 
 test('defineWorkflow: registers metadata on construction', () => {
   clear()
@@ -137,4 +140,47 @@ test('runWorkflow: does NOT install SIGINT when trackerStub is false (tracker ow
   )
   // After the run, the tracker removes its handler — listener count returns to baseline.
   assert.equal(process.listeners('SIGINT').length, before, 'listener should be removed after')
+})
+
+test('runWorkflow: mirrors tracker-enabled in-process runs into SQLite control state', async (t) => {
+  const tmp = mkdtempSync(join(tmpdir(), 'workflow-in-process-sqlite-'))
+  t.after(() => {
+    try { rmSync(tmp, { recursive: true, force: true }) } catch { /* ignore */ }
+  })
+
+  const wf = defineWorkflow({
+    name: `in-process-sqlite-${Date.now()}`,
+    systems: [{ id: 'sharepoint', login: async () => {} }],
+    steps: ['run'] as const,
+    schema: z.object({ sessionId: z.string() }),
+    getId: (data) => data.sessionId ?? '',
+    handler: async (ctx) => {
+      await ctx.step('run', async () => {})
+    },
+  })
+
+  await runWorkflow(wf, { sessionId: 'ocr-session-1' }, {
+    trackerDir: tmp,
+    launchFn: () => Promise.resolve({
+      page: { bringToFront: async () => {} } as unknown as import('playwright').Page,
+      context: { close: async () => {} } as never,
+      browser: { close: async () => {} } as never,
+      chromiumPid: 777777,
+    }),
+  })
+
+  const control = openControlDb({ trackerDir: tmp })
+  const taskStore = createTaskStore(control)
+  const workerStore = createWorkerStore(control)
+  const tasks = taskStore.listTasksForWorkflow(wf.config.name)
+  assert.equal(tasks.length, 1)
+  assert.equal(tasks[0].itemId, 'ocr-session-1')
+  assert.equal(tasks[0].state, 'done')
+  assert.equal(taskStore.listAttemptsForTask(tasks[0].taskId)[0].state, 'done')
+  const worker = workerStore.getWorker(`dashboard:${process.pid}`)
+  assert.equal(worker?.kind, 'dashboard')
+  const browsers = workerStore.listBrowserProcessesForTask({ taskId: tasks[0].taskId })
+  assert.equal(browsers.length, 1)
+  assert.equal(browsers[0].pid, 777777)
+  workerStore.close()
 })

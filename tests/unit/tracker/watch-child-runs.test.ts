@@ -4,6 +4,8 @@ import { mkdirSync, writeFileSync, appendFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { watchChildRuns } from "../../../src/tracker/watch-child-runs.js";
+import { openControlDb } from "../../../src/core/control-db.js";
+import { createTaskStore } from "../../../src/core/task-store.js";
 
 function setupTrackerDir(): string {
   const dir = join(tmpdir(), `wcr-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -49,6 +51,75 @@ test("resolves when all expected itemIds reach terminal status", async () => {
   const r1 = outcomes.find((o) => o.itemId === "test-r1");
   assert.ok(r0); assert.equal(r0.status, "done"); assert.equal(r0.data?.emplId, "10000001");
   assert.ok(r1); assert.equal(r1.status, "failed"); assert.equal(r1.error, "no result");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("uses SQLite task rows when all expected child tasks exist", async () => {
+  const dir = setupTrackerDir();
+  const taskStore = createTaskStore(openControlDb({ trackerDir: dir }));
+  const [a, b] = taskStore.enqueueTasks({
+    workflow: "oath-signature",
+    inputs: [{ emplId: "10000001" }, { emplId: "10000002" }],
+    deriveItemId: (input) => input.emplId,
+    runIds: ["sig-run-a", "sig-run-b"],
+  });
+
+  const promise = watchChildRuns({
+    workflow: "oath-signature",
+    expectedItemIds: ["10000001", "10000002"],
+    trackerDir: dir,
+    timeoutMs: 5000,
+  });
+
+  setTimeout(() => {
+    taskStore.markTaskDone({ taskId: a.taskId, attemptId: a.attemptId });
+    taskStore.markTaskFailed({ taskId: b.taskId, attemptId: b.attemptId, error: "blocked" });
+  }, 100);
+
+  const outcomes = await promise;
+  assert.equal(outcomes.length, 2);
+  assert.equal(outcomes.find((o) => o.itemId === "10000001")?.status, "done");
+  assert.equal(outcomes.find((o) => o.itemId === "10000002")?.status, "failed");
+  taskStore.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("SQLite child failure with block_parent rejects for operator intervention", async () => {
+  const dir = setupTrackerDir();
+  const taskStore = createTaskStore(openControlDb({ trackerDir: dir }));
+  const [parent] = taskStore.enqueueTasks({
+    workflow: "oath-upload",
+    inputs: [{ sessionId: "parent" }],
+    deriveItemId: () => "parent",
+    runIds: ["parent-run"],
+  });
+  const [child] = taskStore.enqueueTasks({
+    workflow: "oath-signature",
+    inputs: [{ emplId: "10000003" }],
+    deriveItemId: (input) => input.emplId,
+    runIds: ["sig-run-c"],
+  });
+  taskStore.createDependency({
+    parentTaskId: parent.taskId,
+    childTaskId: child.taskId,
+    onChildFailed: "block_parent",
+  });
+
+  const promise = watchChildRuns({
+    workflow: "oath-signature",
+    expectedItemIds: ["10000003"],
+    trackerDir: dir,
+    timeoutMs: 5000,
+    isTerminal: (entry) => entry.status === "done",
+  });
+
+  setTimeout(() => {
+    taskStore.markTaskFailed({ taskId: child.taskId, attemptId: child.attemptId, error: "no oath" });
+    taskStore.markDependencyFromChildTerminal({ childTaskId: child.taskId, childState: "failed" });
+  }, 100);
+
+  await assert.rejects(() => promise, /blocked by parent task/);
+  taskStore.close();
   rmSync(dir, { recursive: true, force: true });
 });
 

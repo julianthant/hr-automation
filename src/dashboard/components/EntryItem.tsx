@@ -231,6 +231,7 @@ export function EntryItem({ entry, displayNames, selected, onClick }: EntryItemP
             <QueueItemControls
               workflow={entry.workflow}
               id={entry.id}
+              runId={entry.runId}
               subject={subject}
               className="flex-shrink-0 ml-1"
             />

@@ -18,6 +18,8 @@ import { runOcrRetryPage, RetryPageError } from "../workflows/ocr/retry-page.js"
 import { isAcceptedHdhDepartment } from "../domain/hdh/departments.js";
 import type { ChildOutcome, WatchChildRunsOpts } from "./watch-child-runs.js";
 import type { OcrRequest, OcrResult } from "../ocr/index.js";
+import { openControlDb } from "../core/control-db.js";
+import { createTaskStore } from "../core/task-store.js";
 
 const WORKFLOW = "ocr";
 
@@ -352,7 +354,7 @@ export interface ApproveHandlerOpts {
     inputs: unknown[],
     deriveItemId: (input: unknown, idx: number) => string,
     opts?: { parentRunId?: string },
-  ) => Promise<void>;
+  ) => Promise<void | { enqueued?: Array<{ id: string; taskId?: string; runId?: string }> }>;
 }
 
 export function buildOcrApproveHandler(
@@ -432,8 +434,9 @@ export function buildOcrApproveHandler(
 
     void (async () => {
       try {
+        let dispatchResult: void | { enqueued?: Array<{ id: string; taskId?: string; runId?: string }> };
         if (opts.ensureDaemonsAndEnqueueOverride) {
-          await opts.ensureDaemonsAndEnqueueOverride(
+          dispatchResult = await opts.ensureDaemonsAndEnqueueOverride(
             spec.approveTo.workflow,
             enqueueInputs,
             (_inp, idx) => itemIds[idx],
@@ -452,7 +455,7 @@ export function buildOcrApproveHandler(
           const inputToItemId = new Map(
             enqueueInputs.map((inp, idx) => [JSON.stringify(inp), itemIds[idx] ?? `ocr-fallback-${input.runId}-r${idx}`])
           );
-          await ensureDaemonsAndEnqueue(
+          dispatchResult = await ensureDaemonsAndEnqueue(
             childWf,
             enqueueInputs as never,
             {},
@@ -461,6 +464,14 @@ export function buildOcrApproveHandler(
               ...(parentRunId ? { parentRunId } : {}),
             },
           );
+        }
+        if (parentRunId && dispatchResult?.enqueued) {
+          createApprovalDependencyRows({
+            trackerDir,
+            parentRunId,
+            childWorkflow: spec.approveTo.workflow,
+            children: dispatchResult.enqueued,
+          });
         }
       } catch (err) {
         const msg = errorMessage(err);
@@ -949,6 +960,38 @@ function readParentRunId(sessionId: string, trackerDir: string | undefined): str
     } catch { /* tolerate malformed lines */ }
   }
   return undefined;
+}
+
+function createApprovalDependencyRows(args: {
+  trackerDir?: string;
+  parentRunId: string;
+  childWorkflow: string;
+  children: Array<{ id: string; taskId?: string; runId?: string }>;
+}): void {
+  try {
+    const taskStore = createTaskStore(openControlDb({ trackerDir: args.trackerDir }));
+    const parent = taskStore.getTaskByRunId(args.parentRunId);
+    if (!parent) return;
+    for (const child of args.children) {
+      const childTask = child.taskId
+        ? taskStore.getTask(child.taskId)
+        : taskStore.findTaskByIdentity({
+            workflow: args.childWorkflow,
+            itemId: child.id,
+            ...(child.runId ? { runId: child.runId } : {}),
+          });
+      if (!childTask) continue;
+      taskStore.createDependency({
+        parentTaskId: parent.taskId,
+        childTaskId: childTask.taskId,
+        onChildFailed: "block_parent",
+        cascadeCancel: true,
+        resumeParentAfterChildRetry: true,
+      });
+    }
+  } catch (err) {
+    log.warn(`[ocr-http] approve-batch dependency rows skipped: ${errorMessage(err)}`);
+  }
 }
 
 function isSelectedRecord(record: unknown): boolean {

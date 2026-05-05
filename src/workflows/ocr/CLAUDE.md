@@ -18,6 +18,8 @@ dashboard's Node process via fire-and-forget `runWorkflow` from
   function with test escape hatches. Replaces the duplicated
   `prepare.ts` runners that lived in `oath-signature/` and
   `emergency-contact/`.
+- `eid-lookup-results.ts` — shared OCR record patching helpers for applying
+  terminal `eid-lookup` child outcomes.
 - `form-registry.ts` — `FORM_SPECS = { oath, "emergency-contact" }`. One
   line to add a new form type once you've written its `ocr-form.ts`.
 - `types.ts` — `OcrFormSpec<TOcr, TPreview, TFanOut>` contract.
@@ -27,6 +29,14 @@ dashboard's Node process via fire-and-forget `runWorkflow` from
 - `schema.ts` — `OcrInputSchema` (Zod). Required fields:
   pdfPath, pdfOriginalName, formType, sessionId, rosterMode.
 - `index.ts` — barrel.
+
+## EID lookup dependency mode
+
+The first OCR `eid-lookup` fan-out uses SQLite task dependencies. The OCR
+handler still returns at `awaiting-approval`; the scheduler patches records as
+child lookup runs finish. If dependency setup fails before queue append, OCR
+falls back to the old `watchChildRuns` path. Force-research and whole-PDF
+re-OCR still use `watchChildRuns` during Phase 2.
 
 ## Adding a new form type
 

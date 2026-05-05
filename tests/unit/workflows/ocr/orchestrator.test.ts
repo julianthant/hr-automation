@@ -136,6 +136,175 @@ test("orchestrator with previousRunId carries forward v1 EIDs", async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("orchestrator uses SQLite dependencies for initial eid-lookup fan-out", async () => {
+  const { dir, rosterPath } = setup();
+  let watcherCalled = false;
+  let dependencyBatchCreated = false;
+
+  await runOcrOrchestrator(
+    {
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      formType: "oath",
+      sessionId: "session-deps",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-deps",
+      trackerDir: dir,
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          sourcePage: 1,
+          rowIndex: 0,
+          printedName: "Liam Kustenbauder",
+          employeeSigned: true,
+          officerSigned: true,
+          dateSigned: "05/01/2026",
+          notes: [],
+          documentType: "expected",
+          originallyMissing: [],
+        }],
+        provider: "stub",
+        attempts: 1,
+        cached: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000001", name: "Different Person" }],
+      _enqueueEidLookupOverride: async () => {},
+      _watchChildRunsOverride: async () => {
+        watcherCalled = true;
+        return [];
+      },
+      _createDependencyBatchOverride: async ({ parent, children }) => {
+        dependencyBatchCreated = true;
+        assert.equal(parent.workflow, "ocr");
+        assert.equal(parent.itemId, "session-deps");
+        assert.equal(parent.runId, "run-deps");
+        assert.equal(children.length, 1);
+        assert.equal(children[0].workflow, "eid-lookup");
+        assert.equal(children[0].recordIndex, 0);
+        assert.equal(children[0].lookupKind, "name");
+      },
+      _scheduleDependencyTickOverride: async () => ({ ok: true }),
+    },
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(dependencyBatchCreated, true);
+  assert.equal(watcherCalled, false);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("orchestrator falls back to watchChildRuns when dependency creation fails", async () => {
+  const { dir, rosterPath } = setup();
+  let watcherCalled = false;
+
+  await runOcrOrchestrator(
+    {
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      formType: "oath",
+      sessionId: "session-fallback",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-fallback",
+      trackerDir: dir,
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          sourcePage: 1,
+          rowIndex: 0,
+          printedName: "Liam Kustenbauder",
+          employeeSigned: true,
+          officerSigned: true,
+          dateSigned: "05/01/2026",
+          notes: [],
+          documentType: "expected",
+          originallyMissing: [],
+        }],
+        provider: "stub",
+        attempts: 1,
+        cached: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000001", name: "Different Person" }],
+      _enqueueEidLookupOverride: async () => {},
+      _createDependencyBatchOverride: async () => {
+        throw new Error("db unavailable");
+      },
+      _watchChildRunsOverride: async () => {
+        watcherCalled = true;
+        return [];
+      },
+    },
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(watcherCalled, true);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("orchestrator uses watcher fallback when OCR_SQLITE_DEPENDENCIES is disabled", async () => {
+  const { dir, rosterPath } = setup();
+  const previous = process.env.OCR_SQLITE_DEPENDENCIES;
+  process.env.OCR_SQLITE_DEPENDENCIES = "0";
+  let watcherCalled = false;
+  let dependencyBatchCreated = false;
+
+  try {
+    await runOcrOrchestrator(
+      {
+        pdfPath: "/tmp/fake.pdf",
+        pdfOriginalName: "fake.pdf",
+        formType: "oath",
+        sessionId: "session-env-fallback",
+        rosterPath,
+        rosterMode: "existing",
+      },
+      {
+        runId: "run-env-fallback",
+        trackerDir: dir,
+        _ocrPipelineOverride: async () => ({
+          data: [{
+            sourcePage: 1,
+            rowIndex: 0,
+            printedName: "Liam Kustenbauder",
+            employeeSigned: true,
+            officerSigned: true,
+            dateSigned: "05/01/2026",
+            notes: [],
+            documentType: "expected",
+            originallyMissing: [],
+          }],
+          provider: "stub",
+          attempts: 1,
+          cached: false,
+        }),
+        _loadRosterOverride: async () => [{ eid: "10000001", name: "Different Person" }],
+        _enqueueEidLookupOverride: async () => {},
+        _createDependencyBatchOverride: async () => {
+          dependencyBatchCreated = true;
+        },
+        _watchChildRunsOverride: async () => {
+          watcherCalled = true;
+          return [];
+        },
+      },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(dependencyBatchCreated, false);
+    assert.equal(watcherCalled, true);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.OCR_SQLITE_DEPENDENCIES;
+    } else {
+      process.env.OCR_SQLITE_DEPENDENCIES = previous;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("rosterMode=download delegates to sharepoint-download via watchChildRuns", async () => {
   const { dir, uploadsDir } = setup();
   let watchWorkflow = "";

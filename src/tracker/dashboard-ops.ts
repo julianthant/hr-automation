@@ -8,7 +8,7 @@
  * and so each handler can be unit-tested with a fake `dir` argument
  * (mirroring `buildSelectorWarningsHandler`, `buildSearchHandler`, etc.).
  */
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import { mkdir, rmdir } from "fs/promises";
 import { setTimeout as delay } from "timers/promises";
 import { request as httpRequest } from "http";
@@ -22,12 +22,139 @@ import { queueFilePath, queueLockDirPath } from "../core/daemon-queue.js";
 import type { QueueEvent, Daemon } from "../core/daemon-types.js";
 import { enqueueFromHttp } from "../core/enqueue-dispatch.js";
 import { stopDaemons } from "../core/daemon-client.js";
+import { openControlDb } from "../core/control-db.js";
+import { cancelInProcessRun } from "../core/in-process-runs.js";
+import { createTaskStore, type ControlTaskStore, type TaskRow } from "../core/task-store.js";
+import { createWorkerStore, type BrowserProcessRow, type ControlWorkerStore, type WorkerRow } from "../core/worker-store.js";
 import { join } from "path";
 
 /** Kernel-internal keys we strip when reconstructing an input from `data`.
  * These get stamped onto rows by the kernel (instance) or workflow adapters
  * (__name / __id) but aren't part of any workflow's Zod input schema. */
 const KERNEL_DATA_KEYS = new Set(["instance", "__name", "__id"]);
+const DASHBOARD_CANCEL_ERROR = "cancelled by user from dashboard";
+
+function openControlStores(dir: string): {
+  taskStore: ControlTaskStore;
+  workerStore: ControlWorkerStore;
+  close: () => void;
+} {
+  const control = openControlDb({ trackerDir: dir });
+  return {
+    taskStore: createTaskStore(control),
+    workerStore: createWorkerStore(control),
+    // openStateDb caches one connection per tracker directory. Dashboard
+    // request helpers must not close it out from under other stores in the
+    // same process.
+    close: () => {},
+  };
+}
+
+function resolveControlTask(
+  taskStore: ControlTaskStore,
+  workflow: string,
+  id: string,
+  runId?: string,
+): TaskRow | null {
+  const task = runId
+    ? taskStore.getTaskByRunId(runId)
+    : taskStore.findTaskByIdentity({ workflow, itemId: id });
+  if (!task) return null;
+  if (task.workflow !== workflow || task.itemId !== id) return null;
+  return task;
+}
+
+function appendQueueAudit(workflow: string, event: QueueEvent, dir: string): void {
+  mkdirSync(daemonsDir(dir), { recursive: true });
+  appendFileSync(queueFilePath(workflow, dir), JSON.stringify(event) + "\n");
+}
+
+function appendQueueFailedAudit(
+  workflow: string,
+  id: string,
+  runId: string | undefined,
+  error: string,
+  dir: string,
+): void {
+  appendQueueAudit(
+    workflow,
+    {
+      type: "failed",
+      id,
+      failedAt: new Date().toISOString(),
+      runId: runId ?? "",
+      error,
+    },
+    dir,
+  );
+}
+
+function appendQueueEnqueueAudit(
+  workflow: string,
+  id: string,
+  input: unknown,
+  runId: string,
+  dir: string,
+): void {
+  appendQueueAudit(
+    workflow,
+    {
+      type: "enqueue",
+      id,
+      workflow,
+      input,
+      enqueuedAt: new Date().toISOString(),
+      enqueuedBy: "dashboard",
+      runId,
+    },
+    dir,
+  );
+}
+
+function emitDashboardCancelTrackerRow(
+  workflow: string,
+  id: string,
+  runId: string | undefined,
+  dir: string,
+): void {
+  trackEvent(
+    {
+      workflow,
+      timestamp: new Date().toISOString(),
+      id,
+      runId,
+      status: "failed",
+      step: "cancelled",
+      error: DASHBOARD_CANCEL_ERROR,
+    },
+    dir,
+  );
+}
+
+function currentAttemptWorker(
+  taskStore: ControlTaskStore,
+  workerStore: ControlWorkerStore,
+  task: TaskRow,
+): { workerId?: string; attemptId?: string } {
+  const attemptId = task.currentAttemptId;
+  const attempt = attemptId ? taskStore.getAttempt(attemptId) : null;
+  const owner = workerStore.findWorkerOwnerByTask({
+    taskId: task.taskId,
+    ...(attemptId ? { attemptId } : {}),
+  });
+  return {
+    workerId: task.claimedByWorkerId ?? attempt?.workerId ?? owner?.workerId,
+    ...(attemptId ? { attemptId } : {}),
+  };
+}
+
+function signalBrowserPid(pid: number): void {
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    /* best-effort hard-control fallback */
+  }
+}
 
 /**
  * Lookup an entry's input by (workflow, id, runId?). Three-tier fallback so
@@ -54,6 +181,10 @@ export function findEntryInput(
   runId: string | undefined,
   dir: string,
 ): { input: Record<string, unknown> } | { error: string } {
+  if (runId) {
+    const fromTask = findTaskInput(runId, dir);
+    if (fromTask) return { input: fromTask };
+  }
   const entries = readEntries(workflow, dir);
   const matchingId = entries.filter((e) => {
     if (e.id !== id) return false;
@@ -89,6 +220,24 @@ export function findEntryInput(
     if (Object.keys(input).length > 0) return { input };
   }
   return { error: "no input or data found to reconstruct retry payload" };
+}
+
+function findTaskInput(runId: string, dir: string): Record<string, unknown> | null {
+  try {
+    const store = createTaskStore(openControlDb({ trackerDir: dir }));
+    const input = store.findInputForRunId(runId);
+    return input && typeof input === "object" && !Array.isArray(input)
+      ? input as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function asRecordInput(input: unknown): Record<string, unknown> | null {
+  return input && typeof input === "object" && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : null;
 }
 
 /**
@@ -185,6 +334,43 @@ async function reEnqueueEntry(
   // leak in from clients that build paths instead of identifiers.
   const wf = workflow.trim().replace(/\/+$/, "");
   if (!wf || !id) return { ok: false, error: "workflow and id are required" };
+
+  if (runId && !prefilledData) {
+    const stores = openControlStores(dir);
+    try {
+      const task = resolveControlTask(stores.taskStore, wf, id, runId);
+      if (task) {
+        const input = asRecordInput(task.input);
+        if (!input) {
+          return { ok: false, error: "stored task input is unavailable for retry" };
+        }
+        const retried = stores.taskStore.retryTaskFromAttempt({ runId });
+        stores.workerStore.enqueueWorkerCommand({
+          commandType: "retry_task",
+          workflow: wf,
+          targetTaskId: retried.taskId,
+          targetAttemptId: retried.attemptId,
+          state: "completed",
+          payload: { fromRunId: runId, runId: retried.runId },
+        });
+        appendQueueEnqueueAudit(wf, retried.itemId, input, retried.runId, dir);
+        trackEvent(
+          {
+            workflow: wf,
+            timestamp: new Date().toISOString(),
+            id: retried.itemId,
+            runId: retried.runId,
+            status: "pending",
+            input,
+          },
+          dir,
+        );
+        return { ok: true };
+      }
+    } finally {
+      stores.close();
+    }
+  }
 
   if (IN_PROCESS_WORKFLOWS.has(wf)) {
     return reEnqueueInProcessEntry(wf, id, runId, dir);
@@ -429,6 +615,7 @@ async function withQueueLock<T>(
 export interface CancelQueuedRequest {
   workflow: string;
   id: string;
+  runId?: string;
 }
 
 /**
@@ -444,6 +631,48 @@ export function buildCancelQueuedHandler(dir: string) {
     req: CancelQueuedRequest,
   ): Promise<{ ok: true } | { ok: false; error: string; status?: number }> => {
     if (!req.workflow || !req.id) return { ok: false, error: "workflow and id are required" };
+    const stores = openControlStores(dir);
+    try {
+      const task = resolveControlTask(stores.taskStore, req.workflow, req.id, req.runId);
+      if (task) {
+        if (task.state === "claimed" || task.state === "running" || task.state === "cancel_requested" || task.state === "cancelling") {
+          return {
+            ok: false as const,
+            error: "item already claimed by a daemon — use cancel running",
+            status: 409,
+          };
+        }
+        if (task.state === "done" || task.state === "failed" || task.state === "cancelled") {
+          return { ok: false as const, error: `item is already ${task.state}`, status: 410 };
+        }
+        if (task.state !== "queued") {
+          return { ok: false as const, error: `cannot cancel item in state ${task.state}`, status: 409 };
+        }
+        stores.workerStore.enqueueWorkerCommand({
+          commandType: "cancel_task",
+          workflow: req.workflow,
+          targetTaskId: task.taskId,
+          ...(task.currentAttemptId ? { targetAttemptId: task.currentAttemptId } : {}),
+          state: "completed",
+          payload: { itemId: req.id, runId: req.runId ?? task.currentRunId ?? task.runId },
+        });
+        stores.taskStore.markTaskCancelled({
+          taskId: task.taskId,
+          ...(task.currentAttemptId ? { attemptId: task.currentAttemptId } : {}),
+          reason: DASHBOARD_CANCEL_ERROR,
+        });
+        stores.taskStore.markDependencyFromChildTerminal({
+          childTaskId: task.taskId,
+          childState: "cancelled",
+        });
+        const auditRunId = req.runId ?? task.currentRunId ?? task.runId;
+        appendQueueFailedAudit(req.workflow, req.id, auditRunId, DASHBOARD_CANCEL_ERROR, dir);
+        emitDashboardCancelTrackerRow(req.workflow, req.id, auditRunId, dir);
+        return { ok: true as const };
+      }
+    } finally {
+      stores.close();
+    }
     return withQueueLock(req.workflow, dir, async () => {
       const path = queueFilePath(req.workflow, dir);
       if (!existsSync(path)) return { ok: false as const, error: "queue file does not exist" };
@@ -493,7 +722,7 @@ export function buildCancelQueuedHandler(dir: string) {
         id: req.id,
         failedAt: new Date().toISOString(),
         runId: runId ?? "",
-        error: "cancelled by user from dashboard",
+        error: DASHBOARD_CANCEL_ERROR,
       };
       writeFileSync(path, text.endsWith("\n") || text === "" ? text : text + "\n", { flag: "w" });
       // Use append-style write — the lock guarantees exclusion.
@@ -510,13 +739,224 @@ export function buildCancelQueuedHandler(dir: string) {
           runId,
           status: "failed",
           step: "cancelled",
-          error: "cancelled by user from dashboard",
+          error: DASHBOARD_CANCEL_ERROR,
         },
         dir,
       );
       return { ok: true as const };
     });
   };
+}
+
+export interface CancelRunningRequest {
+  workflow: string;
+  id: string;
+  runId: string;
+}
+
+export type CancelRunningResult =
+  | { ok: true; accepted: true; mode: "worker-command"; commandId: string }
+  | { ok: true; accepted: true; mode: "in-process"; alreadyCancelled?: boolean }
+  | { ok: false; error: string; status?: number };
+
+export function buildCancelRunningHandler(dir: string) {
+  return async (req: CancelRunningRequest): Promise<CancelRunningResult> => {
+    if (!req.workflow || !req.id || !req.runId) {
+      return { ok: false, error: "workflow, id, runId are required", status: 400 };
+    }
+    const stores = openControlStores(dir);
+    try {
+      const task = resolveControlTask(stores.taskStore, req.workflow, req.id, req.runId);
+      if (task) {
+        if (task.state === "queued" || task.state === "waiting_dependencies" || task.state === "blocked") {
+          return { ok: false, error: "item is queued — use cancel queued", status: 409 };
+        }
+        if (task.state === "done" || task.state === "failed" || task.state === "cancelled") {
+          return { ok: false, error: `item is already ${task.state}`, status: 410 };
+        }
+        const { workerId, attemptId } = currentAttemptWorker(stores.taskStore, stores.workerStore, task);
+        if (!workerId || !attemptId) {
+          return { ok: false, error: "task has no owning worker", status: 410 };
+        }
+        stores.taskStore.requestCancelTask({
+          taskId: task.taskId,
+          reason: DASHBOARD_CANCEL_ERROR,
+        });
+        const commandId = stores.workerStore.enqueueWorkerCommand({
+          commandType: "cancel_task",
+          workflow: req.workflow,
+          targetWorkerId: workerId,
+          targetTaskId: task.taskId,
+          targetAttemptId: attemptId,
+          payload: { itemId: req.id, runId: req.runId },
+        });
+        return { ok: true, accepted: true, mode: "worker-command", commandId };
+      }
+    } finally {
+      stores.close();
+    }
+
+    const inProcess = await cancelInProcessRun({
+      workflow: req.workflow,
+      itemId: req.id,
+      runId: req.runId,
+    });
+    if (inProcess.ok) {
+      return {
+        ok: true,
+        accepted: true,
+        mode: "in-process",
+        ...(inProcess.alreadyCancelled ? { alreadyCancelled: true } : {}),
+      };
+    }
+    return {
+      ok: false,
+      error:
+        "item not currently owned by any SQLite worker and no in-process run registered — likely already finished or never started",
+      status: 410,
+    };
+  };
+}
+
+export interface ForceStopTaskRequest {
+  workflow: string;
+  id: string;
+  runId?: string;
+}
+
+export function buildForceStopTaskHandler(dir: string) {
+  return async (
+    req: ForceStopTaskRequest,
+  ): Promise<{ ok: true; commandId: string; killCommands: string[] } | { ok: false; error: string; status?: number }> => {
+    if (!req.workflow || !req.id) return { ok: false, error: "workflow and id are required", status: 400 };
+    const stores = openControlStores(dir);
+    try {
+      const task = resolveControlTask(stores.taskStore, req.workflow, req.id, req.runId);
+      if (!task) return { ok: false, error: "task not found", status: 404 };
+      const { workerId, attemptId } = currentAttemptWorker(stores.taskStore, stores.workerStore, task);
+      const commandId = stores.workerStore.enqueueWorkerCommand({
+        commandType: "force_stop_task",
+        workflow: req.workflow,
+        ...(workerId ? { targetWorkerId: workerId } : {}),
+        targetTaskId: task.taskId,
+        ...(attemptId ? { targetAttemptId: attemptId } : {}),
+        state: "completed",
+        payload: { itemId: req.id, runId: req.runId ?? task.currentRunId ?? task.runId },
+      });
+      const browsers = stores.workerStore.listBrowserProcessesForTask({
+        taskId: task.taskId,
+        ...(attemptId ? { attemptId } : {}),
+      });
+      const killCommands: string[] = [];
+      for (const browser of browsers) {
+        const killCommandId = enqueueKillBrowserCommand(stores.workerStore, browser);
+        stores.workerStore.markBrowserProcessKillRequested({
+          browserProcessId: browser.browserProcessId,
+          commandId: killCommandId,
+        });
+        signalBrowserPid(browser.pid);
+        killCommands.push(killCommandId);
+      }
+      trackEvent(
+        {
+          workflow: req.workflow,
+          timestamp: new Date().toISOString(),
+          id: req.id,
+          runId: req.runId ?? task.currentRunId ?? task.runId,
+          status: "running",
+          step: "force-stop-requested",
+          data: { forceStopCommandId: commandId, killCommands: String(killCommands.length) },
+        },
+        dir,
+      );
+      return { ok: true, commandId, killCommands };
+    } finally {
+      stores.close();
+    }
+  };
+}
+
+export interface KillBrowserRequest {
+  browserProcessId?: string;
+  pid?: number;
+}
+
+export function buildKillBrowserHandler(dir: string) {
+  return async (
+    req: KillBrowserRequest,
+  ): Promise<{ ok: true; commandId: string } | { ok: false; error: string; status?: number }> => {
+    if (!req.browserProcessId && typeof req.pid !== "number") {
+      return { ok: false, error: "browserProcessId or pid is required", status: 400 };
+    }
+    const stores = openControlStores(dir);
+    try {
+      const browser = req.browserProcessId
+        ? stores.workerStore.findBrowserProcessById(req.browserProcessId)
+        : stores.workerStore.findBrowserProcessByPid(req.pid!);
+      if (!browser) return { ok: false, error: "browser process not found", status: 404 };
+      const commandId = enqueueKillBrowserCommand(stores.workerStore, browser);
+      stores.workerStore.markBrowserProcessKillRequested({
+        browserProcessId: browser.browserProcessId,
+        commandId,
+      });
+      signalBrowserPid(browser.pid);
+      return { ok: true, commandId };
+    } finally {
+      stores.close();
+    }
+  };
+}
+
+function enqueueKillBrowserCommand(workerStore: ControlWorkerStore, browser: BrowserProcessRow): string {
+  return workerStore.enqueueWorkerCommand({
+    commandType: "kill_browser",
+    workflow: browser.workflow,
+    targetWorkerId: browser.workerId,
+    ...(browser.taskId ? { targetTaskId: browser.taskId } : {}),
+    ...(browser.attemptId ? { targetAttemptId: browser.attemptId } : {}),
+    targetBrowserProcessId: browser.browserProcessId,
+    payload: { pid: browser.pid, systemId: browser.systemId },
+  });
+}
+
+export interface WorkerCommandRequest {
+  workerId: string;
+}
+
+export function buildDrainWorkerHandler(dir: string) {
+  return async (
+    req: WorkerCommandRequest,
+  ): Promise<{ ok: true; commandId: string } | { ok: false; error: string; status?: number }> =>
+    enqueueWorkerLifecycleCommand(dir, req.workerId, "drain_worker");
+}
+
+export function buildStopWorkerHandler(dir: string) {
+  return async (
+    req: WorkerCommandRequest,
+  ): Promise<{ ok: true; commandId: string } | { ok: false; error: string; status?: number }> =>
+    enqueueWorkerLifecycleCommand(dir, req.workerId, "stop_worker");
+}
+
+function enqueueWorkerLifecycleCommand(
+  dir: string,
+  workerId: string,
+  commandType: "drain_worker" | "stop_worker",
+): { ok: true; commandId: string } | { ok: false; error: string; status?: number } {
+  if (!workerId) return { ok: false, error: "workerId is required", status: 400 };
+  const stores = openControlStores(dir);
+  try {
+    const worker = stores.workerStore.getWorker(workerId);
+    if (!worker) return { ok: false, error: "worker not found", status: 404 };
+    const commandId = stores.workerStore.enqueueWorkerCommand({
+      commandType,
+      workflow: worker.workflow,
+      targetWorkerId: worker.workerId,
+      payload: { pid: worker.pid, instanceId: worker.instanceId },
+    });
+    return { ok: true, commandId };
+  } finally {
+    stores.close();
+  }
 }
 
 export interface QueueBumpRequest {
@@ -604,21 +1044,34 @@ export function buildQueueBumpHandler(dir: string) {
 
 export interface DaemonInfo {
   workflow: string;
+  workerId: string;
   pid: number;
-  port: number;
-  instanceId: string;
+  port: number | null;
+  instanceId: string | null;
   startedAt: string;
   uptimeMs: number;
   itemsProcessed: number;
   currentItem: string | null;
+  currentRunId: string | null;
+  currentTaskId: string | null;
+  currentAttemptId: string | null;
   phase: string;
+  status: string;
+  heartbeatAgeMs: number | null;
+  browserProcesses: Array<{
+    browserProcessId: string;
+    systemId: string;
+    pid: number;
+    status: string;
+  }>;
+  lockfileAlive: boolean;
 }
 
 /** Probe a single daemon's /status endpoint with a short timeout. */
 async function probeDaemonStatus(
   daemon: Daemon,
   timeoutMs = 1000,
-): Promise<{ phase?: string; currentItem?: string | null }> {
+): Promise<{ phase?: string; currentItem?: string | null; currentRunId?: string | null }> {
   return new Promise((resolve) => {
     const reqHttp = httpRequest(
       {
@@ -633,10 +1086,19 @@ async function probeDaemonStatus(
         resHttp.on("data", (chunk) => (body += chunk));
         resHttp.on("end", () => {
           try {
-            const parsed = JSON.parse(body) as { phase?: string; inFlight?: { id?: string } | null };
+            const parsed = JSON.parse(body) as {
+              phase?: string;
+              inFlight?: string | { id?: string } | null;
+              inFlightRunId?: string | null;
+            };
+            const currentItem =
+              typeof parsed.inFlight === "string"
+                ? parsed.inFlight
+                : parsed.inFlight?.id ?? null;
             resolve({
               phase: parsed.phase,
-              currentItem: parsed.inFlight?.id ?? null,
+              currentItem,
+              currentRunId: parsed.inFlightRunId ?? null,
             });
           } catch {
             resolve({});
@@ -686,48 +1148,119 @@ function countItemsProcessed(workflow: string, instanceId: string, dir: string):
  */
 export function buildDaemonsListHandler(dir: string) {
   return async (workflow?: string): Promise<DaemonInfo[]> => {
-    const workflows = workflow
-      ? [workflow]
-      : (() => {
-          // Discover every workflow with a live lockfile by reading the
-          // workflow field from each lockfile's contents. The previous
-          // filename-regex approach captured workflow names wrong when the
-          // workflow itself had a hyphen (e.g. "eid-lookup-eid-db32.lock.json"
-          // matched workflow="eid-lookup-eid" because randomInstanceId emits
-          // "<3-letter-prefix>-<4-hex>" and the regex required pure hex
-          // for instanceId, so it greedily ate one segment too many).
-          // Reading the lockfile content avoids the ambiguity entirely.
-          const d = daemonsDir(dir);
-          if (!existsSync(d)) return [];
-          const names = new Set<string>();
-          for (const file of readdirSync(d)) {
-            if (!file.endsWith(".lock.json") || file.includes(".lock.json.tmp")) continue;
-            try {
-              const lock = JSON.parse(readFileSync(join(d, file), "utf-8")) as { workflow?: string };
-              if (typeof lock.workflow === "string") names.add(lock.workflow);
-            } catch { /* ignore unreadable / malformed */ }
-          }
-          return [...names];
-        })();
+    const stores = openControlStores(dir);
+    const lockfileWorkflows = discoverLockfileWorkflows(dir);
+    const workers = stores.workerStore
+      .listWorkers(workflow)
+      .filter((worker) => worker.kind === "daemon" && (!workflow || worker.workflow === workflow));
+    const workerWorkflows = new Set(workers.map((worker) => worker.workflow).filter(Boolean) as string[]);
+    const workflows = workflow ? [workflow] : [...new Set([...lockfileWorkflows, ...workerWorkflows])];
     const out: DaemonInfo[] = [];
-    for (const wf of workflows) {
-      const daemons = await findAliveDaemons(wf, dir);
-      for (const d of daemons) {
-        const status = await probeDaemonStatus(d);
-        out.push({
-          workflow: d.workflow,
-          pid: d.pid,
-          port: d.port,
-          instanceId: d.instanceId,
-          startedAt: d.startedAt,
-          uptimeMs: Date.now() - new Date(d.startedAt).getTime(),
-          itemsProcessed: countItemsProcessed(d.workflow, d.instanceId, dir),
-          currentItem: status.currentItem ?? null,
-          phase: status.phase ?? "unknown",
-        });
+    const aliveByWorkflow = new Map<string, Daemon[]>();
+    try {
+      for (const wf of workflows) {
+        aliveByWorkflow.set(wf, await findAliveDaemons(wf, dir));
       }
+      for (const worker of workers) {
+        const wf = worker.workflow ?? "";
+        const alive = aliveByWorkflow.get(wf) ?? [];
+        const matchingLock = alive.find((d) =>
+          (worker.instanceId && d.instanceId === worker.instanceId) || d.pid === worker.pid
+        );
+        const currentTask = worker.currentTaskId ? stores.taskStore.getTask(worker.currentTaskId) : null;
+        const currentAttempt = worker.currentAttemptId ? stores.taskStore.getAttempt(worker.currentAttemptId) : null;
+        const browserProcesses = stores.workerStore.listBrowserProcessesForWorker(worker.workerId);
+        out.push(workerToDaemonInfo({
+          worker,
+          matchingLock,
+          currentItem: currentTask?.itemId ?? null,
+          currentRunId: currentAttempt?.runId ?? currentTask?.currentRunId ?? currentTask?.runId ?? null,
+          itemsProcessed: worker.instanceId ? countItemsProcessed(wf, worker.instanceId, dir) : 0,
+          browserProcesses,
+        }));
+      }
+
+      for (const wf of workflows) {
+        const daemons = aliveByWorkflow.get(wf) ?? [];
+        for (const d of daemons) {
+          if (workers.some((worker) => worker.instanceId === d.instanceId || worker.pid === d.pid)) continue;
+          const status = await probeDaemonStatus(d);
+          out.push({
+            workflow: d.workflow,
+            workerId: d.instanceId,
+            pid: d.pid,
+            port: d.port,
+            instanceId: d.instanceId,
+            startedAt: d.startedAt,
+            uptimeMs: Date.now() - new Date(d.startedAt).getTime(),
+            itemsProcessed: countItemsProcessed(d.workflow, d.instanceId, dir),
+            currentItem: status.currentItem ?? null,
+            currentRunId: status.currentRunId ?? null,
+            currentTaskId: null,
+            currentAttemptId: null,
+            phase: status.phase ?? "unknown",
+            status: "alive",
+            heartbeatAgeMs: null,
+            browserProcesses: [],
+            lockfileAlive: true,
+          });
+        }
+      }
+    } finally {
+      stores.close();
     }
     return out;
+  };
+}
+
+function discoverLockfileWorkflows(dir: string): string[] {
+  const d = daemonsDir(dir);
+  if (!existsSync(d)) return [];
+  const names = new Set<string>();
+  for (const file of readdirSync(d)) {
+    if (!file.endsWith(".lock.json") || file.includes(".lock.json.tmp")) continue;
+    try {
+      const lock = JSON.parse(readFileSync(join(d, file), "utf-8")) as { workflow?: string };
+      if (typeof lock.workflow === "string") names.add(lock.workflow);
+    } catch { /* ignore unreadable / malformed */ }
+  }
+  return [...names];
+}
+
+function workerToDaemonInfo(args: {
+  worker: WorkerRow;
+  matchingLock?: Daemon;
+  currentItem: string | null;
+  currentRunId: string | null;
+  itemsProcessed: number;
+  browserProcesses: BrowserProcessRow[];
+}): DaemonInfo {
+  const { worker, matchingLock, browserProcesses } = args;
+  const startedMs = Date.parse(worker.startedAt);
+  const heartbeatMs = worker.lastHeartbeatAt ? Date.parse(worker.lastHeartbeatAt) : NaN;
+  return {
+    workflow: worker.workflow ?? "",
+    workerId: worker.workerId,
+    pid: worker.pid,
+    port: worker.port ?? matchingLock?.port ?? null,
+    instanceId: worker.instanceId ?? matchingLock?.instanceId ?? null,
+    startedAt: worker.startedAt,
+    uptimeMs: Number.isFinite(startedMs) ? Date.now() - startedMs : 0,
+    itemsProcessed: args.itemsProcessed,
+    currentItem: args.currentItem,
+    currentRunId: args.currentRunId,
+    currentTaskId: worker.currentTaskId ?? null,
+    currentAttemptId: worker.currentAttemptId ?? null,
+    phase: worker.phase,
+    status: worker.status,
+    heartbeatAgeMs: Number.isFinite(heartbeatMs) ? Date.now() - heartbeatMs : null,
+    browserProcesses: browserProcesses.map((browser) => ({
+      browserProcessId: browser.browserProcessId,
+      systemId: browser.systemId,
+      pid: browser.pid,
+      status: browser.status,
+    })),
+    lockfileAlive: Boolean(matchingLock),
   };
 }
 
@@ -951,6 +1484,13 @@ export function buildFindPriorByKeyHandler(dir: string) {
 }
 
 export function readQueueDepth(workflow: string, dir: string): number {
+  try {
+    const store = createTaskStore(openControlDb({ trackerDir: dir }));
+    const tasks = store.listTasksForWorkflow(workflow);
+    if (tasks.length > 0) return tasks.filter((task) => task.state === "queued").length;
+  } catch {
+    /* fall through to legacy queue-file depth */
+  }
   const path = queueFilePath(workflow, dir);
   if (!existsSync(path)) return 0;
   const text = readFileSync(path, "utf8");

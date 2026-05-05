@@ -14,6 +14,8 @@ import {
   _resetSessionLockForTests,
   type ApproveHandlerOpts,
 } from "../../../src/tracker/ocr-http.js";
+import { openControlDb } from "../../../src/core/control-db.js";
+import { createTaskStore } from "../../../src/core/task-store.js";
 
 function setup(): string {
   const dir = join(tmpdir(), `ocr-http-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -396,6 +398,83 @@ test("buildOcrApproveHandler forwards parentRunId to ensureDaemonsAndEnqueueOver
     assert.equal(parsedIds.length, 2, "fannedOutItemIds should have 2 elements");
     assert.equal(typeof parsedIds[0], "string");
     assert.equal(typeof parsedIds[1], "string");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("buildOcrApproveHandler creates SQLite dependency rows from approval fan-out task ids", async () => {
+  const dir = join(tmpdir(), `ocr-approve-deps-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  try {
+    const taskStore = createTaskStore(openControlDb({ trackerDir: dir }));
+    const [parent] = taskStore.enqueueTasks({
+      workflow: "oath-upload",
+      inputs: [{ sessionId: "oath-parent" }],
+      deriveItemId: () => "ocr-prep-session-approve-deps",
+      runIds: ["oath-upload-run-deps"],
+    });
+    const ocrFile = join(dir, `ocr-${dateLocalForTest()}.jsonl`);
+    writeFileSync(ocrFile, JSON.stringify({
+      workflow: "ocr",
+      id: "session-approve-deps",
+      runId: "run-approve-deps",
+      status: "done",
+      step: "awaiting-approval",
+      timestamp: "2026-05-01T00:00:00Z",
+      parentRunId: "oath-upload-run-deps",
+      data: {
+        formType: "oath",
+        pdfPath: "/tmp/fake.pdf",
+        pdfOriginalName: "fake.pdf",
+        sessionId: "session-approve-deps",
+        records: JSON.stringify([]),
+      },
+    }) + "\n", "utf-8");
+
+    const handler = buildOcrApproveHandler({
+      trackerDir: dir,
+      ensureDaemonsAndEnqueueOverride: async (workflow, inputs, deriveItemId) => {
+        const enqueued = taskStore.enqueueTasks({
+          workflow,
+          inputs,
+          deriveItemId: (input, index) => deriveItemId(input, index),
+          parentRunId: "oath-upload-run-deps",
+        });
+        return { enqueued: enqueued.map((item) => ({ id: item.id, taskId: item.taskId, runId: item.runId })) };
+      },
+    });
+
+    const resp = await handler({
+      sessionId: "session-approve-deps",
+      runId: "run-approve-deps",
+      records: [
+        {
+          employeeId: "10000001",
+          printedName: "Alice One",
+          selected: true,
+          matchState: "matched",
+          employeeSigned: true,
+          officerSigned: true,
+          dateSigned: "05/01/2026",
+          sourcePage: 1,
+          rowIndex: 0,
+        },
+      ],
+    });
+
+    assert.equal(resp.status, 200);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const deps = taskStore.db.prepare("SELECT * FROM task_dependencies WHERE parent_task_id = ?").all(parent.taskId) as Array<{
+      on_child_failed: string;
+      cascade_cancel: number;
+      resume_parent_after_child_retry: number;
+    }>;
+    assert.equal(deps.length, 1);
+    assert.equal(deps[0].on_child_failed, "block_parent");
+    assert.equal(deps[0].cascade_cancel, 1);
+    assert.equal(deps[0].resume_parent_after_child_retry, 1);
+    taskStore.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

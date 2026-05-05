@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { hostname } from 'node:os'
 import type { WorkflowConfig, RegisteredWorkflow, WorkflowMetadata, RunOpts, BatchResult } from './types.js'
 import { register, autoLabel, normalizeDetailField } from './registry.js'
 import { Session } from './session.js'
@@ -15,6 +16,10 @@ import { withBatchLifecycle } from './batch-lifecycle.js'
 import { makeAuthObserver } from '../tracker/auth-observer.js'
 import { registerInProcessRun, unregisterInProcessRun } from './in-process-runs.js'
 import { operatorSubjectData } from '../domain/operator-subject.js'
+import { openControlDb } from './control-db.js'
+import { createTaskStore } from './task-store.js'
+import { createWorkerStore } from './worker-store.js'
+import type { InProcessRunControl } from './in-process-runs.js'
 
 /**
  * Coerce an arbitrary key → unknown map into the `Record<string, string>`
@@ -459,8 +464,116 @@ export function deriveItemId<TData>(data: TData, fallback: string): string {
     (typeof d?.emplId === 'string' ? d.emplId : undefined) ??
     (typeof d?.docId === 'string' ? d.docId : undefined) ??
     (typeof d?.email === 'string' ? d.email : undefined) ??
+    (typeof d?.sessionId === 'string' ? d.sessionId : undefined) ??
     fallback
   )
+}
+
+function registerInProcessControl<TData>(
+  wf: RegisteredWorkflow<TData, readonly string[]>,
+  input: TData,
+  itemId: string,
+  runId: string,
+  trackerDir: string | undefined,
+): InProcessRunControl | null {
+  if (!trackerDir) return null
+  const workerId = `dashboard:${process.pid}`
+  try {
+    const control = openControlDb({ trackerDir })
+    const taskStore = createTaskStore(control)
+    const workerStore = createWorkerStore(control)
+    workerStore.registerWorker({
+      workerId,
+      workflow: wf.config.name,
+      kind: 'dashboard',
+      pid: process.pid,
+      parentPid: process.ppid,
+      hostname: hostname(),
+      phase: 'processing',
+      status: 'alive',
+      heartbeatTtlMs: 30_000,
+    })
+    const existing = taskStore.getTaskByRunId(runId)
+    const task = existing && existing.workflow === wf.config.name && existing.itemId === itemId
+      ? {
+          taskId: existing.taskId,
+          attemptId: existing.currentAttemptId,
+        }
+      : taskStore.enqueueTasks({
+          workflow: wf.config.name,
+          inputs: [input],
+          deriveItemId: () => itemId,
+          runIds: [runId],
+          source: 'in-process',
+          metadata: { workerId },
+        })[0]
+    if (!task?.attemptId) return null
+    taskStore.markTaskRunning({ taskId: task.taskId, attemptId: task.attemptId, workerId })
+    return { trackerDir, workerId, taskId: task.taskId, attemptId: task.attemptId }
+  } catch (err) {
+    log.warn(
+      `[runWorkflow] SQLite in-process control registration skipped for ${wf.config.name}/${itemId}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    )
+    return null
+  }
+}
+
+function registerInProcessBrowsers<TData>(
+  wf: RegisteredWorkflow<TData, readonly string[]>,
+  session: Session,
+  control: InProcessRunControl | null,
+): void {
+  if (!control) return
+  try {
+    const workerStore = createWorkerStore(openControlDb({ trackerDir: control.trackerDir }))
+    for (const [systemId, pid] of Object.entries(session.chromePids)) {
+      const sys = wf.config.systems.find((s) => s.id === systemId)
+      workerStore.upsertBrowserProcess({
+        workerId: control.workerId,
+        workflow: wf.config.name,
+        taskId: control.taskId,
+        attemptId: control.attemptId,
+        systemId,
+        browserId: systemId,
+        pid,
+        ...(sys?.sessionDir ? { sessionDir: sys.sessionDir } : {}),
+      })
+    }
+  } catch (err) {
+    log.warn(
+      `[runWorkflow] SQLite in-process browser registration skipped for ${wf.config.name}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    )
+  }
+}
+
+function markInProcessControlTerminal(
+  control: InProcessRunControl | null,
+  ok: boolean,
+  error?: unknown,
+): void {
+  if (!control) return
+  try {
+    const taskStore = createTaskStore(openControlDb({ trackerDir: control.trackerDir }))
+    if (ok) {
+      taskStore.markTaskDone({ taskId: control.taskId, attemptId: control.attemptId })
+    } else {
+      taskStore.markTaskFailed({
+        taskId: control.taskId,
+        attemptId: control.attemptId,
+        error: error instanceof Error ? error.message : String(error ?? 'in-process run failed'),
+      })
+    }
+  } catch (err) {
+    log.warn(
+      `[runWorkflow] SQLite in-process terminal update skipped for task=${control.taskId}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    )
+  }
 }
 
 export async function runWorkflow<TData, TSteps extends readonly string[]>(
@@ -543,18 +656,23 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
     // throw (auth-failure-after-3-retries, browser launch failure) still
     // cleans up. See `src/core/in-process-runs.ts`.
     const cancelIdent = { workflow: wf.config.name, itemId: String(itemId), runId }
+    const inProcessControl = opts.trackerStub
+      ? null
+      : registerInProcessControl(wf, handlerInput, String(itemId), runId, opts.trackerDir)
     let cancelRegistered = false
+    let completed = false
     try {
       const session = await Session.launch(wf.config.systems, {
         authChain: wf.config.authChain,
         launchFn: opts.launchFn,
         observer,
         onReady: (sess) => {
-          registerInProcessRun(cancelIdent, sess)
+          registerInProcessRun(cancelIdent, sess, inProcessControl ?? undefined)
           cancelRegistered = true
           onSessionReady?.(sess, runId, stepper, opts.trackerDir)
         },
       })
+      registerInProcessBrowsers(wf, session, inProcessControl)
 
       const ctx = makeCtx<TSteps, TData>({
         session,
@@ -585,6 +703,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
         try {
           if (prefilled) ctx.updateData(prefilled as Partial<TData & Record<string, unknown>>)
           await wf.config.handler(ctx, handlerInput)
+          completed = true
         } catch (err) {
           // Same screenshot-on-handler-throw hoist as runOneItem (see the
           // two other call sites). Best-effort; original throw always wins.
@@ -595,7 +714,11 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
         if (sigintHandler) process.off('SIGINT', sigintHandler)
         await session.close()
       }
+    } catch (err) {
+      markInProcessControlTerminal(inProcessControl, false, err)
+      throw err
     } finally {
+      if (completed) markInProcessControlTerminal(inProcessControl, true)
       if (cancelRegistered) unregisterInProcessRun(cancelIdent)
     }
   }

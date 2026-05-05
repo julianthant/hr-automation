@@ -2,20 +2,22 @@ import { createReadStream, statSync, watchFile, unwatchFile } from "node:fs";
 import type { DashboardRoute } from "../route-types.js";
 import { readJsonBody, writeJson, writeSseHeaders } from "../http.js";
 import { listWorkflows } from "../../jsonl.js";
-import { readQueueState } from "../../../core/daemon-queue.js";
-import { findAliveDaemons } from "../../../core/daemon-registry.js";
-import { cancelInProcessRun } from "../../../core/in-process-runs.js";
 import {
+  buildCancelRunningHandler,
   buildRetryHandler,
   buildRetryBulkHandler,
   buildFindPriorByKeyHandler,
   buildRunWithDataHandler,
   buildSaveDataHandler,
   buildCancelQueuedHandler,
+  buildDrainWorkerHandler,
+  buildForceStopTaskHandler,
+  buildKillBrowserHandler,
   buildQueueBumpHandler,
   buildDaemonsListHandler,
   buildDaemonsSpawnHandler,
   buildDaemonsStopHandler,
+  buildStopWorkerHandler,
   resolveDaemonLogPath,
   readQueueDepth,
 } from "../../dashboard-ops.js";
@@ -123,6 +125,7 @@ export function createOpsRoutes(): DashboardRoute {
       const result = await buildCancelQueuedHandler(dir)({
         workflow: String(parsed.body.workflow ?? ""),
         id: String(parsed.body.id ?? ""),
+        runId: parsed.body.runId ? String(parsed.body.runId) : undefined,
       });
       const status = result.ok ? 200 : (result.status ?? 400);
       writeJson(res, status, result);
@@ -145,63 +148,64 @@ export function createOpsRoutes(): DashboardRoute {
         });
         return true;
       }
-      try {
-        const state = await readQueueState(workflow, dir);
-        const claimed = state.claimed.find((q) => q.id === itemId);
-        if (!claimed || claimed.claimedBy === undefined) {
-          const inProcess = await cancelInProcessRun({ workflow, itemId, runId });
-          if (inProcess.ok) {
-            writeJson(res, 200, {
-              ok: true,
-              accepted: true,
-              mode: "in-process",
-              alreadyCancelled: inProcess.alreadyCancelled,
-            });
-            return true;
-          }
-          writeJson(res, 410, {
-            ok: false,
-            error:
-              "item not currently claimed by any daemon and no in-process run registered — likely already finished or never started",
-          });
-          return true;
-        }
-        const aliveDaemons = await findAliveDaemons(workflow, dir);
-        const owner = aliveDaemons.find((d) => d.instanceId === claimed.claimedBy);
-        if (!owner) {
-          writeJson(res, 410, {
-            ok: false,
-            error: `claiming daemon (${claimed.claimedBy}) is no longer alive`,
-          });
-          return true;
-        }
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 5_000);
-        try {
-          const upstream = await fetch(`http://127.0.0.1:${owner.port}/cancel-current`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ itemId, runId }),
-            signal: ctrl.signal,
-          });
-          clearTimeout(t);
-          const text = await upstream.text();
-          let body: Record<string, unknown> = {};
-          try {
-            body = text ? JSON.parse(text) : {};
-          } catch {
-            body = { ok: false, error: text || "malformed daemon response" };
-          }
-          writeJson(res, upstream.status, body);
-        } finally {
-          clearTimeout(t);
-        }
-      } catch (err) {
-        writeJson(res, 502, {
-          ok: false,
-          error: `cancel-current proxy failed: ${errorMessage(err)}`,
-        });
+      const result = await buildCancelRunningHandler(dir)({ workflow, id: itemId, runId });
+      writeJson(res, result.ok ? 200 : (result.status ?? 400), result);
+      return true;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/task/force-stop") {
+      const parsed = await readJsonBody(req);
+      if (!parsed.ok) {
+        writeJson(res, 400, { ok: false, error: parsed.error });
+        return true;
       }
+      const result = await buildForceStopTaskHandler(dir)({
+        workflow: String(parsed.body.workflow ?? ""),
+        id: String(parsed.body.id ?? ""),
+        runId: parsed.body.runId ? String(parsed.body.runId) : undefined,
+      });
+      writeJson(res, result.ok ? 202 : (result.status ?? 400), result);
+      return true;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/browser/kill") {
+      const parsed = await readJsonBody(req);
+      if (!parsed.ok) {
+        writeJson(res, 400, { ok: false, error: parsed.error });
+        return true;
+      }
+      const pid = typeof parsed.body.pid === "number" ? parsed.body.pid : undefined;
+      const result = await buildKillBrowserHandler(dir)({
+        browserProcessId: parsed.body.browserProcessId ? String(parsed.body.browserProcessId) : undefined,
+        pid,
+      });
+      writeJson(res, result.ok ? 202 : (result.status ?? 400), result);
+      return true;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/worker/drain") {
+      const parsed = await readJsonBody(req);
+      if (!parsed.ok) {
+        writeJson(res, 400, { ok: false, error: parsed.error });
+        return true;
+      }
+      const result = await buildDrainWorkerHandler(dir)({
+        workerId: String(parsed.body.workerId ?? ""),
+      });
+      writeJson(res, result.ok ? 202 : (result.status ?? 400), result);
+      return true;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/worker/stop") {
+      const parsed = await readJsonBody(req);
+      if (!parsed.ok) {
+        writeJson(res, 400, { ok: false, error: parsed.error });
+        return true;
+      }
+      const result = await buildStopWorkerHandler(dir)({
+        workerId: String(parsed.body.workerId ?? ""),
+      });
+      writeJson(res, result.ok ? 202 : (result.status ?? 400), result);
       return true;
     }
 

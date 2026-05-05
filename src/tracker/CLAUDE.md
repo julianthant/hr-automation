@@ -15,7 +15,7 @@ Two-tier tracking: JSONL for live dashboard streaming, Excel for persistent hist
 - `spreadsheet.ts` — `appendRow(filePath, columns, data)` and `parseDepartmentNumber(deptText)`
 - `failure-detector.ts` — `detectFailurePattern(entries, opts)` — pure function that groups failed tracker entries by (workflow, error), returns patterns that cross `thresholdN` inside `windowMs`. Caller-owned `cooldownState: Map<string, number>` suppresses re-alerts for `cooldownMs`. Defaults: 3 / 10min / 1h.
 - `notify.ts` — `notify(title, body)` — best-effort macOS desktop notification via `osascript display notification`. No native deps. On non-darwin or osascript failure, logs a warn and returns without throwing.
-- `watch-child-runs.ts` — `watchChildRuns(opts)` — generic watcher: polls a workflow's JSONL until N expected `itemId`s reach terminal status. Used by the OCR orchestrator's eid-lookup phase and SharePoint delegation. Supports custom `isTerminal` predicate, `onProgress` callback, and 200ms polling fallback for filesystems where `fs.watch` is unavailable.
+- `watch-child-runs.ts` — `watchChildRuns(opts)` — generic watcher: polls a workflow's JSONL until N expected `itemId`s reach terminal status. Used by non-migrated waits such as SharePoint delegation and OCR fallback/force-research paths. Supports custom `isTerminal` predicate, `onProgress` callback, and 200ms polling fallback for filesystems where `fs.watch` is unavailable.
 - `ocr-http.ts` — HTTP handlers for `/api/ocr/*` endpoints: `buildOcrPrepareHandler`, `buildOcrApproveHandler`, `buildOcrDiscardHandler`, `buildOcrForceResearchHandler`, `buildOcrFormsHandler`, `sweepStuckOcrRows`. Per-sessionId in-memory lock (`_resetSessionLockForTests` for tests).
 - `index.ts` — Barrel re-exports
 
@@ -31,6 +31,15 @@ Tracker rows may include:
 ## `TrackerEntry.parentRunId`
 
 Optional field added 2026-05-01. When set, the entry is a child run delegated by the parent. Used purely for dashboard visualization (parent→child pills in `EntryItem`, "Delegated runs" section in `LogPanel`). Watching logic is itemId-based (`watch-child-runs.ts`), not parentRunId-based. Thread through `withTrackedWorkflow` via `opts.parentRunId` (also available in `RunOpts`).
+
+## SQLite Task Dependencies And Control State
+
+- `src/tracker/tasks/store.ts` owns durable task/dependency rows for the Phase 2 OCR → EID lookup cutover.
+- `src/tracker/tasks/scheduler.ts` is idempotent. It may run repeatedly; terminal dependencies are not re-applied.
+- Phase 3 moved live queue/control authority into SQLite via `src/core/task-store.ts` and `src/core/worker-store.ts`: task attempts, claims, worker heartbeats, `worker_commands`, and scoped `browser_processes` are coordination state.
+- JSONL remains audit/history output and dashboard visibility during transition. Do not remove `watchChildRuns`; it remains the fallback for legacy rows with no SQLite task/dependency records.
+- `HRAUTO_QUEUE_BACKEND=jsonl` is a temporary cutover fallback only. Default queue authority is SQLite.
+- New dependency kinds should not be added until a second real workflow needs them.
 
 ## Failure-Pattern Alerts
 
@@ -120,6 +129,7 @@ Appends a single row to an `.xlsx` file. Creates the file and/or worksheet if mi
 - **Do NOT use `markStaleRunningEntries`** — was removed because it falsely marked running entries as "failed" with fake "Process interrupted — no heartbeat" messages. Use SIGINT handler in `withTrackedWorkflow` instead for proper cleanup on Ctrl+C.
 - **SIGINT writes must be synchronous** — `process.on("SIGINT")` handler cannot await async functions (process exits before they complete). Use `fs.appendFileSync` directly when writing final tracker/log entries.
 - **`trackEvent` / `appendLogEntry` are synchronous** — do NOT wrap `appendFileSync` in a mutex. POSIX `write(2)` with `O_APPEND` is atomic at the OS level, and Node is single-threaded within a process. An `async-mutex` wrapper makes the call fire-and-forget (returns a `Promise` but signature is `void`), causing reads-after-write to miss data.
+- **Queue/control state has two outputs** — when changing queue/control behavior, update SQLite state and JSONL audit together. SQLite is live truth; JSONL is audit/history. Never add a dashboard control that only mutates process-local state.
 
 ## Adding Tracking for a New Workflow
 

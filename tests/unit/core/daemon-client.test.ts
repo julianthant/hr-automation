@@ -8,6 +8,7 @@ import { defineWorkflow } from '../../../src/core/workflow.js'
 import { clear } from '../../../src/core/registry.js'
 import { computeSpawnPlan, ensureDaemonsAndEnqueue } from '../../../src/core/daemon-client.js'
 import { readQueueState } from '../../../src/core/daemon-queue.js'
+import { openControlDb } from '../../../src/core/control-db.js'
 
 // ---- computeSpawnPlan routing rule ----
 
@@ -160,6 +161,8 @@ test('ensureDaemonsAndEnqueue: 1 live stub daemon → spawnCount=0, items enqueu
     assert.equal(result.daemons.length, 1, 'used stub daemon, did not spawn a real one')
     assert.equal(result.enqueued.length, 2)
     assert.equal(result.enqueued[0].position, 1)
+    assert.ok(result.enqueued[0].taskId)
+    assert.match(result.enqueued[0].runId ?? '', /^[0-9a-f-]{36}$/)
     assert.equal(result.enqueued[1].position, 2)
     assert.equal(wakeCount, 1, 'POST /wake hit the stub daemon once')
 
@@ -223,6 +226,14 @@ test('ensureDaemonsAndEnqueue: forwards parentRunId opt onto every queued item',
     assert.equal(state.queued.length, 2)
     assert.equal(state.queued[0].parentRunId, parentRunId)
     assert.equal(state.queued[1].parentRunId, parentRunId)
+    const ctl = openControlDb({ trackerDir: dir })
+    const rows = ctl.db.prepare(`
+      SELECT parent_run_id
+      FROM tasks
+      WHERE workflow = 'parent-wf'
+      ORDER BY rowid ASC
+    `).all() as Array<{ parent_run_id: string | null }>
+    assert.deepEqual(rows.map((row) => row.parent_run_id), [parentRunId, parentRunId])
 
     await new Promise<void>((r) => server.close(() => r()))
   } finally {
@@ -269,6 +280,78 @@ test('ensureDaemonsAndEnqueue: omits parentRunId when not in opts (back-compat)'
     const state = await readQueueState('noparent-wf', dir)
     assert.equal(state.queued[0].parentRunId, undefined)
     await new Promise<void>((r) => server.close(() => r()))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('ensureDaemonsAndEnqueue: calls onPreparedItems with stable ids and runIds before enqueue', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-client-prepared-'))
+  try {
+    const { createServer } = await import('node:http')
+    const server = createServer((req, res) => {
+      if (req.url === '/whoami' && req.method === 'GET') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ workflow: 'prepared-wf', instanceId: 'prep-01', pid: process.pid, version: 1 }))
+        return
+      }
+      if (req.url === '/wake' && req.method === 'POST') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end('{"ok":true}')
+        return
+      }
+      res.writeHead(404)
+      res.end()
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+    const addr = server.address()
+    const port = typeof addr === 'object' && addr ? addr.port : 0
+
+    const { writeLockfile, lockfilePath, ensureDaemonsDir } = await import('../../../src/core/daemon-registry.js')
+    ensureDaemonsDir(dir)
+    writeLockfile(
+      { workflow: 'prepared-wf', instanceId: 'prep-01', pid: process.pid, port, startedAt: new Date().toISOString(), hostname: 'host', version: 1 },
+      lockfilePath('prepared-wf', 'prep-01', dir),
+    )
+
+    const wf = defineWorkflow({
+      name: 'prepared-wf',
+      schema: z.object({ label: z.string() }),
+      steps: ['a'],
+      systems: [],
+      authSteps: false,
+      handler: async () => {},
+    })
+
+    const preparedCalls: unknown[] = []
+    const pendingCalls: unknown[] = []
+    await ensureDaemonsAndEnqueue(
+      wf,
+      [{ label: 'one' }, { label: 'two' }],
+      {},
+      {
+        trackerDir: dir,
+        quiet: true,
+        deriveItemId: (item) => `id-${(item as { label: string }).label}`,
+        onPreparedItems: (items) => {
+          preparedCalls.push(items.map((item) => ({ itemId: item.itemId, runId: item.runId })))
+        },
+        onPreEmitPending: (_input, runId, _parentRunId, itemId) => {
+          pendingCalls.push({ itemId, runId })
+        },
+      },
+    )
+
+    assert.equal(preparedCalls.length, 1)
+    assert.deepEqual((preparedCalls[0] as Array<{ itemId: string }>).map((x) => x.itemId), ['id-one', 'id-two'])
+    assert.deepEqual(
+      pendingCalls,
+      preparedCalls[0],
+      'pending callback should receive the same ids/runIds prepared for dependency creation',
+    )
+
+    await new Promise<void>((resolve) => server.close(() => resolve()))
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
