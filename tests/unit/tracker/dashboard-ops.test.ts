@@ -25,6 +25,7 @@ import {
   buildKillBrowserHandler,
   buildQueueBumpHandler,
   buildStopWorkerHandler,
+  buildDaemonsListHandler,
   buildRetryHandler,
   readQueueDepth,
 } from "../../../src/tracker/dashboard-ops.js";
@@ -448,7 +449,7 @@ describe("buildCancelRunningHandler", () => {
 });
 
 describe("dashboard worker command helpers", () => {
-  it("force-stops a task by writing force_stop_task and kill_browser commands", async () => {
+  it("force-stops a task by terminalizing it as cancelled and killing its browser", async () => {
     const control = openControlDb({ trackerDir: tmp });
     const taskStore = createTaskStore(control);
     const workerStore = createWorkerStore(control);
@@ -491,12 +492,21 @@ describe("dashboard worker command helpers", () => {
     assert.equal(result.ok, true);
     assert.equal(result.killCommands.length, 1);
     assert.equal(workerStore.getCommand(result.commandId)?.commandType, "force_stop_task");
-    assert.equal(workerStore.getCommand(result.commandId)?.state, "completed");
+    assert.equal(workerStore.getCommand(result.commandId)?.state, "queued");
+    assert.equal(taskStore.getTask(enqueued.taskId)?.state, "cancelled");
+    assert.equal(taskStore.getAttempt(enqueued.attemptId)?.state, "cancelled");
     const killCommand = workerStore.getCommand(result.killCommands[0]);
     assert.equal(killCommand?.commandType, "kill_browser");
     assert.equal(killCommand?.state, "queued");
     assert.equal(killCommand?.targetBrowserProcessId, browser.browserProcessId);
     assert.equal(workerStore.findBrowserProcessById(browser.browserProcessId)?.status, "kill_requested");
+    const entries = readFileSync(join(tmp, "separations-" + new Date().toISOString().slice(0, 10) + ".jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const cancelled = entries.find((entry) => entry.runId === "run-force-stop" && entry.status === "failed");
+    assert.equal(cancelled?.step, "cancelled");
+    assert.equal(cancelled?.error, "cancelled by user from dashboard");
     workerStore.close();
   });
 
@@ -548,6 +558,62 @@ describe("dashboard worker command helpers", () => {
     assert.equal(workerStore.getCommand(stop.commandId)?.state, "queued");
     assert.equal(workerStore.getCommand(drain.commandId)?.commandType, "drain_worker");
     assert.equal(workerStore.getCommand(drain.commandId)?.state, "queued");
+    workerStore.close();
+  });
+
+  it("daemon list omits terminal dead workers that no longer have a live lockfile", async () => {
+    const control = openControlDb({ trackerDir: tmp });
+    const workerStore = createWorkerStore(control);
+    workerStore.registerWorker({
+      workerId: "eid-dead",
+      workflow: "eid-lookup",
+      kind: "daemon",
+      pid: 12345,
+      hostname: "test-host",
+      phase: "exited",
+      status: "dead",
+    });
+
+    const rows = await buildDaemonsListHandler(tmp)("eid-lookup");
+
+    assert.deepEqual(rows, []);
+    workerStore.close();
+  });
+
+  it("daemon list marks heartbeat-expired workers stale and removes their cards", async () => {
+    const control = openControlDb({ trackerDir: tmp });
+    const taskStore = createTaskStore(control);
+    const workerStore = createWorkerStore(control);
+    const [enqueued] = taskStore.enqueueTasks({
+      workflow: "separations",
+      inputs: [{ docId: "stale-doc" }],
+      deriveItemId: (input) => input.docId,
+      runIds: ["run-stale-worker"],
+      now: "2026-05-05T10:00:00.000Z",
+    });
+    workerStore.registerWorker({
+      workerId: "stale-worker",
+      workflow: "separations",
+      kind: "daemon",
+      pid: 12345,
+      hostname: "test-host",
+      phase: "processing",
+      heartbeatTtlMs: 1,
+      now: "2026-05-05T10:00:00.000Z",
+    });
+    workerStore.heartbeatWorker({
+      workerId: "stale-worker",
+      phase: "processing",
+      currentTaskId: enqueued.taskId,
+      currentAttemptId: enqueued.attemptId,
+      now: "2026-05-05T10:00:00.000Z",
+    });
+
+    const daemons = await buildDaemonsListHandler(tmp)("separations");
+
+    assert.deepEqual(daemons.map((daemon) => daemon.workerId), []);
+    assert.equal(workerStore.getWorker("stale-worker")?.status, "stale");
+    assert.equal(workerStore.getWorker("stale-worker")?.currentTaskId, undefined);
     workerStore.close();
   });
 });

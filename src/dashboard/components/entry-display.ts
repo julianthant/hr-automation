@@ -1,5 +1,25 @@
 import type { TrackerEntry } from "./types";
 
+function firstNonBlank(...values: Array<string | undefined>): string {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) return trimmed;
+  }
+  return "";
+}
+
+function resolveEmployeeLabel(data: Record<string, string>): string {
+  const directName = firstNonBlank(data.name, data.employeeName, data.searchName);
+  if (directName) return directName;
+
+  const subjectKind = data.__subjectKind;
+  if (subjectKind === "person" || subjectKind === "eid" || subjectKind === "email") {
+    return firstNonBlank(data.__name);
+  }
+
+  return "";
+}
+
 /**
  * Resolve the display name for a tracker entry. The kernel stamps the
  * operator-facing label as `data.__subject`; older rows may only have
@@ -19,7 +39,7 @@ export function resolveEntryName(
   const fromMap = displayNames?.get(entry.id);
   if (fromMap) return fromMap;
   const d = entry.data ?? {};
-  return d.__subject || d.__name || d.name || d.employeeName || "";
+  return resolveEmployeeLabel(d) || d.__name || d.__subject || "";
 }
 
 /**
@@ -32,15 +52,17 @@ export function resolveEntryId(entry: TrackerEntry): string {
 }
 
 /**
- * Build a per-entry "<base> <ordinal>" label map.
+ * Build a per-entry display label map.
  *
  * The base name is the entry's existing display name (data.__subject /
  * data.__name / .name / .employeeName) when present, else the workflow's registry label as a
- * fallback. Entries are bucketed by base name and assigned a 1-indexed
- * ordinal in chronological order of their earliest tracker timestamp
- * (firstLogTs when known, else the entry's `timestamp`). This way:
+ * fallback. Person rows keep their literal operator-facing name. Workflow-level
+ * rows are bucketed by base name and assigned a 1-indexed ordinal in
+ * chronological order of their earliest tracker timestamp (firstLogTs when
+ * known, else the entry's `timestamp`). This way:
  *
- *   - OCR rows have no `__name`, so the base is "OCR" and rows render as
+ *   - EID rows render as "Zaw, Hein Thant" rather than "Zaw, Hein Thant 1".
+ *   - OCR rows use a workflow-level label, so rows render as
  *     "OCR 1", "OCR 2", ...
  *   - SharePoint rows carry `__name = "Onboarding Roster"` (or whatever the
  *     spec label is), so they render as "Onboarding Roster 1", ...
@@ -51,17 +73,23 @@ export function buildDisplayNameMap(
   entries: TrackerEntry[],
   workflowLabel: string,
 ): Map<string, string> {
-  const baseFor = (e: TrackerEntry): string => {
+  const displayFor = (e: TrackerEntry): { base: string; ordinal: boolean } => {
     const d = e.data ?? {};
-    const fromData = (d.__subject || d.__name || d.name || d.employeeName || "").trim();
-    return fromData || workflowLabel;
+    const personName = resolveEmployeeLabel(d);
+    if (personName) return { base: personName, ordinal: false };
+    const workflowName = firstNonBlank(d.__name);
+    return { base: workflowName || workflowLabel, ordinal: true };
   };
   const sortKey = (e: TrackerEntry): string => e.firstLogTs || e.timestamp || "";
   const sorted = [...entries].sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
   const counters = new Map<string, number>();
   const result = new Map<string, string>();
   for (const e of sorted) {
-    const base = baseFor(e);
+    const { base, ordinal } = displayFor(e);
+    if (!ordinal) {
+      result.set(e.id, base);
+      continue;
+    }
     const next = (counters.get(base) ?? 0) + 1;
     counters.set(base, next);
     result.set(e.id, `${base} ${next}`);

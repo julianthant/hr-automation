@@ -18,8 +18,8 @@
 //   * MUST NOT block the caller meaningfully. Hard 5s fetch timeout.
 //   * Fire-and-forget — caller doesn't await.
 
-import { emitSessionEvent } from "../tracker/session-events.js";
-import { getLogWorkflow } from "../utils/log.js";
+import { emitSessionEvent, workflowNameFromInstance } from "../tracker/session-events.js";
+import { getLogWorkflow, log } from "../utils/log.js";
 import { renderTelegramNotification } from "../domain/notifications/render.js";
 
 export type AuthEventKind =
@@ -83,7 +83,18 @@ export function createTelegramNotifier(
     try {
       if (!tokenValue || !chatIdValue) return;
 
-      const text = formatAuthEventMessage(ev);
+      const normalized = normalizeAuthEventForTelegram(ev);
+      const text = formatAuthEventMessage(normalized);
+      log.step(`Telegram notification send: ${JSON.stringify({
+        kind: normalized.kind,
+        systemLabel: normalized.systemLabel,
+        workflow: normalized.workflow,
+        ...(normalized.runId ? { runId: normalized.runId } : {}),
+        ...(normalized.instance ? { instance: normalized.instance } : {}),
+        ...(normalized.subject ? { subject: normalized.subject } : {}),
+        ...(normalized.detail ? { detail: normalized.detail } : {}),
+        text,
+      })}`);
       const url = `${TELEGRAM_API}/bot${tokenValue}/sendMessage`;
       const body = JSON.stringify({
         chat_id: chatIdValue,
@@ -106,13 +117,13 @@ export function createTelegramNotifier(
             {
               type: "telegram_sent",
               workflowInstance:
-                ev.instance || ev.workflow || getLogWorkflow() || "unknown",
+                normalized.instance || normalized.workflow || getLogWorkflow() || "unknown",
               data: {
-                kind: ev.kind,
-                systemLabel: ev.systemLabel,
-                workflow: ev.workflow,
-                ...(ev.detail ? { detail: ev.detail } : {}),
-                ...(ev.subject ? { subject: ev.subject } : {}),
+                kind: normalized.kind,
+                systemLabel: normalized.systemLabel,
+                workflow: normalized.workflow,
+                ...(normalized.detail ? { detail: normalized.detail } : {}),
+                ...(normalized.subject ? { subject: normalized.subject } : {}),
               },
             },
             dir,
@@ -125,6 +136,12 @@ export function createTelegramNotifier(
       // Swallow — auth notification failure must never fail a workflow.
     }
   };
+}
+
+export function normalizeAuthEventForTelegram(ev: AuthEvent): AuthEvent {
+  if (ev.workflow && ev.workflow !== "(unknown)") return ev;
+  const workflow = ev.instance ? workflowNameFromInstance(ev.instance) : null;
+  return workflow ? { ...ev, workflow } : ev;
 }
 
 const KIND_HEADER: Record<AuthEventKind, string> = {

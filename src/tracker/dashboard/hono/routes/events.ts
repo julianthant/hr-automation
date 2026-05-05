@@ -25,7 +25,7 @@ import {
   type RunTimeline,
   type StepDurationEntry,
 } from "../../run-timelines.js";
-import { filterEventsForRun, rebuildSessionState } from "../../session-state.js";
+import { filterEventsForRun, filterLiveSessionState, rebuildSessionState } from "../../session-state.js";
 import { isResolvedPrepEntry } from "../../prep-rows.js";
 import { computeFailureCounts } from "../../failures.js";
 import { buildScreenshotsHandler } from "../../screenshots.js";
@@ -295,7 +295,7 @@ export function registerEventRoutes(app: Hono, deps: DashboardHonoDeps): void {
 
   app.get("/events/sessions", () => {
     return sseResponse((send) => {
-      const tick = () => send(rebuildSessionState(deps.dir));
+      const tick = () => send(filterLiveSessionState(rebuildSessionState(deps.dir)));
       tick();
       const interval = setInterval(tick, 1_000);
       interval.unref?.();

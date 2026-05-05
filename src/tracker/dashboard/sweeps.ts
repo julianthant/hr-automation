@@ -11,6 +11,8 @@ import { notify } from "../notify.js";
 import { findAliveDaemons } from "../../core/daemon-registry.js";
 import { readQueueState, markItemFailed } from "../../core/daemon-queue.js";
 import { buildTrackerDataForInput } from "../../core/enqueue-dispatch.js";
+import { openControlDb } from "../../core/control-db.js";
+import { createTaskStore } from "../../core/task-store.js";
 
 /**
  * Cooldown map for failure-pattern alerts. Module-level so it survives the
@@ -122,10 +124,17 @@ export async function scanOrphanedQueueItems(dir = DEFAULT_DIR): Promise<void> {
       const nowIso = new Date().toISOString();
       const failError =
         "No alive daemon available to process this item. Start a daemon and retry.";
+      const taskStore = createTaskStore(openControlDb({ trackerDir: dir }));
       for (const item of stale) {
         const runId = item.runId ?? `${item.id}#1`;
         try {
           await markItemFailed(wf, item.id, failError, runId, dir);
+          if (item.taskId) {
+            taskStore.markDependencyFromChildTerminal({
+              childTaskId: item.taskId,
+              childState: "failed",
+            });
+          }
         } catch {
           /* best-effort */
         }

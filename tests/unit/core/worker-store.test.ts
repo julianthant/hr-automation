@@ -192,3 +192,28 @@ test('findWorkerOwnerByTask resolves current task ownership', () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('markWorkerStatus clears current task ownership when worker becomes terminal', () => {
+  const { dir, workerStore, taskStore } = openTempStores()
+  try {
+    workerStore.registerWorker({ workerId: 'w1', workflow: 'wf', kind: 'daemon', pid: 100, hostname: 'host', phase: 'processing' })
+    const [task] = taskStore.enqueueTasks({ workflow: 'wf', inputs: [{ id: 'a' }], deriveItemId: (x) => x.id, now: iso(1) })
+    workerStore.heartbeatWorker({
+      workerId: 'w1',
+      phase: 'processing',
+      currentTaskId: task.taskId,
+      currentAttemptId: task.attemptId,
+      now: iso(2),
+    })
+
+    workerStore.markWorkerStatus({ workerId: 'w1', status: 'dead', phase: 'exited', now: iso(3) })
+
+    const worker = workerStore.getWorker('w1')
+    assert.equal(worker?.status, 'dead')
+    assert.equal(worker?.currentTaskId, undefined)
+    assert.equal(worker?.currentAttemptId, undefined)
+  } finally {
+    workerStore.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

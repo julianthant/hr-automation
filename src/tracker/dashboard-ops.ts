@@ -26,6 +26,7 @@ import { openControlDb } from "../core/control-db.js";
 import { cancelInProcessRun } from "../core/in-process-runs.js";
 import { createTaskStore, type ControlTaskStore, type TaskRow } from "../core/task-store.js";
 import { createWorkerStore, type BrowserProcessRow, type ControlWorkerStore, type WorkerRow } from "../core/worker-store.js";
+import { log } from "../utils/log.js";
 import { join } from "path";
 
 /** Kernel-internal keys we strip when reconstructing an input from `data`.
@@ -153,6 +154,24 @@ function signalBrowserPid(pid: number): void {
     process.kill(pid, "SIGTERM");
   } catch {
     /* best-effort hard-control fallback */
+  }
+}
+
+async function requestDaemonForceCurrent(
+  worker: WorkerRow | null,
+  itemId: string,
+  runId: string | undefined,
+): Promise<boolean> {
+  if (!worker?.port || !runId) return false;
+  try {
+    const res = await fetch(`http://127.0.0.1:${worker.port}/force-current`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ itemId, runId }),
+    });
+    return res.ok;
+  } catch {
+    return false;
   }
 }
 
@@ -831,15 +850,28 @@ export function buildForceStopTaskHandler(dir: string) {
       const task = resolveControlTask(stores.taskStore, req.workflow, req.id, req.runId);
       if (!task) return { ok: false, error: "task not found", status: 404 };
       const { workerId, attemptId } = currentAttemptWorker(stores.taskStore, stores.workerStore, task);
+      const worker = workerId ? stores.workerStore.getWorker(workerId) : null;
+      const runId = req.runId ?? task.currentRunId ?? task.runId;
       const commandId = stores.workerStore.enqueueWorkerCommand({
         commandType: "force_stop_task",
         workflow: req.workflow,
         ...(workerId ? { targetWorkerId: workerId } : {}),
         targetTaskId: task.taskId,
         ...(attemptId ? { targetAttemptId: attemptId } : {}),
-        state: "completed",
-        payload: { itemId: req.id, runId: req.runId ?? task.currentRunId ?? task.runId },
+        payload: { itemId: req.id, runId },
       });
+      stores.taskStore.markTaskCancelled({
+        taskId: task.taskId,
+        ...(attemptId ? { attemptId } : {}),
+        reason: DASHBOARD_CANCEL_ERROR,
+      });
+      stores.taskStore.markDependencyFromChildTerminal({
+        childTaskId: task.taskId,
+        childState: "cancelled",
+      });
+      appendQueueFailedAudit(req.workflow, req.id, runId, DASHBOARD_CANCEL_ERROR, dir);
+      emitDashboardCancelTrackerRow(req.workflow, req.id, runId, dir);
+      const daemonAccepted = await requestDaemonForceCurrent(worker, req.id, runId);
       const browsers = stores.workerStore.listBrowserProcessesForTask({
         taskId: task.taskId,
         ...(attemptId ? { attemptId } : {}),
@@ -854,18 +886,11 @@ export function buildForceStopTaskHandler(dir: string) {
         signalBrowserPid(browser.pid);
         killCommands.push(killCommandId);
       }
-      trackEvent(
-        {
-          workflow: req.workflow,
-          timestamp: new Date().toISOString(),
-          id: req.id,
-          runId: req.runId ?? task.currentRunId ?? task.runId,
-          status: "running",
-          step: "force-stop-requested",
-          data: { forceStopCommandId: commandId, killCommands: String(killCommands.length) },
-        },
-        dir,
-      );
+      if (!daemonAccepted && killCommands.length === 0) {
+        log.warn(
+          `[force-stop] task ${req.workflow}/${req.id} had no daemon force endpoint and no tracked browsers; marked cancelled in control state only`,
+        );
+      }
       return { ok: true, commandId, killCommands };
     } finally {
       stores.close();
@@ -1180,6 +1205,14 @@ export function buildDaemonsListHandler(dir: string) {
   return async (workflow?: string): Promise<DaemonInfo[]> => {
     const stores = openControlStores(dir);
     const lockfileWorkflows = discoverLockfileWorkflows(dir);
+    for (const stale of stores.workerStore.listStaleWorkers({})) {
+      if (workflow && stale.workflow !== workflow) continue;
+      stores.workerStore.markWorkerStatus({
+        workerId: stale.workerId,
+        status: "stale",
+        phase: stale.phase,
+      });
+    }
     const workers = stores.workerStore
       .listWorkers(workflow)
       .filter((worker) => worker.kind === "daemon" && (!workflow || worker.workflow === workflow));
@@ -1197,6 +1230,12 @@ export function buildDaemonsListHandler(dir: string) {
         const matchingLock = alive.find((d) =>
           (worker.instanceId && d.instanceId === worker.instanceId) || d.pid === worker.pid
         );
+        const terminalWithoutLiveLock =
+          (worker.status === "dead" || worker.status === "stopped" || worker.status === "stale")
+          && !matchingLock
+          && !worker.currentTaskId
+          && !worker.currentAttemptId;
+        if (terminalWithoutLiveLock) continue;
         const currentTask = worker.currentTaskId ? stores.taskStore.getTask(worker.currentTaskId) : null;
         const currentAttempt = worker.currentAttemptId ? stores.taskStore.getAttempt(worker.currentAttemptId) : null;
         const browserProcesses = stores.workerStore.listBrowserProcessesForWorker(worker.workerId);

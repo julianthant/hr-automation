@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "./types";
+import { countEntriesByQueueStatus } from "./queue-status";
 
 interface StatPillsProps {
   entries: TrackerEntry[];
@@ -28,10 +29,7 @@ const STATS = [
 ] as const;
 
 export function StatPills({ entries, activeFilter, onFilter }: StatPillsProps) {
-  const counts: Record<string, number> = { total: entries.length };
-  for (const e of entries) {
-    counts[e.status] = (counts[e.status] || 0) + 1;
-  }
+  const counts = countEntriesByQueueStatus(entries);
 
   return (
     <div role="group" aria-label="Filter queue by status" className="w-full grid grid-cols-5 gap-1.5 h-full items-center">

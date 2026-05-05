@@ -488,8 +488,11 @@ export async function markItemDone(
   if (queueBackend() === 'jsonl') return legacyMarkItemDone(workflow, itemId, runId, trackerDir)
   const store = openQueueTaskStore(trackerDir)
   const task = store.findTaskByIdentity({ workflow, itemId, runId })
-  if (task?.currentAttemptId) {
-    store.markTaskDone({ taskId: task.taskId, attemptId: task.currentAttemptId })
+  const attemptId = task ? resolveCurrentAttemptId(store, task, runId) : undefined
+  if (task && attemptId) {
+    store.markTaskDone({ taskId: task.taskId, attemptId })
+  } else if (task) {
+    markTaskTerminalWithoutAttempt(store, task.taskId, 'done')
   }
   appendEvent(workflow, { type: 'done', id: itemId, completedAt: nowIso(), runId }, trackerDir)
 }
@@ -504,8 +507,11 @@ export async function markItemFailed(
   if (queueBackend() === 'jsonl') return legacyMarkItemFailed(workflow, itemId, error, runId, trackerDir)
   const store = openQueueTaskStore(trackerDir)
   const task = store.findTaskByIdentity({ workflow, itemId, runId })
-  if (task?.currentAttemptId) {
-    store.markTaskFailed({ taskId: task.taskId, attemptId: task.currentAttemptId, error })
+  const attemptId = task ? resolveCurrentAttemptId(store, task, runId) : undefined
+  if (task && attemptId) {
+    store.markTaskFailed({ taskId: task.taskId, attemptId, error })
+  } else if (task) {
+    markTaskTerminalWithoutAttempt(store, task.taskId, 'failed', error)
   }
   appendEvent(workflow, { type: 'failed', id: itemId, failedAt: nowIso(), runId, error }, trackerDir)
 }
@@ -520,8 +526,9 @@ export async function markItemCancelled(
   if (queueBackend() === 'jsonl') return legacyMarkItemFailed(workflow, itemId, reason, runId, trackerDir)
   const store = openQueueTaskStore(trackerDir)
   const task = store.findTaskByIdentity({ workflow, itemId, runId })
-  if (task?.currentAttemptId) {
-    store.markTaskCancelled({ taskId: task.taskId, attemptId: task.currentAttemptId, reason })
+  const attemptId = task ? resolveCurrentAttemptId(store, task, runId) : undefined
+  if (task) {
+    store.markTaskCancelled({ taskId: task.taskId, ...(attemptId ? { attemptId } : {}), reason })
   }
   appendEvent(workflow, { type: 'failed', id: itemId, failedAt: nowIso(), runId, error: reason }, trackerDir)
 }
@@ -580,6 +587,50 @@ function taskToQueueItem(task: TaskRow): QueueItem {
     if (task.error) item.error = task.error
   }
   return item
+}
+
+function resolveCurrentAttemptId(
+  store: ReturnType<typeof openQueueTaskStore>,
+  task: TaskRow,
+  runId: string,
+): string | undefined {
+  if (task.currentAttemptId) return task.currentAttemptId
+  const row = store.db.prepare(`
+    SELECT id
+    FROM task_attempts
+    WHERE task_id = @taskId
+      AND run_id = @runId
+    ORDER BY attempt_no DESC
+    LIMIT 1
+  `).get({ taskId: task.taskId, runId }) as { id: string } | undefined
+  if (!row) return undefined
+  store.db.prepare(`
+    UPDATE tasks
+    SET current_attempt_id = @attemptId,
+        updated_at = @now
+    WHERE id = @taskId
+  `).run({ taskId: task.taskId, attemptId: row.id, now: nowIso() })
+  return row.id
+}
+
+function markTaskTerminalWithoutAttempt(
+  store: ReturnType<typeof openQueueTaskStore>,
+  taskId: string,
+  state: 'done' | 'failed',
+  error?: string,
+): void {
+  const now = nowIso()
+  store.db.prepare(`
+    UPDATE tasks
+    SET control_state = @state,
+        status = @state,
+        terminal_error = @error,
+        terminal_at = COALESCE(terminal_at, @now),
+        claimed_by_worker_id = NULL,
+        claim_expires_at = NULL,
+        updated_at = @now
+    WHERE id = @taskId
+  `).run({ taskId, state, error: error ?? null, now })
 }
 
 function queueStateFromTask(task: TaskRow): QueueItem['state'] {

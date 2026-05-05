@@ -1,9 +1,8 @@
 import { useState } from "react";
-import { Square, OctagonX, Loader2 } from "lucide-react";
+import { Square, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { clearActionToast, registerActionToast } from "./hooks/useActionToasts";
 import type { TrackerEntry } from "./types";
 
 interface CancelRunningButtonProps {
@@ -19,21 +18,12 @@ interface CancelRunningButtonProps {
 }
 
 /**
- * Cancel the running item belonging to a daemon. Posts to
- * `/api/cancel-running`, which proxies to the daemon's `/cancel-current`
- * endpoint. The cancel is **cooperative**: the kernel checks the flag at
- * the next `ctx.step(...)` boundary and throws `CancelledError`, which
- * surfaces as a tracker `failed` row with `step="cancelled"`. Latency is
- * 0–30s depending on what the in-flight step is doing — the toast wording
- * tells the user this so a "Cancel requested" toast that takes 25s to
- * materialize on the dashboard doesn't feel stuck.
- *
- * Confirms via lightweight sonner action toast (matching QueueItemControls'
- * cancel-queued pattern) — destructive but recoverable, since the kernel
- * marks the item failed (retryable).
+ * Stop the running item belonging to a daemon. The primary control now uses
+ * the force-stop endpoint directly so a single click actually stops the
+ * browser-backed run instead of waiting on a cooperative step boundary.
  */
 export function CancelRunningButton({ workflow, id, runId, subject, entry, className }: CancelRunningButtonProps) {
-  const [pending, setPending] = useState<"cancel" | "force" | null>(null);
+  const [pending, setPending] = useState(false);
   const label = subject?.trim() || id;
 
   // OCR-prep parent rows live in the downstream workflow's queue but aren't
@@ -50,12 +40,12 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, class
 
   const fire = async () => {
     if (ocrPrep) return fireOcrDiscard();
-    return fireKernelCancel();
+    return fireStopNow();
   };
 
   const fireOcrDiscard = async () => {
     if (!ocrPrep) return;
-    setPending("cancel");
+    setPending(true);
     const t = toast.loading(`Discarding OCR prep ${label}…`, {
       description: "Cancelling the OCR session and removing this row from the queue.",
     });
@@ -84,82 +74,13 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, class
         description: err instanceof Error ? err.message : String(err),
       });
     } finally {
-      setPending(null);
+      setPending(false);
     }
   };
 
-  const fireKernelCancel = async () => {
-    setPending("cancel");
-    // Loading toast is held open until the entries SSE observes a terminal
-    // status for (workflow, id, runId). The kind="cancel-running" entry in
-    // the action-toast registry maps the toast id so resolveActionToastsForEntry
-    // (called from App's entries effect) can update it in-place when the
-    // tracker writes step="cancelled" or any other terminal state.
-    const t = toast.loading(`Cancelling ${label}…`, {
-      description: "Daemon stops at the next step boundary (up to 30s).",
-    });
-    registerActionToast({
-      toastId: t,
-      workflow,
-      id,
-      runId,
-      kind: "cancel-running",
-      subject,
-      timeoutMs: 30_000,
-      fallbackMessage: `Still cancelling ${label}…`,
-      fallbackDescription:
-        "Daemon hasn't reached a step boundary yet. Check the entry status directly.",
-    });
-    try {
-      const res = await fetch("/api/cancel-running", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workflow, id, runId }),
-      });
-      const body = (await res.json()) as { ok: boolean; error?: string; accepted?: boolean };
-      if (body.ok) {
-        toast.loading("Cancel requested. Worker stops at the next step boundary.", {
-          id: t,
-          description: label,
-        });
-        // Daemon accepted the request — leave the loading toast open. SSE
-        // will resolve it with a concrete "Cancelled" message once the
-        // tracker row hits step="cancelled".
-        return;
-      }
-      // Immediate failure: resolve the toast now and clear the registry
-      // entry so the SSE effect ignores any later transitions for this run.
-      if (res.status === 409) {
-        toast.warning(`No matching item in flight`, {
-          id: t,
-          description: body.error ?? "The item likely just finished.",
-        });
-      } else if (res.status === 410) {
-        toast.warning(`Item is no longer in flight`, {
-          id: t,
-          description: body.error ?? "Refresh to see current state.",
-        });
-      } else {
-        toast.error(`Cancel failed`, {
-          id: t,
-          description: body.error ?? `HTTP ${res.status}`,
-        });
-      }
-      clearActionToast(workflow, id, runId, "cancel-running");
-    } catch (err) {
-      toast.error(`Cancel failed`, {
-        id: t,
-        description: err instanceof Error ? err.message : String(err),
-      });
-      clearActionToast(workflow, id, runId, "cancel-running");
-    } finally {
-      setPending(null);
-    }
-  };
-
-  const fireForceStop = async () => {
-    setPending("force");
-    const t = toast.loading(`Forcing ${label} browser stop…`);
+  const fireStopNow = async () => {
+    setPending(true);
+    const t = toast.loading(`Stopping ${label}…`);
     try {
       const res = await fetch("/api/task/force-stop", {
         method: "POST",
@@ -168,57 +89,30 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, class
       });
       const body = (await res.json()) as { ok?: boolean; error?: string };
       if (res.ok && body.ok) {
-        toast.warning("Browser kill sent. The run should fail shortly.", {
+        toast.success(`Stopped ${label}`, {
           id: t,
-          description: label,
+          description: "Task marked cancelled; worker and browser stop requested.",
         });
       } else {
-        toast.error("Force stop failed", {
+        toast.error("Stop failed", {
           id: t,
           description: body.error ?? `HTTP ${res.status}`,
         });
       }
     } catch (err) {
-      toast.error("Force stop failed", {
+      toast.error("Stop failed", {
         id: t,
         description: err instanceof Error ? err.message : String(err),
       });
     } finally {
-      setPending(null);
+      setPending(false);
     }
   };
 
   const onClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (pending) return;
-    if (ocrPrep) {
-      toast(`Discard OCR prep ${label}?`, {
-        description:
-          "Cancels the OCR session for this PDF. You can re-upload to start over.",
-        action: { label: "Discard prep", onClick: () => void fire() },
-        cancel: { label: "Keep running", onClick: () => {} },
-        duration: 8_000,
-      });
-      return;
-    }
-    toast(`Cancel running ${label}?`, {
-      description:
-        "The current item will fail at the next step. The daemon stays alive and picks up the next item.",
-      action: { label: "Cancel item", onClick: () => void fire() },
-      cancel: { label: "Keep running", onClick: () => {} },
-      duration: 8_000,
-    });
-  };
-
-  const onForceClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (pending) return;
-    toast(`Force stop ${label}?`, {
-      description: "Kills the browser process. Use this only when cooperative cancel is stuck.",
-      action: { label: "Force stop", onClick: () => void fireForceStop() },
-      cancel: { label: "Keep running", onClick: () => {} },
-      duration: 8_000,
-    });
+    void fire();
   };
 
   const buttonClass = cn(
@@ -236,12 +130,12 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, class
         <TooltipTrigger asChild>
           <button
             type="button"
-            aria-label="Cancel at next step"
-            disabled={pending !== null}
+            aria-label={ocrPrep ? "Discard OCR prep" : "Stop running item"}
+            disabled={pending}
             onClick={onClick}
             className={buttonClass}
           >
-            {pending === "cancel" ? (
+            {pending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin text-destructive" />
             ) : (
               <Square className="h-3.5 w-3.5" />
@@ -249,31 +143,9 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, class
           </button>
         </TooltipTrigger>
         <TooltipContent side="top" sideOffset={4}>
-          Cancel at next step
+          {ocrPrep ? "Discard OCR prep" : "Stop running item"}
         </TooltipContent>
       </Tooltip>
-      {!ocrPrep && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="Force stop browser"
-              disabled={pending !== null}
-              onClick={onForceClick}
-              className={buttonClass}
-            >
-              {pending === "force" ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-destructive" />
-              ) : (
-                <OctagonX className="h-3.5 w-3.5" />
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top" sideOffset={4}>
-            Force stop browser
-          </TooltipContent>
-        </Tooltip>
-      )}
     </span>
   );
 }

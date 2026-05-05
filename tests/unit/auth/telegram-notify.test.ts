@@ -6,10 +6,13 @@ import { join } from "node:path";
 import {
   createTelegramNotifier,
   formatAuthEventMessage,
+  normalizeAuthEventForTelegram,
   notifyAuthEvent,
   type AuthEvent,
   type FetchFn,
 } from "../../../src/auth/telegram-notify.js";
+import { readLogEntries } from "../../../src/tracker/jsonl.js";
+import { withLogContext } from "../../../src/utils/log.js";
 
 function makeRecorder(): {
   calls: Array<{ url: string; init?: RequestInit }>;
@@ -196,6 +199,48 @@ describe("createTelegramNotifier — HTTP request shape", () => {
     const headers = calls[0].init?.headers as Record<string, string>;
     assert.equal(headers["Content-Type"], "application/json");
   });
+
+  it("logs the rendered Telegram message before posting to Telegram", async () => {
+    const dir = freshTrackerDir();
+    let sawLogBeforeFetch = false;
+    const fetchFn: FetchFn = async () => {
+      sawLogBeforeFetch = readLogEntries("oath-signature", "item-1", dir)
+        .some((entry) =>
+          entry.message.includes("Telegram notification send")
+          && entry.message.includes("Zaw, Hein Thant")
+          && entry.message.includes("Approve on your phone")
+        );
+      return new Response('{"ok":true,"result":{}}', { status: 200 });
+    };
+    const notify = createTelegramNotifier({
+      fetchFn,
+      tokenValue: "111:AAA",
+      chatIdValue: "987",
+      dir,
+    });
+
+    await withLogContext("oath-signature", "item-1", async () => {
+      await notify({
+        ...sampleEvent,
+        subject: "Zaw, Hein Thant",
+        detail: "Approve on your phone",
+      });
+    }, dir);
+
+    assert.equal(sawLogBeforeFetch, true);
+  });
+});
+
+describe("normalizeAuthEventForTelegram", () => {
+  it("derives workflow from instance when auth fires before item log context", () => {
+    const normalized = normalizeAuthEventForTelegram({
+      ...sampleEvent,
+      workflow: "(unknown)",
+      instance: "EID Lookup 1",
+    });
+
+    assert.equal(normalized.workflow, "eid-lookup");
+  });
 });
 
 describe("createTelegramNotifier — error swallowing", () => {
@@ -310,6 +355,27 @@ describe("createTelegramNotifier — session-event routing (`dir` + `instance`)"
     const { readFileSync } = await import("node:fs");
     const event = JSON.parse(readFileSync(join(dir, "sessions.jsonl"), "utf-8").trim());
     assert.equal(event.workflowInstance, "Oath Signature 1");
+  });
+
+  it("records the resolved workflow when ev.workflow is unknown but instance is known", async () => {
+    const { calls, fetchFn } = makeRecorder();
+    const dir = freshTrackerDir();
+    const notify = createTelegramNotifier({
+      fetchFn,
+      tokenValue: "111:AAA",
+      chatIdValue: "987",
+      dir,
+    });
+
+    await notify({ ...sampleEvent, workflow: "(unknown)", instance: "EID Lookup 1" });
+
+    const body = JSON.parse(String(calls[0].init?.body));
+    assert.match(body.text, /eid-lookup/);
+
+    const { readFileSync } = await import("node:fs");
+    const event = JSON.parse(readFileSync(join(dir, "sessions.jsonl"), "utf-8").trim());
+    assert.equal(event.workflowInstance, "EID Lookup 1");
+    assert.equal(event.data.workflow, "eid-lookup");
   });
 });
 

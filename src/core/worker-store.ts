@@ -395,6 +395,14 @@ function markWorkerStatus(
       UPDATE workers
       SET status = @status,
           phase = COALESCE(@phase, phase),
+          current_task_id = CASE
+            WHEN @status IN ('stopped', 'dead', 'stale') THEN NULL
+            ELSE current_task_id
+          END,
+          current_attempt_id = CASE
+            WHEN @status IN ('stopped', 'dead', 'stale') THEN NULL
+            ELSE current_attempt_id
+          END,
           stopped_at = CASE
             WHEN @status IN ('stopped', 'dead', 'stale') THEN COALESCE(stopped_at, @now)
             ELSE stopped_at

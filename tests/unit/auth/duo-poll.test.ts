@@ -4,6 +4,9 @@ import {
   DUO_POLL_INTERVAL_MS,
   DUO_PRE_CHECK_MS,
   DUO_PRE_CHECK_INTERVAL_MS,
+  buildDuoResentDetail,
+  buildDuoWaitingDetail,
+  extractDuoVerificationCode,
   type DuoPollOptions,
 } from "../../../src/auth/duo-poll.js";
 
@@ -143,5 +146,45 @@ describe("DUO_PRE_CHECK_MS constant", () => {
   it("DUO_PRE_CHECK_INTERVAL_MS is 500ms — finer than the main poll cadence", () => {
     assert.equal(DUO_PRE_CHECK_INTERVAL_MS, 500);
     assert.ok(DUO_PRE_CHECK_INTERVAL_MS < DUO_POLL_INTERVAL_MS);
+  });
+});
+
+describe("Duo verification code helpers", () => {
+  it("extracts the visible Duo Mobile verification code from page text", () => {
+    const text = [
+      "UC San Diego",
+      "Enter code in Duo Mobile",
+      "Verify it's you by entering this verification code in the Duo Mobile app...",
+      "7078",
+      "Sent to \"iOS\" (•••-•••-9464)",
+    ].join("\n");
+
+    assert.equal(extractDuoVerificationCode(text), "7078");
+  });
+
+  it("does not treat the masked phone suffix as a Duo verification code", () => {
+    const text = "Sent to \"iOS\" (•••-•••-9464)";
+
+    assert.equal(extractDuoVerificationCode(text), undefined);
+  });
+
+  it("builds a Telegram detail that carries the Duo code when available", () => {
+    assert.equal(buildDuoWaitingDetail("7078"), "Enter Duo code 7078 in Duo Mobile");
+  });
+
+  it("keeps the push-approval detail when no Duo code is visible", () => {
+    assert.equal(buildDuoWaitingDetail(undefined), "Approve on your phone");
+  });
+
+  it("carries the last visible Duo code into the push resent Telegram detail", () => {
+    assert.equal(buildDuoResentDetail(undefined, "3158"), "Enter Duo code 3158 in Duo Mobile");
+  });
+
+  it("prefers a newly visible Duo code over the previous resend fallback", () => {
+    assert.equal(buildDuoResentDetail("7078", "3158"), "Enter Duo code 7078 in Duo Mobile");
+  });
+
+  it("keeps the short push resent detail when no Duo code has ever been visible", () => {
+    assert.equal(buildDuoResentDetail(undefined, undefined), "Push resent");
   });
 });

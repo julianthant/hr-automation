@@ -166,6 +166,13 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
    */
   initialData?: (input: TData) => Record<string, unknown>
   /**
+   * Derive a stable tracker/queue item id from raw workflow input. The kernel
+   * has a generic top-level id/docId/email fallback, but dashboard HTTP
+   * launches and daemon queue rows need workflow-specific ids for inputs like
+   * person-name searches where the natural key is not one of those fields.
+   */
+  deriveItemId?: (input: TData) => string
+  /**
    * Derive the operator-facing subject from raw workflow input before auth or
    * handler execution. This label is used by queue rows, toasts, Telegram
    * messages, task rows, and later SQLite projections.

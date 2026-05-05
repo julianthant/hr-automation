@@ -389,6 +389,19 @@ export function rebuildSessionState(dir?: string): SessionState {
   return { workflows, duoQueue };
 }
 
+export function filterLiveSessionState(state: SessionState): SessionState {
+  const liveInstances = new Set<string>();
+  const workflows = state.workflows.filter((workflow) => {
+    const visible = (workflow.active && workflow.pidAlive) || workflow.crashedOnLaunch === true;
+    if (visible) liveInstances.add(workflow.instance);
+    return visible;
+  });
+  return {
+    workflows,
+    duoQueue: state.duoQueue.filter((entry) => liveInstances.has(entry.instance)),
+  };
+}
+
 function findBrowser(
   wfMap: Map<string, WorkflowInstanceState>,
   instance: string,

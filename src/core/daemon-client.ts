@@ -158,6 +158,7 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
 
   const idFn = (input: TData, idx: number): string => {
     if (opts.deriveItemId) return opts.deriveItemId(input)
+    if (wf.config.deriveItemId) return wf.config.deriveItemId(input)
     const fallback = `${Date.now()}-${idx}-${randomUUID().slice(0, 8)}`
     return deriveItemId(input, fallback)
   }

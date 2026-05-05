@@ -12,6 +12,7 @@ export {
   getEventSortKey,
   resolveInstanceForRun,
   filterEventsForRun,
+  filterLiveSessionState,
   rebuildSessionState,
 } from "./dashboard/session-state.js";
 export type {
