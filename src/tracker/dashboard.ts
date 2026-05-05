@@ -81,7 +81,7 @@ export {
 
 export {
   buildWorkflowsHandler,
-} from "./dashboard/routes/base.js";
+} from "./dashboard/workflows.js";
 
 export {
   isDownloadInFlight as isRosterDownloadInFlight,

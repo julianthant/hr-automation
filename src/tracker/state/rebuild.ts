@@ -50,6 +50,13 @@ function source(
   return { sourceKind: kind, workflow, trackerDate: date, path, line, offset };
 }
 
+function sessionEventDate(event: SessionEvent | ScreenshotSessionEvent): string {
+  const timestamp = "timestamp" in event && event.timestamp
+    ? event.timestamp
+    : new Date((event as ScreenshotSessionEvent).ts).toISOString();
+  return timestamp.slice(0, 10);
+}
+
 function recordSource(db: Database.Database, args: {
   path: string;
   sourceKind: ProjectionSourceKind;
@@ -94,7 +101,7 @@ export function rebuildProjectionForDate(db: Database.Database, opts: RebuildPro
     db.prepare("DELETE FROM logs WHERE tracker_date = ?").run(date);
     db.prepare("DELETE FROM runs WHERE tracker_date = ?").run(date);
     db.prepare("DELETE FROM items WHERE tracker_date = ?").run(date);
-    db.prepare("DELETE FROM session_events").run();
+    db.prepare("DELETE FROM session_events WHERE tracker_date = ?").run(date);
 
     const filenames = existsSync(dir) ? readdirSync(dir) : [];
     for (const filename of filenames) {
@@ -122,10 +129,14 @@ export function rebuildProjectionForDate(db: Database.Database, opts: RebuildPro
 
     const sessionsPath = join(dir, "sessions.jsonl");
     const sessions = parseJsonl<SessionEvent | ScreenshotSessionEvent>(sessionsPath);
+    let sessionLineCount = 0;
     for (const row of sessions) {
-      applySessionEvent(db, row.value, source(sessionsPath, "session", row.line, row.offset, date));
+      const eventDate = sessionEventDate(row.value);
+      if (eventDate !== date) continue;
+      sessionLineCount += 1;
+      applySessionEvent(db, row.value, source(sessionsPath, "session", row.line, row.offset, eventDate));
     }
-    recordSource(db, { path: sessionsPath, sourceKind: "session", trackerDate: date, lineCount: sessions.length });
+    recordSource(db, { path: sessionsPath, sourceKind: "session", trackerDate: date, lineCount: sessionLineCount });
 
     recomputeRunOrdinals(db, date);
   });

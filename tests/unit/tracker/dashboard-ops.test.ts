@@ -591,6 +591,28 @@ describe("buildRetryHandler SQLite lineage", () => {
 });
 
 describe("buildQueueBumpHandler", () => {
+  it("bumps a queued SQLite task so it is claimed next", async () => {
+    const store = createTaskStore(openControlDb({ trackerDir: tmp }));
+    try {
+      store.enqueueTasks({
+        workflow: "separations",
+        inputs: [{ docId: "first" }, { docId: "second" }, { docId: "third" }],
+        deriveItemId: (input) => input.docId,
+      });
+      const third = store.findTaskByIdentity({ workflow: "separations", itemId: "third" });
+      assert.ok(third?.runId);
+
+      const handler = buildQueueBumpHandler(tmp);
+      const result = await handler({ workflow: "separations", id: "third", runId: third.runId });
+      assert.equal(result.ok, true);
+
+      const claimed = store.claimNextTask({ workflow: "separations", workerId: "worker-1" });
+      assert.equal(claimed?.itemId, "third");
+    } finally {
+      store.close();
+    }
+  });
+
   it("moves a queued item's enqueue event to the head of the file", async () => {
     const path = queueFilePath("separations", tmp);
     mkdirSync(join(tmp, "daemons"), { recursive: true });

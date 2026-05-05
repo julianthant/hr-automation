@@ -1,8 +1,8 @@
 /**
  * Handler factories for the dashboard's operational endpoints — retry,
  * edit-and-resume, queue mutations, and daemon ops. All workflow-agnostic;
- * each handler takes a `workflow` param and operates on tracker / queue /
- * daemon-registry files keyed by that workflow.
+ * each handler takes a `workflow` param and operates on SQLite control rows,
+ * tracker JSONL, and daemon lockfiles keyed by that workflow.
  *
  * Factored out of dashboard.ts so the route bodies in that file stay short
  * and so each handler can be unit-tested with a fake `dir` argument
@@ -580,7 +580,7 @@ export function buildSaveDataHandler(dir: string) {
   };
 }
 
-/** Wrap a body in a fs.mkdir directory mutex so concurrent queue mutations serialize. */
+/** Legacy JSONL fallback lock. SQLite-backed queue mutations use DB transactions. */
 async function withQueueLock<T>(
   workflow: string,
   dir: string,
@@ -619,12 +619,9 @@ export interface CancelQueuedRequest {
 }
 
 /**
- * Remove a queued item from the queue file. If the item has already been
- * claimed by a daemon, returns 409-style error. Cancellation appends a
- * synthetic `failed` queue event so `readQueueState` reflects the change,
- * and writes a `failed` tracker row with `step: "cancelled"` so the
- * dashboard's FAILED filter surfaces it (it can be retried like any other
- * failure).
+ * Cancel a queued item. SQLite-backed tasks are cancelled in the task/attempt
+ * tables and mirrored to JSONL audit + tracker; the queue-file mutation below
+ * remains only for migration fallback rows with no task record.
  */
 export function buildCancelQueuedHandler(dir: string) {
   return async (
@@ -962,19 +959,52 @@ function enqueueWorkerLifecycleCommand(
 export interface QueueBumpRequest {
   workflow: string;
   id: string;
+  runId?: string;
 }
 
 /**
- * Move a queued item to the head of the queue. Implemented as a queue-file
- * rewrite: we read the file, rebuild it with the bumped item's `enqueue`
- * event placed first, preserving every other event in original order. Only
- * `queued` items can be bumped.
+ * Move a queued item to the head of the live queue. SQLite-backed tasks use
+ * priority ordering; the JSONL rewrite below remains only for migration
+ * fallback rows that do not have a task record.
  */
 export function buildQueueBumpHandler(dir: string) {
   return async (
     req: QueueBumpRequest,
   ): Promise<{ ok: true } | { ok: false; error: string; status?: number }> => {
     if (!req.workflow || !req.id) return { ok: false, error: "workflow and id are required" };
+    const stores = openControlStores(dir);
+    try {
+      const task = resolveControlTask(stores.taskStore, req.workflow, req.id, req.runId);
+      if (task) {
+        if (task.state !== "queued") {
+          return {
+            ok: false as const,
+            error: `cannot bump item in state ${task.state}`,
+            status: 409,
+          };
+        }
+        const now = new Date().toISOString();
+        const bump = stores.taskStore.db.transaction(() => {
+          const row = stores.taskStore.db.prepare(`
+            SELECT COALESCE(MAX(priority), 0) + 1 AS priority
+            FROM tasks
+            WHERE workflow = @workflow AND control_state = 'queued'
+          `).get({ workflow: req.workflow }) as { priority: number };
+          const info = stores.taskStore.db.prepare(`
+            UPDATE tasks
+            SET priority = @priority,
+                updated_at = @now
+            WHERE id = @taskId AND control_state = 'queued'
+          `).run({ taskId: task.taskId, priority: row.priority, now });
+          return info.changes;
+        });
+        return bump() === 1
+          ? { ok: true as const }
+          : { ok: false as const, error: "item already claimed by a daemon", status: 409 };
+      }
+    } finally {
+      stores.close();
+    }
     return withQueueLock(req.workflow, dir, async () => {
       const path = queueFilePath(req.workflow, dir);
       if (!existsSync(path)) return { ok: false as const, error: "queue file does not exist" };

@@ -1,0 +1,197 @@
+import { afterEach, beforeEach, test } from "node:test";
+import assert from "node:assert/strict";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+import { openControlDb } from "../../../src/core/control-db.js";
+import { queueFilePath } from "../../../src/core/daemon-queue.js";
+import { createTaskStore } from "../../../src/core/task-store.js";
+import { createWorkerStore } from "../../../src/core/worker-store.js";
+import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
+import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
+
+let dir: string;
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "hono-ops-"));
+});
+
+afterEach(() => {
+  closeStateDbForTests(dir);
+  if (dir && existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+});
+
+function app() {
+  return createDashboardHonoApp({ dir, stateDb: openStateDb(dir) });
+}
+
+function jsonRequest(body: unknown): RequestInit {
+  return {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  };
+}
+
+test("Hono /api/cancel-queued cancels a queued task", async () => {
+  const control = openControlDb({ trackerDir: dir });
+  const taskStore = createTaskStore(control);
+  try {
+    const [task] = taskStore.enqueueTasks({
+      workflow: "separations",
+      inputs: [{ docId: "3930" }],
+      deriveItemId: (input) => input.docId,
+      runIds: ["run-queued"],
+    });
+
+    const res = await app().request("/api/cancel-queued", jsonRequest({
+      workflow: "separations",
+      id: "3930",
+      runId: "run-queued",
+    }));
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ok: true });
+    assert.equal(taskStore.getTask(task.taskId)?.state, "cancelled");
+    assert.equal(taskStore.getAttempt(task.attemptId)?.state, "cancelled");
+  } finally {
+    taskStore.close();
+  }
+});
+
+test("Hono /api/cancel-queued returns not-found shape for missing queue item", async () => {
+  mkdirSync(join(dir, "daemons"), { recursive: true });
+  writeFileSync(queueFilePath("separations", dir), "");
+  const res = await app().request("/api/cancel-queued", jsonRequest({
+    workflow: "separations",
+    id: "missing",
+  }));
+
+  assert.equal(res.status, 404);
+  const body = await res.json() as { ok: boolean; error: string };
+  assert.equal(body.ok, false);
+  assert.equal(body.error, "id not found in queue");
+});
+
+test("Hono /api/cancel-running requires workflow, id, and runId", async () => {
+  const res = await app().request("/api/cancel-running", jsonRequest({
+    workflow: "separations",
+    id: "3930",
+  }));
+
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), {
+    ok: false,
+    error: "workflow, id, runId are required",
+  });
+});
+
+test("Hono /api/queue/bump moves a queued SQLite task ahead and validates input", async () => {
+  const taskStore = createTaskStore(openControlDb({ trackerDir: dir }));
+  try {
+    taskStore.enqueueTasks({
+      workflow: "separations",
+      inputs: [{ docId: "first" }, { docId: "second" }, { docId: "third" }],
+      deriveItemId: (input) => input.docId,
+    });
+    const third = taskStore.findTaskByIdentity({ workflow: "separations", itemId: "third" });
+    assert.ok(third?.runId);
+
+    const bumped = await app().request("/api/queue/bump", jsonRequest({
+      workflow: "separations",
+      id: "third",
+      runId: third.runId,
+    }));
+    assert.equal(bumped.status, 200);
+    assert.deepEqual(await bumped.json(), { ok: true });
+    assert.equal(taskStore.claimNextTask({ workflow: "separations", workerId: "worker-1" })?.itemId, "third");
+
+    const invalid = await app().request("/api/queue/bump", jsonRequest({ workflow: "separations" }));
+    assert.equal(invalid.status, 400);
+    assert.equal((await invalid.json() as { ok: boolean }).ok, false);
+  } finally {
+    taskStore.close();
+  }
+});
+
+test("Hono worker drain and stop routes enqueue worker commands", async () => {
+  const workerStore = createWorkerStore(openControlDb({ trackerDir: dir }));
+  try {
+    workerStore.registerWorker({
+      workerId: "sep-worker",
+      workflow: "separations",
+      kind: "daemon",
+      pid: 12345,
+      hostname: "test-host",
+      phase: "idle",
+    });
+
+    const drain = await app().request("/api/worker/drain", jsonRequest({ workerId: "sep-worker" }));
+    const stop = await app().request("/api/worker/stop", jsonRequest({ workerId: "sep-worker" }));
+
+    assert.equal(drain.status, 202);
+    assert.equal(stop.status, 202);
+    const drainBody = await drain.json() as { ok: boolean; commandId: string };
+    const stopBody = await stop.json() as { ok: boolean; commandId: string };
+    assert.equal(drainBody.ok, true);
+    assert.equal(stopBody.ok, true);
+    assert.equal(workerStore.getCommand(drainBody.commandId)?.commandType, "drain_worker");
+    assert.equal(workerStore.getCommand(stopBody.commandId)?.commandType, "stop_worker");
+  } finally {
+    workerStore.close();
+  }
+});
+
+test("Hono /api/browser/kill accepts pid targeting and rejects missing target", async () => {
+  const workerStore = createWorkerStore(openControlDb({ trackerDir: dir }));
+  try {
+    workerStore.registerWorker({
+      workerId: "sep-worker",
+      workflow: "separations",
+      kind: "daemon",
+      pid: 12345,
+      hostname: "test-host",
+      phase: "processing",
+    });
+    const browser = workerStore.upsertBrowserProcess({
+      workerId: "sep-worker",
+      workflow: "separations",
+      systemId: "ucpath",
+      browserId: "ucpath",
+      pid: 987655,
+    });
+
+    const missing = await app().request("/api/browser/kill", jsonRequest({}));
+    assert.equal(missing.status, 400);
+
+    const killed = await app().request("/api/browser/kill", jsonRequest({ pid: 987655 }));
+    assert.equal(killed.status, 202);
+    const body = await killed.json() as { ok: boolean; commandId: string };
+    assert.equal(body.ok, true);
+    assert.equal(workerStore.getCommand(body.commandId)?.commandType, "kill_browser");
+    assert.equal(workerStore.findBrowserProcessById(browser.browserProcessId)?.status, "kill_requested");
+  } finally {
+    workerStore.close();
+  }
+});
+
+test("Hono /api/daemon/stop preserves empty daemon response shape", async () => {
+  const res = await app().request("/api/daemon/stop", jsonRequest({
+    workflow: "separations",
+    force: false,
+  }));
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), {
+    ok: true,
+    workflow: "separations",
+    force: false,
+    stopped: 0,
+    daemonsStopped: 0,
+    processesKilled: 0,
+    browsersKilled: 0,
+    queuedCancelled: 0,
+    phantomsCleared: 0,
+  });
+});

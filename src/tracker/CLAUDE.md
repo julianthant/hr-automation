@@ -76,7 +76,7 @@ await withTrackedWorkflow("separations", docId, {}, async (setStep, updateData) 
 - Tracker functions (`updateOnboardingTracker`, etc.) are Excel-only — they no longer call `trackEvent()`
 - `opts.onCleanup` — callback for resource teardown (e.g. closing browsers) on both success and failure
 - `opts.preAssignedRunId` — pre-assigned runId for batch mode (caller pre-emits pending for all items, then processes sequentially)
-- `opts.preAssignedInstance` — pre-assigned workflow instance name (e.g. `"EID Lookup 1"`) for batch runners. When present, `withTrackedWorkflow` **skips its own `workflow_start` / `workflow_end` emits and skips calling `generateInstanceName`** — the caller (`withBatchLifecycle` in `src/core/batch-lifecycle.ts`) owns the batch-level lifecycle. The value is also stamped into each tracker row's `data.instance` so SessionPanel can join per-item rows back to the batch instance.
+- `opts.preAssignedInstance` — pre-assigned workflow instance name (e.g. `"EID Lookup 1"`) for batch runners. When present, `withTrackedWorkflow` **skips its own `workflow_start` / `workflow_end` emits and skips calling `generateInstanceName`** — the caller (`withBatchLifecycle` in `src/core/batch-lifecycle.ts`) owns the batch-level lifecycle. The value is also stamped into each tracker row's `data.instance` so the dashboard session drawer can join per-item rows back to the batch instance.
 - Calls `setLogRunId(runId)` to inject `runId` into the `AsyncLocalStorage` log context so log entries include it
 - **SIGINT handler**: Registers a `process.on("SIGINT")` handler that writes a `failed` tracker entry and log entry synchronously via `fs.appendFileSync` before calling `process.exit`. Also kills Playwright Chrome via `wmic` on Windows.
 
@@ -103,10 +103,10 @@ await withTrackedWorkflow("separations", docId, {}, async (setStep, updateData) 
 - `POST /api/emergency-contact/discard-prepare` — JSON `{parentRunId, reason?}`; emits `failed` step `discarded`.
 - `SSE /events?workflow=X&date=Y` — stream entries (enriched with `firstLogTs`, `lastLogTs`, `lastLogMessage`, `stepDurations`) + `wfCounts` + `failureCounts` every 1s. `failureCounts` is computed by the pure helper `computeFailureCounts(entriesByWorkflow)` — `Record<workflow, count>` of `failed` entries on the active date, deduped to latest run per id. Drives the `FailureBell` badge without an extra HTTP fetch.
 - `SSE /events/logs?workflow=X&id=Y&date=Z[&runId=R]` — stream log entries every 500ms
-- `SSE /events/sessions` — stream `SessionState` (workflow instances + browsers + duo queue) for `SessionPanel`
+- `SSE /events/sessions` — stream `SessionState` (workflow instances + browsers + duo queue) for the dashboard session drawer
 - `SSE /events/run-events?workflow=X&id=Y&runId=Z[&date=D]` — stream kernel session events for a specific run (workflow_start, browser_launch, duo_*, auth_*, item_*, etc.) every 500ms. Same delta semantics as `/events/logs`. Events lacking `runId` (emitted by `Session.launch` at batch scope, outside per-item `withLogContext`) are attributed to a run via `workflowInstance`: the handler resolves `runId -> tracker entry -> data.instance`, then pulls in no-`runId` events that share that instance. Implemented by the pure `filterEventsForRun(events, trackers, runId)` function, exported for unit-test access.
 
-API-only: does not serve HTML. The React dashboard is served by Vite dev server (port 5173) which proxies API calls to 3838.
+In dev, the React dashboard is served by Vite (port 5173) and proxies API calls to 3838. In prod, `dashboard --prod` serves `dist/dashboard/index.html` from the Hono dashboard server.
 
 ## JSONL File Format
 

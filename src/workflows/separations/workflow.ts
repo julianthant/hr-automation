@@ -888,7 +888,7 @@ export async function runSeparationCli(
       // Emit a `pending` tracker row per docId at enqueue time so the
       // dashboard queue panel populates BEFORE the daemon finishes Duo.
       // Matches the `runSeparationBatch` pre-emit payload (shape is
-      // read back by SessionPanel + QueuePanel); runId is pre-assigned
+      // read back by the session drawer + QueuePanel); runId is pre-assigned
       // by enqueueItems so the eventual running/done rows pair 1:1.
       onPreEmitPending: (item, runId) => {
         const { docId } = item;

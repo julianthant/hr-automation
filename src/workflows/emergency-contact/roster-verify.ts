@@ -3,6 +3,7 @@ import path from "node:path";
 import ExcelJS from "exceljs";
 import { log } from "../../utils/log.js";
 import { normalizeEid } from "../../match/index.js";
+import { normalizePersonNameForCompare } from "../../domain/identity/person-name.js";
 import type { EmergencyContactBatch } from "./schema.js";
 
 export interface RosterMismatch {
@@ -26,11 +27,7 @@ export interface RosterVerifyResult {
 }
 
 function normalizeName(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z\s]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return normalizePersonNameForCompare(s, { lettersOnly: true });
 }
 
 function namesMatch(a: string, b: string): boolean {

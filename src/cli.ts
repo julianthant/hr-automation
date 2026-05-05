@@ -459,7 +459,10 @@ program
     const { startDashboard } = await import("./tracker/dashboard.js");
     const port = opts.port ?? 3838;
     // Commander's --no-clean sets opts.clean === false; default is `undefined` → clean = true.
-    startDashboard("all", port, { noClean: opts.clean === false });
+    startDashboard("all", port, {
+      noClean: opts.clean === false,
+      serveStatic: Boolean(opts.prod),
+    });
 
     if (opts.prod) {
       // Production mode: serve built HTML from SSE server only

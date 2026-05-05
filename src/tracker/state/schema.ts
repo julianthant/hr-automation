@@ -3,7 +3,7 @@ export interface Migration {
   sql: string;
 }
 
-export const LATEST_SCHEMA_VERSION = 3;
+export const LATEST_SCHEMA_VERSION = 4;
 
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -483,6 +483,19 @@ CREATE INDEX IF NOT EXISTS worker_commands_worker_state_idx
   ON worker_commands(target_worker_id, state, requested_at);
 CREATE INDEX IF NOT EXISTS worker_commands_task_state_idx
   ON worker_commands(target_task_id, state, requested_at);
+    `,
+  },
+  {
+    version: 4,
+    sql: String.raw`
+ALTER TABLE session_events ADD COLUMN tracker_date TEXT NOT NULL DEFAULT '';
+
+UPDATE session_events
+SET tracker_date = substr(timestamp, 1, 10)
+WHERE tracker_date = '';
+
+CREATE INDEX IF NOT EXISTS idx_session_events_date
+  ON session_events(tracker_date, ts_ms);
     `,
   },
 ];

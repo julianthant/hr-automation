@@ -11,6 +11,7 @@ import {
   compareUsAddresses,
   normalizeEid,
 } from "../../match/index.js";
+import { normalizePersonNameForCompare } from "../../domain/identity/person-name.js";
 import type { OcrFormSpec, RosterRow, LookupKind } from "../../workflows/ocr/types.js";
 import {
   AddressSchema,
@@ -91,10 +92,6 @@ Field-level rules:
 - Output ONLY valid JSON matching the schema. No commentary.`;
 
 const ROSTER_AUTO_ACCEPT = 0.85;
-
-function normalizeName(n: string): string {
-  return n.trim().toLowerCase().replace(/\s+/g, " ");
-}
 
 // ─── Spec ──────────────────────────────────────────────────
 
@@ -192,7 +189,7 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
   },
 
   carryForwardKey(record): string {
-    return normalizeName(record.employee.name);
+    return normalizePersonNameForCompare(record.employee.name);
   },
 
   applyCarryForward({ v2, v1 }): PreviewRecord {

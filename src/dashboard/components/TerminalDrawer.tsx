@@ -1,8 +1,10 @@
 import { Terminal as TerminalIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useClock } from "./hooks/useClock";
+import { useDaemons } from "./hooks/useDaemons";
 import { useSessions } from "./hooks/useSessions";
 import { useTerminalDrawer } from "./hooks/useTerminalDrawer";
+import { DaemonGroups } from "./DaemonsSection";
 import { LiveIndicator } from "./LiveIndicator";
 import { WorkflowBox } from "./WorkflowBox";
 
@@ -12,7 +14,7 @@ interface TerminalDrawerProps {
 }
 
 /**
- * Bottom-docked drawer that replaces the right-rail SessionPanel. The bar
+ * Bottom-docked drawer for active workflow sessions. The bar
  * itself is the toggle (clicking it flips state). `Cmd+J` / `Ctrl+J` also
  * toggles, registered globally in `useTerminalDrawer`.
  *
@@ -24,19 +26,21 @@ interface TerminalDrawerProps {
  * Live pill / clock land at the same X as the date nav and Auto-scroll
  * button on the right side of the dashboard.
  *
- * Filter logic mirrors the legacy SessionPanel: only workflows whose process
- * is alive (or crashed-on-launch) AND whose batch hasn't ended.
+ * Only workflows whose process is alive (or crashed-on-launch) and whose
+ * batch has not ended are shown.
  */
 export function TerminalDrawer({ connected }: TerminalDrawerProps) {
   const { open, toggle } = useTerminalDrawer();
   const clock = useClock();
   const { state } = useSessions();
+  const { daemons, refresh: refreshDaemons } = useDaemons();
 
-  // Mirrors SessionPanel filter: keep crashed-on-launch instances even
-  // after pidAlive flips false so the operator learns about the failure.
+  // Keep crashed-on-launch instances even after pidAlive flips false so the
+  // operator learns about the failure.
   const visible = state.workflows.filter((w) => w.pidAlive || w.crashedOnLaunch);
   const active = visible.filter((w) => w.active || w.crashedOnLaunch);
   const count = active.length;
+  const daemonCount = daemons.length;
 
   return (
     <div
@@ -79,6 +83,7 @@ export function TerminalDrawer({ connected }: TerminalDrawerProps) {
           <TerminalIcon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" strokeWidth={2} />
           <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">session</span>
           <CountBadge count={count} />
+          <CountBadge count={daemonCount} noun="workers" />
         </span>
         {/* Right edge: Live pill, then the clock. Live sits before the
             clock so the operator's eye lands on connection state first
@@ -103,29 +108,39 @@ export function TerminalDrawer({ connected }: TerminalDrawerProps) {
           open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
         )}
       >
-        {active.length === 0 ? (
-          <div className="h-full flex items-center px-4 font-mono text-[11px] text-muted-foreground">
-            No active workflows
+        <div className="h-full min-w-0 flex">
+          <div className="h-full w-[360px] max-w-[42vw] flex-shrink-0 overflow-y-auto border-r border-border px-3 py-3 [scrollbar-width:thin]">
+            <DaemonGroups
+              daemons={daemons}
+              onRefresh={refreshDaemons}
+              emptyText="No daemon workers"
+              className="mb-0"
+            />
           </div>
-        ) : (
-          <div
-            className={cn(
-              "h-full flex gap-2.5 px-3.5 py-3",
-              "overflow-x-auto overflow-y-hidden items-stretch",
-              "[scrollbar-width:thin]",
-            )}
-          >
-            {active.map((wf) => (
-              <WorkflowBox key={wf.instance} workflow={wf} />
-            ))}
-          </div>
-        )}
+          {active.length === 0 ? (
+            <div className="h-full flex min-w-0 flex-1 items-center px-4 font-mono text-[11px] text-muted-foreground">
+              No active workflows
+            </div>
+          ) : (
+            <div
+              className={cn(
+                "h-full min-w-0 flex-1 flex gap-2.5 px-3.5 py-3",
+                "overflow-x-auto overflow-y-hidden items-stretch",
+                "[scrollbar-width:thin]",
+              )}
+            >
+              {active.map((wf) => (
+                <WorkflowBox key={wf.instance} workflow={wf} />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-function CountBadge({ count }: { count: number }) {
+function CountBadge({ count, noun = "active" }: { count: number; noun?: string }) {
   const tone = count > 0 ? "active" : "zero";
   return (
     <span
@@ -135,7 +150,7 @@ function CountBadge({ count }: { count: number }) {
           ? "bg-primary/15 text-primary"
           : "bg-muted text-muted-foreground",
       )}
-      aria-label={`${count} active workflow${count === 1 ? "" : "s"}`}
+      aria-label={`${count} ${noun}`}
     >
       <span
         aria-hidden
@@ -144,7 +159,7 @@ function CountBadge({ count }: { count: number }) {
           tone === "active" ? "animate-pulse" : "opacity-40",
         )}
       />
-      <span className="font-mono tabular-nums">{count} active</span>
+      <span className="font-mono tabular-nums">{count} {noun}</span>
     </span>
   );
 }

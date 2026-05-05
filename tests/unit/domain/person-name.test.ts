@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   canonicalPersonNameKey,
   displayPersonName,
+  normalizePersonNameForCompare,
   parseLastFirstName,
   titleCasePersonToken,
 } from "../../../src/domain/identity/person-name.js";
@@ -48,5 +49,13 @@ describe("person-name identity helpers", () => {
 
   it("title-cases hyphenated and apostrophe tokens without breaking separators", () => {
     assert.equal(titleCasePersonToken("o'NEIL-smith"), "O'Neil-Smith");
+  });
+
+  it("normalizes names for loose comparison while preserving punctuation by default", () => {
+    assert.equal(normalizePersonNameForCompare("  O'NEIL-SMITH,   JANE "), "o'neil-smith, jane");
+  });
+
+  it("can normalize names to letters and spaces only for fuzzy roster matching", () => {
+    assert.equal(normalizePersonNameForCompare("  O'NEIL-SMITH,   JANE ", { lettersOnly: true }), "oneilsmith jane");
   });
 });

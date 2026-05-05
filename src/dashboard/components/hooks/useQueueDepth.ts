@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 
 /**
  * Polls /api/queue-depth every 5s. Returns a {workflow: depth} map.
- * Cheap — the backend reads & folds the queue files which are small.
+ * Cheap — the backend counts queued SQLite task rows, with JSONL fallback
+ * only for migration-era rows that do not have task records.
  * Polling rather than SSE because the data changes coarsely (a few
  * times per minute at most) and adding a new SSE channel for it would
  * be more wiring than it's worth.

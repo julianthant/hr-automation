@@ -14,6 +14,8 @@ import {
   queueFilePath,
   queueLockDirPath,
 } from '../../../src/core/daemon-queue.js'
+import { openControlDb } from '../../../src/core/control-db.js'
+import { createTaskStore } from '../../../src/core/task-store.js'
 
 const TMP = (): string => mkdtempSync(join(tmpdir(), 'daemon-q-'))
 
@@ -251,8 +253,8 @@ test('unclaimItem transitions claimed → queued and clears claimedBy', async ()
   const dir = TMP()
   try {
     await enqueueItems('wf', [{}], () => 'x', dir)
-    await claimNextItem('wf', 'w1', dir)
-    await unclaimItem('wf', 'x', 'voluntary', dir)
+    const claimed = await claimNextItem('wf', 'w1', dir)
+    await unclaimItem('wf', 'x', 'voluntary', dir, claimed?.runId)
     const state = await readQueueState('wf', dir)
     assert.equal(state.claimed.length, 0)
     assert.equal(state.queued.length, 1)
@@ -260,6 +262,30 @@ test('unclaimItem transitions claimed → queued and clears claimedBy', async ()
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('unclaimItem uses runId to requeue the in-flight task when an item is re-enqueued', async () => {
+  await withQueueBackend('sqlite', async () => {
+    const dir = TMP()
+    try {
+      const [first] = await enqueueItems('wf', [{ n: 1 }], () => 'x', dir)
+      const claimed = await claimNextItem('wf', 'w1', dir)
+      assert.equal(claimed?.runId, first.runId)
+
+      const [second] = await enqueueItems('wf', [{ n: 2 }], () => 'x', dir)
+      await unclaimItem('wf', 'x', 'voluntary', dir, claimed?.runId)
+
+      const store = createTaskStore(openControlDb({ trackerDir: dir }))
+      try {
+        assert.equal(store.findTaskByIdentity({ workflow: 'wf', itemId: 'x', runId: first.runId })?.state, 'queued')
+        assert.equal(store.findTaskByIdentity({ workflow: 'wf', itemId: 'x', runId: second.runId })?.state, 'queued')
+      } finally {
+        store.close()
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })
 
 test('recoverOrphanedClaims re-queues claims whose owner is not alive', async () => {

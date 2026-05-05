@@ -17,11 +17,19 @@ test('control db migrates idempotently with WAL and busy timeout', () => {
     assert.equal(ctl.db.pragma('journal_mode', { simple: true }), 'wal')
     assert.ok(Number(ctl.db.pragma('busy_timeout', { simple: true })) >= 5000)
     assert.equal(ctl.supportsUpdateReturning(), true)
+    ctl.db.exec(`
+      DROP TABLE IF EXISTS temp.__returning_probe;
+      CREATE TEMP TABLE __returning_probe(
+        id INTEGER PRIMARY KEY,
+        state TEXT NOT NULL CHECK (state = 'not-queued')
+      );
+    `)
+    assert.equal(ctl.supportsUpdateReturning(), true)
 
     const version = ctl.db.prepare('SELECT version FROM schema_version WHERE id = 1').get() as {
       version: number
     }
-    assert.ok(version.version >= 3)
+    assert.ok(version.version >= 4)
     assert.ok(
       ctl.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'worker_commands'").get(),
     )

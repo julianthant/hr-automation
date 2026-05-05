@@ -281,10 +281,10 @@ export function rebuildSessionState(dir?: string): SessionState {
   // Flag workflows that crashed before any browser could launch. A workflow that
   // ended in failed status but never emitted a browser_launch is indistinguishable
   // from normal "no-active-sessions" in the dashboard UI - this flag lets
-  // SessionPanel render a dedicated "Launch failed" placeholder so the user
+  // session drawer render a dedicated "Launch failed" placeholder so the user
   // knows the run crashed early and where to look for details.
   //
-  // Age gate: SessionPanel keeps crashedOnLaunch entries visible even after
+  // Age gate: the session drawer keeps crashedOnLaunch entries visible even after
   // pidAlive flips false (that's the point of the placeholder - the Node
   // process that crashed is already gone). But sessions.jsonl is append-only
   // across orchestrator sessions, so without a time cutoff a crash from days
@@ -355,7 +355,7 @@ export function rebuildSessionState(dir?: string): SessionState {
   // Check liveness of each workflow's spawning process. We split this from `active`:
   //   - `active`  = the workflow_start/end lifecycle (emitted by withTrackedWorkflow)
   //   - `pidAlive`= whether the Node process is still running (and therefore its browsers)
-  // SessionPanel uses `pidAlive` to remove a workflow once its session is closed,
+  // The session drawer uses `pidAlive` to remove a workflow once its session is closed,
   // while `active` stays authoritative for the DONE/FAILED pill in the brief window
   // between workflow_end firing and the Node process exiting.
   //
@@ -363,11 +363,11 @@ export function rebuildSessionState(dir?: string): SessionState {
   // dashboard server process (e.g. the `sharepoint-download` HTTP handler
   // fires `runWorkflow()` without awaiting), the recorded pid equals the
   // dashboard's own pid - so `process.kill(pid, 0)` always succeeds while
-  // the dashboard is up, pinning the workflow box to the Sessions rail
+  // the dashboard is up, pinning the workflow box to the session drawer
   // forever even after it has completed or failed. Treat an in-process run
   // as "session ended" the moment `workflow_end` fires, matching the behavior
   // of spawned-child workflows whose process exits shortly after end. This
-  // keeps the Sessions rail consistent across both execution models.
+  // keeps the session drawer consistent across both execution models.
   const ownPid = process.pid;
   for (const wf of workflows) {
     // Pick the LATEST workflow_start for this instance - when a workflow is re-run

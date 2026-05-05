@@ -230,18 +230,20 @@ export function applySessionEvent(
 ): void {
   const timestamp = "timestamp" in event && event.timestamp ? event.timestamp : new Date((event as ScreenshotSessionEvent).ts).toISOString();
   const tsMs = "ts" in event && typeof event.ts === "number" ? event.ts : toMs(timestamp);
+  const trackerDate = source.trackerDate ?? trackerDateFromTimestamp(timestamp);
   db.prepare(`
     INSERT OR IGNORE INTO session_events (
-      source_path, source_line, source_offset, event_type, workflow_instance,
+      source_path, source_line, source_offset, tracker_date, event_type, workflow_instance,
       run_id, timestamp, ts_ms, raw_json, applied_at
     ) VALUES (
-      @sourcePath, @sourceLine, @sourceOffset, @eventType, @workflowInstance,
+      @sourcePath, @sourceLine, @sourceOffset, @trackerDate, @eventType, @workflowInstance,
       @runId, @timestamp, @tsMs, @rawJson, @appliedAt
     )
   `).run({
     sourcePath: source.path,
     sourceLine: source.line,
     sourceOffset: source.offset,
+    trackerDate,
     eventType: event.type,
     workflowInstance: "workflowInstance" in event ? event.workflowInstance ?? null : null,
     runId: "runId" in event ? event.runId ?? null : null,

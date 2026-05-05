@@ -83,7 +83,7 @@ CLI: npm run oath-signature <emplId...> [--date MM/DD/YYYY]   (daemon — defaul
   → runOathSignatureCli
     → ensureDaemonsAndEnqueue(oathSignatureWorkflow, inputs, { new, parallel })
       - Validates every {emplId, date?} via schema
-      - Appends one enqueue event per EID to .tracker/daemons/oath-signature.queue.jsonl
+      - Inserts one SQLite task row per EID and appends enqueue audit to .tracker/daemons/oath-signature.queue.jsonl
       - Pre-emits `pending` tracker row per EID (dashboard populates instantly)
       - Wakes alive daemons; spawns new ones up to --parallel N (Duo 1×/daemon)
       - Each daemon pulls from the queue:

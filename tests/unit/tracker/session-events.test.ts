@@ -178,7 +178,7 @@ describe("rebuildSessionState — workflows", () => {
     assert.equal(
       state.workflows[0].active,
       true,
-      "active stays true (workflow_end never fired) — SessionPanel filters on pidAlive instead",
+      "active stays true (workflow_end never fired) — session drawer filters on pidAlive instead",
     );
   });
 
@@ -245,12 +245,12 @@ describe("rebuildSessionState — workflows", () => {
     );
   });
 
-  it("flips pidAlive=false for in-process workflows once workflow_end fires (SessionPanel consistency)", () => {
+  it("flips pidAlive=false for in-process workflows once workflow_end fires (session drawer consistency)", () => {
     // Regression guard for the `sharepoint-download` dashboard button. Fire-and-forget
     // workflows run INSIDE the dashboard server process, so the recorded pid equals
     // the dashboard's own pid — `process.kill(pid, 0)` always succeeds while the
-    // dashboard is up, which would pin the workflow box to the Sessions rail forever.
-    // Once workflow_end fires, pidAlive must flip false so the SessionPanel removes
+    // dashboard is up, which would pin the workflow box to the session drawer forever.
+    // Once workflow_end fires, pidAlive must flip false so the drawer removes
     // the box, matching the behavior of spawned-child workflows whose process exits
     // shortly after end.
     emitSessionEvent({ type: "workflow_start", workflowInstance: "SharePoint Download 1" }, dir);

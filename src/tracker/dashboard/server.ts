@@ -1,4 +1,6 @@
 import { createServer, type Server } from "node:http";
+import { resolve } from "node:path";
+import { getRequestListener } from "@hono/node-server";
 import {
   cleanOldScreenshots,
   cleanOldTrackerFiles,
@@ -13,20 +15,7 @@ import { startDependencyScheduler } from "../tasks/scheduler.js";
 import { sweepOrphanUploadDirs } from "../../scripts/ops/clean-tracker.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
-import { createDashboardRequestListener } from "./routes/index.js";
-import { createBaseRoutes } from "./routes/base.js";
-import { createEventsRoute } from "./routes/events.js";
-import { createSearchRoutes } from "./routes/search.js";
-import { createScreenshotRoutes } from "./routes/screenshots.js";
-import { createSharePointRoutes } from "./routes/sharepoint.js";
-import { createEnqueueRoute } from "./routes/enqueue.js";
-import { createDaemonStopRoute } from "./routes/daemon-stop.js";
-import { createOpsRoutes } from "./routes/ops.js";
-import { createOcrRoutes } from "./routes/ocr.js";
-import { createOathUploadRoutes } from "./routes/oath-upload.js";
-import { createCaptureRoutes } from "./routes/capture.js";
 import { createDashboardHonoApp } from "./hono/app.js";
-import { createHonoDashboardRoute } from "./hono/adapter.js";
 import {
   scanFailurePatterns,
   scanOrphanedQueueItems,
@@ -39,6 +28,7 @@ export interface StartDashboardOptions {
   cleanMaxAgeDays?: number;
   dir?: string;
   uploadPort?: number | null;
+  serveStatic?: boolean;
 }
 
 export interface CreateDashboardServerOptions {
@@ -48,6 +38,7 @@ export interface CreateDashboardServerOptions {
   noClean?: boolean;
   cleanMaxAgeDays?: number;
   uploadPort?: number | null;
+  serveStatic?: boolean;
 }
 
 export function startDashboard(
@@ -65,6 +56,7 @@ export function startDashboard(
     dir: opts.dir,
     noClean: opts.noClean,
     cleanMaxAgeDays: opts.cleanMaxAgeDays,
+    serveStatic: opts.serveStatic,
   });
 }
 
@@ -113,33 +105,16 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
   }
 
   let projectionReady = false;
-  let stateDb: ReturnType<typeof openStateDb> | undefined;
+  const stateDb = openStateDb(dir);
   try {
-    stateDb = openStateDb(dir);
     rebuildProjectionForDate(stateDb, { dir, date: dateLocal() });
     projectionReady = true;
   } catch (err) {
     log.warn(`SQLite projection startup skipped: ${err instanceof Error ? err.message : String(err)}`);
   }
-  const honoApp = stateDb ? createDashboardHonoApp({ dir, stateDb }) : null;
-
-  const requestListener = createDashboardRequestListener(
-    { workflow, port, dir, projectionReady, stateDb },
-    [
-      ...(honoApp ? [createHonoDashboardRoute(honoApp)] : []),
-      createBaseRoutes(),
-      createEventsRoute(),
-      createSearchRoutes(),
-      createScreenshotRoutes(),
-      createSharePointRoutes(),
-      createEnqueueRoute(),
-      createDaemonStopRoute(),
-      createOpsRoutes(),
-      createOcrRoutes(),
-      createOathUploadRoutes(),
-      createCaptureRoutes(),
-    ],
-  );
+  const staticDir = opts.serveStatic ? resolve(process.cwd(), "dist/dashboard") : undefined;
+  const honoApp = createDashboardHonoApp({ dir, stateDb, workflow, port, projectionReady, staticDir });
+  const requestListener = getRequestListener(honoApp.fetch);
 
   const localServer: Server = createServer(requestListener);
   const sweepInterval = setInterval(() => {

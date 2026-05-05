@@ -60,3 +60,13 @@ export function canonicalPersonNameKey(raw: string | null | undefined): string {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+export function normalizePersonNameForCompare(
+  raw: string | null | undefined,
+  opts: { lettersOnly?: boolean } = {},
+): string {
+  if (!raw) return "";
+  const lower = raw.toLowerCase();
+  const cleaned = opts.lettersOnly ? lower.replace(/[^a-z\s]/g, "") : lower;
+  return cleaned.replace(/\s+/g, " ").trim();
+}
