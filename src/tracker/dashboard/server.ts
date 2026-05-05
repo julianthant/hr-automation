@@ -9,8 +9,10 @@ import { sweepStuckOcrRows } from "../ocr-http.js";
 import { sweepStuckOathUploadRows } from "../oath-upload-http.js";
 import { openStateDb } from "../state/db.js";
 import { rebuildProjectionForDate } from "../state/rebuild.js";
+import { startDependencyScheduler } from "../tasks/scheduler.js";
 import { sweepOrphanUploadDirs } from "../../scripts/ops/clean-tracker.js";
 import { log } from "../../utils/log.js";
+import { errorMessage } from "../../utils/errors.js";
 import { createDashboardRequestListener } from "./routes/index.js";
 import { createBaseRoutes } from "./routes/base.js";
 import { createEventsRoute } from "./routes/events.js";
@@ -144,7 +146,13 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     void scanFailurePatterns();
     void scanOrphanedQueueItems(dir);
   }, 15_000);
+  const dependencyScheduler = startDependencyScheduler({
+    trackerDir: dir,
+    intervalMs: 1000,
+    onError: (err) => log.warn(`[tasks] dependency scheduler tick failed: ${errorMessage(err)}`),
+  });
   localServer.on("close", () => clearInterval(sweepInterval));
+  localServer.on("close", () => dependencyScheduler.stop());
 
   localServer.on("error", (err: NodeJS.ErrnoException) => {
     if (err.code === "EADDRINUSE") {

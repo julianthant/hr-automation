@@ -10,6 +10,16 @@ import {
 import { join } from 'node:path'
 import { daemonsDir, ensureDaemonsDir } from './daemon-registry.js'
 import type { QueueEvent, QueueItem, QueueState } from './daemon-types.js'
+import { openControlDb } from './control-db.js'
+import { createTaskStore, type TaskRow } from './task-store.js'
+
+function queueBackend(): 'sqlite' | 'jsonl' {
+  return process.env.HRAUTO_QUEUE_BACKEND === 'jsonl' ? 'jsonl' : 'sqlite'
+}
+
+function openQueueTaskStore(trackerDir?: string) {
+  return createTaskStore(openControlDb({ trackerDir }))
+}
 
 export function queueFilePath(workflow: string, trackerDir?: string): string {
   return join(daemonsDir(trackerDir), `${workflow}.queue.jsonl`)
@@ -41,7 +51,7 @@ function nowIso(): string {
  * claimed; enqueue + claim + unclaim → queued (claim-metadata cleared);
  * enqueue + ... + done → done; enqueue + ... + failed → failed.
  */
-export async function readQueueState(workflow: string, trackerDir?: string): Promise<QueueState> {
+async function legacyReadQueueState(workflow: string, trackerDir?: string): Promise<QueueState> {
   const path = queueFilePath(workflow, trackerDir)
   if (!existsSync(path)) {
     return { queued: [], claimed: [], done: [], failed: [] }
@@ -142,7 +152,7 @@ export async function readQueueState(workflow: string, trackerDir?: string): Pro
  * event carries that `parentRunId` for delegation children (e.g. OCR
  * Approve fanning out oath-signature items that each reference the OCR run).
  */
-export async function enqueueItems<T>(
+async function legacyEnqueueItems<T>(
   workflow: string,
   inputs: T[],
   idFn: (input: T, index: number) => string,
@@ -184,7 +194,7 @@ export async function enqueueItems<T>(
     )
   }
   // Position computation: fold and find each id's position in queued[].
-  const state = await readQueueState(workflow, trackerDir)
+  const state = await legacyReadQueueState(workflow, trackerDir)
   const queuedIds = state.queued.map((q) => q.id)
   return assigned.map(({ id, runId }) => {
     const idx = queuedIds.indexOf(id)
@@ -263,7 +273,7 @@ function releaseMutex(lockDir: string): void {
  * mutex; N daemons racing for 1 queued item → exactly 1 claim appended,
  * N-1 calls return null.
  */
-export async function claimNextItem(
+async function legacyClaimNextItem(
   workflow: string,
   instanceId: string,
   trackerDir?: string,
@@ -272,7 +282,7 @@ export async function claimNextItem(
   const lockDir = queueLockDirPath(workflow, trackerDir)
   await acquireMutex(lockDir)
   try {
-    const state = await readQueueState(workflow, trackerDir)
+    const state = await legacyReadQueueState(workflow, trackerDir)
     if (state.queued.length === 0) return null
     const next = state.queued[0]
     // Reuse the enqueue-time runId if one was pre-assigned (see
@@ -300,7 +310,7 @@ export async function claimNextItem(
 }
 
 /** Append a `done` event. Caller must have previously claimed the item. */
-export async function markItemDone(
+async function legacyMarkItemDone(
   workflow: string,
   itemId: string,
   runId: string,
@@ -310,7 +320,7 @@ export async function markItemDone(
 }
 
 /** Append a `failed` event. Caller must have previously claimed the item. */
-export async function markItemFailed(
+async function legacyMarkItemFailed(
   workflow: string,
   itemId: string,
   error: string,
@@ -329,7 +339,7 @@ export async function markItemFailed(
  * soft-stop (reason='sigint-soft'), voluntary release (reason='voluntary'),
  * and orphan recovery (reason='recovered').
  */
-export async function unclaimItem(
+async function legacyUnclaimItem(
   workflow: string,
   itemId: string,
   reason: 'recovered' | 'sigint-soft' | 'voluntary',
@@ -347,19 +357,240 @@ export async function unclaimItem(
  * unclaim → legitimate re-claim sequence (worst case: one redundant
  * unclaim, never a lost item).
  */
+async function legacyRecoverOrphanedClaims(
+  workflow: string,
+  aliveInstanceIds: Set<string>,
+  trackerDir?: string,
+): Promise<number> {
+  const state = await legacyReadQueueState(workflow, trackerDir)
+  let count = 0
+  for (const item of state.claimed) {
+    if (!item.claimedBy) continue
+    if (!aliveInstanceIds.has(item.claimedBy)) {
+      await legacyUnclaimItem(workflow, item.id, 'recovered', trackerDir)
+      count++
+    }
+  }
+  return count
+}
+
+export async function readQueueState(workflow: string, trackerDir?: string): Promise<QueueState> {
+  if (queueBackend() === 'jsonl') return legacyReadQueueState(workflow, trackerDir)
+  const store = openQueueTaskStore(trackerDir)
+  const state: QueueState = { queued: [], claimed: [], done: [], failed: [] }
+  for (const task of store.listTasksForWorkflow(workflow)) {
+    const item = taskToQueueItem(task)
+    state[item.state].push(item)
+  }
+  return state
+}
+
+export async function enqueueItems<T>(
+  workflow: string,
+  inputs: T[],
+  idFn: (input: T, index: number) => string,
+  trackerDir?: string,
+  preAssignedRunIds?: ReadonlyArray<UUID>,
+  preAssignedParentRunIds?: ReadonlyArray<string | undefined>,
+): Promise<Array<{ id: string; position: number; runId: UUID; taskId?: string; attemptId?: string }>> {
+  if (queueBackend() === 'jsonl') {
+    return legacyEnqueueItems(workflow, inputs, idFn, trackerDir, preAssignedRunIds, preAssignedParentRunIds)
+  }
+  if (inputs.length === 0) return []
+  if (preAssignedRunIds && preAssignedRunIds.length !== inputs.length) {
+    throw new Error(
+      `enqueueItems: preAssignedRunIds length ${preAssignedRunIds.length} does not match inputs length ${inputs.length}`,
+    )
+  }
+  if (preAssignedParentRunIds && preAssignedParentRunIds.length !== inputs.length) {
+    throw new Error(
+      `enqueueItems: preAssignedParentRunIds length ${preAssignedParentRunIds.length} does not match inputs length ${inputs.length}`,
+    )
+  }
+  const store = openQueueTaskStore(trackerDir)
+  const enqueued = store.enqueueTasks({
+    workflow,
+    inputs,
+    deriveItemId: idFn,
+    runIds: preAssignedRunIds,
+    source: 'daemon',
+  })
+  const enqueuedBy = `cli-${process.pid}`
+  for (let i = 0; i < enqueued.length; i++) {
+    const task = enqueued[i]
+    const parentRunId = preAssignedParentRunIds?.[i]
+    // JSONL queue writes are audit-only in SQLite mode. Do not use them for claim authority.
+    appendEvent(
+      workflow,
+      {
+        type: 'enqueue',
+        id: task.id,
+        workflow,
+        input: inputs[i],
+        enqueuedAt: nowIso(),
+        enqueuedBy,
+        runId: task.runId,
+        ...(parentRunId ? { parentRunId } : {}),
+      },
+      trackerDir,
+    )
+    if (parentRunId) {
+      const row = store.findTaskByIdentity({ workflow, itemId: task.id, runId: task.runId })
+      if (row) {
+        store.db.prepare('UPDATE tasks SET parent_run_id = ? WHERE id = ?').run(parentRunId, row.taskId)
+      }
+    }
+  }
+  return enqueued.map((task) => ({
+    id: task.id,
+    position: task.position,
+    runId: task.runId as UUID,
+    taskId: task.taskId,
+    attemptId: task.attemptId,
+  }))
+}
+
+export async function claimNextItem(
+  workflow: string,
+  instanceId: string,
+  trackerDir?: string,
+): Promise<QueueItem | null> {
+  if (queueBackend() === 'jsonl') return legacyClaimNextItem(workflow, instanceId, trackerDir)
+  const store = openQueueTaskStore(trackerDir)
+  const claimed = store.claimNextTask({ workflow, workerId: instanceId })
+  if (!claimed) return null
+  appendEvent(
+    workflow,
+    { type: 'claim', id: claimed.itemId, claimedBy: instanceId, claimedAt: nowIso(), runId: claimed.runId },
+    trackerDir,
+  )
+  return {
+    id: claimed.itemId,
+    workflow,
+    input: claimed.input,
+    enqueuedAt: nowIso(),
+    state: 'claimed',
+    taskId: claimed.taskId,
+    attemptId: claimed.attemptId,
+    claimedBy: instanceId,
+    claimedAt: nowIso(),
+    runId: claimed.runId,
+    ...(claimed.parentRunId ? { parentRunId: claimed.parentRunId } : {}),
+  }
+}
+
+export async function markItemDone(
+  workflow: string,
+  itemId: string,
+  runId: string,
+  trackerDir?: string,
+): Promise<void> {
+  if (queueBackend() === 'jsonl') return legacyMarkItemDone(workflow, itemId, runId, trackerDir)
+  const store = openQueueTaskStore(trackerDir)
+  const task = store.findTaskByIdentity({ workflow, itemId, runId })
+  if (task?.currentAttemptId) {
+    store.markTaskDone({ taskId: task.taskId, attemptId: task.currentAttemptId })
+  }
+  appendEvent(workflow, { type: 'done', id: itemId, completedAt: nowIso(), runId }, trackerDir)
+}
+
+export async function markItemFailed(
+  workflow: string,
+  itemId: string,
+  error: string,
+  runId: string,
+  trackerDir?: string,
+): Promise<void> {
+  if (queueBackend() === 'jsonl') return legacyMarkItemFailed(workflow, itemId, error, runId, trackerDir)
+  const store = openQueueTaskStore(trackerDir)
+  const task = store.findTaskByIdentity({ workflow, itemId, runId })
+  if (task?.currentAttemptId) {
+    store.markTaskFailed({ taskId: task.taskId, attemptId: task.currentAttemptId, error })
+  }
+  appendEvent(workflow, { type: 'failed', id: itemId, failedAt: nowIso(), runId, error }, trackerDir)
+}
+
+export async function markItemCancelled(
+  workflow: string,
+  itemId: string,
+  reason: string,
+  runId: string,
+  trackerDir?: string,
+): Promise<void> {
+  if (queueBackend() === 'jsonl') return legacyMarkItemFailed(workflow, itemId, reason, runId, trackerDir)
+  const store = openQueueTaskStore(trackerDir)
+  const task = store.findTaskByIdentity({ workflow, itemId, runId })
+  if (task?.currentAttemptId) {
+    store.markTaskCancelled({ taskId: task.taskId, attemptId: task.currentAttemptId, reason })
+  }
+  appendEvent(workflow, { type: 'failed', id: itemId, failedAt: nowIso(), runId, error: reason }, trackerDir)
+}
+
+export async function unclaimItem(
+  workflow: string,
+  itemId: string,
+  reason: 'recovered' | 'sigint-soft' | 'voluntary',
+  trackerDir?: string,
+): Promise<void> {
+  if (queueBackend() === 'jsonl') return legacyUnclaimItem(workflow, itemId, reason, trackerDir)
+  const store = openQueueTaskStore(trackerDir)
+  const task = store.findTaskByIdentity({ workflow, itemId })
+  if (task) store.returnTaskToQueued({ taskId: task.taskId })
+  appendEvent(workflow, { type: 'unclaim', id: itemId, reason, ts: nowIso() }, trackerDir)
+}
+
 export async function recoverOrphanedClaims(
   workflow: string,
   aliveInstanceIds: Set<string>,
   trackerDir?: string,
 ): Promise<number> {
-  const state = await readQueueState(workflow, trackerDir)
-  let count = 0
-  for (const item of state.claimed) {
-    if (!item.claimedBy) continue
-    if (!aliveInstanceIds.has(item.claimedBy)) {
-      await unclaimItem(workflow, item.id, 'recovered', trackerDir)
-      count++
+  if (queueBackend() === 'jsonl') return legacyRecoverOrphanedClaims(workflow, aliveInstanceIds, trackerDir)
+  const store = openQueueTaskStore(trackerDir)
+  const recovered = store.recoverClaimsForDeadWorkers({ workflow, aliveWorkerIds: aliveInstanceIds })
+  if (recovered > 0) {
+    const state = await readQueueState(workflow, trackerDir)
+    for (const item of state.queued) {
+      if (item.claimedBy && !aliveInstanceIds.has(item.claimedBy)) {
+        appendEvent(workflow, { type: 'unclaim', id: item.id, reason: 'recovered', ts: nowIso() }, trackerDir)
+      }
     }
   }
-  return count
+  return recovered
+}
+
+function taskToQueueItem(task: TaskRow): QueueItem {
+  const state = queueStateFromTask(task)
+  const item: QueueItem = {
+    id: task.itemId,
+    workflow: task.workflow,
+    input: task.input,
+    enqueuedAt: task.enqueuedAt ?? new Date().toISOString(),
+    state,
+    taskId: task.taskId,
+  }
+  if (task.currentAttemptId) item.attemptId = task.currentAttemptId
+  if (task.claimedByWorkerId) item.claimedBy = task.claimedByWorkerId
+  if (task.claimedAt) item.claimedAt = task.claimedAt
+  if (task.currentRunId ?? task.runId) item.runId = task.currentRunId ?? task.runId
+  if (task.parentRunId) item.parentRunId = task.parentRunId
+  if (state === 'done' && task.terminalAt) item.completedAt = task.terminalAt
+  if (state === 'failed') {
+    if (task.terminalAt) item.failedAt = task.terminalAt
+    if (task.error) item.error = task.error
+  }
+  return item
+}
+
+function queueStateFromTask(task: TaskRow): QueueItem['state'] {
+  if (task.state === 'done') return 'done'
+  if (task.state === 'failed' || task.state === 'cancelled' || task.state === 'blocked') return 'failed'
+  if (
+    task.state === 'claimed' ||
+    task.state === 'running' ||
+    task.state === 'cancel_requested' ||
+    task.state === 'cancelling'
+  ) {
+    return 'claimed'
+  }
+  return 'queued'
 }

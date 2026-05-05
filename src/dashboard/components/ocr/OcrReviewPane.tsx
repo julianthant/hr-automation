@@ -26,6 +26,7 @@ import { EcRecordView } from "./EcRecordView";
 import { OathRecordView } from "./OathRecordView";
 import { PdfPagePreview } from "../PdfPagePreview";
 import { usePrepCursor } from "../hooks/usePrepCursor";
+import { useTaskDependencies } from "../hooks/useTaskDependencies";
 import {
   resolveOcrConfigForEntry,
   setOcrDownstreamRenderer,
@@ -78,6 +79,7 @@ setOcrDownstreamRenderer("oath-signature", ({ record, onChange }) => (
 export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps) {
   const sessionId = entry.id;
   const runId = entry.runId ?? entry.id;
+  const { summary: dependencySummary } = useTaskDependencies(entry.runId);
   const cfg = resolveOcrConfigForEntry(entry);
   const data = useMemo(
     () => cfg?.parseRow(entry.data) ?? null,
@@ -228,6 +230,9 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
   // selects something the operator can't dispatch.
   const unselectedApprovableCount = approvableRecords.length - selectedCount;
   const summary = describeSummary(records, failedPages.length);
+  const dependencyCompletedCount = dependencySummary
+    ? dependencySummary.satisfied + dependencySummary.failed + dependencySummary.cancelled
+    : 0;
 
   function selectAllApprovable(): void {
     setLocalEdits((prev) => {
@@ -350,8 +355,25 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
             Review
           </span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
           <span className="font-mono text-xs text-muted-foreground">{summary}</span>
+          {dependencySummary && dependencySummary.total > 0 && (
+            <div className="flex items-center gap-1.5 text-[11px] font-mono text-muted-foreground">
+              <span className="rounded border border-border bg-secondary/40 px-2 py-0.5">
+                EID lookups {dependencyCompletedCount}/{dependencySummary.total}
+              </span>
+              {dependencySummary.pending > 0 && (
+                <span className="rounded border border-warning/40 bg-warning/10 px-2 py-0.5 text-warning">
+                  {dependencySummary.pending} pending
+                </span>
+              )}
+              {dependencySummary.failed > 0 && (
+                <span className="rounded border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-destructive">
+                  {dependencySummary.failed} failed
+                </span>
+              )}
+            </div>
+          )}
           {failedPages.length > 0 && (
             <ReocrWholePdfButton
               sessionId={sessionId}

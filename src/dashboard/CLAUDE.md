@@ -14,6 +14,8 @@ React SPA for real-time HR workflow monitoring. Split-panel layout: queue (left)
 
 Dashboard toasts, queue actions, and parent/child rows should render the shared operator subject first (`data.__subject`). Do not display raw run ids/session ids as primary text unless no subject exists; keep those ids as fallback or debug detail.
 
+Dashboard controls mutate the SQLite control plane first (`tasks`, `task_attempts`, `worker_commands`, `browser_processes`) and let workers observe those commands. JSONL tracker/queue writes are audit/history, not live coordination. Browser force-stop controls must target a recorded `browser_processes` row; do not add a control that kills all Chromium processes or only flips local React state.
+
 ## Component Tree
 
 ```
@@ -70,12 +72,17 @@ The backend is `src/tracker/dashboard.ts` — a plain Node HTTP server. The Vite
 | `/api/retry` | POST | Body: `{workflow, id, runId?}`. Re-enqueues using the entry's persisted `input` field. | `RetryButton` (EntryItem failed rows + LogPanel header) |
 | `/api/retry-bulk` | POST | Body: `{workflow, ids[]}`. Loops `/api/retry`. | `BulkRetryBar` |
 | `/api/run-with-data` | POST | Body: `{workflow, id, data}`. Re-enqueues with `prefilledData` channel; kernel merges into ctx.data + workflow's extraction gate skips. | `EditDataTab` |
-| `/api/cancel-queued` | POST | Body: `{workflow, id}`. File-locked queue rewrite + synthetic failed event + tracker row with `step:"cancelled"`. 409 if claimed. | `QueueItemControls` |
+| `/api/cancel-queued` | POST | Body: `{workflow, id, runId?}`. Cancels the SQLite task/attempt, writes completed `worker_commands.cancel_task`, emits JSONL audit + tracker `failed` with `step:"cancelled"`. 409 if claimed. | `QueueItemControls` |
+| `/api/cancel-running` | POST | Body: `{workflow, id, runId}`. Queues `worker_commands.cancel_task` for the owning worker; cooperative cancel happens at the next kernel step boundary. | `CancelRunningButton` |
+| `/api/task/force-stop` | POST | Body: `{workflow, id, runId?}`. Writes `force_stop_task` plus scoped `kill_browser` commands for browser rows attached to that task. | `CancelRunningButton` force button |
+| `/api/browser/kill` | POST | Body: `{browserProcessId}` or `{pid}`. Kills only the recorded browser process row and records a `kill_browser` command. | `DaemonRow` browser chip |
+| `/api/worker/drain` | POST | Body: `{workerId}`. Queues `drain_worker`; worker stops after the current item without failing queued work. | `DaemonRow` Square button |
+| `/api/worker/stop` | POST | Body: `{workerId}`. Queues `stop_worker`; worker shuts down and hard-kills its active browser only on this explicit stop path. | `DaemonRow` Power button |
 | `/api/queue/bump` | POST | Body: `{workflow, id}`. Moves a queued item to head. 409 if claimed. | `QueueItemControls` |
-| `/api/queue-depth` | GET | `{workflow: depth}` map (count of queued items per workflow). | `useQueueDepth` → `TopBar` queue-depth pill |
-| `/api/daemons` | GET | `DaemonInfo[]` — alive daemons with pid, uptime, items processed, current item, phase. | `useDaemons` → `DaemonRow` |
+| `/api/queue-depth` | GET | `{workflow: depth}` map (count of queued SQLite tasks per workflow, legacy JSONL fallback when no task rows exist). | `useQueueDepth` → `TopBar` queue-depth pill |
+| `/api/daemons` | GET | `DaemonInfo[]` — SQLite workers plus lockfile fallback, heartbeat age, current item/run, and scoped browser processes. | `useDaemons` → `DaemonRow` |
 | `/api/daemons/spawn` | POST | Body: `{workflow, count?}`. Fire-and-forget spawn. | `DaemonsSection` Plus button |
-| `/api/daemons/stop` | POST | Body: `{workflow?, force?}`. Soft-stops one or all workflows' daemons. | `DaemonsSection` Square button + `DaemonRow` PowerOff |
+| `/api/daemons/stop` | POST | Body: `{workflow?, force?}`. Back-compat workflow-level daemon stop; normal calls drain/stop workers, `force:true` is the explicit hard-stop path. | `DaemonsSection` Stop-all button |
 | `/events/daemon-log?pid=X` | SSE | `{line, ts}` per log line, tails `.tracker/daemons/<wf>-<pid>.log`. | `DaemonLogTail` |
 | `/api/selector-warnings?days=N` | GET | `SelectorWarningRow[]` grouped by label | `SelectorWarningsPanel` (right rail) |
 | `/api/preview-inbox` | GET | `PreviewInboxRow[]` — cross-workflow preview rows (`data.mode === "prepare"`, status `done`, step ≠ `approved`/`discarded`) sorted newest first | `ApprovalInbox` via `usePreviewInbox` (5 s poll, paused while popover open) |

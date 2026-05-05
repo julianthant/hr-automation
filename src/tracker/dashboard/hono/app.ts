@@ -6,6 +6,7 @@ import type Database from "better-sqlite3";
 import { getRegisteredFile } from "../../files.js";
 import { getCachedPage } from "../../pdf-cache.js";
 import { queryEntriesPayload, queryProjectionHealth, queryRunsForItem } from "../../state/queries.js";
+import { buildTaskDependenciesHandler } from "../../tasks/http.js";
 
 export interface DashboardHonoDeps {
   dir: string;
@@ -14,6 +15,7 @@ export interface DashboardHonoDeps {
 
 export function createDashboardHonoApp(deps: DashboardHonoDeps): Hono {
   const app = new Hono();
+  const taskDependenciesHandler = buildTaskDependenciesHandler({ trackerDir: deps.dir });
 
   app.get("/api/v2/projection/health", (c) => {
     return c.json(queryProjectionHealth(deps.stateDb, deps.dir));
@@ -33,6 +35,11 @@ export function createDashboardHonoApp(deps: DashboardHonoDeps): Hono {
       return c.json({ ok: false, error: "workflow and id are required" }, 400);
     }
     return c.json(queryRunsForItem(deps.stateDb, { workflow, itemId, date }));
+  });
+
+  app.get("/api/task-dependencies", async (c) => {
+    const result = await taskDependenciesHandler({ parentRunId: c.req.query("parentRunId") });
+    return c.json(result.body, result.status);
   });
 
   app.get("/api/files/:fileId/download", (c) => {

@@ -111,14 +111,14 @@ function DaemonGroup({
     <div>
       <div className="flex items-center justify-between px-2 py-1.5">
         <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
-          {label} daemons ({daemons.length})
+          {label} workers ({daemons.length})
         </span>
         <div className="flex items-center gap-0.5">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                aria-label={`Spawn one more ${label} daemon`}
+                aria-label={`Spawn one more ${label} worker`}
                 disabled={spawning}
                 onClick={onSpawn}
                 className={cn(
@@ -145,7 +145,7 @@ function DaemonGroup({
             <TooltipTrigger asChild>
               <button
                 type="button"
-                aria-label={`Stop all ${label} daemons`}
+                aria-label={`Stop all ${label} workers`}
                 disabled={stopping}
                 onClick={onStopAll}
                 className={cn(
@@ -165,14 +165,14 @@ function DaemonGroup({
               </button>
             </TooltipTrigger>
             <TooltipContent side="top" sideOffset={4}>
-              Stop all
+              Stop all workers
             </TooltipContent>
           </Tooltip>
         </div>
       </div>
       <div className="flex flex-col gap-1.5 px-1.5">
         {daemons.map((d) => (
-          <DaemonRow key={d.pid} daemon={d} onAfterAction={onRefresh} />
+          <DaemonRow key={d.workerId || `${d.workflow}-${d.pid}`} daemon={d} onAfterAction={onRefresh} />
         ))}
       </div>
     </div>

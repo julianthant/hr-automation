@@ -11,6 +11,8 @@
 import { existsSync, readFileSync, statSync, watch as fsWatch } from "node:fs";
 import { join } from "node:path";
 import type { TrackerEntry } from "./jsonl.js";
+import { openControlDb } from "../core/control-db.js";
+import { createTaskStore, type TaskRow } from "../core/task-store.js";
 
 export interface ChildOutcome {
   workflow: string;
@@ -61,9 +63,123 @@ function dateLocal(): string {
   return `${y}-${m}-${day}`;
 }
 
+async function maybeWatchSqliteChildRuns(
+  opts: WatchChildRunsOpts,
+  dir: string,
+): Promise<ChildOutcome[] | null> {
+  let tasks: TaskRow[] = [];
+  try {
+    const taskStore = createTaskStore(openControlDb({ trackerDir: dir }));
+    const byItem = new Map(
+      taskStore
+        .listTasksForWorkflow(opts.workflow)
+        .filter((task) => opts.expectedItemIds.includes(task.itemId))
+        .map((task) => [task.itemId, task]),
+    );
+    if (byItem.size !== opts.expectedItemIds.length) return null;
+    tasks = opts.expectedItemIds.map((itemId) => byItem.get(itemId)!).filter(Boolean);
+  } catch {
+    return null;
+  }
+
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const pollMs = 500;
+  const started = Date.now();
+  const outcomes: ChildOutcome[] = [];
+  const seen = new Set<string>();
+
+  for (;;) {
+    if (isAbortRequested(opts, dir)) {
+      throw new Error(
+        `watchChildRuns aborted by parent row state (${opts.abortIfRowState!.workflow}/${opts.abortIfRowState!.id} step="${opts.abortIfRowState!.step}")`,
+      );
+    }
+    const taskStore = createTaskStore(openControlDb({ trackerDir: dir }));
+    for (const task of tasks) {
+      if (seen.has(task.itemId)) continue;
+      const fresh = taskStore.getTask(task.taskId);
+      if (!fresh) continue;
+      const status = sqliteTaskStatus(fresh);
+      if (!status) continue;
+      const synthetic: TrackerEntry = {
+        workflow: fresh.workflow,
+        id: fresh.itemId,
+        runId: fresh.currentRunId ?? fresh.runId,
+        timestamp: new Date().toISOString(),
+        status,
+        data: {},
+        error: fresh.error,
+      };
+      const isTerminal = opts.isTerminal ?? ((e: TrackerEntry) => e.status === "done" || e.status === "failed");
+      if (!isTerminal(synthetic)) continue;
+      const outcome: ChildOutcome = {
+        workflow: fresh.workflow,
+        itemId: fresh.itemId,
+        runId: fresh.currentRunId ?? fresh.runId ?? "",
+        status,
+        data: synthetic.data,
+        error: fresh.error,
+      };
+      outcomes.push(outcome);
+      seen.add(fresh.itemId);
+      opts.onProgress?.(outcome, tasks.length - outcomes.length);
+    }
+    if (seen.size === tasks.length) return outcomes;
+    const blockedParent = findBlockedParent(taskStore, tasks);
+    if (blockedParent) {
+      throw new Error(`watchChildRuns blocked by parent task ${blockedParent.taskId}`);
+    }
+    if (Date.now() - started > timeoutMs) {
+      const waiting = tasks.filter((task) => !seen.has(task.itemId)).map((task) => task.itemId).join(", ");
+      throw new Error(`watchChildRuns timeout (${timeoutMs}ms) — still waiting for: ${waiting}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+}
+
+function sqliteTaskStatus(task: TaskRow): "done" | "failed" | null {
+  if (task.state === "done") return "done";
+  if (task.state === "failed" || task.state === "cancelled" || task.state === "blocked") return "failed";
+  return null;
+}
+
+function findBlockedParent(taskStore: ReturnType<typeof createTaskStore>, tasks: TaskRow[]): TaskRow | null {
+  for (const task of tasks) {
+    const rows = taskStore.db.prepare(`
+      SELECT parent_task_id
+      FROM task_dependencies
+      WHERE child_task_id = ?
+    `).all(task.taskId) as Array<{ parent_task_id: string }>;
+    for (const row of rows) {
+      const parent = taskStore.getTask(row.parent_task_id);
+      if (parent?.state === "blocked" || parent?.state === "failed" || parent?.state === "cancelled") return parent;
+    }
+  }
+  return null;
+}
+
+function isAbortRequested(opts: WatchChildRunsOpts, dir: string): boolean {
+  if (!opts.abortIfRowState) return false;
+  const date = opts.date ?? dateLocal();
+  const abortFile = join(dir, `${opts.abortIfRowState.workflow}-${date}.jsonl`);
+  if (!existsSync(abortFile)) return false;
+  let raw;
+  try { raw = readFileSync(abortFile, "utf-8"); } catch { return false; }
+  const lines = raw.split("\n").filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let entry: TrackerEntry;
+    try { entry = JSON.parse(lines[i]); } catch { continue; }
+    if (entry.id !== opts.abortIfRowState.id) continue;
+    return entry.step === opts.abortIfRowState.step;
+  }
+  return false;
+}
+
 export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOutcome[]> {
   const dir = opts.trackerDir ?? ".tracker";
   const date = opts.date ?? dateLocal();
+  const sqliteOutcomes = await maybeWatchSqliteChildRuns(opts, dir);
+  if (sqliteOutcomes) return sqliteOutcomes;
   const file = join(dir, `${opts.workflow}-${date}.jsonl`);
   const expected = new Set(opts.expectedItemIds);
   const totalExpected = expected.size;

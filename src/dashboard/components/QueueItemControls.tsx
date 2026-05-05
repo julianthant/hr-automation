@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 interface QueueItemControlsProps {
   workflow: string;
   id: string;
+  runId?: string;
   subject?: string;
   className?: string;
 }
@@ -19,7 +20,7 @@ interface QueueItemControlsProps {
  * surfaced as warnings — the daemon claimed the item between the
  * user's click and the backend lock.
  */
-export function QueueItemControls({ workflow, id, subject, className }: QueueItemControlsProps) {
+export function QueueItemControls({ workflow, id, runId, subject, className }: QueueItemControlsProps) {
   const [pending, setPending] = useState<"cancel" | "bump" | null>(null);
   const label = subject?.trim() || id;
 
@@ -32,7 +33,7 @@ export function QueueItemControls({ workflow, id, subject, className }: QueueIte
       const res = await fetch(path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workflow, id }),
+        body: JSON.stringify(action === "cancel" && runId ? { workflow, id, runId } : { workflow, id }),
       });
       const body = (await res.json()) as { ok: boolean; error?: string };
       if (body.ok) {

@@ -8,6 +8,12 @@ import {
   _resetInProcessRunsForTests,
 } from '../../../src/core/in-process-runs.js'
 import type { Session } from '../../../src/core/session.js'
+import { openControlDb } from '../../../src/core/control-db.js'
+import { createTaskStore } from '../../../src/core/task-store.js'
+import { createWorkerStore } from '../../../src/core/worker-store.js'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 interface FakeSession {
   killChromeHard: (graceMs?: number) => Promise<number>
@@ -82,6 +88,94 @@ test('in-process-runs: unregister removes the entry; subsequent cancel returns n
   assert.equal(_listInProcessRunsForTests().length, 0)
   const result = await cancelInProcessRun(ident)
   assert.deepEqual(result, { ok: false, reason: 'not-found' })
+})
+
+test('in-process-runs: SQLite-backed cancel marks browser rows kill_requested', async () => {
+  _resetInProcessRunsForTests()
+  const dir = mkdtempSync(join(tmpdir(), 'in-process-sqlite-cancel-'))
+  try {
+    const control = openControlDb({ trackerDir: dir })
+    const taskStore = createTaskStore(control)
+    const workerStore = createWorkerStore(control)
+    workerStore.registerWorker({
+      workerId: 'dashboard:123',
+      workflow: 'ocr',
+      kind: 'dashboard',
+      pid: 123,
+      hostname: 'test-host',
+      phase: 'processing',
+    })
+    const [task] = taskStore.enqueueTasks({
+      workflow: 'ocr',
+      inputs: [{ sessionId: 'ocr-1' }],
+      deriveItemId: () => 'ocr-1',
+      runIds: ['ocr-run-1'],
+    })
+    taskStore.markTaskRunning({
+      taskId: task.taskId,
+      attemptId: task.attemptId,
+      workerId: 'dashboard:123',
+    })
+    const browser = workerStore.upsertBrowserProcess({
+      workerId: 'dashboard:123',
+      workflow: 'ocr',
+      taskId: task.taskId,
+      attemptId: task.attemptId,
+      systemId: 'sharepoint',
+      browserId: 'sharepoint',
+      pid: 987654,
+    })
+    const fake = makeFakeSession()
+    const ident = { workflow: 'ocr', itemId: 'ocr-1', runId: 'ocr-run-1' }
+    registerInProcessRun(ident, fake as unknown as Session, {
+      trackerDir: dir,
+      workerId: 'dashboard:123',
+      taskId: task.taskId,
+      attemptId: task.attemptId,
+    })
+
+    const result = await cancelInProcessRun(ident)
+
+    assert.equal(result.ok, true)
+    assert.equal(fake.killCalls.length, 1)
+    assert.equal(workerStore.findBrowserProcessById(browser.browserProcessId)?.status, 'kill_requested')
+    const commandCount = workerStore.db
+      .prepare("SELECT COUNT(*) AS n FROM worker_commands WHERE command_type = 'kill_browser'")
+      .get() as { n: number }
+    assert.equal(commandCount.n, 1)
+    workerStore.close()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('in-process-runs: unregister clears local map but leaves SQLite attempts as history', () => {
+  _resetInProcessRunsForTests()
+  const dir = mkdtempSync(join(tmpdir(), 'in-process-unregister-sqlite-'))
+  try {
+    const control = openControlDb({ trackerDir: dir })
+    const taskStore = createTaskStore(control)
+    const [task] = taskStore.enqueueTasks({
+      workflow: 'ocr',
+      inputs: [{ sessionId: 'ocr-2' }],
+      deriveItemId: () => 'ocr-2',
+      runIds: ['ocr-run-2'],
+    })
+    const ident = { workflow: 'ocr', itemId: 'ocr-2', runId: 'ocr-run-2' }
+    registerInProcessRun(ident, makeFakeSession() as unknown as Session, {
+      trackerDir: dir,
+      workerId: 'dashboard:123',
+      taskId: task.taskId,
+      attemptId: task.attemptId,
+    })
+    unregisterInProcessRun(ident)
+
+    assert.deepEqual(_listInProcessRunsForTests(), [])
+    assert.equal(taskStore.listAttemptsForTask(task.taskId).length, 1)
+    taskStore.close()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('in-process-runs: keying isolates by (workflow, itemId, runId) tuple', async () => {

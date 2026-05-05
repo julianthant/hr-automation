@@ -10,7 +10,11 @@ import { runWorkflowDaemon } from '../../../src/core/daemon.js'
 import { Session } from '../../../src/core/session.js'
 import { enqueueItems, readQueueState } from '../../../src/core/daemon-queue.js'
 import { findAliveDaemons } from '../../../src/core/daemon-registry.js'
+import { openControlDb } from '../../../src/core/control-db.js'
+import { createTaskStore } from '../../../src/core/task-store.js'
+import { createWorkerStore } from '../../../src/core/worker-store.js'
 import { dateLocal } from '../../../src/tracker/jsonl.js'
+import type { SystemConfig } from '../../../src/core/types.js'
 
 // Fake Session that has no browsers — works fine because our test workflow
 // uses `systems: []` so nothing calls `page()` / `healthCheck()`.
@@ -22,6 +26,34 @@ function stubLaunch(): typeof Session.launch {
       readyPromises: new Map(),
     })
   }) as unknown as typeof Session.launch
+}
+
+function stubLaunchWithChromePid(systemId: string, chromiumPid: number): typeof Session.launch {
+  return (async (systems: SystemConfig[]) => {
+    const fakePage = { close: async () => {}, isClosed: () => false } as unknown as import('playwright').Page
+    const fakeContext = { close: async () => {} } as unknown as import('playwright').BrowserContext
+    return Session.forTesting({
+      systems,
+      browsers: new Map([
+        [systemId, { page: fakePage, browser: null as never, context: fakeContext, chromiumPid }],
+      ]),
+      readyPromises: new Map([[systemId, Promise.resolve()]]),
+    })
+  }) as unknown as typeof Session.launch
+}
+
+function deferred<T = void>(): {
+  promise: Promise<T>
+  resolve: (value?: T | PromiseLike<T>) => void
+  reject: (reason?: unknown) => void
+} {
+  let resolve!: (value?: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = (value?: T | PromiseLike<T>) => res(value as T | PromiseLike<T>)
+    reject = rej
+  })
+  return { promise, resolve, reject }
 }
 
 function waitForDaemon(workflow: string, dir: string, timeoutMs = 5000): Promise<{ port: number }> {
@@ -148,6 +180,99 @@ test('runWorkflowDaemon: processes queued items via claim loop', async () => {
   }
 })
 
+test('runWorkflowDaemon: records worker ownership, heartbeats, browser pids, and cancel_task commands', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-worker-'))
+  const control = openControlDb({ trackerDir: dir })
+  const taskStore = createTaskStore(control)
+  const workerStore = createWorkerStore(control)
+  try {
+    const started = deferred()
+    const releaseHold = deferred()
+    let afterRan = false
+    const wf = defineWorkflow({
+      name: 'dint-worker',
+      schema: z.object({ id: z.string() }),
+      steps: ['hold', 'after'],
+      systems: [{ id: 'ucpath', login: async () => {} }],
+      authSteps: false,
+      getId: (d) => (d as { id: string }).id,
+      handler: async (ctx) => {
+        await ctx.step('hold', async () => {
+          started.resolve()
+          await releaseHold.promise
+        })
+        await ctx.step('after', async () => {
+          afterRan = true
+        })
+      },
+    })
+
+    await enqueueItems<{ id: string }>('dint-worker', [{ id: 'held' }], (d) => d.id, dir)
+    const runPromise = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: stubLaunchWithChromePid('ucpath', 424242),
+      idleTimeoutMs: 10_000,
+      heartbeatIntervalMs: 50,
+      commandPollIntervalMs: 50,
+    })
+    const { port } = await waitForDaemon('dint-worker', dir)
+
+    await started.promise
+    const worker = await waitFor(async () => workerStore.listWorkers('dint-worker').length === 1)
+      .then(() => workerStore.listWorkers('dint-worker')[0])
+    assert.equal(worker.kind, 'daemon')
+    assert.equal(worker.instanceId, worker.workerId)
+
+    const task = await waitFor(async () => {
+      const row = taskStore.listTasksForWorkflow('dint-worker')[0]
+      return row?.state === 'running' && row.claimedByWorkerId === worker.workerId
+    }).then(() => taskStore.listTasksForWorkflow('dint-worker')[0])
+    assert.equal(task.claimedByWorkerId, worker.workerId)
+    assert.ok(task.currentAttemptId)
+
+    await waitFor(() => {
+      const row = workerStore.getWorker(worker.workerId)
+      return row?.currentTaskId === task.taskId && row.currentAttemptId === task.currentAttemptId
+    })
+
+    const browsers = workerStore.listBrowserProcessesForWorker(worker.workerId)
+    assert.equal(browsers.length, 1)
+    assert.equal(browsers[0].pid, 424242)
+    assert.equal(browsers[0].systemId, 'ucpath')
+    assert.equal(browsers[0].taskId, task.taskId)
+    assert.equal(browsers[0].attemptId, task.currentAttemptId)
+
+    const commandId = workerStore.enqueueWorkerCommand({
+      commandType: 'cancel_task',
+      workflow: 'dint-worker',
+      targetWorkerId: worker.workerId,
+      targetTaskId: task.taskId,
+      targetAttemptId: task.currentAttemptId,
+    })
+    await waitFor(() => workerStore.getCommand(commandId)?.state === 'completed')
+
+    releaseHold.resolve()
+    await waitFor(() => taskStore.getTask(task.taskId)?.state === 'cancelled', 5_000)
+    assert.equal(afterRan, false)
+
+    await waitFor(() => {
+      const phases = workerStore.listHeartbeats(worker.workerId).map((h) => h.phase)
+      return phases.includes('processing') && phases.includes('idle')
+    })
+
+    await fetch(`http://127.0.0.1:${port}/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    await runPromise
+  } finally {
+    workerStore.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('runWorkflowDaemon: /wake after idle resumes and processes new enqueue', async () => {
   clear()
   const dir = mkdtempSync(join(tmpdir(), 'daemon-int-wake-'))
@@ -195,6 +320,88 @@ test('runWorkflowDaemon: /wake after idle resumes and processes new enqueue', as
     })
     await runPromise
   } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('runWorkflowDaemon: drain_worker command exits through the natural path', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-drain-'))
+  const control = openControlDb({ trackerDir: dir })
+  const workerStore = createWorkerStore(control)
+  try {
+    const wf = defineWorkflow({
+      name: 'dint-drain',
+      schema: z.object({ id: z.string() }),
+      steps: ['run'],
+      systems: [],
+      authSteps: false,
+      handler: async () => {},
+    })
+
+    const runPromise = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: stubLaunch(),
+      idleTimeoutMs: 10_000,
+      heartbeatIntervalMs: 50,
+      commandPollIntervalMs: 50,
+    })
+
+    await waitForDaemon('dint-drain', dir)
+    await waitFor(() => workerStore.listWorkers('dint-drain').length === 1)
+    const worker = workerStore.listWorkers('dint-drain')[0]
+    const commandId = workerStore.enqueueWorkerCommand({
+      commandType: 'drain_worker',
+      workflow: 'dint-drain',
+      targetWorkerId: worker.workerId,
+    })
+
+    await runPromise
+    assert.equal(workerStore.getCommand(commandId)?.state, 'completed')
+    assert.equal(workerStore.getWorker(worker.workerId)?.status, 'stopped')
+  } finally {
+    workerStore.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('runWorkflowDaemon: stop_worker command exits as hard stop', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-stop-command-'))
+  const control = openControlDb({ trackerDir: dir })
+  const workerStore = createWorkerStore(control)
+  try {
+    const wf = defineWorkflow({
+      name: 'dint-stop-command',
+      schema: z.object({ id: z.string() }),
+      steps: ['run'],
+      systems: [],
+      authSteps: false,
+      handler: async () => {},
+    })
+
+    const runPromise = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: stubLaunch(),
+      idleTimeoutMs: 10_000,
+      heartbeatIntervalMs: 50,
+      commandPollIntervalMs: 50,
+    })
+
+    await waitForDaemon('dint-stop-command', dir)
+    await waitFor(() => workerStore.listWorkers('dint-stop-command').length === 1)
+    const worker = workerStore.listWorkers('dint-stop-command')[0]
+    const commandId = workerStore.enqueueWorkerCommand({
+      commandType: 'stop_worker',
+      workflow: 'dint-stop-command',
+      targetWorkerId: worker.workerId,
+    })
+
+    await runPromise
+    assert.equal(workerStore.getCommand(commandId)?.state, 'completed')
+    assert.equal(workerStore.getWorker(worker.workerId)?.status, 'dead')
+  } finally {
+    workerStore.close()
     rmSync(dir, { recursive: true, force: true })
   }
 })

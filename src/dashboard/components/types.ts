@@ -55,6 +55,33 @@ export interface TrackerEntry {
   screenshotCount?: number;
 }
 
+export interface DaemonBrowserProcessInfo {
+  browserProcessId: string;
+  systemId: string;
+  pid: number;
+  status: string;
+}
+
+export interface DaemonInfo {
+  workflow: string;
+  workerId: string;
+  pid: number;
+  port: number | null;
+  instanceId: string | null;
+  startedAt: string;
+  uptimeMs: number;
+  itemsProcessed: number;
+  currentItem: string | null;
+  currentRunId?: string | null;
+  currentTaskId?: string | null;
+  currentAttemptId?: string | null;
+  phase: string;
+  status: string;
+  heartbeatAgeMs?: number | null;
+  browserProcesses?: DaemonBrowserProcessInfo[];
+  lockfileAlive?: boolean;
+}
+
 /** Metadata for a single failure screenshot, as returned by /api/screenshots. */
 export interface ScreenshotListEntry {
   filename: string;

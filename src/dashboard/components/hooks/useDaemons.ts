@@ -1,16 +1,7 @@
 import { useEffect, useState } from "react";
+import type { DaemonInfo } from "../types";
 
-export interface DaemonInfo {
-  workflow: string;
-  pid: number;
-  port: number;
-  instanceId: string;
-  startedAt: string;
-  uptimeMs: number;
-  itemsProcessed: number;
-  currentItem: string | null;
-  phase: string;
-}
+export type { DaemonInfo } from "../types";
 
 /**
  * Polls /api/daemons every 5s. The list is small (typically 0–4 daemons
@@ -55,4 +46,11 @@ export function formatUptime(ms: number): string {
   if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
   if (m > 0) return `${m}m ${String(s).padStart(2, "0")}s`;
   return `${s}s`;
+}
+
+/** Format a heartbeat age as a compact freshness label. */
+export function formatHeartbeatAge(ms?: number | null): string {
+  if (ms === null || ms === undefined || !Number.isFinite(ms)) return "no heartbeat";
+  if (ms < 1_000) return "<1s";
+  return formatUptime(ms);
 }

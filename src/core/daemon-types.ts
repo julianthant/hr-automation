@@ -105,6 +105,8 @@ export interface QueueItem {
   input: unknown
   enqueuedAt: string
   state: 'queued' | 'claimed' | 'done' | 'failed'
+  taskId?: string
+  attemptId?: string
   claimedBy?: string
   claimedAt?: string
   completedAt?: string
@@ -131,6 +133,6 @@ export interface DaemonFlags {
 
 /** Result of `ensureDaemonsAndEnqueue`. */
 export interface EnqueueResult {
-  enqueued: Array<{ id: string; position: number }>
+  enqueued: Array<{ id: string; position: number; taskId?: string; attemptId?: string; runId?: string }>
   daemons: Daemon[]
 }

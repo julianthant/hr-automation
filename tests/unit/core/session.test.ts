@@ -19,6 +19,21 @@ test('session: systemIds returns declared ids in order', () => {
   assert.deepEqual(s.systemIds(), ['ucpath', 'kuali'])
 })
 
+test('session: chromePids returns finite Chromium process ids by system', () => {
+  const fakePage = {} as import('playwright').Page
+  const systems = [makeSystem('ucpath'), makeSystem('kuali'), makeSystem('crm')]
+  const s = Session.forTesting({
+    systems,
+    browsers: new Map([
+      ['ucpath', { page: fakePage, browser: null as never, context: null as never, chromiumPid: 111 }],
+      ['kuali', { page: fakePage, browser: null as never, context: null as never }],
+      ['crm', { page: fakePage, browser: null as never, context: null as never, chromiumPid: Number.NaN }],
+    ]),
+    readyPromises: new Map(),
+  })
+  assert.deepEqual(s.chromePids, { ucpath: 111 })
+})
+
 test('session.page: awaits ready promise, then returns cached page', async () => {
   const fakePage = { __marker: 'fake-page' } as unknown as import('playwright').Page
   let resolveReady: () => void

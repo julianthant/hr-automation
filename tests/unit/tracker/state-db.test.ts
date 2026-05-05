@@ -9,6 +9,7 @@ import {
   openStateDb,
   stateDbPath,
 } from "../../../src/tracker/state/db.js";
+import { LATEST_SCHEMA_VERSION } from "../../../src/tracker/state/schema.js";
 
 function tmpTracker(): string {
   return mkdtempSync(join(tmpdir(), "state-db-"));
@@ -23,7 +24,7 @@ test("openStateDb creates .tracker/state.db with WAL and NORMAL synchronous", ()
     assert.equal(db.pragma("journal_mode", { simple: true }), "wal");
     assert.equal(Number(db.pragma("synchronous", { simple: true })), 1);
     const version = db.prepare("SELECT version FROM schema_version WHERE id = 1").get() as { version: number };
-    assert.equal(version.version, 1);
+    assert.equal(version.version, LATEST_SCHEMA_VERSION);
   } finally {
     closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });

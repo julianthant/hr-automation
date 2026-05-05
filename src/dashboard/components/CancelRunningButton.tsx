@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Square, Loader2 } from "lucide-react";
+import { Square, OctagonX, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -33,7 +33,7 @@ interface CancelRunningButtonProps {
  * marks the item failed (retryable).
  */
 export function CancelRunningButton({ workflow, id, runId, subject, entry, className }: CancelRunningButtonProps) {
-  const [pending, setPending] = useState(false);
+  const [pending, setPending] = useState<"cancel" | "force" | null>(null);
   const label = subject?.trim() || id;
 
   // OCR-prep parent rows live in the downstream workflow's queue but aren't
@@ -55,7 +55,7 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, class
 
   const fireOcrDiscard = async () => {
     if (!ocrPrep) return;
-    setPending(true);
+    setPending("cancel");
     const t = toast.loading(`Discarding OCR prep ${label}…`, {
       description: "Cancelling the OCR session and removing this row from the queue.",
     });
@@ -84,12 +84,12 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, class
         description: err instanceof Error ? err.message : String(err),
       });
     } finally {
-      setPending(false);
+      setPending(null);
     }
   };
 
   const fireKernelCancel = async () => {
-    setPending(true);
+    setPending("cancel");
     // Loading toast is held open until the entries SSE observes a terminal
     // status for (workflow, id, runId). The kind="cancel-running" entry in
     // the action-toast registry maps the toast id so resolveActionToastsForEntry
@@ -118,6 +118,10 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, class
       });
       const body = (await res.json()) as { ok: boolean; error?: string; accepted?: boolean };
       if (body.ok) {
+        toast.loading("Cancel requested. Worker stops at the next step boundary.", {
+          id: t,
+          description: label,
+        });
         // Daemon accepted the request — leave the loading toast open. SSE
         // will resolve it with a concrete "Cancelled" message once the
         // tracker row hits step="cancelled".
@@ -149,7 +153,38 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, class
       });
       clearActionToast(workflow, id, runId, "cancel-running");
     } finally {
-      setPending(false);
+      setPending(null);
+    }
+  };
+
+  const fireForceStop = async () => {
+    setPending("force");
+    const t = toast.loading(`Forcing ${label} browser stop…`);
+    try {
+      const res = await fetch("/api/task/force-stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workflow, id, runId }),
+      });
+      const body = (await res.json()) as { ok?: boolean; error?: string };
+      if (res.ok && body.ok) {
+        toast.warning("Browser kill sent. The run should fail shortly.", {
+          id: t,
+          description: label,
+        });
+      } else {
+        toast.error("Force stop failed", {
+          id: t,
+          description: body.error ?? `HTTP ${res.status}`,
+        });
+      }
+    } catch (err) {
+      toast.error("Force stop failed", {
+        id: t,
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setPending(null);
     }
   };
 
@@ -175,34 +210,70 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, class
     });
   };
 
+  const onForceClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (pending) return;
+    toast(`Force stop ${label}?`, {
+      description: "Kills the browser process. Use this only when cooperative cancel is stuck.",
+      action: { label: "Force stop", onClick: () => void fireForceStop() },
+      cancel: { label: "Keep running", onClick: () => {} },
+      duration: 8_000,
+    });
+  };
+
+  const buttonClass = cn(
+    "h-6 w-6 inline-flex items-center justify-center rounded-md cursor-pointer",
+    "text-muted-foreground bg-transparent",
+    "transition-colors duration-150",
+    "hover:text-destructive hover:bg-muted",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40",
+    "disabled:opacity-60 disabled:cursor-wait",
+  );
+
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          aria-label="Cancel running item"
-          disabled={pending}
-          onClick={onClick}
-          className={cn(
-            "h-6 w-6 inline-flex items-center justify-center rounded-md cursor-pointer",
-            "text-muted-foreground bg-transparent",
-            "transition-colors duration-150",
-            "hover:text-destructive hover:bg-muted",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40",
-            "disabled:opacity-60 disabled:cursor-wait",
-            className,
-          )}
-        >
-          {pending ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-destructive" />
-          ) : (
-            <Square className="h-3.5 w-3.5" />
-          )}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="top" sideOffset={4}>
-        Cancel running item
-      </TooltipContent>
-    </Tooltip>
+    <span className={cn("inline-flex items-center gap-0.5", className)}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label="Cancel at next step"
+            disabled={pending !== null}
+            onClick={onClick}
+            className={buttonClass}
+          >
+            {pending === "cancel" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-destructive" />
+            ) : (
+              <Square className="h-3.5 w-3.5" />
+            )}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={4}>
+          Cancel at next step
+        </TooltipContent>
+      </Tooltip>
+      {!ocrPrep && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label="Force stop browser"
+              disabled={pending !== null}
+              onClick={onForceClick}
+              className={buttonClass}
+            >
+              {pending === "force" ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-destructive" />
+              ) : (
+                <OctagonX className="h-3.5 w-3.5" />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={4}>
+            Force stop browser
+          </TooltipContent>
+        </Tooltip>
+      )}
+    </span>
   );
 }

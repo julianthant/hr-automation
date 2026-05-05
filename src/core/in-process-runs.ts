@@ -1,6 +1,8 @@
 import type { Session } from './session.js'
 import { log } from '../utils/log.js'
 import { errorMessage } from '../utils/errors.js'
+import { openControlDb } from './control-db.js'
+import { createWorkerStore } from './worker-store.js'
 
 /**
  * Module-level registry of fire-and-forget kernel runs that live INSIDE the
@@ -30,6 +32,7 @@ const KEY_SEP = '::'
 interface Entry {
   session: Session
   cancelled: boolean
+  control?: InProcessRunControl
 }
 
 const runs = new Map<string, Entry>()
@@ -44,8 +47,23 @@ export interface InProcessRunIdent {
   runId: string
 }
 
-export function registerInProcessRun(ident: InProcessRunIdent, session: Session): void {
-  runs.set(key(ident.workflow, ident.itemId, ident.runId), { session, cancelled: false })
+export interface InProcessRunControl {
+  trackerDir: string
+  workerId: string
+  taskId: string
+  attemptId: string
+}
+
+export function registerInProcessRun(
+  ident: InProcessRunIdent,
+  session: Session,
+  control?: InProcessRunControl,
+): void {
+  runs.set(key(ident.workflow, ident.itemId, ident.runId), {
+    session,
+    cancelled: false,
+    ...(control ? { control } : {}),
+  })
 }
 
 export function unregisterInProcessRun(ident: InProcessRunIdent): void {
@@ -74,6 +92,7 @@ export async function cancelInProcessRun(
   if (!entry) return { ok: false, reason: 'not-found' }
   if (entry.cancelled) return { ok: true, alreadyCancelled: true }
   entry.cancelled = true
+  markSqliteInProcessCancel(ident, entry.control)
   try {
     await entry.session.killChromeHard(2_000)
   } catch (err) {
@@ -90,4 +109,52 @@ export function _listInProcessRunsForTests(): string[] {
 
 export function _resetInProcessRunsForTests(): void {
   runs.clear()
+}
+
+function markSqliteInProcessCancel(
+  ident: InProcessRunIdent,
+  control: InProcessRunControl | undefined,
+): void {
+  if (!control) return
+  try {
+    const workerStore = createWorkerStore(openControlDb({ trackerDir: control.trackerDir }))
+    workerStore.enqueueWorkerCommand({
+      commandType: 'cancel_task',
+      workflow: ident.workflow,
+      targetWorkerId: control.workerId,
+      targetTaskId: control.taskId,
+      targetAttemptId: control.attemptId,
+      state: 'completed',
+      payload: { itemId: ident.itemId, runId: ident.runId, source: 'in-process' },
+    })
+    const browsers = workerStore.listBrowserProcessesForTask({
+      taskId: control.taskId,
+      attemptId: control.attemptId,
+    })
+    for (const browser of browsers) {
+      const commandId = workerStore.enqueueWorkerCommand({
+        commandType: 'kill_browser',
+        workflow: ident.workflow,
+        targetWorkerId: browser.workerId,
+        ...(browser.taskId ? { targetTaskId: browser.taskId } : {}),
+        ...(browser.attemptId ? { targetAttemptId: browser.attemptId } : {}),
+        targetBrowserProcessId: browser.browserProcessId,
+        state: 'completed',
+        payload: { pid: browser.pid, systemId: browser.systemId, source: 'in-process' },
+      })
+      workerStore.markBrowserProcessKillRequested({
+        browserProcessId: browser.browserProcessId,
+        commandId,
+      })
+      try {
+        process.kill(browser.pid, 'SIGTERM')
+      } catch {
+        /* best-effort */
+      }
+    }
+  } catch (err) {
+    log.warn(
+      `[in-process-cancel] SQLite control update failed for ${ident.workflow}/${ident.itemId}: ${errorMessage(err)}`,
+    )
+  }
 }

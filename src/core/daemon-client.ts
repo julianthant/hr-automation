@@ -41,6 +41,13 @@ export type OnPreEmitPending<TData> = (
  */
 export type OnPreEmitFailed<TData> = (input: TData, runId: string, error: string, itemId: string) => void
 
+export interface PreparedDaemonEnqueueItem<TData> {
+  input: TData
+  itemId: string
+  runId: string
+  parentRunId?: string
+}
+
 /**
  * Pure spawn-math helper. Given the current alive-daemon count and the
  * user's flags, return how many new daemons to spawn. Extracted so the
@@ -106,6 +113,12 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
      */
     onPreEmitFailed?: OnPreEmitFailed<TData>
     /**
+     * Batch-level hook fired after stable itemIds/runIds are assigned and
+     * before pre-emitting pending rows, spawning daemons, or writing queue
+     * events. If this throws, no queue event is written.
+     */
+    onPreparedItems?: (items: Array<PreparedDaemonEnqueueItem<TData>>) => void | Promise<void>
+    /**
      * Optional item-ID deriver. Defaults to the kernel's built-in `deriveItemId`
      * (walks top-level `emplId` / `docId` / `email`) with a UUID fallback.
      * Use this when the input's identifier is nested (e.g.
@@ -125,7 +138,7 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
     parentRunId?: string
   } = {},
 ): Promise<EnqueueResult> {
-  const { trackerDir, quiet, onPreEmitPending, onPreEmitFailed, parentRunId } = opts
+  const { trackerDir, quiet, onPreEmitPending, onPreEmitFailed, onPreparedItems, parentRunId } = opts
 
   if (inputs.length === 0) {
     throw new Error('ensureDaemonsAndEnqueue: inputs[] must not be empty')
@@ -171,6 +184,17 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
   // Step 1: pre-assign runIds. Generated synchronously so step 2 has them.
   const ids = inputs.map(idFn)
   const runIds: UUID[] = inputs.map(() => randomUUID())
+
+  if (onPreparedItems) {
+    await onPreparedItems(
+      inputs.map((input, i) => ({
+        input,
+        itemId: ids[i],
+        runId: runIds[i],
+        ...(parentRunId ? { parentRunId } : {}),
+      })),
+    )
+  }
 
   // Step 2: pre-emit (dashboard pending rows visible immediately).
   if (onPreEmitPending) {

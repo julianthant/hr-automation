@@ -18,9 +18,15 @@ import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChil
 import { trackEvent, dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
-import { isAcceptedHdhDepartment } from "../../domain/hdh/departments.js";
+import { createOcrEidLookupDependencyBatch } from "../../tracker/tasks/store.js";
+import { runDependencySchedulerTickForTrackerDir } from "../../tracker/tasks/scheduler.js";
 import { getFormSpec } from "../../ocr/forms/registry.js";
 import { applyCarryForward } from "./carry-forward.js";
+import {
+  patchOcrRecordFromEidLookupOutcome,
+  patchOcrRecordUnresolved,
+  type OcrLookupKind,
+} from "./eid-lookup-results.js";
 import type { AnyOcrFormSpec, RosterRow as OcrRosterRow } from "./types.js";
 import type { OcrInput } from "./schema.js";
 import { runOcrPipeline } from "../../ocr/pipeline.js";
@@ -72,6 +78,19 @@ export interface OcrOrchestratorOpts {
       taskGroupId?: string;
     }>,
   ) => Promise<void>;
+  _createDependencyBatchOverride?: (input: {
+    parent: { workflow: "ocr"; itemId: string; runId: string; formType: string };
+    children: Array<{
+      workflow: "eid-lookup";
+      itemId: string;
+      runId: string;
+      recordIndex: number;
+      lookupKind: OcrLookupKind;
+      formType: string;
+    }>;
+  }) => Promise<void>;
+  _scheduleDependencyTickOverride?: () => Promise<{ ok: true } | { ok: false; error: string }>;
+  _disableSqliteDependencies?: boolean;
   /** Skip the actual runWorkflow(sharepointDownload...) call (tests only). */
   _skipSharepointDispatch?: boolean;
 }
@@ -471,7 +490,7 @@ export async function runOcrOrchestrator(
     // "name"        → lookup by printed name (CRM cross-verify path)
     // "verify"      → lookup by roster-derived EID (verify it's active in HDH)
     // "verify-only" → lookup by form-extracted EID (same as verify, different provenance)
-    const lookupTargets: Array<{ rec: unknown; index: number; kind: "name" | "verify" | "verify-only" }> = [];
+    const lookupTargets: Array<{ rec: unknown; index: number; kind: OcrLookupKind }> = [];
     records.forEach((rec, index) => {
       const kind = spec.needsLookup(rec);
       if (kind === "name" || kind === "verify" || kind === "verify-only") {
@@ -499,7 +518,102 @@ export async function runOcrOrchestrator(
         return { record: t.rec, index: t.index, kind: t.kind, itemId };
       });
 
+      const sqliteDependenciesEnabled =
+        process.env.OCR_SQLITE_DEPENDENCIES !== "0" && !opts._disableSqliteDependencies;
+      let sqliteDependencyMode = false;
+      const createDependencyBatch = async (
+        children: Array<{
+          workflow: "eid-lookup";
+          itemId: string;
+          runId: string;
+          recordIndex: number;
+          lookupKind: OcrLookupKind;
+          formType: string;
+        }>,
+      ): Promise<void> => {
+        const parent = { workflow: "ocr" as const, itemId: id, runId, formType: spec.formType };
+        if (opts._createDependencyBatchOverride) {
+          await opts._createDependencyBatchOverride({ parent, children });
+        } else {
+          createOcrEidLookupDependencyBatch({
+            trackerDir,
+            parent,
+            children,
+          });
+        }
+        sqliteDependencyMode = true;
+      };
+
+      const wakeDependencyScheduler = async (): Promise<void> => {
+        if (opts._scheduleDependencyTickOverride) {
+          const outcome = await opts._scheduleDependencyTickOverride();
+          if (!outcome.ok) throw new Error(outcome.error);
+          return;
+        }
+        await runDependencySchedulerTickForTrackerDir(trackerDir);
+      };
+
+      const startWatchChildRunsFallback = (): void => {
+        // Background watcher: lives past the orchestrator's return. As each
+        // eid-lookup daemon outcome lands, patch the matching record and
+        // re-emit the awaiting-approval row so the operator sees the EID +
+        // verification badge populate live in the Preview tab.
+        void (async () => {
+          try {
+            const outcomes = await watchChildren({
+              workflow: "eid-lookup",
+              expectedItemIds: enqueueItems.map((e) => e.itemId),
+              trackerDir,
+              date,
+              timeoutMs: opts.eidLookupTimeoutMs ?? 60 * 60_000,
+              onProgress: (outcome, remaining) => {
+                const enq = enqueueItems.find((e) => e.itemId === outcome.itemId);
+                if (!enq) return;
+                patchOcrRecordFromEidLookupOutcome(records, enq.index, outcome, enq.kind);
+                log.step(`[ocr/bg] eid-lookup outcome for rec ${enq.index + 1}: kind=${enq.kind} status=${outcome.status} → record patched (${remaining} remaining)`);
+                emitSnapshot(records, "awaiting-approval", "running", {
+                  failedPages,
+                  emptyPages,
+                  pageStatusSummary,
+                });
+              },
+            });
+            // Mark any items that never got a terminal outcome as unresolved.
+            const seen = new Set(outcomes.map((o) => o.itemId));
+            for (const enq of enqueueItems) {
+              if (!seen.has(enq.itemId)) {
+                patchOcrRecordUnresolved(records, enq.index, "eid-lookup did not return within timeout");
+              }
+            }
+            const verifiedCount = countVerified(records, spec);
+            log.success(`[ocr/bg] eid-lookup watch complete — ${outcomes.length}/${enqueueItems.length} records resolved, ${verifiedCount} verified`);
+            emitSnapshot(records, "awaiting-approval", "done", {
+              failedPages,
+              emptyPages,
+              pageStatusSummary,
+            });
+          } catch (err) {
+            log.warn(`[ocr/bg] eid-lookup watcher errored: ${errorMessage(err)}`);
+          }
+        })();
+      };
+
       if (opts._enqueueEidLookupOverride) {
+        if (sqliteDependenciesEnabled && opts._createDependencyBatchOverride) {
+          try {
+            await createDependencyBatch(enqueueItems.map((child) => ({
+              workflow: "eid-lookup",
+              itemId: child.itemId,
+              runId: "",
+              recordIndex: child.index,
+              lookupKind: child.kind,
+              formType: spec.formType,
+            })));
+          } catch (err) {
+            sqliteDependencyMode = false;
+            log.warn(`[ocr] SQLite dependency setup failed; falling back to watchChildRuns: ${errorMessage(err)}`);
+          }
+        }
         await opts._enqueueEidLookupOverride(
           enqueueItems.map((e) => ({
             ...(e.kind === "name"
@@ -530,21 +644,61 @@ export async function runOcrOrchestrator(
                 taskGroupId: input.sessionId,
               },
         );
-        await ensureDaemonsAndEnqueue(
-          eidLookupCrmWorkflow,
-          inputs as never,
-          {},
-          {
-            deriveItemId: (inp: { name?: string; emplId?: string }) => {
-              const matched = enqueueItems.find((e) => {
-                if ("name" in inp && inp.name) return extractName(e.record, spec) === inp.name;
-                if ("emplId" in inp && inp.emplId) return extractEid(e.record, spec) === inp.emplId;
-                return false;
-              });
-              return matched?.itemId ?? `ocr-fallback-${runId}-r0`;
+        const deriveChildItemId = (inp: { name?: string; emplId?: string }): string => {
+          const matched = enqueueItems.find((e) => {
+            if ("name" in inp && inp.name) return extractName(e.record, spec) === inp.name;
+            if ("emplId" in inp && inp.emplId) return extractEid(e.record, spec) === inp.emplId;
+            return false;
+          });
+          return matched?.itemId ?? `ocr-fallback-${runId}-r0`;
+        };
+        let dependencySetupError: unknown;
+        try {
+          await ensureDaemonsAndEnqueue(
+            eidLookupCrmWorkflow,
+            inputs as never,
+            {},
+            {
+              deriveItemId: deriveChildItemId,
+              parentRunId: runId,
+              onPreparedItems: async (prepared) => {
+                if (!sqliteDependenciesEnabled) return;
+                try {
+                  await createDependencyBatch(prepared.map((preparedItem) => {
+                    const enqueued = enqueueItems.find((item) => item.itemId === preparedItem.itemId);
+                    if (!enqueued) {
+                      throw new Error(`No OCR enqueue metadata for prepared item ${preparedItem.itemId}`);
+                    }
+                    return {
+                      workflow: "eid-lookup",
+                      itemId: preparedItem.itemId,
+                      runId: preparedItem.runId,
+                      recordIndex: enqueued.index,
+                      lookupKind: enqueued.kind,
+                      formType: spec.formType,
+                    };
+                  }));
+                } catch (err) {
+                  dependencySetupError = err;
+                  throw err;
+                }
+              },
             },
-          },
-        );
+          );
+        } catch (err) {
+          if (!dependencySetupError) throw err;
+          sqliteDependencyMode = false;
+          log.warn(`[ocr] SQLite dependency setup failed; falling back to watchChildRuns: ${errorMessage(dependencySetupError)}`);
+          await ensureDaemonsAndEnqueue(
+            eidLookupCrmWorkflow,
+            inputs as never,
+            {},
+            {
+              deriveItemId: deriveChildItemId,
+              parentRunId: runId,
+            },
+          );
+        }
       }
 
       // Don't block: dispatch eid-lookup, snapshot the current pending
@@ -560,46 +714,18 @@ export async function runOcrOrchestrator(
         pageStatusSummary,
       });
 
-      // Background watcher: lives past the orchestrator's return. As each
-      // eid-lookup daemon outcome lands, patch the matching record and
-      // re-emit the awaiting-approval row so the operator sees the EID +
-      // verification badge populate live in the Preview tab.
-      void (async () => {
+      if (sqliteDependencyMode) {
+        log.success("[ocr] eid-lookup dependencies recorded in SQLite; scheduler will patch records as child tasks finish");
         try {
-          const outcomes = await watchChildren({
-            workflow: "eid-lookup",
-            expectedItemIds: enqueueItems.map((e) => e.itemId),
-            trackerDir,
-            date,
-            timeoutMs: opts.eidLookupTimeoutMs ?? 60 * 60_000,
-            onProgress: (outcome, remaining) => {
-              const enq = enqueueItems.find((e) => e.itemId === outcome.itemId);
-              if (!enq) return;
-              patchFromOutcome(records, enq.index, outcome, enq.kind, spec);
-              log.step(`[ocr/bg] eid-lookup outcome for rec ${enq.index + 1}: kind=${enq.kind} status=${outcome.status} → record patched (${remaining} remaining)`);
-              emitSnapshot(records, "awaiting-approval", "running", {
-                failedPages,
-                emptyPages,
-                pageStatusSummary,
-              });
-            },
-          });
-          // Mark any items that never got a terminal outcome as unresolved.
-          const seen = new Set(outcomes.map((o) => o.itemId));
-          for (const enq of enqueueItems) {
-            if (!seen.has(enq.itemId)) patchUnresolved(records, enq.index, spec);
-          }
-          const verifiedCount = countVerified(records, spec);
-          log.success(`[ocr/bg] eid-lookup watch complete — ${outcomes.length}/${enqueueItems.length} records resolved, ${verifiedCount} verified`);
-          emitSnapshot(records, "awaiting-approval", "done", {
-            failedPages,
-            emptyPages,
-            pageStatusSummary,
-          });
+          await wakeDependencyScheduler();
         } catch (err) {
-          log.warn(`[ocr/bg] eid-lookup watcher errored: ${errorMessage(err)}`);
+          sqliteDependencyMode = false;
+          log.warn(`[ocr] dependency scheduler wake failed for sessionId=${id} runId=${runId} childCount=${enqueueItems.length}; falling back to watchChildRuns: ${errorMessage(err)}`);
+          startWatchChildRunsFallback();
         }
-      })();
+      } else {
+        startWatchChildRunsFallback();
+      }
     }
 
     // 5. Verification marker (synthetic — actual verification happens
@@ -697,59 +823,6 @@ function extractEid(record: unknown, _spec: AnyOcrFormSpec): string {
   return "";
 }
 
-function patchUnresolved(records: unknown[], idx: number, _spec: AnyOcrFormSpec): void {
-  const rec = records[idx] as Record<string, unknown>;
-  if (rec.matchState === "lookup-pending" || rec.matchState === "lookup-running") {
-    rec.matchState = "unresolved";
-    const warnings = (rec.warnings as string[]) ?? [];
-    warnings.push("eid-lookup did not return within timeout");
-    rec.warnings = warnings;
-  }
-}
-
-function patchFromOutcome(
-  records: unknown[],
-  idx: number,
-  outcome: ChildOutcome,
-  kind: "name" | "verify" | "verify-only",
-  _spec: AnyOcrFormSpec,
-): void {
-  const rec = records[idx] as Record<string, unknown>;
-  const eid = (outcome.data?.emplId ?? "").trim();
-  const looksLikeEid = /^\d{5,}$/.test(eid);
-
-  if (kind === "name") {
-    if (outcome.status === "done" && looksLikeEid) {
-      if ("employee" in rec) {
-        (rec.employee as Record<string, unknown>).employeeId = eid;
-      } else {
-        rec.employeeId = eid;
-      }
-      rec.matchState = "resolved";
-      rec.matchSource = "eid-lookup";
-    } else {
-      rec.matchState = "unresolved";
-      const warnings = (rec.warnings as string[]) ?? [];
-      warnings.push(`eid-lookup ${outcome.status === "done" ? `returned "${eid || "no result"}"` : "failed"}`);
-      rec.warnings = warnings;
-    }
-  }
-
-  const v = computeVerification({
-    hrStatus: outcome.data?.hrStatus,
-    department: outcome.data?.department,
-    personOrgScreenshot: outcome.data?.personOrgScreenshot,
-  });
-  rec.verification = v;
-  // Only auto-deselect on a HARD "don't process" verification. Soft fails
-  // (`lookup-failed`) leave the record selected — operator can decide based
-  // on the warning banner whether to dispatch. Mirrors `isApprovable` in
-  // OcrReviewPane: lookup-failed is approvable; inactive/non-hdh isn't.
-  if (v.state === "inactive" || v.state === "non-hdh") {
-    rec.selected = false;
-  }
-}
-
 function countVerified(records: unknown[], _spec: AnyOcrFormSpec): number {
   let n = 0;
   for (const r of records) {
@@ -757,26 +830,4 @@ function countVerified(records: unknown[], _spec: AnyOcrFormSpec): number {
     if (v?.state === "verified") n++;
   }
   return n;
-}
-
-function computeVerification(d: {
-  hrStatus?: string;
-  department?: string;
-  personOrgScreenshot?: string;
-}): {
-  state: "verified" | "inactive" | "non-hdh" | "lookup-failed";
-  hrStatus?: string;
-  department?: string;
-  screenshotFilename: string;
-  checkedAt: string;
-  error?: string;
-} {
-  const checkedAt = new Date().toISOString();
-  const screenshotFilename = d.personOrgScreenshot ?? "";
-  if (!d.hrStatus) return { state: "lookup-failed", error: "no result", checkedAt, screenshotFilename };
-  const active = d.hrStatus === "Active";
-  const hdh = isAcceptedHdhDepartment(d.department ?? null);
-  if (!active) return { state: "inactive", hrStatus: d.hrStatus, department: d.department, screenshotFilename, checkedAt };
-  if (!hdh) return { state: "non-hdh", hrStatus: d.hrStatus, department: d.department ?? "", screenshotFilename, checkedAt };
-  return { state: "verified", hrStatus: d.hrStatus, department: d.department ?? "", screenshotFilename, checkedAt };
 }

@@ -4,7 +4,9 @@ import type { Hono } from "hono";
 import type { DashboardRoute } from "../route-types.js";
 
 function isHonoPhase1Path(pathname: string): boolean {
-  return pathname.startsWith("/api/v2/") || pathname.startsWith("/api/files/");
+  return pathname.startsWith("/api/v2/")
+    || pathname.startsWith("/api/files/")
+    || pathname === "/api/task-dependencies";
 }
 
 export function createHonoDashboardRoute(app: Hono): DashboardRoute {
