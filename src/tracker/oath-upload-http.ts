@@ -59,6 +59,7 @@ export function buildOathUploadDuplicateCheckHandler(
 export interface StartInput {
   pdfPath: string;
   pdfOriginalName: string;
+  pdfFileId?: string;
   pdfHash: string;
   sessionId?: string;
   /** Roster source for the delegated OCR step. Defaults to "download". */
@@ -110,6 +111,7 @@ export function buildOathUploadStartHandler(
       {
         pdfPath: input.pdfPath,
         pdfOriginalName: input.pdfOriginalName,
+        pdfFileId: input.pdfFileId,
         sessionId,
         pdfHash: input.pdfHash,
         rosterMode,

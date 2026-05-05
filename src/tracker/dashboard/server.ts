@@ -3,9 +3,12 @@ import {
   cleanOldScreenshots,
   cleanOldTrackerFiles,
   DEFAULT_DIR,
+  dateLocal,
 } from "../jsonl.js";
 import { sweepStuckOcrRows } from "../ocr-http.js";
 import { sweepStuckOathUploadRows } from "../oath-upload-http.js";
+import { openStateDb } from "../state/db.js";
+import { rebuildProjectionForDate } from "../state/rebuild.js";
 import { sweepOrphanUploadDirs } from "../../scripts/ops/clean-tracker.js";
 import { log } from "../../utils/log.js";
 import { createDashboardRequestListener } from "./routes/index.js";
@@ -20,6 +23,12 @@ import { createOpsRoutes } from "./routes/ops.js";
 import { createOcrRoutes } from "./routes/ocr.js";
 import { createOathUploadRoutes } from "./routes/oath-upload.js";
 import { createCaptureRoutes } from "./routes/capture.js";
+import { createDashboardHonoApp } from "./hono/app.js";
+import { createHonoDashboardRoute } from "./hono/adapter.js";
+import {
+  scanFailurePatterns,
+  scanOrphanedQueueItems,
+} from "./sweeps.js";
 
 let server: Server | null = null;
 
@@ -101,9 +110,21 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     }
   }
 
+  let projectionReady = false;
+  let stateDb: ReturnType<typeof openStateDb> | undefined;
+  try {
+    stateDb = openStateDb(dir);
+    rebuildProjectionForDate(stateDb, { dir, date: dateLocal() });
+    projectionReady = true;
+  } catch (err) {
+    log.warn(`SQLite projection startup skipped: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const honoApp = stateDb ? createDashboardHonoApp({ dir, stateDb }) : null;
+
   const requestListener = createDashboardRequestListener(
-    { workflow, port, dir },
+    { workflow, port, dir, projectionReady, stateDb },
     [
+      ...(honoApp ? [createHonoDashboardRoute(honoApp)] : []),
       createBaseRoutes(),
       createEventsRoute(),
       createSearchRoutes(),
@@ -119,6 +140,11 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
   );
 
   const localServer: Server = createServer(requestListener);
+  const sweepInterval = setInterval(() => {
+    void scanFailurePatterns();
+    void scanOrphanedQueueItems(dir);
+  }, 15_000);
+  localServer.on("close", () => clearInterval(sweepInterval));
 
   localServer.on("error", (err: NodeJS.ErrnoException) => {
     if (err.code === "EADDRINUSE") {

@@ -6,6 +6,7 @@ export interface PrepReviewPairProps {
   workflow: string;
   parentRunId: string;
   page: number;
+  fileId?: string;
   formCard: ReactNode;
 }
 
@@ -17,12 +18,13 @@ export function PrepReviewPair({
   workflow,
   parentRunId,
   page,
+  fileId,
   formCard,
 }: PrepReviewPairProps) {
   return (
     <div className="grid grid-cols-2 gap-4 border-b border-border p-4">
       <div className="self-start">
-        <PdfPagePreview workflow={workflow} parentRunId={parentRunId} page={page} />
+        <PdfPagePreview workflow={workflow} parentRunId={parentRunId} page={page} fileId={fileId} />
       </div>
       <div>{formCard}</div>
     </div>

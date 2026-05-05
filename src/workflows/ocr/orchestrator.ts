@@ -10,7 +10,7 @@
  * discard / reupload click is handled via separate HTTP endpoints.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { ZodType } from "zod/v4";
 import { loadRoster as realLoadRoster } from "../../match/index.js";
 import type { RosterRow as MatchRosterRow } from "../../match/match.js";
@@ -93,13 +93,25 @@ export async function runOcrOrchestrator(
     ((entry: TrackerEntry) => trackEvent(entry, trackerDir));
   const loadRosterFn = opts._loadRosterOverride ?? realLoadRoster;
   const watchChildren = opts._watchChildRunsOverride ?? realWatchChildRuns;
+  const trackerBaseDir = trackerDir ?? ".tracker";
+  const legacyPageImagesDir = join(trackerBaseDir, "page-images", input.sessionId);
+  let pageImagesDir = legacyPageImagesDir;
+  let pageImagePad = 2;
 
-  const runOcr = opts._ocrPipelineOverride ?? (async ({ pdfPath, spec: s, sessionId, preRenderedPages }: { pdfPath: string; formType: string; spec: AnyOcrFormSpec; sessionId: string; preRenderedPages?: string[] }) => {
-    // Page images go to .tracker/page-images/<sessionId>/ — sessionId is
-    // the stable key the OCR HTTP layer mints when the operator uploads
-    // the PDF. PdfPagePreview passes this value; do NOT use runId here
-    // (the dashboard would have nothing to look up against).
-    const pageImagesDir = join(trackerDir ?? ".tracker", "page-images", sessionId);
+  if (input.pdfFileId) {
+    try {
+      const { isStateDbReady } = await import("../../tracker/state/db.js");
+      if (isStateDbReady(trackerBaseDir)) {
+        pageImagesDir = join(trackerBaseDir, "pdf-cache", input.pdfFileId);
+        pageImagePad = 3;
+      }
+    } catch {
+      pageImagesDir = legacyPageImagesDir;
+      pageImagePad = 2;
+    }
+  }
+
+  const runOcr = opts._ocrPipelineOverride ?? (async ({ pdfPath, spec: s, preRenderedPages }: { pdfPath: string; formType: string; spec: AnyOcrFormSpec; sessionId: string; preRenderedPages?: string[] }) => {
     const result = await runOcrPipeline({
       pdfPath,
       pageImagesDir,
@@ -138,7 +150,11 @@ export async function runOcrOrchestrator(
     // surfaces it.
     // mode: "prepare" makes the dashboard render this row with the
     // preview-tab affordance (gated on workflow === "ocr").
-    const flat = flattenForData({ ...data, mode: "prepare" });
+    const flat = flattenForData({
+      ...data,
+      ...(input.pdfFileId ? { pdfFileId: input.pdfFileId } : {}),
+      mode: "prepare",
+    });
     flat.__id = input.sessionId ?? "";
     flat.__name = "OCR";
     emit({
@@ -230,9 +246,29 @@ export async function runOcrOrchestrator(
     // 1b. Pre-render PDF pages so we know page count + can show the page
     // image in the Preview tab before OCR finishes.
     log.step(`[ocr] pre-rendering PDF pages so the Preview tab populates immediately`);
-    const pageImagesDir = join(trackerDir ?? ".tracker", "page-images", input.sessionId);
     const { renderPdfPagesToPngs } = await import("../../ocr/render-pages.js");
-    const preRenderedPages = await renderPdfPagesToPngs(input.pdfPath, pageImagesDir);
+    let preRenderedPages: string[];
+    if (input.pdfFileId && pageImagePad === 3) {
+      try {
+        const { openStateDb } = await import("../../tracker/state/db.js");
+        const { ensurePdfPageCache } = await import("../../tracker/pdf-cache.js");
+        const cachedPages = await ensurePdfPageCache(openStateDb(trackerBaseDir), {
+          trackerDir: trackerBaseDir,
+          fileId: input.pdfFileId,
+          pdfPath: input.pdfPath,
+        });
+        preRenderedPages = cachedPages
+          .filter((page) => page.status === "ready" && page.imagePath)
+          .map((page) => basename(page.imagePath!));
+      } catch (err) {
+        log.warn(`[ocr] PDF file cache unavailable, falling back to legacy page images: ${errorMessage(err)}`);
+        pageImagesDir = legacyPageImagesDir;
+        pageImagePad = 2;
+        preRenderedPages = await renderPdfPagesToPngs(input.pdfPath, pageImagesDir);
+      }
+    } else {
+      preRenderedPages = await renderPdfPagesToPngs(input.pdfPath, pageImagesDir);
+    }
     const knownPageCount = preRenderedPages.length;
     log.success(`[ocr] rendered ${knownPageCount} page(s) — Preview tab now shows blank inputs ready to fill in`);
 
@@ -251,6 +287,7 @@ export async function runOcrOrchestrator(
         formType: input.formType,
         pdfOriginalName: input.pdfOriginalName,
         sessionId: input.sessionId,
+        pageImagesDir,
         ...(input.parentRunId ? { parentRunId: input.parentRunId } : {}),
         recordCount: records.length,
         verifiedCount,
@@ -312,12 +349,7 @@ export async function runOcrOrchestrator(
         page: p.page,
         error: p.error ?? "unknown error",
         attemptedKeys: p.attemptedKeys,
-        pageImagePath: join(
-          trackerDir ?? ".tracker",
-          "page-images",
-          input.sessionId,
-          `page-${String(p.page).padStart(2, "0")}.png`,
-        ),
+        pageImagePath: join(pageImagesDir, `page-${String(p.page).padStart(pageImagePad, "0")}.png`),
         attempts: 1,
       }));
     const pageStatusSummary = {

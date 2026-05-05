@@ -58,6 +58,7 @@ export async function oathUploadHandler(
 
   ctx.updateData({
     pdfOriginalName: input.pdfOriginalName,
+    ...(input.pdfFileId ? { pdfFileId: input.pdfFileId } : {}),
     sessionId: input.sessionId,
     pdfHash: input.pdfHash,
     status: "running",
@@ -90,6 +91,7 @@ export async function oathUploadHandler(
       void runWorkflow(ocrWorkflow, {
         pdfPath: input.pdfPath,
         pdfOriginalName: input.pdfOriginalName,
+        pdfFileId: input.pdfFileId,
         formType: "oath",
         sessionId: ocrSessionId,
         rosterMode: input.rosterMode,

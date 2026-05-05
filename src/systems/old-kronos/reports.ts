@@ -243,6 +243,7 @@ async function downloadReportRow(
   const downloadHandler = async (dl: { suggestedFilename: () => string; saveAs: (path: string) => Promise<void> }) => {
     log.step(`[${employeeId}] Download event! ${dl.suggestedFilename()}`);
     await dl.saveAs(dest);
+    await registerDownloadedReportPdf(dest, filename, employeeId);
     log.step(`[${employeeId}] SAVED: ${dest}`);
     downloadCaptured = true;
   };
@@ -324,6 +325,7 @@ async function downloadReportRow(
           if (existsSync(dest)) await unlink(dest);
           await rename(src, dest);
         }
+        await registerDownloadedReportPdf(dest, filename, employeeId);
         log.step(`[${employeeId}] Found file in ${checkDir}: ${newPdfs[0]}`);
         log.success(`[${employeeId}] SAVED: ${dest}`);
         return true;
@@ -335,6 +337,31 @@ async function downloadReportRow(
 
   log.error(`[${employeeId}] Could not find downloaded file`);
   return false;
+}
+
+async function registerDownloadedReportPdf(
+  dest: string,
+  filename: string,
+  employeeId: string,
+): Promise<void> {
+  try {
+    const { openStateDb, isStateDbReady } = await import("../../tracker/state/db.js");
+    const { registerLocalFile } = await import("../../tracker/files.js");
+    const trackerDir = ".tracker";
+    if (isStateDbReady(trackerDir)) {
+      registerLocalFile(openStateDb(trackerDir), {
+        kind: "pdf",
+        mimeType: "application/pdf",
+        path: dest,
+        originalName: filename,
+        source: "old-kronos-download",
+        workflow: "kronos-reports",
+        itemId: employeeId,
+      });
+    }
+  } catch {
+    // File registry is best-effort; report download success remains non-fatal.
+  }
 }
 
 /**

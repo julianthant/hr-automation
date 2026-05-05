@@ -108,6 +108,7 @@ export interface PrepareRowData {
   mode: "prepare";
   pdfPath: string;
   pdfOriginalName: string;
+  pdfFileId?: string;
   rosterMode: "download" | "existing";
   rosterPath: string;
   pageImagesDir?: string;
@@ -219,6 +220,7 @@ export function parsePrepareRowData(
     mode: "prepare",
     pdfPath: rawData.pdfPath ?? "",
     pdfOriginalName: rawData.pdfOriginalName ?? "",
+    pdfFileId: rawData.pdfFileId || undefined,
     rosterMode: rawData.rosterMode === "download" ? "download" : "existing",
     rosterPath: rawData.rosterPath ?? "",
     pageImagesDir: rawData.pageImagesDir || undefined,
@@ -294,6 +296,7 @@ export interface OathPrepareRowData {
   mode: "prepare";
   pdfPath: string;
   pdfOriginalName: string;
+  pdfFileId?: string;
   rosterPath: string;
   pageImagesDir?: string;
   records: OathPreviewRecord[];
@@ -342,6 +345,7 @@ export function parseOathPrepareRowData(
     mode: "prepare",
     pdfPath: rawData.pdfPath ?? "",
     pdfOriginalName: rawData.pdfOriginalName ?? "",
+    pdfFileId: rawData.pdfFileId || undefined,
     rosterPath: rawData.rosterPath ?? "",
     pageImagesDir: rawData.pageImagesDir || undefined,
     records,

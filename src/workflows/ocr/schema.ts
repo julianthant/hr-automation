@@ -3,6 +3,7 @@ import { z } from "zod/v4";
 export const OcrInputSchema = z.object({
   pdfPath:          z.string(),
   pdfOriginalName:  z.string(),
+  pdfFileId:        z.string().optional(),
   formType:         z.string(),
   sessionId:        z.string(),
   rosterPath:       z.string().optional(),

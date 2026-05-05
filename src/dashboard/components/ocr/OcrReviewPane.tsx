@@ -445,7 +445,12 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
             return (
               <div key={`empty-${renderEntry.page}`} className="grid grid-cols-2 gap-4 border-b border-border p-4">
                 <div className="self-start">
-                  <PdfPagePreview workflow={entry.workflow} parentRunId={sessionId} page={renderEntry.page} />
+                  <PdfPagePreview
+                    workflow={entry.workflow}
+                    parentRunId={sessionId}
+                    page={renderEntry.page}
+                    fileId={data.pdfFileId}
+                  />
                 </div>
                 <div>
                   <EmptyPagePlaceholder
@@ -472,6 +477,7 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
                   workflow={entry.workflow}
                   parentRunId={sessionId}
                   page={page}
+                  fileId={data.pdfFileId}
                   formCard={renderFormCard({
                     record,
                     cfg,
@@ -504,6 +510,7 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
               workflow={entry.workflow}
               parentRunId={sessionId}
               page={page}
+              fileId={data.pdfFileId}
               formCards={cards}
               onAddRow={addBlankRow}
             />

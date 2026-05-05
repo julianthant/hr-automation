@@ -13,8 +13,10 @@ import { log } from "../utils/log.js";
 export async function renderPdfPagesToPngs(
   pdfPath: string,
   outDir: string,
+  opts: { pad?: number } = {},
 ): Promise<string[]> {
   try {
+    const pad = opts.pad ?? 2;
     await fs.mkdir(outDir, { recursive: true });
     const pdfBuffer = await fs.readFile(pdfPath);
     const { pdf } = await import("pdf-to-img");
@@ -28,7 +30,7 @@ export async function renderPdfPagesToPngs(
     const filenames: string[] = [];
     let i = 1;
     for await (const image of document) {
-      const name = `page-${String(i).padStart(2, "0")}.png`;
+      const name = `page-${String(i).padStart(pad, "0")}.png`;
       await fs.writeFile(path.join(outDir, name), image);
       filenames.push(name);
       i += 1;

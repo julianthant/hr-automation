@@ -8,6 +8,7 @@ export interface PdfPagePreviewProps {
   parentRunId: string;
   /** 1-indexed page number. */
   page: number;
+  fileId?: string;
   className?: string;
 }
 
@@ -28,6 +29,7 @@ export function PdfPagePreview({
   workflow,
   parentRunId,
   page,
+  fileId,
   className,
 }: PdfPagePreviewProps) {
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
@@ -57,7 +59,9 @@ export function PdfPagePreview({
     return () => obs.disconnect();
   }, [shouldLoad]);
 
-  const src = `/api/prep/pdf-page?workflow=${encodeURIComponent(workflow)}&parentRunId=${encodeURIComponent(parentRunId)}&page=${page}`;
+  const src = fileId
+    ? `/api/files/${encodeURIComponent(fileId)}/pages/${page}`
+    : `/api/prep/pdf-page?workflow=${encodeURIComponent(workflow)}&parentRunId=${encodeURIComponent(parentRunId)}&page=${page}`;
   // Reset state whenever the src changes (different row / different page).
   useEffect(() => { setState("loading"); }, [src]);
   return (

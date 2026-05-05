@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type { DashboardRoute } from "../route-types.js";
 import { readJsonBody, writeJson } from "../http.js";
@@ -10,6 +10,8 @@ import {
   buildOathUploadCancelHandler,
   saveUploadedPdf,
 } from "../../oath-upload-http.js";
+import { registerLocalFile } from "../../files.js";
+import { ensurePdfPageCache } from "../../pdf-cache.js";
 
 function createOathUploadHandlers(dir: string) {
   return {
@@ -67,9 +69,28 @@ export function createOathUploadRoutes(): DashboardRoute {
         return true;
       }
 
-      const pdfPath = await saveUploadedPdf(file.data, file.filename ?? "upload.pdf", ctx.dir);
+      const pdfOriginalName = file.filename ?? "upload.pdf";
+      const pdfPath = await saveUploadedPdf(file.data, pdfOriginalName, ctx.dir);
       const pdfHash = createHash("sha256").update(file.data).digest("hex");
-      const sessionId = mp.parsed.fields["sessionId"]?.trim() || undefined;
+      const sessionId = mp.parsed.fields["sessionId"]?.trim() || randomUUID();
+      const registered = ctx.stateDb
+        ? registerLocalFile(ctx.stateDb, {
+            kind: "pdf",
+            mimeType: "application/pdf",
+            path: pdfPath,
+            originalName: pdfOriginalName,
+            source: "oath-upload",
+            workflow: "oath-upload",
+            itemId: sessionId,
+          })
+        : null;
+      if (registered && ctx.stateDb) {
+        void ensurePdfPageCache(ctx.stateDb, {
+          trackerDir: ctx.dir,
+          fileId: registered.fileId,
+          pdfPath,
+        }).catch(() => undefined);
+      }
 
       const rosterMode = (mp.parsed.fields["rosterMode"]?.trim() ?? "download") as "existing" | "download";
       let rosterPath: string | undefined;
@@ -91,7 +112,8 @@ export function createOathUploadRoutes(): DashboardRoute {
 
       const r = await handlers.start({
         pdfPath,
-        pdfOriginalName: file.filename ?? "upload.pdf",
+        pdfOriginalName,
+        pdfFileId: registered?.fileId,
         pdfHash,
         sessionId,
         rosterMode,

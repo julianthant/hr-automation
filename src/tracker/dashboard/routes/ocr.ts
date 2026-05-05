@@ -14,6 +14,8 @@ import {
   buildOcrReocrWholePdfHandler,
 } from "../../ocr-http.js";
 import { errorMessage } from "../../../utils/errors.js";
+import { registerLocalFile } from "../../files.js";
+import { ensurePdfPageCache } from "../../pdf-cache.js";
 
 function createOcrHandlers(dir: string) {
   return {
@@ -70,13 +72,34 @@ export function createOcrRoutes(): DashboardRoute {
       const formType = fields["formType"]?.trim() ?? "";
       const rosterMode = (fields["rosterMode"]?.trim() ?? "existing") as "existing" | "download";
       const rosterPath = fields["rosterPath"]?.trim() || undefined;
-      const sessionId = fields["sessionId"]?.trim() || undefined;
+      const requestedSessionId = fields["sessionId"]?.trim() || undefined;
+      const sessionId = requestedSessionId ?? (isReupload ? undefined : randomUUID());
       const previousRunId = fields["previousRunId"]?.trim() || undefined;
       const originWorkflow = fields["originWorkflow"]?.trim() || undefined;
+      const pdfOriginalName = file.filename ?? pdfFilename;
+      let pdfFileId: string | undefined;
+      if (ctx.stateDb && sessionId) {
+        const registered = registerLocalFile(ctx.stateDb, {
+          kind: "pdf",
+          mimeType: "application/pdf",
+          path: pdfPath,
+          originalName: pdfOriginalName,
+          source: isReupload ? "ocr-reupload" : "ocr-upload",
+          workflow: "ocr",
+          itemId: sessionId,
+        });
+        pdfFileId = registered.fileId;
+        void ensurePdfPageCache(ctx.stateDb, {
+          trackerDir: ctx.dir,
+          fileId: registered.fileId,
+          pdfPath,
+        }).catch(() => undefined);
+      }
 
       const result = await handlers.prepare({
         pdfPath,
-        pdfOriginalName: file.filename ?? pdfFilename,
+        pdfOriginalName,
+        pdfFileId,
         formType,
         rosterMode,
         rosterPath,
