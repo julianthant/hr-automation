@@ -91,7 +91,7 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, class
       if (res.ok && body.ok) {
         toast.success(`Stopped ${label}`, {
           id: t,
-          description: "Task marked cancelled; worker and browser stop requested.",
+          description: "Task marked cancelled; session and browser stop requested.",
         });
       } else {
         toast.error("Stop failed", {

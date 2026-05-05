@@ -81,6 +81,35 @@ test('session.launch (sequential): awaits each login in order', async () => {
   await s.close()
 })
 
+test('session.launch: abortSignal rejects an in-progress login without waiting for retries', async () => {
+  const controller = new AbortController()
+  let loginStarted!: () => void
+  const started = new Promise<void>((resolve) => { loginStarted = resolve })
+  const sys: SystemConfig = {
+    id: 'ucpath',
+    login: async () => {
+      loginStarted()
+      await new Promise(() => {})
+    },
+  }
+
+  const launched = Session.launch([sys], {
+    authChain: 'sequential',
+    launchFn: fakeLaunch,
+    abortSignal: controller.signal,
+  })
+  await started
+  controller.abort(new Error('stop requested during auth'))
+
+  await assert.rejects(
+    () => Promise.race([
+      launched,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('launch did not abort')), 250)),
+    ]),
+    /stop requested during auth|aborted/i,
+  )
+})
+
 test('session.launch (interleaved): first login blocks; subsequent logins resolve as chain progresses', async () => {
   const logins: Array<{ id: string; at: number }> = []
   let t = 0

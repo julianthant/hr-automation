@@ -249,15 +249,15 @@ export const eidLookupCrmWorkflow = defineWorkflow({
   systems: [
     {
       id: "ucpath",
-      login: async (page, instance) => {
-        const ok = await loginToUCPath(page, instance);
+      login: async (page, instance, context) => {
+        const ok = await loginToUCPath(page, instance, context?.abortSignal);
         if (!ok) throw new Error("UCPath authentication failed");
       },
     },
     {
       id: "crm",
-      login: async (page, instance) => {
-        const ok = await loginToACTCrm(page, instance);
+      login: async (page, instance, context) => {
+        const ok = await loginToACTCrm(page, instance, context?.abortSignal);
         if (!ok) throw new Error("CRM authentication failed");
       },
     },

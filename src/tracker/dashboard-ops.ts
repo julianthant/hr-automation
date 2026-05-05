@@ -175,6 +175,20 @@ async function requestDaemonForceCurrent(
   }
 }
 
+async function requestDaemonStopWorker(worker: WorkerRow | null): Promise<boolean> {
+  if (!worker?.port) return false;
+  try {
+    const res = await fetch(`http://127.0.0.1:${worker.port}/stop`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ force: true }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Lookup an entry's input by (workflow, id, runId?). Three-tier fallback so
  * retry works regardless of how the entry was originally enqueued:
@@ -959,11 +973,11 @@ export function buildStopWorkerHandler(dir: string) {
     enqueueWorkerLifecycleCommand(dir, req.workerId, "stop_worker");
 }
 
-function enqueueWorkerLifecycleCommand(
+async function enqueueWorkerLifecycleCommand(
   dir: string,
   workerId: string,
   commandType: "drain_worker" | "stop_worker",
-): { ok: true; commandId: string } | { ok: false; error: string; status?: number } {
+): Promise<{ ok: true; commandId: string } | { ok: false; error: string; status?: number }> {
   if (!workerId) return { ok: false, error: "workerId is required", status: 400 };
   const stores = openControlStores(dir);
   try {
@@ -975,6 +989,9 @@ function enqueueWorkerLifecycleCommand(
       targetWorkerId: worker.workerId,
       payload: { pid: worker.pid, instanceId: worker.instanceId },
     });
+    if (commandType === "stop_worker") {
+      void requestDaemonStopWorker(worker);
+    }
     return { ok: true, commandId };
   } finally {
     stores.close();

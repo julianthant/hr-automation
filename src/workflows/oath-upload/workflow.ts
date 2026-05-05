@@ -17,8 +17,8 @@ export const oathUploadWorkflow = defineWorkflow({
   systems: [
     {
       id: "servicenow",
-      login: async (page, instance) => {
-        const ok = await loginToServiceNow(page, instance);
+      login: async (page, instance, context) => {
+        const ok = await loginToServiceNow(page, instance, context?.abortSignal);
         if (!ok) throw new Error("ServiceNow authentication failed");
       },
     },

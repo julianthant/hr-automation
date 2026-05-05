@@ -171,8 +171,13 @@ export const separationsWorkflow = defineWorkflow({
         const prep = await kualiNavigateAndFill(page, KUALI_SPACE_URL);
         if (prep === false) throw new Error("Kuali prepareLogin failed");
       },
-      login: async (page, instance) => {
-        const ok = await kualiSubmitAndWaitForDuo(page, KUALI_SPACE_URL, instance);
+      login: async (page, instance, context) => {
+        const ok = await kualiSubmitAndWaitForDuo(
+          page,
+          KUALI_SPACE_URL,
+          instance,
+          context?.abortSignal,
+        );
         if (!ok) throw new Error("Kuali authentication failed");
       },
       resetUrl: KUALI_SPACE_URL,
@@ -183,8 +188,8 @@ export const separationsWorkflow = defineWorkflow({
         const prep = await ukgNavigateAndFill(page);
         if (prep === false) throw new Error("UKG prepareLogin failed");
       },
-      login: async (page, instance) => {
-        const ok = await ukgSubmitAndWaitForDuo(page, instance);
+      login: async (page, instance, context) => {
+        const ok = await ukgSubmitAndWaitForDuo(page, instance, context?.abortSignal);
         if (!ok) throw new Error("Old Kronos (UKG) authentication failed");
       },
       sessionDir: getProcessIsolatedSessionDir(PATHS.ukgSessionSep),
@@ -195,8 +200,8 @@ export const separationsWorkflow = defineWorkflow({
         const prep = await newKronosNavigateAndFill(page);
         if (prep === false) throw new Error("New Kronos prepareLogin failed");
       },
-      login: async (page, instance) => {
-        const ok = await newKronosSubmitAndWaitForDuo(page, instance);
+      login: async (page, instance, context) => {
+        const ok = await newKronosSubmitAndWaitForDuo(page, instance, context?.abortSignal);
         if (!ok) throw new Error("New Kronos authentication failed");
       },
       resetUrl: NEW_KRONOS_URL,
@@ -207,8 +212,8 @@ export const separationsWorkflow = defineWorkflow({
         const prep = await ucpathNavigateAndFill(page);
         if (!prep) throw new Error("UCPath prepareLogin failed");
       },
-      login: async (page, instance) => {
-        const ok = await ucpathSubmitAndWaitForDuo(page, instance);
+      login: async (page, instance, context) => {
+        const ok = await ucpathSubmitAndWaitForDuo(page, instance, context?.abortSignal);
         if (!ok) throw new Error("UCPath authentication failed");
       },
       resetUrl: UCPATH_SMART_HR_URL,

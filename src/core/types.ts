@@ -5,7 +5,11 @@ import type { log } from '../utils/log.js'
 
 export interface SystemConfig {
   id: string
-  login: (page: Page, instance?: string) => Promise<void>
+  login: (
+    page: Page,
+    instance?: string,
+    context?: { abortSignal?: AbortSignal },
+  ) => Promise<void>
   /**
    * Optional "pre-flight" phase: navigate + fill credentials without
    * submitting. When provided, `Session.launch` runs this for EVERY

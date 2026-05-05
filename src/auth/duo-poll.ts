@@ -55,23 +55,87 @@ async function readDuoVerificationCode(page: Page): Promise<string | undefined> 
   return extractDuoVerificationCode(bodyText);
 }
 
-async function readDuoVerificationCodeAfterResend(
+export const DUO_INITIAL_CODE_WAIT_MS = 3_000;
+export const DUO_CODE_WAIT_INTERVAL_MS = 250;
+
+export async function readDuoVerificationCodeWhenVisible(
   page: Page,
-  previousCode: string | undefined,
+  opts: {
+    timeoutMs?: number;
+    intervalMs?: number;
+    previousCode?: string;
+    abortSignal?: AbortSignal;
+  } = {},
 ): Promise<string | undefined> {
-  const deadline = Date.now() + 3_000;
+  const timeoutMs = opts.timeoutMs ?? DUO_INITIAL_CODE_WAIT_MS;
+  const intervalMs = opts.intervalMs ?? DUO_CODE_WAIT_INTERVAL_MS;
+  const deadline = Date.now() + Math.max(0, timeoutMs);
   let lastVisibleCode: string | undefined;
 
-  while (Date.now() < deadline) {
+  do {
+    throwIfDuoAborted(opts.abortSignal);
     const code = await readDuoVerificationCode(page);
     if (code) {
       lastVisibleCode = code;
-      if (!previousCode || code !== previousCode) return code;
+      if (!opts.previousCode || code !== opts.previousCode) return code;
     }
-    await page.waitForTimeout(250);
-  }
+    if (Date.now() >= deadline) break;
+    await waitForDuoPoll(page, intervalMs, opts.abortSignal);
+  } while (Date.now() < deadline);
 
   return lastVisibleCode;
+}
+
+async function readDuoVerificationCodeAfterResend(
+  page: Page,
+  previousCode: string | undefined,
+  abortSignal?: AbortSignal,
+): Promise<string | undefined> {
+  return readDuoVerificationCodeWhenVisible(page, {
+    previousCode,
+    timeoutMs: DUO_INITIAL_CODE_WAIT_MS,
+    intervalMs: DUO_CODE_WAIT_INTERVAL_MS,
+    abortSignal,
+  });
+}
+
+function duoAbortReason(signal: AbortSignal): Error {
+  const reason = signal.reason;
+  if (reason instanceof Error) return reason;
+  return new Error(reason ? String(reason) : "Duo polling aborted");
+}
+
+function throwIfDuoAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw duoAbortReason(signal);
+}
+
+function waitForDuoPoll(
+  page: Page,
+  ms: number,
+  abortSignal?: AbortSignal,
+): Promise<void> {
+  if (!abortSignal) return page.waitForTimeout(ms);
+  if (abortSignal.aborted) return Promise.reject(duoAbortReason(abortSignal));
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const cleanup = (): void => {
+      abortSignal.removeEventListener("abort", onAbort);
+    };
+    const finish = (fn: () => void): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      fn();
+    };
+    const onAbort = (): void => {
+      finish(() => reject(duoAbortReason(abortSignal)));
+    };
+    abortSignal.addEventListener("abort", onAbort, { once: true });
+    page.waitForTimeout(ms).then(
+      () => finish(resolve),
+      (err) => finish(() => reject(err)),
+    );
+  });
 }
 
 /**
@@ -136,6 +200,26 @@ export interface DuoPollOptions {
    * `pollIntervalMs` so the pre-check can sample more aggressively.
    */
   preCheckIntervalMs?: number;
+
+  /**
+   * Short bounded wait for the visible Duo Mobile verification code before
+   * sending the first Telegram notification. Default: 3000ms. This lets the
+   * initial message include the same code the resend path already includes
+   * without blocking indefinitely if Duo only shows push approval.
+   */
+  initialCodeWaitMs?: number;
+
+  /**
+   * Poll cadence for `initialCodeWaitMs`. Default: 250ms.
+   */
+  initialCodeWaitIntervalMs?: number;
+
+  /**
+   * Abort a pending Duo wait. Daemon/session stop passes this through so
+   * polling does not continue sleeping in the background after auth is
+   * interrupted.
+   */
+  abortSignal?: AbortSignal;
 
   /**
    * Determines whether the current URL indicates successful authentication.
@@ -207,6 +291,8 @@ export async function pollDuoApproval(
   const pollIntervalSec = pollIntervalMs / 1000;
   const preCheckMs = options.preCheckMs ?? DUO_PRE_CHECK_MS;
   const preCheckIntervalMs = options.preCheckIntervalMs ?? DUO_PRE_CHECK_INTERVAL_MS;
+  const initialCodeWaitMs = options.initialCodeWaitMs ?? DUO_INITIAL_CODE_WAIT_MS;
+  const initialCodeWaitIntervalMs = options.initialCodeWaitIntervalMs ?? DUO_CODE_WAIT_INTERVAL_MS;
 
   const urlMatches = (url: string): boolean => {
     if (typeof successUrlMatch === "string") {
@@ -227,6 +313,7 @@ export async function pollDuoApproval(
   if (preCheckMs > 0) {
     const preCheckDeadline = Date.now() + preCheckMs;
     while (Date.now() < preCheckDeadline) {
+      throwIfDuoAborted(options.abortSignal);
       try {
         if (urlMatches(page.url())) {
           const verified =
@@ -240,7 +327,7 @@ export async function pollDuoApproval(
       } catch {
         // Page may be navigating — swallow and retry.
       }
-      await page.waitForTimeout(preCheckIntervalMs);
+      await waitForDuoPoll(page, preCheckIntervalMs, options.abortSignal);
     }
   }
 
@@ -254,7 +341,11 @@ export async function pollDuoApproval(
 
   // Best-effort Telegram DM. Activated when TELEGRAM_BOT_TOKEN +
   // TELEGRAM_CHAT_ID are set; otherwise no-op.
-  const initialDuoCode = await readDuoVerificationCode(page);
+  const initialDuoCode = await readDuoVerificationCodeWhenVisible(page, {
+    timeoutMs: initialCodeWaitMs,
+    intervalMs: initialCodeWaitIntervalMs,
+    abortSignal: options.abortSignal,
+  });
   let lastDuoCode = initialDuoCode;
   emitTelegram("duo-waiting", systemLabel ?? "system", buildDuoWaitingDetail(initialDuoCode), instance);
 
@@ -265,6 +356,7 @@ export async function pollDuoApproval(
   );
 
   for (let elapsed = 0; elapsed < timeoutSeconds; elapsed += pollIntervalSec) {
+    throwIfDuoAborted(options.abortSignal);
     try {
       // Run optional recovery callback to handle mid-auth errors (e.g., SAML redirects)
       if (recovery) {
@@ -278,7 +370,11 @@ export async function pollDuoApproval(
       if ((await tryAgainBtn.count()) > 0) {
         log.step("Duo push timed out — clicking Try Again...");
         await tryAgainBtn.first().click({ timeout: 5_000 });
-        const resentDuoCode = await readDuoVerificationCodeAfterResend(page, lastDuoCode);
+        const resentDuoCode = await readDuoVerificationCodeAfterResend(
+          page,
+          lastDuoCode,
+          options.abortSignal,
+        );
         const codeForResend = resentDuoCode?.trim() || lastDuoCode;
         const resentDetail = buildDuoResentDetail(resentDuoCode, lastDuoCode);
         lastDuoCode = codeForResend;
@@ -293,7 +389,7 @@ export async function pollDuoApproval(
           resentDetail,
           instance,
         );
-        await page.waitForTimeout(pollIntervalMs);
+        await waitForDuoPoll(page, pollIntervalMs, options.abortSignal);
         continue;
       }
 
@@ -332,7 +428,7 @@ export async function pollDuoApproval(
         if (successCheck) {
           const verified = await successCheck(page);
           if (!verified) {
-            await page.waitForTimeout(pollIntervalMs);
+            await waitForDuoPoll(page, pollIntervalMs, options.abortSignal);
             continue;
           }
         }
@@ -351,7 +447,7 @@ export async function pollDuoApproval(
       // Page may be navigating — swallow and retry
     }
 
-    await page.waitForTimeout(pollIntervalMs);
+    await waitForDuoPoll(page, pollIntervalMs, options.abortSignal);
   }
 
   log.error("Duo approval timed out");

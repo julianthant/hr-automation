@@ -79,14 +79,21 @@ export function _takeLastDownloadResult(): {
   return result;
 }
 
-async function sharepointLogin(page: Page, instance?: string): Promise<void> {
+async function sharepointLogin(
+  page: Page,
+  instance?: string,
+  context?: { abortSignal?: AbortSignal },
+): Promise<void> {
   if (!pendingLandingUrl) {
     throw new Error(
       "sharepoint-download: systems[].login called without a pending URL — " +
         "handler.ts must call _setPendingLandingUrl() before runWorkflow",
     );
   }
-  await loginToSharePoint(page, pendingLandingUrl, { instance });
+  await loginToSharePoint(page, pendingLandingUrl, {
+    instance,
+    abortSignal: context?.abortSignal,
+  });
 }
 
 /**

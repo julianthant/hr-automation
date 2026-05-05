@@ -1,10 +1,8 @@
 import { Terminal as TerminalIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useClock } from "./hooks/useClock";
-import { useDaemons } from "./hooks/useDaemons";
 import { useSessions } from "./hooks/useSessions";
 import { useTerminalDrawer } from "./hooks/useTerminalDrawer";
-import { DaemonGroups } from "./DaemonsSection";
 import { LiveIndicator } from "./LiveIndicator";
 import { WorkflowBox } from "./WorkflowBox";
 
@@ -33,14 +31,12 @@ export function TerminalDrawer({ connected }: TerminalDrawerProps) {
   const { open, toggle } = useTerminalDrawer();
   const clock = useClock();
   const { state } = useSessions();
-  const { daemons, refresh: refreshDaemons } = useDaemons();
 
   // Keep crashed-on-launch instances even after pidAlive flips false so the
   // operator learns about the failure.
   const visible = state.workflows.filter((w) => w.pidAlive || w.crashedOnLaunch);
   const active = visible.filter((w) => w.active || w.crashedOnLaunch);
   const count = active.length;
-  const daemonCount = daemons.length;
 
   return (
     <div
@@ -83,7 +79,6 @@ export function TerminalDrawer({ connected }: TerminalDrawerProps) {
           <TerminalIcon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" strokeWidth={2} />
           <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">session</span>
           <CountBadge count={count} />
-          <CountBadge count={daemonCount} noun="workers" />
         </span>
         {/* Right edge: Live pill, then the clock. Live sits before the
             clock so the operator's eye lands on connection state first
@@ -109,14 +104,6 @@ export function TerminalDrawer({ connected }: TerminalDrawerProps) {
         )}
       >
         <div className="h-full min-w-0 flex">
-          <div className="h-full w-[360px] max-w-[42vw] flex-shrink-0 overflow-y-auto border-r border-border px-3 py-3 [scrollbar-width:thin]">
-            <DaemonGroups
-              daemons={daemons}
-              onRefresh={refreshDaemons}
-              emptyText="No daemon workers"
-              className="mb-0"
-            />
-          </div>
           {active.length === 0 ? (
             <div className="h-full flex min-w-0 flex-1 items-center px-4 font-mono text-[11px] text-muted-foreground">
               No active workflows

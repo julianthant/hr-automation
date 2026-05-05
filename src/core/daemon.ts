@@ -107,6 +107,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   // null during `phase === 'launching'`. Force-stop paths can also read
   // it to SIGTERM/SIGKILL chromium directly.
   let activeSession: Session | null = null
+  const launchAbort = new AbortController()
   let workerStore: ControlWorkerStore | null = null
   let exitError: unknown = null
   // Cooperative-cancel signal for the in-flight item. Set by the
@@ -119,6 +120,21 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     const prev = phase
     phase = next
     log.step(`[Daemon ${wf.config.name}/${instanceId}] phase: ${prev} → ${next}`)
+  }
+
+  const abortLaunchAndKillSession = (reason: string): void => {
+    if (!launchAbort.signal.aborted) {
+      launchAbort.abort(new Error(reason))
+    }
+    const session = activeSession
+    if (!session) return
+    session.killChromeHard(2_000).catch((err) => {
+      log.warn(
+        `[Daemon ${wf.config.name}/${instanceId}] killChromeHard after abort failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+    })
   }
 
   const server: Server = createServer((req, res) => {
@@ -257,7 +273,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         res.end(JSON.stringify({ ok: true, accepted: true }))
         ;(async (): Promise<void> => {
           await new Promise((r) => setTimeout(r, 50))
-          if (activeSession) await activeSession.killChromeHard(2_000)
+          abortLaunchAndKillSession('Daemon force-current requested')
         })().catch((err) => {
           log.warn(
             `[Daemon ${wf.config.name}/${instanceId}] force-current killChromeHard error: ${
@@ -318,17 +334,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           // chrome down (otherwise the caller might see an aborted socket
           // even though the kill went through cleanly).
           await new Promise((r) => setTimeout(r, 50))
-          if (activeSession) {
-            try {
-              await activeSession.killChromeHard(2_000)
-            } catch (err) {
-              log.warn(
-                `[Daemon ${wf.config.name}/${instanceId}] killChromeHard error: ${
-                  err instanceof Error ? err.message : String(err)
-                }`,
-              )
-            }
-          }
+          abortLaunchAndKillSession('Daemon stop requested')
         })().catch(() => {
           /* best-effort — the natural shutdown path runs regardless */
         })
@@ -427,6 +433,9 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   const sigHandler = (sig: string): void => {
     log.warn(`[Daemon ${wf.config.name}/${instanceId}] received ${sig}; shutting down`)
     shuttingDown = true
+    forceShutdown = true
+    drainOnlyShutdown = false
+    abortLaunchAndKillSession(`Daemon received ${sig}`)
     shutdownResolve?.()
     wakeResolve?.()
   }
@@ -484,10 +493,10 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         drainOnlyShutdown = false
         shuttingDown = true
         workerStore.markWorkerStatus({ workerId: instanceId, status: 'draining', phase: 'draining' })
+        abortLaunchAndKillSession('Daemon force-stop task requested')
         shutdownResolve?.()
         wakeResolve?.()
         workerStore.completeCommand(command.commandId)
-        if (activeSession) await activeSession.killChromeHard(2_000)
         return
       }
       if (command.commandType === 'drain_worker') {
@@ -506,7 +515,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         shuttingDown = true
         wakeResolve?.()
         shutdownResolve?.()
-        if (activeSession) await activeSession.killChromeHard(2_000)
+        abortLaunchAndKillSession('Daemon worker stop requested')
         workerStore.completeCommand(command.commandId)
         return
       }
@@ -596,6 +605,11 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           session = await launchFn(wf.config.systems, {
             authChain: wf.config.authChain,
             observer,
+            abortSignal: launchAbort.signal,
+            onReady: (readySession) => {
+              activeSession = readySession
+              registerBrowserProcesses()
+            },
           })
           // Expose to the /status handler + force-stop path. Cleared in
           // the outer `finally` to avoid a stale reference outliving the
@@ -612,6 +626,13 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
             await session.page(sys.id)
           }
         } catch (e) {
+          if (shuttingDown && launchAbort.signal.aborted) {
+            log.warn(
+              `[Daemon ${wf.config.name}/${instanceId}] auth/launch aborted by shutdown`,
+            )
+            activeSession = null
+            return
+          }
           // Surface the failure with structured context so `npm run <wf>:attach`
           // shows an actionable line instead of a silent daemon exit. Classify
           // via the Playwright error taxonomy when the error looks like a browser

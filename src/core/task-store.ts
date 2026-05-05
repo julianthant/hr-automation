@@ -214,7 +214,10 @@ function enqueueTasks<T>(db: Database.Database, control: ControlDb, request: Enq
     const basePosition = (db.prepare(`
       SELECT COUNT(*) AS n
       FROM tasks
-      WHERE workflow = ? AND control_state = 'queued'
+      WHERE workflow = ?
+        AND task_kind = 'workflow_item'
+        AND source = 'daemon'
+        AND control_state = 'queued'
     `).get(request.workflow) as { n: number }).n
 
     return request.inputs.map((input, index) => {
@@ -450,6 +453,8 @@ function claimNextTaskReturning(
         SELECT id
         FROM tasks
         WHERE workflow = @workflow
+          AND task_kind = 'workflow_item'
+          AND source = 'daemon'
           AND control_state = 'queued'
           AND COALESCE(available_at, created_at) <= @now
           AND NOT EXISTS (
@@ -486,6 +491,8 @@ function claimNextTaskFallback(
       SELECT *
       FROM tasks
       WHERE workflow = @workflow
+        AND task_kind = 'workflow_item'
+        AND source = 'daemon'
         AND control_state = 'queued'
         AND COALESCE(available_at, created_at) <= @now
         AND NOT EXISTS (
@@ -724,7 +731,10 @@ function retryTaskFromAttempt(
     const position = (db.prepare(`
       SELECT COUNT(*) AS n
       FROM tasks
-      WHERE workflow = ? AND control_state = 'queued'
+      WHERE workflow = ?
+        AND task_kind = 'workflow_item'
+        AND source = 'daemon'
+        AND control_state = 'queued'
     `).get(prior.workflow) as { n: number }).n
     return {
       id: prior.item_id,
@@ -971,6 +981,8 @@ function recoverClaimsForDeadWorkers(
       SELECT id, claimed_by_worker_id
       FROM tasks
       WHERE workflow = @workflow
+        AND task_kind = 'workflow_item'
+        AND source = 'daemon'
         AND control_state IN ('claimed', 'running')
         AND claimed_by_worker_id IS NOT NULL
         AND cancel_requested_at IS NULL
@@ -1074,6 +1086,7 @@ function findTaskByWorkflowItemRunRaw(
       WHERE workflow = @workflow
         AND item_id = @itemId
         AND run_id = @runId
+        AND task_kind = 'workflow_item'
       LIMIT 1
     `).get(request) as TaskDbRow | undefined
   ) ?? null

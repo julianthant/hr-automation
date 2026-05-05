@@ -127,6 +127,69 @@ test('runWorkflowDaemon: /whoami handshake + graceful /stop removes lockfile', a
   }
 })
 
+test('runWorkflowDaemon: /stop during launch/auth aborts session launch and fails queued work', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-stop-during-auth-'))
+  try {
+    let abortObserved = false
+    const wf = defineWorkflow({
+      name: 'dint-stop-auth',
+      schema: z.object({ id: z.string() }),
+      steps: ['run'],
+      systems: [{ id: 'ucpath', login: async () => {} }],
+      authSteps: false,
+      getId: (d) => (d as { id: string }).id,
+      handler: async () => {},
+    })
+    await enqueueItems<{ id: string }>('dint-stop-auth', [{ id: 'held' }], (d) => d.id, dir)
+
+    const launchFn = (async (systems: SystemConfig[], opts?: Parameters<typeof Session.launch>[1]) => {
+      const fakePage = { close: async () => {}, isClosed: () => false } as unknown as import('playwright').Page
+      const fakeContext = { close: async () => {} } as unknown as import('playwright').BrowserContext
+      const session = Session.forTesting({
+        systems,
+        browsers: new Map([
+          ['ucpath', { page: fakePage, browser: null as never, context: fakeContext, chromiumPid: 424243 }],
+        ]),
+        readyPromises: new Map([['ucpath', new Promise(() => {})]]),
+      })
+      opts?.onReady?.(session)
+      await new Promise<void>((_resolve, reject) => {
+        opts?.abortSignal?.addEventListener('abort', () => {
+          abortObserved = true
+          reject(new Error('launch aborted by daemon stop'))
+        }, { once: true })
+        setTimeout(() => reject(new Error('test cleanup timeout: launch was not aborted')), 1_000)
+      })
+      return session
+    }) as unknown as typeof Session.launch
+
+    const runPromise = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: launchFn,
+      idleTimeoutMs: 10_000,
+    })
+    const { port } = await waitForDaemon('dint-stop-auth', dir)
+
+    await fetch(`http://127.0.0.1:${port}/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ force: true }),
+    })
+
+    await Promise.race([
+      runPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('daemon did not stop during auth')), 1_500)),
+    ])
+    assert.equal(abortObserved, true)
+    const state = await readQueueState('dint-stop-auth', dir)
+    assert.equal(state.failed.length, 1)
+    assert.equal(state.failed[0].id, 'held')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('runWorkflowDaemon: processes queued items via claim loop', async () => {
   clear()
   const dir = mkdtempSync(join(tmpdir(), 'daemon-int-claim-'))
