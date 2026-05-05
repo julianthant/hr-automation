@@ -20,6 +20,7 @@
 
 import { emitSessionEvent } from "../tracker/session-events.js";
 import { getLogWorkflow } from "../utils/log.js";
+import { renderTelegramNotification } from "../domain/notifications/render.js";
 
 export type AuthEventKind =
   | "duo-waiting"
@@ -41,6 +42,8 @@ export interface AuthEvent {
    * recorded as the `telegram_sent` session event's `workflowInstance`;
    * otherwise falls back to the workflow name. */
   instance?: string;
+  /** Human subject such as "Separation 3930" or "Oath Signature EID 00123456". */
+  subject?: string;
 }
 
 export type FetchFn = (
@@ -109,6 +112,7 @@ export function createTelegramNotifier(
                 systemLabel: ev.systemLabel,
                 workflow: ev.workflow,
                 ...(ev.detail ? { detail: ev.detail } : {}),
+                ...(ev.subject ? { subject: ev.subject } : {}),
               },
             },
             dir,
@@ -130,13 +134,6 @@ const KIND_HEADER: Record<AuthEventKind, string> = {
   "duo-resent": "🔄  Duo push resent",
 };
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
 /**
  * Render an AuthEvent into a short HTML-formatted Telegram message. Pure
  * function — exported for unit-test access. The HTML escaping covers the
@@ -144,12 +141,15 @@ function escapeHtml(s: string): string {
  * Unicode passes through.
  */
 export function formatAuthEventMessage(ev: AuthEvent): string {
-  const lines: string[] = [];
-  lines.push(`${KIND_HEADER[ev.kind]} — <b>${escapeHtml(ev.systemLabel)}</b>`);
-  lines.push(`Workflow: <code>${escapeHtml(ev.workflow)}</code>`);
-  if (ev.detail) lines.push(escapeHtml(ev.detail));
-  if (ev.runId) lines.push(`Run: <code>${escapeHtml(ev.runId)}</code>`);
-  return lines.join("\n");
+  return renderTelegramNotification({
+    title: KIND_HEADER[ev.kind],
+    subject: ev.subject,
+    workflow: ev.workflow,
+    systemLabel: ev.systemLabel,
+    detail: ev.detail,
+    runId: ev.runId,
+    includeDebugIds: false,
+  });
 }
 
 /**

@@ -2,6 +2,7 @@ import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { runWorkflowBatch } from "../../core/index.js";
 import { trackEvent } from "../../tracker/jsonl.js";
+import { operatorSubjectData } from "../../domain/operator-subject.js";
 import { onboardingWorkflow } from "./workflow.js";
 
 /**
@@ -24,13 +25,14 @@ export async function runOnboardingPositional(
       deriveItemId: (item) => (item as { email: string }).email,
       onPreEmitPending: (item, runId) => {
         const { email } = item as { email: string };
+        const subject = onboardingWorkflow.config.operatorSubject?.({ email });
         trackEvent({
           workflow: "onboarding",
           timestamp: now,
           id: email,
           runId,
           status: "pending",
-          data: { email },
+          data: { email, ...operatorSubjectData(subject) },
         });
       },
     });

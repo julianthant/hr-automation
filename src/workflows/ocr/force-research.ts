@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { trackEvent, dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
 import { watchChildRuns } from "../../tracker/watch-child-runs.js";
-import { getFormSpec } from "./form-registry.js";
+import { getFormSpec } from "../../ocr/forms/registry.js";
 
 const WORKFLOW = "ocr";
 

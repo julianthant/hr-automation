@@ -10,6 +10,7 @@ interface CancelRunningButtonProps {
   workflow: string;
   id: string;
   runId: string;
+  subject?: string;
   /** Tracker entry — used to detect prep-parent rows that need OCR discard
    *  routing instead of the kernel cancel-running path. Optional for legacy
    *  callers that don't have the entry handy (kernel daemon items only). */
@@ -31,8 +32,9 @@ interface CancelRunningButtonProps {
  * cancel-queued pattern) — destructive but recoverable, since the kernel
  * marks the item failed (retryable).
  */
-export function CancelRunningButton({ workflow, id, runId, entry, className }: CancelRunningButtonProps) {
+export function CancelRunningButton({ workflow, id, runId, subject, entry, className }: CancelRunningButtonProps) {
   const [pending, setPending] = useState(false);
+  const label = subject?.trim() || id;
 
   // OCR-prep parent rows live in the downstream workflow's queue but aren't
   // daemon-claimed — they're tracker-only proxies for the OCR session. The
@@ -54,7 +56,7 @@ export function CancelRunningButton({ workflow, id, runId, entry, className }: C
   const fireOcrDiscard = async () => {
     if (!ocrPrep) return;
     setPending(true);
-    const t = toast.loading(`Discarding OCR prep ${id}…`, {
+    const t = toast.loading(`Discarding OCR prep ${label}…`, {
       description: "Cancelling the OCR session and removing this row from the queue.",
     });
     try {
@@ -93,7 +95,7 @@ export function CancelRunningButton({ workflow, id, runId, entry, className }: C
     // the action-toast registry maps the toast id so resolveActionToastsForEntry
     // (called from App's entries effect) can update it in-place when the
     // tracker writes step="cancelled" or any other terminal state.
-    const t = toast.loading(`Cancelling ${id}…`, {
+    const t = toast.loading(`Cancelling ${label}…`, {
       description: "Daemon stops at the next step boundary (up to 30s).",
     });
     registerActionToast({
@@ -102,8 +104,9 @@ export function CancelRunningButton({ workflow, id, runId, entry, className }: C
       id,
       runId,
       kind: "cancel-running",
+      subject,
       timeoutMs: 30_000,
-      fallbackMessage: `Still cancelling ${id}…`,
+      fallbackMessage: `Still cancelling ${label}…`,
       fallbackDescription:
         "Daemon hasn't reached a step boundary yet. Check the entry status directly.",
     });
@@ -154,7 +157,7 @@ export function CancelRunningButton({ workflow, id, runId, entry, className }: C
     e.stopPropagation();
     if (pending) return;
     if (ocrPrep) {
-      toast(`Discard OCR prep ${id}?`, {
+      toast(`Discard OCR prep ${label}?`, {
         description:
           "Cancels the OCR session for this PDF. You can re-upload to start over.",
         action: { label: "Discard prep", onClick: () => void fire() },
@@ -163,7 +166,7 @@ export function CancelRunningButton({ workflow, id, runId, entry, className }: C
       });
       return;
     }
-    toast(`Cancel running ${id}?`, {
+    toast(`Cancel running ${label}?`, {
       description:
         "The current item will fail at the next step. The daemon stays alive and picks up the next item.",
       action: { label: "Cancel item", onClick: () => void fire() },

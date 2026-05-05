@@ -1,5 +1,6 @@
 import type { Page } from 'playwright'
 import type { ZodType } from 'zod'
+import type { OperatorSubject } from '../domain/operator-subject.js'
 import type { log } from '../utils/log.js'
 
 export interface SystemConfig {
@@ -164,6 +165,12 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
    * `updateData` calls in the handler take precedence.
    */
   initialData?: (input: TData) => Record<string, unknown>
+  /**
+   * Derive the operator-facing subject from raw workflow input before auth or
+   * handler execution. This label is used by queue rows, toasts, Telegram
+   * messages, task rows, and later SQLite projections.
+   */
+  operatorSubject?: (input: TData) => OperatorSubject | null | undefined
   handler: (ctx: Ctx<TSteps, TData>, data: TData) => Promise<void>
 }
 
@@ -264,6 +271,8 @@ export interface WorkflowMetadata {
    * EditDataTab. See `WorkflowConfig.matchKey` for the full contract.
    */
   matchKey?: string
+  /** True when the workflow declares an operatorSubject hook. */
+  hasOperatorSubject?: boolean
 }
 
 export interface RegisteredWorkflow<TData, TSteps extends readonly string[]> {

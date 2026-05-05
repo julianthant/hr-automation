@@ -18,8 +18,8 @@ import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChil
 import { trackEvent, dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
-import { isAcceptedDept } from "../eid-lookup/search.js";
-import { getFormSpec } from "./form-registry.js";
+import { isAcceptedHdhDepartment } from "../../domain/hdh/departments.js";
+import { getFormSpec } from "../../ocr/forms/registry.js";
 import { applyCarryForward } from "./carry-forward.js";
 import type { AnyOcrFormSpec, RosterRow as OcrRosterRow } from "./types.js";
 import type { OcrInput } from "./schema.js";
@@ -63,7 +63,14 @@ export interface OcrOrchestratorOpts {
   _loadRosterOverride?: (path: string) => Promise<MatchRosterRow[]>;
   _watchChildRunsOverride?: (opts: WatchChildRunsOpts) => Promise<ChildOutcome[]>;
   _enqueueEidLookupOverride?: (
-    items: Array<{ name?: string; emplId?: string; itemId: string }>,
+    items: Array<{
+      name?: string;
+      emplId?: string;
+      itemId: string;
+      taskRole?: string;
+      originWorkflow?: string;
+      taskGroupId?: string;
+    }>,
   ) => Promise<void>;
   /** Skip the actual runWorkflow(sharepointDownload...) call (tests only). */
   _skipSharepointDispatch?: boolean;
@@ -467,6 +474,9 @@ export async function runOcrOrchestrator(
               ? { name: extractName(e.record, spec) }
               : { emplId: extractEid(e.record, spec) }),
             itemId: e.itemId,
+            taskRole: "child",
+            originWorkflow: "ocr",
+            taskGroupId: input.sessionId,
           })),
         );
       } else {
@@ -474,8 +484,19 @@ export async function runOcrOrchestrator(
         const { eidLookupCrmWorkflow } = await import("../eid-lookup/index.js");
         const inputs = enqueueItems.map((e) =>
           e.kind === "name"
-            ? { name: extractName(e.record, spec) }
-            : { emplId: extractEid(e.record, spec), keepNonHdh: true },
+            ? {
+                name: extractName(e.record, spec),
+                taskRole: "child",
+                originWorkflow: "ocr",
+                taskGroupId: input.sessionId,
+              }
+            : {
+                emplId: extractEid(e.record, spec),
+                keepNonHdh: true,
+                taskRole: "child",
+                originWorkflow: "ocr",
+                taskGroupId: input.sessionId,
+              },
         );
         await ensureDaemonsAndEnqueue(
           eidLookupCrmWorkflow,
@@ -722,7 +743,7 @@ function computeVerification(d: {
   const screenshotFilename = d.personOrgScreenshot ?? "";
   if (!d.hrStatus) return { state: "lookup-failed", error: "no result", checkedAt, screenshotFilename };
   const active = d.hrStatus === "Active";
-  const hdh = isAcceptedDept(d.department ?? null);
+  const hdh = isAcceptedHdhDepartment(d.department ?? null);
   if (!active) return { state: "inactive", hrStatus: d.hrStatus, department: d.department, screenshotFilename, checkedAt };
   if (!hdh) return { state: "non-hdh", hrStatus: d.hrStatus, department: d.department ?? "", screenshotFilename, checkedAt };
   return { state: "verified", hrStatus: d.hrStatus, department: d.department ?? "", screenshotFilename, checkedAt };

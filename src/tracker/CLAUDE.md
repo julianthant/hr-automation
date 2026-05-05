@@ -19,6 +19,15 @@ Two-tier tracking: JSONL for live dashboard streaming, Excel for persistent hist
 - `ocr-http.ts` — HTTP handlers for `/api/ocr/*` endpoints: `buildOcrPrepareHandler`, `buildOcrApproveHandler`, `buildOcrDiscardHandler`, `buildOcrForceResearchHandler`, `buildOcrFormsHandler`, `sweepStuckOcrRows`. Per-sessionId in-memory lock (`_resetSessionLockForTests` for tests).
 - `index.ts` — Barrel re-exports
 
+## Observability conventions
+
+Tracker/log/session rows should preserve readable messages and carry structured fields when available. Operator-facing rows should prefer `data.__subject`; raw run ids/session ids are debug identifiers.
+
+Tracker rows may include:
+- `data.__subject` / `data.__subjectKind` from `WorkflowConfig.operatorSubject`.
+- Task display fields such as `taskRole`, `originWorkflow`, and `taskGroupId`.
+- Structured log fields such as `category`, `occasion`, `subject`, `system`, `step`, `attempt`, `childWorkflow`, or `durationMs`.
+
 ## `TrackerEntry.parentRunId`
 
 Optional field added 2026-05-01. When set, the entry is a child run delegated by the parent. Used purely for dashboard visualization (parent→child pills in `EntryItem`, "Delegated runs" section in `LogPanel`). Watching logic is itemId-based (`watch-child-runs.ts`), not parentRunId-based. Thread through `withTrackedWorkflow` via `opts.parentRunId` (also available in `RunOpts`).

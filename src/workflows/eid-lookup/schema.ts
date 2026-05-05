@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { displayPersonName } from "../../domain/identity/person-name.js";
 
 /** Common input shape for both no-CRM and CRM-on lookups. */
 export const EidLookupInputSchema = z.object({
@@ -70,18 +71,6 @@ export function isEidInput(input: EidLookupItem): input is EidLookupEidInput {
  *   - "smith,"             → "smith,"        (empty first → unchanged)
  */
 export function normalizeName(raw: string): string {
-  const trimmed = raw.trim();
-  const commaIdx = trimmed.indexOf(",");
-  if (commaIdx === -1) return raw;
-  const lastRaw = trimmed.slice(0, commaIdx).trim();
-  const restRaw = trimmed.slice(commaIdx + 1).trim();
-  if (!lastRaw || !restRaw) return raw;
-  const restParts = restRaw.split(/\s+/).filter(Boolean).map(titleCase);
-  return `${titleCase(lastRaw)}, ${restParts.join(" ")}`;
-}
-
-/** Capitalize first char, lowercase the rest. Single word only. */
-function titleCase(word: string): string {
-  if (word.length === 0) return word;
-  return word[0].toUpperCase() + word.slice(1).toLowerCase();
+  const display = displayPersonName(raw);
+  return display || raw;
 }

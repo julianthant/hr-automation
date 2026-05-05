@@ -18,8 +18,8 @@ import { loadRoster as realLoadRoster } from "../../match/index.js";
 import type { RosterRow as MatchRosterRow } from "../../match/match.js";
 import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/watch-child-runs.js";
 import { trackEvent, dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
-import { isAcceptedDept } from "../eid-lookup/search.js";
-import { getFormSpec } from "./form-registry.js";
+import { isAcceptedHdhDepartment } from "../../domain/hdh/departments.js";
+import { getFormSpec } from "../../ocr/forms/registry.js";
 import type { AnyOcrFormSpec, RosterRow as OcrRosterRow } from "./types.js";
 
 const WORKFLOW = "ocr";
@@ -457,7 +457,7 @@ function computeVerification(d: { hrStatus?: string; department?: string; person
   const screenshotFilename = d.personOrgScreenshot ?? "";
   if (!d.hrStatus) return { state: "lookup-failed", error: "no result", checkedAt, screenshotFilename };
   const active = d.hrStatus === "Active";
-  const hdh = isAcceptedDept(d.department ?? null);
+  const hdh = isAcceptedHdhDepartment(d.department ?? null);
   if (!active) return { state: "inactive", hrStatus: d.hrStatus, department: d.department, screenshotFilename, checkedAt };
   if (!hdh) return { state: "non-hdh", hrStatus: d.hrStatus, department: d.department ?? "", screenshotFilename, checkedAt };
   return { state: "verified", hrStatus: d.hrStatus, department: d.department ?? "", screenshotFilename, checkedAt };

@@ -4,6 +4,7 @@ import { log } from "../../utils/log.js";
 import { errorMessage, classifyPlaywrightError } from "../../utils/errors.js";
 import { defineWorkflow, runWorkflow, runWorkflowBatch } from "../../core/index.js";
 import { trackEvent } from "../../tracker/jsonl.js";
+import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 
 // Auth wrappers — split into prepare (nav + fill) + submit (click + Duo)
 // phases so Session.launch can pre-fill every SSO form in parallel before
@@ -251,6 +252,8 @@ export const separationsWorkflow = defineWorkflow({
   ],
   getName: (d) => d.name ?? "",
   getId: (d) => d.docId ?? "",
+  operatorSubject: (input) =>
+    buildOperatorSubject({ kind: "document", value: input.docId, prefix: "Separation" }),
   handler: async (ctx, input) => {
     const { docId } = input;
 
@@ -834,13 +837,14 @@ export async function runSeparationBatch(
       deriveItemId: (item) => (item as SeparationInput).docId,
       onPreEmitPending: (item, runId) => {
         const { docId } = item as SeparationInput;
+        const subject = separationsWorkflow.config.operatorSubject?.({ docId });
         trackEvent({
           workflow: "separations",
           timestamp: now,
           id: docId,
           runId,
           status: "pending",
-          data: { docId },
+          data: { docId, ...operatorSubjectData(subject) },
         });
       },
     });
@@ -888,13 +892,14 @@ export async function runSeparationCli(
       // by enqueueItems so the eventual running/done rows pair 1:1.
       onPreEmitPending: (item, runId) => {
         const { docId } = item;
+        const subject = separationsWorkflow.config.operatorSubject?.(item);
         trackEvent({
           workflow: "separations",
           timestamp: now,
           id: docId,
           runId,
           status: "pending",
-          data: { docId },
+          data: { docId, ...operatorSubjectData(subject) },
         });
       },
     },

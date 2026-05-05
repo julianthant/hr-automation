@@ -3,6 +3,7 @@ import { trackEvent } from "../../tracker/jsonl.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { loginToServiceNow } from "../../auth/login.js";
+import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 import { OathUploadInputSchema, type OathUploadInput } from "./schema.js";
 import { oathUploadHandler, oathUploadStepList } from "./handler.js";
 
@@ -44,6 +45,12 @@ export const oathUploadWorkflow = defineWorkflow({
   ],
   getName: (d) => d.pdfOriginalName ?? "",
   getId:   (d) => d.sessionId ?? "",
+  operatorSubject: (input) =>
+    buildOperatorSubject({
+      kind: "pdf",
+      value: input.pdfOriginalName ?? input.pdfPath ?? input.sessionId,
+      prefix: "Oath Upload",
+    }),
   handler: async (ctx, input) => {
     ctx.markStep("servicenow-auth");
     await ctx.page("servicenow");
@@ -80,6 +87,7 @@ export async function runOathUploadCli(
     { new: options.new, parallel: options.parallel },
     {
       onPreEmitPending: (item, runId, parentRunId) => {
+        const subject = oathUploadWorkflow.config.operatorSubject?.(item);
         trackEvent({
           workflow: WORKFLOW,
           timestamp: now,
@@ -92,6 +100,7 @@ export async function runOathUploadCli(
             pdfOriginalName: item.pdfOriginalName,
             sessionId: item.sessionId,
             pdfHash: item.pdfHash,
+            ...operatorSubjectData(subject),
           },
         });
       },

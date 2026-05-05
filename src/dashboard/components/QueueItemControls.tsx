@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 interface QueueItemControlsProps {
   workflow: string;
   id: string;
+  subject?: string;
   className?: string;
 }
 
@@ -18,14 +19,15 @@ interface QueueItemControlsProps {
  * surfaced as warnings — the daemon claimed the item between the
  * user's click and the backend lock.
  */
-export function QueueItemControls({ workflow, id, className }: QueueItemControlsProps) {
+export function QueueItemControls({ workflow, id, subject, className }: QueueItemControlsProps) {
   const [pending, setPending] = useState<"cancel" | "bump" | null>(null);
+  const label = subject?.trim() || id;
 
   const post = async (path: string, action: "cancel" | "bump") => {
     setPending(action);
     const verbing = action === "cancel" ? "Cancelling" : "Bumping";
     const verbed = action === "cancel" ? "Cancelled" : "Bumped to top";
-    const t = toast.loading(`${verbing} ${id}…`);
+    const t = toast.loading(`${verbing} ${label}…`);
     try {
       const res = await fetch(path, {
         method: "POST",
@@ -34,7 +36,7 @@ export function QueueItemControls({ workflow, id, className }: QueueItemControls
       });
       const body = (await res.json()) as { ok: boolean; error?: string };
       if (body.ok) {
-        toast.success(verbed, { id: t, description: id });
+        toast.success(verbed, { id: t, description: label });
       } else if (res.status === 409) {
         toast.warning(`Already in progress`, {
           id: t,
@@ -61,7 +63,7 @@ export function QueueItemControls({ workflow, id, className }: QueueItemControls
     if (pending) return;
     // Lightweight confirm via toast.action — destructive but recoverable
     // (cancellation creates a `failed` row that can itself be retried).
-    toast(`Cancel ${id}?`, {
+    toast(`Cancel ${label}?`, {
       description: "Removes the item from the queue. Can be retried later.",
       action: {
         label: "Cancel item",

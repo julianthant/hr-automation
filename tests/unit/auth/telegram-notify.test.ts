@@ -100,22 +100,22 @@ describe("formatAuthEventMessage", () => {
 
   it("starts with 🔐 for duo-waiting", () => {
     const msg = formatAuthEventMessage(base);
-    assert.match(msg, /^🔐/);
+    assert.match(msg, /^<b>🔐/);
   });
 
   it("starts with ✅ for duo-approved", () => {
     const msg = formatAuthEventMessage({ ...base, kind: "duo-approved" });
-    assert.match(msg, /^✅/);
+    assert.match(msg, /^<b>✅/);
   });
 
   it("starts with ⌛ for duo-timeout", () => {
     const msg = formatAuthEventMessage({ ...base, kind: "duo-timeout" });
-    assert.match(msg, /^⌛/);
+    assert.match(msg, /^<b>⌛/);
   });
 
   it("starts with 🔄 for duo-resent", () => {
     const msg = formatAuthEventMessage({ ...base, kind: "duo-resent" });
-    assert.match(msg, /^🔄/);
+    assert.match(msg, /^<b>🔄/);
   });
 
   it("includes systemLabel", () => {
@@ -128,9 +128,9 @@ describe("formatAuthEventMessage", () => {
     assert.match(msg, /oath-signature/);
   });
 
-  it("includes runId when present", () => {
+  it("omits runId by default even when present", () => {
     const msg = formatAuthEventMessage({ ...base, runId: "abcd-1234" });
-    assert.match(msg, /abcd-1234/);
+    assert.doesNotMatch(msg, /abcd-1234/);
   });
 
   it("omits runId line when absent", () => {

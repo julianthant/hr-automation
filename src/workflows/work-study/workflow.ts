@@ -6,6 +6,7 @@ import { log } from "../../utils/log.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath } from "../../auth/login.js";
+import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 import { buildWorkStudyPlan, type WorkStudyContext } from "./enter.js";
 import { WorkStudyInputSchema, type WorkStudyInput } from "./schema.js";
 import { updateWorkStudyTracker } from "./tracker.js";
@@ -48,6 +49,8 @@ export const workStudyWorkflow = defineWorkflow({
   ],
   getName: (d) => d.name ?? "",
   getId: (d) => d.emplId ?? "",
+  operatorSubject: (input) =>
+    buildOperatorSubject({ kind: "eid", value: input.emplId, prefix: "Work Study" }),
   handler: async (ctx, input) => {
     const wsCtx: WorkStudyContext = { employeeName: "" };
 
@@ -151,13 +154,14 @@ export async function runWorkStudyCli(
       // `ensureDaemonsAndEnqueue` so the eventual running/done rows pair
       // with this pending row under the same runId.
       onPreEmitPending: (item, runId) => {
+        const subject = workStudyWorkflow.config.operatorSubject?.(item);
         trackEvent({
           workflow: "work-study",
           timestamp: now,
           id: item.emplId,
           runId,
           status: "pending",
-          data: { emplId: item.emplId, effectiveDate: item.effectiveDate },
+          data: { emplId: item.emplId, effectiveDate: item.effectiveDate, ...operatorSubjectData(subject) },
         });
       },
     },

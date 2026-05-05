@@ -120,6 +120,7 @@ export function EntryItem({ entry, displayNames, selected, onClick }: EntryItemP
   const emplId = entry.data?.emplId;
   const docId = entry.data?.docId;
   const eid = entry.data?.eid;
+  const subject = typeof entry.data?.__subject === "string" ? entry.data.__subject : undefined;
   const showLiveRow = (isFailed && entry.error) || (isRunning && entry.lastLogMessage);
 
   return (
@@ -221,6 +222,7 @@ export function EntryItem({ entry, displayNames, selected, onClick }: EntryItemP
               workflow={entry.workflow}
               id={entry.id}
               runId={entry.runId}
+              subject={subject}
               entry={entry}
               className="flex-shrink-0 ml-1"
             />
@@ -229,6 +231,7 @@ export function EntryItem({ entry, displayNames, selected, onClick }: EntryItemP
             <QueueItemControls
               workflow={entry.workflow}
               id={entry.id}
+              subject={subject}
               className="flex-shrink-0 ml-1"
             />
           )}

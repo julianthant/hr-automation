@@ -96,12 +96,6 @@ export default function App() {
       registered.find((r) => r.name === DEFAULT_WORKFLOW)?.name ??
       registered[0]?.name;
     if (!fallback || fallback === workflow) return;
-    console.warn(
-      `[dashboard] Unknown workflow "${workflow}" in ?wf= URL param. ` +
-        `Falling back to "${fallback}". Known workflows: ${registered
-          .map((r) => r.name)
-          .join(", ")}.`,
-    );
     toast.warning(`Unknown workflow "${workflow}"`, {
       description: `URL ?wf= didn't match any registered workflow. Showing ${fallback}.`,
       duration: 6000,

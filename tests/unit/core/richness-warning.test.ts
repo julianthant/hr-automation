@@ -26,7 +26,9 @@ function cleanupDir(dir: string) {
 function captureWarn<T>(fn: () => Promise<T>): Promise<{ warnings: string[]; result: T }> {
   const original = log.warn
   const warnings: string[] = []
-  log.warn = (msg: string) => { warnings.push(msg) }
+  log.warn = (msg: Parameters<typeof log.warn>[0]) => {
+    warnings.push(typeof msg === 'string' ? msg : msg.message)
+  }
   return fn().then(
     (result) => { log.warn = original; return { warnings, result } },
     (err) => { log.warn = original; throw err },

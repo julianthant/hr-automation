@@ -37,7 +37,8 @@
     "selector:search": "tsx src/scripts/selectors/search.ts",
     "typecheck": "tsc --noEmit",
     "typecheck:all": "tsc --noEmit -p tsconfig.test.json",
-    "test": "tsx --test 'tests/**/*.test.ts'"
+    "test": "tsx --test 'tests/**/*.test.ts'",
+    "test:architecture": "tsx --test 'tests/unit/architecture/**/*.test.ts'"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

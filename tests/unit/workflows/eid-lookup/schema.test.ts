@@ -22,7 +22,7 @@ describe("normalizeName", () => {
   });
 
   it("preserves hyphenated last names", () => {
-    assert.equal(normalizeName("o'brien-smith, jane"), "O'brien-smith, Jane");
+    assert.equal(normalizeName("o'brien-smith, jane"), "O'Brien-Smith, Jane");
   });
 
   it("trims surrounding whitespace and collapses internal spaces", () => {
@@ -44,8 +44,8 @@ describe("normalizeName", () => {
     assert.equal(once, twice);
   });
 
-  it("returns input unchanged if format is invalid (no comma)", () => {
-    assert.equal(normalizeName("plain string"), "plain string");
+  it("display-normalizes names without a comma", () => {
+    assert.equal(normalizeName("plain string"), "Plain String");
   });
 
   it("returns input unchanged if only last name given", () => {

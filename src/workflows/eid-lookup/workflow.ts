@@ -13,7 +13,13 @@ import { trackEvent } from "../../tracker/jsonl.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath, loginToACTCrm } from "../../auth/login.js";
-import { searchByName, searchByEid, parseNameInput, type EidResult } from "./search.js";
+import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
+import {
+  searchByName,
+  searchByEid,
+  parsePersonOrgNameInput as parseNameInput,
+  type EidResult,
+} from "../../systems/ucpath/person-org-summary.js";
 import { searchCrmByName, datesWithinDays } from "./crm-search.js";
 import {
   EidLookupItemSchema,
@@ -269,6 +275,10 @@ export const eidLookupCrmWorkflow = defineWorkflow({
   ],
   getName: (d) => d.searchName ?? "",
   getId: (d) => d.searchName ?? "",
+  operatorSubject: (input) =>
+    isEidInput(input)
+      ? buildOperatorSubject({ kind: "eid", value: input.emplId, prefix: "EID Lookup" })
+      : buildOperatorSubject({ kind: "person", value: input.name, prefix: "EID Lookup" }),
   initialData: (input) =>
     isEidInput(input)
       ? { searchName: input.emplId, emplId: input.emplId }
@@ -369,18 +379,19 @@ export async function runEidLookupCli(
       // shape whether the user runs the daemon CLI or `--direct`. The
       // runId here is the pre-assigned one from `enqueueItems`, so the
       // eventual running/done rows pair 1:1.
-      onPreEmitPending: (item, runId) => {
+      onPreEmitPending: (item, runId, _parentRunId, itemId) => {
         // CLI adapter only enqueues `{ name }` items, but the workflow
         // schema accepts the union — narrow to the name shape we just
         // constructed at line `inputs.map((name) => ({ name }))`.
         const n = "name" in item ? item.name : item.emplId;
+        const subject = eidLookupCrmWorkflow.config.operatorSubject?.(item);
         trackEvent({
           workflow: "eid-lookup",
           timestamp: now,
-          id: n,
+          id: itemId,
           runId,
           status: "pending",
-          data: { searchName: n, __name: n, __id: n },
+          data: { searchName: n, __name: n, __id: n, ...operatorSubjectData(subject) },
         });
       },
     },

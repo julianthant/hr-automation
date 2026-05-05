@@ -10,6 +10,10 @@ React SPA for real-time HR workflow monitoring. Split-panel layout: queue (left)
 - Fonts: Inter (sans), JetBrains Mono (mono) — loaded via Google Fonts in `index.html`
 - No framer-motion
 
+## Operator text conventions
+
+Dashboard toasts, queue actions, and parent/child rows should render the shared operator subject first (`data.__subject`). Do not display raw run ids/session ids as primary text unless no subject exists; keep those ids as fallback or debug detail.
+
 ## Component Tree
 
 ```

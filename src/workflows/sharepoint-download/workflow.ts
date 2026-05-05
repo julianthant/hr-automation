@@ -31,6 +31,7 @@ import {
 } from "../../core/index.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
+import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import {
   loginToSharePoint,
   captureExcelDownload,
@@ -125,6 +126,8 @@ export const sharepointDownloadWorkflow: RegisteredWorkflow<
   ],
   getName: (d) => d.label ?? "",
   getId: (d) => d.id ?? "",
+  operatorSubject: (input) =>
+    buildOperatorSubject({ kind: "roster", value: input.label || input.id, prefix: "SharePoint" }),
   handler: async (ctx, input) => {
     // Seed the dashboard row with the human-readable label immediately so
     // the queue doesn't flash a blank name while auth runs. `path` and

@@ -5,6 +5,7 @@ import { log, setLogRunId } from "../utils/log.js";
 import { classifyError } from "../utils/errors.js";
 import { maskSsn, maskDob, redactPii } from "../utils/pii.js";
 import { PATHS } from "../config.js";
+import type { StructuredLogEvent } from "../domain/log-events.js";
 import {
   generateInstanceName,
   emitWorkflowStart,
@@ -34,7 +35,7 @@ export function dateLocal(d: Date = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export interface LogEntry {
+export interface LogEntry extends Omit<Partial<StructuredLogEvent>, "level" | "message"> {
   workflow: string;
   itemId: string;
   runId?: string;
@@ -447,8 +448,10 @@ export async function withTrackedWorkflow<T>(
     appendFileSync(join(dir, `${workflow}-${date}-logs.jsonl`), JSON.stringify(logEntry) + "\n");
     appendFileSync(join(dir, `${workflow}-${date}.jsonl`), JSON.stringify(trackEntry) + "\n");
   };
-  process.on("SIGINT", () => { onSignal("SIGINT"); process.exit(130); });
-  process.on("SIGTERM", () => { onSignal("SIGTERM"); process.exit(143); });
+  const onSigint = (): void => { onSignal("SIGINT"); process.exit(130); };
+  const onSigterm = (): void => { onSignal("SIGTERM"); process.exit(143); };
+  process.on("SIGINT", onSigint);
+  process.on("SIGTERM", onSigterm);
 
   // Real emitFailed: sets lastStep (preserves step in terminal failed entry)
   // then emits a running row with a `step:failed:<error>` step string that the
@@ -514,8 +517,8 @@ export async function withTrackedWorkflow<T>(
     if (!opts.preAssignedInstance) emitWorkflowEnd(instanceName, "failed", dir);
     throw e;
   } finally {
-    process.removeAllListeners("SIGINT");
-    process.removeAllListeners("SIGTERM");
+    process.off("SIGINT", onSigint);
+    process.off("SIGTERM", onSigterm);
   }
 }
 

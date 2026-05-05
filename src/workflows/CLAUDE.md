@@ -26,6 +26,25 @@ Legacy workflows would call `defineDashboardMetadata({ name, label, steps, syste
 
 Add the workflow's step list to the "Step Tracking Per Workflow" table in root `CLAUDE.md` for documentation. Frontend requires no edits — the dashboard reads everything from the server-side registry via `/api/workflow-definitions`.
 
+## Naming and ownership conventions
+
+Workflow-local functions should describe orchestration steps. Reusable behavior must move to `src/domain/`, `src/systems/`, `src/core/`, or `src/ocr/forms/`. Use the naming verbs in `docs/engineering/codebase-conventions.md`; avoid vague helpers like `processData` or `handleThing`.
+
+### Shared fixes before workflow-local helpers
+
+Before adding a helper in a workflow folder, check whether the same behavior already exists in:
+- `src/domain/identity/`
+- `src/domain/operator-subject.ts`
+- `src/domain/log-events.ts`
+- `src/domain/notifications/`
+- `src/core/task-display.ts`
+- `src/core/task-control.ts`
+- `src/ocr/forms/`
+- `src/systems/ucpath/person-org-summary.ts`
+- `src/domain/hdh/departments.ts`
+
+If the helper would be useful to another workflow, add or extend the shared module instead. Keep compatibility exports only as migration shims.
+
 ## CLI Integration
 
 Add a Commander subcommand to `src/cli.ts` invoking your workflow's CLI adapter. Add the normal and `:stop` scripts to `package.json`.

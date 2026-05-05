@@ -37,21 +37,11 @@ const WORKFLOW_ICONS: Record<string, LucideIcon> = {
 
 /**
  * Resolve an `iconName` string to a lucide component, falling back to the
- * generic `Workflow` icon for unknown / missing names. Logs a `console.warn`
- * once per unknown name in dev so misconfigured workflows are loud, not
- * silent.
+ * generic `Workflow` icon for unknown / missing names.
  */
-const warnedFor = new Set<string>();
 export function getWorkflowIcon(iconName: string | undefined | null): LucideIcon {
   if (!iconName) return Workflow;
   const icon = WORKFLOW_ICONS[iconName];
   if (icon) return icon;
-  if (!warnedFor.has(iconName)) {
-    warnedFor.add(iconName);
-    console.warn(
-      `[workflow-icons] No lucide icon registered for iconName="${iconName}". ` +
-        `Add an entry to src/dashboard/lib/workflow-icons.ts.`,
-    );
-  }
   return Workflow;
 }

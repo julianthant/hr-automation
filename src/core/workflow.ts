@@ -14,6 +14,7 @@ import { runWorkflowSharedContextPool } from './shared-context-pool.js'
 import { withBatchLifecycle } from './batch-lifecycle.js'
 import { makeAuthObserver } from '../tracker/auth-observer.js'
 import { registerInProcessRun, unregisterInProcessRun } from './in-process-runs.js'
+import { operatorSubjectData } from '../domain/operator-subject.js'
 
 /**
  * Coerce an arbitrary key → unknown map into the `Record<string, string>`
@@ -87,6 +88,15 @@ export function buildTrackerOpts<TData, TSteps extends readonly string[]>(
     nameFn: wf.config.getName,
     idFn: wf.config.getId,
   }
+}
+
+export function buildInitialTrackerData<TData, TSteps extends readonly string[]>(
+  wf: RegisteredWorkflow<TData, TSteps>,
+  input: TData,
+): Record<string, string> {
+  const initial = wf.config.initialData ? stringifyMap(wf.config.initialData(input)) : {}
+  const subject = wf.config.operatorSubject ? operatorSubjectData(wf.config.operatorSubject(input)) : {}
+  return { ...initial, ...subject }
 }
 
 export interface RunOneItemOpts<TData, TSteps extends readonly string[]> {
@@ -229,8 +239,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
   // (unless the caller opted into preEmitPending) so the dashboard shows the
   // row before the first step runs; withTrackedWorkflow skips its own pending
   // emit when preAssignedRunId is provided.
-  const seedData = wf.config.initialData?.(handlerInput) ?? {}
-  const stringifiedSeed = stringifyMap(seedData)
+  const stringifiedSeed = buildInitialTrackerData(wf, handlerInput)
   // The full input (including any prefilledData channel) rides on the
   // pending row so retry / edit-and-resume can reconstruct the call.
   const inputForRow = toRecord(item)
@@ -330,7 +339,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
           preAssignedRunId: runId,
           preAssignedInstance: args.preAssignedInstance,
           dir: trackerDir,
-          initialData: stringifiedSeed,
+          initialData: Object.keys(stringifiedSeed).length > 0 ? stringifiedSeed : undefined,
           // `input` only matters when this branch owns the pending emit
           // (callerPreEmits=false above). When the caller pre-emitted, the
           // input is already on that row — no need to re-stamp.
@@ -431,6 +440,7 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
     ...(config.category ? { category: config.category } : {}),
     ...(config.iconName ? { iconName: config.iconName } : {}),
     ...(config.matchKey ? { matchKey: config.matchKey } : {}),
+    hasOperatorSubject: Boolean(config.operatorSubject),
   }
   register(metadata)
   return { config, metadata }
@@ -607,7 +617,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
   // writes a `failed` tracker entry + log entry before exiting. A kernel
   // handler on top would just duplicate cleanup, so don't install one.
   await withLogContext(wf.config.name, String(itemId), async () => {
-    const seedData = wf.config.initialData?.(handlerInput) ?? {}
+    const seedData = buildInitialTrackerData(wf, handlerInput)
     await withTrackedWorkflow(
       wf.config.name,
       String(itemId),
@@ -636,7 +646,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
         ...buildTrackerOpts(wf),
         preAssignedRunId: opts.preAssignedRunId,
         dir: opts.trackerDir,
-        initialData: stringifyMap(seedData),
+        initialData: Object.keys(seedData).length > 0 ? seedData : undefined,
         ...(inputForRow ? { input: inputForRow } : {}),
         ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
       },

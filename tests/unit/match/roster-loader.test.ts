@@ -86,14 +86,18 @@ describe("loadRoster", () => {
     assert.equal(rows[1].street, undefined);
   });
 
-  it("throws when Employee ID column is missing", async () => {
+  it("supports a name-only roster when Employee ID column is missing", async () => {
     const p = join(tmp, "bad.xlsx");
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Sheet1");
     ws.addRow(["Name", "Street"]);
     ws.addRow(["Jane Doe", "123 Main"]);
     await wb.xlsx.writeFile(p);
-    await assert.rejects(() => loadRoster(p), /Employee ID/i);
+    const rows = await loadRoster(p);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].eid, "");
+    assert.equal(rows[0].name, "Jane Doe");
+    assert.equal(rows[0].street, "123 Main");
   });
 
   it("supports a single 'Name' column", async () => {
@@ -107,7 +111,7 @@ describe("loadRoster", () => {
     assert.equal(rows[0].name, "Jane Doe");
   });
 
-  it("skips rows with empty EID or empty name", async () => {
+  it("keeps rows with empty EID and skips rows with empty name", async () => {
     const p = join(tmp, "skips.xlsx");
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Sheet1");
@@ -117,7 +121,9 @@ describe("loadRoster", () => {
     ws.addRow(["10002", "", ""]);
     await wb.xlsx.writeFile(p);
     const rows = await loadRoster(p);
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0].name, "Jane Doe");
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].eid, "");
+    assert.equal(rows[0].name, "Skip EmptyEid");
+    assert.equal(rows[1].name, "Jane Doe");
   });
 });

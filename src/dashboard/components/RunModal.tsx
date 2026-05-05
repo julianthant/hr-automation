@@ -182,9 +182,6 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
   }, [open]);
 
   if (!config) {
-    if (open && typeof console !== "undefined") {
-      console.error(`RunModal: unknown workflow "${workflow}" — register it in run-modal-registry.ts.`);
-    }
     return null;
   }
 
