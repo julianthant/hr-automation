@@ -31,6 +31,10 @@ Two test files for the same source module are allowed when they test distinct be
 - Each `describe` block covers one exported function or type.
 - Prefer characterization tests for pure logic: cover documented behavior, edge cases, and any JS quirk that's been pinned (e.g. `Date.setMonth` overflow — see `workflows/separations/schema.test.ts`).
 
+## Architecture tests
+
+Static convention guards live in `tests/unit/architecture/`. Add guards when a rule is mechanical: import boundaries, default exports, signal-listener misuse, console logging outside allowed surfaces, and workflow ownership leaks.
+
 ## What belongs here
 
 Pure-logic modules: schemas, date math, mapping tables, reducers, regex classifiers, worker-pool queueing, JSONL I/O, grid layout math, small string helpers.

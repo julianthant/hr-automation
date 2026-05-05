@@ -5,6 +5,7 @@ import {
   defineWorkflow,
   runWorkflow,
 } from "../../core/index.js";
+import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 import { loginToUCPath, loginToACTCrm } from "../../auth/login.js";
 import {
   searchByEmail,
@@ -108,6 +109,8 @@ export const onboardingWorkflow = defineWorkflow({
   ],
   getName: (d) => [d.firstName, d.lastName].filter(Boolean).join(" "),
   getId: (d) => d.email ?? "",
+  operatorSubject: (input) =>
+    buildOperatorSubject({ kind: "email", value: input.email, prefix: "Onboarding" }),
   handler: async (ctx, input) => {
     const email = input.email;
     let data: EmployeeData | null = null;
@@ -476,16 +479,16 @@ export async function runOnboardingCli(
       // to the dashboard. runId pre-assigned by `enqueueItems` pairs 1:1
       // with the downstream running/done rows emitted by the daemon.
       onPreEmitPending: (item, runId) => {
+        const subject = onboardingWorkflow.config.operatorSubject?.(item);
         trackEvent({
           workflow: "onboarding",
           timestamp: now,
           id: item.email,
           runId,
           status: "pending",
-          data: { email: item.email },
+          data: { email: item.email, ...operatorSubjectData(subject) },
         });
       },
     },
   );
 }
-

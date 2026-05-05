@@ -61,6 +61,8 @@ export async function oathUploadHandler(
     sessionId: input.sessionId,
     pdfHash: input.pdfHash,
     status: "running",
+    taskRole: "delegator",
+    taskGroupId: ctx.runId,
   });
 
   const ocrSessionId = `oath-upload-${ctx.runId}-ocr`;

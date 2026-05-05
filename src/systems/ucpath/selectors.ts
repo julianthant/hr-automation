@@ -835,6 +835,83 @@ export const personOrgSummary = {
    */
   clearButton: (f: FrameLocator): Locator =>
     f.getByRole("button", { name: "Clear", exact: true }),
+
+  /**
+   * Person ID value on the single-result detail page. PeopleSoft has exposed
+   * both OPRID and EMPLID ids for the same value. verified 2026-04-24
+   * @tags person-id, emplid, detail, person-org-summary
+   */
+  personIdValue: (f: FrameLocator): Locator =>
+    f.locator("#PER_INST_EMP_VW_OPRID\\$0").or(
+      f.locator("#PER_INST_EMP_VW_EMPLID\\$0"),
+    ),
+
+  /**
+   * Body of the Person Org Summary iframe, used for DOM extraction where the
+   * page renders values as label-adjacent text nodes. verified 2026-04-24
+   * @tags body, evaluate, detail, person-org-summary
+   */
+  body: (f: FrameLocator): Locator =>
+    f.locator("body"),
+
+  /**
+   * Last Hire Date on the detail page's ORG Instance section. verified 2026-04-24
+   * @tags hire-date, start-date, detail, person-org-summary
+   */
+  lastHireDate: (f: FrameLocator): Locator =>
+    f.locator("#PER_INST_EMP_VW_LAST_HIRE_DT\\$0"),
+
+  /**
+   * Termination Date on the detail page's ORG Instance section. Empty means
+   * active employment. verified 2026-04-24
+   * @tags termination-date, end-date, detail, person-org-summary
+   */
+  terminationDate: (f: FrameLocator): Locator =>
+    f.locator("#PER_INST_EMP_VW_TERMINATION_DT\\$0"),
+
+  /**
+   * Empty-state copy shown before any search has run. verified 2026-04-24
+   * @tags empty-state, text, person-org-summary
+   */
+  nothingYetText: (f: FrameLocator): Locator =>
+    f.getByText("Nothing yet"),
+
+  /**
+   * No-results copy shown after PeopleSoft finds no matching values.
+   * verified 2026-04-24
+   * @tags no-results, text, person-org-summary
+   */
+  noMatchingValuesText: (f: FrameLocator): Locator =>
+    f.getByText("No matching values were found"),
+
+  /**
+   * View All link on paginated search results. verified 2026-04-24
+   * @tags view-all, pagination, person-org-summary
+   */
+  viewAllLink: (f: FrameLocator): Locator =>
+    f.getByRole("link", { name: "View All" }),
+
+  /**
+   * PeopleSoft configurable search results grid. verified 2026-04-24
+   * @tags results, table, grid, person-org-summary
+   */
+  resultsTable: (f: FrameLocator): Locator =>
+    f.locator("table[id='tdgbrPTS_CFG_CL_STD_RSL$0']"),
+
+  /**
+   * Row drill-in icon in the search results grid. verified 2026-04-24
+   * @tags drill-in, results, person-org-summary
+   */
+  drillInButton: (f: FrameLocator, rowIndex: number): Locator =>
+    f.locator(`[id="PTS_CFG_CL_RSLT_PTS_DRILLIN$40$$IMG$${rowIndex}"]`),
+
+  /**
+   * Return to Search button on the Person Org Summary detail page.
+   * verified 2026-04-24
+   * @tags return, search, detail, person-org-summary
+   */
+  returnToSearchButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Return to Search", exact: true }),
 };
 
 // ─── PayPath Actions (HR Tasks → PayPath/Additional Pay → PayPath Actions) ─

@@ -4,6 +4,7 @@ import { errorMessage } from "../../utils/errors.js";
 import { defineWorkflow, runWorkflowBatch } from "../../core/index.js";
 import { loginToUCPath } from "../../auth/login.js";
 import { trackEvent } from "../../tracker/jsonl.js";
+import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 import { TransactionError } from "../../systems/ucpath/types.js";
 import {
   navigateToEmergencyContact,
@@ -93,6 +94,12 @@ export const emergencyContactWorkflow = defineWorkflow({
   ],
   getName: (d) => d.employeeName ?? "",
   getId: (d) => d.emplId ?? "",
+  operatorSubject: (input) =>
+    buildOperatorSubject({
+      kind: "person",
+      value: input.employee.name || input.employee.employeeId,
+      prefix: "Emergency Contact",
+    }),
   handler: async (ctx, record) => {
     const page = await ctx.page("ucpath");
 
@@ -214,6 +221,7 @@ export async function runEmergencyContact(
     deriveItemId: (item) => recordItemId(item as EmergencyContactRecord),
     onPreEmitPending: (item, runId) => {
       const record = item as EmergencyContactRecord;
+      const subject = emergencyContactWorkflow.config.operatorSubject?.(record);
       trackEvent({
         workflow: WORKFLOW,
         timestamp: now,
@@ -227,6 +235,7 @@ export async function runEmergencyContact(
           employeeName: record.employee.name,
           contactName: record.emergencyContact.name,
           relationship: record.emergencyContact.relationship,
+          ...operatorSubjectData(subject),
         },
       });
     },
@@ -283,6 +292,7 @@ export async function runEmergencyContactCli(
       deriveItemId: (item) => recordItemId(item as EmergencyContactRecord),
       onPreEmitPending: (item, runId) => {
         const record = item as EmergencyContactRecord;
+        const subject = emergencyContactWorkflow.config.operatorSubject?.(record);
         trackEvent({
           workflow: WORKFLOW,
           timestamp: now,
@@ -296,6 +306,7 @@ export async function runEmergencyContactCli(
             employeeName: record.employee.name,
             contactName: record.emergencyContact.name,
             relationship: record.emergencyContact.relationship,
+            ...operatorSubjectData(subject),
           },
         });
       },

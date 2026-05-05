@@ -54,6 +54,7 @@ npm run selector:search "<intent>"                 # Fuzzy search across SELECTO
 npm run typecheck                                  # Type-check src/
 npm run typecheck:all                              # Type-check src/ + tests
 npm run test                                       # Unit tests
+npm run test:architecture                          # Static architecture/convention guards
 npm run build:dashboard                            # Single-file dashboard build
 ```
 
@@ -127,6 +128,45 @@ Names → (shared-context pool, N tabs) → Person Org Summary (UCPath)
 
 Observability for every workflow: `.tracker/{workflow}-{YYYY-MM-DD}.jsonl` + `*-logs.jsonl`, streamed to the dashboard. Some workflows also write xlsx trackers (see per-workflow docs).
 
+## Codebase conventions
+
+Read `docs/engineering/codebase-conventions.md` before adding shared behavior, new workflows, dashboard controls, or system drivers.
+
+High-level rules:
+- Workflow folders own orchestration, not reusable domain/system helpers.
+- Shared behavior used by two workflows, or by one workflow plus tracker/dashboard/core/OCR, belongs outside `src/workflows/<workflow>/`.
+- New workflows must declare `operatorSubject`, `detailFields`, `getName`, `getId`, and pending-row display data.
+- Operator-facing text should use the shared subject (`data.__subject`) before raw ids/run ids/session ids.
+- Use action-oriented function names: `parse`, `normalize`, `display/format`, `derive`, `resolve`, `build`, `create`, `read/write/list/find`, `is/has/can/should`, `ensure`, `assert`, `run`.
+- Do not add default exports in `src/`.
+- Use `log.*`, structured log fields, and notification policy instead of ad hoc `console.*`, toasts, or Telegram messages.
+
+## Codebase conventions and enforcement
+
+The repo-wide convention source is `docs/engineering/codebase-conventions.md`.
+
+When adding or changing code:
+1. Decide the owner first: `core`, `systems`, `domain`, `ocr/forms`, `tracker`, `dashboard`, or a workflow.
+2. If a helper can be reused by another workflow, put it in the shared owner now.
+3. Use the naming verbs from the convention doc so future agents can infer behavior from the function name.
+4. Add or update architecture tests when a convention can be checked statically.
+5. Update the nearest `CLAUDE.md`/`AGENTS.md` when a new recurring pattern or gotcha is discovered.
+
+## Shared workflow primitives
+
+Any helper used by two or more workflows, or by one workflow plus tracker/dashboard/core/OCR, belongs outside `src/workflows/<workflow>/`.
+
+Use these shared homes first:
+- `src/domain/identity/` for person names and EIDs.
+- `src/domain/operator-subject.ts` for queue/toast/Telegram/log labels.
+- `src/domain/log-events.ts` and `src/domain/notifications/` for structured logs and notification routing.
+- `src/core/task-display.ts` and `src/core/task-control.ts` for delegation display and control vocabulary.
+- `src/ocr/forms/` for OCR form specs and shared verification schemas.
+- `src/systems/ucpath/person-org-summary.ts` for UCPath Person Org Summary search.
+- `src/domain/hdh/departments.ts` for HDH department acceptance.
+
+Workflow folders own orchestration and workflow-specific business steps only. When fixing a bug, decide whether it belongs to the shared primitive or to the workflow-specific handler before adding a new helper.
+
 ## Writing a new workflow
 
 Declare it with `defineWorkflow`. The kernel handles browser launch, auth (Duo-aware, sequential or interleaved), tracker emissions, SIGINT cleanup, screenshotting on step failure, per-item `withTrackedWorkflow` wrapping in batch/pool modes, and the dashboard registry. Your handler just drives Playwright.
@@ -136,6 +176,7 @@ Minimal example:
 ```ts
 import { defineWorkflow, runWorkflow } from "../../core/index.js";
 import { loginToUCPath } from "../../auth/login.js";
+import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { MyInputSchema, type MyInput } from "./schema.js";
 
 const steps = ["ucpath-auth", "transaction"] as const;
@@ -157,6 +198,7 @@ export const myWorkflow = defineWorkflow({
   detailFields: [{ key: "emplId", label: "Empl ID" }, { key: "name", label: "Employee" }],
   getName: (d) => d.name ?? "",
   getId: (d) => d.emplId ?? "",
+  operatorSubject: (d) => buildOperatorSubject({ kind: "eid", value: d.emplId, prefix: "My Workflow" }),
   handler: async (ctx, input: MyInput) => {
     ctx.updateData({ emplId: input.emplId });
     ctx.markStep("ucpath-auth");
@@ -187,6 +229,7 @@ All production workflows are kernel-based as of 2026-04-17. No `defineDashboardM
 - `systems: SystemConfig[]` — one per external system. `{ id, login, sessionDir?, resetUrl? }`. `login` must throw on failure.
 - `steps: readonly string[] as const` — declared step names. `ctx.step`/`markStep` are type-narrowed against this tuple.
 - `schema: ZodType<TData>` — validated before the handler runs.
+- `operatorSubject(input)` — required for new workflows. Derives the operator-facing `data.__subject` label used by queue rows, toasts, Telegram, logs, and later task projections.
 - `authChain: "sequential" | "interleaved" | "parallel-staggered"` — sequential waits for each Duo before the next; interleaved auths #1 blocking then chains #2+ in background while the handler starts; parallel-staggered fires every system's submit click `staggerMs` apart (default 5000ms) so all Duos pend on the user's phone simultaneously and approve order is user-determined. Default: interleaved for >1 system, sequential for 1.
 - `authSteps?: boolean` — default `true`. When `false`, the kernel does NOT auto-prepend `auth:<id>` step names from `systems`. Set to `false` for workflows that already declare their own auth step names (e.g. onboarding's `crm-auth`, `ucpath-auth`).
 - `tiling: "auto" | "single" | "side-by-side"` — CDP-based window tiling.
@@ -446,7 +489,7 @@ These patterns existed pre-kernel and are intentionally removed. Do not reintrod
 <claude-mem-context>
 # Memory Context
 
-# [hr-automation] recent context, 2026-05-04 12:33am PDT
+# [hr-automation] recent context, 2026-05-04 5:04pm PDT
 
 No previous sessions found.
 </claude-mem-context>

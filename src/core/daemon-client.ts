@@ -25,7 +25,8 @@ import type { RegisteredWorkflow } from './types.js'
 export type OnPreEmitPending<TData> = (
   input: TData,
   runId: string,
-  parentRunId?: string,
+  parentRunId: string | undefined,
+  itemId: string,
 ) => void
 
 /**
@@ -38,7 +39,7 @@ export type OnPreEmitPending<TData> = (
  * if pre-emit itself threw, the contract assumes the caller didn't write
  * the row to begin with and there's nothing to fail.
  */
-export type OnPreEmitFailed<TData> = (input: TData, runId: string, error: string) => void
+export type OnPreEmitFailed<TData> = (input: TData, runId: string, error: string, itemId: string) => void
 
 /**
  * Pure spawn-math helper. Given the current alive-daemon count and the
@@ -175,7 +176,7 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
   if (onPreEmitPending) {
     for (let i = 0; i < inputs.length; i++) {
       try {
-        onPreEmitPending(inputs[i], runIds[i], parentRunId)
+        onPreEmitPending(inputs[i], runIds[i], parentRunId, ids[i])
       } catch (err) {
         log.warn(
           `ensureDaemonsAndEnqueue: onPreEmitPending threw for '${ids[i]}': ${
@@ -193,7 +194,7 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
     if (onPreEmitFailed) {
       for (let i = 0; i < inputs.length; i++) {
         try {
-          onPreEmitFailed(inputs[i], runIds[i], message)
+          onPreEmitFailed(inputs[i], runIds[i], message, ids[i])
         } catch (cbErr) {
           log.warn(
             `ensureDaemonsAndEnqueue: onPreEmitFailed threw for '${ids[i]}': ${
@@ -268,10 +269,13 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
     // Step 6: write queue file. Now safe — at least one daemon is registered
     // for this workflow, so the orphan sweep won't false-positive on these
     // items in the spawn-in-flight window.
+    // Use the pre-computed ids[] rather than idFn directly — idFn's fallback
+    // embeds Date.now() so calling it again here would produce different
+    // timestamps than the ids[] we already passed to onPreEmitPending.
     const enqueued = await enqueueItems(
       wf.config.name,
       inputs,
-      idFn,
+      (_input, i) => ids[i],
       trackerDir,
       runIds,
       parentRunId ? inputs.map(() => parentRunId) : undefined,

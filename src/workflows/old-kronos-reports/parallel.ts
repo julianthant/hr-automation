@@ -6,6 +6,7 @@ import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { runWorkflowBatch } from "../../core/index.js";
 import { trackEvent } from "../../tracker/jsonl.js";
+import { operatorSubjectData } from "../../domain/operator-subject.js";
 import { launchBrowser } from "../../browser/launch.js";
 import { SCREEN } from "../../config.js";
 import { createLockedTracker } from "../../tracker/locked.js";
@@ -146,13 +147,14 @@ export async function runParallelKronos(
         deriveItemId: (item) => (item as KronosItem).employeeId,
         onPreEmitPending: (item, runId) => {
           const { employeeId } = item as KronosItem;
+          const subject = kronosReportsWorkflow.config.operatorSubject?.({ employeeId });
           trackEvent({
             workflow: "kronos-reports",
             timestamp: now,
             id: employeeId,
             runId,
             status: "pending",
-            data: { id: employeeId },
+            data: { id: employeeId, ...operatorSubjectData(subject) },
           });
         },
       },

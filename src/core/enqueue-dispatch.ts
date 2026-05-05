@@ -14,7 +14,7 @@
  * workflow-specific backend wiring.
  */
 import { loadWorkflow } from "./workflow-loaders.js";
-import { deriveItemId, splitPrefilled } from "./workflow.js";
+import { splitPrefilled } from "./workflow.js";
 import { trackEvent } from "../tracker/jsonl.js";
 import { log } from "../utils/log.js";
 
@@ -157,9 +157,9 @@ export async function enqueueFromHttp(
       {},
       {
         trackerDir,
-        onPreEmitPending: (item, runId) => {
+        onPreEmitPending: (item, runId, _parentRunId, itemId) => {
           const data = buildTrackerDataForInput(item);
-          const id = deriveItemId(item, runId);
+          const id = itemId;
           // Persist the original input verbatim on the pending row so the
           // dashboard's retry / edit-and-resume features can reconstruct
           // the call without per-workflow input-shaping logic. See the
@@ -181,7 +181,7 @@ export async function enqueueFromHttp(
             trackerDir,
           );
         },
-        onPreEmitFailed: (item, runId, error) => {
+        onPreEmitFailed: (item, runId, error, itemId) => {
           // Pre-emit succeeded but spawn-or-enqueue failed; the dashboard
           // already shows a `pending` row for this runId and there's no
           // queue-file entry for the orphan sweep to clean up. Write a
@@ -190,7 +190,7 @@ export async function enqueueFromHttp(
           // pending emit so prefilledData (edit-and-resume) values stay
           // visible on the failed row.
           const data = buildTrackerDataForInput(item);
-          const id = deriveItemId(item, runId);
+          const id = itemId;
           trackEvent(
             {
               workflow: wf.config.name,

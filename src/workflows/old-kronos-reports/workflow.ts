@@ -7,6 +7,7 @@ import { z } from "zod";
 import { defineWorkflow } from "../../core/index.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
+import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { loginToUKG } from "../../auth/login.js";
 import {
   getGeniesIframe,
@@ -320,6 +321,8 @@ export const kronosReportsWorkflow = defineWorkflow({
   ],
   getName: (d) => d.name ?? "",
   getId: (d) => d.id ?? "",
+  operatorSubject: (input) =>
+    buildOperatorSubject({ kind: "report", value: input.employeeId, prefix: "Kronos" }),
   handler: async (ctx, item) => {
     const { employeeId } = item;
     const rt = requireRuntime();

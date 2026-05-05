@@ -12,10 +12,10 @@ import { randomUUID } from "node:crypto";
 import { trackEvent, dateLocal, appendLogEntry, type TrackerEntry } from "./jsonl.js";
 import { errorMessage } from "../utils/errors.js";
 import { log, withLogContext, setLogRunId } from "../utils/log.js";
-import { listFormTypes, getFormSpec, type FormTypeListing } from "../workflows/ocr/form-registry.js";
+import { listFormTypes, getFormSpec, type FormTypeListing } from "../ocr/forms/registry.js";
 import { runOcrOrchestrator, type OcrOrchestratorOpts } from "../workflows/ocr/orchestrator.js";
 import { runOcrRetryPage, RetryPageError } from "../workflows/ocr/retry-page.js";
-import { isAcceptedDept } from "../workflows/eid-lookup/search.js";
+import { isAcceptedHdhDepartment } from "../domain/hdh/departments.js";
 import type { ChildOutcome, WatchChildRunsOpts } from "./watch-child-runs.js";
 import type { OcrRequest, OcrResult } from "../ocr/index.js";
 
@@ -971,7 +971,7 @@ function computeVerificationLocal(d: { hrStatus?: string; department?: string; p
   const screenshotFilename = d.personOrgScreenshot ?? "";
   if (!d.hrStatus) return { state: "lookup-failed", error: "no result", checkedAt, screenshotFilename };
   const active = d.hrStatus === "Active";
-  const hdh = isAcceptedDept(d.department ?? null);
+  const hdh = isAcceptedHdhDepartment(d.department ?? null);
   if (!active) return { state: "inactive", hrStatus: d.hrStatus, department: d.department, screenshotFilename, checkedAt };
   if (!hdh) return { state: "non-hdh", hrStatus: d.hrStatus, department: d.department ?? "", screenshotFilename, checkedAt };
   return { state: "verified", hrStatus: d.hrStatus, department: d.department ?? "", screenshotFilename, checkedAt };

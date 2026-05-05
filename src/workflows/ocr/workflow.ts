@@ -1,5 +1,6 @@
 import { defineWorkflow } from "../../core/index.js";
 import type { Ctx } from "../../core/types.js";
+import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { runOcrOrchestrator } from "./orchestrator.js";
 import { OcrInputSchema, type OcrInput } from "./schema.js";
 
@@ -31,6 +32,12 @@ export const ocrWorkflow = defineWorkflow({
   ],
   getName: (d) => d.pdfOriginalName ?? "",
   getId:   (d) => d.sessionId ?? "",
+  operatorSubject: (input) =>
+    buildOperatorSubject({
+      kind: "pdf",
+      value: input.pdfOriginalName ?? input.pdfPath ?? input.sessionId,
+      prefix: "OCR",
+    }),
   handler: ocrKernelHandler,
 });
 

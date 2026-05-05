@@ -6,6 +6,7 @@ import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 import { loginToUCPath } from "../../auth/login.js";
+import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 import { buildOathSignaturePlan, type OathSignatureContext } from "./enter.js";
 import { OathSignatureInputSchema, type OathSignatureInput } from "./schema.js";
 
@@ -59,6 +60,8 @@ export const oathSignatureWorkflow = defineWorkflow({
   ],
   getName: (d) => d.name ?? "",
   getId: (d) => d.emplId ?? "",
+  operatorSubject: (input) =>
+    buildOperatorSubject({ kind: "eid", value: input.emplId, prefix: "Oath Signature" }),
   handler: async (ctx, input) => {
     const oathCtx: OathSignatureContext = { employeeName: "", alreadyHasOath: false };
 
@@ -145,6 +148,7 @@ export async function runOathSignatureCli(
     { new: options.new, parallel: options.parallel },
     {
       onPreEmitPending: (item, runId, parentRunId) => {
+        const subject = oathSignatureWorkflow.config.operatorSubject?.(item);
         trackEvent({
           workflow: WORKFLOW,
           timestamp: now,
@@ -155,6 +159,7 @@ export async function runOathSignatureCli(
           data: {
             emplId: item.emplId,
             ...(item.date ? { date: item.date } : {}),
+            ...operatorSubjectData(subject),
           },
         });
       },

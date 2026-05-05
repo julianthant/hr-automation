@@ -38,6 +38,7 @@ interface RegisteredToast {
   id: string;
   runId: string;
   kind: ActionKind;
+  subject?: string;
   registeredAt: number;
   fallbackTimer?: ReturnType<typeof setTimeout>;
 }
@@ -54,6 +55,7 @@ export interface RegisterActionToastOpts {
   id: string;
   runId: string;
   kind: ActionKind;
+  subject?: string;
   /** Time before the toast text flips to a "still in progress" hint. Default 10000ms. */
   timeoutMs?: number;
   /** Customizable fallback hint when the timeout fires. */
@@ -92,6 +94,7 @@ export function registerActionToast(opts: RegisterActionToastOpts): void {
     id: opts.id,
     runId: opts.runId,
     kind: opts.kind,
+    subject: opts.subject,
     registeredAt: Date.now(),
     fallbackTimer,
   });
@@ -137,9 +140,10 @@ export function resolveActionToastsForEntry(entry: EntryShape): void {
     const k = key(entry.workflow, entry.id, entry.runId, kind);
     const reg = registry.get(k);
     if (!reg) continue;
+    const label = reg.subject?.trim() || entry.id;
 
     if (isCancelled) {
-      toast.success(`Cancelled ${entry.id}`, {
+      toast.success(`Cancelled ${label}`, {
         id: reg.toastId,
         description:
           kind === "cancel-running"
@@ -147,12 +151,12 @@ export function resolveActionToastsForEntry(entry: EntryShape): void {
             : "Removed from queue.",
       });
     } else if (isDone) {
-      toast.success(`${entry.id} completed`, {
+      toast.success(`${label} completed`, {
         id: reg.toastId,
         description: "The item finished before the cancel could take effect.",
       });
     } else if (isFailed) {
-      toast.error(`${entry.id} failed`, {
+      toast.error(`${label} failed`, {
         id: reg.toastId,
         description: entry.error ?? "Different error than cancellation.",
       });

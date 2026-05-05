@@ -44,6 +44,10 @@ await safeClick(
 );
 ```
 
+## Selector and driver conventions
+
+System modules own browser interaction. Keep selectors in per-system `selectors.ts`, prefer registry locators with `safeClick`/`safeFill`, and do not move Playwright selectors into workflow folders.
+
 Example log lines you'll see in practice:
 
 ```

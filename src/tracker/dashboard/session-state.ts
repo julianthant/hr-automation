@@ -1,0 +1,404 @@
+import {
+  readSessionEvents,
+  workflowNameFromInstance,
+  type SessionEvent,
+} from "../session-events.js";
+import type { TrackerEntry } from "../jsonl.js";
+
+/**
+ * Canonical sort key for a session event. Events emitted by
+ * emitScreenshotEvent use numeric `ts` (ms since epoch) while other
+ * event emitters use ISO `timestamp`. Normalize both into an ISO string
+ * so localeCompare sorts correctly.
+ */
+export function getEventSortKey(e: { timestamp?: string; ts?: number }): string {
+  if (typeof e.timestamp === "string" && e.timestamp.length > 0) return e.timestamp;
+  if (typeof e.ts === "number" && Number.isFinite(e.ts)) return new Date(e.ts).toISOString();
+  return "";
+}
+
+/**
+ * Resolve a runId to its batch's workflowInstance by looking up the tracker
+ * entry that carries that runId. Returns the first matching `data.instance`
+ * string, or `undefined` if no entry is found or the entry lacks the field.
+ *
+ * Pre-2026-04-21 entries may not have `data.instance`; those degrade to
+ * `undefined` and the caller's batch-scope fallback becomes a no-op.
+ */
+export function resolveInstanceForRun(
+  trackers: Array<Pick<TrackerEntry, "runId" | "data">>,
+  runId: string,
+): string | undefined {
+  if (!runId) return undefined;
+  for (const t of trackers) {
+    if (t.runId !== runId) continue;
+    const instance = t.data?.instance;
+    if (typeof instance === "string" && instance.length > 0) return instance;
+  }
+  return undefined;
+}
+
+/**
+ * Filter session events down to those that belong to a single run. Used by
+ * the `/events/run-events` SSE handler.
+ *
+ * Two matching paths:
+ *
+ * 1. **Direct:** events carrying the exact requested `runId`.
+ * 2. **Batch-scope fallback:** events emitted outside any per-item
+ *    `withLogContext` (so they have no `runId`), attributed to this run via
+ *    matching `workflowInstance` AND falling within the run's
+ *    `[runStart, runEnd]` time window. `Session.launch` emits `auth_start` /
+ *    `auth_complete` / `browser_launch` at batch scope without a runId.
+ *
+ * **Time-window in daemon mode.** A batch workflow (sequential/pool/
+ * shared-context-pool) assigns one `workflowInstance` per batch, so
+ * `workflowInstance` alone isolates each batch. A **daemon** keeps the same
+ * `workflowInstance` for its entire lifetime - it processes many items
+ * (each a distinct `runId`) under one instance. Without the time window,
+ * orphan events from every past or concurrent item in the daemon would
+ * bleed into each item's drill-in view. Filtering orphan events to the
+ * target run's tracker-entry span fixes the leak without breaking legacy
+ * batch shapes (a batch's orphan events all fall inside the batch's span
+ * anyway).
+ *
+ * `runStart` = earliest tracker-entry timestamp for this runId.
+ * `runEnd` = max(latest tracker ts for runId, latest direct-event ts for
+ * runId, `now` - via `runEndFallback` arg, default `Date.now()`). The
+ * `now`/direct-event extension matters for in-progress items where no
+ * terminal tracker entry exists yet.
+ *
+ * Pure: no filesystem access. Clock is injected via `runEndFallback` so
+ * tests stay deterministic.
+ */
+export function filterEventsForRun(
+  events: SessionEvent[],
+  trackers: Array<Pick<TrackerEntry, "runId" | "status" | "data" | "timestamp">>,
+  runId: string,
+  runEndFallback: number = Date.now(),
+): SessionEvent[] {
+  const direct = events.filter((e) => e.runId === runId);
+  const instance = resolveInstanceForRun(trackers, runId);
+
+  let batchScope: SessionEvent[] = [];
+  if (instance) {
+    const runEntries = trackers.filter((t) => t.runId === runId);
+    if (runEntries.length === 0) {
+      // Degenerate: instance resolved but no tracker entries to build a
+      // window from. Skip the fallback rather than over-include.
+      batchScope = [];
+    } else {
+      const trackerTimes = runEntries
+        .map((t) => new Date(t.timestamp).getTime())
+        .filter((n) => Number.isFinite(n));
+      const directTimes = direct
+        .map((e) => new Date(getEventSortKey(e)).getTime())
+        .filter((n) => Number.isFinite(n));
+      const runStart = Math.min(...trackerTimes);
+      // If this run reached a terminal status (done / failed / skipped),
+      // cap runEnd at the last tracker timestamp. Without this check, the
+      // default `runEndFallback = Date.now()` stretched the window all the
+      // way to "now", pulling in orphan events from later items that the
+      // same daemon processed on the same `workflowInstance`.
+      const terminated = runEntries.some(
+        (t) => t.status === "done" || t.status === "failed" || t.status === "skipped",
+      );
+      const lastTrackerTs = Math.max(...trackerTimes);
+      const runEnd = terminated
+        ? Math.max(lastTrackerTs, ...(directTimes.length > 0 ? directTimes : []))
+        : Math.max(
+            lastTrackerTs,
+            ...(directTimes.length > 0 ? directTimes : []),
+            runEndFallback,
+          );
+      batchScope = events.filter((e) => {
+        if (e.runId) return false;
+        if (e.workflowInstance !== instance) return false;
+        const ets = new Date(getEventSortKey(e)).getTime();
+        if (!Number.isFinite(ets)) return false;
+        return ets >= runStart && ets <= runEnd;
+      });
+    }
+  }
+
+  const merged = [...direct, ...batchScope];
+  merged.sort((a, b) => getEventSortKey(a).localeCompare(getEventSortKey(b)));
+  return merged;
+}
+
+/**
+ * How long after a crash-on-launch the dashboard keeps rendering the red
+ * "Launch failed" placeholder in the live Sessions rail. Past this window the
+ * failed run is considered historical - details still live in
+ * `.tracker/sessions.jsonl` and the workflow's per-day log, but the Sessions
+ * panel (which is a "live / currently happening" view) stops pinning it.
+ */
+const CRASH_ON_LAUNCH_WINDOW_MS = 15 * 60 * 1000;
+
+// -- Session state rebuilding from JSONL events ----------
+
+export interface BrowserState {
+  browserId: string;
+  system: string;
+  authState: "idle" | "authenticating" | "authed" | "duo_waiting" | "failed";
+}
+
+export interface SessionInfo {
+  sessionId: string;
+  browsers: BrowserState[];
+}
+
+export interface WorkflowInstanceState {
+  instance: string;
+  /** Kebab-case workflow name resolved from the instance label (e.g. "Separation 1" -> "separations"). null when unrecognised. */
+  workflow: string | null;
+  /** ISO-8601 timestamp of the latest workflow_start event for this instance.
+   * Surfaced to the dashboard's terminal drawer so cards can render a live
+   * elapsed counter. Re-runs under the same instance overwrite this. */
+  startedAt?: string;
+  active: boolean;
+  /** True while the spawning Node process (and therefore its Playwright browsers) is still alive. */
+  pidAlive: boolean;
+  /**
+   * True when workflow_end (finalStatus=failed) fired but no browser_launch event
+   * was ever emitted for this instance - i.e. the workflow crashed before
+   * Playwright launched a browser. Used by the dashboard to render a
+   * "Launch failed" placeholder in place of the usual session/browser chips.
+   */
+  crashedOnLaunch?: boolean;
+  currentItemId: string | null;
+  /** True between item_start and item_complete - i.e. a real item is currently being processed. */
+  itemInFlight: boolean;
+  currentStep: string | null;
+  finalStatus: "done" | "failed" | null;
+  sessions: SessionInfo[];
+}
+
+export interface DuoQueueEntry {
+  position: number;
+  requestId: string;
+  system: string;
+  instance: string;
+  state: "waiting" | "active";
+}
+
+export interface SessionState {
+  workflows: WorkflowInstanceState[];
+  duoQueue: DuoQueueEntry[];
+}
+
+export function rebuildSessionState(dir?: string): SessionState {
+  const events = dir ? readSessionEvents(dir) : readSessionEvents();
+
+  // Build workflow states
+  const wfMap = new Map<string, WorkflowInstanceState>();
+  for (const e of events) {
+    const inst = e.workflowInstance;
+    if (!inst) continue;
+
+    if (e.type === "workflow_start") {
+      wfMap.set(inst, {
+        instance: inst,
+        workflow: workflowNameFromInstance(inst),
+        startedAt: e.timestamp,
+        active: true,
+        pidAlive: true,
+        currentItemId: null,
+        itemInFlight: false,
+        currentStep: null,
+        finalStatus: null,
+        sessions: [],
+      });
+    }
+    if (e.type === "workflow_end") {
+      const wf = wfMap.get(inst);
+      if (wf) {
+        wf.active = false;
+        wf.finalStatus = e.finalStatus ?? null;
+      }
+    }
+    if (e.type === "step_change" && e.currentStep) {
+      const wf = wfMap.get(inst);
+      if (wf) wf.currentStep = e.currentStep!;
+    }
+    if (e.type === "session_create" && e.sessionId) {
+      const wf = wfMap.get(inst);
+      if (wf && !wf.sessions.find((s) => s.sessionId === e.sessionId)) {
+        wf.sessions.push({ sessionId: e.sessionId!, browsers: [] });
+      }
+    }
+    if (e.type === "browser_launch" && e.sessionId && e.browserId && e.system) {
+      const wf = wfMap.get(inst);
+      const sess = wf?.sessions.find((s) => s.sessionId === e.sessionId);
+      if (sess && !sess.browsers.find((b) => b.browserId === e.browserId)) {
+        sess.browsers.push({ browserId: e.browserId!, system: e.system!, authState: "idle" });
+      }
+    }
+    if (e.type === "browser_close" && e.browserId) {
+      const wf = wfMap.get(inst);
+      if (wf) {
+        for (const sess of wf.sessions) {
+          sess.browsers = sess.browsers.filter((b) => b.browserId !== e.browserId);
+        }
+      }
+    }
+    if (e.type === "auth_start" && e.browserId) {
+      const b = findBrowser(wfMap, inst, e.browserId);
+      if (b) b.authState = "authenticating";
+    }
+    if (e.type === "auth_complete" && e.browserId) {
+      const b = findBrowser(wfMap, inst, e.browserId);
+      if (b) b.authState = "authed";
+    }
+    if (e.type === "auth_failed" && e.browserId) {
+      const b = findBrowser(wfMap, inst, e.browserId);
+      if (b) b.authState = "failed";
+    }
+    if (e.type === "duo_request" && e.browserId) {
+      const b = findBrowser(wfMap, inst, e.browserId);
+      if (b) b.authState = "duo_waiting";
+    }
+    if (e.type === "duo_complete" && e.browserId) {
+      const b = findBrowser(wfMap, inst, e.browserId);
+      if (b && b.authState === "duo_waiting") b.authState = "authed";
+    }
+    if (e.type === "item_start" && e.currentItemId) {
+      const wf = wfMap.get(inst);
+      if (wf) {
+        wf.currentItemId = e.currentItemId!;
+        wf.itemInFlight = true;
+      }
+    }
+    if (e.type === "item_complete") {
+      const wf = wfMap.get(inst);
+      if (wf) wf.itemInFlight = false;
+    }
+    // Intentionally do NOT clear currentItemId on item_complete - the dashboard
+    // keeps the last item visible after the workflow ends so users can see which
+    // employee/record the session was for, even after it's done.
+  }
+
+  // Flag workflows that crashed before any browser could launch. A workflow that
+  // ended in failed status but never emitted a browser_launch is indistinguishable
+  // from normal "no-active-sessions" in the dashboard UI - this flag lets
+  // SessionPanel render a dedicated "Launch failed" placeholder so the user
+  // knows the run crashed early and where to look for details.
+  //
+  // Age gate: SessionPanel keeps crashedOnLaunch entries visible even after
+  // pidAlive flips false (that's the point of the placeholder - the Node
+  // process that crashed is already gone). But sessions.jsonl is append-only
+  // across orchestrator sessions, so without a time cutoff a crash from days
+  // ago would permanently pin itself to the live Sessions rail. Only flag
+  // crashes whose workflow_end is within CRASH_ON_LAUNCH_WINDOW_MS.
+  const instancesWithBrowserLaunch = new Set<string>();
+  const workflowEndTimestamps = new Map<string, string>();
+  for (const e of events) {
+    if (e.type === "browser_launch" && e.workflowInstance) {
+      instancesWithBrowserLaunch.add(e.workflowInstance);
+    }
+    if (e.type === "workflow_end" && e.workflowInstance && e.timestamp) {
+      workflowEndTimestamps.set(e.workflowInstance, e.timestamp);
+    }
+  }
+  const now = Date.now();
+  for (const wf of wfMap.values()) {
+    if (wf.finalStatus !== "failed") continue;
+    if (instancesWithBrowserLaunch.has(wf.instance)) continue;
+    const endTs = workflowEndTimestamps.get(wf.instance);
+    if (!endTs) continue;
+    const ageMs = now - Date.parse(endTs);
+    if (Number.isFinite(ageMs) && ageMs <= CRASH_ON_LAUNCH_WINDOW_MS) {
+      wf.crashedOnLaunch = true;
+    }
+  }
+
+  // Build Duo queue (unresolved requests only)
+  const resolved = new Set<string>();
+  for (const e of events) {
+    if ((e.type === "duo_complete" || e.type === "duo_timeout") && e.duoRequestId) {
+      resolved.add(e.duoRequestId);
+    }
+  }
+  const duoQueue: DuoQueueEntry[] = [];
+  let pos = 1;
+  for (const e of events) {
+    if (e.type === "duo_request" && e.duoRequestId && !resolved.has(e.duoRequestId)) {
+      const started = events.some(
+        (s) => s.type === "duo_start" && s.duoRequestId === e.duoRequestId,
+      );
+      duoQueue.push({
+        position: pos++,
+        requestId: e.duoRequestId,
+        system: e.system || "",
+        instance: e.workflowInstance,
+        state: started ? "active" : "waiting",
+      });
+    }
+  }
+
+  // Overlay duo_waiting state: if a browser's system has a pending Duo request
+  // for the same workflow instance, show it as duo_waiting instead of authenticating
+  const workflows = [...wfMap.values()];
+  for (const wf of workflows) {
+    for (const sess of wf.sessions) {
+      for (const b of sess.browsers) {
+        const hasPendingDuo = duoQueue.some(
+          (d) => d.instance === wf.instance && d.system === b.system,
+        );
+        if (hasPendingDuo && (b.authState === "authenticating" || b.authState === "idle")) {
+          b.authState = "duo_waiting";
+        }
+      }
+    }
+  }
+
+  // Check liveness of each workflow's spawning process. We split this from `active`:
+  //   - `active`  = the workflow_start/end lifecycle (emitted by withTrackedWorkflow)
+  //   - `pidAlive`= whether the Node process is still running (and therefore its browsers)
+  // SessionPanel uses `pidAlive` to remove a workflow once its session is closed,
+  // while `active` stays authoritative for the DONE/FAILED pill in the brief window
+  // between workflow_end firing and the Node process exiting.
+  //
+  // In-process (fire-and-forget) workflows: when a workflow runs INSIDE the
+  // dashboard server process (e.g. the `sharepoint-download` HTTP handler
+  // fires `runWorkflow()` without awaiting), the recorded pid equals the
+  // dashboard's own pid - so `process.kill(pid, 0)` always succeeds while
+  // the dashboard is up, pinning the workflow box to the Sessions rail
+  // forever even after it has completed or failed. Treat an in-process run
+  // as "session ended" the moment `workflow_end` fires, matching the behavior
+  // of spawned-child workflows whose process exits shortly after end. This
+  // keeps the Sessions rail consistent across both execution models.
+  const ownPid = process.pid;
+  for (const wf of workflows) {
+    // Pick the LATEST workflow_start for this instance - when a workflow is re-run
+    // under the same instance name, earlier starts reference dead pids. findLast
+    // would be cleaner but target is ES2022; slice+reverse works without a lib bump.
+    const starts = events.filter(
+      (e: SessionEvent) => e.type === "workflow_start" && e.workflowInstance === wf.instance,
+    );
+    const startEv = starts[starts.length - 1];
+    if (!startEv) { wf.pidAlive = false; continue; }
+    if (startEv.pid === ownPid && wf.finalStatus !== null) {
+      wf.pidAlive = false;
+      continue;
+    }
+    try { process.kill(startEv.pid, 0); wf.pidAlive = true; }
+    catch { wf.pidAlive = false; }
+  }
+
+  return { workflows, duoQueue };
+}
+
+function findBrowser(
+  wfMap: Map<string, WorkflowInstanceState>,
+  instance: string,
+  browserId: string,
+): BrowserState | undefined {
+  const wf = wfMap.get(instance);
+  if (!wf) return undefined;
+  for (const sess of wf.sessions) {
+    const b = sess.browsers.find((b) => b.browserId === browserId);
+    if (b) return b;
+  }
+  return undefined;
+}

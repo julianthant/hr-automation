@@ -1,6 +1,7 @@
 import pc from "picocolors";
 import { AsyncLocalStorage } from "async_hooks";
 import { appendLogEntry, type LogEntry } from "../tracker/jsonl.js";
+import type { StructuredLogEvent } from "../domain/log-events.js";
 
 interface LogContext {
   workflow: string;
@@ -13,12 +14,26 @@ const logStore = new AsyncLocalStorage<LogContext>();
 
 const DEBUG_ENABLED = process.env.DEBUG === "true" || process.env.DEBUG === "1";
 
+type LogMessage = string | Omit<StructuredLogEvent, "level">;
+
+function messageText(input: LogMessage): string {
+  return typeof input === "string" ? input : input.message;
+}
+
+function structuredFields(input: LogMessage): Omit<StructuredLogEvent, "level" | "message"> {
+  if (typeof input === "string") return {};
+  const { message, ...rest } = input;
+  return rest;
+}
+
 function emit(
   level: LogEntry["level"],
   prefix: string,
-  msg: string,
+  input: LogMessage,
   toStderr = false,
 ): void {
+  const msg = messageText(input);
+  const extra = structuredFields(input);
   if (toStderr) {
     console.error(prefix + " " + msg);
   } else {
@@ -34,6 +49,7 @@ function emit(
         ...(ctx.runId ? { runId: ctx.runId } : {}),
         level,
         message: msg,
+        ...extra,
         ts: new Date().toISOString(),
       },
       ctx.dir,
@@ -62,11 +78,11 @@ function emitDebug(msg: string): void {
 }
 
 export const log = {
-  step: (msg: string): void => emit("step", pc.blue("->"), msg),
-  success: (msg: string): void => emit("success", pc.green("\u2713"), msg),
-  waiting: (msg: string): void => emit("waiting", pc.yellow("\u231B"), msg),
-  warn: (msg: string): void => emit("warn", pc.yellow("!"), msg),
-  error: (msg: string): void => emit("error", pc.red("\u2717"), msg, true),
+  step: (msg: LogMessage): void => emit("step", pc.blue("->"), msg),
+  success: (msg: LogMessage): void => emit("success", pc.green("\u2713"), msg),
+  waiting: (msg: LogMessage): void => emit("waiting", pc.yellow("\u231B"), msg),
+  warn: (msg: LogMessage): void => emit("warn", pc.yellow("!"), msg),
+  error: (msg: LogMessage): void => emit("error", pc.red("\u2717"), msg, true),
   debug: (msg: string): void => emitDebug(msg),
 };
 
