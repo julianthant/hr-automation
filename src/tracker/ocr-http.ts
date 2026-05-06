@@ -19,7 +19,7 @@ import { isAcceptedHdhDepartment } from "../domain/hdh/departments.js";
 import type { ChildOutcome, WatchChildRunsOpts } from "./watch-child-runs.js";
 import type { OcrRequest, OcrResult } from "../ocr/index.js";
 import { openControlDb } from "../core/control-db.js";
-import { createTaskStore } from "../core/task-store.js";
+import { createTaskStore } from "../core/task-store/index.js";
 
 const WORKFLOW = "ocr";
 

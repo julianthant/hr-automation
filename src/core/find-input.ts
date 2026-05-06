@@ -1,5 +1,5 @@
 import { readEntries } from "../tracker/jsonl.js";
-import { createTaskStore } from "./task-store.js";
+import { createTaskStore } from "./task-store/index.js";
 import { openControlDb } from "./control-db.js";
 
 const KERNEL_DATA_KEYS = new Set(["instance", "__name", "__id"]);

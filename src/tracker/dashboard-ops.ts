@@ -24,7 +24,7 @@ import { enqueueFromHttp } from "../core/enqueue-dispatch.js";
 import { stopDaemons } from "../core/daemon-client.js";
 import { openControlDb } from "../core/control-db.js";
 import { cancelInProcessRun } from "../core/in-process-runs.js";
-import { createTaskStore, type ControlTaskStore, type TaskRow } from "../core/task-store.js";
+import { createTaskStore, type ControlTaskStore, type TaskRow } from "../core/task-store/index.js";
 import { createWorkerStore, type BrowserProcessRow, type ControlWorkerStore, type WorkerRow } from "../core/worker-store.js";
 import { findInputForRetry } from "../core/find-input.js";
 import { log } from "../utils/log.js";

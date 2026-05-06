@@ -18,7 +18,7 @@ import { makeAuthObserver } from '../tracker/auth-observer.js'
 import { registerInProcessRun, unregisterInProcessRun } from './in-process-runs.js'
 import { operatorSubjectData } from '../domain/operator-subject.js'
 import { openControlDb } from './control-db.js'
-import { createTaskStore } from './task-store.js'
+import { createTaskStore } from './task-store/index.js'
 import { createWorkerStore } from './worker-store.js'
 import type { InProcessRunControl } from './in-process-runs.js'
 
