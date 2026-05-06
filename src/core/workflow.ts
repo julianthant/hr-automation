@@ -13,7 +13,7 @@ import { CancelledError } from './types.js'
 import { runWorkflowPool } from './pool.js'
 import { runWorkflowSharedContextPool } from './shared-context-pool.js'
 import { withBatchLifecycle } from './batch-lifecycle.js'
-import { validateAndPrepareItems, callerPreEmitsPending } from './batch-helpers.js'
+import { validateAndPrepareItems, callerPreEmitsPending, awaitAllSystemsReady } from './batch-helpers.js'
 import { makeAuthObserver } from '../tracker/auth-observer.js'
 import { registerInProcessRun, unregisterInProcessRun } from './in-process-runs.js'
 import { operatorSubjectData } from '../domain/operator-subject.js'
@@ -831,11 +831,7 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
         observer,
       })
 
-      // Await every system's readyPromise before snapshotting authTimings
-      // (interleaved authChain returns once first system is ready).
-      for (const sys of wf.config.systems) {
-        try { await session.page(sys.id) } catch { /* auth failure surfaces elsewhere */ }
-      }
+      await awaitAllSystemsReady(session, wf.config.systems)
       const authTimings = wf.config.authSteps !== false ? getAuthTimings() : undefined
 
       // Sequential between-items hook — skipped on the first item (fresh

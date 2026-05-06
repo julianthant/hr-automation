@@ -2,7 +2,7 @@ import type { RegisteredWorkflow, BatchResult, RunOpts } from './types.js'
 import { Session } from './session.js'
 import { runOneItem } from './workflow.js'
 import { withBatchLifecycle } from './batch-lifecycle.js'
-import { validateAndPrepareItems, callerPreEmitsPending } from './batch-helpers.js'
+import { validateAndPrepareItems, callerPreEmitsPending, awaitAllSystemsReady } from './batch-helpers.js'
 import type { PerItem } from './batch-helpers.js'
 import { log } from '../utils/log.js'
 
@@ -59,11 +59,7 @@ export async function runWorkflowPool<TData, TSteps extends readonly string[]>(
           launchFn: opts.launchFn,
           observer,
         })
-        // Wait for every system's auth to complete before processing items
-        // (interleaved returns after first system; we need all).
-        for (const sys of wf.config.systems) {
-          try { await session.page(sys.id) } catch { /* auth failure surfaces below */ }
-        }
+        await awaitAllSystemsReady(session, wf.config.systems)
         // Per-worker authTimings: each worker's Session.launch produced its
         // own auth start/complete events; items this worker processes get
         // THIS worker's timings (matches reality — one auth per worker).
