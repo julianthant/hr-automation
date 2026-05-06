@@ -7,7 +7,7 @@ import {
   DEFAULT_DIR,
   dateLocal,
 } from "../jsonl.js";
-import { sweepStuckOcrRows } from "../ocr-http.js";
+import { sweepStuckOcrRows } from "./ocr/index.js";
 import { sweepStuckOathUploadRows } from "../oath-upload-http.js";
 import { openStateDb } from "../state/db.js";
 import { rebuildProjectionForDate } from "../state/rebuild.js";

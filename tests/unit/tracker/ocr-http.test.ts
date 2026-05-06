@@ -13,7 +13,7 @@ import {
   sweepStuckOcrRows,
   _resetSessionLockForTests,
   type ApproveHandlerOpts,
-} from "../../../src/tracker/ocr-http.js";
+} from "../../../src/tracker/dashboard/ocr/index.js";
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store.js";
 
@@ -162,7 +162,7 @@ test("buildOcrRetryPageHandler rejects concurrent retries on the same row", asyn
   const dir = join(tmpdir(), `ocr-http-mutex-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
   try {
-    const { buildOcrRetryPageHandler, _resetSessionLockForTests } = await import("../../../src/tracker/ocr-http.js");
+    const { buildOcrRetryPageHandler, _resetSessionLockForTests } = await import("../../../src/tracker/dashboard/ocr/index.js");
     _resetSessionLockForTests();
 
     let inFlightResolve: () => void;
@@ -192,7 +192,7 @@ test("buildOcrRetryPageHandler maps RetryPageError codes to HTTP statuses", asyn
   const dir = join(tmpdir(), `ocr-http-err-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
   try {
-    const { buildOcrRetryPageHandler, _resetSessionLockForTests } = await import("../../../src/tracker/ocr-http.js");
+    const { buildOcrRetryPageHandler, _resetSessionLockForTests } = await import("../../../src/tracker/dashboard/ocr/index.js");
     const { RetryPageError } = await import("../../../src/workflows/ocr/retry-page.js");
     _resetSessionLockForTests();
 
@@ -233,7 +233,7 @@ test("buildOcrReocrWholePdfHandler replaces records and clears failedPages", asy
       },
     }) + "\n", "utf-8");
 
-    const { buildOcrReocrWholePdfHandler, _resetSessionLockForTests } = await import("../../../src/tracker/ocr-http.js");
+    const { buildOcrReocrWholePdfHandler, _resetSessionLockForTests } = await import("../../../src/tracker/dashboard/ocr/index.js");
     _resetSessionLockForTests();
 
     const writtenEntries: object[] = [];
@@ -293,7 +293,7 @@ test("buildOcrReocrWholePdfHandler assigns distinct itemIds to eid-lookup fan-ou
       },
     }) + "\n", "utf-8");
 
-    const { buildOcrReocrWholePdfHandler, _resetSessionLockForTests } = await import("../../../src/tracker/ocr-http.js");
+    const { buildOcrReocrWholePdfHandler, _resetSessionLockForTests } = await import("../../../src/tracker/dashboard/ocr/index.js");
     _resetSessionLockForTests();
 
     const captured: Array<{ name?: string; emplId?: string; itemId: string }> = [];
