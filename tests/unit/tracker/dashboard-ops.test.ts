@@ -28,7 +28,7 @@ import {
   buildDaemonsListHandler,
   buildRetryHandler,
   readQueueDepth,
-} from "../../../src/tracker/dashboard-ops.js";
+} from "../../../src/tracker/dashboard/ops/index.js";
 import { queueFilePath } from "../../../src/core/daemon-queue.js";
 import type { QueueEvent } from "../../../src/core/daemon-types.js";
 

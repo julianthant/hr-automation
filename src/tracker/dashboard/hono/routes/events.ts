@@ -16,7 +16,7 @@ import {
   type SessionEvent,
 } from "../../../session-events.js";
 import { queryEntriesPayload } from "../../../state/queries.js";
-import { resolveDaemonLogPath } from "../../../dashboard-ops.js";
+import { resolveDaemonLogPath } from "../../ops/index.js";
 import {
   buildRunTimelines,
   computeStepDurations,
