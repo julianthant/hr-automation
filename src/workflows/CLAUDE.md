@@ -61,7 +61,7 @@ Converting a workflow is mechanical — five edits:
      // ...workflow-specific args...
      options: { new?: boolean; parallel?: number } = {},
    ): Promise<void> {
-     const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
+     const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
      const inputs = [/* ...build typed WorkflowInput[]... */];
      await ensureDaemonsAndEnqueue(xxxWorkflow, inputs, {
        new: options.new,
