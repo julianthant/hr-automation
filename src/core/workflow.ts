@@ -13,6 +13,7 @@ import { CancelledError } from './types.js'
 import { runWorkflowPool } from './pool.js'
 import { runWorkflowSharedContextPool } from './shared-context-pool.js'
 import { withBatchLifecycle } from './batch-lifecycle.js'
+import { validateAndPrepareItems, callerPreEmitsPending } from './batch-helpers.js'
 import { makeAuthObserver } from '../tracker/auth-observer.js'
 import { registerInProcessRun, unregisterInProcessRun } from './in-process-runs.js'
 import { operatorSubjectData } from '../domain/operator-subject.js'
@@ -804,42 +805,14 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
     return runWorkflowSharedContextPool(wf, items, opts)
   }
 
-  // Sequential mode: validate all items upfront. Strip the prefilledData
-  // channel before parsing so workflow schemas don't have to know about
-  // the kernel-level edit-and-resume contract — strict()-mode schemas
-  // would otherwise reject the channel as an unknown key.
-  items.forEach((item) => {
-    try {
-      const { cleaned } = splitPrefilled(item)
-      wf.config.schema.parse(cleaned)
-    } catch (err) {
-      throw new Error(`validation error: ${err instanceof Error ? err.message : String(err)}`)
-    }
+  // Sequential mode: strip the prefilledData channel before parsing so workflow
+  // schemas don't have to know about the kernel-level edit-and-resume contract —
+  // strict()-mode schemas would otherwise reject the channel as an unknown key.
+  const perItem = validateAndPrepareItems(wf, items, opts, (item) => {
+    const { cleaned } = splitPrefilled(item)
+    wf.config.schema.parse(cleaned)
   })
-
-  // Pre-generate one itemId + runId per item so pre-emit callbacks receive the same
-  // runId that withTrackedWorkflow will later use. This lets callers emit the initial
-  // `pending` row now and have withTrackedWorkflow skip its duplicate pending emit.
-  // If the caller provides `deriveItemId`, use it — lets workflows like
-  // emergency-contact produce `p{NN}-{emplId}`-shaped ids that `onPreEmitPending`
-  // and the handler's withTrackedWorkflow both use.
-  const itemIdFn = opts.deriveItemId ?? wf.config.deriveItemId ?? ((item) => deriveItemId(item, randomUUID()))
-  const perItem = items.map((item) => ({
-    item,
-    itemId: itemIdFn(item),
-    runId: randomUUID(),
-  }))
-
-  // Emit pending for all items upfront if requested — runIds are paired so the
-  // caller writes the same runId that the handler's withTrackedWorkflow will use.
-  // If the workflow doesn't opt into preEmitPending, we emit a minimal pending
-  // row per item right before that item runs (below, inside the loop).
-  const callerPreEmits = Boolean(batch?.preEmitPending && opts.onPreEmitPending)
-  if (callerPreEmits) {
-    for (const { item, runId } of perItem) {
-      opts.onPreEmitPending!(item, runId)
-    }
-  }
+  const callerPreEmits = callerPreEmitsPending(wf, opts)
 
   const result: BatchResult = { total: items.length, succeeded: 0, failed: 0, errors: [] }
 

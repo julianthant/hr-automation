@@ -1,15 +1,12 @@
-import { randomUUID } from 'node:crypto'
 import type { RegisteredWorkflow, BatchResult, RunOpts } from './types.js'
 import { Session } from './session.js'
-import { deriveItemId, runOneItem } from './workflow.js'
+import { runOneItem } from './workflow.js'
 import { withBatchLifecycle } from './batch-lifecycle.js'
+import { validateAndPrepareItems, callerPreEmitsPending } from './batch-helpers.js'
+import type { PerItem } from './batch-helpers.js'
 import { log } from '../utils/log.js'
 
-interface PoolItem<TData> {
-  item: TData
-  itemId: string
-  runId: string
-}
+type PoolItem<TData> = PerItem<TData>
 
 /**
  * Run N items across N workers, each with its OWN authenticated Session.
@@ -37,25 +34,10 @@ export async function runWorkflowPool<TData, TSteps extends readonly string[]>(
 ): Promise<BatchResult> {
   const poolSize = opts.poolSize ?? wf.config.batch?.poolSize ?? 4
 
-  items.forEach((item) => {
-    try {
-      wf.config.schema.parse(item)
-    } catch (err) {
-      throw new Error(`validation error: ${err instanceof Error ? err.message : String(err)}`)
-    }
-  })
-
-  const itemIdFn = opts.deriveItemId ?? wf.config.deriveItemId ?? ((item: unknown) => deriveItemId(item, randomUUID()))
-  const perItem: PoolItem<TData>[] = items.map((item) => ({
-    item,
-    itemId: itemIdFn(item),
-    runId: randomUUID(),
-  }))
-
-  const callerPreEmits = Boolean(wf.config.batch?.preEmitPending && opts.onPreEmitPending)
-  if (callerPreEmits) {
-    for (const { item, runId } of perItem) opts.onPreEmitPending!(item, runId)
-  }
+  const perItem: PoolItem<TData>[] = validateAndPrepareItems(wf, items, opts, (item) =>
+    wf.config.schema.parse(item),
+  )
+  const callerPreEmits = callerPreEmitsPending(wf, opts)
 
   const result: BatchResult = { total: items.length, succeeded: 0, failed: 0, errors: [] }
 
