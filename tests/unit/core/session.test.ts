@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { Session } from '../../../src/core/session.js'
-import type { SystemConfig } from '../../../src/core/types.js'
+import { Session } from '../../../src/core/kernel/session.js'
+import type { SystemConfig } from '../../../src/core/kernel/types.js'
 
 const makeSystem = (id: string, loginFn?: () => Promise<void>): SystemConfig => ({
   id,

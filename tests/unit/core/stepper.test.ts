@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { Stepper } from '../../../src/core/stepper.js'
+import { Stepper } from '../../../src/core/kernel/stepper.js'
 
 interface RecordedEvent {
   kind: 'step' | 'data' | 'done' | 'failed'
@@ -115,7 +115,7 @@ test('stepper.markStep: does not throw even if emitStep is a no-op', () => {
 })
 
 test('stepper calls screenshotFn on step failure with { kind: "error", label: stepName }', async () => {
-  const captured: import('../../../src/core/types.js').ScreenshotOpts[] = []
+  const captured: import('../../../src/core/kernel/types.js').ScreenshotOpts[] = []
   const stepper = new Stepper({
     workflow: 't',
     itemId: '1',
@@ -138,7 +138,7 @@ test('stepper calls screenshotFn on step failure with { kind: "error", label: st
 })
 
 test('stepper does not call screenshotFn on success', async () => {
-  const captured: import('../../../src/core/types.js').ScreenshotOpts[] = []
+  const captured: import('../../../src/core/kernel/types.js').ScreenshotOpts[] = []
   const stepper = new Stepper({
     workflow: 't',
     itemId: '1',

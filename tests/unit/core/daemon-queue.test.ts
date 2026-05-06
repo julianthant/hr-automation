@@ -14,7 +14,7 @@ import {
   readQueueState,
   queueFilePath,
   queueLockDirPath,
-} from '../../../src/core/daemon-queue.js'
+} from '../../../src/core/daemon/queue.js'
 import { openControlDb } from '../../../src/core/control-db.js'
 import { createTaskStore } from '../../../src/core/task-store/index.js'
 import { createOcrEidLookupDependencyBatch } from '../../../src/tracker/tasks/store.js'

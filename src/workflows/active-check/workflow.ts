@@ -1,5 +1,5 @@
 import { defineWorkflow, runWorkflow } from "../../core/index.js";
-import type { Ctx } from "../../core/types.js";
+import type { Ctx } from "../../core/kernel/types.js";
 import { loginToUCPath } from "../../auth/login.js";
 import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 import { isAcceptedHdhDepartment } from "../../domain/hdh/departments.js";
@@ -200,7 +200,7 @@ export async function runActiveCheckCli(
   }
   const inputs = queries.map((query) => (/^\d{5,}$/.test(query) ? { emplId: query } : { name: query }));
   const parsed = inputs.map((input) => ActiveCheckItemSchema.parse(input));
-  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
+  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
   const now = new Date().toISOString();
   await ensureDaemonsAndEnqueue(
     activeCheckWorkflow,

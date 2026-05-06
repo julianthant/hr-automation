@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { defineWorkflow, runWorkflowBatch } from '../../../src/core/workflow.js'
+import { defineWorkflow, runWorkflowBatch } from '../../../src/core/kernel/workflow.js'
 import { dateLocal } from '../../../src/tracker/jsonl.js'
 
 function fakeSlot() {

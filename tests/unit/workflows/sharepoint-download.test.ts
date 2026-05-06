@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getByName, clear } from "../../../src/core/registry.js";
+import { getByName, clear } from "../../../src/core/kernel/registry.js";
 
 test("sharepoint-download: registers as kernel workflow on import", async () => {
   clear();
@@ -45,7 +45,7 @@ test("buildSharePointRosterDownloadHandler: fires kernel runWorkflow and returns
     runWorkflowFn: (async (_wf, input) => {
       captured.push(input as CapturedInput);
       await new Promise((resolve) => setTimeout(resolve, 50));
-    }) as typeof import("../../../src/core/workflow.js").runWorkflow,
+    }) as typeof import("../../../src/core/kernel/workflow.js").runWorkflow,
   });
 
   const start = Date.now();
@@ -111,7 +111,7 @@ test("buildSharePointRosterDownloadHandler: 409 when concurrent run in flight", 
     getEnv: () => "https://example.com/file.xlsx",
     runWorkflowFn: (async () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
-    }) as typeof import("../../../src/core/workflow.js").runWorkflow,
+    }) as typeof import("../../../src/core/kernel/workflow.js").runWorkflow,
   });
 
   const first = handler({ id: "onboarding" });

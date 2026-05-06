@@ -1,7 +1,7 @@
 import type { Page } from 'playwright'
 import type { ZodType } from 'zod'
-import type { OperatorSubject } from '../domain/operator-subject.js'
-import type { log } from '../utils/log.js'
+import type { OperatorSubject } from '../../domain/operator-subject.js'
+import type { log } from '../../utils/log.js'
 
 export interface SystemConfig {
   id: string

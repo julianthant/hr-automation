@@ -4,7 +4,7 @@ import { runOneItem } from './workflow.js'
 import { withBatchLifecycle } from './batch-lifecycle.js'
 import { validateAndPrepareItems, callerPreEmitsPending, awaitAllSystemsReady } from './batch-helpers.js'
 import type { PerItem } from './batch-helpers.js'
-import { log } from '../utils/log.js'
+import { log } from '../../utils/log.js'
 
 type PoolItem<TData> = PerItem<TData>
 

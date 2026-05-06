@@ -4,8 +4,8 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { defineWorkflow } from '../../../src/core/workflow.js'
-import { runWorkflowPool } from '../../../src/core/pool.js'
+import { defineWorkflow } from '../../../src/core/kernel/workflow.js'
+import { runWorkflowPool } from '../../../src/core/kernel/pool.js'
 import { dateLocal } from '../../../src/tracker/jsonl.js'
 
 const fakeLaunch = () => Promise.resolve({

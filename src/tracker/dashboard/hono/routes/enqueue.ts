@@ -3,7 +3,7 @@ import type { Hono } from "hono";
 import {
   enqueueFromHttp,
   validateEnqueueRequest,
-} from "../../../../core/enqueue-dispatch.js";
+} from "../../../../core/daemon/enqueue-dispatch.js";
 import { errorMessage } from "../../../../utils/errors.js";
 import { log } from "../../../../utils/log.js";
 import type { DashboardHonoDeps } from "../context.js";

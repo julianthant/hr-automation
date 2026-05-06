@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { z } from 'zod'
-import { defineWorkflow } from '../../../src/core/workflow.js'
-import { getByName, clear } from '../../../src/core/registry.js'
+import { defineWorkflow } from '../../../src/core/kernel/workflow.js'
+import { getByName, clear } from '../../../src/core/kernel/registry.js'
 
 // Isolate each test by clearing the registry before it runs.
 // getByName returns WorkflowMetadata directly (not RegisteredWorkflow).

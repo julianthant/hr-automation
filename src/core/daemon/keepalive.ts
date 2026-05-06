@@ -1,6 +1,6 @@
-import type { Session } from './session.js'
-import type { SystemConfig } from './types.js'
-import { log } from '../utils/log.js'
+import type { Session } from '../kernel/session.js'
+import type { SystemConfig } from '../kernel/types.js'
+import { log } from '../../utils/log.js'
 
 export interface KeepaliveOpts {
   instanceId: string

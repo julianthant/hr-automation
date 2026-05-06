@@ -4,10 +4,10 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { defineWorkflow } from '../../../src/core/workflow.js'
-import { clear } from '../../../src/core/registry.js'
-import { computeSpawnPlan, ensureDaemonsAndEnqueue } from '../../../src/core/daemon-client.js'
-import { readQueueState } from '../../../src/core/daemon-queue.js'
+import { defineWorkflow } from '../../../src/core/kernel/workflow.js'
+import { clear } from '../../../src/core/kernel/registry.js'
+import { computeSpawnPlan, ensureDaemonsAndEnqueue } from '../../../src/core/daemon/client.js'
+import { readQueueState } from '../../../src/core/daemon/queue.js'
 import { openControlDb } from '../../../src/core/control-db.js'
 
 // ---- computeSpawnPlan routing rule ----
@@ -126,7 +126,7 @@ test('ensureDaemonsAndEnqueue: 1 live stub daemon → spawnCount=0, items enqueu
     const port = typeof addr === 'object' && addr ? addr.port : 0
 
     // Write a matching lockfile so findAliveDaemons picks the stub up.
-    const { writeLockfile, lockfilePath, ensureDaemonsDir } = await import('../../../src/core/daemon-registry.js')
+    const { writeLockfile, lockfilePath, ensureDaemonsDir } = await import('../../../src/core/daemon/registry.js')
     ensureDaemonsDir(dir)
     const lp = lockfilePath('stub-wf', 'stub-01', dir)
     writeLockfile(
@@ -197,7 +197,7 @@ test('ensureDaemonsAndEnqueue: forwards parentRunId opt onto every queued item',
     const addr = server.address()
     const port = typeof addr === 'object' && addr ? addr.port : 0
 
-    const { writeLockfile, lockfilePath, ensureDaemonsDir } = await import('../../../src/core/daemon-registry.js')
+    const { writeLockfile, lockfilePath, ensureDaemonsDir } = await import('../../../src/core/daemon/registry.js')
     ensureDaemonsDir(dir)
     const lp = lockfilePath('parent-wf', 'pwf-01', dir)
     writeLockfile(
@@ -262,7 +262,7 @@ test('ensureDaemonsAndEnqueue: omits parentRunId when not in opts (back-compat)'
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
     const addr = server.address()
     const port = typeof addr === 'object' && addr ? addr.port : 0
-    const { writeLockfile, lockfilePath, ensureDaemonsDir } = await import('../../../src/core/daemon-registry.js')
+    const { writeLockfile, lockfilePath, ensureDaemonsDir } = await import('../../../src/core/daemon/registry.js')
     ensureDaemonsDir(dir)
     writeLockfile(
       { workflow: 'noparent-wf', instanceId: 'np-01', pid: process.pid, port, startedAt: new Date().toISOString(), hostname: 'host', version: 1 },
@@ -308,7 +308,7 @@ test('ensureDaemonsAndEnqueue: calls onPreparedItems with stable ids and runIds 
     const addr = server.address()
     const port = typeof addr === 'object' && addr ? addr.port : 0
 
-    const { writeLockfile, lockfilePath, ensureDaemonsDir } = await import('../../../src/core/daemon-registry.js')
+    const { writeLockfile, lockfilePath, ensureDaemonsDir } = await import('../../../src/core/daemon/registry.js')
     ensureDaemonsDir(dir)
     writeLockfile(
       { workflow: 'prepared-wf', instanceId: 'prep-01', pid: process.pid, port, startedAt: new Date().toISOString(), hostname: 'host', version: 1 },

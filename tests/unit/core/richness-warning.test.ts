@@ -4,7 +4,7 @@ import { existsSync, rmSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { defineWorkflow, runWorkflow } from '../../../src/core/workflow.js'
+import { defineWorkflow, runWorkflow } from '../../../src/core/kernel/workflow.js'
 import { log } from '../../../src/utils/log.js'
 
 function fakeSlot() {

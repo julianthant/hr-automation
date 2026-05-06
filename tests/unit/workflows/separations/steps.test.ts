@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { separationsWorkflow } from '../../../../src/workflows/separations/workflow.js'
-import { getByName } from '../../../../src/core/registry.js'
+import { getByName } from '../../../../src/core/kernel/registry.js'
 
 test('separations effective step list is auth:<systems> + work steps', () => {
   // Import of separationsWorkflow triggers defineWorkflow which auto-registers.

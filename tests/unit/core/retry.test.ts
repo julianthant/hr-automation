@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { z } from 'zod'
-import { defineWorkflow, runWorkflow } from '../../../src/core/workflow.js'
+import { defineWorkflow, runWorkflow } from '../../../src/core/kernel/workflow.js'
 
 const mockLaunchFn = () =>
   Promise.resolve({

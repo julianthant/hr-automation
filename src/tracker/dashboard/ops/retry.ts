@@ -1,6 +1,6 @@
 import { existsSync } from "fs";
 import { readEntries, trackEvent } from "../../jsonl.js";
-import { enqueueFromHttp } from "../../../core/enqueue-dispatch.js";
+import { enqueueFromHttp } from "../../../core/daemon/enqueue-dispatch.js";
 import { findInputForRetry } from "../../../core/find-input.js";
 import {
   DASHBOARD_CANCEL_ERROR,

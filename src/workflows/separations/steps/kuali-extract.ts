@@ -5,7 +5,7 @@ import {
   extractSeparationData,
   isVoluntaryTermination,
 } from "../../../systems/kuali/index.js";
-import type { Ctx } from "../../../core/types.js";
+import type { Ctx } from "../../../core/kernel/types.js";
 
 /**
  * Body of the `kuali-extraction` step.

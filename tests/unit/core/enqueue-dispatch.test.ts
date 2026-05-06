@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildHttpPendingData } from "../../../src/core/enqueue-dispatch.js";
+import { buildHttpPendingData } from "../../../src/core/daemon/enqueue-dispatch.js";
 import { eidLookupCrmWorkflow } from "../../../src/workflows/eid-lookup/workflow.js";
 
 test("buildHttpPendingData: EID lookup HTTP enqueue seeds normalized display data", () => {

@@ -1,4 +1,4 @@
-import { classifyError } from '../utils/errors.js'
+import { classifyError } from '../../utils/errors.js'
 import { CancelledError, type ScreenshotFn } from './types.js'
 
 export interface StepperOpts {

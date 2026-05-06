@@ -6,10 +6,10 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { splitPrefilled } from '../../../src/core/workflow.js'
-import { Stepper } from '../../../src/core/stepper.js'
-import { Session } from '../../../src/core/session.js'
-import { makeCtx } from '../../../src/core/ctx.js'
+import { splitPrefilled } from '../../../src/core/kernel/workflow.js'
+import { Stepper } from '../../../src/core/kernel/stepper.js'
+import { Session } from '../../../src/core/kernel/session.js'
+import { makeCtx } from '../../../src/core/kernel/ctx.js'
 
 test('splitPrefilled: returns input untouched + null prefilled when no channel', () => {
   const input = { docId: '3930' }

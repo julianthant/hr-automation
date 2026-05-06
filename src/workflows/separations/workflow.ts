@@ -51,7 +51,7 @@ import {
   UC_INVOL_TERM_TEMPLATE,
 } from "./config.js";
 import { PATHS, UCPATH_SMART_HR_URL } from "../../config.js";
-import { getProcessIsolatedSessionDir } from "../../core/session.js";
+import { getProcessIsolatedSessionDir } from "../../core/kernel/session.js";
 
 // Step functions
 import { runKualiExtract } from "./steps/kuali-extract.js";

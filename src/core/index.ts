@@ -1,4 +1,4 @@
-export type * from './types.js'
+export type * from './kernel/types.js'
 export {
   register,
   defineDashboardMetadata,
@@ -7,23 +7,23 @@ export {
   clear,
   autoLabel,
   normalizeDetailField,
-} from './registry.js'
+} from './kernel/registry.js'
 export {
   defineWorkflow,
   runWorkflow,
   runWorkflowBatch,
   buildTrackerOpts,
   deriveItemId,
-} from './workflow.js'
-export { runWorkflowPool } from './pool.js'
-export { runWorkflowSharedContextPool } from './shared-context-pool.js'
-export { Session } from './session.js'
-export { Stepper } from './stepper.js'
-export { makeCtx } from './ctx.js'
+} from './kernel/workflow.js'
+export { runWorkflowPool } from './kernel/pool.js'
+export { runWorkflowSharedContextPool } from './kernel/shared-context-pool.js'
+export { Session } from './kernel/session.js'
+export { Stepper } from './kernel/stepper.js'
+export { makeCtx } from './kernel/ctx.js'
 export * from './control-db.js'
 export * from './control-schema.js'
 export * from './task-store/index.js'
-export * from './worker-store.js'
+export * from './daemon/worker-store.js'
 export {
   daemonsDir,
   lockfilePath,
@@ -34,7 +34,7 @@ export {
   isProcessAlive,
   findAliveDaemons,
   spawnDaemon,
-} from './daemon-registry.js'
+} from './daemon/registry.js'
 export {
   enqueueItems,
   claimNextItem,
@@ -45,20 +45,20 @@ export {
   readQueueState,
   queueFilePath,
   queueLockDirPath,
-} from './daemon-queue.js'
+} from './daemon/queue.js'
 export {
   ensureDaemonsAndEnqueue,
   stopDaemons,
   computeSpawnPlan,
-} from './daemon-client.js'
-export { runWorkflowDaemon } from './daemon.js'
-export type { DaemonOpts } from './daemon.js'
+} from './daemon/client.js'
+export { runWorkflowDaemon } from './daemon/daemon.js'
+export type { DaemonOpts } from './daemon/daemon.js'
 export {
   registerInProcessRun,
   unregisterInProcessRun,
   cancelInProcessRun,
-} from './in-process-runs.js'
-export type { InProcessRunIdent, CancelInProcessRunResult } from './in-process-runs.js'
+} from './daemon/in-process-runs.js'
+export type { InProcessRunIdent, CancelInProcessRunResult } from './daemon/in-process-runs.js'
 export type {
   DaemonLockfile,
   Daemon,
@@ -67,4 +67,4 @@ export type {
   QueueState,
   DaemonFlags,
   EnqueueResult,
-} from './daemon-types.js'
+} from './daemon/types.js'

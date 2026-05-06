@@ -1,10 +1,10 @@
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { mkdir, rmdir } from "fs/promises";
 import { setTimeout as delay } from "timers/promises";
-import { cancelInProcessRun } from "../../../core/in-process-runs.js";
-import { queueFilePath, queueLockDirPath } from "../../../core/daemon-queue.js";
-import type { QueueEvent } from "../../../core/daemon-types.js";
-import type { BrowserProcessRow, ControlWorkerStore } from "../../../core/worker-store.js";
+import { cancelInProcessRun } from "../../../core/daemon/in-process-runs.js";
+import { queueFilePath, queueLockDirPath } from "../../../core/daemon/queue.js";
+import type { QueueEvent } from "../../../core/daemon/types.js";
+import type { BrowserProcessRow, ControlWorkerStore } from "../../../core/daemon/worker-store.js";
 import {
   DASHBOARD_CANCEL_ERROR,
   openControlStores,
@@ -84,7 +84,7 @@ function signalBrowserPid(pid: number): void {
 }
 
 async function requestDaemonForceCurrent(
-  worker: import("../../../core/worker-store.js").WorkerRow | null,
+  worker: import("../../../core/daemon/worker-store.js").WorkerRow | null,
   itemId: string,
   runId: string | undefined,
 ): Promise<boolean> {

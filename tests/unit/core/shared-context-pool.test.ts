@@ -4,8 +4,8 @@ import { mkdtempSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { defineWorkflow } from '../../../src/core/workflow.js'
-import { runWorkflowSharedContextPool } from '../../../src/core/shared-context-pool.js'
+import { defineWorkflow } from '../../../src/core/kernel/workflow.js'
+import { runWorkflowSharedContextPool } from '../../../src/core/kernel/shared-context-pool.js'
 import { dateLocal } from '../../../src/tracker/jsonl.js'
 
 function fakeSlot() {

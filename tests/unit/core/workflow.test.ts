@@ -4,11 +4,11 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { defineWorkflow, runWorkflow } from '../../../src/core/workflow.js'
-import { getAll, getByName, clear } from '../../../src/core/registry.js'
+import { defineWorkflow, runWorkflow } from '../../../src/core/kernel/workflow.js'
+import { getAll, getByName, clear } from '../../../src/core/kernel/registry.js'
 import { openControlDb } from '../../../src/core/control-db.js'
 import { createTaskStore } from '../../../src/core/task-store/index.js'
-import { createWorkerStore } from '../../../src/core/worker-store.js'
+import { createWorkerStore } from '../../../src/core/daemon/worker-store.js'
 
 test('defineWorkflow: registers metadata on construction', () => {
   clear()

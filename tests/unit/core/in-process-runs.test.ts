@@ -6,11 +6,11 @@ import {
   cancelInProcessRun,
   _listInProcessRunsForTests,
   _resetInProcessRunsForTests,
-} from '../../../src/core/in-process-runs.js'
-import type { Session } from '../../../src/core/session.js'
+} from '../../../src/core/daemon/in-process-runs.js'
+import type { Session } from '../../../src/core/kernel/session.js'
 import { openControlDb } from '../../../src/core/control-db.js'
 import { createTaskStore } from '../../../src/core/task-store/index.js'
-import { createWorkerStore } from '../../../src/core/worker-store.js'
+import { createWorkerStore } from '../../../src/core/daemon/worker-store.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

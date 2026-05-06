@@ -1,5 +1,5 @@
-import { getAll as getAllRegisteredWorkflows } from "../../core/registry.js";
-import type { WorkflowMetadata } from "../../core/types.js";
+import { getAll as getAllRegisteredWorkflows } from "../../core/kernel/registry.js";
+import type { WorkflowMetadata } from "../../core/kernel/types.js";
 
 export function buildWorkflowsHandler(): () => WorkflowMetadata[] {
   return () => getAllRegisteredWorkflows();

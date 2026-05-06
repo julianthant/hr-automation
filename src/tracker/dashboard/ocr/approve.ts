@@ -130,7 +130,7 @@ export function buildOcrApproveHandler(
             parentRunId ? { parentRunId } : undefined,
           );
         } else {
-          const { ensureDaemonsAndEnqueue } = await import("../../../core/daemon-client.js");
+          const { ensureDaemonsAndEnqueue } = await import("../../../core/daemon/client.js");
           const { loadWorkflow } = await import("../../../core/workflow-loaders.js");
           const childWf = await loadWorkflow(spec.approveTo.workflow);
           if (!childWf) {

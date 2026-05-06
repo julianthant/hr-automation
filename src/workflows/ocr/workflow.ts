@@ -1,5 +1,5 @@
 import { defineWorkflow } from "../../core/index.js";
-import type { Ctx } from "../../core/types.js";
+import type { Ctx } from "../../core/kernel/types.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { runOcrOrchestrator } from "./orchestrator.js";
 import { OcrInputSchema, type OcrInput } from "./schema.js";

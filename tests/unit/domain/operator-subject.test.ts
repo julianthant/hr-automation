@@ -5,7 +5,7 @@ import {
   operatorSubjectData,
   resolveOperatorSubjectFromData,
 } from "../../../src/domain/operator-subject.js";
-import { getAll } from "../../../src/core/registry.js";
+import { getAll } from "../../../src/core/kernel/registry.js";
 import "../../../src/workflows/onboarding/index.js";
 import "../../../src/workflows/separations/index.js";
 import "../../../src/workflows/old-kronos-reports/index.js";

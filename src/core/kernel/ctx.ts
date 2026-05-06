@@ -1,7 +1,7 @@
 import type { Ctx, RetryOpts } from './types.js'
 import type { Session } from './session.js'
 import type { Stepper } from './stepper.js'
-import { log } from '../utils/log.js'
+import { log } from '../../utils/log.js'
 import { makeScreenshotFn } from './screenshot.js'
 import type { ScreenshotEvent } from './screenshot.js'
 

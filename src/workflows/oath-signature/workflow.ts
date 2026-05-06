@@ -163,7 +163,7 @@ export async function runOathSignatureCli(
     process.exitCode = 1;
     return;
   }
-  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
+  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
   const now = new Date().toISOString();
   await ensureDaemonsAndEnqueue(
     oathSignatureWorkflow,
