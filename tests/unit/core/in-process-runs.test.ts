@@ -9,7 +9,7 @@ import {
 } from '../../../src/core/in-process-runs.js'
 import type { Session } from '../../../src/core/session.js'
 import { openControlDb } from '../../../src/core/control-db.js'
-import { createTaskStore } from '../../../src/core/task-store.js'
+import { createTaskStore } from '../../../src/core/task-store/index.js'
 import { createWorkerStore } from '../../../src/core/worker-store.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

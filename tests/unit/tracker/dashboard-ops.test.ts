@@ -13,7 +13,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { readLogEntries, trackEvent } from "../../../src/tracker/jsonl.js";
 import { openControlDb } from "../../../src/core/control-db.js";
-import { createTaskStore } from "../../../src/core/task-store.js";
+import { createTaskStore } from "../../../src/core/task-store/index.js";
 import { createWorkerStore } from "../../../src/core/worker-store.js";
 import {
   findEntryInput,

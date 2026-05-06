@@ -12,7 +12,7 @@ import { findAliveDaemons } from "../../core/daemon-registry.js";
 import { readQueueState, markItemFailed } from "../../core/daemon-queue.js";
 import { buildTrackerDataForInput } from "../../core/enqueue-dispatch.js";
 import { openControlDb } from "../../core/control-db.js";
-import { createTaskStore } from "../../core/task-store.js";
+import { createTaskStore } from "../../core/task-store/index.js";
 
 /**
  * Cooldown map for failure-pattern alerts. Module-level so it survives the

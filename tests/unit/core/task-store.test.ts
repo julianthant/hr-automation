@@ -8,7 +8,7 @@ import { openControlDb } from '../../../src/core/control-db.js'
 import {
   createTaskStore,
   type ControlTaskStore,
-} from '../../../src/core/task-store.js'
+} from '../../../src/core/task-store/index.js'
 
 function iso(n: number): string {
   return `2026-05-04T12:00:${String(n).padStart(2, '0')}.000Z`
