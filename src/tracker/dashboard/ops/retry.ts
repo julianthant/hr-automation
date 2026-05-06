@@ -247,7 +247,7 @@ async function reEnqueueOcrEntry(
     return { ok: false, error: `OCR retry: PDF no longer exists at ${pdfPath}` };
   }
 
-  const { buildOcrPrepareHandler } = await import("../../ocr-http.js");
+  const { buildOcrPrepareHandler } = await import("../ocr/index.js");
   const handler = buildOcrPrepareHandler({ trackerDir: dir });
   const result = await handler({
     pdfPath,
