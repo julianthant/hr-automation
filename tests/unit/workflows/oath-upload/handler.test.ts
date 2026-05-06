@@ -165,3 +165,62 @@ test("oathUploadHandler: skips delegate-ocr + wait-ocr-approval when prior appro
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("oathUploadHandler: dryRun propagates to OCR and skips ServiceNow submit", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oath-upload-handler-dry-run-"));
+  try {
+    const stepCalls: string[] = [];
+    const updates: Record<string, unknown>[] = [];
+    let ocrDryRun: boolean | undefined;
+    let submitCalled = false;
+
+    const fakeCtx = {
+      runId: "oath-upload-run-dry",
+      data: {} as Record<string, unknown>,
+      page: async () => ({ url: () => "x", title: async () => "x" }),
+      step: async (name: string, fn: () => Promise<void>) => {
+        stepCalls.push(name);
+        await fn();
+      },
+      markStep: (name: string) => { stepCalls.push(`mark:${name}`); },
+      skipStep: (name: string) => { stepCalls.push(`skip:${name}`); },
+      updateData: (d: Record<string, unknown>) => {
+        updates.push(d);
+        Object.assign(fakeCtx.data, d);
+      },
+      screenshot: async (_opts: { label: string }) => undefined,
+    };
+
+    await oathUploadHandler(fakeCtx as never, {
+      pdfPath: "/tmp/dry.pdf",
+      pdfOriginalName: "dry.pdf",
+      sessionId: "session-dry",
+      pdfHash: "a".repeat(64),
+      rosterMode: "download",
+      dryRun: true,
+    }, {
+      trackerDir: dir,
+      _runOcrOverride: async (input) => { ocrDryRun = input.dryRun; },
+      _waitForOcrApprovalOverride: async () => ({
+        step: "approved" as const,
+        fannedOutItemIds: ["10706431"],
+      }),
+      _watchChildRunsOverride: async () => [],
+      _gotoOverride: async () => undefined,
+      _verifyOverride: async () => undefined,
+      _fillFormOverride: async () => undefined,
+      _submitOverride: async () => {
+        submitCalled = true;
+        return "HRC-SHOULD-NOT-HAPPEN";
+      },
+    });
+
+    assert.equal(ocrDryRun, true);
+    assert.equal(submitCalled, false);
+    assert.ok(stepCalls.includes("submit"));
+    assert.ok(updates.some((u) => u.status === "dry-run-complete"));
+    assert.ok(updates.some((u) => u.ticketNumber === "DRY RUN - not submitted"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

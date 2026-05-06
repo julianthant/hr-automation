@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { FileText, FileScan, Loader2, UploadCloud, X as XIcon } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -27,6 +27,10 @@ import { OathRecordView } from "./OathRecordView";
 import { PdfPagePreview } from "../PdfPagePreview";
 import { usePrepCursor } from "../hooks/usePrepCursor";
 import { useTaskDependencies } from "../hooks/useTaskDependencies";
+import {
+  derivePreviewApprovalGate,
+  type PreviewPageStatus,
+} from "./preview-gate";
 import {
   resolveOcrConfigForEntry,
   setOcrDownstreamRenderer,
@@ -102,6 +106,7 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
   const [discarding, setDiscarding] = useState(false);
   const [researchingIndices, setResearchingIndices] = useState<Set<number>>(new Set());
   const [markedBlankPages, setMarkedBlankPages] = useState<Set<number>>(new Set());
+  const [previewStatusByPage, setPreviewStatusByPage] = useState<Record<number, PreviewPageStatus>>({});
 
   async function handleDiscard(): Promise<void> {
     if (!cfg) return;
@@ -144,6 +149,16 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
     () => baseRecords.map((r, i) => localEdits[i] ?? r),
     [baseRecords, localEdits],
   );
+
+  useEffect(() => {
+    setPreviewStatusByPage({});
+  }, [entry.id, runId, data?.pdfFileId]);
+
+  const handlePreviewStatusChange = useCallback((page: number, status: PreviewPageStatus): void => {
+    setPreviewStatusByPage((prev) => (
+      prev[page] === status ? prev : { ...prev, [page]: status }
+    ));
+  }, []);
 
   const setRecord = (index: number, next: AnyPreviewRecord): void => {
     setLocalEdits((prev) => ({ ...prev, [index]: next }));
@@ -224,6 +239,24 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
     [records],
   );
   const selectedCount = approvableRecords.filter((r) => r.selected).length;
+  const requiredPreviewPages = useMemo(
+    () => Array.from(
+      new Set(
+        renderList
+          .filter((item) => item.kind !== "failed")
+          .map((item) => item.page),
+      ),
+    ).sort((a, b) => a - b),
+    [renderList],
+  );
+  const previewGate = useMemo(
+    () => derivePreviewApprovalGate({
+      requiredPages: requiredPreviewPages,
+      previewStatusByPage,
+      selectedCount,
+    }),
+    [requiredPreviewPages, previewStatusByPage, selectedCount],
+  );
   // How many approvable records aren't yet selected — drives the "Select
   // all" affordance. Records that aren't approvable (inactive / non-hdh /
   // unmatched / no EID) are intentionally excluded so this never auto-
@@ -292,12 +325,24 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
 
   async function handleApprove() {
     if (submitting || !cfg) return;
+    if (previewGate.blocked) {
+      toast.error("Preview required before approval", {
+        description: previewGate.reason,
+      });
+      return;
+    }
     setSubmitting(true);
     try {
       const resp = await fetch(cfg.approveUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, runId, records }),
+        body: JSON.stringify({
+          sessionId,
+          runId,
+          records,
+          previewReady: true,
+          previewPageCount: previewGate.totalCount,
+        }),
       });
       const body = (await resp.json()) as {
         ok?: boolean;
@@ -357,6 +402,19 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
           <span className="font-mono text-xs text-muted-foreground">{summary}</span>
+          {previewGate.totalCount > 0 && (
+            <span
+              className={cn(
+                "rounded border px-2 py-0.5 text-[11px] font-mono",
+                previewGate.blocked
+                  ? "border-warning/40 bg-warning/10 text-warning"
+                  : "border-success/40 bg-success/10 text-success",
+              )}
+              title={previewGate.blocked ? previewGate.reason : "Source preview reviewed"}
+            >
+              Preview {previewGate.loadedCount}/{previewGate.totalCount}
+            </span>
+          )}
           {dependencySummary && dependencySummary.total > 0 && (
             <div className="flex items-center gap-1.5 text-[11px] font-mono text-muted-foreground">
               <span className="rounded border border-border bg-secondary/40 px-2 py-0.5">
@@ -416,17 +474,28 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
               Select all ({unselectedApprovableCount})
             </button>
           )}
-          <button
-            onClick={handleApprove}
-            disabled={submitting || discarding || selectedCount === 0}
-            className={cn(
-              "inline-flex h-7 items-center gap-1.5 rounded-md border border-primary bg-primary px-3 text-xs font-semibold text-primary-foreground",
-              "disabled:cursor-not-allowed disabled:opacity-50",
-            )}
-          >
-            {submitting && <Loader2 className="h-3 w-3 animate-spin" />}
-            Approve {selectedCount}
-          </button>
+          {previewGate.approveVisible ? (
+            <button
+              onClick={handleApprove}
+              disabled={submitting || discarding}
+              className={cn(
+                "inline-flex h-7 items-center gap-1.5 rounded-md border border-primary bg-primary px-3 text-xs font-semibold text-primary-foreground",
+                "disabled:cursor-not-allowed disabled:opacity-50",
+              )}
+            >
+              {submitting && <Loader2 className="h-3 w-3 animate-spin" />}
+              Approve {selectedCount}
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled
+              title={previewGate.reason}
+              className="inline-flex h-7 cursor-not-allowed items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground opacity-70"
+            >
+              Preview required
+            </button>
+          )}
         </div>
       </div>
 
@@ -472,6 +541,7 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
                     parentRunId={sessionId}
                     page={renderEntry.page}
                     fileId={data.pdfFileId}
+                    onStatusChange={handlePreviewStatusChange}
                   />
                 </div>
                 <div>
@@ -500,6 +570,7 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
                   parentRunId={sessionId}
                   page={page}
                   fileId={data.pdfFileId}
+                  onPreviewStatusChange={handlePreviewStatusChange}
                   formCard={renderFormCard({
                     record,
                     cfg,
@@ -533,6 +604,7 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
               parentRunId={sessionId}
               page={page}
               fileId={data.pdfFileId}
+              onPreviewStatusChange={handlePreviewStatusChange}
               formCards={cards}
               onAddRow={addBlankRow}
             />

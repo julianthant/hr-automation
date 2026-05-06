@@ -97,7 +97,6 @@ For each record extract these fields:
 
 Output ONLY the valid JSON array. No commentary, no markdown fences, no wrapper object.`;
 
-const NAME_AUTO_ACCEPT = 0.95;
 const NAME_AUTO_ACCEPT_GAP = 0.10;
 const NAME_DISAMBIG_FLOOR = 0.40;
 const LLM_HIGH_CONFIDENCE = 0.6;
@@ -188,11 +187,11 @@ export const oathOcrFormSpec: OcrFormSpec<
     }
 
     // Name-resolution chain:
-    //   - Top score >= NAME_AUTO_ACCEPT (0.95) with no close second → auto-accept
-    //     (matchSource: "roster")
-    //   - Top score in [NAME_DISAMBIG_FLOOR, NAME_AUTO_ACCEPT) OR close second →
-    //     mark lookup-pending; orchestrator's disambiguating phase runs the LLM
-    //     and applyDisambiguation patches the record
+    //   - Exactly one fuzzy roster candidate → take it, then active-check
+    //     verifies the EID before approval.
+    //   - Multiple fuzzy roster candidates → mark lookup-pending;
+    //     orchestrator's disambiguating phase runs the LLM and
+    //     applyDisambiguation patches the record.
     //   - Top score < NAME_DISAMBIG_FLOOR (0.40) / no candidates → manual
     //     fall-through (matchSource: "manual"); eid-lookup-by-name still runs
     //     as a backstop downstream
@@ -220,9 +219,8 @@ export const oathOcrFormSpec: OcrFormSpec<
       };
     }
 
-    const closeSecond = second && top.score - second.score < NAME_AUTO_ACCEPT_GAP;
-    if (top.score >= NAME_AUTO_ACCEPT && !closeSecond && top.eid) {
-      log.step(`[oath/match] → roster auto-accept: "${top.name}" eid=${top.eid} score=${top.score.toFixed(2)}`);
+    if (ranked.candidates.length === 1 && top.eid) {
+      log.step(`[oath/match] → roster single-candidate accept: "${top.name}" eid=${top.eid} score=${top.score.toFixed(2)}`);
       return {
         ...record,
         employeeId: top.eid,
@@ -234,15 +232,16 @@ export const oathOcrFormSpec: OcrFormSpec<
         originallyMissing: [],
         selected: true,
         warnings: top.score < 1.0
-          ? [`Roster matched "${top.name}" (score ${top.score.toFixed(2)})`]
+          ? [`Single roster candidate "${top.name}" accepted (score ${top.score.toFixed(2)}); active-check will verify`]
           : [],
       };
     }
 
     // Ambiguous: defer to the orchestrator's disambiguating phase.
+    const closeSecond = second && top.score - second.score < NAME_AUTO_ACCEPT_GAP;
     const reason = closeSecond
       ? `top ${top.score.toFixed(2)} too close to second ${second!.score.toFixed(2)} (gap < ${NAME_AUTO_ACCEPT_GAP})`
-      : `top ${top.score.toFixed(2)} in [${NAME_DISAMBIG_FLOOR}, ${NAME_AUTO_ACCEPT}) disambig band`;
+      : `${ranked.candidates.length} fuzzy candidates require LLM selection`;
     log.step(`[oath/match] → lookup-pending (will disambiguate via LLM): ${reason}`);
     return {
       ...record,

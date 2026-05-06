@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   computeOcrVerification,
+  patchOcrRecordFromActiveCheckOutcome,
   patchOcrRecordFromEidLookupOutcome,
   patchOcrRecordUnresolved,
 } from "../../../../src/workflows/ocr/eid-lookup-results.js";
@@ -66,4 +67,52 @@ test("computeOcrVerification classifies Active HDH as verified", () => {
     computeOcrVerification({ hrStatus: "Active", department: "Housing Dining Hospitality", personOrgScreenshot: "x.png" }).state,
     "verified",
   );
+});
+
+test("patchOcrRecordFromActiveCheckOutcome verifies active HDH child results", () => {
+  const records: unknown[] = [{ employeeId: "10000001", selected: true, warnings: [] }];
+
+  patchOcrRecordFromActiveCheckOutcome(records, 0, {
+    workflow: "active-check",
+    itemId: "active-1",
+    runId: "child-active-1",
+    status: "done",
+    data: {
+      emplId: "10000001",
+      activeStatus: "active",
+      isActive: "true",
+      isHdhAccepted: "true",
+      hrStatus: "Active",
+      department: "Housing Dining Hospitality",
+      personOrgScreenshot: "active.png",
+    },
+  });
+
+  const rec = records[0] as Record<string, unknown>;
+  assert.deepEqual((rec.verification as { state: string }).state, "verified");
+  assert.equal(rec.selected, true);
+});
+
+test("patchOcrRecordFromActiveCheckOutcome deselects inactive active-check results", () => {
+  const records: unknown[] = [{ employeeId: "10000001", selected: true, warnings: [] }];
+
+  patchOcrRecordFromActiveCheckOutcome(records, 0, {
+    workflow: "active-check",
+    itemId: "active-1",
+    runId: "child-active-1",
+    status: "done",
+    data: {
+      emplId: "10000001",
+      activeStatus: "inactive",
+      isActive: "false",
+      isHdhAccepted: "true",
+      hrStatus: "Inactive",
+      department: "Housing Dining Hospitality",
+      terminationDate: "04/30/2026",
+    },
+  });
+
+  const rec = records[0] as Record<string, unknown>;
+  assert.deepEqual((rec.verification as { state: string }).state, "inactive");
+  assert.equal(rec.selected, false);
 });

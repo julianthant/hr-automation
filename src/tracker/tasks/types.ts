@@ -14,7 +14,7 @@ export type TaskKind = "workflow_item" | "ocr";
 
 export type TaskDependencyStatus = "pending" | "satisfied" | "failed" | "cancelled";
 
-export type TaskDependencyKind = "ocr-eid-lookup";
+export type TaskDependencyKind = "ocr-eid-lookup" | "ocr-active-check";
 
 export type TaskDependencyFailurePolicy = "record_unresolved" | "fail_parent" | "ignore";
 
@@ -23,6 +23,12 @@ export type OcrLookupKind = "name" | "verify" | "verify-only";
 export interface OcrEidLookupDependencyMetadata {
   recordIndex: number;
   lookupKind: OcrLookupKind;
+  formType: string;
+}
+
+export interface OcrActiveCheckDependencyMetadata {
+  recordIndex: number;
+  lookupKind: Exclude<OcrLookupKind, "name">;
   formType: string;
 }
 

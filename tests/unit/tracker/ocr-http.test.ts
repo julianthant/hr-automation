@@ -58,6 +58,30 @@ test("POST /api/ocr/prepare returns 202 with sessionId+runId on happy path", asy
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("POST /api/ocr/prepare passes dryRun to the orchestrator input", async () => {
+  const dir = setup();
+  _resetSessionLockForTests();
+  let seenDryRun: boolean | undefined;
+  const handler = buildOcrPrepareHandler({
+    trackerDir: dir,
+    runOrchestrator: async (input) => {
+      seenDryRun = input.dryRun;
+    },
+  });
+  const resp = await handler({
+    pdfPath: "/tmp/fake.pdf",
+    pdfOriginalName: "fake.pdf",
+    formType: "oath",
+    rosterMode: "existing",
+    rosterPath: "/tmp/roster.xlsx",
+    dryRun: true,
+  });
+  assert.equal(resp.status, 202);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(seenDryRun, true);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("POST /api/ocr/prepare returns 409 when sessionId is locked", async () => {
   const dir = setup();
   _resetSessionLockForTests();
@@ -378,6 +402,8 @@ test("buildOcrApproveHandler forwards parentRunId to ensureDaemonsAndEnqueueOver
     const resp = await handler({
       sessionId: "session-approve-1",
       runId: "run-approve-1",
+      previewReady: true,
+      previewPageCount: 2,
       records,
     });
 
@@ -398,6 +424,63 @@ test("buildOcrApproveHandler forwards parentRunId to ensureDaemonsAndEnqueueOver
     assert.equal(parsedIds.length, 2, "fannedOutItemIds should have 2 elements");
     assert.equal(typeof parsedIds[0], "string");
     assert.equal(typeof parsedIds[1], "string");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("buildOcrApproveHandler propagates dryRun from OCR row to downstream inputs", async () => {
+  const dir = join(tmpdir(), `ocr-approve-dry-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  try {
+    const ocrFile = join(dir, `ocr-${dateLocalForTest()}.jsonl`);
+    writeFileSync(ocrFile, JSON.stringify({
+      workflow: "ocr",
+      id: "session-approve-dry",
+      runId: "run-approve-dry",
+      status: "done",
+      step: "awaiting-approval",
+      timestamp: "2026-05-01T00:00:00Z",
+      data: {
+        formType: "oath",
+        dryRun: "true",
+        pdfPath: "/tmp/fake.pdf",
+        pdfOriginalName: "fake.pdf",
+        sessionId: "session-approve-dry",
+        records: JSON.stringify([]),
+      },
+    }) + "\n", "utf-8");
+
+    let capturedInputs: unknown[] = [];
+    const handler = buildOcrApproveHandler({
+      trackerDir: dir,
+      ensureDaemonsAndEnqueueOverride: async (_workflow, inputs) => {
+        capturedInputs = inputs;
+      },
+    });
+
+    const resp = await handler({
+      sessionId: "session-approve-dry",
+      runId: "run-approve-dry",
+      previewReady: true,
+      previewPageCount: 1,
+      records: [
+        {
+          employeeId: "10000001",
+          printedName: "Alice One",
+          selected: true,
+          matchState: "matched",
+          employeeSigned: true,
+          officerSigned: true,
+          dateSigned: "05/01/2026",
+          sourcePage: 1,
+          rowIndex: 0,
+        },
+      ],
+    });
+
+    assert.equal(resp.status, 200);
+    assert.equal((capturedInputs[0] as { dryRun?: boolean }).dryRun, true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -448,6 +531,8 @@ test("buildOcrApproveHandler creates SQLite dependency rows from approval fan-ou
     const resp = await handler({
       sessionId: "session-approve-deps",
       runId: "run-approve-deps",
+      previewReady: true,
+      previewPageCount: 1,
       records: [
         {
           employeeId: "10000001",
@@ -529,6 +614,8 @@ test("buildOcrApproveHandler back-compat: no parentRunId on OCR row → spy call
     const resp = await handler({
       sessionId: "session-approve-2",
       runId: "run-approve-2",
+      previewReady: true,
+      previewPageCount: 1,
       records,
     });
 
@@ -546,6 +633,61 @@ test("buildOcrApproveHandler back-compat: no parentRunId on OCR row → spy call
     assert.ok(approvedEntry.data?.fannedOutItemIds, "post-approve entry should still have fannedOutItemIds");
     const parsedIds = JSON.parse(approvedEntry.data.fannedOutItemIds as string) as string[];
     assert.equal(parsedIds.length, 1, "fannedOutItemIds should have 1 element");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("buildOcrApproveHandler rejects approval when source preview readiness is missing", async () => {
+  const dir = join(tmpdir(), `ocr-approve-preview-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  try {
+    const ocrFile = join(dir, `ocr-${dateLocalForTest()}.jsonl`);
+    writeFileSync(ocrFile, JSON.stringify({
+      workflow: "ocr",
+      id: "session-preview-required",
+      runId: "run-preview-required",
+      status: "done",
+      step: "awaiting-approval",
+      timestamp: "2026-05-01T00:00:00Z",
+      data: {
+        formType: "oath",
+        pdfPath: "/tmp/fake.pdf",
+        pdfOriginalName: "fake.pdf",
+        sessionId: "session-preview-required",
+        records: JSON.stringify([]),
+      },
+    }) + "\n", "utf-8");
+
+    let enqueueCalled = false;
+    const handler = buildOcrApproveHandler({
+      trackerDir: dir,
+      ensureDaemonsAndEnqueueOverride: async () => {
+        enqueueCalled = true;
+      },
+    });
+
+    const resp = await handler({
+      sessionId: "session-preview-required",
+      runId: "run-preview-required",
+      records: [
+        {
+          employeeId: "10000001",
+          printedName: "Alice One",
+          selected: true,
+          matchState: "matched",
+          employeeSigned: true,
+          officerSigned: true,
+          dateSigned: "05/01/2026",
+          sourcePage: 1,
+          rowIndex: 0,
+        },
+      ],
+    });
+
+    assert.equal(resp.status, 400);
+    assert.equal(enqueueCalled, false);
+    assert.match((resp.body as { ok: false; error: string }).error, /Source preview is not available/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -111,6 +111,23 @@ export function parseSemicolonSeparated(fieldName: string) {
   };
 }
 
+export function parseActiveCheckInputs(raw: string): QuickRunParseResult {
+  const pieces = raw
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (pieces.length === 0) {
+    return { ok: false, error: "Enter at least one EID or name" };
+  }
+  return {
+    ok: true,
+    inputs: pieces.map((value) => {
+      if (/^\d{5,}$/.test(value)) return { emplId: value };
+      return { name: value };
+    }),
+  };
+}
+
 export const QUICK_RUN_REGISTRY: Record<string, QuickRunConfig> = {
   separations: {
     placeholder: "Enter doc IDs, comma-separated (e.g. 3930, 3929)",
@@ -119,6 +136,10 @@ export const QUICK_RUN_REGISTRY: Record<string, QuickRunConfig> = {
   "eid-lookup": {
     placeholder: 'Enter names, semicolon-separated (e.g. Smith, John; Doe, Jane)',
     parseInput: parseSemicolonSeparated("name"),
+  },
+  "active-check": {
+    placeholder: "Enter EIDs or names, semicolon-separated (e.g. 10873698; Battistessa, Johnnie)",
+    parseInput: parseActiveCheckInputs,
   },
   "oath-signature": {
     placeholder: "Enter EIDs, comma-separated (e.g. 10873611, 10873075)",

@@ -10,6 +10,7 @@ export interface PdfPagePreviewProps {
   page: number;
   fileId?: string;
   className?: string;
+  onStatusChange?: (page: number, status: "loading" | "ok" | "error") => void;
 }
 
 // Pre-render N pages above + below the viewport so scrolling feels instant.
@@ -31,6 +32,7 @@ export function PdfPagePreview({
   page,
   fileId,
   className,
+  onStatusChange,
 }: PdfPagePreviewProps) {
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
   // Defer the image fetch until the container is near the viewport — for a
@@ -63,7 +65,10 @@ export function PdfPagePreview({
     ? `/api/files/${encodeURIComponent(fileId)}/pages/${page}`
     : `/api/prep/pdf-page?workflow=${encodeURIComponent(workflow)}&parentRunId=${encodeURIComponent(parentRunId)}&page=${page}`;
   // Reset state whenever the src changes (different row / different page).
-  useEffect(() => { setState("loading"); }, [src]);
+  useEffect(() => {
+    setState("loading");
+    onStatusChange?.(page, "loading");
+  }, [src, page, onStatusChange]);
   return (
     <div
       ref={containerRef}
@@ -112,8 +117,14 @@ export function PdfPagePreview({
           decoding="async"
           // @ts-expect-error fetchpriority is a valid HTML attribute but React types lag.
           fetchpriority="high"
-          onLoad={() => setState("ok")}
-          onError={() => setState("error")}
+          onLoad={() => {
+            setState("ok");
+            onStatusChange?.(page, "ok");
+          }}
+          onError={() => {
+            setState("error");
+            onStatusChange?.(page, "error");
+          }}
           className={cn("h-full w-full object-contain", state !== "ok" && "opacity-0")}
         />
       )}

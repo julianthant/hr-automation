@@ -59,6 +59,10 @@ type DisplayItem =
   | { kind: "log"; entry: CollapsedLogEntry }
   | { kind: "event"; entry: RunEvent };
 
+export function emptyStreamMessage(source?: "events" | "screenshots" | "edit-data" | "preview"): string {
+  return source === "events" ? "No run events for this row" : "No logs yet";
+}
+
 export function LogStream({
   logs,
   events = [],
@@ -249,7 +253,7 @@ export function LogStream({
           </div>
         ) : displayed.length === 0 && !loading ? (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-            No logs yet
+            {emptyStreamMessage(tab?.source)}
           </div>
         ) : (
           displayed.map((item, i) =>

@@ -176,6 +176,46 @@ export function createOcrEidLookupDependencyBatch(input: {
   });
 }
 
+export function createOcrActiveCheckDependencyBatch(input: {
+  trackerDir?: string;
+  parent: { workflow: "ocr"; itemId: string; runId: string; formType: string };
+  children: Array<{
+    workflow: "active-check";
+    itemId: string;
+    runId: string;
+    recordIndex: number;
+    lookupKind: "verify" | "verify-only";
+    formType: string;
+  }>;
+  now?: string;
+}): ReturnType<typeof createTaskDependencyBatch> {
+  return createTaskDependencyBatch(openTaskStore(input.trackerDir), {
+    parent: {
+      workflow: input.parent.workflow,
+      itemId: input.parent.itemId,
+      runId: input.parent.runId,
+      taskKind: "ocr",
+      status: "waiting_on_children",
+      data: { formType: input.parent.formType },
+    },
+    children: input.children.map((child) => ({
+      workflow: child.workflow,
+      itemId: child.itemId,
+      runId: child.runId,
+      taskKind: "workflow_item",
+      status: "queued",
+      dependencyKind: "ocr-active-check",
+      failurePolicy: "record_unresolved",
+      metadata: {
+        recordIndex: child.recordIndex,
+        lookupKind: child.lookupKind,
+        formType: child.formType,
+      },
+    })),
+    now: input.now,
+  });
+}
+
 export function getTaskByTrackerIdentity(store: TaskStore, identity: TrackerIdentity): TaskRow | null {
   const row = findTaskDbRow(store, identity);
   return row ? mapTaskRow(row) : null;

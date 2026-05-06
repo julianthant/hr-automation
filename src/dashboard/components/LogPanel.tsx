@@ -14,6 +14,7 @@ import { useElapsed, formatDuration } from "./hooks/useElapsed";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry, RunInfo } from "./types";
 import { formatTrackerValue, isMonospaceKey } from "./types";
+import { deriveTrackerFallbackLog } from "./log-fallback";
 import { useWorkflow } from "../workflows-context";
 import { resolveEntryName } from "./entry-display";
 import { statusBadgeClass } from "./status-styles";
@@ -104,6 +105,10 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, defa
   const logSourceWorkflow = entry?.workflow ?? workflow;
   const { logs, loading: logsLoading } = useLogs(logSourceWorkflow, entry?.id || null, activeRunId, date);
   const { events } = useRunEvents(logSourceWorkflow, entry?.id || null, activeRunId, date);
+  const trackerFallbackLog = deriveTrackerFallbackLog(entry, activeRunId);
+  const displayedLogs = !logsLoading && logs.length === 0 && trackerFallbackLog
+    ? [trackerFallbackLog]
+    : logs;
 
   // Derive step/status from active run when viewing a HISTORICAL run via the
   // RunSelector. For the LIVE run (activeRun matches the SSE-delivered entry's
@@ -179,7 +184,7 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, defa
   );
 
   // Show skeleton while logs are loading and we have no data yet
-  const showSkeleton = logsLoading && logs.length === 0;
+  const showSkeleton = logsLoading && displayedLogs.length === 0;
 
   return (
     <div className="flex-1 flex flex-col bg-card min-w-0 min-h-0 overflow-hidden">
@@ -300,7 +305,7 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, defa
       )}
 
       <LogStream
-        logs={logs}
+        logs={displayedLogs}
         events={events}
         loading={logsLoading}
         screenshotsSlot={
@@ -329,4 +334,3 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, defa
     </div>
   );
 }
-

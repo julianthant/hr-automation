@@ -92,6 +92,7 @@ Field-level rules:
 - Output ONLY valid JSON matching the schema. No commentary.`;
 
 const ROSTER_AUTO_ACCEPT = 0.85;
+const LLM_HIGH_CONFIDENCE = 0.6;
 
 // ─── Spec ──────────────────────────────────────────────────
 
@@ -132,7 +133,7 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
     // through to the eid-lookup branch so the downstream daemon resolves
     // the EID instead of trusting an empty string.
     const result = matchAgainstRoster(roster, record.employee.name);
-    if (result.bestScore >= ROSTER_AUTO_ACCEPT && result.candidates[0].eid) {
+    if (result.candidates.length === 1 && result.candidates[0].eid) {
       const top = result.candidates[0];
       const rosterRow = roster.find((r) => r.eid === top.eid);
       const addressMatch =
@@ -157,7 +158,7 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
         selected: true,
         warnings:
           top.score < 1.0
-            ? [`Roster fuzzy-matched "${top.name}" (score ${top.score.toFixed(2)})`]
+            ? [`Single roster candidate "${top.name}" accepted (score ${top.score.toFixed(2)}); active-check will verify`]
             : [],
       };
     }
@@ -171,14 +172,47 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
       selected: true,
       warnings:
         result.candidates.length > 0
-          ? [`Best roster score ${result.bestScore.toFixed(2)} < ${ROSTER_AUTO_ACCEPT} — needs eid-lookup`]
-          : ["No roster match — falling back to eid-lookup"],
+          ? [`${result.candidates.length} roster candidates need LLM disambiguation`]
+          : [`No roster match above ${ROSTER_AUTO_ACCEPT} — falling back to eid-lookup`],
     };
   },
 
-  applyDisambiguation({ record }): PreviewRecord {
-    // EC currently uses sync algorithmic matching only.
-    return record;
+  applyDisambiguation({ record, result }): PreviewRecord {
+    if (result.eid === null || result.eid.length === 0) {
+      return {
+        ...record,
+        employee: { ...record.employee, employeeId: "" },
+        matchState: "lookup-pending",
+        matchSource: "llm",
+        warnings: [
+          ...(record.warnings ?? []),
+          "LLM disambiguation: no roster candidate matched — falling back to eid-lookup by name",
+        ],
+      };
+    }
+
+    if (result.confidence < LLM_HIGH_CONFIDENCE) {
+      return {
+        ...record,
+        employee: { ...record.employee, employeeId: result.eid },
+        matchState: "lookup-pending",
+        matchSource: "llm",
+        matchConfidence: result.confidence,
+        warnings: [
+          ...(record.warnings ?? []),
+          `LLM picked EID ${result.eid} but low confidence (${result.confidence.toFixed(2)}) — review`,
+        ],
+      };
+    }
+
+    return {
+      ...record,
+      employee: { ...record.employee, employeeId: result.eid },
+      matchState: "matched",
+      matchSource: "llm",
+      matchConfidence: result.confidence,
+      warnings: record.warnings ?? [],
+    };
   },
 
   needsLookup(record): LookupKind {

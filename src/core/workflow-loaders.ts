@@ -43,6 +43,10 @@ export const WORKFLOW_LOADERS: Record<string, () => Promise<AnyRegisteredWorkflo
     const mod = await import("../workflows/oath-upload/index.js");
     return mod.oathUploadWorkflow as unknown as AnyRegisteredWorkflow;
   },
+  "active-check": async () => {
+    const mod = await import("../workflows/active-check/index.js");
+    return mod.activeCheckWorkflow as unknown as AnyRegisteredWorkflow;
+  },
 };
 
 /**

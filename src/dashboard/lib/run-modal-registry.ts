@@ -42,11 +42,13 @@ export interface RunModalToast {
  * - `formType`: OCR-style radio picker for which form template to parse.
  * - `roster`: roster-mode picker (use latest local | download fresh).
  * - `duplicateCheck`: hash the PDF on pick and surface prior runs.
+ * - `dryRun`: dry-run toggle for workflows that can otherwise save/submit.
  */
 export interface RunModalSections {
   formType?: boolean;
   roster?: boolean;
   duplicateCheck?: boolean;
+  dryRun?: boolean;
 }
 
 export interface RunModalConfig {
@@ -78,7 +80,7 @@ export const RUN_MODAL_REGISTRY: Record<string, RunModalConfig> = {
         : "Upload a scanned PDF. We’ll OCR it, match against the roster, then approve before queuing.",
     submitUrl: ({ reuploadFor }) =>
       reuploadFor ? "/api/ocr/reupload" : "/api/ocr/prepare",
-    sections: { roster: true },
+    sections: { roster: true, dryRun: true },
     lockedFormType: "emergency-contact",
     buildSuccessToast: (_resp, file) => ({
       title: "Preparation started",
@@ -93,7 +95,7 @@ export const RUN_MODAL_REGISTRY: Record<string, RunModalConfig> = {
         : "Upload a scanned oath PDF. We’ll OCR it, match against the roster, then approve before queuing oath-signature for each match.",
     submitUrl: ({ reuploadFor }) =>
       reuploadFor ? "/api/ocr/reupload" : "/api/ocr/prepare",
-    sections: { roster: true },
+    sections: { roster: true, dryRun: true },
     lockedFormType: "oath",
     buildSuccessToast: (_resp, file) => ({
       title: "Preparation started",
@@ -114,7 +116,7 @@ export const RUN_MODAL_REGISTRY: Record<string, RunModalConfig> = {
     },
     submitUrl: ({ reuploadFor }) =>
       reuploadFor ? "/api/ocr/reupload" : "/api/ocr/prepare",
-    sections: { roster: true, formType: true },
+    sections: { roster: true, formType: true, dryRun: true },
     buildSuccessToast: (_resp, file) => ({
       title: "Preparation started",
       description: file.name,
@@ -127,7 +129,7 @@ export const RUN_MODAL_REGISTRY: Record<string, RunModalConfig> = {
     submitUrl: () => "/api/oath-upload/start",
     // Roster picker is required because oath-upload delegates to OCR, which needs
     // a roster to match the OCR'd names → EIDs before fanning out oath-signature.
-    sections: { roster: true, duplicateCheck: true },
+    sections: { roster: true, duplicateCheck: true, dryRun: true },
     buildSuccessToast: (resp, file) => ({
       title: resp.sessionId
         ? `Oath upload queued — session ${resp.sessionId.slice(0, 8)}`

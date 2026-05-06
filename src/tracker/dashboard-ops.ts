@@ -12,7 +12,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, write
 import { mkdir, rmdir } from "fs/promises";
 import { setTimeout as delay } from "timers/promises";
 import { request as httpRequest } from "http";
-import { readEntries, readEntriesForDate, listDatesForWorkflow, trackEvent, type TrackerEntry } from "./jsonl.js";
+import { appendLogEntry, readEntries, readEntriesForDate, listDatesForWorkflow, trackEvent, type TrackerEntry } from "./jsonl.js";
 import {
   findAliveDaemons,
   spawnDaemon,
@@ -118,15 +118,46 @@ function emitDashboardCancelTrackerRow(
   runId: string | undefined,
   dir: string,
 ): void {
+  const ts = new Date().toISOString();
   trackEvent(
     {
       workflow,
-      timestamp: new Date().toISOString(),
+      timestamp: ts,
       id,
       runId,
       status: "failed",
       step: "cancelled",
       error: DASHBOARD_CANCEL_ERROR,
+    },
+    dir,
+  );
+  appendLogEntry(
+    {
+      workflow,
+      itemId: id,
+      runId,
+      level: "warn",
+      message: `Dashboard cancellation: ${DASHBOARD_CANCEL_ERROR}`,
+      ts,
+    },
+    dir,
+  );
+}
+
+function emitDashboardCancelRequestedLog(
+  workflow: string,
+  id: string,
+  runId: string,
+  dir: string,
+): void {
+  appendLogEntry(
+    {
+      workflow,
+      itemId: id,
+      runId,
+      level: "warn",
+      message: "Cancellation requested by dashboard; waiting for the worker to stop this run.",
+      ts: new Date().toISOString(),
     },
     dir,
   );
@@ -758,21 +789,9 @@ export function buildCancelQueuedHandler(dir: string) {
       // Use append-style write — the lock guarantees exclusion.
       writeFileSync(path, JSON.stringify(cancelEvent) + "\n", { flag: "a" });
 
-      // Mirror the cancellation onto the tracker so it shows up in the
-      // dashboard's FAILED stat pill alongside genuine failures. Use
-      // `step: "cancelled"` for clarity.
-      trackEvent(
-        {
-          workflow: req.workflow,
-          timestamp: new Date().toISOString(),
-          id: req.id,
-          runId,
-          status: "failed",
-          step: "cancelled",
-          error: DASHBOARD_CANCEL_ERROR,
-        },
-        dir,
-      );
+      // Mirror the cancellation onto tracker + logs so selecting the row
+      // never lands on an unexplained "No logs yet" panel.
+      emitDashboardCancelTrackerRow(req.workflow, req.id, runId, dir);
       return { ok: true as const };
     });
   };
@@ -820,6 +839,7 @@ export function buildCancelRunningHandler(dir: string) {
           targetAttemptId: attemptId,
           payload: { itemId: req.id, runId: req.runId },
         });
+        emitDashboardCancelRequestedLog(req.workflow, req.id, req.runId, dir);
         return { ok: true, accepted: true, mode: "worker-command", commandId };
       }
     } finally {
@@ -832,6 +852,7 @@ export function buildCancelRunningHandler(dir: string) {
       runId: req.runId,
     });
     if (inProcess.ok) {
+      emitDashboardCancelRequestedLog(req.workflow, req.id, req.runId, dir);
       return {
         ok: true,
         accepted: true,

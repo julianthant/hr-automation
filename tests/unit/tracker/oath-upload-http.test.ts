@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { trackEvent, dateLocal } from "../../../src/tracker/jsonl.js";
 import {
   buildOathUploadDuplicateCheckHandler,
+  buildOathUploadStartHandler,
   buildOathUploadCancelHandler,
   sweepStuckOathUploadRows,
 } from "../../../src/tracker/oath-upload-http.js";
@@ -75,6 +76,26 @@ test("buildOathUploadCancelHandler: writes step=cancel-requested sentinel on the
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("buildOathUploadStartHandler: passes dryRun to runOathUploadCli input", async () => {
+  let dryRun: boolean | undefined;
+  const h = buildOathUploadStartHandler({
+    runOathUploadCli: async (inputs) => {
+      dryRun = inputs[0]?.dryRun;
+    },
+  });
+  const r = await h({
+    pdfPath: "/tmp/oath.pdf",
+    pdfOriginalName: "oath.pdf",
+    pdfHash: "a".repeat(64),
+    sessionId: "session-dry",
+    rosterMode: "download",
+    dryRun: true,
+  });
+  assert.equal(r.status, 202);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(dryRun, true);
 });
 
 test("buildOathUploadCancelHandler: returns 400 when no active row for sessionId", async () => {

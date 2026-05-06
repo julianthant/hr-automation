@@ -11,6 +11,7 @@ import { runEmergencyContactCli } from "./workflows/emergency-contact/index.js";
 import { runParallelKronos, DEFAULT_WORKERS } from "./workflows/old-kronos-reports/index.js";
 import { runSeparationCli } from "./workflows/separations/index.js";
 import { runEidLookupCli } from "./workflows/eid-lookup/index.js";
+import { runActiveCheckCli } from "./workflows/active-check/index.js";
 import {
   runOathSignatureCli,
   OathSignatureInputSchema,
@@ -175,12 +176,14 @@ program
   .option("--roster-url <url>", "SharePoint URL of roster xlsx — downloaded + used for pre-flight verification")
   .option("--roster-path <path>", "Local roster xlsx for pre-flight verification (skip download)")
   .option("--ignore-roster-mismatch", "Continue even if roster verification reports mismatches")
+  .option("--dry-run", "Run through UCPath pre-save proof point, then skip Save")
   .option("-n, --new", "Spawn an additional daemon even if others are alive")
   .option("-p, --parallel <count>", "Ensure at least N daemons are alive before enqueueing", parseInt)
   .action(async (batchYaml: string, options: {
     rosterUrl?: string;
     rosterPath?: string;
     ignoreRosterMismatch?: boolean;
+    dryRun?: boolean;
     new?: boolean;
     parallel?: number;
   }) => {
@@ -195,6 +198,7 @@ program
         rosterUrl: options.rosterUrl,
         rosterPath: options.rosterPath,
         ignoreRosterMismatch: options.ignoreRosterMismatch,
+        dryRun: options.dryRun,
         new: options.new,
         parallel: options.parallel,
       });
@@ -278,12 +282,14 @@ program
   )
   .argument("<emplIds...>", "One or more employee IDs (e.g. 10873075 10862930)")
   .option("--date <MM/DD/YYYY>", "Override the signature date (default: UCPath prefills today)")
+  .option("--dry-run", "Run through UCPath pre-save proof point, then skip Save")
   .option("-n, --new", "Force spawn of a brand-new daemon (ignores alive ones for dispatch)")
   .option("-p, --parallel <N>", "Fan out across N daemons (reuses up to N alive; spawns the rest)", parseInt)
   .action(async (
     emplIds: string[],
     options: {
       date?: string;
+      dryRun?: boolean;
       new?: boolean;
       parallel?: number;
     },
@@ -304,9 +310,13 @@ program
     }
 
     // Validate every EID up front so a malformed tail doesn't fire Duo prompts.
-    const inputs: Array<{ emplId: string; date?: string }> = [];
+    const inputs: Array<{ emplId: string; date?: string; dryRun?: boolean }> = [];
     for (const emplId of emplIds) {
-      const parsed = OathSignatureInputSchema.safeParse({ emplId, date: options.date });
+      const parsed = OathSignatureInputSchema.safeParse({
+        emplId,
+        date: options.date,
+        dryRun: options.dryRun,
+      });
       if (!parsed.success) {
         log.error(
           `Invalid input for ${emplId}: ${parsed.error.issues.map((i) => i.message).join(", ")}`,
@@ -338,10 +348,11 @@ program
   )
   .argument("<pdfPaths...>", "One or more PDF file paths")
   .option("-n, --new", "Force spawn of a brand-new daemon (ignores alive ones for dispatch)")
+  .option("--dry-run", "Run through OCR/signature/ServiceNow pre-submit proof point, then skip submit")
   .option("-p, --parallel <N>", "Fan out across N daemons (reuses up to N alive; spawns the rest)", parseInt)
   .action(async (
     pdfPaths: string[],
-    options: { new?: boolean; parallel?: number },
+    options: { new?: boolean; parallel?: number; dryRun?: boolean },
   ) => {
     try {
       validateEnv();
@@ -371,6 +382,7 @@ program
       pdfHash: string;
       rosterMode: "existing" | "download";
       rosterPath?: string;
+      dryRun?: boolean;
     }> = [];
     for (const p of pdfPaths) {
       if (!existsSync(p)) {
@@ -387,6 +399,7 @@ program
           // CLI defaults to fresh SharePoint download; dashboard modal lets the
           // operator pick "use latest local" instead.
           rosterMode: "download",
+          dryRun: options.dryRun,
         });
       } catch (err) {
         log.error(`Failed to hash ${p}: ${errorMessage(err)}`);
@@ -430,6 +443,31 @@ program
     await runEidLookupCli(names, { new: options.new, parallel: options.parallel });
   });
 
+// ─── active-check ───
+
+program
+  .command("active-check")
+  .description("Check whether one or more employees are active in UCPath Person Organizational Summary. Accepts EIDs or names.")
+  .argument("<queries...>", 'One or more EIDs or names in "Last, First Middle" format')
+  .option("-n, --new", "Force spawn of a brand-new daemon (ignores alive ones for dispatch)")
+  .option("-p, --parallel <N>", "Fan out across N daemons (reuses up to N alive; spawns the rest)", parseInt)
+  .action(async (
+    queries: string[],
+    options: { new?: boolean; parallel?: number },
+  ) => {
+    try {
+      validateEnv();
+    } catch {
+      process.exit(1);
+    }
+    if (options.parallel !== undefined && (options.parallel < 1 || !Number.isFinite(options.parallel))) {
+      log.error("--parallel must be a positive integer.");
+      process.exit(1);
+    }
+
+    await runActiveCheckCli(queries, { new: options.new, parallel: options.parallel });
+  });
+
 // ─── dashboard ───
 
 program
@@ -449,6 +487,7 @@ program
       import("./workflows/separations/index.js"),
       import("./workflows/work-study/index.js"),
       import("./workflows/eid-lookup/index.js"),
+      import("./workflows/active-check/index.js"),
       import("./workflows/emergency-contact/index.js"),
       import("./workflows/old-kronos-reports/index.js"),
       import("./workflows/oath-signature/index.js"),

@@ -1,0 +1,81 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import type { EidResult } from "../../../../src/systems/ucpath/person-org-summary.js";
+import { deriveActiveCheckOutcome } from "../../../../src/workflows/active-check/workflow.js";
+
+function eidResult(patch: Partial<EidResult> = {}): EidResult {
+  return {
+    emplId: "10706431",
+    emplRecord: "0",
+    hrStatus: "Active",
+    businessUnit: "SDCMP",
+    jobCode: "004722",
+    jobCodeDescription: "Student 2",
+    lastName: "Zaw",
+    name: "Hein Thant Zaw",
+    department: "Dining Services",
+    terminationDate: "",
+    expectedJobEndDate: "",
+    ...patch,
+  };
+}
+
+describe("deriveActiveCheckOutcome", () => {
+  it("marks an active HDH employee active when no termination date is present", () => {
+    const outcome = deriveActiveCheckOutcome({ emplId: "10706431" }, [eidResult()]);
+
+    assert.equal(outcome.activeStatus, "active");
+    assert.equal(outcome.isActive, true);
+    assert.equal(outcome.isHdhAccepted, true);
+    assert.equal(outcome.emplId, "10706431");
+  });
+
+  it("marks a person inactive when UCPath has a termination date", () => {
+    const outcome = deriveActiveCheckOutcome({ emplId: "10706431" }, [
+      eidResult({ terminationDate: "04/30/2026", hrStatus: "Inactive" }),
+    ]);
+
+    assert.equal(outcome.activeStatus, "inactive");
+    assert.equal(outcome.isActive, false);
+    assert.equal(outcome.terminationDate, "04/30/2026");
+  });
+
+  it("keeps expected job end date as context without making an employee inactive", () => {
+    const outcome = deriveActiveCheckOutcome({ emplId: "10706431" }, [
+      eidResult({ expectedJobEndDate: "06/30/2026", terminationDate: "" }),
+    ]);
+
+    assert.equal(outcome.activeStatus, "active");
+    assert.equal(outcome.isActive, true);
+    assert.equal(outcome.expectedJobEndDate, "06/30/2026");
+  });
+
+  it("flags active non-HDH employees without hiding their active state", () => {
+    const outcome = deriveActiveCheckOutcome({ emplId: "10706431" }, [
+      eidResult({ department: "QUALCOMM INSTITUTE" }),
+    ]);
+
+    assert.equal(outcome.activeStatus, "non-hdh");
+    assert.equal(outcome.isActive, true);
+    assert.equal(outcome.isHdhAccepted, false);
+  });
+
+  it("marks a missing result not-found", () => {
+    const outcome = deriveActiveCheckOutcome({ emplId: "10706431" }, []);
+
+    assert.equal(outcome.activeStatus, "not-found");
+    assert.equal(outcome.isActive, false);
+    assert.equal(outcome.emplId, "10706431");
+  });
+
+  it("marks name searches with multiple candidates ambiguous", () => {
+    const outcome = deriveActiveCheckOutcome({ name: "Zaw, Hein" }, [
+      eidResult({ emplId: "10706431" }),
+      eidResult({ emplId: "10706432", name: "Hein Zaw" }),
+    ]);
+
+    assert.equal(outcome.activeStatus, "ambiguous");
+    assert.equal(outcome.isActive, false);
+    assert.deepEqual(outcome.candidateEids, ["10706431", "10706432"]);
+  });
+});

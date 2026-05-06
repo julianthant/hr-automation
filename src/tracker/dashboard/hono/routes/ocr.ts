@@ -41,6 +41,8 @@ export function registerOcrRoutes(app: Hono, deps: DashboardHonoDeps): void {
       sessionId: String(parsed.body.sessionId ?? ""),
       runId: String(parsed.body.runId ?? ""),
       records: Array.isArray(parsed.body.records) ? parsed.body.records : [],
+      previewReady: parsed.body.previewReady === true,
+      previewPageCount: Number(parsed.body.previewPageCount ?? 0),
     });
     return jsonResponse(result.body, result.status);
   });
@@ -116,6 +118,7 @@ async function handlePrepare(
   const sessionId = requestedSessionId ?? (isReupload ? undefined : randomUUID());
   const previousRunId = fields.previousRunId?.trim() || undefined;
   const originWorkflow = fields.originWorkflow?.trim() || undefined;
+  const dryRun = fields.dryRun === "true" || fields.dryRun === "1";
   const pdfOriginalName = file.filename ?? pdfFilename;
   let pdfFileId: string | undefined;
   if (deps.stateDb && sessionId) {
@@ -147,6 +150,7 @@ async function handlePrepare(
     previousRunId,
     isReupload,
     originWorkflow,
+    dryRun,
   });
   return jsonResponse(result.body, result.status);
 }

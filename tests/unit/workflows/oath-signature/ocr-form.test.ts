@@ -24,6 +24,21 @@ test("matchRecord: signed row with high-confidence roster name → matched", asy
   assert.equal(preview.matchSource, "roster");
 });
 
+test("matchRecord: signed row with one fuzzy roster candidate → matched before active-check", async () => {
+  const ocr = {
+    sourcePage: 1, rowIndex: 0,
+    printedName: "Sarah Chenn",
+    employeeSigned: true, officerSigned: true,
+    dateSigned: "05/01/2026",
+    notes: [], documentType: "expected" as const, originallyMissing: [],
+  };
+  const preview = await oathOcrFormSpec.matchRecord({ record: ocr, roster });
+  assert.equal(preview.matchState, "matched");
+  assert.equal(preview.employeeId, "10000003");
+  assert.equal(preview.matchSource, "roster");
+  assert.match(preview.warnings.join(" "), /single roster candidate/i);
+});
+
 test("matchRecord: unsigned row → extracted, deselected, no employeeId", async () => {
   const ocr = {
     sourcePage: 1, rowIndex: 1,

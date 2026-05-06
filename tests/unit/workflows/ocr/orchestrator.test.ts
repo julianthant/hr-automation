@@ -31,7 +31,7 @@ test("orchestrator emits pending → loading-roster → ocr → matching → don
     {
       runId: "run-1",
       trackerDir: dir,
-      _emitOverride: (entry) => writtenEntries.push(entry),
+      _emitOverride: (entry: any) => writtenEntries.push(entry),
       _ocrPipelineOverride: async () => ({
         data: [{
           sourcePage: 1, rowIndex: 0,
@@ -192,6 +192,176 @@ test("orchestrator uses SQLite dependencies for initial eid-lookup fan-out", asy
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(dependencyBatchCreated, true);
   assert.equal(watcherCalled, false);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("orchestrator dispatches active-check for records that already have an EID", async () => {
+  const { dir, rosterPath } = setup();
+  const writtenEntries: object[] = [];
+  let eidLookupItems: Array<{ name?: string; emplId?: string; itemId: string }> = [];
+  let activeCheckItems: Array<{ name?: string; emplId?: string; itemId: string }> = [];
+
+  await runOcrOrchestrator(
+    {
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      formType: "oath",
+      sessionId: "session-active",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-active",
+      trackerDir: dir,
+      _emitOverride: (entry: any) => writtenEntries.push(entry),
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          sourcePage: 1,
+          rowIndex: 0,
+          printedName: "Liam Kustenbauder",
+          employeeSigned: true,
+          officerSigned: true,
+          dateSigned: "05/01/2026",
+          notes: [],
+          documentType: "expected",
+          originallyMissing: [],
+        }],
+        provider: "stub",
+        attempts: 1,
+        cached: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000001", name: "Liam Kustenbauder" }],
+      _enqueueEidLookupOverride: async (items: Array<{ name?: string; emplId?: string; itemId: string }>) => {
+        eidLookupItems = items;
+      },
+      _enqueueActiveCheckOverride: async (items: Array<{ name?: string; emplId?: string; itemId: string }>) => {
+        activeCheckItems = items;
+      },
+      _disableSqliteDependencies: true,
+    } as never,
+  );
+
+  assert.equal(eidLookupItems.length, 0, "records that already have an EID should not run eid-lookup");
+  assert.equal(activeCheckItems.length, 1);
+  assert.equal(activeCheckItems[0].emplId, "10000001");
+  assert.match(activeCheckItems[0].itemId, /^ocr-active-run-active-r0$/);
+  const steps = writtenEntries.map((e: any) => `${e.status}/${e.step ?? ""}`);
+  assert.ok(steps.some((s) => s.includes("active-check")), `steps: ${steps.join(", ")}`);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("orchestrator records SQLite dependencies for active-check fan-out", async () => {
+  const { dir, rosterPath } = setup();
+  let watcherCalled = false;
+  let dependencyBatchCreated = false;
+
+  await runOcrOrchestrator(
+    {
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      formType: "oath",
+      sessionId: "session-active-deps",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-active-deps",
+      trackerDir: dir,
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          sourcePage: 1,
+          rowIndex: 0,
+          printedName: "Liam Kustenbauder",
+          employeeSigned: true,
+          officerSigned: true,
+          dateSigned: "05/01/2026",
+          notes: [],
+          documentType: "expected",
+          originallyMissing: [],
+        }],
+        provider: "stub",
+        attempts: 1,
+        cached: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000001", name: "Liam Kustenbauder" }],
+      _enqueueActiveCheckOverride: async () => {},
+      _createActiveCheckDependencyBatchOverride: async ({ parent, children }) => {
+        dependencyBatchCreated = true;
+        assert.equal(parent.workflow, "ocr");
+        assert.equal(parent.itemId, "session-active-deps");
+        assert.equal(parent.runId, "run-active-deps");
+        assert.equal(children.length, 1);
+        assert.equal(children[0].workflow, "active-check");
+        assert.equal(children[0].itemId, "ocr-active-run-active-deps-r0");
+        assert.equal(children[0].recordIndex, 0);
+        assert.equal(children[0].lookupKind, "verify");
+      },
+      _scheduleDependencyTickOverride: async () => ({ ok: true }),
+      _watchChildRunsOverride: async () => {
+        watcherCalled = true;
+        return [];
+      },
+    },
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(dependencyBatchCreated, true);
+  assert.equal(watcherCalled, false);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("orchestrator uses LLM lookup suggestions when fuzzy roster matching has no candidates", async () => {
+  const { dir, rosterPath } = setup();
+  let eidLookupItems: Array<{ name?: string; emplId?: string; itemId: string }> = [];
+  let activeCheckItems: Array<{ name?: string; emplId?: string; itemId: string }> = [];
+
+  await runOcrOrchestrator(
+    {
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      formType: "oath",
+      sessionId: "session-suggestions",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-suggestions",
+      trackerDir: dir,
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          sourcePage: 1,
+          rowIndex: 0,
+          printedName: "Jhn Batistessa",
+          employeeSigned: true,
+          officerSigned: true,
+          dateSigned: "05/01/2026",
+          notes: [],
+          documentType: "expected",
+          originallyMissing: [],
+        }],
+        provider: "stub",
+        attempts: 1,
+        cached: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000001", name: "Unrelated Person" }],
+      _lookupSuggestionOverride: async () => [
+        { name: "Johnnie Battistessa", confidence: 0.72 },
+        { emplId: "10873698", confidence: 0.81 },
+      ],
+      _enqueueEidLookupOverride: async (items: Array<{ name?: string; emplId?: string; itemId: string }>) => {
+        eidLookupItems = items;
+      },
+      _enqueueActiveCheckOverride: async (items: Array<{ name?: string; emplId?: string; itemId: string }>) => {
+        activeCheckItems = items;
+      },
+      _disableSqliteDependencies: true,
+      _watchChildRunsOverride: async () => [],
+    } as never,
+  );
+
+  assert.ok(eidLookupItems.some((item) => item.name === "Johnnie Battistessa"));
+  assert.ok(eidLookupItems.some((item) => item.name === "jhn batistessa"));
+  assert.ok(activeCheckItems.some((item) => item.emplId === "10873698"));
   rmSync(dir, { recursive: true, force: true });
 });
 
