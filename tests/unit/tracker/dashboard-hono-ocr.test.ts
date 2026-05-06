@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
-import { _resetSessionLockForTests } from "../../../src/tracker/ocr-http.js";
+import { _resetSessionLockForTests } from "../../../src/tracker/dashboard/ocr/index.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
 
 let dir: string;
