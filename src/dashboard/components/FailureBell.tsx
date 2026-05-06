@@ -14,18 +14,37 @@ export interface FailureBellProps {
   onSelect: (row: FailureRow) => void;
 }
 
+const FAILURE_BELL_STORAGE_KEY = "failure-bell-read-count";
+
 export function FailureBell({ failureCounts, date, onSelect }: FailureBellProps) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<FailureRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [readCount, setReadCount] = useState<number>(() => {
+    try {
+      const stored = localStorage.getItem(FAILURE_BELL_STORAGE_KEY);
+      return stored ? parseInt(stored, 10) : 0;
+    } catch {
+      return 0;
+    }
+  });
   const registered = useWorkflows();
   const labelFor = (wf: string): string =>
     registered.find((r) => r.name === wf)?.label ?? autoLabel(wf);
 
   const total = Object.values(failureCounts).reduce((s, n) => s + n, 0);
+  const unreadCount = Math.max(0, total - readCount);
 
   useEffect(() => {
     if (!open) return;
+    // Mark as read when popover opens
+    try {
+      localStorage.setItem(FAILURE_BELL_STORAGE_KEY, String(total));
+    } catch {
+      // Ignore localStorage errors
+    }
+    setReadCount(total);
+
     let cancelled = false;
     setLoading(true);
     fetch(`/api/failures?date=${encodeURIComponent(date)}`)
@@ -42,7 +61,7 @@ export function FailureBell({ failureCounts, date, onSelect }: FailureBellProps)
     return () => {
       cancelled = true;
     };
-  }, [open, date]);
+  }, [open, date, total]);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -50,9 +69,9 @@ export function FailureBell({ failureCounts, date, onSelect }: FailureBellProps)
         <button
           type="button"
           aria-label={
-            total === 0
-              ? "Failure bell — no failures today"
-              : `Failure bell — ${total} failures today`
+            unreadCount === 0
+              ? "Failure bell — no new failures"
+              : `Failure bell — ${unreadCount} new failure${unreadCount === 1 ? "" : "s"}`
           }
           className={cn(
             "h-8 w-8 rounded-md border border-border bg-secondary",
@@ -63,7 +82,7 @@ export function FailureBell({ failureCounts, date, onSelect }: FailureBellProps)
           )}
         >
           <Bell className="h-3.5 w-3.5" aria-hidden />
-          {total > 0 && (
+          {unreadCount > 0 && (
             <span
               aria-hidden
               className={cn(
@@ -73,7 +92,7 @@ export function FailureBell({ failureCounts, date, onSelect }: FailureBellProps)
                 "ring-2 ring-card",
               )}
             >
-              {total > 99 ? "99+" : total}
+              {unreadCount > 99 ? "99+" : unreadCount}
             </span>
           )}
         </button>

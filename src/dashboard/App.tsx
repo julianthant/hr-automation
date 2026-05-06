@@ -16,7 +16,7 @@ import { useCaptureToasts } from "./components/hooks/useCaptureToasts";
 import { resolveActionToastsForEntry } from "./components/hooks/useActionToasts";
 import { useWorkflow, useWorkflows, autoLabel } from "./workflows-context";
 import { resolveEntryName, buildDisplayNameMap } from "./components/entry-display";
-import type { SearchResultRow, PreviewInboxRow, FailureRow } from "./components/types";
+import type { SearchResultRow, FailureRow } from "./components/types";
 import { WorkflowRail } from "./components/WorkflowRail";
 import { QuickRunPanel } from "./components/QuickRunPanel";
 import { RetryAllButton } from "./components/RetryAllButton";
@@ -217,11 +217,6 @@ export default function App() {
     setSelectedId(row.id);
   }, [workflow, date, handleWorkflowChange, handleDateChange]);
 
-  const handlePreviewSelect = useCallback((row: PreviewInboxRow) => {
-    if (row.workflow !== workflow) handleWorkflowChange(row.workflow);
-    if (row.date !== date) handleDateChange(row.date);
-    setSelectedId(row.id);
-  }, [workflow, date, handleWorkflowChange, handleDateChange]);
 
   const handleFailureSelect = useCallback((row: FailureRow) => {
     if (row.workflow !== workflow) handleWorkflowChange(row.workflow);
@@ -266,7 +261,6 @@ export default function App() {
         onDateChange={handleDateChange}
         availableDates={availableDates}
         onSearchSelect={handleSearchSelect}
-        onPreviewSelect={handlePreviewSelect}
         onFailureSelect={handleFailureSelect}
         failureCounts={failureCounts ?? {}}
       />
