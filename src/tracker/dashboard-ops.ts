@@ -26,13 +26,10 @@ import { openControlDb } from "../core/control-db.js";
 import { cancelInProcessRun } from "../core/in-process-runs.js";
 import { createTaskStore, type ControlTaskStore, type TaskRow } from "../core/task-store.js";
 import { createWorkerStore, type BrowserProcessRow, type ControlWorkerStore, type WorkerRow } from "../core/worker-store.js";
+import { findInputForRetry } from "../core/find-input.js";
 import { log } from "../utils/log.js";
 import { join } from "path";
 
-/** Kernel-internal keys we strip when reconstructing an input from `data`.
- * These get stamped onto rows by the kernel (instance) or workflow adapters
- * (__name / __id) but aren't part of any workflow's Zod input schema. */
-const KERNEL_DATA_KEYS = new Set(["instance", "__name", "__id"]);
 const DASHBOARD_CANCEL_ERROR = "cancelled by user from dashboard";
 
 function openControlStores(dir: string): {
@@ -221,23 +218,9 @@ async function requestDaemonStopWorker(worker: WorkerRow | null): Promise<boolea
 }
 
 /**
- * Lookup an entry's input by (workflow, id, runId?). Three-tier fallback so
- * retry works regardless of how the entry was originally enqueued:
- *
- *   1. **Latest pending row with stored `input`** — set by the HTTP path
- *      (`enqueue-dispatch.ts onPreEmitPending`). Carries the verbatim input
- *      object including any nested fields (work-study's effectiveDate,
- *      emergency-contact's full record).
- *   2. **Any tracker row with stored `input`** — covers re-enqueues where a
- *      later pending row exists but didn't get an `input` write.
- *   3. **Fallback: latest entry's `data` field** — for CLI-enqueued items
- *      where each workflow's hand-rolled `onPreEmitPending` skips the
- *      `input` field entirely (separations, eid-lookup, oath-signature,
- *      emergency-contact, onboarding all do this today). Strips
- *      kernel-internal keys (`instance`, `__name`, `__id`) so they don't
- *      leak into the schema. Workflow schemas are non-strict z.object so
- *      extras (e.g. data fields produced by the workflow itself) are
- *      stripped at validation time without erroring.
+ * Lookup an entry's input by (workflow, id, runId?). Delegates to the
+ * canonical three-tier lookup in `src/core/find-input.ts` and reshapes
+ * the result into the `{input} | {error}` shape consumed by `reEnqueueEntry`.
  */
 export function findEntryInput(
   workflow: string,
@@ -245,57 +228,18 @@ export function findEntryInput(
   runId: string | undefined,
   dir: string,
 ): { input: Record<string, unknown> } | { error: string } {
-  if (runId) {
-    const fromTask = findTaskInput(runId, dir);
-    if (fromTask) return { input: fromTask };
-  }
-  const entries = readEntries(workflow, dir);
-  const matchingId = entries.filter((e) => {
+  const input = findInputForRetry(workflow, id, runId, dir);
+  if (input) return { input };
+
+  const entries = readEntries(workflow, dir).filter((e) => {
     if (e.id !== id) return false;
     if (runId && e.runId !== runId) return false;
     return true;
   });
-  if (matchingId.length === 0) {
+  if (entries.length === 0) {
     return { error: `no tracker entry found for id=${id}` };
   }
-  // Tier 1: pending row with stored input.
-  const pendingWithInput = matchingId
-    .filter((e) => e.status === "pending" && Boolean(e.input))
-    .sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
-  if (pendingWithInput.length > 0) {
-    return { input: pendingWithInput[0].input as Record<string, unknown> };
-  }
-  // Tier 2: any row with stored input.
-  const anyWithInput = matchingId
-    .filter((e) => Boolean(e.input))
-    .sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
-  if (anyWithInput.length > 0) {
-    return { input: anyWithInput[0].input as Record<string, unknown> };
-  }
-  // Tier 3: derive from the latest entry's data (CLI-enqueued workflows).
-  const sorted = [...matchingId].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
-  const data = sorted[0].data;
-  if (data && typeof data === "object") {
-    const input: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(data)) {
-      if (KERNEL_DATA_KEYS.has(k)) continue;
-      input[k] = v;
-    }
-    if (Object.keys(input).length > 0) return { input };
-  }
   return { error: "no input or data found to reconstruct retry payload" };
-}
-
-function findTaskInput(runId: string, dir: string): Record<string, unknown> | null {
-  try {
-    const store = createTaskStore(openControlDb({ trackerDir: dir }));
-    const input = store.findInputForRunId(runId);
-    return input && typeof input === "object" && !Array.isArray(input)
-      ? input as Record<string, unknown>
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 function asRecordInput(input: unknown): Record<string, unknown> | null {
