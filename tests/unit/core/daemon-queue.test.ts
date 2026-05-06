@@ -16,7 +16,7 @@ import {
   queueLockDirPath,
 } from '../../../src/core/daemon-queue.js'
 import { openControlDb } from '../../../src/core/control-db.js'
-import { createTaskStore } from '../../../src/core/task-store.js'
+import { createTaskStore } from '../../../src/core/task-store/index.js'
 import { createOcrEidLookupDependencyBatch } from '../../../src/tracker/tasks/store.js'
 
 const TMP = (): string => mkdtempSync(join(tmpdir(), 'daemon-q-'))

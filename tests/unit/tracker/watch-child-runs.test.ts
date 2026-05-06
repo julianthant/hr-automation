@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { watchChildRuns } from "../../../src/tracker/watch-child-runs.js";
 import { openControlDb } from "../../../src/core/control-db.js";
-import { createTaskStore } from "../../../src/core/task-store.js";
+import { createTaskStore } from "../../../src/core/task-store/index.js";
 
 function setupTrackerDir(): string {
   const dir = join(tmpdir(), `wcr-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);

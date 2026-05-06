@@ -22,7 +22,7 @@ export { Stepper } from './stepper.js'
 export { makeCtx } from './ctx.js'
 export * from './control-db.js'
 export * from './control-schema.js'
-export * from './task-store.js'
+export * from './task-store/index.js'
 export * from './worker-store.js'
 export {
   daemonsDir,

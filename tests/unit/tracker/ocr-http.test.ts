@@ -15,7 +15,7 @@ import {
   type ApproveHandlerOpts,
 } from "../../../src/tracker/ocr-http.js";
 import { openControlDb } from "../../../src/core/control-db.js";
-import { createTaskStore } from "../../../src/core/task-store.js";
+import { createTaskStore } from "../../../src/core/task-store/index.js";
 
 function setup(): string {
   const dir = join(tmpdir(), `ocr-http-${Date.now()}-${Math.random().toString(36).slice(2)}`);
