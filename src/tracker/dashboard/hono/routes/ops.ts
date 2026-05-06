@@ -18,7 +18,7 @@ import {
   buildSaveDataHandler,
   buildStopWorkerHandler,
   readQueueDepth,
-} from "../../../dashboard-ops.js";
+} from "../../ops/index.js";
 import { errorMessage } from "../../../../utils/errors.js";
 import { log } from "../../../../utils/log.js";
 import type { DashboardHonoDeps } from "../context.js";
