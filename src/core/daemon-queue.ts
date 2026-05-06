@@ -489,6 +489,44 @@ export async function claimNextItem(
   }
 }
 
+type TerminalStatus = 'done' | 'failed' | 'cancelled'
+
+async function markTaskTerminal(
+  workflow: string,
+  itemId: string,
+  runId: string,
+  status: TerminalStatus,
+  payload: { error?: string; reason?: string },
+  trackerDir: string | undefined,
+): Promise<void> {
+  const store = openQueueTaskStore(trackerDir)
+  const task = store.findTaskByIdentity({ workflow, itemId, runId })
+  const attemptId = task ? resolveCurrentAttemptId(store, task, runId) : undefined
+
+  if (task) {
+    if (status === 'done') {
+      if (attemptId) store.markTaskDone({ taskId: task.taskId, attemptId })
+      else markTaskTerminalWithoutAttempt(store, task.taskId, 'done')
+    } else if (status === 'failed') {
+      if (attemptId) store.markTaskFailed({ taskId: task.taskId, attemptId, error: payload.error ?? '' })
+      else markTaskTerminalWithoutAttempt(store, task.taskId, 'failed', payload.error)
+    } else {
+      store.markTaskCancelled({
+        taskId: task.taskId,
+        ...(attemptId ? { attemptId } : {}),
+        reason: payload.reason ?? '',
+      })
+    }
+  }
+
+  if (status === 'done') {
+    appendEvent(workflow, { type: 'done', id: itemId, completedAt: nowIso(), runId }, trackerDir)
+  } else {
+    const error = status === 'failed' ? (payload.error ?? '') : (payload.reason ?? '')
+    appendEvent(workflow, { type: 'failed', id: itemId, failedAt: nowIso(), runId, error }, trackerDir)
+  }
+}
+
 export async function markItemDone(
   workflow: string,
   itemId: string,
@@ -496,15 +534,7 @@ export async function markItemDone(
   trackerDir?: string,
 ): Promise<void> {
   if (queueBackend() === 'jsonl') return legacyMarkItemDone(workflow, itemId, runId, trackerDir)
-  const store = openQueueTaskStore(trackerDir)
-  const task = store.findTaskByIdentity({ workflow, itemId, runId })
-  const attemptId = task ? resolveCurrentAttemptId(store, task, runId) : undefined
-  if (task && attemptId) {
-    store.markTaskDone({ taskId: task.taskId, attemptId })
-  } else if (task) {
-    markTaskTerminalWithoutAttempt(store, task.taskId, 'done')
-  }
-  appendEvent(workflow, { type: 'done', id: itemId, completedAt: nowIso(), runId }, trackerDir)
+  return markTaskTerminal(workflow, itemId, runId, 'done', {}, trackerDir)
 }
 
 export async function markItemFailed(
@@ -515,15 +545,7 @@ export async function markItemFailed(
   trackerDir?: string,
 ): Promise<void> {
   if (queueBackend() === 'jsonl') return legacyMarkItemFailed(workflow, itemId, error, runId, trackerDir)
-  const store = openQueueTaskStore(trackerDir)
-  const task = store.findTaskByIdentity({ workflow, itemId, runId })
-  const attemptId = task ? resolveCurrentAttemptId(store, task, runId) : undefined
-  if (task && attemptId) {
-    store.markTaskFailed({ taskId: task.taskId, attemptId, error })
-  } else if (task) {
-    markTaskTerminalWithoutAttempt(store, task.taskId, 'failed', error)
-  }
-  appendEvent(workflow, { type: 'failed', id: itemId, failedAt: nowIso(), runId, error }, trackerDir)
+  return markTaskTerminal(workflow, itemId, runId, 'failed', { error }, trackerDir)
 }
 
 export async function markItemCancelled(
@@ -534,13 +556,7 @@ export async function markItemCancelled(
   trackerDir?: string,
 ): Promise<void> {
   if (queueBackend() === 'jsonl') return legacyMarkItemFailed(workflow, itemId, reason, runId, trackerDir)
-  const store = openQueueTaskStore(trackerDir)
-  const task = store.findTaskByIdentity({ workflow, itemId, runId })
-  const attemptId = task ? resolveCurrentAttemptId(store, task, runId) : undefined
-  if (task) {
-    store.markTaskCancelled({ taskId: task.taskId, ...(attemptId ? { attemptId } : {}), reason })
-  }
-  appendEvent(workflow, { type: 'failed', id: itemId, failedAt: nowIso(), runId, error: reason }, trackerDir)
+  return markTaskTerminal(workflow, itemId, runId, 'cancelled', { reason }, trackerDir)
 }
 
 export async function unclaimItem(
