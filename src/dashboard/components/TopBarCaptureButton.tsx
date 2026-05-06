@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Camera } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { CaptureModal } from "./CaptureModal";
+import { CaptureModal } from "./CaptureModal/index.js";
 import { useCaptureRegistration } from "./hooks/useCaptureRegistration";
 
 /**
