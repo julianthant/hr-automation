@@ -16,25 +16,11 @@ UCPath HR automation for UCSD. Playwright-driven onboarding, separations, EID lo
   → `docs/engineering/codebase-conventions.md`
 
 **General lessons that apply everywhere:**  
-→ **Lessons Learned** section (below) — read before every non-trivial task. Documents selector workflow, shared code boundaries, kernel patterns, common mistakes, and architectural decisions.
+→ `LESSONS.md` (project root) — read before every non-trivial task. Selector workflow, shared code boundaries, kernel patterns, common mistakes, architecture guards, daemon mode.
 
-Before non-trivial tasks, **query claude-mem** with `mem-search` skill to surface prior patterns and solutions.
-
-## Lessons Learned
-
-**Selector mapping:** Always `npm run selector:search "<intent>"` first. If found, USE IT — don't remap. Reuse saves time and prevents brittle duplication. Never guess selectors. When a selector fails for non-obvious reasons, append to the system's LESSONS.md so the next session doesn't relearn it.
-
-**Shared code:** If used by 2+ workflows (or 1 workflow + tracker/dashboard/core/OCR), it belongs in `src/domain/` or `src/core/`, not workflow-local. Duplicating a function across workflows is an anti-pattern.
-
-**Kernel patterns:** Always declare `operatorSubject` in new workflows (used by queue rows, Telegram, logs). Use `ctx.step` for Playwright work — the kernel handles errors, screenshots, tracker emission. For dupe-protection, use live-page probes (check the page state before submitting), not tracker-side caches. Live-page probes beat name matching because UCPath↔Kuali name variants silently miss dupes (EID match is the key).
-
-**Architecture guards:** `npm run test:architecture` enforces no inline selectors, no default exports, lesson format, selector catalog sync. These gates prevent anti-patterns. Run before commits.
-
-**Daemon mode:** Default for most CLI commands. `-n, --new` spawns an additional daemon; `-p, --parallel <N>` ensures N are alive. Multi-daemon dispatch uses atomic fs.mkdir mutex — whichever daemon finishes first claims the next queued row.
-
-**Common mistakes:** (1) Inline `page.locator("...")` in system files — all selectors go through `selectors.ts`. (2) Default exports in `src/`. (3) Assuming one Duo auth per workflow — onboarding runs 2, separations runs 4. Check the workflow's `systems` list. (4) Guessing at PeopleSoft behavior — every quirk has been hit. Read the system's CLAUDE.md first.
-
-**Continuous improvement:** Update the relevant CLAUDE.md after every lesson. Bump `// verified` dates in `selectors.ts` when you re-verify a selector. These files are the only memory between sessions.
+Before non-trivial tasks:
+- **Read `LESSONS.md`** in the project root — cross-codebase patterns, common mistakes, architecture decisions.
+- **Query claude-mem** with `mem-search` skill to surface prior solutions.
 
 ## Commands
 
