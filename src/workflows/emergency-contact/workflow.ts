@@ -16,6 +16,7 @@ import {
   buildEmergencyContactPlan,
   extractEmployeeName,
   findExistingContactDuplicate,
+  type ContactMatch,
 } from "./enter.js";
 import type { EmergencyContactContext } from "./enter.js";
 import { loadBatch, RecordSchema } from "./schema.js";
@@ -29,11 +30,20 @@ export interface EmergencyContactOptions {
   rosterPath?: string;
   /** Continue even if roster verification reports mismatches. */
   ignoreRosterMismatch?: boolean;
+  /** Run browser path to the pre-save proof point, then skip UCPath Save. */
+  dryRun?: boolean;
 }
 
 const WORKFLOW = "emergency-contact";
 
 const emergencyContactSteps = ["navigation", "fill-form", "save"] as const;
+
+export function shouldDemoteExistingContactForRun(
+  match: ContactMatch | null,
+  dryRun: boolean | undefined,
+): boolean {
+  return Boolean(match && !match.isExact && !dryRun);
+}
 
 /**
  * Stable dashboard item ID — `p{NN}-{emplId}` (zero-padded source page + EID).
@@ -122,6 +132,7 @@ export const emergencyContactWorkflow = defineWorkflow({
         relationship: c.relationship,
         contactPhone: phoneSummary,
         contactAddress: addrSummary,
+        ...(record.dryRun ? { dryRun: true } : {}),
       });
     }
 
@@ -150,15 +161,21 @@ export const emergencyContactWorkflow = defineWorkflow({
       }
       if (existing && !existing.isExact) {
         // Fuzzy match — demote the existing row and continue with normal add.
-        log.step(
-          `Fuzzy duplicate "${existing.name}" (distance ${existing.distance}) — demoting and adding new as primary.`,
-        );
-        await demoteExistingContact(page, existing.name);
-        // After save+return, navigate back into the editor for this employee
-        // so the subsequent fill-form step starts from the right place.
-        await navigateToEmergencyContact(page, record.employee.employeeId);
+        if (shouldDemoteExistingContactForRun(existing, record.dryRun)) {
+          log.step(
+            `Fuzzy duplicate "${existing.name}" (distance ${existing.distance}) — demoting and adding new as primary.`,
+          );
+          await demoteExistingContact(page, existing.name);
+          // After save+return, navigate back into the editor for this employee
+          // so the subsequent fill-form step starts from the right place.
+          await navigateToEmergencyContact(page, record.employee.employeeId);
+        } else {
+          log.step(
+            `Dry run: would demote fuzzy duplicate "${existing.name}" (distance ${existing.distance}) before adding new primary contact.`,
+          );
+        }
         ctx.updateData({
-          fuzzyDemote: "true",
+          fuzzyDemote: record.dryRun ? "would-run" : "true",
           fuzzyDemoteName: existing.name,
         });
       }
@@ -169,10 +186,16 @@ export const emergencyContactWorkflow = defineWorkflow({
 
     await ctx.step("fill-form", async () => {
       const planCtx: EmergencyContactContext = { employeeName: record.employee.name };
-      const plan = buildEmergencyContactPlan(record, page, planCtx);
+      const plan = buildEmergencyContactPlan(record, page, planCtx, {
+        beforeCommit: async () => {
+          await ctx.screenshot({ kind: "form", label: "emergency-contact-dry-run-pre-save" });
+        },
+      });
       try {
         await plan.execute();
-        await ctx.screenshot({ kind: 'form', label: 'emergency-contact-saved' });
+        if (!record.dryRun) {
+          await ctx.screenshot({ kind: "form", label: "emergency-contact-saved" });
+        }
       } catch (err) {
         if (err instanceof TransactionError) {
           throw new Error(
@@ -184,6 +207,11 @@ export const emergencyContactWorkflow = defineWorkflow({
     });
 
     await ctx.step("save", async () => {
+      if (record.dryRun) {
+        ctx.updateData({ status: "Dry Run Complete" });
+        log.success(`Dry run complete for ${record.employee.name} — UCPath Save was skipped.`);
+        return;
+      }
       log.success(`Saved emergency contact for ${record.employee.name}`);
     });
   },
@@ -207,12 +235,15 @@ export async function runEmergencyContact(
   options: EmergencyContactOptions = {},
 ): Promise<void> {
   const batch = loadBatch(batchYaml);
+  const records = options.dryRun
+    ? batch.records.map((record) => ({ ...record, dryRun: true }))
+    : batch.records;
   log.step(`Loaded batch "${batch.batchName}" — ${batch.records.length} records`);
 
   await runPreflight(batch, options);
 
   const now = new Date().toISOString();
-  const result = await runWorkflowBatch(emergencyContactWorkflow, batch.records, {
+  const result = await runWorkflowBatch(emergencyContactWorkflow, records, {
     // Per-record itemId shape `p{NN}-{emplId}` — the kernel's built-in
     // deriveItemId only looks at top-level emplId/docId/email, not
     // `employee.employeeId`, so without this the kernel would hand
@@ -235,6 +266,7 @@ export async function runEmergencyContact(
           employeeName: record.employee.name,
           contactName: record.emergencyContact.name,
           relationship: record.emergencyContact.relationship,
+          ...(record.dryRun ? { dryRun: "true" } : {}),
           ...operatorSubjectData(subject),
         },
       });
@@ -275,9 +307,12 @@ export async function runEmergencyContact(
  */
 export async function runEmergencyContactCli(
   batchYaml: string,
-  options: EmergencyContactOptions & { new?: boolean; parallel?: number } = {},
+  options: EmergencyContactOptions & { new?: boolean; parallel?: number; dryRun?: boolean } = {},
 ): Promise<void> {
   const batch = loadBatch(batchYaml);
+  const records = options.dryRun
+    ? batch.records.map((record) => ({ ...record, dryRun: true }))
+    : batch.records;
   log.step(`Loaded batch "${batch.batchName}" — ${batch.records.length} records`);
 
   await runPreflight(batch, options);
@@ -286,7 +321,7 @@ export async function runEmergencyContactCli(
   const now = new Date().toISOString();
   await ensureDaemonsAndEnqueue(
     emergencyContactWorkflow,
-    batch.records,
+    records,
     { new: options.new, parallel: options.parallel },
     {
       deriveItemId: (item) => recordItemId(item as EmergencyContactRecord),
@@ -304,10 +339,11 @@ export async function runEmergencyContactCli(
             sourcePage: String(record.sourcePage),
             emplId: record.employee.employeeId,
             employeeName: record.employee.name,
-            contactName: record.emergencyContact.name,
-            relationship: record.emergencyContact.relationship,
-            ...operatorSubjectData(subject),
-          },
+          contactName: record.emergencyContact.name,
+          relationship: record.emergencyContact.relationship,
+          ...(record.dryRun ? { dryRun: "true" } : {}),
+          ...operatorSubjectData(subject),
+        },
         });
       },
     },

@@ -12,6 +12,17 @@ export interface OathSignatureContext {
   alreadyHasOath: boolean;
 }
 
+export interface OathSignaturePlanOptions {
+  beforeCommit?: () => Promise<void>;
+}
+
+export function shouldCommitOathSignature(
+  input: OathSignatureInput,
+  ctx: Pick<OathSignatureContext, "alreadyHasOath">,
+): boolean {
+  return !input.dryRun && !ctx.alreadyHasOath;
+}
+
 // --- Helpers ---
 
 async function waitForPageReady(page: Page): Promise<void> {
@@ -165,6 +176,7 @@ export function buildOathSignaturePlan(
   input: OathSignatureInput,
   page: Page,
   ctx: OathSignatureContext,
+  options: OathSignaturePlanOptions = {},
 ): ActionPlan {
   const plan = new ActionPlan();
   const getFrame = (): FrameLocator => oathSignature.getPersonProfileFrame(page);
@@ -201,6 +213,11 @@ export function buildOathSignaturePlan(
 
   plan.add("Click Save (commit oath)", async () => {
     if (ctx.alreadyHasOath) return;
+    if (!shouldCommitOathSignature(input, ctx)) {
+      await options.beforeCommit?.();
+      log.success("Dry run: skipped UCPath Save for oath signature.");
+      return;
+    }
     await clickSave(page, getFrame());
   });
 

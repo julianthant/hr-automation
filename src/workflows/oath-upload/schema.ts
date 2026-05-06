@@ -11,6 +11,7 @@ export const OathUploadInputSchema = z.object({
   // copy from SharePoint via the OCR orchestrator's loading-roster step.
   rosterMode:      z.enum(["existing", "download"]).default("download"),
   rosterPath:      z.string().optional(),
+  dryRun:          z.boolean().optional(),
 });
 
 export type OathUploadInput = z.infer<typeof OathUploadInputSchema>;

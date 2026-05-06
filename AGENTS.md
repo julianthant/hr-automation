@@ -30,6 +30,11 @@ npm run emergency-contact:stop             # Soft-stop all daemons
 npm run eid-lookup "Last, First Middle"    # Enqueue to an alive daemon or spawn one (CRM-on variant)
 npm run eid-lookup:stop                    # Soft-stop all daemons
 
+# Active Check (daemon mode by default — see "Daemon mode" below)
+npm run active-check "Last, First Middle"  # Check UCPath Person Org Summary active status by name
+npm run active-check 10873698              # Check UCPath Person Org Summary active status by EID
+npm run active-check:stop                  # Soft-stop all daemons
+
 # Oath Signature (daemon mode by default — see "Daemon mode" below)
 npm run oath-signature <emplId> [emplId ...]     # Enqueue to an alive daemon or spawn one (UCPath only)
 npm run oath-signature:stop                      # Soft-stop all daemons
@@ -87,6 +92,7 @@ src/
     work-study/        # Kernel. UCPath PayPath work-study update.
     emergency-contact/ # Kernel (batch, preEmitPending). UCPath Emergency Contact fill.
     eid-lookup/        # Kernel. Person Org Summary lookup + optional CRM cross-verify.
+    active-check/      # Kernel. Person Org Summary active/inactive check by name or EID.
     onboarding/        # Kernel (single mode). CRM → UCPath + I9. Daemon mode for repeated runs.
     separations/       # Kernel (4 systems, interleaved auth, sequential batch via runWorkflowBatch).
     old-kronos-reports/# Kernel (pool mode, N workers, per-worker sessionDir via opts.launchFn).
@@ -257,7 +263,7 @@ Dupe-protection: the kernel provides no tracker-side idempotency cache or step-c
 
 ## Daemon mode (persistent workflow processes)
 
-Kernel workflows exposed on the CLI (`npm run separation <ids>`, `npm run work-study <emplId> <date>`, `npm run eid-lookup <names...>`, `npm run onboarding <emails...>`) default to **daemon mode**:
+Kernel workflows exposed on the CLI (`npm run separation <ids>`, `npm run work-study <emplId> <date>`, `npm run eid-lookup <names...>`, `npm run active-check <names-or-eids...>`, `npm run onboarding <emails...>`) default to **daemon mode**:
 
 - **First invocation with no alive daemon** → spawns one detached daemon (`tsx src/cli-daemon.ts <workflow>`), waits for auth (Duo once), enqueues the item. Daemon stays alive after processing.
 - **Subsequent invocations** → enqueue tasks in SQLite, append the same queue event to `.tracker/daemons/{workflow}.queue.jsonl` as audit/history, and `POST /wake` every alive daemon. No re-Duo.
@@ -266,7 +272,7 @@ Kernel workflows exposed on the CLI (`npm run separation <ids>`, `npm run work-s
 - **Dashboard controls**: cancel, retry, drain, stop, and browser-kill actions write `worker_commands` rows. Browser kills target recorded `browser_processes.pid` rows, not every Chromium process on the machine.
 - **Keepalive**: every 15 min idle, each daemon runs `session.healthCheck(system)` per system so SAML/Duo sessions don't silently expire between items.
 
-Flags (on `separation`, `work-study`, `eid-lookup`, `onboarding`):
+Flags (on `separation`, `work-study`, `eid-lookup`, `active-check`, `onboarding`):
 - `-n, --new` — spawn one **additional** daemon even if others are alive.
 - `-p, --parallel <N>` — ensure ≥N daemons are alive before enqueueing (spawns `max(0, N - alive)`).
 
@@ -274,7 +280,7 @@ Flags (on `separation`, `work-study`, `eid-lookup`, `onboarding`):
 
 `onboarding` daemon runs the standard `onboardingWorkflow` (CRM + UCPath + I9, 2 Duos per session since I9 is SSO no-2FA). For throughput, start N daemons with `-p N`. Pass multiple emails positionally to fan them across alive daemons via the shared queue.
 
-Lifecycle commands (converted workflows: `separations`, `work-study`, `eid-lookup`, `onboarding`, `oath-signature`, `emergency-contact`):
+Lifecycle commands (converted workflows: `separations`, `work-study`, `eid-lookup`, `active-check`, `onboarding`, `oath-signature`, `emergency-contact`):
 - `npm run <workflow>:stop` — soft-stop (drain in-flight, re-queue). Use `-- --force` to mark in-flight as failed and exit immediately.
 
 Converting a new workflow to daemon mode is mechanical — see `src/workflows/AGENTS.md#daemon-mode-conversion-template`. Implementation: `src/core/daemon-{types,registry,queue,client}.ts` + `src/core/daemon.ts` (main loop) + `src/cli-daemon.ts` (entry). Full design doc: `docs/superpowers/specs/2026-04-22-workflow-daemon-mode-design.md`.
@@ -376,13 +382,14 @@ Current step tracking per workflow. Steps prefixed with `auth:` are auto-prepend
 | emergency-contact | auth:ucpath → navigation → fill-form → save |
 | oath-signature | ucpath-auth → transaction (opts out of auto-prepend) |
 | oath-upload | servicenow-auth → delegate-ocr → wait-ocr-approval → delegate-signatures → wait-signatures → open-hr-form → fill-form → submit (workflow opts out of auto-prepend; declares `servicenow-auth` itself) |
-| ocr | loading-roster → ocr → matching → disambiguating → eid-lookup → verification → awaiting-approval |
+| active-check | auth:ucpath → checking |
+| ocr | loading-roster → ocr → matching → disambiguating → active-check → eid-lookup → verification → awaiting-approval |
 
 As of 2026-04-18, the dashboard is **observation-only**. The previous "⚡ RUN" drawer + `RunnerLauncher` button + `SchemaForm` + `runner-recents` localStorage helper + the backend `buildSpawnHandler`/`buildCancelHandler`/`buildActiveRunsHandler`/`buildWorkflowSchemaHandler` factories + the child-process registry were all removed. Workflows are launched via the npm scripts above (or whatever replacement launcher the user wires up later — out of scope for this pass). Live session monitoring (`TerminalDrawer`), selector-warning aggregation (`SelectorWarningsPanel`), screenshot browsing (`ScreenshotsPanel` — replaced the inline `FailureDrillDown` on 2026-04-21), step-timing chips (`StepPipeline`), and cross-workflow search (`SearchBar`) all keep working — they read kernel-emitted events from `src/tracker/jsonl.ts`, independent of any launcher.
 
-**OCR workflow + delegation primitive (2026-05-01).** The operator selects the `ocr` workflow (Run button appears), picks a form type (oath / emergency-contact), uploads a PDF. The dashboard backend runs OCR via `src/ocr/`, matches against the roster, enqueues eid-lookup for unmatched rows. When all rows reach a terminal match state the row shows `step=awaiting-approval` in the QueuePanel; the operator reviews/edits per-row data inline, clicks Approve to fan out N kernel queue items to the downstream daemon (oath-signature or emergency-contact). SharePoint roster download delegates as a child workflow (`parentRunId` links the child row back). Reupload carries forward resolved EIDs from the previous run. Implementation: `src/workflows/ocr/`, `src/tracker/ocr-http.ts`, `src/dashboard/components/ocr/`, `src/tracker/watch-child-runs.ts`.
+**OCR workflow + delegation primitive (2026-05-01; active-check updated 2026-05-05).** The operator selects the `ocr` workflow (Run button appears), picks a form type (oath / emergency-contact), uploads a PDF. The dashboard backend runs OCR via `src/ocr/`, matches against the roster, takes exactly one fuzzy roster candidate, uses LLM disambiguation for multiple candidates, asks the LLM for 2-3 lookup suggestions when no fuzzy candidate exists, enqueues eid-lookup for name candidates, and enqueues active-check for EID candidates before approval. When all rows reach a terminal match state the row shows `step=awaiting-approval` in the QueuePanel; the operator reviews/edits per-row data inline, clicks Approve to fan out N kernel queue items to the downstream daemon (oath-signature or emergency-contact). SharePoint roster download delegates as a child workflow (`parentRunId` links the child row back). Reupload carries forward resolved EIDs from the previous run. Implementation: `src/workflows/ocr/`, `src/tracker/ocr-http.ts`, `src/dashboard/components/ocr/`, `src/tracker/watch-child-runs.ts`.
 
-**SQLite task dependencies cutover (2026-05-04).** OCR's initial `eid-lookup` delegation now records parent/child task rows in SQLite and lets the dependency scheduler patch OCR records from projected child run state. `watchChildRuns` remains as fallback and still owns non-migrated waits such as force-research, whole-PDF re-OCR, SharePoint roster wait, oath-upload OCR approval, and downstream signature waits.
+**SQLite task dependencies cutover (2026-05-04; active-check added 2026-05-05).** OCR's initial `eid-lookup` and `active-check` delegation now records parent/child task rows in SQLite and lets the dependency scheduler patch OCR records from projected child run state. `watchChildRuns` remains as fallback and still owns non-migrated waits such as force-research, whole-PDF re-OCR, SharePoint roster wait, oath-upload OCR approval, and downstream signature waits.
 
 Implementation details live in `src/dashboard/AGENTS.md` (frontend) and `src/tracker/AGENTS.md` (backend).
 
@@ -495,7 +502,7 @@ These patterns existed pre-kernel and are intentionally removed. Do not reintrod
 <claude-mem-context>
 # Memory Context
 
-# [hr-automation] recent context, 2026-05-05 2:36pm PDT
+# [hr-automation] recent context, 2026-05-05 9:38pm PDT
 
 No previous sessions found.
 </claude-mem-context>

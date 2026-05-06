@@ -64,6 +64,7 @@ export async function oathUploadHandler(
     status: "running",
     taskRole: "delegator",
     taskGroupId: ctx.runId,
+    ...(input.dryRun ? { dryRun: true } : {}),
   });
 
   const ocrSessionId = `oath-upload-${ctx.runId}-ocr`;
@@ -96,6 +97,7 @@ export async function oathUploadHandler(
         sessionId: ocrSessionId,
         rosterMode: input.rosterMode,
         rosterPath: input.rosterPath,
+        dryRun: input.dryRun,
         parentRunId: ctx.runId,
       } as never).catch((err) =>
         log.warn(`[oath-upload] OCR child crashed: ${errorMessage(err)}`),
@@ -153,6 +155,15 @@ export async function oathUploadHandler(
   });
 
   await ctx.step("submit", async () => {
+    if (input.dryRun) {
+      await ctx.screenshot({ kind: "form", label: "hr-inquiry-dry-run-pre-submit" });
+      ctx.updateData({
+        ticketNumber: "DRY RUN - not submitted",
+        status: "dry-run-complete",
+      });
+      log.success("Dry run complete — ServiceNow submit was skipped.");
+      return;
+    }
     const ticketNumber = await (opts._submitOverride ?? submitAndCaptureTicketNumber)(page);
     await ctx.screenshot({ kind: "form", label: "hr-inquiry-submitted" });
     ctx.updateData({

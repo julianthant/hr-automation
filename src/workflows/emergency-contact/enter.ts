@@ -15,6 +15,10 @@ export interface EmergencyContactContext {
   employeeName: string;
 }
 
+export interface EmergencyContactPlanOptions {
+  beforeCommit?: () => Promise<void>;
+}
+
 export interface ContactMatch {
   /** The existing contact's name as it appears on the UCPath record. */
   name: string;
@@ -93,6 +97,7 @@ export function buildEmergencyContactPlan(
   record: EmergencyContactRecord,
   page: Page,
   _ctx: EmergencyContactContext,
+  options: EmergencyContactPlanOptions = {},
 ): ActionPlan {
   const plan = new ActionPlan();
   const contact = record.emergencyContact;
@@ -224,6 +229,11 @@ export function buildEmergencyContactPlan(
 
   // 7. Save.
   plan.add("Click Save", async () => {
+    if (record.dryRun) {
+      await options.beforeCommit?.();
+      log.success("Dry run: skipped UCPath Save for emergency contact.");
+      return;
+    }
     await hidePeopleSoftModalMask(page);
     await page
       .getByRole("button", { name: "Save", exact: true })

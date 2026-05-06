@@ -7,7 +7,10 @@ import {
   updateAttemptStatus,
   updateTaskStatus,
 } from "./store.js";
-import { applyOcrEidLookupContinuation } from "./ocr-continuation.js";
+import {
+  applyOcrActiveCheckContinuation,
+  applyOcrEidLookupContinuation,
+} from "./ocr-continuation.js";
 
 export interface ProjectedRun {
   workflow: string;
@@ -112,7 +115,7 @@ export async function runDependencySchedulerTick(
       const childTaskStatus = childRun.status === "failed" ? "failed" : "done";
       let continuationApplied = false;
 
-      if (dep.kind === "ocr-eid-lookup") {
+      if (dep.kind === "ocr-eid-lookup" || dep.kind === "ocr-active-check") {
         const parentRun = await projection.getLatestParentRun({
           workflow: dep.parent.workflow,
           itemId: dep.parent.itemId,
@@ -124,14 +127,23 @@ export async function runDependencySchedulerTick(
           );
           continue;
         }
-        const continuation = await applyOcrEidLookupContinuation({
-          store: opts.store,
-          dependency: dep,
-          parentRun,
-          childRun,
-          now,
-          emitTracker,
-        });
+        const continuation = dep.kind === "ocr-active-check"
+          ? await applyOcrActiveCheckContinuation({
+            store: opts.store,
+            dependency: dep,
+            parentRun,
+            childRun,
+            now,
+            emitTracker,
+          })
+          : await applyOcrEidLookupContinuation({
+            store: opts.store,
+            dependency: dep,
+            parentRun,
+            childRun,
+            now,
+            emitTracker,
+          });
         if (!continuation.ok) {
           result.errors.push(`OCR continuation skipped for dependency ${dep.id}: ${continuation.reason}`);
           continue;

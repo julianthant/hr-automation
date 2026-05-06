@@ -37,6 +37,9 @@ export interface EidResult {
   deptId?: string;
   positionNumber?: string;
   effectiveDate?: string;
+  terminationDate?: string;
+  expectedJobEndDate?: string;
+  /** Legacy alias historically populated with termination date or "Active". */
   expectedEndDate?: string;
   fte?: string;
   emplClass?: string;
@@ -65,6 +68,44 @@ export function parsePersonOrgNameInput(input: string): {
     lastName: parsed.lastName,
     first: parsed.firstName,
     middle: parsed.middleName,
+  };
+}
+
+export interface PersonOrgAssignmentDetails {
+  emplRecord: string;
+  effectiveDate: string;
+  hrStatus: string;
+  businessUnit: string;
+  positionNumber: string;
+  deptId: string;
+  department: string;
+  jobCode: string;
+  jobCodeDescription: string;
+  expectedJobEndDate: string;
+  fte: string;
+  emplClass: string;
+}
+
+export function deriveAssignmentDetailsFromCells(cells: string[]): PersonOrgAssignmentDetails | null {
+  if (cells.length < 12) return null;
+  const values = cells.map((cell) => cell.trim());
+  const businessUnit = values[3] ?? "";
+  const department = values[6] ?? "";
+  if (!/^[A-Z]{4,5}\d?$/.test(businessUnit)) return null;
+  if (!department || department === "Department Description") return null;
+  return {
+    emplRecord: values[0] ?? "",
+    effectiveDate: values[1] ?? "",
+    hrStatus: values[2] ?? "",
+    businessUnit,
+    positionNumber: values[4] ?? "",
+    deptId: values[5] ?? "",
+    department,
+    jobCode: values[7] ?? "",
+    jobCodeDescription: values[8] ?? "",
+    expectedJobEndDate: values[9] ?? "",
+    fte: values[10] ?? "",
+    emplClass: values[11] ?? "",
   };
 }
 
@@ -199,7 +240,7 @@ async function extractSingleResultDetail(
   }).catch(() => null);
 
   // Extract assignment details (same logic as drillInAndGetDetails)
-  const assignment = await personOrgSummary.body(frame).evaluate((body) => {
+  const assignmentCells = await personOrgSummary.body(frame).evaluate((body) => {
     const tables = body.querySelectorAll("table");
     for (const table of Array.from(tables)) {
       for (const row of Array.from(table.rows)) {
@@ -208,24 +249,14 @@ async function extractSingleResultDetail(
           const buCell = cells[3]?.textContent?.trim() ?? "";
           const deptCell = cells[6]?.textContent?.trim() ?? "";
           if (/^[A-Z]{4,5}\d?$/.test(buCell) && deptCell && deptCell !== "Department Description") {
-            return {
-              emplRecord: cells[0]?.textContent?.trim() ?? "",
-              hrStatus: cells[2]?.textContent?.trim() ?? "",
-              businessUnit: buCell,
-              positionNumber: cells[4]?.textContent?.trim() ?? "",
-              deptId: cells[5]?.textContent?.trim() ?? "",
-              department: deptCell,
-              jobCode: cells[7]?.textContent?.trim() ?? "",
-              jobCodeDescription: cells[8]?.textContent?.trim() ?? "",
-              fte: cells[10]?.textContent?.trim() ?? "",
-              emplClass: cells[11]?.textContent?.trim() ?? "",
-            };
+            return cells.map((cell) => cell.textContent?.trim() ?? "");
           }
         }
       }
     }
     return null;
   }).catch(() => null);
+  const assignment = assignmentCells ? deriveAssignmentDetailsFromCells(assignmentCells) : null;
 
   const endDate = termDate || "Active";
   const nameParts = fullName?.split(" ") ?? [];
@@ -249,6 +280,8 @@ async function extractSingleResultDetail(
     deptId: assignment?.deptId,
     positionNumber: assignment?.positionNumber,
     effectiveDate: startDate,
+    terminationDate: termDate,
+    expectedJobEndDate: assignment?.expectedJobEndDate,
     expectedEndDate: endDate,
     fte: assignment?.fte,
     emplClass: assignment?.emplClass,
@@ -380,11 +413,17 @@ async function clearSearch(page: Page, frame: FrameLocator): Promise<FrameLocato
 
 /** Details extracted from the drill-in detail page. */
 interface DrillInDetails {
+  emplRecord: string;
+  hrStatus: string;
+  businessUnit: string;
   department: string;
   deptId: string;
   positionNumber: string;
+  jobCode: string;
+  jobCodeDescription: string;
   startDate: string;
-  endDate: string;
+  terminationDate: string;
+  expectedJobEndDate: string;
   fte: string;
   emplClass: string;
 }
@@ -422,7 +461,7 @@ async function drillInAndGetDetails(
 
   // Extract assignment details from the Assignments grid.
   // Scan all tables for rows with 10+ cells where cell[3] is a business unit code.
-  const assignment = await personOrgSummary.body(frame).evaluate((body) => {
+  const assignmentCells = await personOrgSummary.body(frame).evaluate((body) => {
     const tables = body.querySelectorAll("table");
     for (const table of Array.from(tables)) {
       for (const row of Array.from(table.rows)) {
@@ -431,19 +470,14 @@ async function drillInAndGetDetails(
           const buCell = cells[3]?.textContent?.trim() ?? "";
           const deptCell = cells[6]?.textContent?.trim() ?? "";
           if (/^[A-Z]{4,5}\d?$/.test(buCell) && deptCell && deptCell !== "Department Description") {
-            return {
-              positionNumber: cells[4]?.textContent?.trim() ?? "",
-              deptId: cells[5]?.textContent?.trim() ?? "",
-              department: deptCell,
-              fte: cells[10]?.textContent?.trim() ?? "",
-              emplClass: cells[11]?.textContent?.trim() ?? "",
-            };
+            return cells.map((cell) => cell.textContent?.trim() ?? "");
           }
         }
       }
     }
     return null;
   }).catch(() => null);
+  const assignment = assignmentCells ? deriveAssignmentDetailsFromCells(assignmentCells) : null;
 
   if (assignment) {
     const endDate = termDate || "Active";
@@ -451,7 +485,7 @@ async function drillInAndGetDetails(
     return {
       ...assignment,
       startDate,
-      endDate,
+      terminationDate: termDate,
     };
   }
   log.step(`  Could not extract assignment details`);
@@ -515,11 +549,13 @@ async function populateDepartments(
       result.deptId = details.deptId;
       result.positionNumber = details.positionNumber;
       result.effectiveDate = details.startDate;
-      result.expectedEndDate = details.endDate;
+      result.terminationDate = details.terminationDate;
+      result.expectedJobEndDate = details.expectedJobEndDate;
+      result.expectedEndDate = details.terminationDate || "Active";
       result.fte = details.fte;
       result.emplClass = details.emplClass;
 
-      log.step(`  EID ${result.emplId} — ${details.department} (${details.endDate || "Active"})`);
+      log.step(`  EID ${result.emplId} — ${details.department} (${details.terminationDate || "Active"})`);
     }
 
     // Only return to search if there are more results to check

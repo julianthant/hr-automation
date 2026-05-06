@@ -8,6 +8,7 @@ export interface PrepReviewPairProps {
   page: number;
   fileId?: string;
   formCard: ReactNode;
+  onPreviewStatusChange?: (page: number, status: "loading" | "ok" | "error") => void;
 }
 
 /**
@@ -20,11 +21,18 @@ export function PrepReviewPair({
   page,
   fileId,
   formCard,
+  onPreviewStatusChange,
 }: PrepReviewPairProps) {
   return (
     <div className="grid grid-cols-2 gap-4 border-b border-border p-4">
       <div className="self-start">
-        <PdfPagePreview workflow={workflow} parentRunId={parentRunId} page={page} fileId={fileId} />
+        <PdfPagePreview
+          workflow={workflow}
+          parentRunId={parentRunId}
+          page={page}
+          fileId={fileId}
+          onStatusChange={onPreviewStatusChange}
+        />
       </div>
       <div>{formCard}</div>
     </div>

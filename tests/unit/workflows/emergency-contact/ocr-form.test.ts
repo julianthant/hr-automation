@@ -35,6 +35,47 @@ test("matchRecord: no form-EID, high roster name match → matched (roster)", as
   assert.equal(preview.employee.employeeId, "10001234");
 });
 
+test("matchRecord: no form-EID, one fuzzy roster candidate → matched", async () => {
+  const ocr = {
+    sourcePage: 2,
+    employee: { name: "James Womg", employeeId: "" },
+    emergencyContact: { name: "Sara Wong", relationship: "Sister", primary: true, sameAddressAsEmployee: true, cellPhone: "(555) 123-4567" },
+    notes: [], documentType: "expected" as const, originallyMissing: [],
+  };
+  const preview = await emergencyContactOcrFormSpec.matchRecord({ record: ocr, roster });
+  assert.equal(preview.matchState, "matched");
+  assert.equal(preview.matchSource, "roster");
+  assert.equal(preview.employee.employeeId, "10005678");
+  assert.match(preview.warnings.join(" "), /single roster candidate/i);
+});
+
+test("matchRecord: no form-EID, multiple fuzzy roster candidates → LLM disambiguation can pick", async () => {
+  const ocr = {
+    sourcePage: 2,
+    employee: { name: "Maria", employeeId: "" },
+    emergencyContact: { name: "Sara Garcia", relationship: "Sister", primary: true, sameAddressAsEmployee: true, cellPhone: "(555) 123-4567" },
+    notes: [], documentType: "expected" as const, originallyMissing: [],
+  };
+  const preview = await emergencyContactOcrFormSpec.matchRecord({
+    record: ocr,
+    roster: [
+      { eid: "10001234", name: "Maria Garcia" },
+      { eid: "10009999", name: "Maria Gonzalez" },
+    ],
+  });
+  assert.equal(preview.matchState, "lookup-pending");
+  assert.equal(preview.employee.employeeId, "");
+  assert.equal(preview.rosterCandidates?.length, 2);
+
+  const patched = emergencyContactOcrFormSpec.applyDisambiguation({
+    record: preview,
+    result: { eid: "10009999", confidence: 0.8 },
+  });
+  assert.equal(patched.matchState, "matched");
+  assert.equal(patched.matchSource, "llm");
+  assert.equal(patched.employee.employeeId, "10009999");
+});
+
 test("matchRecord: no form-EID, no roster match → lookup-pending", async () => {
   const ocr = {
     sourcePage: 3,

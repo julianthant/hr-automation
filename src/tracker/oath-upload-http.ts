@@ -66,6 +66,7 @@ export interface StartInput {
   rosterMode?: "existing" | "download";
   /** Required when `rosterMode === "existing"`. Resolved by the route from disk. */
   rosterPath?: string;
+  dryRun?: boolean;
 }
 export interface StartResponse {
   status: 202 | 400 | 500;
@@ -116,6 +117,7 @@ export function buildOathUploadStartHandler(
         pdfHash: input.pdfHash,
         rosterMode,
         rosterPath: input.rosterPath,
+        dryRun: input.dryRun,
       },
     ]).catch((err) =>
       log.error(`[oath-upload-http] runOathUploadCli threw: ${errorMessage(err)}`),

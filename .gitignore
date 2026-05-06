@@ -59,6 +59,9 @@ src/data/screenshots/*
 # Legacy screenshot location — kept for cleanup on older working trees.
 .screenshots/
 
+# E2E test screenshots
+.e2e-screenshots/
+
 # Generated JSON Schemas (re-generated via `npm run schemas:export`)
 schemas/*.schema.json
 

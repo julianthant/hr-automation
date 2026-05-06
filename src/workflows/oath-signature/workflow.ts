@@ -65,7 +65,11 @@ export const oathSignatureWorkflow = defineWorkflow({
   handler: async (ctx, input) => {
     const oathCtx: OathSignatureContext = { employeeName: "", alreadyHasOath: false };
 
-    ctx.updateData({ emplId: input.emplId, ...(input.date ? { date: input.date } : {}) });
+    ctx.updateData({
+      emplId: input.emplId,
+      ...(input.date ? { date: input.date } : {}),
+      ...(input.dryRun ? { dryRun: true } : {}),
+    });
 
     // Synthetic "ocr" marker — every oath-signature item originates from an
     // OCR-prep upload + operator approval, so emit a completed-step beat so
@@ -81,9 +85,17 @@ export const oathSignatureWorkflow = defineWorkflow({
       // OK/Save steps when an oath already exists on the profile — that's
       // the sole duplicate guard now. Tracker-side idempotency was removed
       // 2026-04-23 per user direction (fail-loud / no silent skip-by-record).
-      const plan = buildOathSignaturePlan(input, page, oathCtx);
+      let dryRunProofCaptured = false;
+      const plan = buildOathSignaturePlan(input, page, oathCtx, {
+        beforeCommit: async () => {
+          await ctx.screenshot({ kind: "form", label: "oath-signature-dry-run-pre-save" });
+          dryRunProofCaptured = true;
+        },
+      });
       await plan.execute();
-      await ctx.screenshot({ kind: 'form', label: 'oath-signature-saved' });
+      if (!input.dryRun) {
+        await ctx.screenshot({ kind: "form", label: "oath-signature-saved" });
+      }
 
       if (oathCtx.employeeName) {
         ctx.updateData({ name: oathCtx.employeeName });
@@ -92,6 +104,17 @@ export const oathSignatureWorkflow = defineWorkflow({
         ctx.updateData({ status: "Skipped (Existing Oath)" });
         log.success(
           `Skipped ${input.emplId}${oathCtx.employeeName ? ` (${oathCtx.employeeName})` : ""} — oath already on file.`,
+        );
+        return;
+      }
+
+      if (input.dryRun) {
+        ctx.updateData({
+          status: "Dry Run Complete",
+          dryRunProofCaptured: String(dryRunProofCaptured),
+        });
+        log.success(
+          `Dry run complete for ${input.emplId}${oathCtx.employeeName ? ` (${oathCtx.employeeName})` : ""} — UCPath Save was skipped.`,
         );
         return;
       }
@@ -159,6 +182,7 @@ export async function runOathSignatureCli(
           data: {
             emplId: item.emplId,
             ...(item.date ? { date: item.date } : {}),
+            ...(item.dryRun ? { dryRun: "true" } : {}),
             ...operatorSubjectData(subject),
           },
         });

@@ -61,6 +61,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
   // gate further down.
   const showFormType = (config?.sections.formType ?? false) || Boolean(effectiveLockedFormType);
   const showDuplicateCheck = config?.sections.duplicateCheck ?? false;
+  const showDryRun = config?.sections.dryRun ?? false;
   const ctx = { reuploadFor, lockedFormType: effectiveLockedFormType };
 
   const [file, setFile] = useState<File | null>(null);
@@ -74,6 +75,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
   const formOptionsCache = useFormTypes();
   const formOptions: FormTypeOption[] = formOptionsCache ?? [];
   const [priorRuns, setPriorRuns] = useState<PriorRunSummary[]>([]);
+  const [dryRun, setDryRun] = useState(false);
 
   useEffect(() => {
     if (open && effectiveLockedFormType) setFormType(effectiveLockedFormType);
@@ -179,6 +181,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
     setError(null);
     setPriorRuns([]);
     setRosterMode("existing");
+    setDryRun(false);
   }, [open]);
 
   if (!config) {
@@ -223,6 +226,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
       }
     }
     if (showFormType && formType) fd.append("formType", formType);
+    if (showDryRun && dryRun) fd.append("dryRun", "true");
     if (reuploadFor) {
       fd.append("sessionId", reuploadFor.sessionId);
       fd.append("previousRunId", reuploadFor.previousRunId);
@@ -414,6 +418,32 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
 
           {showDuplicateCheck && priorRuns.length > 0 && (
             <DuplicateBanner priorRuns={priorRuns} />
+          )}
+
+          {showDryRun && (
+            <section>
+              <label
+                className={cn(
+                  "flex min-h-11 cursor-pointer items-start gap-3 rounded-[10px] px-3.5 py-3",
+                  "border border-border/70 bg-transparent transition-colors",
+                  "hover:bg-muted/20",
+                )}
+              >
+                <input
+                  type="checkbox"
+                  checked={dryRun}
+                  disabled={submitting}
+                  onChange={(e) => setDryRun(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 accent-primary"
+                />
+                <span className="grid gap-0.5">
+                  <span className="text-[13px] font-medium text-foreground">Dry run</span>
+                  <span className="text-[11px] leading-[1.45] text-muted-foreground">
+                    Fill live pages, capture proof, then skip UCPath Save or ServiceNow Submit.
+                  </span>
+                </span>
+              </label>
+            </section>
           )}
 
           {error && (

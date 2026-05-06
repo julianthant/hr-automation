@@ -11,6 +11,7 @@ export interface PrepReviewMultiPairProps {
   formCards: ReactNode[];
   /** Optional: when provided, renders an "Add row to this page" footer button. */
   onAddRow?: (page: number) => void;
+  onPreviewStatusChange?: (page: number, status: "loading" | "ok" | "error") => void;
 }
 
 /**
@@ -31,11 +32,18 @@ export function PrepReviewMultiPair({
   fileId,
   formCards,
   onAddRow,
+  onPreviewStatusChange,
 }: PrepReviewMultiPairProps) {
   return (
     <div className="grid grid-cols-2 gap-4 border-b border-border p-4">
       <div className="sticky top-4 self-start">
-        <PdfPagePreview workflow={workflow} parentRunId={parentRunId} page={page} fileId={fileId} />
+        <PdfPagePreview
+          workflow={workflow}
+          parentRunId={parentRunId}
+          page={page}
+          fileId={fileId}
+          onStatusChange={onPreviewStatusChange}
+        />
       </div>
       <div className="flex flex-col gap-3">
         {formCards.map((card, i) => (

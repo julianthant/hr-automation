@@ -61,6 +61,7 @@ export type EmergencyContact = z.infer<typeof EmergencyContactSchema>;
 
 export const RecordSchema = z.object({
   sourcePage: z.number().int().positive(),
+  dryRun: z.boolean().optional(),
   employee: EmployeeSchema,
   emergencyContact: EmergencyContactSchema,
   notes: z.array(z.string()).default([]),

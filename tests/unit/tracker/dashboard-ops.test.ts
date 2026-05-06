@@ -8,10 +8,10 @@
  */
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { trackEvent } from "../../../src/tracker/jsonl.js";
+import { readLogEntries, trackEvent } from "../../../src/tracker/jsonl.js";
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store.js";
 import { createWorkerStore } from "../../../src/core/worker-store.js";
@@ -320,6 +320,10 @@ describe("buildCancelQueuedHandler", () => {
     const queueAudit = readFileSync(queueFilePath("separations", tmp), "utf8");
     assert.ok(queueAudit.includes('"type":"failed"'));
     assert.ok(queueAudit.includes("cancelled by user from dashboard"));
+    const logs = readLogEntries("separations", "3930", tmp);
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].runId, "sqlite-run-queued");
+    assert.match(logs[0].message, /cancelled by user from dashboard/);
     workerStore.close();
   });
 
@@ -370,6 +374,10 @@ describe("buildCancelQueuedHandler", () => {
     const after = readFileSync(path, "utf8");
     assert.ok(after.includes('"type":"failed"'));
     assert.ok(after.includes("cancelled by user from dashboard"));
+    const logs = readLogEntries("separations", "3930", tmp);
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].runId, "u-1");
+    assert.match(logs[0].message, /cancelled by user from dashboard/);
   });
 
   it("returns 409 when the item is already claimed", async () => {
@@ -444,6 +452,10 @@ describe("buildCancelRunningHandler", () => {
     assert.equal(command?.targetWorkerId, "sep-worker");
     assert.equal(command?.targetTaskId, enqueued.taskId);
     assert.equal(command?.targetAttemptId, enqueued.attemptId);
+    const logs = readLogEntries("separations", "4000", tmp);
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].runId, "run-cancel-running");
+    assert.match(logs[0].message, /Cancellation requested by dashboard/);
     workerStore.close();
   });
 });
@@ -500,7 +512,9 @@ describe("dashboard worker command helpers", () => {
     assert.equal(killCommand?.state, "queued");
     assert.equal(killCommand?.targetBrowserProcessId, browser.browserProcessId);
     assert.equal(workerStore.findBrowserProcessById(browser.browserProcessId)?.status, "kill_requested");
-    const entries = readFileSync(join(tmp, "separations-" + new Date().toISOString().slice(0, 10) + ".jsonl"), "utf8")
+    const trackerFile = readdirSync(tmp).find((file) => /^separations-\d{4}-\d{2}-\d{2}\.jsonl$/.test(file));
+    assert.ok(trackerFile, "force-stop should emit a separations tracker file");
+    const entries = readFileSync(join(tmp, trackerFile), "utf8")
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));

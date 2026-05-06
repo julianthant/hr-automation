@@ -3,6 +3,7 @@ import type { PendingTaskDependency, TaskStore } from "./store.js";
 import type { ProjectedRun } from "./scheduler.js";
 import {
   computeOcrVerification,
+  patchOcrRecordFromActiveCheckOutcome,
   patchOcrRecordFromEidLookupOutcome,
   patchOcrRecordUnresolved,
   type OcrLookupKind,
@@ -19,6 +20,7 @@ export type OcrEidLookupContinuationResult =
   | { ok: false; reason: string };
 
 const EID_LOOKUP_FAILED_WARNING = "eid-lookup failed";
+const ACTIVE_CHECK_FAILED_WARNING = "active-check failed";
 
 export async function applyOcrEidLookupContinuation(args: {
   store: TaskStore;
@@ -76,12 +78,64 @@ export async function applyOcrEidLookupContinuation(args: {
   return { ok: true };
 }
 
+export async function applyOcrActiveCheckContinuation(args: {
+  store: TaskStore;
+  dependency: PendingTaskDependency;
+  parentRun: ProjectedRun;
+  childRun: ProjectedRun;
+  now: string;
+  emitTracker: (entry: TrackerEntry) => void;
+}): Promise<OcrEidLookupContinuationResult> {
+  const metadata = readOcrActiveCheckMetadata(args.dependency.metadata);
+  if (!metadata) {
+    return { ok: false, reason: `invalid ocr-active-check dependency metadata for ${args.dependency.id}` };
+  }
+  const records = readRecords(args.parentRun.data?.records);
+  if (!records) {
+    return { ok: false, reason: `missing OCR records on parent run ${args.parentRun.runId ?? args.parentRun.id}` };
+  }
+  if (isActiveCheckContinuationAlreadyApplied(records, metadata, args.childRun)) {
+    return { ok: true };
+  }
+
+  if (args.childRun.status === "done" || args.childRun.status === "skipped") {
+    patchOcrRecordFromActiveCheckOutcome(records, metadata.recordIndex, {
+      workflow: args.childRun.workflow,
+      itemId: args.childRun.id,
+      runId: args.childRun.runId ?? "",
+      status: "done",
+      data: args.childRun.data,
+      error: args.childRun.error,
+    });
+  } else {
+    markOcrRecordUnresolved(records, metadata.recordIndex, ACTIVE_CHECK_FAILED_WARNING);
+  }
+
+  emitPatchedOcrTrackerRow({
+    parentRun: args.parentRun,
+    records,
+    now: args.now,
+    emitTracker: args.emitTracker,
+  });
+  return { ok: true };
+}
+
 function readOcrEidLookupMetadata(raw: Record<string, unknown>): OcrEidLookupDependencyMetadata | null {
   const recordIndex = raw.recordIndex;
   const lookupKind = raw.lookupKind;
   const formType = raw.formType;
   if (typeof recordIndex !== "number") return null;
   if (lookupKind !== "name" && lookupKind !== "verify" && lookupKind !== "verify-only") return null;
+  if (typeof formType !== "string" || !formType) return null;
+  return { recordIndex, lookupKind, formType };
+}
+
+function readOcrActiveCheckMetadata(raw: Record<string, unknown>): OcrEidLookupDependencyMetadata | null {
+  const recordIndex = raw.recordIndex;
+  const lookupKind = raw.lookupKind;
+  const formType = raw.formType;
+  if (typeof recordIndex !== "number") return null;
+  if (lookupKind !== "verify" && lookupKind !== "verify-only") return null;
   if (typeof formType !== "string" || !formType) return null;
   return { recordIndex, lookupKind, formType };
 }
@@ -123,6 +177,47 @@ function isContinuationAlreadyApplied(
   return verificationMatchesChildOutcome(record.verification, childRun);
 }
 
+function isActiveCheckContinuationAlreadyApplied(
+  records: unknown[],
+  metadata: OcrEidLookupDependencyMetadata,
+  childRun: ProjectedRun,
+): boolean {
+  const record = asRecord(records[metadata.recordIndex]);
+  if (!record) return false;
+  if (childRun.status !== "done" && childRun.status !== "skipped") {
+    return record.matchState === "unresolved" && warningsContain(record, ACTIVE_CHECK_FAILED_WARNING);
+  }
+  return verificationMatchesActiveCheckOutcome(record.verification, childRun);
+}
+
+function emitPatchedOcrTrackerRow(args: {
+  parentRun: ProjectedRun;
+  records: unknown[];
+  now: string;
+  emitTracker: (entry: TrackerEntry) => void;
+}): void {
+  const verifiedCount = args.records.filter((record) => {
+    const verification = (record as Record<string, unknown>).verification as { state?: string } | undefined;
+    return verification?.state === "verified";
+  }).length;
+
+  args.emitTracker({
+    workflow: "ocr",
+    timestamp: args.now,
+    id: args.parentRun.id,
+    ...(args.parentRun.runId ? { runId: args.parentRun.runId } : {}),
+    ...(args.parentRun.parentRunId ? { parentRunId: args.parentRun.parentRunId } : {}),
+    status: "running",
+    step: "awaiting-approval",
+    data: {
+      ...(args.parentRun.data ?? {}),
+      recordCount: String(args.records.length),
+      verifiedCount: String(verifiedCount),
+      records: JSON.stringify(args.records),
+    },
+  });
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -140,6 +235,16 @@ function warningsContain(record: Record<string, unknown>, warning: string): bool
     && record.warnings.some((value) => value === warning);
 }
 
+function markOcrRecordUnresolved(records: unknown[], idx: number, warning: string): void {
+  const record = asRecord(records[idx]);
+  if (!record) return;
+  record.matchState = "unresolved";
+  record.selected = false;
+  const warnings = Array.isArray(record.warnings) ? record.warnings as string[] : [];
+  if (!warnings.includes(warning)) warnings.push(warning);
+  record.warnings = warnings;
+}
+
 function verificationMatchesChildOutcome(raw: unknown, childRun: ProjectedRun): boolean {
   const actual = asRecord(raw);
   if (!actual) return false;
@@ -147,6 +252,25 @@ function verificationMatchesChildOutcome(raw: unknown, childRun: ProjectedRun): 
     hrStatus: childRun.data?.hrStatus,
     department: childRun.data?.department,
     personOrgScreenshot: childRun.data?.personOrgScreenshot,
+  });
+  return actual.state === expected.state
+    && optionalString(actual.hrStatus) === optionalString(expected.hrStatus)
+    && optionalString(actual.department) === optionalString(expected.department)
+    && optionalString(actual.screenshotFilename) === optionalString(expected.screenshotFilename)
+    && optionalString(actual.error) === optionalString(expected.error);
+}
+
+function verificationMatchesActiveCheckOutcome(raw: unknown, childRun: ProjectedRun): boolean {
+  const actual = asRecord(raw);
+  if (!actual) return false;
+  const expected = computeOcrVerification({
+    activeStatus: childRun.data?.activeStatus,
+    isActive: childRun.data?.isActive,
+    isHdhAccepted: childRun.data?.isHdhAccepted,
+    hrStatus: childRun.data?.hrStatus,
+    department: childRun.data?.department,
+    personOrgScreenshot: childRun.data?.personOrgScreenshot,
+    terminationDate: childRun.data?.terminationDate,
   });
   return actual.state === expected.state
     && optionalString(actual.hrStatus) === optionalString(expected.hrStatus)

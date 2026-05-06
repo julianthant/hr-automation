@@ -11,6 +11,7 @@ export const OcrInputSchema = z.object({
   parentRunId:      z.string().optional(),
   previousRunId:    z.string().optional(),
   forceResearchAll: z.boolean().optional(),
+  dryRun:           z.boolean().optional(),
 });
 
 export type OcrInput = z.infer<typeof OcrInputSchema>;

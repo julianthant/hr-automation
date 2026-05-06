@@ -254,6 +254,9 @@ export const INSTANCE_LABELS: Record<string, string> = {
   "emergency-contact": "Emergency Contact",
   "sharepoint-download": "SharePoint Download",
   "oath-signature": "Oath Signature",
+  "oath-upload": "Oath Upload",
+  "active-check": "Active Check",
+  ocr: "OCR",
 };
 
 /**
@@ -263,6 +266,9 @@ export const INSTANCE_LABELS: Record<string, string> = {
  */
 export function workflowNameFromInstance(instance: string): string | null {
   const stripped = instance.replace(/\s+\d+$/, "").trim();
+  if (Object.prototype.hasOwnProperty.call(INSTANCE_LABELS, stripped)) {
+    return stripped;
+  }
   for (const [wf, label] of Object.entries(INSTANCE_LABELS)) {
     if (label === stripped) return wf;
   }

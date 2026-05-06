@@ -100,6 +100,7 @@ export async function runOathUploadCli(
             pdfOriginalName: item.pdfOriginalName,
             sessionId: item.sessionId,
             pdfHash: item.pdfHash,
+            ...(item.dryRun ? { dryRun: "true" } : {}),
             ...operatorSubjectData(subject),
           },
         });

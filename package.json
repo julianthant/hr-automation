@@ -21,6 +21,8 @@
     "oath-upload:stop": "tsx --env-file=.env src/cli.ts daemon-stop oath-upload",
     "eid-lookup": "tsx --env-file=.env src/cli.ts eid-lookup",
     "eid-lookup:stop": "tsx --env-file=.env src/cli.ts daemon-stop eid-lookup",
+    "active-check": "tsx --env-file=.env src/cli.ts active-check",
+    "active-check:stop": "tsx --env-file=.env src/cli.ts daemon-stop active-check",
     "kronos": "tsx --env-file=.env src/cli.ts kronos",
     "emergency-contact": "tsx --env-file=.env src/cli.ts emergency-contact",
     "emergency-contact:stop": "tsx --env-file=.env src/cli.ts daemon-stop emergency-contact",

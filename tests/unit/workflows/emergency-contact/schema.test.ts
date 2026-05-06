@@ -63,6 +63,7 @@ describe("EmergencyContactSchema — same-address-when-null transform", () => {
   it("transform also fires when nested under RecordSchema", () => {
     const parsed = RecordSchema.parse({
       sourcePage: 1,
+      dryRun: true,
       employee: { name: "Test", employeeId: "12345" },
       emergencyContact: {
         name: "Friend",
@@ -77,5 +78,6 @@ describe("EmergencyContactSchema — same-address-when-null transform", () => {
       notes: [],
     });
     assert.equal(parsed.emergencyContact.sameAddressAsEmployee, true);
+    assert.equal(parsed.dryRun, true);
   });
 });

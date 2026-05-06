@@ -72,6 +72,7 @@ export function registerOathUploadRoutes(app: Hono, deps: DashboardHonoDeps): vo
     }
 
     const rosterMode = (multipart.parsed.fields.rosterMode?.trim() ?? "download") as "existing" | "download";
+    const dryRun = multipart.parsed.fields.dryRun === "true" || multipart.parsed.fields.dryRun === "1";
     let rosterPath: string | undefined;
     if (rosterMode === "existing") {
       const rosterDirs = [
@@ -95,6 +96,7 @@ export function registerOathUploadRoutes(app: Hono, deps: DashboardHonoDeps): vo
       sessionId,
       rosterMode,
       rosterPath,
+      dryRun,
     });
     return jsonResponse(result.body, result.status);
   });

@@ -9,6 +9,7 @@ import {
   generateInstanceName,
   readSessionEvents,
   getSessionsFilePath,
+  workflowNameFromInstance,
 } from "../../../src/tracker/session-events.js";
 import { filterLiveSessionState, rebuildSessionState } from "../../../src/tracker/dashboard.js";
 
@@ -544,4 +545,17 @@ test("generateInstanceName: paired start+end frees the number", () => {
   ]);
   const name = generateInstanceName("eid-lookup", dir);
   assert.equal(name, "EID Lookup 1", "paired start+end frees the slot");
+});
+
+test("workflowNameFromInstance resolves newly daemonized workflow labels", () => {
+  assert.equal(workflowNameFromInstance("Active Check 1"), "active-check");
+  assert.equal(workflowNameFromInstance("active-check 1"), "active-check");
+  assert.equal(workflowNameFromInstance("Oath Upload 2"), "oath-upload");
+});
+
+test("generateInstanceName: active-check uses human label so dashboard stop controls can resolve it", () => {
+  const dir = TMP();
+  const name = generateInstanceName("active-check", dir);
+
+  assert.equal(name, "Active Check 1");
 });

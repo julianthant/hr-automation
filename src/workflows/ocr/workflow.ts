@@ -10,6 +10,7 @@ const ocrSteps = [
   "matching",
   "disambiguating",
   "eid-lookup",
+  "active-check",
   "verification",
   "awaiting-approval",
 ] as const;

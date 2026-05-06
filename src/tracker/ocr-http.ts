@@ -58,6 +58,7 @@ export interface PrepareInput {
   sessionId?: string;
   previousRunId?: string;
   isReupload?: boolean;
+  dryRun?: boolean;
   /**
    * Workflow that originated this OCR upload. When set to a non-`"ocr"`
    * value (e.g. `"oath-signature"`, `"emergency-contact"`), the prepare
@@ -147,6 +148,7 @@ export function buildOcrPrepareHandler(
         ocrSessionId: sessionId,
         ocrRunId: runId,
         pdfFileId: input.pdfFileId,
+        dryRun: input.dryRun,
         trackerDir,
       });
     }
@@ -183,6 +185,7 @@ export function buildOcrPrepareHandler(
               rosterPath: input.rosterPath,
               rosterMode: input.rosterMode,
               previousRunId: input.previousRunId,
+              dryRun: input.dryRun,
               ...(parentRunId ? { parentRunId } : {}),
             },
             { runId, trackerDir },
@@ -218,6 +221,7 @@ function writeOriginParentPending(args: {
   ocrRunId: string;
   pdfFileId?: string;
   trackerDir?: string;
+  dryRun?: boolean;
 }): void {
   const ts = new Date().toISOString();
   // mode: "prepare" hooks the parent into the existing prep-row machinery
@@ -231,6 +235,7 @@ function writeOriginParentPending(args: {
     mode: "prepare",
     pdfOriginalName: args.pdfOriginalName,
     ...(args.pdfFileId ? { pdfFileId: args.pdfFileId } : {}),
+    ...(args.dryRun ? { dryRun: "true" } : {}),
     ocrSessionId: args.ocrSessionId,
     ocrRunId: args.ocrRunId,
   };
@@ -340,6 +345,8 @@ export interface ApproveInput {
   sessionId: string;
   runId: string;
   records: unknown[];
+  previewReady?: boolean;
+  previewPageCount?: number;
 }
 export interface ApproveResponse {
   status: 200 | 400 | 500;
@@ -365,6 +372,12 @@ export function buildOcrApproveHandler(
     if (!input.sessionId || !input.runId || !Array.isArray(input.records)) {
       return { status: 400, body: { ok: false, error: "Missing sessionId/runId/records" } };
     }
+    if (input.previewReady !== true || !Number.isFinite(input.previewPageCount) || Number(input.previewPageCount) <= 0) {
+      return {
+        status: 400,
+        body: { ok: false, error: "Source preview is not available yet; reopen the Preview tab or retry OCR before approving." },
+      };
+    }
     const formType = readFormType(input.sessionId, trackerDir);
     if (!formType) {
       return { status: 400, body: { ok: false, error: "Could not resolve formType for session" } };
@@ -375,6 +388,7 @@ export function buildOcrApproveHandler(
     }
 
     const parentRunId = readParentRunId(input.sessionId, trackerDir);
+    const dryRun = readDryRun(input.sessionId, trackerDir);
 
     // Only fan out records the operator selected in the preview pane.
     // Unsigned rows / unverified rows / unknown-doc rows are kept in the
@@ -384,7 +398,10 @@ export function buildOcrApproveHandler(
     const itemIds: string[] = [];
     input.records.forEach((rec, index) => {
       if (!isSelectedRecord(rec)) return;
-      const fanInput = spec.approveTo.deriveInput(rec as never);
+      const baseFanInput = spec.approveTo.deriveInput(rec as never);
+      const fanInput = dryRun && baseFanInput && typeof baseFanInput === "object"
+        ? { ...(baseFanInput as Record<string, unknown>), dryRun: true }
+        : baseFanInput;
       const itemId = spec.approveTo.deriveItemId(rec as never, input.runId, index);
       enqueueInputs.push(fanInput);
       itemIds.push(itemId);
@@ -418,6 +435,7 @@ export function buildOcrApproveHandler(
         data: {
           fannedOutCount: String(fannedOut.length),
           fannedOutItemIds: JSON.stringify(itemIds),
+          ...(dryRun ? { dryRun: "true" } : {}),
         },
       },
       trackerDir,
@@ -960,6 +978,22 @@ function readParentRunId(sessionId: string, trackerDir: string | undefined): str
     } catch { /* tolerate malformed lines */ }
   }
   return undefined;
+}
+
+function readDryRun(sessionId: string, trackerDir: string | undefined): boolean {
+  const date = dateLocal();
+  const file = join(trackerDir ?? ".tracker", `ocr-${date}.jsonl`);
+  if (!existsSync(file)) return false;
+  const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      const e = JSON.parse(lines[i]) as TrackerEntry;
+      if (e.id !== sessionId) continue;
+      const value = e.data?.dryRun as unknown;
+      if (value === true || value === "true" || value === "1") return true;
+    } catch { /* tolerate malformed lines */ }
+  }
+  return false;
 }
 
 function createApprovalDependencyRows(args: {
