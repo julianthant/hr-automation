@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { openControlDb } from '../../../src/core/control-db.js'
-import { createTaskStore } from '../../../src/core/task-store.js'
+import { createTaskStore } from '../../../src/core/task-store/index.js'
 import {
   createWorkerStore,
   type ControlWorkerStore,
