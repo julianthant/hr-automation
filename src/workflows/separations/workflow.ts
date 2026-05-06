@@ -1,10 +1,9 @@
-import type { Page } from "playwright";
 import { z } from "zod/v4";
 import { log } from "../../utils/log.js";
-import { errorMessage, classifyPlaywrightError } from "../../utils/errors.js";
-import { defineWorkflow, runWorkflow, runWorkflowBatch } from "../../core/index.js";
-import { trackEvent } from "../../tracker/jsonl.js";
-import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
+import { errorMessage } from "../../utils/errors.js";
+import { classifyPlaywrightError } from "../../utils/errors.js";
+import { defineWorkflow } from "../../core/index.js";
+import { buildOperatorSubject } from "../../domain/operator-subject.js";
 
 // Auth wrappers — split into prepare (nav + fill) + submit (click + Duo)
 // phases so Session.launch can pre-fill every SSO form in parallel before
@@ -22,67 +21,28 @@ import {
 
 // Kuali module
 import {
-  openActionList,
-  clickDocument,
-  extractSeparationData,
   isVoluntaryTermination,
   fillTimekeeperTasks,
-  fillFinalTransactions,
-  fillTransactionResults,
-  fillTimekeeperComments,
   updateLastDayWorked,
   updateSeparationDate,
-  verifyTxnNumberFilled,
-  clickSave,
 } from "../../systems/kuali/index.js";
 import type { KualiSeparationData } from "../../systems/kuali/index.js";
 
-// Old Kronos module
+// New Kronos (used for post-search scroll)
 import {
-  getGeniesIframe,
-  searchEmployee as searchOldKronos,
-  clickEmployeeRow,
-  dismissModal,
-  setDateRange as setOldKronosDateRange,
-  clickGoToTimecard as clickOldKronosGoToTimecard,
-  getTimecardLastDate as getOldKronosTimecardLastDate,
-} from "../../systems/old-kronos/index.js";
-
-// New Kronos module
-import {
-  searchEmployee as searchNewKronos,
-  selectEmployeeResult as selectNewKronosResult,
-  clickGoToTimecard as clickNewKronosGoToTimecard,
-  setDateRange as setNewKronosDateRange,
-  getTimecardLastDate as getNewKronosTimecardLastDate,
   scrollNewKronosTimecardToDate,
   NEW_KRONOS_URL,
 } from "../../systems/new-kronos/index.js";
 
-// UCPath modules
-import {
-  navigateToSmartHR,
-  getContentFrame,
-  clickSmartHRTransactions,
-  selectTemplate,
-  enterEffectiveDate,
-  clickCreateTransaction,
-  selectReasonCode,
-  fillComments,
-  clickSaveAndSubmit,
-  getJobSummaryData,
-  findExistingTerminationTransaction,
-} from "../../systems/ucpath/index.js";
+// UCPath (used for jobSummary result resolution)
 import type { JobSummaryData } from "../../systems/ucpath/index.js";
 
 import {
   computeTerminationEffDate,
   computeKronosDateRange,
   buildTerminationComments,
-  buildDateChangeComments,
   resolveKronosDates,
   mapReasonCode,
-  getInitials,
   validateLastDayWorked,
 } from "./schema.js";
 import {
@@ -92,13 +52,19 @@ import {
 } from "./config.js";
 import { PATHS, UCPATH_SMART_HR_URL } from "../../config.js";
 import { getProcessIsolatedSessionDir } from "../../core/session.js";
-import { rmSync } from "node:fs";
+
+// Step functions
+import { runKualiExtract } from "./steps/kuali-extract.js";
+import { runKronosSearch } from "./steps/kronos-search.js";
+import { runUcpathJobSummary } from "./steps/ucpath-job-summary.js";
+import { runUcpathTransaction } from "./steps/ucpath-transaction.js";
+import { runKualiFinalize } from "./steps/kuali-finalize.js";
 
 /** Input schema for the separations kernel workflow — only docId from the CLI. */
 const SeparationInputSchema = z.object({
   docId: z.string().min(1),
 });
-type SeparationInput = z.infer<typeof SeparationInputSchema>;
+export type SeparationInput = z.infer<typeof SeparationInputSchema>;
 
 const separationsSteps = [
   "kuali-extraction",
@@ -107,23 +73,6 @@ const separationsSteps = [
   "ucpath-transaction",
   "kuali-finalization",
 ] as const;
-
-/**
- * Helper: detect "No matches were found" modal on Old Kronos after an EID search
- * and dismiss it. Returns false when the modal appeared (i.e. EID not found).
- */
-async function checkOldKronosResult(page: Page): Promise<boolean> {
-  let found = true;
-  for (const f of page.frames()) {
-    const noMatch = await f.locator("text=No matches were found").count().catch(() => 0);
-    if (noMatch > 0) {
-      found = false;
-      try { await f.locator("button:has-text('OK')").click({ timeout: 3_000 }); } catch { /* ok */ }
-      break;
-    }
-  }
-  return found;
-}
 
 /**
  * Kernel definition for the separations workflow.
@@ -308,7 +257,7 @@ export const separationsWorkflow = defineWorkflow({
       (k) => typeof ctx.data[k] === "string" && (ctx.data[k] as string).length > 0,
     );
 
-    let kualiData: Awaited<ReturnType<typeof extractSeparationData>>;
+    let kualiData: KualiSeparationData;
     if (allPrefilled) {
       ctx.skipStep("kuali-extraction");
       log.step(
@@ -334,38 +283,7 @@ export const separationsWorkflow = defineWorkflow({
         location: "",
       };
     } else {
-      kualiData = await ctx.step("kuali-extraction", async () => {
-        const t0 = Date.now();
-        log.debug(`[Step: kuali-extraction] START docId='${docId}'`);
-        const kualiPage = await ctx.page("kuali");
-        // Auto-dismiss PeopleSoft dialogs on UCPath — important when a previous
-        // doc's transaction leaves a confirmation modal up (batch mode state).
-        const ucpathPage = await ctx.page("ucpath");
-        ucpathPage.on("dialog", (d) => d.accept().catch(() => {}));
-
-        await openActionList(kualiPage);
-        await clickDocument(kualiPage, docId);
-        const result = await extractSeparationData(kualiPage);
-        // Write extracted fields onto the tracker row BEFORE the step returns.
-        // Anything that throws downstream (validateLastDayWorked, Kronos, Kuali
-        // finalize, etc.) still leaves a populated detail grid instead of a row
-        // of em-dashes. `rawTerminationType` is the un-mapped Kuali string —
-        // edit-and-resume needs it for `mapReasonCode()` on the bypass path.
-        ctx.updateData({
-          name: result.employeeName,
-          eid: result.eid,
-          rawTerminationType: result.terminationType,
-          separationDate: result.separationDate,
-          lastDayWorked: result.lastDayWorked,
-          terminationType: isVoluntaryTermination(result.terminationType) ? "Vol" : "Invol",
-        });
-        log.step(
-          `[Step: kuali-extraction] END took=${Date.now() - t0}ms `
-          + `employeeName='${result.employeeName}' eid='${result.eid}' `
-          + `lastDayWorked='${result.lastDayWorked}' separationDate='${result.separationDate}'`,
-        );
-        return result;
-      });
+      kualiData = await ctx.step("kuali-extraction", () => runKualiExtract(ctx, docId));
     }
 
     // Preflight: reject future-dated separations so we don't waste Kronos/UCPath
@@ -422,68 +340,9 @@ export const separationsWorkflow = defineWorkflow({
         log.warn(`[Kuali] timekeeper-name fill failed during kronos-search skip: ${errorMessage(e)}`);
       }
     } else {
-    const phase1 = await ctx.step("kronos-search", async () => {
-      const t0 = Date.now();
-      log.debug(`[Step: kronos-search] START eid='${kualiData.eid}'`);
-      log.step("=== PHASE 1: Kronos + Job Summary + Kuali fill (parallel) ===");
-      const result = await ctx.parallel({
-        oldK: async () => {
-          const page = await ctx.page("old-kronos");
-          // Old Kronos: set date range FIRST, then search by ID
-          const iframe = await getGeniesIframe(page);
-          await dismissModal(page, iframe);
-          await setOldKronosDateRange(page, iframe, kronosStart, kronosEnd);
-          await searchOldKronos(page, iframe, kualiData.eid);
-          await page.waitForTimeout(3_000);
-          const found = await checkOldKronosResult(page);
-          log.step(`[Old Kronos] EID ${kualiData.eid}: ${found ? "FOUND" : "NOT FOUND"}`);
-          if (!found) return { found: false, date: null as string | null };
-          await clickEmployeeRow(page, iframe, kualiData.eid);
-          const okTimecard = await clickOldKronosGoToTimecard(page, iframe);
-          if (!okTimecard) return { found: true, date: null as string | null };
-          await page.waitForTimeout(3_000);
-          await dismissModal(page, iframe);
-          const date = await getOldKronosTimecardLastDate(page, iframe);
-          return { found: true, date };
-        },
-        newK: async () => {
-          const page = await ctx.page("new-kronos");
-          // New Kronos: search by ID first, then go to timecard, then set date range
-          const found = await searchNewKronos(page, kualiData.eid);
-          log.step(`[New Kronos] EID ${kualiData.eid}: ${found ? "FOUND" : "NOT FOUND"}`);
-          if (!found) return { found: false, date: null as string | null };
-          await selectNewKronosResult(page);
-          const okTimecard = await clickNewKronosGoToTimecard(page);
-          if (!okTimecard) return { found: true, date: null as string | null };
-          await page.waitForTimeout(3_000);
-          await setNewKronosDateRange(page, kronosStart, kronosEnd);
-          const date = await getNewKronosTimecardLastDate(page);
-          return { found: true, date };
-        },
-        jobSummary: async (): Promise<JobSummaryData | undefined> => {
-          const page = await ctx.page("ucpath");
-          log.step("[UCPath] Starting Job Summary lookup...");
-          // Throws with a clear "verify EID in Kuali" message if Workforce
-          // Job Summary returns no results. No cross-source fallbacks —
-          // wrong EIDs get surfaced, not silently corrected.
-          return getJobSummaryData(page, kualiData.eid);
-        },
-        kualiTimekeeper: async () => {
-          const page = await ctx.page("kuali");
-          log.step("[Kuali] Filling timekeeper name...");
-          await fillTimekeeperTasks(page, timekeeperName);
-          log.success("[Kuali] Timekeeper name filled");
-        },
-      });
-      log.step(
-        `[Step: kronos-search] END took=${Date.now() - t0}ms `
-        + `oldK found=${result.oldK.status === "fulfilled"} `
-        + `newK found=${result.newK.status === "fulfilled"} `
-        + `jobSummary ok=${result.jobSummary.status === "fulfilled"} `
-        + `kualiTimekeeper ok=${result.kualiTimekeeper.status === "fulfilled"}`,
-      );
-      return result;
-    });
+    const phase1 = await ctx.step("kronos-search", () =>
+      runKronosSearch(ctx, kualiData, kronosStart, kronosEnd, timekeeperName),
+    );
 
     if (phase1.oldK.status === "fulfilled") {
       oldKronosFound = phase1.oldK.value.found;
@@ -589,23 +448,9 @@ export const separationsWorkflow = defineWorkflow({
           : `[Step: ucpath-job-summary] SKIPPED — UCPath Job Summary returned no fillable data`,
       );
     } else {
-      await ctx.step("ucpath-job-summary", async () => {
-        const t0 = Date.now();
-        log.debug(`[Step: ucpath-job-summary] START eid='${kualiData.eid}'`);
-        log.step("[Kuali] Filling department + payroll from UCPath Job Summary...");
-        await fillFinalTransactions(kualiPage, {
-          department: jobSummaryData!.departmentDescription,
-          payrollTitleCode: jobSummaryData!.jobCode,
-          payrollTitle: jobSummaryData!.jobDescription,
-        });
-        log.success("[Kuali] Department + payroll filled");
-        log.step(
-          `[Step: ucpath-job-summary] END took=${Date.now() - t0}ms `
-          + `dept='${jobSummaryData!.departmentDescription ?? ""}' `
-          + `jobCode='${jobSummaryData!.jobCode ?? ""}' `
-          + `payrollTitle='${jobSummaryData!.jobDescription ?? ""}'`,
-        );
-      });
+      await ctx.step("ucpath-job-summary", () =>
+        runUcpathJobSummary(kualiPage, jobSummaryData!, kualiData.eid),
+      );
     }
 
     // ─── Step 6: UCPath Smart HR Transaction ───
@@ -635,101 +480,17 @@ export const separationsWorkflow = defineWorkflow({
       ctx.updateData({ transactionNumber });
     } else {
     await ctx.step("ucpath-transaction", async () => {
-      const t0 = Date.now();
-      log.debug(`[Step: ucpath-transaction] START empl='${kualiData.eid}' template='${template}'`);
-      try {
-        log.step("=== UCPath Smart HR Transaction ===");
-        const ucpathPage = await ctx.page("ucpath");
-
-        // Pre-submit existence check — match by EID (Person ID column) +
-        // effective date + "Terminatn" action. Names are unreliable
-        // (Kuali-vs-UCPath nickname/spelling/column-order variants cause
-        // real dupes — EID 10794813 Aki Uchida, 2026-04-24); EID is
-        // deterministic. If a row already exists, reuse its txn# and skip
-        // the submit.
-        const existingTxn = await findExistingTerminationTransaction(
-          ucpathPage,
-          kualiData.eid,
-          finalTermEffDate,
-        );
-        if (existingTxn) {
-          log.warn(`[UCPath Txn] Existing termination transaction #${existingTxn} found on Smart HR list — skipping submit.`);
-          transactionNumber = existingTxn;
-          // Persist the txn # immediately. If kuali-finalization throws
-          // later, the handler exits before the final updateData at the end
-          // of the body — without this inline call the dashboard detail
-          // panel shows "—".
-          ctx.updateData({ transactionNumber, existingTransactionFound: "true" });
-          await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-existing' });
-          return;
-        }
-
-        try {
-          await navigateToSmartHR(ucpathPage);
-          await clickSmartHRTransactions(ucpathPage);
-
-          const frame = getContentFrame(ucpathPage);
-          await selectTemplate(frame, template);
-          await enterEffectiveDate(frame, finalTermEffDate);
-
-          const createResult = await clickCreateTransaction(ucpathPage, frame);
-          if (!createResult.success) {
-            log.error(`[UCPath Txn] Create failed: ${createResult.error}`);
-            return;
-          }
-          log.step("[UCPath Txn] Filling Empl ID...");
-          await frame.getByRole("textbox", { name: "Empl ID" }).fill(kualiData.eid, { timeout: 10_000 });
-          await selectReasonCode(ucpathPage, frame, ucpathReason);
-          await fillComments(frame, finalComments);
-
-          const submitResult = await clickSaveAndSubmit(ucpathPage, frame, kualiData.eid);
-          transactionNumber = submitResult.transactionNumber ?? "";
-          log.step(
-            `[UCPath Txn] submit result: success=${submitResult.success} `
-            + `txnNumber='${transactionNumber || "<empty>"}' `
-            + `reasonMessage='${submitResult.error ?? "<none>"}'`,
-          );
-          if (!submitResult.success) {
-            log.error(`[UCPath Txn] Submit failed: ${submitResult.error}`);
-            return;
-          }
-          if (!transactionNumber) {
-            submittedWithoutTxnNumber = true;
-            return;
-          }
-          // Persist txn # immediately so kuali-finalization failures don't
-          // drop it from the tracker entry's data.
-          ctx.updateData({ transactionNumber });
-          log.success(`[UCPath Txn] Transaction submitted (#${transactionNumber})`);
-          await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-submitted' });
-        } catch (e) {
-          log.error(`[UCPath Txn] Failed: ${errorMessage(e)}`);
-          // Diagnostic capture for this soft-failure path. The handler
-          // intentionally swallows the throw (kuali-finalization still runs
-          // with an empty txn#), so the kernel's step-failure screenshot
-          // never fires — explicit ctx.screenshot keeps the debug image
-          // reachable from the dashboard Screenshots panel.
-          await ctx.screenshot({ kind: "error", label: "ucpath-transaction-failed" });
-        }
-
-        // In batch mode, navigate UCPath back to Smart HR base URL so the next
-        // doc's transaction starts from a clean page. Kernel's between-items
-        // reset-browsers also does this via the resetUrl SystemConfig field, but
-        // we do it immediately here so the current phase3 step doesn't collide
-        // with a confirmation modal left over on the page.
-        if (ctx.isBatch) {
-          try {
-            await navigateToSmartHR(ucpathPage);
-          } catch {
-            // Non-fatal — the between-items reset will retry
-          }
-        }
-      } finally {
-        log.step(
-          `[Step: ucpath-transaction] END took=${Date.now() - t0}ms `
-          + `txnNumber='${transactionNumber || "<empty>"}'`,
-        );
-      }
+      const result = await runUcpathTransaction(
+        ctx,
+        kualiData,
+        finalTermEffDate,
+        ucpathReason,
+        finalComments,
+        template,
+        transactionNumber,
+      );
+      transactionNumber = result.transactionNumber;
+      submittedWithoutTxnNumber = result.submittedWithoutTxnNumber;
     });
 
     if (submittedWithoutTxnNumber) {
@@ -740,52 +501,16 @@ export const separationsWorkflow = defineWorkflow({
     } // end !txnNumberPrefilled branch
 
     // ─── Step 7: Kuali finalization ───
-    await ctx.step("kuali-finalization", async () => {
-      const t0 = Date.now();
-      log.debug(`[Step: kuali-finalization] START txnNumber='${transactionNumber || "<empty>"}'`);
-      log.step("=== PHASE 3: Kuali finalization ===");
-
-      // Termination Effective Date — required for every Kuali save. Lives
-      // here (not inside ucpath-job-summary) so the dashboard pipeline
-      // accurately distinguishes "Kuali fill" from "UCPath dept/payroll
-      // lookup". When no UCPath data was fetched (edit-and-resume bypass
-      // path), ucpath-job-summary is skipped entirely and this fill is
-      // the only Kuali term-eff-date write that happens.
-      log.step(`[Kuali] Filling Termination Effective Date: ${finalTermEffDate}`);
-      await kualiPage
-        .getByRole("textbox", { name: "Termination Effective Date*" })
-        .fill(finalTermEffDate, { timeout: 5_000 });
-
-      // Always fill checkbox + radio; fill txn number if we have it
-      await fillTransactionResults(kualiPage, transactionNumber);
-      if (!transactionNumber) {
-        log.error("[Kuali] No transaction number — left blank for manual entry");
-      }
-
-      const initials = getInitials(timekeeperName);
-      const dateChangeComments = buildDateChangeComments(
-        kualiData.lastDayWorked, resolved.lastDayWorked,
-        kualiData.separationDate, resolved.separationDate,
-        initials,
-      );
-      // User-supplied free-form Kuali timekeeper-comments override (set
-      // via the dashboard's EditDataTab → prefilledData channel). Joined
-      // with auto-generated date-change comments using a newline. The
-      // combined string is then handed to `fillTimekeeperComments`, which
-      // reads the form's existing value and prepends it (also newline-
-      // joined) so nothing the user / prior run wrote gets clobbered.
-      const userComments = ((ctx.data.comments as string | undefined) ?? "").trim();
-      const newComments = [dateChangeComments, userComments].filter(Boolean).join("\n");
-      if (newComments) {
-        log.step(`[Kuali] Comments to add: ${newComments}`);
-        await fillTimekeeperComments(kualiPage, newComments);
-      }
-
-      await verifyTxnNumberFilled(kualiPage, transactionNumber);
-      await clickSave(kualiPage);
-      await ctx.screenshot({ kind: 'form', label: 'kuali-finalization-saved' });
-      log.step(`[Step: kuali-finalization] END took=${Date.now() - t0}ms success`);
-    });
+    await ctx.step("kuali-finalization", () =>
+      runKualiFinalize(ctx, {
+        kualiPage,
+        kualiData,
+        resolved,
+        transactionNumber,
+        finalTermEffDate,
+        timekeeperName,
+      }),
+    );
 
     // Final state snapshot for the dashboard detail panel / JSONL readers.
     ctx.updateData({
@@ -805,108 +530,5 @@ export const separationsWorkflow = defineWorkflow({
   },
 });
 
-/**
- * CLI adapter for single-doc separation runs. Delegates to
- * `runWorkflow(separationsWorkflow, { docId })` which owns browser launch, the
- * interleaved auth chain, step emission, screenshot-on-failure, and SIGINT
- * cleanup.
- */
-export async function runSeparation(docId: string): Promise<void> {
-  const sessionDir = getProcessIsolatedSessionDir(PATHS.ukgSessionSep);
-  try {
-    await runWorkflow(separationsWorkflow, { docId });
-  } finally {
-    try { rmSync(sessionDir, { recursive: true, force: true }); } catch { /* non-fatal */ }
-  }
-}
-
-/**
- * CLI adapter for multi-doc batch runs.
- *
- * Delegates to `runWorkflowBatch` sequential mode — the kernel launches
- * browsers once, runs the auth chain once, and reuses the same 4 browsers for
- * every doc, calling `session.reset(id)` between docs.
- *
- * `onPreEmitPending` emits a `pending` tracker row per docId before the first
- * step runs so the dashboard populates the queue immediately. `deriveItemId`
- * produces the docId-shaped item ID that `withTrackedWorkflow` will use.
- */
-export async function runSeparationBatch(
-  docIds: string[],
-): Promise<{ total: number; succeeded: number; failed: number }> {
-  const sessionDir = getProcessIsolatedSessionDir(PATHS.ukgSessionSep);
-  const now = new Date().toISOString();
-  const items = docIds.map((id) => ({ docId: id }));
-  try {
-    const result = await runWorkflowBatch(separationsWorkflow, items, {
-      deriveItemId: (item) => (item as SeparationInput).docId,
-      onPreEmitPending: (item, runId) => {
-        const { docId } = item as SeparationInput;
-        const subject = separationsWorkflow.config.operatorSubject?.({ docId });
-        trackEvent({
-          workflow: "separations",
-          timestamp: now,
-          id: docId,
-          runId,
-          status: "pending",
-          data: { docId, ...operatorSubjectData(subject) },
-        });
-      },
-    });
-    return { total: result.total, succeeded: result.succeeded, failed: result.failed };
-  } finally {
-    try { rmSync(sessionDir, { recursive: true, force: true }); } catch { /* non-fatal */ }
-  }
-}
-
-/**
- * Daemon-mode CLI adapter. Dispatches docIds through the shared daemon queue
- * instead of launching an in-process batch: first call spawns a detached
- * daemon + pays Duo once, subsequent calls enqueue + wake alive daemons.
- *
- * See `src/core/daemon-client.ts::ensureDaemonsAndEnqueue` for flag semantics
- * and `src/workflows/separations/CLAUDE.md` ("Daemon mode") for user-facing
- * docs. `runSeparation` / `runSeparationBatch` above remain untouched so
- * tests and scripting can still run the separations workflow directly
- * without the daemon.
- */
-export async function runSeparationCli(
-  docIds: string[],
-  options: { new?: boolean; parallel?: number } = {},
-): Promise<void> {
-  if (docIds.length === 0) {
-    log.error("runSeparationCli: no doc IDs provided");
-    process.exitCode = 1;
-    return;
-  }
-  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
-  const inputs = docIds.map((docId) => ({ docId }));
-  const now = new Date().toISOString();
-  await ensureDaemonsAndEnqueue(
-    separationsWorkflow,
-    inputs,
-    {
-      new: options.new,
-      parallel: options.parallel,
-    },
-    {
-      // Emit a `pending` tracker row per docId at enqueue time so the
-      // dashboard queue panel populates BEFORE the daemon finishes Duo.
-      // Matches the `runSeparationBatch` pre-emit payload (shape is
-      // read back by the session drawer + QueuePanel); runId is pre-assigned
-      // by enqueueItems so the eventual running/done rows pair 1:1.
-      onPreEmitPending: (item, runId) => {
-        const { docId } = item;
-        const subject = separationsWorkflow.config.operatorSubject?.(item);
-        trackEvent({
-          workflow: "separations",
-          timestamp: now,
-          id: docId,
-          runId,
-          status: "pending",
-          data: { docId, ...operatorSubjectData(subject) },
-        });
-      },
-    },
-  );
-}
+// Re-export CLI runners so existing import sites (index.ts, src/cli.ts) continue working.
+export { runSeparation, runSeparationBatch, runSeparationCli } from "./cli.js";
