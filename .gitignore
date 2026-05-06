@@ -74,3 +74,6 @@ Thumbs.db
 /notes.md
 .ocr-cache/
 .worktrees/
+
+# Pathfinder reports (analysis scratch, not committed)
+PATHFINDER-*/

@@ -14,7 +14,33 @@ export interface PdfPagePreviewProps {
 }
 
 // Pre-render N pages above + below the viewport so scrolling feels instant.
-const VIEWPORT_PRELOAD_MARGIN = "800px";
+const VIEWPORT_PRELOAD_MARGIN_PX = 800;
+const VIEWPORT_PRELOAD_MARGIN = `${VIEWPORT_PRELOAD_MARGIN_PX}px`;
+
+type RectLike = Pick<DOMRect, "top" | "bottom" | "left" | "right">;
+type LocationLike = Pick<Location, "protocol" | "hostname" | "port">;
+
+export function isPreviewNearViewport(
+  rect: RectLike,
+  viewport: { width: number; height: number },
+  marginPx = VIEWPORT_PRELOAD_MARGIN_PX,
+): boolean {
+  return (
+    rect.bottom >= -marginPx &&
+    rect.top <= viewport.height + marginPx &&
+    rect.right >= -marginPx &&
+    rect.left <= viewport.width + marginPx
+  );
+}
+
+export function resolveDashboardApiSrc(path: string, locationLike?: LocationLike): string {
+  const loc = locationLike ?? (typeof window === "undefined" ? undefined : window.location);
+  if (!loc) return path;
+  if (loc.port !== "5173") return path;
+  const protocol = loc.protocol || "http:";
+  const hostname = loc.hostname || "localhost";
+  return `${protocol}//${hostname}:3838${path}`;
+}
 
 /**
  * <img> wrapper that pulls a single PDF page render from the
@@ -35,6 +61,7 @@ export function PdfPagePreview({
   onStatusChange,
 }: PdfPagePreviewProps) {
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
+  const imgRef = useRef<HTMLImageElement>(null);
   // Defer the image fetch until the container is near the viewport — for a
   // 50-page PDF that means we never download the bytes for pages the
   // operator never scrolled to. IntersectionObserver with a generous
@@ -45,30 +72,123 @@ export function PdfPagePreview({
     if (shouldLoad) return; // already loading/loaded
     const el = containerRef.current;
     if (!el) return;
-    const obs = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) {
-          if (e.isIntersecting) {
-            setShouldLoad(true);
-            obs.disconnect();
-            break;
+    let obs: IntersectionObserver | null = null;
+    let disposed = false;
+
+    const markIfNearViewport = (): boolean => {
+      if (disposed) return false;
+      const rect = el.getBoundingClientRect();
+      if (!isPreviewNearViewport(rect, { width: window.innerWidth, height: window.innerHeight })) {
+        return false;
+      }
+      setShouldLoad(true);
+      obs?.disconnect();
+      window.removeEventListener("scroll", markIfNearViewport, true);
+      window.removeEventListener("resize", markIfNearViewport);
+      return true;
+    };
+
+    if (markIfNearViewport()) return;
+
+    if ("IntersectionObserver" in window) {
+      obs = new IntersectionObserver(
+        (entries) => {
+          for (const e of entries) {
+            if (e.isIntersecting) {
+              markIfNearViewport();
+              break;
+            }
           }
-        }
-      },
-      { rootMargin: VIEWPORT_PRELOAD_MARGIN, threshold: 0 },
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
+        },
+        { rootMargin: VIEWPORT_PRELOAD_MARGIN, threshold: 0 },
+      );
+      obs.observe(el);
+    }
+
+    window.addEventListener("scroll", markIfNearViewport, { capture: true, passive: true });
+    window.addEventListener("resize", markIfNearViewport);
+    const firstLayoutCheck = window.setTimeout(markIfNearViewport, 100);
+    const secondLayoutCheck = window.setTimeout(markIfNearViewport, 500);
+
+    return () => {
+      disposed = true;
+      obs?.disconnect();
+      window.removeEventListener("scroll", markIfNearViewport, true);
+      window.removeEventListener("resize", markIfNearViewport);
+      window.clearTimeout(firstLayoutCheck);
+      window.clearTimeout(secondLayoutCheck);
+    };
   }, [shouldLoad]);
 
-  const src = fileId
+  const srcPath = fileId
     ? `/api/files/${encodeURIComponent(fileId)}/pages/${page}`
     : `/api/prep/pdf-page?workflow=${encodeURIComponent(workflow)}&parentRunId=${encodeURIComponent(parentRunId)}&page=${page}`;
+  const src = resolveDashboardApiSrc(srcPath);
+
   // Reset state whenever the src changes (different row / different page).
   useEffect(() => {
     setState("loading");
     onStatusChange?.(page, "loading");
   }, [src, page, onStatusChange]);
+
+  useEffect(() => {
+    if (!shouldLoad) return;
+    let done = false;
+    const mark = (status: "ok" | "error") => {
+      if (done) return;
+      done = true;
+      setState(status);
+      onStatusChange?.(page, status);
+    };
+    const checkDecoded = () => {
+      const img = imgRef.current;
+      if (!img?.complete) return;
+      mark(img.naturalWidth > 0 ? "ok" : "error");
+    };
+
+    checkDecoded();
+    const interval = window.setInterval(checkDecoded, 100);
+    const timeout = window.setTimeout(() => {
+      const img = imgRef.current;
+      if (img?.complete && img.naturalWidth > 0) {
+        mark("ok");
+      } else {
+        mark("error");
+      }
+    }, 15000);
+
+    return () => {
+      window.clearInterval(interval);
+      window.clearTimeout(timeout);
+    };
+  }, [shouldLoad, src, page, onStatusChange]);
+
+  const markLoaded = () => {
+    const img = imgRef.current;
+    if (!img || img.naturalWidth <= 0) return;
+    setState("ok");
+    onStatusChange?.(page, "ok");
+  };
+
+  const markFailed = () => {
+    setState("error");
+    onStatusChange?.(page, "error");
+  };
+
+  useEffect(() => {
+    if (!shouldLoad) return;
+    const img = imgRef.current;
+    if (img?.complete) {
+      if (img.naturalWidth > 0) {
+        setState("ok");
+        onStatusChange?.(page, "ok");
+      } else {
+        setState("error");
+        onStatusChange?.(page, "error");
+      }
+    }
+  }, [shouldLoad, src, page, onStatusChange]);
+
   return (
     <div
       ref={containerRef}
@@ -111,20 +231,14 @@ export function PdfPagePreview({
       )}
       {shouldLoad && (
         <img
+          ref={imgRef}
           key={src}
           src={src}
           alt={`PDF page ${page}`}
           decoding="async"
-          // @ts-expect-error fetchpriority is a valid HTML attribute but React types lag.
-          fetchpriority="high"
-          onLoad={() => {
-            setState("ok");
-            onStatusChange?.(page, "ok");
-          }}
-          onError={() => {
-            setState("error");
-            onStatusChange?.(page, "error");
-          }}
+          fetchPriority="high"
+          onLoad={markLoaded}
+          onError={markFailed}
           className={cn("h-full w-full object-contain", state !== "ok" && "opacity-0")}
         />
       )}
