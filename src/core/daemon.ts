@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
-import { createServer, type Server } from 'node:http'
 import { existsSync, unlinkSync } from 'node:fs'
 import type { RegisteredWorkflow } from './types.js'
 import { Session } from './session.js'
@@ -29,6 +28,8 @@ import { buildTrackerDataForInput } from './enqueue-dispatch.js'
 import { openControlDb } from './control-db.js'
 import { createTaskStore } from './task-store.js'
 import { createWorkerStore, type ControlWorkerStore, type WorkerCommandRow } from './worker-store.js'
+import { startDaemonHttpServer } from './daemon-http.js'
+import { runKeepaliveTick } from './daemon-keepalive.js'
 
 export interface DaemonOpts {
   trackerDir?: string
@@ -137,217 +138,25 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     })
   }
 
-  const server: Server = createServer((req, res) => {
-    const url = req.url ?? '/'
-    if (req.method === 'GET' && url === '/whoami') {
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(
-        JSON.stringify({
-          workflow: wf.config.name,
-          instanceId,
-          pid: process.pid,
-          version: 1,
-        }),
-      )
-      return
-    }
-    if (req.method === 'GET' && url === '/status') {
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(
-        JSON.stringify({
-          workflow: wf.config.name,
-          instanceId,
-          phase,
-          queueDepth: queueDepthCache,
-          inFlight: inFlight?.itemId ?? null,
-          inFlightRunId: inFlight?.runId ?? null,
-          lastActivity: new Date(lastActivity).toISOString(),
-          // chromePids is best-effort: undefined during phase === 'launching'
-          // (session not yet allocated) and on win32 (defaultLaunchOne's
-          // pgrep diff returns no children). Spawn pre-check tolerates both.
-          chromePids: activeSession ? Object.values(activeSession.chromePids) : [],
-        }),
-      )
-      return
-    }
-    if (req.method === 'POST' && url === '/wake') {
-      wakeResolve?.()
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end('{"ok":true}')
-      return
-    }
-    if (req.method === 'POST' && url === '/cancel-current') {
-      let body = ''
-      req.on('data', (c) => {
-        body += c
-      })
-      req.on('end', () => {
-        // Body shape: `{ itemId: string, runId: string }`. Match against
-        // the in-flight tuple to avoid cancelling an unrelated next item
-        // if the user clicked stale UI. Any mismatch → 409.
-        let parsed: { itemId?: unknown; runId?: unknown } = {}
-        try {
-          parsed = body ? (JSON.parse(body) as { itemId?: unknown; runId?: unknown }) : {}
-        } catch {
-          /* malformed body — fall through to 400 below */
-        }
-        if (typeof parsed.itemId !== 'string' || typeof parsed.runId !== 'string') {
-          res.writeHead(400, { 'content-type': 'application/json' })
-          res.end(JSON.stringify({ ok: false, error: 'itemId and runId are required strings' }))
-          return
-        }
-        const reqItemId = parsed.itemId
-        const reqRunId = parsed.runId
-        if (!inFlight || inFlight.itemId !== reqItemId || inFlight.runId !== reqRunId) {
-          res.writeHead(409, { 'content-type': 'application/json' })
-          res.end(
-            JSON.stringify({
-              ok: false,
-              error: 'no matching in-flight item — already finished or claim has rotated',
-            }),
-          )
-          return
-        }
-        // Set the cooperative-cancel flag. Stepper's next step boundary
-        // throws CancelledError, claim loop catches kind='cancelled',
-        // resets pages, claims next item.
-        cancelTarget = { itemId: reqItemId, runId: reqRunId }
-        if (workerStore && inFlight.taskId) {
-          workerStore.enqueueWorkerCommand({
-            commandType: 'cancel_task',
-            workflow: wf.config.name,
-            targetWorkerId: instanceId,
-            targetTaskId: inFlight.taskId,
-            payload: { itemId: reqItemId, runId: reqRunId, source: 'http-compat' },
-            ...(inFlight.attemptId ? { targetAttemptId: inFlight.attemptId } : {}),
-          })
-        }
-        log.warn(
-          `[Daemon ${wf.config.name}/${instanceId}] cancel-current accepted for item=${reqItemId} runId=${reqRunId}`,
-        )
-        res.writeHead(200, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({ ok: true, accepted: true }))
-      })
-      return
-    }
-    if (req.method === 'POST' && url === '/force-current') {
-      let body = ''
-      req.on('data', (c) => {
-        body += c
-      })
-      req.on('end', () => {
-        let parsed: { itemId?: unknown; runId?: unknown } = {}
-        try {
-          parsed = body ? (JSON.parse(body) as { itemId?: unknown; runId?: unknown }) : {}
-        } catch {
-          /* malformed body — fall through to 400 below */
-        }
-        if (typeof parsed.itemId !== 'string' || typeof parsed.runId !== 'string') {
-          res.writeHead(400, { 'content-type': 'application/json' })
-          res.end(JSON.stringify({ ok: false, error: 'itemId and runId are required strings' }))
-          return
-        }
-        const reqItemId = parsed.itemId
-        const reqRunId = parsed.runId
-        if (!inFlight || inFlight.itemId !== reqItemId || inFlight.runId !== reqRunId) {
-          res.writeHead(409, { 'content-type': 'application/json' })
-          res.end(
-            JSON.stringify({
-              ok: false,
-              error: 'no matching in-flight item — already finished or claim has rotated',
-            }),
-          )
-          return
-        }
-        cancelTarget = { itemId: reqItemId, runId: reqRunId }
-        forceShutdown = true
-        drainOnlyShutdown = false
-        shuttingDown = true
-        workerStore?.markWorkerStatus({ workerId: instanceId, status: 'draining', phase: 'draining' })
-        shutdownResolve?.()
-        wakeResolve?.()
-        log.warn(
-          `[Daemon ${wf.config.name}/${instanceId}] force-current accepted for item=${reqItemId} runId=${reqRunId}`,
-        )
-        res.writeHead(200, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({ ok: true, accepted: true }))
-        ;(async (): Promise<void> => {
-          await new Promise((r) => setTimeout(r, 50))
-          abortLaunchAndKillSession('Daemon force-current requested')
-        })().catch((err) => {
-          log.warn(
-            `[Daemon ${wf.config.name}/${instanceId}] force-current killChromeHard error: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          )
-        })
-      })
-      return
-    }
-    if (req.method === 'POST' && url === '/stop') {
-      let body = ''
-      req.on('data', (c) => {
-        body += c
-      })
-      req.on('end', () => {
-        // The `force` body field is parsed but IGNORED as of the 2026-04-28
-        // Cluster A spec. Every /stop is now force semantics: in-flight item
-        // marked failed (not re-queued), queued items marked failed, chrome
-        // SIGTERM → SIGKILL, daemon exits. Per user direction: "I don't want
-        // graceful. I don't want the requeue. I want to see it fail when
-        // daemon dies because I already have the retry buttons for that. I
-        // don't want unfinished business."
-        try {
-          // Tolerate malformed bodies — the field is no-op anyway.
-          if (body) JSON.parse(body)
-        } catch {
-          /* ignore */
-        }
-        forceShutdown = true
-        drainOnlyShutdown = false
-        shuttingDown = true
-        if (workerStore) {
-          workerStore.enqueueWorkerCommand({
-            commandType: 'stop_worker',
-            workflow: wf.config.name,
-            targetWorkerId: instanceId,
-            payload: { source: 'http-compat' },
-            state: 'completed',
-          })
-          workerStore.markWorkerStatus({ workerId: instanceId, status: 'draining', phase: 'draining' })
-        }
-        shutdownResolve?.()
-        wakeResolve?.()
-        res.writeHead(200, { 'content-type': 'application/json' })
-        res.end('{"ok":true}')
-        // Kill tracked chromium PIDs (SIGTERM + 2s grace + SIGKILL). With
-        // chrome dead, any pending Playwright awaits in `Session.launch`
-        // or in-flight handlers reject immediately with "browser closed",
-        // unwinding the natural shutdown path. The outer-finally cleanup
-        // then marks in-flight failed, marks queued failed, unlinks the
-        // lockfile, and the daemon function returns. We deliberately do
-        // NOT call `process.exit(1)` here — natural shutdown is enough
-        // and matches the test runner's expectations (tests inject a
-        // stub `sessionLaunchFn` and await the daemon promise).
-        ;(async (): Promise<void> => {
-          // 50ms grace so the HTTP response fully flushes before we tear
-          // chrome down (otherwise the caller might see an aborted socket
-          // even though the kill went through cleanly).
-          await new Promise((r) => setTimeout(r, 50))
-          abortLaunchAndKillSession('Daemon stop requested')
-        })().catch(() => {
-          /* best-effort — the natural shutdown path runs regardless */
-        })
-      })
-      return
-    }
-    res.writeHead(404)
-    res.end()
+  const { listenPromise } = startDaemonHttpServer({
+    workflowName: wf.config.name,
+    instanceId,
+    getPhase: () => phase,
+    getQueueDepthCache: () => queueDepthCache,
+    getInFlight: () => inFlight,
+    getLastActivity: () => lastActivity,
+    getActiveSession: () => activeSession,
+    getWorkerStore: () => workerStore,
+    setCancelTarget: (target) => { cancelTarget = target },
+    setForceShutdown: (value) => { forceShutdown = value },
+    setDrainOnlyShutdown: (value) => { drainOnlyShutdown = value },
+    setShuttingDown: (value) => { shuttingDown = value },
+    resolveWake: () => { wakeResolve?.() },
+    resolveShutdown: () => { shutdownResolve?.() },
+    abortLaunchAndKillSession,
   })
-
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
-  const address = server.address()
-  const port = typeof address === 'object' && address ? address.port : 0
+  const httpHandle = await listenPromise
+  const port = httpHandle.port
 
   const lock: DaemonLockfile = {
     workflow: wf.config.name,
@@ -840,24 +649,12 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
 
             // Keepalive tick: recover orphans + healthCheck each system.
             setPhase('keepalive')
-            await recoverClaimsFromDeadOrStaleWorkers()
-
-            for (const sys of wf.config.systems) {
-              try {
-                const ok = await session.healthCheck(sys.id)
-                if (!ok) {
-                  log.warn(
-                    `[Daemon ${instanceId}] healthCheck(${sys.id}) failed — next claim may re-auth`,
-                  )
-                }
-              } catch (e) {
-                log.warn(
-                  `[Daemon ${instanceId}] healthCheck(${sys.id}) error: ${
-                    e instanceof Error ? e.message : String(e)
-                  }`,
-                )
-              }
-            }
+            await runKeepaliveTick({
+              instanceId,
+              session,
+              systems: wf.config.systems,
+              recoverOrphanedClaims: recoverClaimsFromDeadOrStaleWorkers,
+            })
             setPhase('idle')
           }
         } finally {
@@ -1035,7 +832,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     } catch {
       /* best-effort */
     }
-    await new Promise<void>((resolve) => server.close(() => resolve()))
+    await httpHandle.stop()
     setPhase('exited')
     try {
       workerStore?.markWorkerStatus({
