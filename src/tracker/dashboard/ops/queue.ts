@@ -13,7 +13,7 @@ import {
   daemonsDir,
 } from "../../../core/daemon-registry.js";
 import { openControlDb } from "../../../core/control-db.js";
-import { createTaskStore } from "../../../core/task-store.js";
+import { createTaskStore } from "../../../core/task-store/index.js";
 import { queueFilePath, queueLockDirPath } from "../../../core/daemon-queue.js";
 import type { QueueEvent } from "../../../core/daemon-types.js";
 import { openControlStores, resolveControlTask } from "./shared.js";

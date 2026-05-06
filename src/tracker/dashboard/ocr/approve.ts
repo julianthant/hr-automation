@@ -3,7 +3,7 @@ import { log } from "../../../utils/log.js";
 import { errorMessage } from "../../../utils/errors.js";
 import { getFormSpec } from "../../../ocr/forms/registry.js";
 import { openControlDb } from "../../../core/control-db.js";
-import { createTaskStore } from "../../../core/task-store.js";
+import { createTaskStore } from "../../../core/task-store/index.js";
 import { readFormType, readParentRunId, readDryRun } from "./shared.js";
 
 const WORKFLOW = "ocr";
