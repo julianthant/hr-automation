@@ -11,7 +11,7 @@ import {
   buildOcrPrepareHandler,
   buildOcrReocrWholePdfHandler,
   buildOcrRetryPageHandler,
-} from "../../../ocr-http.js";
+} from "../../ocr/index.js";
 import { registerLocalFile } from "../../../files.js";
 import { ensurePdfPageCache } from "../../../pdf-cache.js";
 import type { DashboardHonoDeps } from "../context.js";
