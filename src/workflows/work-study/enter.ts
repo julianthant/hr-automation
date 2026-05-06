@@ -1,6 +1,7 @@
 import type { Page, FrameLocator } from "playwright";
 import { ActionPlan } from "../../systems/ucpath/action-plan.js";
 import { getContentFrame } from "../../systems/ucpath/navigate.js";
+import { payPathActions } from "../../systems/ucpath/selectors.js";
 import { log } from "../../utils/log.js";
 import { UCPATH_SMART_HR_URL } from "../../config.js";
 import type { WorkStudyInput } from "./schema.js";
@@ -9,12 +10,6 @@ import type { WorkStudyInput } from "./schema.js";
 export interface WorkStudyContext {
   employeeName: string;
 }
-
-// --- Selectors (verified via playwright-cli 2026-03-17) ---
-// Use role-based selectors (more resilient to PeopleSoft dynamic rendering).
-// Fallback ID selectors as .or() alternatives.
-
-const SEL_SAVE_AND_SUBMIT = '[id="UC_E102_PP_WRK_SUBMIT_BTN"]';
 
 // --- Helpers ---
 
@@ -44,12 +39,12 @@ async function navigateToPayPathActions(page: Page): Promise<void> {
 
   // Click PayPath/Additional Pay in sidebar to expand sub-items
   log.step("Expanding PayPath/Additional Pay...");
-  await page.getByRole("link", { name: "PayPath/Additional Pay" }).click({ timeout: 10_000 });
+  await payPathActions.navigationLink(page).click({ timeout: 10_000 });
   await page.waitForTimeout(2_000);
 
   // Click PayPath Actions sub-item
   log.step("Clicking PayPath Actions...");
-  await page.getByRole("link", { name: "PayPath Actions", exact: true }).click({ timeout: 10_000 });
+  await payPathActions.actionsLink(page).click({ timeout: 10_000 });
   await waitForPageReady(page);
   log.success("PayPath Actions search page loaded");
 }
@@ -61,15 +56,15 @@ async function searchEmployee(
   ctx: WorkStudyContext,
 ): Promise<void> {
   log.step(`Searching for Empl ID: ${emplId}...`);
-  await frame.getByRole("textbox", { name: "Empl ID" }).fill(emplId, { timeout: 10_000 });
+  await payPathActions.emplIdInput(frame).fill(emplId, { timeout: 10_000 });
   log.step("Filled Empl ID, clicking Search...");
-  await frame.getByRole("button", { name: "Search", exact: true }).click({ timeout: 10_000 });
+  await payPathActions.searchButton(frame).click({ timeout: 10_000 });
   // PeopleSoft reloads the iframe content after search — needs extra wait
   await page.waitForTimeout(5_000);
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 
   // Dismiss any PeopleSoft alert dialog (e.g. "payroll in progress" warning)
-  const okBtn = page.getByRole("button", { name: "OK" });
+  const okBtn = payPathActions.alertOkButton(page);
   if (await okBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
     log.step("Dismissing PeopleSoft alert dialog...");
     await okBtn.click({ timeout: 5_000 });
@@ -77,11 +72,8 @@ async function searchEmployee(
   }
 
   // Extract employee name from Position Data header.
-  // SELECTOR: verified v1 — the name is a SPAN with ID UC_E102_PP_WRK_NAME_DISPLAY
-  // or the first text in the record header area. Try multiple selectors.
   try {
-    const nameEl = frame.locator('[id="UC_E102_PP_WRK_NAME_DISPLAY"]')
-      .or(frame.locator('[id*="NAME_DISPLAY"]').first());
+    const nameEl = payPathActions.employeeNameDisplay(frame);
     const name = await nameEl.textContent({ timeout: 5_000 });
     ctx.employeeName = name?.trim() ?? "";
   } catch {
@@ -91,7 +83,7 @@ async function searchEmployee(
 }
 
 async function collapseSidebar(page: Page): Promise<void> {
-  const sidebarBtn = page.getByRole("button", { name: "Navigation Area" });
+  const sidebarBtn = payPathActions.navigationAreaButton(page);
   const isExpanded = await sidebarBtn.getAttribute("aria-expanded").catch(() => null);
   if (isExpanded === "true") {
     log.step("Collapsing sidebar...");
@@ -110,15 +102,15 @@ async function fillPositionData(
   log.step("Filling Position Data tab...");
 
   log.step(`  Effective Date: ${effectiveDate}`);
-  await frame.getByRole("textbox", { name: "Effective Date:" })
+  await payPathActions.effectiveDateInput(frame)
     .fill(effectiveDate, { timeout: 20_000 });
 
   log.step("  Position Change Reason: JRL");
-  await frame.getByRole("textbox", { name: "Position Change Reason:" })
+  await payPathActions.positionChangeReasonInput(frame)
     .fill("JRL", { timeout: 10_000 });
 
   log.step("  Position Pool: F");
-  await frame.getByRole("textbox", { name: "Position Pool:" })
+  await payPathActions.positionPoolInput(frame)
     .fill("F", { timeout: 10_000 });
 
   log.success("Position Data filled");
@@ -128,7 +120,7 @@ async function fillPositionData(
 
 async function clickJobDataTab(page: Page, frame: FrameLocator): Promise<void> {
   log.step("Clicking Job Data tab...");
-  await frame.getByRole("tab", { name: "Job Data" }).click({ timeout: 10_000 });
+  await payPathActions.jobDataTab(frame).click({ timeout: 10_000 });
   await waitForPageReady(page);
   log.success("Job Data tab loaded");
 }
@@ -138,7 +130,7 @@ async function fillJobDataComments(
   comments: string,
 ): Promise<void> {
   log.step(`  Job Data Comments: ${comments}`);
-  await frame.getByRole("textbox", { name: "Job Data Comments:" })
+  await payPathActions.jobDataCommentsInput(frame)
     .fill(comments, { timeout: 10_000 });
   log.success("Job Data Comments filled");
 }
@@ -147,7 +139,7 @@ async function fillJobDataComments(
 
 async function clickAdditionalPayTab(page: Page, frame: FrameLocator): Promise<void> {
   log.step("Clicking Additional Pay Data tab...");
-  await frame.getByRole("tab", { name: "Additional Pay Data" }).click({ timeout: 10_000 });
+  await payPathActions.additionalPayDataTab(frame).click({ timeout: 10_000 });
   await waitForPageReady(page);
   log.success("Additional Pay Data tab loaded");
 }
@@ -157,14 +149,14 @@ async function fillInitiatorComments(
   comments: string,
 ): Promise<void> {
   log.step(`  Initiator's Comments: ${comments}`);
-  await frame.getByRole("textbox", { name: "Initiator's Comments" })
+  await payPathActions.initiatorsCommentsInput(frame)
     .fill(comments, { timeout: 10_000 });
   log.success("Initiator's Comments filled");
 }
 
 async function clickSaveAndSubmit(page: Page, frame: FrameLocator): Promise<void> {
   log.step("Clicking Save And Submit...");
-  await frame.locator(SEL_SAVE_AND_SUBMIT).click({ timeout: 10_000 });
+  await payPathActions.saveAndSubmitButton(frame).click({ timeout: 10_000 });
   await waitForPageReady(page);
   log.success("Save And Submit clicked");
 }

@@ -1062,6 +1062,100 @@ export const payPathActions = {
    */
   saveAndSubmitButton: (f: FrameLocator): Locator =>
     f.locator("#UC_E102_PP_WRK_SUBMIT_BTN"),
+
+  // ── Edit-page selectors (post-search, work-study PayPath transaction) ──
+  // verified 2026-03-17 (original inline comment in enter.ts)
+
+  /**
+   * Sidebar parent link "PayPath/Additional Pay" — expands sub-items.
+   * Simple name match (without "select to expand" suffix); use
+   * `hrTasks.payPathLink` when the full regex variant is needed. verified 2026-03-17
+   * @tags sidebar, paypath, additional-pay, link, navigation
+   */
+  navigationLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "PayPath/Additional Pay" }),
+
+  /**
+   * Sidebar sub-item "PayPath Actions" (exact). Same element as
+   * `hrTasks.payPathActionsLink`; provided here for single-import call sites.
+   * verified 2026-03-17
+   * @tags sidebar, paypath, actions, link, navigation
+   */
+  actionsLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "PayPath Actions", exact: true }),
+
+  /**
+   * PeopleSoft alert dialog OK button (e.g. "payroll in progress" warning).
+   * verified 2026-03-17
+   * @tags alert, dialog, ok, button, paypath-actions
+   */
+  alertOkButton: (page: Page): Locator =>
+    page.getByRole("button", { name: "OK" }),
+
+  /**
+   * Employee name display span in the Position Data header (after search).
+   * Falls back to any element whose ID contains "NAME_DISPLAY". verified 2026-03-17
+   * @tags employee, name, display, position-data, paypath-actions
+   */
+  employeeNameDisplay: (f: FrameLocator): Locator =>
+    f.locator('[id="UC_E102_PP_WRK_NAME_DISPLAY"]')
+      .or(f.locator('[id*="NAME_DISPLAY"]').first()),
+
+  /**
+   * Sidebar collapse/expand toggle (Navigation Area button). verified 2026-03-17
+   * @tags sidebar, navigation, collapse, button, paypath-actions
+   */
+  navigationAreaButton: (page: Page): Locator =>
+    page.getByRole("button", { name: "Navigation Area" }),
+
+  /**
+   * Effective Date textbox on the Position Data tab. verified 2026-03-17
+   * @tags effective-date, textbox, position-data, paypath-actions
+   */
+  effectiveDateInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Effective Date:" }),
+
+  /**
+   * Position Change Reason textbox on the Position Data tab. verified 2026-03-17
+   * @tags position, change-reason, textbox, position-data, paypath-actions
+   */
+  positionChangeReasonInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Position Change Reason:" }),
+
+  /**
+   * Position Pool textbox on the Position Data tab. verified 2026-03-17
+   * @tags position, pool, textbox, position-data, paypath-actions
+   */
+  positionPoolInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Position Pool:" }),
+
+  /**
+   * Job Data tab on the PayPath edit page. verified 2026-03-17
+   * @tags job-data, tab, paypath-actions
+   */
+  jobDataTab: (f: FrameLocator): Locator =>
+    f.getByRole("tab", { name: "Job Data" }),
+
+  /**
+   * Job Data Comments textbox. verified 2026-03-17
+   * @tags job-data, comments, textbox, paypath-actions
+   */
+  jobDataCommentsInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Job Data Comments:" }),
+
+  /**
+   * Additional Pay Data tab on the PayPath edit page. verified 2026-03-17
+   * @tags additional-pay, tab, paypath-actions
+   */
+  additionalPayDataTab: (f: FrameLocator): Locator =>
+    f.getByRole("tab", { name: "Additional Pay Data" }),
+
+  /**
+   * Initiator's Comments textbox on the Additional Pay Data tab. verified 2026-03-17
+   * @tags initiators-comments, textbox, additional-pay, paypath-actions
+   */
+  initiatorsCommentsInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Initiator's Comments" }),
 };
 
 // ─── SS Smart HR Transactions (self-service Smart HR) ─────────────────────
