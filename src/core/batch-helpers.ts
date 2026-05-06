@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import type { RegisteredWorkflow, RunOpts } from './types.js'
+import type { RegisteredWorkflow, RunOpts, SystemConfig } from './types.js'
+import { Session } from './session.js'
 import { deriveItemId } from './workflow.js'
 
 export interface PerItem<TData> {
@@ -59,4 +60,28 @@ export function callerPreEmitsPending<TData, TSteps extends readonly string[]>(
   opts: RunOpts,
 ): boolean {
   return Boolean(wf.config.batch?.preEmitPending && opts.onPreEmitPending)
+}
+
+/**
+ * Wait for every system's auth-ready promise to resolve. Auth failures
+ * are swallowed — the failure path is owned by the observer / batch
+ * lifecycle helper, which surfaces it via auth-failure tracker rows
+ * and does not need this loop to throw.
+ *
+ * Must be called BEFORE snapshotting authTimings via the observer's
+ * `getAuthTimings()` — `Session.launch` with `authChain: 'interleaved'`
+ * returns once the FIRST system is ready, so timings for systems 2..N
+ * are still being captured asynchronously.
+ */
+export async function awaitAllSystemsReady(
+  session: Session,
+  systems: readonly SystemConfig[],
+): Promise<void> {
+  for (const sys of systems) {
+    try {
+      await session.page(sys.id)
+    } catch {
+      // intentional swallow — see JSDoc above
+    }
+  }
 }

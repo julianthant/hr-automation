@@ -2,7 +2,7 @@ import type { RegisteredWorkflow, BatchResult, RunOpts } from './types.js'
 import { Session } from './session.js'
 import { runOneItem } from './workflow.js'
 import { withBatchLifecycle } from './batch-lifecycle.js'
-import { validateAndPrepareItems, callerPreEmitsPending } from './batch-helpers.js'
+import { validateAndPrepareItems, callerPreEmitsPending, awaitAllSystemsReady } from './batch-helpers.js'
 import type { PerItem } from './batch-helpers.js'
 
 type PoolItem<TData> = PerItem<TData>
@@ -54,15 +54,7 @@ export async function runWorkflowSharedContextPool<TData, TSteps extends readonl
         observer,
       })
 
-      // In interleaved authChain (default for >1 system), `Session.launch`
-      // returns as soon as the FIRST system is authenticated — the rest
-      // chain in the background. Wait for every system's ready promise
-      // before snapshotting authTimings so we capture the full window
-      // for every auth. `page(id)` awaits the ready promise without
-      // opening a new page on the parent (persistent pages are reused).
-      for (const sys of wf.config.systems) {
-        try { await parent.page(sys.id) } catch { /* auth failure surfaces elsewhere */ }
-      }
+      await awaitAllSystemsReady(parent, wf.config.systems)
 
       // Snapshot authTimings AFTER every system is ready so every
       // onAuthComplete has fired. Shared across every runOneItem call —
