@@ -60,7 +60,7 @@ type DisplayItem =
   | { kind: "event"; entry: RunEvent };
 
 export function emptyStreamMessage(source?: "events" | "screenshots" | "edit-data" | "preview"): string {
-  return source === "events" ? "No run events for this row" : "No logs yet";
+  return source === "events" ? "No run events for this row" : "No log entries for this row";
 }
 
 export function LogStream({

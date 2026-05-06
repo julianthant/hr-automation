@@ -8,7 +8,7 @@ describe("emptyStreamMessage", () => {
     assert.equal(emptyStreamMessage("events"), "No run events for this row");
   });
 
-  it("keeps the log empty state for log tabs", () => {
-    assert.equal(emptyStreamMessage(undefined), "No logs yet");
+  it("uses an explicit empty state for log tabs without implying logs are missing", () => {
+    assert.equal(emptyStreamMessage(undefined), "No log entries for this row");
   });
 });
