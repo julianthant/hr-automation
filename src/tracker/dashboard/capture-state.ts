@@ -7,7 +7,7 @@ import {
 } from "../../capture/index.js";
 import type { CaptureSession } from "../../capture/sessions.js";
 import { log } from "../../utils/log.js";
-import { buildOcrPrepareHandler } from "../ocr-http.js";
+import { buildOcrPrepareHandler } from "./ocr/index.js";
 
 export const captureStore: CaptureSessionStore = createSessionStore();
 export const CAPTURE_PHOTOS_DIR = ".tracker/captures";
