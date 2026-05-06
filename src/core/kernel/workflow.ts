@@ -5,20 +5,20 @@ import { register, autoLabel, normalizeDetailField } from './registry.js'
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
 import { makeCtx } from './ctx.js'
-import { trackEvent, withTrackedWorkflow, emitScreenshotEvent, type WithTrackedWorkflowOpts } from '../tracker/jsonl.js'
+import { trackEvent, withTrackedWorkflow, emitScreenshotEvent, type WithTrackedWorkflowOpts } from '../../tracker/jsonl.js'
 import { makeScreenshotFn } from './screenshot.js'
-import { withLogContext, log } from '../utils/log.js'
+import { withLogContext, log } from '../../utils/log.js'
 import { runWorkflowPool } from './pool.js'
 import { runWorkflowSharedContextPool } from './shared-context-pool.js'
 import { withBatchLifecycle } from './batch-lifecycle.js'
 import { validateAndPrepareItems, callerPreEmitsPending, awaitAllSystemsReady } from './batch-helpers.js'
-import { makeAuthObserver } from '../tracker/auth-observer.js'
-import { registerInProcessRun, unregisterInProcessRun } from './in-process-runs.js'
-import { operatorSubjectData } from '../domain/operator-subject.js'
-import { openControlDb } from './control-db.js'
-import { createTaskStore } from './task-store/index.js'
-import { createWorkerStore } from './worker-store.js'
-import type { InProcessRunControl } from './in-process-runs.js'
+import { makeAuthObserver } from '../../tracker/auth-observer.js'
+import { registerInProcessRun, unregisterInProcessRun } from '../daemon/in-process-runs.js'
+import { operatorSubjectData } from '../../domain/operator-subject.js'
+import { openControlDb } from '../control-db.js'
+import { createTaskStore } from '../task-store/index.js'
+import { createWorkerStore } from '../daemon/worker-store.js'
+import type { InProcessRunControl } from '../daemon/in-process-runs.js'
 import { runOneItem } from './run-one-item.js'
 export { runOneItem } from './run-one-item.js'
 export type { RunOneItemOpts, RunOneItemResult } from './run-one-item.js'
@@ -119,7 +119,7 @@ export function buildInitialTrackerData<TData, TSteps extends readonly string[]>
  */
 export function buildSessionObserver<TData, TSteps extends readonly string[]>(
   wf: RegisteredWorkflow<TData, TSteps>,
-  sessionCtx: import('../tracker/jsonl.js').SessionContext,
+  sessionCtx: import('../../tracker/jsonl.js').SessionContext,
   setStep: (step: string) => void,
   emitFailed: (step: string, error: string) => void = () => {},
   /**

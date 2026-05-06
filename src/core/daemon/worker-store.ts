@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
 
-import type { ControlDb } from './control-db.js'
+import type { ControlDb } from '../control-db.js'
 
 export type WorkerKind = 'daemon' | 'dashboard' | 'pool' | 'shared_context_pool'
 export type WorkerStatus = 'starting' | 'alive' | 'draining' | 'stopped' | 'dead' | 'stale'

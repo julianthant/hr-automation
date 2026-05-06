@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { getProcessIsolatedSessionDir } from "../../../src/core/session.js";
+import { getProcessIsolatedSessionDir } from "../../../src/core/kernel/session.js";
 
 describe("getProcessIsolatedSessionDir", () => {
   it("appends _pid<PID> to the base path", () => {

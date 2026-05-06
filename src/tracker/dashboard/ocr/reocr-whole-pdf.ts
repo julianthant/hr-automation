@@ -108,7 +108,7 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
             })),
           );
         } else {
-          const { ensureDaemonsAndEnqueue } = await import("../../../core/daemon-client.js");
+          const { ensureDaemonsAndEnqueue } = await import("../../../core/daemon/client.js");
           const { eidLookupCrmWorkflow } = await import("../../../workflows/eid-lookup/index.js");
           const inputs = enqueueItems.map((e) =>
             e.kind === "name"

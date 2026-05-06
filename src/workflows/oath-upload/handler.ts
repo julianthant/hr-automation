@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Ctx } from "../../core/types.js";
+import type { Ctx } from "../../core/kernel/types.js";
 import { runWorkflow } from "../../core/index.js";
 import { ocrWorkflow } from "../ocr/index.js";
 import { watchChildRuns } from "../../tracker/watch-child-runs.js";

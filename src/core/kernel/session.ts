@@ -3,10 +3,10 @@ import { promises as fs } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import type { SystemConfig, SessionObserver, CaptureFileOpts } from './types.js'
-import { launchBrowser } from '../browser/launch.js'
-import { log } from '../utils/log.js'
-import { classifyPlaywrightError, errorMessage } from '../utils/errors.js'
-import { PATHS } from '../config.js'
+import { launchBrowser } from '../../browser/launch.js'
+import { log } from '../../utils/log.js'
+import { classifyPlaywrightError, errorMessage } from '../../utils/errors.js'
+import { PATHS } from '../../config.js'
 
 export function formatCaptureFilename(args: {
   workflow: string

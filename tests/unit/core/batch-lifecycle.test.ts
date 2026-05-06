@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { withBatchLifecycle, createBatchObserver } from '../../../src/core/batch-lifecycle.js'
+import { withBatchLifecycle, createBatchObserver } from '../../../src/core/kernel/batch-lifecycle.js'
 import { dateLocal } from '../../../src/tracker/jsonl.js'
 
 const TMP = () => mkdtempSync(join(tmpdir(), 'hrauto-batchlife-'))

@@ -1,10 +1,10 @@
 import { randomUUID, type UUID } from 'node:crypto'
-import { findAliveDaemons, killOrphanedChromiumProcesses, spawnDaemon } from './daemon-registry.js'
-import { enqueueItems } from './daemon-queue.js'
-import { deriveItemId } from './workflow.js'
-import { log } from '../utils/log.js'
-import type { Daemon, DaemonFlags, EnqueueResult } from './daemon-types.js'
-import type { RegisteredWorkflow } from './types.js'
+import { findAliveDaemons, killOrphanedChromiumProcesses, spawnDaemon } from './registry.js'
+import { enqueueItems } from './queue.js'
+import { deriveItemId } from '../kernel/workflow.js'
+import { log } from '../../utils/log.js'
+import type { Daemon, DaemonFlags, EnqueueResult } from './types.js'
+import type { RegisteredWorkflow } from '../kernel/types.js'
 
 /**
  * Optional caller-provided callback fired once per input IMMEDIATELY at the

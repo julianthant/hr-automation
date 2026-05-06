@@ -5,11 +5,11 @@ import {
   findAliveDaemons,
   spawnDaemon,
   daemonsDir,
-} from "../../../core/daemon-registry.js";
-import { queueFilePath } from "../../../core/daemon-queue.js";
-import { stopDaemons } from "../../../core/daemon-client.js";
-import type { Daemon } from "../../../core/daemon-types.js";
-import type { BrowserProcessRow, WorkerRow } from "../../../core/worker-store.js";
+} from "../../../core/daemon/registry.js";
+import { queueFilePath } from "../../../core/daemon/queue.js";
+import { stopDaemons } from "../../../core/daemon/client.js";
+import type { Daemon } from "../../../core/daemon/types.js";
+import type { BrowserProcessRow, WorkerRow } from "../../../core/daemon/worker-store.js";
 import { openControlStores } from "./shared.js";
 
 export interface WorkerCommandRequest {
@@ -164,9 +164,9 @@ function countItemsProcessed(workflow: string, instanceId: string, dir: string):
   const runIdsForInstance = new Set<string>();
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
-    let ev: import("../../../core/daemon-types.js").QueueEvent;
+    let ev: import("../../../core/daemon/types.js").QueueEvent;
     try {
-      ev = JSON.parse(line) as import("../../../core/daemon-types.js").QueueEvent;
+      ev = JSON.parse(line) as import("../../../core/daemon/types.js").QueueEvent;
     } catch {
       continue;
     }

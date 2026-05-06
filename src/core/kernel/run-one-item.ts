@@ -3,9 +3,9 @@ import { CancelledError } from './types.js'
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
 import { makeCtx } from './ctx.js'
-import { trackEvent, withTrackedWorkflow, emitScreenshotEvent } from '../tracker/jsonl.js'
-import { withLogContext } from '../utils/log.js'
-import { classifyError } from '../utils/errors.js'
+import { trackEvent, withTrackedWorkflow, emitScreenshotEvent } from '../../tracker/jsonl.js'
+import { withLogContext } from '../../utils/log.js'
+import { classifyError } from '../../utils/errors.js'
 import { splitPrefilled, buildInitialTrackerData, buildTrackerOpts, toRecord } from './workflow.js'
 
 export interface RunOneItemOpts<TData, TSteps extends readonly string[]> {

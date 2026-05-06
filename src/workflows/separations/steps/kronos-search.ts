@@ -20,7 +20,7 @@ import { getJobSummaryData } from "../../../systems/ucpath/index.js";
 import { fillTimekeeperTasks } from "../../../systems/kuali/index.js";
 import type { JobSummaryData } from "../../../systems/ucpath/index.js";
 import type { KualiSeparationData } from "../../../systems/kuali/index.js";
-import type { Ctx } from "../../../core/types.js";
+import type { Ctx } from "../../../core/kernel/types.js";
 
 /**
  * Helper: detect "No matches were found" modal on Old Kronos after an EID search

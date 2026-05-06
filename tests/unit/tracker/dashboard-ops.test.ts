@@ -14,7 +14,7 @@ import { join } from "path";
 import { readLogEntries, trackEvent } from "../../../src/tracker/jsonl.js";
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
-import { createWorkerStore } from "../../../src/core/worker-store.js";
+import { createWorkerStore } from "../../../src/core/daemon/worker-store.js";
 import {
   findEntryInput,
   findLatestEntryData,
@@ -29,8 +29,8 @@ import {
   buildRetryHandler,
   readQueueDepth,
 } from "../../../src/tracker/dashboard/ops/index.js";
-import { queueFilePath } from "../../../src/core/daemon-queue.js";
-import type { QueueEvent } from "../../../src/core/daemon-types.js";
+import { queueFilePath } from "../../../src/core/daemon/queue.js";
+import type { QueueEvent } from "../../../src/core/daemon/types.js";
 
 let tmp: string;
 beforeEach(() => {

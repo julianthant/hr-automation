@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { formatCaptureFilename } from '../../../src/core/session.js'
+import { formatCaptureFilename } from '../../../src/core/kernel/session.js'
 
 test('formatCaptureFilename round-trips parseable metadata', () => {
   const fn = formatCaptureFilename({

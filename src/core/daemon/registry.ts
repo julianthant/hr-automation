@@ -12,7 +12,7 @@ import {
 import { hostname } from 'node:os'
 import { join, resolve } from 'node:path'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import type { Daemon, DaemonLockfile } from './daemon-types.js'
+import type { Daemon, DaemonLockfile } from './types.js'
 
 /**
  * Absolute path to the repo-local tsx binary. We spawn this directly instead

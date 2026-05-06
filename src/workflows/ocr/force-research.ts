@@ -72,7 +72,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDir?: s
     trackerDir,
   );
 
-  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
+  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
   const { eidLookupCrmWorkflow } = await import("../eid-lookup/index.js");
   const inputToItemId = new Map(
     enqueueInputs.map((inp, idx) => [JSON.stringify(inp), itemIds[idx] ?? ""])

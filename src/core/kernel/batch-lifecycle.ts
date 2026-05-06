@@ -1,5 +1,5 @@
 import type { SessionObserver, SystemConfig } from './types.js'
-import { trackEvent } from '../tracker/jsonl.js'
+import { trackEvent } from '../../tracker/jsonl.js'
 import {
   generateInstanceName,
   emitWorkflowStart,
@@ -9,7 +9,7 @@ import {
   emitAuthStart,
   emitAuthComplete,
   emitAuthFailed,
-} from '../tracker/session-events.js'
+} from '../../tracker/session-events.js'
 
 /**
  * Per-system auth duration captured by `createBatchObserver`. `startTs` and

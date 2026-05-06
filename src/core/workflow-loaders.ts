@@ -7,7 +7,7 @@
  * To register a new workflow: add one entry here. Both daemon spawn and
  * dashboard enqueue pick it up automatically.
  */
-import type { RegisteredWorkflow } from "./types.js";
+import type { RegisteredWorkflow } from "./kernel/types.js";
 
 export type AnyRegisteredWorkflow = RegisteredWorkflow<unknown, readonly string[]>;
 

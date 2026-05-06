@@ -3,7 +3,7 @@ import { runWorkflow, runWorkflowBatch } from "../../core/index.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 import { PATHS } from "../../config.js";
-import { getProcessIsolatedSessionDir } from "../../core/session.js";
+import { getProcessIsolatedSessionDir } from "../../core/kernel/session.js";
 import { rmSync } from "node:fs";
 import { separationsWorkflow } from "./workflow.js";
 import type { SeparationInput } from "./workflow.js";
@@ -82,7 +82,7 @@ export async function runSeparationCli(
     process.exitCode = 1;
     return;
   }
-  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
+  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
   const inputs = docIds.map((docId) => ({ docId }));
   const now = new Date().toISOString();
   await ensureDaemonsAndEnqueue(

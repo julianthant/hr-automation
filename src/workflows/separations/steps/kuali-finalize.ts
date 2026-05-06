@@ -8,7 +8,7 @@ import {
 } from "../../../systems/kuali/index.js";
 import { buildDateChangeComments, getInitials } from "../schema.js";
 import type { KualiSeparationData } from "../../../systems/kuali/index.js";
-import type { Ctx } from "../../../core/types.js";
+import type { Ctx } from "../../../core/kernel/types.js";
 
 export interface KualiFinalizationArgs {
   kualiPage: Page;

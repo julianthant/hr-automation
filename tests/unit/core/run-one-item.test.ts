@@ -4,8 +4,8 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { defineWorkflow, runOneItem } from '../../../src/core/workflow.js'
-import { Session } from '../../../src/core/session.js'
+import { defineWorkflow, runOneItem } from '../../../src/core/kernel/workflow.js'
+import { Session } from '../../../src/core/kernel/session.js'
 import { dateLocal } from '../../../src/tracker/jsonl.js'
 
 const TMP = () => mkdtempSync(join(tmpdir(), 'hrauto-runone-'))

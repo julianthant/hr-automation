@@ -13,11 +13,11 @@
  * it in `workflow-loaders.ts` plus a frontend registry entry; no
  * workflow-specific backend wiring.
  */
-import { loadWorkflow } from "./workflow-loaders.js";
-import type { RegisteredWorkflow } from "./types.js";
-import { buildInitialTrackerData, splitPrefilled } from "./workflow.js";
-import { trackEvent } from "../tracker/jsonl.js";
-import { log } from "../utils/log.js";
+import { loadWorkflow } from "../workflow-loaders.js";
+import type { RegisteredWorkflow } from "../kernel/types.js";
+import { buildInitialTrackerData, splitPrefilled } from "../kernel/workflow.js";
+import { trackEvent } from "../../tracker/jsonl.js";
+import { log } from "../../utils/log.js";
 
 export interface EnqueueHttpResult {
   ok: boolean;
@@ -173,7 +173,7 @@ export async function enqueueFromHttp(
     }
   }
 
-  const { ensureDaemonsAndEnqueue } = await import("./daemon-client.js");
+  const { ensureDaemonsAndEnqueue } = await import("./client.js");
   const now = new Date().toISOString();
   const deriveItemId = wf.config.deriveItemId
     ? (item: unknown) => {

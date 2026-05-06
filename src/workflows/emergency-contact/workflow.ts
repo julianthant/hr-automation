@@ -317,7 +317,7 @@ export async function runEmergencyContactCli(
 
   await runPreflight(batch, options);
 
-  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
+  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
   const now = new Date().toISOString();
   await ensureDaemonsAndEnqueue(
     emergencyContactWorkflow,

@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { openControlDb } from "../../../src/core/control-db.js";
-import { queueFilePath } from "../../../src/core/daemon-queue.js";
+import { queueFilePath } from "../../../src/core/daemon/queue.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
-import { createWorkerStore } from "../../../src/core/worker-store.js";
+import { createWorkerStore } from "../../../src/core/daemon/worker-store.js";
 import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
 

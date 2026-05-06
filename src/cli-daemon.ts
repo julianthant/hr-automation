@@ -16,7 +16,7 @@
  * dispatches through the adapter, which in turn uses `ensureDaemonsAndEnqueue`
  * → `spawnDaemon` → this file.
  */
-import { runWorkflowDaemon } from "./core/daemon.js";
+import { runWorkflowDaemon } from "./core/daemon/daemon.js";
 import { log } from "./utils/log.js";
 import { loadWorkflow, listWorkflowNames } from "./core/workflow-loaders.js";
 

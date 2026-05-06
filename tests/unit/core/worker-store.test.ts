@@ -9,7 +9,7 @@ import { createTaskStore } from '../../../src/core/task-store/index.js'
 import {
   createWorkerStore,
   type ControlWorkerStore,
-} from '../../../src/core/worker-store.js'
+} from '../../../src/core/daemon/worker-store.js'
 
 function iso(n: number): string {
   return `2026-05-04T12:00:${String(n).padStart(2, '0')}.000Z`

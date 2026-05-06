@@ -463,7 +463,7 @@ export async function runOnboardingCli(
     return;
   }
 
-  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
+  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
   const inputs = emails.map((email) => ({ email }));
   const now = new Date().toISOString();
   await ensureDaemonsAndEnqueue(

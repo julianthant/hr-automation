@@ -12,8 +12,8 @@ import {
   ensureDaemonsDir,
   isProcessAlive,
   randomInstanceId,
-} from '../../../src/core/daemon-registry.js'
-import type { DaemonLockfile } from '../../../src/core/daemon-types.js'
+} from '../../../src/core/daemon/registry.js'
+import type { DaemonLockfile } from '../../../src/core/daemon/types.js'
 
 const TMP = (): string => mkdtempSync(join(tmpdir(), 'daemon-reg-'))
 

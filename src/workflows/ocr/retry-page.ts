@@ -169,7 +169,7 @@ export async function runOcrRetryPage(
         })),
       );
     } else {
-      const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
+      const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
       const { eidLookupCrmWorkflow } = await import("../eid-lookup/index.js");
       const inputs = enqueueItems.map((e) =>
         e.kind === "name"

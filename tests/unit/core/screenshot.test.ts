@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { makeScreenshotFn } from '../../../src/core/screenshot.js'
+import { makeScreenshotFn } from '../../../src/core/kernel/screenshot.js'
 
 test('captures files and emits screenshot event with current step', async () => {
   const emitted: any[] = []

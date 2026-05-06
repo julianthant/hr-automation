@@ -8,10 +8,10 @@ import {
   statSync,
 } from 'node:fs'
 import { join } from 'node:path'
-import { daemonsDir, ensureDaemonsDir } from './daemon-registry.js'
-import type { QueueEvent, QueueItem, QueueState } from './daemon-types.js'
-import { openControlDb } from './control-db.js'
-import { createTaskStore, type TaskRow } from './task-store/index.js'
+import { daemonsDir, ensureDaemonsDir } from './registry.js'
+import type { QueueEvent, QueueItem, QueueState } from './types.js'
+import { openControlDb } from '../control-db.js'
+import { createTaskStore, type TaskRow } from '../task-store/index.js'
 
 function queueBackend(): 'sqlite' | 'jsonl' {
   return process.env.HRAUTO_QUEUE_BACKEND === 'jsonl' ? 'jsonl' : 'sqlite'

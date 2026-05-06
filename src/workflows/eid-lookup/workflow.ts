@@ -8,7 +8,7 @@
  */
 
 import { defineWorkflow } from "../../core/index.js";
-import type { Ctx } from "../../core/types.js";
+import type { Ctx } from "../../core/kernel/types.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
@@ -368,7 +368,7 @@ export async function runEidLookupCli(
 
   const uniqueNames = prepareNames(names);
 
-  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
+  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
   const inputs = uniqueNames.map((name) => ({ name }));
   const now = new Date().toISOString();
   await ensureDaemonsAndEnqueue(

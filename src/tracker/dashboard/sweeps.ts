@@ -8,9 +8,9 @@ import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { detectFailurePattern } from "../failure-detector.js";
 import { notify } from "../notify.js";
-import { findAliveDaemons } from "../../core/daemon-registry.js";
-import { readQueueState, markItemFailed } from "../../core/daemon-queue.js";
-import { buildTrackerDataForInput } from "../../core/enqueue-dispatch.js";
+import { findAliveDaemons } from "../../core/daemon/registry.js";
+import { readQueueState, markItemFailed } from "../../core/daemon/queue.js";
+import { buildTrackerDataForInput } from "../../core/daemon/enqueue-dispatch.js";
 import { openControlDb } from "../../core/control-db.js";
 import { createTaskStore } from "../../core/task-store/index.js";
 

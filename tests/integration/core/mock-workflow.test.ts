@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { z } from 'zod'
-import { defineWorkflow, runWorkflow } from '../../../src/core/workflow.js'
+import { defineWorkflow, runWorkflow } from '../../../src/core/kernel/workflow.js'
 
 test('integration: mock workflow with 2 systems runs end-to-end', async () => {
   const events: string[] = []

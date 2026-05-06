@@ -1,18 +1,18 @@
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { existsSync, unlinkSync } from 'node:fs'
-import type { RegisteredWorkflow } from './types.js'
-import { Session } from './session.js'
-import { runOneItem } from './workflow.js'
-import { withBatchLifecycle } from './batch-lifecycle.js'
-import { log } from '../utils/log.js'
+import type { RegisteredWorkflow } from '../kernel/types.js'
+import { Session } from '../kernel/session.js'
+import { runOneItem } from '../kernel/workflow.js'
+import { withBatchLifecycle } from '../kernel/batch-lifecycle.js'
+import { log } from '../../utils/log.js'
 import {
   lockfilePath,
   randomInstanceId,
   writeLockfile,
   findAliveDaemons,
   ensureDaemonsDir,
-} from './daemon-registry.js'
+} from './registry.js'
 import {
   claimNextItem,
   markItemCancelled,
@@ -20,16 +20,16 @@ import {
   markItemFailed,
   recoverOrphanedClaims,
   readQueueState,
-} from './daemon-queue.js'
-import type { DaemonLockfile } from './daemon-types.js'
-import { emitItemStart, emitItemComplete } from '../tracker/session-events.js'
-import { trackEvent } from '../tracker/jsonl.js'
+} from './queue.js'
+import type { DaemonLockfile } from './types.js'
+import { emitItemStart, emitItemComplete } from '../../tracker/session-events.js'
+import { trackEvent } from '../../tracker/jsonl.js'
 import { buildTrackerDataForInput } from './enqueue-dispatch.js'
-import { openControlDb } from './control-db.js'
-import { createTaskStore } from './task-store/index.js'
+import { openControlDb } from '../control-db.js'
+import { createTaskStore } from '../task-store/index.js'
 import { createWorkerStore, type ControlWorkerStore, type WorkerCommandRow } from './worker-store.js'
-import { startDaemonHttpServer } from './daemon-http.js'
-import { runKeepaliveTick } from './daemon-keepalive.js'
+import { startDaemonHttpServer } from './http.js'
+import { runKeepaliveTick } from './keepalive.js'
 
 export interface DaemonOpts {
   trackerDir?: string

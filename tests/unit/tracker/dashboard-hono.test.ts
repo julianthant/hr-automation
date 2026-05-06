@@ -10,8 +10,8 @@ import { queryProjectionHealth } from "../../../src/tracker/state/queries.js";
 import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
 import { registerLocalFile } from "../../../src/tracker/files.js";
 import { trackEventForDate } from "../../../src/tracker/jsonl.js";
-import { clear, defineDashboardMetadata } from "../../../src/core/registry.js";
-import { defineWorkflow } from "../../../src/core/workflow.js";
+import { clear, defineDashboardMetadata } from "../../../src/core/kernel/registry.js";
+import { defineWorkflow } from "../../../src/core/kernel/workflow.js";
 import { SCREENSHOTS_DIR } from "../../../src/tracker/dashboard/screenshots.js";
 
 test("Hono /api/v2/projection/health returns projection metadata", async () => {

@@ -1,4 +1,4 @@
-import type { SessionObserver, ScreenshotFn } from '../core/types.js'
+import type { SessionObserver, ScreenshotFn } from '../core/kernel/types.js'
 
 export interface AuthObserverDeps {
   /** Called with auth step name (`auth:<id>`). Caller wires to tracker step-start stream. */

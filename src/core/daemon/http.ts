@@ -1,8 +1,8 @@
 import { createServer, type Server } from 'node:http'
 import type { DaemonPhase } from './daemon.js'
-import type { Session } from './session.js'
+import type { Session } from '../kernel/session.js'
 import type { ControlWorkerStore } from './worker-store.js'
-import { log } from '../utils/log.js'
+import { log } from '../../utils/log.js'
 
 export interface DaemonHttpOpts {
   workflowName: string

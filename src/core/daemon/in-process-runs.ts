@@ -1,7 +1,7 @@
-import type { Session } from './session.js'
-import { log } from '../utils/log.js'
-import { errorMessage } from '../utils/errors.js'
-import { openControlDb } from './control-db.js'
+import type { Session } from '../kernel/session.js'
+import { log } from '../../utils/log.js'
+import { errorMessage } from '../../utils/errors.js'
+import { openControlDb } from '../control-db.js'
 import { createWorkerStore } from './worker-store.js'
 
 /**

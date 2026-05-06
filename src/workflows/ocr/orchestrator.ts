@@ -649,7 +649,7 @@ export async function runOcrOrchestrator(
           : undefined,
         skipWatchFallback: opts._enqueueEidLookupOverride !== undefined,
         realEnqueue: async (onPreparedItems) => {
-          const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
+          const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
           const { activeCheckWorkflow } = await import("../active-check/index.js");
           const inputs = activeEnqueueItems.map((e) => ({
             emplId: e.eid,
@@ -744,7 +744,7 @@ export async function runOcrOrchestrator(
           : undefined,
         skipWatchFallback: false,
         realEnqueue: async (onPreparedItems) => {
-          const { ensureDaemonsAndEnqueue } = await import("../../core/daemon-client.js");
+          const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
           const { eidLookupCrmWorkflow } = await import("../eid-lookup/index.js");
           const inputs = eidLookupEnqueueItems.map((e) =>
             e.kind === "name"

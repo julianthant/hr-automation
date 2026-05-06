@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { makeCtx } from '../../../src/core/ctx.js'
-import { Session } from '../../../src/core/session.js'
-import { Stepper } from '../../../src/core/stepper.js'
+import { makeCtx } from '../../../src/core/kernel/ctx.js'
+import { Session } from '../../../src/core/kernel/session.js'
+import { Stepper } from '../../../src/core/kernel/stepper.js'
 
 test('makeCtx returns a Ctx with page/step/parallel/updateData/session bound', () => {
   const session = Session.forTesting({

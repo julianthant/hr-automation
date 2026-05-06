@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { defineWorkflow, runWorkflow } from '../../../src/core/index.js'
-import type { SystemConfig } from '../../../src/core/types.js'
+import type { SystemConfig } from '../../../src/core/kernel/types.js'
 
 const TMP = () => mkdtempSync(join(tmpdir(), 'hrauto-observer-'))
 
