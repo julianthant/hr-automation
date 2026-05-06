@@ -18,9 +18,9 @@
 //   * MUST NOT block the caller meaningfully. Hard 5s fetch timeout.
 //   * Fire-and-forget — caller doesn't await.
 
-import { emitSessionEvent, workflowNameFromInstance } from "../tracker/session-events.js";
-import { getLogWorkflow, log } from "../utils/log.js";
-import { renderTelegramNotification } from "../domain/notifications/render.js";
+import { emitSessionEvent, workflowNameFromInstance } from "../../tracker/session-events.js";
+import { getLogWorkflow, log } from "../../utils/log.js";
+import { renderTelegramNotification } from "./render.js";
 
 export type AuthEventKind =
   | "duo-waiting"

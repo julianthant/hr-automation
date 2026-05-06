@@ -4,7 +4,7 @@ import { cueDuo } from "./voice-cue.js";
 import {
   notifyAuthEvent,
   type AuthEventKind,
-} from "./telegram-notify.js";
+} from "../domain/notifications/telegram.js";
 
 /**
  * Fire a best-effort Telegram notification with the active log context's

@@ -10,7 +10,7 @@ import {
   notifyAuthEvent,
   type AuthEvent,
   type FetchFn,
-} from "../../../src/auth/telegram-notify.js";
+} from "../../../src/domain/notifications/telegram.js";
 import { readLogEntries } from "../../../src/tracker/jsonl.js";
 import { withLogContext } from "../../../src/utils/log.js";
 
