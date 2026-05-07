@@ -67,6 +67,14 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Selector:** `personSearch.*`, `personOrgSummary.*` in `selectors.ts`
 **Tags:** person, search, org-summary, find-existing-value, lookup, hr-tasks
 
+## 2026-05-07 — Person Org Summary detail-page Person ID id is `PERSON_NPC_VW_EMPLID`, not `PER_INST_EMP_VW_*`
+
+**Tried:** Detecting the single-result detail page in `extractSingleResultDetail` by counting `personOrgSummary.personIdValue`, whose registry definition was `#PER_INST_EMP_VW_OPRID$0` `.or` `#PER_INST_EMP_VW_EMPLID$0`.
+**Failed because:** Live UCPath renders the header Person ID as `<span id="PERSON_NPC_VW_EMPLID">10874572</span>` — no `$0` suffix and a different DOM-prefix entirely. Both fallback ids miss; `count()` returns 0; `extractSingleResultDetail` returns null; `searchByEid` warns "no detail page rendered" and the active-check workflow reports `not-found` for an Active employee. The `PER_INST_EMP_VW_LAST_HIRE_DT$0` and `PER_INST_EMP_VW_TERMINATION_DT$0` ids in the same selector group are correct (verified live), so the bug is isolated to the Person ID gate.
+**Fix:** Lead the `personIdValue` chain with `#PERSON_NPC_VW_EMPLID`, keep the legacy ids as fallbacks for cross-flow safety. Bumped `// verified` to 2026-05-07. Discovered by running playwright-cli against `PERSON_ORG_SUMM.GBL` for EID 10874572 (Leo Langley, SDCMP HDH, Active) during the 2026-05-05 E2E session.
+**Selector:** `personOrgSummary.personIdValue` in `selectors.ts`
+**Tags:** person-id, emplid, detail, person-org-summary, single-result, active-check, eid-lookup
+
 ## 2026-04-23 — Workforce Job Summary multi-row grid blocks detail-page tabs
 
 **Tried:** Clicking the "Work Location" tab immediately after `searchJobSummary` returns `true`.
