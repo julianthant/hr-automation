@@ -41,8 +41,8 @@
     "typecheck:all": "tsc --noEmit -p tsconfig.test.json",
     "lint": "eslint src --ext .ts,.tsx",
     "lint:fix": "eslint src --ext .ts,.tsx --fix",
-    "test": "tsx --test 'tests/**/*.test.ts'",
-    "test:architecture": "tsx --test 'tests/unit/architecture/**/*.test.ts'"
+    "test": "node scripts/run-tests.mjs tests",
+    "test:architecture": "node scripts/run-tests.mjs tests/unit/architecture"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
