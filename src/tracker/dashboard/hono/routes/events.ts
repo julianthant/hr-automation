@@ -211,6 +211,8 @@ export function registerEventRoutes(app: Hono, deps: DashboardHonoDeps): void {
     const date = c.req.query("date") ?? "";
     const today = dateLocal();
 
+    // E2E-TEMP: SSE first-tick + delta logging for FE/BE sync verification
+    log.e2e("sse:logs:open", { wf: workflow, id: itemId, runId, date });
     return sseResponse((send) => {
       let sentCount = 0;
       let firstTick = true;
@@ -223,17 +225,26 @@ export function registerEventRoutes(app: Hono, deps: DashboardHonoDeps): void {
         }
         if (firstTick) {
           send(entries);
+          // E2E-TEMP
+          log.e2e("sse:logs:firstTick", { wf: workflow, id: itemId, runId, count: entries.length });
           sentCount = entries.length;
           firstTick = false;
         } else if (entries.length > sentCount) {
-          send(entries.slice(sentCount));
+          const delta = entries.slice(sentCount);
+          send(delta);
+          // E2E-TEMP
+          log.e2e("sse:logs:delta", { wf: workflow, id: itemId, runId, deltaCount: delta.length, total: entries.length });
           sentCount = entries.length;
         }
       };
       tick();
       const interval = setInterval(tick, 500);
       interval.unref?.();
-      return () => clearInterval(interval);
+      return () => {
+        clearInterval(interval);
+        // E2E-TEMP
+        log.e2e("sse:logs:close", { wf: workflow, id: itemId, runId });
+      };
     });
   });
 
@@ -243,6 +254,8 @@ export function registerEventRoutes(app: Hono, deps: DashboardHonoDeps): void {
     const date = c.req.query("date") ?? "";
     const today = dateLocal();
 
+    // E2E-TEMP
+    log.e2e("sse:run-events:open", { wf: workflow, runId: requestedRunId, date });
     return sseResponse((send) => {
       let sentCount = 0;
       let firstTick = true;
@@ -257,17 +270,26 @@ export function registerEventRoutes(app: Hono, deps: DashboardHonoDeps): void {
         const filtered = filterEventsForRun(allEvents, trackerEntries, requestedRunId);
         if (firstTick) {
           send(filtered);
+          // E2E-TEMP
+          log.e2e("sse:run-events:firstTick", { wf: workflow, runId: requestedRunId, count: filtered.length });
           sentCount = filtered.length;
           firstTick = false;
         } else if (filtered.length > sentCount) {
-          send(filtered.slice(sentCount));
+          const delta = filtered.slice(sentCount);
+          send(delta);
+          // E2E-TEMP
+          log.e2e("sse:run-events:delta", { wf: workflow, runId: requestedRunId, deltaCount: delta.length, total: filtered.length });
           sentCount = filtered.length;
         }
       };
       void tick();
       const interval = setInterval(() => void tick(), 500);
       interval.unref?.();
-      return () => clearInterval(interval);
+      return () => {
+        clearInterval(interval);
+        // E2E-TEMP
+        log.e2e("sse:run-events:close", { wf: workflow, runId: requestedRunId });
+      };
     });
   });
 

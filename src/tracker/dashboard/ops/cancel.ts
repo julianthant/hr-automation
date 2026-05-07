@@ -5,6 +5,7 @@ import { cancelInProcessRun } from "../../../core/daemon/in-process-runs.js";
 import { queueFilePath, queueLockDirPath } from "../../../core/daemon/queue.js";
 import type { QueueEvent } from "../../../core/daemon/types.js";
 import type { BrowserProcessRow, ControlWorkerStore } from "../../../core/daemon/worker-store.js";
+import { log } from "../../../utils/log.js"; // E2E-TEMP
 import {
   DASHBOARD_CANCEL_ERROR,
   openControlStores,
@@ -123,6 +124,7 @@ export function buildCancelQueuedHandler(dir: string) {
     req: CancelQueuedRequest,
   ): Promise<{ ok: true } | { ok: false; error: string; status?: number }> => {
     if (!req.workflow || !req.id) return { ok: false, error: "workflow and id are required" };
+    log.e2e("cancel:queued", { ...req }); // E2E-TEMP
     const stores = openControlStores(dir);
     try {
       const task = resolveControlTask(stores.taskStore, req.workflow, req.id, req.runId);
@@ -233,6 +235,7 @@ export function buildCancelRunningHandler(dir: string) {
     if (!req.workflow || !req.id || !req.runId) {
       return { ok: false, error: "workflow, id, runId are required", status: 400 };
     }
+    log.e2e("cancel:running", { ...req }); // E2E-TEMP
     const stores = openControlStores(dir);
     try {
       const task = resolveControlTask(stores.taskStore, req.workflow, req.id, req.runId);
@@ -294,6 +297,7 @@ export function buildForceStopTaskHandler(dir: string) {
     req: ForceStopTaskRequest,
   ): Promise<{ ok: true; commandId: string; killCommands: string[] } | { ok: false; error: string; status?: number }> => {
     if (!req.workflow || !req.id) return { ok: false, error: "workflow and id are required", status: 400 };
+    log.e2e("cancel:force-stop", { ...req }); // E2E-TEMP
     const stores = openControlStores(dir);
     try {
       const task = resolveControlTask(stores.taskStore, req.workflow, req.id, req.runId);
