@@ -175,7 +175,7 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
     return;
   }
 
-  let crmRecords: Awaited<ReturnType<typeof searchCrmByName>> = [];
+  let crmRecords: Awaited<ReturnType<typeof searchCrmByName>>;
   try {
     crmRecords = await searchCrmByName(crmPage, parsed.lastName, parsed.first);
   } catch (err) {

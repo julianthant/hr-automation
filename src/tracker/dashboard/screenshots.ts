@@ -178,7 +178,7 @@ export function buildScreenshotsHandler(
       if (!f.endsWith(".png")) continue;
       if (!f.startsWith(prefix)) continue;
       const full = join(rootDir, f);
-      let sizeBytes = 0;
+      let sizeBytes: number;
       try {
         sizeBytes = statSync(full).size;
       } catch {

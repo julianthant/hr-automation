@@ -149,7 +149,7 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
     try {
       wf.config.schema.parse(input)
     } catch (err) {
-      throw new Error(`validation error: ${err instanceof Error ? err.message : String(err)}`)
+      throw new Error(`validation error: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
     }
   }
 

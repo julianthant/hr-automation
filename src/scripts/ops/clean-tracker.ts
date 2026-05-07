@@ -196,7 +196,6 @@ export function cleanTrackerMain(argv: string[] = process.argv.slice(2)): {
   }
   let trackerDeleted = 0;
   let screenshotsDeleted = 0;
-  let uploadsRemoved = 0;
   if (cleanTracker) {
     trackerDeleted = cleanOldTrackerFiles(days, dir);
     log.success(
@@ -204,7 +203,7 @@ export function cleanTrackerMain(argv: string[] = process.argv.slice(2)): {
     );
     // Orphan upload-dir sweep runs alongside the tracker prune — same
     // working-directory assumption, same target.
-    uploadsRemoved = sweepOrphanUploadDirs(dir);
+    const uploadsRemoved = sweepOrphanUploadDirs(dir);
     if (uploadsRemoved > 0) {
       log.success(
         `Removed ${uploadsRemoved} orphan upload dir${uploadsRemoved === 1 ? "" : "s"} from ${dir}/uploads`

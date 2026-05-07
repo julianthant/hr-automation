@@ -82,6 +82,7 @@ export async function waitForOcrApproval(
   } catch (err) {
     throw new Error(
       `waitForOcrApproval: ${opts.sessionId} fannedOutItemIds is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
     );
   }
   if (!Array.isArray(ids) || !ids.every((s) => typeof s === "string")) {

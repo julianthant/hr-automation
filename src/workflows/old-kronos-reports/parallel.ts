@@ -113,7 +113,7 @@ export async function runParallelKronos(
   const sessionDirs: string[] = [];
   let workerCounter = 0;
   const launchFn: NonNullable<Parameters<typeof runWorkflowBatch<KronosItem, typeof kronosReportsWorkflow.config.steps>>[2]>["launchFn"] =
-    async ({ system: __unused_system }) => {
+    async ({ system: _system }) => {
       workerCounter += 1;
       const workerId = workerCounter;
       const prefix = `[W${workerId}]`;

@@ -67,9 +67,9 @@ async function maybeWatchSqliteChildRuns(
   opts: WatchChildRunsOpts,
   dir: string,
 ): Promise<ChildOutcome[] | null> {
-  let tasks: TaskRow[] = [];
   let controlDb: ReturnType<typeof openControlDb> | null = null;
-  let taskStore: ReturnType<typeof createTaskStore> | null = null;
+  let taskStore: ReturnType<typeof createTaskStore>;
+  let tasks: TaskRow[];
   try {
     controlDb = openControlDb({ trackerDir: dir });
     taskStore = createTaskStore(controlDb);
@@ -203,8 +203,16 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
   return new Promise<ChildOutcome[]>((resolve, reject) => {
     let finalized = false;
     let watcher: ReturnType<typeof fsWatch> | undefined;
-    let pollHandle: ReturnType<typeof setInterval> | undefined;
-    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    let pollHandle = setInterval(() => {
+      checkFile();
+    }, 200);
+    let timeoutHandle = setTimeout(() => {
+      if (!finalized) {
+        finalized = true;
+        cleanup();
+        reject(new Error(`wait timeout — still waiting on ${expected.size} item(s) after ${opts.timeoutMs}ms`));
+      }
+    }, opts.timeoutMs);
 
     const cleanup = (): void => {
       finalized = true;

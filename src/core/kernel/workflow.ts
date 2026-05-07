@@ -339,7 +339,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
   try {
     wf.config.schema.parse(handlerInput)
   } catch (err) {
-    throw new Error(`validation error: ${err instanceof Error ? err.message : String(err)}`)
+    throw new Error(`validation error: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
   }
 
   // 2. Derive itemId from workflow-specific/common id fields, fall back to UUID.

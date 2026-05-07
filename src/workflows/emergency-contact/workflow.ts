@@ -200,6 +200,7 @@ export const emergencyContactWorkflow = defineWorkflow({
         if (err instanceof TransactionError) {
           throw new Error(
             `Transaction failed at step: ${err.step ?? "unknown"} — ${err.message}`,
+            { cause: err },
           );
         }
         throw err;

@@ -28,7 +28,7 @@ export function validateAndPrepareItems<TData, TSteps extends readonly string[]>
     try {
       validate(item)
     } catch (err) {
-      throw new Error(`validation error: ${err instanceof Error ? err.message : String(err)}`)
+      throw new Error(`validation error: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
     }
   })
 

@@ -403,7 +403,7 @@ export const onboardingWorkflow = defineWorkflow({
             ? `Transaction failed at step "${error.step ?? "unknown"}": ${error.message}`
             : `Transaction failed: ${errorMessage(error)}`;
           ctx.updateData({ status: "Failed", transactionError: errMsg });
-          throw new Error(errMsg);
+          throw new Error(errMsg, { cause: error });
         }
       } finally {
         const exitStr = failedAtStep ? `<failed at step: ${failedAtStep}>` : txnExit;
