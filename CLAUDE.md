@@ -82,7 +82,7 @@ All runtime scripts use `tsx --env-file=.env` (tsx is in `devDependencies` and p
 
 ## Architecture
 
-The repo is split three ways: per-system drivers (`src/systems/`), a small workflow kernel (`src/core/`), and composed workflows (`src/workflows/`). Auth, tracker, dashboard, and utils are cross-cutting support.
+The repo is split into clear layers: business concepts (`src/domain/`), runtime infrastructure (`src/infra/`), reusable services (`src/services/`), per-system drivers (`src/systems/`), the workflow kernel (`src/core/`), and composed workflows (`src/workflows/`). Tracker, dashboard, scripts, and utils remain top-level support areas.
 
 ```
 src/
@@ -111,8 +111,13 @@ src/
     separations/       # Kernel (4 systems, interleaved auth, sequential batch via runWorkflowBatch).
     old-kronos-reports/# Kernel (pool mode, N workers, per-worker sessionDir via opts.launchFn).
     oath-upload/       # Kernel + daemon-mode. ServiceNow + delegated OCR + delegated oath-signature.
-  auth/                # Per-system login flows + duo-poll + sso-fields (shared).
-  browser/             # launchBrowser, tiling math. Kernel-internal.
+  infra/               # Runtime infrastructure that makes automation possible.
+    auth/              # Per-system login flows + duo-poll + sso-fields (shared).
+    browser/           # launchBrowser, tiling math. Kernel-internal.
+  services/            # Reusable IO/stateful primitives used by workflows + dashboard backend.
+    capture/           # Mobile photo capture + QR/session/PDF bundling.
+    matching/          # Roster loading, name/address/EID matching, optional LLM disambiguation.
+    ocr/               # OCR engine, provider rotation, page rendering, form specs.
   tracker/             # JSONL append + SSE dashboard server + Excel export.
   dashboard/           # React SPA (Vite + shadcn/ui). Reads SSE, renders queue + logs.
   utils/               # env / errors / log (with AsyncLocalStorage runId context).
@@ -160,7 +165,7 @@ Observability for every workflow: `.tracker/{workflow}-{YYYY-MM-DD}.jsonl` + `*-
 | Tracker & JSONL observability patterns | `src/tracker/CLAUDE.md` | Emit patterns, Excel export, child-run delegation |
 | Daemon mode (queues, health checks, etc.) | Root CLAUDE.md → **Daemon Mode** | Default for most CLI commands; use `-n` / `-p N` flags |
 | System-specific gotchas | `src/systems/<system>/CLAUDE.md` | PeopleSoft quirks, frame navigation, auth edge cases |
-| Shared primitives & anti-patterns | `src/domain/`, `src/ocr/` + `docs/engineering/codebase-conventions.md` | Names, operators, logs, OCR — use before adding workflow-local |
+| Shared primitives & anti-patterns | `src/domain/`, `src/services/`, `src/infra/` + `docs/engineering/codebase-conventions.md` | Names, operators, logs, matching, OCR, capture, auth/browser — use before adding workflow-local |
 | Architecture guards & what they enforce | `npm run test:architecture` + test files in `tests/unit/` | No inline selectors, no default exports, lesson format, catalog sync |
 | General cross-codebase lessons | `src/LESSONS.md` | Read before every non-trivial task |
 
@@ -186,7 +191,8 @@ Use these shared homes first:
 - `src/domain/operator-subject.ts` for queue/toast/Telegram/log labels.
 - `src/domain/log-events.ts` and `src/domain/notifications/` for structured logs and notification routing.
 - `src/core/task-display.ts` and `src/core/task-control.ts` for delegation display and control vocabulary.
-- `src/ocr/forms/` for OCR form specs and shared verification schemas.
+- `src/services/ocr/forms/` for OCR form specs and shared verification schemas.
+- `src/services/matching/` for roster loading plus name/address/EID matching.
 - `src/systems/ucpath/person-org-summary.ts` for UCPath Person Org Summary search.
 - `src/domain/hdh/departments.ts` for HDH department acceptance.
 
@@ -214,7 +220,7 @@ Minimal example:
 
 ```ts
 import { defineWorkflow, runWorkflow } from "../../core/index.js";
-import { loginToUCPath } from "../../auth/login.js";
+import { loginToUCPath } from "../../infra/auth/login.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { MyInputSchema, type MyInput } from "./schema.js";
 
@@ -403,4 +409,3 @@ playwright-cli -s=session close
 ```
 
 After mapping, add to `src/systems/<system>/selectors.ts` with `// verified YYYY-MM-DD` comment. Run `npm run selectors:catalog` to sync.
-

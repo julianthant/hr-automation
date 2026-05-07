@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 
-import { renderPdfPagesToPngs } from "../ocr/render-pages.js";
+import { renderPdfPagesToPngs } from "../services/ocr/render-pages.js";
 
 export interface EnsurePdfPageCacheOpts {
   trackerDir: string;

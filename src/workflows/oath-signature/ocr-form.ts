@@ -7,11 +7,11 @@ export {
   type OathRosterOcrRecord,
   type OathOcrOutput,
   type OathPreviewRecord,
-} from "../../ocr/forms/oath.js";
+} from "../../services/ocr/forms/oath.js";
 
 export {
   VerificationSchema,
   MatchStateSchema,
   type Verification,
   type MatchState,
-} from "../../ocr/forms/shared.js";
+} from "../../services/ocr/forms/shared.js";

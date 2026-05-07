@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import type { TrackerEntry } from "../types";
+import type { TrackerEntry } from "@/components/shared/types";
 import { resolveOcrConfigForEntry } from "@/lib/ocr-downstream-registry";
 
 /**

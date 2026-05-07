@@ -6,7 +6,7 @@
  * Drops carry-forward when v1 record has `forceResearch === true` (set by
  * the operator's per-row ↻ click in the prior version).
  */
-import { levenshteinDistance } from "../../match/index.js";
+import { levenshteinDistance } from "../../services/matching/index.js";
 import type { AnyOcrFormSpec } from "./types.js";
 
 const FUZZY_THRESHOLD = 2;

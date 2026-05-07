@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { computeAuthGroupDuration } from "../../../src/dashboard/components/StepPipeline";
+import { computeAuthGroupDuration } from "../../../src/dashboard/components/log-panel/StepPipeline";
 
 describe("computeAuthGroupDuration", () => {
   it("returns undefined when no children have durations", () => {

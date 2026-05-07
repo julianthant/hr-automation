@@ -1,4 +1,5 @@
-// Export each workflow's Zod input schema as a JSON Schema file in `schemas/`.
+// Export each workflow's Zod input schema as a JSON Schema file in
+// `generated/schemas/`.
 //
 // Usage:
 //   npm run schemas:export
@@ -9,8 +10,9 @@
 //     `defineWorkflow`, which registers the workflow into `src/core/registry`.
 //   * For every registered workflow that has a matching `<Name>InputSchema` or
 //     similar exported Zod schema in the workflow module, convert via Zod v4's
-//     native `toJSONSchema` and write to `schemas/<workflow-name>.schema.json`.
-//   * The `schemas/` directory is kept via `.gitkeep`; the generated
+//     native `toJSONSchema` and write to
+//     `generated/schemas/<workflow-name>.schema.json`.
+//   * The `generated/schemas/` directory is kept via `.gitkeep`; the generated
 //     `*.schema.json` artifacts are gitignored (re-run this after a schema
 //     change).
 //
@@ -80,7 +82,7 @@ export interface ExportResult {
  * Convert each Zod schema to JSON Schema and write to `<outDir>/<name>.schema.json`.
  *
  * Exported so tests can point it at a tmp dir without touching the real
- * `schemas/` directory at repo root.
+ * `generated/schemas/` directory.
  */
 export function exportSchemas(outDir: string): ExportResult[] {
   mkdirSync(outDir, { recursive: true });
@@ -104,7 +106,7 @@ export function exportSchemas(outDir: string): ExportResult[] {
 // exported `exportSchemas` function).
 const isMain = import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("export-schemas.ts");
 if (isMain) {
-  const outDir = path.resolve(process.cwd(), "schemas");
+  const outDir = path.resolve(process.cwd(), "generated", "schemas");
   const results = exportSchemas(outDir);
   for (const r of results) {
     process.stdout.write(`  ${r.workflowName} -> ${path.relative(process.cwd(), r.outputPath)}\n`);

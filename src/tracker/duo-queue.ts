@@ -1,5 +1,5 @@
 import type { Page } from "playwright";
-import { pollDuoApproval, type DuoPollOptions } from "../auth/duo-poll.js";
+import { pollDuoApproval, type DuoPollOptions } from "../infra/auth/duo-poll.js";
 import { emitSessionEvent, readSessionEvents } from "./session-events.js";
 import { log } from "../utils/log.js";
 

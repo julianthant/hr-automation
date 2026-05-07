@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import type { TrackerEntry } from "../types";
+import type { TrackerEntry } from "@/components/shared/types";
 import { dateLocal } from "../../lib/utils";
 
 interface UseEntriesResult {

@@ -1,4 +1,4 @@
-import type { TrackerEntry } from "../types.js";
+import type { TrackerEntry } from "@/components/shared/types.js";
 
 export interface BatchCounts {
   done: number;

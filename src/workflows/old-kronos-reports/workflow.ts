@@ -8,7 +8,7 @@ import { defineWorkflow } from "../../core/index.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
-import { loginToUKG } from "../../auth/login.js";
+import { loginToUKG } from "../../infra/auth/login.js";
 import {
   getGeniesIframe,
   searchEmployee,

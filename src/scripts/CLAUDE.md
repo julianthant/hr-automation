@@ -12,7 +12,7 @@ src/scripts/
 │   └── search-lib.ts     — pure scoring/index logic (tested in isolation)
 ├── codegen/          ← code generators
 │   ├── new-workflow.ts   — scaffolds a new kernel workflow's 5 canonical files
-│   └── export-schemas.ts — per-workflow Zod → JSON Schema export to schemas/
+│   └── export-schemas.ts — per-workflow Zod → JSON Schema export to generated/schemas/
 ├── ops/              ← operational tooling
 │   ├── clean-tracker.ts  — prunes .tracker JSONL + .screenshots PNGs
 │   └── setup.ts          — first-use environment validation wizard
@@ -35,7 +35,7 @@ src/workflows/emergency-contact/scripts/   ← workflow-specific dev tools
 ### `codegen/`
 
 - **`new-workflow.ts`** — Scaffolder for a new kernel workflow. Generates `schema.ts`, `workflow.ts`, `config.ts`, `index.ts`, and a templated `CLAUDE.md` with deep links to per-system LESSONS/SELECTORS/common-intents based on the `--systems crm,ucpath` flag. Pure helpers `kebabToPascal`, `kebabToCamel`, `parseArgv`, `scaffold` exported for tests. Wired as `npm run new:workflow`.
-- **`export-schemas.ts`** — Walks every `src/workflows/*/schema.ts`, exports each Zod input schema to a JSON Schema file under `schemas/`. Pure `exportSchemas(outDir)` exported for tests. Wired as `npm run schemas:export`.
+- **`export-schemas.ts`** — Walks every `src/workflows/*/schema.ts`, exports each Zod input schema to a JSON Schema file under `generated/schemas/`. Pure `exportSchemas(outDir)` exported for tests. Wired as `npm run schemas:export`.
 
 ### `ops/`
 

@@ -13,7 +13,7 @@ import {
 } from "../../../src/tracker/jsonl.js";
 import { log, withLogContext } from "../../../src/utils/log.js";
 
-const TEST_DIR = ".tracker-test";
+const TEST_DIR = "generated/.tracker-test";
 
 describe("JSONL tracker", () => {
   beforeEach(() => {

@@ -224,7 +224,7 @@ npm run typecheck:all               # src + tests
 npm run build:dashboard             # production frontend bundle
 npm run dashboard                   # SSE backend + Vite dev server (operator UI)
 npm run setup                       # environment validation wizard
-npm run schemas:export              # writes schemas/<workflow>.schema.json
+npm run schemas:export              # writes generated/schemas/<workflow>.schema.json
 npm run new:workflow -- <name> [--systems a,b]   # scaffolds a new workflow
 npm run selectors:catalog                        # regenerates per-system SELECTORS.md
 npm run selector:search "<intent>"               # fuzzy search across SELECTORS + LESSONS

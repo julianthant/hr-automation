@@ -41,9 +41,8 @@ node_modules/
 # Superpowers plans / review-request scratch docs
 docs/superpowers/
 
-# Tracker data (local runtime) + ephemeral test/idempotency dirs
+# Tracker data (local runtime)
 .tracker/
-.tracker-*/
 
 # Excel tracking files
 *.xlsx
@@ -55,15 +54,19 @@ src/data/*
 !src/data/screenshots/
 src/data/screenshots/*
 !src/data/screenshots/.gitkeep
+!src/data/sharepoint/
+src/data/sharepoint/*
+!src/data/sharepoint/.gitkeep
 
 # Legacy screenshot location — kept for cleanup on older working trees.
 .screenshots/
 
-# E2E test screenshots
-.e2e-screenshots/
-
-# Generated JSON Schemas (re-generated via `npm run schemas:export`)
-schemas/*.schema.json
+# Generated artifacts. Directory shells/docs may be tracked; generated outputs
+# are re-created by scripts/tests.
+generated/schemas/*.schema.json
+generated/pathfinder/
+generated/.tracker-*/
+generated/.e2e-screenshots/
 
 # OS
 .DS_Store
@@ -74,6 +77,3 @@ Thumbs.db
 /notes.md
 .ocr-cache/
 .worktrees/
-
-# Pathfinder reports (analysis scratch, not committed)
-PATHFINDER-*/

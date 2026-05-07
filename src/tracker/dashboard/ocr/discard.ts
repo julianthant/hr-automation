@@ -1,5 +1,5 @@
 import { trackEvent, appendLogEntry } from "../../jsonl.js";
-import { getFormSpec } from "../../../ocr/forms/registry.js";
+import { getFormSpec } from "../../../services/ocr/forms/registry.js";
 import { readFormType, readParentRunId } from "./shared.js";
 
 const WORKFLOW = "ocr";

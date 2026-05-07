@@ -10,7 +10,10 @@ module-specific parts.
 - `src/systems/`: browser drivers for external systems. Playwright selectors and navigation helpers belong here, not in workflows.
 - `src/workflows/`: orchestration only. Workflow folders own schema, step composition, CLI adapter, and workflow-specific business decisions.
 - `src/domain/`: shared pure/domain behavior used across workflows, tracker, dashboard, OCR, or core.
-- `src/ocr/forms/`: OCR form specs and shared OCR schemas. OCR orchestration must not import form specs from downstream workflow folders.
+- `src/infra/`: runtime infrastructure such as auth, Duo/SSO helpers, and browser launch/session primitives.
+- `src/services/`: reusable stateful or IO-backed capabilities such as capture, OCR, and roster matching.
+- `src/services/ocr/forms/`: OCR form specs and shared OCR schemas. OCR orchestration must not import form specs from downstream workflow folders.
+- `src/services/matching/`: roster loading plus name/address/EID matching. Pure matching can be split into `src/domain/matching/` when it no longer depends on IO or LLM disambiguation.
 - `src/tracker/`: JSONL/session/event persistence and dashboard backend APIs.
 - `src/dashboard/`: React operator UI. It renders backend metadata and should not re-invent workflow business rules.
 - `tests/unit/`: mirrors `src/` and guards pure logic, architecture boundaries, and regression-prone helpers.
@@ -63,7 +66,7 @@ If code is used by two workflows, or one workflow plus tracker/dashboard/core/OC
 - New workflows use `defineWorkflow`.
 - Every workflow declares `operatorSubject`, `detailFields`, `getName`, and `getId`.
 - Every workflow seeds pending-row display data through `initialData` or `operatorSubject`.
-- Shared fixes belong in `src/core`, `src/domain`, `src/systems`, or `src/ocr/forms` before workflow-local helpers.
+- Shared fixes belong in `src/core`, `src/domain`, `src/systems`, `src/services`, or `src/infra` before workflow-local helpers.
 - Before adding a workflow-local helper, ask: "Would another workflow need this when it grows?" If yes, promote it now.
 
 ## Errors And Cancellation

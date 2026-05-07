@@ -1,8 +1,8 @@
 import { Loader2, Clock, CheckCircle2, AlertTriangle } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { TrackerEntry } from "../types";
-import { useElapsed, formatDuration } from "../hooks/useElapsed";
+import type { TrackerEntry } from "@/components/shared/types";
+import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
 import {
   aggregateBatchCounts,
   pickPreviewChildren,

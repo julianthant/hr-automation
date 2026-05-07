@@ -15,7 +15,7 @@ import {
   handleUpload,
   handleValidate,
   pickLanIp,
-} from "../../../../capture/index.js";
+} from "../../../../services/capture/index.js";
 import {
   CAPTURE_PHOTOS_DIR,
   CAPTURE_UPLOADS_DIR,

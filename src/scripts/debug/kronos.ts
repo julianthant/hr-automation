@@ -17,8 +17,8 @@
  * Default EID is `10598634` (matches the legacy single-purpose scripts).
  */
 import type { Page } from "playwright";
-import { launchBrowser } from "../../browser/launch.js";
-import { loginToUKG, loginToNewKronos } from "../../auth/login.js";
+import { launchBrowser } from "../../infra/browser/launch.js";
+import { loginToUKG, loginToNewKronos } from "../../infra/auth/login.js";
 import { PATHS } from "../../config.js";
 import {
   getGeniesIframe,

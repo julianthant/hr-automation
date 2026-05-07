@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {
   filterLogsForDebugVisibility,
   isDebugLog,
-} from "../../../src/dashboard/components/log-display";
+} from "../../../src/dashboard/components/log-panel/log-display";
 
 describe("dashboard log display filtering", () => {
   it("hides debug logs by default while preserving operator-facing logs", () => {

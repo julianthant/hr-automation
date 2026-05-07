@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { PreviewInboxRow } from "../types";
+import type { PreviewInboxRow } from "@/components/shared/types";
 
 const POLL_MS = 5_000;
 

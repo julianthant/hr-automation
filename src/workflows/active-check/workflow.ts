@@ -1,6 +1,6 @@
 import { defineWorkflow, runWorkflow } from "../../core/index.js";
 import type { Ctx } from "../../core/kernel/types.js";
-import { loginToUCPath } from "../../auth/login.js";
+import { loginToUCPath } from "../../infra/auth/login.js";
 import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 import { isAcceptedHdhDepartment } from "../../domain/hdh/departments.js";
 import {

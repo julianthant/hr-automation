@@ -2,7 +2,7 @@
 // Usage:
 //   npm run clean:tracker                           # default 30 days — cleans both
 //   npm run clean:tracker -- --days 14              # custom age
-//   npm run clean:tracker -- --dir .tracker-test --days 1
+//   npm run clean:tracker -- --dir generated/.tracker-test --days 1
 //   npm run clean:tracker -- --no-screenshots       # tracker only
 //   npm run clean:tracker -- --screenshots-only     # screenshots only
 

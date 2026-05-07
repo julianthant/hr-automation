@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { PdfPagePreview } from "../PdfPagePreview";
+import { PdfPagePreview } from "@/components/shared/PdfPagePreview";
 
 export interface PrepReviewPairProps {
   /** Workflow name passed through to the PdfPagePreview backend route. */

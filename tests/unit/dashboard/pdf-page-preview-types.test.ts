@@ -8,7 +8,7 @@ import {
 import {
   isPreviewNearViewport,
   resolveDashboardApiSrc,
-} from "../../../src/dashboard/components/PdfPagePreview.js";
+} from "../../../src/dashboard/components/shared/PdfPagePreview.js";
 import { getOcrDownstream } from "../../../src/dashboard/lib/ocr-downstream-registry.js";
 
 test("parsePrepareRowData preserves pdfFileId for cached page previews", () => {

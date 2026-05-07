@@ -12,8 +12,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ZodType } from "zod/v4";
-import { loadRoster as realLoadRoster } from "../../match/index.js";
-import type { RosterRow as MatchRosterRow } from "../../match/match.js";
+import { loadRoster as realLoadRoster } from "../../services/matching/index.js";
+import type { RosterRow as MatchRosterRow } from "../../services/matching/match.js";
 import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/watch-child-runs.js";
 import { trackEvent, dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
 import { errorMessage } from "../../utils/errors.js";
@@ -23,7 +23,7 @@ import {
   createOcrEidLookupDependencyBatch,
 } from "../../tracker/tasks/store.js";
 import { runDependencySchedulerTickForTrackerDir } from "../../tracker/tasks/scheduler.js";
-import { getFormSpec } from "../../ocr/forms/registry.js";
+import { getFormSpec } from "../../services/ocr/forms/registry.js";
 import { applyCarryForward } from "./carry-forward.js";
 import {
   patchOcrRecordFromActiveCheckOutcome,
@@ -33,8 +33,8 @@ import {
 } from "./eid-lookup-results.js";
 import type { AnyOcrFormSpec, RosterRow as OcrRosterRow } from "./types.js";
 import type { OcrInput } from "./schema.js";
-import { runOcrPipeline } from "../../ocr/pipeline.js";
-import type { LookupSuggestion } from "../../ocr/lookup-suggestions.js";
+import { runOcrPipeline } from "../../services/ocr/pipeline.js";
+import type { LookupSuggestion } from "../../services/ocr/lookup-suggestions.js";
 
 const WORKFLOW = "ocr";
 
@@ -296,7 +296,7 @@ export async function runOcrOrchestrator(
     // 1b. Pre-render PDF pages so we know page count + can show the page
     // image in the Preview tab before OCR finishes.
     log.step(`[ocr] pre-rendering PDF pages so the Preview tab populates immediately`);
-    const { renderPdfPagesToPngs } = await import("../../ocr/render-pages.js");
+    const { renderPdfPagesToPngs } = await import("../../services/ocr/render-pages.js");
     let preRenderedPages: string[];
     if (input.pdfFileId && pageImagePad === 3) {
       try {
@@ -482,7 +482,7 @@ export async function runOcrOrchestrator(
       // while disambiguation runs in the background.
       emitSnapshot(records, "disambiguating", "running", { failedPages, emptyPages, pageStatusSummary });
 
-      const { disambiguateMatch } = await import("../../ocr/disambiguate.js");
+      const { disambiguateMatch } = await import("../../services/ocr/disambiguate.js");
       const concurrencyEnv = Number.parseInt(process.env.OCR_DISAMBIG_CONCURRENCY ?? "", 10);
       const concurrency = Number.isFinite(concurrencyEnv) && concurrencyEnv > 0 ? concurrencyEnv : 4;
 
@@ -530,7 +530,7 @@ export async function runOcrOrchestrator(
     const lookupSuggestionsByIndex = new Map<number, LookupSuggestion[]>();
     if (suggestionTargets.length > 0) {
       log.step(`[ocr] asking LLM for lookup suggestions for ${suggestionTargets.length} record(s) with no fuzzy roster candidates`);
-      const { suggestLookupCandidates } = await import("../../ocr/lookup-suggestions.js");
+      const { suggestLookupCandidates } = await import("../../services/ocr/lookup-suggestions.js");
       await Promise.all(suggestionTargets.map(async (target) => {
         try {
           const suggestions = opts._lookupSuggestionOverride

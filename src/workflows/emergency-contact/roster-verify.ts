@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import ExcelJS from "exceljs";
 import { log } from "../../utils/log.js";
-import { normalizeEid } from "../../match/index.js";
+import { normalizeEid } from "../../services/matching/index.js";
 import { normalizePersonNameForCompare } from "../../domain/identity/person-name.js";
 import type { EmergencyContactBatch } from "./schema.js";
 

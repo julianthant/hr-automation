@@ -31,9 +31,9 @@
 import path from "node:path";
 import fs from "node:fs";
 import type { Download, Page } from "playwright";
-import { launchBrowser } from "../../browser/launch.js";
-import { fillSsoCredentials, clickSsoSubmit } from "../../auth/sso-fields.js";
-import { pollDuoApproval } from "../../auth/duo-poll.js";
+import { launchBrowser } from "../../infra/browser/launch.js";
+import { fillSsoCredentials, clickSsoSubmit } from "../../infra/auth/sso-fields.js";
+import { pollDuoApproval } from "../../infra/auth/duo-poll.js";
 import { requestDuoApproval } from "../../tracker/duo-queue.js";
 import { validateEnv } from "../../utils/env.js";
 import { log } from "../../utils/log.js";

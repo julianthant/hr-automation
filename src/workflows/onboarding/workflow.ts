@@ -6,7 +6,7 @@ import {
   runWorkflow,
 } from "../../core/index.js";
 import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
-import { loginToUCPath, loginToACTCrm } from "../../auth/login.js";
+import { loginToUCPath, loginToACTCrm } from "../../infra/auth/login.js";
 import {
   searchByEmail,
   selectLatestResult,

@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import type { SystemConfig, SessionObserver, CaptureFileOpts } from './types.js'
-import { launchBrowser } from '../../browser/launch.js'
+import { launchBrowser } from '../../infra/browser/launch.js'
 import { log } from '../../utils/log.js'
 import { classifyPlaywrightError, errorMessage } from '../../utils/errors.js'
 import { PATHS } from '../../config.js'
@@ -169,7 +169,7 @@ export class Session {
       // Parallel-staggered: every system's login fires in its own promise,
       // each one waiting i*5s before clicking submit so that Duo prompts
       // arrive ~5s apart on the user's phone (avoids the multi-prompt
-      // collision documented in src/auth/CLAUDE.md while still letting all
+      // collision documented in src/infra/auth/CLAUDE.md while still letting all
       // Duos pend in parallel — total auth time is max(single Duo) + (N-1)*5s
       // instead of sum(all Duos)). The IIFEs are constructed and registered
       // in `readyPromises` synchronously, so `Session.launch` returns

@@ -4,4 +4,4 @@ export {
   listFormTypes,
   type FormType,
   type FormTypeListing,
-} from "../../ocr/forms/registry.js";
+} from "../../services/ocr/forms/registry.js";

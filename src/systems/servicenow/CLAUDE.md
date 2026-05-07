@@ -17,7 +17,7 @@ UCPath.
 
 ## Auth
 
-`loginToServiceNow` in `src/auth/login.ts` mirrors `loginToUCPath`:
+`loginToServiceNow` in `src/infra/auth/login.ts` mirrors `loginToUCPath`:
 fill UCSD SSO username + password, click Log In, poll Duo via
 `requestDuoApproval`. The form lives in the main DOM (no iframe), so
 no `getContentFrame` adapter is needed.

@@ -9,7 +9,7 @@
  */
 import type { ZodType } from "zod/v4";
 
-/** A single roster row, as loaded by `src/match/`. Shape mirrors RosterRow used today. */
+/** A single roster row, as loaded by `src/services/matching/`. Shape mirrors RosterRow used today. */
 export interface RosterRow {
   eid: string;
   name: string;

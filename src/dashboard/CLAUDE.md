@@ -18,28 +18,30 @@ Dashboard controls mutate the SQLite control plane first (`tasks`, `task_attempt
 
 ## Component Tree
 
+Component placement rules live in `components/AGENTS.md`. Read that file before adding, moving, or promoting files under `src/dashboard/components/`.
+
 ```
 App.tsx
-├── TopBar.tsx
+├── navigation/TopBar.tsx
 │   ├── Workflow dropdown (shadcn Select → popover with name + count)
 │   ├── Date navigation (arrow buttons + shadcn Popover + Calendar)
 │   ├── SearchBar.tsx (cross-workflow tracker entry search → SearchResults.tsx)
 │   ├── FailureBell.tsx (red badge with read-state — failed entries on the active date, persists read status via localStorage)
 │   ├── Live indicator (green dot pill)
 │   └── Clock (useClock hook)
-├── QueuePanel.tsx
+├── queue-panel/QueuePanel.tsx
 │   ├── Search input (shadcn Input)
 │   ├── StatPills.tsx (5 clickable cards, doubles as status filter)
 │   └── Entry list (shadcn ScrollArea)
 │       └── EntryItem.tsx × N (name, badge, step, time, error)
-├── LogPanel.tsx
+├── log-panel/LogPanel.tsx
 │   ├── Header (name, badge, email, RunSelector.tsx)
 │   ├── Detail grid (4 cells, varies per workflow)
 │   ├── StepPipeline.tsx (horizontal dots + connectors + timing)
 │   ├── LogStream.tsx (shadcn ScrollArea; filter tabs + debug-log visibility toggle)
 │   │   └── LogLine.tsx × N (timestamp, icon, message, dup badge, copy)
 │   └── Footer (streaming indicator, count, auto-scroll toggle)
-└── TerminalDrawer.tsx (bottom session/worker drawer)
+└── terminal-drawer/TerminalDrawer.tsx (bottom session/worker drawer)
     ├── DaemonGroups / DaemonRow (worker spawn/stop/drain/log-tail/browser-kill)
     └── WorkflowBox.tsx × N (active workflow instances + BrowserChip.tsx per browser)
 ```
@@ -96,7 +98,7 @@ The backend entrypoint is `src/tracker/dashboard.ts`, which now delegates HTTP r
 ### Data Types (shared between backend and frontend)
 
 ```typescript
-// src/tracker/jsonl.ts (backend) and src/dashboard/components/types.ts (frontend)
+// src/tracker/jsonl.ts (backend) and src/dashboard/components/shared/types.ts (frontend)
 
 interface TrackerEntry {
   workflow: string;

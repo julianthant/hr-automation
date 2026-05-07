@@ -1,4 +1,4 @@
-import type { PriorRunSummary } from "../types";
+import type { PriorRunSummary } from "@/components/shared/types";
 
 interface DuplicateBannerProps {
   priorRuns: PriorRunSummary[];

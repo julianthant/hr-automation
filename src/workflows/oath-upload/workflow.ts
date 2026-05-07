@@ -2,7 +2,7 @@ import { defineWorkflow, runWorkflow } from "../../core/index.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
-import { loginToServiceNow } from "../../auth/login.js";
+import { loginToServiceNow } from "../../infra/auth/login.js";
 import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 import { OathUploadInputSchema, type OathUploadInput } from "./schema.js";
 import { oathUploadHandler, oathUploadStepList } from "./handler.js";

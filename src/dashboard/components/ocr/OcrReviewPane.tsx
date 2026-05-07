@@ -10,7 +10,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import type { TrackerEntry } from "../types";
+import type { TrackerEntry } from "@/components/shared/types";
 import {
   type PreviewRecord,
   type Verification,
@@ -24,9 +24,9 @@ import { PrepReviewFormCard } from "./PrepReviewFormCard";
 import { EmptyPagePlaceholder } from "./EmptyPagePlaceholder";
 import { EcRecordView } from "./EcRecordView";
 import { OathRecordView } from "./OathRecordView";
-import { PdfPagePreview } from "../PdfPagePreview";
-import { usePrepCursor } from "../hooks/usePrepCursor";
-import { useTaskDependencies } from "../hooks/useTaskDependencies";
+import { PdfPagePreview } from "@/components/shared/PdfPagePreview";
+import { usePrepCursor } from "@/components/hooks/usePrepCursor";
+import { useTaskDependencies } from "@/components/hooks/useTaskDependencies";
 import {
   derivePreviewApprovalGate,
   type PreviewPageStatus,

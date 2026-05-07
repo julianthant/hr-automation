@@ -1,6 +1,6 @@
 import type { Locator, Page } from "playwright";
 import { log } from "../../utils/log.js";
-import { gotoWithRetry } from "../../browser/launch.js";
+import { gotoWithRetry } from "../../infra/browser/launch.js";
 import {
   actionList,
   separationForm,
