@@ -150,7 +150,6 @@ export const activeCheckWorkflow = defineWorkflow({
     { key: "emplId", label: "EID" },
     { key: "activeStatus", label: "Active Check" },
     { key: "terminationDate", label: "End Date" },
-    { key: "expectedJobEndDate", label: "Expected Job End" },
     { key: "department", label: "Dept" },
   ],
   getName: (d) => d.name || d.searchName || "",

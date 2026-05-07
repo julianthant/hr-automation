@@ -228,10 +228,23 @@ async function extractSingleResultDetail(
       const text = el.textContent?.trim() ?? "";
       // Name pattern: "First Last" (2+ words, letters only, no digits)
       if (/^[A-Za-z]+\s+[A-Za-z]+/.test(text) && text.length < 60 && !/\d/.test(text) && el.children.length === 0) {
-        // Skip common UI labels
-        if (!["Search Criteria", "Recent Searches", "Saved Searches", "Employment Instances",
-              "Person Organizational Summary", "Return to Search", "Show fewer options",
-              "Navigation Area", "Julian Zaw"].some((label) => text.includes(label))) {
+        // Skip common UI labels. The Person Org Summary detail page renders many
+        // 2-word labels in leaf spans that match the name regex; without this list
+        // the iteration returns the first label ("Person ID") instead of the name.
+        // TODO: replace with a registry selector targeting the actual name span
+        // (likely #PERSON_NPC_VW_NAME_DISPL or similar PeopleSoft id) once verified.
+        const labels = [
+          "Search Criteria", "Recent Searches", "Saved Searches", "Employment Instances",
+          "Person Organizational Summary", "Return to Search", "Show fewer options",
+          "Navigation Area", "Julian Zaw",
+          "Person ID", "Benefit Eligibility", "Limited Hours", "Floater Hours",
+          "HR Status", "Payroll Status", "Last Hire", "Termination Date",
+          "ORG Instance", "Primary Job", "Empl Record", "Position Number",
+          "Dept ID", "Department Description", "Job Code", "Expected Job",
+          "Empl Class", "Pay Group", "Employee Type", "Probation Code",
+          "Probation End", "Union Code", "FLSA Status", "Business Unit",
+        ];
+        if (!labels.some((label) => text.includes(label))) {
           return text;
         }
       }
