@@ -56,6 +56,14 @@ export function appendLogEntry(entry: LogEntry, dir: string = DEFAULT_DIR): void
   // Errors like `Error: SSN 123-45-6789 not found in I9` get normalized to
   // `Error: SSN ***-**-**** not found in I9` automatically.
   const scrubbed: LogEntry = { ...entry, message: redactPii(entry.message) };
+  // E2E-TEMP: log every log emit (after PII scrub) for FE/BE sync verification
+  log.e2e("appendLog", {
+    wf: scrubbed.workflow,
+    id: scrubbed.itemId,
+    runId: scrubbed.runId,
+    level: scrubbed.level,
+    msg: scrubbed.message.slice(0, 80),
+  });
   const source = appendJsonlWithSource(logPath, scrubbed, {
     sourceKind: "log",
     workflow: scrubbed.workflow,
@@ -183,6 +191,15 @@ export function trackEventForDate(
 }
 
 export function trackEvent(entry: TrackerEntry, dir: string = DEFAULT_DIR): void {
+  // E2E-TEMP: log every tracker emit for FE/BE sync verification
+  log.e2e("trackEvent", {
+    wf: entry.workflow,
+    id: entry.id,
+    runId: entry.runId,
+    status: entry.status,
+    step: entry.step,
+    parentRunId: entry.parentRunId,
+  });
   const logPath = getLogPath(entry.workflow, dir);
   const source = appendJsonlWithSource(logPath, entry, {
     sourceKind: "tracker",

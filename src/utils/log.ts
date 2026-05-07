@@ -13,6 +13,9 @@ interface LogContext {
 const logStore = new AsyncLocalStorage<LogContext>();
 
 const DEBUG_ENABLED = process.env.DEBUG === "true" || process.env.DEBUG === "1";
+// E2E-TEMP: Gate verbose E2E debug logs behind E2E_DEBUG=1 env. Branch-local
+// scaffolding for dashboard/backend sync verification; not for master.
+const E2E_DEBUG_ENABLED = process.env.E2E_DEBUG === "true" || process.env.E2E_DEBUG === "1";
 
 type LogMessage = string | Omit<StructuredLogEvent, "level">;
 
@@ -78,6 +81,15 @@ function emitDebug(msg: string): void {
   }
 }
 
+// E2E-TEMP: Verbose, no-op when E2E_DEBUG is unset. Stdout-only (does NOT
+// write to JSONL \u2014 keeps tracker files clean during E2E reruns).
+function emitE2e(category: string, payload: string | Record<string, unknown>): void {
+  if (!E2E_DEBUG_ENABLED) return;
+  const ts = new Date().toISOString().slice(11, 23); // HH:MM:SS.sss
+  const body = typeof payload === "string" ? payload : JSON.stringify(payload);
+  console.log(pc.magenta(`[E2E][${ts}][${category}]`) + " " + body);
+}
+
 export const log = {
   step: (msg: LogMessage): void => emit("step", pc.blue("->"), msg),
   success: (msg: LogMessage): void => emit("success", pc.green("\u2713"), msg),
@@ -85,6 +97,9 @@ export const log = {
   warn: (msg: LogMessage): void => emit("warn", pc.yellow("!"), msg),
   error: (msg: LogMessage): void => emit("error", pc.red("\u2717"), msg, true),
   debug: (msg: string): void => emitDebug(msg),
+  // E2E-TEMP: log.e2e(category, payload) \u2014 no-op unless E2E_DEBUG=1.
+  e2e: (category: string, payload: string | Record<string, unknown>): void =>
+    emitE2e(category, payload),
 };
 
 /** Update the current log context with a runId (called from withTrackedWorkflow). */

@@ -49,8 +49,11 @@ export function useLogs(
     if (date) params.set("date", date);
 
     let gotSseData = false;
+    // E2E-TEMP: gated on ?debug=1 URL flag (matches the existing dashboard debug toggle convention)
+    const e2eDebug = typeof window !== "undefined" && window.location.search.includes("debug=1");
 
     const es = new EventSource("/events/logs?" + params.toString());
+    if (e2eDebug) console.log(`[E2E][useLogs] open wf=${workflow} id=${itemId} runId=${runId} date=${date}`);
     es.onmessage = (e) => {
       try {
         const newEntries: LogEntry[] = JSON.parse(e.data);
@@ -63,12 +66,17 @@ export function useLogs(
           setRawLogs(newEntries);
           setLoading(false);
           gotSseData = true;
+          if (e2eDebug) console.log(`[E2E][useLogs] firstTick count=${newEntries.length}`);
         } else if (newEntries.length > 0) {
           setRawLogs((prev) => [...prev, ...newEntries]);
+          if (e2eDebug) console.log(`[E2E][useLogs] delta count=${newEntries.length}`);
         }
       } catch {}
     };
-    es.onerror = () => setLoading(false);
+    es.onerror = () => {
+      setLoading(false);
+      if (e2eDebug) console.log(`[E2E][useLogs] error wf=${workflow} id=${itemId}`);
+    };
 
     return () => {
       es.close();
