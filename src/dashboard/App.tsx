@@ -47,6 +47,9 @@ function syncUrlState(workflow: string, selectedId: string | null, date: string)
   params.set("wf", workflow);
   if (selectedId) params.set("id", selectedId);
   params.set("date", date);
+  // E2E-TEMP: preserve debug=1 so the useLogs/useRunEvents debug gate stays on across syncs
+  const existing = new URLSearchParams(window.location.search);
+  if (existing.get("debug") === "1") params.set("debug", "1");
   const url = `${window.location.pathname}?${params.toString()}`;
   window.history.replaceState(null, "", url);
 }
