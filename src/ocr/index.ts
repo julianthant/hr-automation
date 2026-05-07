@@ -139,7 +139,7 @@ export async function ocrDocument<T>(req: OcrRequest<T>): Promise<OcrResult<T>> 
         attempts: totalAttempts,
         cached: false,
       };
-      rotation.markSuccess(key);
+      rotation.markSuccess();
       rotation.flush();
       return result;
     } catch (err) {

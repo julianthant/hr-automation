@@ -374,8 +374,6 @@ export const kronosReportsWorkflow = defineWorkflow({
     if (earlyReturn) return;
 
     await ctx.step("downloading", async () => {
-      let success = false;
-
       // ctx.retry handles the flaky "Go To Reports → wait → Run Report → download"
       // sequence: 2 attempts with 3s backoff. Each attempt is wrapped in the
       // cross-worker report mutex (UKG serializes this navigation path
@@ -396,6 +394,7 @@ export const kronosReportsWorkflow = defineWorkflow({
         return true;
       };
 
+      let success: boolean;
       try {
         success = await ctx.retry(
           async () => {

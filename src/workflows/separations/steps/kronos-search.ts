@@ -79,7 +79,7 @@ export async function runKronosSearch(
       if (!okTimecard) return { found: true, date: null as string | null };
       await page.waitForTimeout(3_000);
       await dismissModal(page, iframe);
-      const date = await getOldKronosTimecardLastDate(page, iframe);
+      const date = await getOldKronosTimecardLastDate(page);
       return { found: true, date };
     },
     newK: async () => {

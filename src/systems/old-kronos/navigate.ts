@@ -362,7 +362,6 @@ export async function clickGoToTimecard(
  */
 export async function switchToPreviousPayPeriod(
   page: Page,
-  iframe: Frame,
 ): Promise<boolean> {
   log.step("[Old Kronos] Switching to previous pay period...");
 
@@ -405,7 +404,6 @@ export async function switchToPreviousPayPeriod(
  */
 export async function getTimecardLastDate(
   page: Page,
-  iframe: Frame,
 ): Promise<string | null> {
   log.step("[Old Kronos] Checking timecard for time entries...");
 
@@ -468,18 +466,18 @@ export async function checkTimecardDates(
   await debugScreenshot(page, "ukg-timecard-01-current");
 
   // Check current pay period
-  let lastDate = await getTimecardLastDate(page, iframe);
+  let lastDate = await getTimecardLastDate(page);
   if (lastDate) {
     log.step("[Old Kronos] Found entries in current period — no need to check previous");
     return lastDate;
   }
 
   // No entries in current — try previous pay period
-  const switched = await switchToPreviousPayPeriod(page, iframe);
+  const switched = await switchToPreviousPayPeriod(page);
   if (switched) {
     await dismissModal(page, iframe);
     await debugScreenshot(page, "ukg-timecard-02-previous");
-    lastDate = await getTimecardLastDate(page, iframe);
+    lastDate = await getTimecardLastDate(page);
   }
 
   return lastDate;
