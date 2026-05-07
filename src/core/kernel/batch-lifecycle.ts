@@ -100,7 +100,7 @@ export function createBatchObserver(
   }
 }
 
-export interface BatchLifecycleOpts<TData> {
+export interface BatchLifecycleOpts<_TData = unknown> {
   /** Workflow name — threaded into `generateInstanceName` and tracker rows. */
   workflow: string
   /** Systems the workflow will authenticate — used to attribute the auth-

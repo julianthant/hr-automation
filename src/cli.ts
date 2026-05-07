@@ -78,7 +78,7 @@ program
 
     try {
       await runAuthFlow();
-    } catch (firstError) {
+    } catch {
       log.error("Unexpected error -- retrying...");
       try {
         await runAuthFlow();

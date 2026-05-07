@@ -252,7 +252,7 @@ export async function killOrphanedChromiumProcesses(): Promise<number> {
   if (candidates.size === 0) return 0
   let killed = 0
   for (const pid of candidates) {
-    let ppid: number | null = null
+    let ppid: number
     try {
       const out = execFileSync('ps', ['-o', 'ppid=', '-p', String(pid)], {
         stdio: ['ignore', 'pipe', 'ignore'],

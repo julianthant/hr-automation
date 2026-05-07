@@ -146,8 +146,9 @@ export async function waitForReportAndDownload(
   log.step(`[${employeeId}] Waiting for report to complete...`);
 
   // Switch to CHECK REPORT STATUS tab
-  await clickInFrames(page, [...reportsPage.checkStatusSelectors]) ||
+  if (!(await clickInFrames(page, [...reportsPage.checkStatusSelectors]))) {
     await jsClickText(page, "CHECK REPORT STATUS");
+  }
 
   // Wait 12 seconds for the report to generate
   await page.waitForTimeout(12_000);
@@ -157,8 +158,9 @@ export async function waitForReportAndDownload(
   let statusFrame: Frame | null = null;
 
   for (let attempt = 0; attempt < 10; attempt++) {
-    await clickInFrames(page, [...reportsPage.refreshStatusSelectors]) ||
+    if (!(await clickInFrames(page, [...reportsPage.refreshStatusSelectors]))) {
       await jsClickText(page, "Refresh Status");
+    }
     await page.waitForTimeout(3_000);
 
     for (const f of page.frames()) {
@@ -268,8 +270,9 @@ async function downloadReportRow(
   }
 
   // Click View Report
-  await clickInFrames(page, [...reportsPage.viewReportSelectors]) ||
+  if (!(await clickInFrames(page, [...reportsPage.viewReportSelectors]))) {
     await jsClickText(page, "View Report");
+  }
 
   // Wait for download
   for (let i = 0; i < 30; i++) {

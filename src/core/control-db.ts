@@ -51,7 +51,7 @@ export function openControlDb(opts: OpenControlDbOpts = {}): ControlDb {
 function supportsUpdateReturning(db: Database.Database): boolean {
   const cached = updateReturningSupportByDb.get(db)
   if (typeof cached === 'boolean') return cached
-  let supported = false
+  let supported: boolean
   try {
     db.exec('CREATE TEMP TABLE IF NOT EXISTS __returning_probe(id INTEGER PRIMARY KEY, state TEXT)')
     db.exec('DELETE FROM __returning_probe')

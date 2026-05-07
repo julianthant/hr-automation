@@ -261,7 +261,7 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
         notes: record.notes ?? [],
       } as EmergencyContactRecord;
     },
-    deriveItemId(record, parentRunId, index): string {
+    deriveItemId(_record, parentRunId, index): string {
       return `ocr-ec-${parentRunId}-r${index}`;
     },
   },

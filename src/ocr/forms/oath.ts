@@ -379,7 +379,7 @@ export function normalizeOathDate(raw: string | null): string | null {
   if (!raw) return null;
   const trimmed = raw.trim();
   if (trimmed.length === 0) return null;
-  const m = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2}|\d{4})$/);
+  const m = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})$/);
   if (!m) return null;
   const month = Number.parseInt(m[1], 10);
   const day = Number.parseInt(m[2], 10);

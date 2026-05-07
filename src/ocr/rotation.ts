@@ -124,7 +124,7 @@ export class KeyRotation {
   markDead(key: ProviderKey): void {
     this.setState(key, { kind: "dead" });
   }
-  markSuccess(_key: ProviderKey): void {
+  markSuccess(): void {
     // Optional: could clear transient throttle. No-op for now.
   }
 

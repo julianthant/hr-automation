@@ -64,7 +64,7 @@ async function withQueueLock<T>(
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "EEXIST") {
         if (Date.now() - start > 5_000) {
-          throw new Error("queue lock acquisition timed out");
+          throw new Error("queue lock acquisition timed out", { cause: err });
         }
         await delay(100);
         continue;

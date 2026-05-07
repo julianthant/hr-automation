@@ -105,7 +105,9 @@ async function runTest(eid: string): Promise<void> {
         const noMatch = await f.locator("text=No matches were found").count().catch(() => 0);
         if (noMatch > 0) {
           found = false;
-          try { await f.locator("button:has-text('OK')").click({ timeout: 3_000 }); } catch {}
+          try { await f.locator("button:has-text('OK')").click({ timeout: 3_000 }); } catch {
+            // Modal button may not exist; continue
+          }
           break;
         }
       }
