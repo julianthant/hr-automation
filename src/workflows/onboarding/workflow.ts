@@ -78,8 +78,8 @@ export const onboardingWorkflow = defineWorkflow({
       id: "i9",
       // I9 has no Duo MFA so `instance` isn't used — accept it to keep the
       // closure signature uniform with the other kernel-invoked logins.
-      login: async (page, _instance) => {
-        const ok = await loginToI9(page);
+      login: async (_page, _instance) => {
+        const ok = await loginToI9(_page);
         if (!ok) throw new Error("I-9 Complete authentication failed");
       },
     },
