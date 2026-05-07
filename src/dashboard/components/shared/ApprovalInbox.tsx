@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Inbox } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { useWorkflows, autoLabel } from "@/workflows-context";
+import { useWorkflows, autoLabel } from "@/lib/workflows-context";
 import { usePreviewInbox } from "@/components/hooks/usePreviewInbox";
 import type { PreviewInboxRow } from "./types";
 

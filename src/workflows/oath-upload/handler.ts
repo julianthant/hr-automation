@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { Ctx } from "../../core/kernel/types.js";
 import { runWorkflow } from "../../core/index.js";
 import { ocrWorkflow } from "../ocr/index.js";
-import { watchChildRuns } from "../../tracker/watch-child-runs.js";
+import { watchChildRuns } from "../../tracker/delegation/watch-child-runs.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
 import { dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";

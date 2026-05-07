@@ -5,8 +5,8 @@ import {
   DEFAULT_DIR,
 } from "../jsonl.js";
 import { log } from "../../utils/log.js";
-import { detectFailurePattern } from "../failure-detector.js";
-import { notify } from "../notify.js";
+import { detectFailurePattern } from "../alerts/failure-detector.js";
+import { notify } from "../alerts/notify.js";
 import { findAliveDaemons } from "../../core/daemon/registry.js";
 import { readQueueState, markItemFailed } from "../../core/daemon/queue.js";
 import { buildTrackerDataForInput } from "../../core/daemon/enqueue-dispatch.js";

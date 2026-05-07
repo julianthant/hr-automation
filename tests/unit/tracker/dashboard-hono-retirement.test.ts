@@ -11,7 +11,7 @@ import {
   getDashboardHonoRouteManifest,
   type DashboardHonoRouteManifestEntry,
 } from "../../../src/tracker/dashboard/hono/manifest.js";
-import { registerLocalFile } from "../../../src/tracker/files.js";
+import { registerLocalFile } from "../../../src/tracker/files/files.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
 
 let server: Server | undefined;

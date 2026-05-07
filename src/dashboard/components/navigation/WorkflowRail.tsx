@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { useWorkflows, autoLabel, type WorkflowMetadata } from "@/workflows-context";
+import { useWorkflows, autoLabel, type WorkflowMetadata } from "@/lib/workflows-context";
 import { useQueueDepth } from "@/components/hooks/useQueueDepth";
 
 interface WorkflowRailProps {

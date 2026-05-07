@@ -13,7 +13,7 @@ import { formatStepName } from "@/components/shared/types";
 import { useElapsed } from "@/components/hooks/useElapsed";
 import { useTerminalDrawer } from "@/components/hooks/useTerminalDrawer";
 import { useQueueDepth } from "@/components/hooks/useQueueDepth";
-import { useWorkflow } from "@/workflows-context";
+import { useWorkflow } from "@/lib/workflows-context";
 import { getWorkflowIcon } from "@/lib/workflow-icons";
 
 /* ----------------------------------------------------------------------

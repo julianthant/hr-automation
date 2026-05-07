@@ -6,7 +6,7 @@ import { trackEvent, dateLocal } from "../../jsonl.js";
 import type { TrackerEntry } from "../../jsonl.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
 import { isAcceptedHdhDepartment } from "../../../domain/hdh/departments.js";
-import type { ChildOutcome, WatchChildRunsOpts } from "../../watch-child-runs.js";
+import type { ChildOutcome, WatchChildRunsOpts } from "../../delegation/watch-child-runs.js";
 import type { OcrRequest, OcrResult } from "../../../services/ocr/index.js";
 import { rowKey, hasRowLock, acquireRowLock, releaseRowLock } from "./lock.js";
 
@@ -129,7 +129,7 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
           });
         }
 
-        const { watchChildRuns: realWatchChildRuns } = await import("../../watch-child-runs.js");
+        const { watchChildRuns: realWatchChildRuns } = await import("../../delegation/watch-child-runs.js");
         const watchChildren = opts._watchChildRunsOverride ?? realWatchChildRuns;
         const outcomes = await watchChildren({
           workflow: "eid-lookup",

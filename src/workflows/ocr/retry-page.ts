@@ -16,7 +16,7 @@ import { runOcrPerPage } from "../../services/ocr/per-page.js";
 import { buildVisionPool } from "../../services/ocr/per-page-pool.js";
 import { loadRoster as realLoadRoster } from "../../services/matching/index.js";
 import type { RosterRow as MatchRosterRow } from "../../services/matching/match.js";
-import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/watch-child-runs.js";
+import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
 import { trackEvent, dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
 import { isAcceptedHdhDepartment } from "../../domain/hdh/departments.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";

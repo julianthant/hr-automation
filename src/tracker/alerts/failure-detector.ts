@@ -1,4 +1,4 @@
-import type { TrackerEntry } from "./jsonl.js";
+import type { TrackerEntry } from "../jsonl.js";
 
 /**
  * Input options for `detectFailurePattern`. All have defaults tuned for the

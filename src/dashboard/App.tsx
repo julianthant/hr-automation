@@ -14,7 +14,7 @@ import { prefetchFormTypes } from "./components/hooks/useFormTypes";
 import { useTelegramToasts } from "./components/hooks/useTelegramToasts";
 import { useCaptureToasts } from "./components/hooks/useCaptureToasts";
 import { resolveActionToastsForEntry } from "./components/hooks/useActionToasts";
-import { useWorkflow, useWorkflows, autoLabel } from "./workflows-context";
+import { useWorkflow, useWorkflows, autoLabel } from "./lib/workflows-context";
 import { resolveEntryName, buildDisplayNameMap } from "./components/shared/entry-display";
 import type { SearchResultRow, FailureRow } from "./components/shared/types";
 import { WorkflowRail } from "./components/navigation/WorkflowRail";

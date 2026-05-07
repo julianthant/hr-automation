@@ -2,31 +2,49 @@ import { useEffect, useState } from "react";
 
 /**
  * Polls /api/queue-depth every 5s. Returns a {workflow: depth} map.
- * Cheap — the backend counts queued SQLite task rows, with JSONL fallback
- * only for migration-era rows that do not have task records.
- * Polling rather than SSE because the data changes coarsely (a few
- * times per minute at most) and adding a new SSE channel for it would
- * be more wiring than it's worth.
+ *
+ * Module-level singleton: one fetch + one interval shared across all
+ * subscribers. Without this, every WorkflowBox + WorkflowRail mount spins
+ * its own independent poll, and on a busy dashboard those redundant
+ * fetches pile up behind the SSE streams that already saturate Chrome's
+ * HTTP/1.1 6-per-origin connection pool — manifesting as a refresh hang
+ * with hundreds of pending /api/queue-depth requests in the network tab.
  */
+
+let cache: Record<string, number> = {};
+const subscribers = new Set<(depth: Record<string, number>) => void>();
+let interval: ReturnType<typeof setInterval> | null = null;
+let inflight = false;
+
+async function fetchDepth(): Promise<void> {
+  if (inflight) return;
+  inflight = true;
+  try {
+    const res = await fetch("/api/queue-depth");
+    if (!res.ok) return;
+    cache = (await res.json()) as Record<string, number>;
+    for (const cb of subscribers) cb(cache);
+  } catch {
+    /* swallow — transient fetch failures shouldn't break the UI */
+  } finally {
+    inflight = false;
+  }
+}
+
 export function useQueueDepth(): Record<string, number> {
-  const [depth, setDepth] = useState<Record<string, number>>({});
+  const [depth, setDepth] = useState<Record<string, number>>(cache);
   useEffect(() => {
-    let cancelled = false;
-    const fetchDepth = async (): Promise<void> => {
-      try {
-        const res = await fetch("/api/queue-depth");
-        if (!res.ok) return;
-        const body = (await res.json()) as Record<string, number>;
-        if (!cancelled) setDepth(body);
-      } catch {
-        /* swallow — transient fetch failures shouldn't break the UI */
-      }
-    };
-    void fetchDepth();
-    const interval = setInterval(fetchDepth, 5_000);
+    subscribers.add(setDepth);
+    if (subscribers.size === 1) {
+      void fetchDepth();
+      interval = setInterval(fetchDepth, 5_000);
+    }
     return () => {
-      cancelled = true;
-      clearInterval(interval);
+      subscribers.delete(setDepth);
+      if (subscribers.size === 0 && interval !== null) {
+        clearInterval(interval);
+        interval = null;
+      }
     };
   }, []);
   return depth;

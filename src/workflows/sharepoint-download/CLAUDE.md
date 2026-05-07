@@ -43,7 +43,7 @@ The **emergency-contact preflight + standalone CLI** deliberately bypass the ker
 All auth logic is shared with every other system. Do NOT re-implement:
 
 - `fillSsoCredentials` + `clickSsoSubmit` from `src/infra/auth/sso-fields.ts` — UCSD Shibboleth.
-- `requestDuoApproval` from `src/tracker/duo-queue.ts` (kernel path) or `pollDuoApproval` from `src/infra/auth/duo-poll.ts` (non-kernel fallback). Both handle "Try Again" push-timeout retries and the "Yes, this is my device" trust prompt automatically.
+- `requestDuoApproval` from `src/tracker/sessions/duo-queue.ts` (kernel path) or `pollDuoApproval` from `src/infra/auth/duo-poll.ts` (non-kernel fallback). Both handle "Try Again" push-timeout retries and the "Yes, this is my device" trust prompt automatically.
 - `microsoft.*` / `kmsi.*` / `excelOnline.*` / `fileMenu.*` selectors from `src/systems/sharepoint/selectors.ts` — see `src/systems/sharepoint/CLAUDE.md` for the step-by-step flow.
 
 ## Download location

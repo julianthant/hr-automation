@@ -1,5 +1,5 @@
 import { exec } from "node:child_process";
-import { log } from "../utils/log.js";
+import { log } from "../../utils/log.js";
 
 /**
  * Escape a string for safe interpolation inside single quotes on the shell

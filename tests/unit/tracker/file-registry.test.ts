@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { openStateDb, closeStateDbForTests } from "../../../src/tracker/state/db.js";
-import { registerLocalFile, getRegisteredFile } from "../../../src/tracker/files.js";
+import { registerLocalFile, getRegisteredFile } from "../../../src/tracker/files/files.js";
 
 function tmpTracker(): string {
   return mkdtempSync(join(tmpdir(), "file-reg-"));

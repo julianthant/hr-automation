@@ -164,7 +164,7 @@ When re-running the same ID (e.g. a failed separation re-run):
 
 ## Workflow-Specific Configuration
 
-All dashboard UI metadata lives on the server-side `WorkflowMetadata` registry (populated by `defineWorkflow` for kernel workflows, `defineDashboardMetadata` for legacy ones). Frontend consumes via the `WorkflowsProvider` + `useWorkflow(name)` hook (`src/dashboard/workflows-context.tsx`) backed by `/api/workflow-definitions`. The former `WF_CONFIG` constant was deleted in subsystem D — there is no frontend-side hardcoding of labels, name/id resolvers, or detailField arrays anywhere.
+All dashboard UI metadata lives on the server-side `WorkflowMetadata` registry (populated by `defineWorkflow` for kernel workflows, `defineDashboardMetadata` for legacy ones). Frontend consumes via the `WorkflowsProvider` + `useWorkflow(name)` hook (`src/dashboard/lib/workflows-context.tsx`) backed by `/api/workflow-definitions`. The former `WF_CONFIG` constant was deleted in subsystem D — there is no frontend-side hardcoding of labels, name/id resolvers, or detailField arrays anywhere.
 
 Current consumption:
 
@@ -286,7 +286,7 @@ The dashboard now auto-adapts — no frontend changes needed. When a new workflo
 src/dashboard/
   App.tsx                    # Top-level layout (TopBar + QueuePanel + LogPanel + TerminalDrawer)
   main.tsx                   # React root + WorkflowsProvider
-  workflows-context.tsx      # /api/workflow-definitions consumer; useWorkflow(name)
+  lib/workflows-context.tsx     # /api/workflow-definitions consumer; useWorkflow(name)
   index.css                  # CSS variables, @import "@heroui/styles", Tailwind setup
   index.html                 # Vite entry
   components/

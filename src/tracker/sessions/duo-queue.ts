@@ -1,7 +1,7 @@
 import type { Page } from "playwright";
-import { pollDuoApproval, type DuoPollOptions } from "../infra/auth/duo-poll.js";
-import { emitSessionEvent, readSessionEvents } from "./session-events.js";
-import { log } from "../utils/log.js";
+import { pollDuoApproval, type DuoPollOptions } from "../../infra/auth/duo-poll.js";
+import { emitSessionEvent, readSessionEvents } from "../session-events.js";
+import { log } from "../../utils/log.js";
 
 /** Options for requestDuoApproval — extends DuoPollOptions with queue metadata. */
 export interface DuoQueueOptions extends DuoPollOptions {
