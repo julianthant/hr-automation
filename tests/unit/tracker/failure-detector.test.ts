@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   detectFailurePattern,
   type FailurePattern,
-} from "../../../src/tracker/failure-detector.js";
+} from "../../../src/tracker/alerts/failure-detector.js";
 import type { TrackerEntry } from "../../../src/tracker/jsonl.js";
 
 // Fixed "now" so we can reason about timestamps in ms offsets.

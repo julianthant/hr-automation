@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 import type { TrackerEntry, RunInfo } from "@/components/shared/types";
 import { formatTrackerValue, isMonospaceKey } from "@/components/shared/types";
 import { deriveTrackerFallbackLog } from "./log-fallback";
-import { useWorkflow } from "@/workflows-context";
+import { useWorkflow } from "@/lib/workflows-context";
 import { resolveEntryName } from "@/components/shared/entry-display";
 import { statusBadgeClass } from "@/components/shared/status-styles";
 

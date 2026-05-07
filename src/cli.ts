@@ -20,7 +20,7 @@ import {
   runOathUploadCli,
   sha256OfFile,
 } from "./workflows/oath-upload/index.js";
-import { exportToExcel } from "./tracker/export-excel.js";
+import { exportToExcel } from "./tracker/exports/export-excel.js";
 
 const program = new Command();
 

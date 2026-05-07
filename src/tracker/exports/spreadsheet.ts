@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import { dateLocal } from "./jsonl.js";
+import { dateLocal } from "../jsonl.js";
 
 /** Column definition for ExcelJS worksheets. */
 export interface ColumnDef {

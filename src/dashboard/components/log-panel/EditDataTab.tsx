@@ -3,7 +3,7 @@ import { Play, Loader2, Save, RefreshCcw, Copy, Check, ChevronDown } from "lucid
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "@/components/shared/types";
-import { useWorkflow } from "@/workflows-context";
+import { useWorkflow } from "@/lib/workflows-context";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { statusBadgeClass } from "@/components/shared/status-styles";
 

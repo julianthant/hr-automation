@@ -14,7 +14,7 @@ import { basename, join } from "node:path";
 import type { ZodType } from "zod/v4";
 import { loadRoster as realLoadRoster } from "../../services/matching/index.js";
 import type { RosterRow as MatchRosterRow } from "../../services/matching/match.js";
-import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/watch-child-runs.js";
+import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
 import { trackEvent, dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
@@ -301,7 +301,7 @@ export async function runOcrOrchestrator(
     if (input.pdfFileId && pageImagePad === 3) {
       try {
         const { openStateDb } = await import("../../tracker/state/db.js");
-        const { ensurePdfPageCache } = await import("../../tracker/pdf-cache.js");
+        const { ensurePdfPageCache } = await import("../../tracker/files/pdf-cache.js");
         const cachedPages = await ensurePdfPageCache(openStateDb(trackerBaseDir), {
           trackerDir: trackerBaseDir,
           fileId: input.pdfFileId,

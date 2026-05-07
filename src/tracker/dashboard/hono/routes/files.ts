@@ -2,8 +2,8 @@ import { basename } from "node:path";
 import { existsSync } from "node:fs";
 import type { Hono } from "hono";
 
-import { getRegisteredFile } from "../../../files.js";
-import { getCachedPage } from "../../../pdf-cache.js";
+import { getRegisteredFile } from "../../../files/files.js";
+import { getCachedPage } from "../../../files/pdf-cache.js";
 import type { DashboardHonoDeps } from "../context.js";
 import { streamFileResponse, textResponse } from "../responses.js";
 

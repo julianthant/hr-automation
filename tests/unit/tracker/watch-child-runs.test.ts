@@ -3,7 +3,7 @@ import assert from "node:assert";
 import { mkdirSync, writeFileSync, appendFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { watchChildRuns } from "../../../src/tracker/watch-child-runs.js";
+import { watchChildRuns } from "../../../src/tracker/delegation/watch-child-runs.js";
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
 

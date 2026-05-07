@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { useWorkflows, autoLabel } from "@/workflows-context";
+import { useWorkflows, autoLabel } from "@/lib/workflows-context";
 import type { SearchResultRow } from "@/components/shared/types";
 import { statusBadgeClass } from "@/components/shared/status-styles";
 

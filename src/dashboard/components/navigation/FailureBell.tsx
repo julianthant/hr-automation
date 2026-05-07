@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Bell } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { useWorkflows, autoLabel } from "@/workflows-context";
+import { useWorkflows, autoLabel } from "@/lib/workflows-context";
 import { statusBadgeClass } from "@/components/shared/status-styles";
 import type { FailureRow } from "@/components/shared/types";
 

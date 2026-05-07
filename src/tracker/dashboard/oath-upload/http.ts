@@ -1,6 +1,6 @@
 /**
- * HTTP handlers for /api/oath-upload/*. Mirrors src/tracker/ocr-http.ts +
- * src/tracker/emergency-contact-http.ts shape.
+ * HTTP handlers for /api/oath-upload/*. Mirrors the dashboard OCR route
+ * handler modules.
  *
  *  - check-duplicate: read-only — scans recent oath-upload JSONLs for the hash
  *  - start:           fire-and-forget runOathUploadCli (caller has already
@@ -12,13 +12,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { trackEvent, dateLocal, type TrackerEntry } from "./jsonl.js";
-import { errorMessage } from "../utils/errors.js";
-import { log } from "../utils/log.js";
+import { trackEvent, dateLocal, type TrackerEntry } from "../../jsonl.js";
+import { errorMessage } from "../../../utils/errors.js";
+import { log } from "../../../utils/log.js";
 import {
   findPriorRunsForHash,
   type PriorRunSummary,
-} from "../workflows/oath-upload/duplicate-check.js";
+} from "../../../workflows/oath-upload/duplicate-check.js";
 
 const WORKFLOW = "oath-upload";
 
@@ -78,7 +78,7 @@ export interface StartHandlerOpts {
   trackerDir?: string;
   /** Test/escape-hatch override for the daemon-enqueue side effect. */
   runOathUploadCli?: (
-    inputs: import("../workflows/oath-upload/schema.js").OathUploadInput[],
+    inputs: import("../../../workflows/oath-upload/schema.js").OathUploadInput[],
   ) => Promise<void>;
 }
 
@@ -89,7 +89,7 @@ export function buildOathUploadStartHandler(
     opts.runOathUploadCli ??
     (async (inputs) => {
       const { runOathUploadCli } = await import(
-        "../workflows/oath-upload/index.js"
+        "../../../workflows/oath-upload/index.js"
       );
       await runOathUploadCli(inputs);
     });

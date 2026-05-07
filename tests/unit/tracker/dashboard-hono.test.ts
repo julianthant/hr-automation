@@ -8,7 +8,7 @@ import { z } from "zod";
 import { openStateDb, closeStateDbForTests } from "../../../src/tracker/state/db.js";
 import { queryProjectionHealth } from "../../../src/tracker/state/queries.js";
 import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
-import { registerLocalFile } from "../../../src/tracker/files.js";
+import { registerLocalFile } from "../../../src/tracker/files/files.js";
 import { trackEventForDate } from "../../../src/tracker/jsonl.js";
 import { clear, defineDashboardMetadata } from "../../../src/core/kernel/registry.js";
 import { defineWorkflow } from "../../../src/core/kernel/workflow.js";

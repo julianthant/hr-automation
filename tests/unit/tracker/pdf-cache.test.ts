@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { openStateDb, closeStateDbForTests } from "../../../src/tracker/state/db.js";
-import { registerLocalFile } from "../../../src/tracker/files.js";
-import { ensurePdfPageCache, getCachedPage } from "../../../src/tracker/pdf-cache.js";
+import { registerLocalFile } from "../../../src/tracker/files/files.js";
+import { ensurePdfPageCache, getCachedPage } from "../../../src/tracker/files/pdf-cache.js";
 
 test("ensurePdfPageCache renders page rows and reuses cache hits", async () => {
   const dir = mkdtempSync(join(tmpdir(), "pdf-cache-"));

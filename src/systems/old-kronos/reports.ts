@@ -349,7 +349,7 @@ async function registerDownloadedReportPdf(
 ): Promise<void> {
   try {
     const { openStateDb, isStateDbReady } = await import("../../tracker/state/db.js");
-    const { registerLocalFile } = await import("../../tracker/files.js");
+    const { registerLocalFile } = await import("../../tracker/files/files.js");
     const trackerDir = ".tracker";
     if (isStateDbReady(trackerDir)) {
       registerLocalFile(openStateDb(trackerDir), {

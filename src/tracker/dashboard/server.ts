@@ -8,7 +8,7 @@ import {
   dateLocal,
 } from "../jsonl.js";
 import { sweepStuckOcrRows } from "./ocr/index.js";
-import { sweepStuckOathUploadRows } from "../oath-upload-http.js";
+import { sweepStuckOathUploadRows } from "./oath-upload/http.js";
 import { openStateDb } from "../state/db.js";
 import { rebuildProjectionForDate } from "../state/rebuild.js";
 import { startDependencyScheduler } from "../tasks/scheduler.js";

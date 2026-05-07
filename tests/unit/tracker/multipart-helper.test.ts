@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   parseBoundary,
   parseMultipartBuffer,
-} from "../../../src/tracker/multipart-helper.js";
+} from "../../../src/tracker/files/multipart-helper.js";
 
 const BOUNDARY = "----boundary123";
 

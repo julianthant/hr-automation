@@ -1,7 +1,7 @@
 import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
 import { pollDuoApproval } from "./duo-poll.js";
-import { requestDuoApproval } from "../../tracker/duo-queue.js";
+import { requestDuoApproval } from "../../tracker/sessions/duo-queue.js";
 import { validateEnv } from "../../utils/env.js";
 import { UKG_URL } from "../../config.js";
 import { fillSsoCredentials, clickSsoSubmit, isSsoFormReady } from "./sso-fields.js";

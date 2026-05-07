@@ -9,7 +9,7 @@ import {
   buildOathUploadStartHandler,
   buildOathUploadCancelHandler,
   sweepStuckOathUploadRows,
-} from "../../../src/tracker/oath-upload-http.js";
+} from "../../../src/tracker/dashboard/oath-upload/http.js";
 
 test("buildOathUploadDuplicateCheckHandler: returns 400 on invalid hash", async () => {
   const dir = mkdtempSync(join(tmpdir(), "oath-upload-dup-handler-bad-"));

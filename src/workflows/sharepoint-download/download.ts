@@ -34,7 +34,7 @@ import type { Download, Page } from "playwright";
 import { launchBrowser } from "../../infra/browser/launch.js";
 import { fillSsoCredentials, clickSsoSubmit } from "../../infra/auth/sso-fields.js";
 import { pollDuoApproval } from "../../infra/auth/duo-poll.js";
-import { requestDuoApproval } from "../../tracker/duo-queue.js";
+import { requestDuoApproval } from "../../tracker/sessions/duo-queue.js";
 import { validateEnv } from "../../utils/env.js";
 import { log } from "../../utils/log.js";
 import {

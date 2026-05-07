@@ -8,9 +8,9 @@ import {
   buildOathUploadDuplicateCheckHandler,
   buildOathUploadStartHandler,
   saveUploadedPdf,
-} from "../../../oath-upload-http.js";
-import { registerLocalFile } from "../../../files.js";
-import { ensurePdfPageCache } from "../../../pdf-cache.js";
+} from "../../oath-upload/http.js";
+import { registerLocalFile } from "../../../files/files.js";
+import { ensurePdfPageCache } from "../../../files/pdf-cache.js";
 import type { DashboardHonoDeps } from "../context.js";
 import { readMultipartRequest } from "../multipart.js";
 import { jsonResponse, readJsonRequest } from "../responses.js";

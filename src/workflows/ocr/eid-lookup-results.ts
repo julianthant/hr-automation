@@ -1,5 +1,5 @@
 import { isAcceptedHdhDepartment } from "../../domain/hdh/departments.js";
-import type { ChildOutcome } from "../../tracker/watch-child-runs.js";
+import type { ChildOutcome } from "../../tracker/delegation/watch-child-runs.js";
 
 export type OcrLookupKind = "name" | "verify" | "verify-only";
 

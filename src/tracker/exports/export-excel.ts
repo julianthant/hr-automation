@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
-import { readEntries, type TrackerEntry } from "./jsonl.js";
-import { log } from "../utils/log.js";
+import { readEntries, type TrackerEntry } from "../jsonl.js";
+import { log } from "../../utils/log.js";
 
 export async function exportToExcel(
   workflow: string,

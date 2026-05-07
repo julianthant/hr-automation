@@ -10,9 +10,9 @@
  */
 import { existsSync, readFileSync, statSync, watch as fsWatch } from "node:fs";
 import { join } from "node:path";
-import type { TrackerEntry } from "./jsonl.js";
-import { openControlDb } from "../core/control-db.js";
-import { createTaskStore, type TaskRow } from "../core/task-store/index.js";
+import type { TrackerEntry } from "../jsonl.js";
+import { openControlDb } from "../../core/control-db.js";
+import { createTaskStore, type TaskRow } from "../../core/task-store/index.js";
 
 export interface ChildOutcome {
   workflow: string;

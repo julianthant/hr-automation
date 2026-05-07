@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { watchChildRuns } from "../../tracker/watch-child-runs.js";
+import { watchChildRuns } from "../../tracker/delegation/watch-child-runs.js";
 import { dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
 
 export interface WaitForOcrApprovalOpts {
