@@ -16,7 +16,7 @@ import {
   mapAttemptRow,
   parseJson,
 } from './types.js'
-import { enqueueTasks, findTaskByWorkflowItemRunRaw } from './enqueue.js'
+import { enqueueTasks } from './enqueue.js'
 import {
   claimNextTask,
   markTaskRunning,

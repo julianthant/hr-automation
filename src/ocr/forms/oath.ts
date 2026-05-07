@@ -9,9 +9,9 @@ import { z } from "zod/v4";
 import { matchAgainstRoster } from "../../match/index.js";
 import { log } from "../../utils/log.js";
 import { normalizePersonNameForCompare } from "../../domain/identity/person-name.js";
-import type { OcrFormSpec, RosterRow, LookupKind } from "../../workflows/ocr/types.js";
+import type { OcrFormSpec, LookupKind } from "../../workflows/ocr/types.js";
 import type { OathSignatureInput } from "../../workflows/oath-signature/schema.js";
-import { MatchStateSchema, VerificationSchema, type MatchState, type Verification } from "./shared.js";
+import { MatchStateSchema, VerificationSchema } from "./shared.js";
 
 // ─── OCR-pass record (one row of a paper roster) ──────────
 

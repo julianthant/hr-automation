@@ -12,13 +12,13 @@ import {
   normalizeEid,
 } from "../../match/index.js";
 import { normalizePersonNameForCompare } from "../../domain/identity/person-name.js";
-import type { OcrFormSpec, RosterRow, LookupKind } from "../../workflows/ocr/types.js";
+import type { OcrFormSpec, LookupKind } from "../../workflows/ocr/types.js";
 import {
   AddressSchema,
   EmergencyContactSchema,
   type EmergencyContactRecord,
 } from "../../workflows/emergency-contact/schema.js";
-import { MatchStateSchema, VerificationSchema, type MatchState, type Verification } from "./shared.js";
+import { MatchStateSchema, VerificationSchema } from "./shared.js";
 
 // ─── Permissive OCR-pass schema ────────────────────────────
 
