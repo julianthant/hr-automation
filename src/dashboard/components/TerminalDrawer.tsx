@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState } from "react";
 import { Terminal as TerminalIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useClock } from "./hooks/useClock";
@@ -5,6 +6,10 @@ import { useSessions } from "./hooks/useSessions";
 import { useTerminalDrawer } from "./hooks/useTerminalDrawer";
 import { LiveIndicator } from "./LiveIndicator";
 import { WorkflowBox } from "./WorkflowBox";
+
+const BAR_HEIGHT = 36;
+const MAX_DRAWER_HEIGHT = 320;
+const MIN_BODY_HEIGHT = 32;
 
 interface TerminalDrawerProps {
   /** SSE-backend connection state, surfaced as the right-edge Live pill. */
@@ -17,8 +22,9 @@ interface TerminalDrawerProps {
  * toggles, registered globally in `useTerminalDrawer`.
  *
  * Closed: 36px-tall status bar showing chevron + "session" label + active-
- * instance count. Open: 260px tall — the bar plus a horizontal scroller of
- * `WorkflowBox` cards (one per active workflow instance).
+ * instance count. Open: bar + horizontal scroller of `WorkflowBox` cards,
+ * with the body height auto-fitting to the tallest card (capped at
+ * `MAX_DRAWER_HEIGHT`) so a single small card doesn't leave dead space.
  *
  * Right edge of the bar tiles with LogPanel + LogStream's `pr-6` so the
  * Live pill / clock land at the same X as the date nav and Auto-scroll
@@ -38,6 +44,22 @@ export function TerminalDrawer({ connected }: TerminalDrawerProps) {
   const active = visible.filter((w) => w.active || w.crashedOnLaunch);
   const count = active.length;
 
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [contentHeight, setContentHeight] = useState(0);
+
+  useLayoutEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    const measure = () => setContentHeight(el.scrollHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const bodyHeight = Math.max(contentHeight, MIN_BODY_HEIGHT);
+  const openHeight = Math.min(BAR_HEIGHT + bodyHeight, MAX_DRAWER_HEIGHT);
+
   return (
     <div
       id="terminal-drawer"
@@ -46,12 +68,12 @@ export function TerminalDrawer({ connected }: TerminalDrawerProps) {
       className={cn(
         "terminal-drawer",
         "flex-shrink-0 bg-background overflow-hidden flex flex-col",
-        // Height transition uses ease-out-expo for a snappy open. Closing
-        // uses standard ease-out via the inverse transition. `prefers-
-        // reduced-motion` zeroes both via the .terminal-drawer class.
-        open ? "h-[260px]" : "h-9",
       )}
       style={{
+        // Height transition uses ease-out-expo for a snappy open. Closing
+        // uses standard ease-out via the inverse transition. `prefers-
+        // reduced-motion` zeroes the transition via the .terminal-drawer class.
+        height: open ? `${openHeight}px` : `${BAR_HEIGHT}px`,
         transition: "height 180ms cubic-bezier(0.16, 1, 0.3, 1)",
       }}
     >
@@ -103,15 +125,15 @@ export function TerminalDrawer({ connected }: TerminalDrawerProps) {
           open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
         )}
       >
-        <div className="h-full min-w-0 flex">
+        <div ref={contentRef} className="min-w-0 flex">
           {active.length === 0 ? (
-            <div className="h-full flex min-w-0 flex-1 items-center px-4 font-mono text-[11px] text-muted-foreground">
+            <div className="flex min-w-0 flex-1 items-center px-4 py-3 font-mono text-[11px] text-muted-foreground">
               No active workflows
             </div>
           ) : (
             <div
               className={cn(
-                "h-full min-w-0 flex-1 flex gap-2.5 px-3.5 py-3",
+                "min-w-0 flex-1 flex gap-2.5 px-3.5 py-3",
                 "overflow-x-auto overflow-y-hidden items-start",
                 "[scrollbar-width:thin]",
               )}
