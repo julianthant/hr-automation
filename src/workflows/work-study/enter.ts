@@ -95,7 +95,7 @@ async function collapseSidebar(page: Page): Promise<void> {
 // --- Position Data tab ---
 
 async function fillPositionData(
-  page: Page,
+  _page: Page,
   frame: FrameLocator,
   effectiveDate: string,
 ): Promise<void> {
@@ -152,13 +152,6 @@ async function fillInitiatorComments(
   await payPathActions.initiatorsCommentsInput(frame)
     .fill(comments, { timeout: 10_000 });
   log.success("Initiator's Comments filled");
-}
-
-async function clickSaveAndSubmit(page: Page, frame: FrameLocator): Promise<void> {
-  log.step("Clicking Save And Submit...");
-  await payPathActions.saveAndSubmitButton(frame).click({ timeout: 10_000 });
-  await waitForPageReady(page);
-  log.success("Save And Submit clicked");
 }
 
 // --- ActionPlan builder ---
