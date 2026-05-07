@@ -139,7 +139,7 @@ export async function runOcrRetryPage(
   // 3. Match new records against the roster.
   const rosterPath = (row.data?.rosterPath as unknown as string | undefined) ?? "";
   const roster = rosterPath ? ((await loadRosterFn(rosterPath)) as OcrRosterRow[]) : [];
-  let newRecords = await Promise.all(
+  const newRecords = await Promise.all(
     ocr.records.map((r) => spec.matchRecord({ record: r, roster })),
   );
 

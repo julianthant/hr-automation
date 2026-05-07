@@ -371,7 +371,7 @@ export const onboardingWorkflow = defineWorkflow({
 
     await ctx.step("transaction", async () => {
       const t0 = Date.now();
-      let txnExit = "<empty>";
+      const txnExit = "<empty>";
       let failedAtStep: string | null = null;
       try {
         if (!data) throw new Error("extraction did not produce data");

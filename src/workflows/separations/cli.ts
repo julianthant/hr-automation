@@ -1,7 +1,7 @@
 import { log } from "../../utils/log.js";
 import { runWorkflow, runWorkflowBatch } from "../../core/index.js";
 import { trackEvent } from "../../tracker/jsonl.js";
-import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
+import { operatorSubjectData } from "../../domain/operator-subject.js";
 import { PATHS } from "../../config.js";
 import { getProcessIsolatedSessionDir } from "../../core/kernel/session.js";
 import { rmSync } from "node:fs";

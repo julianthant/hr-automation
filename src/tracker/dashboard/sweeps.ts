@@ -5,7 +5,6 @@ import {
   DEFAULT_DIR,
 } from "../jsonl.js";
 import { log } from "../../utils/log.js";
-import { errorMessage } from "../../utils/errors.js";
 import { detectFailurePattern } from "../failure-detector.js";
 import { notify } from "../notify.js";
 import { findAliveDaemons } from "../../core/daemon/registry.js";

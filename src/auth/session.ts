@@ -1,5 +1,4 @@
 import type { Page } from "playwright";
-import { log } from "../utils/log.js";
 
 /**
  * Check if the page is already on an authenticated ACT CRM page.

@@ -5,12 +5,10 @@ import type { ControlDb } from '../control-db.js'
 import {
   type TaskState,
   type ChildFailurePolicy,
-  type TaskDbRow,
   getTaskRaw,
   legacyFailurePolicy,
   normalizeTaskState,
 } from './types.js'
-import { markTaskCancelled } from './terminal.js'
 
 export function createDependency(
   db: Database.Database,

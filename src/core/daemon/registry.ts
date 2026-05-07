@@ -9,7 +9,6 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { hostname } from 'node:os'
 import { join, resolve } from 'node:path'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import type { Daemon, DaemonLockfile } from './types.js'
