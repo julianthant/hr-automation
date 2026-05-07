@@ -837,13 +837,17 @@ export const personOrgSummary = {
     f.getByRole("button", { name: "Clear", exact: true }),
 
   /**
-   * Person ID value on the single-result detail page. PeopleSoft has exposed
-   * both OPRID and EMPLID ids for the same value. verified 2026-04-24
+   * Person ID value on the single-result detail page. PeopleSoft renders
+   * the header EID as `PERSON_NPC_VW_EMPLID` (no grid suffix); older
+   * deployments / variant code paths also expose `PER_INST_EMP_VW_OPRID$0`
+   * and `PER_INST_EMP_VW_EMPLID$0`. verified 2026-05-07
    * @tags person-id, emplid, detail, person-org-summary
    */
   personIdValue: (f: FrameLocator): Locator =>
-    f.locator("#PER_INST_EMP_VW_OPRID\\$0").or(
-      f.locator("#PER_INST_EMP_VW_EMPLID\\$0"),
+    f.locator("#PERSON_NPC_VW_EMPLID").or(
+      f.locator("#PER_INST_EMP_VW_OPRID\\$0").or(
+        f.locator("#PER_INST_EMP_VW_EMPLID\\$0"),
+      ),
     ),
 
   /**
