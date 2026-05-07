@@ -692,3 +692,126 @@ test("buildOcrApproveHandler rejects approval when source preview readiness is m
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Case (g): previewReady=false → 400 with actionable message
+test("buildOcrApproveHandler rejects when previewReady is explicitly false", async () => {
+  const dir = join(tmpdir(), `ocr-approve-preview-false-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  try {
+    let enqueueCalled = false;
+    const handler = buildOcrApproveHandler({
+      trackerDir: dir,
+      ensureDaemonsAndEnqueueOverride: async () => {
+        enqueueCalled = true;
+      },
+    });
+
+    const resp = await handler({
+      sessionId: "session-preview-false",
+      runId: "run-preview-false",
+      previewReady: false,
+      previewPageCount: 2,
+      records: [
+        {
+          employeeId: "10000001",
+          printedName: "Alice One",
+          selected: true,
+          matchState: "matched",
+          employeeSigned: true,
+          officerSigned: true,
+          dateSigned: "05/01/2026",
+          sourcePage: 1,
+          rowIndex: 0,
+        },
+      ],
+    });
+
+    assert.equal(resp.status, 400);
+    assert.equal(enqueueCalled, false);
+    assert.match((resp.body as { ok: false; error: string }).error, /Source preview is not available/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Case (h): previewReady=true but previewPageCount<=0 → 400 with actionable message
+test("buildOcrApproveHandler rejects when previewReady is true but previewPageCount is 0", async () => {
+  const dir = join(tmpdir(), `ocr-approve-preview-zero-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  try {
+    let enqueueCalled = false;
+    const handler = buildOcrApproveHandler({
+      trackerDir: dir,
+      ensureDaemonsAndEnqueueOverride: async () => {
+        enqueueCalled = true;
+      },
+    });
+
+    const resp = await handler({
+      sessionId: "session-preview-zero",
+      runId: "run-preview-zero",
+      previewReady: true,
+      previewPageCount: 0,
+      records: [
+        {
+          employeeId: "10000001",
+          printedName: "Alice One",
+          selected: true,
+          matchState: "matched",
+          employeeSigned: true,
+          officerSigned: true,
+          dateSigned: "05/01/2026",
+          sourcePage: 1,
+          rowIndex: 0,
+        },
+      ],
+    });
+
+    assert.equal(resp.status, 400);
+    assert.equal(enqueueCalled, false);
+    assert.match((resp.body as { ok: false; error: string }).error, /Source preview is not available/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Case (h): previewReady=true but previewPageCount is negative → 400
+test("buildOcrApproveHandler rejects when previewPageCount is negative", async () => {
+  const dir = join(tmpdir(), `ocr-approve-preview-neg-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  try {
+    let enqueueCalled = false;
+    const handler = buildOcrApproveHandler({
+      trackerDir: dir,
+      ensureDaemonsAndEnqueueOverride: async () => {
+        enqueueCalled = true;
+      },
+    });
+
+    const resp = await handler({
+      sessionId: "session-preview-neg",
+      runId: "run-preview-neg",
+      previewReady: true,
+      previewPageCount: -1,
+      records: [
+        {
+          employeeId: "10000001",
+          printedName: "Alice One",
+          selected: true,
+          matchState: "matched",
+          employeeSigned: true,
+          officerSigned: true,
+          dateSigned: "05/01/2026",
+          sourcePage: 1,
+          rowIndex: 0,
+        },
+      ],
+    });
+
+    assert.equal(resp.status, 400);
+    assert.equal(enqueueCalled, false);
+    assert.match((resp.body as { ok: false; error: string }).error, /Source preview is not available/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
