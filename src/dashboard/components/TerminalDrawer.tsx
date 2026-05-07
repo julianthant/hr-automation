@@ -112,7 +112,7 @@ export function TerminalDrawer({ connected }: TerminalDrawerProps) {
             <div
               className={cn(
                 "h-full min-w-0 flex-1 flex gap-2.5 px-3.5 py-3",
-                "overflow-x-auto overflow-y-hidden items-stretch",
+                "overflow-x-auto overflow-y-hidden items-start",
                 "[scrollbar-width:thin]",
               )}
             >
