@@ -117,9 +117,6 @@ export function EntryItem({ entry, displayNames, selected, onClick }: EntryItemP
       })
     : "";
 
-  const emplId = entry.data?.emplId;
-  const docId = entry.data?.docId;
-  const eid = entry.data?.eid;
   const subject = typeof entry.data?.__subject === "string" ? entry.data.__subject : undefined;
   const showLiveRow = (isFailed && entry.error) || (isRunning && entry.lastLogMessage);
 
@@ -157,11 +154,6 @@ export function EntryItem({ entry, displayNames, selected, onClick }: EntryItemP
               <span className="font-semibold text-[14px] text-foreground truncate">
                 {name || entry.id}
               </span>
-              {docId && (
-                <span className="text-[11px] font-mono text-muted-foreground bg-secondary px-1.5 py-px rounded flex-shrink-0 tabular-nums">
-                  {docId}
-                </span>
-              )}
             </div>
             <span
               className={cn(
@@ -195,12 +187,12 @@ export function EntryItem({ entry, displayNames, selected, onClick }: EntryItemP
           <span className="bg-secondary/80 px-1.5 py-px rounded font-medium flex-shrink-0 tabular-nums">
             #{runNumber}
           </span>
-          {(emplId || eid) && (
+          {entry.id && entry.id !== name && (
             <span
               className="truncate text-foreground/80 flex-shrink min-w-0 tabular-nums"
-              title={emplId || eid}
+              title={entry.id}
             >
-              {emplId || eid}
+              {entry.id}
             </span>
           )}
           <span className="flex-1" />
