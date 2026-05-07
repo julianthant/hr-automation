@@ -404,8 +404,7 @@ async function extractResults(page: Page, frame: FrameLocator): Promise<EidResul
  * re-navigates to Person Org Summary and returns the fresh frame.
  */
 // TODO: consider using this function for multi-search fallback or just delete if not needed
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function clearSearch(page: Page, frame: FrameLocator): Promise<FrameLocator> {
+async function _clearSearch(page: Page, frame: FrameLocator): Promise<FrameLocator> {
   // Click Clear button
   try {
     await personOrgSummary.clearButton(frame).click({ timeout: 5_000 });
