@@ -305,7 +305,7 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
       role="article"
       aria-label={`${instance} session`}
     >
-      <div className="px-2.5 pt-2 pb-2.5 flex flex-col gap-2 flex-1">
+      <div className="px-2.5 pt-2 pb-2.5 flex flex-col gap-2">
         {/* Header: dot + (icon + title + subline) + right-stack */}
         <div className="flex items-start gap-2 min-w-0">
           <span className={cn("w-2 h-2 rounded-full flex-shrink-0 mt-1.5", statusDot)} />
@@ -397,7 +397,7 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
             for the instance's current step. Only renders when we have
             both a registered step list and at least 2 steps. */}
         {steps.length >= 2 && (
-          <div className="flex items-center gap-0 mt-auto pt-1" aria-hidden>
+          <div className="flex items-center gap-0 pt-1" aria-hidden>
             {steps.map((s, i) => {
               const done = currentIdx > i;
               const running = currentIdx === i;
