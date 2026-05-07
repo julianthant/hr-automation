@@ -425,7 +425,7 @@ export const kronosReportsWorkflow = defineWorkflow({
           employeeName,
           rt.reportsDir,
           undefined,
-          (filePath, data) => rt.writeTracker(data),
+          (_filePath, data) => rt.writeTracker(data),
         );
       } else {
         log.error(`${employeeId} -> Report failed`);
