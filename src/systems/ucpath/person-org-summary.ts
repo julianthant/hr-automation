@@ -390,7 +390,7 @@ async function extractResults(page: Page, frame: FrameLocator): Promise<EidResul
  * If the form is unresponsive (PeopleSoft stale after failed searches),
  * re-navigates to Person Org Summary and returns the fresh frame.
  */
-async function clearSearch(page: Page, frame: FrameLocator): Promise<FrameLocator> {
+async function clearSearch(_page: Page, frame: FrameLocator): Promise<FrameLocator> {
   // Click Clear button
   try {
     await personOrgSummary.clearButton(frame).click({ timeout: 5_000 });

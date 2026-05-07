@@ -59,8 +59,8 @@ export async function requestDuoApproval(
 
 async function waitForDuoTurn(
   requestId: string,
-  instance: string,
-  system: string,
+  _instance: string,
+  _system: string,
   abortSignal?: AbortSignal,
 ): Promise<void> {
   let logged = false;
