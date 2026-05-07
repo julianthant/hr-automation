@@ -896,7 +896,6 @@ async function runFanOutPhase(fanOpts: FanOutOpts): Promise<void> {
     patchRecord,
     scheduleDependencyTickOverride,
     records,
-    spec,
     watchChildren,
     trackerDir,
     date,
