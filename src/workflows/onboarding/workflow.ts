@@ -28,7 +28,6 @@ import { z } from "zod/v4";
 const OnboardingInputSchema = z.object({
   email: z.string().email(),
 });
-type OnboardingInput = z.infer<typeof OnboardingInputSchema>;
 
 /** Mask SSN for dashboard display. */
 function maskSsn(ssn: string | undefined | null): string {
