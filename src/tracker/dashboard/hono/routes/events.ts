@@ -49,6 +49,76 @@ export function getActiveHonoCaptureSseSubscriberCountForTests(): number {
   return activeCaptureSseSubscribers;
 }
 
+interface CrossWorkflowCountsCache {
+  workflows: string[];
+  wfCounts: Record<string, number>;
+  failureCounts: Record<string, number>;
+  computedAt: number;
+  key: string;
+}
+
+let countsCache: CrossWorkflowCountsCache | null = null;
+const CROSS_WORKFLOW_COUNTS_TTL_MS = 1_000;
+
+/**
+ * TTL cache for the cross-workflow `wfCounts` + `failureCounts` aggregation.
+ *
+ * The `/events` JSONL-fallback path otherwise re-reads every workflow's
+ * tracker JSONL on every 1s tick, regardless of which workflow the client
+ * is subscribed to. Under multi-workflow load that's the dominant cost in
+ * `buildJsonlEventsPayload` — a sync directory scan + N file reads + N
+ * dedupe passes + N failure-count computations, all blocking the Node
+ * event loop and queueing other concurrent fetches behind it.
+ *
+ * The TTL matches the SSE poll cadence (1s), so within any given second
+ * the heavy aggregation runs at most once across all connected clients.
+ * The cache key includes (dir, targetDate) so date switches and test
+ * isolation directories don't share state.
+ */
+function getCrossWorkflowCounts(
+  targetDate: string,
+  dir: string,
+): { workflows: string[]; wfCounts: Record<string, number>; failureCounts: Record<string, number> } {
+  const key = `${dir}::${targetDate}`;
+  const now = Date.now();
+  if (
+    countsCache &&
+    countsCache.key === key &&
+    now - countsCache.computedAt < CROSS_WORKFLOW_COUNTS_TTL_MS
+  ) {
+    return {
+      workflows: countsCache.workflows,
+      wfCounts: countsCache.wfCounts,
+      failureCounts: countsCache.failureCounts,
+    };
+  }
+  const workflows = listWorkflows(dir);
+  const wfCounts: Record<string, number> = {};
+  const failureCounts: Record<string, number> = {};
+  for (const wf of workflows) {
+    const all = readEntriesForDate(wf, targetDate, dir);
+    const latestById = new Map<string, TrackerEntry>();
+    for (const entry of all) {
+      const prev = latestById.get(entry.id);
+      if (!prev || prev.timestamp <= entry.timestamp) latestById.set(entry.id, entry);
+    }
+    let count = 0;
+    for (const entry of latestById.values()) {
+      if (isResolvedPrepEntry(entry)) continue;
+      count++;
+    }
+    wfCounts[wf] = count;
+    const failures = computeFailureCounts(all);
+    if (failures > 0) failureCounts[wf] = failures;
+  }
+  countsCache = { workflows, wfCounts, failureCounts, computedAt: now, key };
+  return { workflows, wfCounts, failureCounts };
+}
+
+export function __resetCrossWorkflowCountsCacheForTests(): void {
+  countsCache = null;
+}
+
 function readTrackerEntriesForStream(
   workflow: string,
   date: string,
@@ -179,26 +249,8 @@ function buildJsonlEventsPayload(
     };
   });
 
-  const workflows = listWorkflows(dir);
   const targetDate = date || today;
-  const wfCounts: Record<string, number> = {};
-  const failureCounts: Record<string, number> = {};
-  for (const wf of workflows) {
-    const all = readEntriesForDate(wf, targetDate, dir);
-    const latestById = new Map<string, TrackerEntry>();
-    for (const entry of all) {
-      const prev = latestById.get(entry.id);
-      if (!prev || prev.timestamp <= entry.timestamp) latestById.set(entry.id, entry);
-    }
-    let count = 0;
-    for (const entry of latestById.values()) {
-      if (isResolvedPrepEntry(entry)) continue;
-      count++;
-    }
-    wfCounts[wf] = count;
-    const failures = computeFailureCounts(all);
-    if (failures > 0) failureCounts[wf] = failures;
-  }
+  const { workflows, wfCounts, failureCounts } = getCrossWorkflowCounts(targetDate, dir);
 
   return { entries: enriched, workflows, wfCounts, failureCounts };
 }
