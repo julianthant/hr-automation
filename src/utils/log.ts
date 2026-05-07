@@ -25,8 +25,7 @@ function messageText(input: LogMessage): string {
 
 function structuredFields(input: LogMessage): Omit<StructuredLogEvent, "level" | "message"> {
   if (typeof input === "string") return {};
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { message, ...rest } = input;
+  const { message: _message, ...rest } = input;
   return rest;
 }
 
