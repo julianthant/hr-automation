@@ -5,7 +5,7 @@ import {
 import { log } from "../../utils/log.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 import { errorMessage } from "../../utils/errors.js";
-import { loginToUCPath } from "../../auth/login.js";
+import { loginToUCPath } from "../../infra/auth/login.js";
 import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 import { buildWorkStudyPlan, type WorkStudyContext } from "./enter.js";
 import { WorkStudyInputSchema, type WorkStudyInput } from "./schema.js";

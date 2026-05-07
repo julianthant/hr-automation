@@ -5,7 +5,7 @@ import {
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { trackEvent } from "../../tracker/jsonl.js";
-import { loginToUCPath } from "../../auth/login.js";
+import { loginToUCPath } from "../../infra/auth/login.js";
 import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 import { buildOathSignaturePlan, type OathSignatureContext } from "./enter.js";
 import { OathSignatureInputSchema, type OathSignatureInput } from "./schema.js";

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { emptyStreamMessage } from "../../../src/dashboard/components/LogStream.js";
+import { emptyStreamMessage } from "../../../src/dashboard/components/log-panel/LogStream.js";
 
 describe("emptyStreamMessage", () => {
   it("uses an events-specific empty state for the Events tab", () => {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import type { SessionState } from "../types";
+import type { SessionState } from "@/components/shared/types";
 
 const EMPTY_STATE: SessionState = { workflows: [], duoQueue: [] };
 

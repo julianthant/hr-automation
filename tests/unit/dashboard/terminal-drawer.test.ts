@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 
 test("TerminalDrawer renders workflow sessions without the daemon worker strip", () => {
   const source = readFileSync(
-    join(process.cwd(), "src/dashboard/components/TerminalDrawer.tsx"),
+    join(process.cwd(), "src/dashboard/components/terminal-drawer/TerminalDrawer.tsx"),
     "utf-8",
   );
 

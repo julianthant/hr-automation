@@ -2,7 +2,7 @@ import type { Page, Frame } from "playwright";
 import { log } from "../../utils/log.js";
 import { UKGError } from "./types.js";
 import { debugScreenshot } from "../../utils/screenshot.js";
-import { loginToUKG } from "../../auth/login.js";
+import { loginToUKG } from "../../infra/auth/login.js";
 import {
   ssoProbe,
   employeeGrid,

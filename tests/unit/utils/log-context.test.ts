@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, rmSync, readFileSync, readdirSync } from "fs";
 import { withLogContext, log } from "../../../src/utils/log.js";
 
-const TEST_DIR = ".tracker-log-test";
+const TEST_DIR = "generated/.tracker-log-test";
 
 describe("withLogContext", () => {
   beforeEach(() => {

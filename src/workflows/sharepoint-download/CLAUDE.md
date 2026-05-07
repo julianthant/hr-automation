@@ -2,7 +2,7 @@
 
 Kernel workflow for pulling a shared SharePoint / Excel Online file to a local `.xlsx`. Used by:
 
-- The **dashboard queue-header download dropdown** — always visible regardless of which workflow is selected. Each menu item is one row from `registry.ts`. Selecting an option hits `POST /api/sharepoint-download/run { id }` via `buildSharePointRosterDownloadHandler()`; the dropdown itself is populated by `GET /api/sharepoint-download/list` via `buildSharePointListHandler()`. Downloads land in `src/data/<YYYY-MM-DDTHH-MM-SS>-<suggested>.xlsx` (overridable per-spec via `spec.outDir`).
+- The **dashboard queue-header download dropdown** — always visible regardless of which workflow is selected. Each menu item is one row from `registry.ts`. Selecting an option hits `POST /api/sharepoint-download/run { id }` via `buildSharePointRosterDownloadHandler()`; the dropdown itself is populated by `GET /api/sharepoint-download/list` via `buildSharePointListHandler()`. Downloads land in `src/data/sharepoint/<YYYY-MM-DDTHH-MM-SS>-<suggested>.xlsx` (overridable per-spec via `spec.outDir`).
 - **emergency-contact pre-flight roster verification** — `runPreflight()` in `src/workflows/emergency-contact/workflow.ts` calls `downloadSharePointFile()` directly when `--roster-url` is passed, saving into `.tracker/rosters/` for the duration of the run. Does NOT go through the kernel — preflight already runs inside a kernel workflow and nesting would double-emit tracker rows.
 - **`tsx src/workflows/emergency-contact/scripts/download-roster.ts <url>`** — standalone CLI wrapper for ad-hoc downloads into `.tracker/rosters/`. Also bypasses the kernel (no dashboard context).
 
@@ -42,13 +42,13 @@ The **emergency-contact preflight + standalone CLI** deliberately bypass the ker
 
 All auth logic is shared with every other system. Do NOT re-implement:
 
-- `fillSsoCredentials` + `clickSsoSubmit` from `src/auth/sso-fields.ts` — UCSD Shibboleth.
-- `requestDuoApproval` from `src/tracker/duo-queue.ts` (kernel path) or `pollDuoApproval` from `src/auth/duo-poll.ts` (non-kernel fallback). Both handle "Try Again" push-timeout retries and the "Yes, this is my device" trust prompt automatically.
+- `fillSsoCredentials` + `clickSsoSubmit` from `src/infra/auth/sso-fields.ts` — UCSD Shibboleth.
+- `requestDuoApproval` from `src/tracker/duo-queue.ts` (kernel path) or `pollDuoApproval` from `src/infra/auth/duo-poll.ts` (non-kernel fallback). Both handle "Try Again" push-timeout retries and the "Yes, this is my device" trust prompt automatically.
 - `microsoft.*` / `kmsi.*` / `excelOnline.*` / `fileMenu.*` selectors from `src/systems/sharepoint/selectors.ts` — see `src/systems/sharepoint/CLAUDE.md` for the step-by-step flow.
 
 ## Download location
 
-The dashboard path saves to `src/data/<YYYY-MM-DDTHH-MM-SS>-<suggested>.xlsx`; emergency-contact pre-flight saves to `.tracker/rosters/`; the standalone CLI takes an explicit `--out-dir`. All use `Playwright download.saveAs(outPath)` rooted inside the project tree — nothing ever lands in `~/Downloads`. If you see an xlsx in `.playwright-cli/`, it's a selector-mapping artifact from the interactive `playwright-cli` tool, not a production download; delete it.
+The dashboard path saves to `src/data/sharepoint/<YYYY-MM-DDTHH-MM-SS>-<suggested>.xlsx`; emergency-contact pre-flight saves to `.tracker/rosters/`; the standalone CLI takes an explicit `--out-dir`. All use `Playwright download.saveAs(outPath)` rooted inside the project tree — nothing ever lands in `~/Downloads`. If you see an xlsx in `.playwright-cli/`, it's a selector-mapping artifact from the interactive `playwright-cli` tool, not a production download; delete it.
 
 ## HTTP behavior — fire-and-forget
 

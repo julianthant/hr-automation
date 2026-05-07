@@ -3,7 +3,7 @@ import type {
   CapturePhotoSummary,
   CaptureSessionEvent,
   CaptureSessionInfo,
-} from "../capture-types";
+} from "@/components/capture/capture-types";
 
 /**
  * Subscribes to `/api/capture/sessions/stream` (SSE) and maintains a

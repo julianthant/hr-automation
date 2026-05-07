@@ -9,7 +9,7 @@ Two-tier tracking: JSONL for live dashboard streaming, Excel for persistent hist
 - `jsonl.ts` — JSONL append-only tracker + `withTrackedWorkflow` lifecycle wrapper, `cleanOldTrackerFiles`/`cleanOldScreenshots`, PII-aware `serializeValue` + `toTypedValue`
 - `dashboard.ts` — SSE API server (port 3838) — serves `/api/*` and `/events/*` endpoints only (no HTML). Owns session-state rebuild, screenshots endpoint, search endpoint, selector-warnings endpoint
 - `session-events.ts` — `emitWorkflowStart` / `emitWorkflowEnd` / `emitSessionCreate` / `emitBrowserLaunch` / `emitAuthStart` / `emitAuthComplete` / `emitItemStart` / etc. Append `SessionEvent` lines to `.tracker/sessions.jsonl`. `rebuildSessionState` (in `dashboard.ts`) reduces them into a live `SessionState`
-- `duo-queue.ts` — `requestDuoApproval(page, options)` — wraps `pollDuoApproval` with queue semantics (emit `duo_waiting` browser overlay, register in the global Duo queue, swap to `duo_active` when this request becomes head-of-line). Used by every login flow in `src/auth/login.ts`
+- `duo-queue.ts` — `requestDuoApproval(page, options)` — wraps `pollDuoApproval` with queue semantics (emit `duo_waiting` browser overlay, register in the global Duo queue, swap to `duo_active` when this request becomes head-of-line). Used by every login flow in `src/infra/auth/login.ts`
 - `export-excel.ts` — On-demand Excel export from JSONL data
 - `locked.ts` — Generic mutex-locked write wrapper for parallel Excel access
 - `spreadsheet.ts` — `appendRow(filePath, columns, data)` and `parseDepartmentNumber(deptText)`

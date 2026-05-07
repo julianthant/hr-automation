@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { CaptureRegistration } from "../capture-types";
+import type { CaptureRegistration } from "@/components/capture/capture-types";
 
 /**
  * Looks up a workflow's capture registration. Returns null if the

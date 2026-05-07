@@ -140,7 +140,7 @@ When a workflow is waiting on Duo, play a short audio cue (`osascript -e 'say "d
 `npm run setup` that checks `.env` exists, validates creds (dry login), offers to install playwright browsers. First-use friction reducer.
 
 ### 🔥 5.2 Batch YAML JSON Schema
-Emergency-contact's YAML batch is Zod-validated at runtime. Export the Zod schema → JSON Schema so the user's editor (VSCode) autocompletes. `npm run schema:export` writes it to `schemas/emergency-contact-batch.json`.
+Emergency-contact's YAML batch is Zod-validated at runtime. Export the Zod schema → JSON Schema so the user's editor (VSCode) autocompletes. `npm run schema:export` writes it to `generated/schemas/emergency-contact-batch.json`.
 
 ### ⚡ 5.4 Integration test sandbox
 Stand up a minimal Playwright-against-a-mock-PeopleSoft fake (or a recorded HAR). Run actual kernel end-to-end against it. Replaces the dry-run-only gate that limits coverage today.

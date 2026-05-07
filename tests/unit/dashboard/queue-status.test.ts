@@ -5,8 +5,8 @@ import {
   countEntriesByQueueStatus,
   entryMatchesStatusFilter,
   isQueueLikeEntry,
-} from "../../../src/dashboard/components/queue-status.js";
-import type { TrackerEntry } from "../../../src/dashboard/components/types.js";
+} from "../../../src/dashboard/components/queue-panel/queue-status.js";
+import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
 
 function entry(status: TrackerEntry["status"], step?: string): TrackerEntry {
   return {

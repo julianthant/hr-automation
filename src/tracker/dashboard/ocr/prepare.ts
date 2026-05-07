@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { trackEvent, appendLogEntry } from "../../jsonl.js";
 import { log, withLogContext, setLogRunId } from "../../../utils/log.js";
-import { getFormSpec } from "../../../ocr/forms/registry.js";
+import { getFormSpec } from "../../../services/ocr/forms/registry.js";
 import { runOcrOrchestrator, type OcrOrchestratorOpts } from "../../../workflows/ocr/orchestrator.js";
 import { errorMessage } from "../../../utils/errors.js";
 import { hasSessionLock, acquireSessionLock, releaseSessionLock } from "./lock.js";

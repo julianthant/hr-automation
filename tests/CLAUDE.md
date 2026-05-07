@@ -8,8 +8,11 @@ Unit tests for pure/near-pure logic. Playwright automation, login flows, and liv
 
 ```
 tests/unit/
-  auth/            ← src/auth/
-  browser/         ← src/browser/
+  infra/auth/      ← src/infra/auth/
+  infra/browser/   ← src/infra/browser/
+  services/ocr/    ← src/services/ocr/
+  services/capture/ ← src/services/capture/
+  services/matching/← src/services/matching/
   tracker/         ← src/tracker/
   systems/
     ucpath/        ← src/systems/ucpath/

@@ -12,14 +12,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, basename, dirname } from "node:path";
 import type { ZodType } from "zod/v4";
-import { runOcrPerPage } from "../../ocr/per-page.js";
-import { buildVisionPool } from "../../ocr/per-page-pool.js";
-import { loadRoster as realLoadRoster } from "../../match/index.js";
-import type { RosterRow as MatchRosterRow } from "../../match/match.js";
+import { runOcrPerPage } from "../../services/ocr/per-page.js";
+import { buildVisionPool } from "../../services/ocr/per-page-pool.js";
+import { loadRoster as realLoadRoster } from "../../services/matching/index.js";
+import type { RosterRow as MatchRosterRow } from "../../services/matching/match.js";
 import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/watch-child-runs.js";
 import { trackEvent, dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
 import { isAcceptedHdhDepartment } from "../../domain/hdh/departments.js";
-import { getFormSpec } from "../../ocr/forms/registry.js";
+import { getFormSpec } from "../../services/ocr/forms/registry.js";
 import type { AnyOcrFormSpec, RosterRow as OcrRosterRow } from "./types.js";
 
 const WORKFLOW = "ocr";

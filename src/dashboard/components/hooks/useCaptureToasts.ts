@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { Camera, AlertTriangle, CheckCircle2, XOctagon, Clock } from "lucide-react";
 import { createElement } from "react";
-import type { CaptureSessionEvent } from "../capture-types";
+import type { CaptureSessionEvent } from "@/components/capture/capture-types";
 
 /**
  * Companion to `useTelegramToasts` for capture lifecycle events. Mounted

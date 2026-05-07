@@ -17,7 +17,7 @@ import {
   ucpathSubmitAndWaitForDuo,
   newKronosNavigateAndFill,
   newKronosSubmitAndWaitForDuo,
-} from "../../auth/login.js";
+} from "../../infra/auth/login.js";
 
 // Kuali module
 import {

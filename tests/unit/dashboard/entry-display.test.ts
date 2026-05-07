@@ -4,8 +4,8 @@ import assert from "node:assert/strict";
 import {
   buildDisplayNameMap,
   resolveEntryName,
-} from "../../../src/dashboard/components/entry-display.js";
-import type { TrackerEntry } from "../../../src/dashboard/components/types.js";
+} from "../../../src/dashboard/components/shared/entry-display.js";
+import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
 
 function entry(id: string, data: Record<string, string>, timestamp = "2026-05-05T12:00:00.000Z"): TrackerEntry {
   return {

@@ -4,8 +4,8 @@ import { join, resolve } from "node:path";
 import {
   createSessionStore,
   type CaptureSessionStore,
-} from "../../capture/index.js";
-import type { CaptureSession } from "../../capture/sessions.js";
+} from "../../services/capture/index.js";
+import type { CaptureSession } from "../../services/capture/sessions.js";
 import { log } from "../../utils/log.js";
 import { buildOcrPrepareHandler } from "./ocr/index.js";
 
@@ -13,7 +13,7 @@ export const captureStore: CaptureSessionStore = createSessionStore();
 export const CAPTURE_PHOTOS_DIR = ".tracker/captures";
 export const CAPTURE_UPLOADS_DIR = ".tracker/uploads";
 
-const captureMobileHtmlPath = join(import.meta.dirname ?? ".", "../../capture/mobile.html");
+const captureMobileHtmlPath = join(import.meta.dirname ?? ".", "../../services/capture/mobile.html");
 let captureMobileHtmlCache: string | undefined;
 
 export function getCaptureMobileHtml(): string {

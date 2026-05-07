@@ -97,8 +97,13 @@ src/
     separations/       # Kernel (4 systems, interleaved auth, sequential batch via runWorkflowBatch).
     old-kronos-reports/# Kernel (pool mode, N workers, per-worker sessionDir via opts.launchFn).
     oath-upload/       # Kernel + daemon-mode. ServiceNow + delegated OCR + delegated oath-signature.
-  auth/                # Per-system login flows + duo-poll + sso-fields (shared).
-  browser/             # launchBrowser, tiling math. Kernel-internal.
+  infra/               # Runtime infrastructure that makes automation possible.
+    auth/              # Per-system login flows + duo-poll + sso-fields (shared).
+    browser/           # launchBrowser, tiling math. Kernel-internal.
+  services/            # Reusable IO/stateful primitives used by workflows + dashboard backend.
+    capture/           # Mobile photo capture + QR/session/PDF bundling.
+    matching/          # Roster loading, name/address/EID matching, optional LLM disambiguation.
+    ocr/               # OCR engine, provider rotation, page rendering, form specs.
   tracker/             # JSONL append + SSE dashboard server + Excel export.
   dashboard/           # React SPA (Vite + shadcn/ui). Reads SSE, renders queue + logs.
   utils/               # env / errors / log (with AsyncLocalStorage runId context).
@@ -152,7 +157,7 @@ High-level rules:
 The repo-wide convention source is `docs/engineering/codebase-conventions.md`.
 
 When adding or changing code:
-1. Decide the owner first: `core`, `systems`, `domain`, `ocr/forms`, `tracker`, `dashboard`, or a workflow.
+1. Decide the owner first: `core`, `systems`, `domain`, `services`, `infra`, `tracker`, `dashboard`, or a workflow.
 2. If a helper can be reused by another workflow, put it in the shared owner now.
 3. Use the naming verbs from the convention doc so future agents can infer behavior from the function name.
 4. Add or update architecture tests when a convention can be checked statically.
@@ -167,7 +172,8 @@ Use these shared homes first:
 - `src/domain/operator-subject.ts` for queue/toast/Telegram/log labels.
 - `src/domain/log-events.ts` and `src/domain/notifications/` for structured logs and notification routing.
 - `src/core/task-display.ts` and `src/core/task-control.ts` for delegation display and control vocabulary.
-- `src/ocr/forms/` for OCR form specs and shared verification schemas.
+- `src/services/ocr/forms/` for OCR form specs and shared verification schemas.
+- `src/services/matching/` for roster loading plus name/address/EID matching.
 - `src/systems/ucpath/person-org-summary.ts` for UCPath Person Org Summary search.
 - `src/domain/hdh/departments.ts` for HDH department acceptance.
 
@@ -181,7 +187,7 @@ Minimal example:
 
 ```ts
 import { defineWorkflow, runWorkflow } from "../../core/index.js";
-import { loginToUCPath } from "../../auth/login.js";
+import { loginToUCPath } from "../../infra/auth/login.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { MyInputSchema, type MyInput } from "./schema.js";
 
@@ -387,7 +393,7 @@ Current step tracking per workflow. Steps prefixed with `auth:` are auto-prepend
 
 As of 2026-04-18, the dashboard is **observation-only**. The previous "⚡ RUN" drawer + `RunnerLauncher` button + `SchemaForm` + `runner-recents` localStorage helper + the backend `buildSpawnHandler`/`buildCancelHandler`/`buildActiveRunsHandler`/`buildWorkflowSchemaHandler` factories + the child-process registry were all removed. Workflows are launched via the npm scripts above (or whatever replacement launcher the user wires up later — out of scope for this pass). Live session monitoring (`TerminalDrawer`), selector-warning aggregation (`SelectorWarningsPanel`), screenshot browsing (`ScreenshotsPanel` — replaced the inline `FailureDrillDown` on 2026-04-21), step-timing chips (`StepPipeline`), and cross-workflow search (`SearchBar`) all keep working — they read kernel-emitted events from `src/tracker/jsonl.ts`, independent of any launcher.
 
-**OCR workflow + delegation primitive (2026-05-01; active-check updated 2026-05-05).** The operator selects the `ocr` workflow (Run button appears), picks a form type (oath / emergency-contact), uploads a PDF. The dashboard backend runs OCR via `src/ocr/`, matches against the roster, takes exactly one fuzzy roster candidate, uses LLM disambiguation for multiple candidates, asks the LLM for 2-3 lookup suggestions when no fuzzy candidate exists, enqueues eid-lookup for name candidates, and enqueues active-check for EID candidates before approval. When all rows reach a terminal match state the row shows `step=awaiting-approval` in the QueuePanel; the operator reviews/edits per-row data inline, clicks Approve to fan out N kernel queue items to the downstream daemon (oath-signature or emergency-contact). SharePoint roster download delegates as a child workflow (`parentRunId` links the child row back). Reupload carries forward resolved EIDs from the previous run. Implementation: `src/workflows/ocr/`, `src/tracker/ocr-http.ts`, `src/dashboard/components/ocr/`, `src/tracker/watch-child-runs.ts`.
+**OCR workflow + delegation primitive (2026-05-01; active-check updated 2026-05-05).** The operator selects the `ocr` workflow (Run button appears), picks a form type (oath / emergency-contact), uploads a PDF. The dashboard backend runs OCR via `src/services/ocr/`, matches against the roster, takes exactly one fuzzy roster candidate, uses LLM disambiguation for multiple candidates, asks the LLM for 2-3 lookup suggestions when no fuzzy candidate exists, enqueues eid-lookup for name candidates, and enqueues active-check for EID candidates before approval. When all rows reach a terminal match state the row shows `step=awaiting-approval` in the QueuePanel; the operator reviews/edits per-row data inline, clicks Approve to fan out N kernel queue items to the downstream daemon (oath-signature or emergency-contact). SharePoint roster download delegates as a child workflow (`parentRunId` links the child row back). Reupload carries forward resolved EIDs from the previous run. Implementation: `src/workflows/ocr/`, `src/tracker/ocr-http.ts`, `src/dashboard/components/ocr/`, `src/tracker/watch-child-runs.ts`.
 
 **SQLite task dependencies cutover (2026-05-04; active-check added 2026-05-05).** OCR's initial `eid-lookup` and `active-check` delegation now records parent/child task rows in SQLite and lets the dependency scheduler patch OCR records from projected child run state. `watchChildRuns` remains as fallback and still owns non-migrated waits such as force-research, whole-PDF re-OCR, SharePoint roster wait, oath-upload OCR approval, and downstream signature waits.
 
@@ -502,7 +508,7 @@ These patterns existed pre-kernel and are intentionally removed. Do not reintrod
 <claude-mem-context>
 # Memory Context
 
-# [hr-automation] recent context, 2026-05-06 12:45pm PDT
+# [hr-automation] recent context, 2026-05-07 2:02pm PDT
 
 No previous sessions found.
 </claude-mem-context>

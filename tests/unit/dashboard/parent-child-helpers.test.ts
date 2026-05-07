@@ -7,7 +7,7 @@ import {
   computeBatchElapsed,
   resolveBatchAccent,
 } from "../../../src/dashboard/components/ocr/parent-child-helpers.js";
-import type { TrackerEntry } from "../../../src/dashboard/components/types.js";
+import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
 
 function child(over: Partial<TrackerEntry>): TrackerEntry {
   return {

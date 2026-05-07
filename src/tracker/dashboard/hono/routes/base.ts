@@ -16,7 +16,7 @@ import {
 } from "../../../jsonl.js";
 import { getSessionsFilePath } from "../../../session-events.js";
 import { queryRunsForItem } from "../../../state/queries.js";
-import { listRosters } from "../../../../match/roster-loader.js";
+import { listRosters } from "../../../../services/matching/roster-loader.js";
 import { log } from "../../../../utils/log.js";
 import {
   buildRunTimelines,

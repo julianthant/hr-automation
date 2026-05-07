@@ -13,7 +13,7 @@ import type { Page, Locator, FrameLocator } from "playwright";
  *      wraps the ribbon / workbook inside `iframe[name="WacFrame_Excel_0"]`.
  *
  * UCSD Shibboleth username/password and Duo polling live in
- * `src/auth/sso-fields.ts` + `src/auth/duo-poll.ts` and are shared with every
+ * `src/infra/auth/sso-fields.ts` + `src/infra/auth/duo-poll.ts` and are shared with every
  * other system, so they're intentionally NOT duplicated here. Call sites
  * should compose:
  *

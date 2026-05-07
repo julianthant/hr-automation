@@ -7,7 +7,7 @@ import {
 } from "../../systems/ucpath/personal-data.js";
 import { normalizePersonNameForCompare } from "../../domain/identity/person-name.js";
 import { mapRelationship } from "./config.js";
-import { levenshteinDistance } from "../../match/index.js";
+import { levenshteinDistance } from "../../services/matching/index.js";
 import type { EmergencyContactRecord } from "./schema.js";
 
 export interface EmergencyContactContext {

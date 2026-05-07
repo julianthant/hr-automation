@@ -1,4 +1,4 @@
-import { listFormTypes, type FormTypeListing } from "../../../ocr/forms/registry.js";
+import { listFormTypes, type FormTypeListing } from "../../../services/ocr/forms/registry.js";
 
 // ─── GET /api/ocr/forms ──────────────────────────────────────
 

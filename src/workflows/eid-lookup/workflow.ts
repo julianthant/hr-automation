@@ -12,7 +12,7 @@ import type { Ctx } from "../../core/kernel/types.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
-import { loginToUCPath, loginToACTCrm } from "../../auth/login.js";
+import { loginToUCPath, loginToACTCrm } from "../../infra/auth/login.js";
 import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 import {
   searchByName,

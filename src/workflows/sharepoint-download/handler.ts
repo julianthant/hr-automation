@@ -194,7 +194,7 @@ function resolveOutDir(
 export function buildSharePointRosterDownloadHandler(
   options: RosterDownloadHandlerOptions = {},
 ): (input: { id?: string; parentRunId?: string }) => Promise<RosterDownloadResponse> {
-  const defaultOutDir = options.outDir ?? resolve(process.cwd(), "src/data");
+  const defaultOutDir = options.outDir ?? resolve(process.cwd(), "src/data/sharepoint");
   const runWorkflowImpl = options.runWorkflowFn ?? runWorkflow;
   const getEnv = options.getEnv ?? ((name: string) => process.env[name]);
 

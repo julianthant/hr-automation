@@ -22,8 +22,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { deriveTrackerFallbackLog } from "../../../src/dashboard/components/log-fallback.js";
-import type { TrackerEntry } from "../../../src/dashboard/components/types.js";
+import { deriveTrackerFallbackLog } from "../../../src/dashboard/components/log-panel/log-fallback.js";
+import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
 
 /**
  * Pure extraction of the LogPanel logSourceWorkflow derivation (LogPanel.tsx line 105):

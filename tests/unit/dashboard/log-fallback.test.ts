@@ -1,8 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { deriveTrackerFallbackLog } from "../../../src/dashboard/components/log-fallback.js";
-import type { TrackerEntry } from "../../../src/dashboard/components/types.js";
+import { deriveTrackerFallbackLog } from "../../../src/dashboard/components/log-panel/log-fallback.js";
+import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
 
 describe("deriveTrackerFallbackLog", () => {
   it("turns a terminal cancelled tracker row into an operator-visible log line", () => {

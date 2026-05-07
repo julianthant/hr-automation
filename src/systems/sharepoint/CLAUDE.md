@@ -18,7 +18,7 @@ SharePoint pushes you through four auth layers. Every other workflow that talks 
    - `adfs.submitButton(page).click()`
    - See `handleAdfsLogin()` in `src/workflows/sharepoint-download/download.ts` for the canonical caller. Falls back to Shibboleth (`fillSsoCredentials` + `clickSsoSubmit`) if AAD ever routes us there instead — detection is URL-prefix based.
 3. **Duo MFA** (`api-*.duosecurity.com/frame/frameless/v4/auth`).
-   - `pollDuoApproval(page, { systemLabel: "SharePoint", successUrlMatch: (u) => u.includes("sharepoint.com") || u.includes("office.com") || u.includes("login.microsoftonline.com/kmsi"), timeoutSeconds: 180 })` from `src/auth/duo-poll.ts`. The poller already handles "Try Again" (Duo push timeout → resend) and "Yes, this is my device" (device-trust nudge) — do not duplicate.
+   - `pollDuoApproval(page, { systemLabel: "SharePoint", successUrlMatch: (u) => u.includes("sharepoint.com") || u.includes("office.com") || u.includes("login.microsoftonline.com/kmsi"), timeoutSeconds: 180 })` from `src/infra/auth/duo-poll.ts`. The poller already handles "Try Again" (Duo push timeout → resend) and "Yes, this is my device" (device-trust nudge) — do not duplicate.
 4. **KMSI / "Stay signed in?"** (`login.microsoftonline.com/login.srf`).
    - `kmsi.noButton(page).click()` — always No. Let the persistent browser profile decide what to remember, not AAD.
 

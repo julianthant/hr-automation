@@ -7,7 +7,7 @@ import { errorMessage } from "../../utils/errors.js";
 import { runWorkflowBatch } from "../../core/index.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 import { operatorSubjectData } from "../../domain/operator-subject.js";
-import { launchBrowser } from "../../browser/launch.js";
+import { launchBrowser } from "../../infra/browser/launch.js";
 import { SCREEN } from "../../config.js";
 import { createLockedTracker } from "../../tracker/locked.js";
 import {

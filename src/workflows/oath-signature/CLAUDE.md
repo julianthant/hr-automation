@@ -108,7 +108,7 @@ Single guard (tracker-side idempotency removed 2026-04-23):
 
 ## Capture integration (mobile-photo entry)
 
-`src/capture/` is the alternate entry point: instead of uploading a
+`src/services/capture/` is the alternate entry point: instead of uploading a
 pre-scanned PDF, the operator can click "Capture" on the dashboard, scan
 a QR code on their phone, and snap photos of each signed roster page.
 When the operator taps Done, capture bundles the photos into a PDF and
@@ -136,7 +136,7 @@ TopBar Run button (oath-signature)
   → POST /api/oath-signature/prepare (multipart, fire-and-forget)
     → runPaperOathPrepare in src/workflows/oath-signature/prepare.ts:
       - synchronous: writes pending tracker row → loads newest .xlsx in
-        .tracker/rosters/ (or src/data/) → OCR via src/ocr/
+        .tracker/rosters/ (or src/data/) → OCR via src/services/ocr/
       - synchronous: per-row match (signed + roster name match >= 0.85)
       - async: enqueue eid-lookup daemon for unmatched signed rows;
         watches eid-lookup JSONL for completions, patches records progressively
@@ -168,9 +168,9 @@ each other's completion events when watching the same eid-lookup JSONL.
 ### Shared roster + match primitives
 
 `prepare.ts` imports `findLatestRoster`, `loadRoster`, and
-`matchAgainstRoster` from `src/match/` — a shared module that holds
+`matchAgainstRoster` from `src/services/matching/` — a shared module that holds
 roster xlsx loading, name matching (with Levenshtein), and US address
-normalization. emergency-contact also consumes it. See `src/match/index.ts`
+normalization. emergency-contact also consumes it. See `src/services/matching/index.ts`
 for the full export surface.
 
 ## Gotchas

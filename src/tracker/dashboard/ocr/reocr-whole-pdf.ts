@@ -4,10 +4,10 @@ import { log } from "../../../utils/log.js";
 import { errorMessage } from "../../../utils/errors.js";
 import { trackEvent, dateLocal } from "../../jsonl.js";
 import type { TrackerEntry } from "../../jsonl.js";
-import { getFormSpec } from "../../../ocr/forms/registry.js";
+import { getFormSpec } from "../../../services/ocr/forms/registry.js";
 import { isAcceptedHdhDepartment } from "../../../domain/hdh/departments.js";
 import type { ChildOutcome, WatchChildRunsOpts } from "../../watch-child-runs.js";
-import type { OcrRequest, OcrResult } from "../../../ocr/index.js";
+import type { OcrRequest, OcrResult } from "../../../services/ocr/index.js";
 import { rowKey, hasRowLock, acquireRowLock, releaseRowLock } from "./lock.js";
 
 const WORKFLOW = "ocr";
@@ -67,7 +67,7 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
       if (!pdfPath) return { status: 400, body: { ok: false, error: "Row missing pdfPath" } };
       const rosterPath = (row.data?.rosterPath as unknown as string | undefined) ?? "";
 
-      const { runOcrWholePdf } = await import("../../../ocr/pipeline.js");
+      const { runOcrWholePdf } = await import("../../../services/ocr/pipeline.js");
       const ocrResult = await runOcrWholePdf({
         pdfPath,
         arraySchema: spec.ocrArraySchema as never,
@@ -76,7 +76,7 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
         _override: opts._wholePdfOverride,
       });
 
-      const { loadRoster: realLoadRoster } = await import("../../../match/index.js");
+      const { loadRoster: realLoadRoster } = await import("../../../services/matching/index.js");
       const loadRosterFn = opts._loadRosterOverride ?? realLoadRoster;
       const roster = rosterPath ? (await loadRosterFn(rosterPath) as unknown[]) : [];
 

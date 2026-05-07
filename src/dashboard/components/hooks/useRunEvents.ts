@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import type { RunEvent } from "../types";
+import type { RunEvent } from "@/components/shared/types";
 
 /**
  * SSE consumer for /events/run-events. Twin of useLogs: one stream, delta

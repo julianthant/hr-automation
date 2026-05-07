@@ -11,7 +11,7 @@ Before adding a helper in a workflow folder, check whether the same behavior alr
 - `src/domain/notifications/`
 - `src/core/task-display.ts`
 - `src/core/task-control.ts`
-- `src/ocr/forms/`
+- `src/services/ocr/forms/`
 - `src/systems/ucpath/person-org-summary.ts`
 - `src/domain/hdh/departments.ts`
 
@@ -19,4 +19,4 @@ If the helper would be useful to another workflow, add or extend the shared modu
 
 ## Naming and ownership conventions
 
-Workflow-local functions should describe orchestration steps. Reusable behavior must move to `src/domain/`, `src/systems/`, `src/core/`, or `src/ocr/forms/`. Use the naming verbs in `docs/engineering/codebase-conventions.md`; avoid vague helpers like `processData` or `handleThing`.
+Workflow-local functions should describe orchestration steps. Reusable behavior must move to `src/domain/`, `src/systems/`, `src/core/`, or `src/services/ocr/forms/`. Use the naming verbs in `docs/engineering/codebase-conventions.md`; avoid vague helpers like `processData` or `handleThing`.
