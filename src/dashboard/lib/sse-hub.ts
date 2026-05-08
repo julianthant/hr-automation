@@ -49,11 +49,21 @@ export class SseHub {
     const url = `/events/hub?subs=${encodeURIComponent(JSON.stringify(subsArray))}`;
     const es = new EventSource(url);
     es.onmessage = (ev) => {
+      let env: { sub: string; data: unknown; event?: string };
       try {
-        const env = JSON.parse(ev.data) as { sub: string; data: unknown; event?: string };
-        this.subs.get(env.sub)?.listener(env.data, env.event);
+        env = JSON.parse(ev.data) as { sub: string; data: unknown; event?: string };
       } catch {
         // malformed envelope — ignore
+        console.warn("SseHub: malformed envelope (could not parse JSON), ignoring.");
+        return;
+      }
+      const sub = this.subs.get(env.sub);
+      if (!sub) return;
+      try {
+        sub.listener(env.data, env.event);
+      } catch (err) {
+        console.error(`SseHub listener threw for topic '${sub.topic}':`, err);
+        // Do NOT crash the connection — other listeners still need delivery.
       }
     };
     es.onerror = () => {

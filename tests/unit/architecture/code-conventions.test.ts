@@ -46,6 +46,9 @@ describe("codebase conventions", () => {
       "src/cli-daemon.ts",
       "src/scripts/",
       "/scripts/",
+      // Browser-side React SPA — log.* uses Node AsyncLocalStorage and is unavailable
+      // in the browser. console.warn/error are the correct idiom for client-side diagnostics.
+      "src/dashboard/",
     ];
     const violations = walk(SRC)
       .filter((file) => {
