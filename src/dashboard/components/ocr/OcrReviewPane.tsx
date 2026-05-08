@@ -139,17 +139,18 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
     }
   }
 
-  // Persist edits — debounced via React's state batching is enough here.
+  // Persist edits — debounced 300ms so rapid keystrokes don't hit localStorage
+  // synchronously on every character. Final write still lands; intermediate
+  // writes are dropped.
   useEffect(() => {
-    if (Object.keys(localEdits).length === 0) {
-      window.localStorage.removeItem(storageKey);
-      return;
-    }
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify(localEdits));
-    } catch {
-      /* localStorage full / disabled — silently drop */
-    }
+    const handle = window.setTimeout(() => {
+      if (Object.keys(localEdits).length === 0) {
+        try { window.localStorage.removeItem(storageKey); } catch { /* ignore */ }
+        return;
+      }
+      try { window.localStorage.setItem(storageKey, JSON.stringify(localEdits)); } catch { /* quota / unavailable */ }
+    }, 300);
+    return () => window.clearTimeout(handle);
   }, [localEdits, storageKey]);
 
   const records: AnyPreviewRecord[] = useMemo(
