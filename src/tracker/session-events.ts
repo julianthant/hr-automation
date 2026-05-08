@@ -177,7 +177,7 @@ const STEP_LOG_TAIL_BYTES = 2048;
  * `openSync`/`readSync`, which covers far more than the 50ms window can
  * produce.
  */
-export function recentStepLogExists(
+function recentStepLogExists(
   workflow: string,
   runId: string,
   step: string,
