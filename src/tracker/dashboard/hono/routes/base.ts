@@ -28,6 +28,19 @@ import { getDefaultWorkflow, type DashboardHonoDeps } from "../context.js";
 import { jsonResponse } from "../responses.js";
 import { buildWorkflowsHandler } from "../../workflows.js";
 
+// Module-scoped throttle: prune work runs at most once per 60s per
+// process. The prune is idempotent, so caching its outcome between
+// calls is safe and elides the frontend's preflight-polling cost.
+let lastPruneAtMs = 0;
+let cachedPruneResult = { deleted: 0, deletedShots: 0, sessionsCleaned: false };
+const PRUNE_INTERVAL_MS = 60_000;
+
+/** Test-only: reset the /api/preflight prune throttle so each test sees a fresh prune. */
+export function __resetPreflightThrottleForTests(): void {
+  lastPruneAtMs = 0;
+  cachedPruneResult = { deleted: 0, deletedShots: 0, sessionsCleaned: false };
+}
+
 export function registerBaseRoutes(app: Hono, deps: DashboardHonoDeps): void {
   app.get("/api/workflows", () => jsonResponse(listWorkflows(deps.dir)));
 
@@ -147,22 +160,28 @@ export function registerBaseRoutes(app: Hono, deps: DashboardHonoDeps): void {
   });
 
   app.get("/api/preflight", () => {
-    const deleted = cleanOldTrackerFiles(30, deps.dir);
-    const deletedShots = cleanOldScreenshots(30);
-    let sessionsCleaned = false;
-    // Only the pre-rotation legacy `sessions.jsonl` is age-gated here.
-    // Dated `sessions-YYYY-MM-DD.jsonl` files are managed by the regular
-    // 30-day prune in `cleanOldSessionFiles`. Pointing this check at the
-    // current dated file (as `getSessionsFilePath` would) is a no-op because
-    // today's file always has a fresh mtime.
-    const legacySessionsPath = join(deps.dir, "sessions.jsonl");
-    if (existsSync(legacySessionsPath)) {
-      const ageMs = Date.now() - statSync(legacySessionsPath).mtimeMs;
-      if (ageMs > 24 * 60 * 60 * 1000) {
-        unlinkSync(legacySessionsPath);
-        sessionsCleaned = true;
+    const now = Date.now();
+    if (now - lastPruneAtMs >= PRUNE_INTERVAL_MS) {
+      const deleted = cleanOldTrackerFiles(30, deps.dir);
+      const deletedShots = cleanOldScreenshots(30);
+      let sessionsCleaned = false;
+      // Only the pre-rotation legacy `sessions.jsonl` is age-gated here.
+      // Dated `sessions-YYYY-MM-DD.jsonl` files are managed by the regular
+      // 30-day prune in `cleanOldSessionFiles`. Pointing this check at the
+      // current dated file (as `getSessionsFilePath` would) is a no-op because
+      // today's file always has a fresh mtime.
+      const legacySessionsPath = join(deps.dir, "sessions.jsonl");
+      if (existsSync(legacySessionsPath)) {
+        const ageMs = now - statSync(legacySessionsPath).mtimeMs;
+        if (ageMs > 24 * 60 * 60 * 1000) {
+          unlinkSync(legacySessionsPath);
+          sessionsCleaned = true;
+        }
       }
+      cachedPruneResult = { deleted, deletedShots, sessionsCleaned };
+      lastPruneAtMs = now;
     }
+    const { deleted, deletedShots, sessionsCleaned } = cachedPruneResult;
     return jsonResponse({
       checks: [
         { name: "Dashboard connected", passed: true, detail: "SSE server running" },
