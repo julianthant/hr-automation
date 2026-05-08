@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Bug, Maximize2, Minimize2 } from "lucide-react";
 import { LogLine } from "./LogLine";
@@ -103,28 +103,33 @@ export function LogStream({
   const tab = FILTER_TABS.find((t) => t.key === filter);
   const visibleLogs = filterLogsForDebugVisibility(logs, showDebug);
   const hiddenDebugCount = showDebug ? 0 : logs.length - visibleLogs.length;
-  let displayed: DisplayItem[];
 
-  if (tab?.source === "events") {
-    displayed = events.map((e) => ({ kind: "event" as const, entry: e }));
-  } else if (filter === "all") {
-    displayed = [
-      ...visibleLogs.map((l) => ({ kind: "log" as const, entry: l })),
-      ...events.map((e) => ({ kind: "event" as const, entry: e })),
-    ].sort((a, b) => {
-      const ta = a.kind === "log"
-        ? a.entry.ts
-        : (a.entry.timestamp ?? (typeof a.entry.ts === "number" ? new Date(a.entry.ts).toISOString() : ""));
-      const tb = b.kind === "log"
-        ? b.entry.ts
-        : (b.entry.timestamp ?? (typeof b.entry.ts === "number" ? new Date(b.entry.ts).toISOString() : ""));
-      return (ta ?? "").localeCompare(tb ?? "");
-    });
-  } else {
-    displayed = visibleLogs
+  const displayed = useMemo<DisplayItem[]>(() => {
+    if (tab?.source === "events") {
+      return events.map((e) => ({ kind: "event" as const, entry: e }));
+    }
+    if (filter === "all") {
+      const merged: DisplayItem[] = [
+        ...visibleLogs.map((l) => ({ kind: "log" as const, entry: l })),
+        ...events.map((e) => ({ kind: "event" as const, entry: e })),
+      ];
+      merged.sort((a, b) => {
+        const ta = a.kind === "log"
+          ? a.entry.ts
+          : (a.entry.timestamp ?? (typeof a.entry.ts === "number" ? new Date(a.entry.ts).toISOString() : ""));
+        const tb = b.kind === "log"
+          ? b.entry.ts
+          : (b.entry.timestamp ?? (typeof b.entry.ts === "number" ? new Date(b.entry.ts).toISOString() : ""));
+        const sa = ta ?? "";
+        const sb = tb ?? "";
+        return sa < sb ? -1 : sa > sb ? 1 : 0;
+      });
+      return merged;
+    }
+    return visibleLogs
       .filter((l) => tab?.categories.includes(getLogCategory(l.level, l.message)))
       .map((l) => ({ kind: "log" as const, entry: l }));
-  }
+  }, [filter, tab, visibleLogs, events]);
 
   const collapsedCount = visibleLogs.reduce((acc, l) => acc + (l.count > 1 ? l.count - 1 : 0), 0);
 
@@ -143,10 +148,10 @@ export function LogStream({
     prevLenRef.current = displayed.length;
   }, [displayed.length, autoScroll]);
 
-  const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text);
+  const handleCopy = useCallback((text: string) => {
+    void navigator.clipboard.writeText(text);
     toast.success("Copied to clipboard", { duration: 1500 });
-  };
+  }, []);
 
   const visibleTabs = FILTER_TABS.filter(
     (t) =>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import type { LogEntry } from "@/components/shared/types";
 
 export interface CollapsedLogEntry extends LogEntry {
@@ -77,16 +77,19 @@ export function useLogs(
     };
   }, [workflow, itemId, runId, date]);
 
-  // Collapse consecutive duplicate messages
-  const collapsed: CollapsedLogEntry[] = [];
-  for (const log of rawLogs) {
-    const prev = collapsed[collapsed.length - 1];
-    if (prev && prev.message === log.message) {
-      prev.count++;
-    } else {
-      collapsed.push({ ...log, count: 1 });
+  // Collapse consecutive duplicate messages (memoized so it doesn't re-run on every parent render)
+  const collapsed = useMemo(() => {
+    const out: CollapsedLogEntry[] = [];
+    for (const log of rawLogs) {
+      const prev = out[out.length - 1];
+      if (prev && prev.message === log.message) {
+        prev.count++;
+      } else {
+        out.push({ ...log, count: 1 });
+      }
     }
-  }
+    return out;
+  }, [rawLogs]);
 
   return { logs: collapsed, loading };
 }
