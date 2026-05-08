@@ -1,11 +1,14 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import {
   buildScreenshotsHandler,
   resolveScreenshotPath,
 } from "../../../src/tracker/dashboard.js";
+import { openStateDb, closeStateDbForTests, stateDbPath } from "../../../src/tracker/state/db.js";
+import { trackEvent, emitScreenshotEvent } from "../../../src/tracker/jsonl.js";
 
 const TEST_DIR = ".screenshots-test";
 
@@ -121,5 +124,81 @@ describe("resolveScreenshotPath (path-traversal guard)", () => {
 
   it("rejects empty filenames", () => {
     assert.equal(resolveScreenshotPath("", TEST_DIR), null);
+  });
+});
+
+describe("SQLite path vs disk fallback parity (grouped handler)", () => {
+  let trackerDir: string;
+  let shotsDir: string;
+
+  beforeEach(() => {
+    trackerDir = mkdtempSync(join(tmpdir(), "scr-ep-parity-"));
+    shotsDir = join(trackerDir, "screenshots");
+    mkdirSync(shotsDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    closeStateDbForTests(trackerDir);
+    rmSync(trackerDir, { recursive: true, force: true });
+  });
+
+  it("SQLite path returns same shape as disk path", async () => {
+    const ts = 1713370000000;
+    const pngPath = join(shotsDir, `onboarding-jane-form-ucpath-${ts}.png`);
+    writeFileSync(pngPath, Buffer.alloc(16, 0x89));
+
+    // Open DB and seed a tracker entry so runs table has workflow+item_id.
+    openStateDb(trackerDir);
+    trackEvent(
+      {
+        workflow: "onboarding",
+        timestamp: new Date(ts).toISOString(),
+        id: "jane",
+        runId: "run-ep-1",
+        status: "running",
+        data: {},
+      },
+      trackerDir,
+    );
+
+    // Emit screenshot event → seeds both sessions.jsonl and SQLite files table.
+    emitScreenshotEvent(
+      {
+        type: "screenshot",
+        runId: "run-ep-1",
+        ts,
+        timestamp: new Date(ts).toISOString(),
+        kind: "form",
+        label: "step-1",
+        step: "onboarding-step",
+        files: [{ system: "ucpath", path: pngPath }],
+      },
+      { dir: trackerDir },
+    );
+
+    const handler = buildScreenshotsHandler({
+      dir: trackerDir,
+      screenshotsDir: shotsDir,
+    });
+    const fromSqlite = await handler({ workflow: "onboarding", itemId: "jane" });
+
+    // Force legacy fallback: close + delete DB.
+    closeStateDbForTests(trackerDir);
+    rmSync(stateDbPath(trackerDir), { force: true });
+
+    const handler2 = buildScreenshotsHandler({
+      dir: trackerDir,
+      screenshotsDir: shotsDir,
+    });
+    const fromDisk = await handler2({ workflow: "onboarding", itemId: "jane" });
+
+    assert.ok(fromSqlite.length > 0, "SQLite path returned no entries");
+    assert.ok(fromDisk.length > 0, "Disk path returned no entries");
+
+    // Spread for null-prototype-row compat before deepEqual.
+    assert.deepEqual(
+      fromDisk.map((e) => ({ ...e, files: e.files.map((f) => ({ ...f })) })),
+      fromSqlite.map((e) => ({ ...e, files: e.files.map((f) => ({ ...f })) })),
+    );
   });
 });
