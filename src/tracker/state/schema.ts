@@ -3,7 +3,7 @@ export interface Migration {
   sql: string;
 }
 
-export const LATEST_SCHEMA_VERSION = 4;
+export const LATEST_SCHEMA_VERSION = 5;
 
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -496,6 +496,18 @@ WHERE tracker_date = '';
 
 CREATE INDEX IF NOT EXISTS idx_session_events_date
   ON session_events(tracker_date, ts_ms);
+    `,
+  },
+  {
+    // Migration 5: indexes for run_id-only lookups (used by applyScreenshotFiles).
+    // runs.run_id and files(kind='screenshot', run_id) were unindexed; the existing
+    // PK on runs and idx_files_owner on files are leftmost-prefix-only and don't
+    // help a run_id-only filter.
+    version: 5,
+    sql: String.raw`
+CREATE INDEX IF NOT EXISTS idx_runs_run_id ON runs(run_id);
+CREATE INDEX IF NOT EXISTS idx_files_run_id_screenshot
+  ON files(run_id) WHERE kind = 'screenshot';
     `,
   },
 ];

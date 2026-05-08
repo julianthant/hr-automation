@@ -106,7 +106,7 @@ test("migration 4 backfills session event tracker_date from timestamp", () => {
     runMigrations(db);
 
     const version = db.prepare("SELECT version FROM schema_version WHERE id = 1").get() as { version: number };
-    assert.equal(version.version, 4);
+    assert.equal(version.version, LATEST_SCHEMA_VERSION);
     const rows = db.prepare(`
       SELECT source_line AS sourceLine, tracker_date AS trackerDate
       FROM session_events
