@@ -11,7 +11,7 @@ import { queryEntriesPayload, querySessionEventsForRun } from "../../../tracker/
 import { buildJsonlEventsPayload } from "./routes/entries-payload.js";
 import { filterLiveSessionState, filterEventsForRun, rebuildSessionState } from "../session-state.js";
 import { log } from "../../../utils/log.js";
-import { getDefaultWorkflow, type DashboardHonoDeps } from "./context.js";
+import { getDefaultWorkflow } from "./context.js";
 import { registerTopic, type TopicEmitter } from "./topics.js";
 import { captureStore, serializeCaptureSession } from "../capture-state.js";
 
