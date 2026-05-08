@@ -2,7 +2,7 @@
 
 Automates full UC employee hiring: extracts data from ACT CRM, validates with Zod, searches UCPath for duplicates, searches I9 before creating a profile, creates Smart HR transactions.
 
-**Kernel-based (daemon mode default).** CLI is `npm run onboarding <email> [<email> ...]` → `runOnboardingCli` → `ensureDaemonsAndEnqueue(onboardingWorkflow, [{email}, ...])`. Each alive daemon is one long-lived single-worker Session (3 browsers: CRM + UCPath + I9; 2 Duos since I9 is SSO no-2FA) that claims emails from the shared SQLite `tasks` queue via an atomic transaction. `.tracker/daemons/onboarding.queue.jsonl` remains audit/history and `HRAUTO_QUEUE_BACKEND=jsonl` fallback only. Multiple alive daemons race for items — that's how parallelism works in daemon mode (no re-Duo between items). For N-way throughput, start N daemons with `-p N`.
+**Kernel-based (daemon mode default).** CLI is `npm run onboarding <email> [<email> ...]` → `runOnboardingCli` → `ensureDaemonsAndEnqueue(onboardingWorkflow, [{email}, ...])`. Each alive daemon is one long-lived single-worker Session (3 browsers: CRM + UCPath + I9; 2 Duos since I9 is SSO no-2FA) that claims emails from the shared SQLite `tasks` queue via an atomic transaction. `.tracker/daemons/onboarding.queue.jsonl` is append-only audit/history — not read for state (queue authority is SQLite). Multiple alive daemons race for items — that's how parallelism works in daemon mode (no re-Duo between items). For N-way throughput, start N daemons with `-p N`.
 
 The kernel owns browser launch, auth chain, per-item `withTrackedWorkflow` wrapping, SIGINT cleanup, screenshot on failure. Daemon mode wraps the same `runOneItem` primitive — per-item tracker output is byte-identical to single-mode `runWorkflow`.
 
