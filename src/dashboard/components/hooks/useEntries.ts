@@ -70,8 +70,14 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
         if (counts) setWfCounts(counts);
         setFailureCounts(fcounts ?? {});
 
-        // Skip if data hasn't changed (prevent unnecessary re-renders)
-        const hash = JSON.stringify(raw.map((r) => `${r.id}:${r.status}:${r.step}:${r.timestamp}:${JSON.stringify(r.data)}:${(r as any).lastLogMessage || ""}`));
+        // Skip if data hasn't changed (prevent unnecessary re-renders).
+        // Compact fingerprint: id + status + step + timestamp + run anchors.
+        // Deliberately omits `data` and `lastLogMessage` — neither affects
+        // queue rendering identity, and including them caused per-log-line
+        // hash churn that forced displayNames to rebuild every tick.
+        const hash = raw.map((r) =>
+          `${r.id}|${r.status}|${r.step ?? ""}|${r.timestamp}|${(r as any).firstLogTs ?? ""}|${(r as any).lastLogTs ?? ""}|${r.runId ?? ""}|${r.error ?? ""}`
+        ).join(";");
         if (hash === prevHashRef.current) return;
         prevHashRef.current = hash;
 
