@@ -49,7 +49,7 @@ export interface HubEnvelope {
 
 // ── Topic registry ────────────────────────────────────────────────────────────
 
-export const topicRegistry = new Map<string, TopicEmitter<any>>();
+export const topicRegistry = new Map<string, TopicEmitter<unknown>>();
 
 export function registerTopic<P>(name: string, emitter: TopicEmitter<P>): void {
   topicRegistry.set(name, emitter as TopicEmitter<unknown>);
