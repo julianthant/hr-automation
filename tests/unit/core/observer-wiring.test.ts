@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { defineWorkflow, runWorkflow } from '../../../src/core/index.js'
 import type { SystemConfig } from '../../../src/core/kernel/types.js'
+import { readSessionEvents } from '../../../src/tracker/session-events.js'
 
 const TMP = () => mkdtempSync(join(tmpdir(), 'hrauto-observer-'))
 
@@ -24,12 +25,7 @@ const fakeLaunch = async ({ system: _system }: { system: SystemConfig }) => ({
 })
 
 function readSessions(dir: string): any[] {
-  const p = join(dir, 'sessions.jsonl')
-  try {
-    return readFileSync(p, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
-  } catch {
-    return []
-  }
+  return readSessionEvents(dir)
 }
 
 test('runWorkflow: observer bridges Session.launch hooks to sessionCtx + setStep', async () => {

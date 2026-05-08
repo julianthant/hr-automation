@@ -13,6 +13,7 @@ import {
 } from "../../../../src/domain/notifications/telegram.js";
 import { readLogEntries } from "../../../../src/tracker/jsonl.js";
 import { withLogContext } from "../../../../src/utils/log.js";
+import { readSessionEvents } from "../../../../src/tracker/session-events.js";
 
 function makeRecorder(): {
   calls: Array<{ url: string; init?: RequestInit }>;
@@ -318,12 +319,11 @@ describe("createTelegramNotifier — session-event routing (`dir` + `instance`)"
       dir,
     });
     await notify(sampleEvent);
-    const { readFileSync, existsSync } = await import("node:fs");
-    const path = join(dir, "sessions.jsonl");
-    assert.ok(existsSync(path), "sessions.jsonl should exist in supplied dir");
-    const lines = readFileSync(path, "utf-8").split("\n").filter(Boolean);
-    assert.equal(lines.length, 1);
-    const event = JSON.parse(lines[0]);
+    // After rotation, events go to sessions-YYYY-MM-DD.jsonl — use readSessionEvents.
+    const events = readSessionEvents(dir);
+    assert.ok(events.length > 0, "session event should be written to supplied dir");
+    assert.equal(events.length, 1);
+    const event = events[0];
     assert.equal(event.type, "telegram_sent");
   });
 
@@ -337,9 +337,10 @@ describe("createTelegramNotifier — session-event routing (`dir` + `instance`)"
       dir,
     });
     await notify(sampleEvent);
-    const { readFileSync } = await import("node:fs");
-    const event = JSON.parse(readFileSync(join(dir, "sessions.jsonl"), "utf-8").trim());
-    assert.equal(event.workflowInstance, "oath-signature");
+    // After rotation, events go to sessions-YYYY-MM-DD.jsonl — use readSessionEvents.
+    const events = readSessionEvents(dir);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].workflowInstance, "oath-signature");
   });
 
   it("uses ev.instance for workflowInstance when set", async () => {
@@ -352,9 +353,10 @@ describe("createTelegramNotifier — session-event routing (`dir` + `instance`)"
       dir,
     });
     await notify({ ...sampleEvent, instance: "Oath Signature 1" });
-    const { readFileSync } = await import("node:fs");
-    const event = JSON.parse(readFileSync(join(dir, "sessions.jsonl"), "utf-8").trim());
-    assert.equal(event.workflowInstance, "Oath Signature 1");
+    // After rotation, events go to sessions-YYYY-MM-DD.jsonl — use readSessionEvents.
+    const events = readSessionEvents(dir);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].workflowInstance, "Oath Signature 1");
   });
 
   it("records the resolved workflow when ev.workflow is unknown but instance is known", async () => {
@@ -372,10 +374,11 @@ describe("createTelegramNotifier — session-event routing (`dir` + `instance`)"
     const body = JSON.parse(String(calls[0].init?.body));
     assert.match(body.text, /eid-lookup/);
 
-    const { readFileSync } = await import("node:fs");
-    const event = JSON.parse(readFileSync(join(dir, "sessions.jsonl"), "utf-8").trim());
-    assert.equal(event.workflowInstance, "EID Lookup 1");
-    assert.equal(event.data.workflow, "eid-lookup");
+    // After rotation, events go to sessions-YYYY-MM-DD.jsonl — use readSessionEvents.
+    const events = readSessionEvents(dir);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].workflowInstance, "EID Lookup 1");
+    assert.equal((events[0] as any).data.workflow, "eid-lookup");
   });
 });
 

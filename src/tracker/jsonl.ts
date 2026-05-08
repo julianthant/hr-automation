@@ -22,6 +22,7 @@ import {
   emitItemComplete,
   emitStepChange,
   getSessionsFilePath,
+  getSessionsFilePathForDate,
   type ScreenshotSessionEvent,
 } from "./session-events.js";
 
@@ -632,11 +633,54 @@ export function cleanOldTrackerFiles(maxAgeDays: number = 30, dir: string = DEFA
   let deleted = 0;
   for (const f of readdirSync(dir)) {
     if (!f.endsWith(".jsonl")) continue;
+    // Skip sessions-YYYY-MM-DD.jsonl — those are handled by cleanOldSessionFiles.
+    if (f.startsWith("sessions-")) continue;
     const match = f.match(/(\d{4}-\d{2}-\d{2})/);
     if (match && match[1] < cutoffStr) {
       unlinkSync(join(dir, f));
       deleted++;
     }
+  }
+  return deleted;
+}
+
+/**
+ * Delete `sessions-YYYY-MM-DD.jsonl` files older than `maxAgeDays`. Also
+ * deletes the legacy single `sessions.jsonl` if its mtime is older than
+ * `maxAgeDays` — matches the existing age-gated treatment that file
+ * receives elsewhere.
+ */
+export function cleanOldSessionFiles(maxAgeDays: number, dir: string = DEFAULT_DIR): number {
+  if (!existsSync(dir)) return 0;
+  const cutoffMs = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+  let deleted = 0;
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return 0;
+  }
+  for (const f of entries) {
+    const full = join(dir, f);
+    if (f === "sessions.jsonl") {
+      try {
+        const stat = statSync(full);
+        if (stat.mtimeMs < cutoffMs) {
+          unlinkSync(full);
+          deleted += 1;
+        }
+      } catch { /* missing or unreadable — skip */ }
+      continue;
+    }
+    const m = f.match(/^sessions-(\d{4}-\d{2}-\d{2})\.jsonl$/);
+    if (!m) continue;
+    const dateStr = m[1];
+    const dateMs = Date.parse(`${dateStr}T00:00:00Z`);
+    if (!Number.isFinite(dateMs) || dateMs >= cutoffMs) continue;
+    try {
+      unlinkSync(full);
+      deleted += 1;
+    } catch { /* missing or unreadable — skip */ }
   }
   return deleted;
 }
@@ -749,9 +793,13 @@ export function emitScreenshotEvent(
   opts?: { dir?: string },
 ): void {
   const dir = opts?.dir ?? DEFAULT_DIR;
-  const source = appendJsonlWithSource(getSessionsFilePath(dir), event, {
+  // Route to the dated file matching the event's local date, consistent with
+  // how emitSessionEvent routes session events in session-events.ts.
+  const trackerDate = dateLocal(new Date(event.timestamp));
+  const path = getSessionsFilePathForDate(trackerDate, dir);
+  const source = appendJsonlWithSource(path, event, {
     sourceKind: "session",
-    trackerDate: event.timestamp.slice(0, 10),
+    trackerDate,
   });
   applySessionEventLive(event, source, dir);
 }

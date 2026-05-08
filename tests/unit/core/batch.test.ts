@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { defineWorkflow, runWorkflowBatch } from '../../../src/core/kernel/workflow.js'
 import { dateLocal } from '../../../src/tracker/jsonl.js'
+import { readSessionEvents } from '../../../src/tracker/session-events.js'
 
 function fakeSlot() {
   return {
@@ -186,9 +187,9 @@ test('runWorkflowBatch sequential: emits exactly one workflow_start + one workfl
     },
   )
 
-  const sessPath = join(tmp, 'sessions.jsonl')
-  assert.ok(existsSync(sessPath), 'sessions.jsonl written')
-  const events = readFileSync(sessPath, 'utf-8').trim().split('\n').map((l) => JSON.parse(l))
+  // After rotation, events go to sessions-YYYY-MM-DD.jsonl — use readSessionEvents.
+  const events = readSessionEvents(tmp)
+  assert.ok(events.length > 0, 'session events written')
   const starts = events.filter((e: any) => e.type === 'workflow_start')
   const ends = events.filter((e: any) => e.type === 'workflow_end')
   assert.equal(starts.length, 1, 'one workflow_start per sequential batch')

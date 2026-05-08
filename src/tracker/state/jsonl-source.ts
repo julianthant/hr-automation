@@ -24,7 +24,8 @@ export function appendJsonlWithSource(
 }
 
 export function sourceKindForFile(path: string): ProjectionSourceKind {
-  if (path.endsWith("sessions.jsonl")) return "session";
+  // Match both the legacy sessions.jsonl and dated sessions-YYYY-MM-DD.jsonl files.
+  if (path.endsWith("sessions.jsonl") || /sessions-\d{4}-\d{2}-\d{2}\.jsonl$/.test(path)) return "session";
   if (path.endsWith("-logs.jsonl")) return "log";
   return "tracker";
 }

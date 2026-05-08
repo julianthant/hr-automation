@@ -7,7 +7,9 @@ import {
   writeFileSync,
   utimesSync,
   readdirSync,
+  mkdtempSync,
 } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 import {
   cleanOldTrackerFiles,
@@ -178,6 +180,38 @@ describe("cleanOldScreenshots (clean-tracker screenshots support)", () => {
     const deleted = cleanOldScreenshots(1, SCREENSHOTS_TEST_DIR);
     assert.equal(deleted, 2);
     assert.equal(readdirSync(SCREENSHOTS_TEST_DIR).length, 0);
+  });
+});
+
+describe("cleanTrackerMain sessionsDeleted field", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "clean-sess-"));
+  });
+  afterEach(() => {
+    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("returns sessionsDeleted field in result", () => {
+    const result = cleanTrackerMain(["--days", "30", "--dir", dir, "--no-screenshots"]);
+    assert.ok("sessionsDeleted" in result, "sessionsDeleted field present");
+    assert.equal(typeof result.sessionsDeleted, "number");
+  });
+
+  it("deletes old sessions-YYYY-MM-DD.jsonl files and returns count", () => {
+    // Write an old dated sessions file (40 days ago).
+    const oldDate = isoDate(40);
+    const oldFile = join(dir, `sessions-${oldDate}.jsonl`);
+    writeFileSync(oldFile, '{"type":"workflow_start","workflowInstance":"old"}\n');
+    // Write a recent dated sessions file (1 day ago).
+    const recentDate = isoDate(1);
+    const recentFile = join(dir, `sessions-${recentDate}.jsonl`);
+    writeFileSync(recentFile, '{"type":"workflow_start","workflowInstance":"recent"}\n');
+
+    const result = cleanTrackerMain(["--days", "30", "--dir", dir, "--no-screenshots"]);
+    assert.equal(result.sessionsDeleted, 1, "only the 40-day-old file deleted");
+    assert.ok(!existsSync(oldFile), "old file deleted");
+    assert.ok(existsSync(recentFile), "recent file kept");
   });
 });
 
