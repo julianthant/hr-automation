@@ -5,13 +5,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { withBatchLifecycle, createBatchObserver } from '../../../src/core/kernel/batch-lifecycle.js'
 import { dateLocal } from '../../../src/tracker/jsonl.js'
+import { readSessionEvents } from '../../../src/tracker/session-events.js'
 
 const TMP = () => mkdtempSync(join(tmpdir(), 'hrauto-batchlife-'))
 
 function readSessions(dir: string): any[] {
-  const p = join(dir, 'sessions.jsonl')
-  if (!existsSync(p)) return []
-  return readFileSync(p, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  return readSessionEvents(dir)
 }
 
 function readTracker(dir: string, wf: string): any[] {

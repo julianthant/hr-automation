@@ -1,10 +1,10 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync, readFileSync, existsSync, appendFileSync, mkdirSync } from "fs";
+import { mkdtempSync, rmSync, existsSync, appendFileSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { withLogContext, setLogRunId } from "../../../src/utils/log.js";
-import { emitStepChange, type SessionEvent } from "../../../src/tracker/session-events.js";
+import { emitStepChange, readSessionEvents, type SessionEvent } from "../../../src/tracker/session-events.js";
 import { dateLocal } from "../../../src/tracker/jsonl.js";
 
 const today = () => dateLocal();
@@ -23,10 +23,8 @@ describe("emitStepChange dedupe against recent step log", () => {
     }) + "\n");
   }
 
-  function readSessionEvents(): SessionEvent[] {
-    const path = join(tmp, "sessions.jsonl");
-    if (!existsSync(path)) return [];
-    return readFileSync(path, "utf-8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  function readLocalSessionEvents(): SessionEvent[] {
+    return readSessionEvents(tmp);
   }
 
   it("suppresses session event when matching step log was just appended (within 50ms)", async () => {
@@ -36,7 +34,7 @@ describe("emitStepChange dedupe against recent step log", () => {
       setLogRunId("alice@example.com#1");
       emitStepChange("Onboarding 1", "extraction", tmp);
     });
-    const events = readSessionEvents().filter((e) => e.type === "step_change");
+    const events = readLocalSessionEvents().filter((e) => e.type === "step_change");
     assert.equal(events.length, 0);
   });
 
@@ -47,7 +45,7 @@ describe("emitStepChange dedupe against recent step log", () => {
       setLogRunId("alice@example.com#1");
       emitStepChange("Onboarding 1", "extraction", tmp);
     });
-    const events = readSessionEvents().filter((e) => e.type === "step_change");
+    const events = readLocalSessionEvents().filter((e) => e.type === "step_change");
     assert.equal(events.length, 1);
   });
 
@@ -58,13 +56,13 @@ describe("emitStepChange dedupe against recent step log", () => {
       setLogRunId("alice@example.com#1");
       emitStepChange("Onboarding 1", "extraction", tmp);
     });
-    const events = readSessionEvents().filter((e) => e.type === "step_change");
+    const events = readLocalSessionEvents().filter((e) => e.type === "step_change");
     assert.equal(events.length, 1);
   });
 
   it("emits the event when no log context is set (no runId to key against)", () => {
     emitStepChange("Onboarding 1", "extraction", tmp);
-    const events = readSessionEvents().filter((e) => e.type === "step_change");
+    const events = readLocalSessionEvents().filter((e) => e.type === "step_change");
     assert.equal(events.length, 1);
   });
 });

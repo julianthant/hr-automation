@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { defineWorkflow } from '../../../src/core/kernel/workflow.js'
 import { runWorkflowPool } from '../../../src/core/kernel/pool.js'
 import { dateLocal } from '../../../src/tracker/jsonl.js'
+import { readSessionEvents } from '../../../src/tracker/session-events.js'
 
 const fakeLaunch = () => Promise.resolve({
   page: { bringToFront: async () => {} } as unknown as import('playwright').Page,
@@ -233,9 +234,9 @@ test('runWorkflowPool: emits exactly one workflow_start + one workflow_end(done)
     },
   )
 
-  const sessPath = join(tmp, 'sessions.jsonl')
-  assert.ok(existsSync(sessPath), 'sessions.jsonl written')
-  const events = readFileSync(sessPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  // After rotation, events go to sessions-YYYY-MM-DD.jsonl — use readSessionEvents.
+  const events = readSessionEvents(tmp)
+  assert.ok(events.length > 0, 'session events written')
   const starts = events.filter((e: any) => e.type === 'workflow_start')
   const ends = events.filter((e: any) => e.type === 'workflow_end')
   assert.equal(starts.length, 1, 'one workflow_start per batch')

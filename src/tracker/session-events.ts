@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, readdirSync } from "fs";
-import { join } from "path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { DEFAULT_DIR, dateLocal } from "./jsonl.js";
 import { getLogRunId } from "../utils/log.js";
 import { appendJsonlWithSource } from "./state/jsonl-source.js";
@@ -61,12 +61,26 @@ export interface SessionEvent {
   chromiumPid?: number;
 }
 
-// ── File path ──────────────────────────────────────────
+// ── File paths ─────────────────────────────────────────
+//
+// Sessions rotate into dated files (`sessions-YYYY-MM-DD.jsonl`) the same
+// way tracker entries do. Reads aggregate every dated file plus a legacy
+// single `sessions.jsonl` written before rotation landed; that legacy
+// file ages out via `cleanOldSessionFiles` like any other dated file.
 
-const SESSIONS_FILE = "sessions.jsonl";
+const LEGACY_SESSIONS_FILE = "sessions.jsonl";
+const SESSIONS_PREFIX = "sessions-";
+const SESSIONS_SUFFIX = ".jsonl";
 
 export function getSessionsFilePath(dir: string = DEFAULT_DIR): string {
-  return join(dir, SESSIONS_FILE);
+  return getSessionsFilePathForDate(dateLocal(), dir);
+}
+
+export function getSessionsFilePathForDate(
+  date: string,
+  dir: string = DEFAULT_DIR,
+): string {
+  return join(dir, `${SESSIONS_PREFIX}${date}${SESSIONS_SUFFIX}`);
 }
 
 // ── Read / Write ───────────────────────────────────────
@@ -82,20 +96,47 @@ export function emitSessionEvent(
     timestamp: new Date().toISOString(),
     pid: process.pid,
   };
-  const source = appendJsonlWithSource(getSessionsFilePath(dir), full, {
+  // Route to the dated file matching `full.timestamp`'s local date — same
+  // rule tracker entries follow (see `dateLocal(new Date(entry.timestamp))`
+  // in jsonl.ts:trackEvent). Keeps batch-scope events emitted near local
+  // midnight in the same file as the per-item rows from the same run.
+  const trackerDate = dateLocal(new Date(full.timestamp));
+  const path = getSessionsFilePathForDate(trackerDate, dir);
+  const source = appendJsonlWithSource(path, full, {
     sourceKind: "session",
-    trackerDate: full.timestamp.slice(0, 10),
+    trackerDate,
   });
   applySessionEventLive(full, source, dir);
 }
 
 export function readSessionEvents(dir: string = DEFAULT_DIR): SessionEvent[] {
-  const path = getSessionsFilePath(dir);
-  if (!existsSync(path)) return [];
-  return readFileSync(path, "utf-8")
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as SessionEvent);
+  const out: SessionEvent[] = [];
+  let files: string[] = [];
+  try {
+    files = readdirSync(dir).filter(
+      (f) => f === LEGACY_SESSIONS_FILE ||
+        (f.startsWith(SESSIONS_PREFIX) && f.endsWith(SESSIONS_SUFFIX)),
+    );
+  } catch {
+    return out; // dir doesn't exist
+  }
+  // Sort by date for deterministic ordering. Legacy file sorts first
+  // (no date in its name; treat as oldest).
+  files.sort();
+  for (const f of files) {
+    const path = join(dir, f);
+    if (!existsSync(path)) continue;
+    const raw = readFileSync(path, "utf-8");
+    for (const line of raw.split("\n")) {
+      if (!line) continue;
+      try {
+        out.push(JSON.parse(line) as SessionEvent);
+      } catch {
+        // Skip malformed lines — same tolerance as the prior implementation.
+      }
+    }
+  }
+  return out;
 }
 
 // ── Convenience helpers ────────────────────────────────
