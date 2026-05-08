@@ -191,7 +191,7 @@ export function QueuePanel({
                 entry={entry}
                 displayNames={displayNames}
                 selected={selectedId === entry.id}
-                onClick={() => onSelect(entry.id)}
+                onSelect={onSelect}
               />
             ))
           )
@@ -239,7 +239,7 @@ export function QueuePanel({
                   entry={entry}
                   displayNames={displayNames}
                   selected={selectedId === entry.id}
-                  onClick={() => onSelect(entry.id)}
+                  onSelect={onSelect}
                 />
               ))
             )}

@@ -227,6 +227,37 @@ export default function App() {
     setSelectedId(row.id);
   }, [workflow, date, handleWorkflowChange, handleDateChange]);
 
+  // Stable handlers for QueuePanel — inline arrows here would mint a fresh
+  // identity on every App render and defeat the React.memo on EntryItem.
+  // All setters from useState are stable references (React guarantee), so
+  // empty deps are correct.
+  const handleSelectEntry = useCallback((id: string) => {
+    // Selecting another queue entry exits review mode (preserving
+    // localStorage edits per spec — only Approve / Discard wipe).
+    setReviewingPrepId(null);
+    setSelectedId(id);
+  }, []);
+  const handleOpenReview = useCallback((runId: string) => {
+    setReviewingPrepId(runId);
+  }, []);
+  const handleReupload = useCallback(
+    (reuploadFor: { sessionId: string; previousRunId: string }) => {
+      setRunModalReuploadFor(reuploadFor);
+      setRunModalOpen(true);
+    },
+    [],
+  );
+  const handleDrillIn = useCallback((parentRunId: string) => {
+    // Drilling exits any open prep review and clears any selected child —
+    // the user explicitly switched contexts.
+    setReviewingPrepId(null);
+    setSelectedId(null);
+    setDrilledBatchRunId(parentRunId);
+  }, []);
+  const handleDrillOut = useCallback(() => {
+    setDrilledBatchRunId(null);
+  }, []);
+
   // Entry counts per workflow from backend SSE (accurate across all workflows)
   const entryCounts = wfCounts;
 
@@ -279,29 +310,13 @@ export default function App() {
           workflow={workflow}
           displayNames={displayNames}
           selectedId={selectedId}
-          onSelect={(id) => {
-            // Selecting another queue entry exits review mode (preserving
-            // localStorage edits per spec — only Approve / Discard wipe).
-            setReviewingPrepId(null);
-            setSelectedId(id);
-          }}
+          onSelect={handleSelectEntry}
           reviewingPrepId={reviewingPrepId}
-          onOpenReview={(runId) => setReviewingPrepId(runId)}
-          onReupload={(reuploadFor) => {
-            setRunModalReuploadFor(reuploadFor);
-            setRunModalOpen(true);
-          }}
+          onOpenReview={handleOpenReview}
+          onReupload={handleReupload}
           drilledBatchRunId={drilledBatchRunId}
-          onDrillIn={(parentRunId) => {
-            // Drilling exits any open prep review and clears any selected child —
-            // the user explicitly switched contexts.
-            setReviewingPrepId(null);
-            setSelectedId(null);
-            setDrilledBatchRunId(parentRunId);
-          }}
-          onDrillOut={() => {
-            setDrilledBatchRunId(null);
-          }}
+          onDrillIn={handleDrillIn}
+          onDrillOut={handleDrillOut}
           loading={loading}
           runControlsSlot={
             <>

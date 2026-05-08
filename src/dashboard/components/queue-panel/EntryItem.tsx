@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 import { CheckCircle2, AlertTriangle, Loader2, Clock, CircleSlash, X, Ban } from "lucide-react";
-import type { ComponentType, SVGProps } from "react";
+import { memo, type ComponentType, type SVGProps } from "react";
 import type { TrackerEntry } from "@/components/shared/types";
 import { resolveEntryName } from "@/components/shared/entry-display";
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
@@ -76,10 +76,16 @@ interface EntryItemProps {
   /** Per-entry "<base> <ordinal>" labels from `buildDisplayNameMap`. */
   displayNames?: Map<string, string>;
   selected: boolean;
-  onClick: () => void;
+  /**
+   * Stable selection callback — receives `entry.id`. EntryItem composes the
+   * call internally so parents can pass a useCallback-stable handler without
+   * minting a fresh inline closure per row each render. Pairs with the
+   * `React.memo` wrapper below to avoid re-rendering 50+ rows on every SSE tick.
+   */
+  onSelect: (id: string) => void;
 }
 
-export function EntryItem({ entry, displayNames, selected, onClick }: EntryItemProps) {
+function EntryItemImpl({ entry, displayNames, selected, onSelect }: EntryItemProps) {
   const name = resolveEntryName(entry, displayNames);
   // `step === "cancelled"` overrides the generic `failed` status so the row
   // renders amber/Ban instead of red/AlertTriangle. The data model is still
@@ -123,7 +129,7 @@ export function EntryItem({ entry, displayNames, selected, onClick }: EntryItemP
   return (
     <div className="px-3 pt-2 first:pt-3">
       <div
-        onClick={onClick}
+        onClick={() => onSelect(entry.id)}
         role="button"
         tabIndex={0}
         aria-pressed={selected}
@@ -131,7 +137,7 @@ export function EntryItem({ entry, displayNames, selected, onClick }: EntryItemP
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            onClick();
+            onSelect(entry.id);
           }
         }}
         className={cn(
@@ -233,3 +239,41 @@ export function EntryItem({ entry, displayNames, selected, onClick }: EntryItemP
     </div>
   );
 }
+
+/**
+ * Memoized export. Queue rows re-render on every SSE tick (1–5 Hz) when the
+ * parent entries array shifts; without memoization that's 50+ subtree
+ * re-renders per second. The custom comparator hand-checks the fields
+ * EntryItem actually reads from `entry` (status, step, timestamps, runId,
+ * runOrdinal, parentRunId, error, last-log fields, data ref) plus the three
+ * other props. Returning `true` skips the render.
+ *
+ * Note: `data` is compared by reference. The tracker pipeline merges patches
+ * into a fresh object via `{...prev, ...patch}` (see ctx.updateData), so a
+ * new reference reliably signals a real change. If a producer ever mutates
+ * `data` in place this will become stale — that would be a bug at the
+ * source, not here.
+ */
+export const EntryItem = memo(EntryItemImpl, (prev, next) => {
+  if (prev.selected !== next.selected) return false;
+  if (prev.onSelect !== next.onSelect) return false;
+  if (prev.displayNames !== next.displayNames) return false;
+  const a = prev.entry;
+  const b = next.entry;
+  return (
+    a.id === b.id &&
+    a.workflow === b.workflow &&
+    a.status === b.status &&
+    a.step === b.step &&
+    a.timestamp === b.timestamp &&
+    a.startTimestamp === b.startTimestamp &&
+    a.runId === b.runId &&
+    a.runOrdinal === b.runOrdinal &&
+    a.parentRunId === b.parentRunId &&
+    a.error === b.error &&
+    a.lastLogMessage === b.lastLogMessage &&
+    a.firstLogTs === b.firstLogTs &&
+    a.lastLogTs === b.lastLogTs &&
+    a.data === b.data
+  );
+});
