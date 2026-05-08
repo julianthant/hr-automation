@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { cn } from "@/lib/utils";
 import {
   Pencil, MousePointer, ArrowDownToLine, Search, ListFilter,
@@ -33,7 +34,7 @@ interface LogLineProps {
   onCopy: (text: string) => void;
 }
 
-export function LogLine({ entry, isCurrent, onCopy }: LogLineProps) {
+function LogLineImpl({ entry, isCurrent, onCopy }: LogLineProps) {
   if (entry.kind === "event") {
     return <EventLine event={entry} />;
   }
@@ -75,6 +76,8 @@ export function LogLine({ entry, isCurrent, onCopy }: LogLineProps) {
     </div>
   );
 }
+
+export const LogLine = memo(LogLineImpl);
 
 const EVENT_VISUAL: Record<RunEvent["type"], { glyph: string; color: string }> = {
   workflow_start:   { glyph: "▶", color: "#3b82f6" },
