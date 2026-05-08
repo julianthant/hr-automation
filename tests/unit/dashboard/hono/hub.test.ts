@@ -312,6 +312,131 @@ describe("/events/hub integration", () => {
   });
 });
 
+// ── entries + sessions topic integration tests ────────────────────────────────
+
+describe("/events/hub entries + sessions topics", () => {
+  let dir: string;
+  let server: Server;
+  let port: number;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "hub-entries-test-"));
+    mkdirSync(dir, { recursive: true });
+    server = createDashboardServer({ port: 0, dir, noClean: true, uploadPort: null });
+    port = (server.address() as { port: number }).port;
+  });
+
+  afterEach(async () => {
+    server.closeAllConnections?.();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    closeStateDbForTests(dir);
+    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("hub with entries + sessions subs gets both envelopes within 2.5s", async () => {
+    const subs = encodeURIComponent(
+      JSON.stringify([
+        { id: "e1", topic: "entries", params: { workflow: "onboarding" } },
+        { id: "s1", topic: "sessions", params: {} },
+      ]),
+    );
+    const envelopes = await collectHubEnvelopes(
+      `http://localhost:${port}/events/hub?subs=${subs}`,
+      { stopAfter: 2, timeoutMs: 2500 },
+    );
+
+    assert.ok(envelopes.length >= 2, `expected at least 2 envelopes, got ${envelopes.length}`);
+
+    const subIds = new Set(envelopes.map((e) => e.sub));
+    assert.ok(subIds.has("e1"), "expected envelope with sub id 'e1' (entries)");
+    assert.ok(subIds.has("s1"), "expected envelope with sub id 's1' (sessions)");
+  });
+
+  test("hub entries envelope has entries/workflows/wfCounts/failureCounts shape", async () => {
+    const subs = encodeURIComponent(
+      JSON.stringify([
+        { id: "e1", topic: "entries", params: { workflow: "onboarding" } },
+      ]),
+    );
+    const envelopes = await collectHubEnvelopes(
+      `http://localhost:${port}/events/hub?subs=${subs}`,
+      { stopAfter: 1, timeoutMs: 2500 },
+    );
+
+    assert.ok(envelopes.length >= 1, "expected at least 1 envelope");
+    const env = envelopes.find((e) => e.sub === "e1");
+    assert.ok(env, "expected envelope with sub=e1");
+    const data = env!.data as Record<string, unknown>;
+    assert.ok(Array.isArray(data.entries), "data.entries must be an array");
+    assert.ok(Array.isArray(data.workflows), "data.workflows must be an array");
+    assert.ok(data.wfCounts !== null && typeof data.wfCounts === "object", "data.wfCounts must be an object");
+    assert.ok(data.failureCounts !== null && typeof data.failureCounts === "object", "data.failureCounts must be an object");
+  });
+
+  test("hub sessions envelope has workflows and duoQueue shape", async () => {
+    const subs = encodeURIComponent(
+      JSON.stringify([
+        { id: "s1", topic: "sessions", params: {} },
+      ]),
+    );
+    const envelopes = await collectHubEnvelopes(
+      `http://localhost:${port}/events/hub?subs=${subs}`,
+      { stopAfter: 1, timeoutMs: 2500 },
+    );
+
+    assert.ok(envelopes.length >= 1, "expected at least 1 envelope");
+    const env = envelopes.find((e) => e.sub === "s1");
+    assert.ok(env, "expected envelope with sub=s1");
+    const data = env!.data as Record<string, unknown>;
+    assert.ok(Array.isArray(data.workflows), "data.workflows must be an array");
+    assert.ok(Array.isArray(data.duoQueue), "data.duoQueue must be an array");
+  });
+
+  test("legacy /events?workflow=X emits entries payload shape", async () => {
+    const payload = await collectOneLegacySsePayload(
+      `http://localhost:${port}/events?workflow=onboarding`,
+    );
+
+    assert.ok(payload !== null && typeof payload === "object", "expected object payload");
+    const data = payload as Record<string, unknown>;
+    assert.ok(Array.isArray(data.entries), "payload.entries must be an array");
+    assert.ok(Array.isArray(data.workflows), "payload.workflows must be an array");
+    assert.ok(data.wfCounts !== null && typeof data.wfCounts === "object", "payload.wfCounts must be an object");
+    assert.ok(data.failureCounts !== null && typeof data.failureCounts === "object", "payload.failureCounts must be an object");
+  });
+
+  test("legacy /events/sessions emits SessionState shape", async () => {
+    const payload = await collectOneLegacySsePayload(
+      `http://localhost:${port}/events/sessions`,
+    );
+
+    assert.ok(payload !== null && typeof payload === "object", "expected object payload");
+    const data = payload as Record<string, unknown>;
+    assert.ok(Array.isArray(data.workflows), "payload.workflows must be an array");
+    assert.ok(Array.isArray(data.duoQueue), "payload.duoQueue must be an array");
+  });
+
+  test("entries topic emits default workflow when no workflow param given", async () => {
+    // No workflow param — should use getDefaultWorkflow (= "onboarding")
+    const subs = encodeURIComponent(
+      JSON.stringify([
+        { id: "e1", topic: "entries", params: {} },
+      ]),
+    );
+    const envelopes = await collectHubEnvelopes(
+      `http://localhost:${port}/events/hub?subs=${subs}`,
+      { stopAfter: 1, timeoutMs: 2500 },
+    );
+
+    assert.ok(envelopes.length >= 1, "expected at least 1 envelope");
+    const env = envelopes.find((e) => e.sub === "e1");
+    assert.ok(env, "expected envelope with sub=e1");
+    const data = env!.data as Record<string, unknown>;
+    // The emitter fell back to default workflow; payload still has the right shape
+    assert.ok(Array.isArray(data.entries), "data.entries must be an array");
+  });
+});
+
 // ── Manifest check ────────────────────────────────────────────────────────────
 
 test("/events/hub is registered in the Hono app", async () => {
