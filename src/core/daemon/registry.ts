@@ -115,10 +115,9 @@ async function probeWhoami(
   timeoutMs = 1500,
 ): Promise<ProbeResult> {
   try {
-    const ctrl = new AbortController()
-    const t = setTimeout(() => ctrl.abort(), timeoutMs)
-    const res = await fetch(`http://127.0.0.1:${port}/whoami`, { signal: ctrl.signal })
-    clearTimeout(t)
+    const res = await fetch(`http://127.0.0.1:${port}/whoami`, {
+      signal: AbortSignal.timeout(timeoutMs),
+    })
     if (!res.ok) return 'unreachable'
     const body = (await res.json()) as { workflow?: string; instanceId?: string }
     if (body.workflow === expected.workflow && body.instanceId === expected.instanceId) {

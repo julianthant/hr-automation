@@ -2,6 +2,7 @@ import type { Page, Browser, BrowserContext } from 'playwright'
 import { promises as fs } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
+import { setTimeout as sleep } from 'node:timers/promises'
 import type { SystemConfig, SessionObserver, CaptureFileOpts } from './types.js'
 import { launchBrowser } from '../../infra/browser/launch.js'
 import { log } from '../../utils/log.js'
@@ -680,26 +681,16 @@ function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   })
 }
 
-function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
-  if (!signal) {
-    return new Promise((resolve) => setTimeout(resolve, ms))
+async function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  try {
+    await sleep(ms, undefined, { signal })
+  } catch (err) {
+    // node:timers/promises throws AbortError with the signal's reason
+    // attached as `cause`. Surface our codebase's abortReason() shape so
+    // existing callers see the same Error instance shape they got before.
+    if (signal?.aborted) throw abortReason(signal)
+    throw err
   }
-  if (signal.aborted) return Promise.reject(abortReason(signal))
-  return new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      cleanup()
-      resolve()
-    }, ms)
-    const onAbort = (): void => {
-      clearTimeout(timer)
-      cleanup()
-      reject(abortReason(signal))
-    }
-    const cleanup = (): void => {
-      signal.removeEventListener('abort', onAbort)
-    }
-    signal.addEventListener('abort', onAbort, { once: true })
-  })
 }
 
 async function loginWithRetry(
