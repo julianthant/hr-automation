@@ -259,7 +259,12 @@ test("buildOcrReocrWholePdfHandler replaces records and clears failedPages", asy
       _enqueueEidLookupOverride: async () => {},
     });
     const r = await handler({ sessionId: "s3", runId: "r3" });
-    assert.equal(r.status, 200);
+    assert.equal(r.status, 202);
+    assert.equal((r.body as { ok: boolean }).ok, true);
+    // Handler returns 202 immediately; tracker emits happen in the background
+    // async block. Flush the microtask/macrotask queue so the void promise
+    // settles before we inspect writtenEntries.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     const approval = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>)
       .find((e) => (e.status === "running" || e.status === "done") && e.step === "awaiting-approval");
     assert.ok(approval);

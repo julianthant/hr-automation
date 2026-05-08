@@ -19,8 +19,11 @@ export interface ReocrWholePdfBody {
   runId: string;
 }
 export interface ReocrWholePdfHttpResponse {
-  status: 200 | 400 | 404 | 409;
-  body: { ok: true; recordCount: number; verifiedCount: number } | { ok: false; error: string };
+  status: 200 | 202 | 400 | 404 | 409;
+  body:
+    | { ok: true; recordCount: number; verifiedCount: number }
+    | { ok: true; accepted: true; parentRunId?: string }
+    | { ok: false; error: string };
 }
 export interface ReocrWholePdfHandlerOpts {
   trackerDir?: string;
@@ -45,6 +48,7 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
       return { status: 409, body: { ok: false, error: "Operation already in progress for this row" } };
     }
     acquireRowLock(key);
+    let backgroundStarted = false;
     try {
       const date = opts.date ?? dateLocal();
       const file = join(trackerDir ?? ".tracker", `ocr-${date}.jsonl`);
@@ -91,8 +95,9 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
         if (kind === "name" || kind === "verify") lookupTargets.push({ rec, index, kind });
       });
 
+      let enqueueItems: Array<{ record: unknown; index: number; kind: "name" | "verify"; itemId: string }> = [];
       if (lookupTargets.length > 0) {
-        const enqueueItems = lookupTargets.map((t) => ({
+        enqueueItems = lookupTargets.map((t) => ({
           record: t.rec,
           index: t.index,
           kind: t.kind,
@@ -128,96 +133,118 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
             },
           });
         }
-
-        const { watchChildRuns: realWatchChildRuns } = await import("../../delegation/watch-child-runs.js");
-        const watchChildren = opts._watchChildRunsOverride ?? realWatchChildRuns;
-        const outcomes = await watchChildren({
-          workflow: "eid-lookup",
-          expectedItemIds: enqueueItems.map((e) => e.itemId),
-          trackerDir,
-          date,
-          timeoutMs: 60 * 60_000,
-        }).catch(() => [] as ChildOutcome[]);
-
-        const outcomesByItemId = new Map(outcomes.map((o) => [o.itemId, o]));
-        for (const enq of enqueueItems) {
-          const outcome = outcomesByItemId.get(enq.itemId);
-          const idx = enq.index;
-          const rec = records[idx] as Record<string, unknown>;
-          if (!outcome) {
-            if (rec.matchState === "lookup-pending" || rec.matchState === "lookup-running") rec.matchState = "unresolved";
-            continue;
-          }
-          if (enq.kind === "name") {
-            const eid = (outcome.data?.emplId ?? "").trim();
-            if (outcome.status === "done" && /^\d{5,}$/.test(eid)) {
-              if ("employee" in rec) (rec.employee as Record<string, unknown>).employeeId = eid;
-              else rec.employeeId = eid;
-              rec.matchState = "resolved";
-              rec.matchSource = "eid-lookup";
-            } else {
-              rec.matchState = "unresolved";
-            }
-          }
-          const v = computeVerificationLocal({
-            hrStatus: outcome.data?.hrStatus,
-            department: outcome.data?.department,
-            personOrgScreenshot: outcome.data?.personOrgScreenshot,
-          });
-          rec.verification = v;
-          // Match `isApprovable` in OcrReviewPane: only auto-deselect on a
-          // hard "don't process" verification. Soft `lookup-failed` keeps
-          // selection — operator decides from the warning banner.
-          if (v.state === "inactive" || v.state === "non-hdh") {
-            rec.selected = false;
-          }
-        }
       }
 
-      const verifiedCount = records.filter((r) => {
-        const v = (r as Record<string, unknown>).verification as { state?: string } | undefined;
-        return v?.state === "verified";
-      }).length;
-
+      // All pre-watch work (validation, OCR, matching, enqueue) is done.
+      // The watch can hold the connection for up to 1 hour — fire it in the
+      // background and return 202 immediately. The frontend polls SSE for
+      // OCR row state changes regardless of this HTTP response.
+      const parentRunId = row.parentRunId;
       const emit = opts._emitOverride ?? ((e: TrackerEntry) => trackEvent(e, trackerDir));
-      const data = {
-        formType,
-        pdfOriginalName: (row.data?.pdfOriginalName as unknown as string) ?? "",
-        sessionId: input.sessionId,
-        ...(row.parentRunId ? { parentRunId: row.parentRunId } : {}),
-        recordCount: String(records.length),
-        verifiedCount: String(verifiedCount),
-        records: JSON.stringify(records),
-        failedPages: JSON.stringify([]),
-        pageStatusSummary: JSON.stringify({ total: 0, succeeded: 0, failed: 0 }),
-      };
-      emit({
-        workflow: WORKFLOW,
-        timestamp: new Date().toISOString(),
-        id: input.sessionId,
-        runId: input.runId,
-        ...(row.parentRunId ? { parentRunId: row.parentRunId } : {}),
-        status: "running",
-        step: "awaiting-approval",
-        data,
-      });
-      emit({
-        workflow: WORKFLOW,
-        timestamp: new Date().toISOString(),
-        id: input.sessionId,
-        runId: input.runId,
-        ...(row.parentRunId ? { parentRunId: row.parentRunId } : {}),
-        status: "done",
-        step: "awaiting-approval",
-        data,
-      });
+      const capturedRow = row;
+      const capturedEnqueueItems = enqueueItems;
+      backgroundStarted = true;
+      void (async () => {
+        try {
+          let outcomes: ChildOutcome[] = [];
+          if (capturedEnqueueItems.length > 0) {
+            const { watchChildRuns: realWatchChildRuns } = await import("../../delegation/watch-child-runs.js");
+            const watchChildren = opts._watchChildRunsOverride ?? realWatchChildRuns;
+            outcomes = await watchChildren({
+              workflow: "eid-lookup",
+              expectedItemIds: capturedEnqueueItems.map((e) => e.itemId),
+              trackerDir,
+              date,
+              timeoutMs: 60 * 60_000,
+            }).catch(() => [] as ChildOutcome[]);
 
-      return { status: 200, body: { ok: true, recordCount: records.length, verifiedCount } };
+            const outcomesByItemId = new Map(outcomes.map((o) => [o.itemId, o]));
+            for (const enq of capturedEnqueueItems) {
+              const outcome = outcomesByItemId.get(enq.itemId);
+              const idx = enq.index;
+              const rec = records[idx] as Record<string, unknown>;
+              if (!outcome) {
+                if (rec.matchState === "lookup-pending" || rec.matchState === "lookup-running") rec.matchState = "unresolved";
+                continue;
+              }
+              if (enq.kind === "name") {
+                const eid = (outcome.data?.emplId ?? "").trim();
+                if (outcome.status === "done" && /^\d{5,}$/.test(eid)) {
+                  if ("employee" in rec) (rec.employee as Record<string, unknown>).employeeId = eid;
+                  else rec.employeeId = eid;
+                  rec.matchState = "resolved";
+                  rec.matchSource = "eid-lookup";
+                } else {
+                  rec.matchState = "unresolved";
+                }
+              }
+              const v = computeVerificationLocal({
+                hrStatus: outcome.data?.hrStatus,
+                department: outcome.data?.department,
+                personOrgScreenshot: outcome.data?.personOrgScreenshot,
+              });
+              rec.verification = v;
+              // Match `isApprovable` in OcrReviewPane: only auto-deselect on a
+              // hard "don't process" verification. Soft `lookup-failed` keeps
+              // selection — operator decides from the warning banner.
+              if (v.state === "inactive" || v.state === "non-hdh") {
+                rec.selected = false;
+              }
+            }
+          }
+
+          const verifiedCount = records.filter((r) => {
+            const v = (r as Record<string, unknown>).verification as { state?: string } | undefined;
+            return v?.state === "verified";
+          }).length;
+
+          const data = {
+            formType,
+            pdfOriginalName: (capturedRow.data?.pdfOriginalName as unknown as string) ?? "",
+            sessionId: input.sessionId,
+            ...(parentRunId ? { parentRunId } : {}),
+            recordCount: String(records.length),
+            verifiedCount: String(verifiedCount),
+            records: JSON.stringify(records),
+            failedPages: JSON.stringify([]),
+            pageStatusSummary: JSON.stringify({ total: 0, succeeded: 0, failed: 0 }),
+          };
+          emit({
+            workflow: WORKFLOW,
+            timestamp: new Date().toISOString(),
+            id: input.sessionId,
+            runId: input.runId,
+            ...(parentRunId ? { parentRunId } : {}),
+            status: "running",
+            step: "awaiting-approval",
+            data,
+          });
+          emit({
+            workflow: WORKFLOW,
+            timestamp: new Date().toISOString(),
+            id: input.sessionId,
+            runId: input.runId,
+            ...(parentRunId ? { parentRunId } : {}),
+            status: "done",
+            step: "awaiting-approval",
+            data,
+          });
+        } catch (err) {
+          log.warn(`[reocr-whole-pdf] watch failed for parent=${input.runId}: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+          releaseRowLock(key);
+        }
+      })();
+
+      return {
+        status: 202,
+        body: { ok: true, accepted: true, ...(parentRunId ? { parentRunId } : {}) },
+      };
     } catch (err) {
       log.error(`[ocr-http] reocr-whole-pdf threw: ${errorMessage(err)}`);
       return { status: 400, body: { ok: false, error: errorMessage(err) } };
     } finally {
-      releaseRowLock(key);
+      if (!backgroundStarted) releaseRowLock(key);
     }
   };
 }
