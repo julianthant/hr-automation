@@ -75,6 +75,34 @@ test("rebuildProjectionForDate is idempotent and skips malformed lines", () => {
   }
 });
 
+test("rebuildProjectionForDate skips sessions-${date}.jsonl in the tracker loop", () => {
+  // Regression: sessions-${date}.jsonl matches the `-${date}.jsonl` suffix
+  // and was being parsed as a tracker file with workflow="sessions".
+  // Session events have no `workflow` field, so `applyTrackerEntry` failed
+  // bind on parameter 4 (@workflow), aborting the projection rebuild.
+  const dir = tmpTracker();
+  const date = "2026-05-04";
+  try {
+    appendFileSync(join(dir, `sessions-${date}.jsonl`), JSON.stringify({
+      type: "workflow_start",
+      timestamp: "2026-05-04T20:00:00.000Z",
+      pid: 1,
+      workflowInstance: "Today 1",
+      runId: "run-1",
+    }) + "\n");
+
+    const db = openStateDb(dir);
+    rebuildProjectionForDate(db, { dir, date });
+    const trackerCount = db.prepare("SELECT COUNT(*) AS n FROM run_events").get() as { n: number };
+    const sessionCount = db.prepare("SELECT COUNT(*) AS n FROM session_events").get() as { n: number };
+    assert.equal(trackerCount.n, 0, "session file must not produce tracker rows");
+    assert.equal(sessionCount.n, 1, "session file must still flow through the session loop");
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("rebuildProjectionForDate only clears session events for the rebuilt date", () => {
   const dir = tmpTracker();
   try {

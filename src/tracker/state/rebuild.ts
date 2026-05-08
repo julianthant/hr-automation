@@ -113,6 +113,10 @@ export function rebuildProjectionForDate(db: Database, opts: RebuildProjectionOp
     for (const filename of filenames) {
       if (!filename.endsWith(`-${date}.jsonl`)) continue;
       if (filename.endsWith(`-${date}-logs.jsonl`)) continue;
+      // `sessions-${date}.jsonl` (post-rotation) matches the tracker suffix
+      // but holds session events, not TrackerEntry rows. Routed via the
+      // dedicated session loop below; never as a "sessions" workflow.
+      if (filename === `sessions-${date}.jsonl`) continue;
       const workflow = filename.slice(0, -`-${date}.jsonl`.length);
       const path = join(dir, filename);
       const parsed = parseJsonl<TrackerEntry>(path);
