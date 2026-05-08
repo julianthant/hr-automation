@@ -55,18 +55,25 @@ function parseJsonl<T>(path: string): ParsedLine<T>[] {
  */
 function parseJsonlFrom<T>(path: string, startAt: number): ParsedLine<T>[] {
   const stat = existsSync(path) ? statSync(path) : null;
-  if (!stat || stat.size <= startAt) return [];
-  const remaining = stat.size - startAt;
+  if (!stat) return [];
+  // Truncation detection: if the file is now shorter than the cached
+  // offset, the file was truncated/rewritten between rebuilds. Reset to
+  // the start; INSERT OR IGNORE on UNIQUE(source_path, source_offset)
+  // absorbs duplicates. Without this branch, post-truncation appends
+  // would be skipped forever (`stat.size <= startAt`).
+  const effectiveStart = stat.size < startAt ? 0 : startAt;
+  if (stat.size <= effectiveStart) return [];
+  const remaining = stat.size - effectiveStart;
   const buf = Buffer.alloc(remaining);
   const fd = openSync(path, "r");
   try {
-    readSync(fd, buf, 0, remaining, startAt);
+    readSync(fd, buf, 0, remaining, effectiveStart);
   } finally {
     closeSync(fd);
   }
   const text = buf.toString("utf-8");
   const out: ParsedLine<T>[] = [];
-  let offset = startAt;
+  let offset = effectiveStart;
   let line = 1; // approximate — we don't track absolute line number from startAt
   for (const rawLine of text.split("\n")) {
     const bytes = Buffer.byteLength(rawLine + "\n");

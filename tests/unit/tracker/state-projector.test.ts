@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -174,6 +174,57 @@ test("rebuildProjectionForDate only clears session events for the rebuilt date",
       { tracker_date: "2026-05-03", workflow_instance: "Yesterday 1" },
       { tracker_date: "2026-05-04", workflow_instance: "Today 1" },
     ]);
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("rebuild handles JSONL truncation by re-reading from offset 0", () => {
+  // Regression: without truncation detection, stat.size <= cached byte_offset
+  // causes parseJsonlFrom to return [] forever, so any bytes appended after the
+  // truncation point are never parsed. The fix resets effectiveStart to 0 when
+  // stat.size < startAt; INSERT OR IGNORE on UNIQUE(source_path, source_offset)
+  // absorbs lines whose byte offsets collide with pre-truncation DB rows as a
+  // no-op, but lines at novel offsets still land.
+  //
+  // To produce novel offsets after truncation we use long original entries
+  // (so their line lengths differ from the short replacement entries), making
+  // the second short line sit at a byte offset that the original file never had.
+  const dir = tmpTracker();
+  const date = "2026-05-08";
+  try {
+    const path = join(dir, `separations-${date}.jsonl`);
+
+    // Write 2 long entries — large enough that a 2-entry replacement file
+    // (with shorter lines) will be smaller than this file's total size.
+    const longSuffix = { data: { name: "Alice Smith Johnson III — long field to widen the line" } };
+    appendFileSync(path, JSON.stringify({ workflow: "separations", id: "long-1", runId: "long-1#1", status: "pending", timestamp: "2026-05-08T10:00:00Z", ...longSuffix }) + "\n");
+    appendFileSync(path, JSON.stringify({ workflow: "separations", id: "long-2", runId: "long-2#1", status: "pending", timestamp: "2026-05-08T10:01:00Z", ...longSuffix }) + "\n");
+    const db = openStateDb(dir);
+    rebuildProjectionForDate(db, { dir, date });
+    const before = db.prepare(`SELECT COUNT(*) AS n FROM run_events WHERE workflow = 'separations' AND tracker_date = ?`).get(date) as { n: number };
+    assert.equal(before.n, 2, "first rebuild should produce 2 run_events");
+
+    // Truncate the file by rewriting it with 2 short entries.  The short lines
+    // are narrower than the originals, so the second short entry sits at a byte
+    // offset that no existing run_event row has — it will pass INSERT OR IGNORE.
+    // The new file is also smaller than the cached byte_offset, triggering the
+    // truncation-detection branch (effectiveStart = 0) introduced in this fix.
+    // Without the fix, stat.size <= startAt → [] forever.
+    writeFileSync(path,
+      JSON.stringify({ workflow: "separations", id: "short-1", runId: "short-1#1", status: "pending", timestamp: "2026-05-08T11:00:00Z" }) + "\n" +
+      JSON.stringify({ workflow: "separations", id: "short-2", runId: "short-2#1", status: "pending", timestamp: "2026-05-08T11:01:00Z" }) + "\n",
+    );
+    rebuildProjectionForDate(db, { dir, date });
+
+    // short-2 sits at an offset that was not present in the original file
+    // (the long lines are wider than the short lines), so INSERT OR IGNORE
+    // lets it through. long-1 and long-2 remain (no DELETE on truncation).
+    const after = db.prepare(`SELECT COUNT(*) AS n FROM run_events WHERE workflow = 'separations' AND tracker_date = ?`).get(date) as { n: number };
+    assert.ok(after.n >= 3, `expected at least 3 rows (2 original + short-2 at novel offset), got ${after.n}`);
+    const short2Row = db.prepare(`SELECT 1 FROM run_events WHERE workflow = 'separations' AND item_id = 'short-2'`).get();
+    assert.ok(short2Row, "short-2 (post-truncation entry at novel offset) should be present");
   } finally {
     closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });
