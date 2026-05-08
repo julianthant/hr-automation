@@ -1,14 +1,9 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 
 import type { ProjectionSourceKind, ProjectionSourceRef } from "./types.js";
 
-export function countJsonlLines(path: string): number {
-  if (!existsSync(path)) return 0;
-  const text = readFileSync(path, "utf8");
-  if (!text) return 0;
-  return text.endsWith("\n") ? text.split("\n").length - 1 : text.split("\n").filter(Boolean).length;
-}
+const knownDirs = new Set<string>();
 
 export function appendJsonlWithSource(
   path: string,
@@ -16,11 +11,31 @@ export function appendJsonlWithSource(
   source: Omit<ProjectionSourceRef, "path" | "line" | "offset">,
 ): ProjectionSourceRef {
   const dir = dirname(path);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const offset = existsSync(path) ? statSync(path).size : 0;
-  const line = countJsonlLines(path) + 1;
-  appendFileSync(path, JSON.stringify(payload) + "\n");
-  return { ...source, path, line, offset };
+  if (!knownDirs.has(dir)) {
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    knownDirs.add(dir);
+  }
+  let offset = 0;
+  try {
+    offset = statSync(path).size;
+  } catch {
+    // File doesn't exist yet — append will create it.
+  }
+  const line = JSON.stringify(payload) + "\n";
+  try {
+    appendFileSync(path, line);
+  } catch (err) {
+    // Cached dir may have been removed (e.g. tests rm-rf the tracker dir
+    // between cases). Recreate and retry once.
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      mkdirSync(dir, { recursive: true });
+      knownDirs.add(dir);
+      appendFileSync(path, line);
+    } else {
+      throw err;
+    }
+  }
+  return { ...source, path, offset };
 }
 
 export function sourceKindForFile(path: string): ProjectionSourceKind {

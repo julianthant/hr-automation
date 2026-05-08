@@ -5,7 +5,7 @@ export interface ProjectionSourceRef {
   workflow?: string;
   trackerDate?: string;
   path: string;
-  line: number;
+  line?: number;
   offset: number;
 }
 
