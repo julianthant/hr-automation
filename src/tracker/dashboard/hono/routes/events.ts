@@ -3,7 +3,6 @@ import type { Hono } from "hono";
 
 import {
   dateLocal,
-  listWorkflows,
   readEntries,
   readEntriesForDate,
   readLogEntries,
@@ -14,20 +13,9 @@ import {
   readSessionEvents,
   type SessionEvent,
 } from "../../../session-events.js";
-import { queryEntriesPayload, querySessionEventsForRun } from "../../../state/queries.js";
+import { querySessionEventsForRun } from "../../../state/queries.js";
 import { resolveDaemonLogPath } from "../../ops/index.js";
-import {
-  buildRunTimelines,
-  computeStepDurations,
-  pickEarlier,
-  pickLater,
-  type RunTimeline,
-  type StepDurationEntry,
-} from "../../run-timelines.js";
-import { filterEventsForRun, filterLiveSessionState, rebuildSessionState } from "../../session-state.js";
-import { isResolvedPrepEntry } from "../../prep-rows.js";
-import { computeFailureCounts } from "../../failures.js";
-import { buildScreenshotsHandler } from "../../screenshots.js";
+import { filterEventsForRun } from "../../session-state.js";
 import {
   captureStore,
   serializeCaptureSession,
@@ -36,7 +24,7 @@ import { log } from "../../../../utils/log.js";
 import { getDefaultWorkflow, type DashboardHonoDeps } from "../context.js";
 import { jsonResponse } from "../responses.js";
 import { sseResponse } from "../sse.js";
-import { telegramTopic } from "../topics-emitters.js";
+import { telegramTopic, entriesTopic, sessionsTopic } from "../topics-emitters.js";
 
 let activeDaemonLogWatchers = 0;
 let activeCaptureSseSubscribers = 0;
@@ -49,111 +37,9 @@ export function getActiveHonoCaptureSseSubscriberCountForTests(): number {
   return activeCaptureSseSubscribers;
 }
 
-interface CrossWorkflowCountsCache {
-  workflows: string[];
-  wfCounts: Record<string, number>;
-  failureCounts: Record<string, number>;
-  computedAt: number;
-  key: string;
-}
-
-let countsCache: CrossWorkflowCountsCache | null = null;
-const CROSS_WORKFLOW_COUNTS_TTL_MS = 1_000;
-
-/**
- * TTL cache for the cross-workflow `wfCounts` + `failureCounts` aggregation.
- *
- * The `/events` JSONL-fallback path otherwise re-reads every workflow's
- * tracker JSONL on every 1s tick, regardless of which workflow the client
- * is subscribed to. Under multi-workflow load that's the dominant cost in
- * `buildJsonlEventsPayload` — a sync directory scan + N file reads + N
- * dedupe passes + N failure-count computations, all blocking the Node
- * event loop and queueing other concurrent fetches behind it.
- *
- * The TTL matches the SSE poll cadence (1s), so within any given second
- * the heavy aggregation runs at most once across all connected clients.
- * The cache key includes (dir, targetDate) so date switches and test
- * isolation directories don't share state.
- */
-function getCrossWorkflowCounts(
-  targetDate: string,
-  dir: string,
-): { workflows: string[]; wfCounts: Record<string, number>; failureCounts: Record<string, number> } {
-  const key = `${dir}::${targetDate}`;
-  const now = Date.now();
-  if (
-    countsCache &&
-    countsCache.key === key &&
-    now - countsCache.computedAt < CROSS_WORKFLOW_COUNTS_TTL_MS
-  ) {
-    return {
-      workflows: countsCache.workflows,
-      wfCounts: countsCache.wfCounts,
-      failureCounts: countsCache.failureCounts,
-    };
-  }
-  const workflows = listWorkflows(dir);
-  const wfCounts: Record<string, number> = {};
-  const failureCounts: Record<string, number> = {};
-  for (const wf of workflows) {
-    const all = readEntriesForDate(wf, targetDate, dir);
-    const latestById = new Map<string, TrackerEntry>();
-    for (const entry of all) {
-      const prev = latestById.get(entry.id);
-      if (!prev || prev.timestamp <= entry.timestamp) latestById.set(entry.id, entry);
-    }
-    let count = 0;
-    for (const entry of latestById.values()) {
-      if (isResolvedPrepEntry(entry)) continue;
-      count++;
-    }
-    wfCounts[wf] = count;
-    const failures = computeFailureCounts(all);
-    if (failures > 0) failureCounts[wf] = failures;
-  }
-  countsCache = { workflows, wfCounts, failureCounts, computedAt: now, key };
-  return { workflows, wfCounts, failureCounts };
-}
-
-export function __resetCrossWorkflowCountsCacheForTests(): void {
-  countsCache = null;
-}
-
-const SESSION_STATE_TTL_MS = 1_000;
-let sessionStateCache:
-  | { state: ReturnType<typeof rebuildSessionState>; computedAt: number; key: string }
-  | null = null;
-
-/**
- * 1s TTL cache around `rebuildSessionState` — shared across all connected
- * SSE clients of `/events/sessions` (and any other endpoint that wants the
- * current session aggregate). Without this, every SSE tick (1 Hz × N tabs)
- * re-aggregates every dated `sessions-YYYY-MM-DD.jsonl` file via uncached
- * `readSessionEvents`. With 5 tabs × 30 retained day-files that's ~150 sync
- * file reads/sec on a quiet dashboard.
- *
- * Mirrors the `getCrossWorkflowCounts` pattern: module-level cache keyed by
- * `dir`, TTL matches SSE cadence so within any second the heavy aggregation
- * runs at most once across all connected clients.
- */
-function getCachedSessionState(dir: string): ReturnType<typeof rebuildSessionState> {
-  const key = dir;
-  const now = Date.now();
-  if (
-    sessionStateCache &&
-    sessionStateCache.key === key &&
-    now - sessionStateCache.computedAt < SESSION_STATE_TTL_MS
-  ) {
-    return sessionStateCache.state;
-  }
-  const state = rebuildSessionState(dir);
-  sessionStateCache = { state, computedAt: now, key };
-  return state;
-}
-
-export function __resetSessionStateCacheForTests(): void {
-  sessionStateCache = null;
-}
+// Re-export so existing callers of __resetCrossWorkflowCountsCacheForTests from
+// events.ts continue to work without import changes in test files.
+export { __resetCrossWorkflowCountsCacheForTests } from "./entries-payload.js";
 
 function readTrackerEntriesForStream(
   workflow: string,
@@ -173,112 +59,6 @@ async function readSessionEventsTolerant(dir: string): Promise<SessionEvent[]> {
     // Transient read failures recover on the next tick.
     return [];
   }
-}
-
-function buildJsonlEventsPayload(
-  workflow: string,
-  date: string,
-  today: string,
-  dir: string,
-): {
-  entries: Array<TrackerEntry & {
-    firstLogTs?: string;
-    lastLogTs?: string;
-    lastLogMessage?: string;
-    stepDurations: Record<string, number>;
-    runOrdinal?: number;
-    screenshotCount?: number;
-  }>;
-  workflows: string[];
-  wfCounts: Record<string, number>;
-  failureCounts: Record<string, number>;
-} {
-  const entries = readTrackerEntriesForStream(workflow, date, today, dir);
-  const logs = date && date !== today
-    ? readLogEntriesForDate(workflow, undefined, date, dir)
-    : readLogEntries(workflow, undefined, dir);
-
-  const logFirst = new Map<string, string>();
-  const logLast = new Map<string, string>();
-  const logLastMsg = new Map<string, string>();
-  for (const entry of logs) {
-    const runId = entry.runId || `${entry.itemId}#1`;
-    const key = `${entry.itemId}::${runId}`;
-    if (!logFirst.has(key)) logFirst.set(key, entry.ts);
-    logLast.set(key, entry.ts);
-    logLastMsg.set(key, entry.message);
-  }
-
-  const runHistory = new Map<string, StepDurationEntry[]>();
-  for (const entry of entries) {
-    const runId = entry.runId || `${entry.id}#1`;
-    const key = `${entry.id}::${runId}`;
-    const slim: StepDurationEntry = {
-      timestamp: entry.timestamp,
-      status: entry.status,
-      step: entry.step,
-    };
-    const bucket = runHistory.get(key);
-    if (bucket) bucket.push(slim);
-    else runHistory.set(key, [slim]);
-  }
-  const stepDurationsByRun = new Map<string, Record<string, number>>();
-  for (const [key, rows] of runHistory) {
-    stepDurationsByRun.set(key, computeStepDurations(rows));
-  }
-
-  const entriesByItem = new Map<string, TrackerEntry[]>();
-  for (const entry of entries) {
-    const bucket = entriesByItem.get(entry.id) ?? [];
-    bucket.push(entry);
-    entriesByItem.set(entry.id, bucket);
-  }
-  const timelinesByItem = new Map<string, Map<string, RunTimeline>>();
-  for (const [itemId, rows] of entriesByItem) {
-    timelinesByItem.set(itemId, buildRunTimelines(rows));
-  }
-
-  const screenshotCountByItem = new Map<string, number>();
-  const screenshotsHandler = buildScreenshotsHandler();
-  const enriched = entries.map((entry) => {
-    const runId = entry.runId || `${entry.id}#1`;
-    const key = `${entry.id}::${runId}`;
-    let screenshotCount: number | undefined;
-    if (entry.status === "failed") {
-      const screenshotKey = `${entry.workflow}::${entry.id}`;
-      let count = screenshotCountByItem.get(screenshotKey);
-      if (count === undefined) {
-        try {
-          count = screenshotsHandler(entry.workflow, entry.id).length;
-        } catch {
-          count = 0;
-        }
-        screenshotCountByItem.set(screenshotKey, count);
-      }
-      screenshotCount = count;
-    }
-
-    const timeline = timelinesByItem.get(entry.id)?.get(runId);
-    const logFirstTs = logFirst.get(key);
-    const logLastTs = logLast.get(key);
-    const spanFirstTs = pickEarlier(logFirstTs, timeline?.earliestTrackerTs);
-    const spanLastTs = pickLater(logLastTs, timeline?.latestTrackerTs);
-
-    return {
-      ...entry,
-      firstLogTs: spanFirstTs,
-      lastLogTs: spanLastTs,
-      lastLogMessage: logLastMsg.get(key),
-      stepDurations: stepDurationsByRun.get(key) ?? {},
-      ...(timeline ? { runOrdinal: timeline.ordinal } : {}),
-      ...(screenshotCount !== undefined ? { screenshotCount } : {}),
-    };
-  });
-
-  const targetDate = date || today;
-  const { workflows, wfCounts, failureCounts } = getCrossWorkflowCounts(targetDate, dir);
-
-  return { entries: enriched, workflows, wfCounts, failureCounts };
 }
 
 export function registerEventRoutes(app: Hono, deps: DashboardHonoDeps): void {
@@ -406,37 +186,13 @@ export function registerEventRoutes(app: Hono, deps: DashboardHonoDeps): void {
   });
 
   app.get("/events/sessions", () => {
-    return sseResponse((send) => {
-      const tick = () => send(filterLiveSessionState(getCachedSessionState(deps.dir)));
-      tick();
-      const interval = setInterval(tick, 1_000);
-      interval.unref?.();
-      return () => clearInterval(interval);
-    });
+    return sseResponse((send) => sessionsTopic({}, send, deps));
   });
 
   app.get("/events", (c) => {
-    const workflow = c.req.query("workflow") ?? getDefaultWorkflow(deps);
-    const date = c.req.query("date") ?? "";
-    const today = dateLocal();
-
-    return sseResponse((send) => {
-      const tick = () => {
-        if (deps.projectionReady && deps.stateDb) {
-          try {
-            send(queryEntriesPayload(deps.stateDb, { workflow, date: date || today }));
-            return;
-          } catch (err) {
-            log.warn(`SQLite /events fallback to JSONL: ${err instanceof Error ? err.message : String(err)}`);
-          }
-        }
-        send(buildJsonlEventsPayload(workflow, date, today, deps.dir));
-      };
-      tick();
-      const interval = setInterval(tick, 1_000);
-      interval.unref?.();
-      return () => clearInterval(interval);
-    });
+    const workflow = c.req.query("workflow");
+    const date = c.req.query("date");
+    return sseResponse((send) => entriesTopic({ workflow, date }, send, deps));
   });
 
   app.get("/events/daemon-log", async (c) => {
