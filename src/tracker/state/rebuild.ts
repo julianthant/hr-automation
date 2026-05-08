@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { transaction, type Database } from "../../infra/sqlite/index.js";
 
-import type { TrackerEntry, LogEntry } from "../jsonl.js";
+import { dateLocal, type TrackerEntry, type LogEntry } from "../jsonl.js";
 import type { SessionEvent, ScreenshotSessionEvent } from "../session-events.js";
 import { applyTrackerEntry, applyLogEntry, applySessionEvent } from "./apply.js";
 import type { ProjectionSourceKind, ProjectionSourceRef } from "./types.js";
@@ -55,7 +55,12 @@ function sessionEventDate(event: SessionEvent | ScreenshotSessionEvent): string 
   const timestamp = "timestamp" in event && event.timestamp
     ? event.timestamp
     : new Date((event as ScreenshotSessionEvent).ts).toISOString();
-  return timestamp.slice(0, 10);
+  // Match the writer's local-date routing in `emitSessionEvent`. Using
+  // `timestamp.slice(0, 10)` (UTC) here would silently drop events whose
+  // local date differs from their UTC date — e.g. an event at
+  // 2026-05-08T01:30Z written in PDT routes to `sessions-2026-05-07.jsonl`
+  // but a UTC slice would say "2026-05-08", filtering it out of both dates.
+  return dateLocal(new Date(timestamp));
 }
 
 function recordSource(db: Database, args: {
@@ -148,6 +153,22 @@ export function rebuildProjectionForDate(db: Database, opts: RebuildProjectionOp
     }
 
     recomputeRunOrdinals(db, date);
+
+    // Backfill workflow + item_id on screenshot files whose run row arrived
+    // after `applyScreenshotFiles` ran (or that predate the join fix landing
+    // in the 2026-05-07 storage-opt). `queryScreenshotsForItem` filters by
+    // (workflow, item_id), so null-owner rows are otherwise invisible to the
+    // SQLite-first /api/screenshots path. Idempotent — re-running matches
+    // the same rows the next pass would.
+    db.prepare(`
+      UPDATE files
+      SET workflow = (SELECT workflow FROM runs WHERE runs.run_id = files.run_id),
+          item_id  = (SELECT item_id  FROM runs WHERE runs.run_id = files.run_id)
+      WHERE files.kind = 'screenshot'
+        AND files.run_id IS NOT NULL
+        AND (files.workflow IS NULL OR files.item_id IS NULL)
+        AND EXISTS (SELECT 1 FROM runs WHERE runs.run_id = files.run_id)
+    `).run();
   });
 }
 

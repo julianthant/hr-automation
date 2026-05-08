@@ -262,6 +262,44 @@ describe("cleanTrackerMain SQLite prune", () => {
     );
   });
 
+  it("prunes terminal task_attempts rows by created_at but preserves non-terminal ones", () => {
+    // Open the DB so the schema is migrated. We then seed `task_attempts`
+    // rows directly via SQL — the daemon path that normally creates them
+    // isn't reachable from a unit test. The test pins both:
+    //   (a) the column name `created_at` (a typo here would surface as a
+    //       SQLITE_ERROR rather than a silent no-op), and
+    //   (b) the status guard added 2026-05-07: pruning a still-running
+    //       attempt with an old `created_at` would null out
+    //       `tasks.current_attempt_id` via ON DELETE SET NULL on a live row.
+    const db = openStateDb(dir);
+    const oldIso = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
+    const todayIso = new Date().toISOString();
+
+    // Need parent `tasks` rows because task_attempts.task_id is a FK.
+    db.prepare(
+      "INSERT INTO tasks (id, workflow, item_id, task_kind, status, created_at, updated_at) " +
+        "VALUES ('t1','x','i1','workflow_item','done',@old,@old), " +
+        "       ('t2','x','i2','workflow_item','running',@old,@old), " +
+        "       ('t3','x','i3','workflow_item','done',@today,@today)",
+    ).run({ old: oldIso, today: todayIso });
+    db.prepare(
+      "INSERT INTO task_attempts (id, task_id, attempt_no, run_id, status, " +
+        "tracker_workflow, tracker_item_id, created_at, updated_at) VALUES " +
+        "('a-old-done','t1',1,'r1','done','x','i1',@old,@old), " +
+        "('a-old-running','t2',1,'r2','running','x','i2',@old,@old), " +
+        "('a-today-done','t3',1,'r3','done','x','i3',@today,@today)",
+    ).run({ old: oldIso, today: todayIso });
+
+    cleanTrackerMain(["--days", "30", "--dir", dir, "--no-screenshots"]);
+
+    const remaining = db.prepare(
+      "SELECT id FROM task_attempts ORDER BY id",
+    ).all() as Array<{ id: string }>;
+    const ids = remaining.map((r) => r.id);
+    // Old + done → pruned. Old + running → kept (status guard). Today → kept.
+    assert.deepEqual(ids, ["a-old-running", "a-today-done"]);
+  });
+
   it("returns sqlRowsDeleted count in result", () => {
     // Initialize the DB before seeding so applyTrackerEntryLive writes to it.
     openStateDb(dir);

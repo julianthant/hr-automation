@@ -102,6 +102,49 @@ describe("/events/run-events SSE", () => {
     assert.equal(tick2[0].type, "auth_complete");
   });
 
+  it("falls back to JSONL when SQLite is open but returns zero rows", async () => {
+    // Regression test for the run-events handler's missing zero-rows-fallback
+    // (added 2026-05-07). When the projection is initialised but the query
+    // happens to return no rows (e.g. mid-rebuild, or the run row hasn't
+    // been applied yet), the handler used to assign `[]` unconditionally and
+    // serve an empty stream. It now falls through to the rotation-aware
+    // JSONL aggregation.
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "I", runId: "Z" }, tmp);
+    // Clear SQLite while leaving JSONL intact. The handler's SQLite branch
+    // will see `[]` and must fall back to the JSONL path.
+    const db = openStateDb(tmp);
+    db.exec("DELETE FROM session_events");
+
+    const messages = await collectSSE(
+      `http://localhost:${port}/events/run-events?workflow=onboarding&id=alice@example.com&runId=Z&date=2026-04-19`,
+      { stopAfter: 1, timeoutMs: 1500 },
+    );
+    const allEvents = messages.flatMap((m) => JSON.parse(m));
+    // The event survives via the JSONL fallback even though SQLite is empty.
+    assert.equal(allEvents.length, 1);
+    assert.equal(allEvents[0].type, "workflow_start");
+    assert.equal(allEvents[0].runId, "Z");
+  });
+
+  it("falls back to JSONL when the SQLite query throws", async () => {
+    // Regression test for the run-events handler's missing try/catch
+    // (added 2026-05-07). Drop the table the handler queries to force a
+    // SQLite-side throw — the handler must catch, log a warn, and continue
+    // through to the JSONL fallback rather than emit an empty stream.
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "I", runId: "T" }, tmp);
+    const db = openStateDb(tmp);
+    db.exec("DROP TABLE session_events");
+
+    const messages = await collectSSE(
+      `http://localhost:${port}/events/run-events?workflow=onboarding&id=alice@example.com&runId=T&date=2026-04-19`,
+      { stopAfter: 1, timeoutMs: 1500 },
+    );
+    const allEvents = messages.flatMap((m) => JSON.parse(m));
+    assert.equal(allEvents.length, 1);
+    assert.equal(allEvents[0].type, "workflow_start");
+    assert.equal(allEvents[0].runId, "T");
+  });
+
   it("skips malformed JSONL lines without crashing", async () => {
     emitSessionEvent({ type: "workflow_start", workflowInstance: "I", runId: "A" }, tmp);
     // Malformed line in JSONL does not affect SQLite; both events should be readable.

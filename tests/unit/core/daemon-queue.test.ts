@@ -247,7 +247,13 @@ test('recoverOrphanedClaims leaves claims by alive workers alone', async () => {
   }
 })
 
-test('readQueueState skips malformed lines (truncated / corrupted)', async () => {
+// `readQueueState` reads exclusively from SQLite (Task 6, 2026-05-07 retired
+// the JSONL queue backend). The two tests below exist as regression guards
+// against re-introducing a JSONL read path: if someone wires `readQueueState`
+// to consume `.queue.jsonl` again, the malformed-line and orphan-claim cases
+// would silently corrupt state. We assert SQLite stays the authority by
+// poisoning the audit JSONL and confirming queue state is unchanged.
+test('readQueueState ignores arbitrary content in the .queue.jsonl audit log', async () => {
   const dir = TMP()
   try {
     await enqueueItems('wf', [{}], () => 'a', dir)
@@ -261,11 +267,9 @@ test('readQueueState skips malformed lines (truncated / corrupted)', async () =>
   }
 })
 
-test('readQueueState ignores orphan claim/done/failed events without prior enqueue', async () => {
+test('readQueueState ignores orphan claim/done/failed events appended to the audit log', async () => {
   const dir = TMP()
   try {
-    // Seed one real enqueue so the queue file + dir exist, then manually append
-    // an orphan claim for a non-existent id.
     await enqueueItems('wf', [{}], () => 'real', dir)
     appendFileSync(
       queueFilePath('wf', dir),
