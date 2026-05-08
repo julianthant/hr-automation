@@ -103,6 +103,46 @@ test("rebuildProjectionForDate skips sessions-${date}.jsonl in the tracker loop"
   }
 });
 
+test("rebuildProjectionForDate applies only new bytes on second call (incremental)", () => {
+  const dir = tmpTracker();
+  const date = "2026-05-04";
+  try {
+    const trackerPath = join(dir, `onboarding-${date}.jsonl`);
+
+    // First write: one entry
+    appendFileSync(trackerPath, JSON.stringify({
+      workflow: "onboarding",
+      timestamp: "2026-05-04T20:00:00.000Z",
+      id: "alice",
+      runId: "run-1",
+      status: "done",
+      data: { name: "Alice" },
+    }) + "\n");
+
+    const db = openStateDb(dir);
+    rebuildProjectionForDate(db, { dir, date });
+    const countAfterFirst = (db.prepare("SELECT COUNT(*) AS n FROM run_events").get() as { n: number }).n;
+    assert.equal(countAfterFirst, 1, "first rebuild should produce 1 run_event");
+
+    // Second write: a new entry appended after the first rebuild
+    appendFileSync(trackerPath, JSON.stringify({
+      workflow: "onboarding",
+      timestamp: "2026-05-04T21:00:00.000Z",
+      id: "bob",
+      runId: "run-2",
+      status: "done",
+      data: { name: "Bob" },
+    }) + "\n");
+
+    rebuildProjectionForDate(db, { dir, date });
+    const countAfterSecond = (db.prepare("SELECT COUNT(*) AS n FROM run_events").get() as { n: number }).n;
+    assert.equal(countAfterSecond, 2, "second rebuild should add only the new entry");
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("rebuildProjectionForDate only clears session events for the rebuilt date", () => {
   const dir = tmpTracker();
   try {

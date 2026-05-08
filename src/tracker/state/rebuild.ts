@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { transaction, type Database } from "../../infra/sqlite/index.js";
@@ -19,6 +19,13 @@ interface ParsedLine<T> {
   offset: number;
 }
 
+/**
+ * Read all lines from a JSONL file regardless of byte offset.
+ * Used only for the legacy multi-date `sessions.jsonl` where we cannot
+ * skip by offset (the file spans multiple dates, so we must filter by date
+ * at parse time — but INSERT OR IGNORE on UNIQUE(source_path, source_offset)
+ * absorbs already-seen lines as a no-op).
+ */
 function parseJsonl<T>(path: string): ParsedLine<T>[] {
   if (!existsSync(path)) return [];
   const text = readFileSync(path, "utf8");
@@ -32,6 +39,42 @@ function parseJsonl<T>(path: string): ParsedLine<T>[] {
         out.push({ value: JSON.parse(rawLine) as T, line, offset });
       } catch {
         // Rebuild is tolerant so one truncated append cannot block the dashboard.
+      }
+    }
+    offset += bytes;
+    line += 1;
+  }
+  return out;
+}
+
+/**
+ * Read only the slice [startAt, EOF] of a JSONL file.
+ * Each returned ParsedLine carries its byte offset within the full file
+ * (not relative to startAt), so the source ref passed to apply* functions
+ * remains consistent with previously-stored offsets.
+ */
+function parseJsonlFrom<T>(path: string, startAt: number): ParsedLine<T>[] {
+  const stat = existsSync(path) ? statSync(path) : null;
+  if (!stat || stat.size <= startAt) return [];
+  const remaining = stat.size - startAt;
+  const buf = Buffer.alloc(remaining);
+  const fd = openSync(path, "r");
+  try {
+    readSync(fd, buf, 0, remaining, startAt);
+  } finally {
+    closeSync(fd);
+  }
+  const text = buf.toString("utf-8");
+  const out: ParsedLine<T>[] = [];
+  let offset = startAt;
+  let line = 1; // approximate — we don't track absolute line number from startAt
+  for (const rawLine of text.split("\n")) {
+    const bytes = Buffer.byteLength(rawLine + "\n");
+    if (rawLine.trim()) {
+      try {
+        out.push({ value: JSON.parse(rawLine) as T, line, offset });
+      } catch {
+        // Tolerant — a truncated tail line should not block the dashboard.
       }
     }
     offset += bytes;
@@ -100,14 +143,27 @@ function recordSource(db: Database, args: {
   });
 }
 
+/**
+ * Load existing per-path byte_offsets from projection_sources.
+ * UNIQUE(source_kind, path) — no tracker_date in the key — so we key by path.
+ */
+function loadExistingOffsets(db: Database): Map<string, number> {
+  const rows = db.prepare(`
+    SELECT path, byte_offset FROM projection_sources
+  `).all() as Array<{ path: string; byte_offset: number }>;
+  const map = new Map<string, number>();
+  for (const row of rows) map.set(row.path, row.byte_offset);
+  return map;
+}
+
 export function rebuildProjectionForDate(db: Database, opts: RebuildProjectionOpts): void {
   const { dir, date } = opts;
   transaction(db, () => {
-    db.prepare("DELETE FROM run_events WHERE tracker_date = ?").run(date);
-    db.prepare("DELETE FROM logs WHERE tracker_date = ?").run(date);
-    db.prepare("DELETE FROM runs WHERE tracker_date = ?").run(date);
-    db.prepare("DELETE FROM items WHERE tracker_date = ?").run(date);
-    db.prepare("DELETE FROM session_events WHERE tracker_date = ?").run(date);
+    // Incremental rebuild: instead of DELETE + full replay, we read only the
+    // bytes past each source's last-recorded byte_offset. INSERT OR IGNORE on
+    // UNIQUE(source_path, source_offset) absorbs any over-read as a no-op, so
+    // the approach is safe even if the offset is slightly stale. No DELETE needed.
+    const existingOffsets = loadExistingOffsets(db);
 
     const filenames = existsSync(dir) ? readdirSync(dir) : [];
     for (const filename of filenames) {
@@ -119,7 +175,8 @@ export function rebuildProjectionForDate(db: Database, opts: RebuildProjectionOp
       if (filename === `sessions-${date}.jsonl`) continue;
       const workflow = filename.slice(0, -`-${date}.jsonl`.length);
       const path = join(dir, filename);
-      const parsed = parseJsonl<TrackerEntry>(path);
+      const startAt = existingOffsets.get(path) ?? 0;
+      const parsed = parseJsonlFrom<TrackerEntry>(path, startAt);
       for (const row of parsed) {
         applyTrackerEntry(db, row.value, source(path, "tracker", row.line, row.offset, date, workflow));
       }
@@ -130,7 +187,8 @@ export function rebuildProjectionForDate(db: Database, opts: RebuildProjectionOp
       if (!filename.endsWith(`-${date}-logs.jsonl`)) continue;
       const workflow = filename.slice(0, -`-${date}-logs.jsonl`.length);
       const path = join(dir, filename);
-      const parsed = parseJsonl<LogEntry>(path);
+      const startAt = existingOffsets.get(path) ?? 0;
+      const parsed = parseJsonlFrom<LogEntry>(path, startAt);
       for (const row of parsed) {
         applyLogEntry(db, row.value, source(path, "log", row.line, row.offset, date, workflow));
       }
@@ -140,12 +198,23 @@ export function rebuildProjectionForDate(db: Database, opts: RebuildProjectionOp
     // Aggregate session events from both the legacy sessions.jsonl and any
     // dated sessions-YYYY-MM-DD.jsonl files. The dated file for `date` is the
     // primary source after rotation; the legacy file holds pre-rotation data.
-    const sessionFiles = [
-      join(dir, "sessions.jsonl"),
-      join(dir, `sessions-${date}.jsonl`),
-    ].filter((p, i, arr) => arr.indexOf(p) === i); // deduplicate (if same path)
-    for (const sessionsPath of sessionFiles) {
-      const sessions = parseJsonl<SessionEvent | ScreenshotSessionEvent>(sessionsPath);
+    //
+    // Incremental strategy per file type:
+    //   - sessions-${date}.jsonl: single-date file → safe to use byte_offset.
+    //   - sessions.jsonl: multi-date file → must read fully and filter by date
+    //     at parse time. INSERT OR IGNORE absorbs already-seen lines as a no-op.
+    const datedSessionPath = join(dir, `sessions-${date}.jsonl`);
+    const legacySessionPath = join(dir, "sessions.jsonl");
+    const sessionFilePairs: Array<{ path: string; incremental: boolean }> = [
+      { path: legacySessionPath, incremental: false },
+      { path: datedSessionPath, incremental: true },
+    ].filter((f, i, arr) => arr.findIndex((x) => x.path === f.path) === i); // deduplicate
+
+    for (const { path: sessionsPath, incremental } of sessionFilePairs) {
+      const startAt = incremental ? (existingOffsets.get(sessionsPath) ?? 0) : 0;
+      const sessions = incremental
+        ? parseJsonlFrom<SessionEvent | ScreenshotSessionEvent>(sessionsPath, startAt)
+        : parseJsonl<SessionEvent | ScreenshotSessionEvent>(sessionsPath);
       let sessionLineCount = 0;
       for (const row of sessions) {
         const eventDate = sessionEventDate(row.value);
@@ -177,25 +246,33 @@ export function rebuildProjectionForDate(db: Database, opts: RebuildProjectionOp
 }
 
 export function recomputeRunOrdinals(db: Database, date: string): void {
-  const rows = db.prepare(`
-    SELECT workflow, item_id, run_id, COALESCE(first_work_ts, first_any_ts) AS first_ts
-    FROM runs
-    WHERE tracker_date = ?
-    ORDER BY workflow, item_id, first_ts, run_id
-  `).all(date) as Array<{ workflow: string; item_id: string; run_id: string; first_ts: string }>;
-  let currentKey = "";
-  let ordinal = 0;
-  const update = db.prepare(`
-    UPDATE runs SET run_ordinal = @ordinal
-    WHERE workflow = @workflow AND tracker_date = @date AND item_id = @itemId AND run_id = @runId
+  // Single CTE-driven UPDATE replaces N per-row UPDATEs.
+  // date is a controlled YYYY-MM-DD string from dateLocal() — not user input.
+  const safeDate = date.replace(/'/g, "''");
+  db.exec(`
+    WITH ordered AS (
+      SELECT
+        workflow, item_id, run_id,
+        ROW_NUMBER() OVER (
+          PARTITION BY workflow, item_id
+          ORDER BY COALESCE(first_work_ts, first_any_ts), run_id
+        ) AS ordinal
+      FROM runs
+      WHERE tracker_date = '${safeDate}'
+    )
+    UPDATE runs
+    SET run_ordinal = (
+      SELECT ordinal FROM ordered
+      WHERE ordered.workflow = runs.workflow
+        AND ordered.item_id = runs.item_id
+        AND ordered.run_id  = runs.run_id
+    )
+    WHERE tracker_date = '${safeDate}'
+      AND EXISTS (
+        SELECT 1 FROM ordered
+        WHERE ordered.workflow = runs.workflow
+          AND ordered.item_id  = runs.item_id
+          AND ordered.run_id   = runs.run_id
+      );
   `);
-  for (const row of rows) {
-    const key = `${row.workflow}\0${row.item_id}`;
-    if (key !== currentKey) {
-      currentKey = key;
-      ordinal = 0;
-    }
-    ordinal += 1;
-    update.run({ ordinal, workflow: row.workflow, date, itemId: row.item_id, runId: row.run_id });
-  }
 }
