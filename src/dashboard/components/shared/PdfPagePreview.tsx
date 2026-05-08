@@ -133,34 +133,20 @@ export function PdfPagePreview({
 
   useEffect(() => {
     if (!shouldLoad) return;
-    let done = false;
-    const mark = (status: "ok" | "error") => {
-      if (done) return;
-      done = true;
-      setState(status);
-      onStatusChange?.(page, status);
-    };
-    const checkDecoded = () => {
-      const img = imgRef.current;
-      if (!img?.complete) return;
-      mark(img.naturalWidth > 0 ? "ok" : "error");
-    };
-
-    checkDecoded();
-    const interval = window.setInterval(checkDecoded, 100);
+    // 15s safety net — onLoad/onError fire reliably on the <img>; this
+    // is the fallback for pathological cases where neither fires (e.g.,
+    // navigation aborts the fetch silently).
     const timeout = window.setTimeout(() => {
       const img = imgRef.current;
       if (img?.complete && img.naturalWidth > 0) {
-        mark("ok");
+        setState("ok");
+        onStatusChange?.(page, "ok");
       } else {
-        mark("error");
+        setState("error");
+        onStatusChange?.(page, "error");
       }
     }, 15000);
-
-    return () => {
-      window.clearInterval(interval);
-      window.clearTimeout(timeout);
-    };
+    return () => window.clearTimeout(timeout);
   }, [shouldLoad, src, page, onStatusChange]);
 
   const markLoaded = () => {
