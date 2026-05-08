@@ -1,4 +1,5 @@
 import type { Page } from "playwright";
+import { setTimeout as sleep } from "node:timers/promises";
 import { pollDuoApproval, type DuoPollOptions } from "../../infra/auth/duo-poll.js";
 import { emitSessionEvent, readSessionEvents } from "../session-events.js";
 import { log } from "../../utils/log.js";
@@ -119,24 +120,13 @@ function throwIfDuoQueueAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw duoQueueAbortReason(signal);
 }
 
-function waitForDuoQueue(ms: number, abortSignal?: AbortSignal): Promise<void> {
-  if (!abortSignal) return new Promise((r) => setTimeout(r, ms));
-  if (abortSignal.aborted) return Promise.reject(duoQueueAbortReason(abortSignal));
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      cleanup();
-      resolve();
-    }, ms);
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      cleanup();
-      reject(duoQueueAbortReason(abortSignal));
-    };
-    const cleanup = (): void => {
-      abortSignal.removeEventListener("abort", onAbort);
-    };
-    abortSignal.addEventListener("abort", onAbort, { once: true });
-  });
+async function waitForDuoQueue(ms: number, abortSignal?: AbortSignal): Promise<void> {
+  try {
+    await sleep(ms, undefined, { signal: abortSignal });
+  } catch (err) {
+    if (abortSignal?.aborted) throw duoQueueAbortReason(abortSignal);
+    throw err;
+  }
 }
 
 function isProcessAlive(pid: number): boolean {

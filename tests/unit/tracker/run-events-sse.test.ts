@@ -24,10 +24,10 @@ async function collectSSE(
   opts: { stopAfter: number; timeoutMs: number },
 ): Promise<string[]> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
+  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(opts.timeoutMs)]);
   const messages: string[] = [];
   try {
-    const res = await fetch(url, { signal: controller.signal });
+    const res = await fetch(url, { signal });
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     while (messages.length < opts.stopAfter) {
@@ -41,7 +41,6 @@ async function collectSSE(
   } catch {
     // AbortError or any read error — return whatever we gathered.
   } finally {
-    clearTimeout(timer);
     controller.abort();
   }
   return messages;
