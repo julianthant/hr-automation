@@ -187,10 +187,21 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, defa
     { key: "__elapsed", label: "Elapsed" },
   ];
 
+  // The detail grid renders fields off `formatTrackerValue(entry, key)`,
+  // which reads `entry.data[key]`. When the operator is viewing a HISTORICAL
+  // run via the RunSelector, the deduped entry's data is the LATEST run's
+  // data (often null/empty for cancelled rows) \u2014 not the data captured by
+  // the run they actually selected. Use the per-run `data` carried on
+  // `RunInfo` (server-side `runs.latest_data_json` via `/api/runs`) so
+  // switching the run pill repaints the grid with that run's own values.
+  const detailEntry: TrackerEntry = !isViewingLiveRun && activeRun?.data
+    ? { ...entry, data: activeRun.data as TrackerEntry["data"] }
+    : entry;
+
   const renderDetailValue = (key: string): string => {
     if (key === "__started") return startTime;
     if (key === "__elapsed") return elapsed || duration || "\u2014";
-    return formatTrackerValue(entry, key);
+    return formatTrackerValue(detailEntry, key);
   };
 
   const Skeleton = ({ className }: { className?: string }) => (
