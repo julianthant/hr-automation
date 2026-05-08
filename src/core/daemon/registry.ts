@@ -157,45 +157,50 @@ export async function findAliveDaemons(workflow: string, trackerDir?: string): P
   const candidates = entries.filter(
     (f) => f.startsWith(prefix) && f.endsWith('.lock.json') && !f.includes('.lock.json.tmp'),
   )
-  const alive: Daemon[] = []
-  for (const entry of candidates) {
-    const path = join(dir, entry)
-    const lock = readLockfile(path)
-    if (!lock || lock.workflow !== workflow) {
-      safeUnlink(path)
-      continue
-    }
-    if (!isProcessAlive(lock.pid)) {
-      safeUnlink(path)
-      continue
-    }
-    const probe = await probeWhoami(lock.port, {
-      workflow: lock.workflow,
-      instanceId: lock.instanceId,
-    })
-    if (probe === 'mismatch') {
-      // Positive identity mismatch: that port is bound by a different daemon
-      // (or an unrelated process). Lockfile is stale — unlink so subsequent
-      // probes don't keep checking it.
-      safeUnlink(path)
-      continue
-    }
-    // 'match' OR ('unreachable' && PID alive) — trust the lockfile. The
-    // unreachable-but-alive case happens when the daemon's event loop is
-    // briefly busy (sync write during keepalive, mid-Playwright RPC). The
-    // alternative — unlinking — orphans a healthy daemon and forces enqueue
-    // callers to spawn a duplicate. Best-effort wake fan-out tolerates a
-    // wedged probe; spawning duplicates is a far worse failure mode.
-    alive.push({
-      workflow: lock.workflow,
-      instanceId: lock.instanceId,
-      pid: lock.pid,
-      ...(lock.parentPid ? { parentPid: lock.parentPid } : {}),
-      port: lock.port,
-      startedAt: lock.startedAt,
-      lockfilePath: path,
-    })
-  }
+  // Probe every candidate in parallel — each lockfile + probe is an
+  // independent network/syscall pair. Worst-case wall time was N × 1.5s
+  // (one slow probe times out, the next one starts); now it's max(per-probe).
+  const probeResults = await Promise.all(
+    candidates.map(async (entry) => {
+      const path = join(dir, entry)
+      const lock = readLockfile(path)
+      if (!lock || lock.workflow !== workflow) {
+        safeUnlink(path)
+        return null
+      }
+      if (!isProcessAlive(lock.pid)) {
+        safeUnlink(path)
+        return null
+      }
+      const probe = await probeWhoami(lock.port, {
+        workflow: lock.workflow,
+        instanceId: lock.instanceId,
+      })
+      if (probe === 'mismatch') {
+        // Positive identity mismatch: that port is bound by a different daemon
+        // (or an unrelated process). Lockfile is stale — unlink so subsequent
+        // probes don't keep checking it.
+        safeUnlink(path)
+        return null
+      }
+      // 'match' OR ('unreachable' && PID alive) — trust the lockfile. The
+      // unreachable-but-alive case happens when the daemon's event loop is
+      // briefly busy (sync write during keepalive, mid-Playwright RPC). The
+      // alternative — unlinking — orphans a healthy daemon and forces enqueue
+      // callers to spawn a duplicate. Best-effort wake fan-out tolerates a
+      // wedged probe; spawning duplicates is a far worse failure mode.
+      return {
+        workflow: lock.workflow,
+        instanceId: lock.instanceId,
+        pid: lock.pid,
+        ...(lock.parentPid ? { parentPid: lock.parentPid } : {}),
+        port: lock.port,
+        startedAt: lock.startedAt,
+        lockfilePath: path,
+      } satisfies Daemon
+    }),
+  )
+  const alive = probeResults.filter((d): d is Daemon => d !== null)
   alive.sort((a, b) => a.startedAt.localeCompare(b.startedAt))
   return alive
 }
