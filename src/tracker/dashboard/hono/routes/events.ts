@@ -119,6 +119,42 @@ export function __resetCrossWorkflowCountsCacheForTests(): void {
   countsCache = null;
 }
 
+const SESSION_STATE_TTL_MS = 1_000;
+let sessionStateCache:
+  | { state: ReturnType<typeof rebuildSessionState>; computedAt: number; key: string }
+  | null = null;
+
+/**
+ * 1s TTL cache around `rebuildSessionState` — shared across all connected
+ * SSE clients of `/events/sessions` (and any other endpoint that wants the
+ * current session aggregate). Without this, every SSE tick (1 Hz × N tabs)
+ * re-aggregates every dated `sessions-YYYY-MM-DD.jsonl` file via uncached
+ * `readSessionEvents`. With 5 tabs × 30 retained day-files that's ~150 sync
+ * file reads/sec on a quiet dashboard.
+ *
+ * Mirrors the `getCrossWorkflowCounts` pattern: module-level cache keyed by
+ * `dir`, TTL matches SSE cadence so within any second the heavy aggregation
+ * runs at most once across all connected clients.
+ */
+function getCachedSessionState(dir: string): ReturnType<typeof rebuildSessionState> {
+  const key = dir;
+  const now = Date.now();
+  if (
+    sessionStateCache &&
+    sessionStateCache.key === key &&
+    now - sessionStateCache.computedAt < SESSION_STATE_TTL_MS
+  ) {
+    return sessionStateCache.state;
+  }
+  const state = rebuildSessionState(dir);
+  sessionStateCache = { state, computedAt: now, key };
+  return state;
+}
+
+export function __resetSessionStateCacheForTests(): void {
+  sessionStateCache = null;
+}
+
 function readTrackerEntriesForStream(
   workflow: string,
   date: string,
@@ -389,7 +425,7 @@ export function registerEventRoutes(app: Hono, deps: DashboardHonoDeps): void {
 
   app.get("/events/sessions", () => {
     return sseResponse((send) => {
-      const tick = () => send(filterLiveSessionState(rebuildSessionState(deps.dir)));
+      const tick = () => send(filterLiveSessionState(getCachedSessionState(deps.dir)));
       tick();
       const interval = setInterval(tick, 1_000);
       interval.unref?.();
