@@ -246,10 +246,10 @@ export function rebuildProjectionForDate(db: Database, opts: RebuildProjectionOp
 }
 
 export function recomputeRunOrdinals(db: Database, date: string): void {
-  // Single CTE-driven UPDATE replaces N per-row UPDATEs.
-  // date is a controlled YYYY-MM-DD string from dateLocal() — not user input.
-  const safeDate = date.replace(/'/g, "''");
-  db.exec(`
+  // Single CTE-driven UPDATE replaces N per-row UPDATEs. Parameterized
+  // via db.prepare(...).run() — node:sqlite supports CTE in UPDATEs
+  // through prepared statements, no manual string escape needed.
+  db.prepare(`
     WITH ordered AS (
       SELECT
         workflow, item_id, run_id,
@@ -258,7 +258,7 @@ export function recomputeRunOrdinals(db: Database, date: string): void {
           ORDER BY COALESCE(first_work_ts, first_any_ts), run_id
         ) AS ordinal
       FROM runs
-      WHERE tracker_date = '${safeDate}'
+      WHERE tracker_date = @date
     )
     UPDATE runs
     SET run_ordinal = (
@@ -267,12 +267,12 @@ export function recomputeRunOrdinals(db: Database, date: string): void {
         AND ordered.item_id = runs.item_id
         AND ordered.run_id  = runs.run_id
     )
-    WHERE tracker_date = '${safeDate}'
+    WHERE tracker_date = @date
       AND EXISTS (
         SELECT 1 FROM ordered
         WHERE ordered.workflow = runs.workflow
           AND ordered.item_id  = runs.item_id
           AND ordered.run_id   = runs.run_id
       );
-  `);
+  `).run({ date });
 }
