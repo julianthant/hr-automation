@@ -145,6 +145,17 @@ describe("selectPersonName", () => {
     assert.equal(selectPersonName(["Active", "Leo Langley"]), "Leo Langley");
   });
 
+  it("rejects 'Loading Complete' UI status text leaking from UCPath", () => {
+    // Regression observed 2026-05-08 on a fresh-daemon Person Org Summary
+    // single-result page: "Loading Complete" passed the two-word + no-digit
+    // shape filter and was picked as the name when the page hadn't fully
+    // settled. Skip-list now rejects it.
+    assert.equal(
+      selectPersonName(["Loading Complete", "Leo Langley"]),
+      "Leo Langley",
+    );
+  });
+
   it("PERSON_ORG_NAME_LABELS is the default label list", () => {
     assert.ok(PERSON_ORG_NAME_LABELS.includes("Person ID"));
     assert.ok(PERSON_ORG_NAME_LABELS.includes("HR Status"));

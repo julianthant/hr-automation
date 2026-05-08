@@ -80,6 +80,53 @@ test("queryRunsForItem returns /api/runs-compatible run summaries", () => {
   }
 });
 
+test("queryRunsForItem assigns distinct run_ordinal in live-apply path (regression)", () => {
+  // Repro: previously two runs for the same item both ended up with
+  // run_ordinal=1 because the live applyTrackerEntry path never recomputed
+  // ordinals — only the full rebuildProjectionForDate did. The dashboard
+  // RunSelector then displayed both as "Run #1".
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    // First run (older first_work_ts).
+    trackEvent({
+      workflow: "work-study",
+      timestamp: "2026-05-04T20:00:00.000Z",
+      id: "10000001",
+      runId: "run-uuid-a",
+      status: "running",
+      step: "transaction",
+    }, dir);
+    trackEvent({
+      workflow: "work-study",
+      timestamp: "2026-05-04T20:01:00.000Z",
+      id: "10000001",
+      runId: "run-uuid-a",
+      status: "done",
+    }, dir);
+    // Second run, same item, same day.
+    trackEvent({
+      workflow: "work-study",
+      timestamp: "2026-05-04T20:05:00.000Z",
+      id: "10000001",
+      runId: "run-uuid-b",
+      status: "running",
+      step: "transaction",
+    }, dir);
+    const db = openStateDb(dir);
+    const runs = queryRunsForItem(db, { workflow: "work-study", itemId: "10000001", date: "2026-05-04" });
+    assert.equal(runs.length, 2);
+    const a = runs.find((r) => r.runId === "run-uuid-a");
+    const b = runs.find((r) => r.runId === "run-uuid-b");
+    assert.ok(a && b, "both runs present");
+    assert.equal(a.runOrdinal, 1, "first run gets ordinal 1");
+    assert.equal(b.runOrdinal, 2, "second run gets ordinal 2");
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ── queryPriorEntriesByKey ────────────────────────────────────────────────────
 
 test("queryPriorEntriesByKey: returns rows where data[key] === value", () => {
