@@ -3,6 +3,7 @@ import { mkdir, rmdir } from "fs/promises";
 import { setTimeout as delay } from "timers/promises";
 import { join } from "path";
 import {
+  dateLocal,
   listDatesForWorkflow,
   readEntries,
   readEntriesForDate,
@@ -305,8 +306,10 @@ export function findPriorEntriesByKey(
   if (isStateDbReady(dir)) {
     try {
       const db = openStateDb(dir);
-      // Compute YYYY-MM-DD cutoff matching the JSONL path's date arithmetic.
-      const cutoffDate = cutoff.toISOString().slice(0, 10);
+      // Match the JSONL fallback's local-time cutoff. UTC slicing here would
+      // shift the cutoff by a day for late-evening queries in negative-UTC
+      // timezones (US/PT), silently dropping the boundary day's hits.
+      const cutoffDate = dateLocal(cutoff);
       const rows = queryPriorEntriesByKey(db, {
         workflow,
         keyField,
