@@ -7,11 +7,9 @@ import { createServer, type Server } from "http";
 import { getRequestListener } from "@hono/node-server";
 import { createDashboardServer } from "../../../src/tracker/dashboard.js";
 import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
-import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
-
-function appendEvent(dir: string, event: object): void {
-  appendFileSync(join(dir, "sessions.jsonl"), JSON.stringify(event) + "\n");
-}
+import { closeStateDbForTests, openStateDb, stateDbPath } from "../../../src/tracker/state/db.js";
+import { emitSessionEvent, readSessionEvents } from "../../../src/tracker/session-events.js";
+import { querySessionEventsForRun } from "../../../src/tracker/state/queries.js";
 
 /**
  * Collect SSE `data:` payloads from `url` until either `stopAfter` messages
@@ -53,6 +51,9 @@ describe("/events/run-events SSE", () => {
 
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "run-evt-sse-"));
+    // Open the DB first so that emitSessionEvent can populate SQLite via the
+    // live projection path (applySessionEventLive -> isStateDbReady -> true).
+    openStateDb(tmp);
     server = createDashboardServer({ port: 0, dir: tmp, noClean: true });
     port = (server.address() as { port: number }).port;
   });
@@ -65,9 +66,9 @@ describe("/events/run-events SSE", () => {
   });
 
   it("filters events by runId on first tick", async () => {
-    appendEvent(tmp, { type: "workflow_start", timestamp: "2026-04-19T10:00:00Z", pid: 1, workflowInstance: "I", runId: "A" });
-    appendEvent(tmp, { type: "browser_launch", timestamp: "2026-04-19T10:00:01Z", pid: 1, workflowInstance: "I", runId: "A", system: "crm" });
-    appendEvent(tmp, { type: "workflow_start", timestamp: "2026-04-19T10:01:00Z", pid: 2, workflowInstance: "J", runId: "B" });
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "I", runId: "A" }, tmp);
+    emitSessionEvent({ type: "browser_launch", workflowInstance: "I", runId: "A", system: "crm", sessionId: "s1", browserId: "b1" }, tmp);
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "J", runId: "B" }, tmp);
 
     const messages = await collectSSE(
       `http://localhost:${port}/events/run-events?workflow=onboarding&id=alice@example.com&runId=A&date=2026-04-19`,
@@ -79,16 +80,16 @@ describe("/events/run-events SSE", () => {
   });
 
   it("emits delta on subsequent ticks (only new events)", async () => {
-    appendEvent(tmp, { type: "workflow_start", timestamp: "2026-04-19T10:00:00Z", pid: 1, workflowInstance: "I", runId: "A" });
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "I", runId: "A" }, tmp);
 
-    // Kick off collection in the background; append the second event mid-flight
+    // Kick off collection in the background; emit the second event mid-flight
     // so the server's next 500ms tick picks it up and emits a delta message.
     const pending = collectSSE(
       `http://localhost:${port}/events/run-events?workflow=onboarding&id=alice@example.com&runId=A&date=2026-04-19`,
       { stopAfter: 2, timeoutMs: 2500 },
     );
     await new Promise((r) => setTimeout(r, 200));
-    appendEvent(tmp, { type: "auth_complete", timestamp: "2026-04-19T10:00:05Z", pid: 1, workflowInstance: "I", runId: "A", system: "crm" });
+    emitSessionEvent({ type: "auth_complete", workflowInstance: "I", runId: "A", system: "crm", browserId: "b1" }, tmp);
 
     const messages = await pending;
 
@@ -102,9 +103,10 @@ describe("/events/run-events SSE", () => {
   });
 
   it("skips malformed JSONL lines without crashing", async () => {
-    appendEvent(tmp, { type: "workflow_start", timestamp: "2026-04-19T10:00:00Z", pid: 1, workflowInstance: "I", runId: "A" });
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "I", runId: "A" }, tmp);
+    // Malformed line in JSONL does not affect SQLite; both events should be readable.
     appendFileSync(join(tmp, "sessions.jsonl"), "{not-valid-json\n");
-    appendEvent(tmp, { type: "auth_complete", timestamp: "2026-04-19T10:00:05Z", pid: 1, workflowInstance: "I", runId: "A", system: "crm" });
+    emitSessionEvent({ type: "auth_complete", workflowInstance: "I", runId: "A", system: "crm", browserId: "b1" }, tmp);
 
     const messages = await collectSSE(
       `http://localhost:${port}/events/run-events?workflow=onboarding&id=alice@example.com&runId=A&date=2026-04-19`,
@@ -113,6 +115,54 @@ describe("/events/run-events SSE", () => {
     const allEvents = messages.flatMap((m) => JSON.parse(m));
     assert.equal(allEvents.length, 2);
     assert.deepEqual(allEvents.map((e: { type: string }) => e.type), ["workflow_start", "auth_complete"]);
+  });
+});
+
+describe("/events/run-events SQLite vs JSONL parity", () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "run-evt-parity-"));
+    // Initialize SQLite so that emitSessionEvent populates both JSONL and
+    // SQLite via the live projection path (applySessionEventLive).
+    openStateDb(tmp);
+  });
+
+  afterEach(() => {
+    closeStateDbForTests(tmp);
+    if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("querySessionEventsForRun returns the same events as readSessionEvents filtered by runId", () => {
+    // Seed via the normal emit path so both JSONL and SQLite are populated.
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "I", runId: "r1" }, tmp);
+    emitSessionEvent({ type: "auth_complete", workflowInstance: "I", runId: "r1", system: "ucpath", browserId: "b1" }, tmp);
+    // A second run that should NOT appear.
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "J", runId: "r2" }, tmp);
+
+    const db = openStateDb(tmp);
+
+    // SQLite path: query by runId.
+    const fromSqlite = querySessionEventsForRun(db, { runId: "r1" })
+      .map((e) => ({ ...e }));
+
+    // JSONL path: read all events and filter by runId (mirrors what filterEventsForRun does).
+    const fromJsonl = readSessionEvents(tmp)
+      .filter((e) => e.runId === "r1")
+      .map((e) => ({ ...e }));
+
+    // Both paths should return the same two events.
+    assert.equal(fromSqlite.length, 2, "SQLite should return 2 events for r1");
+    assert.equal(fromJsonl.length, 2, "JSONL should return 2 events for r1");
+
+    // Event types must match (order may differ by fractional ms; sort to compare).
+    const sqliteTypes = fromSqlite.map((e) => e.type).sort();
+    const jsonlTypes = fromJsonl.map((e) => e.type).sort();
+    assert.deepEqual(sqliteTypes, jsonlTypes, "event types should match between SQLite and JSONL paths");
+
+    // runId must be present on all returned events.
+    assert.ok(fromSqlite.every((e) => e.runId === "r1"), "all SQLite events should have runId r1");
+    assert.ok(fromJsonl.every((e) => e.runId === "r1"), "all JSONL events should have runId r1");
   });
 });
 
