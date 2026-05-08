@@ -58,6 +58,7 @@ async function requestDaemonStopWorker(worker: WorkerRow | null): Promise<boolea
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ force: true }),
+      signal: AbortSignal.timeout(5_000),
     });
     return res.ok;
   } catch {
