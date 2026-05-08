@@ -62,7 +62,15 @@ export function useRunEvents(
           setEvents((prev) => [...prev, ...newEntries]);
         }
       },
-      () => setLoading(false),
+      () => {
+        // Browser EventSource auto-reconnects on network blips or sleep+wake.
+        // The backend sends a full history snapshot on the new connection's
+        // first tick. Reset gotSseData so that first message replaces (not
+        // appends) the current event state — without this, full history
+        // arrives into the "delta" branch and duplicates all prior events.
+        gotSseData = false;
+        setLoading(false);
+      },
     );
 
     return () => {
