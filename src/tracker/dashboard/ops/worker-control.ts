@@ -154,16 +154,13 @@ async function probeDaemonStatus(
 }
 
 /** Count `done` + `failed` queue events whose `claimedBy === instanceId`. */
-function countItemsProcessed(workflow: string, instanceId: string, dir: string): number {
-  const path = queueFilePath(workflow, dir);
-  if (!existsSync(path)) return 0;
-  const text = readFileSync(path, "utf8");
+function countItemsProcessed(instanceId: string, queueLines: string[]): number {
   let count = 0;
   // We track which runIds were claimed by this instance, then count
   // terminal events for those runIds — `done` / `failed` events carry
   // `runId` but not `claimedBy`.
   const runIdsForInstance = new Set<string>();
-  for (const line of text.split("\n")) {
+  for (const line of queueLines) {
     if (!line.trim()) continue;
     let ev: import("../../../core/daemon/types.js").QueueEvent;
     try {
@@ -255,9 +252,23 @@ export function buildDaemonsListHandler(dir: string) {
     const out: DaemonInfo[] = [];
     const aliveByWorkflow = new Map<string, Daemon[]>();
     try {
+      // Parallelize findAliveDaemons across workflows — each probe is independent.
+      const aliveResults = await Promise.all(
+        workflows.map(async (wf) => [wf, await findAliveDaemons(wf, dir)] as const),
+      );
+      for (const [wf, alive] of aliveResults) aliveByWorkflow.set(wf, alive);
+
+      // Hoist queue JSONL reads: one read per workflow instead of one per daemon.
+      const queueLinesByWorkflow = new Map<string, string[]>();
       for (const wf of workflows) {
-        aliveByWorkflow.set(wf, await findAliveDaemons(wf, dir));
+        try {
+          const text = readFileSync(queueFilePath(wf, dir), "utf-8");
+          queueLinesByWorkflow.set(wf, text.split("\n").filter(Boolean));
+        } catch {
+          queueLinesByWorkflow.set(wf, []);
+        }
       }
+
       for (const worker of workers) {
         const wf = worker.workflow ?? "";
         const alive = aliveByWorkflow.get(wf) ?? [];
@@ -278,36 +289,44 @@ export function buildDaemonsListHandler(dir: string) {
           matchingLock,
           currentItem: currentTask?.itemId ?? null,
           currentRunId: currentAttempt?.runId ?? currentTask?.currentRunId ?? currentTask?.runId ?? null,
-          itemsProcessed: worker.instanceId ? countItemsProcessed(wf, worker.instanceId, dir) : 0,
+          itemsProcessed: worker.instanceId
+            ? countItemsProcessed(worker.instanceId, queueLinesByWorkflow.get(wf) ?? [])
+            : 0,
           browserProcesses,
         }));
       }
 
+      // Collect lockfile-only daemons (no SQLite worker row) then probe all in parallel.
+      const lockfileOnlyDaemons: Array<{ wf: string; d: Daemon }> = [];
       for (const wf of workflows) {
-        const daemons = aliveByWorkflow.get(wf) ?? [];
-        for (const d of daemons) {
+        for (const d of aliveByWorkflow.get(wf) ?? []) {
           if (workers.some((worker) => worker.instanceId === d.instanceId || worker.pid === d.pid)) continue;
-          const status = await probeDaemonStatus(d);
-          out.push({
-            workflow: d.workflow,
-            workerId: d.instanceId,
-            pid: d.pid,
-            port: d.port,
-            instanceId: d.instanceId,
-            startedAt: d.startedAt,
-            uptimeMs: Date.now() - new Date(d.startedAt).getTime(),
-            itemsProcessed: countItemsProcessed(d.workflow, d.instanceId, dir),
-            currentItem: status.currentItem ?? null,
-            currentRunId: status.currentRunId ?? null,
-            currentTaskId: null,
-            currentAttemptId: null,
-            phase: status.phase ?? "unknown",
-            status: "alive",
-            heartbeatAgeMs: null,
-            browserProcesses: [],
-            lockfileAlive: true,
-          });
+          lockfileOnlyDaemons.push({ wf, d });
         }
+      }
+      const statuses = await Promise.all(lockfileOnlyDaemons.map(({ d }) => probeDaemonStatus(d)));
+      for (let i = 0; i < lockfileOnlyDaemons.length; i++) {
+        const { wf, d } = lockfileOnlyDaemons[i];
+        const status = statuses[i];
+        out.push({
+          workflow: d.workflow,
+          workerId: d.instanceId,
+          pid: d.pid,
+          port: d.port,
+          instanceId: d.instanceId,
+          startedAt: d.startedAt,
+          uptimeMs: Date.now() - new Date(d.startedAt).getTime(),
+          itemsProcessed: countItemsProcessed(d.instanceId, queueLinesByWorkflow.get(wf) ?? []),
+          currentItem: status.currentItem ?? null,
+          currentRunId: status.currentRunId ?? null,
+          currentTaskId: null,
+          currentAttemptId: null,
+          phase: status.phase ?? "unknown",
+          status: "alive",
+          heartbeatAgeMs: null,
+          browserProcesses: [],
+          lockfileAlive: true,
+        });
       }
     } finally {
       stores.close();
