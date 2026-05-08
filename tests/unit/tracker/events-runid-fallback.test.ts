@@ -31,12 +31,23 @@ async function collectSSE(
     const res = await fetch(url, { signal });
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
+    let buffered = "";
     while (messages.length < opts.stopAfter) {
       const { value, done } = await reader.read();
       if (done) break;
-      const text = decoder.decode(value);
-      for (const line of text.split("\n")) {
-        if (line.startsWith("data: ")) messages.push(line.slice(6));
+      buffered += decoder.decode(value, { stream: true });
+      // Parse complete SSE blocks (double-newline delimited) to avoid splitting mid-envelope
+      let splitAt = buffered.indexOf("\n\n");
+      while (splitAt >= 0 && messages.length < opts.stopAfter) {
+        const block = buffered.slice(0, splitAt);
+        buffered = buffered.slice(splitAt + 2);
+        const dataLine = block.split("\n").find((l) => l.startsWith("data: "));
+        if (dataLine) {
+          // Unwrap hub envelope: { sub, data, event? } → serialize data back to JSON string
+          const envelope = JSON.parse(dataLine.slice(6)) as { sub: string; data: unknown; event?: string };
+          messages.push(JSON.stringify(envelope.data));
+        }
+        splitAt = buffered.indexOf("\n\n");
       }
     }
   } catch {
@@ -291,8 +302,11 @@ describe("/events/run-events instance-based fallback (HTTP)", () => {
     server = createDashboardServer({ port: 0, dir: tmp, noClean: true });
     port = (server.address() as { port: number }).port;
 
+    const hubSubs = encodeURIComponent(
+      JSON.stringify([{ id: "s1", topic: "runEvents", params: { workflow: "onboarding", id: "alice@example.com", runId: "A", date: today } }]),
+    );
     const messages = await collectSSE(
-      `http://localhost:${port}/events/run-events?workflow=onboarding&id=alice@example.com&runId=A&date=${today}`,
+      `http://localhost:${port}/events/hub?subs=${hubSubs}`,
       { stopAfter: 1, timeoutMs: 1500 },
     );
     const data = messages.map((m) => JSON.parse(m)).flat();
