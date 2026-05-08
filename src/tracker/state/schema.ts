@@ -516,6 +516,14 @@ CREATE INDEX IF NOT EXISTS idx_files_run_id_screenshot
     // columns (data_json, typed_data_json, input_json, etc.). Every emit paid for
     // the duplicate JSON.stringify; queries.ts reconstructs from typed columns and
     // never reads raw_json. SQLite 3.35+ supports DROP COLUMN natively.
+    //
+    // OPERATOR NOTE — first-boot cost on existing prod DBs:
+    // SQLite 3.35+ implements DROP COLUMN as a full table rewrite (not metadata-only).
+    // On a prod state DB with millions of run_events rows, the first dashboard boot
+    // after pulling this change pauses for tens of seconds while the rewrite runs.
+    // Subsequent boots are unaffected. Fresh DBs run migrations 1→6 in sequence and
+    // pay the cost on a near-empty table — negligible. See tracker/CLAUDE.md
+    // 2026-05-08 lesson for the operator-side surface and workaround.
     version: 6,
     sql: String.raw`
 ALTER TABLE run_events DROP COLUMN raw_json;
