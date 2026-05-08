@@ -94,6 +94,11 @@ function readJsonlCached<T>(path: string): T[] {
     .split("\n")
     .filter(Boolean)
     .map((line) => JSON.parse(line));
+  // Delete-then-set so a re-parse of an already-cached path bumps its
+  // insertion-order position. Map.set on an existing key keeps the original
+  // position, which would freeze hot files at first-read time and evict them
+  // unfairly once the cache fills.
+  parseCache.delete(path);
   parseCache.set(path, { mtimeMs: stat.mtimeMs, size: stat.size, entries });
   if (parseCache.size > PARSE_CACHE_MAX) {
     const oldestKey = parseCache.keys().next().value;

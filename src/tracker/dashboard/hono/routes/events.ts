@@ -12,7 +12,6 @@ import {
   type TrackerEntry,
 } from "../../../jsonl.js";
 import {
-  getSessionsFilePath,
   readSessionEvents,
   type SessionEvent,
 } from "../../../session-events.js";
@@ -309,18 +308,35 @@ export function registerEventRoutes(app: Hono, deps: DashboardHonoDeps): void {
         } catch {
           // Tracker read failure only disables workflowInstance fallback for this tick.
         }
-        let allEvents: SessionEvent[];
+        let allEvents: SessionEvent[] = [];
+        let usedSqlite = false;
         if (deps.projectionReady && deps.stateDb) {
           const trackerEntry = trackerEntries.find((e) => e.runId === requestedRunId);
           const wfInstance =
             typeof trackerEntry?.data?.instance === "string"
               ? trackerEntry.data.instance
               : undefined;
-          allEvents = querySessionEventsForRun(deps.stateDb, {
-            runId: requestedRunId,
-            ...(wfInstance ? { workflowInstance: wfInstance } : {}),
-          });
-        } else {
+          try {
+            const sqliteEvents = querySessionEventsForRun(deps.stateDb, {
+              runId: requestedRunId,
+              ...(wfInstance ? { workflowInstance: wfInstance } : {}),
+            });
+            // Treat zero rows as "projection not yet caught up" and fall back
+            // to the rotation-aware JSONL aggregation. Mirrors the
+            // /api/screenshots grouped handler's `rows.length > 0` guard.
+            if (sqliteEvents.length > 0) {
+              allEvents = sqliteEvents;
+              usedSqlite = true;
+            }
+          } catch (err) {
+            // SQLite read failure (DB locked, schema mid-migration, etc.) must
+            // not silently empty the SSE stream. Log and fall through to the
+            // JSONL path below.
+            const msg = err instanceof Error ? err.message : String(err);
+            log.warn(`run-events SQLite query failed (runId=${requestedRunId}): ${msg} — falling back to JSONL`);
+          }
+        }
+        if (!usedSqlite) {
           allEvents = await readSessionEventsTolerant(deps.dir);
         }
         const filtered = filterEventsForRun(allEvents, trackerEntries, requestedRunId);

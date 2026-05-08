@@ -69,8 +69,15 @@ export function pruneStateDb(dir: string, cutoffDate: string): PruneResult {
     result.filesDeleted = db
       .prepare("DELETE FROM files WHERE created_at < @cutoffIso")
       .run({ cutoffIso }).changes;
+    // Only prune terminal task_attempts. A non-terminal attempt with an old
+    // created_at (e.g. a long-lived daemon) still owns `tasks.current_attempt_id`
+    // (FK ON DELETE SET NULL) and `worker_commands.target_attempt_id`, and
+    // deleting it would silently null those references on a live row.
     result.taskAttemptsDeleted = db
-      .prepare("DELETE FROM task_attempts WHERE created_at < @cutoffIso")
+      .prepare(
+        "DELETE FROM task_attempts WHERE created_at < @cutoffIso " +
+          "AND status IN ('done', 'failed', 'cancelled')",
+      )
       .run({ cutoffIso }).changes;
     // worker_commands: uses requested_at TEXT ISO (not created_at — verified in schema.ts).
     result.workerCommandsDeleted = db

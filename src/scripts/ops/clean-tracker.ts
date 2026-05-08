@@ -13,6 +13,7 @@ import {
   cleanOldTrackerFiles,
   cleanOldSessionFiles,
   cleanOldScreenshots,
+  dateLocal,
   DEFAULT_DIR,
 } from "../../tracker/jsonl.js";
 import { pruneStateDb } from "../../tracker/state/cleanup.js";
@@ -213,10 +214,12 @@ export function cleanTrackerMain(argv: string[] = process.argv.slice(2)): {
         `Deleted ${sessionsDeleted} stale sessions file${sessionsDeleted === 1 ? "" : "s"} (older than ${days} day${days === 1 ? "" : "s"}) from ${dir}`,
       );
     }
-    // Prune SQLite projection rows in lockstep with JSONL pruning.
-    const cutoffDate = new Date(Date.now() - days * 24 * 3600 * 1000)
-      .toISOString()
-      .slice(0, 10);
+    // Prune SQLite projection rows in lockstep with JSONL pruning. Use the
+    // shared local-date helper so the cutoff matches `cleanOldTrackerFiles`
+    // and `cleanOldSessionFiles` (both `dateLocal`-based since 2026-04-27).
+    // `.toISOString().slice(0, 10)` would diverge by a day in timezones
+    // west of UTC after local 5pm and prune one extra day's projection rows.
+    const cutoffDate = dateLocal(new Date(Date.now() - days * 24 * 3600 * 1000));
     const sqlPrune = pruneStateDb(dir, cutoffDate);
     sqlRowsDeleted =
       sqlPrune.runEventsDeleted +

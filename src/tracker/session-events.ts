@@ -71,6 +71,7 @@ export interface SessionEvent {
 const LEGACY_SESSIONS_FILE = "sessions.jsonl";
 const SESSIONS_PREFIX = "sessions-";
 const SESSIONS_SUFFIX = ".jsonl";
+const SESSIONS_DATE_RE = /^sessions-\d{4}-\d{2}-\d{2}\.jsonl$/;
 
 export function getSessionsFilePath(dir: string = DEFAULT_DIR): string {
   return getSessionsFilePathForDate(dateLocal(), dir);
@@ -114,8 +115,11 @@ export function readSessionEvents(dir: string = DEFAULT_DIR): SessionEvent[] {
   let files: string[] = [];
   try {
     files = readdirSync(dir).filter(
-      (f) => f === LEGACY_SESSIONS_FILE ||
-        (f.startsWith(SESSIONS_PREFIX) && f.endsWith(SESSIONS_SUFFIX)),
+      // Strict YYYY-MM-DD dated names + the single legacy file. Loose
+      // `sessions-*.jsonl` would slurp editor temp files / malformed dates
+      // that `cleanOldSessionFiles` correctly refuses to delete, leaving
+      // them to accumulate.
+      (f) => f === LEGACY_SESSIONS_FILE || SESSIONS_DATE_RE.test(f),
     );
   } catch {
     return out; // dir doesn't exist

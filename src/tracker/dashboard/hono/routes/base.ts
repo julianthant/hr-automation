@@ -1,5 +1,5 @@
 import { existsSync, statSync, unlinkSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import type { Hono } from "hono";
 
 import {
@@ -14,7 +14,6 @@ import {
   readRunsForId,
   type TrackerEntry,
 } from "../../../jsonl.js";
-import { getSessionsFilePath } from "../../../session-events.js";
 import { queryRunsForItem } from "../../../state/queries.js";
 import { listRosters } from "../../../../services/matching/roster-loader.js";
 import { log } from "../../../../utils/log.js";
@@ -151,11 +150,16 @@ export function registerBaseRoutes(app: Hono, deps: DashboardHonoDeps): void {
     const deleted = cleanOldTrackerFiles(30, deps.dir);
     const deletedShots = cleanOldScreenshots(30);
     let sessionsCleaned = false;
-    const sessionsPath = getSessionsFilePath(deps.dir);
-    if (existsSync(sessionsPath)) {
-      const ageMs = Date.now() - statSync(sessionsPath).mtimeMs;
+    // Only the pre-rotation legacy `sessions.jsonl` is age-gated here.
+    // Dated `sessions-YYYY-MM-DD.jsonl` files are managed by the regular
+    // 30-day prune in `cleanOldSessionFiles`. Pointing this check at the
+    // current dated file (as `getSessionsFilePath` would) is a no-op because
+    // today's file always has a fresh mtime.
+    const legacySessionsPath = join(deps.dir, "sessions.jsonl");
+    if (existsSync(legacySessionsPath)) {
+      const ageMs = Date.now() - statSync(legacySessionsPath).mtimeMs;
       if (ageMs > 24 * 60 * 60 * 1000) {
-        unlinkSync(sessionsPath);
+        unlinkSync(legacySessionsPath);
         sessionsCleaned = true;
       }
     }

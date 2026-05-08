@@ -1,10 +1,5 @@
 import { randomUUID, type UUID } from 'node:crypto'
-import {
-  appendFileSync,
-  mkdirSync,
-  rmdirSync,
-  statSync,
-} from 'node:fs'
+import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { daemonsDir, ensureDaemonsDir } from './registry.js'
 import type { QueueEvent, QueueItem, QueueState } from './types.js'
@@ -40,67 +35,6 @@ function appendEvent(workflow: string, event: QueueEvent, trackerDir?: string): 
 
 function nowIso(): string {
   return new Date().toISOString()
-}
-
-/**
- * Total wall time acceptable when contending for the claim mutex: ~3s.
- * 20 attempts with exponential backoff capped at 100ms per sleep + ±30% jitter.
- * In normal operation the mutex is held for single-digit milliseconds; 20
- * retries handles a fleet of 8+ daemons all racing.
- */
-const CLAIM_RETRY_COUNT = 20
-const CLAIM_BASE_BACKOFF_MS = 1
-const CLAIM_MAX_BACKOFF_MS = 100
-
-/** Mutex considered stale if its directory mtime is this old without a release. */
-const STALE_MUTEX_AGE_MS = 5000
-
-function jitteredSleep(base: number): Promise<void> {
-  const jitter = 1 + (Math.random() - 0.5) * 0.6 // ±30%
-  const ms = Math.max(1, Math.round(base * jitter))
-  return new Promise((r) => setTimeout(r, ms))
-}
-
-async function acquireMutex(lockDir: string): Promise<void> {
-  let backoff = CLAIM_BASE_BACKOFF_MS
-  for (let attempt = 0; attempt < CLAIM_RETRY_COUNT; attempt++) {
-    try {
-      mkdirSync(lockDir)
-      return
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code
-      if (code !== 'EEXIST') throw err
-      // Stale-mutex defense: if the dir's mtime is older than the stale
-      // threshold, try force-removing it and retry. Benign if concurrent
-      // removal races.
-      try {
-        const st = statSync(lockDir)
-        if (Date.now() - st.mtimeMs > STALE_MUTEX_AGE_MS) {
-          try {
-            rmdirSync(lockDir)
-          } catch {
-            /* concurrent removal is fine */
-          }
-          continue // retry immediately after cleanup
-        }
-      } catch {
-        /* statSync may fail if the dir was just removed — loop retries */
-      }
-      await jitteredSleep(backoff)
-      backoff = Math.min(CLAIM_MAX_BACKOFF_MS, backoff * 2)
-    }
-  }
-  throw new Error(
-    `daemon-queue: could not acquire claim mutex ${lockDir} after ${CLAIM_RETRY_COUNT} attempts`,
-  )
-}
-
-function releaseMutex(lockDir: string): void {
-  try {
-    rmdirSync(lockDir)
-  } catch {
-    /* already removed / never existed — benign */
-  }
 }
 
 export async function readQueueState(workflow: string, trackerDir?: string): Promise<QueueState> {
