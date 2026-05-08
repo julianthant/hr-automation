@@ -1,13 +1,6 @@
 import { afterEach, beforeEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Server } from "node:http";
@@ -587,15 +580,17 @@ describe("/events/hub logs + runEvents topics", () => {
   });
 });
 
-// ── captureSessions + daemonLog topic integration tests ───────────────────────
+// ── captureSessions topic integration tests ───────────────────────────────────
+// Note: daemonLog topic removed 2026-05-08 — no frontend consumer exists.
+// DaemonLogTail component was deleted in c5df7639; the topic was unused backend-only code.
 
-describe("/events/hub captureSessions + daemonLog topics", () => {
+describe("/events/hub captureSessions topic", () => {
   let dir: string;
   let server: Server;
   let port: number;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "hub-capture-daemon-test-"));
+    dir = mkdtempSync(join(tmpdir(), "hub-capture-test-"));
     mkdirSync(dir, { recursive: true });
     server = createDashboardServer({ port: 0, dir, noClean: true, uploadPort: null });
     port = (server.address() as { port: number }).port;
@@ -623,71 +618,6 @@ describe("/events/hub captureSessions + daemonLog topics", () => {
     assert.equal(first.event, "session-list", "first envelope event should be 'session-list'");
     const data = first.data as Record<string, unknown>;
     assert.ok(Array.isArray(data.sessions), "data.sessions must be an array");
-  });
-
-  test("hub daemonLog with non-existent pid — receives error envelope, hub stays open with other subs", async () => {
-    // Use pid 99999999 — extremely unlikely to have a daemon lockfile
-    const nonExistentPid = 99999999;
-    const subs = encodeURIComponent(
-      JSON.stringify([
-        { id: "d1", topic: "daemonLog", params: { pid: nonExistentPid } },
-        { id: "t1", topic: "telegram", params: {} },
-      ]),
-    );
-
-    const envelopes = await collectHubEnvelopes(
-      `http://localhost:${port}/events/hub?subs=${subs}`,
-      { stopAfter: 2, timeoutMs: 3000 },
-    );
-
-    // The daemonLog sub should emit an error envelope
-    const daemonEnvelope = envelopes.find((e) => e.sub === "d1");
-    assert.ok(daemonEnvelope, "expected error envelope for daemonLog sub");
-    const data = daemonEnvelope!.data as Record<string, unknown>;
-    assert.equal(data.ok, false, "error envelope data.ok should be false");
-    assert.ok(typeof data.error === "string" && data.error.length > 0, "error envelope data.error should be a string");
-
-    // The telegram sub should also receive an envelope — hub stays open
-    const telegramEnvelope = envelopes.find((e) => e.sub === "t1");
-    assert.ok(telegramEnvelope, "expected telegram envelope — hub should stay open after daemonLog error");
-  });
-
-  test("hub daemonLog with valid pid and log file — receives tail lines", async () => {
-    // Set up a daemon lock file and log file matching resolveDaemonLogPath expectations.
-    // daemonsDir(dir) = join(dir, 'daemons')
-    // lock file: daemons/<workflow>-<instanceId>.lock.json with { pid, workflow }
-    // log file: daemons/<workflow>-<pid>.log
-    const testPid = 123456789;
-    const testWorkflow = "onboarding";
-    const daemonsSubdir = join(dir, "daemons");
-    mkdirSync(daemonsSubdir, { recursive: true });
-
-    // Write a lock file (resolveDaemonLogPath scans for *.lock.json and checks pid field)
-    writeFileSync(
-      join(daemonsSubdir, `${testWorkflow}-abc123.lock.json`),
-      JSON.stringify({ pid: testPid, workflow: testWorkflow }),
-    );
-
-    // Write the log file that resolveDaemonLogPath will resolve to
-    const logPath = join(daemonsSubdir, `${testWorkflow}-${testPid}.log`);
-    writeFileSync(logPath, "daemon log line one\ndaemon log line two\n");
-
-    const subs = encodeURIComponent(
-      JSON.stringify([{ id: "d1", topic: "daemonLog", params: { pid: testPid } }]),
-    );
-
-    const envelopes = await collectHubEnvelopes(
-      `http://localhost:${port}/events/hub?subs=${subs}`,
-      { stopAfter: 1, timeoutMs: 3000 },
-    );
-
-    assert.ok(envelopes.length >= 1, "expected at least 1 envelope from daemonLog tail");
-    const first = envelopes[0];
-    assert.equal(first.sub, "d1");
-    const data = first.data as Record<string, unknown>;
-    // Should be a tail line, not an error
-    assert.ok(data.ok !== false, "should not be an error envelope");
-    assert.ok(typeof data.line === "string" && data.line.length > 0, "data.line should be a non-empty string");
   });
 
   test("legacy /api/capture/sessions/stream returns 404 (removed — use /events/hub)", async () => {

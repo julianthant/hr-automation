@@ -1,15 +1,7 @@
 import type { Hono } from "hono";
 
 import { type DashboardHonoDeps } from "../context.js";
-import {
-  activeDaemonLogWatchers as _activeDaemonLogWatchers,
-  activeCaptureSseSubscribers as _activeCaptureSseSubscribers,
-} from "../topics-emitters.js";
-
-export function getActiveHonoDaemonLogWatcherCountForTests(): number {
-  // Read the live ESM binding from topics-emitters.
-  return _activeDaemonLogWatchers;
-}
+import { activeCaptureSseSubscribers as _activeCaptureSseSubscribers } from "../topics-emitters.js";
 
 export function getActiveHonoCaptureSseSubscriberCountForTests(): number {
   // Read the live ESM binding from topics-emitters.
