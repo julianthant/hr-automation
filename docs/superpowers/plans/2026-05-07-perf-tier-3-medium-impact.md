@@ -25,15 +25,7 @@ Verify with `git log --oneline -25` before starting.
 
 ## Dispatch waves
 
-Tier 3 has **two waves** — Wave A is sequential (tracker storage layer; T1–T4 share `state/` files and migration version numbers), Wave B is parallel (file-disjoint).
-
-### Wave A — sequential on master
-
-T1 → T2 → T3 → T4. One subagent per task, each commits to master, next subagent picks up the post-commit state.
-
-### Wave B — parallel in worktrees
-
-T5, T6, T7, T8, T9, T10 dispatch in one batch. Each subagent gets its own worktree (`.claude/worktrees/perf-tier-3-task-N/`) and `feature/perf-tier-3-task-N` branch. Per `~/.claude/CLAUDE.md` parallel discipline: subagents commit only to their branch; orchestrator verifies and merges sequentially after all return; worktrees + branches deleted post-merge.
+Tier 3 has **two waves** — Both are sequential.
 
 ---
 
