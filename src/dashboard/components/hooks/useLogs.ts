@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import type { LogEntry } from "@/components/shared/types";
+import { sseHub } from "@/lib/sse-hub";
 
 export interface CollapsedLogEntry extends LogEntry {
   count: number;
@@ -43,17 +44,17 @@ export function useLogs(
     }
     setLoading(true);
 
-    // Build query params
-    const params = new URLSearchParams({ workflow, id: itemId });
-    if (runId) params.set("runId", runId);
-    if (date) params.set("date", date);
+    // Build hub params
+    const hubParams: { workflow: string; id: string; runId?: string; date?: string } = { workflow, id: itemId };
+    if (runId) hubParams.runId = runId;
+    if (date) hubParams.date = date;
 
     let gotSseData = false;
 
-    const es = new EventSource("/events/logs?" + params.toString());
-    es.onmessage = (e) => {
-      try {
-        const newEntries: LogEntry[] = JSON.parse(e.data);
+    const unsubscribe = sseHub.subscribe<LogEntry[]>(
+      "logs",
+      hubParams,
+      (newEntries) => {
         if (!Array.isArray(newEntries)) return;
 
         if (!gotSseData) {
@@ -66,14 +67,14 @@ export function useLogs(
         } else if (newEntries.length > 0) {
           setRawLogs((prev) => [...prev, ...newEntries]);
         }
-      } catch {}
-    };
-    es.onerror = () => {
-      setLoading(false);
-    };
+      },
+      () => {
+        setLoading(false);
+      },
+    );
 
     return () => {
-      es.close();
+      unsubscribe();
     };
   }, [workflow, itemId, runId, date]);
 

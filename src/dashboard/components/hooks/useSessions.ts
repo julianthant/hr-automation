@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import type { SessionState, WorkflowInstanceState, DuoQueueEntry } from "@/components/shared/types";
+import { sseHub } from "@/lib/sse-hub";
 
 const EMPTY_STATE: SessionState = { workflows: [], duoQueue: [] };
 
@@ -51,25 +52,20 @@ export function useSessions(): { state: SessionState; connected: boolean } {
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    const es = new EventSource("/events/sessions");
-
-    es.onopen = () => setConnected(true);
-
-    es.onmessage = (e) => {
-      try {
-        const data: SessionState = JSON.parse(e.data);
+    const unsubscribe = sseHub.subscribe<SessionState>(
+      "sessions",
+      {},
+      (data) => {
+        setConnected(true);
         setState((prev) => (sessionStateEqual(prev, data) ? prev : data));
-      } catch {
-        // Ignore malformed
-      }
-    };
-
-    es.onerror = () => {
-      setConnected(false);
-    };
+      },
+      () => {
+        setConnected(false);
+      },
+    );
 
     return () => {
-      es.close();
+      unsubscribe();
       setConnected(false);
     };
   }, []);

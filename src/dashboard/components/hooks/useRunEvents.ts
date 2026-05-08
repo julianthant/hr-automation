@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import type { RunEvent } from "@/components/shared/types";
+import { sseHub } from "@/lib/sse-hub";
 
 /**
  * SSE consumer for /events/run-events. Twin of useLogs: one stream, delta
@@ -37,16 +38,17 @@ export function useRunEvents(
     }
     setLoading(true);
 
-    // Build query params
-    const params = new URLSearchParams({ workflow, id: itemId, runId });
-    if (date) params.set("date", date);
+    // Build hub params (note: legacy /events/run-events accepted id but the
+    // topic backend ignores it — only workflow, runId, and date are used)
+    const hubParams: { workflow: string; runId: string; date?: string } = { workflow, runId };
+    if (date) hubParams.date = date;
 
     let gotSseData = false;
 
-    const es = new EventSource("/events/run-events?" + params.toString());
-    es.onmessage = (e) => {
-      try {
-        const newEntries: RunEvent[] = JSON.parse(e.data);
+    const unsubscribe = sseHub.subscribe<RunEvent[]>(
+      "runEvents",
+      hubParams,
+      (newEntries) => {
         if (!Array.isArray(newEntries)) return;
 
         if (!gotSseData) {
@@ -59,12 +61,12 @@ export function useRunEvents(
         } else if (newEntries.length > 0) {
           setEvents((prev) => [...prev, ...newEntries]);
         }
-      } catch {}
-    };
-    es.onerror = () => setLoading(false);
+      },
+      () => setLoading(false),
+    );
 
     return () => {
-      es.close();
+      unsubscribe();
     };
   }, [workflow, itemId, runId, date]);
 
