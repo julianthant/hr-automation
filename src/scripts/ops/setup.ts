@@ -16,7 +16,7 @@
 //   * We do NOT use the `log` module here — the wizard output is its own thing,
 //     and the log module would emit colored prefixes we don't want for checks.
 
-import pc from "picocolors";
+import { styleText } from "node:util";
 import {
   existsSync,
   mkdirSync,
@@ -463,9 +463,9 @@ export function runAllChecks(cwd: string = process.cwd()): CheckResult[] {
 }
 
 function renderStatus(s: CheckStatus): string {
-  if (s === "ok") return pc.green("[ok]  ");
-  if (s === "warn") return pc.yellow("[warn]");
-  return pc.red("[fail]");
+  if (s === "ok") return styleText("green","[ok]  ");
+  if (s === "warn") return styleText("yellow","[warn]");
+  return styleText("red","[fail]");
 }
 
 /**
@@ -477,12 +477,12 @@ export function renderResults(results: CheckResult[]): {
   output: string;
 } {
   const lines: string[] = [];
-  lines.push(pc.bold("HR Automation — environment check"));
+  lines.push(styleText("bold","HR Automation — environment check"));
   lines.push("");
   for (const r of results) {
-    lines.push(`${renderStatus(r.status)}  ${pc.bold(r.name)} — ${r.message}`);
+    lines.push(`${renderStatus(r.status)}  ${styleText("bold",r.name)} — ${r.message}`);
     if (r.fix && r.status !== "ok") {
-      lines.push(`        ${pc.dim("fix:")} ${r.fix}`);
+      lines.push(`        ${styleText("dim","fix:")} ${r.fix}`);
     }
   }
   lines.push("");
@@ -490,19 +490,19 @@ export function renderResults(results: CheckResult[]): {
   const warned = results.filter((r) => r.status === "warn").length;
   if (failed > 0) {
     lines.push(
-      pc.red(
+      styleText("red",
         `  ${failed} check${failed === 1 ? "" : "s"} failed — address the fix suggestions above.`,
       ),
     );
   } else if (warned > 0) {
     lines.push(
-      pc.yellow(
+      styleText("yellow",
         `  All required checks passed (${warned} warning${warned === 1 ? "" : "s"}). You can run any workflow.`,
       ),
     );
   } else {
     lines.push(
-      pc.green(
+      styleText("green",
         `  All ${results.length} checks passed. You're ready to run any workflow.`,
       ),
     );
@@ -549,12 +549,12 @@ function prompt(question: string): Promise<string> {
  * so callers / tests can target tmp dirs.
  */
 export async function runTelegramSetup(cwd: string = process.cwd()): Promise<number> {
-  console.log(pc.bold("HR Automation — Telegram bot setup"));
+  console.log(styleText("bold","HR Automation — Telegram bot setup"));
   console.log("");
 
   if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
     console.log(
-      pc.green(
+      styleText("green",
         "  Already configured (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID set in .env).",
       ),
     );
@@ -578,11 +578,11 @@ export async function runTelegramSetup(cwd: string = process.cwd()): Promise<num
       token = v.token;
       break;
     }
-    console.log(pc.red(`  Invalid: ${v.reason}. Try again, or Ctrl+C to cancel.`));
+    console.log(styleText("red",`  Invalid: ${v.reason}. Try again, or Ctrl+C to cancel.`));
   }
 
   writeEnvVar(cwd, "TELEGRAM_BOT_TOKEN", token);
-  console.log(pc.green("  ✓ TELEGRAM_BOT_TOKEN saved to .env"));
+  console.log(styleText("green","  ✓ TELEGRAM_BOT_TOKEN saved to .env"));
   console.log("");
 
   console.log("Step 2 of 3 — Discover your chat_id");
@@ -600,11 +600,11 @@ export async function runTelegramSetup(cwd: string = process.cwd()): Promise<num
     },
   });
   if (!chatRes.ok) {
-    console.log(pc.red(`  Failed: ${chatRes.reason}`));
+    console.log(styleText("red",`  Failed: ${chatRes.reason}`));
     return 1;
   }
   writeEnvVar(cwd, "TELEGRAM_CHAT_ID", chatRes.chatId);
-  console.log(pc.green(`  ✓ TELEGRAM_CHAT_ID=${chatRes.chatId} saved to .env`));
+  console.log(styleText("green",`  ✓ TELEGRAM_CHAT_ID=${chatRes.chatId} saved to .env`));
   console.log("");
 
   console.log("Step 3 of 3 — Send a confirmation message");
@@ -621,10 +621,10 @@ export async function runTelegramSetup(cwd: string = process.cwd()): Promise<num
       }),
       signal: AbortSignal.timeout(5_000),
     });
-    console.log(pc.green("  ✓ Confirmation message sent. Check your phone."));
+    console.log(styleText("green","  ✓ Confirmation message sent. Check your phone."));
   } catch (err) {
     console.log(
-      pc.yellow(
+      styleText("yellow",
         `  Confirmation send failed: ${(err as Error).message}. .env is saved; you can test later.`,
       ),
     );

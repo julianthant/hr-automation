@@ -22,7 +22,7 @@ Environment validation, error helpers, error classification, and colored logging
 - `screenshot.ts` — `debugScreenshot(page, label, dir?)` — best-effort screenshot to `.screenshots/`; never throws (so a screenshot failure can't mask the original error). Used by `Stepper.step` on failure via `Session.screenshotAll`.
 - `worker-pool.ts` — `runWorkerPool({ items, workerCount, setup, process })` — generic queue-based fan-out helper. NOT a kernel mode (kernel pool launches one Session per worker; this helper shares one Session/Context across N tabs). Used by eid-lookup for the "1 Duo, N searches" pattern.
 
-Uses `picocolors` for colorization. Only `log.error()` uses `console.error` (stderr); all others use `console.log` (stdout).
+Uses `node:util` `styleText` for colorization (replaces the prior `picocolors` dep, which respected fewer environment hints). Only `log.error()` uses `console.error` (stderr); all others use `console.log` (stdout). `styleText` honors `NO_COLOR`, `FORCE_COLOR`, and TTY detection automatically.
 
 ## Lessons Learned
 
