@@ -20,20 +20,25 @@ export async function runKeepaliveTick(opts: KeepaliveOpts): Promise<void> {
 
   await recoverOrphanedClaims()
 
-  for (const sys of systems) {
-    try {
-      const ok = await session.healthCheck(sys.id)
-      if (!ok) {
+  // Per-system healthChecks are independent — parallelize. Sequential
+  // (the previous shape) made the daemon's "phase=keepalive" window
+  // ~N×3s; parallel makes it ~max(3s).
+  await Promise.allSettled(
+    systems.map(async (sys) => {
+      try {
+        const ok = await session.healthCheck(sys.id)
+        if (!ok) {
+          log.warn(
+            `[Daemon ${instanceId}] healthCheck(${sys.id}) failed — next claim may re-auth`,
+          )
+        }
+      } catch (e) {
         log.warn(
-          `[Daemon ${instanceId}] healthCheck(${sys.id}) failed — next claim may re-auth`,
+          `[Daemon ${instanceId}] healthCheck(${sys.id}) error: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
         )
       }
-    } catch (e) {
-      log.warn(
-        `[Daemon ${instanceId}] healthCheck(${sys.id}) error: ${
-          e instanceof Error ? e.message : String(e)
-        }`,
-      )
-    }
-  }
+    }),
+  )
 }
