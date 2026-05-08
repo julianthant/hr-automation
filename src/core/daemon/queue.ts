@@ -5,6 +5,7 @@ import { daemonsDir, ensureDaemonsDir } from './registry.js'
 import type { QueueEvent, QueueItem, QueueState } from './types.js'
 import { openControlDb } from '../control-db.js'
 import { createTaskStore, type TaskRow } from '../task-store/index.js'
+import { mapTaskRow, type TaskDbRow } from '../task-store/types.js'
 
 function openQueueTaskStore(trackerDir?: string) {
   return createTaskStore(openControlDb({ trackerDir }))
@@ -40,17 +41,18 @@ function nowIso(): string {
 export async function readQueueState(workflow: string, trackerDir?: string): Promise<QueueState> {
   const store = openQueueTaskStore(trackerDir)
   const state: QueueState = { queued: [], claimed: [], done: [], failed: [] }
+  // One query for full task rows. Previous shape (SELECT id then per-id
+  // store.getTask) was N+1 prepared-statement executions per call.
   const rows = store.db.prepare(`
-    SELECT id
+    SELECT *
     FROM tasks
     WHERE workflow = ?
       AND task_kind = 'workflow_item'
       AND source = 'daemon'
     ORDER BY COALESCE(enqueued_at, created_at) ASC, rowid ASC
-  `).all(workflow) as Array<{ id: string }>
+  `).all(workflow) as Array<TaskDbRow>
   for (const row of rows) {
-    const task = store.getTask(row.id)
-    if (!task) continue
+    const task = mapTaskRow(row)
     const item = taskToQueueItem(task)
     state[item.state].push(item)
   }
