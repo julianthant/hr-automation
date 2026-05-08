@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -666,6 +667,169 @@ describe("/events/hub logs + runEvents topics", () => {
       events.some((e) => e.type === "item_start"),
       "expected item_start event in run events",
     );
+  });
+});
+
+// ── captureSessions + daemonLog topic integration tests ───────────────────────
+
+describe("/events/hub captureSessions + daemonLog topics", () => {
+  let dir: string;
+  let server: Server;
+  let port: number;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "hub-capture-daemon-test-"));
+    mkdirSync(dir, { recursive: true });
+    server = createDashboardServer({ port: 0, dir, noClean: true, uploadPort: null });
+    port = (server.address() as { port: number }).port;
+  });
+
+  afterEach(async () => {
+    server.closeAllConnections?.();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    closeStateDbForTests(dir);
+    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("hub captureSessions subscription — first envelope has event: session-list with sessions array", async () => {
+    const subs = encodeURIComponent(
+      JSON.stringify([{ id: "c1", topic: "captureSessions", params: {} }]),
+    );
+    const envelopes = await collectHubEnvelopes(
+      `http://localhost:${port}/events/hub?subs=${subs}`,
+      { stopAfter: 1, timeoutMs: 2500 },
+    );
+
+    assert.ok(envelopes.length >= 1, "expected at least 1 envelope");
+    const first = envelopes[0];
+    assert.equal(first.sub, "c1");
+    assert.equal(first.event, "session-list", "first envelope event should be 'session-list'");
+    const data = first.data as Record<string, unknown>;
+    assert.ok(Array.isArray(data.sessions), "data.sessions must be an array");
+  });
+
+  test("hub daemonLog with non-existent pid — receives error envelope, hub stays open with other subs", async () => {
+    // Use pid 99999999 — extremely unlikely to have a daemon lockfile
+    const nonExistentPid = 99999999;
+    const subs = encodeURIComponent(
+      JSON.stringify([
+        { id: "d1", topic: "daemonLog", params: { pid: nonExistentPid } },
+        { id: "t1", topic: "telegram", params: {} },
+      ]),
+    );
+
+    const envelopes = await collectHubEnvelopes(
+      `http://localhost:${port}/events/hub?subs=${subs}`,
+      { stopAfter: 2, timeoutMs: 3000 },
+    );
+
+    // The daemonLog sub should emit an error envelope
+    const daemonEnvelope = envelopes.find((e) => e.sub === "d1");
+    assert.ok(daemonEnvelope, "expected error envelope for daemonLog sub");
+    const data = daemonEnvelope!.data as Record<string, unknown>;
+    assert.equal(data.ok, false, "error envelope data.ok should be false");
+    assert.ok(typeof data.error === "string" && data.error.length > 0, "error envelope data.error should be a string");
+
+    // The telegram sub should also receive an envelope — hub stays open
+    const telegramEnvelope = envelopes.find((e) => e.sub === "t1");
+    assert.ok(telegramEnvelope, "expected telegram envelope — hub should stay open after daemonLog error");
+  });
+
+  test("hub daemonLog with valid pid and log file — receives tail lines", async () => {
+    // Set up a daemon lock file and log file matching resolveDaemonLogPath expectations.
+    // daemonsDir(dir) = join(dir, 'daemons')
+    // lock file: daemons/<workflow>-<instanceId>.lock.json with { pid, workflow }
+    // log file: daemons/<workflow>-<pid>.log
+    const testPid = 123456789;
+    const testWorkflow = "onboarding";
+    const daemonsSubdir = join(dir, "daemons");
+    mkdirSync(daemonsSubdir, { recursive: true });
+
+    // Write a lock file (resolveDaemonLogPath scans for *.lock.json and checks pid field)
+    writeFileSync(
+      join(daemonsSubdir, `${testWorkflow}-abc123.lock.json`),
+      JSON.stringify({ pid: testPid, workflow: testWorkflow }),
+    );
+
+    // Write the log file that resolveDaemonLogPath will resolve to
+    const logPath = join(daemonsSubdir, `${testWorkflow}-${testPid}.log`);
+    writeFileSync(logPath, "daemon log line one\ndaemon log line two\n");
+
+    const subs = encodeURIComponent(
+      JSON.stringify([{ id: "d1", topic: "daemonLog", params: { pid: testPid } }]),
+    );
+
+    const envelopes = await collectHubEnvelopes(
+      `http://localhost:${port}/events/hub?subs=${subs}`,
+      { stopAfter: 1, timeoutMs: 3000 },
+    );
+
+    assert.ok(envelopes.length >= 1, "expected at least 1 envelope from daemonLog tail");
+    const first = envelopes[0];
+    assert.equal(first.sub, "d1");
+    const data = first.data as Record<string, unknown>;
+    // Should be a tail line, not an error
+    assert.ok(data.ok !== false, "should not be an error envelope");
+    assert.ok(typeof data.line === "string" && data.line.length > 0, "data.line should be a non-empty string");
+  });
+
+  test("legacy /api/capture/sessions/stream — first SSE event is session-list", async () => {
+    // Collect the first SSE event (with typed event name)
+    const controller = new AbortController();
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(2500)]);
+    let firstEvent: { event?: string; data: unknown } | undefined;
+    try {
+      const res = await fetch(`http://localhost:${port}/api/capture/sessions/stream`, { signal });
+      assert.equal(res.status, 200);
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffered = "";
+      outer: while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffered += decoder.decode(value, { stream: true });
+        let splitAt = buffered.indexOf("\n\n");
+        while (splitAt >= 0) {
+          const block = buffered.slice(0, splitAt);
+          buffered = buffered.slice(splitAt + 2);
+          const eventLine = block.split("\n").find((l) => l.startsWith("event: "));
+          const dataLine = block.split("\n").find((l) => l.startsWith("data: "));
+          if (dataLine) {
+            firstEvent = {
+              ...(eventLine ? { event: eventLine.slice("event: ".length) } : {}),
+              data: JSON.parse(dataLine.slice("data: ".length)),
+            };
+            break outer;
+          }
+          splitAt = buffered.indexOf("\n\n");
+        }
+      }
+      await reader.cancel();
+    } catch {
+      // timeout — use what we have
+    } finally {
+      controller.abort();
+    }
+
+    assert.ok(firstEvent, "expected at least one SSE event");
+    assert.equal(firstEvent!.event, "session-list", "first event should be 'session-list'");
+    const data = firstEvent!.data as Record<string, unknown>;
+    assert.ok(Array.isArray(data.sessions), "data.sessions must be an array");
+  });
+
+  test("legacy /events/daemon-log with invalid pid returns 400 JSON", async () => {
+    const res = await fetch(`http://localhost:${port}/events/daemon-log?pid=not-a-number`);
+    assert.equal(res.status, 400, "expected HTTP 400 for invalid pid");
+    const body = await res.json() as { ok: boolean; error: string };
+    assert.equal(body.ok, false);
+    assert.ok(typeof body.error === "string" && body.error.length > 0);
+  });
+
+  test("legacy /events/daemon-log with pid=0 returns 400 JSON", async () => {
+    const res = await fetch(`http://localhost:${port}/events/daemon-log?pid=0`);
+    assert.equal(res.status, 400, "expected HTTP 400 for pid=0");
+    const body = await res.json() as { ok: boolean; error: string };
+    assert.equal(body.ok, false);
   });
 });
 

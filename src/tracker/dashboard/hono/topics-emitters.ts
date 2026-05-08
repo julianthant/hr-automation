@@ -1,3 +1,4 @@
+import { createReadStream, readFileSync, statSync, unwatchFile, watchFile } from "node:fs";
 import { readSessionEvents } from "../../../tracker/session-events.js";
 import {
   dateLocal,
@@ -12,7 +13,9 @@ import { buildJsonlEventsPayload } from "./routes/entries-payload.js";
 import { filterLiveSessionState, filterEventsForRun, rebuildSessionState } from "../session-state.js";
 import { log } from "../../../utils/log.js";
 import { getDefaultWorkflow, type DashboardHonoDeps } from "./context.js";
-import { registerTopic, type TopicEmitter } from "./topics.js";
+import { registerTopic, type TopicEmitter, type TopicStop } from "./topics.js";
+import { captureStore, serializeCaptureSession } from "../capture-state.js";
+import { resolveDaemonLogPath } from "../ops/index.js";
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -335,3 +338,128 @@ export const runEventsTopic: TopicEmitter<{
 };
 
 registerTopic("runEvents", runEventsTopic);
+
+// ── captureSessions topic ─────────────────────────────────────────────────────
+
+/**
+ * Subscribes to capture session store changes and forwards events with typed
+ * SSE event names: `"session-list"` on first tick, `"session-event"` on each
+ * store mutation, and `"heartbeat"` every 15 seconds.
+ *
+ * Identical behavior to the legacy `/api/capture/sessions/stream` handler.
+ * Preserves the `activeCaptureSseSubscribers` counter.
+ */
+export let activeCaptureSseSubscribers = 0;
+
+export const captureSessionsTopic: TopicEmitter<Record<string, never>> = (
+  _params,
+  send,
+) => {
+  send({ sessions: captureStore.listAll().map(serializeCaptureSession) }, "session-list");
+  const unsubscribe = captureStore.subscribe((event) => send(event, "session-event"));
+  activeCaptureSseSubscribers += 1;
+  const heartbeat = setInterval(() => send({ ts: Date.now() }, "heartbeat"), 15_000);
+  heartbeat.unref?.();
+  return () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+    activeCaptureSseSubscribers = Math.max(0, activeCaptureSseSubscribers - 1);
+  };
+};
+
+registerTopic("captureSessions", captureSessionsTopic);
+
+// ── daemonLog topic ───────────────────────────────────────────────────────────
+
+/**
+ * Tails a daemon log file for a given pid.  Uses `watchFile` to detect
+ * new content and streams new lines as `{ line, ts }` objects.
+ *
+ * If the pid is invalid or no log file exists, sends an error envelope and
+ * returns a no-op stop.  The hub connection stays open — only this sub errors.
+ *
+ * Identical behavior to the legacy `/events/daemon-log` handler, except
+ * pid validation errors are sent as SSE data instead of HTTP 400 (the legacy
+ * HTTP-level 400 is preserved for the legacy route in events.ts).
+ *
+ * Preserves the `activeDaemonLogWatchers` counter.
+ */
+export let activeDaemonLogWatchers = 0;
+
+export const daemonLogTopic: TopicEmitter<{ pid: number }> = (
+  params,
+  send,
+  deps,
+) => {
+  const { pid } = params;
+
+  // Validate the pid synchronously.
+  if (!Number.isFinite(pid) || pid <= 0) {
+    send({ ok: false, error: "valid pid query param required" });
+    return () => {};
+  }
+
+  // Async resolve: return a stop fn immediately; set up the watcher once
+  // the path is known.
+  let cancelled = false;
+  let cleanup: (() => void) | null = null;
+
+  void (async () => {
+    const path = await resolveDaemonLogPath(pid, deps.dir);
+    if (cancelled) return;
+
+    if (!path) {
+      send({ ok: false, error: "no log file for that pid" });
+      return;
+    }
+
+    let bytesSent = 0;
+    try {
+      const stat = statSync(path);
+      const tailBytes = Math.min(stat.size, 4096);
+      const startAt = Math.max(0, stat.size - tailBytes);
+      const tail = readFileSync(path).subarray(startAt).toString("utf-8");
+      for (const line of tail.split("\n")) {
+        if (!line) continue;
+        send({ line, ts: new Date().toISOString() });
+      }
+      bytesSent = stat.size;
+    } catch {
+      // Empty or deleted log files recover if watchFile sees new content.
+    }
+
+    const onChange = (curr: { size: number }): void => {
+      if (curr.size <= bytesSent) return;
+      const stream = createReadStream(path, { start: bytesSent, end: curr.size - 1 });
+      let buffered = "";
+      stream.on("data", (chunk) => {
+        buffered += String(chunk);
+      });
+      stream.on("end", () => {
+        for (const line of buffered.split("\n")) {
+          if (!line) continue;
+          send({ line, ts: new Date().toISOString() });
+        }
+        bytesSent = curr.size;
+      });
+    };
+
+    if (cancelled) return;
+
+    watchFile(path, { interval: 500 }, onChange);
+    activeDaemonLogWatchers += 1;
+    cleanup = () => {
+      unwatchFile(path, onChange);
+      activeDaemonLogWatchers = Math.max(0, activeDaemonLogWatchers - 1);
+    };
+  })();
+
+  const stop: TopicStop = () => {
+    cancelled = true;
+    cleanup?.();
+    cleanup = null;
+  };
+  return stop;
+};
+
+registerTopic("daemonLog", daemonLogTopic);
