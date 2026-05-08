@@ -23,6 +23,60 @@ import { hrTasks, personOrgSummary, smartHR } from "./selectors.js";
 const PERSON_ORG_SUMMARY_URL =
   "https://ucphrprdpub.universityofcalifornia.edu/psc/ucphrprd/EMPLOYEE/HRMS/c/NUI_FRAMEWORK.PT_AGSTARTPAGE_NUI.GBL?CONTEXTIDPARAMS=TEMPLATE_ID%3aPTPPNAVCOL&scname=ADMN_UC_ADMIN_LOC_HIRE_NAVCOLL&PanelCollapsible=Y&PTPPB_GROUPLET_ID=UC_HIRE_TASKS_TILE_FL&CRefName=UC_HIRE_TASKS_TILE_FL&AJAXTRANSFER=Y";
 
+/**
+ * Substring labels rendered as 2-word leaf spans on the Person Org Summary
+ * detail page. Any candidate text whose normalized form (case-insensitive,
+ * whitespace-collapsed) contains one of these is rejected from name detection.
+ *
+ * Background: PeopleSoft renders some labels with non-breaking spaces, and
+ * earlier code did a case-sensitive, whitespace-literal `text.includes(label)`
+ * which let "Person ID" leak through as the picked name. `selectPersonName`
+ * normalizes both sides before comparison.
+ *
+ * TODO: replace with a registry selector targeting the actual name span
+ * (likely `#PERSON_NPC_VW_NAME_DISPL` or similar) once verified live.
+ */
+export const PERSON_ORG_NAME_LABELS: readonly string[] = [
+  "Search Criteria", "Recent Searches", "Saved Searches", "Employment Instances",
+  "Person Organizational Summary", "Return to Search", "Show fewer options",
+  "Navigation Area", "Julian Zaw",
+  "Person ID", "Benefit Eligibility", "Limited Hours", "Floater Hours",
+  "HR Status", "Payroll Status", "Last Hire", "Termination Date",
+  "ORG Instance", "Primary Job", "Empl Record", "Position Number",
+  "Dept ID", "Department Description", "Job Code", "Expected Job",
+  "Empl Class", "Pay Group", "Employee Type", "Probation Code",
+  "Probation End", "Union Code", "FLSA Status", "Business Unit",
+];
+
+/**
+ * Pick the employee's full name from a list of candidate leaf-text strings
+ * collected from the Person Org Summary detail page. Returns the first
+ * candidate that:
+ *   - matches the "Word Word…" shape (2+ alpha words separated by whitespace),
+ *   - is shorter than 60 characters,
+ *   - contains no digits, and
+ *   - is not a known UI label.
+ *
+ * Whitespace is collapsed (so non-breaking spaces match regular spaces) and
+ * label comparison is case-insensitive.
+ */
+export function selectPersonName(
+  candidates: readonly string[],
+  labels: readonly string[] = PERSON_ORG_NAME_LABELS,
+): string | null {
+  const lowerLabels = labels.map((l) => l.toLowerCase());
+  for (const raw of candidates) {
+    const text = raw.replace(/\s+/g, " ").trim();
+    if (text.length === 0 || text.length >= 60) continue;
+    if (!/^[A-Za-z]+\s+[A-Za-z]+/.test(text)) continue;
+    if (/\d/.test(text)) continue;
+    const lower = text.toLowerCase();
+    if (lowerLabels.some((label) => lower.includes(label))) continue;
+    return text;
+  }
+  return null;
+}
+
 export interface EidResult {
   emplId: string;
   emplRecord: string;
@@ -220,37 +274,20 @@ async function extractSingleResultDetail(
   const termDate = await personOrgSummary.terminationDate(frame)
     .textContent({ timeout: 5_000 }).then((t) => t?.trim() ?? "").catch(() => "");
 
-  // Extract name from the page
-  const fullName = await personOrgSummary.body(frame).evaluate((body) => {
-    // The name appears as a text node near the Person ID, often in a generic/span element
-    const allElements = body.querySelectorAll("span, div");
-    for (const el of Array.from(allElements)) {
+  // Extract name from the page. Two-stage: collect leaf-element candidate texts
+  // in the browser, then pick the name in Node where it can be unit-tested.
+  const candidates = await personOrgSummary.body(frame).evaluate((body) => {
+    const out: string[] = [];
+    const els = body.querySelectorAll("span, div");
+    for (const el of Array.from(els)) {
+      if (el.children.length !== 0) continue;
       const text = el.textContent?.trim() ?? "";
-      // Name pattern: "First Last" (2+ words, letters only, no digits)
-      if (/^[A-Za-z]+\s+[A-Za-z]+/.test(text) && text.length < 60 && !/\d/.test(text) && el.children.length === 0) {
-        // Skip common UI labels. The Person Org Summary detail page renders many
-        // 2-word labels in leaf spans that match the name regex; without this list
-        // the iteration returns the first label ("Person ID") instead of the name.
-        // TODO: replace with a registry selector targeting the actual name span
-        // (likely #PERSON_NPC_VW_NAME_DISPL or similar PeopleSoft id) once verified.
-        const labels = [
-          "Search Criteria", "Recent Searches", "Saved Searches", "Employment Instances",
-          "Person Organizational Summary", "Return to Search", "Show fewer options",
-          "Navigation Area", "Julian Zaw",
-          "Person ID", "Benefit Eligibility", "Limited Hours", "Floater Hours",
-          "HR Status", "Payroll Status", "Last Hire", "Termination Date",
-          "ORG Instance", "Primary Job", "Empl Record", "Position Number",
-          "Dept ID", "Department Description", "Job Code", "Expected Job",
-          "Empl Class", "Pay Group", "Employee Type", "Probation Code",
-          "Probation End", "Union Code", "FLSA Status", "Business Unit",
-        ];
-        if (!labels.some((label) => text.includes(label))) {
-          return text;
-        }
-      }
+      if (text.length === 0 || text.length >= 60) continue;
+      out.push(text);
     }
-    return null;
-  }).catch(() => null);
+    return out;
+  }).catch(() => [] as string[]);
+  const fullName = selectPersonName(candidates, PERSON_ORG_NAME_LABELS);
 
   // Extract assignment details (same logic as drillInAndGetDetails)
   const assignmentCells = await personOrgSummary.body(frame).evaluate((body) => {

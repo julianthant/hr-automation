@@ -2,8 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { isAcceptedHdhDepartment } from "../../../../src/domain/hdh/departments.js";
 import {
+  PERSON_ORG_NAME_LABELS,
   deriveAssignmentDetailsFromCells,
   parsePersonOrgNameInput,
+  selectPersonName,
 } from "../../../../src/systems/ucpath/person-org-summary.js";
 
 describe("HDH department policy", () => {
@@ -84,5 +86,67 @@ describe("deriveAssignmentDetailsFromCells", () => {
       ]),
       null,
     );
+  });
+});
+
+describe("selectPersonName", () => {
+  it("picks a real two-word name", () => {
+    assert.equal(selectPersonName(["Leo Langley"]), "Leo Langley");
+  });
+
+  it("picks the name and skips two-word UI labels in front of it", () => {
+    assert.equal(
+      selectPersonName(["Person ID", "HR Status", "Leo Langley"]),
+      "Leo Langley",
+    );
+  });
+
+  it("rejects 'Person ID' rendered with a non-breaking space", () => {
+    // Regression: PeopleSoft renders 'Person ID' as a leaf span. Pre-fix,
+    // text.includes('Person ID') returned false (regular space mismatch) and
+    // 'Person ID' leaked through as the picked name.
+    assert.equal(
+      selectPersonName(["Person ID", "Leo Langley"]),
+      "Leo Langley",
+    );
+  });
+
+  it("matches labels case-insensitively", () => {
+    assert.equal(
+      selectPersonName(["person id", "PERSON ID", "Leo Langley"]),
+      "Leo Langley",
+    );
+  });
+
+  it("returns the normalized form (collapses internal NBSP/whitespace)", () => {
+    assert.equal(
+      selectPersonName(["Leo Langley"]),
+      "Leo Langley",
+    );
+  });
+
+  it("rejects candidates containing digits", () => {
+    assert.equal(
+      selectPersonName(["12345 Foo", "Leo Langley"]),
+      "Leo Langley",
+    );
+  });
+
+  it("rejects candidates of length ≥ 60", () => {
+    const long = "A" + " B".repeat(40); // exceeds 60 chars
+    assert.equal(selectPersonName([long, "Leo Langley"]), "Leo Langley");
+  });
+
+  it("returns null when no candidate qualifies", () => {
+    assert.equal(selectPersonName(["Person ID", "HR Status", "Active"]), null);
+  });
+
+  it("rejects single-word candidates", () => {
+    assert.equal(selectPersonName(["Active", "Leo Langley"]), "Leo Langley");
+  });
+
+  it("PERSON_ORG_NAME_LABELS is the default label list", () => {
+    assert.ok(PERSON_ORG_NAME_LABELS.includes("Person ID"));
+    assert.ok(PERSON_ORG_NAME_LABELS.includes("HR Status"));
   });
 });
