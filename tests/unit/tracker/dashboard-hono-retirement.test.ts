@@ -123,7 +123,6 @@ test("Hono manifest covers the dashboard public route inventory", () => {
     ["POST", "/api/daemons/spawn"],
     ["POST", "/api/daemons/stop"],
     ["GET", "/api/queue-depth"],
-    ["GET", "/events/daemon-log"],
     ["GET", "/api/ocr/forms"],
     ["POST", "/api/ocr/prepare"],
     ["POST", "/api/ocr/reupload"],
@@ -149,13 +148,8 @@ test("Hono manifest covers the dashboard public route inventory", () => {
     ["POST", "/api/capture/extend"],
     ["POST", "/api/capture/validate"],
     ["GET", "/api/capture/registry"],
-    ["GET", "/api/capture/sessions/stream"],
     ["GET", "/capture-assets/heic2any.min.js"],
-    ["GET", "/events"],
-    ["GET", "/events/logs"],
-    ["GET", "/events/run-events"],
-    ["GET", "/events/telegram"],
-    ["GET", "/events/sessions"],
+    ["GET", "/events/hub"],
     ["GET", "/"],
     ["GET", "/index.html"],
     ["GET", "*"],
@@ -217,8 +211,13 @@ test("dashboard server Hono-only listener serves representative routes", async (
   assert.equal(definitions.status, 200);
   assert.equal(Array.isArray(await definitions.json()), true);
 
-  const events = JSON.parse(await collectOneSsePayload(`http://localhost:${port}/events?workflow=onboarding`));
-  assert.equal(Array.isArray(events.entries), true);
+  const hubSubs = encodeURIComponent(
+    JSON.stringify([{ id: "e1", topic: "entries", params: { workflow: "onboarding" } }]),
+  );
+  const hubEnvelope = JSON.parse(await collectOneSsePayload(`http://localhost:${port}/events/hub?subs=${hubSubs}`));
+  // Hub envelope shape: { sub, data: { entries, workflows, wfCounts, failureCounts } }
+  assert.equal(typeof hubEnvelope.sub, "string");
+  assert.equal(Array.isArray(hubEnvelope.data.entries), true);
 
   const original = await fetch(`http://localhost:${port}/api/files/${file.fileId}/original`);
   assert.equal(original.status, 200);

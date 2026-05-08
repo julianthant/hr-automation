@@ -12,10 +12,18 @@ import { emitSessionEvent, readSessionEvents } from "../../../src/tracker/sessio
 import { querySessionEventsForRun } from "../../../src/tracker/state/queries.js";
 
 /**
- * Collect SSE `data:` payloads from `url` until either `stopAfter` messages
- * have arrived or `timeoutMs` elapses. Uses an AbortController to tear down
- * the underlying fetch cleanly — no dangling reader promises left behind
- * for `node:test` to flag as "resolution still pending."
+ * Build a hub URL for a single subscription.
+ */
+function hubUrl(port: number, topic: string, params: unknown): string {
+  const subs = encodeURIComponent(JSON.stringify([{ id: "s1", topic, params }]));
+  return `http://localhost:${port}/events/hub?subs=${subs}`;
+}
+
+/**
+ * Collect SSE hub envelopes from `url` until either `stopAfter` messages
+ * have arrived or `timeoutMs` elapses. Unwraps the hub envelope to return
+ * the inner `data` field as a JSON string, so callers can parse it identically
+ * to the legacy SSE behavior.
  */
 async function collectSSE(
   url: string,
@@ -28,12 +36,24 @@ async function collectSSE(
     const res = await fetch(url, { signal });
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
+    let buffered = "";
     while (messages.length < opts.stopAfter) {
       const { value, done } = await reader.read();
       if (done) break;
       const text = decoder.decode(value);
-      for (const line of text.split("\n")) {
-        if (line.startsWith("data: ")) messages.push(line.slice(6));
+      buffered += text;
+      // Parse complete SSE blocks (double-newline delimited)
+      let splitAt = buffered.indexOf("\n\n");
+      while (splitAt >= 0 && messages.length < opts.stopAfter) {
+        const block = buffered.slice(0, splitAt);
+        buffered = buffered.slice(splitAt + 2);
+        const dataLine = block.split("\n").find((l) => l.startsWith("data: "));
+        if (dataLine) {
+          // Unwrap hub envelope: { sub, data, event? } → serialize data back to JSON string
+          const envelope = JSON.parse(dataLine.slice(6)) as { sub: string; data: unknown; event?: string };
+          messages.push(JSON.stringify(envelope.data));
+        }
+        splitAt = buffered.indexOf("\n\n");
       }
     }
   } catch {
@@ -71,7 +91,7 @@ describe("/events/run-events SSE", () => {
     emitSessionEvent({ type: "workflow_start", workflowInstance: "J", runId: "B" }, tmp);
 
     const messages = await collectSSE(
-      `http://localhost:${port}/events/run-events?workflow=onboarding&id=alice@example.com&runId=A&date=2026-04-19`,
+      hubUrl(port, "runEvents", { workflow: "onboarding", id: "alice@example.com", runId: "A", date: "2026-04-19" }),
       { stopAfter: 1, timeoutMs: 1500 },
     );
     const allEvents = messages.flatMap((m) => JSON.parse(m));
@@ -85,7 +105,7 @@ describe("/events/run-events SSE", () => {
     // Kick off collection in the background; emit the second event mid-flight
     // so the server's next 500ms tick picks it up and emits a delta message.
     const pending = collectSSE(
-      `http://localhost:${port}/events/run-events?workflow=onboarding&id=alice@example.com&runId=A&date=2026-04-19`,
+      hubUrl(port, "runEvents", { workflow: "onboarding", id: "alice@example.com", runId: "A", date: "2026-04-19" }),
       { stopAfter: 2, timeoutMs: 2500 },
     );
     await new Promise((r) => setTimeout(r, 200));
@@ -116,7 +136,7 @@ describe("/events/run-events SSE", () => {
     db.exec("DELETE FROM session_events");
 
     const messages = await collectSSE(
-      `http://localhost:${port}/events/run-events?workflow=onboarding&id=alice@example.com&runId=Z&date=2026-04-19`,
+      hubUrl(port, "runEvents", { workflow: "onboarding", id: "alice@example.com", runId: "Z", date: "2026-04-19" }),
       { stopAfter: 1, timeoutMs: 1500 },
     );
     const allEvents = messages.flatMap((m) => JSON.parse(m));
@@ -136,7 +156,7 @@ describe("/events/run-events SSE", () => {
     db.exec("DROP TABLE session_events");
 
     const messages = await collectSSE(
-      `http://localhost:${port}/events/run-events?workflow=onboarding&id=alice@example.com&runId=T&date=2026-04-19`,
+      hubUrl(port, "runEvents", { workflow: "onboarding", id: "alice@example.com", runId: "T", date: "2026-04-19" }),
       { stopAfter: 1, timeoutMs: 1500 },
     );
     const allEvents = messages.flatMap((m) => JSON.parse(m));
@@ -152,7 +172,7 @@ describe("/events/run-events SSE", () => {
     emitSessionEvent({ type: "auth_complete", workflowInstance: "I", runId: "A", system: "crm", browserId: "b1" }, tmp);
 
     const messages = await collectSSE(
-      `http://localhost:${port}/events/run-events?workflow=onboarding&id=alice@example.com&runId=A&date=2026-04-19`,
+      hubUrl(port, "runEvents", { workflow: "onboarding", id: "alice@example.com", runId: "A", date: "2026-04-19" }),
       { stopAfter: 1, timeoutMs: 1500 },
     );
     const allEvents = messages.flatMap((m) => JSON.parse(m));
@@ -234,12 +254,42 @@ describe("/events SSE JSONL fallback", () => {
       await new Promise<void>((resolve) => server.listen(0, resolve));
       try {
         const port = (server.address() as { port: number }).port;
-        const messages = await collectSSE(
-          `http://localhost:${port}/events?workflow=onboarding&date=${date}`,
-          { stopAfter: 1, timeoutMs: 1500 },
-        );
-        assert.ok(messages[0], "expected one SSE payload");
-        const payload = JSON.parse(messages[0]);
+        // Use the hub endpoint instead of the removed legacy /events endpoint
+        const subs = encodeURIComponent(JSON.stringify([{ id: "s1", topic: "entries", params: { workflow: "onboarding", date } }]));
+        const controller = new AbortController();
+        const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(1500)]);
+        let envelopeData: unknown;
+        try {
+          const res = await fetch(`http://localhost:${port}/events/hub?subs=${subs}`, { signal });
+          assert.equal(res.status, 200);
+          const reader = res.body!.getReader();
+          const decoder = new TextDecoder();
+          let buffered = "";
+          outer: while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffered += decoder.decode(value, { stream: true });
+            let splitAt = buffered.indexOf("\n\n");
+            while (splitAt >= 0) {
+              const block = buffered.slice(0, splitAt);
+              buffered = buffered.slice(splitAt + 2);
+              const dataLine = block.split("\n").find((l) => l.startsWith("data: "));
+              if (dataLine) {
+                const envelope = JSON.parse(dataLine.slice(6)) as { sub: string; data: unknown };
+                envelopeData = envelope.data;
+                await reader.cancel();
+                break outer;
+              }
+              splitAt = buffered.indexOf("\n\n");
+            }
+          }
+        } catch {
+          // timeout
+        } finally {
+          controller.abort();
+        }
+        assert.ok(envelopeData, "expected one SSE payload");
+        const payload = envelopeData as { entries: Array<{ id: string }>; source?: unknown };
         assert.equal(Array.isArray(payload.entries), true);
         assert.equal(payload.source, undefined);
         assert.equal(payload.entries[0].id, "alice@example.com");

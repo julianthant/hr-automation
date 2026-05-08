@@ -105,6 +105,18 @@ async function readSseMessages(
   };
 }
 
+/** Build a hub URL for a single subscription. */
+function hubUrl(topic: string, params: unknown): string {
+  const subs = encodeURIComponent(JSON.stringify([{ id: "s1", topic, params }]));
+  return `/events/hub?subs=${subs}`;
+}
+
+/** Extract the inner `data` field from a hub envelope message. */
+function unpack(msg: { data: string }): unknown {
+  const envelope = JSON.parse(msg.data) as { sub: string; data: unknown; event?: string };
+  return envelope.data;
+}
+
 async function waitFor(predicate: () => boolean, label: string): Promise<void> {
   const deadline = Date.now() + 750;
   while (Date.now() < deadline) {
@@ -116,10 +128,10 @@ async function waitFor(predicate: () => boolean, label: string): Promise<void> {
 
 test("Hono /events/logs sends an empty first tick and aborts cleanly", async () => {
   const stream = await readSseMessages(
-    await app().request("/events/logs?workflow=onboarding&id=no-logs&runId=no-logs%231&date=2026-04-19"),
+    await app().request(hubUrl("logs", { workflow: "onboarding", id: "no-logs", runId: "no-logs#1", date: "2026-04-19" })),
     1,
   );
-  assert.deepEqual(JSON.parse(stream.messages[0].data), []);
+  assert.deepEqual(unpack(stream.messages[0]), []);
   await stream.cancel();
 });
 
@@ -142,11 +154,11 @@ test("Hono /events/logs filters runId and treats missing runId as #1", async () 
 
   const stream = await readSseMessages(
     await app().request(
-      `/events/logs?workflow=onboarding&id=${encodeURIComponent("alice@example.com")}&runId=${encodeURIComponent("alice@example.com#1")}&date=2026-04-19`,
+      hubUrl("logs", { workflow: "onboarding", id: "alice@example.com", runId: "alice@example.com#1", date: "2026-04-19" }),
     ),
     1,
   );
-  const logs = JSON.parse(stream.messages[0].data) as Array<{ message: string }>;
+  const logs = unpack(stream.messages[0]) as Array<{ message: string }>;
   assert.deepEqual(logs.map((log) => log.message), ["legacy run one"]);
   await stream.cancel();
 });
@@ -161,10 +173,10 @@ test("Hono /events/run-events reconnect replays full relevant history", async ()
   });
 
   const first = await readSseMessages(
-    await app().request("/events/run-events?workflow=onboarding&runId=run-a&date=2026-04-19"),
+    await app().request(hubUrl("runEvents", { workflow: "onboarding", runId: "run-a", date: "2026-04-19" })),
     1,
   );
-  assert.equal((JSON.parse(first.messages[0].data) as unknown[]).length, 1);
+  assert.equal((unpack(first.messages[0]) as unknown[]).length, 1);
   await first.cancel();
 
   appendSessionEvent({
@@ -177,10 +189,10 @@ test("Hono /events/run-events reconnect replays full relevant history", async ()
   });
 
   const second = await readSseMessages(
-    await app().request("/events/run-events?workflow=onboarding&runId=run-a&date=2026-04-19"),
+    await app().request(hubUrl("runEvents", { workflow: "onboarding", runId: "run-a", date: "2026-04-19" })),
     1,
   );
-  const events = JSON.parse(second.messages[0].data) as Array<{ type: string }>;
+  const events = unpack(second.messages[0]) as Array<{ type: string }>;
   assert.deepEqual(events.map((event) => event.type), ["workflow_start", "auth_complete"]);
   await second.cancel();
 });
@@ -222,10 +234,10 @@ test("Hono /events/run-events includes batch-scope events via workflowInstance a
   });
 
   const stream = await readSseMessages(
-    await app().request("/events/run-events?workflow=onboarding&runId=run-b&date=2026-04-19"),
+    await app().request(hubUrl("runEvents", { workflow: "onboarding", runId: "run-b", date: "2026-04-19" })),
     1,
   );
-  const events = JSON.parse(stream.messages[0].data) as Array<{ type: string; workflowInstance: string }>;
+  const events = unpack(stream.messages[0]) as Array<{ type: string; workflowInstance: string }>;
   assert.deepEqual(events.map((event) => `${event.workflowInstance}:${event.type}`), [
     "Onboarding 2:browser_launch",
     "Onboarding 2:item_start",
@@ -250,10 +262,10 @@ test("Hono /events JSONL fallback reads the requested historical date", async ()
   });
 
   const stream = await readSseMessages(
-    await app().request("/events?workflow=alpha&date=2026-04-19"),
+    await app().request(hubUrl("entries", { workflow: "alpha", date: "2026-04-19" })),
     1,
   );
-  const payload = JSON.parse(stream.messages[0].data) as { entries: Array<{ id: string }> };
+  const payload = unpack(stream.messages[0]) as { entries: Array<{ id: string }> };
   assert.deepEqual(payload.entries.map((entry) => entry.id), ["past-item"]);
   await stream.cancel();
 });
@@ -266,10 +278,13 @@ test("Hono /events/daemon-log tails and releases its watcher on abort", async ()
   writeFileSync(join(daemons, `onboarding-${pid}.log`), "first line\n");
 
   const stream = await readSseMessages(
-    await app().request(`/events/daemon-log?pid=${pid}`),
+    await app().request(hubUrl("daemonLog", { pid })),
     1,
   );
-  assert.match(stream.messages[0].data, /first line/);
+  const data = unpack(stream.messages[0]) as { line?: string; ok?: boolean };
+  // First message should be a tail line with the log content, not an error
+  assert.ok(data.ok !== false, "should not be an error envelope");
+  assert.match(data.line ?? "", /first line/);
   await waitFor(() => getActiveHonoDaemonLogWatcherCountForTests() === 1, "daemon log watcher to register");
   await stream.cancel();
   await waitFor(() => getActiveHonoDaemonLogWatcherCountForTests() === 0, "daemon log watcher cleanup");
@@ -277,11 +292,13 @@ test("Hono /events/daemon-log tails and releases its watcher on abort", async ()
 
 test("Hono capture session stream starts with session-list and releases its subscription on abort", async () => {
   const stream = await readSseMessages(
-    await app().request("/api/capture/sessions/stream"),
+    await app().request(hubUrl("captureSessions", {})),
     1,
   );
-  assert.equal(stream.messages[0].event, "session-list");
-  assert.deepEqual(JSON.parse(stream.messages[0].data), { sessions: [] });
+  // Hub envelope: { sub, data: { sessions: [] }, event: "session-list" }
+  const envelope = JSON.parse(stream.messages[0].data) as { sub: string; data: unknown; event?: string };
+  assert.equal(envelope.event, "session-list");
+  assert.deepEqual(envelope.data, { sessions: [] });
   await waitFor(() => getActiveHonoCaptureSseSubscriberCountForTests() === 1, "capture subscriber to register");
   await stream.cancel();
   await waitFor(() => getActiveHonoCaptureSseSubscriberCountForTests() === 0, "capture subscriber cleanup");

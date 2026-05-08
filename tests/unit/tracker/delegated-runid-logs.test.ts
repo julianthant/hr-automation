@@ -1,10 +1,10 @@
 /**
- * Regression test: delegated-runId log routing via /events/logs.
+ * Regression test: delegated-runId log routing via /events/hub (logs topic).
  *
  * When an OCR parent run spawns a child active-check run, the child has its
  * own runId and its own workflow name. The dashboard must:
  *
- *   1. Fetch `/events/logs?workflow=active-check&id=<childId>&runId=<childRunId>`
+ *   1. Subscribe via /events/hub?subs=[{topic:"logs", params:{workflow:"active-check",id,runId}}]
  *      and receive ONLY the child's logs (from `active-check-<date>-logs.jsonl`).
  *   2. NOT receive logs from the parent OCR run or any other workflow.
  *
@@ -68,6 +68,14 @@ function appendLog(
   );
 }
 
+/** Build a hub request path for a single logs subscription. */
+function logsHubPath(workflow: string, id: string, runId: string, date: string): string {
+  const subs = encodeURIComponent(
+    JSON.stringify([{ id: "s1", topic: "logs", params: { workflow, id, runId, date } }]),
+  );
+  return `/events/hub?subs=${subs}`;
+}
+
 async function readFirstSseMessage(response: Response, timeoutMs = 750): Promise<unknown[]> {
   assert.equal(response.status, 200);
   const reader = response.body!.getReader();
@@ -91,7 +99,9 @@ async function readFirstSseMessage(response: Response, timeoutMs = 750): Promise
         if (dataLine) {
           clearTimeout(timer);
           await reader.cancel();
-          return JSON.parse(dataLine.slice("data: ".length)) as unknown[];
+          // Unwrap the hub envelope: { sub, data } → data (which is the logs array)
+          const envelope = JSON.parse(dataLine.slice("data: ".length)) as { sub: string; data: unknown };
+          return envelope.data as unknown[];
         }
       }
     }
@@ -146,9 +156,7 @@ describe("/events/logs delegated-runId routing", () => {
       ts: `${TEST_DATE}T10:00:02.500Z`,
     });
 
-    const response = await app().request(
-      `/events/logs?workflow=active-check&id=${encodeURIComponent(childId)}&runId=${encodeURIComponent(childRunId)}&date=${TEST_DATE}`,
-    );
+    const response = await app().request(logsHubPath("active-check", childId, childRunId, TEST_DATE));
     const messages = await readFirstSseMessage(response);
 
     // Must contain exactly the child's two log entries.
@@ -187,9 +195,7 @@ describe("/events/logs delegated-runId routing", () => {
     // This simulates the bug that LogPanel.105 prevents: if the frontend used
     // `topbarWorkflow` instead of `entry.workflow`, the route would read from
     // the wrong log file and return an empty array.
-    const response = await app().request(
-      `/events/logs?workflow=oath-upload&id=${encodeURIComponent(childId)}&runId=${encodeURIComponent(childRunId)}&date=${TEST_DATE}`,
-    );
+    const response = await app().request(logsHubPath("oath-upload", childId, childRunId, TEST_DATE));
     const messages = await readFirstSseMessage(response);
 
     // oath-upload-<date>-logs.jsonl has no entries for this itemId.
@@ -227,9 +233,7 @@ describe("/events/logs delegated-runId routing", () => {
     });
 
     // Query specifically for the child item.
-    const response = await app().request(
-      `/events/logs?workflow=active-check&id=${encodeURIComponent(childItemId)}&runId=${encodeURIComponent(childRunId)}&date=${TEST_DATE}`,
-    );
+    const response = await app().request(logsHubPath("active-check", childItemId, childRunId, TEST_DATE));
     const messages = await readFirstSseMessage(response);
 
     assert.equal(messages.length, 1);

@@ -133,36 +133,6 @@ async function collectHubEnvelopes(
   return envelopes;
 }
 
-/**
- * Collect the first SSE `data:` payload from a legacy endpoint (returns raw
- * data value, not an envelope).
- */
-async function collectOneLegacySsePayload(url: string, timeoutMs = 2000): Promise<unknown> {
-  const controller = new AbortController();
-  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(timeoutMs)]);
-  try {
-    const res = await fetch(url, { signal });
-    assert.equal(res.status, 200);
-    const reader = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffered = "";
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffered += decoder.decode(value, { stream: true });
-      const match = /^data: (.+)$/m.exec(buffered);
-      if (match) {
-        await reader.cancel();
-        return JSON.parse(match[1]);
-      }
-    }
-  } catch {
-    // timeout or abort
-  } finally {
-    controller.abort();
-  }
-  assert.fail("timed out waiting for first SSE payload");
-}
 
 describe("/events/hub integration", () => {
   let dir: string;
@@ -246,29 +216,9 @@ describe("/events/hub integration", () => {
     );
   });
 
-  test("legacy /events/telegram emits same payload shape as before", async () => {
-    // Write a sessions file with a telegram_sent event
-    const datedFile = join(dir, `sessions-${new Date().toISOString().slice(0, 10)}.jsonl`);
-    appendFileSync(
-      datedFile,
-      JSON.stringify({
-        type: "telegram_sent",
-        timestamp: new Date().toISOString(),
-        pid: process.pid,
-        message: "Hello from legacy",
-      }) + "\n",
-    );
-
-    const payload = await collectOneLegacySsePayload(
-      `http://localhost:${port}/events/telegram`,
-    );
-
-    assert.ok(Array.isArray(payload), "legacy endpoint should emit an array");
-    const events = payload as Array<{ type: string }>;
-    assert.ok(
-      events.some((e) => e.type === "telegram_sent"),
-      "expected telegram_sent in legacy payload",
-    );
+  test("legacy /events/telegram returns 404 (removed — use /events/hub)", async () => {
+    const res = await fetch(`http://localhost:${port}/events/telegram`);
+    assert.equal(res.status, 404, "legacy endpoint should return 404 after removal");
   });
 
   test("hub emits correct envelope when sessions dir uses legacy sessions.jsonl", async () => {
@@ -393,28 +343,14 @@ describe("/events/hub entries + sessions topics", () => {
     assert.ok(Array.isArray(data.duoQueue), "data.duoQueue must be an array");
   });
 
-  test("legacy /events?workflow=X emits entries payload shape", async () => {
-    const payload = await collectOneLegacySsePayload(
-      `http://localhost:${port}/events?workflow=onboarding`,
-    );
-
-    assert.ok(payload !== null && typeof payload === "object", "expected object payload");
-    const data = payload as Record<string, unknown>;
-    assert.ok(Array.isArray(data.entries), "payload.entries must be an array");
-    assert.ok(Array.isArray(data.workflows), "payload.workflows must be an array");
-    assert.ok(data.wfCounts !== null && typeof data.wfCounts === "object", "payload.wfCounts must be an object");
-    assert.ok(data.failureCounts !== null && typeof data.failureCounts === "object", "payload.failureCounts must be an object");
+  test("legacy /events?workflow=X returns 404 (removed — use /events/hub)", async () => {
+    const res = await fetch(`http://localhost:${port}/events?workflow=onboarding`);
+    assert.equal(res.status, 404, "legacy endpoint should return 404 after removal");
   });
 
-  test("legacy /events/sessions emits SessionState shape", async () => {
-    const payload = await collectOneLegacySsePayload(
-      `http://localhost:${port}/events/sessions`,
-    );
-
-    assert.ok(payload !== null && typeof payload === "object", "expected object payload");
-    const data = payload as Record<string, unknown>;
-    assert.ok(Array.isArray(data.workflows), "payload.workflows must be an array");
-    assert.ok(Array.isArray(data.duoQueue), "payload.duoQueue must be an array");
+  test("legacy /events/sessions returns 404 (removed — use /events/hub)", async () => {
+    const res = await fetch(`http://localhost:${port}/events/sessions`);
+    assert.equal(res.status, 404, "legacy endpoint should return 404 after removal");
   });
 
   test("entries topic emits default workflow when no workflow param given", async () => {
@@ -629,44 +565,25 @@ describe("/events/hub logs + runEvents topics", () => {
     );
   });
 
-  test("legacy /events/logs?... returns the same payload shape as hub logs topic", async () => {
-    // NOTE: testRunId contains '#' which is a URL fragment delimiter — must be encoded.
+  test("legacy /events/logs?... returns 404 (removed — use /events/hub)", async () => {
     const params = new URLSearchParams({
       workflow: testWorkflow,
       id: testItemId,
       runId: testRunId,
       date: today,
     });
-    const payload = await collectOneLegacySsePayload(
-      `http://localhost:${port}/events/logs?${params}`,
-    );
-
-    assert.ok(Array.isArray(payload), "legacy /events/logs should emit an array");
-    const entries = payload as Array<{ runId?: string; message: string }>;
-    assert.ok(entries.length >= 2, `expected at least 2 log entries, got ${entries.length}`);
-    assert.ok(
-      entries.every((e) => !e.runId || e.runId === testRunId),
-      "all entries should match the requested runId",
-    );
+    const res = await fetch(`http://localhost:${port}/events/logs?${params}`);
+    assert.equal(res.status, 404, "legacy endpoint should return 404 after removal");
   });
 
-  test("legacy /events/run-events?... returns the same payload shape as hub runEvents topic", async () => {
-    // NOTE: testRunId contains '#' which is a URL fragment delimiter — must be encoded.
+  test("legacy /events/run-events?... returns 404 (removed — use /events/hub)", async () => {
     const params = new URLSearchParams({
       workflow: testWorkflow,
       runId: testRunId,
       date: today,
     });
-    const payload = await collectOneLegacySsePayload(
-      `http://localhost:${port}/events/run-events?${params}`,
-    );
-
-    assert.ok(Array.isArray(payload), "legacy /events/run-events should emit an array");
-    const events = payload as Array<{ type: string }>;
-    assert.ok(
-      events.some((e) => e.type === "item_start"),
-      "expected item_start event in run events",
-    );
+    const res = await fetch(`http://localhost:${port}/events/run-events?${params}`);
+    assert.equal(res.status, 404, "legacy endpoint should return 404 after removal");
   });
 });
 
@@ -773,63 +690,19 @@ describe("/events/hub captureSessions + daemonLog topics", () => {
     assert.ok(typeof data.line === "string" && data.line.length > 0, "data.line should be a non-empty string");
   });
 
-  test("legacy /api/capture/sessions/stream — first SSE event is session-list", async () => {
-    // Collect the first SSE event (with typed event name)
-    const controller = new AbortController();
-    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(2500)]);
-    let firstEvent: { event?: string; data: unknown } | undefined;
-    try {
-      const res = await fetch(`http://localhost:${port}/api/capture/sessions/stream`, { signal });
-      assert.equal(res.status, 200);
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffered = "";
-      outer: while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffered += decoder.decode(value, { stream: true });
-        let splitAt = buffered.indexOf("\n\n");
-        while (splitAt >= 0) {
-          const block = buffered.slice(0, splitAt);
-          buffered = buffered.slice(splitAt + 2);
-          const eventLine = block.split("\n").find((l) => l.startsWith("event: "));
-          const dataLine = block.split("\n").find((l) => l.startsWith("data: "));
-          if (dataLine) {
-            firstEvent = {
-              ...(eventLine ? { event: eventLine.slice("event: ".length) } : {}),
-              data: JSON.parse(dataLine.slice("data: ".length)),
-            };
-            break outer;
-          }
-          splitAt = buffered.indexOf("\n\n");
-        }
-      }
-      await reader.cancel();
-    } catch {
-      // timeout — use what we have
-    } finally {
-      controller.abort();
-    }
-
-    assert.ok(firstEvent, "expected at least one SSE event");
-    assert.equal(firstEvent!.event, "session-list", "first event should be 'session-list'");
-    const data = firstEvent!.data as Record<string, unknown>;
-    assert.ok(Array.isArray(data.sessions), "data.sessions must be an array");
+  test("legacy /api/capture/sessions/stream returns 404 (removed — use /events/hub)", async () => {
+    const res = await fetch(`http://localhost:${port}/api/capture/sessions/stream`);
+    assert.equal(res.status, 404, "legacy endpoint should return 404 after removal");
   });
 
-  test("legacy /events/daemon-log with invalid pid returns 400 JSON", async () => {
+  test("legacy /events/daemon-log with invalid pid returns 404 (removed — use /events/hub)", async () => {
     const res = await fetch(`http://localhost:${port}/events/daemon-log?pid=not-a-number`);
-    assert.equal(res.status, 400, "expected HTTP 400 for invalid pid");
-    const body = await res.json() as { ok: boolean; error: string };
-    assert.equal(body.ok, false);
-    assert.ok(typeof body.error === "string" && body.error.length > 0);
+    assert.equal(res.status, 404, "legacy endpoint should return 404 after removal");
   });
 
-  test("legacy /events/daemon-log with pid=0 returns 400 JSON", async () => {
+  test("legacy /events/daemon-log with pid=0 returns 404 (removed — use /events/hub)", async () => {
     const res = await fetch(`http://localhost:${port}/events/daemon-log?pid=0`);
-    assert.equal(res.status, 400, "expected HTTP 400 for pid=0");
-    const body = await res.json() as { ok: boolean; error: string };
-    assert.equal(body.ok, false);
+    assert.equal(res.status, 404, "legacy endpoint should return 404 after removal");
   });
 });
 
