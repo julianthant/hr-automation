@@ -4,30 +4,85 @@
 
 **Goal:** Eliminate the five concrete scaling smells in the tracker storage layer (unbounded `sessions.jsonl`, unindexed disk scan for screenshots, no SQLite TTL, unbounded parse cache, dual queue backends) without changing observable workflow behavior.
 
-**Architecture:** SQLite (`.tracker/state.db`) is already the live projection of every JSONL append. This plan completes the migration so SSE reads come from SQLite where the data already exists, JSONL writes are bounded by date rotation, and cleanup prunes both layers in lockstep.
+**Architecture:** SQLite (`.tracker/state.db`) is already the live projection of every JSONL append via `applyTrackerEntryLive` / `applyLogEntryLive` / `applySessionEventLive` (`src/tracker/state/runtime.ts`). This plan completes the migration so SSE reads come from SQLite where the data already exists, JSONL writes are bounded by date rotation, and cleanup prunes both layers in lockstep.
 
-**Tech Stack:** TypeScript / Node 20 / better-sqlite3 / Hono SSE / Vitest. No new dependencies.
+**Tech Stack:** TypeScript / **Node 26** (ESM, `"type": "module"`, target ES2024) / `node:sqlite` via the project's compat shim at `src/infra/sqlite/index.ts` / Hono SSE / `node:test` (run via `tsx --test`). No new runtime dependencies.
+
+**Working branch:** `tracker-storage-opt` (= local `master` + the plan commit). Master itself is checked out in another worktree, so subagent worktrees branch off `tracker-storage-opt` and merge back into it.
 
 ---
 
-## Approach
+## Master codebase reality (read this before writing code)
 
-Six independent tasks. Each is a single-subagent dispatch. **Files touched are disjoint enough to dispatch all six in parallel** (each in its own worktree), with the orchestrator merging sequentially after every parallel subagent has been verified per `~/.claude/CLAUDE.md` § "Parallel worktree discipline."
+The plan was originally drafted against an older branch with different paths. These are the *real* paths on master, verified at plan-write time:
 
-The two near-overlaps are:
-- **Tasks 1 & 5** both touch `src/tracker/jsonl.ts`, but Task 1 only adds an export at the bottom (`cleanOldSessionFiles`) and Task 5 only modifies the existing `parseCache` block (~lines 66–83). Merges land cleanly in either order; resolve any trivial conflict in the orchestrator.
-- **Task 2** adds one query function to `src/tracker/state/queries.ts`; **Task 3** creates a new `src/tracker/state/file-queries.ts`. Disjoint files, no overlap.
+| Concept | Path on master |
+|---|---|
+| JSONL append/read | `src/tracker/jsonl.ts` |
+| Sessions emit/read | `src/tracker/session-events.ts` |
+| SQLite open/migrate | `src/tracker/state/db.ts` (uses `openDatabase` from `src/infra/sqlite/index.js`) |
+| Live projection apply | `src/tracker/state/runtime.ts` |
+| SQLite read queries | `src/tracker/state/queries.ts` |
+| Schema migrations | `src/tracker/state/schema.ts` |
+| `/events/run-events` SSE handler | `src/tracker/dashboard/hono/routes/events.ts` |
+| Screenshots handler | `src/tracker/dashboard/screenshots.ts` (impl) + `src/tracker/dashboard/hono/routes/screenshots.ts` (HTTP wiring) |
+| `filterEventsForRun` / `rebuildSessionState` | `src/tracker/dashboard/session-state.ts` |
+| `clean:tracker` CLI | `src/scripts/ops/clean-tracker.ts` |
+| Daemon queue (jsonl + sqlite paths) | `src/core/daemon/queue.ts` |
 
-| Task | Branch name | Primary files | Backstop tests |
+**SQLite shim API** (`src/infra/sqlite/index.ts`) — important differences from `better-sqlite3`:
+
+```ts
+// Open
+import { openDatabase, transaction, type Database } from "../infra/sqlite/index.js";
+const db = openDatabase(path, { readonly: false }); // pragmas applied automatically
+
+// Type — never import from "better-sqlite3" or "node:sqlite" directly
+function take(db: Database, ...): ... { ... }
+
+// Transaction is a FREE FUNCTION, not a method
+transaction(db, () => { /* body */ });   // ✅
+db.transaction(() => { /* body */ })();  // ❌ does not exist on the shim
+
+// prepare/all/get/run shape is unchanged from better-sqlite3
+db.prepare("SELECT ... WHERE x = @x").all({ x: 1 });
+
+// Unknown named params are silently ignored (shim sets setAllowUnknownNamedParameters(true))
+```
+
+**Test framework** is `node:test` (NOT vitest). Pattern from `tests/unit/tracker/jsonl.test.ts:1-14`:
+
+```ts
+import { describe, it, beforeEach } from "node:test";
+import assert from "node:assert/strict";
+import { existsSync, rmSync } from "fs";
+import { /* ... */ } from "../../../src/tracker/jsonl.js"; // .js extensions required
+```
+
+Run a single test file: `tsx --test tests/unit/tracker/jsonl.test.ts`.
+Run a directory: `node scripts/run-tests.mjs tests/unit/tracker`.
+Run all: `npm run test`.
+
+---
+
+## Task decomposition
+
+Six independent tasks. Each is a single-subagent dispatch on its own worktree branched off `tracker-storage-opt`. The orchestrator merges sequentially after every parallel subagent has been verified per `~/.claude/CLAUDE.md` § "Parallel worktree discipline."
+
+| Task | Branch | Primary files | Backstop tests |
 |---|---|---|---|
-| 1 | `feature/tracker-opt-1-sessions-rotation` | `src/tracker/session-events.ts`, `src/tracker/jsonl.ts` (add export only), `tests/unit/tracker/session-events-rotation.test.ts` (new) | `npm run test -- session-events`, `npm run test -- jsonl` |
-| 2 | `feature/tracker-opt-2-sse-from-sqlite` | `src/server/routes/events.ts`, `src/tracker/state/queries.ts`, `src/server/session-state.ts` (no logic change; type tightening optional), `tests/unit/tracker/run-events-sse.test.ts` | `npm run test -- run-events-sse`, `npm run test -- dashboard-hono-sse` |
-| 3 | `feature/tracker-opt-3-screenshots-from-files` | `src/server/screenshots.ts`, `src/tracker/state/file-queries.ts` (new), `tests/unit/server/screenshots-endpoint.test.ts`, `tests/unit/tracker/dashboard-screenshots.test.ts` | `npm run test -- screenshots` |
-| 4 | `feature/tracker-opt-4-sqlite-prune` | `src/scripts/ops/clean-tracker.ts`, `src/tracker/state/cleanup.ts` (new), `tests/unit/scripts/ops/clean-tracker.test.ts` | `npm run test -- clean-tracker` |
-| 5 | `feature/tracker-opt-5-parsecache-lru` | `src/tracker/jsonl.ts` (parseCache block only), `tests/unit/tracker/jsonl.test.ts` | `npm run test -- jsonl` |
-| 6 | `feature/tracker-opt-6-retire-jsonl-queue` | `src/core/daemon/queue.ts`, `src/tracker/CLAUDE.md`, `tests/unit/core/daemon/daemon-queue.test.ts` | `npm run test -- daemon-queue`, `npm run test -- daemon`, `npm run test:architecture` |
+| 1 | `feature/tracker-opt-1-sessions-rotation` | `src/tracker/session-events.ts`, `src/tracker/jsonl.ts` (add export only), `src/scripts/ops/clean-tracker.ts`, new `tests/unit/tracker/session-events-rotation.test.ts` | `tsx --test tests/unit/tracker/session-events-rotation.test.ts`, `tsx --test tests/unit/tracker/jsonl.test.ts`, `tsx --test tests/unit/scripts/ops/clean-tracker.test.ts` |
+| 2 | `feature/tracker-opt-2-sse-from-sqlite` | `src/tracker/dashboard/hono/routes/events.ts`, `src/tracker/state/queries.ts`, `tests/unit/tracker/run-events-sse.test.ts` | `tsx --test tests/unit/tracker/run-events-sse.test.ts` |
+| 3 | `feature/tracker-opt-3-screenshots-from-files` | `src/tracker/dashboard/screenshots.ts`, new `src/tracker/state/file-queries.ts`, `tests/unit/tracker/screenshots-endpoint.test.ts`, `tests/unit/tracker/dashboard-screenshots.test.ts` | `tsx --test tests/unit/tracker/screenshots-endpoint.test.ts`, `tsx --test tests/unit/tracker/dashboard-screenshots.test.ts` |
+| 4 | `feature/tracker-opt-4-sqlite-prune` | `src/scripts/ops/clean-tracker.ts`, new `src/tracker/state/cleanup.ts`, `tests/unit/scripts/ops/clean-tracker.test.ts` | `tsx --test tests/unit/scripts/ops/clean-tracker.test.ts` |
+| 5 | `feature/tracker-opt-5-parsecache-lru` | `src/tracker/jsonl.ts` (parseCache block only), `tests/unit/tracker/jsonl.test.ts` | `tsx --test tests/unit/tracker/jsonl.test.ts` |
+| 6 | `feature/tracker-opt-6-retire-jsonl-queue` | `src/core/daemon/queue.ts`, `src/tracker/CLAUDE.md`, `tests/unit/core/daemon-queue.test.ts` | `tsx --test tests/unit/core/daemon-queue.test.ts`, `tsx --test tests/unit/core/daemon.test.ts` |
 
-Every task ends with `npm run typecheck && npm run test:architecture && npm run test -- <relevant>` green before commit.
+**Task 1 and Task 5** both touch `src/tracker/jsonl.ts` but in non-overlapping sections (Task 1 only adds an export at the bottom; Task 5 only modifies the existing `parseCache` block ~lines 67–83). They can dispatch in parallel; trivial merge in the orchestrator if anything overlaps.
+
+**Tasks 1 and 4** both touch `src/scripts/ops/clean-tracker.ts`. They overlap at the import block plus one block inside `cleanTrackerMain`. Easiest: dispatch Task 1 first (small change, lands quickly), then dispatch Task 4. Or dispatch in parallel and resolve the import-list conflict in the orchestrator.
+
+Every task ends with `npm run typecheck && npm run test:architecture && tsx --test <relevant>` green before commit.
 
 ---
 
@@ -35,18 +90,20 @@ Every task ends with `npm run typecheck && npm run test:architecture && npm run 
 
 **Files:**
 - Modify: `src/tracker/session-events.ts:66-99` — switch `getSessionsFilePath` + read/write to date-aware behavior
-- Modify: `src/tracker/jsonl.ts` — append `cleanOldSessionFiles(maxAgeDays, dir)` near the existing `cleanOldTrackerFiles` (find via grep — function lives in the same file but its line number isn't stable)
+- Modify: `src/tracker/jsonl.ts` — append `cleanOldSessionFiles(maxAgeDays, dir)` near the existing `cleanOldTrackerFiles` (find via grep — function lives there)
+- Modify: `src/scripts/ops/clean-tracker.ts` — call `cleanOldSessionFiles` from `cleanTrackerMain`
 - Create: `tests/unit/tracker/session-events-rotation.test.ts`
 
 **Why:** `.tracker/sessions.jsonl` is one file for the project's lifetime. Every `/events/run-events` SSE tick re-parses it on mtime change. After months of daemon uptime it's multi-MB. Rotation gives clean per-day files that prune automatically with the existing `clean:tracker` flow.
 
-**Migration strategy:** Going forward, writes go to `sessions-{YYYY-MM-DD}.jsonl`. Reads aggregate every `sessions-*.jsonl` PLUS the legacy single `sessions.jsonl` (until it ages out via `cleanOldSessionFiles`). No one-time migration script — the legacy file is simply read alongside dated files until pruning removes it.
+**Migration strategy:** Going forward, writes go to `sessions-{YYYY-MM-DD}.jsonl`. Reads aggregate every `sessions-*.jsonl` PLUS the legacy single `sessions.jsonl` (until it ages out via `cleanOldSessionFiles`). No one-time migration script — the legacy file is read alongside dated files until pruning removes it.
 
-- [ ] **Step 1: Read the existing module to anchor edits**
+- [ ] **Step 1: Anchor edits**
 
 ```bash
 grep -n "SESSIONS_FILE\|getSessionsFilePath\|readSessionEvents\|emitSessionEvent" src/tracker/session-events.ts
 grep -n "cleanOldTrackerFiles\|cleanOldScreenshots" src/tracker/jsonl.ts
+grep -n "cleanOldTrackerFiles\|cleanOldScreenshots\|cleanOldSession" src/scripts/ops/clean-tracker.ts
 ```
 
 - [ ] **Step 2: Write failing rotation test**
@@ -54,32 +111,36 @@ grep -n "cleanOldTrackerFiles\|cleanOldScreenshots" src/tracker/jsonl.ts
 Create `tests/unit/tracker/session-events-rotation.test.ts`:
 
 ```ts
-import { mkdtempSync, readdirSync, writeFileSync, existsSync } from "node:fs";
+import { describe, it, beforeEach, afterEach } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, readdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   emitSessionEvent,
   readSessionEvents,
   getSessionsFilePath,
   getSessionsFilePathForDate,
-} from "../../../src/tracker/session-events";
+} from "../../../src/tracker/session-events.js";
 
 describe("sessions.jsonl rotation", () => {
   let dir: string;
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "sess-rot-"));
   });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
 
   it("writes new events to a date-suffixed file", () => {
     emitSessionEvent({ type: "workflow_start", workflowInstance: "Test 1" }, dir);
     const today = new Date().toISOString().slice(0, 10);
-    expect(existsSync(join(dir, `sessions-${today}.jsonl`))).toBe(true);
-    expect(existsSync(join(dir, "sessions.jsonl"))).toBe(false);
+    assert.ok(existsSync(join(dir, `sessions-${today}.jsonl`)));
+    assert.equal(existsSync(join(dir, "sessions.jsonl")), false);
   });
 
   it("reads from both dated files and legacy single file", () => {
-    // Seed a legacy file (pre-rotation data we still need to surface).
+    // Seed legacy file (pre-rotation data we still need to surface).
     writeFileSync(
       join(dir, "sessions.jsonl"),
       JSON.stringify({
@@ -89,7 +150,7 @@ describe("sessions.jsonl rotation", () => {
         workflowInstance: "Legacy 1",
       }) + "\n",
     );
-    // Seed a dated file (post-rotation).
+    // Seed an old dated file.
     writeFileSync(
       join(dir, "sessions-2026-04-01.jsonl"),
       JSON.stringify({
@@ -99,28 +160,29 @@ describe("sessions.jsonl rotation", () => {
         workflowInstance: "Apr 1",
       }) + "\n",
     );
-    // And a fresh emit to today's file.
+    // Fresh emit lands in today's file.
     emitSessionEvent({ type: "workflow_start", workflowInstance: "Today 1" }, dir);
 
     const events = readSessionEvents(dir);
     const instances = events.map((e) => e.workflowInstance).sort();
-    expect(instances).toEqual(["Apr 1", "Legacy 1", "Today 1"]);
+    assert.deepEqual(instances, ["Apr 1", "Legacy 1", "Today 1"]);
   });
 
   it("getSessionsFilePathForDate returns the dated path", () => {
-    expect(getSessionsFilePathForDate("2026-05-07", dir)).toBe(
+    assert.equal(
+      getSessionsFilePathForDate("2026-05-07", dir),
       join(dir, "sessions-2026-05-07.jsonl"),
     );
   });
 
   it("getSessionsFilePath returns today's dated path", () => {
     const today = new Date().toISOString().slice(0, 10);
-    expect(getSessionsFilePath(dir)).toBe(join(dir, `sessions-${today}.jsonl`));
+    assert.equal(getSessionsFilePath(dir), join(dir, `sessions-${today}.jsonl`));
   });
 });
 ```
 
-Run: `npm run test -- session-events-rotation` — Expected: FAIL (`getSessionsFilePathForDate` not exported, dated file not written).
+Run: `tsx --test tests/unit/tracker/session-events-rotation.test.ts` — Expected: FAIL (`getSessionsFilePathForDate` not exported, dated file not written).
 
 - [ ] **Step 3: Implement rotation in session-events.ts**
 
@@ -149,14 +211,6 @@ export function getSessionsFilePathForDate(
   return join(dir, `${SESSIONS_PREFIX}${date}${SESSIONS_SUFFIX}`);
 }
 
-/**
- * Legacy-only path. Used by `readSessionEvents` to drain pre-rotation data
- * until the file ages out via `cleanOldSessionFiles`. Do not write here.
- */
-function getLegacySessionsFilePath(dir: string = DEFAULT_DIR): string {
-  return join(dir, LEGACY_SESSIONS_FILE);
-}
-
 // ── Read / Write ───────────────────────────────────────
 
 export function emitSessionEvent(
@@ -172,8 +226,8 @@ export function emitSessionEvent(
   };
   // Route to the dated file matching `full.timestamp`'s local date — same
   // rule tracker entries follow (see `dateLocal(new Date(entry.timestamp))`
-  // in jsonl.ts:trackEvent). This keeps batch-scope events emitted near
-  // local midnight in the same file as the per-item rows from the same run.
+  // in jsonl.ts:trackEvent). Keeps batch-scope events emitted near local
+  // midnight in the same file as the per-item rows from the same run.
   const trackerDate = dateLocal(new Date(full.timestamp));
   const path = getSessionsFilePathForDate(trackerDate, dir);
   const source = appendJsonlWithSource(path, full, {
@@ -216,14 +270,14 @@ export function readSessionEvents(dir: string = DEFAULT_DIR): SessionEvent[] {
 
 - [ ] **Step 4: Add `cleanOldSessionFiles` to `src/tracker/jsonl.ts`**
 
-Find the existing `cleanOldTrackerFiles` (grep for it). Right after it, add:
+Find the existing `cleanOldTrackerFiles` (`grep -n cleanOldTrackerFiles src/tracker/jsonl.ts`). Right after it, add:
 
 ```ts
 /**
  * Delete `sessions-YYYY-MM-DD.jsonl` files older than `maxAgeDays`. Also
- * deletes the legacy single `sessions.jsonl` if it has not been touched for
- * `maxAgeDays` (matches the file-mtime gate the dashboard's age-gated prune
- * already applies to that legacy file).
+ * deletes the legacy single `sessions.jsonl` if its mtime is older than
+ * `maxAgeDays` — matches the existing age-gated treatment that file
+ * receives elsewhere.
  */
 export function cleanOldSessionFiles(maxAgeDays: number, dir: string = DEFAULT_DIR): number {
   if (!existsSync(dir)) return 0;
@@ -261,9 +315,11 @@ export function cleanOldSessionFiles(maxAgeDays: number, dir: string = DEFAULT_D
 }
 ```
 
+(`statSync` and `unlinkSync` should already be imported in `jsonl.ts`. Verify with grep; if missing, extend the existing `import { ... } from "node:fs"` line.)
+
 - [ ] **Step 5: Wire into `src/scripts/ops/clean-tracker.ts`**
 
-Add a call to `cleanOldSessionFiles` inside the `if (cleanTracker)` block of `cleanTrackerMain`, alongside `cleanOldTrackerFiles` and `sweepOrphanUploadDirs`. Imports stay grouped at the top:
+Add to the import group at the top:
 
 ```ts
 import {
@@ -271,10 +327,10 @@ import {
   cleanOldSessionFiles,
   cleanOldScreenshots,
   DEFAULT_DIR,
-} from "../../tracker/jsonl";
+} from "../../tracker/jsonl.js";
 ```
 
-In `cleanTrackerMain`, after the existing `cleanOldTrackerFiles` log and before the uploads sweep:
+Inside `cleanTrackerMain`, in the existing `if (cleanTracker)` block — after the existing `cleanOldTrackerFiles` log line, before the orphan-uploads sweep:
 
 ```ts
 const sessionsDeleted = cleanOldSessionFiles(days, dir);
@@ -285,25 +341,31 @@ if (sessionsDeleted > 0) {
 }
 ```
 
-No new flag. Sessions prune piggybacks on the existing `--days` and `--no-screenshots` doesn't apply (these aren't screenshots).
+Extend the return type to include `sessionsDeleted`:
 
-- [ ] **Step 6: Update return shape**
+```ts
+export function cleanTrackerMain(argv: string[] = process.argv.slice(2)): {
+  trackerDeleted: number;
+  screenshotsDeleted: number;
+  sessionsDeleted: number;
+} {
+```
 
-`cleanTrackerMain` returns `{ trackerDeleted, screenshotsDeleted }`. Extend to `{ trackerDeleted, screenshotsDeleted, sessionsDeleted }` and update the corresponding test in `tests/unit/scripts/ops/clean-tracker.test.ts` to assert sessions are pruned.
+Update the test in `tests/unit/scripts/ops/clean-tracker.test.ts` to assert the new field exists.
 
-- [ ] **Step 7: Run tests**
+- [ ] **Step 6: Run tests**
 
 ```bash
-npm run test -- session-events-rotation
-npm run test -- jsonl
-npm run test -- clean-tracker
+tsx --test tests/unit/tracker/session-events-rotation.test.ts
+tsx --test tests/unit/tracker/jsonl.test.ts
+tsx --test tests/unit/scripts/ops/clean-tracker.test.ts
 npm run typecheck
 npm run test:architecture
 ```
 
-All must pass. Existing tests that touched `sessions.jsonl` directly may need to use `getSessionsFilePathForDate(today, dir)` instead — fix any breakage as you go (architecture-test failures should be obvious; functional test failures should be limited to a handful of fixtures).
+All must pass. Existing tests that referenced `sessions.jsonl` directly may need to use `getSessionsFilePathForDate(today, dir)` — fix breakage as you go.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/tracker/session-events.ts src/tracker/jsonl.ts \
@@ -328,46 +390,46 @@ EOF
 ## Task 2: Switch `/events/run-events` SSE to query SQLite for session events
 
 **Files:**
-- Modify: `src/server/routes/events.ts:240-280` — replace `readSessionEventsTolerant` call with a SQLite query when DB is ready
+- Modify: `src/tracker/dashboard/hono/routes/events.ts` — replace `readSessionEventsTolerant` call with a SQLite query when DB is ready
 - Modify: `src/tracker/state/queries.ts` — add `querySessionEventsForRun(db, opts)`
 - Test: `tests/unit/tracker/run-events-sse.test.ts` (existing, extend)
 
-**Why:** `session_events` table is already populated synchronously via `applySessionEventLive` on every emit (`src/tracker/jsonl.ts:9, 63, 89`, runtime.ts). The SSE handler still parses the entire JSONL on every tick. Switching the read to SQL is a constant-time index seek on `(workflow_instance, ts_ms)`, and Task 1's rotation makes the JSONL split, so the JSONL fallback only ever scans today's file.
+**Why:** `session_events` table is already populated synchronously via `applySessionEventLive` on every emit (`src/tracker/session-events.ts:89` → `src/tracker/state/runtime.ts:33`). The SSE handler still parses the entire JSONL on every tick. Switching the read to an indexed SQL query (`idx_session_events_run` on `(run_id, ts_ms)`, `idx_session_events_instance` on `(workflow_instance, ts_ms)` per `src/tracker/state/schema.ts:140-141`) is constant-time. After Task 1 lands, the JSONL fallback only ever scans today's file.
 
 **Backwards compatibility:** Keep the JSONL fallback when `isStateDbReady(dir)` returns false (DB missing, schema mismatch, or read-only failure). Same gate the projection's other read sites already use.
 
 - [ ] **Step 1: Read the existing handler**
 
 ```bash
-sed -n '230,290p' src/server/routes/events.ts
+grep -n "/events/run-events\|readSessionEventsTolerant\|filterEventsForRun" src/tracker/dashboard/hono/routes/events.ts
 ```
 
 - [ ] **Step 2: Add the query function to `src/tracker/state/queries.ts`**
 
-Append to `src/tracker/state/queries.ts` (after `queryRunsForItem`):
+Append (after `queryRunsForItem`):
 
 ```ts
-import type { SessionEvent } from "../session-events";
+import type { Database } from "../../infra/sqlite/index.js";
+import type { SessionEvent } from "../session-events.js";
 
 /**
- * Read every session event whose `runId` matches `opts.runId` OR (for
+ * Read every session event whose `run_id` matches `opts.runId` OR (for
  * batch-scope events emitted before the per-item ALS context was
- * established) whose `workflow_instance` falls within the run's
- * `[firstTrackerTs, lastTrackerTs]` window. The window filter mirrors
- * `filterEventsForRun`'s second pass so the caller can pass the result
- * straight through `filterEventsForRun(events, trackers, runId)` and get
- * identical output to the JSONL path.
+ * established) whose `workflow_instance` matches `opts.workflowInstance`.
+ * Time-window filtering happens client-side via `filterEventsForRun` so the
+ * caller can pass the result straight through and get identical output to
+ * the JSONL path.
  *
  * Returns events ordered by ts_ms ASC for deterministic SSE rendering.
+ *
+ * The session_events row stores the full event payload as `raw_json` (see
+ * src/tracker/state/schema.ts:135). We deserialize that to recover the same
+ * shape `readSessionEvents` returns from JSONL.
  */
 export function querySessionEventsForRun(
-  db: Database.Database,
-  opts: { runId: string; workflowInstance?: string; runStartMs?: number; runEndMs?: number },
+  db: Database,
+  opts: { runId: string; workflowInstance?: string },
 ): SessionEvent[] {
-  // Fetch direct matches by runId AND any orphan events sharing the
-  // workflowInstance (no runId on the event). The window filter is
-  // applied client-side by filterEventsForRun, so we deliberately
-  // over-fetch on workflow_instance and let the pure helper trim.
   const params: Record<string, unknown> = { runId: opts.runId };
   let where = "run_id = @runId";
   if (opts.workflowInstance) {
@@ -375,14 +437,14 @@ export function querySessionEventsForRun(
     params.instance = opts.workflowInstance;
   }
   const rows = db.prepare(`
-    SELECT event_json FROM session_events
+    SELECT raw_json FROM session_events
     WHERE ${where}
     ORDER BY ts_ms ASC, id ASC
-  `).all(params) as Array<{ event_json: string }>;
+  `).all(params) as Array<{ raw_json: string }>;
   const out: SessionEvent[] = [];
   for (const r of rows) {
     try {
-      out.push(JSON.parse(r.event_json) as SessionEvent);
+      out.push(JSON.parse(r.raw_json) as SessionEvent);
     } catch {
       // Skip — projection rebuild will reconcile.
     }
@@ -391,17 +453,9 @@ export function querySessionEventsForRun(
 }
 ```
 
-(If `event_json` isn't the projected column name, grep `session_events` in `src/tracker/state/schema.ts` and use the actual column. Most schemas project the full JSON for readback.)
+- [ ] **Step 3: Update the handler in `src/tracker/dashboard/hono/routes/events.ts`**
 
-- [ ] **Step 3: Update the handler in `src/server/routes/events.ts`**
-
-In the `/events/run-events` handler around line 250, replace:
-
-```ts
-const allEvents = await readSessionEventsTolerant(deps.dir);
-```
-
-with:
+Find the line that calls `readSessionEventsTolerant(deps.dir)` for `/events/run-events`. Replace with:
 
 ```ts
 let allEvents: SessionEvent[];
@@ -420,24 +474,58 @@ if (isStateDbReady(deps.dir)) {
 }
 ```
 
-Add the imports near the top of `events.ts`:
+Add imports near the top of `events.ts`:
 
 ```ts
-import { isStateDbReady, openStateDb } from "../../tracker/state/db";
-import { querySessionEventsForRun } from "../../tracker/state/queries";
+import { isStateDbReady, openStateDb } from "../../state/db.js";
+import { querySessionEventsForRun } from "../../state/queries.js";
 ```
+
+(Verify the relative depth — `events.ts` is at `src/tracker/dashboard/hono/routes/events.ts`, so it's `../../state/db.js` reaching `src/tracker/state/db.ts`. Confirm with the existing imports in that file before committing.)
 
 `filterEventsForRun(allEvents, trackerEntries, requestedRunId)` runs unchanged — its inputs are the same shape from either source.
 
 - [ ] **Step 4: Extend the SSE test**
 
-In `tests/unit/tracker/run-events-sse.test.ts`, add a test that asserts the handler returns identical output whether the SQLite projection is ready or has been deleted (forcing JSONL fallback). Pattern the test on the existing test that exercises `filterEventsForRun` — set up tracker entries and session events through the normal emit path so both stores are populated, hit the endpoint once, then `closeStateDbForTests(dir); rmSync(stateDbPath(dir))` and hit the endpoint again. Both responses must contain the same event objects in the same order.
+In `tests/unit/tracker/run-events-sse.test.ts`, add a test that asserts identical output between the two paths. Pattern:
+
+```ts
+import { describe, it, beforeEach, afterEach } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
+// ... existing imports
+
+describe("/events/run-events SQLite vs JSONL parity", () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(/* ... */); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  it("returns identical events from SQLite and JSONL fallback paths", async () => {
+    // Seed via the normal emit path so both stores are populated.
+    // ... emit a tracker entry + session events ...
+
+    const fromSqlite = await callRunEventsHandler({ dir, runId: "r1" });
+
+    // Force fallback by closing+removing the DB.
+    closeStateDbForTests(dir);
+    rmSync(stateDbPath(dir));
+
+    const fromJsonl = await callRunEventsHandler({ dir, runId: "r1" });
+
+    assert.deepEqual(
+      fromJsonl.map((e) => ({ ...e })), // spread for null-prototype-row compat
+      fromSqlite.map((e) => ({ ...e })),
+    );
+  });
+});
+```
+
+(See `src/infra/sqlite/CLAUDE.md` lessons learned: `node:sqlite` returns `[Object: null prototype]` rows; spread `{ ...row }` before `assert.deepEqual`.)
 
 - [ ] **Step 5: Run tests**
 
 ```bash
-npm run test -- run-events-sse
-npm run test -- dashboard-hono-sse
+tsx --test tests/unit/tracker/run-events-sse.test.ts
 npm run typecheck
 npm run test:architecture
 ```
@@ -445,14 +533,16 @@ npm run test:architecture
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/server/routes/events.ts src/tracker/state/queries.ts \
+git add src/tracker/dashboard/hono/routes/events.ts \
+        src/tracker/state/queries.ts \
         tests/unit/tracker/run-events-sse.test.ts
 git commit -m "$(cat <<'EOF'
 perf(server): serve /events/run-events from SQLite when projection ready
 
 Replaces the per-tick full-file JSONL parse of sessions.jsonl with an
-indexed SQL query against session_events. JSONL fallback retained for
-when isStateDbReady returns false (DB missing or schema drift).
+indexed SQL query against session_events (idx_session_events_run +
+idx_session_events_instance). JSONL fallback retained for when
+isStateDbReady returns false.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -464,68 +554,108 @@ EOF
 ## Task 3: Screenshots endpoint queries `files` table instead of scanning disk
 
 **Files:**
-- Modify: `src/server/screenshots.ts:45-213` — both overloads of `buildScreenshotsHandler`
-- Create: `src/tracker/state/file-queries.ts` — new module for `files` table reads
-- Test: `tests/unit/server/screenshots-endpoint.test.ts` (existing, extend) and `tests/unit/tracker/dashboard-screenshots.test.ts`
+- Modify: `src/tracker/dashboard/screenshots.ts` — both overloads of `buildScreenshotsHandler`
+- Create: `src/tracker/state/file-queries.ts`
+- Test: `tests/unit/tracker/screenshots-endpoint.test.ts` (existing, extend) and `tests/unit/tracker/dashboard-screenshots.test.ts`
 
-**Why:** Every screenshot is registered in SQLite `files` (workflow, item_id, run_id, storage_path, kind, sha256, bytes) at capture time. The current handler still parses `sessions.jsonl` AND `readdirSync`s the disk to build its grouped + legacy view. With the data already indexed by `(workflow, item_id)`, neither read is needed.
+**Why:** Every screenshot is registered in SQLite `files` table at capture time (see schema in `src/tracker/state/schema.ts:143-162`: `kind`, `storage_path`, `workflow`, `item_id`, `run_id`, `sha256`, `bytes`, with index `idx_files_owner` on `(workflow, item_id, run_id)`). The current handler still parses `sessions.jsonl` AND `readdirSync`s the disk to build its grouped + legacy view. With the data already indexed by `(workflow, item_id, run_id)`, neither read is needed.
 
-**Backwards compatibility:** Keep the legacy disk-scan path as a fallback when `isStateDbReady(dir)` is false OR when the `files` table has zero rows for the queried `(workflow, itemId)` pair (so a stale projection on an old DB doesn't blank out a real screenshot list — the disk fallback still surfaces "legacy" entries correctly).
+**Backwards compatibility:** Keep the legacy disk-scan path as a fallback when `isStateDbReady(dir)` is false OR when the `files` table has zero rows for the queried `(workflow, itemId)` (so a stale projection doesn't blank a real screenshot list — disk fallback still surfaces "legacy" entries correctly).
 
 - [ ] **Step 1: Read existing handler**
 
 ```bash
-sed -n '45,213p' src/server/screenshots.ts
-grep -n "files\b" src/tracker/state/schema.ts | head -30
+grep -n "buildScreenshotsHandler\|getSessionsFilePath\|readdirSync" src/tracker/dashboard/screenshots.ts
 ```
-
-Confirm the `files` table columns (expected: `file_id`, `kind`, `storage_path`, `workflow`, `item_id`, `run_id`, `parent_run_id`, `source`, `sha256`, `bytes`, plus a timestamp).
 
 - [ ] **Step 2: Create `src/tracker/state/file-queries.ts`**
 
 ```ts
-import type Database from "better-sqlite3";
-import type { ScreenshotGroupedEntry } from "../../server/screenshots";
+import type { Database } from "../../infra/sqlite/index.js";
 
 export interface FileRow {
   file_id: string;
   kind: string;
   storage_path: string;
-  workflow: string;
-  item_id: string;
+  workflow: string | null;
+  item_id: string | null;
   run_id: string | null;
-  source: string | null;
-  bytes: number | null;
-  ts_ms: number | null;
+  source: string;
+  bytes: number;
+  created_at: string; // ISO-8601
+  last_accessed_at: string | null;
 }
 
 /**
  * List every screenshot registered in the `files` table for a workflow +
- * itemId. Joins with session_events when available to pull the screenshot
- * label/kind/step (same shape as the JSONL screenshot event). Files whose
- * storage_path no longer exists on disk are filtered out by the caller.
+ * itemId. The schema indexes on (workflow, item_id, run_id) so this is a
+ * direct seek. Files whose storage_path no longer exists on disk should be
+ * filtered by the caller via `existsSync` — projection rebuild does not
+ * unregister files when the disk copy is removed by `cleanOldScreenshots`.
  */
 export function queryScreenshotsForItem(
-  db: Database.Database,
+  db: Database,
   opts: { workflow: string; itemId: string },
 ): FileRow[] {
   return db.prepare(`
-    SELECT file_id, kind, storage_path, workflow, item_id, run_id, source, bytes, ts_ms
+    SELECT file_id, kind, storage_path, workflow, item_id, run_id, source, bytes,
+           created_at, last_accessed_at
     FROM files
     WHERE workflow = @workflow AND item_id = @itemId AND kind = 'screenshot'
-    ORDER BY ts_ms DESC
+    ORDER BY created_at DESC
   `).all(opts) as FileRow[];
 }
+```
 
-/**
- * Group rows by their session_event grouping (matched via run_id + ts_ms
- * proximity to a screenshot session_event). For files lacking a matching
- * event, return them as a single legacy bucket — preserves the existing
- * "legacy" entry behavior of the JSONL path.
- */
-export function groupScreenshotRows(
+- [ ] **Step 3: Switch grouped handler in `src/tracker/dashboard/screenshots.ts`**
+
+In the `groupedHandler` branch, replace the JSONL parse + disk scan with a SQLite-first path:
+
+```ts
+return async function groupedHandler(
+  query: { workflow: string; itemId: string },
+): Promise<ScreenshotGroupedEntry[]> {
+  const { workflow, itemId } = query;
+
+  // Prefer SQLite when ready and populated.
+  if (isStateDbReady(dir)) {
+    const db = openStateDb(dir);
+    const rows = queryScreenshotsForItem(db, { workflow, itemId });
+    if (rows.length > 0) {
+      // Pull the matching screenshot session_events from SQLite to recover
+      // group labels (kind/step). Group rows by ts when an event matches;
+      // unmatched rows fall under the synthetic "legacy" bucket.
+      const events = rows[0]?.run_id
+        ? querySessionEventsForRun(db, { runId: rows[0].run_id })
+            .filter((e) => e.type === "screenshot")
+        : [];
+      const grouped = groupScreenshotRows(
+        rows.filter((r) => existsSync(r.storage_path)),
+        events as Array<{
+          ts: number;
+          kind: "form" | "error" | "manual";
+          label: string;
+          step: string | null;
+          files: Array<{ system: string; path: string }>;
+        }>,
+      );
+      if (grouped.length > 0) return grouped;
+    }
+  }
+
+  // Fallback: original JSONL + disk implementation, unchanged.
+  return groupedHandlerLegacy({ dir, screenshotsDir, workflow, itemId });
+};
+```
+
+Move the existing JSONL+disk implementation into a private `groupedHandlerLegacy` function in the same file so both paths are testable.
+
+Add a private helper next to it:
+
+```ts
+function groupScreenshotRows(
   rows: FileRow[],
-  events: Array<{ ts: number; runId?: string; kind: "form" | "error" | "manual"; label: string; step: string | null; files: Array<{ system: string; path: string }> }>,
+  events: Array<{ ts: number; kind: "form" | "error" | "manual"; label: string; step: string | null; files: Array<{ system: string; path: string }> }>,
 ): ScreenshotGroupedEntry[] {
   const eventByPath = new Map<string, { ts: number; kind: "form" | "error" | "manual"; label: string; step: string | null; system: string }>();
   for (const ev of events) {
@@ -533,8 +663,8 @@ export function groupScreenshotRows(
       eventByPath.set(f.path, { ts: ev.ts, kind: ev.kind, label: ev.label, step: ev.step, system: f.system });
     }
   }
-  const groupedByEventTs = new Map<number, ScreenshotGroupedEntry>();
-  const legacy: ScreenshotGroupedEntry["files"] = [];
+  const groupedByTs = new Map<number, ScreenshotGroupedEntry>();
+  const legacyFiles: ScreenshotGroupedEntry["files"] = [];
   let legacyTs = 0;
 
   for (const row of rows) {
@@ -545,102 +675,66 @@ export function groupScreenshotRows(
       url: `/screenshots/${encodeURIComponent(row.storage_path.split(/[/\\]/).pop() ?? "")}`,
     };
     if (ev) {
-      const existing = groupedByEventTs.get(ev.ts);
-      if (existing) {
-        existing.files.push(fileEntry);
-      } else {
-        groupedByEventTs.set(ev.ts, {
-          ts: ev.ts,
-          kind: ev.kind,
-          label: ev.label,
-          step: ev.step,
-          files: [fileEntry],
-        });
-      }
+      const existing = groupedByTs.get(ev.ts);
+      if (existing) existing.files.push(fileEntry);
+      else groupedByTs.set(ev.ts, { ts: ev.ts, kind: ev.kind, label: ev.label, step: ev.step, files: [fileEntry] });
     } else {
-      const fileTs = row.ts_ms ?? 0;
-      if (fileTs > legacyTs) legacyTs = fileTs;
-      legacy.push(fileEntry);
+      const fileTs = Date.parse(row.created_at);
+      if (Number.isFinite(fileTs) && fileTs > legacyTs) legacyTs = fileTs;
+      legacyFiles.push(fileEntry);
     }
   }
 
-  const out = [...groupedByEventTs.values()];
-  if (legacy.length > 0) {
-    out.push({ ts: legacyTs, kind: "error", label: "legacy", step: null, files: legacy });
+  const out = [...groupedByTs.values()];
+  if (legacyFiles.length > 0) {
+    out.push({ ts: legacyTs, kind: "error", label: "legacy", step: null, files: legacyFiles });
   }
   out.sort((a, b) => b.ts - a.ts);
   return out;
 }
 ```
 
-- [ ] **Step 3: Switch grouped handler in `src/server/screenshots.ts`**
+For the legacy flat-list overload, apply the same SQLite-first pattern: query `queryScreenshotsForItem`, fall back to `readdirSync`. Both return the same `ScreenshotListEntry[]` shape so callers don't change.
 
-In the `groupedHandler` branch (lines ~58-168), replace the JSONL parse + disk scan with:
-
-```ts
-return async function groupedHandler(
-  query: { workflow: string; itemId: string },
-): Promise<ScreenshotGroupedEntry[]> {
-  const { workflow, itemId } = query;
-
-  // Prefer SQLite when the projection is ready and has rows for this item.
-  if (isStateDbReady(dir)) {
-    const db = openStateDb(dir);
-    const rows = queryScreenshotsForItem(db, { workflow, itemId });
-    if (rows.length > 0) {
-      // Pull screenshot session events for the same item to populate
-      // group labels (kind/step). Same query the JSONL path was doing
-      // in spirit, but indexed.
-      const events = querySessionEventsForRun(db, {
-        runId: rows[0]?.run_id ?? "",
-      })
-        .filter((e) => e.type === "screenshot" && e.files?.some((f) => f.path && rows.some((r) => r.storage_path === f.path)))
-        .map((e) => ({
-          ts: e.ts as number,
-          ...(e.runId ? { runId: e.runId } : {}),
-          kind: e.kind,
-          label: e.label,
-          step: e.step,
-          files: e.files,
-        }));
-      const grouped = groupScreenshotRows(
-        rows.filter((r) => existsSync(r.storage_path)),
-        events,
-      );
-      if (grouped.length > 0) return grouped;
-    }
-  }
-
-  // Disk-scan fallback: legacy behavior preserved verbatim. (Original
-  // JSONL parse + readdirSync walk — see Task 3 spec for context.)
-  return await groupedHandlerLegacy({ dir, screenshotsDir, workflow, itemId });
-};
-```
-
-Move the existing JSONL+disk implementation into a private `groupedHandlerLegacy` function (same file) so both paths are testable.
-
-For the legacy flat-list overload (lines ~172-212), apply the same pattern: query `queryScreenshotsForItem` first, fall back to `readdirSync`. Both return the same `ScreenshotListEntry[]` shape so callers don't change.
-
-Imports at the top of `src/server/screenshots.ts`:
+Imports at the top of `src/tracker/dashboard/screenshots.ts`:
 
 ```ts
-import { isStateDbReady, openStateDb } from "../tracker/state/db";
-import {
-  queryScreenshotsForItem,
-  groupScreenshotRows,
-} from "../tracker/state/file-queries";
-import { querySessionEventsForRun } from "../tracker/state/queries";
+import { isStateDbReady, openStateDb } from "../state/db.js";
+import { queryScreenshotsForItem, type FileRow } from "../state/file-queries.js";
+import { querySessionEventsForRun } from "../state/queries.js";
 ```
 
-- [ ] **Step 4: Extend the screenshots endpoint test**
+- [ ] **Step 4: Extend the screenshots tests**
 
-In `tests/unit/server/screenshots-endpoint.test.ts`, add a test asserting the SQLite path returns the same shape as the disk path. Seed via the normal emit path (so `files` table is populated), call the handler, capture the result, then drop the DB and assert the disk fallback returns the same content.
+Add a parity test in `tests/unit/tracker/screenshots-endpoint.test.ts`:
+
+```ts
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+
+it("SQLite path returns same shape as disk path", async () => {
+  // Seed via normal emit so files table is populated.
+  // ... emit a screenshot session event + register file ...
+  const fromSqlite = await handler({ workflow, itemId });
+
+  // Force disk fallback.
+  closeStateDbForTests(dir);
+  rmSync(stateDbPath(dir));
+
+  const fromDisk = await handler({ workflow, itemId });
+
+  assert.deepEqual(
+    fromDisk.map((e) => ({ ...e, files: e.files.map((f) => ({ ...f })) })),
+    fromSqlite.map((e) => ({ ...e, files: e.files.map((f) => ({ ...f })) })),
+  );
+});
+```
 
 - [ ] **Step 5: Run tests**
 
 ```bash
-npm run test -- screenshots-endpoint
-npm run test -- dashboard-screenshots
+tsx --test tests/unit/tracker/screenshots-endpoint.test.ts
+tsx --test tests/unit/tracker/dashboard-screenshots.test.ts
 npm run typecheck
 npm run test:architecture
 ```
@@ -648,16 +742,16 @@ npm run test:architecture
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/server/screenshots.ts src/tracker/state/file-queries.ts \
-        tests/unit/server/screenshots-endpoint.test.ts \
+git add src/tracker/dashboard/screenshots.ts \
+        src/tracker/state/file-queries.ts \
+        tests/unit/tracker/screenshots-endpoint.test.ts \
         tests/unit/tracker/dashboard-screenshots.test.ts
 git commit -m "$(cat <<'EOF'
 perf(server): serve /api/screenshots from SQLite files table
 
-Replaces the per-request sessions.jsonl parse + readdirSync scan with
-an indexed SQL query against the files table, which already records
-every captured screenshot at emit time. Disk-scan path retained as
-fallback for missing/stale projection.
+Replaces sessions.jsonl parse + readdirSync scan with an indexed SQL
+query against the files table (idx_files_owner). Disk-scan path
+retained as fallback for missing/stale projection.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -673,35 +767,52 @@ EOF
 - Modify: `src/scripts/ops/clean-tracker.ts`
 - Modify: `tests/unit/scripts/ops/clean-tracker.test.ts`
 
-**Why:** `state.db` accumulates `run_events`, `runs`, `items`, `logs`, `session_events`, `files`, `task_*`, and `worker_commands` rows indefinitely. JSONL pruning leaves them behind. Single nightly DELETE plus VACUUM keeps the DB bounded.
+**Why:** `state.db` accumulates `run_events`, `runs`, `items`, `logs`, `session_events`, `files`, `task_attempts`, `worker_commands` rows indefinitely. JSONL pruning leaves them behind. Single transaction-wrapped DELETE plus VACUUM keeps the DB bounded.
 
-**Retention semantics:** Match the JSONL `--days` flag. Anything whose tracker_date (or projected timestamp for non-dated tables) is older than the cutoff gets deleted. `worker_commands` and `task_attempts` use their own ts_ms with the same cutoff.
+**Retention semantics:** Match the JSONL `--days` flag. Anything whose `tracker_date` (TEXT YYYY-MM-DD) or applicable timestamp column is older than the cutoff gets deleted. **All schema timestamp columns on master are TEXT ISO-8601 strings**, not numeric ms — comparisons use string ordering (which works correctly for ISO format).
 
-- [ ] **Step 1: Read the schema**
+- [ ] **Step 1: Read schema column names**
 
 ```bash
-sed -n '1,200p' src/tracker/state/schema.ts
+grep -n "CREATE TABLE\|tracker_date\|created_at\|ts_ms" src/tracker/state/schema.ts
 ```
 
-Note column names for each table — `tracker_date` for run_events/runs/items/logs/session_events/files; `created_ms` or `ts_ms` for tasks/worker_commands.
+Verify the columns used below match the actual schema. The plan assumes:
+- `run_events`, `runs`, `items`, `logs`: `tracker_date` (TEXT YYYY-MM-DD)
+- `session_events`: `ts_ms` (INTEGER)
+- `files`: `created_at` (TEXT ISO)
+- `tasks`: `created_at` (TEXT ISO)
+- `task_attempts`: `created_at` (TEXT ISO)
+- `worker_commands`: needs to be checked (likely `created_at` TEXT ISO or `enqueued_at`)
+- `workers`: `last_heartbeat_at` for stale, `stopped_at` for completed (TEXT ISO)
+- `browser_processes`: `terminated_at` (TEXT ISO) for completed
+
+If a column name differs, adjust the SQL — the schema is the source of truth.
 
 - [ ] **Step 2: Write the failing test in `tests/unit/scripts/ops/clean-tracker.test.ts`**
 
 Add:
 
 ```ts
-import { mkdtempSync } from "node:fs";
+import { describe, it, beforeEach, afterEach } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { trackEvent, appendLogEntry } from "../../../../src/tracker/jsonl";
-import { openStateDb, closeStateDbForTests } from "../../../../src/tracker/state/db";
-import { cleanTrackerMain } from "../../../../src/scripts/ops/clean-tracker";
+import { trackEvent } from "../../../../src/tracker/jsonl.js";
+import {
+  openStateDb,
+  closeStateDbForTests,
+} from "../../../../src/tracker/state/db.js";
+import { cleanTrackerMain } from "../../../../src/scripts/ops/clean-tracker.js";
 
 describe("cleanTrackerMain SQLite prune", () => {
   let dir: string;
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "clean-sql-")); });
-  afterEach(() => { closeStateDbForTests(dir); });
+  afterEach(() => {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  });
 
   it("deletes SQLite rows whose tracker_date is older than --days", () => {
     // Seed two tracker entries: one fresh (today), one ancient (90 days ago).
@@ -717,23 +828,29 @@ describe("cleanTrackerMain SQLite prune", () => {
     } as any, dir);
 
     const db = openStateDb(dir);
-    expect((db.prepare("SELECT COUNT(*) AS n FROM run_events").get() as { n: number }).n).toBe(2);
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM run_events").get() as { n: number }).n,
+      2,
+    );
 
     cleanTrackerMain(["--days", "30", "--dir", dir, "--no-screenshots"]);
 
     const remaining = db.prepare("SELECT item_id FROM run_events").all() as Array<{ item_id: string }>;
-    expect(remaining.map((r) => r.item_id)).toEqual(["2"]);
+    assert.deepEqual(remaining.map((r) => r.item_id), ["2"]);
   });
 });
 ```
 
-Run: `npm run test -- clean-tracker` — Expected: FAIL (SQLite not pruned).
+Run: `tsx --test tests/unit/scripts/ops/clean-tracker.test.ts` — Expected: FAIL (SQLite not pruned).
 
 - [ ] **Step 3: Implement `src/tracker/state/cleanup.ts`**
 
 ```ts
-import type Database from "better-sqlite3";
-import { isStateDbReady, openStateDb } from "./db";
+import {
+  isStateDbReady,
+  openStateDb,
+} from "./db.js";
+import { transaction } from "../../infra/sqlite/index.js";
 
 export interface PruneResult {
   runEventsDeleted: number;
@@ -748,9 +865,9 @@ export interface PruneResult {
 
 /**
  * Delete every projected row whose tracker_date (or timestamp, for tables
- * lacking tracker_date) is older than `cutoffDate` (`YYYY-MM-DD`). Runs in
- * a single transaction so a partial prune can't half-update the DB. Final
- * VACUUM reclaims the freed pages.
+ * lacking tracker_date) is older than `cutoffDate` (YYYY-MM-DD ISO). Runs in
+ * a single transaction via the shim's `transaction(db, fn)` so a partial
+ * prune can't half-update the DB. VACUUM runs after commit (best-effort).
  *
  * Returns counts per table for log output. No-op (returns zeros) when the
  * projection isn't ready.
@@ -763,53 +880,60 @@ export function pruneStateDb(dir: string, cutoffDate: string): PruneResult {
   };
   if (!isStateDbReady(dir)) return zero;
   const db = openStateDb(dir);
-  const cutoffMs = Date.parse(`${cutoffDate}T00:00:00Z`);
+  const cutoffIso = `${cutoffDate}T00:00:00.000Z`;
+  const cutoffMs = Date.parse(cutoffIso);
   const result = { ...zero };
-  const txn = db.transaction(() => {
+
+  transaction(db, () => {
     result.runEventsDeleted = db.prepare(
-      "DELETE FROM run_events WHERE tracker_date < @cutoff"
-    ).run({ cutoff: cutoffDate }).changes;
+      "DELETE FROM run_events WHERE tracker_date < @cutoffDate"
+    ).run({ cutoffDate }).changes;
     result.runsDeleted = db.prepare(
-      "DELETE FROM runs WHERE tracker_date < @cutoff"
-    ).run({ cutoff: cutoffDate }).changes;
+      "DELETE FROM runs WHERE tracker_date < @cutoffDate"
+    ).run({ cutoffDate }).changes;
     result.itemsDeleted = db.prepare(
-      "DELETE FROM items WHERE tracker_date < @cutoff"
-    ).run({ cutoff: cutoffDate }).changes;
+      "DELETE FROM items WHERE tracker_date < @cutoffDate"
+    ).run({ cutoffDate }).changes;
     result.logsDeleted = db.prepare(
-      "DELETE FROM logs WHERE tracker_date < @cutoff"
-    ).run({ cutoff: cutoffDate }).changes;
+      "DELETE FROM logs WHERE tracker_date < @cutoffDate"
+    ).run({ cutoffDate }).changes;
+    // session_events stores ts_ms (numeric), all others TEXT ISO.
     result.sessionEventsDeleted = db.prepare(
       "DELETE FROM session_events WHERE ts_ms < @cutoffMs"
     ).run({ cutoffMs }).changes;
+    // files: created_at (TEXT ISO). String comparison works for ISO.
     result.filesDeleted = db.prepare(
-      "DELETE FROM files WHERE ts_ms < @cutoffMs"
-    ).run({ cutoffMs }).changes;
-    // task_* + worker_commands cleanup — time column may be `created_ms`,
-    // `ts_ms`, or `claimed_at` depending on schema. Read the actual column
-    // name from src/tracker/state/schema.ts and substitute below; structure
-    // is identical.
+      "DELETE FROM files WHERE created_at < @cutoffIso"
+    ).run({ cutoffIso }).changes;
     result.taskAttemptsDeleted = db.prepare(
-      "DELETE FROM task_attempts WHERE created_ms < @cutoffMs"
-    ).run({ cutoffMs }).changes;
+      "DELETE FROM task_attempts WHERE created_at < @cutoffIso"
+    ).run({ cutoffIso }).changes;
+    // worker_commands — use whatever timestamp column exists (created_at
+    // typical). Adjust per schema.ts at write time.
     result.workerCommandsDeleted = db.prepare(
-      "DELETE FROM worker_commands WHERE created_ms < @cutoffMs"
-    ).run({ cutoffMs }).changes;
+      "DELETE FROM worker_commands WHERE created_at < @cutoffIso"
+    ).run({ cutoffIso }).changes;
   });
-  txn();
-  // VACUUM cannot run inside a transaction. Best-effort.
-  try { db.exec("VACUUM"); } catch { /* WAL-mode VACUUM may need exclusive — skip if busy */ }
+
+  // VACUUM cannot run inside a transaction. Best-effort — WAL exclusive
+  // locking can fail if another connection is open; that's fine, the next
+  // run will pick it up.
+  try { db.exec("VACUUM"); } catch { /* skip if busy */ }
   return result;
 }
 ```
 
-- [ ] **Step 4: Wire into clean-tracker.ts**
+- [ ] **Step 4: Wire into `src/scripts/ops/clean-tracker.ts`**
 
-In `src/scripts/ops/clean-tracker.ts`, after the existing `cleanOldTrackerFiles` call:
+Add to imports:
 
 ```ts
-import { pruneStateDb } from "../../tracker/state/cleanup";
+import { pruneStateDb } from "../../tracker/state/cleanup.js";
+```
 
-// ...inside cleanTrackerMain, after the tracker delete log line:
+Inside `cleanTrackerMain`, after the existing tracker-files log line:
+
+```ts
 const cutoffDate = new Date(Date.now() - days * 24 * 3600 * 1000)
   .toISOString().slice(0, 10);
 const sqlPrune = pruneStateDb(dir, cutoffDate);
@@ -832,12 +956,12 @@ if (totalSqlDeleted > 0) {
 - [ ] **Step 5: Run tests**
 
 ```bash
-npm run test -- clean-tracker
+tsx --test tests/unit/scripts/ops/clean-tracker.test.ts
 npm run typecheck
 npm run test:architecture
 ```
 
-If a column name differs from the assumption (e.g. `ts_ms` vs `created_ms` vs `claimed_at`), adjust the SQL — the schema is in `src/tracker/state/schema.ts`.
+If a column name differs from the assumption, adjust the SQL and re-run.
 
 - [ ] **Step 6: Commit**
 
@@ -861,60 +985,56 @@ EOF
 ## Task 5: LRU eviction on `parseCache`
 
 **Files:**
-- Modify: `src/tracker/jsonl.ts:66-83` — replace `Map` with bounded LRU
+- Modify: `src/tracker/jsonl.ts` — replace `Map` with bounded LRU at the `parseCache` block (find via `grep -n parseCache src/tracker/jsonl.ts`)
 - Test: `tests/unit/tracker/jsonl.test.ts` (existing, extend)
 
 **Why:** `parseCache` is `new Map()` with no eviction. Every `(workflow, date)` ever read by the dashboard adds an entry that never gets removed. After a long-lived dashboard session walking through historical dates, this grows unboundedly.
 
-**Sizing:** Default cap = 64. Largest plausible working set is ~10 workflows × ~7 days = 70 entries; 64 covers active use without re-parsing today's hot file. Trivial to tune later.
+**Sizing:** Default cap = 64. ~10 workflows × ~7 active dates = 70 entries; 64 covers active use without re-parsing today's hot file. Trivial to tune later.
 
 - [ ] **Step 1: Read the existing block**
 
 ```bash
-sed -n '66,83p' src/tracker/jsonl.ts
+grep -n -A 20 "const parseCache\|function readJsonlCached" src/tracker/jsonl.ts
 ```
 
 - [ ] **Step 2: Write failing test in `tests/unit/tracker/jsonl.test.ts`**
 
 ```ts
-import { __resetParseCacheForTests, __getParseCacheSizeForTests } from "../../../src/tracker/jsonl";
-// ...
+import {
+  __resetParseCacheForTests,
+  __getParseCacheSizeForTests,
+  readEntries,
+} from "../../../src/tracker/jsonl.js";
 
 describe("parseCache LRU", () => {
   beforeEach(() => __resetParseCacheForTests());
 
-  it("caps cache size at the configured limit", () => {
+  it("caps cache size at 64 entries", () => {
     const dir = mkdtempSync(join(tmpdir(), "lru-"));
-    // Force >64 distinct (workflow, date) reads.
     for (let i = 0; i < 100; i++) {
       const wf = `wf${i}`;
-      writeFileSync(join(dir, `${wf}-2026-05-07.jsonl`), '{"workflow":"' + wf + '","id":"x","runId":"r","timestamp":"2026-05-07T00:00:00Z","status":"done","data":{}}\n');
+      writeFileSync(
+        join(dir, `${wf}-2026-05-07.jsonl`),
+        '{"workflow":"' + wf + '","id":"x","runId":"r","timestamp":"2026-05-07T00:00:00Z","status":"done","data":{}}\n',
+      );
       readEntries(wf, dir);
     }
-    expect(__getParseCacheSizeForTests()).toBeLessThanOrEqual(64);
-  });
-
-  it("evicts the least-recently-used entry on overflow", () => {
-    // Touch entries A, B, C, then overflow with 64 fresh ones; A should be gone.
-    // Implementation: read a fixture file under name A, then fill the cache
-    // past 64, then verify A is evicted by checking re-read still returns
-    // identical content (always true) but cache size is capped.
-    // (Functional correctness — content is preserved; only memory bound matters.)
+    assert.ok(__getParseCacheSizeForTests() <= 64);
   });
 });
 ```
 
-Run: `npm run test -- jsonl` — Expected: FAIL (`__getParseCacheSizeForTests` not exported, cache uncapped).
+Run: `tsx --test tests/unit/tracker/jsonl.test.ts` — Expected: FAIL (`__getParseCacheSizeForTests` not exported, cache uncapped).
 
-- [ ] **Step 3: Implement bounded LRU in `src/tracker/jsonl.ts`**
+- [ ] **Step 3: Implement bounded LRU**
 
-Replace the `parseCache` block (lines 66-83) with:
+Replace the `parseCache` block in `src/tracker/jsonl.ts` with:
 
 ```ts
 // Cache parsed JSONL by file path with LRU eviction. Map's insertion-order
-// iteration plus delete-on-hit + re-set gives a 6-line LRU without an
-// extra dep. Cap chosen for ~10 workflows × ~7 active dates — adjust with
-// PARSE_CACHE_MAX if needed.
+// iteration plus delete-on-hit + re-set gives a 6-line LRU without a dep.
+// Cap chosen for ~10 workflows × ~7 active dates.
 const PARSE_CACHE_MAX = 64;
 type ParseCacheEntry = { mtimeMs: number; size: number; entries: unknown[] };
 const parseCache = new Map<string, ParseCacheEntry>();
@@ -924,7 +1044,7 @@ function readJsonlCached<T>(path: string): T[] {
   const stat = statSync(path);
   const cached = parseCache.get(path);
   if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
-    // Bump to most-recent by re-inserting.
+    // Bump to most-recent.
     parseCache.delete(path);
     parseCache.set(path, cached);
     return cached.entries as T[];
@@ -935,14 +1055,13 @@ function readJsonlCached<T>(path: string): T[] {
     .map((line) => JSON.parse(line));
   parseCache.set(path, { mtimeMs: stat.mtimeMs, size: stat.size, entries });
   if (parseCache.size > PARSE_CACHE_MAX) {
-    // Evict oldest (insertion-order first key).
     const oldestKey = parseCache.keys().next().value;
     if (oldestKey !== undefined) parseCache.delete(oldestKey);
   }
   return entries as T[];
 }
 
-/** Test-only — reset between cases so cache state doesn't leak. */
+/** Test-only — reset between cases. */
 export function __resetParseCacheForTests(): void {
   parseCache.clear();
 }
@@ -956,7 +1075,7 @@ export function __getParseCacheSizeForTests(): number {
 - [ ] **Step 4: Run tests**
 
 ```bash
-npm run test -- jsonl
+tsx --test tests/unit/tracker/jsonl.test.ts
 npm run typecheck
 npm run test:architecture
 ```
@@ -982,69 +1101,69 @@ EOF
 ## Task 6: Retire the JSONL queue backend
 
 **Files:**
-- Modify: `src/core/daemon/queue.ts` — delete `legacyReadQueueState`, `queueBackend()`, the `HRAUTO_QUEUE_BACKEND` env-var branch
+- Modify: `src/core/daemon/queue.ts` — delete `legacyReadQueueState`, `queueBackend()`, the `HRAUTO_QUEUE_BACKEND` env-var dispatch
 - Modify: `src/tracker/CLAUDE.md` — drop the "`HRAUTO_QUEUE_BACKEND=jsonl` is a temporary cutover fallback" line
-- Modify: `tests/unit/core/daemon/daemon-queue.test.ts` — remove tests targeting the legacy path, keep audit-append tests
-- Verify: `tests/unit/core/daemon/daemon.test.ts` and `tests/unit/core/daemon/daemon-client.test.ts` still pass
+- Modify: `tests/unit/core/daemon-queue.test.ts` — remove tests targeting the legacy path; keep audit-append tests
+- Verify: `tests/unit/core/daemon.test.ts` and `tests/unit/core/daemon-client.test.ts` still pass
 
-**Why:** SQLite has been the default queue backend for some time. The JSONL fallback is parallel code — `legacyReadQueueState` (queue.ts:54-130+) — that needs to be maintained, exercised by tests, and is O(n) on claim. Removing it shrinks `queue.ts` and removes a configuration footgun.
+**Why:** SQLite has been the default queue backend. The JSONL fallback (`legacyReadQueueState` at `src/core/daemon/queue.ts:54`) is parallel code that needs to be maintained, exercised by tests, and is O(n) on claim. Removing it shrinks `queue.ts` and removes a configuration footgun.
 
-**Audit-only writes preserved:** `appendEvent` (queue.ts:37-41) keeps appending to `.queue.jsonl` so existing dashboards/operators can `tail -f` for debugging. Only the *read* path is retired.
+**Audit-only writes preserved:** `appendEvent` in `queue.ts` keeps appending to `.queue.jsonl` so existing dashboards/operators can `tail -f` for debugging. Only the *read* path is retired.
 
 **Pre-flight check:** Search for production callers and CI configs that set `HRAUTO_QUEUE_BACKEND=jsonl`:
 
 ```bash
-grep -rn "HRAUTO_QUEUE_BACKEND" --include="*.ts" --include="*.yml" --include="*.yaml" --include="*.json" --include="*.md"
+grep -rn "HRAUTO_QUEUE_BACKEND" --include="*.ts" --include="*.yml" --include="*.yaml" --include="*.json" --include="*.md" .
 ```
 
-If any non-test caller exists, **stop and surface to the orchestrator** — that's a sign the legacy path is still load-bearing. In that case the task converts to "deprecate with warning, remove in a follow-up" instead of a hard removal.
+If any non-test caller exists, **stop and surface to the orchestrator** — the legacy path may still be load-bearing. The task then converts to "deprecate with warning, remove in a follow-up" instead of a hard removal.
 
 - [ ] **Step 1: Verify no production callers**
 
 ```bash
-grep -rn "HRAUTO_QUEUE_BACKEND" --include="*.ts" --include="*.yml" --include="*.yaml" --include="*.json" --include="*.md"
+grep -rn "HRAUTO_QUEUE_BACKEND" --include="*.ts" --include="*.yml" --include="*.yaml" --include="*.json" --include="*.md" .
 ```
 
-Expected: matches only in `src/core/daemon/queue.ts`, `src/tracker/CLAUDE.md`, and test files. If any other production file matches, halt and flag.
+Expected: matches only in `src/core/daemon/queue.ts`, `src/tracker/CLAUDE.md`, `src/core/CLAUDE.md`, and test files. Halt and flag if anything else matches.
 
-- [ ] **Step 2: Read the full queue.ts to map all branches that gate on `queueBackend()`**
+- [ ] **Step 2: Map all branches that gate on `queueBackend()`**
 
 ```bash
-grep -n "queueBackend\|HRAUTO_QUEUE_BACKEND\|legacyReadQueueState" src/core/daemon/queue.ts
+grep -n "queueBackend\|HRAUTO_QUEUE_BACKEND\|legacyReadQueueState\|legacy[A-Z]" src/core/daemon/queue.ts
 ```
 
 - [ ] **Step 3: Delete the legacy branches**
 
 In `src/core/daemon/queue.ts`:
-1. Remove `queueBackend()` function (lines 16-18).
-2. Remove `legacyReadQueueState` and `legacy*` write helpers (the JSONL fold and any legacy claim/done/failed paths).
-3. Remove every `if (queueBackend() === 'jsonl') { ...legacy... } else { ...sqlite... }` branch — keep only the SQLite branch.
-4. Keep `appendEvent` and the JSONL write side-effects in the SQLite path so the audit trail file still gets written.
+1. Remove `queueBackend()` function (line 16-18).
+2. Remove `legacyReadQueueState` (line 54+) and any `legacy*` write/claim/done/failed helpers.
+3. For every `if (queueBackend() === 'jsonl') { /* legacy */ } else { /* sqlite */ }` branch — keep only the SQLite branch.
+4. Keep `appendEvent` and the JSONL audit-write side effects in the SQLite path. Audit trail stays.
 
 - [ ] **Step 4: Update `src/tracker/CLAUDE.md`**
 
-Remove the line:
+Remove:
 > `HRAUTO_QUEUE_BACKEND=jsonl` is a temporary cutover fallback only. Default queue authority is SQLite.
 
 Replace with:
 > Queue authority is SQLite. The `.queue.jsonl` file in `.tracker/daemons/` is an append-only audit trail only — readers must not consume it as state.
 
-Also check `src/core/CLAUDE.md` for similar mentions and update.
+Check `src/core/CLAUDE.md` for similar mentions and update.
 
 - [ ] **Step 5: Update tests**
 
-In `tests/unit/core/daemon/daemon-queue.test.ts`:
-- Delete every test that explicitly sets `process.env.HRAUTO_QUEUE_BACKEND = 'jsonl'`.
+In `tests/unit/core/daemon-queue.test.ts`:
+- Delete every test that explicitly sets `process.env.HRAUTO_QUEUE_BACKEND = 'jsonl'`. The existing `withQueueBackend` helper (file:25) becomes a no-op or is removed.
 - Keep tests that verify `.queue.jsonl` audit lines are still appended on enqueue/claim/done/failed.
 - Confirm SQLite-path tests still pass without the env var dispatch.
 
 - [ ] **Step 6: Run the broader daemon test suite**
 
 ```bash
-npm run test -- daemon-queue
-npm run test -- daemon
-npm run test -- daemon-client
-npm run test -- enqueue-dispatch
+tsx --test tests/unit/core/daemon-queue.test.ts
+tsx --test tests/unit/core/daemon.test.ts
+tsx --test tests/unit/core/daemon-client.test.ts
+tsx --test tests/unit/core/enqueue-dispatch.test.ts
 npm run typecheck
 npm run test:architecture
 ```
@@ -1054,13 +1173,13 @@ All must pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/core/daemon/queue.ts src/tracker/CLAUDE.md \
-        tests/unit/core/daemon/daemon-queue.test.ts
+git add src/core/daemon/queue.ts src/tracker/CLAUDE.md src/core/CLAUDE.md \
+        tests/unit/core/daemon-queue.test.ts
 git commit -m "$(cat <<'EOF'
 refactor(daemon): retire JSONL queue backend, SQLite is sole authority
 
 HRAUTO_QUEUE_BACKEND=jsonl was a transitional fallback; SQLite has
-been the default. Removed legacyReadQueueState + every queueBackend()
+been default. Removed legacyReadQueueState + every queueBackend()
 gate. .queue.jsonl audit-append preserved for tail-f debugging.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
@@ -1072,9 +1191,9 @@ EOF
 
 ## Final Sweep
 
-After all six tasks merge to master:
+After all six tasks merge to `tracker-storage-opt`:
 
-- [ ] Run the full suite once over the combined diff:
+- [ ] Full suite over the combined diff:
 
 ```bash
 npm run typecheck:all
@@ -1086,23 +1205,27 @@ npm run test:architecture
 
 ```bash
 npm run dashboard
-# In another terminal: load http://localhost:5173, click into a recent run,
-# open the Events tab, confirm events render. Page through dates in the date
-# picker. Run npm run separation 1234 once and confirm the queue row appears
-# and screenshots are visible if the run failed.
+# Browser: http://localhost:5173 — click into a recent run, open Events tab,
+# confirm events render. Page through dates in the date picker. If a separation
+# fails locally, confirm screenshots show in the failure card.
 ```
 
-- [ ] Run `clean:tracker` end-to-end against a real `.tracker/` and confirm both file deletes and SQLite row deletes are reported.
+- [ ] Run `clean:tracker` end-to-end against a real `.tracker/` and confirm both file deletes, session-file deletes, and SQLite row deletes are reported.
 
-- [ ] Update `src/tracker/CLAUDE.md` "Lessons Learned" with one dated entry per task that introduced non-obvious behavior (rotation read order, SQLite-first SSE fallback, LRU sizing rationale, queue-backend retirement).
+- [ ] Update `src/tracker/CLAUDE.md` "Lessons Learned" with one dated entry per non-obvious change (rotation read order, SQLite-first SSE fallback, LRU sizing rationale, queue-backend retirement).
 
-- [ ] Run codex:rescue over the combined diff (read-only review per the global execution model). Findings come back to the orchestrator session for follow-up commits if any.
+- [ ] Run codex:rescue over the combined diff (read-only review per the global execution model). Findings go to the orchestrator session for follow-up commits if any.
+
+- [ ] Fast-forward `master` to `tracker-storage-opt` from the user's primary worktree, then delete `tracker-storage-opt`.
 
 ---
 
 ## Self-Review Notes
 
-- **Spec coverage:** Every smell from the audit has a task: sessions.jsonl growth (Task 1), JSONL-on-every-tick (Task 2 — sessions, Task 3 — screenshots), SQLite TTL gap (Task 4), parseCache unbounded (Task 5), dual queue backend (Task 6).
-- **Type consistency:** `cleanOldSessionFiles` (Task 1), `pruneStateDb` (Task 4), `queryScreenshotsForItem` / `groupScreenshotRows` (Task 3), `querySessionEventsForRun` (Task 2), `__resetParseCacheForTests` / `__getParseCacheSizeForTests` (Task 5) are all referenced consistently between definition and consumer steps.
-- **Placeholder scan:** No "TBD"/"add error handling"/"similar to Task N". One explicit "stop and surface to orchestrator" guard in Task 6 with a concrete trigger condition.
-- **Risk concentrated in Task 6.** It's the only task that *removes* a code path. Pre-flight grep is mandatory; if a non-test caller exists, the task degrades gracefully to a deprecation-with-warning step rather than a hard cut.
+- **Path correctness:** Every plan-touched path was verified against master at write time (2026-05-07 PT).
+- **SQLite shim:** All DB access goes through `openDatabase` + `transaction(db, fn)` — no `better-sqlite3` imports introduced.
+- **Test framework:** All tests use `node:test` + `node:assert/strict`. No vitest helpers (`expect`, `vi`) appear.
+- **Imports:** All `.js` extensions on relative imports per repo convention.
+- **Schema columns:** TEXT ISO (`created_at`, `last_accessed_at`, `tracker_date`) compared as strings; INTEGER ms (`ts_ms`) compared numerically.
+- **Risk concentrated in Task 6.** It's the only task that *removes* a code path. The pre-flight grep is mandatory; if a non-test caller exists, the task degrades to deprecation-with-warning rather than hard removal.
+- **Welcome's 6 server hardening fixes** (CORS bind, 4xx codes, sweep DB cleanup, await enqueue, daemon-log streaming, preview-inbox now-injection) are NOT in this plan. They live in deleted welcome commits and need a separate follow-up plan to port to master's `src/tracker/dashboard/` paths.
