@@ -253,8 +253,19 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   process.on('SIGINT', onSigint)
   process.on('SIGTERM', onSigterm)
 
+  // Track the last inFlight state when browser PIDs were registered. chromePids
+  // don't change between claims, so skip redundant upserts unless the inFlight
+  // task changed (a new claim brings a new taskId/attemptId that must be
+  // stamped onto the existing browser_process row). Reset to null on browser
+  // disconnect so the next Session.launch re-registers fresh PIDs.
+  // Initialized to a sentinel (undefined, distinct from null) so the first call
+  // always runs even when inFlight is null (pre-claim startup registrations).
+  let lastRegisteredInFlight: { itemId: string; runId: string; taskId?: string; attemptId?: string } | null | undefined = undefined
+  let browsersRegistered = false
   const registerBrowserProcesses = (): void => {
     if (!activeSession || !workerStore) return
+    // Skip if pids are already registered for the same inFlight task.
+    if (browsersRegistered && inFlight === lastRegisteredInFlight) return
     for (const [systemId, pid] of Object.entries(activeSession.chromePids)) {
       const sys = wf.config.systems.find((s) => s.id === systemId)
       workerStore.upsertBrowserProcess({
@@ -268,6 +279,8 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         ...(sys?.sessionDir ? { sessionDir: sys.sessionDir } : {}),
       })
     }
+    browsersRegistered = true
+    lastRegisteredInFlight = inFlight
   }
 
   const handleCommand = async (command: WorkerCommandRow): Promise<void> => {
@@ -471,6 +484,9 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         // items anyway. Mirrors SIGTERM: set shuttingDown, resolve the idle
         // waiters so the loop exits. In-flight teardown runs in `finally`.
         const unsubscribeDisconnect = session.onBrowserDisconnect((systemId) => {
+          // Reset so a future Session.launch re-registers fresh PIDs.
+          browsersRegistered = false
+          lastRegisteredInFlight = null
           if (shuttingDown) return
           log.warn(
             `[Daemon ${wf.config.name}/${instanceId}] browser disconnected (${systemId}); shutting down`,
