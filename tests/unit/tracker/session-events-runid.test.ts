@@ -1,12 +1,13 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "fs";
+import { mkdtempSync, rmSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { withLogContext, setLogRunId } from "../../../src/utils/log.js";
 import {
   emitSessionEvent,
   emitWorkflowStart,
+  readSessionEvents,
   type SessionEvent,
 } from "../../../src/tracker/session-events.js";
 
@@ -16,9 +17,7 @@ describe("emitSessionEvent + runId", () => {
   afterEach(() => { if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true }); });
 
   function readEvents(): SessionEvent[] {
-    const path = join(tmp, "sessions.jsonl");
-    if (!existsSync(path)) return [];
-    return readFileSync(path, "utf-8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    return readSessionEvents(tmp);
   }
 
   it("writes runId field when called inside a log context with runId set", async () => {

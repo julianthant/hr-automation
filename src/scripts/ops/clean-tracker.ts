@@ -11,6 +11,7 @@ import { join } from "node:path";
 
 import {
   cleanOldTrackerFiles,
+  cleanOldSessionFiles,
   cleanOldScreenshots,
   DEFAULT_DIR,
 } from "../../tracker/jsonl.js";
@@ -182,6 +183,7 @@ function parseArgs(argv: string[]): Args {
 export function cleanTrackerMain(argv: string[] = process.argv.slice(2)): {
   trackerDeleted: number;
   screenshotsDeleted: number;
+  sessionsDeleted: number;
 } {
   const {
     days,
@@ -196,11 +198,18 @@ export function cleanTrackerMain(argv: string[] = process.argv.slice(2)): {
   }
   let trackerDeleted = 0;
   let screenshotsDeleted = 0;
+  let sessionsDeleted = 0;
   if (cleanTracker) {
     trackerDeleted = cleanOldTrackerFiles(days, dir);
     log.success(
       `Deleted ${trackerDeleted} stale tracker file${trackerDeleted === 1 ? "" : "s"} (older than ${days} day${days === 1 ? "" : "s"}) from ${dir}`
     );
+    sessionsDeleted = cleanOldSessionFiles(days, dir);
+    if (sessionsDeleted > 0) {
+      log.success(
+        `Deleted ${sessionsDeleted} stale sessions file${sessionsDeleted === 1 ? "" : "s"} (older than ${days} day${days === 1 ? "" : "s"}) from ${dir}`,
+      );
+    }
     // Orphan upload-dir sweep runs alongside the tracker prune — same
     // working-directory assumption, same target.
     const uploadsRemoved = sweepOrphanUploadDirs(dir);
@@ -216,7 +225,7 @@ export function cleanTrackerMain(argv: string[] = process.argv.slice(2)): {
       `Deleted ${screenshotsDeleted} stale screenshot${screenshotsDeleted === 1 ? "" : "s"} (older than ${days} day${days === 1 ? "" : "s"}) from ${screenshotsDir}`
     );
   }
-  return { trackerDeleted, screenshotsDeleted };
+  return { trackerDeleted, screenshotsDeleted, sessionsDeleted };
 }
 
 // Only run when invoked directly (not when imported by tests)
