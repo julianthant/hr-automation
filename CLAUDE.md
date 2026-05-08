@@ -330,8 +330,8 @@ All production workflows are kernel-based as of 2026-04-17. No `defineDashboardM
 Kernel workflows exposed on the CLI (`npm run separation <ids>`, `npm run work-study <emplId> <date>`, `npm run eid-lookup <names...>`, `npm run onboarding <emails...>`) default to **daemon mode**:
 
 - **First invocation with no alive daemon** → spawns one detached daemon (`tsx src/cli-daemon.ts <workflow>`), waits for auth (Duo once), enqueues the item. Daemon stays alive after processing.
-- **Subsequent invocations** → append to the shared queue (`.tracker/daemons/{workflow}.queue.jsonl`) and `POST /wake` every alive daemon. No re-Duo.
-- **Multi-daemon dispatch**: all alive daemons for a workflow race to claim the next queued row via an atomic `fs.mkdir` mutex. Whichever daemon finishes its current item first grabs the next — dynamic load balancing without a coordinator.
+- **Subsequent invocations** → insert into the shared SQLite queue (`tasks` table in `.tracker/state.db`, audit-appended to `.tracker/daemons/{workflow}.queue.jsonl` for `tail -f` debugging) and `POST /wake` every alive daemon. No re-Duo.
+- **Multi-daemon dispatch**: all alive daemons for a workflow race to claim the next queued row via a single `UPDATE … RETURNING` against `tasks` indexed by `tasks_control_claimable_idx (workflow, control_state, priority DESC, enqueued_at ASC)`, run inside a `transaction(...)`. Whichever daemon's `UPDATE` wins grabs the row — dynamic load balancing without a coordinator. (No filesystem mutex; the JSONL `.queue.jsonl` is audit-only.)
 - **Keepalive**: every 15 min idle, each daemon runs `session.healthCheck(system)` per system so SAML/Duo sessions don't silently expire between items.
 
 Flags (on `separation`, `work-study`, `eid-lookup`, `onboarding`):
