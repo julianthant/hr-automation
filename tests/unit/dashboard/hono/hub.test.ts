@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Server } from "node:http";
@@ -8,6 +8,7 @@ import type { Server } from "node:http";
 import { parseSubsQuery } from "../../../../src/tracker/dashboard/hono/topics.js";
 import { createDashboardServer } from "../../../../src/tracker/dashboard.js";
 import { closeStateDbForTests } from "../../../../src/tracker/state/db.js";
+import { emitSessionEvent } from "../../../../src/tracker/session-events.js";
 
 // ── parseSubsQuery validation tests ──────────────────────────────────────────
 
@@ -496,6 +497,76 @@ describe("/events/hub logs + runEvents topics", () => {
     assert.ok(
       events.some((e) => e.type === "item_start"),
       "expected item_start event in run events",
+    );
+  });
+
+  test("hub runEvents subscription resolves workflowInstance past pending tracker rows that lack data.instance (regression: 2026-05-08)", async () => {
+    // The scenario: a pending tracker row is emitted FIRST (no data.instance),
+    // then later running rows carry the batch instance. Walking the tracker
+    // entries with `Array.find` returns the pending row, leaves wfInstance
+    // undefined, the SQLite query runs without workflowInstance, and
+    // batch-scope session events (workflow_start, browser_launch, auth_*,
+    // duo_*) — which have no runId — are never returned. Operator-visible
+    // symptom: Events tab shows ONLY runId-direct events (step_change,
+    // screenshot) and is missing every batch-scope event for the run.
+    //
+    // The fix uses `resolveInstanceForRun` instead, which loops past pending
+    // rows and returns the first row carrying `data.instance`.
+
+    // Prepend a pending row (no data.instance) BEFORE the running row that
+    // beforeEach already wrote. Append-order matters — pending must come
+    // first in the file so `Array.find` would have returned it.
+    const trackerFile = join(dir, `${testWorkflow}-${today}.jsonl`);
+    const existingContents = readFileSync(trackerFile, "utf-8");
+    const pendingRow =
+      JSON.stringify({
+        workflow: testWorkflow,
+        id: testItemId,
+        runId: testRunId,
+        status: "pending",
+        timestamp: new Date(Date.now() - 5000).toISOString(),
+        data: { __subject: "Onboarding test-item-1" }, // NO `instance` field
+      }) + "\n";
+    writeFileSync(trackerFile, pendingRow + existingContents);
+
+    // Add batch-scope session events (no runId) tagged with the matching
+    // workflowInstance. These are the events that were missing in the bug.
+    // Use `emitSessionEvent` (not raw appendFileSync) so the SQLite live
+    // projection picks them up — the SQLite path is what this test exercises.
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "Onboarding 1" }, dir);
+    emitSessionEvent({ type: "browser_launch", workflowInstance: "Onboarding 1" }, dir);
+
+    const subs = encodeURIComponent(
+      JSON.stringify([
+        {
+          id: "r1",
+          topic: "runEvents",
+          params: { workflow: testWorkflow, runId: testRunId, date: today },
+        },
+      ]),
+    );
+    const envelopes = await collectHubEnvelopes(
+      `http://localhost:${port}/events/hub?subs=${subs}`,
+      { stopAfter: 1, timeoutMs: 2500 },
+    );
+
+    assert.ok(envelopes.length >= 1, "expected at least 1 envelope");
+    const env = envelopes[0];
+    const events = env.data as Array<{ type: string; runId?: string; workflowInstance?: string }>;
+    // Both batch-scope events should be attributed to this run via
+    // workflowInstance fallback. The runId-direct item_start must also still
+    // be present.
+    assert.ok(
+      events.some((e) => e.type === "workflow_start"),
+      "expected workflow_start (batch-scope) attributed via workflowInstance",
+    );
+    assert.ok(
+      events.some((e) => e.type === "browser_launch"),
+      "expected browser_launch (batch-scope) attributed via workflowInstance",
+    );
+    assert.ok(
+      events.some((e) => e.type === "item_start"),
+      "expected item_start (runId-direct) preserved",
     );
   });
 
