@@ -9,12 +9,18 @@ import {
   readdirSync,
 } from "fs";
 import { join } from "path";
+import { tmpdir } from "node:os";
 import {
   cleanOldTrackerFiles,
   cleanOldScreenshots,
   dateLocal,
+  trackEvent,
 } from "../../../../src/tracker/jsonl.js";
 import { cleanTrackerMain } from "../../../../src/scripts/ops/clean-tracker.js";
+import {
+  openStateDb,
+  closeStateDbForTests,
+} from "../../../../src/tracker/state/db.js";
 
 // Dedicated tmp dir to keep the real .tracker/ untouched.
 const TEST_DIR = ".tracker-clean-test";
@@ -178,6 +184,70 @@ describe("cleanOldScreenshots (clean-tracker screenshots support)", () => {
     const deleted = cleanOldScreenshots(1, SCREENSHOTS_TEST_DIR);
     assert.equal(deleted, 2);
     assert.equal(readdirSync(SCREENSHOTS_TEST_DIR).length, 0);
+  });
+});
+
+describe("cleanTrackerMain SQLite prune", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = join(tmpdir(), `clean-sql-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(dir, { recursive: true });
+  });
+  afterEach(() => {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("deletes SQLite rows whose tracker_date is older than --days", () => {
+    // Initialize the DB before seeding — applyTrackerEntryLive skips SQLite
+    // when the DB file doesn't exist yet (isStateDbReady returns false).
+    const db = openStateDb(dir);
+
+    // Seed two tracker entries: one fresh (today), one ancient (90 days ago).
+    const old = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
+    const today = new Date().toISOString();
+    trackEvent(
+      { workflow: "x", id: "1", runId: "r1", timestamp: old, status: "done", data: {} },
+      dir,
+    );
+    trackEvent(
+      { workflow: "x", id: "2", runId: "r2", timestamp: today, status: "done", data: {} },
+      dir,
+    );
+
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM run_events").get() as { n: number }).n,
+      2,
+    );
+
+    cleanTrackerMain(["--days", "30", "--dir", dir, "--no-screenshots"]);
+
+    const remaining = db.prepare("SELECT item_id FROM run_events").all() as Array<{ item_id: string }>;
+    assert.deepEqual(
+      remaining.map((r) => ({ ...r })).map((r) => r.item_id),
+      ["2"],
+    );
+  });
+
+  it("returns sqlRowsDeleted count in result", () => {
+    // Initialize the DB before seeding so applyTrackerEntryLive writes to it.
+    openStateDb(dir);
+
+    const old = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
+    trackEvent(
+      { workflow: "x", id: "3", runId: "r3", timestamp: old, status: "done", data: {} },
+      dir,
+    );
+
+    const result = cleanTrackerMain(["--days", "30", "--dir", dir, "--no-screenshots"]);
+    assert.ok(
+      "sqlRowsDeleted" in result,
+      "cleanTrackerMain result should include sqlRowsDeleted",
+    );
+    assert.ok(
+      result.sqlRowsDeleted > 0,
+      "sqlRowsDeleted should be > 0 when old rows exist",
+    );
   });
 });
 
