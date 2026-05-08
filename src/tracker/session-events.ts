@@ -1,9 +1,10 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_DIR, dateLocal } from "./jsonl.js";
 import { getLogRunId } from "../utils/log.js";
 import { appendJsonlWithSource } from "./state/jsonl-source.js";
 import { applySessionEventLive } from "./state/runtime.js";
+import { isStateDbReady, openStateDb } from "./state/db.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -161,22 +162,89 @@ export function emitWorkflowEnd(instance: string, finalStatus?: "done" | "failed
 }
 
 const STEP_LOG_DEDUPE_WINDOW_MS = 50;
+const STEP_LOG_TAIL_BYTES = 2048;
 
+/**
+ * Dedupe `step_change` session events against `step` log entries written
+ * within the last 50ms for the same (runId, step). Prefers a constant-time
+ * SQLite seek on idx_logs_item_run when projection is ready; falls back to
+ * a bounded-byte tail read of today's logs JSONL otherwise.
+ *
+ * The previous "tail-read" implementation was a `readFileSync` of the full
+ * `*-logs.jsonl` followed by `.split("\n")` and a tail-slice — by midday on
+ * a busy daemon that was multi-MB-per-`markStep` × N workflow files. The
+ * current impl reads at most ~2 KB (or the full file if smaller) via
+ * `openSync`/`readSync`, which covers far more than the 50ms window can
+ * produce.
+ */
 function recentStepLogExists(
   workflow: string,
   runId: string,
   step: string,
   dir: string,
 ): boolean {
+  const cutoffMs = Date.now() - STEP_LOG_DEDUPE_WINDOW_MS;
+
+  // SQLite path — uses idx_logs_item_run (workflow, tracker_date, item_id,
+  // run_id, ts_ms). We don't have item_id from the caller (emitStepChange
+  // has only workflow + runId), so we filter by (workflow, tracker_date,
+  // run_id, ts_ms >= cutoff, level = 'step') and let SQLite pick the index.
+  // run_id is highly selective on its own, and ts_ms >= cutoff limits the
+  // scan to the last 50ms of rows.
+  if (isStateDbReady(dir)) {
+    try {
+      const db = openStateDb(dir);
+      const row = db.prepare(`
+        SELECT 1
+        FROM logs
+        WHERE workflow = @workflow
+          AND tracker_date = @date
+          AND run_id = @runId
+          AND level = 'step'
+          AND ts_ms >= @cutoff
+          AND message LIKE '%' || @step || '%'
+        LIMIT 1
+      `).get({
+        workflow,
+        date: dateLocal(),
+        runId,
+        cutoff: cutoffMs,
+        step,
+      });
+      return row !== undefined;
+    } catch {
+      // Fall through to JSONL path on any SQLite hiccup.
+    }
+  }
+
+  // JSONL fallback — bounded byte tail read of today's logs file. ~2 KB
+  // covers the last ~10–20 lines, which is far more than the 50ms window
+  // can produce. Avoids the multi-MB readFileSync the previous impl did.
   const path = join(dir, `${workflow}-${dateLocal()}-logs.jsonl`);
-  if (!existsSync(path)) return false;
-  let content: string;
-  try { content = readFileSync(path, "utf-8"); } catch { return false; }
-  const lines = content.split("\n");
-  // Walk last few lines (cheap; no need to read whole file for a 50ms window)
-  const tail = lines.slice(Math.max(0, lines.length - 8));
-  const cutoff = Date.now() - STEP_LOG_DEDUPE_WINDOW_MS;
-  for (const line of tail) {
+  let stat;
+  try { stat = statSync(path); } catch { return false; }
+  const tailBytes = Math.min(stat.size, STEP_LOG_TAIL_BYTES);
+  if (tailBytes === 0) return false;
+  let tail: string;
+  try {
+    const fd = openSync(path, "r");
+    try {
+      const buf = Buffer.alloc(tailBytes);
+      readSync(fd, buf, 0, tailBytes, stat.size - tailBytes);
+      tail = buf.toString("utf-8");
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return false;
+  }
+  // Drop the first (possibly partial) line if we didn't seek to a newline
+  // boundary (i.e. the file is bigger than our tail window).
+  const firstNl = tail.indexOf("\n");
+  const lines = firstNl >= 0 && stat.size > tailBytes
+    ? tail.slice(firstNl + 1).split("\n")
+    : tail.split("\n");
+  for (const line of lines) {
     if (!line) continue;
     try {
       const log = JSON.parse(line);
@@ -185,7 +253,7 @@ function recentStepLogExists(
         log.level === "step" &&
         typeof log.message === "string" &&
         log.message.includes(step) &&
-        new Date(log.ts).getTime() >= cutoff
+        new Date(log.ts).getTime() >= cutoffMs
       ) {
         return true;
       }
