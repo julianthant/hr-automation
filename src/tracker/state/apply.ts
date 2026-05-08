@@ -257,6 +257,19 @@ export function applySessionEvent(
 
 function applyScreenshotFiles(db: Database, event: ScreenshotSessionEvent): void {
   const files = Array.isArray(event.files) ? event.files : [];
+  // Look up workflow + item_id from the runs table so the files row is
+  // queryable by the (workflow, item_id, run_id) index via queryScreenshotsForItem.
+  let workflow: string | undefined;
+  let itemId: string | undefined;
+  if (event.runId) {
+    const run = db.prepare(
+      "SELECT workflow, item_id FROM runs WHERE run_id = ? LIMIT 1",
+    ).get(event.runId) as { workflow: string; item_id: string } | undefined;
+    if (run) {
+      workflow = run.workflow;
+      itemId = run.item_id;
+    }
+  }
   for (const file of files) {
     if (!file.path || !existsSync(file.path)) continue;
     registerLocalFile(db, {
@@ -266,6 +279,8 @@ function applyScreenshotFiles(db: Database, event: ScreenshotSessionEvent): void
       originalName: basename(file.path),
       source: "screenshot-event",
       runId: event.runId,
+      workflow,
+      itemId,
       metadata: {
         system: file.system,
         label: event.label,
