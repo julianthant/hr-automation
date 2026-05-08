@@ -3,7 +3,7 @@ export interface Migration {
   sql: string;
 }
 
-export const LATEST_SCHEMA_VERSION = 5;
+export const LATEST_SCHEMA_VERSION = 6;
 
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -508,6 +508,17 @@ CREATE INDEX IF NOT EXISTS idx_session_events_date
 CREATE INDEX IF NOT EXISTS idx_runs_run_id ON runs(run_id);
 CREATE INDEX IF NOT EXISTS idx_files_run_id_screenshot
   ON files(run_id) WHERE kind = 'screenshot';
+    `,
+  },
+  {
+    // Migration 6: drop run_events.raw_json (dead duplicate).
+    // raw_json stored the entire entry serialized as JSON in addition to the typed
+    // columns (data_json, typed_data_json, input_json, etc.). Every emit paid for
+    // the duplicate JSON.stringify; queries.ts reconstructs from typed columns and
+    // never reads raw_json. SQLite 3.35+ supports DROP COLUMN natively.
+    version: 6,
+    sql: String.raw`
+ALTER TABLE run_events DROP COLUMN raw_json;
     `,
   },
 ];

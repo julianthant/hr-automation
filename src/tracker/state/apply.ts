@@ -29,11 +29,11 @@ function stmts(db: Database): CachedStatements {
       INSERT OR IGNORE INTO run_events (
         source_path, source_line, source_offset, workflow, tracker_date, item_id,
         run_id, parent_run_id, status, step, event_ts, event_ms, data_json,
-        typed_data_json, input_json, error, raw_json, applied_at
+        typed_data_json, input_json, error, applied_at
       ) VALUES (
         @sourcePath, @sourceLine, @sourceOffset, @workflow, @trackerDate, @itemId,
         @runId, @parentRunId, @status, @step, @eventTs, @eventMs, @dataJson,
-        @typedDataJson, @inputJson, @error, @rawJson, @appliedAt
+        @typedDataJson, @inputJson, @error, @appliedAt
       )
     `),
     upsertRun: db.prepare(`
@@ -174,7 +174,6 @@ export function applyTrackerEntry(
   const dataJson = entry.data ? JSON.stringify(entry.data) : null;
   const typedDataJson = entry.typedData ? JSON.stringify(entry.typedData) : null;
   const inputJson = entry.input ? JSON.stringify(entry.input) : null;
-  const rawJson = JSON.stringify(entry);
   const now = new Date().toISOString();
   const isWork = entry.status !== "pending";
 
@@ -197,7 +196,6 @@ export function applyTrackerEntry(
       typedDataJson,
       inputJson,
       error: entry.error ?? null,
-      rawJson,
       appliedAt: now,
     });
 
