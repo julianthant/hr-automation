@@ -33,6 +33,7 @@
     "dashboard": "tsx --env-file=.env src/cli.ts dashboard",
     "dashboard:prod": "tsx --env-file=.env src/cli.ts dashboard --prod",
     "dashboard:tunneled": "./scripts/dashboard-tunneled.sh",
+    "dashboard:watch": "tsx watch --env-file=.env src/cli.ts dashboard",
     "dev:dashboard": "vite --config vite.dashboard.config.ts",
     "build:dashboard": "vite build --config vite.dashboard.config.ts",
     "setup": "tsx --env-file=.env src/scripts/ops/setup.ts",

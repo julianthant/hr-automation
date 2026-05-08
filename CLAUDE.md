@@ -60,6 +60,7 @@ npm run oath-upload:stop                         # Soft-stop all daemons
 
 # Dashboard (separate terminal — auto-updates as workflows run)
 npm run dashboard            # SSE backend (:3838) + Vite dev (:5173) — open http://localhost:5173
+npm run dashboard:watch      # Same as `dashboard`, but the SSE backend hot-reloads on src/ changes via tsx watch
 npm run dashboard:prod       # Serve pre-built dashboard from SSE only
 
 # Export / Utilities
