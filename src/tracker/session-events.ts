@@ -177,7 +177,7 @@ const STEP_LOG_TAIL_BYTES = 2048;
  * `openSync`/`readSync`, which covers far more than the 50ms window can
  * produce.
  */
-function recentStepLogExists(
+export function recentStepLogExists(
   workflow: string,
   runId: string,
   step: string,
@@ -194,6 +194,11 @@ function recentStepLogExists(
   if (isStateDbReady(dir)) {
     try {
       const db = openStateDb(dir);
+      // Escape SQL LIKE wildcards (%, _) and the escape character (\) in
+      // @step so the substring match is literal — same semantics as the
+      // JSONL fallback's String.includes. Without this, a future step name
+      // containing % or _ would over-match. Use \ as the escape character
+      // (uncommon in step names; see ESCAPE clause).
       const row = db.prepare(`
         SELECT 1
         FROM logs
@@ -202,7 +207,10 @@ function recentStepLogExists(
           AND run_id = @runId
           AND level = 'step'
           AND ts_ms >= @cutoff
-          AND message LIKE '%' || @step || '%'
+          AND message LIKE
+            '%' ||
+            REPLACE(REPLACE(REPLACE(@step, '\\', '\\\\'), '%', '\\%'), '_', '\\_')
+            || '%' ESCAPE '\\'
         LIMIT 1
       `).get({
         workflow,
