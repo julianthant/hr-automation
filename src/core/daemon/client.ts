@@ -282,11 +282,17 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
     }
 
     // Step 5: wake every alive daemon (alive ∪ spawned). Fire-and-forget;
-    // a wake failure on one daemon doesn't block the others.
+    // a wake failure on one daemon doesn't block the others. The 2s timeout
+    // bounds the wait when a daemon's event loop is wedged — without it,
+    // a hung daemon would block this Promise.all until the OS times out
+    // the socket (typically ~120s), pegging the dashboard's enqueue path.
     await Promise.all(
       daemons.map((d) =>
-        fetch(`http://127.0.0.1:${d.port}/wake`, { method: 'POST' }).catch(() => {
-          /* ignore — wake is best-effort */
+        fetch(`http://127.0.0.1:${d.port}/wake`, {
+          method: 'POST',
+          signal: AbortSignal.timeout(2_000),
+        }).catch(() => {
+          /* ignore — wake is best-effort (incl. AbortError on timeout) */
         }),
       ),
     )
@@ -336,8 +342,9 @@ export async function stopDaemons(
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ force }),
+        signal: AbortSignal.timeout(5_000),
       }).catch(() => {
-        /* ignore — the daemon may already be tearing down */
+        /* ignore — the daemon may already be tearing down (incl. AbortError) */
       }),
     ),
   )
