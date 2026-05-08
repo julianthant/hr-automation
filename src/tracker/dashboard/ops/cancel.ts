@@ -90,16 +90,22 @@ async function requestDaemonForceCurrent(
   runId: string | undefined,
 ): Promise<boolean> {
   if (!worker?.port || !runId) return false;
+  // Manual AbortController + clearTimeout (not AbortSignal.timeout) so the
+  // timer can't fire after the response completes — see "abort race" lesson.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5_000);
   try {
     const res = await fetch(`http://127.0.0.1:${worker.port}/force-current`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ itemId, runId }),
-      signal: AbortSignal.timeout(5_000),
+      signal: ctrl.signal,
     });
     return res.ok;
   } catch {
     return false;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

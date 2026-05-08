@@ -286,15 +286,23 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
     // bounds the wait when a daemon's event loop is wedged — without it,
     // a hung daemon would block this Promise.all until the OS times out
     // the socket (typically ~120s), pegging the dashboard's enqueue path.
+    // Manual AbortController + clearTimeout (not AbortSignal.timeout) so the
+    // timer can't fire after the response completes — see "abort race" lesson.
     await Promise.all(
-      daemons.map((d) =>
-        fetch(`http://127.0.0.1:${d.port}/wake`, {
-          method: 'POST',
-          signal: AbortSignal.timeout(2_000),
-        }).catch(() => {
+      daemons.map(async (d) => {
+        const ctrl = new AbortController()
+        const timer = setTimeout(() => ctrl.abort(), 2_000)
+        try {
+          await fetch(`http://127.0.0.1:${d.port}/wake`, {
+            method: 'POST',
+            signal: ctrl.signal,
+          })
+        } catch {
           /* ignore — wake is best-effort (incl. AbortError on timeout) */
-        }),
-      ),
+        } finally {
+          clearTimeout(timer)
+        }
+      }),
     )
 
 	    // Step 6: write task rows + queue audit. Now safe — at least one daemon is registered
@@ -336,17 +344,25 @@ export async function stopDaemons(
   trackerDir?: string,
 ): Promise<number> {
   const alive = await findAliveDaemons(workflow, trackerDir)
+  // Manual AbortController + clearTimeout (not AbortSignal.timeout) so the
+  // timer can't fire after the response completes — see "abort race" lesson.
   await Promise.all(
-    alive.map((d) =>
-      fetch(`http://127.0.0.1:${d.port}/stop`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ force }),
-        signal: AbortSignal.timeout(5_000),
-      }).catch(() => {
+    alive.map(async (d) => {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 5_000)
+      try {
+        await fetch(`http://127.0.0.1:${d.port}/stop`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ force }),
+          signal: ctrl.signal,
+        })
+      } catch {
         /* ignore — the daemon may already be tearing down (incl. AbortError) */
-      }),
-    ),
+      } finally {
+        clearTimeout(timer)
+      }
+    }),
   )
   return alive.length
 }
