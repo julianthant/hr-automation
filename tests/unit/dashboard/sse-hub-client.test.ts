@@ -210,6 +210,68 @@ test("10. unsubscribing the last sub closes the EventSource and sets es to null"
   assert.equal((hub as any).es, null);
 });
 
+test("12. listener that throws does not prevent a second sub's listener from being called", async () => {
+  const received: unknown[] = [];
+
+  // s1 throws on every message
+  hub.subscribe("entries", {}, () => {
+    throw new Error("s1 deliberate throw");
+  });
+  // s2 records all deliveries
+  hub.subscribe("logs", { id: "x" }, (data) => {
+    received.push(data);
+  });
+  await flushMicrotasks();
+  assert.equal(constructorCallCount, 1);
+
+  // Read sub ids from the encoded URL
+  const url = lastInstance!.url;
+  const decoded = JSON.parse(decodeURIComponent(url.slice("/events/hub?subs=".length))) as Array<{
+    id: string;
+    topic: string;
+  }>;
+  const s2Id = decoded.find((s) => s.topic === "logs")!.id;
+
+  // Deliver an envelope to s2; the hub must not crash from s1's throw
+  assert.doesNotThrow(() => {
+    lastInstance!.onmessage!({
+      data: JSON.stringify({ sub: s2Id, data: { hello: "world" } }),
+    });
+  });
+
+  assert.equal(received.length, 1, "s2 listener should receive the message");
+  assert.deepEqual(received[0], { hello: "world" });
+});
+
+test("13. listener error reaches console.error with the topic name included", async () => {
+  const errors: unknown[] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => errors.push(args.join(" "));
+
+  try {
+    hub.subscribe("entries", {}, () => {
+      throw new Error("deliberate");
+    });
+    await flushMicrotasks();
+
+    const url = lastInstance!.url;
+    const decoded = JSON.parse(decodeURIComponent(url.slice("/events/hub?subs=".length))) as Array<{
+      id: string;
+    }>;
+    const subId = decoded[0].id;
+
+    lastInstance!.onmessage!({ data: JSON.stringify({ sub: subId, data: {} }) });
+
+    assert.equal(errors.length, 1, "console.error should be called once");
+    assert.ok(
+      String(errors[0]).includes("entries"),
+      `error message should include the topic name 'entries', got: ${errors[0]}`,
+    );
+  } finally {
+    console.error = originalError;
+  }
+});
+
 test("11. subscribing again after close opens a fresh EventSource on the next microtask", async () => {
   const unsub1 = hub.subscribe("entries", {}, () => {});
   await flushMicrotasks();
