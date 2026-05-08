@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import type Database from 'better-sqlite3'
+
+import { type Database } from '../../infra/sqlite/index.js'
 
 import type { ControlDb } from '../control-db.js'
 
@@ -75,7 +76,7 @@ export interface BrowserProcessRow {
 
 export interface ControlWorkerStore {
   control: ControlDb
-  db: Database.Database
+  db: Database
   close(): void
   registerWorker(request: RegisterWorkerRequest): WorkerRow
   heartbeatWorker(request: HeartbeatWorkerRequest): void
@@ -277,7 +278,7 @@ export function createWorkerStore(control: ControlDb): ControlWorkerStore {
   }
 }
 
-function registerWorker(db: Database.Database, control: ControlDb, request: RegisterWorkerRequest): WorkerRow {
+function registerWorker(db: Database, control: ControlDb, request: RegisterWorkerRequest): WorkerRow {
   const now = request.now ?? new Date().toISOString()
   control.transaction(() => {
     db.prepare(`
@@ -325,7 +326,7 @@ function registerWorker(db: Database.Database, control: ControlDb, request: Regi
   return requireWorker(db, request.workerId)
 }
 
-function heartbeatWorker(db: Database.Database, control: ControlDb, request: HeartbeatWorkerRequest): void {
+function heartbeatWorker(db: Database, control: ControlDb, request: HeartbeatWorkerRequest): void {
   const now = request.now ?? new Date().toISOString()
   const cutoff = new Date(Date.parse(now) - 24 * 60 * 60_000).toISOString()
   control.transaction(() => {
@@ -369,7 +370,7 @@ function heartbeatWorker(db: Database.Database, control: ControlDb, request: Hea
   })
 }
 
-function listStaleWorkers(db: Database.Database, now: string): WorkerRow[] {
+function listStaleWorkers(db: Database, now: string): WorkerRow[] {
   const rows = db.prepare(`
     SELECT *
     FROM workers
@@ -385,7 +386,7 @@ function listStaleWorkers(db: Database.Database, now: string): WorkerRow[] {
 }
 
 function markWorkerStatus(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   request: { workerId: string; status: WorkerStatus; phase?: string; now?: string },
 ): void {
@@ -412,7 +413,7 @@ function markWorkerStatus(
   })
 }
 
-function enqueueWorkerCommand(db: Database.Database, control: ControlDb, request: EnqueueWorkerCommandRequest): string {
+function enqueueWorkerCommand(db: Database, control: ControlDb, request: EnqueueWorkerCommandRequest): string {
   const now = request.now ?? new Date().toISOString()
   const commandId = randomUUID()
   control.transaction(() => {
@@ -443,7 +444,7 @@ function enqueueWorkerCommand(db: Database.Database, control: ControlDb, request
   return commandId
 }
 
-function listQueuedCommandsForWorker(db: Database.Database, workerId: string): WorkerCommandRow[] {
+function listQueuedCommandsForWorker(db: Database, workerId: string): WorkerCommandRow[] {
   const rows = db.prepare(`
     SELECT *
     FROM worker_commands
@@ -454,7 +455,7 @@ function listQueuedCommandsForWorker(db: Database.Database, workerId: string): W
   return rows.map(mapCommandRow)
 }
 
-function acknowledgeCommand(db: Database.Database, control: ControlDb, commandId: string, workerId: string, now?: string): void {
+function acknowledgeCommand(db: Database, control: ControlDb, commandId: string, workerId: string, now?: string): void {
   const ts = now ?? new Date().toISOString()
   control.transaction(() => {
     db.prepare(`
@@ -468,7 +469,7 @@ function acknowledgeCommand(db: Database.Database, control: ControlDb, commandId
   })
 }
 
-function completeCommand(db: Database.Database, control: ControlDb, commandId: string, now?: string): void {
+function completeCommand(db: Database, control: ControlDb, commandId: string, now?: string): void {
   const ts = now ?? new Date().toISOString()
   control.transaction(() => {
     db.prepare(`
@@ -480,7 +481,7 @@ function completeCommand(db: Database.Database, control: ControlDb, commandId: s
   })
 }
 
-function failCommand(db: Database.Database, control: ControlDb, commandId: string, error: string, now?: string): void {
+function failCommand(db: Database, control: ControlDb, commandId: string, error: string, now?: string): void {
   const ts = now ?? new Date().toISOString()
   control.transaction(() => {
     db.prepare(`
@@ -494,7 +495,7 @@ function failCommand(db: Database.Database, control: ControlDb, commandId: strin
 }
 
 function upsertBrowserProcess(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   request: UpsertBrowserProcessRequest,
 ): BrowserProcessRow {
@@ -546,7 +547,7 @@ function upsertBrowserProcess(
 }
 
 function markBrowserProcessSeen(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   request: { browserProcessId: string; now?: string },
 ): void {
@@ -562,7 +563,7 @@ function markBrowserProcessSeen(
 }
 
 function markBrowserProcessKillRequested(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   request: { browserProcessId: string; commandId: string; now?: string },
 ): void {
@@ -579,7 +580,7 @@ function markBrowserProcessKillRequested(
 }
 
 function markBrowserProcessTerminal(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   browserProcessId: string,
   status: Extract<BrowserProcessStatus, 'terminated' | 'lost'>,
@@ -598,7 +599,7 @@ function markBrowserProcessTerminal(
 }
 
 function listBrowserProcessesForTask(
-  db: Database.Database,
+  db: Database,
   request: { taskId?: string; attemptId?: string },
 ): BrowserProcessRow[] {
   const rows = db.prepare(`
@@ -612,7 +613,7 @@ function listBrowserProcessesForTask(
 }
 
 function findWorkerOwnerByTask(
-  db: Database.Database,
+  db: Database,
   request: { taskId?: string; attemptId?: string },
 ): WorkerRow | null {
   const row = db.prepare(`
@@ -628,7 +629,7 @@ function findWorkerOwnerByTask(
   return row ? mapWorkerRow(row) : null
 }
 
-function listWorkers(db: Database.Database, workflow?: string): WorkerRow[] {
+function listWorkers(db: Database, workflow?: string): WorkerRow[] {
   const rows = workflow
     ? db.prepare(`
         SELECT *
@@ -644,7 +645,7 @@ function listWorkers(db: Database.Database, workflow?: string): WorkerRow[] {
   return rows.map(mapWorkerRow)
 }
 
-function requireWorker(db: Database.Database, workerId: string): WorkerRow {
+function requireWorker(db: Database, workerId: string): WorkerRow {
   const row = db.prepare('SELECT * FROM workers WHERE worker_id = ?').get(workerId) as WorkerDbRow | undefined
   if (!row) throw new Error(`Worker ${workerId} not found after registration`)
   return mapWorkerRow(row)

@@ -1,7 +1,8 @@
 import { existsSync, statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import type Database from "better-sqlite3";
+
+import { transaction, type Database } from "../../infra/sqlite/index.js";
 
 import { renderPdfPagesToPngs } from "../../services/ocr/render-pages.js";
 
@@ -36,7 +37,7 @@ function pageNumberFromFilename(filename: string): number | null {
 }
 
 export async function ensurePdfPageCache(
-  db: Database.Database,
+  db: Database,
   opts: EnsurePdfPageCacheOpts,
 ): Promise<CachedPage[]> {
   const key = `${opts.trackerDir}\0${opts.fileId}\0${opts.pdfPath}`;
@@ -52,7 +53,7 @@ export async function ensurePdfPageCache(
 }
 
 async function ensurePdfPageCacheInner(
-  db: Database.Database,
+  db: Database,
   opts: EnsurePdfPageCacheOpts,
 ): Promise<CachedPage[]> {
   const existing = db.prepare(`
@@ -113,7 +114,7 @@ async function ensurePdfPageCacheInner(
       updated_at = excluded.updated_at
   `);
   const pages: CachedPage[] = [];
-  const tx = db.transaction(() => {
+  transaction(db, () => {
     for (const filename of filenames) {
       const page = pageNumberFromFilename(filename);
       if (!page) continue;
@@ -130,12 +131,11 @@ async function ensurePdfPageCacheInner(
       pages.push({ fileId: opts.fileId, page, status: "ready", imagePath, mimeType: "image/png", bytes });
     }
   });
-  tx();
   return pages;
 }
 
 export function getCachedPage(
-  db: Database.Database,
+  db: Database,
   fileId: string,
   page: number,
 ): CachedPage | null {

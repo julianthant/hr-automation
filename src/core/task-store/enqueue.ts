@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import type Database from 'better-sqlite3'
+
+import { type Database } from '../../infra/sqlite/index.js'
 
 import type { ControlDb } from '../control-db.js'
 import {
@@ -9,7 +10,7 @@ import {
   type AttemptDbRow,
 } from './types.js'
 
-export function enqueueTasks<T>(db: Database.Database, control: ControlDb, request: EnqueueTasksRequest<T>): EnqueuedTask[] {
+export function enqueueTasks<T>(db: Database, control: ControlDb, request: EnqueueTasksRequest<T>): EnqueuedTask[] {
   if (request.runIds && request.runIds.length !== request.inputs.length) {
     throw new Error(`enqueueTasks: runIds length ${request.runIds.length} does not match inputs length ${request.inputs.length}`)
   }
@@ -104,7 +105,7 @@ export function enqueueTasks<T>(db: Database.Database, control: ControlDb, reque
 }
 
 function adoptExistingTaskForEnqueue(
-  db: Database.Database,
+  db: Database,
   request: {
     task: TaskDbRow
     workflow: string
@@ -163,7 +164,7 @@ function adoptExistingTaskForEnqueue(
 }
 
 function ensureQueuedAttemptForTask(
-  db: Database.Database,
+  db: Database,
   request: {
     task: TaskDbRow
     workflow: string
@@ -235,7 +236,7 @@ function ensureQueuedAttemptForTask(
 }
 
 export function findTaskByWorkflowItemRunRaw(
-  db: Database.Database,
+  db: Database,
   request: { workflow: string; itemId: string; runId: string },
 ): TaskDbRow | null {
   return (

@@ -40,7 +40,7 @@ test("rebuildProjectionForDate replays tracker and log JSONL into SQLite", () =>
       latest_step: string;
       last_log_message: string;
     };
-    assert.deepEqual(run, {
+    assert.deepEqual({ ...run }, {
       latest_status: "running",
       latest_step: "extraction",
       last_log_message: "Extracting",
@@ -102,7 +102,7 @@ test("rebuildProjectionForDate only clears session events for the rebuilt date",
       FROM session_events
       ORDER BY tracker_date ASC
     `).all() as Array<{ tracker_date: string; workflow_instance: string }>;
-    assert.deepEqual(rows, [
+    assert.deepEqual(rows.map((r) => ({ ...r })), [
       { tracker_date: "2026-05-03", workflow_instance: "Yesterday 1" },
       { tracker_date: "2026-05-04", workflow_instance: "Today 1" },
     ]);

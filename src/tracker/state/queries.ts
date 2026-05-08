@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import { type Database } from "../../infra/sqlite/index.js";
 
 import { computeFailureCounts } from "../dashboard/failures.js";
 import { computeStepDurations } from "../dashboard/run-timelines.js";
@@ -14,7 +14,7 @@ function parseJsonObject<T>(raw: string | null | undefined, fallback: T): T {
   }
 }
 
-export function queryProjectionHealth(db: Database.Database, dir: string): ProjectionHealth {
+export function queryProjectionHealth(db: Database, dir: string): ProjectionHealth {
   const version = db.prepare("SELECT version FROM schema_version WHERE id = 1").get() as { version: number };
   const sourceCount = db.prepare("SELECT COUNT(*) AS n FROM projection_sources").get() as { n: number };
   const runEventCount = db.prepare("SELECT COUNT(*) AS n FROM run_events").get() as { n: number };
@@ -32,7 +32,7 @@ export function queryProjectionHealth(db: Database.Database, dir: string): Proje
 }
 
 export function queryEntriesPayload(
-  db: Database.Database,
+  db: Database,
   opts: { workflow: string; date: string },
 ): ProjectionEntriesPayload {
   const eventRows = db.prepare(`
@@ -161,7 +161,7 @@ export function queryEntriesPayload(
 }
 
 export function queryRunsForItem(
-  db: Database.Database,
+  db: Database,
   opts: { workflow: string; itemId: string; date: string },
 ): Array<{
   runId: string;

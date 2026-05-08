@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import type Database from 'better-sqlite3'
+
+import { type Database } from '../../infra/sqlite/index.js'
 
 import type { ControlDb } from '../control-db.js'
 import {
@@ -11,7 +12,7 @@ import {
 } from './types.js'
 
 export function createDependency(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   request: {
     parentTaskId: string
@@ -70,7 +71,7 @@ export function createDependency(
 }
 
 export function markDependencyFromChildTerminal(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   request: { childTaskId: string; childState: 'done' | 'failed' | 'cancelled'; now?: string },
 ): void {
@@ -116,7 +117,7 @@ export function markDependencyFromChildTerminal(
 }
 
 export function releaseParentsIfDependenciesSatisfied(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   request: { childTaskId: string; now?: string },
 ): void {
@@ -125,7 +126,7 @@ export function releaseParentsIfDependenciesSatisfied(
 }
 
 export async function waitForDependencies(
-  db: Database.Database,
+  db: Database,
   request: { parentTaskId: string; timeoutMs?: number; pollMs?: number },
 ): Promise<void> {
   const started = Date.now()
@@ -153,7 +154,7 @@ export async function waitForDependencies(
 }
 
 function markParentTerminal(
-  db: Database.Database,
+  db: Database,
   parentTaskId: string,
   state: Extract<TaskState, 'failed' | 'cancelled'>,
   now: string,
@@ -183,7 +184,7 @@ function markParentTerminal(
 }
 
 function setDependencyStatus(
-  db: Database.Database,
+  db: Database,
   dependencyId: string,
   status: 'satisfied' | 'failed' | 'cancelled',
   now: string,
@@ -197,7 +198,7 @@ function setDependencyStatus(
   `).run({ dependencyId, status, now })
 }
 
-function releaseParentsForChildren(db: Database.Database, childTaskIds: string[], now: string): void {
+function releaseParentsForChildren(db: Database, childTaskIds: string[], now: string): void {
   for (const childTaskId of childTaskIds) {
     const parents = db.prepare(`
       SELECT DISTINCT parent_task_id

@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import type Database from 'better-sqlite3'
+
+import { type Database } from '../../infra/sqlite/index.js'
 
 import type { ControlDb } from '../control-db.js'
 import { type EnqueuedTask, type AttemptDbRow } from './types.js'
 
 export function retryTaskFromAttempt(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   request: { runId: string; now?: string },
 ): EnqueuedTask {

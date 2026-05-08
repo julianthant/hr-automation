@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import Database from "better-sqlite3";
 
+import { openDatabase, type Database } from "../../../src/infra/sqlite/index.js";
 import {
   closeStateDbForTests,
   openStateDb,
@@ -23,8 +23,10 @@ test("openStateDb creates .tracker/state.db with WAL and NORMAL synchronous", ()
     const db = openStateDb(dir);
     assert.equal(stateDbPath(dir), join(dir, "state.db"));
     assert.equal(existsSync(join(dir, "state.db")), true);
-    assert.equal(db.pragma("journal_mode", { simple: true }), "wal");
-    assert.equal(Number(db.pragma("synchronous", { simple: true })), 1);
+    const journal = db.prepare("PRAGMA journal_mode").get() as { journal_mode: string };
+    const sync = db.prepare("PRAGMA synchronous").get() as { synchronous: number };
+    assert.equal(journal.journal_mode.toLowerCase(), "wal");
+    assert.equal(sync.synchronous, 1);
     const version = db.prepare("SELECT version FROM schema_version WHERE id = 1").get() as { version: number };
     assert.equal(version.version, LATEST_SCHEMA_VERSION);
   } finally {
@@ -51,12 +53,9 @@ test("openStateDb is idempotent for an already migrated DB", () => {
 test("migration 4 backfills session event tracker_date from timestamp", () => {
   const dir = tmpTracker();
   const dbPath = join(dir, "state.db");
-  let db: Database.Database | null = null;
+  let db: Database | null = null;
   try {
-    db = new Database(dbPath);
-    db.pragma("journal_mode = WAL");
-    db.pragma("synchronous = NORMAL");
-    db.pragma("foreign_keys = ON");
+    db = openDatabase(dbPath);
     for (const migration of MIGRATIONS.filter((entry) => entry.version <= 3)) {
       db.exec(migration.sql);
     }
@@ -113,7 +112,9 @@ test("migration 4 backfills session event tracker_date from timestamp", () => {
       FROM session_events
       ORDER BY source_line
     `).all() as Array<{ sourceLine: number; trackerDate: string }>;
-    assert.deepEqual(rows, [
+    // node:sqlite returns rows with [Object: null prototype]; spread to
+    // plain objects so deepEqual's prototype check passes.
+    assert.deepEqual(rows.map((r) => ({ ...r })), [
       { sourceLine: 1, trackerDate: "2026-05-04" },
       { sourceLine: 2, trackerDate: "bad-value" },
     ]);

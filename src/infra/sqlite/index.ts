@@ -14,16 +14,39 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { DatabaseSync, type StatementSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 
 /**
- * The runtime database handle. Identical to `node:sqlite`'s `DatabaseSync`,
- * re-exported under a stable name for ergonomics.
+ * Permissive prepared-statement shape. `node:sqlite`'s `StatementSync` types
+ * `.get/.all/.run` parameters as `SQLInputValue` (only primitives + ArrayBuffer
+ * views) and returns `Record<string, SQLOutputValue>`, which is too strict for
+ * the existing better-sqlite3-style call sites that pass typed parameter
+ * objects with nested fields and `as TableRow` cast results. The runtime
+ * accepts these — node:sqlite stringifies non-primitive values via JSON before
+ * binding — but the static types reject them. This interface mirrors the
+ * better-sqlite3 surface the codebase already uses so the migration is
+ * mechanical (replace imports + `Database.Database` → `Database`) instead of
+ * touching every caller.
  */
-export type Database = DatabaseSync;
+export interface Statement {
+  run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint };
+  get(...params: unknown[]): unknown;
+  all(...params: unknown[]): unknown[];
+  iterate(...params: unknown[]): IterableIterator<unknown>;
+}
 
-/** Re-export for callers that need to type a prepared statement. */
-export type Statement = StatementSync;
+/**
+ * Permissive Database shape over `node:sqlite`'s `DatabaseSync`. Same
+ * rationale as `Statement` above — keeps caller code unchanged through the
+ * migration. Structurally compatible with `DatabaseSync` at runtime; the only
+ * substantive difference is `transaction(db, fn)` is exposed as a free
+ * function (see below) because `node:sqlite` doesn't have a method form.
+ */
+export interface Database {
+  prepare(sql: string): Statement;
+  exec(sql: string): void;
+  close(): void;
+}
 
 export interface OpenDatabaseOpts {
   /** Open in read-only mode. Maps to `node:sqlite`'s `readOnly` option. */
@@ -71,36 +94,92 @@ export function openDatabase(path: string, opts: OpenDatabaseOpts = {}): Databas
     db.exec("PRAGMA foreign_keys = ON");
   }
 
-  return db;
+  return wrapDatabase(db);
 }
+
+/**
+ * Wrap a `DatabaseSync` to apply the better-sqlite3-compat statement defaults
+ * on every prepared statement. Two knobs matter:
+ *
+ *  - `setAllowUnknownNamedParameters(true)` — better-sqlite3 silently ignored
+ *    named parameters that the SQL didn't reference; node:sqlite throws by
+ *    default. The codebase passes bundled param objects across multiple
+ *    statements, so we relax this to match the prior contract.
+ *  - `setAllowBareNamedParameters(true)` is the node:sqlite default; left as-is.
+ *
+ * The wrapper is thin (just intercepts `prepare`); other methods pass through.
+ */
+function wrapDatabase(raw: DatabaseSync): Database {
+  return {
+    prepare(sql: string): Statement {
+      const stmt = raw.prepare(sql);
+      stmt.setAllowUnknownNamedParameters(true);
+      return stmt as unknown as Statement;
+    },
+    exec(sql: string): void {
+      raw.exec(sql);
+    },
+    close(): void {
+      raw.close();
+    },
+  };
+}
+
+/**
+ * Per-`Database` transaction depth, used to pick BEGIN/COMMIT vs
+ * SAVEPOINT/RELEASE so nested `transaction(db, ...)` calls work the same way
+ * better-sqlite3's nested `db.transaction(fn)` did. better-sqlite3 used
+ * `_bs3_NNN` savepoint names internally; we use `_compat_NNN` to make the
+ * origin obvious in any error message.
+ */
+const txDepthByDb = new WeakMap<Database, number>();
 
 /**
  * Run `body` inside a SQLite transaction. Equivalent to better-sqlite3's
  * `db.transaction(body)()` — opens a transaction, runs the body, commits on
- * success, rolls back on throw, and re-throws.
- *
- * Uses `BEGIN IMMEDIATE` (matching better-sqlite3's default) so write-write
- * conflicts are detected at BEGIN time instead of mid-statement. Critical
- * for the daemon claim path where two daemons may race.
- *
- * Does NOT support nesting via SAVEPOINT — the codebase does not nest
- * transactions today. If a future caller needs nesting, extend this helper
- * with savepoint semantics rather than letting callers hand-roll BEGIN.
+ * success, rolls back on throw, and re-throws. Outer call uses
+ * `BEGIN IMMEDIATE` (matching better-sqlite3's default) so write-write
+ * conflicts surface at BEGIN time. Nested calls use SAVEPOINT, so callers
+ * that wrap helpers which themselves call `transaction(db, ...)` work
+ * unchanged (e.g. `rebuildProjectionForDate` → `applyTrackerEntry`).
  */
 export function transaction<T>(db: Database, body: () => T): T {
-  db.exec("BEGIN IMMEDIATE");
+  const depth = txDepthByDb.get(db) ?? 0;
+  txDepthByDb.set(db, depth + 1);
+  if (depth === 0) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = body();
+      db.exec("COMMIT");
+      return result;
+    } catch (err) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* If rollback itself throws (e.g. connection lost), surface the
+         * original error rather than the rollback error. */
+      }
+      throw err;
+    } finally {
+      txDepthByDb.set(db, depth);
+    }
+  }
+  const sp = `_compat_${depth}`;
+  db.exec(`SAVEPOINT ${sp}`);
   try {
     const result = body();
-    db.exec("COMMIT");
+    db.exec(`RELEASE ${sp}`);
     return result;
   } catch (err) {
     try {
-      db.exec("ROLLBACK");
+      db.exec(`ROLLBACK TO ${sp}`);
+      db.exec(`RELEASE ${sp}`);
     } catch {
-      /* If rollback itself throws (e.g. connection lost), surface the
-       * original error rather than the rollback error. */
+      /* See above. */
     }
     throw err;
+  } finally {
+    txDepthByDb.set(db, depth);
   }
 }
 

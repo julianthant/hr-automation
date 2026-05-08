@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type Database from "better-sqlite3";
+
+import { transaction, type Database } from "../../infra/sqlite/index.js";
 
 import type { TrackerEntry, LogEntry } from "../jsonl.js";
 import type { SessionEvent, ScreenshotSessionEvent } from "../session-events.js";
@@ -57,7 +58,7 @@ function sessionEventDate(event: SessionEvent | ScreenshotSessionEvent): string 
   return timestamp.slice(0, 10);
 }
 
-function recordSource(db: Database.Database, args: {
+function recordSource(db: Database, args: {
   path: string;
   sourceKind: ProjectionSourceKind;
   workflow?: string;
@@ -94,9 +95,9 @@ function recordSource(db: Database.Database, args: {
   });
 }
 
-export function rebuildProjectionForDate(db: Database.Database, opts: RebuildProjectionOpts): void {
+export function rebuildProjectionForDate(db: Database, opts: RebuildProjectionOpts): void {
   const { dir, date } = opts;
-  const tx = db.transaction(() => {
+  transaction(db, () => {
     db.prepare("DELETE FROM run_events WHERE tracker_date = ?").run(date);
     db.prepare("DELETE FROM logs WHERE tracker_date = ?").run(date);
     db.prepare("DELETE FROM runs WHERE tracker_date = ?").run(date);
@@ -140,10 +141,9 @@ export function rebuildProjectionForDate(db: Database.Database, opts: RebuildPro
 
     recomputeRunOrdinals(db, date);
   });
-  tx();
 }
 
-export function recomputeRunOrdinals(db: Database.Database, date: string): void {
+export function recomputeRunOrdinals(db: Database, date: string): void {
   const rows = db.prepare(`
     SELECT workflow, item_id, run_id, COALESCE(first_work_ts, first_any_ts) AS first_ts
     FROM runs

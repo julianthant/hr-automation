@@ -1,27 +1,23 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import Database from "better-sqlite3";
+
+import { openDatabase, transaction, type Database } from "../../infra/sqlite/index.js";
 
 import { DEFAULT_DIR } from "../jsonl.js";
 import { LATEST_SCHEMA_VERSION, MIGRATIONS } from "./schema.js";
 
-const openDbs = new Map<string, Database.Database>();
+const openDbs = new Map<string, Database>();
 
 export function stateDbPath(dir: string = DEFAULT_DIR): string {
   return join(dir, "state.db");
 }
 
-export function openStateDb(dir: string = DEFAULT_DIR): Database.Database {
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+export function openStateDb(dir: string = DEFAULT_DIR): Database {
   const path = stateDbPath(dir);
   const existing = openDbs.get(path);
   if (existing) return existing;
 
-  const db = new Database(path);
-  db.pragma("journal_mode = WAL");
-  db.pragma("synchronous = NORMAL");
-  db.pragma("busy_timeout = 5000");
-  db.pragma("foreign_keys = ON");
+  const db = openDatabase(path);
   runMigrations(db);
   openDbs.set(path, db);
   return db;
@@ -30,9 +26,9 @@ export function openStateDb(dir: string = DEFAULT_DIR): Database.Database {
 export function isStateDbReady(dir: string = DEFAULT_DIR): boolean {
   const path = stateDbPath(dir);
   if (!existsSync(path)) return false;
-  let db: Database.Database | null = null;
+  let db: Database | null = null;
   try {
-    db = new Database(path, { readonly: true, fileMustExist: true });
+    db = openDatabase(path, { readonly: true, fileMustExist: true, applyDefaultPragmas: false });
     const row = db.prepare("SELECT version FROM schema_version WHERE id = 1").get() as { version?: number } | undefined;
     return row?.version === LATEST_SCHEMA_VERSION;
   } catch {
@@ -42,7 +38,7 @@ export function isStateDbReady(dir: string = DEFAULT_DIR): boolean {
   }
 }
 
-export function runMigrations(db: Database.Database): void {
+export function runMigrations(db: Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_version (
       id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -54,7 +50,7 @@ export function runMigrations(db: Database.Database): void {
   let current = row?.version ?? 0;
   for (const migration of MIGRATIONS) {
     if (migration.version <= current) continue;
-    const apply = db.transaction(() => {
+    transaction(db, () => {
       db.exec(migration.sql);
       db.prepare(`
         INSERT INTO schema_version (id, version, applied_at)
@@ -62,7 +58,6 @@ export function runMigrations(db: Database.Database): void {
         ON CONFLICT(id) DO UPDATE SET version = excluded.version, applied_at = excluded.applied_at
       `).run({ version: migration.version, appliedAt: new Date().toISOString() });
     });
-    apply();
     current = migration.version;
   }
 }

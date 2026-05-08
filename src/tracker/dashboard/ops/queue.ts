@@ -12,6 +12,7 @@ import {
 import {
   daemonsDir,
 } from "../../../core/daemon/registry.js";
+import { transaction } from "../../../infra/sqlite/index.js";
 import { openControlDb } from "../../../core/control-db.js";
 import { createTaskStore } from "../../../core/task-store/index.js";
 import { queueFilePath, queueLockDirPath } from "../../../core/daemon/queue.js";
@@ -84,7 +85,7 @@ export function buildQueueBumpHandler(dir: string) {
           };
         }
         const now = new Date().toISOString();
-        const bump = stores.taskStore.db.transaction(() => {
+        const bumpFn = (): number => transaction(stores.taskStore.db, () => {
           const row = stores.taskStore.db.prepare(`
             SELECT COALESCE(MAX(priority), 0) + 1 AS priority
             FROM tasks
@@ -98,7 +99,7 @@ export function buildQueueBumpHandler(dir: string) {
           `).run({ taskId: task.taskId, priority: row.priority, now });
           return info.changes;
         });
-        return bump() === 1
+        return bumpFn() === 1
           ? { ok: true as const }
           : { ok: false as const, error: "item already claimed by a daemon", status: 409 };
       }
