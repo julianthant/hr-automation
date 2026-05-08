@@ -78,6 +78,7 @@ const DASHBOARD_HONO_ROUTE_MANIFEST: readonly DashboardHonoRouteManifestEntry[] 
   { method: "GET", path: "/api/capture/sessions/stream" },
   { method: "GET", path: "/capture-assets/heic2any.min.js" },
   { method: "GET", path: "/events" },
+  { method: "GET", path: "/events/hub" },
   { method: "GET", path: "/events/logs" },
   { method: "GET", path: "/events/run-events" },
   { method: "GET", path: "/events/telegram" },
