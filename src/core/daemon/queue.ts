@@ -1,4 +1,4 @@
-import { randomUUID, type UUID } from 'node:crypto'
+import { type UUID } from 'node:crypto'
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { daemonsDir, ensureDaemonsDir } from './registry.js'
