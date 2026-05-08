@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import type { TrackerEntry } from "@/components/shared/types";
 import { dateLocal } from "../../lib/utils";
+import { sseHub } from "@/lib/sse-hub";
 
 interface UseEntriesResult {
   entries: TrackerEntry[];
@@ -44,19 +45,23 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
     prevHashRef.current = "";
 
     const today = dateLocal();
-    let sseUrl = "/events?workflow=" + encodeURIComponent(workflow);
+    const params: { workflow: string; date?: string } = { workflow };
     if (date && date !== today) {
-      sseUrl += "&date=" + encodeURIComponent(date);
+      params.date = date;
     }
 
-    const es = new EventSource(sseUrl);
+    const unsubscribe = sseHub.subscribe(
+      "entries",
+      params,
+      (data) => {
+        const { entries: raw, workflows: wfs, wfCounts: counts, failureCounts: fcounts } = data as {
+          entries: TrackerEntry[];
+          workflows: string[];
+          wfCounts?: Record<string, number>;
+          failureCounts?: Record<string, number>;
+        };
 
-    es.onopen = () => setConnected(true);
-
-    es.onmessage = (e) => {
-      try {
-        const { entries: raw, workflows: wfs, wfCounts: counts, failureCounts: fcounts }: { entries: TrackerEntry[]; workflows: string[]; wfCounts?: Record<string, number>; failureCounts?: Record<string, number> } = JSON.parse(e.data);
-
+        setConnected(true);
         setLoading(false);
 
         // Workflows + per-workflow counts update EVERY tick regardless of
@@ -113,18 +118,15 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
         setWorkflows(wfs || []);
         if (counts) setWfCounts(counts);
         setFailureCounts(fcounts ?? {});
-      } catch {
-        // ignore malformed
-      }
-    };
-
-    es.onerror = () => {
-      setConnected(false);
-      setLoading(false);
-    };
+      },
+      () => {
+        setConnected(false);
+        setLoading(false);
+      },
+    );
 
     return () => {
-      es.close();
+      unsubscribe();
       setConnected(false);
     };
   }, [workflow, date]);

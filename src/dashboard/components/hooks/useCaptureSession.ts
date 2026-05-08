@@ -4,6 +4,7 @@ import type {
   CaptureSessionEvent,
   CaptureSessionInfo,
 } from "@/components/capture/capture-types";
+import { sseHub } from "@/lib/sse-hub";
 
 /**
  * Subscribes to `/api/capture/sessions/stream` (SSE) and maintains a
@@ -169,43 +170,43 @@ export function useCaptureSession(opts: { enabled?: boolean } = {}): UseCaptureS
 
   useEffect(() => {
     if (!enabled) return;
-    const es = new EventSource("/api/capture/sessions/stream");
 
-    const onSnapshot = (e: MessageEvent) => {
-      try {
-        const data = JSON.parse(e.data) as { sessions?: CaptureSessionInfo[] };
-        dispatchRef.current({ type: "snapshot", sessions: data.sessions ?? [] });
-      } catch {
-        /* malformed payload — ignore, snapshot is idempotent */
-      }
-    };
-    const onEvent = (e: MessageEvent) => {
-      try {
-        const data = JSON.parse(e.data) as CaptureSessionEvent;
-        dispatchRef.current({ type: "event", event: data });
-      } catch {
-        /* ignore */
-      }
-    };
-    const onHeartbeat = () => {
-      /* keep-alive only */
-    };
-    const onOpen = () => dispatchRef.current({ type: "open" });
-    const onError = () => dispatchRef.current({ type: "close" });
+    const unsubscribe = sseHub.subscribe<unknown>(
+      "captureSessions",
+      {},
+      (data, event) => {
+        if (event === "session-list") {
+          try {
+            const snapshot = data as { sessions?: CaptureSessionInfo[] };
+            dispatchRef.current({ type: "snapshot", sessions: snapshot.sessions ?? [] });
+          } catch {
+            /* malformed payload — ignore, snapshot is idempotent */
+          }
+          // First message also signals a successful connection.
+          dispatchRef.current({ type: "open" });
+          return;
+        }
 
-    es.addEventListener("session-list", onSnapshot as EventListener);
-    es.addEventListener("session-event", onEvent as EventListener);
-    es.addEventListener("heartbeat", onHeartbeat);
-    es.addEventListener("open", onOpen);
-    es.addEventListener("error", onError);
+        if (event === "heartbeat") {
+          /* keep-alive only */
+          return;
+        }
+
+        if (event === "session-event") {
+          try {
+            const ev = data as CaptureSessionEvent;
+            dispatchRef.current({ type: "event", event: ev });
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+      },
+      () => dispatchRef.current({ type: "close" }),
+    );
 
     return () => {
-      es.removeEventListener("session-list", onSnapshot as EventListener);
-      es.removeEventListener("session-event", onEvent as EventListener);
-      es.removeEventListener("heartbeat", onHeartbeat);
-      es.removeEventListener("open", onOpen);
-      es.removeEventListener("error", onError);
-      es.close();
+      unsubscribe();
     };
   }, [enabled]);
 
