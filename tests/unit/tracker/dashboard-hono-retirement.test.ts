@@ -52,9 +52,9 @@ function routeKey(method: string, path: string): string {
 
 async function collectOneSsePayload(url: string): Promise<string> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 1000);
+  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(1000)]);
   try {
-    const res = await fetch(url, { signal: controller.signal });
+    const res = await fetch(url, { signal });
     assert.equal(res.status, 200);
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
@@ -70,7 +70,6 @@ async function collectOneSsePayload(url: string): Promise<string> {
       }
     }
   } finally {
-    clearTimeout(timer);
     controller.abort();
   }
   assert.fail("expected one SSE data payload");
