@@ -308,7 +308,9 @@ export interface PriorEntrySummaryRow {
  *
  * SQLite JSON1: `json_extract(latest_data_json, '$.' || @key)` works for
  * top-level keys only — behaviorally equivalent to the JSONL path's
- * `entry.data?.[keyField]` (which is also single-level).
+ * `entry.data?.[keyField]` (which is also single-level). The result is
+ * wrapped in TRIM(...) to match the JSONL path's `String(value).trim()`
+ * comparison; callers should pass an already-trimmed @value.
  */
 export function queryPriorEntriesByKey(
   db: Database,
@@ -324,7 +326,7 @@ export function queryPriorEntriesByKey(
     WHERE workflow = @workflow
       AND tracker_date >= @cutoff
       AND latest_data_json IS NOT NULL
-      AND json_extract(latest_data_json, '$.' || @key) = @value
+      AND TRIM(json_extract(latest_data_json, '$.' || @key)) = @value
       AND NOT (latest_status = 'failed' AND (latest_step = 'cancelled' OR latest_step = 'discarded'))
     ORDER BY latest_ts DESC
   `).all({

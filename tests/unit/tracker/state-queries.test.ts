@@ -224,6 +224,28 @@ test("queryPriorEntriesByKey: dedupes by item_id keeping latest timestamp", () =
   }
 });
 
+test("queryPriorEntriesByKey: trims whitespace in stored value — matches trimmed query value", () => {
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    // Store an entry whose data value has surrounding whitespace.
+    trackEvent({ workflow: "separations", timestamp: "2026-05-04T10:00:00.000Z", id: "doc-ws", runId: "r1", status: "done", data: { name: "  Jane Doe  " } }, dir);
+    const db = openStateDb(dir);
+    // Query with the trimmed value — must match despite stored whitespace.
+    const rows = queryPriorEntriesByKey(db, {
+      workflow: "separations",
+      keyField: "name",
+      keyValue: "Jane Doe",
+      cutoffDate: "2026-01-01",
+    });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, "doc-ws");
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("queryPriorEntriesByKey: key with special chars (quotes, dots) does not throw", () => {
   const dir = tmpTracker();
   try {
