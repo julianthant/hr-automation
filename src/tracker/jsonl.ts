@@ -73,15 +73,21 @@ export function appendLogEntry(entry: LogEntry, dir: string = DEFAULT_DIR): void
   applyLogEntryLive(scrubbed, source, dir);
 }
 
-// Cache parsed JSONL by file path — avoids re-parsing on every SSE tick.
-// Invalidated when mtime or size changes (covers new appends and file rotation).
-const parseCache = new Map<string, { mtimeMs: number; size: number; entries: unknown[] }>();
+// Cache parsed JSONL by file path with LRU eviction. Map's insertion-order
+// iteration plus delete-on-hit + re-set gives a 6-line LRU without a dep.
+// Cap chosen for ~10 workflows × ~7 active dates.
+const PARSE_CACHE_MAX = 64;
+type ParseCacheEntry = { mtimeMs: number; size: number; entries: unknown[] };
+const parseCache = new Map<string, ParseCacheEntry>();
 
 function readJsonlCached<T>(path: string): T[] {
   if (!existsSync(path)) return [];
   const stat = statSync(path);
   const cached = parseCache.get(path);
   if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    // Bump to most-recent.
+    parseCache.delete(path);
+    parseCache.set(path, cached);
     return cached.entries as T[];
   }
   const entries = readFileSync(path, "utf-8")
@@ -89,7 +95,21 @@ function readJsonlCached<T>(path: string): T[] {
     .filter(Boolean)
     .map((line) => JSON.parse(line));
   parseCache.set(path, { mtimeMs: stat.mtimeMs, size: stat.size, entries });
+  if (parseCache.size > PARSE_CACHE_MAX) {
+    const oldestKey = parseCache.keys().next().value;
+    if (oldestKey !== undefined) parseCache.delete(oldestKey);
+  }
   return entries as T[];
+}
+
+/** Test-only — reset between cases. */
+export function __resetParseCacheForTests(): void {
+  parseCache.clear();
+}
+
+/** Test-only — observable cache size for size-cap assertions. */
+export function __getParseCacheSizeForTests(): number {
+  return parseCache.size;
 }
 
 export function readLogEntries(

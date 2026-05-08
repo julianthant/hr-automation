@@ -1,6 +1,8 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, rmSync } from "fs";
+import { existsSync, rmSync, mkdtempSync, writeFileSync } from "fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   trackEvent,
   readEntries,
@@ -9,6 +11,8 @@ import {
   serializeValue,
   toTypedValue,
   withTrackedWorkflow,
+  __resetParseCacheForTests,
+  __getParseCacheSizeForTests,
   type TrackerEntry,
 } from "../../../src/tracker/jsonl.js";
 import { log, withLogContext } from "../../../src/utils/log.js";
@@ -223,5 +227,26 @@ describe("toTypedValue", () => {
   it("collapses objects to JSON string", () => {
     assert.deepEqual(toTypedValue({ a: 1 }), { type: "string", value: '{"a":1}' });
     assert.deepEqual(toTypedValue([1, 2]), { type: "string", value: "[1,2]" });
+  });
+});
+
+describe("parseCache LRU", () => {
+  beforeEach(() => __resetParseCacheForTests());
+
+  it("caps cache size at 64 entries", () => {
+    const dir = mkdtempSync(join(tmpdir(), "lru-"));
+    try {
+      for (let i = 0; i < 100; i++) {
+        const wf = `wf${i}`;
+        writeFileSync(
+          join(dir, `${wf}-2026-05-07.jsonl`),
+          '{"workflow":"' + wf + '","id":"x","runId":"r","timestamp":"2026-05-07T00:00:00Z","status":"done","data":{}}\n',
+        );
+        readEntries(wf, dir);
+      }
+      assert.ok(__getParseCacheSizeForTests() <= 64);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
