@@ -43,7 +43,7 @@ Optional field added 2026-05-01. When set, the entry is a child run delegated by
 - `src/tracker/tasks/scheduler.ts` is idempotent. It may run repeatedly; terminal dependencies are not re-applied.
 - Phase 3 moved live queue/control authority into SQLite via `src/core/task-store/index.ts` and `src/core/daemon/worker-store.ts`: task attempts, claims, worker heartbeats, `worker_commands`, and scoped `browser_processes` are coordination state.
 - JSONL remains audit/history output and dashboard visibility during transition. Do not remove `watchChildRuns`; it remains the fallback for legacy rows with no SQLite task/dependency records.
-- `HRAUTO_QUEUE_BACKEND=jsonl` is a temporary cutover fallback only. Default queue authority is SQLite.
+- Queue authority is SQLite. The `.queue.jsonl` file in `.tracker/daemons/` is an append-only audit trail only — readers must not consume it as state.
 - New dependency kinds should not be added until a second real workflow needs them.
 
 ## Failure-Pattern Alerts
