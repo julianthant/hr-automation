@@ -56,7 +56,7 @@ export function applyTrackerEntry(
       )
     `).run({
       sourcePath: source.path,
-      sourceLine: source.line,
+      sourceLine: source.line ?? 0,
       sourceOffset: source.offset,
       workflow: entry.workflow,
       trackerDate,
@@ -173,7 +173,7 @@ export function applyLogEntry(
       )
     `).run({
       sourcePath: source.path,
-      sourceLine: source.line,
+      sourceLine: source.line ?? 0,
       sourceOffset: source.offset,
       workflow: entry.workflow,
       trackerDate,
@@ -239,7 +239,7 @@ export function applySessionEvent(
     )
   `).run({
     sourcePath: source.path,
-    sourceLine: source.line,
+    sourceLine: source.line ?? 0,
     sourceOffset: source.offset,
     trackerDate,
     eventType: event.type,
