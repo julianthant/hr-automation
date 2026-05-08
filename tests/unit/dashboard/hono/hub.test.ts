@@ -437,6 +437,238 @@ describe("/events/hub entries + sessions topics", () => {
   });
 });
 
+// ── logs + runEvents topic integration tests ──────────────────────────────────
+
+describe("/events/hub logs + runEvents topics", () => {
+  let dir: string;
+  let server: Server;
+  let port: number;
+  const today = new Date().toISOString().slice(0, 10);
+  const testWorkflow = "onboarding";
+  const testItemId = "test-item-1";
+  const testRunId = `${testItemId}#1`;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "hub-logs-test-"));
+    mkdirSync(dir, { recursive: true });
+
+    // Write a couple of log entries so the logs topic has data to return.
+    const logsFile = join(dir, `${testWorkflow}-${today}-logs.jsonl`);
+    appendFileSync(
+      logsFile,
+      JSON.stringify({
+        workflow: testWorkflow,
+        itemId: testItemId,
+        runId: testRunId,
+        level: "step",
+        message: "starting step",
+        ts: new Date().toISOString(),
+      }) + "\n",
+    );
+    appendFileSync(
+      logsFile,
+      JSON.stringify({
+        workflow: testWorkflow,
+        itemId: testItemId,
+        runId: testRunId,
+        level: "success",
+        message: "step complete",
+        ts: new Date().toISOString(),
+      }) + "\n",
+    );
+
+    // Write a tracker entry + session event for runEvents topic.
+    const trackerFile = join(dir, `${testWorkflow}-${today}.jsonl`);
+    appendFileSync(
+      trackerFile,
+      JSON.stringify({
+        workflow: testWorkflow,
+        id: testItemId,
+        runId: testRunId,
+        status: "running",
+        step: "ucpath-auth",
+        timestamp: new Date().toISOString(),
+        data: { instance: "Onboarding 1" },
+      }) + "\n",
+    );
+    const sessionsDatedFile = join(dir, `sessions-${today}.jsonl`);
+    appendFileSync(
+      sessionsDatedFile,
+      JSON.stringify({
+        type: "item_start",
+        timestamp: new Date().toISOString(),
+        pid: process.pid,
+        workflowInstance: "Onboarding 1",
+        runId: testRunId,
+        currentItemId: testItemId,
+      }) + "\n",
+    );
+
+    server = createDashboardServer({ port: 0, dir, noClean: true, uploadPort: null });
+    port = (server.address() as { port: number }).port;
+  });
+
+  afterEach(async () => {
+    server.closeAllConnections?.();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    closeStateDbForTests(dir);
+    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("hub logs subscription returns first-tick array of log entries matching runId", async () => {
+    const subs = encodeURIComponent(
+      JSON.stringify([
+        {
+          id: "l1",
+          topic: "logs",
+          params: { workflow: testWorkflow, id: testItemId, runId: testRunId, date: today },
+        },
+      ]),
+    );
+    const envelopes = await collectHubEnvelopes(
+      `http://localhost:${port}/events/hub?subs=${subs}`,
+      { stopAfter: 1, timeoutMs: 2500 },
+    );
+
+    assert.ok(envelopes.length >= 1, "expected at least 1 envelope");
+    const env = envelopes[0];
+    assert.equal(env.sub, "l1");
+    assert.ok(Array.isArray(env.data), "data should be an array of log entries");
+    const entries = env.data as Array<{ runId?: string; message: string }>;
+    assert.ok(entries.length >= 2, `expected at least 2 log entries, got ${entries.length}`);
+    assert.ok(
+      entries.every((e) => !e.runId || e.runId === testRunId),
+      "all entries should match the requested runId",
+    );
+  });
+
+  test("hub runEvents subscription returns first-tick array filtered for the run", async () => {
+    const subs = encodeURIComponent(
+      JSON.stringify([
+        {
+          id: "r1",
+          topic: "runEvents",
+          params: { workflow: testWorkflow, runId: testRunId, date: today },
+        },
+      ]),
+    );
+    const envelopes = await collectHubEnvelopes(
+      `http://localhost:${port}/events/hub?subs=${subs}`,
+      { stopAfter: 1, timeoutMs: 2500 },
+    );
+
+    assert.ok(envelopes.length >= 1, "expected at least 1 envelope");
+    const env = envelopes[0];
+    assert.equal(env.sub, "r1");
+    assert.ok(Array.isArray(env.data), "data should be an array of session events");
+    const events = env.data as Array<{ type: string }>;
+    // The item_start event should be included (has the matching runId)
+    assert.ok(
+      events.some((e) => e.type === "item_start"),
+      "expected item_start event in run events",
+    );
+  });
+
+  test("two logs subscriptions on the same hub with different params get correctly demuxed", async () => {
+    // Write a second item's log entry
+    const logsFile = join(dir, `${testWorkflow}-${today}-logs.jsonl`);
+    const secondItemId = "test-item-2";
+    const secondRunId = `${secondItemId}#1`;
+    appendFileSync(
+      logsFile,
+      JSON.stringify({
+        workflow: testWorkflow,
+        itemId: secondItemId,
+        runId: secondRunId,
+        level: "step",
+        message: "second item step",
+        ts: new Date().toISOString(),
+      }) + "\n",
+    );
+
+    const subs = encodeURIComponent(
+      JSON.stringify([
+        {
+          id: "l1",
+          topic: "logs",
+          params: { workflow: testWorkflow, id: testItemId, runId: testRunId, date: today },
+        },
+        {
+          id: "l2",
+          topic: "logs",
+          params: { workflow: testWorkflow, id: secondItemId, runId: secondRunId, date: today },
+        },
+      ]),
+    );
+    const envelopes = await collectHubEnvelopes(
+      `http://localhost:${port}/events/hub?subs=${subs}`,
+      { stopAfter: 2, timeoutMs: 3000 },
+    );
+
+    assert.ok(envelopes.length >= 2, `expected at least 2 envelopes, got ${envelopes.length}`);
+    const subIds = new Set(envelopes.map((e) => e.sub));
+    assert.ok(subIds.has("l1"), "expected envelope with sub id 'l1'");
+    assert.ok(subIds.has("l2"), "expected envelope with sub id 'l2'");
+
+    // Verify each envelope only contains the logs for its own item
+    const l1Env = envelopes.find((e) => e.sub === "l1");
+    const l2Env = envelopes.find((e) => e.sub === "l2");
+    assert.ok(l1Env, "missing l1 envelope");
+    assert.ok(l2Env, "missing l2 envelope");
+
+    const l1Entries = l1Env!.data as Array<{ itemId: string }>;
+    const l2Entries = l2Env!.data as Array<{ itemId: string }>;
+    assert.ok(
+      l1Entries.every((e) => e.itemId === testItemId),
+      "l1 entries should all belong to testItemId",
+    );
+    assert.ok(
+      l2Entries.every((e) => e.itemId === secondItemId),
+      "l2 entries should all belong to secondItemId",
+    );
+  });
+
+  test("legacy /events/logs?... returns the same payload shape as hub logs topic", async () => {
+    // NOTE: testRunId contains '#' which is a URL fragment delimiter — must be encoded.
+    const params = new URLSearchParams({
+      workflow: testWorkflow,
+      id: testItemId,
+      runId: testRunId,
+      date: today,
+    });
+    const payload = await collectOneLegacySsePayload(
+      `http://localhost:${port}/events/logs?${params}`,
+    );
+
+    assert.ok(Array.isArray(payload), "legacy /events/logs should emit an array");
+    const entries = payload as Array<{ runId?: string; message: string }>;
+    assert.ok(entries.length >= 2, `expected at least 2 log entries, got ${entries.length}`);
+    assert.ok(
+      entries.every((e) => !e.runId || e.runId === testRunId),
+      "all entries should match the requested runId",
+    );
+  });
+
+  test("legacy /events/run-events?... returns the same payload shape as hub runEvents topic", async () => {
+    // NOTE: testRunId contains '#' which is a URL fragment delimiter — must be encoded.
+    const params = new URLSearchParams({
+      workflow: testWorkflow,
+      runId: testRunId,
+      date: today,
+    });
+    const payload = await collectOneLegacySsePayload(
+      `http://localhost:${port}/events/run-events?${params}`,
+    );
+
+    assert.ok(Array.isArray(payload), "legacy /events/run-events should emit an array");
+    const events = payload as Array<{ type: string }>;
+    assert.ok(
+      events.some((e) => e.type === "item_start"),
+      "expected item_start event in run events",
+    );
+  });
+});
+
 // ── Manifest check ────────────────────────────────────────────────────────────
 
 test("/events/hub is registered in the Hono app", async () => {
