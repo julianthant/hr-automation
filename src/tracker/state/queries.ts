@@ -186,6 +186,7 @@ export function queryRunsForItem(
   firstLogTs?: string;
   lastLogTs?: string;
   runOrdinal: number;
+  data?: Record<string, unknown>;
 }> {
   const rows = db.prepare(`
     SELECT * FROM runs
@@ -196,6 +197,7 @@ export function queryRunsForItem(
     latest_status: string;
     latest_step: string | null;
     latest_tracker_ts: string;
+    latest_data_json: string | null;
     first_any_ts: string;
     first_work_ts: string | null;
     first_log_ts: string | null;
@@ -219,16 +221,20 @@ export function queryRunsForItem(
     arr.push({ timestamp: row.timestamp, status: row.status, ...(row.step ? { step: row.step } : {}) });
     byRun.set(row.run_id, arr);
   }
-  return rows.map((row) => ({
-    runId: row.run_id,
-    status: row.latest_status,
-    ...(row.latest_step ? { step: row.latest_step } : {}),
-    timestamp: row.latest_tracker_ts,
-    stepDurations: computeStepDurations(byRun.get(row.run_id) ?? []),
-    firstLogTs: pickEarlier(row.first_log_ts ?? undefined, row.first_work_ts ?? row.first_any_ts),
-    lastLogTs: pickLater(row.last_log_ts ?? undefined, row.latest_tracker_ts),
-    runOrdinal: row.run_ordinal,
-  }));
+  return rows.map((row) => {
+    const data = parseJsonObject<Record<string, unknown>>(row.latest_data_json, {});
+    return {
+      runId: row.run_id,
+      status: row.latest_status,
+      ...(row.latest_step ? { step: row.latest_step } : {}),
+      timestamp: row.latest_tracker_ts,
+      stepDurations: computeStepDurations(byRun.get(row.run_id) ?? []),
+      firstLogTs: pickEarlier(row.first_log_ts ?? undefined, row.first_work_ts ?? row.first_any_ts),
+      lastLogTs: pickLater(row.last_log_ts ?? undefined, row.latest_tracker_ts),
+      runOrdinal: row.run_ordinal,
+      ...(Object.keys(data).length > 0 ? { data } : {}),
+    };
+  });
 }
 
 /**

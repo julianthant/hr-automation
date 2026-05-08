@@ -764,16 +764,21 @@ export function readRunsForId(
   id: string,
   date?: string,
   dir: string = DEFAULT_DIR,
-): { runId: string; status: string; step?: string; timestamp: string }[] {
+): { runId: string; status: string; step?: string; timestamp: string; data?: Record<string, unknown> }[] {
   const all = date ? readEntriesForDate(workflow, date, dir) : readEntries(workflow, dir);
   const entries = all.filter((e) => e.id === id);
   const runMap = new Map<string, TrackerEntry>();
   // Track the last known step per run (the "failed"/"done" event may have no step)
   const lastStep = new Map<string, string>();
+  // Track the richest-known data per run. The last tracker entry's data may
+  // be null (e.g. a post-cancel row), so keep the latest non-empty data
+  // observed across the run's history.
+  const lastData = new Map<string, Record<string, unknown>>();
   for (const e of entries) {
     const rid = e.runId || `${e.id}#1`;
     runMap.set(rid, e);
     if (e.step) lastStep.set(rid, e.step);
+    if (e.data && Object.keys(e.data).length > 0) lastData.set(rid, e.data);
   }
   // Earliest tracker timestamp per run (the pending emit) — defines
   // chronological order regardless of runId shape.
@@ -787,7 +792,14 @@ export function readRunsForId(
   const raw = [...runMap.values()]
     .map((e) => {
       const rid = e.runId || `${e.id}#1`;
-      return { runId: rid, status: e.status, step: lastStep.get(rid), timestamp: e.timestamp };
+      const data = lastData.get(rid);
+      return {
+        runId: rid,
+        status: e.status,
+        step: lastStep.get(rid),
+        timestamp: e.timestamp,
+        ...(data ? { data } : {}),
+      };
     })
     // Chronological asc (oldest first, newest last — callers rely on
     // data[length-1] to be the latest run). Both legacy `{id}#N` and UUID

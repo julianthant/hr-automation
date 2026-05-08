@@ -200,6 +200,14 @@ export interface RunInfo {
    *  over parsing `runId.split('#')[1]` — UUID runIds have no trailing
    *  `#N`. See `buildRunTimelines` in src/tracker/dashboard.ts. */
   runOrdinal?: number;
+  /** Latest data captured for THIS specific run. Use this (not the deduped
+   *  entry.data) when rendering the LogPanel detail grid for an older run,
+   *  so switching the RunSelector pill to a previously successful run
+   *  populates the grid even when the latest entry on the same itemId is
+   *  a no-data row (e.g. a subsequent cancellation). Empty/missing for
+   *  runs whose tracker rows never carried data (very-early-cancelled
+   *  pending). */
+  data?: Record<string, unknown>;
 }
 
 // ── Detail-value formatting ──────────────────────────────

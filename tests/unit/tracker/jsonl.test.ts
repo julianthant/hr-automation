@@ -8,6 +8,7 @@ import {
   readEntries,
   readLogEntries,
   appendLogEntry,
+  readRunsForId,
   serializeValue,
   toTypedValue,
   withTrackedWorkflow,
@@ -86,6 +87,47 @@ describe("JSONL tracker", () => {
       active: { type: "boolean", value: "true" },
       start: { type: "date", value: "2026-04-17T00:00:00.000Z" },
     });
+  });
+});
+
+describe("readRunsForId data carry-over (LogPanel detail-grid fix)", () => {
+  beforeEach(() => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+    __resetParseCacheForTests();
+  });
+
+  it("returns the latest non-empty data per run, not the latest tracker line's data", () => {
+    const date = new Date().toISOString().slice(0, 10);
+    // Run 1 progresses through pending→running→done with full data on done.
+    trackEvent({ workflow: "ac", timestamp: `${date}T10:00:00.000Z`, id: "id-1", runId: "run-1", status: "pending", data: {} }, TEST_DIR);
+    trackEvent({ workflow: "ac", timestamp: `${date}T10:00:01.000Z`, id: "id-1", runId: "run-1", status: "running", step: "checking", data: { name: "Alice" } }, TEST_DIR);
+    trackEvent({ workflow: "ac", timestamp: `${date}T10:00:02.000Z`, id: "id-1", runId: "run-1", status: "done", data: { name: "Alice", emplId: "111" } }, TEST_DIR);
+
+    // Run 2 cancelled before any data was captured (data null on the
+    // terminal row simulates the dashboard's cancel-queued path).
+    trackEvent({ workflow: "ac", timestamp: `${date}T11:00:00.000Z`, id: "id-1", runId: "run-2", status: "pending", data: { name: "Alice" } }, TEST_DIR);
+    const cancelEntry = { workflow: "ac", timestamp: `${date}T11:00:01.000Z`, id: "id-1", runId: "run-2", status: "failed" as const, step: "cancelled" };
+    trackEvent(cancelEntry as TrackerEntry, TEST_DIR);
+
+    const runs = readRunsForId("ac", "id-1", date, TEST_DIR);
+    assert.equal(runs.length, 2);
+    const run1 = runs.find((r) => r.runId === "run-1");
+    const run2 = runs.find((r) => r.runId === "run-2");
+    assert.ok(run1, "run-1 missing from readRunsForId result");
+    assert.ok(run2, "run-2 missing from readRunsForId result");
+    assert.deepEqual(run1!.data, { name: "Alice", emplId: "111" });
+    // Run 2's last non-empty data is the pending row's `name` — even though
+    // the latest tracker line for run-2 is the cancel emit with no data.
+    assert.deepEqual(run2!.data, { name: "Alice" });
+  });
+
+  it("omits data when no run-tracker line ever carried it", () => {
+    const date = new Date().toISOString().slice(0, 10);
+    trackEvent({ workflow: "ac", timestamp: `${date}T12:00:00.000Z`, id: "id-2", runId: "run-3", status: "pending" } as TrackerEntry, TEST_DIR);
+    const runs = readRunsForId("ac", "id-2", date, TEST_DIR);
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].runId, "run-3");
+    assert.equal(runs[0].data, undefined);
   });
 });
 
