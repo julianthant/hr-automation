@@ -36,6 +36,7 @@ import { log } from "../../../../utils/log.js";
 import { getDefaultWorkflow, type DashboardHonoDeps } from "../context.js";
 import { jsonResponse } from "../responses.js";
 import { sseResponse } from "../sse.js";
+import { telegramTopic } from "../topics-emitters.js";
 
 let activeDaemonLogWatchers = 0;
 let activeCaptureSseSubscribers = 0;
@@ -401,25 +402,7 @@ export function registerEventRoutes(app: Hono, deps: DashboardHonoDeps): void {
   });
 
   app.get("/events/telegram", () => {
-    return sseResponse((send) => {
-      let sentCount = 0;
-      let firstTick = true;
-      const tick = async () => {
-        const events = (await readSessionEventsTolerant(deps.dir)).filter((event) => event.type === "telegram_sent");
-        if (firstTick) {
-          send(events);
-          sentCount = events.length;
-          firstTick = false;
-        } else if (events.length > sentCount) {
-          send(events.slice(sentCount));
-          sentCount = events.length;
-        }
-      };
-      void tick();
-      const interval = setInterval(() => void tick(), 1_000);
-      interval.unref?.();
-      return () => clearInterval(interval);
-    });
+    return sseResponse((send) => telegramTopic({}, send, deps));
   });
 
   app.get("/events/sessions", () => {
