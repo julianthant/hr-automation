@@ -30,7 +30,7 @@ const PERSON_ORG_SUMMARY_URL =
  *
  * Background: PeopleSoft renders some labels with non-breaking spaces, and
  * earlier code did a case-sensitive, whitespace-literal `text.includes(label)`
- * which let "Person ID" leak through as the picked name. `selectPersonName`
+ * which let "Person ID" leak through as the picked name. `selectPersonName`
  * normalizes both sides before comparison.
  *
  * TODO: replace with a registry selector targeting the actual name span

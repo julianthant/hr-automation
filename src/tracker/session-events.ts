@@ -113,7 +113,7 @@ export function emitSessionEvent(
 
 export function readSessionEvents(dir: string = DEFAULT_DIR): SessionEvent[] {
   const out: SessionEvent[] = [];
-  let files: string[] = [];
+  let files: string[];
   try {
     files = readdirSync(dir).filter(
       // Strict YYYY-MM-DD dated names + the single legacy file. Loose

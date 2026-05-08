@@ -1,5 +1,4 @@
 import { createReadStream, readFileSync, statSync, unwatchFile, watchFile } from "node:fs";
-import { readFile as readFileAsync } from "node:fs/promises";
 import type { Hono } from "hono";
 
 import {

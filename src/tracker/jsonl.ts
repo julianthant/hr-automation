@@ -21,7 +21,6 @@ import {
   emitItemStart,
   emitItemComplete,
   emitStepChange,
-  getSessionsFilePath,
   getSessionsFilePathForDate,
   type ScreenshotSessionEvent,
 } from "./session-events.js";
