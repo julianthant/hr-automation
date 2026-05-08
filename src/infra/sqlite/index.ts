@@ -145,9 +145,13 @@ const txDepthByDb = new WeakMap<Database, number>();
  */
 export function transaction<T>(db: Database, body: () => T): T {
   const depth = txDepthByDb.get(db) ?? 0;
-  txDepthByDb.set(db, depth + 1);
   if (depth === 0) {
+    // Bump depth only AFTER BEGIN IMMEDIATE succeeds — if it throws (e.g.
+    // SQLITE_BUSY past busy_timeout), the counter must stay at 0 so the next
+    // call doesn't think it's nested and silently degrade isolation by
+    // issuing an autocommit savepoint outside any transaction.
     db.exec("BEGIN IMMEDIATE");
+    txDepthByDb.set(db, 1);
     try {
       const result = body();
       db.exec("COMMIT");
@@ -161,11 +165,14 @@ export function transaction<T>(db: Database, body: () => T): T {
       }
       throw err;
     } finally {
-      txDepthByDb.set(db, depth);
+      txDepthByDb.set(db, 0);
     }
   }
   const sp = `_compat_${depth}`;
+  // Same ordering rule as the outer branch: only bump depth after SAVEPOINT
+  // succeeds.
   db.exec(`SAVEPOINT ${sp}`);
+  txDepthByDb.set(db, depth + 1);
   try {
     const result = body();
     db.exec(`RELEASE ${sp}`);
