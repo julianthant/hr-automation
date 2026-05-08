@@ -1,27 +1,14 @@
-import { useState, useEffect } from "react";
+import { useNow } from "./useNow.js";
 
 /** Returns a live "Xm Ys" string that counts up from startTime. */
 export function useElapsed(startTime: string | null): string {
-  const [elapsed, setElapsed] = useState("");
-
-  useEffect(() => {
-    if (!startTime) {
-      setElapsed("");
-      return;
-    }
-    const start = new Date(startTime).getTime();
-    const update = () => {
-      const diff = Math.max(0, Math.floor((Date.now() - start) / 1000));
-      const m = Math.floor(diff / 60);
-      const s = diff % 60;
-      setElapsed(`${m}m ${s.toString().padStart(2, "0")}s`);
-    };
-    update();
-    const id = setInterval(update, 1000);
-    return () => clearInterval(id);
-  }, [startTime]);
-
-  return elapsed;
+  const now = useNow();
+  if (!startTime) return "";
+  const start = new Date(startTime).getTime();
+  const diff = Math.max(0, Math.floor((now - start) / 1000));
+  const m = Math.floor(diff / 60);
+  const s = diff % 60;
+  return `${m}m ${s.toString().padStart(2, "0")}s`;
 }
 
 /** Format a duration in seconds to "Xm Ys" (static, no hook). */
