@@ -1,11 +1,146 @@
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
-import { transaction, type Database } from "../../infra/sqlite/index.js";
+import { transaction, type Database, type Statement } from "../../infra/sqlite/index.js";
 
 import type { TrackerEntry, LogEntry } from "../jsonl.js";
 import type { SessionEvent, ScreenshotSessionEvent } from "../session-events.js";
 import { registerLocalFile } from "../files/files.js";
 import type { ProjectionSourceRef } from "./types.js";
+
+interface CachedStatements {
+  insertRunEvent: Statement;
+  upsertRun: Statement;
+  upsertItem: Statement;
+  insertLog: Statement;
+  updateRunLogTs: Statement;
+  insertSessionEvent: Statement;
+  selectRunForScreenshot: Statement;
+  countScreenshotsForRun: Statement;
+  updateRunScreenshotCount: Statement;
+}
+
+const stmtCache = new WeakMap<Database, CachedStatements>();
+
+function stmts(db: Database): CachedStatements {
+  let cached = stmtCache.get(db);
+  if (cached) return cached;
+  cached = {
+    insertRunEvent: db.prepare(`
+      INSERT OR IGNORE INTO run_events (
+        source_path, source_line, source_offset, workflow, tracker_date, item_id,
+        run_id, parent_run_id, status, step, event_ts, event_ms, data_json,
+        typed_data_json, input_json, error, raw_json, applied_at
+      ) VALUES (
+        @sourcePath, @sourceLine, @sourceOffset, @workflow, @trackerDate, @itemId,
+        @runId, @parentRunId, @status, @step, @eventTs, @eventMs, @dataJson,
+        @typedDataJson, @inputJson, @error, @rawJson, @appliedAt
+      )
+    `),
+    upsertRun: db.prepare(`
+      INSERT INTO runs (
+        workflow, tracker_date, item_id, run_id, parent_run_id,
+        first_any_ts, first_work_ts, latest_tracker_ts, latest_status, latest_step,
+        latest_data_json, latest_typed_data_json, latest_input_json, latest_error,
+        updated_at
+      ) VALUES (
+        @workflow, @trackerDate, @itemId, @runId, @parentRunId,
+        @eventTs, @firstWorkTs, @eventTs, @status, @step,
+        @dataJson, @typedDataJson, @inputJson, @error, @updatedAt
+      )
+      ON CONFLICT(workflow, tracker_date, item_id, run_id) DO UPDATE SET
+        parent_run_id = COALESCE(excluded.parent_run_id, runs.parent_run_id),
+        first_any_ts = CASE WHEN excluded.first_any_ts < runs.first_any_ts THEN excluded.first_any_ts ELSE runs.first_any_ts END,
+        first_work_ts = CASE
+          WHEN excluded.first_work_ts IS NULL THEN runs.first_work_ts
+          WHEN runs.first_work_ts IS NULL THEN excluded.first_work_ts
+          WHEN excluded.first_work_ts < runs.first_work_ts THEN excluded.first_work_ts
+          ELSE runs.first_work_ts
+        END,
+        latest_tracker_ts = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_tracker_ts ELSE runs.latest_tracker_ts END,
+        latest_status = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_status ELSE runs.latest_status END,
+        latest_step = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_step ELSE runs.latest_step END,
+        latest_data_json = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_data_json ELSE runs.latest_data_json END,
+        latest_typed_data_json = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_typed_data_json ELSE runs.latest_typed_data_json END,
+        latest_input_json = COALESCE(runs.latest_input_json, excluded.latest_input_json),
+        latest_error = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_error ELSE runs.latest_error END,
+        updated_at = excluded.updated_at
+    `),
+    upsertItem: db.prepare(`
+      INSERT INTO items (
+        workflow, tracker_date, item_id, latest_run_id, latest_status,
+        latest_step, latest_ts, latest_data_json, latest_error, resolved_prep, updated_at
+      ) VALUES (
+        @workflow, @trackerDate, @itemId, @runId, @status,
+        @step, @eventTs, @dataJson, @error, @resolvedPrep, @updatedAt
+      )
+      ON CONFLICT(workflow, tracker_date, item_id) DO UPDATE SET
+        latest_run_id = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_run_id ELSE items.latest_run_id END,
+        latest_status = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_status ELSE items.latest_status END,
+        latest_step = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_step ELSE items.latest_step END,
+        latest_ts = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_ts ELSE items.latest_ts END,
+        latest_data_json = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_data_json ELSE items.latest_data_json END,
+        latest_error = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_error ELSE items.latest_error END,
+        resolved_prep = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.resolved_prep ELSE items.resolved_prep END,
+        updated_at = excluded.updated_at
+    `),
+    insertLog: db.prepare(`
+      INSERT OR IGNORE INTO logs (
+        source_path, source_line, source_offset, workflow, tracker_date, item_id,
+        run_id, level, message, ts, ts_ms, raw_json, applied_at
+      ) VALUES (
+        @sourcePath, @sourceLine, @sourceOffset, @workflow, @trackerDate, @itemId,
+        @runId, @level, @message, @ts, @tsMs, @rawJson, @appliedAt
+      )
+    `),
+    updateRunLogTs: db.prepare(`
+      UPDATE runs SET
+        first_log_ts = CASE
+          WHEN first_log_ts IS NULL THEN @ts
+          WHEN @ts < first_log_ts THEN @ts
+          ELSE first_log_ts
+        END,
+        last_log_ts = CASE
+          WHEN last_log_ts IS NULL THEN @ts
+          WHEN @ts >= last_log_ts THEN @ts
+          ELSE last_log_ts
+        END,
+        last_log_message = CASE
+          WHEN last_log_ts IS NULL THEN @message
+          WHEN @ts >= last_log_ts THEN @message
+          ELSE last_log_message
+        END,
+        updated_at = @updatedAt
+      WHERE workflow = @workflow
+        AND tracker_date = @trackerDate
+        AND item_id = @itemId
+        AND run_id = @runId
+    `),
+    insertSessionEvent: db.prepare(`
+      INSERT OR IGNORE INTO session_events (
+        source_path, source_line, source_offset, tracker_date, event_type, workflow_instance,
+        run_id, timestamp, ts_ms, raw_json, applied_at
+      ) VALUES (
+        @sourcePath, @sourceLine, @sourceOffset, @trackerDate, @eventType, @workflowInstance,
+        @runId, @timestamp, @tsMs, @rawJson, @appliedAt
+      )
+    `),
+    selectRunForScreenshot: db.prepare(
+      "SELECT workflow, item_id FROM runs WHERE run_id = ? LIMIT 1",
+    ),
+    countScreenshotsForRun: db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM files
+      WHERE kind = 'screenshot' AND run_id = ?
+    `),
+    updateRunScreenshotCount: db.prepare(`
+      UPDATE runs
+      SET screenshot_count = ?, updated_at = ?
+      WHERE run_id = ?
+    `),
+  };
+  stmtCache.set(db, cached);
+  return cached;
+}
 
 function toMs(ts: string | undefined, fallback = 0): number {
   const ms = Date.parse(ts ?? "");
@@ -43,18 +178,9 @@ export function applyTrackerEntry(
   const now = new Date().toISOString();
   const isWork = entry.status !== "pending";
 
+  const s = stmts(db);
   transaction(db, () => {
-    db.prepare(`
-      INSERT OR IGNORE INTO run_events (
-        source_path, source_line, source_offset, workflow, tracker_date, item_id,
-        run_id, parent_run_id, status, step, event_ts, event_ms, data_json,
-        typed_data_json, input_json, error, raw_json, applied_at
-      ) VALUES (
-        @sourcePath, @sourceLine, @sourceOffset, @workflow, @trackerDate, @itemId,
-        @runId, @parentRunId, @status, @step, @eventTs, @eventMs, @dataJson,
-        @typedDataJson, @inputJson, @error, @rawJson, @appliedAt
-      )
-    `).run({
+    s.insertRunEvent.run({
       sourcePath: source.path,
       sourceLine: source.line ?? 0,
       sourceOffset: source.offset,
@@ -75,35 +201,7 @@ export function applyTrackerEntry(
       appliedAt: now,
     });
 
-    db.prepare(`
-      INSERT INTO runs (
-        workflow, tracker_date, item_id, run_id, parent_run_id,
-        first_any_ts, first_work_ts, latest_tracker_ts, latest_status, latest_step,
-        latest_data_json, latest_typed_data_json, latest_input_json, latest_error,
-        updated_at
-      ) VALUES (
-        @workflow, @trackerDate, @itemId, @runId, @parentRunId,
-        @eventTs, @firstWorkTs, @eventTs, @status, @step,
-        @dataJson, @typedDataJson, @inputJson, @error, @updatedAt
-      )
-      ON CONFLICT(workflow, tracker_date, item_id, run_id) DO UPDATE SET
-        parent_run_id = COALESCE(excluded.parent_run_id, runs.parent_run_id),
-        first_any_ts = CASE WHEN excluded.first_any_ts < runs.first_any_ts THEN excluded.first_any_ts ELSE runs.first_any_ts END,
-        first_work_ts = CASE
-          WHEN excluded.first_work_ts IS NULL THEN runs.first_work_ts
-          WHEN runs.first_work_ts IS NULL THEN excluded.first_work_ts
-          WHEN excluded.first_work_ts < runs.first_work_ts THEN excluded.first_work_ts
-          ELSE runs.first_work_ts
-        END,
-        latest_tracker_ts = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_tracker_ts ELSE runs.latest_tracker_ts END,
-        latest_status = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_status ELSE runs.latest_status END,
-        latest_step = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_step ELSE runs.latest_step END,
-        latest_data_json = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_data_json ELSE runs.latest_data_json END,
-        latest_typed_data_json = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_typed_data_json ELSE runs.latest_typed_data_json END,
-        latest_input_json = COALESCE(runs.latest_input_json, excluded.latest_input_json),
-        latest_error = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_error ELSE runs.latest_error END,
-        updated_at = excluded.updated_at
-    `).run({
+    s.upsertRun.run({
       workflow: entry.workflow,
       trackerDate,
       itemId: entry.id,
@@ -120,24 +218,7 @@ export function applyTrackerEntry(
       updatedAt: now,
     });
 
-    db.prepare(`
-      INSERT INTO items (
-        workflow, tracker_date, item_id, latest_run_id, latest_status,
-        latest_step, latest_ts, latest_data_json, latest_error, resolved_prep, updated_at
-      ) VALUES (
-        @workflow, @trackerDate, @itemId, @runId, @status,
-        @step, @eventTs, @dataJson, @error, @resolvedPrep, @updatedAt
-      )
-      ON CONFLICT(workflow, tracker_date, item_id) DO UPDATE SET
-        latest_run_id = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_run_id ELSE items.latest_run_id END,
-        latest_status = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_status ELSE items.latest_status END,
-        latest_step = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_step ELSE items.latest_step END,
-        latest_ts = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_ts ELSE items.latest_ts END,
-        latest_data_json = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_data_json ELSE items.latest_data_json END,
-        latest_error = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_error ELSE items.latest_error END,
-        resolved_prep = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.resolved_prep ELSE items.resolved_prep END,
-        updated_at = excluded.updated_at
-    `).run({
+    s.upsertItem.run({
       workflow: entry.workflow,
       trackerDate,
       itemId: entry.id,
@@ -162,16 +243,9 @@ export function applyLogEntry(
   const runId = entry.runId || `${entry.itemId}#1`;
   const tsMs = toMs(entry.ts);
   const now = new Date().toISOString();
+  const s = stmts(db);
   transaction(db, () => {
-    db.prepare(`
-      INSERT OR IGNORE INTO logs (
-        source_path, source_line, source_offset, workflow, tracker_date, item_id,
-        run_id, level, message, ts, ts_ms, raw_json, applied_at
-      ) VALUES (
-        @sourcePath, @sourceLine, @sourceOffset, @workflow, @trackerDate, @itemId,
-        @runId, @level, @message, @ts, @tsMs, @rawJson, @appliedAt
-      )
-    `).run({
+    s.insertLog.run({
       sourcePath: source.path,
       sourceLine: source.line ?? 0,
       sourceOffset: source.offset,
@@ -187,29 +261,7 @@ export function applyLogEntry(
       appliedAt: now,
     });
 
-    db.prepare(`
-      UPDATE runs SET
-        first_log_ts = CASE
-          WHEN first_log_ts IS NULL THEN @ts
-          WHEN @ts < first_log_ts THEN @ts
-          ELSE first_log_ts
-        END,
-        last_log_ts = CASE
-          WHEN last_log_ts IS NULL THEN @ts
-          WHEN @ts >= last_log_ts THEN @ts
-          ELSE last_log_ts
-        END,
-        last_log_message = CASE
-          WHEN last_log_ts IS NULL THEN @message
-          WHEN @ts >= last_log_ts THEN @message
-          ELSE last_log_message
-        END,
-        updated_at = @updatedAt
-      WHERE workflow = @workflow
-        AND tracker_date = @trackerDate
-        AND item_id = @itemId
-        AND run_id = @runId
-    `).run({
+    s.updateRunLogTs.run({
       workflow: entry.workflow,
       trackerDate,
       itemId: entry.itemId,
@@ -229,15 +281,7 @@ export function applySessionEvent(
   const timestamp = "timestamp" in event && event.timestamp ? event.timestamp : new Date((event as ScreenshotSessionEvent).ts).toISOString();
   const tsMs = "ts" in event && typeof event.ts === "number" ? event.ts : toMs(timestamp);
   const trackerDate = source.trackerDate ?? trackerDateFromTimestamp(timestamp);
-  db.prepare(`
-    INSERT OR IGNORE INTO session_events (
-      source_path, source_line, source_offset, tracker_date, event_type, workflow_instance,
-      run_id, timestamp, ts_ms, raw_json, applied_at
-    ) VALUES (
-      @sourcePath, @sourceLine, @sourceOffset, @trackerDate, @eventType, @workflowInstance,
-      @runId, @timestamp, @tsMs, @rawJson, @appliedAt
-    )
-  `).run({
+  stmts(db).insertSessionEvent.run({
     sourcePath: source.path,
     sourceLine: source.line ?? 0,
     sourceOffset: source.offset,
@@ -262,9 +306,7 @@ function applyScreenshotFiles(db: Database, event: ScreenshotSessionEvent): void
   let workflow: string | undefined;
   let itemId: string | undefined;
   if (event.runId) {
-    const run = db.prepare(
-      "SELECT workflow, item_id FROM runs WHERE run_id = ? LIMIT 1",
-    ).get(event.runId) as { workflow: string; item_id: string } | undefined;
+    const run = stmts(db).selectRunForScreenshot.get(event.runId) as { workflow: string; item_id: string } | undefined;
     if (run) {
       workflow = run.workflow;
       itemId = run.item_id;
@@ -289,14 +331,7 @@ function applyScreenshotFiles(db: Database, event: ScreenshotSessionEvent): void
       },
     });
   }
-  const row = db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM files
-    WHERE kind = 'screenshot' AND run_id = ?
-  `).get(event.runId) as { count: number } | undefined;
-  db.prepare(`
-    UPDATE runs
-    SET screenshot_count = ?, updated_at = ?
-    WHERE run_id = ?
-  `).run(row?.count ?? 0, new Date().toISOString(), event.runId);
+  const s = stmts(db);
+  const row = s.countScreenshotsForRun.get(event.runId) as { count: number } | undefined;
+  s.updateRunScreenshotCount.run(row?.count ?? 0, new Date().toISOString(), event.runId);
 }
