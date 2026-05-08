@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import type { SessionState } from "@/components/shared/types";
 
 const EMPTY_STATE: SessionState = { workflows: [], duoQueue: [] };
@@ -6,7 +6,6 @@ const EMPTY_STATE: SessionState = { workflows: [], duoQueue: [] };
 export function useSessions(): { state: SessionState; connected: boolean } {
   const [state, setState] = useState<SessionState>(EMPTY_STATE);
   const [connected, setConnected] = useState(false);
-  const prevHashRef = useRef<string>("");
 
   useEffect(() => {
     const es = new EventSource("/events/sessions");
@@ -16,12 +15,6 @@ export function useSessions(): { state: SessionState; connected: boolean } {
     es.onmessage = (e) => {
       try {
         const data: SessionState = JSON.parse(e.data);
-
-        // Skip if unchanged
-        const hash = JSON.stringify(data);
-        if (hash === prevHashRef.current) return;
-        prevHashRef.current = hash;
-
         setState(data);
       } catch {
         // Ignore malformed
