@@ -69,6 +69,12 @@ export function useLogs(
         }
       },
       () => {
+        // Browser EventSource auto-reconnects on network blips or sleep+wake.
+        // The backend sends a full history snapshot on the new connection's
+        // first tick. Reset gotSseData so that first message replaces (not
+        // appends) the current log state — without this, full history arrives
+        // into the "delta" branch and duplicates every prior log line.
+        gotSseData = false;
         setLoading(false);
       },
     );
