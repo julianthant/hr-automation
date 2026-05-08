@@ -14,6 +14,7 @@ import {
   cleanOldScreenshots,
   DEFAULT_DIR,
 } from "../../tracker/jsonl.js";
+import { pruneStateDb } from "../../tracker/state/cleanup.js";
 import { log } from "../../utils/log.js";
 
 /**
@@ -182,6 +183,7 @@ function parseArgs(argv: string[]): Args {
 export function cleanTrackerMain(argv: string[] = process.argv.slice(2)): {
   trackerDeleted: number;
   screenshotsDeleted: number;
+  sqlRowsDeleted: number;
 } {
   const {
     days,
@@ -196,11 +198,36 @@ export function cleanTrackerMain(argv: string[] = process.argv.slice(2)): {
   }
   let trackerDeleted = 0;
   let screenshotsDeleted = 0;
+  let sqlRowsDeleted = 0;
   if (cleanTracker) {
     trackerDeleted = cleanOldTrackerFiles(days, dir);
     log.success(
       `Deleted ${trackerDeleted} stale tracker file${trackerDeleted === 1 ? "" : "s"} (older than ${days} day${days === 1 ? "" : "s"}) from ${dir}`
     );
+    // Prune SQLite projection rows in lockstep with JSONL pruning.
+    const cutoffDate = new Date(Date.now() - days * 24 * 3600 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const sqlPrune = pruneStateDb(dir, cutoffDate);
+    sqlRowsDeleted =
+      sqlPrune.runEventsDeleted +
+      sqlPrune.runsDeleted +
+      sqlPrune.itemsDeleted +
+      sqlPrune.logsDeleted +
+      sqlPrune.sessionEventsDeleted +
+      sqlPrune.filesDeleted +
+      sqlPrune.taskAttemptsDeleted +
+      sqlPrune.workerCommandsDeleted;
+    if (sqlRowsDeleted > 0) {
+      log.success(
+        `Deleted ${sqlRowsDeleted} SQLite row${sqlRowsDeleted === 1 ? "" : "s"} ` +
+          `(run_events=${sqlPrune.runEventsDeleted} runs=${sqlPrune.runsDeleted} ` +
+          `items=${sqlPrune.itemsDeleted} logs=${sqlPrune.logsDeleted} ` +
+          `session_events=${sqlPrune.sessionEventsDeleted} files=${sqlPrune.filesDeleted} ` +
+          `task_attempts=${sqlPrune.taskAttemptsDeleted} worker_commands=${sqlPrune.workerCommandsDeleted}) ` +
+          `older than ${days} day${days === 1 ? "" : "s"}`,
+      );
+    }
     // Orphan upload-dir sweep runs alongside the tracker prune — same
     // working-directory assumption, same target.
     const uploadsRemoved = sweepOrphanUploadDirs(dir);
@@ -216,7 +243,7 @@ export function cleanTrackerMain(argv: string[] = process.argv.slice(2)): {
       `Deleted ${screenshotsDeleted} stale screenshot${screenshotsDeleted === 1 ? "" : "s"} (older than ${days} day${days === 1 ? "" : "s"}) from ${screenshotsDir}`
     );
   }
-  return { trackerDeleted, screenshotsDeleted };
+  return { trackerDeleted, screenshotsDeleted, sqlRowsDeleted };
 }
 
 // Only run when invoked directly (not when imported by tests)
