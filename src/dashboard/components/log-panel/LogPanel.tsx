@@ -72,8 +72,16 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, defa
         .then((r) => r.json())
         .then((data: RunInfo[]) => {
           setRuns((prev) => {
-            // Only update if runs actually changed
-            if (JSON.stringify(prev) === JSON.stringify(data)) return prev;
+            // Structural compare on the fields that matter for rendering
+            if (
+              prev.length === data.length &&
+              prev.every((r, i) =>
+                r.runId === data[i].runId &&
+                r.status === data[i].status &&
+                r.step === data[i].step &&
+                r.lastLogTs === data[i].lastLogTs,
+              )
+            ) return prev;
             return data;
           });
           // Switch to latest run when a NEW run appears
