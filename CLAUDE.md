@@ -183,6 +183,51 @@ High-level rules:
 - Do not add default exports in `src/`.
 - Use `log.*`, structured log fields, and notification policy instead of ad hoc `console.*`, toasts, or Telegram messages.
 
+## Node 26 conventions
+
+Floor: Node 26.0.0 (pinned via `engines` + `.nvmrc`). Prefer the Node 26 primitives below over older equivalents in new code. Do **not** codemod existing working code for aesthetic reasons — adopt these as files are touched.
+
+| Use this | Instead of | When |
+|---|---|---|
+| `Promise.withResolvers()` | `let resolve, reject; const p = new Promise((r, j) => { resolve = r; reject = j; })` | Building deferred promises (event handlers, lazy gates) |
+| `Array.fromAsync(asyncIter)` | `const out = []; for await (const x of iter) out.push(x); return out;` | Materializing an async iterable |
+| Iterator helpers (`.map/.filter/.take/.drop/.flatMap`) | `[...iter].map(...)` / `Array.from(iter).filter(...)` | Streaming transforms where you don't need the full array materialized |
+| `AbortSignal.timeout(ms)` | `const c = new AbortController(); setTimeout(() => c.abort(), ms);` | Fetch / cancellation timeouts |
+| `AbortSignal.any([a, b])` | Manual `addEventListener("abort", ...)` chaining | Composing multiple signals |
+| `node:timers/promises` `setTimeout(ms, value, { signal })` | Hand-rolled abortable sleep | Sleep that should reject on abort |
+| `import.meta.dirname` | `fileURLToPath(import.meta.url)` + `dirname()` | `__dirname` equivalent in ESM |
+| `styleText("red", s)` from `node:util` | `chalk.red(s)` / `pc.red(s)` | Colored CLI output |
+| `node:sqlite` (via `src/infra/sqlite/` shim) | `better-sqlite3` | Any SQLite — project default |
+| `Object.groupBy(iter, fn)` | Reduce-into-accumulator | Bucketing items by key |
+| `node:util.parseArgs` | `commander` (for **new internal scripts only**) | Tiny scripts in `src/scripts/` that don't need commander's subcommand tree |
+
+**Type-stripping note:** The codebase uses `tsx` for runtime TS execution. Native `node --strip-types` is intentionally NOT used because the codebase imports relative paths with `.js` extensions and Node 26's strip-types mode does not rewrite `.js` → `.ts`. Migrating to native execution would require rewriting every relative import — rejected for a marginal cold-start win. If `tsx` ever drops support, revisit then.
+
+### Sandboxing (optional)
+
+Node 26's permission model can sandbox daemon processes so a Playwright bug or rogue selector cannot write outside expected paths. Disabled by default — the threat model for an internal HR tool running on operator machines doesn't justify the operational cost (every new write path becomes an allowlist edit).
+
+To enable for a specific deployment, launch daemons with:
+
+```bash
+node --permission \
+  --allow-fs-read=* \
+  --allow-fs-write=/Users/$USER/Documents/hr-automation/.tracker \
+  --allow-fs-write=/Users/$USER/Documents/hr-automation/.screenshots \
+  --allow-fs-write=/tmp \
+  --allow-child-process \
+  ./node_modules/.bin/tsx --env-file=.env src/cli-daemon.ts <workflow>
+```
+
+Required flags:
+- `--allow-fs-read=*` — Playwright reads from many paths (Chromium binaries, user-data-dir, system fonts).
+- `--allow-fs-write=<tracker dir>` — JSONL emissions, SQLite state DB, screenshot uploads.
+- `--allow-fs-write=<screenshots dir>` — debug screenshots written by `Stepper.step` on failure.
+- `--allow-fs-write=/tmp` — Playwright + Chromium temp files.
+- `--allow-child-process` — Playwright spawns Chromium.
+
+Network access does not need a flag (allowed by default in the permission model).
+
 ## Shared workflow primitives
 
 Any helper used by two or more workflows, or by one workflow plus tracker/dashboard/core/OCR, belongs outside `src/workflows/<workflow>/`.
