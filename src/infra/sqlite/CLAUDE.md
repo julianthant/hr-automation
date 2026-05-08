@@ -14,10 +14,13 @@ on — not a domain concept and not workflow-specific.
   for read-only probes that should fail loud if the file is missing.
 - `transaction(db, body)` — runs `body` inside `BEGIN IMMEDIATE` /
   `COMMIT` / `ROLLBACK`. Re-throws the caller's error after rollback.
-- `Database` — type alias for `DatabaseSync`. Every consumer imports this
-  type from here, never from `node:sqlite` directly, so the migration shape
-  is consistent.
-- `Statement` — type alias for `StatementSync`.
+- `Database` — permissive structural interface over `DatabaseSync` (see
+  `index.ts` for rationale; node:sqlite's strict `SQLInputValue`/`SQLOutputValue`
+  signatures don't fit better-sqlite3-style call sites that pass typed param
+  objects with nested fields and `as TableRow` cast results). Every consumer
+  imports this type from here, never from `node:sqlite` directly.
+- `Statement` — permissive structural interface over `StatementSync`. Same
+  rationale as `Database`.
 
 ## Migration patterns from better-sqlite3
 
@@ -44,10 +47,18 @@ on — not a domain concept and not workflow-specific.
 - **`RETURNING` support**: SQLite engine supports it (3.35+). `node:sqlite`
   bundles a recent SQLite. The existing `supportsUpdateReturning()` probe in
   `core/control-db.ts` continues to work as-is via `db.prepare(...).get()`.
-- **Transactions are not re-entrant.** `transaction(db, () => transaction(db, ...))`
-  will fail with "cannot start a transaction within a transaction." The
-  codebase does not nest today; if a future caller needs to, extend the
-  helper to use SAVEPOINTs.
+- **Nested transactions use SAVEPOINTs.** Outer `transaction(db, ...)` runs
+  `BEGIN IMMEDIATE`; nested calls run `SAVEPOINT _compat_<depth>` and roll
+  back to the savepoint on throw. Mirrors better-sqlite3's behavior so
+  callers like `rebuildProjectionForDate` (which itself wraps each
+  `applyTrackerEntry` in a transaction) work unchanged. Depth is tracked in
+  a module-level `WeakMap<Database, number>`.
+- **Unknown named parameters are silently ignored.** The shim's `prepare`
+  calls `setAllowUnknownNamedParameters(true)` on every prepared statement.
+  better-sqlite3 ignored extra keys in bound objects; node:sqlite throws
+  "Unknown named parameter" by default. The codebase passes bundled param
+  objects across multiple statements, so this knob preserves the prior
+  contract without per-callsite cleanup.
 - **Bigints**: default off (`setReadBigInts(false)` is the default). Matches
   better-sqlite3. If a future caller stores 64-bit integers, opt in
   per-statement.

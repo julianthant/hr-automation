@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import type Database from "better-sqlite3";
+import { type Database } from "../../infra/sqlite/index.js";
 
 export interface RegisterLocalFileInput {
   kind: "pdf" | "screenshot" | "page-image" | "image" | "other";
@@ -40,7 +40,7 @@ export function hashFile(path: string): { sha256: string; bytes: number } {
 }
 
 export function registerLocalFile(
-  db: Database.Database,
+  db: Database,
   input: RegisterLocalFileInput,
 ): RegisteredFile {
   if (!existsSync(input.path)) throw new Error(`file does not exist: ${input.path}`);
@@ -103,7 +103,7 @@ export function registerLocalFile(
 }
 
 export function getRegisteredFile(
-  db: Database.Database,
+  db: Database,
   fileId: string,
 ): RegisteredFile | null {
   if (!/^[a-f0-9]{32,64}$/.test(fileId)) return null;

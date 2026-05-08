@@ -14,8 +14,10 @@ test('control db migrates idempotently with WAL and busy timeout', () => {
     ctl.migrate()
     ctl.migrate()
 
-    assert.equal(ctl.db.pragma('journal_mode', { simple: true }), 'wal')
-    assert.ok(Number(ctl.db.pragma('busy_timeout', { simple: true })) >= 5000)
+    const journal = ctl.db.prepare('PRAGMA journal_mode').get() as { journal_mode: string }
+    const busy = ctl.db.prepare('PRAGMA busy_timeout').get() as { timeout: number }
+    assert.equal(journal.journal_mode.toLowerCase(), 'wal')
+    assert.ok(busy.timeout >= 5000)
     assert.equal(ctl.supportsUpdateReturning(), true)
     ctl.db.exec(`
       DROP TABLE IF EXISTS temp.__returning_probe;

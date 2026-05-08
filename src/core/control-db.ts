@@ -1,6 +1,4 @@
-import { existsSync, mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
-import Database from 'better-sqlite3'
+import { openDatabase, transaction, type Database } from '../infra/sqlite/index.js'
 
 import { closeStateDbForTests, openStateDb, runMigrations, stateDbPath } from '../tracker/state/db.js'
 import { DEFAULT_DIR } from '../tracker/jsonl.js'
@@ -11,14 +9,14 @@ export interface OpenControlDbOpts {
 }
 
 export interface ControlDb {
-  db: Database.Database
+  db: Database
   migrate(): void
   transaction<T>(body: () => T): T
   supportsUpdateReturning(): boolean
   close(): void
 }
 
-const updateReturningSupportByDb = new WeakMap<Database.Database, boolean>()
+const updateReturningSupportByDb = new WeakMap<Database, boolean>()
 
 export function controlDbPath(trackerDir: string = DEFAULT_DIR): string {
   return stateDbPath(trackerDir)
@@ -38,8 +36,7 @@ export function openControlDb(opts: OpenControlDbOpts = {}): ControlDb {
       runMigrations(db)
     },
     transaction<T>(body: () => T): T {
-      const tx = db.transaction(body)
-      return tx()
+      return transaction(db, body)
     },
     supportsUpdateReturning() {
       return supportsUpdateReturning(db)
@@ -48,7 +45,7 @@ export function openControlDb(opts: OpenControlDbOpts = {}): ControlDb {
   }
 }
 
-function supportsUpdateReturning(db: Database.Database): boolean {
+function supportsUpdateReturning(db: Database): boolean {
   const cached = updateReturningSupportByDb.get(db)
   if (typeof cached === 'boolean') return cached
   let supported: boolean
@@ -65,14 +62,8 @@ function supportsUpdateReturning(db: Database.Database): boolean {
   return supported
 }
 
-function openStandaloneDb(path: string): Database.Database {
-  const dir = dirname(path)
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-  const db = new Database(path)
-  db.pragma('journal_mode = WAL')
-  db.pragma('synchronous = NORMAL')
-  db.pragma('busy_timeout = 5000')
-  db.pragma('foreign_keys = ON')
+function openStandaloneDb(path: string): Database {
+  const db = openDatabase(path)
   runMigrations(db)
   return db
 }

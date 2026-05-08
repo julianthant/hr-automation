@@ -1,8 +1,8 @@
-import type Database from "better-sqlite3";
+import { type Database } from "../../../infra/sqlite/index.js";
 
 export interface DashboardHonoDeps {
   dir: string;
-  stateDb: Database.Database;
+  stateDb: Database;
   workflow?: string;
   port?: number;
   projectionReady?: boolean;

@@ -1,3 +1,5 @@
+import { transaction } from "../../infra/sqlite/index.js";
+
 import { trackEvent, type TrackerEntry } from "../jsonl.js";
 import type { TaskStore } from "./store.js";
 import {
@@ -151,7 +153,7 @@ export async function runDependencySchedulerTick(
         continuationApplied = true;
       }
 
-      const markResolved = opts.store.db.transaction(() => {
+      transaction(opts.store.db, () => {
         markDependencyTerminal(opts.store, {
           dependencyId: dep.id,
           status: terminalStatus,
@@ -184,7 +186,6 @@ export async function runDependencySchedulerTick(
           });
         }
       });
-      markResolved();
       result.dependenciesResolved += 1;
       if (continuationApplied) result.continuationsApplied += 1;
     } catch (err) {

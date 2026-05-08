@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3'
+import { type Database } from '../../infra/sqlite/index.js'
 
 import type { ControlDb } from '../control-db.js'
 import {
@@ -51,7 +51,7 @@ export type {
 
 export interface ControlTaskStore {
   control: ControlDb
-  db: Database.Database
+  db: Database
   close(): void
   enqueueTasks<T>(request: EnqueueTasksRequest<T>): EnqueuedTask[]
   claimNextTask(request: { workflow: string; workerId: string; now?: string; leaseMs?: number }): ClaimedTask | null
@@ -140,7 +140,7 @@ export function createTaskStore(control: ControlDb): ControlTaskStore {
   return store
 }
 
-function getTaskByRunId(db: Database.Database, runId: string): TaskRow | null {
+function getTaskByRunId(db: Database, runId: string): TaskRow | null {
   const row = db.prepare(`
     SELECT t.*
     FROM task_attempts a
@@ -152,7 +152,7 @@ function getTaskByRunId(db: Database.Database, runId: string): TaskRow | null {
 }
 
 function findTaskByIdentity(
-  db: Database.Database,
+  db: Database,
   request: { workflow: string; itemId: string; runId?: string },
 ): TaskRow | null {
   const row = request.runId
@@ -176,7 +176,7 @@ function findTaskByIdentity(
   return row ? mapTaskRow(row) : null
 }
 
-function listTasksForWorkflow(db: Database.Database, workflow: string): TaskRow[] {
+function listTasksForWorkflow(db: Database, workflow: string): TaskRow[] {
   const rows = db.prepare(`
     SELECT *
     FROM tasks

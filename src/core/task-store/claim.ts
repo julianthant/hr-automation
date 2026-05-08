@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3'
+import { type Database } from '../../infra/sqlite/index.js'
 
 import type { ControlDb } from '../control-db.js'
 import {
@@ -9,7 +9,7 @@ import {
 } from './types.js'
 
 export function claimNextTask(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   request: { workflow: string; workerId: string; now?: string; leaseMs?: number },
 ): ClaimedTask | null {
@@ -22,7 +22,7 @@ export function claimNextTask(
 }
 
 function claimNextTaskReturning(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   request: { workflow: string; workerId: string; now: string; claimExpiresAt: string },
 ): ClaimedTask | null {
@@ -61,7 +61,7 @@ function claimNextTaskReturning(
 }
 
 function claimNextTaskFallback(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   request: { workflow: string; workerId: string; now: string; claimExpiresAt: string },
 ): ClaimedTask | null {
@@ -100,7 +100,7 @@ function claimNextTaskFallback(
   })
 }
 
-export function markAttemptClaimed(db: Database.Database, attemptId: string, workerId: string, now: string): void {
+export function markAttemptClaimed(db: Database, attemptId: string, workerId: string, now: string): void {
   db.prepare(`
     UPDATE task_attempts
     SET control_state = 'claimed',
@@ -112,7 +112,7 @@ export function markAttemptClaimed(db: Database.Database, attemptId: string, wor
 }
 
 export function markTaskRunning(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   request: { taskId: string; attemptId: string; workerId: string; now?: string },
 ): void {
@@ -140,7 +140,7 @@ export function markTaskRunning(
 }
 
 export function returnTaskToQueued(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   request: { taskId: string; now?: string },
 ): void {
@@ -171,7 +171,7 @@ export function returnTaskToQueued(
 }
 
 export function recoverClaimsForDeadWorkers(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   request: { workflow: string; aliveWorkerIds: Set<string>; now?: string },
 ): number {
@@ -204,7 +204,7 @@ export function recoverClaimsForDeadWorkers(
   })
 }
 
-function claimedFromTaskRow(db: Database.Database, row: TaskDbRow, workerId: string): ClaimedTask {
+function claimedFromTaskRow(db: Database, row: TaskDbRow, workerId: string): ClaimedTask {
   if (!row.current_attempt_id) throw new Error(`Task ${row.id} has no current attempt`)
   const attempt = db.prepare('SELECT * FROM task_attempts WHERE id = ?').get(row.current_attempt_id) as { id: string; run_id: string }
   const result: ClaimedTask = {

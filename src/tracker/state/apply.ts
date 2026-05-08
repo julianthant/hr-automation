@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
-import type Database from "better-sqlite3";
+import { transaction, type Database } from "../../infra/sqlite/index.js";
 
 import type { TrackerEntry, LogEntry } from "../jsonl.js";
 import type { SessionEvent, ScreenshotSessionEvent } from "../session-events.js";
@@ -29,7 +29,7 @@ function isResolvedPrepData(status: string, step: string | undefined, data: Reco
 }
 
 export function applyTrackerEntry(
-  db: Database.Database,
+  db: Database,
   entry: TrackerEntry,
   source: ProjectionSourceRef,
 ): void {
@@ -43,7 +43,7 @@ export function applyTrackerEntry(
   const now = new Date().toISOString();
   const isWork = entry.status !== "pending";
 
-  const tx = db.transaction(() => {
+  transaction(db, () => {
     db.prepare(`
       INSERT OR IGNORE INTO run_events (
         source_path, source_line, source_offset, workflow, tracker_date, item_id,
@@ -151,11 +151,10 @@ export function applyTrackerEntry(
       updatedAt: now,
     });
   });
-  tx();
 }
 
 export function applyLogEntry(
-  db: Database.Database,
+  db: Database,
   entry: LogEntry,
   source: ProjectionSourceRef,
 ): void {
@@ -163,7 +162,7 @@ export function applyLogEntry(
   const runId = entry.runId || `${entry.itemId}#1`;
   const tsMs = toMs(entry.ts);
   const now = new Date().toISOString();
-  const tx = db.transaction(() => {
+  transaction(db, () => {
     db.prepare(`
       INSERT OR IGNORE INTO logs (
         source_path, source_line, source_offset, workflow, tracker_date, item_id,
@@ -220,11 +219,10 @@ export function applyLogEntry(
       updatedAt: now,
     });
   });
-  tx();
 }
 
 export function applySessionEvent(
-  db: Database.Database,
+  db: Database,
   event: SessionEvent | ScreenshotSessionEvent,
   source: ProjectionSourceRef,
 ): void {
@@ -257,7 +255,7 @@ export function applySessionEvent(
   }
 }
 
-function applyScreenshotFiles(db: Database.Database, event: ScreenshotSessionEvent): void {
+function applyScreenshotFiles(db: Database, event: ScreenshotSessionEvent): void {
   const files = Array.isArray(event.files) ? event.files : [];
   for (const file of files) {
     if (!file.path || !existsSync(file.path)) continue;

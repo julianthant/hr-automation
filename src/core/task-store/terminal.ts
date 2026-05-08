@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3'
+import { type Database } from '../../infra/sqlite/index.js'
 
 import type { ControlDb } from '../control-db.js'
 import {
@@ -14,7 +14,7 @@ import {
 import { returnTaskToQueued } from './claim.js'
 
 export function markTaskDone(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   request: { taskId: string; attemptId: string; now?: string },
 ): void {
@@ -22,7 +22,7 @@ export function markTaskDone(
 }
 
 export function markTaskFailed(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   request: { taskId: string; attemptId: string; error: string; now?: string },
 ): void {
@@ -30,7 +30,7 @@ export function markTaskFailed(
 }
 
 export function markTaskCancelled(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   request: { taskId: string; attemptId?: string; reason?: string; now?: string },
 ): void {
@@ -47,7 +47,7 @@ export function markTaskCancelled(
 }
 
 function markTerminal(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   request: {
     taskId: string
@@ -88,7 +88,7 @@ function markTerminal(
 }
 
 export function requestCancelTask(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   request: { taskId: string; reason?: string; now?: string },
 ): TaskRow | null {
@@ -127,7 +127,7 @@ export function requestCancelTask(
 }
 
 export function requestCancelParentAndChildren(
-  db: Database.Database,
+  db: Database,
   control: ControlDb,
   request: { parentTaskId: string; reason?: string; now?: string },
 ): void {

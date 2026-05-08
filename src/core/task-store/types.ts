@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3'
+import { type Database } from '../../infra/sqlite/index.js'
 
 // ── Public types (re-exported from index.ts) ──────────────────────────────────
 
@@ -190,11 +190,11 @@ export function parseJson(raw: string): unknown {
   }
 }
 
-export function getTaskRaw(db: Database.Database, taskId: string): TaskDbRow | null {
+export function getTaskRaw(db: Database, taskId: string): TaskDbRow | null {
   return (db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as TaskDbRow | undefined) ?? null
 }
 
-export function getMappedTask(db: Database.Database, taskId: string): TaskRow | null {
+export function getMappedTask(db: Database, taskId: string): TaskRow | null {
   const row = getTaskRaw(db, taskId)
   return row ? mapTaskRow(row) : null
 }

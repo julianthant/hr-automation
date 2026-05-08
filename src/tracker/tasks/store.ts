@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import Database from "better-sqlite3";
+
+import { openDatabase, transaction, type Database } from "../../infra/sqlite/index.js";
 
 import { openStateDb, runMigrations } from "../state/db.js";
 import type {
@@ -14,7 +15,7 @@ import type {
 } from "./types.js";
 
 export interface TaskStore {
-  db: Database.Database;
+  db: Database;
 }
 
 export interface TrackerIdentity {
@@ -74,11 +75,7 @@ export function openTaskStore(trackerDir?: string): TaskStore {
 }
 
 export function openTaskStoreForTests(dbPath: string): TaskStore {
-  const db = new Database(dbPath);
-  db.pragma("journal_mode = WAL");
-  db.pragma("synchronous = NORMAL");
-  db.pragma("busy_timeout = 5000");
-  db.pragma("foreign_keys = ON");
+  const db = openDatabase(dbPath);
   runMigrations(db);
   return { db };
 }
@@ -96,7 +93,7 @@ export function createTaskDependencyBatch(
   dependencies: Array<{ id: string; childTaskId: string }>;
 } {
   const now = input.now ?? new Date().toISOString();
-  const tx = store.db.transaction(() => {
+  return transaction(store.db, () => {
     const parentTaskId = upsertTask(store, input.parent, now);
     const children = input.children.map((child) => {
       const childTaskId = upsertTask(store, { ...child, parentTaskId, data: {} }, now);
@@ -133,7 +130,6 @@ export function createTaskDependencyBatch(
       dependencies: children.map((child) => ({ id: child.dependencyId, childTaskId: child.taskId })),
     };
   });
-  return tx();
 }
 
 export function createOcrEidLookupDependencyBatch(input: {
