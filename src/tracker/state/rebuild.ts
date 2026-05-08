@@ -74,7 +74,12 @@ function parseJsonlFrom<T>(path: string, startAt: number): ParsedLine<T>[] {
   const text = buf.toString("utf-8");
   const out: ParsedLine<T>[] = [];
   let offset = effectiveStart;
-  let line = 1; // approximate — we don't track absolute line number from startAt
+  // The `line` field is local to this read slice (1-indexed from startAt),
+  // NOT an absolute line number in the file. Used only as a debug breadcrumb
+  // — UNIQUE constraint on (source_path, source_offset) means correctness
+  // hinges on `offset`, not `line`. If a future debug tool surfaces
+  // `source.line`, document this caveat there.
+  let line = 1;
   for (const rawLine of text.split("\n")) {
     const bytes = Buffer.byteLength(rawLine + "\n");
     if (rawLine.trim()) {
