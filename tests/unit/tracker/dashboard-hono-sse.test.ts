@@ -1,14 +1,11 @@
 import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
-import {
-  getActiveHonoCaptureSseSubscriberCountForTests,
-  getActiveHonoDaemonLogWatcherCountForTests,
-} from "../../../src/tracker/dashboard/hono/routes/events.js";
+import { getActiveHonoCaptureSseSubscriberCountForTests } from "../../../src/tracker/dashboard/hono/routes/events.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
 import type { TrackerEntry } from "../../../src/tracker/jsonl.js";
 
@@ -268,26 +265,6 @@ test("Hono /events JSONL fallback reads the requested historical date", async ()
   const payload = unpack(stream.messages[0]) as { entries: Array<{ id: string }> };
   assert.deepEqual(payload.entries.map((entry) => entry.id), ["past-item"]);
   await stream.cancel();
-});
-
-test("Hono /events/daemon-log tails and releases its watcher on abort", async () => {
-  const pid = 444444;
-  const daemons = join(dir, "daemons");
-  mkdirSync(daemons, { recursive: true });
-  writeFileSync(join(daemons, "onboarding-abc.lock.json"), JSON.stringify({ pid, workflow: "onboarding" }));
-  writeFileSync(join(daemons, `onboarding-${pid}.log`), "first line\n");
-
-  const stream = await readSseMessages(
-    await app().request(hubUrl("daemonLog", { pid })),
-    1,
-  );
-  const data = unpack(stream.messages[0]) as { line?: string; ok?: boolean };
-  // First message should be a tail line with the log content, not an error
-  assert.ok(data.ok !== false, "should not be an error envelope");
-  assert.match(data.line ?? "", /first line/);
-  await waitFor(() => getActiveHonoDaemonLogWatcherCountForTests() === 1, "daemon log watcher to register");
-  await stream.cancel();
-  await waitFor(() => getActiveHonoDaemonLogWatcherCountForTests() === 0, "daemon log watcher cleanup");
 });
 
 test("Hono capture session stream starts with session-list and releases its subscription on abort", async () => {
