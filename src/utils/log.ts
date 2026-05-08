@@ -1,4 +1,4 @@
-import pc from "picocolors";
+import { styleText } from "node:util";
 import { AsyncLocalStorage } from "async_hooks";
 import { appendLogEntry, type LogEntry } from "../tracker/jsonl.js";
 import type { StructuredLogEvent } from "../domain/log-events.js";
@@ -62,7 +62,7 @@ function emit(
 
 function emitDebug(msg: string): void {
   if (DEBUG_ENABLED) {
-    console.log(pc.gray("\u00B7 " + msg));
+    console.log(styleText("gray", "\u00B7 " + msg));
   }
   const ctx = logStore.getStore();
   if (ctx) {
@@ -86,15 +86,15 @@ function emitE2e(category: string, payload: string | Record<string, unknown>): v
   if (!E2E_DEBUG_ENABLED) return;
   const ts = new Date().toISOString().slice(11, 23); // HH:MM:SS.sss
   const body = typeof payload === "string" ? payload : JSON.stringify(payload);
-  console.log(pc.magenta(`[E2E][${ts}][${category}]`) + " " + body);
+  console.log(styleText("magenta", `[E2E][${ts}][${category}]`) + " " + body);
 }
 
 export const log = {
-  step: (msg: LogMessage): void => emit("step", pc.blue("->"), msg),
-  success: (msg: LogMessage): void => emit("success", pc.green("\u2713"), msg),
-  waiting: (msg: LogMessage): void => emit("waiting", pc.yellow("\u231B"), msg),
-  warn: (msg: LogMessage): void => emit("warn", pc.yellow("!"), msg),
-  error: (msg: LogMessage): void => emit("error", pc.red("\u2717"), msg, true),
+  step: (msg: LogMessage): void => emit("step", styleText("blue", "->"), msg),
+  success: (msg: LogMessage): void => emit("success", styleText("green", "\u2713"), msg),
+  waiting: (msg: LogMessage): void => emit("waiting", styleText("yellow", "\u231B"), msg),
+  warn: (msg: LogMessage): void => emit("warn", styleText("yellow", "!"), msg),
+  error: (msg: LogMessage): void => emit("error", styleText("red", "\u2717"), msg, true),
   debug: (msg: string): void => emitDebug(msg),
   // E2E-TEMP: log.e2e(category, payload) \u2014 no-op unless E2E_DEBUG=1.
   e2e: (category: string, payload: string | Record<string, unknown>): void =>
