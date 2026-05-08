@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { PATHS } from "../../config.js";
-import { getSessionsFilePath } from "../session-events.js";
+import { readSessionEvents } from "../session-events.js";
 import { isStateDbReady, openStateDb } from "../state/db.js";
 import { queryScreenshotsForItem, type FileRow } from "../state/file-queries.js";
 import { querySessionEventsForRun } from "../state/queries.js";
@@ -162,36 +162,23 @@ async function groupedHandlerLegacy(opts: {
   const { dir, screenshotsDir, workflow, itemId } = opts;
   const prefix = `${workflow}-${itemId}-`;
 
-  // 1. Read sessions.jsonl and collect screenshot events whose files
-  //    touch the requested workflow/itemId.
-  const sessPath = getSessionsFilePath(dir);
-  const events: import("../session-events.js").ScreenshotSessionEvent[] = [];
-  if (existsSync(sessPath)) {
-    const raw = readFileSync(sessPath, "utf-8");
-    for (const line of raw.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(trimmed);
-      } catch {
-        continue;
-      }
-      if (
-        parsed !== null &&
-        typeof parsed === "object" &&
-        "type" in parsed &&
-        (parsed as Record<string, unknown>)["type"] === "screenshot" &&
-        "files" in parsed
-      ) {
-        const ev = parsed as import("../session-events.js").ScreenshotSessionEvent;
-        // Include this event if ANY of its files belong to this workflow+itemId.
-        const matches = ev.files.some((f) => {
-          const base = f.path.split(/[/\\]/).pop() ?? "";
-          return base.startsWith(prefix);
-        });
-        if (matches) events.push(ev);
-      }
+  // 1. Read every session file (legacy sessions.jsonl + dated
+  //    sessions-YYYY-MM-DD.jsonl) via readSessionEvents and collect
+  //    screenshot events whose files touch the requested workflow/itemId.
+  const events: ScreenshotSessionEvent[] = [];
+  for (const ev of readSessionEvents(dir) as unknown as Array<Record<string, unknown>>) {
+    if (
+      ev !== null &&
+      typeof ev === "object" &&
+      ev["type"] === "screenshot" &&
+      "files" in ev
+    ) {
+      const screenshotEv = ev as unknown as ScreenshotSessionEvent;
+      const matches = screenshotEv.files.some((f) => {
+        const base = f.path.split(/[/\\]/).pop() ?? "";
+        return base.startsWith(prefix);
+      });
+      if (matches) events.push(screenshotEv);
     }
   }
 

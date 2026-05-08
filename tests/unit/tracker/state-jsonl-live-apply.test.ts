@@ -33,7 +33,7 @@ test("trackEvent appends JSONL and applies the same tracker event to SQLite", ()
       latest_status: string;
       latest_step: string;
     };
-    assert.deepEqual(row, {
+    assert.deepEqual({ ...row }, {
       workflow: "onboarding",
       item_id: "jane@ucsd.edu",
       run_id: "run-1",
