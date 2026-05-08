@@ -9,15 +9,16 @@ import {
 export function ScreenshotsPanel({
   workflow,
   itemId,
-  runId,
-  date,
+  screenshotEventCount,
 }: {
   workflow: string | null;
   itemId: string | null;
-  runId: string | null;
-  date: string | null;
+  /** Count of `screenshot` events in useRunEvents — drives refetch. The
+   *  parent owns the SSE subscription so we don't open a duplicate one
+   *  here (HTTP/1.1 slot exhaustion, see useRunScreenshots). */
+  screenshotEventCount: number;
 }) {
-  const { entries } = useRunScreenshots(workflow, itemId, runId, date);
+  const { entries } = useRunScreenshots(workflow, itemId, screenshotEventCount);
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
 
   const { errors, others, flat } = useMemo(() => {

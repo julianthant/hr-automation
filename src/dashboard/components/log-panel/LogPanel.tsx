@@ -105,6 +105,12 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, defa
   const logSourceWorkflow = entry?.workflow ?? workflow;
   const { logs, loading: logsLoading } = useLogs(logSourceWorkflow, entry?.id || null, activeRunId, date);
   const { events } = useRunEvents(logSourceWorkflow, entry?.id || null, activeRunId, date);
+  // Count screenshot events for the screenshots tab; ScreenshotsPanel uses
+  // this to refetch /api/screenshots without opening its own SSE.
+  const screenshotEventCount = events.reduce(
+    (n, e) => (e.type === "screenshot" ? n + 1 : n),
+    0,
+  );
   const trackerFallbackLog = deriveTrackerFallbackLog(entry, activeRunId);
   const displayedLogs = !logsLoading && logs.length === 0 && trackerFallbackLog
     ? [trackerFallbackLog]
@@ -312,8 +318,7 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, defa
           <ScreenshotsPanel
             workflow={workflow}
             itemId={entry?.id ?? null}
-            runId={activeRunId}
-            date={date}
+            screenshotEventCount={screenshotEventCount}
           />
         }
         editDataAvailable={detailFields.some((f) => f.editable)}

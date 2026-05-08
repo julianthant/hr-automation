@@ -10,67 +10,60 @@ export interface ScreenshotEntry {
 
 /**
  * Fetches grouped ScreenshotEntry[] from /api/screenshots for a given
- * (workflow, itemId) pair and re-fetches whenever a `screenshot` session
- * event arrives on the /events/run-events SSE stream.
+ * (workflow, itemId) pair, refetching whenever the count of screenshot
+ * session events changes. The caller (LogPanel) already subscribes to
+ * `/events/run-events` via useRunEvents and computes the count from there
+ * — this hook does NOT open its own EventSource.
  *
- * Mirrors useRunEvents' structure: one EventSource, cleaned up on deps
- * change, cancelled flag guards async fetch races.
+ * Why this hook used to open its own EventSource and why it doesn't now:
+ * — Two SSE connections to `/events/run-events` for the same (workflow, id,
+ *   runId) tuple were wasteful, AND because Vite proxies HTTP/1.1, every
+ *   open EventSource holds one of Chrome's 6 per-origin connection slots.
+ *   With useEntries + useLogs + useRunEvents + useSessions + this hook all
+ *   open at once, plus a queue-depth poll, the slot pool was saturated.
+ *   New /api/screenshots fetches sat in `pending` indefinitely and
+ *   ScreenshotsPanel showed "No screenshots captured for this run yet."
+ *   even after a screenshot landed.
+ *
+ * The fetch uses an AbortController to abort an in-flight previous fetch
+ * when a new one starts (or on unmount), so a burst of count changes
+ * doesn't pile up requests.
  */
 export function useRunScreenshots(
   workflow: string | null,
   itemId: string | null,
-  runId: string | null,
-  date: string | null,
+  screenshotEventCount: number,
 ): { entries: ScreenshotEntry[] } {
   const [entries, setEntries] = useState<ScreenshotEntry[]>([]);
 
   useEffect(() => {
-    if (!workflow || !itemId) return;
-    let cancelled = false;
+    if (!workflow || !itemId) {
+      setEntries([]);
+      return;
+    }
+    const ctrl = new AbortController();
 
-    const fetchOnce = async () => {
+    void (async () => {
       try {
         const res = await fetch(
           `/api/screenshots?workflow=${encodeURIComponent(workflow)}&itemId=${encodeURIComponent(itemId)}`,
+          { signal: ctrl.signal },
         );
-        if (!res.ok || cancelled) return;
+        if (!res.ok) return;
         const data = (await res.json()) as ScreenshotEntry[];
-        if (!cancelled) setEntries(data);
+        if (!ctrl.signal.aborted) setEntries(data);
       } catch {
-        // Swallow — stale network or cancelled navigation is fine.
+        // AbortError on supersession is expected; other errors will
+        // resolve on the next screenshotEventCount tick.
       }
-    };
-
-    void fetchOnce();
-
-    // Re-fetch when the SSE stream notifies us a new screenshot landed.
-    // /events/run-events carries all session-event types (including
-    // `type === "screenshot"`) in the unnamed SSE data stream — no
-    // separate named event is needed. We only need the notification,
-    // not the payload itself, so we re-fetch once and discard the body.
-    const params = new URLSearchParams({ workflow, id: itemId });
-    if (runId) params.set("runId", runId);
-    if (date) params.set("date", date);
-
-    const es = new EventSource("/events/run-events?" + params.toString());
-    es.onmessage = (e) => {
-      try {
-        const newEvents: Array<{ type?: string }> = JSON.parse(e.data);
-        if (!Array.isArray(newEvents)) return;
-        const hasScreenshot = newEvents.some((ev) => ev?.type === "screenshot");
-        if (hasScreenshot && !cancelled) {
-          void fetchOnce();
-        }
-      } catch {
-        // Ignore parse errors.
-      }
-    };
+    })();
 
     return () => {
-      cancelled = true;
-      es.close();
+      ctrl.abort();
     };
-  }, [workflow, itemId, runId, date]);
+    // screenshotEventCount intentionally drives refetch — it changes when a
+    // new screenshot session_event arrives in useRunEvents.
+  }, [workflow, itemId, screenshotEventCount]);
 
   return { entries };
 }
