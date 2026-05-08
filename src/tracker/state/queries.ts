@@ -218,8 +218,6 @@ export function queryRunsForItem(
   }));
 }
 
-import type { SessionEvent } from "../session-events.js";
-
 /**
  * Read every session event whose `run_id` matches `opts.runId` OR (for
  * batch-scope events emitted before the per-item ALS context was

@@ -20,5 +20,5 @@ if (files.length === 0) {
   process.exit(1);
 }
 
-const result = spawnSync("tsx", ["--test", ...files], { stdio: "inherit" });
+const result = spawnSync("tsx", ["--test", "--test-force-exit", ...files], { stdio: "inherit" });
 process.exit(result.status ?? 1);

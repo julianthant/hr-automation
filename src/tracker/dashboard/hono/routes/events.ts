@@ -17,7 +17,6 @@ import {
   type SessionEvent,
 } from "../../../session-events.js";
 import { queryEntriesPayload, querySessionEventsForRun } from "../../../state/queries.js";
-import { isStateDbReady, openStateDb } from "../../../state/db.js";
 import { resolveDaemonLogPath } from "../../ops/index.js";
 import {
   buildRunTimelines,
@@ -311,13 +310,13 @@ export function registerEventRoutes(app: Hono, deps: DashboardHonoDeps): void {
           // Tracker read failure only disables workflowInstance fallback for this tick.
         }
         let allEvents: SessionEvent[];
-        if (isStateDbReady(deps.dir)) {
+        if (deps.projectionReady && deps.stateDb) {
           const trackerEntry = trackerEntries.find((e) => e.runId === requestedRunId);
           const wfInstance =
             typeof trackerEntry?.data?.instance === "string"
               ? trackerEntry.data.instance
               : undefined;
-          allEvents = querySessionEventsForRun(openStateDb(deps.dir), {
+          allEvents = querySessionEventsForRun(deps.stateDb, {
             runId: requestedRunId,
             ...(wfInstance ? { workflowInstance: wfInstance } : {}),
           });

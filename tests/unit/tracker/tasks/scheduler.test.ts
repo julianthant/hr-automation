@@ -426,7 +426,7 @@ test("scheduler resolves only terminal child while another dependency remains pe
       FROM task_attempts
       ORDER BY tracker_item_id
     `).all() as Array<{ itemId: string; status: string }>;
-    assert.deepEqual(attempts, [
+    assert.deepEqual(attempts.map((r) => ({ ...r })), [
       { itemId: "ocr-oath-ocr-run-1-r0", status: "done" },
       { itemId: "ocr-oath-ocr-run-1-r1", status: "queued" },
     ]);

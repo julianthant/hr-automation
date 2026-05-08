@@ -257,31 +257,39 @@ describe("filterEventsForRun", () => {
 
 describe("/events/run-events instance-based fallback (HTTP)", () => {
   let tmp: string;
-  let server: Server;
+  let server: Server | undefined;
   let port: number;
 
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "run-events-inst-"));
-    server = createDashboardServer({ port: 0, dir: tmp, noClean: true });
-    port = (server.address() as { port: number }).port;
   });
 
   afterEach(async () => {
-    server.closeAllConnections?.();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    if (server) {
+      server.closeAllConnections?.();
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
+      server = undefined;
+    }
     if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
   });
 
   it("streams batch-scope events attributed via workflowInstance", async () => {
     const today = dateLocal();
+    // Use today's date in event timestamps so the SQLite projection (scoped
+    // per-day in rebuildProjectionForDate) picks them up at server start.
+    const tsBase = `${today}T10:00:0`;
     appendTrackerEntry(tmp, "onboarding", today, trackerEntry("A", "Onboarding 1"));
 
-    appendEvent(tmp, { type: "workflow_start", timestamp: "2026-04-23T10:00:00Z", pid: 1234, workflowInstance: "Onboarding 1" });
-    appendEvent(tmp, { type: "browser_launch", timestamp: "2026-04-23T10:00:01Z", pid: 1234, workflowInstance: "Onboarding 1", sessionId: "s1", browserId: "b1", system: "crm" });
-    appendEvent(tmp, { type: "auth_start", timestamp: "2026-04-23T10:00:02Z", pid: 1234, workflowInstance: "Onboarding 1", browserId: "b1", system: "crm" });
-    appendEvent(tmp, { type: "item_start", timestamp: "2026-04-23T10:00:03Z", pid: 1234, workflowInstance: "Onboarding 1", runId: "A", currentItemId: "alice@example.com" });
+    appendEvent(tmp, { type: "workflow_start", timestamp: `${tsBase}0Z`, pid: 1234, workflowInstance: "Onboarding 1" });
+    appendEvent(tmp, { type: "browser_launch", timestamp: `${tsBase}1Z`, pid: 1234, workflowInstance: "Onboarding 1", sessionId: "s1", browserId: "b1", system: "crm" });
+    appendEvent(tmp, { type: "auth_start", timestamp: `${tsBase}2Z`, pid: 1234, workflowInstance: "Onboarding 1", browserId: "b1", system: "crm" });
+    appendEvent(tmp, { type: "item_start", timestamp: `${tsBase}3Z`, pid: 1234, workflowInstance: "Onboarding 1", runId: "A", currentItemId: "alice@example.com" });
     // Different batch, different instance — must be excluded even though pid is shared.
-    appendEvent(tmp, { type: "browser_launch", timestamp: "2026-04-23T10:00:04Z", pid: 1234, workflowInstance: "Onboarding 2", sessionId: "s2", browserId: "b2", system: "ucpath" });
+    appendEvent(tmp, { type: "browser_launch", timestamp: `${tsBase}4Z`, pid: 1234, workflowInstance: "Onboarding 2", sessionId: "s2", browserId: "b2", system: "ucpath" });
+
+    // Start server AFTER seeding so the projection rebuild reads the events.
+    server = createDashboardServer({ port: 0, dir: tmp, noClean: true });
+    port = (server.address() as { port: number }).port;
 
     const messages = await collectSSE(
       `http://localhost:${port}/events/run-events?workflow=onboarding&id=alice@example.com&runId=A&date=${today}`,
