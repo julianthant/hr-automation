@@ -128,16 +128,24 @@ export function rebuildProjectionForDate(db: Database, opts: RebuildProjectionOp
       recordSource(db, { path, sourceKind: "log", workflow, trackerDate: date, lineCount: parsed.length });
     }
 
-    const sessionsPath = join(dir, "sessions.jsonl");
-    const sessions = parseJsonl<SessionEvent | ScreenshotSessionEvent>(sessionsPath);
-    let sessionLineCount = 0;
-    for (const row of sessions) {
-      const eventDate = sessionEventDate(row.value);
-      if (eventDate !== date) continue;
-      sessionLineCount += 1;
-      applySessionEvent(db, row.value, source(sessionsPath, "session", row.line, row.offset, eventDate));
+    // Aggregate session events from both the legacy sessions.jsonl and any
+    // dated sessions-YYYY-MM-DD.jsonl files. The dated file for `date` is the
+    // primary source after rotation; the legacy file holds pre-rotation data.
+    const sessionFiles = [
+      join(dir, "sessions.jsonl"),
+      join(dir, `sessions-${date}.jsonl`),
+    ].filter((p, i, arr) => arr.indexOf(p) === i); // deduplicate (if same path)
+    for (const sessionsPath of sessionFiles) {
+      const sessions = parseJsonl<SessionEvent | ScreenshotSessionEvent>(sessionsPath);
+      let sessionLineCount = 0;
+      for (const row of sessions) {
+        const eventDate = sessionEventDate(row.value);
+        if (eventDate !== date) continue;
+        sessionLineCount += 1;
+        applySessionEvent(db, row.value, source(sessionsPath, "session", row.line, row.offset, eventDate));
+      }
+      recordSource(db, { path: sessionsPath, sourceKind: "session", trackerDate: date, lineCount: sessionLineCount });
     }
-    recordSource(db, { path: sessionsPath, sourceKind: "session", trackerDate: date, lineCount: sessionLineCount });
 
     recomputeRunOrdinals(db, date);
   });

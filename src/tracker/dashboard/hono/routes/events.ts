@@ -13,6 +13,7 @@ import {
 } from "../../../jsonl.js";
 import {
   getSessionsFilePath,
+  readSessionEvents,
   type SessionEvent,
 } from "../../../session-events.js";
 import { queryEntriesPayload } from "../../../state/queries.js";
@@ -131,22 +132,12 @@ function readTrackerEntriesForStream(
 }
 
 async function readSessionEventsTolerant(dir: string): Promise<SessionEvent[]> {
-  const sessionsPath = getSessionsFilePath(dir);
-  const events: SessionEvent[] = [];
   try {
-    const raw = await readFileAsync(sessionsPath, "utf-8");
-    for (const line of raw.split("\n")) {
-      if (!line) continue;
-      try {
-        events.push(JSON.parse(line) as SessionEvent);
-      } catch {
-        // Skip malformed JSONL lines without breaking the stream tick.
-      }
-    }
+    return readSessionEvents(dir);
   } catch {
-    // ENOENT or transient read failures recover on the next tick.
+    // Transient read failures recover on the next tick.
+    return [];
   }
-  return events;
 }
 
 function buildJsonlEventsPayload(
