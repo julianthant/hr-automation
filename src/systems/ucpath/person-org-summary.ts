@@ -46,6 +46,9 @@ export const PERSON_ORG_NAME_LABELS: readonly string[] = [
   "Dept ID", "Department Description", "Job Code", "Expected Job",
   "Empl Class", "Pay Group", "Employee Type", "Probation Code",
   "Probation End", "Union Code", "FLSA Status", "Business Unit",
+  // PeopleSoft transient status strings — observed leaking through on a
+  // first-of-session run when the page hadn't finished settling.
+  "Loading Complete", "Page Loading",
 ];
 
 /**

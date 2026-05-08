@@ -562,7 +562,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 }))
               }
               firstItemClaimed = true
-              emitItemStart(instance, item.id, trackerDir)
+              emitItemStart(instance, item.id, trackerDir, runId)
               const r = await runOneItem({
                 wf,
                 session,
@@ -577,7 +577,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                   cancelTarget?.itemId === item.id && cancelTarget?.runId === runId,
                 ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
               })
-              emitItemComplete(instance, item.id, trackerDir)
+              emitItemComplete(instance, item.id, trackerDir, runId)
               markTerminated(runId)
               const taskStateAfterRun = item.taskId ? taskStore.getTask(item.taskId)?.state : null
               if (r.ok) {

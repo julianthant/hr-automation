@@ -337,12 +337,22 @@ export function emitAuthFailed(instance: string, browserId: string, system: stri
   emitSessionEvent({ type: "auth_failed", workflowInstance: instance, browserId, system }, dir);
 }
 
-export function emitItemStart(instance: string, itemId: string, dir?: string): void {
-  emitSessionEvent({ type: "item_start", workflowInstance: instance, currentItemId: itemId }, dir);
+export function emitItemStart(instance: string, itemId: string, dir?: string, runId?: string): void {
+  emitSessionEvent({
+    type: "item_start",
+    workflowInstance: instance,
+    currentItemId: itemId,
+    ...(runId ? { runId } : {}),
+  }, dir);
 }
 
-export function emitItemComplete(instance: string, itemId: string, dir?: string): void {
-  emitSessionEvent({ type: "item_complete", workflowInstance: instance, currentItemId: itemId }, dir);
+export function emitItemComplete(instance: string, itemId: string, dir?: string, runId?: string): void {
+  emitSessionEvent({
+    type: "item_complete",
+    workflowInstance: instance,
+    currentItemId: itemId,
+    ...(runId ? { runId } : {}),
+  }, dir);
 }
 
 // ── Instance naming ────────────────────────────────────

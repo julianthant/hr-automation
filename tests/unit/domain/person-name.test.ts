@@ -6,6 +6,7 @@ import {
   normalizePersonNameForCompare,
   parseLastFirstName,
   titleCasePersonToken,
+  toLastFirstName,
 } from "../../../src/domain/identity/person-name.js";
 
 describe("person-name identity helpers", () => {
@@ -57,5 +58,41 @@ describe("person-name identity helpers", () => {
 
   it("can normalize names to letters and spaces only for fuzzy roster matching", () => {
     assert.equal(normalizePersonNameForCompare("  O'NEIL-SMITH,   JANE ", { lettersOnly: true }), "oneilsmith jane");
+  });
+});
+
+describe("toLastFirstName", () => {
+  it("converts \"First Last\" + lastName anchor to \"Last, First\"", () => {
+    assert.equal(toLastFirstName("Person 1290", "Langley"), "Person 1290");
+  });
+
+  it("preserves middle name(s) when splitting at the trailing last-name anchor", () => {
+    assert.equal(toLastFirstName("Hein Thant Zaw", "Zaw"), "Zaw, Hein Thant");
+  });
+
+  it("is idempotent on already-comma-formatted input", () => {
+    assert.equal(toLastFirstName("Person 1290", "Langley"), "Person 1290");
+  });
+
+  it("matches the trailing last name case-insensitively and normalizes display casing", () => {
+    assert.equal(toLastFirstName("Person 1290", "langley"), "Person 1290");
+  });
+
+  it("falls back to displayPersonName(fullName) when the lastName does not match the trailing tokens", () => {
+    assert.equal(toLastFirstName("Person 1290", "Smith"), "Person 1290");
+  });
+
+  it("falls back to displayPersonName(fullName) when the lastName is missing", () => {
+    assert.equal(toLastFirstName("Person 1290", ""), "Person 1290");
+    assert.equal(toLastFirstName("Person 1290", null), "Person 1290");
+  });
+
+  it("returns empty string for empty fullName regardless of lastName", () => {
+    assert.equal(toLastFirstName("", "Langley"), "");
+    assert.equal(toLastFirstName(null, "Langley"), "");
+  });
+
+  it("handles multi-token last names like \"Van Dyke\"", () => {
+    assert.equal(toLastFirstName("Dick Van Dyke", "Van Dyke"), "Van Dyke, Dick");
   });
 });

@@ -35,6 +35,30 @@ export function displayPersonName(raw: string | null | undefined): string {
   return `${last}, ${rest}`;
 }
 
+/**
+ * Format a "First [Middle] Last" full name into "Last, First [Middle]" using
+ * a known last name as the split anchor. Idempotent on already-comma-formatted
+ * input. Falls back to the trimmed full name when the last name doesn't match
+ * the trailing tokens.
+ */
+export function toLastFirstName(
+  fullName: string | null | undefined,
+  lastName: string | null | undefined,
+): string {
+  if (!fullName) return "";
+  const fn = fullName.trim().replace(/\s+/g, " ");
+  if (!fn) return "";
+  if (fn.includes(",")) return displayPersonName(fn);
+  const ln = (lastName ?? "").trim().replace(/\s+/g, " ");
+  if (!ln) return displayPersonName(fn);
+  const escaped = ln.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const trailing = new RegExp(`\\s+${escaped}$`, "i");
+  if (!trailing.test(fn)) return displayPersonName(fn);
+  const rest = fn.replace(trailing, "").trim();
+  if (!rest) return displayPersonName(fn);
+  return displayPersonName(`${ln}, ${rest}`);
+}
+
 export function parseLastFirstName(raw: string | null | undefined): ParsedLastFirstName | null {
   const display = displayPersonName(raw);
   const commaIdx = display.indexOf(",");

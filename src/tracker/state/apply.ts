@@ -17,6 +17,7 @@ interface CachedStatements {
   selectRunForScreenshot: Statement;
   countScreenshotsForRun: Statement;
   updateRunScreenshotCount: Statement;
+  recomputeRunOrdinalsForItem: Statement;
 }
 
 const stmtCache = new WeakMap<Database, CachedStatements>();
@@ -137,6 +138,27 @@ function stmts(db: Database): CachedStatements {
       SET screenshot_count = ?, updated_at = ?
       WHERE run_id = ?
     `),
+    // Mirror of the rebuild path's recomputeRunOrdinals, scoped to one
+    // (workflow, tracker_date, item_id) bucket so it's cheap enough to call
+    // on every live tracker apply. Without this, new run rows hit the schema
+    // default of 1 and the dashboard shows two "Run #1" entries side-by-side.
+    recomputeRunOrdinalsForItem: db.prepare(`
+      WITH ordered AS (
+        SELECT
+          run_id,
+          ROW_NUMBER() OVER (
+            ORDER BY COALESCE(first_work_ts, first_any_ts), run_id
+          ) AS ordinal
+        FROM runs
+        WHERE workflow = @workflow AND tracker_date = @date AND item_id = @itemId
+      )
+      UPDATE runs
+      SET run_ordinal = (
+        SELECT ordinal FROM ordered WHERE ordered.run_id = runs.run_id
+      )
+      WHERE workflow = @workflow AND tracker_date = @date AND item_id = @itemId
+        AND EXISTS (SELECT 1 FROM ordered WHERE ordered.run_id = runs.run_id)
+    `),
   };
   stmtCache.set(db, cached);
   return cached;
@@ -228,6 +250,12 @@ export function applyTrackerEntry(
       error: entry.error ?? null,
       resolvedPrep: isResolvedPrepData(entry.status, entry.step, entry.data),
       updatedAt: now,
+    });
+
+    s.recomputeRunOrdinalsForItem.run({
+      workflow: entry.workflow,
+      date: trackerDate,
+      itemId: entry.id,
     });
   });
 }

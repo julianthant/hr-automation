@@ -3,6 +3,7 @@ import type { Ctx } from "../../core/kernel/types.js";
 import { loginToUCPath } from "../../infra/auth/login.js";
 import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 import { isAcceptedHdhDepartment } from "../../domain/hdh/departments.js";
+import { toLastFirstName } from "../../domain/identity/person-name.js";
 import {
   searchByEid,
   searchByName,
@@ -32,6 +33,7 @@ export interface ActiveCheckOutcome {
   name: string;
   department: string;
   hrStatus: string;
+  effdt: string;
   terminationDate: string;
   expectedJobEndDate: string;
   candidateEids: string[];
@@ -52,6 +54,7 @@ export function deriveActiveCheckOutcome(
       name: "",
       department: "",
       hrStatus: "Not found",
+      effdt: "",
       terminationDate: "",
       expectedJobEndDate: "",
       candidateEids: [],
@@ -68,6 +71,7 @@ export function deriveActiveCheckOutcome(
       name: "",
       department: "",
       hrStatus: "Ambiguous",
+      effdt: "",
       terminationDate: "",
       expectedJobEndDate: "",
       candidateEids: results.map((result) => result.emplId),
@@ -95,9 +99,10 @@ export function deriveActiveCheckOutcome(
     isHdhAccepted,
     searchName,
     emplId: result.emplId,
-    name: result.name,
+    name: toLastFirstName(result.name, result.lastName),
     department: result.department ?? "",
     hrStatus,
+    effdt: normalizeDate(result.effectiveDate),
     terminationDate,
     expectedJobEndDate,
     candidateEids: [result.emplId],
@@ -145,10 +150,10 @@ export const activeCheckWorkflow = defineWorkflow({
   authChain: "sequential",
   batch: { mode: "shared-context-pool", poolSize: 4, preEmitPending: true },
   detailFields: [
-    { key: "searchName", label: "Search" },
     { key: "name", label: "Employee" },
     { key: "emplId", label: "EID" },
-    { key: "activeStatus", label: "Active Check" },
+    { key: "hrStatus", label: "HR Status" },
+    { key: "effdt", label: "EFFDT" },
     { key: "terminationDate", label: "End Date" },
     { key: "department", label: "Dept" },
   ],
