@@ -13,6 +13,7 @@ import { formatStepName } from "@/components/shared/types";
 import { useElapsed } from "@/components/hooks/useElapsed";
 import { useTerminalDrawer } from "@/components/hooks/useTerminalDrawer";
 import { useQueueDepth } from "@/components/hooks/useQueueDepth";
+import { useDaemons } from "@/components/hooks/useDaemons";
 import { useWorkflow } from "@/lib/workflows-context";
 import { getWorkflowIcon } from "@/lib/workflow-icons";
 
@@ -67,10 +68,31 @@ function AuthIcon({ state, className }: { state: AuthState; className?: string }
  * daemons, browser processes, stale sessions, and queued rows clear in one
  * action.
  */
-function StopPill({ workflow, instance }: { workflow: string; instance: string }) {
+function StopPill({
+  workflow,
+  instance,
+  totalDaemonCount,
+}: {
+  workflow: string;
+  instance: string;
+  /** Total alive daemons for this workflow (across all instance cards).
+   * When >1, the stop click tears down EVERY daemon — the label and confirm
+   * dialog reflect that blast radius truthfully so the operator can't
+   * accidentally over-stop. */
+  totalDaemonCount: number;
+}) {
   const [sending, setSending] = useState(false);
 
   const postStop = async () => {
+    if (totalDaemonCount > 1) {
+      const ok = window.confirm(
+        `Stop ALL ${totalDaemonCount} ${workflow} daemons?\n\n` +
+          `The /api/daemon/stop endpoint is workflow-scoped, not per-card. ` +
+          `Clicking the stop button on this single card will tear down every ` +
+          `${workflow} daemon currently alive — including any in-flight items.`,
+      );
+      if (!ok) return;
+    }
     setSending(true);
     const toastId = toast.loading(`Stopping ${workflow}…`);
     try {
@@ -123,7 +145,9 @@ function StopPill({ workflow, instance }: { workflow: string; instance: string }
     }
   };
 
-  const title = `Stop the ${workflow} daemon now`;
+  const title = totalDaemonCount > 1
+    ? `Stop ALL ${totalDaemonCount} ${workflow} daemons (workflow-scoped)`
+    : `Stop the ${workflow} daemon now`;
 
   return (
     <button
@@ -151,7 +175,7 @@ function StopPill({ workflow, instance }: { workflow: string; instance: string }
       ) : (
         <span aria-hidden className="text-[11px] leading-none opacity-90">×</span>
       )}
-      stop
+      {totalDaemonCount > 1 ? `stop all ${totalDaemonCount}` : "stop"}
     </button>
   );
 }
@@ -193,8 +217,21 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
   const { focusedInstance, setFocusedInstance } = useTerminalDrawer();
   const meta = useWorkflow(workflowName ?? "");
   const queueDepth = useQueueDepth();
+  const daemons = useDaemons();
   const elapsed = useElapsed(startedAt ?? null);
   const isFocused = focusedInstance === instance;
+  // Total daemons currently alive for this card's workflow. Driven by
+  // /api/daemons polling. Used by StopPill to make blast radius explicit
+  // when multiple daemons share the workflow — the stop button hits
+  // /api/daemon/stop which is workflow-scoped, not per-card. With a fresh
+  // daemon name allocator (generateInstanceName) and the lockfile
+  // self-heal in place, multi-daemon scenarios should each render as
+  // their own WorkflowBox via the SSE sessions topic; this count guards
+  // against the rare case where two daemons race the instance allocator
+  // and aggregate visually.
+  const totalDaemonsForWorkflow = workflowName
+    ? daemons.filter((d) => d.workflow === workflowName).length
+    : 0;
 
   if (workflow.crashedOnLaunch) {
     return (
@@ -335,7 +372,11 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
               via min-w on the column so they read as one anchored unit. */}
           <div className="flex flex-col gap-1 items-stretch flex-shrink-0 min-w-[64px]">
             {active && pidAlive && workflowName ? (
-              <StopPill workflow={workflowName} instance={instance} />
+              <StopPill
+                workflow={workflowName}
+                instance={instance}
+                totalDaemonCount={totalDaemonsForWorkflow}
+              />
             ) : (
               <span className="h-[20px]" aria-hidden />
             )}
