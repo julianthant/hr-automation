@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, existsSync, appendFileSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { withLogContext, setLogRunId } from "../../../src/utils/log.js";
-import { emitStepChange, readSessionEvents, recentStepLogExists, type SessionEvent } from "../../../src/tracker/session-events.js";
+import { emitStepChange, readSessionEvents, type SessionEvent } from "../../../src/tracker/session-events.js";
 import { dateLocal } from "../../../src/tracker/jsonl.js";
 import { openStateDb, closeStateDbForTests } from "../../../src/tracker/state/db.js";
 
@@ -68,30 +68,49 @@ describe("emitStepChange dedupe against recent step log", () => {
   });
 });
 
-test("recentStepLogExists LIKE escape: % and _ in step name match literally (SQLite path)", () => {
-  const dir = mkdtempSync(join(tmpdir(), "step-like-"));
+test("emitStepChange wildcard escape: % in step name does not over-match unrelated SQLite log rows", async () => {
+  // Drives the SQLite-path wildcard escape via the public emitStepChange caller.
+  //
+  // Setup: seed a SQLite logs row whose message contains "extractZdone" — NOT
+  // a literal "extract%done". Then call emitStepChange with step "extract%done".
+  //
+  // Pre-fix, recentStepLogExists's SQL becomes  LIKE '%extract%done%'  (no
+  // ESCAPE), the inner % is treated as a wildcard and matches the Z in
+  // "extractZdone", so the dedupe gate fires and the session event is
+  // suppressed → 0 events emitted.
+  //
+  // Post-fix, the SQL becomes  LIKE '%extract\%done%' ESCAPE '\\' , the % is
+  // literal, no row matches, dedupe doesn't fire → 1 event emitted.
+  //
+  // The discriminating shape is "no row literally contains 'extract%done'."
+  // An earlier version of this test seeded a literal-`%done` row alongside
+  // the wildcard-leak row — with that row present, BOTH pre-fix (wildcard
+  // path) and post-fix (literal path) hit a match and dedupe equally,
+  // hiding the regression.
+  const dir = mkdtempSync(join(tmpdir(), "step-wildcard-"));
   try {
     const db = openStateDb(dir);
     const date = dateLocal();
     const now = Date.now();
     const appliedAt = new Date().toISOString();
-    // Seed two log rows:
-    //   row 0: message contains the literal step "extract%done"
-    //   row 1: message contains "extractZdone" — would match if % were treated as wildcard
+
     db.prepare(`
       INSERT INTO logs (source_path, source_line, source_offset, workflow, tracker_date, item_id, run_id, level, message, ts, ts_ms, raw_json, applied_at)
-      VALUES
-        ('fake', 1, 0, 'test-wf', ?, 'item-1', 'item-1#1', 'step', 'literal extract%done message', ?, ?, '{}', ?),
-        ('fake', 2, 1, 'test-wf', ?, 'item-1', 'item-1#1', 'step', 'extractZdone wildcard-leak message', ?, ?, '{}', ?)
-    `).run(date, new Date().toISOString(), now, appliedAt, date, new Date().toISOString(), now, appliedAt);
+      VALUES ('fake', 1, 0, 'onboarding', ?, 'alice@example.com', 'alice@example.com#1', 'step', 'step started: extractZdone', ?, ?, '{}', ?)
+    `).run(date, new Date().toISOString(), now, appliedAt);
 
-    // "extract%done" should match only the first row (literal)
-    const found = recentStepLogExists("test-wf", "item-1#1", "extract%done", dir);
-    assert.equal(found, true, "literal step name containing % should match");
+    // emitStepChange discovers workflows by scanning *-{date}-logs.jsonl
+    // filenames; create an empty file so the dedupe loop iterates with
+    // wf="onboarding" and recentStepLogExists is actually called.
+    appendFileSync(join(dir, `onboarding-${date}-logs.jsonl`), "");
 
-    // "extractXdone" should not match (the wildcard-leak check)
-    const leak = recentStepLogExists("test-wf", "item-1#1", "extractXdone", dir);
-    assert.equal(leak, false, "literal step name should not match different message under wildcard semantics");
+    await withLogContext("onboarding", "alice@example.com", async () => {
+      setLogRunId("alice@example.com#1");
+      emitStepChange("Onboarding 1", "extract%done", dir);
+    });
+
+    const events = readSessionEvents(dir).filter((e) => e.type === "step_change");
+    assert.equal(events.length, 1, "step_change should emit; pre-fix wildcard would falsely dedupe against extractZdone");
   } finally {
     closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });
