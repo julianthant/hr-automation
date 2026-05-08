@@ -128,23 +128,36 @@ export function queryEntriesPayload(
   for (const row of countRows) wfCounts[row.workflow] = row.n;
 
   const failureCounts: Record<string, number> = {};
+  // One query for ALL workflows on this date, partition in JS.
+  // Replaces the prior per-workflow N+1 (one prepared statement per
+  // workflow per tick per connected SSE client).
+  const allLatestRows = db.prepare(`
+    SELECT workflow, latest_ts AS timestamp, item_id AS id, latest_run_id AS runId,
+           latest_status AS status, latest_step AS step, latest_data_json AS data_json,
+           latest_error AS error
+    FROM items
+    WHERE tracker_date = @date
+  `).all({ date: opts.date }) as Array<{
+    workflow: string;
+    timestamp: string;
+    id: string;
+    runId: string;
+    status: "pending" | "running" | "done" | "failed" | "skipped";
+    step?: string | null;
+    data_json?: string | null;
+    error?: string | null;
+  }>;
+
+  const rowsByWorkflow = new Map<string, typeof allLatestRows>();
+  for (const row of allLatestRows) {
+    const bucket = rowsByWorkflow.get(row.workflow);
+    if (bucket) bucket.push(row);
+    else rowsByWorkflow.set(row.workflow, [row]);
+  }
+
   for (const wf of workflows) {
-    const latestRows = db.prepare(`
-      SELECT workflow, latest_ts AS timestamp, item_id AS id, latest_run_id AS runId,
-             latest_status AS status, latest_step AS step, latest_data_json AS data_json,
-             latest_error AS error
-      FROM items
-      WHERE workflow = @workflow AND tracker_date = @date
-    `).all({ workflow: wf, date: opts.date }) as Array<{
-      workflow: string;
-      timestamp: string;
-      id: string;
-      runId: string;
-      status: "pending" | "running" | "done" | "failed" | "skipped";
-      step?: string | null;
-      data_json?: string | null;
-      error?: string | null;
-    }>;
+    const latestRows = rowsByWorkflow.get(wf) ?? [];
+    if (latestRows.length === 0) continue;
     const n = computeFailureCounts(latestRows.map((row) => ({
       workflow: row.workflow,
       timestamp: row.timestamp,
