@@ -484,9 +484,11 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         // items anyway. Mirrors SIGTERM: set shuttingDown, resolve the idle
         // waiters so the loop exits. In-flight teardown runs in `finally`.
         const unsubscribeDisconnect = session.onBrowserDisconnect((systemId) => {
-          // Reset so a future Session.launch re-registers fresh PIDs.
-          browsersRegistered = false
-          lastRegisteredInFlight = null
+          // A daemon's lifetime is one Session.launch — there is no
+          // re-launch path inside a single daemon process. So we don't
+          // bother resetting browsersRegistered / lastRegisteredInFlight
+          // here (they'd be dead-code resets). The disconnect just
+          // triggers shutdown; the OS reclaims the daemon's state.
           if (shuttingDown) return
           log.warn(
             `[Daemon ${wf.config.name}/${instanceId}] browser disconnected (${systemId}); shutting down`,
