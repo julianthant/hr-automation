@@ -1,9 +1,15 @@
-import test from 'node:test'
+import test, { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { promises as fs } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { buildScreenshotsHandler } from '../../../src/tracker/dashboard.js'
+import { openStateDb, closeStateDbForTests, stateDbPath } from '../../../src/tracker/state/db.js'
+import { trackEvent } from '../../../src/tracker/jsonl.js'
+import { emitScreenshotEvent } from '../../../src/tracker/jsonl.js'
 
 test('returns grouped entries matching screenshot events, legacy files under kind:error label:legacy', async () => {
   const trackerDir = await fs.mkdtemp(path.join(os.tmpdir(), 'scr-dash-'))
@@ -21,6 +27,7 @@ test('returns grouped entries matching screenshot events, legacy files under kin
   const sessionsJsonl = path.join(trackerDir, 'sessions.jsonl')
   await fs.writeFile(sessionsJsonl, JSON.stringify({
     type: 'screenshot', runId: 'r1', ts, kind: 'form', label: 'kuali-saved', step: 'kuali-finalization',
+    timestamp: new Date(ts).toISOString(),
     files: [
       { system: 'kuali', path: path.join(shotsDir, `separations-3907-form-kuali-saved-kuali-${ts}.png`) },
       { system: 'ucpath', path: path.join(shotsDir, `separations-3907-form-kuali-saved-ucpath-${ts}.png`) },
@@ -34,4 +41,85 @@ test('returns grouped entries matching screenshot events, legacy files under kin
   assert.equal(byKey['kuali-saved'].files.length, 2)
   assert.equal(byKey['legacy'].kind, 'error')
   assert.equal(byKey['legacy'].files.length, 1)
+
+  closeStateDbForTests(trackerDir)
+  rmSync(trackerDir, { recursive: true, force: true })
+})
+
+describe('grouped handler SQLite vs JSONL parity', () => {
+  let trackerDir: string
+  let shotsDir: string
+
+  beforeEach(async () => {
+    trackerDir = mkdtempSync(join(tmpdir(), 'scr-parity-'))
+    shotsDir = join(trackerDir, 'screenshots')
+    await fs.mkdir(shotsDir, { recursive: true })
+  })
+
+  afterEach(() => {
+    closeStateDbForTests(trackerDir)
+    rmSync(trackerDir, { recursive: true, force: true })
+  })
+
+  it('SQLite path returns same shape as JSONL+disk fallback', async () => {
+    const ts = 1776712000000
+
+    // 1. Create a physical PNG so registerLocalFile (existsSync) doesn't skip it.
+    const pngPath = join(shotsDir, `separations-3907-form-kuali-saved-kuali-${ts}.png`)
+    writeFileSync(pngPath, 'fake-png-data')
+
+    // 2. Open the DB so applyTrackerEntry/applySessionEvent feed into it.
+    openStateDb(trackerDir)
+
+    // 3. Emit a tracker entry to populate the runs table with workflow+item_id
+    //    so applyScreenshotFiles can look them up via run_id.
+    trackEvent({
+      workflow: 'separations',
+      timestamp: new Date(ts).toISOString(),
+      id: '3907',
+      runId: 'run-parity-1',
+      status: 'running',
+      data: {},
+    }, trackerDir)
+
+    // 4. Emit the screenshot event — populates both sessions.jsonl and SQLite files table.
+    emitScreenshotEvent({
+      type: 'screenshot',
+      runId: 'run-parity-1',
+      ts,
+      timestamp: new Date(ts).toISOString(),
+      kind: 'form',
+      label: 'kuali-saved',
+      step: 'kuali-finalization',
+      files: [{ system: 'kuali', path: pngPath }],
+    }, { dir: trackerDir })
+
+    // 5. Call the grouped handler — should use SQLite path since isStateDbReady is true.
+    const handler = buildScreenshotsHandler({ dir: trackerDir, screenshotsDir: shotsDir })
+    const fromSqlite = await handler({ workflow: 'separations', itemId: '3907' })
+
+    // 6. Force fallback: close+remove the DB.
+    closeStateDbForTests(trackerDir)
+    rmSync(stateDbPath(trackerDir), { force: true })
+
+    // 7. Call again — should fall back to JSONL+disk legacy path.
+    const handler2 = buildScreenshotsHandler({ dir: trackerDir, screenshotsDir: shotsDir })
+    const fromLegacy = await handler2({ workflow: 'separations', itemId: '3907' })
+
+    // 8. Both paths must return at least one entry with the same label + kind.
+    assert.ok(fromSqlite.length > 0, 'SQLite path returned no entries')
+    assert.ok(fromLegacy.length > 0, 'Legacy path returned no entries')
+
+    // Find the kuali-saved entry in both results.
+    const sqliteEntry = fromSqlite.find(e => e.label === 'kuali-saved')
+    const legacyEntry = fromLegacy.find(e => e.label === 'kuali-saved')
+    assert.ok(sqliteEntry, 'SQLite path missing kuali-saved entry')
+    assert.ok(legacyEntry, 'Legacy path missing kuali-saved entry')
+
+    // Shapes must match (spread for null-prototype-row compat).
+    assert.equal({ ...sqliteEntry }.kind, { ...legacyEntry }.kind)
+    assert.equal({ ...sqliteEntry }.label, { ...legacyEntry }.label)
+    assert.equal({ ...sqliteEntry }.step, { ...legacyEntry }.step)
+    assert.equal({ ...sqliteEntry }.files.length, { ...legacyEntry }.files.length)
+  })
 })

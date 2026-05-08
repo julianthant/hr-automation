@@ -218,6 +218,48 @@ export function queryRunsForItem(
   }));
 }
 
+import type { SessionEvent } from "../session-events.js";
+
+/**
+ * Read every session event whose `run_id` matches `opts.runId` OR (for
+ * batch-scope events emitted before the per-item ALS context was
+ * established) whose `workflow_instance` matches `opts.workflowInstance`.
+ * Time-window filtering happens client-side via `filterEventsForRun` so the
+ * caller can pass the result straight through and get identical output to
+ * the JSONL path.
+ *
+ * Returns events ordered by ts_ms ASC for deterministic SSE rendering.
+ *
+ * The session_events row stores the full event payload as `raw_json` (see
+ * src/tracker/state/schema.ts:135). We deserialize that to recover the same
+ * shape `readSessionEvents` returns from JSONL.
+ */
+export function querySessionEventsForRun(
+  db: Database,
+  opts: { runId: string; workflowInstance?: string },
+): SessionEvent[] {
+  const params: Record<string, unknown> = { runId: opts.runId };
+  let where = "run_id = @runId";
+  if (opts.workflowInstance) {
+    where += " OR (run_id IS NULL AND workflow_instance = @instance)";
+    params.instance = opts.workflowInstance;
+  }
+  const rows = db.prepare(`
+    SELECT raw_json FROM session_events
+    WHERE ${where}
+    ORDER BY ts_ms ASC, id ASC
+  `).all(params) as Array<{ raw_json: string }>;
+  const out: SessionEvent[] = [];
+  for (const r of rows) {
+    try {
+      out.push(JSON.parse(r.raw_json) as SessionEvent);
+    } catch {
+      // Skip — projection rebuild will reconcile.
+    }
+  }
+  return out;
+}
+
 export function pickEarlier(a: string | undefined, b: string | undefined): string | undefined {
   if (!a) return b;
   if (!b) return a;
