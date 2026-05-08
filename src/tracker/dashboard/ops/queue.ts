@@ -18,6 +18,8 @@ import { createTaskStore } from "../../../core/task-store/index.js";
 import { queueFilePath, queueLockDirPath } from "../../../core/daemon/queue.js";
 import type { QueueEvent } from "../../../core/daemon/types.js";
 import { openControlStores, resolveControlTask } from "./shared.js";
+import { isStateDbReady, openStateDb } from "../../state/db.js";
+import { queryPriorEntriesByKey } from "../../state/queries.js";
 
 export interface QueueBumpRequest {
   workflow: string;
@@ -297,6 +299,34 @@ export function findPriorEntriesByKey(
   const cutoffMs = cutoff.getTime();
   const wantedValue = keyValue.trim();
   if (!wantedValue) return [];
+
+  // SQLite fast path: query the `items` table (latest event per item_id per date)
+  // when the projection DB is available. Falls back to JSONL scan on any hiccup.
+  if (isStateDbReady(dir)) {
+    try {
+      const db = openStateDb(dir);
+      // Compute YYYY-MM-DD cutoff matching the JSONL path's date arithmetic.
+      const cutoffDate = cutoff.toISOString().slice(0, 10);
+      const rows = queryPriorEntriesByKey(db, {
+        workflow,
+        keyField,
+        keyValue: wantedValue,
+        excludeId,
+        cutoffDate,
+      });
+      return rows.map((row) => ({
+        id: row.id,
+        runId: row.runId ?? undefined,
+        status: row.status,
+        step: row.step ?? undefined,
+        timestamp: row.timestamp,
+        date: row.date,
+        data: row.data as Record<string, string>,
+      }));
+    } catch {
+      // Fall through to JSONL on any SQLite error.
+    }
+  }
 
   const allDates = listDatesForWorkflow(workflow, dir);
   // listDatesForWorkflow returns YYYY-MM-DD strings sorted desc; only walk
