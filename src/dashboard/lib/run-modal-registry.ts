@@ -42,13 +42,11 @@ export interface RunModalToast {
  * - `formType`: OCR-style radio picker for which form template to parse.
  * - `roster`: roster-mode picker (use latest local | download fresh).
  * - `duplicateCheck`: hash the PDF on pick and surface prior runs.
- * - `dryRun`: dry-run toggle for workflows that can otherwise save/submit.
  */
 export interface RunModalSections {
   formType?: boolean;
   roster?: boolean;
   duplicateCheck?: boolean;
-  dryRun?: boolean;
 }
 
 export interface RunModalConfig {
@@ -112,11 +110,14 @@ export const RUN_MODAL_REGISTRY: Record<string, RunModalConfig> = {
       if (lockedFormType === "oath") {
         return "Upload a scanned oath PDF. We’ll OCR it, match against the roster, then approve before queuing oath-signature for each match.";
       }
-      return "Upload a scanned PDF. We’ll OCR it, match against the roster, then approve before queuing.";
+      return "Upload a scanned PDF. We'll OCR it so you can inspect the results — no downstream submission.";
     },
     submitUrl: ({ reuploadFor }) =>
       reuploadFor ? "/api/ocr/reupload" : "/api/ocr/prepare",
-    sections: { roster: true, formType: true, dryRun: true },
+    // Dedicated OCR runs have no Approve flow (just inspecting OCR output),
+    // so dry-run is meaningless here. Delegations from oath-signature /
+    // emergency-contact / oath-upload keep their own dry-run toggles.
+    sections: { roster: true, formType: true },
     buildSuccessToast: (_resp, file) => ({
       title: "Preparation started",
       description: file.name,

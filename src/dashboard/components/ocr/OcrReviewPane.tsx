@@ -85,6 +85,13 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
   const runId = entry.runId ?? entry.id;
   const { summary: dependencySummary } = useTaskDependencies(entry.runId);
   const cfg = resolveOcrConfigForEntry(entry);
+  // Dedicated OCR run = no parent row in a downstream workflow (operator
+  // ran the OCR workflow directly to inspect results). Delegations from
+  // oath-signature / emergency-contact / oath-upload set parentRunId on
+  // the OCR row; for those we keep the Approve flow that fans out child
+  // queue items. Standalone runs hide Approve since there's nothing to
+  // dispatch.
+  const isDelegation = Boolean(entry.parentRunId);
   const data = useMemo(
     () => cfg?.parseRow(entry.data) ?? null,
     [entry.data, cfg],
@@ -463,7 +470,7 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
             {discarding ? <Loader2 className="h-3 w-3 animate-spin" /> : <XIcon className="h-3 w-3" />}
             Discard
           </button>
-          {unselectedApprovableCount > 0 && (
+          {isDelegation && unselectedApprovableCount > 0 && (
             <button
               type="button"
               onClick={selectAllApprovable}
@@ -474,7 +481,7 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
               Select all ({unselectedApprovableCount})
             </button>
           )}
-          {previewGate.approveVisible ? (
+          {isDelegation && (previewGate.approveVisible ? (
             <button
               onClick={handleApprove}
               disabled={submitting || discarding}
@@ -495,7 +502,7 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
             >
               Preview required
             </button>
-          )}
+          ))}
         </div>
       </div>
 
