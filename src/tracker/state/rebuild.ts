@@ -210,6 +210,7 @@ export function rebuildProjectionForDate(db: Database, opts: RebuildProjectionOp
       { path: datedSessionPath, incremental: true },
     ].filter((f, i, arr) => arr.findIndex((x) => x.path === f.path) === i); // deduplicate
 
+    let sessionLinesAppliedTotal = 0;
     for (const { path: sessionsPath, incremental } of sessionFilePairs) {
       const startAt = incremental ? (existingOffsets.get(sessionsPath) ?? 0) : 0;
       const sessions = incremental
@@ -222,6 +223,7 @@ export function rebuildProjectionForDate(db: Database, opts: RebuildProjectionOp
         sessionLineCount += 1;
         applySessionEvent(db, row.value, source(sessionsPath, "session", row.line, row.offset, eventDate));
       }
+      sessionLinesAppliedTotal += sessionLineCount;
       recordSource(db, { path: sessionsPath, sourceKind: "session", trackerDate: date, lineCount: sessionLineCount });
     }
 
@@ -232,16 +234,20 @@ export function rebuildProjectionForDate(db: Database, opts: RebuildProjectionOp
     // in the 2026-05-07 storage-opt). `queryScreenshotsForItem` filters by
     // (workflow, item_id), so null-owner rows are otherwise invisible to the
     // SQLite-first /api/screenshots path. Idempotent — re-running matches
-    // the same rows the next pass would.
-    db.prepare(`
-      UPDATE files
-      SET workflow = (SELECT workflow FROM runs WHERE runs.run_id = files.run_id),
-          item_id  = (SELECT item_id  FROM runs WHERE runs.run_id = files.run_id)
-      WHERE files.kind = 'screenshot'
-        AND files.run_id IS NOT NULL
-        AND (files.workflow IS NULL OR files.item_id IS NULL)
-        AND EXISTS (SELECT 1 FROM runs WHERE runs.run_id = files.run_id)
-    `).run();
+    // the same rows the next pass would. Skip when no new session lines
+    // arrived: screenshot rows are only emitted as ScreenshotSessionEvents,
+    // so without a session-line increment there are no new candidate rows.
+    if (sessionLinesAppliedTotal > 0) {
+      db.prepare(`
+        UPDATE files
+        SET workflow = (SELECT workflow FROM runs WHERE runs.run_id = files.run_id),
+            item_id  = (SELECT item_id  FROM runs WHERE runs.run_id = files.run_id)
+        WHERE files.kind = 'screenshot'
+          AND files.run_id IS NOT NULL
+          AND (files.workflow IS NULL OR files.item_id IS NULL)
+          AND EXISTS (SELECT 1 FROM runs WHERE runs.run_id = files.run_id)
+      `).run();
+    }
   });
 }
 
