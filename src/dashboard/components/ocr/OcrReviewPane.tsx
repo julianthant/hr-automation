@@ -141,16 +141,37 @@ export function OcrReviewPane({ entry, onClose, onReupload }: OcrReviewPaneProps
 
   // Persist edits — debounced 300ms so rapid keystrokes don't hit localStorage
   // synchronously on every character. Final write still lands; intermediate
-  // writes are dropped.
+  // writes are dropped. A `pagehide` listener flushes the pending write so a
+  // tab close within 300ms of the last keystroke doesn't lose it.
   useEffect(() => {
-    const handle = window.setTimeout(() => {
+    let pendingFlush: (() => void) | null = null;
+
+    const flush = (): void => {
       if (Object.keys(localEdits).length === 0) {
         try { window.localStorage.removeItem(storageKey); } catch { /* ignore */ }
         return;
       }
       try { window.localStorage.setItem(storageKey, JSON.stringify(localEdits)); } catch { /* quota / unavailable */ }
+    };
+
+    const handle = window.setTimeout(() => {
+      pendingFlush = null;
+      flush();
     }, 300);
-    return () => window.clearTimeout(handle);
+    pendingFlush = flush;
+
+    const onPageHide = (): void => {
+      if (pendingFlush) {
+        pendingFlush();
+        pendingFlush = null;
+      }
+    };
+    window.addEventListener("pagehide", onPageHide);
+
+    return () => {
+      window.clearTimeout(handle);
+      window.removeEventListener("pagehide", onPageHide);
+    };
   }, [localEdits, storageKey]);
 
   const records: AnyPreviewRecord[] = useMemo(
