@@ -274,7 +274,7 @@ Kernel workflows exposed on the CLI (`npm run separation <ids>`, `npm run work-s
 - **First invocation with no alive daemon** → spawns one detached daemon (`tsx src/cli-daemon.ts <workflow>`), waits for auth (Duo once), enqueues the item. Daemon stays alive after processing.
 - **Subsequent invocations** → enqueue tasks in SQLite, append the same queue event to `.tracker/daemons/{workflow}.queue.jsonl` as audit/history, and `POST /wake` every alive daemon. No re-Duo.
 - **Multi-daemon dispatch**: all alive daemons for a workflow race to claim the next SQLite `tasks` row in one transaction. Whichever daemon finishes its current item first grabs the next — dynamic load balancing without a coordinator.
-- **Cutover fallback**: `HRAUTO_QUEUE_BACKEND=jsonl` temporarily restores the old queue JSONL authority for migration/debugging. Default behavior is SQLite authority; JSONL queue/control writes are audit output only. Daemon lockfiles remain a liveness fallback while workers/heartbeats settle.
+- **Queue authority**: SQLite is the sole queue authority. JSONL queue/control writes (`.tracker/daemons/{workflow}.queue.jsonl`) are append-only audit output only — not read for state. Daemon lockfiles remain a liveness fallback while workers/heartbeats settle.
 - **Dashboard controls**: cancel, retry, drain, stop, and browser-kill actions write `worker_commands` rows. Browser kills target recorded `browser_processes.pid` rows, not every Chromium process on the machine.
 - **Keepalive**: every 15 min idle, each daemon runs `session.healthCheck(system)` per system so SAML/Duo sessions don't silently expire between items.
 

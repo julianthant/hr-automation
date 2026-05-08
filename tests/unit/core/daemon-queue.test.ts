@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, appendFileSync, mkdirSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, appendFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { UUID } from 'node:crypto'
@@ -20,20 +20,6 @@ import { createTaskStore } from '../../../src/core/task-store/index.js'
 import { createOcrEidLookupDependencyBatch } from '../../../src/tracker/tasks/store.js'
 
 const TMP = (): string => mkdtempSync(join(tmpdir(), 'daemon-q-'))
-
-async function withQueueBackend<T>(backend: 'sqlite' | 'jsonl', body: () => Promise<T>): Promise<T> {
-  const prev = process.env.HRAUTO_QUEUE_BACKEND
-  process.env.HRAUTO_QUEUE_BACKEND = backend
-  try {
-    return await body()
-  } finally {
-    if (prev === undefined) {
-      delete process.env.HRAUTO_QUEUE_BACKEND
-    } else {
-      process.env.HRAUTO_QUEUE_BACKEND = prev
-    }
-  }
-}
 
 test('enqueueItems creates queue file and assigns 1-indexed positions', async () => {
   const dir = TMP()
@@ -78,62 +64,6 @@ test('claimNextItem reuses the pre-assigned runId from the enqueue event', async
   }
 })
 
-test('claimNextItem generates a fresh runId for legacy enqueue events (no pre-assignment)', async () => {
-  await withQueueBackend('jsonl', async () => {
-    const dir = TMP()
-    try {
-      // Simulate a queue.jsonl written by an older version that didn't carry
-      // a runId in its enqueue events. The daemon must still claim it and
-      // assign a runId at claim time so downstream tracker rows have one.
-      mkdirSync(join(dir, 'daemons'), { recursive: true })
-      const path = queueFilePath('wf', dir)
-      appendFileSync(
-        path,
-        JSON.stringify({
-          type: 'enqueue',
-          id: 'legacy-a',
-          workflow: 'wf',
-          input: { x: 1 },
-          enqueuedAt: new Date().toISOString(),
-          enqueuedBy: 'cli-legacy',
-        }) + '\n',
-      )
-      const claimed = await claimNextItem('wf', 'worker1', dir)
-      assert.ok(claimed)
-      assert.match(claimed.runId!, /^[0-9a-f-]{36}$/)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-})
-
-test('HRAUTO_QUEUE_BACKEND=jsonl reads legacy queue JSONL as migration fallback', async () => {
-  await withQueueBackend('jsonl', async () => {
-    const dir = TMP()
-    try {
-      mkdirSync(join(dir, 'daemons'), { recursive: true })
-      appendFileSync(
-        queueFilePath('wf', dir),
-        JSON.stringify({
-          type: 'enqueue',
-          id: 'legacy-read',
-          workflow: 'wf',
-          input: { from: 'jsonl' },
-          runId: 'legacy-run-id',
-          enqueuedAt: new Date().toISOString(),
-          enqueuedBy: 'cli-legacy',
-        }) + '\n',
-      )
-
-      const state = await readQueueState('wf', dir)
-      assert.deepEqual(state.queued.map((q) => q.id), ['legacy-read'])
-      assert.equal(state.queued[0].runId, 'legacy-run-id')
-      assert.deepEqual(state.queued[0].input, { from: 'jsonl' })
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-})
 
 test('enqueueItems with no inputs is a no-op', async () => {
   const dir = TMP()
@@ -267,27 +197,25 @@ test('unclaimItem transitions claimed → queued and clears claimedBy', async ()
 })
 
 test('unclaimItem uses runId to requeue the in-flight task when an item is re-enqueued', async () => {
-  await withQueueBackend('sqlite', async () => {
-    const dir = TMP()
+  const dir = TMP()
+  try {
+    const [first] = await enqueueItems('wf', [{ n: 1 }], () => 'x', dir)
+    const claimed = await claimNextItem('wf', 'w1', dir)
+    assert.equal(claimed?.runId, first.runId)
+
+    const [second] = await enqueueItems('wf', [{ n: 2 }], () => 'x', dir)
+    await unclaimItem('wf', 'x', 'voluntary', dir, claimed?.runId)
+
+    const store = createTaskStore(openControlDb({ trackerDir: dir }))
     try {
-      const [first] = await enqueueItems('wf', [{ n: 1 }], () => 'x', dir)
-      const claimed = await claimNextItem('wf', 'w1', dir)
-      assert.equal(claimed?.runId, first.runId)
-
-      const [second] = await enqueueItems('wf', [{ n: 2 }], () => 'x', dir)
-      await unclaimItem('wf', 'x', 'voluntary', dir, claimed?.runId)
-
-      const store = createTaskStore(openControlDb({ trackerDir: dir }))
-      try {
-        assert.equal(store.findTaskByIdentity({ workflow: 'wf', itemId: 'x', runId: first.runId })?.state, 'queued')
-        assert.equal(store.findTaskByIdentity({ workflow: 'wf', itemId: 'x', runId: second.runId })?.state, 'queued')
-      } finally {
-        store.close()
-      }
+      assert.equal(store.findTaskByIdentity({ workflow: 'wf', itemId: 'x', runId: first.runId })?.state, 'queued')
+      assert.equal(store.findTaskByIdentity({ workflow: 'wf', itemId: 'x', runId: second.runId })?.state, 'queued')
     } finally {
-      rmSync(dir, { recursive: true, force: true })
+      store.close()
     }
-  })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('recoverOrphanedClaims re-queues claims whose owner is not alive', async () => {
