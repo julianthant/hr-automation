@@ -4,7 +4,6 @@ import { TerminalSquare } from "lucide-react";
 import { StepPipeline } from "./StepPipeline";
 import { LogStream } from "./LogStream";
 import { RunSelector } from "./RunSelector";
-import { RetryButton } from "@/components/shared/RetryButton";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ScreenshotsPanel } from "./ScreenshotsPanel";
 import { EditDataTab } from "./EditDataTab";
@@ -16,8 +15,6 @@ import type { TrackerEntry, RunInfo } from "@/components/shared/types";
 import { formatTrackerValue, isMonospaceKey } from "@/components/shared/types";
 import { deriveTrackerFallbackLog } from "./log-fallback";
 import { useWorkflow } from "@/lib/workflows-context";
-import { resolveEntryName } from "@/components/shared/entry-display";
-import { statusBadgeClass } from "@/components/shared/status-styles";
 
 interface LogPanelProps {
   entry: TrackerEntry | null;
@@ -49,7 +46,7 @@ interface LogPanelProps {
 // type-aware formatter can't handle them — we branch on the key.
 const COMPUTED_KEYS = new Set(["__started", "__elapsed"]);
 
-export function LogPanel({ entry, workflow, date, allEntries, displayNames, siblings, defaultTab, previewSlot, previewAvailable, onDeleteEntry }: LogPanelProps) {
+export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultTab, previewSlot, previewAvailable, onDeleteEntry }: LogPanelProps) {
   const [runs, setRuns] = useState<RunInfo[]>([]);
   const [activeRunId, setActiveRunId] = useState<string | null>(entry?.runId || null);
   const registered = useWorkflow(workflow);
@@ -158,6 +155,15 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
   // own itemId.
   const activeRunForLog = runs.find((r) => r.runId === activeRunId);
   const activeItemId = activeRunForLog?.itemId || entry?.id || null;
+  const handleRunDeleted = () => {
+    const remainingRuns = runs.filter((run) => run.runId !== activeRunId);
+    if (remainingRuns.length === 0) {
+      onDeleteEntry?.();
+      return;
+    }
+    setRuns(remainingRuns);
+    setActiveRunId(remainingRuns[remainingRuns.length - 1]?.runId ?? null);
+  };
   const { logs, loading: logsLoading } = useLogs(logSourceWorkflow, activeItemId, activeRunId, date);
   const { events } = useRunEvents(logSourceWorkflow, activeItemId, activeRunId, date);
   // Count screenshot events for the screenshots tab; ScreenshotsPanel uses
@@ -217,7 +223,6 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
     );
   }
 
-  const name = resolveEntryName(entry, displayNames);
   const displayTs = firstTs || entry.timestamp;
   const startTime = displayTs
     ? new Date(displayTs).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" })
@@ -266,35 +271,10 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
 
   return (
     <div className="flex-1 flex flex-col bg-card min-w-0 min-h-0 overflow-hidden">
-      {/* Header + detail grid + step pipeline are hidden when the operator
-          maximizes a tab so the tab content takes the full LogPanel height. */}
+      {/* Detail grid + step pipeline are hidden when the operator maximizes
+          a tab so the tab content takes the full LogPanel height. The
+          previous title/action header was removed to move content up. */}
       {!maximized && (<>
-      {/* Header — height matches QueuePanel search + DuoPanel title */}
-      <div className="h-[69.5px] flex items-center justify-between px-6 border-b border-border flex-shrink-0">
-        <div className="flex items-center gap-3.5">
-          {showSkeleton ? (
-            <>
-              <Skeleton className="h-6 w-40" />
-              <Skeleton className="h-5 w-16 rounded-xl" />
-            </>
-          ) : (
-            <>
-              <span className="font-bold text-lg">{name || entry.id}</span>
-              <span className={cn("text-[10px] font-semibold px-2.5 py-0.5 rounded-xl uppercase tracking-wide font-mono", statusBadgeClass(runStatus))}>
-                {runStatus}
-              </span>
-              {name && <span className="font-mono text-[13px] text-muted-foreground">{entry.id}</span>}
-            </>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
-          <RunSelector runs={runs} activeRunId={activeRunId} onSelect={setActiveRunId} onDeleteEntry={onDeleteEntry} />
-          {runStatus === "failed" && entry && (
-            <RetryButton workflow={entry.workflow} id={entry.id} size="md" />
-          )}
-        </div>
-      </div>
-
       {/* Detail grid — rendered from registry metadata via formatTrackerValue;
           auto-adapts to any workflow's detailFields declaration. Wraps to
           rows of 4. Special __started / __elapsed keys are synthesized from
@@ -404,6 +384,24 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
         }
         previewSlot={previewSlot}
         previewAvailable={previewAvailable}
+        runControlsSlot={
+          <RunSelector
+            runs={runs}
+            activeRunId={activeRunId}
+            onSelect={setActiveRunId}
+            retryTarget={runStatus === "failed" ? {
+              workflow: entry.workflow,
+              id: entry.id,
+            } : undefined}
+            deleteTarget={onDeleteEntry && activeRunId ? {
+              workflow: entry.workflow,
+              id: activeItemId ?? entry.id,
+              date,
+              runId: activeRunId,
+              onDeleted: handleRunDeleted,
+            } : undefined}
+          />
+        }
         initialTab={defaultTab}
         maximized={maximized}
         onToggleMaximize={() => setMaximized((v) => !v)}

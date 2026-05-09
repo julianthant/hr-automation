@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Maximize2, Minimize2 } from "lucide-react";
+import { ArrowDownToLine, Maximize2, Minimize2 } from "lucide-react";
 import { LogLine } from "./LogLine";
 import type { CollapsedLogEntry } from "@/components/hooks/useLogs";
 import type { LogCategory, RunEvent } from "@/components/shared/types";
@@ -8,6 +8,7 @@ import { getLogCategory } from "@/components/shared/types";
 import { isDebugLog } from "./log-display";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface LogStreamProps {
   logs: CollapsedLogEntry[];
@@ -27,6 +28,8 @@ interface LogStreamProps {
   previewSlot?: ReactNode;
   /** Whether this row has a previewable payload — gates the Preview tab. */
   previewAvailable?: boolean;
+  /** Compact controls for run history and row actions, rendered in the footer. */
+  runControlsSlot?: ReactNode;
   /** Default-active when first mounted — used to deep-link into Preview from another row. */
   initialTab?: string;
   /**
@@ -72,6 +75,7 @@ export function LogStream({
   editDataAvailable,
   previewSlot,
   previewAvailable,
+  runControlsSlot,
   initialTab,
   maximized,
   onToggleMaximize,
@@ -256,40 +260,58 @@ export function LogStream({
 
       {/* Footer — h-12 matches QueuePanel's run-controls footer height so
           the two panels' bottom edges tile cleanly across the column gap.
-          Hidden when a non-log slot tab (screenshots / edit-data) owns
-          the panel — the streaming/auto-scroll affordances aren't
-          relevant there. */}
-      <div className={cn("h-12 flex items-center justify-between px-6 text-[12px] text-muted-foreground flex-shrink-0", (tab?.source === "screenshots" || tab?.source === "edit-data" || tab?.source === "preview") && "hidden")}>
-        <div className="flex items-center gap-2 leading-none">
-          <span className="relative flex items-center justify-center w-[7px] h-[7px]">
-            <span className="absolute inset-0 rounded-full bg-primary/50 animate-ping" />
-            <span className="relative w-[7px] h-[7px] rounded-full bg-primary" />
-          </span>
-          <span className="font-medium">Streaming</span>
-          <span className="text-border">•</span>
-          <span className="font-mono tabular-nums">{displayed.length}</span>
-          <span>entries</span>
-          {collapsedCount > 0 && (
-            <>
-              <span className="text-border">•</span>
-              <span className="font-mono tabular-nums">{collapsedCount}</span>
-              <span>collapsed</span>
-            </>
+          Streaming/auto-scroll affordances hide when a non-log slot owns
+          the panel, but run controls stay available after the header is
+          removed. */}
+      <div className="h-12 flex items-center justify-between gap-3 px-6 text-[12px] text-muted-foreground flex-shrink-0">
+        {tab?.source === "screenshots" || tab?.source === "edit-data" || tab?.source === "preview" ? (
+          <div />
+        ) : (
+          <div className="flex items-center gap-2 leading-none">
+            <span className="relative flex items-center justify-center w-[7px] h-[7px]">
+              <span className="absolute inset-0 rounded-full bg-primary/50 animate-ping" />
+              <span className="relative w-[7px] h-[7px] rounded-full bg-primary" />
+            </span>
+            <span className="font-medium">Streaming</span>
+            <span className="text-border">•</span>
+            <span className="font-mono tabular-nums">{displayed.length}</span>
+            <span>entries</span>
+            {collapsedCount > 0 && (
+              <>
+                <span className="text-border">•</span>
+                <span className="font-mono tabular-nums">{collapsedCount}</span>
+                <span>collapsed</span>
+              </>
+            )}
+          </div>
+        )}
+        <div className="ml-auto flex items-center gap-1">
+          {runControlsSlot}
+          {(tab?.source !== "screenshots" && tab?.source !== "edit-data" && tab?.source !== "preview") && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => setAutoScroll((v) => !v)}
+                  aria-label={autoScroll ? "Disable auto-scroll" : "Enable auto-scroll"}
+                  aria-pressed={autoScroll}
+                  className={cn(
+                    "h-8 w-8 inline-flex items-center justify-center rounded-md border cursor-pointer transition-colors outline-none",
+                    "focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-card",
+                    autoScroll
+                      ? "bg-primary/10 text-primary border-primary/40 hover:bg-primary/15"
+                      : "bg-secondary text-muted-foreground border-border hover:text-foreground hover:border-border/80",
+                  )}
+                >
+                  <ArrowDownToLine className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={4}>
+                {autoScroll ? "Auto-scroll on" : "Auto-scroll off"}
+              </TooltipContent>
+            </Tooltip>
           )}
         </div>
-        <button
-          onClick={() => setAutoScroll((v) => !v)}
-          aria-pressed={autoScroll}
-          className={cn(
-            "h-6 text-[11px] px-2.5 rounded-md border font-medium cursor-pointer transition-colors leading-none flex items-center gap-1.5",
-            autoScroll
-              ? "bg-primary/10 text-primary border-primary/40 hover:bg-primary/15"
-              : "bg-secondary text-muted-foreground border-border hover:text-foreground hover:border-border/80",
-          )}
-        >
-          <span aria-hidden>↧</span>
-          Auto-scroll
-        </button>
       </div>
     </>
   );

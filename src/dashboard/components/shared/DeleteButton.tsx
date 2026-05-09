@@ -8,6 +8,8 @@ interface DeleteButtonProps {
   workflow: string;
   id: string;
   date: string;
+  /** Optional run scope. Omit to delete every run for the queue item. */
+  runId?: string;
   /** Called after the delete succeeds so the parent can remove the entry from state. */
   onDeleted: (id: string) => void;
   /** "sm" = 24×24 for inline queue rows. "md" = 32×32 for the LogPanel header. */
@@ -16,12 +18,13 @@ interface DeleteButtonProps {
 }
 
 /**
- * Permanently removes an entry and all its logs from the JSONL tracker files
- * and the SQLite projection via POST /api/delete-entry. Non-reversible — the
- * tooltip and destructive styling make the intent clear.
+ * Permanently removes either a queue item or one scoped run from the JSONL
+ * tracker files and the SQLite projection via POST /api/delete-entry.
+ * Non-reversible — the tooltip and destructive styling make the intent clear.
  */
-export function DeleteButton({ workflow, id, date, onDeleted, size = "sm", className }: DeleteButtonProps) {
+export function DeleteButton({ workflow, id, date, runId, onDeleted, size = "sm", className }: DeleteButtonProps) {
   const [pending, setPending] = useState(false);
+  const label = runId ? "Delete this run permanently" : "Delete this entry permanently";
 
   const onClick = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -31,7 +34,7 @@ export function DeleteButton({ workflow, id, date, onDeleted, size = "sm", class
       const res = await fetch("/api/delete-entry", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workflow, id, date }),
+        body: JSON.stringify({ workflow, id, date, ...(runId ? { runId } : {}) }),
       });
       const body = (await res.json()) as { ok: boolean; error?: string };
       if (body.ok) {
@@ -56,7 +59,7 @@ export function DeleteButton({ workflow, id, date, onDeleted, size = "sm", class
       <TooltipTrigger asChild>
         <button
           type="button"
-          aria-label="Delete this entry permanently"
+          aria-label={label}
           disabled={pending}
           onClick={onClick}
           className={cn(
@@ -86,7 +89,7 @@ export function DeleteButton({ workflow, id, date, onDeleted, size = "sm", class
         </button>
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={4}>
-        Delete entry permanently
+        {runId ? "Delete run permanently" : "Delete entry permanently"}
       </TooltipContent>
     </Tooltip>
   );
