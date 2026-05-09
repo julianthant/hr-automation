@@ -16,6 +16,7 @@ import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
 import { createWorkerStore } from "../../../src/core/daemon/worker-store.js";
 import {
+  buildDeleteEntryHandler,
   findEntryInput,
   findLatestEntryData,
   buildCancelQueuedHandler,
@@ -30,6 +31,7 @@ import {
   readQueueDepth,
 } from "../../../src/tracker/dashboard/ops/index.js";
 import { queueFilePath } from "../../../src/core/daemon/queue.js";
+import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
 import type { QueueEvent } from "../../../src/core/daemon/types.js";
 
 let tmp: string;
@@ -37,6 +39,7 @@ beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), "dash-ops-"));
 });
 afterEach(() => {
+  closeStateDbForTests(tmp);
   if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -284,6 +287,268 @@ describe("findLatestEntryData", () => {
       tmp,
     );
     assert.deepEqual(findLatestEntryData("separations", "X", tmp), { transactionNumber: "T002109055" });
+  });
+});
+
+describe("buildDeleteEntryHandler", () => {
+  it("deletes a scoped legacy JSONL run by its synthesized runId", () => {
+    writeFileSync(
+      join(tmp, "separations-2026-05-09.jsonl"),
+      [
+        JSON.stringify({ workflow: "separations", id: "3930", status: "failed" }),
+        JSON.stringify({ workflow: "separations", id: "other", runId: "run-2", status: "done" }),
+      ].join("\n") + "\n",
+    );
+    writeFileSync(
+      join(tmp, "separations-2026-05-09-logs.jsonl"),
+      [
+        JSON.stringify({ workflow: "separations", itemId: "3930", message: "legacy" }),
+        JSON.stringify({ workflow: "separations", itemId: "other", runId: "run-2", message: "other" }),
+      ].join("\n") + "\n",
+    );
+
+    const result = buildDeleteEntryHandler(tmp)({
+      workflow: "separations",
+      id: "3930",
+      date: "2026-05-09",
+      runId: "3930#1",
+    });
+
+    assert.equal(result.ok, true);
+    const trackerLines = readFileSync(join(tmp, "separations-2026-05-09.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const logLines = readFileSync(join(tmp, "separations-2026-05-09-logs.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(trackerLines.map((line) => line.id), ["other"]);
+    assert.deepEqual(logLines.map((line) => line.itemId), ["other"]);
+  });
+
+  it("deletes all runs for an item when runId is omitted", () => {
+    writeFileSync(
+      join(tmp, "separations-2026-05-09.jsonl"),
+      [
+        JSON.stringify({ workflow: "separations", id: "3930", runId: "run-1", status: "failed" }),
+        JSON.stringify({ workflow: "separations", id: "3930", runId: "run-2", status: "done" }),
+        JSON.stringify({ workflow: "separations", id: "other", runId: "run-3", status: "done" }),
+      ].join("\n") + "\n",
+    );
+    writeFileSync(
+      join(tmp, "separations-2026-05-09-logs.jsonl"),
+      [
+        JSON.stringify({ workflow: "separations", itemId: "3930", runId: "run-1", message: "first" }),
+        JSON.stringify({ workflow: "separations", itemId: "3930", runId: "run-2", message: "second" }),
+        JSON.stringify({ workflow: "separations", itemId: "other", runId: "run-3", message: "third" }),
+      ].join("\n") + "\n",
+    );
+
+    const result = buildDeleteEntryHandler(tmp)({
+      workflow: "separations",
+      id: "3930",
+      date: "2026-05-09",
+    });
+
+    assert.equal(result.ok, true);
+    const trackerLines = readFileSync(join(tmp, "separations-2026-05-09.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const logLines = readFileSync(join(tmp, "separations-2026-05-09-logs.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(trackerLines.map((line) => line.id), ["other"]);
+    assert.deepEqual(logLines.map((line) => line.itemId), ["other"]);
+  });
+
+  it("deletes only the requested run and promotes the previous run in SQLite", () => {
+    writeFileSync(
+      join(tmp, "separations-2026-05-09.jsonl"),
+      [
+        JSON.stringify({ workflow: "separations", id: "3930", runId: "run-1", status: "failed" }),
+        JSON.stringify({ workflow: "separations", id: "3930", runId: "run-2", status: "done" }),
+      ].join("\n") + "\n",
+    );
+    writeFileSync(
+      join(tmp, "separations-2026-05-09-logs.jsonl"),
+      [
+        JSON.stringify({ workflow: "separations", itemId: "3930", runId: "run-1", message: "first" }),
+        JSON.stringify({ workflow: "separations", itemId: "3930", runId: "run-2", message: "second" }),
+      ].join("\n") + "\n",
+    );
+
+    const db = openStateDb(tmp);
+    db.prepare(`
+      INSERT INTO run_events (
+        source_path, source_line, source_offset, workflow, tracker_date, item_id, run_id,
+        status, event_ts, event_ms, applied_at
+      )
+      VALUES (@sourcePath, @sourceLine, @sourceOffset, 'separations', '2026-05-09', '3930', @runId,
+        @status, @ts, @eventMs, @ts)
+    `).run({
+      sourcePath: "separations-2026-05-09.jsonl",
+      sourceLine: 1,
+      sourceOffset: 1,
+      runId: "run-1",
+      status: "failed",
+      ts: "2026-05-09T10:00:00.000Z",
+      eventMs: 1,
+    });
+    db.prepare(`
+      INSERT INTO run_events (
+        source_path, source_line, source_offset, workflow, tracker_date, item_id, run_id,
+        status, event_ts, event_ms, applied_at
+      )
+      VALUES (@sourcePath, @sourceLine, @sourceOffset, 'separations', '2026-05-09', '3930', @runId,
+        @status, @ts, @eventMs, @ts)
+    `).run({
+      sourcePath: "separations-2026-05-09.jsonl",
+      sourceLine: 2,
+      sourceOffset: 2,
+      runId: "run-2",
+      status: "done",
+      ts: "2026-05-09T11:00:00.000Z",
+      eventMs: 2,
+    });
+    db.prepare(`
+      INSERT INTO logs (
+        source_path, source_line, source_offset, workflow, tracker_date, item_id, run_id,
+        level, message, ts, ts_ms, raw_json, applied_at
+      )
+      VALUES (@sourcePath, @sourceLine, @sourceOffset, 'separations', '2026-05-09', '3930', @runId,
+        'step', @message, @ts, @tsMs, '{}', @ts)
+    `).run({
+      sourcePath: "separations-2026-05-09-logs.jsonl",
+      sourceLine: 1,
+      sourceOffset: 11,
+      runId: "run-1",
+      message: "first",
+      ts: "2026-05-09T10:00:00.000Z",
+      tsMs: 1,
+    });
+    db.prepare(`
+      INSERT INTO logs (
+        source_path, source_line, source_offset, workflow, tracker_date, item_id, run_id,
+        level, message, ts, ts_ms, raw_json, applied_at
+      )
+      VALUES (@sourcePath, @sourceLine, @sourceOffset, 'separations', '2026-05-09', '3930', @runId,
+        'step', @message, @ts, @tsMs, '{}', @ts)
+    `).run({
+      sourcePath: "separations-2026-05-09-logs.jsonl",
+      sourceLine: 2,
+      sourceOffset: 12,
+      runId: "run-2",
+      message: "second",
+      ts: "2026-05-09T11:00:00.000Z",
+      tsMs: 2,
+    });
+    db.prepare(`
+      INSERT INTO runs (
+        workflow, tracker_date, item_id, run_id, first_any_ts, latest_tracker_ts,
+        latest_status, run_ordinal, updated_at
+      )
+      VALUES ('separations', '2026-05-09', '3930', @runId, @ts, @ts, @status, @ordinal, @ts)
+    `).run({ runId: "run-1", ts: "2026-05-09T10:00:00.000Z", status: "failed", ordinal: 1 });
+    db.prepare(`
+      INSERT INTO runs (
+        workflow, tracker_date, item_id, run_id, first_any_ts, latest_tracker_ts,
+        latest_status, run_ordinal, updated_at
+      )
+      VALUES ('separations', '2026-05-09', '3930', @runId, @ts, @ts, @status, @ordinal, @ts)
+    `).run({ runId: "run-2", ts: "2026-05-09T11:00:00.000Z", status: "done", ordinal: 2 });
+    db.prepare(`
+      INSERT INTO items (
+        workflow, tracker_date, item_id, latest_run_id, latest_status, latest_ts, updated_at
+      )
+      VALUES ('separations', '2026-05-09', '3930', 'run-2', 'done', '2026-05-09T11:00:00.000Z', '2026-05-09T11:00:00.000Z')
+    `).run();
+
+    const result = buildDeleteEntryHandler(tmp)({
+      workflow: "separations",
+      id: "3930",
+      date: "2026-05-09",
+      runId: "run-2",
+    });
+
+    assert.equal(result.ok, true);
+    const trackerLines = readFileSync(join(tmp, "separations-2026-05-09.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const logLines = readFileSync(join(tmp, "separations-2026-05-09-logs.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(trackerLines.map((line) => line.runId), ["run-1"]);
+    assert.deepEqual(logLines.map((line) => line.runId), ["run-1"]);
+    const remainingRuns = db.prepare("SELECT run_id FROM runs ORDER BY run_ordinal").all() as Array<{ run_id: string }>;
+    assert.deepEqual(remainingRuns.map((row) => row.run_id), ["run-1"]);
+    const item = db.prepare("SELECT latest_run_id, latest_status FROM items").get() as {
+      latest_run_id: string;
+      latest_status: string;
+    };
+    assert.deepEqual({ ...item }, { latest_run_id: "run-1", latest_status: "failed" });
+  });
+
+  it("compacts SQLite run ordinals after deleting a middle run", () => {
+    writeFileSync(
+      join(tmp, "separations-2026-05-09.jsonl"),
+      [
+        JSON.stringify({ workflow: "separations", id: "3930", runId: "run-1", status: "failed" }),
+        JSON.stringify({ workflow: "separations", id: "3930", runId: "run-2", status: "failed" }),
+        JSON.stringify({ workflow: "separations", id: "3930", runId: "run-3", status: "done" }),
+      ].join("\n") + "\n",
+    );
+    writeFileSync(
+      join(tmp, "separations-2026-05-09-logs.jsonl"),
+      [
+        JSON.stringify({ workflow: "separations", itemId: "3930", runId: "run-1", message: "first" }),
+        JSON.stringify({ workflow: "separations", itemId: "3930", runId: "run-2", message: "second" }),
+        JSON.stringify({ workflow: "separations", itemId: "3930", runId: "run-3", message: "third" }),
+      ].join("\n") + "\n",
+    );
+
+    const db = openStateDb(tmp);
+    for (const [index, runId] of ["run-1", "run-2", "run-3"].entries()) {
+      const ordinal = index + 1;
+      const ts = `2026-05-09T1${index}:00:00.000Z`;
+      db.prepare(`
+        INSERT INTO runs (
+          workflow, tracker_date, item_id, run_id, first_any_ts, latest_tracker_ts,
+          latest_status, run_ordinal, updated_at
+        )
+        VALUES ('separations', '2026-05-09', '3930', @runId, @ts, @ts, @status, @ordinal, @ts)
+      `).run({ runId, ts, status: runId === "run-3" ? "done" : "failed", ordinal });
+    }
+    db.prepare(`
+      INSERT INTO items (
+        workflow, tracker_date, item_id, latest_run_id, latest_status, latest_ts, updated_at
+      )
+      VALUES ('separations', '2026-05-09', '3930', 'run-3', 'done', '2026-05-09T12:00:00.000Z', '2026-05-09T12:00:00.000Z')
+    `).run();
+
+    const result = buildDeleteEntryHandler(tmp)({
+      workflow: "separations",
+      id: "3930",
+      date: "2026-05-09",
+      runId: "run-2",
+    });
+
+    assert.equal(result.ok, true);
+    const remainingRuns = db.prepare("SELECT run_id, run_ordinal FROM runs ORDER BY run_ordinal").all() as Array<{
+      run_id: string;
+      run_ordinal: number;
+    }>;
+    assert.deepEqual(
+      remainingRuns.map((row) => ({ ...row })),
+      [
+        { run_id: "run-1", run_ordinal: 1 },
+        { run_id: "run-3", run_ordinal: 2 },
+      ],
+    );
   });
 });
 

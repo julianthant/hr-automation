@@ -1,6 +1,8 @@
 import { useMemo } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, Check, X, Play, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Check, X, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { DeleteButton } from "@/components/shared/DeleteButton";
+import { RetryButton } from "@/components/shared/RetryButton";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -13,7 +15,17 @@ interface RunSelectorProps {
   runs: RunInfo[];
   activeRunId: string | null;
   onSelect: (runId: string) => void;
-  onDeleteEntry?: () => void;
+  retryTarget?: {
+    workflow: string;
+    id: string;
+  };
+  deleteTarget?: {
+    workflow: string;
+    id: string;
+    date: string;
+    runId?: string | null;
+    onDeleted: (id: string) => void;
+  };
 }
 
 /**
@@ -48,7 +60,7 @@ function statusColor(status: string): string {
  * which alphabetic sort would produce). Opens an ordered list of every run
  * with its status glyph; the trigger always shows the active run + a chevron.
  */
-export function RunSelector({ runs, activeRunId, onSelect, onDeleteEntry }: RunSelectorProps) {
+export function RunSelector({ runs, activeRunId, onSelect, retryTarget, deleteTarget }: RunSelectorProps) {
   // Numeric desc — newest run on top regardless of how it was inserted upstream.
   const sortedRuns = useMemo(
     () => [...runs].sort((a, b) => runNumber(b) - runNumber(a)),
@@ -74,6 +86,25 @@ export function RunSelector({ runs, activeRunId, onSelect, onDeleteEntry }: RunS
 
   return (
     <div className="flex items-center gap-1">
+      {retryTarget && (
+        <RetryButton
+          workflow={retryTarget.workflow}
+          id={retryTarget.id}
+          size="md"
+          className="rounded-md"
+        />
+      )}
+      {deleteTarget && (
+        <DeleteButton
+          workflow={deleteTarget.workflow}
+          id={deleteTarget.id}
+          date={deleteTarget.date}
+          runId={deleteTarget.runId ?? undefined}
+          onDeleted={deleteTarget.onDeleted}
+          size="md"
+          className="rounded-md"
+        />
+      )}
       <button
         type="button"
         aria-label="Older run"
@@ -83,21 +114,14 @@ export function RunSelector({ runs, activeRunId, onSelect, onDeleteEntry }: RunS
       >
         <ChevronLeft className="w-3.5 h-3.5" />
       </button>
-      <button
-        type="button"
-        aria-label="Newer run"
-        disabled={!canGoNewer}
-        onClick={() => canGoNewer && onSelect(sortedRuns[activeIndex - 1].runId)}
-        className={navBtnClass}
-      >
-        <ChevronRight className="w-3.5 h-3.5" />
-      </button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
             aria-label={`Run #${activeNum} of ${totalRuns} — ${active.status}`}
             className={cn(
-              "flex items-center gap-2 h-8 px-3 rounded-lg border border-border bg-secondary cursor-pointer transition-colors hover:border-primary data-[state=open]:border-primary outline-none focus-visible:ring-2 focus-visible:ring-primary",
+              "h-8 min-w-[126px] px-3 rounded-md border border-border bg-secondary cursor-pointer",
+              "inline-flex items-center justify-center gap-2 transition-colors",
+              "hover:bg-accent data-[state=open]:border-primary outline-none focus-visible:ring-2 focus-visible:ring-primary",
             )}
           >
             <span className={cn("flex items-center gap-1 font-mono text-xs font-medium tabular-nums", statusColor(active.status))}>
@@ -134,21 +158,15 @@ export function RunSelector({ runs, activeRunId, onSelect, onDeleteEntry }: RunS
           })}
         </DropdownMenuContent>
       </DropdownMenu>
-      {onDeleteEntry && (
-        <button
-          type="button"
-          aria-label="Delete this entry permanently"
-          onClick={(e) => { e.stopPropagation(); onDeleteEntry(); }}
-          className={cn(
-            "h-8 w-8 inline-flex items-center justify-center rounded-md border border-destructive/40 bg-destructive/10",
-            "text-destructive cursor-pointer transition-colors",
-            "hover:bg-destructive/20 hover:border-destructive/60",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive",
-          )}
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
-      )}
+      <button
+        type="button"
+        aria-label="Newer run"
+        disabled={!canGoNewer}
+        onClick={() => canGoNewer && onSelect(sortedRuns[activeIndex - 1].runId)}
+        className={navBtnClass}
+      >
+        <ChevronRight className="w-3.5 h-3.5" />
+      </button>
     </div>
   );
 }

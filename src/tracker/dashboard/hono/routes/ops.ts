@@ -209,6 +209,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       workflow: String(parsed.body.workflow ?? ""),
       id: String(parsed.body.id ?? ""),
       date: String(parsed.body.date ?? ""),
+      runId: parsed.body.runId ? String(parsed.body.runId) : undefined,
     });
     return jsonResponse(result, result.ok ? 200 : (result.status ?? 400));
   });

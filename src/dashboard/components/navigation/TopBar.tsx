@@ -30,14 +30,13 @@ interface TopBarProps {
 }
 
 /**
- * Three-region centered navbar:
+ * Three-region navbar:
  *
- *   [ Brand ]                [ centered Search ]               [ Date nav ]
+ *   [ Brand ]   [ Search spans queue + half log panel ]        [ Date nav ]
  *
- * Implemented as a 3-column grid with `1fr · auto · 1fr` so the search
- * bar is *truly* centered on the page regardless of the brand or date
- * cluster widths. Each side cluster is justified to the screen edge so
- * the navbar reads as a clean, symmetric container.
+ * The search box is positioned against the same horizontal grid as the main
+ * dashboard: rail (200px), queue (responsive width), then the log panel. Its
+ * width reaches the second detail-cell boundary in the log panel.
  *
  * Connection state (the green/red Live pill) lives in the TerminalDrawer
  * bar at the bottom right — the dashboard reserves its right edge for
@@ -80,10 +79,7 @@ export function TopBar({
   return (
     <div
       className={cn(
-        "grid items-center gap-4 px-6 py-2 bg-card flex-shrink-0 border-b border-border",
-        // Outer 1fr columns let the centered search stay centered while
-        // the brand/date clusters anchor to the screen edges.
-        "grid-cols-[1fr_auto_1fr]",
+        "relative flex items-center justify-between gap-4 px-6 py-2 bg-card flex-shrink-0 border-b border-border",
       )}
     >
       {/* ── Brand — left edge ──────────────────────────────────── */}
@@ -95,7 +91,14 @@ export function TopBar({
 
       {/* ── Search — centered ──────────────────────────────────── */}
       {onSearchSelect ? (
-        <div className="w-[420px] max-w-[40vw]">
+        <div
+          className={cn(
+            "absolute top-1/2 -translate-y-1/2 left-[200px]",
+            "w-[calc(300px+((100vw-200px-300px)/2))]",
+            "min-[1440px]:w-[calc(380px+((100vw-200px-380px)/2))]",
+            "2xl:w-[calc(460px+((100vw-200px-460px)/2))]",
+          )}
+        >
           <SearchBar onSelect={onSearchSelect} />
         </div>
       ) : (
@@ -110,9 +113,6 @@ export function TopBar({
             date={date}
             onSelect={onFailureSelect}
           />
-        )}
-        {onFailureSelect && (
-          <span aria-hidden className="w-2.5 inline-block" />
         )}
         <button
           onClick={() => navigateDay(-1)}
