@@ -9,6 +9,14 @@ interface Sub {
   onError?: ErrorHandler;
 }
 
+function buildHubUrl(subsArray: Array<{ id: string; topic: string; params: unknown }>): string {
+  const path = `/events/hub?subs=${encodeURIComponent(JSON.stringify(subsArray))}`;
+  if (typeof window !== "undefined" && window.location.port === "5173") {
+    return `${window.location.protocol}//${window.location.hostname}:3838${path}`;
+  }
+  return path;
+}
+
 export class SseHub {
   private es: EventSource | null = null;
   private subs = new Map<string, Sub>();
@@ -46,7 +54,7 @@ export class SseHub {
     }
     if (this.subs.size === 0) return;
     const subsArray = [...this.subs.values()].map(({ id, topic, params }) => ({ id, topic, params }));
-    const url = `/events/hub?subs=${encodeURIComponent(JSON.stringify(subsArray))}`;
+    const url = buildHubUrl(subsArray);
     const es = new EventSource(url);
     es.onmessage = (ev) => {
       let env: { sub: string; data: unknown; event?: string };

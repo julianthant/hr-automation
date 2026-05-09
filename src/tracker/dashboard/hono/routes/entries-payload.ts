@@ -27,6 +27,7 @@ import {
 import { isResolvedPrepEntry } from "../../prep-rows.js";
 import { computeFailureCounts } from "../../failures.js";
 import { buildScreenshotsHandler } from "../../screenshots.js";
+import { countSidebarRowsFromTrackerHistory } from "../../../queue-row-count.js";
 
 // ── Cross-workflow counts cache ───────────────────────────────────────────────
 
@@ -78,17 +79,7 @@ function getCrossWorkflowCounts(
   const failureCounts: Record<string, number> = {};
   for (const wf of workflows) {
     const all = readEntriesForDate(wf, targetDate, dir);
-    const latestById = new Map<string, TrackerEntry>();
-    for (const entry of all) {
-      const prev = latestById.get(entry.id);
-      if (!prev || prev.timestamp <= entry.timestamp) latestById.set(entry.id, entry);
-    }
-    let count = 0;
-    for (const entry of latestById.values()) {
-      if (isResolvedPrepEntry(entry)) continue;
-      count++;
-    }
-    wfCounts[wf] = count;
+    wfCounts[wf] = countSidebarRowsFromTrackerHistory(all, isResolvedPrepEntry);
     const failures = computeFailureCounts(all);
     if (failures > 0) failureCounts[wf] = failures;
   }

@@ -68,7 +68,9 @@ test("buildDisplayNameMap falls back to the workflow label when no employee name
 
   const displayNames = buildDisplayNameMap([row], "Separation");
 
-  assert.equal(resolveEntryName(row, displayNames), "Separation 1");
+  // Single workflow-level entry — buildDisplayNameMap suppresses the ordinal
+  // (to avoid "Active Check 1" noise), so resolveEntryName falls through to __subject.
+  assert.equal(resolveEntryName(row, displayNames), "Separation separation-doc-1");
 });
 
 test("buildDisplayNameMap still ordinals workflow-level rows such as OCR batches", () => {

@@ -49,6 +49,97 @@ test("queryEntriesPayload returns /events-compatible entries and counts", () => 
   }
 });
 
+test("queryEntriesPayload wfCounts merges same-day items that share emplId", () => {
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    const day = "2026-05-09";
+    trackEvent(
+      {
+        workflow: "active-check",
+        timestamp: `${day}T18:00:00.000Z`,
+        id: "Doe, Jane",
+        runId: "Doe, Jane#1",
+        status: "done",
+        data: { emplId: "10999999", name: "Doe, Jane" },
+      },
+      dir,
+    );
+    trackEvent(
+      {
+        workflow: "active-check",
+        timestamp: `${day}T18:05:00.000Z`,
+        id: "10999999",
+        runId: "10999999#1",
+        status: "done",
+        data: { emplId: "10999999" },
+      },
+      dir,
+    );
+    const db = openStateDb(dir);
+    const payload = queryEntriesPayload(db, { workflow: "active-check", date: day });
+    assert.equal(payload.wfCounts["active-check"], 1);
+    assert.equal(payload.entries.length, 2, "stream still lists latest event rows per run, not merged");
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("queryEntriesPayload wfCounts carries emplId from earlier events when latest items row drops it", () => {
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    const day = "2026-05-10";
+    // Final row has no emplId (e.g. cancel cleanup), but earlier row resolved one — merges with sibling EID item.
+    trackEvent(
+      {
+        workflow: "eid-lookup",
+        timestamp: `${day}T10:00:00.000Z`,
+        id: "Runwithdata, Test",
+        runId: "Runwithdata, Test#1",
+        status: "running",
+        step: "searching",
+        data: { emplId: "77777001", searchName: "Runwithdata, Test" },
+      },
+      dir,
+    );
+    trackEvent(
+      {
+        workflow: "eid-lookup",
+        timestamp: `${day}T10:01:00.000Z`,
+        id: "Runwithdata, Test",
+        runId: "Runwithdata, Test#1",
+        status: "failed",
+        step: "cancelled",
+        data: {},
+      },
+      dir,
+    );
+    trackEvent(
+      {
+        workflow: "eid-lookup",
+        timestamp: `${day}T11:01:00.000Z`,
+        id: "77777001",
+        runId: "77777001#1",
+        status: "done",
+        data: { emplId: "77777001" },
+      },
+      dir,
+    );
+    const db = openStateDb(dir);
+    const payload = queryEntriesPayload(db, { workflow: "eid-lookup", date: day });
+    assert.equal(
+      payload.wfCounts["eid-lookup"],
+      1,
+      "SQLite rail count respects cross-event emplId carry + merge-by-emplId",
+    );
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("queryRunsForItem returns /api/runs-compatible run summaries", () => {
   const dir = tmpTracker();
   try {
