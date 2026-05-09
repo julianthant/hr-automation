@@ -13,6 +13,8 @@ import { entryMatchesStatusFilter } from "./queue-status";
 
 interface QueuePanelProps {
   entries: TrackerEntry[];
+  /** Row set for StatPills (merged EXCLUDING operator-resolved prep). Defaults to discarded-prep-filtered entries when omitted. */
+  statPanelEntries?: TrackerEntry[];
   workflow: string;
   /** Per-entry "<base> <ordinal>" labels from `buildDisplayNameMap`. */
   displayNames?: Map<string, string>;
@@ -66,6 +68,7 @@ interface QueuePanelProps {
  */
 export function QueuePanel({
   entries,
+  statPanelEntries,
   workflow,
   displayNames,
   selectedId,
@@ -161,6 +164,8 @@ export function QueuePanel({
     return result;
   }, [visibleEntries, statusFilter, approvedParentRunIds]);
 
+  const statPillSource = statPanelEntries ?? visibleEntries;
+
   return (
     <div className="w-[300px] min-[1440px]:w-[380px] 2xl:w-[460px] flex-shrink-0 flex flex-col bg-background">
       {drilledParent ? (
@@ -175,7 +180,7 @@ export function QueuePanel({
       ) : (
         <div className="h-[69.5px] flex items-center px-3 min-[1440px]:px-4 py-2 border-b border-border bg-card/60 flex-shrink-0">
           <StatPills
-            entries={visibleEntries}
+            entries={statPillSource}
             activeFilter={statusFilter}
             onFilter={setStatusFilter}
           />

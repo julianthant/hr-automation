@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import type { TrackerEntry } from "@/components/shared/types";
 import { dateLocal } from "../../lib/utils";
 import { sseHub } from "@/lib/sse-hub";
+import { dedupeLatestByIdWithCarriedEmplId } from "../../../tracker/queue-row-count.js";
 
 interface UseEntriesResult {
   entries: TrackerEntry[];
@@ -105,45 +106,15 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
         }
         prevHashRef.current = hash;
 
-        // Dedupe by ID, keep latest entry
-        const latest = new Map<string, TrackerEntry>();
-        // Track first-seen timestamp per ID for sort order
-        const firstSeen = new Map<string, string>();
-        // Track the latest non-empty `data.emplId` observed across an item's
-        // run history. The latest tracker row may be from a cancellation
-        // cleanup (raw input only, no emplId), but an earlier successful run
-        // may have resolved one. Carrying it forward lets cross-run dedup
-        // recognise that "Langley, Leo" and "10874572" are the same person.
-        const resolvedEmplIds = new Map<string, string>();
-        for (const entry of raw) {
-          latest.set(entry.id, entry);
-          if (!firstSeen.has(entry.id)) {
-            firstSeen.set(entry.id, entry.timestamp);
-          }
-          const emplId = entry.data?.emplId;
-          if (typeof emplId === "string" && emplId.length > 0) {
-            resolvedEmplIds.set(entry.id, emplId);
-          }
-        }
+        const dedupedBase = dedupeLatestByIdWithCarriedEmplId(raw as TrackerEntry[]);
 
+        type WithFirstLog = TrackerEntry & { firstLogTs?: string };
         // Sort by running start time (firstLogTs), pending entries at bottom
-        const deduped = [...latest.values()]
-          .map((entry) => {
-            const carried = resolvedEmplIds.get(entry.id);
-            const data =
-              carried && (!entry.data?.emplId || entry.data.emplId.length === 0)
-                ? { ...(entry.data ?? {}), emplId: carried }
-                : entry.data;
-            return {
-              ...entry,
-              data,
-              startTimestamp: firstSeen.get(entry.id) || entry.timestamp,
-            };
-          })
+        const deduped = [...dedupedBase]
           .sort((a, b) => {
             // Pending entries (no firstLogTs) go to bottom
-            const aStart = a.firstLogTs || "";
-            const bStart = b.firstLogTs || "";
+            const aStart = (a as WithFirstLog).firstLogTs || "";
+            const bStart = (b as WithFirstLog).firstLogTs || "";
             if (!aStart && bStart) return 1;
             if (aStart && !bStart) return -1;
             if (!aStart && !bStart) return b.timestamp.localeCompare(a.timestamp);
