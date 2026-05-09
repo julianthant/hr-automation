@@ -312,13 +312,28 @@ export function buildForceStopTaskHandler(dir: string) {
       const { workerId, attemptId } = currentAttemptWorker(stores.taskStore, stores.workerStore, task);
       const worker = workerId ? stores.workerStore.getWorker(workerId) : null;
       const runId = req.runId ?? task.currentRunId ?? task.runId;
+      // Chrome-preserving force-cancel:
+      // - Mark the SQLite task cancelled so the daemon's claim-loop
+      //   precedence check sees it and writes a cancelled tracker row even
+      //   if the in-flight step happens to finish at the same instant.
+      // - Enqueue a `cancel_task` worker command (not `force_stop_task`) so
+      //   the daemon's command handler sets the cooperative-cancel flag
+      //   without triggering shutdown.
+      // - Call the daemon's /force-current HTTP endpoint, which now
+      //   navigates each system's page to about:blank to interrupt
+      //   in-flight Playwright work — chrome and the daemon stay alive,
+      //   just the current item dies. The Stepper's catch block converts
+      //   the resulting Playwright error to CancelledError.
+      // - DO NOT enqueue kill_browser commands or SIGTERM browser PIDs;
+      //   the operator explicitly does not want chrome torn down on a
+      //   per-item cancel.
       const commandId = stores.workerStore.enqueueWorkerCommand({
-        commandType: "force_stop_task",
+        commandType: "cancel_task",
         workflow: req.workflow,
         ...(workerId ? { targetWorkerId: workerId } : {}),
         targetTaskId: task.taskId,
         ...(attemptId ? { targetAttemptId: attemptId } : {}),
-        payload: { itemId: req.id, runId },
+        payload: { itemId: req.id, runId, source: "dashboard-force-stop" },
       });
       stores.taskStore.markTaskCancelled({
         taskId: task.taskId,
@@ -332,27 +347,15 @@ export function buildForceStopTaskHandler(dir: string) {
       appendQueueFailedAudit(req.workflow, req.id, runId, DASHBOARD_CANCEL_ERROR, dir);
       emitDashboardCancelTrackerRow(req.workflow, req.id, runId, dir);
       const daemonAccepted = await requestDaemonForceCurrent(worker, req.id, runId);
-      const browsers = stores.workerStore.listBrowserProcessesForTask({
-        taskId: task.taskId,
-        ...(attemptId ? { attemptId } : {}),
-      });
-      const killCommands: string[] = [];
-      for (const browser of browsers) {
-        const killCommandId = enqueueKillBrowserCommand(stores.workerStore, browser);
-        stores.workerStore.markBrowserProcessKillRequested({
-          browserProcessId: browser.browserProcessId,
-          commandId: killCommandId,
-        });
-        signalBrowserPid(browser.pid);
-        killCommands.push(killCommandId);
-      }
-      if (!daemonAccepted && killCommands.length === 0) {
+      if (!daemonAccepted) {
         const { log } = await import("../../../utils/log.js");
         log.warn(
-          `[force-stop] task ${req.workflow}/${req.id} had no daemon force endpoint and no tracked browsers; marked cancelled in control state only`,
+          `[force-stop] task ${req.workflow}/${req.id} could not reach daemon /force-current — marked cancelled in control state; daemon will pick up the worker_command on next poll`,
         );
       }
-      return { ok: true, commandId, killCommands };
+      // Return shape preserved for back-compat — `killCommands` always
+      // empty now (chrome is no longer killed on per-item force-stop).
+      return { ok: true, commandId, killCommands: [] };
     } finally {
       stores.close();
     }

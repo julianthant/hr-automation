@@ -433,9 +433,13 @@ describe("buildForceStopTaskHandler for active-check tasks", () => {
     // Task cancelled in SQLite
     assert.equal(taskStore.getTask(enqueued.taskId)?.state, "cancelled");
     assert.equal(taskStore.getAttempt(enqueued.attemptId)?.state, "cancelled");
-    // force_stop_task command written
+    // Chrome-preserving force-stop (per operator request 2026-05-08): the
+    // dashboard now enqueues `cancel_task` (not `force_stop_task`) so the
+    // daemon interrupts work via about:blank navigation instead of killing
+    // the browser. The cooperative-cancel command flag still terminalizes
+    // the task in SQLite immediately.
     const fsCommand = workerStore.getCommand(result.commandId);
-    assert.equal(fsCommand?.commandType, "force_stop_task");
+    assert.equal(fsCommand?.commandType, "cancel_task");
     assert.equal(fsCommand?.state, "queued");
     // Tracker row emitted with failed/step=cancelled
     const trackerFile = readdirSync(tmp).find((file) =>

@@ -18,7 +18,7 @@ export type SessionEventType =
   | "browser_launch" | "browser_close"
   | "auth_start" | "auth_complete" | "auth_failed"
   | "duo_request" | "duo_start" | "duo_complete" | "duo_timeout"
-  | "item_start" | "item_complete"
+  | "item_start" | "item_complete" | "item_cancelled"
   | "step_change"
   | "screenshot"
   | "telegram_sent";
@@ -354,6 +354,31 @@ export function emitItemComplete(instance: string, itemId: string, dir?: string,
     ...(runId ? { runId } : {}),
   }, dir);
 }
+
+/**
+ * Emit a cancellation event for the Events tab. The reason is carried in
+ * `data.reason` so the dashboard can render it inline (e.g. "cancelled by
+ * user from dashboard", "Daemon stopped while processing this item",
+ * "browser closed"). Surface the cancellation as a session event rather
+ * than a warn-level log entry so the operator sees it under the Events
+ * filter, distinct from arrow-icon step logs.
+ */
+export function emitItemCancelled(
+  instance: string,
+  itemId: string,
+  reason: string,
+  dir?: string,
+  runId?: string,
+): void {
+  emitSessionEvent({
+    type: "item_cancelled",
+    workflowInstance: instance,
+    currentItemId: itemId,
+    data: { reason },
+    ...(runId ? { runId } : {}),
+  }, dir);
+}
+
 
 // ── Instance naming ────────────────────────────────────
 

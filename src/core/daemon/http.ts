@@ -20,6 +20,16 @@ export interface DaemonHttpOpts {
   resolveWake: () => void
   resolveShutdown: () => void
   abortLaunchAndKillSession: (reason: string) => void
+  /**
+   * Interrupt any in-flight Playwright work for the current item without
+   * killing chrome. Implementation navigates each system's active page to
+   * `about:blank`, which causes pending awaits (clicks, fills, waits,
+   * navigations) to reject. Browser context, cookies, and auth state are
+   * preserved — the daemon's existing post-cancel `session.reset(sysId)`
+   * loop restores the page to its resetUrl before the next claim.
+   * Best-effort: errors are swallowed by the implementation.
+   */
+  interruptInFlightWork: () => void
 }
 
 export interface DaemonHttpHandle {
@@ -44,6 +54,7 @@ export function startDaemonHttpServer(opts: DaemonHttpOpts): { server: Server; l
     resolveWake,
     resolveShutdown,
     abortLaunchAndKillSession,
+    interruptInFlightWork,
   } = opts
 
   const server: Server = createServer((req, res) => {
@@ -173,28 +184,29 @@ export function startDaemonHttpServer(opts: DaemonHttpOpts): { server: Server; l
           )
           return
         }
+        // Chrome-preserving force-cancel: set cooperative-cancel flag AND
+        // immediately interrupt in-flight Playwright awaits by navigating
+        // each system's page to about:blank. The browser stays alive (auth
+        // / cookies preserved), the daemon stays alive, the current item
+        // gets reclassified as cancelled by the Stepper's catch block, and
+        // the claim loop continues with the next queued item. No
+        // forceShutdown / shuttingDown — those paths are reserved for
+        // /stop (full daemon shutdown).
         setCancelTarget({ itemId: reqItemId, runId: reqRunId })
-        setForceShutdown(true)
-        setDrainOnlyShutdown(false)
-        setShuttingDown(true)
-        getWorkerStore()?.markWorkerStatus({ workerId: instanceId, status: 'draining', phase: 'draining' })
-        resolveShutdown()
-        resolveWake()
         log.warn(
-          `[Daemon ${workflowName}/${instanceId}] force-current accepted for item=${reqItemId} runId=${reqRunId}`,
+          `[Daemon ${workflowName}/${instanceId}] force-current accepted for item=${reqItemId} runId=${reqRunId} (interrupting work, chrome preserved)`,
         )
-        res.writeHead(200, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({ ok: true, accepted: true }))
-        ;(async (): Promise<void> => {
-          await new Promise((r) => setTimeout(r, 50))
-          abortLaunchAndKillSession('Daemon force-current requested')
-        })().catch((err) => {
+        try {
+          interruptInFlightWork()
+        } catch (err) {
           log.warn(
-            `[Daemon ${workflowName}/${instanceId}] force-current killChromeHard error: ${
+            `[Daemon ${workflowName}/${instanceId}] force-current interrupt failed: ${
               err instanceof Error ? err.message : String(err)
             }`,
           )
-        })
+        }
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, accepted: true }))
       })
       return
     }

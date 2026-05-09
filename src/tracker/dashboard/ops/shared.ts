@@ -3,7 +3,8 @@
  * folder. Not part of the public surface — not re-exported from index.ts.
  */
 import { appendFileSync, mkdirSync } from "fs";
-import { appendLogEntry, trackEvent } from "../../jsonl.js";
+import { appendLogEntry, dateLocal, readEntries, readEntriesForDate, trackEvent } from "../../jsonl.js";
+import { emitItemCancelled } from "../../session-events.js";
 import {
   daemonsDir,
 } from "../../../core/daemon/registry.js";
@@ -92,6 +93,30 @@ export function appendQueueEnqueueAudit(
   );
 }
 
+/**
+ * Resolve the workflowInstance for a given (workflow, runId) so dashboard
+ * cancel handlers — which only have (workflow, id, runId) — can still emit
+ * a `SessionEvent` (which requires `workflowInstance`). Scans today's
+ * tracker entries first, then yesterday's as a near-midnight fallback.
+ * Returns null when no entry carries `data.instance` for that run; callers
+ * skip the event emit silently in that case (the tracker row written
+ * alongside is the authoritative user-visible signal).
+ */
+function resolveInstanceForRunId(workflow: string, runId: string, dir: string): string | null {
+  for (const e of readEntries(workflow, dir)) {
+    if (e.runId === runId && typeof e.data?.instance === "string") {
+      return e.data.instance;
+    }
+  }
+  const ydate = dateLocal(new Date(Date.now() - 24 * 60 * 60 * 1000));
+  for (const e of readEntriesForDate(workflow, ydate, dir)) {
+    if (e.runId === runId && typeof e.data?.instance === "string") {
+      return e.data.instance;
+    }
+  }
+  return null;
+}
+
 export function emitDashboardCancelTrackerRow(
   workflow: string,
   id: string,
@@ -111,17 +136,32 @@ export function emitDashboardCancelTrackerRow(
     },
     dir,
   );
-  appendLogEntry(
-    {
-      workflow,
-      itemId: id,
-      runId,
-      level: "warn",
-      message: `Dashboard cancellation: ${DASHBOARD_CANCEL_ERROR}`,
-      ts,
-    },
-    dir,
-  );
+  // Surface the cancellation primarily as a session event (Events tab)
+  // instead of a warn-level log line (arrow-icon All tab). Falls back to
+  // the legacy log line when the workflowInstance can't be resolved
+  // (e.g., the run never emitted a tracker row carrying `data.instance`,
+  // which happens in tests and any pre-instance-stamping legacy data).
+  let emittedEvent = false;
+  if (runId) {
+    const instance = resolveInstanceForRunId(workflow, runId, dir);
+    if (instance) {
+      emitItemCancelled(instance, id, DASHBOARD_CANCEL_ERROR, dir, runId);
+      emittedEvent = true;
+    }
+  }
+  if (!emittedEvent) {
+    appendLogEntry(
+      {
+        workflow,
+        itemId: id,
+        runId,
+        level: "warn",
+        message: `Dashboard cancellation: ${DASHBOARD_CANCEL_ERROR}`,
+        ts,
+      },
+      dir,
+    );
+  }
 }
 
 export function emitDashboardCancelRequestedLog(
@@ -130,13 +170,24 @@ export function emitDashboardCancelRequestedLog(
   runId: string,
   dir: string,
 ): void {
+  // Cooperative cancel — daemon will pick the cancel up at the next step
+  // boundary. Surface the "requested, waiting" state as a session event
+  // when we can resolve workflowInstance, otherwise fall back to a warn
+  // log entry so the operator still sees something even when no tracker
+  // row has stamped data.instance yet.
+  const reason = "Cancellation requested by dashboard; waiting for the worker to stop this run.";
+  const instance = resolveInstanceForRunId(workflow, runId, dir);
+  if (instance) {
+    emitItemCancelled(instance, id, reason, dir, runId);
+    return;
+  }
   appendLogEntry(
     {
       workflow,
       itemId: id,
       runId,
       level: "warn",
-      message: "Cancellation requested by dashboard; waiting for the worker to stop this run.",
+      message: reason,
       ts: new Date().toISOString(),
     },
     dir,

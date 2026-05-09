@@ -7,6 +7,7 @@ import {
   buildDaemonsListHandler,
   buildDaemonsSpawnHandler,
   buildDaemonsStopHandler,
+  buildDeleteEntryHandler,
   buildDrainWorkerHandler,
   buildFindPriorByKeyHandler,
   buildForceStopTaskHandler,
@@ -199,5 +200,16 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       result[workflow] = readQueueDepth(workflow, deps.dir);
     }
     return jsonResponse(result);
+  });
+
+  app.post("/api/delete-entry", async (c) => {
+    const parsed = await readJsonRequest(c.req.raw);
+    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
+    const result = buildDeleteEntryHandler(deps.dir)({
+      workflow: String(parsed.body.workflow ?? ""),
+      id: String(parsed.body.id ?? ""),
+      date: String(parsed.body.date ?? ""),
+    });
+    return jsonResponse(result, result.ok ? 200 : (result.status ?? 400));
   });
 }
