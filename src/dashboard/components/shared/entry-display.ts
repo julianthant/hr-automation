@@ -1,4 +1,8 @@
 import type { TrackerEntry } from "./types";
+export {
+  groupMergedTrackerEntries as groupMergedEntries,
+  type MergedEntryGroup,
+} from "../../../tracker/queue-row-count.js";
 
 function firstNonBlank(...values: Array<string | undefined>): string {
   for (const value of values) {
@@ -40,62 +44,6 @@ export function resolveEntryName(
   if (fromMap) return fromMap;
   const d = entry.data ?? {};
   return resolveEmployeeLabel(d) || d.__name || d.__subject || "";
-}
-
-/**
- * Group entries that resolve to the same person (same canonical EID) so the
- * queue shows one row per person instead of one row per (input-shape) check.
- *
- * - Canonical id: `data.emplId` if present, else `entry.id`. `useEntries`
- *   carries forward an entry's last-known emplId across runs, so a name-based
- *   check that previously resolved an EID groups with the EID-based check.
- * - Primary (the visible entry on the queue): the entry that owns the most
- *   recent run within the group (highest `firstLogTs`). Title + status badge
- *   on the queue row reflect that entry. Selecting the row sets `selectedId`
- *   to the primary's id.
- * - Siblings: other entries in the group whose runs get folded into the
- *   primary's run history. The LogPanel fetches `/api/runs` for each and
- *   pools the results.
- *
- * Singleton groups (no merging) come back with `siblings: []`.
- */
-export interface MergedEntryGroup {
-  primary: TrackerEntry;
-  siblings: TrackerEntry[];
-}
-
-export function groupMergedEntries(entries: TrackerEntry[]): MergedEntryGroup[] {
-  const canonicalId = (e: TrackerEntry): string => {
-    const eid = e.data?.emplId;
-    return typeof eid === "string" && eid.length > 0 ? eid : e.id;
-  };
-
-  const buckets = new Map<string, TrackerEntry[]>();
-  for (const e of entries) {
-    const key = canonicalId(e);
-    const bucket = buckets.get(key) ?? [];
-    bucket.push(e);
-    buckets.set(key, bucket);
-  }
-
-  const groups: MergedEntryGroup[] = [];
-  for (const bucket of buckets.values()) {
-    if (bucket.length === 0) continue;
-    if (bucket.length === 1) {
-      groups.push({ primary: bucket[0], siblings: [] });
-      continue;
-    }
-    // Latest activity wins for primary — its display name + status are what
-    // the operator sees, and matches "I just ran this person again" intent.
-    const sorted = [...bucket].sort((a, b) => {
-      const aTs = a.firstLogTs || a.timestamp || "";
-      const bTs = b.firstLogTs || b.timestamp || "";
-      return bTs.localeCompare(aTs);
-    });
-    const [primary, ...siblings] = sorted;
-    groups.push({ primary, siblings });
-  }
-  return groups;
 }
 
 /**

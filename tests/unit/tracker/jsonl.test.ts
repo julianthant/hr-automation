@@ -12,6 +12,7 @@ import {
   serializeValue,
   toTypedValue,
   withTrackedWorkflow,
+  dateLocal,
   __resetParseCacheForTests,
   __getParseCacheSizeForTests,
   type TrackerEntry,
@@ -276,9 +277,10 @@ describe("parseCache LRU", () => {
   beforeEach(() => __resetParseCacheForTests());
 
   function seedWorkflowFile(dir: string, wf: string): void {
+    const today = dateLocal();
     writeFileSync(
-      join(dir, `${wf}-2026-05-07.jsonl`),
-      '{"workflow":"' + wf + '","id":"x","runId":"r","timestamp":"2026-05-07T00:00:00Z","status":"done","data":{}}\n',
+      join(dir, `${wf}-${today}.jsonl`),
+      '{"workflow":"' + wf + '","id":"x","runId":"r","timestamp":"' + today + 'T00:00:00Z","status":"done","data":{}}\n',
     );
   }
 
@@ -371,15 +373,16 @@ describe("parseCache LRU", () => {
       // The miss path must `delete(key)` before `set(key, ...)` to bump
       // wf0 to MRU. Without that, wf0 stays oldest and the next eviction
       // takes it.
+      const wf0today = dateLocal();
       writeFileSync(
-        join(dir, `wf0-2026-05-07.jsonl`),
-        '{"workflow":"wf0","id":"x","runId":"r","timestamp":"2026-05-07T00:00:00Z","status":"done","data":{"v":2}}\n' +
-          '{"workflow":"wf0","id":"y","runId":"r2","timestamp":"2026-05-07T00:00:01Z","status":"done","data":{}}\n',
+        join(dir, `wf0-${wf0today}.jsonl`),
+        '{"workflow":"wf0","id":"x","runId":"r","timestamp":"' + wf0today + 'T00:00:00Z","status":"done","data":{"v":2}}\n' +
+          '{"workflow":"wf0","id":"y","runId":"r2","timestamp":"' + wf0today + 'T00:00:01Z","status":"done","data":{}}\n',
       );
       // Force a small mtime delta so the cache key invalidates even on
       // filesystems with low mtime resolution.
       const future = new Date(Date.now() + 5_000);
-      utimesSync(join(dir, `wf0-2026-05-07.jsonl`), future, future);
+      utimesSync(join(dir, `wf0-${wf0today}.jsonl`), future, future);
       readEntries("wf0", dir); // re-parse, MUST bump to MRU
 
       // Add wf64 → should evict the now-oldest, which is wf1 (wf0 was bumped).

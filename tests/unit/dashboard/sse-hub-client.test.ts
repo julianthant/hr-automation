@@ -47,6 +47,7 @@ function flushMicrotasks(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 const originalEventSource = globalThis.EventSource;
+const originalWindow = globalThis.window;
 let hub: SseHub;
 
 beforeEach(() => {
@@ -62,6 +63,8 @@ afterEach(() => {
   hub.__resetForTests();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (globalThis as any).EventSource = originalEventSource;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (globalThis as any).window = originalWindow;
 });
 
 // ---------------------------------------------------------------------------
@@ -99,6 +102,22 @@ test("4. after the microtask the URL contains the encoded subs JSON with both su
   const topics = (decoded as Array<{ topic: string }>).map((s) => s.topic);
   assert.ok(topics.includes("entries"), "entries topic missing");
   assert.ok(topics.includes("logs"), "logs topic missing");
+});
+
+test("4b. Vite dev dashboard connects EventSource directly to the Hono backend", async () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (globalThis as any).window = {
+    location: { protocol: "http:", hostname: "localhost", port: "5173" },
+  };
+
+  hub.subscribe("entries", { workflow: "active-check" }, () => {});
+  await flushMicrotasks();
+
+  assert.equal(constructorCallCount, 1);
+  assert.ok(
+    lastInstance!.url.startsWith("http://localhost:3838/events/hub?subs="),
+    `expected EventSource to bypass the Vite proxy, got: ${lastInstance!.url}`,
+  );
 });
 
 test("5. envelope dispatch: listener fires with correct data and undefined event", async () => {

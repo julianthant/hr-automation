@@ -5,6 +5,8 @@ import { computeStepDurations } from "../dashboard/run-timelines.js";
 import type { ProjectionEntriesPayload, ProjectionHealth } from "./types.js";
 import { stateDbPath } from "./db.js";
 import type { SessionEvent } from "../session-events.js";
+import { groupMergedTrackerEntries } from "../queue-row-count.js";
+import type { TrackerEntry } from "../jsonl.js";
 
 function parseJsonObject<T>(raw: string | null | undefined, fallback: T): T {
   if (!raw) return fallback;
@@ -13,6 +15,50 @@ function parseJsonObject<T>(raw: string | null | undefined, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+const WF_ITEM_KEY_SEP = "\u0000";
+
+/**
+ * Chronological snapshots that carry non-empty data.emplId — last match per
+ * `(workflow,item_id)` mirrors `useEntries` carry-forward across the JSONL replay.
+ */
+function resolvedEmplIdMapFromRunEvents(db: Database, trackerDate: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const rows = db.prepare(`
+    SELECT workflow, item_id, data_json
+    FROM run_events
+    WHERE tracker_date = @date
+      AND data_json IS NOT NULL
+      AND TRIM(IFNULL(json_extract(data_json, '$.emplId'), '')) != ''
+    ORDER BY workflow ASC, item_id ASC, event_ms ASC, id ASC
+  `).all({ date: trackerDate }) as Array<{ workflow: string; item_id: string; data_json: string }>;
+  for (const row of rows) {
+    const data = parseJsonObject(row.data_json, {} as Record<string, unknown>);
+    const raw = data.emplId;
+    let emplId =
+      typeof raw === "string" && raw.trim().length > 0
+        ? raw.trim()
+        : typeof raw === "number" && Number.isFinite(raw)
+          ? String(Math.trunc(raw))
+          : null;
+    if (!emplId?.length) continue;
+    out.set(`${row.workflow}${WF_ITEM_KEY_SEP}${row.item_id}`, emplId);
+  }
+  return out;
+}
+
+function patchItemDataWithCarriedEmpl(
+  workflow: string,
+  itemId: string,
+  data: Record<string, string>,
+  resolvedEmplIds: Map<string, string>,
+): Record<string, string> {
+  const carried = resolvedEmplIds.get(`${workflow}${WF_ITEM_KEY_SEP}${itemId}`);
+  if (carried && (!data.emplId || String(data.emplId).trim() === "")) {
+    return { ...data, emplId: carried };
+  }
+  return data;
 }
 
 export function queryProjectionHealth(db: Database, dir: string): ProjectionHealth {
@@ -118,14 +164,52 @@ export function queryEntriesPayload(
     SELECT DISTINCT workflow FROM items WHERE tracker_date = @date ORDER BY workflow
   `).all({ date: opts.date }) as Array<{ workflow: string }>).map((r) => r.workflow);
 
+  const resolvedEmplFromDay = resolvedEmplIdMapFromRunEvents(db, opts.date);
+
   const wfCounts: Record<string, number> = {};
-  const countRows = db.prepare(`
-    SELECT workflow, COUNT(*) AS n
+  const wfCountRows = db.prepare(`
+    SELECT workflow, item_id AS id, latest_run_id AS runId,
+           latest_status AS status, latest_step AS step, latest_ts AS timestamp,
+           latest_data_json AS data_json, latest_error AS error
     FROM items
     WHERE tracker_date = @date AND resolved_prep = 0
-    GROUP BY workflow
-  `).all({ date: opts.date }) as Array<{ workflow: string; n: number }>;
-  for (const row of countRows) wfCounts[row.workflow] = row.n;
+  `).all({ date: opts.date }) as Array<{
+    workflow: string;
+    id: string;
+    runId: string;
+    status: "pending" | "running" | "done" | "failed" | "skipped";
+    step: string | null;
+    timestamp: string;
+    data_json: string | null;
+    error: string | null;
+  }>;
+
+  const rowsByWorkflowForCount = new Map<string, typeof wfCountRows>();
+  for (const row of wfCountRows) {
+    const bucket = rowsByWorkflowForCount.get(row.workflow);
+    if (bucket) bucket.push(row);
+    else rowsByWorkflowForCount.set(row.workflow, [row]);
+  }
+
+  for (const wf of workflows) {
+    const rows = rowsByWorkflowForCount.get(wf) ?? [];
+    const asTracker: TrackerEntry[] = rows.map((row) => ({
+      workflow: row.workflow,
+      timestamp: row.timestamp,
+      id: row.id,
+      runId: row.runId,
+      status: row.status,
+      ...(row.step ? { step: row.step } : {}),
+      data: patchItemDataWithCarriedEmpl(
+        row.workflow,
+        row.id,
+        parseJsonObject(row.data_json, {} as Record<string, string>),
+        resolvedEmplFromDay,
+      ),
+      ...(row.error ? { error: row.error } : {}),
+    }));
+    wfCounts[wf] = groupMergedTrackerEntries(asTracker).length;
+  }
 
   const failureCounts: Record<string, number> = {};
   // One query for ALL workflows on this date, partition in JS.
