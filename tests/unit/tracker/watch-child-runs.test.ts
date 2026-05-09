@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { watchChildRuns } from "../../../src/tracker/delegation/watch-child-runs.js";
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
+import { closeStateDbForTests } from "../../../src/tracker/state/db.js";
 
 function setupTrackerDir(): string {
   const dir = join(tmpdir(), `wcr-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -84,7 +85,7 @@ test("uses SQLite task rows when all expected child tasks exist", async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("closes SQLite watcher connection after terminal outcomes", async () => {
+test("fresh dir after closeStateDbForTests yields empty store", async () => {
   const dir = setupTrackerDir();
   let reopenedStore: ReturnType<typeof createTaskStore> | null = null;
   try {
@@ -106,12 +107,17 @@ test("closes SQLite watcher connection after terminal outcomes", async () => {
     });
     assert.equal(outcomes.length, 1);
 
+    // controlDb.close() inside watchChildRuns is a no-op for shared connections.
+    // Explicitly clear the cache so the next openControlDb call below opens a
+    // fresh connection against the recreated (empty) directory.
+    closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
     reopenedStore = createTaskStore(openControlDb({ trackerDir: dir }));
     assert.deepEqual(reopenedStore.listTasksForWorkflow("oath-signature"), []);
   } finally {
     reopenedStore?.close();
+    closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });
   }
 });

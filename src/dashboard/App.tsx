@@ -25,6 +25,8 @@ import { TopBarCaptureButton } from "./components/navigation/TopBarCaptureButton
 import { parsePrepareRowData, isResolvedPrepRow } from "./components/ocr/types";
 import { RunModal } from "./components/run-modal/RunModal";
 import { dateLocal } from "./lib/utils";
+import type { TrackerEntry as TrackerEntryJsonl } from "../tracker/jsonl.js";
+import { isResolvedPrepEntry } from "../tracker/dashboard/prep-rows.js";
 
 /** Default workflow when ?wf= is missing or unknown. Must always exist
  *  in the registry; if it doesn't, we fall through to the first registered
@@ -127,8 +129,9 @@ export default function App() {
       const primaries = mergeGroups.map((g) => g.primary);
       // Match useEntries' newest-first sort so position is stable.
       return [...primaries].sort((a, b) => {
-        const aStart = a.firstLogTs || "";
-        const bStart = b.firstLogTs || "";
+        type WithFirstLog = TrackerEntry & { firstLogTs?: string };
+        const aStart = (a as WithFirstLog).firstLogTs || "";
+        const bStart = (b as WithFirstLog).firstLogTs || "";
         if (!aStart && bStart) return 1;
         if (aStart && !bStart) return -1;
         if (!aStart && !bStart) return b.timestamp.localeCompare(a.timestamp);
@@ -136,6 +139,12 @@ export default function App() {
       });
     },
     [mergeGroups],
+  );
+
+  /** Merged primaries Operator still cares about (excludes approved/discarded prep, etc.). */
+  const statPanelEntries = useMemo(
+    () => dedupedEntries.filter((e) => !isResolvedPrepEntry(e as TrackerEntryJsonl)),
+    [dedupedEntries],
   );
 
   // Lookup: primary entry id → its siblings. Passed to LogPanel so it can
@@ -309,8 +318,16 @@ export default function App() {
     if (selectedId === id) setSelectedId(null);
   }, [selectedId]);
 
-  // Entry counts per workflow from backend SSE (accurate across all workflows)
-  const entryCounts = wfCounts;
+  // Rail badges: other workflows use SSE `wfCounts`; the **active** workflow
+  // uses the same merged + resolved-prep exclusion as the StatPills strip so
+  // the sidebar digit and "ALL" stay lockstep.
+  const entryCounts = useMemo(
+    () => ({
+      ...wfCounts,
+      [workflow]: statPanelEntries.length,
+    }),
+    [wfCounts, workflow, statPanelEntries],
+  );
 
   const selectedEntry = dedupedEntries.find((e) => e.id === selectedId) || null;
 
@@ -358,6 +375,7 @@ export default function App() {
         />
         <QueuePanel
           entries={dedupedEntries}
+          statPanelEntries={statPanelEntries}
           workflow={workflow}
           displayNames={displayNames}
           selectedId={selectedId}

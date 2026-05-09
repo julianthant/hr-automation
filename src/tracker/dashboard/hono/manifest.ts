@@ -37,6 +37,7 @@ const DASHBOARD_HONO_ROUTE_MANIFEST: readonly DashboardHonoRouteManifestEntry[] 
   { method: "POST", path: "/api/retry-bulk" },
   { method: "POST", path: "/api/run-with-data" },
   { method: "POST", path: "/api/save-data" },
+  { method: "POST", path: "/api/delete-entry" },
   { method: "GET", path: "/api/find-prior-by-key" },
   { method: "POST", path: "/api/cancel-queued" },
   { method: "POST", path: "/api/cancel-running" },
