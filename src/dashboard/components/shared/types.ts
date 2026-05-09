@@ -208,6 +208,12 @@ export interface RunInfo {
    *  runs whose tracker rows never carried data (very-early-cancelled
    *  pending). */
   data?: Record<string, unknown>;
+  /** When the LogPanel pools runs across a merged entry group (e.g. EID +
+   *  name checks for the same person), each run is tagged with the tracker
+   *  itemId it actually came from so log fetching addresses the right
+   *  JSONL key. Absent on the single-entry path — fall back to the
+   *  selected entry's id in that case. */
+  itemId?: string;
 }
 
 // ── Detail-value formatting ──────────────────────────────

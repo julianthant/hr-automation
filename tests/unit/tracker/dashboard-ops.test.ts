@@ -502,16 +502,19 @@ describe("dashboard worker command helpers", () => {
     });
 
     assert.equal(result.ok, true);
-    assert.equal(result.killCommands.length, 1);
-    assert.equal(workerStore.getCommand(result.commandId)?.commandType, "force_stop_task");
+    // Chrome-preserving force-stop (per operator request 2026-05-08): no
+    // longer enqueues kill_browser commands or SIGTERMs browsers. The
+    // command type is now `cancel_task` (not `force_stop_task`); the
+    // daemon's `/force-current` HTTP endpoint navigates pages to
+    // about:blank to interrupt in-flight Playwright work without killing
+    // chrome. Browser process row is left untouched (status stays as it
+    // was — still owned by the daemon for the next item).
+    assert.equal(result.killCommands.length, 0);
+    assert.equal(workerStore.getCommand(result.commandId)?.commandType, "cancel_task");
     assert.equal(workerStore.getCommand(result.commandId)?.state, "queued");
     assert.equal(taskStore.getTask(enqueued.taskId)?.state, "cancelled");
     assert.equal(taskStore.getAttempt(enqueued.attemptId)?.state, "cancelled");
-    const killCommand = workerStore.getCommand(result.killCommands[0]);
-    assert.equal(killCommand?.commandType, "kill_browser");
-    assert.equal(killCommand?.state, "queued");
-    assert.equal(killCommand?.targetBrowserProcessId, browser.browserProcessId);
-    assert.equal(workerStore.findBrowserProcessById(browser.browserProcessId)?.status, "kill_requested");
+    assert.notEqual(workerStore.findBrowserProcessById(browser.browserProcessId)?.status, "kill_requested");
     const trackerFile = readdirSync(tmp).find((file) => /^separations-\d{4}-\d{2}-\d{2}\.jsonl$/.test(file));
     assert.ok(trackerFile, "force-stop should emit a separations tracker file");
     const entries = readFileSync(join(tmp, trackerFile), "utf8")

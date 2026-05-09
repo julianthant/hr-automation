@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { ChevronDown, Check, X, Play } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Check, X, Play, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -13,6 +13,7 @@ interface RunSelectorProps {
   runs: RunInfo[];
   activeRunId: string | null;
   onSelect: (runId: string) => void;
+  onDeleteEntry?: () => void;
 }
 
 /**
@@ -47,7 +48,7 @@ function statusColor(status: string): string {
  * which alphabetic sort would produce). Opens an ordered list of every run
  * with its status glyph; the trigger always shows the active run + a chevron.
  */
-export function RunSelector({ runs, activeRunId, onSelect }: RunSelectorProps) {
+export function RunSelector({ runs, activeRunId, onSelect, onDeleteEntry }: RunSelectorProps) {
   // Numeric desc — newest run on top regardless of how it was inserted upstream.
   const sortedRuns = useMemo(
     () => [...runs].sort((a, b) => runNumber(b) - runNumber(a)),
@@ -59,49 +60,95 @@ export function RunSelector({ runs, activeRunId, onSelect }: RunSelectorProps) {
   const active = sortedRuns.find((r) => r.runId === activeRunId) ?? sortedRuns[0];
   const activeNum = runNumber(active);
   const totalRuns = sortedRuns.length;
+  // sortedRuns is desc (newest first), so index 0 = newest, last index = oldest
+  const activeIndex = sortedRuns.findIndex((r) => r.runId === active.runId);
+  const canGoNewer = activeIndex > 0;
+  const canGoOlder = activeIndex < sortedRuns.length - 1;
+
+  const navBtnClass = cn(
+    "h-8 w-8 inline-flex items-center justify-center rounded-md border border-border bg-secondary cursor-pointer transition-colors",
+    "text-muted-foreground hover:text-foreground hover:border-primary",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+    "disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-border disabled:hover:text-muted-foreground",
+  );
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        aria-label="Older run"
+        disabled={!canGoOlder}
+        onClick={() => canGoOlder && onSelect(sortedRuns[activeIndex + 1].runId)}
+        className={navBtnClass}
+      >
+        <ChevronLeft className="w-3.5 h-3.5" />
+      </button>
+      <button
+        type="button"
+        aria-label="Newer run"
+        disabled={!canGoNewer}
+        onClick={() => canGoNewer && onSelect(sortedRuns[activeIndex - 1].runId)}
+        className={navBtnClass}
+      >
+        <ChevronRight className="w-3.5 h-3.5" />
+      </button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            aria-label={`Run #${activeNum} of ${totalRuns} — ${active.status}`}
+            className={cn(
+              "flex items-center gap-2 h-8 px-3 rounded-lg border border-border bg-secondary cursor-pointer transition-colors hover:border-primary data-[state=open]:border-primary outline-none focus-visible:ring-2 focus-visible:ring-primary",
+            )}
+          >
+            <span className={cn("flex items-center gap-1 font-mono text-xs font-medium tabular-nums", statusColor(active.status))}>
+              {statusGlyph(active.status)}
+              #{activeNum}
+            </span>
+            <span className="text-[10px] text-muted-foreground font-mono tabular-nums">
+              of {totalRuns}
+            </span>
+            <ChevronDown className="w-3.5 h-3.5 text-muted-foreground transition-transform data-[state=open]:rotate-180" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-[200px] max-h-[320px] overflow-y-auto">
+          {sortedRuns.map((run) => {
+            const num = runNumber(run);
+            const isActive = run.runId === active.runId;
+            return (
+              <DropdownMenuItem
+                key={run.runId}
+                onClick={() => onSelect(run.runId)}
+                className={cn(isActive && "bg-accent")}
+              >
+                <span className="flex items-center justify-between w-full">
+                  <span className={cn("flex items-center gap-1.5 font-mono font-medium tabular-nums", statusColor(run.status))}>
+                    {statusGlyph(run.status)}
+                    Run #{num}
+                  </span>
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    {run.status}
+                  </span>
+                </span>
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {onDeleteEntry && (
         <button
-          aria-label={`Run #${activeNum} of ${totalRuns} — ${active.status}`}
+          type="button"
+          aria-label="Delete this entry permanently"
+          onClick={(e) => { e.stopPropagation(); onDeleteEntry(); }}
           className={cn(
-            "flex items-center gap-2 h-8 px-3 rounded-lg border border-border bg-secondary cursor-pointer transition-colors hover:border-primary data-[state=open]:border-primary outline-none focus-visible:ring-2 focus-visible:ring-primary",
+            "h-8 w-8 inline-flex items-center justify-center rounded-md border border-destructive/40 bg-destructive/10",
+            "text-destructive cursor-pointer transition-colors",
+            "hover:bg-destructive/20 hover:border-destructive/60",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive",
           )}
         >
-          <span className={cn("flex items-center gap-1 font-mono text-xs font-medium tabular-nums", statusColor(active.status))}>
-            {statusGlyph(active.status)}
-            #{activeNum}
-          </span>
-          <span className="text-[10px] text-muted-foreground font-mono tabular-nums">
-            of {totalRuns}
-          </span>
-          <ChevronDown className="w-3.5 h-3.5 text-muted-foreground transition-transform data-[state=open]:rotate-180" />
+          <Trash2 className="w-3.5 h-3.5" />
         </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-[200px] max-h-[320px] overflow-y-auto">
-        {sortedRuns.map((run) => {
-          const num = runNumber(run);
-          const isActive = run.runId === active.runId;
-          return (
-            <DropdownMenuItem
-              key={run.runId}
-              onClick={() => onSelect(run.runId)}
-              className={cn(isActive && "bg-accent")}
-            >
-              <span className="flex items-center justify-between w-full">
-                <span className={cn("flex items-center gap-1.5 font-mono font-medium tabular-nums", statusColor(run.status))}>
-                  {statusGlyph(run.status)}
-                  Run #{num}
-                </span>
-                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                  {run.status}
-                </span>
-              </span>
-            </DropdownMenuItem>
-          );
-        })}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      )}
+    </div>
   );
 }

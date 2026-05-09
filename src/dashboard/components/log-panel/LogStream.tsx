@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Bug, Maximize2, Minimize2 } from "lucide-react";
+import { Maximize2, Minimize2 } from "lucide-react";
 import { LogLine } from "./LogLine";
 import type { CollapsedLogEntry } from "@/components/hooks/useLogs";
 import type { LogCategory, RunEvent } from "@/components/shared/types";
 import { getLogCategory } from "@/components/shared/types";
-import { filterLogsForDebugVisibility } from "./log-display";
+import { isDebugLog } from "./log-display";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -83,34 +83,23 @@ export function LogStream({
     if (initialTab) setFilter(initialTab);
   }, [initialTab]);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [showDebug, setShowDebug] = useState(() => {
-    try {
-      return localStorage.getItem("hr-dashboard:show-debug-logs") === "1";
-    } catch {
-      return false;
-    }
-  });
   const scrollRef = useRef<HTMLDivElement>(null);
   const prevLenRef = useRef(0);
-  useEffect(() => {
-    try {
-      localStorage.setItem("hr-dashboard:show-debug-logs", showDebug ? "1" : "0");
-    } catch {
-      // Private browsing / disabled storage should not break log viewing.
-    }
-  }, [showDebug]);
 
   const tab = FILTER_TABS.find((t) => t.key === filter);
-  const visibleLogs = filterLogsForDebugVisibility(logs, showDebug);
-  const hiddenDebugCount = showDebug ? 0 : logs.length - visibleLogs.length;
+  const nonDebugLogs = useMemo(() => logs.filter((l) => !isDebugLog(l)), [logs]);
+  const debugLogs = useMemo(() => logs.filter(isDebugLog), [logs]);
 
   const displayed = useMemo<DisplayItem[]>(() => {
     if (tab?.source === "events") {
       return events.map((e) => ({ kind: "event" as const, entry: e }));
     }
+    if (filter === "debug") {
+      return debugLogs.map((l) => ({ kind: "log" as const, entry: l }));
+    }
     if (filter === "all") {
       const merged: DisplayItem[] = [
-        ...visibleLogs.map((l) => ({ kind: "log" as const, entry: l })),
+        ...nonDebugLogs.map((l) => ({ kind: "log" as const, entry: l })),
         ...events.map((e) => ({ kind: "event" as const, entry: e })),
       ];
       merged.sort((a, b) => {
@@ -126,12 +115,12 @@ export function LogStream({
       });
       return merged;
     }
-    return visibleLogs
+    return nonDebugLogs
       .filter((l) => tab?.categories.includes(getLogCategory(l.level, l.message)))
       .map((l) => ({ kind: "log" as const, entry: l }));
-  }, [filter, tab, visibleLogs, events]);
+  }, [filter, tab, nonDebugLogs, debugLogs, events]);
 
-  const collapsedCount = visibleLogs.reduce((acc, l) => acc + (l.count > 1 ? l.count - 1 : 0), 0);
+  const collapsedCount = nonDebugLogs.reduce((acc, l) => acc + (l.count > 1 ? l.count - 1 : 0), 0);
 
   // Snap to bottom before paint when logs first appear (no visible scroll)
   useLayoutEffect(() => {
@@ -155,7 +144,6 @@ export function LogStream({
 
   const visibleTabs = FILTER_TABS.filter(
     (t) =>
-      (t.key !== "debug" || showDebug) &&
       (t.key !== "edit-data" || editDataAvailable) &&
       (t.key !== "preview" || previewAvailable),
   );
@@ -177,23 +165,6 @@ export function LogStream({
             {tab.label}
           </button>
         ))}
-        <button
-          type="button"
-          role="switch"
-          aria-checked={showDebug}
-          onClick={() => setShowDebug((value) => !value)}
-          title={showDebug ? "Hide debug logs" : "Show debug logs"}
-          className={cn(
-            "ml-auto inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium transition-colors",
-            showDebug
-              ? "border-primary/40 bg-primary/10 text-primary hover:bg-primary/15"
-              : "border-border bg-secondary text-muted-foreground hover:text-foreground hover:border-border/80",
-            onToggleMaximize ? "mr-1" : "",
-          )}
-        >
-          <Bug className="h-3.5 w-3.5" />
-          <span>Debug</span>
-        </button>
         {onToggleMaximize && (
           <button
             type="button"
@@ -201,7 +172,7 @@ export function LogStream({
             aria-pressed={maximized}
             title={maximized ? "Exit fullscreen" : "Maximize tab content"}
             className={cn(
-              "inline-flex h-7 w-7 items-center justify-center rounded-md cursor-pointer transition-colors",
+              "ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md cursor-pointer transition-colors",
               "text-muted-foreground hover:text-foreground hover:bg-secondary",
               maximized && "text-foreground bg-accent",
             )}
@@ -303,13 +274,6 @@ export function LogStream({
               <span className="text-border">•</span>
               <span className="font-mono tabular-nums">{collapsedCount}</span>
               <span>collapsed</span>
-            </>
-          )}
-          {hiddenDebugCount > 0 && (
-            <>
-              <span className="text-border">•</span>
-              <span className="font-mono tabular-nums">{hiddenDebugCount}</span>
-              <span>debug hidden</span>
             </>
           )}
         </div>

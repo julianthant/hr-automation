@@ -21,6 +21,15 @@ interface UseEntriesResult {
   loading: boolean;
 }
 
+export function shouldApplyEntriesUpdate(args: {
+  previousHash: string;
+  nextHash: string;
+  activeKey: string;
+  targetKey: string;
+}): boolean {
+  return args.previousHash !== args.nextHash || args.activeKey !== args.targetKey;
+}
+
 /**
  * SSE hook for workflow entries.
  * Dedupes by ID (keeps latest), sorts newest-first by first-seen timestamp.
@@ -34,14 +43,16 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const prevHashRef = useRef("");
+  const activeKeyRef = useRef("");
 
   useEffect(() => {
     setLoading(true);
     setEntriesKey("");
-    // Reset the entry-hash memo on every (workflow, date) change so a new
-    // subscription always emits a fresh diff — otherwise the hash carried
-    // over from the previous date can short-circuit the first message on
-    // the new one, stranding `wfCounts` at its previous value.
+    activeKeyRef.current = "";
+    // Reset the entry-hash/key memos on every (workflow, date) change so a
+    // new subscription applies its first payload even when the payload is
+    // empty. Without the key guard, switching to an empty date leaves the
+    // previous date's rows on screen because both hashes are "".
     prevHashRef.current = "";
 
     const today = dateLocal();
@@ -83,26 +94,52 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
         const hash = raw.map((r) =>
           `${r.id}|${r.status}|${r.step ?? ""}|${r.timestamp}|${(r as any).firstLogTs ?? ""}|${(r as any).lastLogTs ?? ""}|${r.runId ?? ""}|${r.error ?? ""}`
         ).join(";");
-        if (hash === prevHashRef.current) return;
+        const targetKey = `${workflow}|${date}`;
+        if (!shouldApplyEntriesUpdate({
+          previousHash: prevHashRef.current,
+          nextHash: hash,
+          activeKey: activeKeyRef.current,
+          targetKey,
+        })) {
+          return;
+        }
         prevHashRef.current = hash;
 
         // Dedupe by ID, keep latest entry
         const latest = new Map<string, TrackerEntry>();
         // Track first-seen timestamp per ID for sort order
         const firstSeen = new Map<string, string>();
+        // Track the latest non-empty `data.emplId` observed across an item's
+        // run history. The latest tracker row may be from a cancellation
+        // cleanup (raw input only, no emplId), but an earlier successful run
+        // may have resolved one. Carrying it forward lets cross-run dedup
+        // recognise that "Langley, Leo" and "10874572" are the same person.
+        const resolvedEmplIds = new Map<string, string>();
         for (const entry of raw) {
           latest.set(entry.id, entry);
           if (!firstSeen.has(entry.id)) {
             firstSeen.set(entry.id, entry.timestamp);
           }
+          const emplId = entry.data?.emplId;
+          if (typeof emplId === "string" && emplId.length > 0) {
+            resolvedEmplIds.set(entry.id, emplId);
+          }
         }
 
         // Sort by running start time (firstLogTs), pending entries at bottom
         const deduped = [...latest.values()]
-          .map((entry) => ({
-            ...entry,
-            startTimestamp: firstSeen.get(entry.id) || entry.timestamp,
-          }))
+          .map((entry) => {
+            const carried = resolvedEmplIds.get(entry.id);
+            const data =
+              carried && (!entry.data?.emplId || entry.data.emplId.length === 0)
+                ? { ...(entry.data ?? {}), emplId: carried }
+                : entry.data;
+            return {
+              ...entry,
+              data,
+              startTimestamp: firstSeen.get(entry.id) || entry.timestamp,
+            };
+          })
           .sort((a, b) => {
             // Pending entries (no firstLogTs) go to bottom
             const aStart = a.firstLogTs || "";
@@ -114,7 +151,8 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
           });
 
         setEntries(deduped);
-        setEntriesKey(`${workflow}|${date}`);
+        activeKeyRef.current = targetKey;
+        setEntriesKey(targetKey);
         setWorkflows(wfs || []);
         if (counts) setWfCounts(counts);
         setFailureCounts(fcounts ?? {});

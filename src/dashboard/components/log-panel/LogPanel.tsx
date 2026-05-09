@@ -27,12 +27,21 @@ interface LogPanelProps {
   allEntries?: TrackerEntry[];
   /** Per-entry "<base> <ordinal>" labels from `buildDisplayNameMap`. */
   displayNames?: Map<string, string>;
+  /**
+   * Other entries merged into this entry (same person, different input
+   * shapes — e.g. EID + name checks). Their runs are pooled with `entry`'s
+   * runs and presented as one combined history. Each pooled run keeps its
+   * true `itemId` so log fetching addresses the right JSONL key.
+   */
+  siblings?: TrackerEntry[];
   /** Default-active LogStream tab (e.g. "preview" when opening from an OcrQueueRow click). */
   defaultTab?: string;
   /** Optional preview content for the LogStream's Preview tab (e.g. OcrReviewPane body). */
   previewSlot?: ReactNode;
   /** Whether the Preview tab is shown. */
   previewAvailable?: boolean;
+  /** Called when the operator triggers a hard-delete from the RunSelector toolbar. */
+  onDeleteEntry?: () => void;
 }
 
 // Special virtual keys the generic detail renderer recognizes. These come
@@ -40,7 +49,7 @@ interface LogPanelProps {
 // type-aware formatter can't handle them — we branch on the key.
 const COMPUTED_KEYS = new Set(["__started", "__elapsed"]);
 
-export function LogPanel({ entry, workflow, date, allEntries, displayNames, defaultTab, previewSlot, previewAvailable }: LogPanelProps) {
+export function LogPanel({ entry, workflow, date, allEntries, displayNames, siblings, defaultTab, previewSlot, previewAvailable, onDeleteEntry }: LogPanelProps) {
   const [runs, setRuns] = useState<RunInfo[]>([]);
   const [activeRunId, setActiveRunId] = useState<string | null>(entry?.runId || null);
   const registered = useWorkflow(workflow);
@@ -56,63 +65,101 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, defa
   const steps = registered?.steps ?? [];
   const detailFields = registered?.detailFields ?? [];
 
-  // Fetch runs when entry changes or a new run appears
+  // Stable key for the sibling list so we don't refetch on every parent
+  // re-render — the siblings array reference may differ each tick even
+  // when its contents are identical.
+  const siblingIdsKey = (siblings ?? []).map((s) => s.id).sort().join("|");
+
+  // Fetch runs when entry changes or a new run appears. When siblings are
+  // present (merged-entry group), fetch each member's runs and pool them
+  // into a single, globally-renumbered history. The merge ordering rule
+  // is "concat by entry first-seen, then renumber 1..N globally" — so the
+  // older entry keeps the low ordinals (1..k), siblings get k+1..N.
   useEffect(() => {
     if (!entry) {
       setRuns([]);
       setActiveRunId(null);
       return;
     }
-    // Set runId from entry immediately so useLogs doesn't fire with null first
     setActiveRunId((prev) => prev || entry.runId || null);
 
     const runsWorkflow = entry.workflow ?? workflow;
+    const members: { id: string; firstSeen: string }[] = [
+      { id: entry.id, firstSeen: entry.startTimestamp || entry.firstLogTs || entry.timestamp || "" },
+      ...((siblings ?? []).map((s) => ({
+        id: s.id,
+        firstSeen: s.startTimestamp || s.firstLogTs || s.timestamp || "",
+      }))),
+    ];
+    // Oldest-first so the older entry's ordinals come before the newer's
+    // (matches "Langley, Leo keeps 1-5, 10874572 becomes 6-7").
+    members.sort((a, b) => (a.firstSeen || "").localeCompare(b.firstSeen || ""));
+
     const fetchRuns = () => {
-      fetch(`/api/runs?workflow=${encodeURIComponent(runsWorkflow)}&id=${encodeURIComponent(entry.id)}&date=${encodeURIComponent(date)}`)
-        .then((r) => r.json())
-        .then((data: RunInfo[]) => {
-          setRuns((prev) => {
-            // Structural compare on the fields that matter for rendering
-            if (
-              prev.length === data.length &&
-              prev.every((r, i) =>
-                r.runId === data[i].runId &&
-                r.status === data[i].status &&
-                r.step === data[i].step &&
-                r.lastLogTs === data[i].lastLogTs,
-              )
-            ) return prev;
-            return data;
-          });
-          // Switch to latest run when a NEW run appears
-          setActiveRunId((prev) => {
-            if (!prev) return data.length > 0 ? data[data.length - 1].runId : entry.runId || null;
-            // If a new run appeared that wasn't there before, switch to it
-            const latestRunId = data.length > 0 ? data[data.length - 1].runId : null;
-            if (latestRunId && latestRunId !== prev && !data.slice(0, -1).some((r) => r.runId === latestRunId)) {
-              return latestRunId;
-            }
-            if (data.some((r) => r.runId === prev)) return prev;
-            return data.length > 0 ? data[data.length - 1].runId : entry.runId || null;
-          });
-        })
-        .catch(() => {});
+      Promise.all(
+        members.map((m) =>
+          fetch(`/api/runs?workflow=${encodeURIComponent(runsWorkflow)}&id=${encodeURIComponent(m.id)}&date=${encodeURIComponent(date)}`)
+            .then((r) => r.json())
+            .then((data: RunInfo[]) => data.map((run) => ({ ...run, itemId: m.id })))
+            .catch(() => [] as RunInfo[]),
+        ),
+      ).then((perMember) => {
+        // Concatenate in member order; within each member preserve the
+        // backend's ordinal order (chronological within an itemId).
+        const pooled = perMember.flat();
+        // Globally renumber so the dropdown reads 1..N continuously.
+        const renumbered = pooled.map((run, i) => ({ ...run, runOrdinal: i + 1 }));
+
+        setRuns((prev) => {
+          if (
+            prev.length === renumbered.length &&
+            prev.every((r, i) =>
+              r.runId === renumbered[i].runId &&
+              r.status === renumbered[i].status &&
+              r.step === renumbered[i].step &&
+              r.lastLogTs === renumbered[i].lastLogTs &&
+              r.itemId === renumbered[i].itemId,
+            )
+          ) return prev;
+          return renumbered;
+        });
+
+        setActiveRunId((prev) => {
+          if (!prev) return renumbered.length > 0 ? renumbered[renumbered.length - 1].runId : entry.runId || null;
+          const latestRunId = renumbered.length > 0 ? renumbered[renumbered.length - 1].runId : null;
+          if (latestRunId && latestRunId !== prev && !renumbered.slice(0, -1).some((r) => r.runId === latestRunId)) {
+            return latestRunId;
+          }
+          if (renumbered.some((r) => r.runId === prev)) return prev;
+          return renumbered.length > 0 ? renumbered[renumbered.length - 1].runId : entry.runId || null;
+        });
+      });
     };
 
     fetchRuns();
-    // Poll for new runs while entry is running/pending
-    const isLive = entry.status === "running" || entry.status === "pending";
-    const interval = isLive ? setInterval(fetchRuns, 2_000) : undefined;
+    // Poll for new runs while ANY member of the group is running/pending —
+    // a sibling can transition while this primary is terminal, and the
+    // pooled run list needs to reflect that.
+    const anyLive =
+      entry.status === "running" || entry.status === "pending" ||
+      (siblings ?? []).some((s) => s.status === "running" || s.status === "pending");
+    const interval = anyLive ? setInterval(fetchRuns, 2_000) : undefined;
     return () => { if (interval) clearInterval(interval); };
-  }, [entry?.id, entry?.runId, entry?.status, entry?.workflow, workflow, date]);
+  }, [entry?.id, entry?.runId, entry?.status, entry?.workflow, workflow, date, siblingIdsKey]);
 
   // Use the entry's own workflow when present (cross-workflow rows: OCR
   // prep rows surface in oath-signature/emergency-contact queues, but
   // their logs live in ocr-logs.jsonl). Falls back to the topbar workflow
   // when no entry is selected (skeleton state).
   const logSourceWorkflow = entry?.workflow ?? workflow;
-  const { logs, loading: logsLoading } = useLogs(logSourceWorkflow, entry?.id || null, activeRunId, date);
-  const { events } = useRunEvents(logSourceWorkflow, entry?.id || null, activeRunId, date);
+  // When the active run came from a merged sibling, fetch logs against
+  // the run's TRUE itemId rather than the primary's id — JSONL keys logs
+  // per (workflow, itemId, runId) and the sibling's logs live under its
+  // own itemId.
+  const activeRunForLog = runs.find((r) => r.runId === activeRunId);
+  const activeItemId = activeRunForLog?.itemId || entry?.id || null;
+  const { logs, loading: logsLoading } = useLogs(logSourceWorkflow, activeItemId, activeRunId, date);
+  const { events } = useRunEvents(logSourceWorkflow, activeItemId, activeRunId, date);
   // Count screenshot events for the screenshots tab; ScreenshotsPanel uses
   // this to refetch /api/screenshots without opening its own SSE.
   const screenshotEventCount = events.reduce(
@@ -194,8 +241,14 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, defa
   // the run they actually selected. Use the per-run `data` carried on
   // `RunInfo` (server-side `runs.latest_data_json` via `/api/runs`) so
   // switching the run pill repaints the grid with that run's own values.
+  // When swapping in a historical run's data, ALSO clear typedData — it's
+  // the typed-shape mirror of the deduped entry's `data` and `formatTrackerValue`
+  // checks it first. Leaving the primary's typedData in place would mask the
+  // per-run `data` we just substituted (e.g. showing "Not found" from
+  // 10874572's last run while the operator is viewing Langley's earlier
+  // successful run).
   const detailEntry: TrackerEntry = !isViewingLiveRun && activeRun?.data
-    ? { ...entry, data: activeRun.data as TrackerEntry["data"] }
+    ? { ...entry, data: activeRun.data as TrackerEntry["data"], typedData: undefined }
     : entry;
 
   const renderDetailValue = (key: string): string => {
@@ -235,7 +288,7 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, defa
           )}
         </div>
         <div className="flex items-center gap-1">
-          <RunSelector runs={runs} activeRunId={activeRunId} onSelect={setActiveRunId} />
+          <RunSelector runs={runs} activeRunId={activeRunId} onSelect={setActiveRunId} onDeleteEntry={onDeleteEntry} />
           {runStatus === "failed" && entry && (
             <RetryButton workflow={entry.workflow} id={entry.id} size="md" />
           )}
@@ -336,7 +389,7 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, defa
         screenshotsSlot={
           <ScreenshotsPanel
             workflow={workflow}
-            itemId={entry?.id ?? null}
+            itemId={activeItemId}
             screenshotEventCount={screenshotEventCount}
           />
         }

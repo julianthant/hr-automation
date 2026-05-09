@@ -18,6 +18,10 @@ interface QueuePanelProps {
   displayNames?: Map<string, string>;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** The tracker date — forwarded to EntryItem delete buttons. */
+  date?: string;
+  /** Called after a hard-delete so App.tsx can remove the row from state. */
+  onDelete?: (id: string) => void;
   /** Run-id of the prep row currently open in the right-pane review. */
   reviewingPrepId?: string | null;
   /** Open the right-pane review for this prep row. */
@@ -66,6 +70,8 @@ export function QueuePanel({
   displayNames,
   selectedId,
   onSelect,
+  date,
+  onDelete,
   reviewingPrepId,
   onOpenReview,
   onReupload,
@@ -192,6 +198,8 @@ export function QueuePanel({
                 displayNames={displayNames}
                 selected={selectedId === entry.id}
                 onSelect={onSelect}
+                date={date}
+                onDelete={onDelete}
               />
             ))
           )
@@ -240,6 +248,8 @@ export function QueuePanel({
                   displayNames={displayNames}
                   selected={selectedId === entry.id}
                   onSelect={onSelect}
+                  date={date}
+                  onDelete={onDelete}
                 />
               ))
             )}

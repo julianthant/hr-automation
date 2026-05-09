@@ -65,6 +65,21 @@ export class Stepper {
       if (err instanceof CancelledError) {
         throw err
       }
+      // Force-cancel via about:blank navigation produces Playwright errors
+      // ("Navigation interrupted", "Target page closed", etc.) inside the
+      // step body. If cancellation was requested while the step ran,
+      // reclassify any thrown error as CancelledError so the daemon's
+      // claim-loop classifier sees `r.kind === 'cancelled'` and writes a
+      // cancelled tracker row instead of a failed one. Uses the literal
+      // 'force-stop' step name to match the convention established by
+      // runOneItem's catch (`new CancelledError('force-stop')` at the
+      // outer boundary) — operator-visible cancel messages stay
+      // consistent regardless of where the cancellation got intercepted.
+      if (this.opts.isCancelRequested?.()) {
+        this.currentStep = 'cancelled'
+        this.opts.emitStep('cancelled')
+        throw new CancelledError('force-stop')
+      }
       // Best-effort screenshot BEFORE emitFailed so the filename correlates with
       // the failed-step event. Errors inside screenshotFn are swallowed — the
       // original throw must always win.

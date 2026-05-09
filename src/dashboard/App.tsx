@@ -15,8 +15,8 @@ import { useTelegramToasts } from "./components/hooks/useTelegramToasts";
 import { useCaptureToasts } from "./components/hooks/useCaptureToasts";
 import { resolveActionToastsForEntry } from "./components/hooks/useActionToasts";
 import { useWorkflow, useWorkflows, autoLabel } from "./lib/workflows-context";
-import { resolveEntryName, buildDisplayNameMap } from "./components/shared/entry-display";
-import type { SearchResultRow, FailureRow } from "./components/shared/types";
+import { resolveEntryName, buildDisplayNameMap, groupMergedEntries } from "./components/shared/entry-display";
+import type { TrackerEntry, SearchResultRow, FailureRow } from "./components/shared/types";
 import { WorkflowRail } from "./components/navigation/WorkflowRail";
 import { QuickRunPanel } from "./components/navigation/QuickRunPanel";
 import { RetryAllButton } from "./components/queue-panel/RetryAllButton";
@@ -114,6 +114,53 @@ export default function App() {
   // SSE entries
   const { entries, entriesKey, workflows, wfCounts, failureCounts, connected, loading } = useEntries(workflow, date);
 
+  // Merge entries that resolve to the same person (same EID) into a single
+  // queue row. The "primary" is the entry that owns the latest run; its
+  // display name and status surface on the queue row. The other entries
+  // ("siblings") get folded into the LogPanel's run history. Run pooling +
+  // log routing happens in LogPanel.
+  const mergeGroups = useMemo(() => groupMergedEntries(entries), [entries]);
+
+  // Queue-display entries: one per merge group (the primary).
+  const dedupedEntries = useMemo<TrackerEntry[]>(
+    () => {
+      const primaries = mergeGroups.map((g) => g.primary);
+      // Match useEntries' newest-first sort so position is stable.
+      return [...primaries].sort((a, b) => {
+        const aStart = a.firstLogTs || "";
+        const bStart = b.firstLogTs || "";
+        if (!aStart && bStart) return 1;
+        if (aStart && !bStart) return -1;
+        if (!aStart && !bStart) return b.timestamp.localeCompare(a.timestamp);
+        return bStart.localeCompare(aStart);
+      });
+    },
+    [mergeGroups],
+  );
+
+  // Lookup: primary entry id → its siblings. Passed to LogPanel so it can
+  // pool runs across the merged group.
+  const siblingsByPrimaryId = useMemo(() => {
+    const m = new Map<string, TrackerEntry[]>();
+    for (const g of mergeGroups) m.set(g.primary.id, g.siblings);
+    return m;
+  }, [mergeGroups]);
+
+  // If the URL `?id=` points to a sibling that's been folded into a primary,
+  // redirect to the primary so the LogPanel actually loads. Without this,
+  // bookmarking/refreshing on a now-merged sibling would land on an empty
+  // log panel (the sibling no longer appears in the queue).
+  useEffect(() => {
+    if (!selectedId) return;
+    if (dedupedEntries.some((e) => e.id === selectedId)) return;
+    for (const g of mergeGroups) {
+      if (g.siblings.some((s) => s.id === selectedId)) {
+        setSelectedId(g.primary.id);
+        return;
+      }
+    }
+  }, [selectedId, dedupedEntries, mergeGroups]);
+
   // Fetch available dates when workflow changes. The selected date is
   // preserved across workflow switches — operators want to stay on the date
   // they were investigating, even if the new workflow has no data there
@@ -136,8 +183,8 @@ export default function App() {
   // ordinal stays stable as more rows arrive (the map is keyed by entry id;
   // older rows keep their #1, the newest gets #N).
   const displayNames = useMemo(
-    () => buildDisplayNameMap(entries, wfLabel),
-    [entries, wfLabel],
+    () => buildDisplayNameMap(dedupedEntries, wfLabel),
+    [dedupedEntries, wfLabel],
   );
 
   // Toast on completion/failure for LIVE transitions only — i.e. an entry
@@ -161,7 +208,7 @@ export default function App() {
       statusRef.current = new Map();
       lastToastKeyRef.current = targetKey;
     }
-    for (const entry of entries) {
+    for (const entry of dedupedEntries) {
       const prevStatus = statusRef.current.get(entry.id);
       statusRef.current.set(entry.id, entry.status);
       if (prevStatus === undefined) continue;
@@ -189,13 +236,13 @@ export default function App() {
         });
       }
     }
-  }, [entries, entriesKey, wfLabel, workflow, date, displayNames]);
+  }, [dedupedEntries, entriesKey, wfLabel, workflow, date, displayNames]);
 
   // Update document title
   useEffect(() => {
-    const running = entries.filter((e) => e.status === "running").length;
+    const running = dedupedEntries.filter((e) => e.status === "running").length;
     document.title = running > 0 ? `${running} running \u2014 HR Dashboard` : "HR Dashboard";
-  }, [entries]);
+  }, [dedupedEntries]);
 
   // Clear selection when switching workflows
   const handleWorkflowChange = useCallback((wf: string) => {
@@ -258,10 +305,14 @@ export default function App() {
     setDrilledBatchRunId(null);
   }, []);
 
+  const handleDeleteEntry = useCallback((id: string) => {
+    if (selectedId === id) setSelectedId(null);
+  }, [selectedId]);
+
   // Entry counts per workflow from backend SSE (accurate across all workflows)
   const entryCounts = wfCounts;
 
-  const selectedEntry = entries.find((e) => e.id === selectedId) || null;
+  const selectedEntry = dedupedEntries.find((e) => e.id === selectedId) || null;
 
   // Failed IDs across the current workflow + date — feeds RetryAllButton.
   // Excludes operator-discarded prep rows via `isResolvedPrepRow` so retry-bulk
@@ -270,10 +321,10 @@ export default function App() {
   // backend — same predicate drives FailureBell badge + WorkflowRail counts.
   const failedIds = useMemo(
     () =>
-      entries
+      dedupedEntries
         .filter((e) => e.status === "failed" && !isResolvedPrepRow(e))
         .map((e) => e.id),
-    [entries],
+    [dedupedEntries],
   );
 
   return (
@@ -306,11 +357,13 @@ export default function App() {
           onWorkflowChange={handleWorkflowChange}
         />
         <QueuePanel
-          entries={entries}
+          entries={dedupedEntries}
           workflow={workflow}
           displayNames={displayNames}
           selectedId={selectedId}
           onSelect={handleSelectEntry}
+          date={date}
+          onDelete={handleDeleteEntry}
           reviewingPrepId={reviewingPrepId}
           onOpenReview={handleOpenReview}
           onReupload={handleReupload}
@@ -324,7 +377,7 @@ export default function App() {
               <TopBarRunButton
                 activeWorkflow={workflow}
                 busyCount={
-                  entries.filter(
+                  dedupedEntries.filter(
                     (e) =>
                       (e.status === "pending" || e.status === "running") &&
                       parsePrepareRowData(e.data) !== null,
@@ -352,6 +405,8 @@ export default function App() {
               workflow={workflow}
               date={date}
               displayNames={displayNames}
+              siblings={selectedEntry ? siblingsByPrimaryId.get(selectedEntry.id) ?? [] : []}
+              onDeleteEntry={() => handleDeleteEntry(selectedEntry?.id ?? "")}
               previewAvailable={isPrepEntry}
               previewSlot={
                 isPrepEntry && selectedEntry ? (

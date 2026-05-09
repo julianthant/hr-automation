@@ -5,6 +5,7 @@ import type { TrackerEntry } from "@/components/shared/types";
 import { resolveEntryName } from "@/components/shared/entry-display";
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
 import { RetryButton } from "@/components/shared/RetryButton";
+import { DeleteButton } from "@/components/shared/DeleteButton";
 import { QueueItemControls } from "./QueueItemControls";
 import { CancelRunningButton } from "./CancelRunningButton";
 
@@ -83,10 +84,14 @@ interface EntryItemProps {
    * `React.memo` wrapper below to avoid re-rendering 50+ rows on every SSE tick.
    */
   onSelect: (id: string) => void;
+  /** The tracker date this entry belongs to — passed to DeleteButton. */
+  date?: string;
+  /** Called after a successful hard-delete so the parent can remove the row. */
+  onDelete?: (id: string) => void;
 }
 
-function EntryItemImpl({ entry, displayNames, selected, onSelect }: EntryItemProps) {
-  const name = resolveEntryName(entry, displayNames);
+function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete }: EntryItemProps) {
+  const resolvedName = resolveEntryName(entry, displayNames);
   // `step === "cancelled"` overrides the generic `failed` status so the row
   // renders amber/Ban instead of red/AlertTriangle. The data model is still
   // `status: "failed"` (one tracker enum, no schema change) — `step` is the
@@ -94,6 +99,11 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect }: EntryItemPro
   // when the daemon's cancel flag is set; cancel-queued's handler does the
   // same on a queued item.
   const isCancelled = entry.status === "failed" && entry.step === "cancelled";
+  // Cancelled entries: prefer entry.id over an ordinal label ("Active Check 1")
+  // when they differ — the concrete identifier is more useful than a sequence
+  // number once the run is terminal, and it avoids duplicating the value in
+  // both the header and the footer.
+  const name = isCancelled && entry.id && entry.id !== resolvedName ? entry.id : resolvedName;
   const isRunning = entry.status === "running";
   const isFailed = entry.status === "failed" && !isCancelled;
   const isDone = entry.status === "done";
@@ -209,10 +219,20 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect }: EntryItemPro
             <span className="tabular-nums flex-shrink-0">{duration}</span>
           )}
           {(isFailed || isCancelled) && (
-            <RetryButton
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <RetryButton workflow={entry.workflow} id={entry.id} />
+              {onDelete && date && (
+                <DeleteButton workflow={entry.workflow} id={entry.id} date={date} onDeleted={onDelete} />
+              )}
+            </div>
+          )}
+          {isDone && onDelete && date && (
+            <DeleteButton
               workflow={entry.workflow}
               id={entry.id}
-              className="flex-shrink-0 ml-1"
+              date={date}
+              onDeleted={onDelete}
+              className="flex-shrink-0"
             />
           )}
           {isRunning && entry.runId && (
@@ -257,6 +277,8 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect }: EntryItemPro
 export const EntryItem = memo(EntryItemImpl, (prev, next) => {
   if (prev.selected !== next.selected) return false;
   if (prev.onSelect !== next.onSelect) return false;
+  if (prev.onDelete !== next.onDelete) return false;
+  if (prev.date !== next.date) return false;
   if (prev.displayNames !== next.displayNames) return false;
   const a = prev.entry;
   const b = next.entry;
