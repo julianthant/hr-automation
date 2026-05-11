@@ -1,9 +1,16 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, useEffect, useRef, type ReactNode } from "react";
 import { Inbox } from "lucide-react";
 import { StatPills } from "./StatPills";
 import { EntryItem } from "./EntryItem";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { ParentChildRow } from "@/components/ocr/ParentChildRow";
+import { cn } from "@/lib/utils";
+import {
+  BatchQueueMemberList,
+  BatchQueueToolbar,
+  buildSyntheticBatchQueueAnchor,
+} from "./batch-queue-view";
+import { DaemonBatchRow } from "./DaemonBatchRow";
+import { DelegationRow } from "@/components/ocr/DelegationRow";
 import type { TrackerEntry } from "@/components/shared/types";
 import {
   isApprovedPrepRow,
@@ -16,6 +23,8 @@ interface QueuePanelProps {
   /** Row set for StatPills (merged EXCLUDING operator-resolved prep). Defaults to discarded-prep-filtered entries when omitted. */
   statPanelEntries?: TrackerEntry[];
   workflow: string;
+  /** Registry label for batch summary cards / synthetic batch toolbar titles. */
+  workflowLabel: string;
   /** Per-entry "<base> <ordinal>" labels from `buildDisplayNameMap`. */
   displayNames?: Map<string, string>;
   selectedId: string | null;
@@ -30,12 +39,15 @@ interface QueuePanelProps {
   onOpenReview?: (runId: string) => void;
   /** Open RunModal in reupload mode for the given OCR session. */
   onReupload?: (reuploadFor: { sessionId: string; previousRunId: string }) => void;
-  /** RunId of the approved prep row currently drilled-into. null = main queue view. */
-  drilledBatchRunId?: string | null;
-  /** Open the drilled batch view for the given parent runId. */
-  onDrillIn?: (parentRunId: string) => void;
-  /** Exit drilled batch view back to the main queue. */
-  onDrillOut?: () => void;
+  /**
+   * When set, the panel shows `BatchQueueToolbar` + `BatchQueueMemberList` for
+   * that batch anchor only (delegation children today; same shell for future daemon batches).
+   */
+  batchQueueParentRunId?: string | null;
+  /** Enter batch-queue mode scoped to entries whose parent run id matches. */
+  onEnterBatchQueue?: (parentRunId: string) => void;
+  /** Leave batch-queue mode and return to the main queue list. */
+  onExitBatchQueue?: () => void;
   loading: boolean;
   /**
    * Optional cluster of run controls (QuickRunPanel + Capture / Oath /
@@ -70,6 +82,7 @@ export function QueuePanel({
   entries,
   statPanelEntries,
   workflow,
+  workflowLabel,
   displayNames,
   selectedId,
   onSelect,
@@ -78,13 +91,12 @@ export function QueuePanel({
   reviewingPrepId,
   onOpenReview,
   onReupload,
-  drilledBatchRunId,
-  onDrillIn,
-  onDrillOut,
+  batchQueueParentRunId,
+  onEnterBatchQueue,
+  onExitBatchQueue,
   loading,
   runControlsSlot,
 }: QueuePanelProps) {
-  void workflow;
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
   // Resolved prep rows (approved/discarded) are treated as fully retired —
@@ -105,11 +117,10 @@ export function QueuePanel({
   );
 
   /**
-   * Map approved-prep runId → list of child entries (entries whose
-   * `parentRunId` matches the prep row's runId). Computed once per entries
-   * change so each ParentChildRow render is O(1) lookup.
+   * Map parent runId → delegated member entries (`parentRunId`). Used for
+   * {@link DelegationRow} summaries and for {@link BatchQueueMemberList}.
    */
-  const childrenByParentRun = useMemo(() => {
+  const batchMembersByParentRunId = useMemo(() => {
     const map = new Map<string, TrackerEntry[]>();
     for (const e of visibleEntries) {
       if (!e.parentRunId) continue;
@@ -120,26 +131,48 @@ export function QueuePanel({
     return map;
   }, [visibleEntries]);
 
-  const drilledParent = useMemo(
-    () =>
-      drilledBatchRunId
-        ? approvedPrepEntries.find(
-            (e) => (e.runId ?? e.id) === drilledBatchRunId,
-          ) ?? null
-        : null,
-    [drilledBatchRunId, approvedPrepEntries],
+  /**
+   * Toolbar title row for batch-queue mode: OCR prep anchor row if present,
+   * else a synthetic row for daemon/dashboard batch ids.
+   */
+  const resolvedBatchToolbarEntry = useMemo(() => {
+    if (!batchQueueParentRunId) return null;
+    const prep = approvedPrepEntries.find(
+      (e) => (e.runId ?? e.id) === batchQueueParentRunId,
+    );
+    if (prep) return prep;
+    const members = batchMembersByParentRunId.get(batchQueueParentRunId) ?? [];
+    return buildSyntheticBatchQueueAnchor(
+      batchQueueParentRunId,
+      members,
+      workflowLabel,
+      workflow,
+    );
+  }, [
+    batchQueueParentRunId,
+    approvedPrepEntries,
+    batchMembersByParentRunId,
+    workflowLabel,
+    workflow,
+  ]);
+
+  const batchAnchorIsPrep = Boolean(
+    batchQueueParentRunId &&
+      approvedPrepEntries.some((e) => (e.runId ?? e.id) === batchQueueParentRunId),
   );
 
-  const drilledChildren = useMemo(
+  const batchQueueMembers = useMemo(
     () =>
-      drilledBatchRunId ? childrenByParentRun.get(drilledBatchRunId) ?? [] : [],
-    [drilledBatchRunId, childrenByParentRun],
+      batchQueueParentRunId
+        ? batchMembersByParentRunId.get(batchQueueParentRunId) ?? []
+        : [],
+    [batchQueueParentRunId, batchMembersByParentRunId],
   );
 
   /**
-   * Set of parent runIds that are currently rendered as ParentChildRow above
-   * the regular list. Children of these parents are folded INTO the parent
-   * card, so they should not also appear in the flat list.
+   * Approved prep rows render as {@link DelegationRow} above the flat list.
+   * Their members are folded into the batch card or the batch queue view, so
+   * exclude them from the main list.
    */
   const approvedParentRunIds = useMemo(
     () =>
@@ -149,33 +182,116 @@ export function QueuePanel({
     [approvedPrepEntries],
   );
 
+  /** Non–OCR-prep `parentRunId` keys (daemon batches, dashboard multi-enqueue). */
+  const daemonBatchParentIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const pid of batchMembersByParentRunId.keys()) {
+      if (!approvedParentRunIds.has(pid)) ids.push(pid);
+    }
+    ids.sort((a, b) => {
+      const ta = batchMembersByParentRunId.get(a)?.[0]?.timestamp ?? "";
+      const tb = batchMembersByParentRunId.get(b)?.[0]?.timestamp ?? "";
+      return tb.localeCompare(ta);
+    });
+    return ids;
+  }, [batchMembersByParentRunId, approvedParentRunIds]);
+
   const filtered = useMemo(() => {
     let result = visibleEntries.filter(
       (e) =>
-        // Prep rows now render as regular EntryItem in the main list — only
-        // approved-prep parents (which become ParentChildRow above) and
-        // children-of-approved-parents (folded into the parent) are excluded.
+        // Prep rows render as EntryItem in the main list — approved-prep
+        // parents become DelegationRow; their members stay out of the flat list.
         !isApprovedPrepRow(e) &&
-        !(e.parentRunId && approvedParentRunIds.has(e.parentRunId)),
+        !(e.parentRunId && approvedParentRunIds.has(e.parentRunId)) &&
+        !(e.parentRunId && batchMembersByParentRunId.has(e.parentRunId)),
     );
     if (statusFilter) {
       result = result.filter((e) => entryMatchesStatusFilter(e, statusFilter));
     }
     return result;
-  }, [visibleEntries, statusFilter, approvedParentRunIds]);
+  }, [
+    visibleEntries,
+    statusFilter,
+    approvedParentRunIds,
+    batchMembersByParentRunId,
+  ]);
 
   const statPillSource = statPanelEntries ?? visibleEntries;
 
+  /** Same order as rendered `EntryItem` rows — used for ↑/↓ keyboard selection. */
+  const navigableIds = useMemo(() => {
+    if (loading) return [];
+    if (batchQueueParentRunId) return batchQueueMembers.map((e) => e.id);
+    return filtered.map((e) => e.id);
+  }, [loading, batchQueueParentRunId, batchQueueMembers, filtered]);
+
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const navigableIdsRef = useRef(navigableIds);
+  navigableIdsRef.current = navigableIds;
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+
+  useEffect(() => {
+    const isEditableFocus = (el: EventTarget | null): boolean => {
+      if (!(el instanceof HTMLElement)) return false;
+      if (el.isContentEditable) return true;
+      const tag = el.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+      return Boolean(el.closest("[role='textbox'][contenteditable='true']"));
+    };
+
+    const scrollEntryIntoView = (id: string) => {
+      const root = scrollAreaRef.current;
+      if (!root) return;
+      const node = root.querySelector(`[data-queue-entry-id="${CSS.escape(id)}"]`);
+      if (node instanceof HTMLElement) {
+        node.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      if (e.defaultPrevented) return;
+      if (isEditableFocus(e.target)) return;
+
+      const ids = navigableIdsRef.current;
+      if (ids.length === 0) return;
+
+      e.preventDefault();
+      let idx = ids.indexOf(selectedIdRef.current ?? "");
+      if (idx === -1) {
+        idx = e.key === "ArrowDown" ? -1 : ids.length;
+      }
+      const delta = e.key === "ArrowDown" ? 1 : -1;
+      const nextIdx = idx + delta;
+      if (nextIdx < 0 || nextIdx >= ids.length) return;
+      const nextId = ids[nextIdx]!;
+      onSelectRef.current(nextId);
+      requestAnimationFrame(() => scrollEntryIntoView(nextId));
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   return (
     <div className="w-[300px] min-[1440px]:w-[380px] 2xl:w-[460px] flex-shrink-0 flex flex-col bg-background">
-      {drilledParent ? (
-        <DrilledHeader
-          parent={drilledParent}
-          onBack={() => onDrillOut?.()}
-          onOpenReview={() => {
-            const runId = drilledParent.runId ?? drilledParent.id;
-            onOpenReview?.(runId);
-          }}
+      {batchQueueParentRunId && resolvedBatchToolbarEntry ? (
+        <BatchQueueToolbar
+          batchAnchor={resolvedBatchToolbarEntry}
+          anchorKind={batchAnchorIsPrep ? "prep" : "daemon"}
+          onBack={() => onExitBatchQueue?.()}
+          onOpenPrepReview={
+            batchAnchorIsPrep
+              ? () => {
+                  const runId =
+                    resolvedBatchToolbarEntry.runId ?? resolvedBatchToolbarEntry.id;
+                  onOpenReview?.(runId);
+                }
+              : undefined
+          }
         />
       ) : (
         <div className="h-[69.5px] flex items-center px-3 min-[1440px]:px-4 py-2 border-b border-border bg-card/60 flex-shrink-0">
@@ -187,41 +303,40 @@ export function QueuePanel({
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto border-b border-border">
-        {drilledParent ? (
-          drilledChildren.length === 0 ? (
-            <EmptyState
-              icon={Inbox}
-              title="No children yet"
-              description="Children will appear here as the workflow processes them"
-            />
-          ) : (
-            drilledChildren.map((entry) => (
-              <EntryItem
-                key={entry.id}
-                entry={entry}
-                displayNames={displayNames}
-                selected={selectedId === entry.id}
-                onSelect={onSelect}
-                date={date}
-                onDelete={onDelete}
-              />
-            ))
-          )
+      <div ref={scrollAreaRef} className="flex-1 overflow-y-auto border-b border-border">
+        {batchQueueParentRunId ? (
+          <BatchQueueMemberList
+            members={batchQueueMembers}
+            selectedId={selectedId}
+            onSelect={onSelect}
+            displayNames={displayNames}
+            date={date}
+            onDelete={onDelete}
+          />
         ) : (
           <>
             {approvedPrepEntries.map((e) => {
               const runId = e.runId ?? e.id;
               return (
-                <ParentChildRow
-                  key={`pcr-${runId}`}
+                <DelegationRow
+                  key={`delegation-${runId}`}
                   parent={e}
-                  childEntries={childrenByParentRun.get(runId) ?? []}
-                  isDrilled={drilledBatchRunId === runId}
-                  onDrillIn={(rid) => onDrillIn?.(rid)}
+                  delegatedEntries={batchMembersByParentRunId.get(runId) ?? []}
+                  isBatchQueueFocused={batchQueueParentRunId === runId}
+                  onEnterBatchQueue={(rid) => onEnterBatchQueue?.(rid)}
                 />
               );
             })}
+            {daemonBatchParentIds.map((batchId) => (
+              <DaemonBatchRow
+                key={`daemon-batch-${batchId}`}
+                batchParentRunId={batchId}
+                workflowLabel={workflowLabel}
+                memberEntries={batchMembersByParentRunId.get(batchId) ?? []}
+                isBatchQueueFocused={batchQueueParentRunId === batchId}
+                onEnterBatchQueue={(rid) => onEnterBatchQueue?.(rid)}
+              />
+            ))}
             {/* Prep rows render as regular EntryItem (same size + behavior
                 as other workflow rows). The only differentiator is the
                 Preview tab inside LogPanel, gated on data.mode === "prepare".
@@ -263,62 +378,15 @@ export function QueuePanel({
       </div>
 
       {runControlsSlot && (
-        <div className="h-12 flex items-center gap-2 px-3 min-[1440px]:px-4 bg-card/40 flex-shrink-0 justify-end">
+        <div
+          className={cn(
+            "h-12 flex items-center gap-2 px-3 min-[1440px]:px-4 bg-card/40 flex-shrink-0",
+            batchQueueParentRunId ? "justify-between" : "justify-end",
+          )}
+        >
           {runControlsSlot}
         </div>
       )}
     </div>
   );
-}
-
-function DrilledHeader({
-  parent,
-  onBack,
-  onOpenReview,
-}: {
-  parent: TrackerEntry;
-  onBack: () => void;
-  onOpenReview: () => void;
-}) {
-  const filename = parent.data?.pdfOriginalName || "Prep batch";
-  const runId = parent.runId ?? parent.id;
-  const time = formatPrepHeaderTime(parent.timestamp);
-  return (
-    <div className="h-[69.5px] flex flex-col justify-center px-3 min-[1440px]:px-4 border-b border-border bg-card/60 flex-shrink-0 gap-1">
-      <div className="flex items-center gap-2 min-w-0">
-        <button
-          type="button"
-          onClick={onBack}
-          className="inline-flex items-center gap-1 rounded-md border border-border bg-secondary/40 px-2 py-1 text-[11px] text-foreground hover:bg-secondary/70 flex-shrink-0"
-        >
-          ← Queue
-        </button>
-        <span className="text-muted-foreground/60">/</span>
-        <span className="font-semibold text-[13px] text-foreground truncate min-w-0 flex-1">
-          {filename}
-        </span>
-      </div>
-      <div className="text-[10px] font-mono text-muted-foreground pl-1 flex items-center gap-1.5">
-        <span>Approved {time} · prep#{runId.slice(-4)}</span>
-        <span className="text-muted-foreground/50">·</span>
-        <button
-          type="button"
-          onClick={onOpenReview}
-          className="text-primary hover:text-primary/80 underline-offset-2 hover:underline transition-colors"
-        >
-          Open prep review
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function formatPrepHeaderTime(ts: string): string {
-  try {
-    const d = new Date(ts);
-    if (Number.isNaN(d.getTime())) return ts.slice(11, 16);
-    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  } catch {
-    return ts.slice(11, 16);
-  }
 }

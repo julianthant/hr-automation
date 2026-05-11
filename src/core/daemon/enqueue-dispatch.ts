@@ -26,6 +26,13 @@ export interface EnqueueHttpResult {
   error?: string;
 }
 
+/** Options for {@link enqueueFromHttp} (queue dir + optional batch / delegation id). */
+export interface EnqueueFromHttpOptions {
+  trackerDir?: string;
+  /** Stamps every queued item + pre-emitted tracker rows with this parent run id. */
+  parentRunId?: string;
+}
+
 export interface EnqueueValidateResult {
   ok: boolean;
   error?: string;
@@ -141,8 +148,17 @@ export function buildHttpPendingData<TData, TSteps extends readonly string[]>(
 export async function enqueueFromHttp(
   workflowName: string,
   inputs: unknown[],
-  trackerDir?: string,
+  trackerDirOrOptions?: string | EnqueueFromHttpOptions,
 ): Promise<EnqueueHttpResult> {
+  const trackerDir =
+    typeof trackerDirOrOptions === "string"
+      ? trackerDirOrOptions
+      : trackerDirOrOptions?.trackerDir;
+  const parentRunId =
+    typeof trackerDirOrOptions === "object" && trackerDirOrOptions
+      ? trackerDirOrOptions.parentRunId
+      : undefined;
+
   if (!Array.isArray(inputs) || inputs.length === 0) {
     return { ok: false, workflow: workflowName, enqueued: 0, error: "inputs must be a non-empty array" };
   }
@@ -189,10 +205,13 @@ export async function enqueueFromHttp(
       {},
       {
         trackerDir,
+        ...(parentRunId ? { parentRunId } : {}),
         ...(deriveItemId ? { deriveItemId } : {}),
-        onPreEmitPending: (item, runId, _parentRunId, itemId) => {
+        onPreEmitPending: (item, runId, passedParentRunId, itemId) => {
           const data = buildHttpPendingData(wf, item);
           const id = itemId;
+          /** Pending + spawn-failure rows share stamp; `??` tolerates enqueue-client vs HTTP-option drift. */
+          const stampedParentRunId = passedParentRunId ?? parentRunId;
           // Persist the original input verbatim on the pending row so the
           // dashboard's retry / edit-and-resume features can reconstruct
           // the call without per-workflow input-shaping logic. See the
@@ -209,6 +228,7 @@ export async function enqueueFromHttp(
               runId,
               status: "pending",
               data,
+              ...(stampedParentRunId ? { parentRunId: stampedParentRunId } : {}),
               ...(input ? { input } : {}),
             },
             trackerDir,
@@ -232,6 +252,7 @@ export async function enqueueFromHttp(
               runId,
               status: "failed",
               data,
+              ...(parentRunId ? { parentRunId } : {}),
               error: `Spawn failed before enqueue: ${error}`,
             },
             trackerDir,

@@ -389,10 +389,11 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
             runs={runs}
             activeRunId={activeRunId}
             onSelect={setActiveRunId}
-            retryTarget={runStatus === "failed" ? {
-              workflow: entry.workflow,
-              id: entry.id,
-            } : undefined}
+            retryTarget={{
+              workflow: logSourceWorkflow,
+              id: activeItemId ?? entry.id,
+              runId: activeRunId ?? undefined,
+            }}
             deleteTarget={onDeleteEntry && activeRunId ? {
               workflow: entry.workflow,
               id: activeItemId ?? entry.id,

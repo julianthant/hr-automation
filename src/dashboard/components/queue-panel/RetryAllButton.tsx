@@ -6,9 +6,11 @@ import { cn } from "@/lib/utils";
 interface RetryAllButtonProps {
   workflow: string;
   failedIds: string[];
+  /** When set (batch queue mode), retries are stamped with this batch parent id. */
+  parentRunId?: string;
 }
 
-export function RetryAllButton({ workflow, failedIds }: RetryAllButtonProps) {
+export function RetryAllButton({ workflow, failedIds, parentRunId }: RetryAllButtonProps) {
   const [retrying, setRetrying] = useState(false);
 
   async function retryAll() {
@@ -19,7 +21,11 @@ export function RetryAllButton({ workflow, failedIds }: RetryAllButtonProps) {
       const res = await fetch("/api/retry-bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workflow, ids: failedIds }),
+        body: JSON.stringify({
+          workflow,
+          ids: failedIds,
+          ...(parentRunId ? { parentRunId } : {}),
+        }),
       });
       const body = (await res.json()) as {
         ok: boolean;

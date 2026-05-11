@@ -7,6 +7,7 @@ import { LogPanel } from "./components/log-panel/LogPanel";
 import { OcrReviewPane } from "./components/ocr/OcrReviewPane";
 import { TerminalDrawer } from "./components/terminal-drawer/TerminalDrawer";
 import { TerminalDrawerProvider } from "./components/hooks/useTerminalDrawer";
+import { BatchQueueParentRunIdProvider } from "./components/hooks/useBatchQueueContext";
 import { useEntries } from "./components/hooks/useEntries";
 import { usePreflight } from "./components/hooks/usePreflight";
 import { prefetchRosters } from "./components/hooks/useRosters";
@@ -61,7 +62,7 @@ export default function App() {
   const [workflow, setWorkflow] = useState(initial.workflow);
   const [selectedId, setSelectedId] = useState<string | null>(initial.selectedId);
   const [reviewingPrepId, setReviewingPrepId] = useState<string | null>(null);
-  const [drilledBatchRunId, setDrilledBatchRunId] = useState<string | null>(null);
+  const [batchQueueParentRunId, setBatchQueueParentRunId] = useState<string | null>(null);
   const [runModalOpen, setRunModalOpen] = useState(false);
   const [runModalReuploadFor, setRunModalReuploadFor] = useState<{ sessionId: string; previousRunId: string } | undefined>(undefined);
   const [date, setDate] = useState(initial.date);
@@ -257,12 +258,12 @@ export default function App() {
   const handleWorkflowChange = useCallback((wf: string) => {
     setWorkflow(wf);
     setSelectedId(null);
-    setDrilledBatchRunId(null);
+    setBatchQueueParentRunId(null);
   }, []);
 
   const handleDateChange = useCallback((d: string) => {
     setDate(d);
-    setDrilledBatchRunId(null);
+    setBatchQueueParentRunId(null);
   }, []);
 
   // Cross-date search → deep-link to the matching (workflow, date, id).
@@ -303,15 +304,14 @@ export default function App() {
     },
     [],
   );
-  const handleDrillIn = useCallback((parentRunId: string) => {
-    // Drilling exits any open prep review and clears any selected child —
-    // the user explicitly switched contexts.
+  const handleEnterBatchQueue = useCallback((parentRunId: string) => {
+    // Batch queue mode exits any open prep review and clears any selected child.
     setReviewingPrepId(null);
     setSelectedId(null);
-    setDrilledBatchRunId(parentRunId);
+    setBatchQueueParentRunId(parentRunId);
   }, []);
-  const handleDrillOut = useCallback(() => {
-    setDrilledBatchRunId(null);
+  const handleExitBatchQueue = useCallback(() => {
+    setBatchQueueParentRunId(null);
   }, []);
 
   const handleDeleteEntry = useCallback((id: string) => {
@@ -321,12 +321,16 @@ export default function App() {
   // Rail badges: other workflows use SSE `wfCounts`; the **active** workflow
   // uses the same merged + resolved-prep exclusion as the StatPills strip so
   // the sidebar digit and "ALL" stay lockstep.
+  // Only override the active workflow's count once `entriesKey` confirms the
+  // loaded entries belong to the current workflow — prevents a stale count
+  // flash when switching workflows before the new SSE tick arrives.
+  const entriesMatchWorkflow = entriesKey.startsWith(`${workflow}|`);
   const entryCounts = useMemo(
     () => ({
       ...wfCounts,
-      [workflow]: statPanelEntries.length,
+      ...(entriesMatchWorkflow ? { [workflow]: statPanelEntries.length } : {}),
     }),
-    [wfCounts, workflow, statPanelEntries],
+    [wfCounts, workflow, statPanelEntries, entriesMatchWorkflow],
   );
 
   const selectedEntry = dedupedEntries.find((e) => e.id === selectedId) || null;
@@ -344,7 +348,20 @@ export default function App() {
     [dedupedEntries],
   );
 
+  const retryAllFailedIds = useMemo(() => {
+    if (!batchQueueParentRunId) return failedIds;
+    return dedupedEntries
+      .filter(
+        (e) =>
+          e.parentRunId === batchQueueParentRunId &&
+          e.status === "failed" &&
+          !isResolvedPrepRow(e),
+      )
+      .map((e) => e.id);
+  }, [batchQueueParentRunId, dedupedEntries, failedIds]);
+
   return (
+    <BatchQueueParentRunIdProvider parentRunId={batchQueueParentRunId}>
     <TooltipProvider delayDuration={150} skipDelayDuration={300}>
     <TerminalDrawerProvider>
     <div className="flex flex-col h-screen">
@@ -377,6 +394,7 @@ export default function App() {
           entries={dedupedEntries}
           statPanelEntries={statPanelEntries}
           workflow={workflow}
+          workflowLabel={wfLabel}
           displayNames={displayNames}
           selectedId={selectedId}
           onSelect={handleSelectEntry}
@@ -385,9 +403,9 @@ export default function App() {
           reviewingPrepId={reviewingPrepId}
           onOpenReview={handleOpenReview}
           onReupload={handleReupload}
-          drilledBatchRunId={drilledBatchRunId}
-          onDrillIn={handleDrillIn}
-          onDrillOut={handleDrillOut}
+          batchQueueParentRunId={batchQueueParentRunId}
+          onEnterBatchQueue={handleEnterBatchQueue}
+          onExitBatchQueue={handleExitBatchQueue}
           loading={loading}
           runControlsSlot={
             <>
@@ -402,7 +420,11 @@ export default function App() {
                   ).length
                 }
               />
-              <RetryAllButton workflow={workflow} failedIds={failedIds} />
+              <RetryAllButton
+                workflow={workflow}
+                failedIds={retryAllFailedIds}
+                parentRunId={batchQueueParentRunId ?? undefined}
+              />
               <TopBarCaptureButton workflow={workflow} />
             </>
           }
@@ -457,5 +479,6 @@ export default function App() {
     </div>
     </TerminalDrawerProvider>
     </TooltipProvider>
+    </BatchQueueParentRunIdProvider>
   );
 }

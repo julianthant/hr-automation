@@ -9,7 +9,7 @@ import {
   computeBatchElapsed,
   resolveBatchAccent,
   type BatchAccent,
-} from "./parent-child-helpers";
+} from "./delegation-row-helpers";
 
 const PREVIEW_KIDS = 3;
 
@@ -27,27 +27,32 @@ const STATUS_ICON: Record<string, { Icon: LucideIcon; color: string; spin: boole
   failed: { Icon: AlertTriangle, color: "text-destructive", spin: false },
 };
 
-export interface ParentChildRowProps {
-  /** The approved prep tracker row. */
+/**
+ * Summary card for a **delegation batch**: an approved prep row and its
+ * downstream kernel runs (`parentRunId`). Click enters batch queue mode
+ * (`BatchQueueToolbar` + `BatchQueueMemberList`). For generic daemon batches,
+ * use those two components without this row once an anchor exists in tracker.
+ */
+export interface DelegationRowProps {
+  /** The approved prep tracker row (delegation parent). */
   parent: TrackerEntry;
-  /** All children of this parent (entries with parentRunId === parent.runId).
-   *  Named `childEntries` (not `children`) to avoid colliding with React's
-   *  built-in `children` prop and with the `children` keyword. */
-  childEntries: TrackerEntry[];
-  isDrilled: boolean;
-  onDrillIn: (parentRunId: string) => void;
+  /** Downstream entries with `parentRunId === parent.runId`. */
+  delegatedEntries: TrackerEntry[];
+  /** Whether the batch queue view is showing this parent's members. */
+  isBatchQueueFocused: boolean;
+  onEnterBatchQueue: (parentRunId: string) => void;
 }
 
-export function ParentChildRow({
+export function DelegationRow({
   parent,
-  childEntries,
-  isDrilled,
-  onDrillIn,
-}: ParentChildRowProps) {
-  const counts = aggregateBatchCounts(childEntries);
+  delegatedEntries,
+  isBatchQueueFocused,
+  onEnterBatchQueue,
+}: DelegationRowProps) {
+  const counts = aggregateBatchCounts(delegatedEntries);
   const accent = resolveBatchAccent(counts);
-  const previewKids = pickPreviewChildren(childEntries, PREVIEW_KIDS);
-  const elapsed = computeBatchElapsed(childEntries);
+  const previewKids = pickPreviewChildren(delegatedEntries, PREVIEW_KIDS);
+  const elapsed = computeBatchElapsed(delegatedEntries);
 
   const liveTick = useElapsed(
     elapsed && !elapsed.frozen ? new Date(elapsed.startMs).toISOString() : null,
@@ -72,13 +77,13 @@ export function ParentChildRow({
       <div
         role="button"
         tabIndex={0}
-        aria-pressed={isDrilled}
+        aria-pressed={isBatchQueueFocused}
         aria-label={`${filename} — ${counts.done} of ${counts.total} done`}
-        onClick={() => onDrillIn(runId)}
+        onClick={() => onEnterBatchQueue(runId)}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            onDrillIn(runId);
+            onEnterBatchQueue(runId);
           }
         }}
         className={cn(
@@ -87,7 +92,7 @@ export function ParentChildRow({
           "hover:border-primary/40 hover:shadow-lg hover:shadow-black/20",
           "focus-visible:ring-2 focus-visible:ring-primary",
           ACCENT_BORDER[accent],
-          isDrilled && "ring-2 ring-primary",
+          isBatchQueueFocused && "ring-2 ring-primary",
         )}
       >
         {/* Header */}

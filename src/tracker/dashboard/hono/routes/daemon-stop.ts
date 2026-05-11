@@ -29,8 +29,8 @@ export function registerDaemonStopRoute(app: Hono, deps: DashboardHonoDeps): voi
       if (!workflow) return jsonResponse({ ok: false, error: "workflow is required" }, 400);
       const force = input.force === true;
 
-      const aliveDaemons = await findAliveDaemons(workflow, deps.dir);
-      const daemonPids = new Set(aliveDaemons.map((daemon) => daemon.pid));
+      const aliveDaemonsBefore = await findAliveDaemons(workflow, deps.dir);
+      const daemonPids = new Set(aliveDaemonsBefore.map((daemon) => daemon.pid));
       const daemonsStopped = await stopDaemons(workflow, force, deps.dir);
 
       const events = readSessionEvents(deps.dir);
@@ -46,6 +46,42 @@ export function registerDaemonStopRoute(app: Hono, deps: DashboardHonoDeps): voi
           const set = browserPidsByInstance.get(event.workflowInstance) ?? new Set<number>();
           set.add(event.chromiumPid);
           browserPidsByInstance.set(event.workflowInstance, set);
+        }
+      }
+
+      // Session drawer closure is driven by `workflow_end`. The legacy phantom
+      // path only synthesized an end when `process.kill(pid, 0)` failed — but
+      // defunct/zombie OS PIDs can still answer kill(0), so the card stayed
+      // "alive" forever after browsers were torn down. When we had lockfile+
+      // /whoami-proven daemon PIDs before stop and the registry shows them
+      // gone afterward, synthesize workflow_end unconditionally for matching
+      // workflow_start.pid rows (daemon registry is authoritative for "this
+      // workflow's workers are toast").
+      let phantomsCleared = 0;
+      if (daemonPids.size > 0) {
+        await new Promise<void>((r) => setTimeout(r, 250));
+        const aliveAfterStop = await findAliveDaemons(workflow, deps.dir);
+        const survivedDaemonPids = new Set(aliveAfterStop.map((d) => d.pid));
+        for (const daemonPid of daemonPids) {
+          if (survivedDaemonPids.has(daemonPid)) continue;
+          for (const [instance, startEvent] of startsByInstance) {
+            if (endedInstances.has(instance)) continue;
+            if (startEvent.pid !== daemonPid) continue;
+            try {
+              emitWorkflowEnd(instance, "failed", deps.dir);
+              endedInstances.add(instance);
+              phantomsCleared += 1;
+            } catch (err) {
+              log.warn(
+                `[/api/daemon/stop] failed to synthesize workflow_end for stopped daemon '${instance}': ${errorMessage(err)}`,
+              );
+            }
+          }
+        }
+        if (phantomsCleared > 0) {
+          log.step(
+            `[/api/daemon/stop] closed ${phantomsCleared} ${workflow} session drawer instance(s) (daemon(s) gone from registry)`,
+          );
         }
       }
 
@@ -106,7 +142,7 @@ export function registerDaemonStopRoute(app: Hono, deps: DashboardHonoDeps): voi
         log.step(`[/api/daemon/stop] SIGKILL'd ${browsersKilled} orphaned Chromium process(es) for ${workflow}`);
       }
 
-      let phantomsCleared = 0;
+      const afterRegistryPhantoms = phantomsCleared;
       for (const [instance, startEvent] of startsByInstance) {
         if (endedInstances.has(instance)) continue;
         const pid = startEvent.pid;
@@ -121,13 +157,16 @@ export function registerDaemonStopRoute(app: Hono, deps: DashboardHonoDeps): voi
         if (alive) continue;
         try {
           emitWorkflowEnd(instance, "failed", deps.dir);
+          endedInstances.add(instance);
           phantomsCleared += 1;
         } catch (err) {
           log.warn(`[/api/daemon/stop] failed to synthesize workflow_end for phantom '${instance}': ${errorMessage(err)}`);
         }
       }
-      if (phantomsCleared > 0) {
-        log.step(`[/api/daemon/stop] cleared ${phantomsCleared} phantom ${workflow} instance(s) from session drawer`);
+      if (phantomsCleared > afterRegistryPhantoms) {
+        log.step(
+          `[/api/daemon/stop] cleared ${phantomsCleared - afterRegistryPhantoms} phantom ${workflow} instance(s) from session drawer (pid probe)`,
+        );
       }
 
       let queuedCancelled = 0;

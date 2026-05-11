@@ -3,24 +3,32 @@ import { RotateCcw, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useOptionalBatchQueueParentRunId } from "@/components/hooks/useBatchQueueContext";
 
 interface RetryButtonProps {
   workflow: string;
   id: string;
-  /** Compact variant: 24×24 for inline use on EntryItem rows. Default: same. */
+  /** When set, targets this run for SQLite-backed daemon retries. */
+  runId?: string;
   size?: "sm" | "md";
-  /** Optional class extension for parent-driven margin etc. */
   className?: string;
 }
 
 /**
- * Small icon-only button that re-enqueues a failed run via POST /api/retry.
+ * Small icon-only button that re-enqueues via POST /api/retry using the persisted input.
  * Tooltip-wrapped (a11y) and disables itself during the in-flight roundtrip
  * to prevent double-fire. Uses sonner toasts for feedback — non-destructive,
  * so no AlertDialog confirmation step.
  */
-export function RetryButton({ workflow, id, size = "sm", className }: RetryButtonProps) {
+export function RetryButton({
+  workflow,
+  id,
+  runId,
+  size = "sm",
+  className,
+}: RetryButtonProps) {
   const [pending, setPending] = useState(false);
+  const batchParentRunId = useOptionalBatchQueueParentRunId();
 
   const onClick = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -31,7 +39,12 @@ export function RetryButton({ workflow, id, size = "sm", className }: RetryButto
       const res = await fetch("/api/retry", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workflow, id }),
+        body: JSON.stringify({
+          workflow,
+          id,
+          ...(runId ? { runId } : {}),
+          ...(batchParentRunId ? { parentRunId: batchParentRunId } : {}),
+        }),
       });
       const body = (await res.json()) as { ok: boolean; error?: string };
       if (body.ok) {

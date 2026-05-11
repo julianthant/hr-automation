@@ -6,6 +6,7 @@ import type { TrackerEntry } from "@/components/shared/types";
 import { useWorkflow } from "@/lib/workflows-context";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { statusBadgeClass } from "@/components/shared/status-styles";
+import { useOptionalBatchQueueParentRunId } from "@/components/hooks/useBatchQueueContext";
 
 interface EditDataTabProps {
   workflow: string;
@@ -38,6 +39,7 @@ interface EditDataTabProps {
  */
 export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) {
   const meta = useWorkflow(workflow);
+  const batchQueueParentRunId = useOptionalBatchQueueParentRunId();
   const editableFields = useMemo(
     () => (meta?.detailFields ?? []).filter((f) => f.editable),
     [meta],
@@ -182,6 +184,8 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
           workflow,
           id: entry.id,
           data: values,
+          ...(runId ? { runId } : {}),
+          ...(batchQueueParentRunId ? { parentRunId: batchQueueParentRunId } : {}),
         }),
       });
       const body = (await res.json()) as { ok: boolean; error?: string };

@@ -1,4 +1,6 @@
 import { createReadStream, statSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { Readable } from "node:stream";
 
 export type JsonBodyResult =
   | { ok: true; body: Record<string, unknown> }
@@ -44,24 +46,33 @@ export function preflightResponse(): Response {
   });
 }
 
-export function streamFileResponse(
+/** Above this, serve via Readable.toWeb — raw fs.ReadStream as BodyInit breaks Node 26 + Vite proxy. */
+const STREAM_FILE_BUFFER_BYTES = 32 * 1024 * 1024;
+
+export async function streamFileResponse(
   path: string,
   opts: {
     contentType: string;
     cacheControl: string;
     disposition?: string;
   },
-): Response {
+): Promise<Response> {
   const stat = statSync(path);
-  return new Response(createReadStream(path) as unknown as BodyInit, {
-    headers: {
-      "Content-Type": opts.contentType,
-      "Content-Length": String(stat.size),
-      "Cache-Control": opts.cacheControl,
-      "Access-Control-Allow-Origin": "*",
-      ...(opts.disposition ? { "Content-Disposition": opts.disposition } : {}),
-    },
-  });
+  const headers: Record<string, string> = {
+    "Content-Type": opts.contentType,
+    "Content-Length": String(stat.size),
+    "Cache-Control": opts.cacheControl,
+    "Access-Control-Allow-Origin": "*",
+    ...(opts.disposition ? { "Content-Disposition": opts.disposition } : {}),
+  };
+
+  if (stat.size <= STREAM_FILE_BUFFER_BYTES) {
+    const buf = await readFile(path);
+    return new Response(buf, { headers });
+  }
+
+  const webBody = Readable.toWeb(createReadStream(path));
+  return new Response(webBody as unknown as BodyInit, { headers });
 }
 
 export async function readJsonRequest(

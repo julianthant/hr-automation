@@ -12,7 +12,7 @@ React SPA for real-time HR workflow monitoring. Split-panel layout: queue (left)
 
 ## Operator text conventions
 
-Dashboard toasts, queue actions, and parent/child rows should render the shared operator subject first (`data.__subject`). Do not display raw run ids/session ids as primary text unless no subject exists; keep those ids as fallback or debug detail.
+Dashboard toasts, queue actions, delegation batch rows, and batch member rows should render the shared operator subject first (`data.__subject`). Do not display raw run ids/session ids as primary text unless no subject exists; keep those ids as fallback or debug detail.
 
 Dashboard controls mutate the SQLite control plane first (`tasks`, `task_attempts`, `worker_commands`, `browser_processes`) and let workers observe those commands. JSONL tracker/queue writes are audit/history, not live coordination. Browser force-stop controls must target a recorded `browser_processes` row; do not add a control that kills all Chromium processes or only flips local React state.
 
@@ -30,10 +30,12 @@ App.tsx
 │   ├── Live indicator (green dot pill)
 │   └── Clock (useClock hook)
 ├── queue-panel/QueuePanel.tsx
-│   ├── Search input (shadcn Input)
-│   ├── StatPills.tsx (5 clickable cards, doubles as status filter)
-│   └── Entry list (shadcn ScrollArea)
-│       └── EntryItem.tsx × N (name, badge, step, time, error)
+│   ├── StatPills.tsx (5 clickable cards — hidden in batch queue mode)
+│   ├── batch-queue-view `BatchQueueToolbar` — back link + batch title (batch queue mode only)
+│   └── Entry list (scroll)
+│       ├── ocr `DelegationRow` — approved prep delegation summary; click → batch queue mode
+│       ├── batch-queue-view `BatchQueueMemberList` — scoped member `EntryItem` rows (batch queue mode)
+│       └── `EntryItem.tsx` — main queue rows (name, badge, step, time, error)
 ├── log-panel/LogPanel.tsx
 │   ├── Header (name, badge, email, RunSelector.tsx)
 │   ├── Detail grid (4 cells, varies per workflow)
@@ -240,6 +242,7 @@ The dashboard now auto-adapts — no frontend changes needed. When a new workflo
 
 ## Lessons Learned
 
+- **2026-05-11: `DelegationRow` + batch queue shell.** Renamed `ParentChildRow` → `DelegationRow` and `parent-child-helpers` → `delegation-row-helpers`. Extracted `BatchQueueToolbar` + `BatchQueueMemberList` from `queue-panel/batch-queue-view.tsx` as the reusable “batch queue mode” surface (toolbar fixed, members scroll). `QueuePanel` props: `batchQueueParentRunId`, `onEnterBatchQueue`, `onExitBatchQueue`. Today the anchor is always an approved OCR prep row; the same components can host future daemon batch groupings by supplying a tracker anchor + member list + optional `titleOverride` / omitting `onOpenPrepReview`.
 - **2026-05-08: daemonLog topic removed — no frontend consumer.** `DaemonLogTail` was built in 8745b684, then explicitly deleted in c5df7639 ("remove Daemons UI"). The `daemonLog` hub topic was added during the SSE migration without noticing the component was gone. Removed the topic from `topics-emitters.ts` and its tests. If a new daemon log tail UI is ever needed, re-add the topic emitter (it was well-tested; the deletion commit has the full implementation) and add a `DaemonLogTail` component in `terminal-drawer/`.
 - **2026-05-08: SseHub listener errors no longer silently swallowed.** Split the single `try/catch` in `SseHub.onmessage` into two layers: JSON parse errors → `console.warn` + return (malformed envelope ignored); listener errors → `console.error("SseHub listener threw for topic '<topic>':", err)` + continue (other listeners still fire). Without this split, a listener throwing on a bad shape killed delivery to all other topics on the same hub without any log output.
 - **2026-05-08: useLogs / useRunEvents reset first-tick flag on SSE error.** Both hooks now reset `gotSseData = false` in their `onError` callback. Browser EventSource auto-reconnects after network blips; the backend sends full history on the new connection's first tick. Without the reset, that snapshot arrived into the delta-append branch and duplicated every prior log/event line.

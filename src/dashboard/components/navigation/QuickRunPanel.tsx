@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { getQuickRunConfig } from "@/lib/quick-run-registry";
 import { RunModal } from "@/components/run-modal/RunModal";
+import { useOptionalBatchQueueParentRunId } from "@/components/hooks/useBatchQueueContext";
 
 interface QuickRunPanelProps {
   workflow: string;
@@ -29,6 +30,7 @@ interface QuickRunPanelProps {
  */
 export function QuickRunPanel({ workflow }: QuickRunPanelProps) {
   const config = getQuickRunConfig(workflow);
+  const batchQueueParentRunId = useOptionalBatchQueueParentRunId();
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -51,10 +53,17 @@ export function QuickRunPanel({ workflow }: QuickRunPanelProps) {
     }
     setSubmitting(true);
     try {
+      const parentRunId =
+        batchQueueParentRunId ??
+        (parsed.inputs.length > 1 ? crypto.randomUUID() : undefined);
       const res = await fetch("/api/enqueue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workflow, inputs: parsed.inputs }),
+        body: JSON.stringify({
+          workflow,
+          inputs: parsed.inputs,
+          ...(parentRunId ? { parentRunId } : {}),
+        }),
       });
       const body = (await res.json().catch(() => ({}))) as {
         ok?: boolean;

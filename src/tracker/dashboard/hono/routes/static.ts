@@ -25,11 +25,11 @@ export function registerStaticRoutes(app: Hono, deps: DashboardHonoDeps): void {
   });
 }
 
-function serveIndex(deps: DashboardHonoDeps): Response {
+async function serveIndex(deps: DashboardHonoDeps): Promise<Response> {
   if (!deps.staticDir) return textResponse("not found", 404);
   const indexPath = join(deps.staticDir, "index.html");
   if (!existsSync(indexPath)) return textResponse("dashboard build not found", 404);
-  return streamFileResponse(indexPath, {
+  return await streamFileResponse(indexPath, {
     contentType: "text/html; charset=utf-8",
     cacheControl: "no-cache",
   });
