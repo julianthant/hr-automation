@@ -23,16 +23,23 @@ import {
 import { errorMessage } from "../../../../utils/errors.js";
 import { log } from "../../../../utils/log.js";
 import type { DashboardHonoDeps } from "../context.js";
+import { PARENT_RUN_ID_VALIDATION_HINT, parseOptionalParentRunId } from "../parent-run-id.js";
 import { jsonResponse, readJsonRequest } from "../responses.js";
 
 export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
   app.post("/api/retry", async (c) => {
     const parsed = await readJsonRequest(c.req.raw);
     if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
+    const body = parsed.body as { parentRunId?: unknown };
+    const parentRunId = parseOptionalParentRunId(body.parentRunId);
+    if (body.parentRunId !== undefined && body.parentRunId !== null && !parentRunId) {
+      return jsonResponse({ ok: false, error: PARENT_RUN_ID_VALIDATION_HINT }, 400);
+    }
     const result = await buildRetryHandler(deps.dir)({
       workflow: String(parsed.body.workflow ?? ""),
       id: String(parsed.body.id ?? ""),
       runId: parsed.body.runId ? String(parsed.body.runId) : undefined,
+      ...(parentRunId ? { parentRunId } : {}),
     });
     return jsonResponse(result, result.ok ? 202 : 400);
   });
@@ -40,10 +47,16 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
   app.post("/api/retry-bulk", async (c) => {
     const parsed = await readJsonRequest(c.req.raw);
     if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
+    const body = parsed.body as { parentRunId?: unknown };
+    const parentRunId = parseOptionalParentRunId(body.parentRunId);
+    if (body.parentRunId !== undefined && body.parentRunId !== null && !parentRunId) {
+      return jsonResponse({ ok: false, error: PARENT_RUN_ID_VALIDATION_HINT }, 400);
+    }
     const ids = Array.isArray(parsed.body.ids) ? (parsed.body.ids as unknown[]).map(String) : [];
     const result = await buildRetryBulkHandler(deps.dir)({
       workflow: String(parsed.body.workflow ?? ""),
       ids,
+      ...(parentRunId ? { parentRunId } : {}),
     });
     return jsonResponse(result, 202);
   });
@@ -51,6 +64,11 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
   app.post("/api/run-with-data", async (c) => {
     const parsed = await readJsonRequest(c.req.raw);
     if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
+    const body = parsed.body as { parentRunId?: unknown };
+    const parentRunId = parseOptionalParentRunId(body.parentRunId);
+    if (body.parentRunId !== undefined && body.parentRunId !== null && !parentRunId) {
+      return jsonResponse({ ok: false, error: PARENT_RUN_ID_VALIDATION_HINT }, 400);
+    }
     const data = parsed.body.data && typeof parsed.body.data === "object"
       ? parsed.body.data as Record<string, unknown>
       : {};
@@ -59,6 +77,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       id: String(parsed.body.id ?? ""),
       runId: parsed.body.runId ? String(parsed.body.runId) : undefined,
       data,
+      ...(parentRunId ? { parentRunId } : {}),
     });
     return jsonResponse(result, result.ok ? 202 : 400);
   });

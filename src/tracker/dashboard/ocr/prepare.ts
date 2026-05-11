@@ -188,7 +188,7 @@ function writeOriginParentPending(args: {
   const ts = new Date().toISOString();
   // mode: "prepare" hooks the parent into the existing prep-row machinery
   // so post-approval the row is auto-extracted from the regular queue and
-  // folded into a ParentChildRow with its kernel children (which inherit
+  // folded into a DelegationRow with its kernel children (which inherit
   // parentRunId from the OCR fan-out path). Pre-approval the row renders
   // as a standard EntryItem in the queue.
   const baseData: Record<string, string> = {

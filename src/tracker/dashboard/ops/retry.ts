@@ -1,7 +1,11 @@
 import { existsSync } from "fs";
-import { readEntries, trackEvent } from "../../jsonl.js";
+import { readEntries, trackEvent, type TrackerEntry } from "../../jsonl.js";
 import { enqueueFromHttp } from "../../../core/daemon/enqueue-dispatch.js";
-import { findInputForRetry } from "../../../core/find-input.js";
+import {
+  findRetryInputFromTaskStore,
+  readEntriesForRetryItem,
+  selectRetryInputFromEntries,
+} from "../../../core/find-input.js";
 import {
   openControlStores,
   resolveControlTask,
@@ -12,6 +16,8 @@ export interface RetryRequest {
   workflow: string;
   id: string;
   runId?: string;
+  /** When set, stamps the new run under this batch / delegation parent. */
+  parentRunId?: string;
 }
 
 export interface RunWithDataRequest {
@@ -19,11 +25,13 @@ export interface RunWithDataRequest {
   id: string;
   data: Record<string, unknown>;
   runId?: string;
+  parentRunId?: string;
 }
 
 export interface RetryBulkRequest {
   workflow: string;
   ids: string[];
+  parentRunId?: string;
 }
 
 type ReEnqueueResult = { ok: true } | { ok: false; error: string };
@@ -34,29 +42,74 @@ type ReEnqueueResult = { ok: true } | { ok: false; error: string };
  * non-daemon rationale. */
 const IN_PROCESS_WORKFLOWS = new Set(["ocr", "sharepoint-download"]);
 
+export type FindEntryInputResult =
+  | {
+      input: Record<string, unknown>;
+      /** Latest non-empty delegation parent seen on any row for this item id */
+      latestParentRunId?: string;
+      /** Merged accumulated `data` strings for edit-and-resume (same rules as {@link findLatestEntryData}). */
+      mergedEntryStrings: Record<string, string>;
+    }
+  | { error: string };
+
+/** Merge accumulated `data` for an item from pre-filtered tracker rows */
+function mergeAccumulatedTrackerStrings(rows: TrackerEntry[]): Record<string, string> {
+  const entries = rows.filter((e) => e.data);
+  if (entries.length === 0) return {};
+  entries.sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
+  const merged: Record<string, string> = {};
+  for (const e of entries) {
+    for (const [k, v] of Object.entries(e.data ?? {})) {
+      if (k === "__name" || k === "__id" || k === "instance") continue;
+      if (v === undefined || v === null || v === "") continue;
+      merged[k] = String(v);
+    }
+  }
+  return merged;
+}
+
+/** Latest non-empty `parentRunId` among `rows` (sorted by tracker `timestamp`). */
+function extractLatestParentRunId(rows: TrackerEntry[]): string | undefined {
+  if (rows.length === 0) return undefined;
+  const sorted = [...rows].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const p = sorted[i]!.parentRunId;
+    if (typeof p === "string" && p.length > 0) return p;
+  }
+  return undefined;
+}
+
 /**
- * Lookup an entry's input by (workflow, id, runId?). Delegates to the
- * canonical three-tier lookup in `src/core/find-input.ts` and reshapes
- * the result into the `{input} | {error}` shape consumed by `reEnqueueEntry`.
+ * Lookup an entry's input by (workflow, id, runId?). SQLite tier-1 runs first
+ * when `runId` is set; one JSONL pass supplies input fallback, latest parent run
+ * id, and accumulated data for merge.
  */
 export function findEntryInput(
   workflow: string,
   id: string,
   runId: string | undefined,
   dir: string,
-): { input: Record<string, unknown> } | { error: string } {
-  const input = findInputForRetry(workflow, id, runId, dir);
-  if (input) return { input };
-
-  const entries = readEntries(workflow, dir).filter((e) => {
-    if (e.id !== id) return false;
-    if (runId && e.runId !== runId) return false;
-    return true;
-  });
-  if (entries.length === 0) {
-    return { error: `no tracker entry found for id=${id}` };
+): FindEntryInputResult {
+  let input: Record<string, unknown> | undefined;
+  if (runId) {
+    const fromTask = findRetryInputFromTaskStore(runId, dir);
+    if (fromTask) input = fromTask;
   }
-  return { error: "no input or data found to reconstruct retry payload" };
+  const { allForId, scoped } = readEntriesForRetryItem(workflow, id, runId, dir);
+  if (!input) {
+    input = selectRetryInputFromEntries(scoped);
+  }
+  if (!input) {
+    if (scoped.length === 0) {
+      return { error: `no tracker entry found for id=${id}` };
+    }
+    return { error: "no input or data found to reconstruct retry payload" };
+  }
+  return {
+    input,
+    latestParentRunId: extractLatestParentRunId(runId ? scoped : allForId),
+    mergedEntryStrings: mergeAccumulatedTrackerStrings(allForId),
+  };
 }
 
 function asRecordInput(input: unknown): Record<string, unknown> | null {
@@ -86,19 +139,27 @@ export function findLatestEntryData(
   id: string,
   dir: string,
 ): Record<string, string> {
-  const entries = readEntries(workflow, dir).filter((e) => e.id === id && e.data);
-  if (entries.length === 0) return {};
-  // Ascending sort so later non-empty values overwrite earlier ones per key.
-  entries.sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
-  const merged: Record<string, string> = {};
-  for (const e of entries) {
-    for (const [k, v] of Object.entries(e.data ?? {})) {
-      if (k === "__name" || k === "__id" || k === "instance") continue;
-      if (v === undefined || v === null || v === "") continue;
-      merged[k] = String(v);
-    }
-  }
-  return merged;
+  const rows = readEntries(workflow, dir).filter((e) => e.id === id && e.data);
+  return mergeAccumulatedTrackerStrings(rows);
+}
+
+/**
+ * Latest non-empty `parentRunId` on any tracker row for this item id (by
+ * timestamp). Used so retries stay inside a dashboard batch when the HTTP
+ * client did not send an explicit `parentRunId`.
+ */
+export function findLatestParentRunId(
+  workflow: string,
+  id: string,
+  dir: string,
+): string | undefined {
+  const { allForId } = readEntriesForRetryItem(workflow, id, undefined, dir);
+  return extractLatestParentRunId(allForId);
+}
+
+interface ReEnqueueOptions {
+  prefilledData?: Record<string, unknown>;
+  parentRunId?: string;
 }
 
 /**
@@ -126,9 +187,12 @@ async function reEnqueueEntry(
   workflow: string,
   id: string,
   runId: string | undefined,
-  prefilledData: Record<string, unknown> | undefined,
   dir: string,
+  options?: ReEnqueueOptions,
 ): Promise<ReEnqueueResult> {
+  const prefilledData = options?.prefilledData;
+  const requestedParent = options?.parentRunId;
+
   // Tolerate trailing slash from URL-shaped workflow values that occasionally
   // leak in from clients that build paths instead of identifiers.
   const wf = workflow.trim().replace(/\/+$/, "");
@@ -143,7 +207,16 @@ async function reEnqueueEntry(
         if (!input) {
           return { ok: false, error: "stored task input is unavailable for retry" };
         }
+        const resolvedParent =
+          requestedParent ??
+          task.parentRunId ??
+          extractLatestParentRunId(readEntriesForRetryItem(wf, id, runId, dir).scoped);
         const retried = stores.taskStore.retryTaskFromAttempt({ runId });
+        if (resolvedParent) {
+          stores.taskStore.db
+            .prepare(`UPDATE tasks SET parent_run_id = @p WHERE id = @tid`)
+            .run({ p: resolvedParent, tid: retried.taskId });
+        }
         stores.workerStore.enqueueWorkerCommand({
           commandType: "retry_task",
           workflow: wf,
@@ -161,6 +234,7 @@ async function reEnqueueEntry(
             runId: retried.runId,
             status: "pending",
             input,
+            ...(resolvedParent ? { parentRunId: resolvedParent } : {}),
           },
           dir,
         );
@@ -180,11 +254,20 @@ async function reEnqueueEntry(
 
   let input: Record<string, unknown> = lookup.input;
   if (prefilledData) {
-    const previousData = findLatestEntryData(wf, id, dir);
-    input = { ...input, prefilledData: { ...previousData, ...prefilledData } };
+    input = {
+      ...input,
+      prefilledData: {
+        ...lookup.mergedEntryStrings,
+        ...prefilledData,
+      },
+    };
   }
 
-  const result = await enqueueFromHttp(wf, [input], dir);
+  const resolvedParent = requestedParent ?? lookup.latestParentRunId;
+  const result = await enqueueFromHttp(wf, [input], {
+    trackerDir: dir,
+    ...(resolvedParent ? { parentRunId: resolvedParent } : {}),
+  });
   if (!result.ok) return { ok: false, error: result.error ?? "enqueue failed" };
   return { ok: true };
 }
@@ -287,7 +370,9 @@ async function reEnqueueSharePointEntry(
 
 export function buildRetryHandler(dir: string) {
   return (req: RetryRequest): Promise<ReEnqueueResult> =>
-    reEnqueueEntry(req.workflow, req.id, req.runId, undefined, dir);
+    reEnqueueEntry(req.workflow, req.id, req.runId, dir, {
+      parentRunId: req.parentRunId,
+    });
 }
 
 export function buildRunWithDataHandler(dir: string) {
@@ -295,7 +380,10 @@ export function buildRunWithDataHandler(dir: string) {
     if (!req.data || typeof req.data !== "object") {
       return Promise.resolve({ ok: false, error: "data is required" });
     }
-    return reEnqueueEntry(req.workflow, req.id, req.runId, req.data, dir);
+    return reEnqueueEntry(req.workflow, req.id, req.runId, dir, {
+      prefilledData: req.data,
+      parentRunId: req.parentRunId,
+    });
   };
 }
 
@@ -307,7 +395,7 @@ export function buildRetryBulkHandler(dir: string) {
     const errors: Array<{ id: string; error: string }> = [];
     let count = 0;
     for (const id of req.ids ?? []) {
-      const r = await retry({ workflow: req.workflow, id });
+      const r = await retry({ workflow: req.workflow, id, parentRunId: req.parentRunId });
       if (r.ok) count++;
       else errors.push({ id, error: r.error });
     }

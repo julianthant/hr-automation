@@ -18,6 +18,7 @@ interface RunSelectorProps {
   retryTarget?: {
     workflow: string;
     id: string;
+    runId?: string;
   };
   deleteTarget?: {
     workflow: string;
@@ -90,6 +91,7 @@ export function RunSelector({ runs, activeRunId, onSelect, retryTarget, deleteTa
         <RetryButton
           workflow={retryTarget.workflow}
           id={retryTarget.id}
+          runId={retryTarget.runId}
           size="md"
           className="rounded-md"
         />

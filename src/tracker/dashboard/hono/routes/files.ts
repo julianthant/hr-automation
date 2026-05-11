@@ -8,32 +8,32 @@ import type { DashboardHonoDeps } from "../context.js";
 import { streamFileResponse, textResponse } from "../responses.js";
 
 export function registerFileRoutes(app: Hono, deps: DashboardHonoDeps): void {
-  app.get("/api/files/:fileId/download", (c) => {
+  app.get("/api/files/:fileId/download", async (c) => {
     const file = getRegisteredFile(deps.stateDb, c.req.param("fileId"));
     if (!file || !existsSync(file.storagePath)) return textResponse("not found", 404);
-    return streamFileResponse(file.storagePath, {
+    return await streamFileResponse(file.storagePath, {
       contentType: file.mimeType,
       cacheControl: "no-store",
       disposition: `attachment; filename="${basename(file.originalName).replace(/"/g, "")}"`,
     });
   });
 
-  app.get("/api/files/:fileId/original", (c) => {
+  app.get("/api/files/:fileId/original", async (c) => {
     const file = getRegisteredFile(deps.stateDb, c.req.param("fileId"));
     if (!file || !existsSync(file.storagePath)) return textResponse("not found", 404);
-    return streamFileResponse(file.storagePath, {
+    return await streamFileResponse(file.storagePath, {
       contentType: file.mimeType,
       cacheControl: "no-store",
     });
   });
 
-  app.get("/api/files/:fileId/pages/:page", (c) => {
+  app.get("/api/files/:fileId/pages/:page", async (c) => {
     const page = Number(c.req.param("page"));
     const cached = getCachedPage(deps.stateDb, c.req.param("fileId"), page);
     if (!cached || cached.status !== "ready" || !cached.imagePath || !existsSync(cached.imagePath)) {
       return textResponse("not found", 404);
     }
-    return streamFileResponse(cached.imagePath, {
+    return await streamFileResponse(cached.imagePath, {
       contentType: cached.mimeType ?? "image/png",
       cacheControl: "public, max-age=31536000, immutable",
     });

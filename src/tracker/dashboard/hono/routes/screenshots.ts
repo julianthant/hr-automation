@@ -26,7 +26,7 @@ export function registerScreenshotRoutes(app: Hono, deps: DashboardHonoDeps): vo
     }
   });
 
-  app.get("/api/prep/pdf-page", (c) => {
+  app.get("/api/prep/pdf-page", async (c) => {
     const workflow = c.req.query("workflow") ?? "";
     const parentRunId = c.req.query("parentRunId") ?? "";
     const page = Number.parseInt(c.req.query("page") ?? "0", 10);
@@ -57,18 +57,18 @@ export function registerScreenshotRoutes(app: Hono, deps: DashboardHonoDeps): vo
 
     const foundPath = candidates.find((candidate) => existsSync(candidate));
     if (!foundPath) return textResponse("not found", 404);
-    return streamFileResponse(foundPath, {
+    return await streamFileResponse(foundPath, {
       contentType: "image/png",
       cacheControl: "public, max-age=31536000, immutable",
     });
   });
 
-  app.get("/screenshots/:filename", (c) => {
+  app.get("/screenshots/:filename", async (c) => {
     const filename = c.req.param("filename");
     const resolved = resolveScreenshotPath(filename, screenshotsDir);
     if (!resolved) return textResponse("Not found", 404);
     try {
-      return streamFileResponse(resolved, {
+      return await streamFileResponse(resolved, {
         contentType: "image/png",
         cacheControl: "no-cache",
       });

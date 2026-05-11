@@ -58,7 +58,8 @@ describe("findEntryInput", () => {
       tmp,
     );
     const result = findEntryInput("separations", "3930", undefined, tmp);
-    assert.deepEqual(result, { input: { docId: "3930" } });
+    assert.ok("input" in result);
+    assert.deepEqual(result.input, { docId: "3930" });
   });
 
   it("falls back to data when no row has stored input (CLI-enqueued path)", () => {
@@ -78,7 +79,8 @@ describe("findEntryInput", () => {
       tmp,
     );
     const result = findEntryInput("separations", "3930", undefined, tmp);
-    assert.deepEqual(result, { input: { docId: "3930" } });
+    assert.ok("input" in result);
+    assert.deepEqual(result.input, { docId: "3930" });
   });
 
   it("strips kernel-internal keys from data when falling back", () => {
@@ -102,7 +104,8 @@ describe("findEntryInput", () => {
       tmp,
     );
     const result = findEntryInput("eid-lookup", "Smith, Jane", undefined, tmp);
-    assert.deepEqual(result, { input: { searchName: "Smith, Jane" } });
+    assert.ok("input" in result);
+    assert.deepEqual(result.input, { searchName: "Smith, Jane" });
   });
 
   it("returns an error when no entry exists for the id", () => {
@@ -170,6 +173,40 @@ describe("findEntryInput", () => {
     assert.equal((result.input as { v: string }).v, "first");
   });
 
+  it("does not inherit an older batch parent when a later standalone run is scoped by runId", () => {
+    trackEvent(
+      {
+        workflow: "separations",
+        timestamp: "2026-04-24T12:00:00.000Z",
+        id: "3930",
+        runId: "old-batch-run",
+        parentRunId: "old-parent-batch",
+        status: "pending",
+        data: {},
+        input: { docId: "3930", v: "old" },
+      },
+      tmp,
+    );
+    trackEvent(
+      {
+        workflow: "separations",
+        timestamp: "2026-04-24T13:00:00.000Z",
+        id: "3930",
+        runId: "standalone-run",
+        status: "pending",
+        data: {},
+        input: { docId: "3930", v: "standalone" },
+      },
+      tmp,
+    );
+
+    const result = findEntryInput("separations", "3930", "standalone-run", tmp);
+
+    assert.ok("input" in result);
+    assert.equal((result.input as { v: string }).v, "standalone");
+    assert.equal(result.latestParentRunId, undefined);
+  });
+
   it("prefers SQLite task input by runId before tracker fallback", () => {
     const store = createTaskStore(openControlDb({ trackerDir: tmp }));
     const [task] = store.enqueueTasks({
@@ -193,7 +230,8 @@ describe("findEntryInput", () => {
     );
 
     const result = findEntryInput("separations", "3930", "sqlite-run-1", tmp);
-    assert.deepEqual(result, { input: { docId: "3930", source: "sqlite" } });
+    assert.ok("input" in result);
+    assert.deepEqual(result.input, { docId: "3930", source: "sqlite" });
   });
 });
 
@@ -934,6 +972,46 @@ describe("buildRetryHandler SQLite lineage", () => {
     assert.equal(commands.length, 1);
     assert.equal(commands[0].state, "completed");
     assert.equal(commands[0].target_task_id, enqueued.taskId);
+    workerStore.close();
+  });
+
+  it("does not stamp a retry with an older batch parent for the same item", async () => {
+    const control = openControlDb({ trackerDir: tmp });
+    const taskStore = createTaskStore(control);
+    const workerStore = createWorkerStore(control);
+    const [enqueued] = taskStore.enqueueTasks({
+      workflow: "separations",
+      inputs: [{ docId: "6000" }],
+      deriveItemId: (input) => input.docId,
+      runIds: ["standalone-run"],
+    });
+    taskStore.claimNextTask({ workflow: "separations", workerId: "sep-worker" });
+    taskStore.markTaskFailed({
+      taskId: enqueued.taskId,
+      attemptId: enqueued.attemptId,
+      error: "boom",
+    });
+    trackEvent(
+      {
+        workflow: "separations",
+        timestamp: "2026-04-24T12:00:00.000Z",
+        id: "6000",
+        runId: "old-batch-run",
+        parentRunId: "old-parent-batch",
+        status: "failed",
+        data: { docId: "6000" },
+      },
+      tmp,
+    );
+
+    const result = await buildRetryHandler(tmp)({
+      workflow: "separations",
+      id: "6000",
+      runId: "standalone-run",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(taskStore.getTask(enqueued.taskId)?.parentRunId, undefined);
     workerStore.close();
   });
 });

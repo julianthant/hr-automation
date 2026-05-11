@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 import { CheckCircle2, AlertTriangle, Loader2, Clock, CircleSlash, X, Ban } from "lucide-react";
 import { memo, type ComponentType, type SVGProps } from "react";
 import type { TrackerEntry } from "@/components/shared/types";
-import { resolveEntryName } from "@/components/shared/entry-display";
+import { resolveEntryId, resolveEntryName } from "@/components/shared/entry-display";
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
 import { RetryButton } from "@/components/shared/RetryButton";
 import { DeleteButton } from "@/components/shared/DeleteButton";
@@ -134,7 +134,30 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
     : "";
 
   const subject = typeof entry.data?.__subject === "string" ? entry.data.__subject : undefined;
+  const footerSecondaryId = resolveEntryId(entry);
   const showLiveRow = (isFailed && entry.error) || (isRunning && entry.lastLogMessage);
+
+  const activeCheckStatus =
+    entry.workflow === "active-check" && typeof entry.data?.activeStatus === "string"
+      ? entry.data.activeStatus
+      : null;
+  /** UCPath-active rows: HDH-accepted uses `active`; others use `non-hdh` (still not inactive). */
+  const activeCheckTag =
+    activeCheckStatus === "inactive"
+      ? {
+          text: "IA",
+          title: "Inactive",
+          className: "bg-[#fbbf24]/12 text-[#fbbf24] border border-[#fbbf24]/30",
+        }
+      : activeCheckStatus === "active" ||
+          activeCheckStatus === "non-hdh" ||
+          (isDone && entry.data?.isActive === "true")
+        ? {
+            text: "A",
+            title: activeCheckStatus === "non-hdh" ? "Active (non-HDH dept)" : "Active",
+            className: "bg-[#4ade80]/12 text-[#4ade80] border border-[#4ade80]/30",
+          }
+        : null;
 
   return (
     <div className="px-3 pt-2 first:pt-3">
@@ -143,7 +166,12 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
         role="button"
         tabIndex={0}
         aria-pressed={selected}
-        aria-label={`${name || entry.id} — ${cfg.label.toLowerCase()}`}
+        aria-label={
+          activeCheckTag
+            ? `${name || entry.id} — ${activeCheckTag.title.toLowerCase()}, ${cfg.label.toLowerCase()}`
+            : `${name || entry.id} — ${cfg.label.toLowerCase()}`
+        }
+        data-queue-entry-id={entry.id}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
@@ -171,14 +199,27 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
                 {name || entry.id}
               </span>
             </div>
-            <span
-              className={cn(
-                "text-[10px] font-medium px-2 py-0.5 rounded-md font-sans tracking-wide flex-shrink-0",
-                cfg.badge,
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              {activeCheckTag && (
+                <span
+                  title={activeCheckTag.title}
+                  className={cn(
+                    "text-[10px] font-semibold px-1.5 py-0.5 rounded-md font-sans tabular-nums",
+                    activeCheckTag.className,
+                  )}
+                >
+                  {activeCheckTag.text}
+                </span>
               )}
-            >
-              {cfg.label}
-            </span>
+              <span
+                className={cn(
+                  "text-[10px] font-medium px-2 py-0.5 rounded-md font-sans tracking-wide",
+                  cfg.badge,
+                )}
+              >
+                {cfg.label}
+              </span>
+            </div>
           </div>
 
           {showLiveRow && (
@@ -203,12 +244,12 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
           <span className="bg-secondary/80 px-1.5 py-px rounded font-medium flex-shrink-0 tabular-nums">
             #{runNumber}
           </span>
-          {entry.id && entry.id !== name && (
+          {footerSecondaryId && footerSecondaryId !== name && (
             <span
               className="truncate text-foreground/80 flex-shrink min-w-0 tabular-nums"
-              title={entry.id}
+              title={footerSecondaryId}
             >
-              {entry.id}
+              {footerSecondaryId}
             </span>
           )}
           <span className="flex-1" />
@@ -220,7 +261,7 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
           )}
           {(isFailed || isCancelled) && (
             <div className="flex items-center gap-1 flex-shrink-0">
-              <RetryButton workflow={entry.workflow} id={entry.id} />
+              <RetryButton workflow={entry.workflow} id={entry.id} runId={entry.runId} />
               {onDelete && date && (
                 <DeleteButton workflow={entry.workflow} id={entry.id} date={date} onDeleted={onDelete} />
               )}

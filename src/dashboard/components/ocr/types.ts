@@ -150,7 +150,7 @@ export function isResolvedPrepRow(e: {
 
 /**
  * A prep row whose operator-resolved state is "approved" — children have been
- * fanned out into the downstream workflow's queue. Drives `ParentChildRow`
+ * fanned out into the downstream workflow's queue. Drives `DelegationRow`
  * rendering in the QueuePanel.
  */
 export function isApprovedPrepRow(e: {

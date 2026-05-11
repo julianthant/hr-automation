@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface ScreenshotEntry {
   ts: number;
@@ -25,9 +25,8 @@ export interface ScreenshotEntry {
  *   ScreenshotsPanel showed "No screenshots captured for this run yet."
  *   even after a screenshot landed.
  *
- * The fetch uses an AbortController to abort an in-flight previous fetch
- * when a new one starts (or on unmount), so a burst of count changes
- * doesn't pile up requests.
+ * Superseded in-flight responses are dropped via a monotonic generation id (no
+ * AbortSignal — abort-after-headers can race stream teardown on some stacks).
  */
 export function useRunScreenshots(
   workflow: string | null,
@@ -35,32 +34,30 @@ export function useRunScreenshots(
   screenshotEventCount: number,
 ): { entries: ScreenshotEntry[] } {
   const [entries, setEntries] = useState<ScreenshotEntry[]>([]);
+  const fetchGeneration = useRef(0);
 
   useEffect(() => {
     if (!workflow || !itemId) {
       setEntries([]);
       return;
     }
-    const ctrl = new AbortController();
+
+    const myGen = ++fetchGeneration.current;
 
     void (async () => {
       try {
         const res = await fetch(
           `/api/screenshots?workflow=${encodeURIComponent(workflow)}&itemId=${encodeURIComponent(itemId)}`,
-          { signal: ctrl.signal },
         );
+        if (myGen !== fetchGeneration.current) return;
         if (!res.ok) return;
         const data = (await res.json()) as ScreenshotEntry[];
-        if (!ctrl.signal.aborted) setEntries(data);
+        if (myGen !== fetchGeneration.current) return;
+        setEntries(data);
       } catch {
-        // AbortError on supersession is expected; other errors will
-        // resolve on the next screenshotEventCount tick.
+        // Network or parse errors — next screenshotEventCount tick retries.
       }
     })();
-
-    return () => {
-      ctrl.abort();
-    };
     // screenshotEventCount intentionally drives refetch — it changes when a
     // new screenshot session_event arrives in useRunEvents.
   }, [workflow, itemId, screenshotEventCount]);
