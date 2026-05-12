@@ -136,7 +136,7 @@ export function isPrepareRow(e: { data?: Record<string, string> }): boolean {
  * so frontend and backend agree on which rows count as "still
  * actionable" vs "operator-resolved." Used by:
  *   - QueuePanel — filters from the visible queue + StatPills
- *   - App.tsx `failedIds` — filters from RetryAllButton's count + targets
+ *   - App.tsx `retryAllIds` — from bulk queue scope for RetryAllButton (any status)
  *     so discarded prep rows don't get re-enqueued via /api/retry-bulk
  *     (they have `data.mode === "prepare"`, no schema-valid emplId/docId)
  */

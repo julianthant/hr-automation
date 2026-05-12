@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { defineWorkflow, runWorkflow } from "../../core/index.js";
 import type { Ctx } from "../../core/kernel/types.js";
 import { loginToUCPath } from "../../infra/auth/login.js";
+import { PATHS } from "../../config.js";
 import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 import { isAcceptedHdhDepartment } from "../../domain/hdh/departments.js";
 import { toLastFirstName } from "../../domain/identity/person-name.js";
@@ -9,11 +11,13 @@ import {
   searchByName,
   type EidResult,
 } from "../../systems/ucpath/person-org-summary.js";
+import { allocateLowestBatchDisplayOrdinal } from "../../tracker/batch-display-ordinal.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
 import {
   ActiveCheckItemSchema,
+  buildActiveCheckCliInput,
   deriveActiveCheckItemId,
   displayActiveCheckInput,
   isActiveCheckEidInput,
@@ -202,16 +206,22 @@ export async function runActiveCheckCli(
     process.exitCode = 1;
     return;
   }
-  const inputs = queries.map((query) => (/^\d{5,}$/.test(query) ? { emplId: query } : { name: query }));
+  const inputs = queries.map(buildActiveCheckCliInput);
   const parsed = inputs.map((input) => ActiveCheckItemSchema.parse(input));
   const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
   const now = new Date().toISOString();
+  const batchParentRunId = parsed.length > 1 ? randomUUID() : undefined;
+  const batchDisplayOrdinal =
+    batchParentRunId !== undefined
+      ? allocateLowestBatchDisplayOrdinal("active-check", PATHS.trackerDir)
+      : undefined;
   await ensureDaemonsAndEnqueue(
     activeCheckWorkflow,
     parsed,
     { new: options.new, parallel: options.parallel },
     {
       deriveItemId: deriveActiveCheckItemId,
+      ...(batchParentRunId ? { parentRunId: batchParentRunId } : {}),
       onPreEmitPending: (item, runId, _parentRunId, itemId) => {
         const subject = activeCheckWorkflow.config.operatorSubject?.(item);
         const display = displayActiveCheckInput(item);
@@ -221,7 +231,16 @@ export async function runActiveCheckCli(
           id: itemId,
           runId,
           status: "pending",
-          data: { searchName: display, __name: display, __id: itemId, ...operatorSubjectData(subject) },
+          data: {
+            searchName: display,
+            __name: display,
+            __id: itemId,
+            ...(batchDisplayOrdinal !== undefined
+              ? { batchDisplayOrdinal: String(batchDisplayOrdinal) }
+              : {}),
+            ...operatorSubjectData(subject),
+          },
+          ...(batchParentRunId ? { parentRunId: batchParentRunId } : {}),
         });
       },
     },

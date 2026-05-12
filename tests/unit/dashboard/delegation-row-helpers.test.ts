@@ -99,28 +99,37 @@ describe("pickPreviewChildren", () => {
     assert.equal(pickPreviewChildren(kids, 10).length, 2);
   });
 
-  it("resolves name from data.name with fallback to id", () => {
+  it("prefers data.__subject and person names over bare EID for preview labels", () => {
     const out = pickPreviewChildren(
       [
-        child({ id: "10001780", data: { name: "Akitsugu Uchida", emplId: "10001780" } }),
-        child({ id: "noname", data: {} }),
+        child({
+          id: "10001780",
+          data: {
+            __subject: "Oath · 10001780",
+            name: "Akitsugu Uchida",
+            emplId: "10001780",
+          },
+        }),
+        child({ id: "bad-eid", data: { name: "Carlos Barahona", emplId: "12345" } }),
+        child({ id: "noname", data: { emplId: "10800001" } }),
       ],
-      2,
+      3,
     );
-    assert.equal(out[0]?.name, "Akitsugu Uchida");
-    assert.equal(out[1]?.name, "noname");
+    assert.equal(out[0]?.name, "Oath · 10001780");
+    assert.equal(out[1]?.name, "Carlos Barahona");
+    assert.equal(out[2]?.name, "10800001");
   });
 
   it("resolves emplId from data.emplId or data.eid", () => {
     const out = pickPreviewChildren(
       [
-        child({ id: "a", data: { emplId: "111" } }),
-        child({ id: "b", data: { eid: "222" } }),
+        child({ id: "a", data: { emplId: "10000910" } }),
+        child({ id: "b", data: { eid: "10000002" } }),
       ],
       2,
     );
-    assert.equal(out[0]?.emplId, "111");
-    assert.equal(out[1]?.emplId, "222");
+    assert.equal(out[0]?.emplId, "10000910");
+    assert.equal(out[1]?.emplId, "10000002");
   });
 });
 

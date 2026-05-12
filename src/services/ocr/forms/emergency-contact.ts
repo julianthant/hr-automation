@@ -6,6 +6,7 @@
  * (both deleted in Task 25).
  */
 import { z } from "zod/v4";
+import { normalizeUcpathEmployeeId } from "../../../domain/identity/eid.js";
 import {
   matchAgainstRoster,
   compareUsAddresses,
@@ -113,7 +114,7 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
   async matchRecord({ record, roster }): Promise<PreviewRecord> {
     // Stage 1: form-EID. If the operator transcribed an EID on the paper,
     // trust it (subject to verification later).
-    const formEid = normalizeEid(record.employee.employeeId);
+    const formEid = normalizeUcpathEmployeeId(normalizeEid(record.employee.employeeId));
     if (formEid) {
       return {
         ...record,
@@ -178,7 +179,8 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
   },
 
   applyDisambiguation({ record, result }): PreviewRecord {
-    if (result.eid === null || result.eid.length === 0) {
+    const resultEid = normalizeUcpathEmployeeId(result.eid);
+    if (resultEid.length === 0) {
       return {
         ...record,
         employee: { ...record.employee, employeeId: "" },
@@ -194,20 +196,20 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
     if (result.confidence < LLM_HIGH_CONFIDENCE) {
       return {
         ...record,
-        employee: { ...record.employee, employeeId: result.eid },
+        employee: { ...record.employee, employeeId: resultEid },
         matchState: "lookup-pending",
         matchSource: "llm",
         matchConfidence: result.confidence,
         warnings: [
           ...(record.warnings ?? []),
-          `LLM picked EID ${result.eid} but low confidence (${result.confidence.toFixed(2)}) — review`,
+          `LLM picked EID ${resultEid} but low confidence (${result.confidence.toFixed(2)}) — review`,
         ],
       };
     }
 
     return {
       ...record,
-      employee: { ...record.employee, employeeId: result.eid },
+      employee: { ...record.employee, employeeId: resultEid },
       matchState: "matched",
       matchSource: "llm",
       matchConfidence: result.confidence,
@@ -218,7 +220,7 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
   needsLookup(record): LookupKind {
     if (record.verification) return null;
     if (record.matchState === "lookup-pending") return "name";
-    if (record.matchState === "matched" && record.employee.employeeId) return "verify";
+    if (record.matchState === "matched" && normalizeUcpathEmployeeId(record.employee.employeeId)) return "verify";
     return null;
   },
 

@@ -69,19 +69,30 @@ export function buildScreenshotsHandler(
         const db = openStateDb(dir);
         const rows = queryScreenshotsForItem(db, { workflow, itemId });
         if (rows.length > 0) {
-          // Pull the matching screenshot session_events from SQLite to recover
-          // group labels (kind/step). Use the first run_id to fetch events;
-          // group rows by path when an event matches; unmatched rows fall under
-          // the synthetic "legacy" bucket.
-          const firstRunId = rows.find((r) => r.run_id)?.run_id ?? null;
-          const screenshotEvents: ScreenshotSessionEvent[] = firstRunId
-            ? (querySessionEventsForRun(db, { runId: firstRunId })
-                .filter((e) => e.type === "screenshot") as unknown as ScreenshotSessionEvent[])
-            : [];
-          const grouped = groupScreenshotRows(
+          // Recover group labels from screenshot session_events for every run
+          // that has file rows — not only the newest run (otherwise prior-run
+          // metadata is wrong and paths only on disk vanish from the grouped UI).
+          const runIds = [
+            ...new Set(rows.map((r) => r.run_id).filter((id): id is string => Boolean(id))),
+          ];
+          const screenshotEvents: ScreenshotSessionEvent[] = [];
+          for (const rid of runIds) {
+            for (const e of querySessionEventsForRun(db, { runId: rid })) {
+              if (e.type === "screenshot") {
+                screenshotEvents.push(e as unknown as ScreenshotSessionEvent);
+              }
+            }
+          }
+          let grouped = groupScreenshotRows(
             rows.filter((r) => existsSync(r.storage_path)),
             screenshotEvents,
           );
+          // Match groupedHandlerLegacy: PNGs on disk matching the prefix must
+          // appear even when they have no `files` row (pre-projection captures,
+          // failed registration, etc.). Without this merge, a new run that
+          // adds SQLite rows caused the handler to return early and hide
+          // older on-disk shots.
+          grouped = mergeDiskOnlyScreenshotFiles(grouped, { screenshotsDir, workflow, itemId });
           if (grouped.length > 0) return grouped;
         }
       }
@@ -148,6 +159,72 @@ export function buildScreenshotsHandler(
 }
 
 // ── Private helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Append any `.png` files under `screenshotsDir` with the workflow+itemId
+ * prefix whose paths are not already represented in `grouped` (same rule as
+ * step 3 of `groupedHandlerLegacy`).
+ */
+function mergeDiskOnlyScreenshotFiles(
+  grouped: ScreenshotGroupedEntry[],
+  opts: { screenshotsDir: string; workflow: string; itemId: string },
+): ScreenshotGroupedEntry[] {
+  const prefix = `${opts.workflow}-${opts.itemId}-`;
+  const covered = new Set<string>();
+  for (const g of grouped) {
+    for (const f of g.files) {
+      covered.add(f.path);
+    }
+  }
+  const additions: ScreenshotGroupedEntry["files"] = [];
+  let legacyTs = 0;
+  if (!existsSync(opts.screenshotsDir)) return grouped;
+  for (const f of readdirSync(opts.screenshotsDir)) {
+    if (!f.endsWith(".png")) continue;
+    if (!f.startsWith(prefix)) continue;
+    const fullPath = join(opts.screenshotsDir, f);
+    if (covered.has(fullPath)) continue;
+    const tsMatch = f.match(/-(\d+)\.png$/);
+    const fileTsNum = tsMatch ? Number(tsMatch[1]) : 0;
+    const stripped = f.slice(prefix.length, -".png".length);
+    const segs = stripped.split("-");
+    let system = "unknown";
+    if (segs.length >= 2) {
+      system = segs[segs.length - 2];
+    }
+    if (fileTsNum > legacyTs) legacyTs = fileTsNum;
+    additions.push({
+      system,
+      path: fullPath,
+      url: `/screenshots/${encodeURIComponent(f)}`,
+    });
+  }
+  if (additions.length === 0) return grouped;
+  const legacyIdx = grouped.findIndex((e) => e.label === "legacy" && e.kind === "error");
+  let out: ScreenshotGroupedEntry[];
+  if (legacyIdx >= 0) {
+    out = [...grouped];
+    const prev = out[legacyIdx];
+    out[legacyIdx] = {
+      ...prev,
+      files: [...prev.files, ...additions],
+      ts: Math.max(prev.ts, legacyTs),
+    };
+  } else {
+    out = [
+      ...grouped,
+      {
+        ts: legacyTs,
+        kind: "error",
+        label: "legacy",
+        step: null,
+        files: additions,
+      },
+    ];
+  }
+  out.sort((a, b) => b.ts - a.ts);
+  return out;
+}
 
 /**
  * Legacy grouped handler: reads sessions.jsonl and uses readdirSync.

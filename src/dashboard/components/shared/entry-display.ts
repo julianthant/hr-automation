@@ -1,4 +1,5 @@
 import type { TrackerEntry } from "./types";
+import type { MergedEntryGroup } from "../../../tracker/queue-row-count.js";
 export {
   groupMergedTrackerEntries as groupMergedEntries,
   type MergedEntryGroup,
@@ -118,12 +119,12 @@ export function buildDisplayNameMap(
   entries: TrackerEntry[],
   workflowLabel: string,
 ): Map<string, string> {
-  const displayFor = (e: TrackerEntry): { base: string; ordinal: boolean } => {
+  const displayFor = (e: TrackerEntry): { base: string; ordinal: boolean; explicitWorkflowName: boolean } => {
     const d = e.data ?? {};
     const personName = resolveEmployeeLabel(d);
-    if (personName) return { base: personName, ordinal: false };
+    if (personName) return { base: personName, ordinal: false, explicitWorkflowName: false };
     const workflowName = firstNonBlank(d.__name);
-    return { base: workflowName || workflowLabel, ordinal: true };
+    return { base: workflowName || workflowLabel, ordinal: true, explicitWorkflowName: Boolean(workflowName) };
   };
   const sortKey = (e: TrackerEntry): string => e.firstLogTs || e.timestamp || "";
   const sorted = [...entries].sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
@@ -132,25 +133,61 @@ export function buildDisplayNameMap(
   // Ordinals are only meaningful when more than one entry shares the same base.
   const totals = new Map<string, number>();
   for (const e of sorted) {
+    if (e.parentRunId) continue;
     const { base, ordinal } = displayFor(e);
     if (ordinal) totals.set(base, (totals.get(base) ?? 0) + 1);
   }
 
-  // Second pass: build the result map.
+  // Second pass: build own labels for non-delegated rows.
   const counters = new Map<string, number>();
   const result = new Map<string, string>();
   for (const e of sorted) {
-    const { base, ordinal } = displayFor(e);
+    if (e.parentRunId) continue;
+    const { base, ordinal, explicitWorkflowName } = displayFor(e);
     if (!ordinal) {
       result.set(e.id, base);
       continue;
     }
     // Only one entry with this base — omit from map so resolveEntryName falls
     // through to data fields / entry.id, avoiding a pointless "Active Check 1".
-    if ((totals.get(base) ?? 0) <= 1) continue;
+    // Explicit workflow-level names such as "OCR" still get an ordinal so the
+    // parent row and all delegated children share "OCR 1" from the first run.
+    if ((totals.get(base) ?? 0) <= 1 && !explicitWorkflowName) continue;
     const next = (counters.get(base) ?? 0) + 1;
     counters.set(base, next);
     result.set(e.id, `${base} ${next}`);
   }
+
+  // Final pass: delegated rows always use their parent's display label.
+  const parentLabelByRunId = new Map<string, string>();
+  for (const e of sorted) {
+    if (!e.runId || e.parentRunId) continue;
+    parentLabelByRunId.set(e.runId, result.get(e.id) ?? resolveEntryName(e, result));
+  }
+  for (const e of sorted) {
+    if (!e.parentRunId) continue;
+    const parentLabel = parentLabelByRunId.get(e.parentRunId);
+    if (parentLabel) result.set(e.id, parentLabel);
+  }
   return result;
+}
+
+/** Expand visible merged primaries to their hidden siblings for bulk queue controls. */
+export function collectEntriesForMergedScope(
+  mergeGroups: MergedEntryGroup[],
+  primariesInScope: TrackerEntry[],
+): TrackerEntry[] {
+  const scope = new Set(primariesInScope.map((e) => e.id));
+  const out: TrackerEntry[] = [];
+  const seen = new Set<string>();
+  for (const g of mergeGroups) {
+    if (!scope.has(g.primary.id)) continue;
+    for (const entry of [g.primary, ...g.siblings]) {
+      const key = `${entry.workflow}#${entry.id}#${entry.runId ?? ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(entry);
+    }
+  }
+  return out;
 }

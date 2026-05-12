@@ -1,3 +1,4 @@
+import { queueStatusDisplayLabel } from "../../domain/tracker-terminal-display.js";
 import { dateLocal, type TrackerEntry } from "../jsonl.js";
 import { isResolvedPrepEntry } from "./prep-rows.js";
 
@@ -16,6 +17,8 @@ export interface SearchResultRow {
   date: string;
   /** Compact one-line summary (name / doc id / email). Never empty. */
   summary: string;
+  /** Queue/search pill text — matches {@link queueStatusDisplayLabel}. */
+  displayStatus: string;
 }
 
 /**
@@ -149,6 +152,11 @@ export function buildSearchHandler(deps: SearchDeps) {
                 lastTs: e.timestamp,
                 date,
                 summary: buildSearchSummary(e),
+                displayStatus: queueStatusDisplayLabel({
+                  workflow: wf,
+                  status: e.status,
+                  data: e.data,
+                }),
               },
             });
           }

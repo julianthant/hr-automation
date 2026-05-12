@@ -9,6 +9,12 @@ export interface TopBarRunButtonProps {
   busyCount?: number;
 }
 
+/**
+ * Upload / Run-modal launcher for workflows registered in {@link RUN_MODAL_REGISTRY}
+ * (OCR, emergency-contact, oath-upload, …). Self-gating via {@link isRunModalEnabled}.
+ *
+ * Mounted from `App` in the queue panel bulk-actions row to the left of Capture and Retry.
+ */
 export function TopBarRunButton({ activeWorkflow, busyCount = 0 }: TopBarRunButtonProps) {
   const [open, setOpen] = useState(false);
   if (!isRunModalEnabled(activeWorkflow)) return null;

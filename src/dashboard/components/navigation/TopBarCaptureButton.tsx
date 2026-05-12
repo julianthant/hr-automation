@@ -5,7 +5,8 @@ import { CaptureModal } from "@/components/capture/modal/index.js";
 import { useCaptureRegistration } from "@/components/hooks/useCaptureRegistration";
 
 /**
- * "Capture" CTA in the TopBar's queue zone.
+ * Capture workflow photos — mounted from `App` in the queue panel bulk-actions row
+ * (after Run/upload, before Retry) when the workflow registers a capture handler.
  *
  * Self-gating: queries `GET /api/capture/registry` via
  * `useCaptureRegistration(workflow)` and renders nothing if the active

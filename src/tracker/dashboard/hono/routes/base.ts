@@ -163,7 +163,7 @@ export function registerBaseRoutes(app: Hono, deps: DashboardHonoDeps): void {
     const now = Date.now();
     if (now - lastPruneAtMs >= PRUNE_INTERVAL_MS) {
       const deleted = cleanOldTrackerFiles(30, deps.dir);
-      const deletedShots = cleanOldScreenshots(30);
+      const deletedShots = cleanOldScreenshots(30, deps.screenshotsDir);
       let sessionsCleaned = false;
       // Only the pre-rotation legacy `sessions.jsonl` is age-gated here.
       // Dated `sessions-YYYY-MM-DD.jsonl` files are managed by the regular

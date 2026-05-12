@@ -41,6 +41,11 @@ export interface DelegationRowProps {
   /** Whether the batch queue view is showing this parent's members. */
   isBatchQueueFocused: boolean;
   onEnterBatchQueue: (parentRunId: string) => void;
+  /**
+   * When false, the row is display-only (no drill-in). Nested batch navigation
+   * is unsupported; keep this true only on the main queue list.
+   */
+  batchDrillInEnabled?: boolean;
 }
 
 export function DelegationRow({
@@ -48,6 +53,7 @@ export function DelegationRow({
   delegatedEntries,
   isBatchQueueFocused,
   onEnterBatchQueue,
+  batchDrillInEnabled = true,
 }: DelegationRowProps) {
   const counts = aggregateBatchCounts(delegatedEntries);
   const accent = resolveBatchAccent(counts);
@@ -71,26 +77,32 @@ export function DelegationRow({
   const prepTime = formatTime(parent.timestamp);
 
   const segs = computeProgressSegments(counts);
+  const interactive = batchDrillInEnabled;
 
   return (
     <div className="px-3 pt-2 first:pt-3">
       <div
-        role="button"
-        tabIndex={0}
-        aria-pressed={isBatchQueueFocused}
+        role={interactive ? "button" : undefined}
+        tabIndex={interactive ? 0 : undefined}
+        aria-pressed={interactive ? isBatchQueueFocused : undefined}
         aria-label={`${filename} — ${counts.done} of ${counts.total} done`}
-        onClick={() => onEnterBatchQueue(runId)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            onEnterBatchQueue(runId);
-          }
-        }}
+        onClick={interactive ? () => onEnterBatchQueue(runId) : undefined}
+        onKeyDown={
+          interactive
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onEnterBatchQueue(runId);
+                }
+              }
+            : undefined
+        }
         className={cn(
-          "group bg-card border border-border border-l-[3px] rounded-lg cursor-pointer outline-none overflow-hidden",
+          "group bg-card border border-border border-l-[3px] rounded-lg outline-none overflow-hidden",
           "transition-all duration-200",
-          "hover:border-primary/40 hover:shadow-lg hover:shadow-black/20",
-          "focus-visible:ring-2 focus-visible:ring-primary",
+          interactive &&
+            "cursor-pointer hover:border-primary/40 hover:shadow-lg hover:shadow-black/20 focus-visible:ring-2 focus-visible:ring-primary",
+          !interactive && "cursor-default",
           ACCENT_BORDER[accent],
           isBatchQueueFocused && "ring-2 ring-primary",
         )}

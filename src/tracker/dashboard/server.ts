@@ -27,6 +27,7 @@ export interface StartDashboardOptions {
   noClean?: boolean;
   cleanMaxAgeDays?: number;
   dir?: string;
+  screenshotsDir?: string;
   uploadPort?: number | null;
   serveStatic?: boolean;
 }
@@ -37,6 +38,7 @@ export interface CreateDashboardServerOptions {
   dir?: string;
   noClean?: boolean;
   cleanMaxAgeDays?: number;
+  screenshotsDir?: string;
   uploadPort?: number | null;
   serveStatic?: boolean;
 }
@@ -56,6 +58,7 @@ export function startDashboard(
     dir: opts.dir,
     noClean: opts.noClean,
     cleanMaxAgeDays: opts.cleanMaxAgeDays,
+    screenshotsDir: opts.screenshotsDir,
     serveStatic: opts.serveStatic,
   });
 }
@@ -68,7 +71,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
   if (!opts.noClean) {
     try {
       const maxAge = opts.cleanMaxAgeDays ?? 30;
-      const deleted = cleanOldTrackerFiles(maxAge);
+      const deleted = cleanOldTrackerFiles(maxAge, dir);
       if (deleted > 0) {
         log.step(`Pruned ${deleted} tracker file${deleted === 1 ? "" : "s"} older than ${maxAge} days`);
       }
@@ -77,7 +80,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     }
     try {
       const maxAge = opts.cleanMaxAgeDays ?? 30;
-      const deletedShots = cleanOldScreenshots(maxAge);
+      const deletedShots = cleanOldScreenshots(maxAge, opts.screenshotsDir);
       if (deletedShots > 0) {
         log.step(`Pruned ${deletedShots} screenshot${deletedShots === 1 ? "" : "s"} older than ${maxAge} days`);
       }
@@ -113,7 +116,15 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     log.warn(`SQLite projection startup skipped: ${err instanceof Error ? err.message : String(err)}`);
   }
   const staticDir = opts.serveStatic ? resolve(process.cwd(), "dist/dashboard") : undefined;
-  const honoApp = createDashboardHonoApp({ dir, stateDb, workflow, port, projectionReady, staticDir });
+  const honoApp = createDashboardHonoApp({
+    dir,
+    stateDb,
+    workflow,
+    port,
+    projectionReady,
+    staticDir,
+    screenshotsDir: opts.screenshotsDir,
+  });
   const requestListener = getRequestListener(honoApp.fetch);
 
   const localServer: Server = createServer(requestListener);

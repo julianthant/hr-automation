@@ -36,15 +36,16 @@ interface TopBarProps {
  *
  * The search box is positioned against the same horizontal grid as the main
  * dashboard: rail (200px), queue (responsive width), then the log panel. Its
- * width reaches the second detail-cell boundary in the log panel.
+ * width reaches the first detail-cell boundary in the log panel, matching the
+ * right edge of the Employee detail cell.
  *
  * Connection state (the green/red Live pill) lives in the TerminalDrawer
  * bar at the bottom right — the dashboard reserves its right edge for
  * "ambient state" indicators (clock, live), and the navbar for navigation.
  *
- * The previous BRAND·QUEUE·STREAM grid (with run controls in the queue
- * zone) was retired so the operator's run cluster sits closer to the
- * queue it acts on, in QueuePanel's footer.
+ * Quick-run enqueue (`QuickRunPanel`) lives in the QueuePanel footer. PDF upload
+ * (`TopBarRunButton`) and photo Capture (`TopBarCaptureButton`) mount in the queue
+ * toolbar beside Retry when enabled for the active workflow.
  */
 export function TopBar({
   date, onDateChange, availableDates,
@@ -79,7 +80,7 @@ export function TopBar({
   return (
     <div
       className={cn(
-        "relative flex items-center justify-between gap-4 px-6 py-2 bg-card flex-shrink-0 border-b border-border",
+        "relative z-20 flex items-center justify-between gap-4 px-6 py-2 bg-card flex-shrink-0 border-b border-border",
       )}
     >
       {/* ── Brand — left edge ──────────────────────────────────── */}
@@ -94,9 +95,9 @@ export function TopBar({
         <div
           className={cn(
             "absolute top-1/2 -translate-y-1/2 left-[200px]",
-            "w-[calc(300px+((100vw-200px-300px)/2))]",
-            "min-[1440px]:w-[calc(380px+((100vw-200px-380px)/2))]",
-            "2xl:w-[calc(460px+((100vw-200px-460px)/2))]",
+            "w-[calc(300px+((100vw-200px-300px)/4))]",
+            "min-[1440px]:w-[calc(380px+((100vw-200px-380px)/4))]",
+            "2xl:w-[calc(460px+((100vw-200px-460px)/4))]",
           )}
         >
           <SearchBar onSelect={onSearchSelect} />

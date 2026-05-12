@@ -186,7 +186,7 @@ interface WorkflowBoxProps {
 
 /**
  * Horizontal session card rendered inside `TerminalDrawer`. The visual
- * contract mirrors the production `WorkflowBox` (rounded-xl, dot, title,
+ * contract mirrors the production `WorkflowBox` (rounded-xl, title,
  * mono subline, 2×2 browser tile grid) so the read carries over from the
  * old vertical right-rail. Additions in this iteration:
  *
@@ -269,20 +269,8 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
     : itemInFlight && currentItemId
       ? currentItemId
       : authedBrowsers === totalBrowsers && totalBrowsers > 0
-        ? "Ready · waiting for next item"
+        ? "waiting for next item"
         : `Authenticating ${authedBrowsers}/${totalBrowsers}`;
-
-  // Status dot color follows the existing rules — running = cyan pulse,
-  // ready = green, authing = blue pulse, failed = destructive, ended = grey.
-  const statusDot = !active
-    ? finalStatus === "failed"
-      ? "bg-destructive"
-      : "bg-muted-foreground/60"
-    : itemInFlight
-      ? "bg-[#22d3ee] animate-pulse"
-      : authedBrowsers === totalBrowsers && totalBrowsers > 0
-        ? "bg-[#4ade80]"
-        : "bg-[#60a5fa] animate-pulse";
 
   // Card border tint reflects "current state" — in-flight cards get a
   // subtle cyan ring so an operator can pick out the working session
@@ -304,7 +292,7 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
     : currentStep
       ? formatStepName(currentStep)
       : authedBrowsers === totalBrowsers && totalBrowsers > 0
-        ? "idle · waiting"
+        ? "waiting for next item"
         : "authenticating";
 
   const stepClass = !active
@@ -343,9 +331,8 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
       aria-label={`${instance} session`}
     >
       <div className="px-2.5 pt-2 pb-2.5 flex flex-col gap-2">
-        {/* Header: dot + (icon + title + subline) + right-stack */}
+        {/* Header: (icon + title + subline) + right-stack */}
         <div className="flex items-start gap-2 min-w-0">
-          <span className={cn("w-2 h-2 rounded-full flex-shrink-0 mt-1.5", statusDot)} />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5 min-w-0">
               <Icon

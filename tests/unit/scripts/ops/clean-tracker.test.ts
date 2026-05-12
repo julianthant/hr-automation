@@ -17,11 +17,15 @@ import {
   dateLocal,
   trackEvent,
 } from "../../../../src/tracker/jsonl.js";
-import { cleanTrackerMain } from "../../../../src/scripts/ops/clean-tracker.js";
+import {
+  DEFAULT_SCREENSHOTS_DIR,
+  cleanTrackerMain,
+} from "../../../../src/scripts/ops/clean-tracker.js";
 import {
   openStateDb,
   closeStateDbForTests,
 } from "../../../../src/tracker/state/db.js";
+import { PATHS } from "../../../../src/config.js";
 
 // Dedicated tmp dir to keep the real .tracker/ untouched.
 const TEST_DIR = ".tracker-clean-test";
@@ -186,6 +190,10 @@ describe("cleanOldScreenshots (clean-tracker screenshots support)", () => {
     assert.equal(deleted, 2);
     assert.equal(readdirSync(SCREENSHOTS_TEST_DIR).length, 0);
   });
+
+  it("uses the runtime screenshot directory as the clean script default", () => {
+    assert.equal(DEFAULT_SCREENSHOTS_DIR, PATHS.screenshotDir);
+  });
 });
 
 describe("cleanTrackerMain sessionsDeleted field", () => {
@@ -321,4 +329,3 @@ describe("cleanTrackerMain SQLite prune", () => {
     );
   });
 });
-

@@ -30,7 +30,7 @@
  * promoting more variants is one entry away if needed.
  */
 
-export type StatusKey = "running" | "done" | "failed" | "pending" | "skipped";
+export type StatusKey = "running" | "done" | "failed" | "pending" | "skipped" | "not found";
 
 /**
  * Tailwind class string for a tinted status badge — bg/12 + text.
@@ -49,6 +49,9 @@ export function statusBadgeClass(status: string): string {
       return "bg-[#fbbf24]/12 text-[#fbbf24]";
     case "skipped":
       return "bg-secondary text-muted-foreground";
+    case "not found":
+    case "Not found":
+      return "bg-secondary/90 text-muted-foreground";
     default:
       return "";
   }

@@ -16,9 +16,11 @@ import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
 import { createWorkerStore } from "../../../src/core/daemon/worker-store.js";
 import {
+  buildDeleteBulkHandler,
   buildDeleteEntryHandler,
   findEntryInput,
   findLatestEntryData,
+  buildCancelActiveBulkHandler,
   buildCancelQueuedHandler,
   buildCancelRunningHandler,
   buildDrainWorkerHandler,
@@ -329,6 +331,88 @@ describe("findLatestEntryData", () => {
 });
 
 describe("buildDeleteEntryHandler", () => {
+  it("deletes screenshots for the deleted item", () => {
+    const shotsDir = join(tmp, "screenshots");
+    mkdirSync(shotsDir, { recursive: true });
+    const deletedShot = join(shotsDir, `separations-3930-error-ucpath-transaction-ucpath-${Date.now()}.png`);
+    const keptShot = join(shotsDir, `separations-other-error-ucpath-transaction-ucpath-${Date.now()}.png`);
+    writeFileSync(deletedShot, "png");
+    writeFileSync(keptShot, "png");
+    writeFileSync(
+      join(tmp, "separations-2026-05-09.jsonl"),
+      [
+        JSON.stringify({ workflow: "separations", id: "3930", runId: "run-1", status: "failed" }),
+        JSON.stringify({ workflow: "separations", id: "other", runId: "run-2", status: "done" }),
+      ].join("\n") + "\n",
+    );
+
+    const result = buildDeleteEntryHandler(tmp, { screenshotsDir: shotsDir })({
+      workflow: "separations",
+      id: "3930",
+      date: "2026-05-09",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(existsSync(deletedShot), false, "deleted item's screenshot removed");
+    assert.equal(existsSync(keptShot), true, "other item's screenshot kept");
+  });
+
+  it("deletes only the scoped run screenshots when runId is supplied", () => {
+    const shotsDir = join(tmp, "screenshots");
+    mkdirSync(shotsDir, { recursive: true });
+    const run1Shot = join(shotsDir, `separations-3930-error-first-ucpath-${Date.now()}.png`);
+    const run2Shot = join(shotsDir, `separations-3930-error-second-ucpath-${Date.now() + 1}.png`);
+    writeFileSync(run1Shot, "png");
+    writeFileSync(run2Shot, "png");
+    writeFileSync(
+      join(tmp, "sessions-2026-05-09.jsonl"),
+      [
+        JSON.stringify({
+          type: "screenshot",
+          timestamp: "2026-05-09T10:00:00.000Z",
+          pid: 1,
+          workflowInstance: "separations",
+          runId: "run-1",
+          ts: 1,
+          kind: "error",
+          label: "first",
+          step: "first",
+          files: [{ system: "ucpath", path: run1Shot }],
+        }),
+        JSON.stringify({
+          type: "screenshot",
+          timestamp: "2026-05-09T11:00:00.000Z",
+          pid: 1,
+          workflowInstance: "separations",
+          runId: "run-2",
+          ts: 2,
+          kind: "error",
+          label: "second",
+          step: "second",
+          files: [{ system: "ucpath", path: run2Shot }],
+        }),
+      ].join("\n") + "\n",
+    );
+    writeFileSync(
+      join(tmp, "separations-2026-05-09.jsonl"),
+      [
+        JSON.stringify({ workflow: "separations", id: "3930", runId: "run-1", status: "failed" }),
+        JSON.stringify({ workflow: "separations", id: "3930", runId: "run-2", status: "done" }),
+      ].join("\n") + "\n",
+    );
+
+    const result = buildDeleteEntryHandler(tmp, { screenshotsDir: shotsDir })({
+      workflow: "separations",
+      id: "3930",
+      date: "2026-05-09",
+      runId: "run-2",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(existsSync(run1Shot), true, "other run screenshot kept");
+    assert.equal(existsSync(run2Shot), false, "deleted run screenshot removed");
+  });
+
   it("deletes a scoped legacy JSONL run by its synthesized runId", () => {
     writeFileSync(
       join(tmp, "separations-2026-05-09.jsonl"),
@@ -590,6 +674,63 @@ describe("buildDeleteEntryHandler", () => {
   });
 });
 
+describe("buildDeleteBulkHandler", () => {
+  it("deletes multiple items for the same workflow and date", () => {
+    writeFileSync(
+      join(tmp, "separations-2026-05-09.jsonl"),
+      [
+        JSON.stringify({ workflow: "separations", id: "a", status: "done" }),
+        JSON.stringify({ workflow: "separations", id: "b", status: "failed" }),
+        JSON.stringify({ workflow: "separations", id: "c", status: "pending" }),
+      ].join("\n") + "\n",
+    );
+    writeFileSync(join(tmp, "separations-2026-05-09-logs.jsonl"), "\n");
+
+    const result = buildDeleteBulkHandler(tmp)({
+      workflow: "separations",
+      date: "2026-05-09",
+      ids: ["a", "b"],
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.equal(result.count, 2);
+    const trackerLines = readFileSync(join(tmp, "separations-2026-05-09.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(trackerLines.map((line) => line.id), ["c"]);
+  });
+
+  it("can delete only scoped runs for repeated item ids", () => {
+    writeFileSync(
+      join(tmp, "separations-2026-05-09.jsonl"),
+      [
+        JSON.stringify({ workflow: "separations", id: "a", runId: "run-old", status: "done" }),
+        JSON.stringify({ workflow: "separations", id: "a", runId: "run-batch", status: "failed" }),
+        JSON.stringify({ workflow: "separations", id: "b", runId: "run-batch-b", status: "failed" }),
+      ].join("\n") + "\n",
+    );
+    writeFileSync(join(tmp, "separations-2026-05-09-logs.jsonl"), "\n");
+
+    const result = buildDeleteBulkHandler(tmp)({
+      workflow: "separations",
+      date: "2026-05-09",
+      items: [
+        { id: "a", runId: "run-batch" },
+        { id: "b", runId: "run-batch-b" },
+      ],
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.equal(result.count, 2);
+    const trackerLines = readFileSync(join(tmp, "separations-2026-05-09.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(trackerLines.map((line) => `${line.id}:${line.runId}`), ["a:run-old"]);
+  });
+});
+
 describe("buildCancelQueuedHandler", () => {
   it("cancels a queued SQLite task and writes a completed cancel_task command", async () => {
     const control = openControlDb({ trackerDir: tmp });
@@ -709,6 +850,125 @@ describe("buildCancelQueuedHandler", () => {
     const result = await handler({ workflow: "separations", id: "3930" });
     assert.equal(result.ok, false);
     assert.equal((result as { status?: number }).status, 409);
+  });
+});
+
+describe("buildCancelActiveBulkHandler", () => {
+  it("cancels multiple queued SQLite tasks", async () => {
+    const control = openControlDb({ trackerDir: tmp });
+    const taskStore = createTaskStore(control);
+    const workerStore = createWorkerStore(control);
+    const [a] = taskStore.enqueueTasks({
+      workflow: "separations",
+      inputs: [{ docId: "3930" }],
+      deriveItemId: (input) => input.docId,
+      runIds: ["sqlite-run-a"],
+    });
+    const [b] = taskStore.enqueueTasks({
+      workflow: "separations",
+      inputs: [{ docId: "3932" }],
+      deriveItemId: (input) => input.docId,
+      runIds: ["sqlite-run-b"],
+    });
+
+    const result = await buildCancelActiveBulkHandler(tmp)({
+      workflow: "separations",
+      items: [
+        { id: "3930", status: "pending", runId: "sqlite-run-a" },
+        { id: "3932", status: "pending", runId: "sqlite-run-b" },
+      ],
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.equal(result.count, 2);
+    assert.equal(taskStore.getTask(a.taskId)?.state, "cancelled");
+    assert.equal(taskStore.getTask(b.taskId)?.state, "cancelled");
+    workerStore.close();
+  });
+
+  it("runs cancel-running before cancel-queued for mixed items", async () => {
+    const control = openControlDb({ trackerDir: tmp });
+    const taskStore = createTaskStore(control);
+    const workerStore = createWorkerStore(control);
+    workerStore.registerWorker({
+      workerId: "sep-worker",
+      workflow: "separations",
+      kind: "daemon",
+      pid: 12345,
+      hostname: "test-host",
+      phase: "processing",
+    });
+    const [running] = taskStore.enqueueTasks({
+      workflow: "separations",
+      inputs: [{ docId: "4000" }],
+      deriveItemId: (input) => input.docId,
+      runIds: ["run-inflight"],
+    });
+    const claimed = taskStore.claimNextTask({ workflow: "separations", workerId: "sep-worker" });
+    assert.ok(claimed);
+    taskStore.markTaskRunning({
+      taskId: running.taskId,
+      attemptId: running.attemptId,
+      workerId: "sep-worker",
+    });
+    const [queued] = taskStore.enqueueTasks({
+      workflow: "separations",
+      inputs: [{ docId: "4001" }],
+      deriveItemId: (input) => input.docId,
+      runIds: ["run-queued"],
+    });
+
+    const result = await buildCancelActiveBulkHandler(tmp)({
+      workflow: "separations",
+      items: [
+        { id: "4000", status: "running", runId: "run-inflight" },
+        { id: "4001", status: "pending", runId: "run-queued" },
+      ],
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.equal(result.count, 2);
+    assert.equal(taskStore.getTask(running.taskId)?.state, "cancel_requested");
+    assert.equal(taskStore.getTask(queued.taskId)?.state, "cancelled");
+    workerStore.close();
+  });
+
+  it("requires runId for running items (no id#1 fallback)", async () => {
+    const control = openControlDb({ trackerDir: tmp });
+    const taskStore = createTaskStore(control);
+    const workerStore = createWorkerStore(control);
+    workerStore.registerWorker({
+      workerId: "sep-worker",
+      workflow: "separations",
+      kind: "daemon",
+      pid: 12345,
+      hostname: "test-host",
+      phase: "processing",
+    });
+    const [running] = taskStore.enqueueTasks({
+      workflow: "separations",
+      inputs: [{ docId: "5000" }],
+      deriveItemId: (input) => input.docId,
+      runIds: ["needs-run-id"],
+    });
+    const claimed = taskStore.claimNextTask({ workflow: "separations", workerId: "sep-worker" });
+    assert.ok(claimed);
+    taskStore.markTaskRunning({
+      taskId: running.taskId,
+      attemptId: running.attemptId,
+      workerId: "sep-worker",
+    });
+
+    const result = await buildCancelActiveBulkHandler(tmp)({
+      workflow: "separations",
+      items: [{ id: "5000", status: "running" }],
+    });
+
+    assert.equal(result.count, 0);
+    assert.equal(result.errors.length, 1);
+    assert.match(result.errors[0]?.error ?? "", /runId is required/i);
+    assert.equal(taskStore.getTask(running.taskId)?.state, "running");
+    workerStore.close();
   });
 });
 

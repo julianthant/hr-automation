@@ -1,11 +1,21 @@
 import { cn } from "@/lib/utils";
-import { CheckCircle2, AlertTriangle, Loader2, Clock, CircleSlash, X, Ban } from "lucide-react";
+import {
+  CheckCircle2,
+  AlertTriangle,
+  Loader2,
+  Clock,
+  CircleSlash,
+  X,
+  Ban,
+  SearchX,
+} from "lucide-react";
 import { memo, type ComponentType, type SVGProps } from "react";
 import type { TrackerEntry } from "@/components/shared/types";
 import { resolveEntryId, resolveEntryName } from "@/components/shared/entry-display";
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
 import { RetryButton } from "@/components/shared/RetryButton";
 import { DeleteButton } from "@/components/shared/DeleteButton";
+import { isTerminalNotFoundEntry } from "../../../domain/tracker-terminal-display.js";
 import { QueueItemControls } from "./QueueItemControls";
 import { CancelRunningButton } from "./CancelRunningButton";
 
@@ -70,6 +80,14 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
     iconColor: "text-muted-foreground",
     label: "Skipped",
   },
+  /** EID lookup / Active Check — UCPath had no matching row (tracker status is still `done`). */
+  notFound: {
+    badge: "bg-secondary/90 text-muted-foreground border border-border/80",
+    icon: SearchX,
+    iconClass: "",
+    iconColor: "text-muted-foreground",
+    label: "Not found",
+  },
 };
 
 interface EntryItemProps {
@@ -108,9 +126,12 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
   const isFailed = entry.status === "failed" && !isCancelled;
   const isDone = entry.status === "done";
   const isPending = entry.status === "pending";
+  const isNotFoundTerminal = isDone && isTerminalNotFoundEntry(entry);
   const cfg = isCancelled
     ? STATUS_CONFIG.cancelled
-    : STATUS_CONFIG[entry.status] ?? STATUS_CONFIG.pending;
+    : isNotFoundTerminal
+      ? STATUS_CONFIG.notFound
+      : STATUS_CONFIG[entry.status] ?? STATUS_CONFIG.pending;
   const StatusIcon = cfg.icon;
 
   const firstTs = entry.firstLogTs || entry.startTimestamp || entry.timestamp;

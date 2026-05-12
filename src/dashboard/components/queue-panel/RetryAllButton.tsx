@@ -5,25 +5,30 @@ import { cn } from "@/lib/utils";
 
 interface RetryAllButtonProps {
   workflow: string;
-  failedIds: string[];
+  /** Entries in the current queue scope (any status). Resolved prep rows are omitted upstream. */
+  ids: string[];
   /** When set (batch queue mode), retries are stamped with this batch parent id. */
   parentRunId?: string;
 }
 
-export function RetryAllButton({ workflow, failedIds, parentRunId }: RetryAllButtonProps) {
+export function RetryAllButton({ workflow, ids, parentRunId }: RetryAllButtonProps) {
   const [retrying, setRetrying] = useState(false);
 
   async function retryAll() {
-    if (retrying || failedIds.length === 0) return;
+    if (retrying) return;
+    if (ids.length === 0) {
+      toast.message("Nothing to retry", { description: "No entries in the current view." });
+      return;
+    }
     setRetrying(true);
-    const t = toast.loading(`Retrying ${failedIds.length} failed items…`);
+    const t = toast.loading(`Retrying ${ids.length} items…`);
     try {
       const res = await fetch("/api/retry-bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           workflow,
-          ids: failedIds,
+          ids,
           ...(parentRunId ? { parentRunId } : {}),
         }),
       });
@@ -35,7 +40,7 @@ export function RetryAllButton({ workflow, failedIds, parentRunId }: RetryAllBut
       if (body.errors.length === 0) {
         toast.success(`Retry scheduled`, {
           id: t,
-          description: `${body.count} of ${failedIds.length} items re-added to queue`,
+          description: `${body.count} of ${ids.length} items re-added to queue`,
         });
       } else {
         toast.warning(`Some retries failed`, {
@@ -44,7 +49,7 @@ export function RetryAllButton({ workflow, failedIds, parentRunId }: RetryAllBut
         });
       }
     } catch (err) {
-      toast.error(`Couldn't retry failed items`, {
+      toast.error(`Couldn't retry items`, {
         id: t,
         description: err instanceof Error ? err.message : String(err),
       });
@@ -53,23 +58,20 @@ export function RetryAllButton({ workflow, failedIds, parentRunId }: RetryAllBut
     }
   }
 
-  const failedCount = failedIds.length;
-  const noFailures = failedCount === 0;
+  const n = ids.length;
 
   return (
     <button
       type="button"
       onClick={retryAll}
-      disabled={retrying || noFailures}
+      disabled={retrying}
       aria-label={
-        noFailures
-          ? "No failed entries to retry"
-          : `Retry all ${failedCount} failed entries`
+        n === 0 ? "Retry all entries (none in view)" : `Retry all ${n} entries in this view`
       }
       title={
-        noFailures
-          ? "No failed entries to retry"
-          : `Retry ${failedCount} failed ${failedCount === 1 ? "entry" : "entries"}`
+        n === 0
+          ? "Re-queue every row in this view (any status)"
+          : `Retry ${n} ${n === 1 ? "entry" : "entries"} (any status)`
       }
       className={cn(
         "flex-shrink-0 h-8 w-8 flex items-center justify-center rounded-lg transition-colors outline-none",

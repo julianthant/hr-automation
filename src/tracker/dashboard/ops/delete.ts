@@ -1,5 +1,7 @@
-import { existsSync, readFileSync, writeFileSync } from "fs";
-import { join } from "path";
+import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
+import { basename, join, resolve, sep } from "path";
+import { PATHS } from "../../../config.js";
+import { readSessionEvents } from "../../session-events.js";
 import { openStateDb } from "../../state/db.js";
 import { transaction } from "../../../infra/sqlite/index.js";
 
@@ -14,6 +16,17 @@ export type DeleteEntryResult =
   | { ok: true }
   | { ok: false; error: string; status?: number };
 
+export interface DeleteBulkRequest {
+  workflow: string;
+  date: string;
+  ids?: string[];
+  items?: Array<{ id: string; runId?: string }>;
+}
+
+export interface DeleteEntryOptions {
+  screenshotsDir?: string;
+}
+
 /**
  * Hard-delete JSONL rows and SQLite records for a tracker entry.
  *
@@ -22,7 +35,7 @@ export type DeleteEntryResult =
  * The parse cache in jsonl.ts invalidates on next read because the file's
  * mtime changes after the rewrite.
  */
-export function buildDeleteEntryHandler(dir: string) {
+export function buildDeleteEntryHandler(dir: string, opts: DeleteEntryOptions = {}) {
   return function deleteEntry(req: DeleteEntryRequest): DeleteEntryResult {
     const { workflow, id, date, runId } = req;
     if (!workflow || !id || !date) {
@@ -58,6 +71,7 @@ export function buildDeleteEntryHandler(dir: string) {
     });
 
     const db = openStateDb(dir);
+    deleteScreenshotsForEntry(db, dir, req, opts.screenshotsDir ?? PATHS.screenshotDir);
     transaction(db, () => {
       const params = { workflow, date, id, runId: runId ?? "" };
       const runClause = runId ? " AND run_id = @runId" : "";
@@ -69,6 +83,9 @@ export function buildDeleteEntryHandler(dir: string) {
       ).run(params);
       db.prepare(
         `DELETE FROM runs WHERE workflow = @workflow AND tracker_date = @date AND item_id = @id${runClause}`,
+      ).run(params);
+      db.prepare(
+        `DELETE FROM files WHERE kind = 'screenshot' AND workflow = @workflow AND item_id = @id${runClause}`,
       ).run(params);
       if (!runId) {
         db.prepare("DELETE FROM items WHERE workflow = @workflow AND tracker_date = @date AND item_id = @id").run(params);
@@ -137,4 +154,79 @@ export function buildDeleteEntryHandler(dir: string) {
 
     return { ok: true };
   };
+}
+
+export function buildDeleteBulkHandler(dir: string, opts: DeleteEntryOptions = {}) {
+  const del = buildDeleteEntryHandler(dir, opts);
+  return (
+    req: DeleteBulkRequest,
+  ): {
+    ok: true;
+    count: number;
+    errors: Array<{ id: string; error: string }>;
+  } => {
+    const errors: Array<{ id: string; error: string }> = [];
+    let count = 0;
+    const items: Array<{ id: string; runId?: string }> = req.items && req.items.length > 0
+      ? req.items
+      : (req.ids ?? []).map((id) => ({ id }));
+    for (const item of items) {
+      const r = del({
+        workflow: req.workflow,
+        id: item.id,
+        date: req.date,
+        ...(item.runId ? { runId: item.runId } : {}),
+      });
+      if (r.ok) count++;
+      else errors.push({ id: item.id, error: r.error });
+    }
+    return { ok: true, count, errors };
+  };
+}
+
+function deleteScreenshotsForEntry(
+  db: ReturnType<typeof openStateDb>,
+  dir: string,
+  req: DeleteEntryRequest,
+  screenshotsDir: string,
+): void {
+  const prefix = `${req.workflow}-${req.id}-`;
+  const filenames = new Set<string>();
+
+  if (req.runId) {
+    for (const ev of readSessionEvents(dir)) {
+      if (ev.type !== "screenshot" || ev.runId !== req.runId) continue;
+      for (const file of (ev as { files?: Array<{ path?: string }> }).files ?? []) {
+        const name = basename(file.path ?? "");
+        if (name.startsWith(prefix) && name.endsWith(".png")) filenames.add(name);
+      }
+    }
+
+    const rows = db.prepare(
+      "SELECT storage_path FROM files WHERE kind = 'screenshot' AND workflow = @workflow AND item_id = @id AND run_id = @runId",
+    ).all({ workflow: req.workflow, id: req.id, runId: req.runId }) as Array<{ storage_path: string }>;
+    for (const row of rows) {
+      const name = basename(row.storage_path);
+      if (name.startsWith(prefix) && name.endsWith(".png")) filenames.add(name);
+    }
+  } else {
+    try {
+      for (const name of readdirSync(screenshotsDir)) {
+        if (name.startsWith(prefix) && name.endsWith(".png")) filenames.add(name);
+      }
+    } catch {
+      return;
+    }
+  }
+
+  const rootAbs = resolve(screenshotsDir);
+  for (const name of filenames) {
+    const full = resolve(screenshotsDir, name);
+    if (!full.startsWith(rootAbs + sep) && full !== rootAbs) continue;
+    try {
+      unlinkSync(full);
+    } catch {
+      // Best-effort: deleting a run must not fail because a screenshot is gone.
+    }
+  }
 }

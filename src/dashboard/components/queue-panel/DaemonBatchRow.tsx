@@ -1,4 +1,6 @@
 import { cn } from "@/lib/utils";
+import { useState, type MouseEvent } from "react";
+import { toast } from "sonner";
 import type { TrackerEntry } from "@/components/shared/types";
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
 import {
@@ -8,7 +10,8 @@ import {
   resolveBatchAccent,
   type BatchAccent,
 } from "@/components/ocr/delegation-row-helpers";
-import { Loader2, Clock, CheckCircle2, AlertTriangle } from "lucide-react";
+import { resolveDaemonBatchQueueTitle } from "./batch-queue-view";
+import { Loader2, Clock, CheckCircle2, AlertTriangle, Trash2, RotateCcw } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 const PREVIEW_KIDS = 3;
@@ -28,6 +31,9 @@ const STATUS_ICON: Record<string, { Icon: LucideIcon; color: string; spin: boole
 };
 
 export interface DaemonBatchRowProps {
+  workflow: string;
+  /** Tracker date — required for bulk delete API. */
+  date?: string;
   /** Shared `parentRunId` / dashboard batch id for all members. */
   batchParentRunId: string;
   /** Workflow label for display (kernel registry). */
@@ -35,6 +41,13 @@ export interface DaemonBatchRowProps {
   memberEntries: TrackerEntry[];
   isBatchQueueFocused: boolean;
   onEnterBatchQueue: (batchParentRunId: string) => void;
+  /**
+   * When false, the row is display-only (no drill-in). Use inside surfaces
+   * where nested batch navigation is forbidden.
+   */
+  batchDrillInEnabled?: boolean;
+  /** Called after bulk-delete removes rows so the parent can clear selection. */
+  onDeletedIds?: (ids: string[]) => void;
 }
 
 /**
@@ -42,16 +55,29 @@ export interface DaemonBatchRowProps {
  * share the same `parentRunId` from one multi-enqueue or batch-context run.
  */
 export function DaemonBatchRow({
+  workflow,
+  date,
   batchParentRunId,
   workflowLabel,
   memberEntries,
   isBatchQueueFocused,
   onEnterBatchQueue,
+  batchDrillInEnabled = true,
+  onDeletedIds,
 }: DaemonBatchRowProps) {
   const counts = aggregateBatchCounts(memberEntries);
   const accent = resolveBatchAccent(counts);
   const previewKids = pickPreviewChildren(memberEntries, PREVIEW_KIDS);
   const elapsed = computeBatchElapsed(memberEntries);
+
+  const [deleting, setDeleting] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+
+  const memberDeleteItems = memberEntries.map((e) => ({
+    id: e.id,
+    ...(e.runId ? { runId: e.runId } : {}),
+  }));
+  const memberIds = memberDeleteItems.map((e) => e.id);
 
   const liveTick = useElapsed(
     elapsed && !elapsed.frozen ? new Date(elapsed.startMs).toISOString() : null,
@@ -70,27 +96,132 @@ export function DaemonBatchRow({
   const batchTime = firstTs ? formatTime(firstTs) : "";
 
   const segs = computeProgressSegments(counts);
-  const title = `${workflowLabel} batch`;
+  const title = resolveDaemonBatchQueueTitle(workflowLabel, memberEntries, batchParentRunId);
+
+  async function deleteEntireBatch(e: MouseEvent) {
+    e.stopPropagation();
+    if (deleting || memberIds.length === 0 || !date) return;
+    const n = memberIds.length;
+    if (
+      !window.confirm(
+        `Permanently delete all ${n} entr${n === 1 ? "y" : "ies"} in this batch? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    const t = toast.loading(`Deleting ${n} ${n === 1 ? "entry" : "entries"}…`);
+    try {
+      const res = await fetch("/api/delete-bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workflow, date, items: memberDeleteItems }),
+      });
+      const body = (await res.json()) as {
+        ok?: boolean;
+        count?: number;
+        errors?: Array<{ id: string; error: string }>;
+        error?: string;
+      };
+      const errors = body.errors ?? [];
+      if (!res.ok) {
+        toast.error(res.status === 422 ? "Couldn't delete any entries" : "Couldn't delete entries", {
+          id: t,
+          description:
+            errors.length > 0
+              ? `${errors[0]!.error}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ""}`
+              : body.error ?? `HTTP ${res.status}`,
+        });
+        return;
+      }
+      if (errors.length === 0) {
+        toast.success(`Deleted ${body.count} ${body.count === 1 ? "entry" : "entries"}`, { id: t });
+        onDeletedIds?.(memberIds);
+      } else {
+        toast.warning(`Some deletes failed`, {
+          id: t,
+          description: `${body.count} removed · ${errors.length} failed (${errors[0]!.error})`,
+        });
+        const failed = new Set(errors.map((x) => x.id));
+        onDeletedIds?.(memberIds.filter((id) => !failed.has(id)));
+      }
+    } catch (err) {
+      toast.error(`Couldn't delete batch`, {
+        id: t,
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function retryAllInBatch(ev: MouseEvent) {
+    ev.stopPropagation();
+    if (retrying || memberIds.length === 0) return;
+    setRetrying(true);
+    const t = toast.loading(`Retrying ${memberIds.length} items…`);
+    try {
+      const res = await fetch("/api/retry-bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workflow,
+          ids: memberIds,
+          parentRunId: batchParentRunId,
+        }),
+      });
+      const body = (await res.json()) as {
+        ok: boolean;
+        count: number;
+        errors: Array<{ id: string; error: string }>;
+      };
+      if (body.errors.length === 0) {
+        toast.success(`Retry scheduled`, {
+          id: t,
+          description: `${body.count} of ${memberIds.length} items re-added to queue`,
+        });
+      } else {
+        toast.warning(`Some retries failed`, {
+          id: t,
+          description: `${body.count} succeeded · ${body.errors.length} failed (${body.errors[0]?.error})`,
+        });
+      }
+    } catch (err) {
+      toast.error(`Couldn't retry`, {
+        id: t,
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setRetrying(false);
+    }
+  }
+
+  const interactive = batchDrillInEnabled;
 
   return (
     <div className="px-3 pt-2 first:pt-3">
       <div
-        role="button"
-        tabIndex={0}
-        aria-pressed={isBatchQueueFocused}
+        role={interactive ? "button" : undefined}
+        tabIndex={interactive ? 0 : undefined}
+        aria-pressed={interactive ? isBatchQueueFocused : undefined}
         aria-label={`${title} — ${counts.done} of ${counts.total} done`}
-        onClick={() => onEnterBatchQueue(batchParentRunId)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            onEnterBatchQueue(batchParentRunId);
-          }
-        }}
+        onClick={interactive ? () => onEnterBatchQueue(batchParentRunId) : undefined}
+        onKeyDown={
+          interactive
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onEnterBatchQueue(batchParentRunId);
+                }
+              }
+            : undefined
+        }
         className={cn(
-          "group bg-card border border-border border-l-[3px] rounded-lg cursor-pointer outline-none overflow-hidden",
+          "group bg-card border border-border border-l-[3px] rounded-lg outline-none overflow-hidden",
           "transition-all duration-200",
-          "hover:border-primary/40 hover:shadow-lg hover:shadow-black/20",
-          "focus-visible:ring-2 focus-visible:ring-primary",
+          interactive &&
+            "cursor-pointer hover:border-primary/40 hover:shadow-lg hover:shadow-black/20 focus-visible:ring-2 focus-visible:ring-primary",
+          !interactive && "cursor-default",
           ACCENT_BORDER[accent],
           isBatchQueueFocused && "ring-2 ring-primary",
         )}
@@ -179,6 +310,55 @@ export function DaemonBatchRow({
               {elapsedLabel}
             </span>
           )}
+          <div
+            className="flex items-center gap-1 flex-shrink-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {memberIds.length > 0 && (
+              <button
+                type="button"
+                aria-label={`Retry all ${memberIds.length} ${memberIds.length === 1 ? "item" : "items"} in this batch`}
+                title="Re-queue every row in this batch (any status)"
+                disabled={retrying}
+                onClick={retryAllInBatch}
+                className={cn(
+                  "inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors outline-none",
+                  "text-muted-foreground bg-transparent",
+                  "hover:text-foreground hover:bg-muted",
+                  "focus-visible:ring-2 focus-visible:ring-primary/40",
+                  "disabled:opacity-60 disabled:cursor-wait",
+                )}
+              >
+                {retrying ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" aria-hidden />
+                ) : (
+                  <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+                )}
+              </button>
+            )}
+            {memberIds.length > 0 && date ? (
+              <button
+                type="button"
+                aria-label="Delete all entries in this batch"
+                title="Delete entire batch"
+                disabled={deleting}
+                onClick={deleteEntireBatch}
+                className={cn(
+                  "inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors outline-none",
+                  "text-muted-foreground bg-transparent",
+                  "hover:text-destructive hover:bg-destructive/10",
+                  "focus-visible:ring-2 focus-visible:ring-destructive/40",
+                  "disabled:opacity-60 disabled:cursor-wait",
+                )}
+              >
+                {deleting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : (
+                  <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                )}
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
     </div>

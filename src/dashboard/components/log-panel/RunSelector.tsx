@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, Check, X, Play } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Check, X, Play, SearchX } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DeleteButton } from "@/components/shared/DeleteButton";
 import { RetryButton } from "@/components/shared/RetryButton";
@@ -10,11 +10,14 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import type { RunInfo } from "@/components/shared/types";
+import { queueStatusDisplayLabel } from "../../../domain/tracker-terminal-display.js";
 
 interface RunSelectorProps {
   runs: RunInfo[];
   activeRunId: string | null;
   onSelect: (runId: string) => void;
+  /** Workflow id for per-run outcome labels (e.g. "Not found" for eid-lookup). */
+  workflow: string;
   retryTarget?: {
     workflow: string;
     id: string;
@@ -41,17 +44,29 @@ function runNumber(run: RunInfo): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function statusGlyph(status: string) {
-  if (status === "failed") return <X className="w-3 h-3" aria-hidden />;
-  if (status === "done") return <Check className="w-3 h-3" aria-hidden />;
-  if (status === "running") return <Play className="w-3 h-3" aria-hidden />;
+function runDisplayStatus(workflow: string, run: RunInfo): string {
+  return queueStatusDisplayLabel({
+    workflow,
+    status: run.status,
+    data: run.data as Record<string, unknown> | undefined,
+  });
+}
+
+function statusGlyph(run: RunInfo, workflow: string) {
+  const display = runDisplayStatus(workflow, run);
+  if (run.status === "failed") return <X className="w-3 h-3" aria-hidden />;
+  if (display === "Not found") return <SearchX className="w-3 h-3" aria-hidden />;
+  if (run.status === "done") return <Check className="w-3 h-3" aria-hidden />;
+  if (run.status === "running") return <Play className="w-3 h-3" aria-hidden />;
   return null;
 }
 
-function statusColor(status: string): string {
-  if (status === "failed") return "text-destructive";
-  if (status === "done") return "text-[#4ade80]";
-  if (status === "running") return "text-primary";
+function statusColor(run: RunInfo, workflow: string): string {
+  const display = runDisplayStatus(workflow, run);
+  if (run.status === "failed") return "text-destructive";
+  if (display === "Not found") return "text-muted-foreground";
+  if (run.status === "done") return "text-[#4ade80]";
+  if (run.status === "running") return "text-primary";
   return "text-muted-foreground";
 }
 
@@ -61,7 +76,7 @@ function statusColor(status: string): string {
  * which alphabetic sort would produce). Opens an ordered list of every run
  * with its status glyph; the trigger always shows the active run + a chevron.
  */
-export function RunSelector({ runs, activeRunId, onSelect, retryTarget, deleteTarget }: RunSelectorProps) {
+export function RunSelector({ runs, activeRunId, onSelect, retryTarget, deleteTarget, workflow }: RunSelectorProps) {
   // Numeric desc — newest run on top regardless of how it was inserted upstream.
   const sortedRuns = useMemo(
     () => [...runs].sort((a, b) => runNumber(b) - runNumber(a)),
@@ -72,6 +87,7 @@ export function RunSelector({ runs, activeRunId, onSelect, retryTarget, deleteTa
 
   const active = sortedRuns.find((r) => r.runId === activeRunId) ?? sortedRuns[0];
   const activeNum = runNumber(active);
+  const activeDisplay = runDisplayStatus(workflow, active);
   const totalRuns = sortedRuns.length;
   // sortedRuns is desc (newest first), so index 0 = newest, last index = oldest
   const activeIndex = sortedRuns.findIndex((r) => r.runId === active.runId);
@@ -119,15 +135,15 @@ export function RunSelector({ runs, activeRunId, onSelect, retryTarget, deleteTa
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
-            aria-label={`Run #${activeNum} of ${totalRuns} — ${active.status}`}
+            aria-label={`Run #${activeNum} of ${totalRuns} — ${activeDisplay}`}
             className={cn(
               "h-8 min-w-[126px] px-3 rounded-md border border-border bg-secondary cursor-pointer",
               "inline-flex items-center justify-center gap-2 transition-colors",
               "hover:bg-accent data-[state=open]:border-primary outline-none focus-visible:ring-2 focus-visible:ring-primary",
             )}
           >
-            <span className={cn("flex items-center gap-1 font-mono text-xs font-medium tabular-nums", statusColor(active.status))}>
-              {statusGlyph(active.status)}
+            <span className={cn("flex items-center gap-1 font-mono text-xs font-medium tabular-nums", statusColor(active, workflow))}>
+              {statusGlyph(active, workflow)}
               #{activeNum}
             </span>
             <span className="text-[10px] text-muted-foreground font-mono tabular-nums">
@@ -147,12 +163,12 @@ export function RunSelector({ runs, activeRunId, onSelect, retryTarget, deleteTa
                 className={cn(isActive && "bg-accent")}
               >
                 <span className="flex items-center justify-between w-full">
-                  <span className={cn("flex items-center gap-1.5 font-mono font-medium tabular-nums", statusColor(run.status))}>
-                    {statusGlyph(run.status)}
+                  <span className={cn("flex items-center gap-1.5 font-mono font-medium tabular-nums", statusColor(run, workflow))}>
+                    {statusGlyph(run, workflow)}
                     Run #{num}
                   </span>
                   <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    {run.status}
+                    {runDisplayStatus(workflow, run)}
                   </span>
                 </span>
               </DropdownMenuItem>

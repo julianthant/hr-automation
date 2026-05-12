@@ -1,4 +1,4 @@
-// Prune stale .tracker/ JSONL files and .screenshots/ PNG files.
+// Prune stale .tracker/ JSONL files and runtime screenshot PNG files.
 // Usage:
 //   npm run clean:tracker                           # default 30 days — cleans both
 //   npm run clean:tracker -- --days 14              # custom age
@@ -17,6 +17,7 @@ import {
   DEFAULT_DIR,
 } from "../../tracker/jsonl.js";
 import { pruneStateDb } from "../../tracker/state/cleanup.js";
+import { PATHS } from "../../config.js";
 import { log } from "../../utils/log.js";
 
 /**
@@ -112,7 +113,7 @@ function readPrepRunIds(dir: string): Set<string> {
   return runIds;
 }
 
-export const DEFAULT_SCREENSHOTS_DIR = ".screenshots";
+export const DEFAULT_SCREENSHOTS_DIR = PATHS.screenshotDir;
 
 interface Args {
   days: number;
@@ -125,7 +126,7 @@ interface Args {
 function parseArgs(argv: string[]): Args {
   let days = 30;
   let dir = DEFAULT_DIR;
-  let screenshotsDir = DEFAULT_SCREENSHOTS_DIR;
+  let screenshotsDir: string = DEFAULT_SCREENSHOTS_DIR;
   let cleanTracker = true;
   let cleanScreenshots = true;
   for (let i = 0; i < argv.length; i++) {

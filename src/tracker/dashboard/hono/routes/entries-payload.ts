@@ -195,6 +195,7 @@ export function buildJsonlEventsPayload(
 
     return {
       ...entry,
+      runId: entry.runId || `${entry.id}#1`,
       firstLogTs: spanFirstTs,
       lastLogTs: spanLastTs,
       lastLogMessage: logLastMsg.get(key),
