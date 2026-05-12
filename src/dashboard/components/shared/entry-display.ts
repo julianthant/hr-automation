@@ -13,6 +13,15 @@ function firstNonBlank(...values: Array<string | undefined>): string {
   return "";
 }
 
+/** OCR prep rows — short queue labels by form instead of workflow "OCR". */
+function ocrQueueDisplayBase(entry: TrackerEntry): string | null {
+  if (entry.workflow !== "ocr") return null;
+  const ft = (entry.data?.formType ?? "").trim();
+  if (ft === "oath") return "OATH";
+  if (ft === "emergency-contact") return "EMPL";
+  return null;
+}
+
 function resolveEmployeeLabel(data: Record<string, string>): string {
   const directName = firstNonBlank(data.name, data.employeeName, data.searchName);
   if (directName) return directName;
@@ -32,7 +41,7 @@ function resolveEmployeeLabel(data: Record<string, string>): string {
  *
  * When a `displayNames` map is supplied (built via `buildDisplayNameMap`),
  * the precomputed "<base> <ordinal>" label takes precedence so the queue
- * shows "OCR 1", "Onboarding Roster 2", etc.
+ * shows "OATH 1", "EMPL 2", "Onboarding Roster 2", etc.
  *
  * Single source of truth for "what's this entry called" — used by QueuePanel,
  * LogPanel, and the toast system.
@@ -108,8 +117,8 @@ export function resolveEntryId(entry: TrackerEntry): string {
  * known, else the entry's `timestamp`). This way:
  *
  *   - EID rows render as "Zaw, Hein Thant" rather than "Zaw, Hein Thant 1".
- *   - OCR rows use a workflow-level label, so rows render as
- *     "OCR 1", "OCR 2", ...
+ *   - OCR rows use {@link ocrQueueDisplayBase}: "OATH 1", "EMPL 2", …
+ *     (fallback: workflow label from registry if formType is missing).
  *   - SharePoint rows carry `__name = "Onboarding Roster"` (or whatever the
  *     spec label is), so they render as "Onboarding Roster 1", ...
  *
@@ -123,6 +132,8 @@ export function buildDisplayNameMap(
     const d = e.data ?? {};
     const personName = resolveEmployeeLabel(d);
     if (personName) return { base: personName, ordinal: false, explicitWorkflowName: false };
+    const ocrBase = ocrQueueDisplayBase(e);
+    if (ocrBase) return { base: ocrBase, ordinal: true, explicitWorkflowName: true };
     const workflowName = firstNonBlank(d.__name);
     return { base: workflowName || workflowLabel, ordinal: true, explicitWorkflowName: Boolean(workflowName) };
   };
@@ -150,8 +161,8 @@ export function buildDisplayNameMap(
     }
     // Only one entry with this base — omit from map so resolveEntryName falls
     // through to data fields / entry.id, avoiding a pointless "Active Check 1".
-    // Explicit workflow-level names such as "OCR" still get an ordinal so the
-    // parent row and all delegated children share "OCR 1" from the first run.
+    // Explicit workflow-level names (incl. OATH/EMPL) still get an ordinal so the
+    // parent row and all delegated children share the same numbered label as the OCR run.
     if ((totals.get(base) ?? 0) <= 1 && !explicitWorkflowName) continue;
     const next = (counters.get(base) ?? 0) + 1;
     counters.set(base, next);

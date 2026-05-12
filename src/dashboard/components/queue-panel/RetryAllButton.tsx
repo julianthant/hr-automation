@@ -7,11 +7,13 @@ interface RetryAllButtonProps {
   workflow: string;
   /** Entries in the current queue scope (any status). Resolved prep rows are omitted upstream. */
   ids: string[];
+  /** Tracker date selected in the dashboard. */
+  date?: string;
   /** When set (batch queue mode), retries are stamped with this batch parent id. */
   parentRunId?: string;
 }
 
-export function RetryAllButton({ workflow, ids, parentRunId }: RetryAllButtonProps) {
+export function RetryAllButton({ workflow, ids, date, parentRunId }: RetryAllButtonProps) {
   const [retrying, setRetrying] = useState(false);
 
   async function retryAll() {
@@ -29,6 +31,7 @@ export function RetryAllButton({ workflow, ids, parentRunId }: RetryAllButtonPro
         body: JSON.stringify({
           workflow,
           ids,
+          ...(date ? { date } : {}),
           ...(parentRunId ? { parentRunId } : {}),
         }),
       });

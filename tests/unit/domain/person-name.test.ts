@@ -7,6 +7,7 @@ import {
   parseLastFirstName,
   titleCasePersonToken,
   toLastFirstName,
+  toLastFirstSearchName,
 } from "../../../src/domain/identity/person-name.js";
 
 describe("person-name identity helpers", () => {
@@ -94,5 +95,19 @@ describe("toLastFirstName", () => {
 
   it("handles multi-token last names like \"Van Dyke\"", () => {
     assert.equal(toLastFirstName("Dick Van Dyke", "Van Dyke"), "Van Dyke, Dick");
+  });
+});
+
+describe("toLastFirstSearchName", () => {
+  it("formats OCR comma variants for Person Org Summary search", () => {
+    assert.equal(toLastFirstSearchName("barahona martell, carlos, d"), "Barahona Martell, Carlos D");
+  });
+
+  it("formats OCR first-middle-last variants for Person Org Summary search", () => {
+    assert.equal(toLastFirstSearchName("Carlos D. Barahona Martell"), "Barahona Martell, Carlos D");
+  });
+
+  it("strips a trailing period after middle initial in Last, First display", () => {
+    assert.equal(displayPersonName("Barahona Martell, Carlos D."), "Barahona Martell, Carlos D");
   });
 });

@@ -15,6 +15,10 @@ import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath, loginToACTCrm } from "../../infra/auth/login.js";
 import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 import {
+  deriveActiveCheckOutcome,
+  type ActiveCheckOutcome,
+} from "../../domain/active-check-outcome.js";
+import {
   searchByName,
   searchByEid,
   parsePersonOrgNameInput as parseNameInput,
@@ -35,7 +39,7 @@ export interface LookupResult {
   error?: string;
 }
 
-const stepsCrm = ["searching", "cross-verification"] as const;
+const stepsCrm = ["searching", "cross-verification", "active-status"] as const;
 
 /**
  * Perform the UCPath search for one item and stamp the result fields
@@ -86,7 +90,7 @@ async function searchingStep<TSteps extends readonly string[]>(
       hrStatus: result.hrStatus,
       jobTitle: result.jobCodeDescription ?? "",
     });
-    await captureAndStampScreenshot(ctx);
+  await captureAndStampScreenshot(ctx, "person-org-summary", "personOrgScreenshot");
     return [result];
   }
 
@@ -95,6 +99,9 @@ async function searchingStep<TSteps extends readonly string[]>(
   try {
     result = await searchByName(page, input.name, {
       keepNonHdh: input.keepNonHdh,
+      onAfterSearchAttempt: async () => {
+        await captureAndStampScreenshot(ctx, "person-org-summary-search-results", "personOrgSearchScreenshot");
+      },
     });
   } catch (err) {
     log.error(`Search failed for "${input.name}": ${errorMessage(err)}`);
@@ -116,7 +123,7 @@ async function searchingStep<TSteps extends readonly string[]>(
     hrStatus: first.hrStatus,
     jobTitle: first.jobCodeDescription ?? "",
   });
-  await captureAndStampScreenshot(ctx);
+    await captureAndStampScreenshot(ctx, "person-org-summary", "personOrgScreenshot");
   return result.sdcmpResults;
 }
 
@@ -128,21 +135,23 @@ async function searchingStep<TSteps extends readonly string[]>(
  */
 async function captureAndStampScreenshot<TSteps extends readonly string[]>(
   ctx: Ctx<TSteps, EidLookupItem>,
+  label = "person-org-summary",
+  dataKey = "personOrgScreenshot",
 ): Promise<void> {
   try {
     const cap = await ctx.screenshot({
       kind: "form",
-      label: "person-org-summary",
+      label,
     });
     if (cap.files && cap.files.length > 0) {
       // Take the basename — matches how `/screenshots/<filename>` resolves.
       const fullPath = cap.files[0].path;
       const filename = fullPath.split("/").pop() ?? fullPath;
-      ctx.updateData({ personOrgScreenshot: filename });
+      ctx.updateData({ [dataKey]: filename });
     }
   } catch (err) {
     log.warn(
-      `Person Org screenshot failed: ${errorMessage(err)} — verification result will lack screenshotFilename`,
+      `${label} screenshot failed: ${errorMessage(err)} — verification result may lack screenshotFilename`,
     );
   }
 }
@@ -177,7 +186,11 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
 
   let crmRecords: Awaited<ReturnType<typeof searchCrmByName>>;
   try {
-    crmRecords = await searchCrmByName(crmPage, parsed.lastName, parsed.first);
+    crmRecords = await searchCrmByName(crmPage, parsed.lastName, parsed.first, {
+      onAfterSearch: async () => {
+        await captureAndStampScreenshot(ctx, "crm-search-results", "crmSearchScreenshot");
+      },
+    });
   } catch (err) {
     log.error(`CRM cross-verify: search failed for "${input.name}" — ${errorMessage(err)}`);
     ctx.updateData({ crmMatch: "" });
@@ -213,7 +226,7 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
       const match = sdcmp.find((r) => r.emplId === crec.ucpathEmployeeId);
       if (match) {
         log.success(`Direct EID match: ${match.emplId} — ${match.department}`);
-        ctx.updateData({ crmMatch: "direct" });
+        ctx.updateData({ crmMatch: "direct", crmMatchedEmplId: match.emplId });
         return;
       }
     }
@@ -227,7 +240,7 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
       if (!ucDate) continue;
       if (datesWithinDays(crmDate, ucDate, 7)) {
         log.success(`Date match: CRM "${crmDate}" ≈ UCPath "${ucDate}" → EID ${ucRec.emplId}`);
-        ctx.updateData({ crmMatch: "date" });
+        ctx.updateData({ crmMatch: "date", crmMatchedEmplId: ucRec.emplId });
         return;
       }
     }
@@ -236,9 +249,100 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
   ctx.updateData({ crmMatch: "none" });
 }
 
+function stampActiveCheckFields<TSteps extends readonly string[]>(
+  ctx: Ctx<TSteps, EidLookupItem>,
+  outcome: ActiveCheckOutcome,
+): void {
+  ctx.updateData({
+    activeStatus: outcome.activeStatus,
+    hrStatus: outcome.hrStatus,
+    department: outcome.department,
+    ...(outcome.emplId ? { emplId: outcome.emplId } : {}),
+    effdt: outcome.effdt,
+    terminationDate: outcome.terminationDate,
+    expectedJobEndDate: outcome.expectedJobEndDate,
+    isActive: String(outcome.isActive),
+    isHdhAccepted: String(outcome.isHdhAccepted),
+    candidateEids: outcome.candidateEids.join(", "),
+  });
+  if (outcome.activeStatus === "active") {
+    log.success(`EID Lookup active status: ${outcome.emplId} is active (HDH)`);
+  } else {
+    log.step(`EID Lookup active status: ${outcome.searchName} → ${outcome.activeStatus}`);
+  }
+}
+
+export function resolveActiveStatusResultsForEidLookup(args: {
+  input: EidLookupItem;
+  sdcmpFromSearch: EidResult[];
+  crmMatchedEmplId?: string;
+}): {
+  deriveInput: { kind: "by-eid"; emplId: string } | { kind: "by-name"; name: string };
+  results: EidResult[];
+} {
+  if (isEidInput(args.input)) {
+    return {
+      deriveInput: { kind: "by-eid", emplId: args.input.emplId },
+      results: args.sdcmpFromSearch,
+    };
+  }
+
+  const matchedEid = args.crmMatchedEmplId?.trim();
+  if (matchedEid) {
+    const matched = args.sdcmpFromSearch.find((result) => result.emplId === matchedEid);
+    return {
+      deriveInput: { kind: "by-eid", emplId: matchedEid },
+      results: matched ? [matched] : [],
+    };
+  }
+
+  return {
+    deriveInput: { kind: "by-name", name: args.input.name },
+    results: args.sdcmpFromSearch,
+  };
+}
+
 /**
- * CRM-on kernel definition. Two systems (UCPath + CRM), two handler steps.
- * Each item = one searched name with its own UCPath tab AND its own CRM tab.
+ * UCPath Person Org active / HDH disposition (same rules as standalone Active Check).
+ * Uses search results from `searching`, except CRM-only matches where UCPath had no row
+ * — then loads detail by CRM EID via `searchByEid`.
+ */
+async function activeStatusStep<TSteps extends readonly string[]>(
+  ctx: Ctx<TSteps, EidLookupItem>,
+  input: EidLookupItem,
+  sdcmpFromSearch: EidResult[],
+): Promise<void> {
+  const crmMatch = ctx.data.crmMatch as string | undefined;
+
+  if (!isEidInput(input) && crmMatch === "crm-only") {
+    const page = await ctx.page("ucpath");
+    const eid = String(ctx.data.emplId ?? "").trim();
+    if (!/^10\d{6}$/.test(eid)) {
+      const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: eid }, []);
+      stampActiveCheckFields(ctx, outcome);
+      return;
+    }
+    const row = await searchByEid(page, eid);
+    const results = row ? [row] : [];
+    await captureAndStampScreenshot(ctx, "person-org-summary", "personOrgScreenshot");
+    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: eid }, results);
+    stampActiveCheckFields(ctx, outcome);
+    return;
+  }
+
+  const { deriveInput, results } = resolveActiveStatusResultsForEidLookup({
+    input,
+    sdcmpFromSearch,
+    crmMatchedEmplId:
+      typeof ctx.data.crmMatchedEmplId === "string" ? ctx.data.crmMatchedEmplId : undefined,
+  });
+  const outcome = deriveActiveCheckOutcome(deriveInput, results);
+  stampActiveCheckFields(ctx, outcome);
+}
+
+/**
+ * CRM-on kernel definition. Two systems (UCPath + CRM), three handler steps:
+ * searching → cross-verification → active-status (UCPath disposition / HDH rules).
  * Sequential auth chain — Duo ×1 UCPath then ×1 CRM, once for the whole pool.
  */
 export const eidLookupCrmWorkflow = defineWorkflow({
@@ -272,6 +376,14 @@ export const eidLookupCrmWorkflow = defineWorkflow({
     { key: "emplId", label: "EID" },
     { key: "department", label: "Dept" },
     { key: "crmMatch", label: "CRM Match" },
+    { key: "activeStatus", label: "Active status" },
+    { key: "hrStatus", label: "HR Status" },
+    { key: "effdt", label: "EFFDT" },
+    { key: "terminationDate", label: "End Date" },
+    { key: "expectedJobEndDate", label: "Expected job end" },
+    { key: "candidateEids", label: "Candidate EIDs" },
+    { key: "isActive", label: "Is active" },
+    { key: "isHdhAccepted", label: "HDH dept" },
   ],
   getName: (d) => d.searchName ?? "",
   getId: (d) => d.searchName ?? "",
@@ -290,15 +402,14 @@ export const eidLookupCrmWorkflow = defineWorkflow({
     }
     const sdcmp = await ctx.step("searching", async () => searchingStep(ctx, input));
     if (isEidInput(input)) {
-      // Prep-flow verification path doesn't need CRM cross-check —
-      // mark cross-verification as skipped to keep the dashboard
-      // pipeline tidy.
       ctx.skipStep?.("cross-verification");
+      await ctx.step("active-status", async () => activeStatusStep(ctx, input, sdcmp));
       return;
     }
     await ctx.step("cross-verification", async () => {
       await crossVerificationStep(ctx, input, sdcmp);
     });
+    await ctx.step("active-status", async () => activeStatusStep(ctx, input, sdcmp));
   },
 });
 

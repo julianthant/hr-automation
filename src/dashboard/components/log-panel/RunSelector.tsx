@@ -22,6 +22,7 @@ interface RunSelectorProps {
     workflow: string;
     id: string;
     runId?: string;
+    date?: string;
   };
   deleteTarget?: {
     workflow: string;
@@ -108,6 +109,7 @@ export function RunSelector({ runs, activeRunId, onSelect, retryTarget, deleteTa
           workflow={retryTarget.workflow}
           id={retryTarget.id}
           runId={retryTarget.runId}
+          date={retryTarget.date}
           size="md"
           className="rounded-md"
         />

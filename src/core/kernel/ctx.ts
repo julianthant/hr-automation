@@ -50,6 +50,8 @@ export function makeCtx<TSteps extends readonly string[], TData>(
 ): Ctx<TSteps, TData> {
   const { session, stepper, isBatch, runId, workflow, itemId, emitScreenshotEvent } = opts
 
+  session.setUcpathIdleGuard(() => stepper.isInsideStep())
+
   const screenshot = makeScreenshotFn({
     session,
     runId,

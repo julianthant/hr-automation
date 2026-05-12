@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { readLogEntries, trackEvent } from "../../../src/tracker/jsonl.js";
+import { readLogEntries, trackEvent, trackEventForDate } from "../../../src/tracker/jsonl.js";
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
 import { createWorkerStore } from "../../../src/core/daemon/worker-store.js";
@@ -32,6 +32,7 @@ import {
   buildRetryHandler,
   readQueueDepth,
 } from "../../../src/tracker/dashboard/ops/index.js";
+import { resolveRetryRosterPath } from "../../../src/tracker/dashboard/ops/retry.js";
 import { queueFilePath } from "../../../src/core/daemon/queue.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
 import type { QueueEvent } from "../../../src/core/daemon/types.js";
@@ -1273,6 +1274,92 @@ describe("buildRetryHandler SQLite lineage", () => {
     assert.equal(result.ok, true);
     assert.equal(taskStore.getTask(enqueued.taskId)?.parentRunId, undefined);
     workerStore.close();
+  });
+});
+
+describe("buildRetryHandler OCR retry", () => {
+  it("prefers the stored OCR roster path over newer unrelated data workbooks", () => {
+    const originalCwd = process.cwd();
+    const storedRosterPath = join(tmp, "stored-roster.xlsx");
+    const broadDataDir = join(tmp, "src/data");
+    mkdirSync(broadDataDir, { recursive: true });
+    writeFileSync(storedRosterPath, "");
+    writeFileSync(join(broadDataDir, "newer-unrelated.xlsx"), "");
+
+    try {
+      process.chdir(tmp);
+      const retryRosterPath = resolveRetryRosterPath(tmp, storedRosterPath);
+      assert.equal(retryRosterPath, storedRosterPath);
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  it("retries an OCR run from the selected tracker date", async () => {
+    const pdfPath = join(tmp, "upload.pdf");
+    writeFileSync(pdfPath, "%PDF-1.4\n% test\n%%EOF\n");
+    const rosterDir = join(tmp, "rosters");
+    mkdirSync(rosterDir, { recursive: true });
+    const rosterPath = join(rosterDir, "latest.xlsx");
+    writeFileSync(rosterPath, "");
+
+    trackEventForDate(
+      {
+        workflow: "ocr",
+        timestamp: "2026-05-12T06:19:53.904Z",
+        id: "ocr-session-from-yesterday",
+        runId: "ocr-run-from-yesterday",
+        status: "pending",
+        data: {
+          formType: "oath",
+          pdfPath,
+          pdfOriginalName: "oath.pdf",
+          sessionId: "ocr-session-from-yesterday",
+          rosterMode: "existing",
+        },
+      },
+      "2026-05-11",
+      tmp,
+    );
+    trackEventForDate(
+      {
+        workflow: "ocr",
+        timestamp: "2026-05-12T06:20:06.041Z",
+        id: "ocr-session-from-yesterday",
+        runId: "ocr-run-from-yesterday",
+        status: "done",
+        step: "awaiting-approval",
+        data: {
+          formType: "oath",
+          pdfPath,
+          pdfOriginalName: "oath.pdf",
+          sessionId: "ocr-session-from-yesterday",
+          rosterMode: "existing",
+          rosterPath,
+        },
+      },
+      "2026-05-11",
+      tmp,
+    );
+
+    const originalLog = console.log;
+    const originalError = console.error;
+    console.log = () => {};
+    console.error = () => {};
+    try {
+      const result = await buildRetryHandler(tmp)({
+        workflow: "ocr",
+        id: "ocr-session-from-yesterday",
+        runId: "ocr-run-from-yesterday",
+        date: "2026-05-11",
+      } as Parameters<ReturnType<typeof buildRetryHandler>>[0] & { date: string });
+
+      assert.equal(result.ok, true);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      console.log = originalLog;
+      console.error = originalError;
+    }
   });
 });
 

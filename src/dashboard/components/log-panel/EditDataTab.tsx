@@ -185,6 +185,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
           id: entry.id,
           data: values,
           ...(runId ? { runId } : {}),
+          ...(date ? { date } : {}),
           ...(batchQueueParentRunId ? { parentRunId: batchQueueParentRunId } : {}),
         }),
       });

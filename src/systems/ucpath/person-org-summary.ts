@@ -8,6 +8,11 @@
  *   1. Last Name = Last, Name = "First Middle"
  *   2. Last Name = Last, Name = "First" (drop middle)
  *   3. Last Name = Last, Name = "Middle" (try middle as first)
+ *   4. Multi-token Last Name = "A B": also try Last="A" and Last="B" with Name=First
+ *
+ * We intentionally do not search arbitrary name tokens as Last Name with a blank
+ * Name field — that matches unrelated people who share only a token (e.g. a
+ * middle name that matches someone else's surname).
  *
  * All selectors verified via playwright-cli v1.0 against live UCPath.
  */
@@ -109,6 +114,11 @@ export interface EidSearchResult {
   sdcmpResults: EidResult[];
 }
 
+export interface PersonOrgNameSearchAttempt {
+  lastName: string;
+  name: string;
+}
+
 /**
  * Parse "Last, First Middle" input format into name parts.
  */
@@ -141,6 +151,38 @@ export interface PersonOrgAssignmentDetails {
   expectedJobEndDate: string;
   fte: string;
   emplClass: string;
+}
+
+export function buildPersonOrgNameSearchAttempts(input: {
+  lastName: string;
+  first: string;
+  middle: string | null;
+}): PersonOrgNameSearchAttempt[] {
+  const attempts: PersonOrgNameSearchAttempt[] = [];
+  const seen = new Set<string>();
+  const add = (lastName: string, name: string): void => {
+    const normalizedLast = lastName.trim();
+    const normalizedName = name.trim();
+    if (!normalizedLast) return;
+    const key = `${normalizedLast.toLowerCase()}\u0000${normalizedName.toLowerCase()}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    attempts.push({ lastName: normalizedLast, name: normalizedName });
+  };
+
+  const fullName = input.middle ? `${input.first} ${input.middle}` : input.first;
+  add(input.lastName, fullName);
+  if (input.middle) {
+    add(input.lastName, input.first);
+    add(input.lastName, input.middle);
+  }
+
+  const lastTokens = input.lastName.split(/\s+/).filter(Boolean);
+  if (lastTokens.length > 1) {
+    for (const token of lastTokens) add(token, input.first);
+  }
+
+  return attempts;
 }
 
 export function deriveAssignmentDetailsFromCells(cells: string[]): PersonOrgAssignmentDetails | null {
@@ -675,7 +717,10 @@ async function searchOnce(
 export async function searchByName(
   page: Page,
   nameInput: string,
-  options: { keepNonHdh?: boolean } = {},
+  options: {
+    keepNonHdh?: boolean;
+    onAfterSearchAttempt?: (attempt: EidSearchResult) => Promise<void>;
+  } = {},
 ): Promise<{
   found: boolean;
   sdcmpResults: EidResult[];
@@ -688,35 +733,20 @@ export async function searchByName(
   // Navigate to Person Org Summary
   let frame = await navigateToPersonOrgSummary(page);
 
-  // Strategy 1: Full name — "First Middle"
-  const fullName = middle ? `${first} ${middle}` : first;
-  const attempt1 = await searchOnce(page, frame, lastName, fullName);
-  allAttempts.push(attempt1);
-
-  if (attempt1.sdcmpResults.length > 0) {
-    sdcmpResults = attempt1.sdcmpResults;
-  }
-
-  // Strategy 2: First name only (drop middle) — only if we had a middle and no SDCMP yet
-  if (middle && sdcmpResults.length === 0) {
-    log.step(`Search fallback: full name returned 0 — trying "${first}"`);
-    // Always re-navigate fresh — PeopleSoft forms break after "No matching values" popups
-    frame = await navigateToPersonOrgSummary(page);
-    const attempt2 = await searchOnce(page, frame, lastName, first);
-    allAttempts.push(attempt2);
-
-    if (attempt2.sdcmpResults.length > 0) {
-      sdcmpResults = attempt2.sdcmpResults;
-    } else {
-      // Strategy 3: Middle name as first name
-      log.step(`Search fallback: first-only returned 0 — trying "${middle}"`);
+  const attempts = buildPersonOrgNameSearchAttempts({ lastName, first, middle });
+  for (let i = 0; i < attempts.length; i++) {
+    const attempt = attempts[i];
+    if (i > 0) {
+      log.step(`Search fallback ${i + 1}/${attempts.length}: trying "${attempt.lastName}, ${attempt.name}"`);
+      // Always re-navigate fresh — PeopleSoft forms break after "No matching values" popups.
       frame = await navigateToPersonOrgSummary(page);
-      const attempt3 = await searchOnce(page, frame, lastName, middle);
-      allAttempts.push(attempt3);
-
-      if (attempt3.sdcmpResults.length > 0) {
-        sdcmpResults = attempt3.sdcmpResults;
-      }
+    }
+    const result = await searchOnce(page, frame, attempt.lastName, attempt.name);
+    allAttempts.push(result);
+    await options.onAfterSearchAttempt?.(result);
+    if (result.sdcmpResults.length > 0) {
+      sdcmpResults = result.sdcmpResults;
+      break;
     }
   }
 

@@ -45,18 +45,40 @@ export function patchOcrRecordFromEidLookupOutcome(
       warnings.push(`eid-lookup ${outcome.status === "done" ? `returned "${eid || "no result"}"` : "failed"}`);
       rec.warnings = warnings;
     }
+  } else {
+    if (outcome.status === "done" && looksLikeEid) {
+      if ("employee" in rec) {
+        (rec.employee as Record<string, unknown>).employeeId = eid;
+      } else {
+        rec.employeeId = eid;
+      }
+      rec.matchState = "resolved";
+      rec.matchSource = "eid-lookup";
+    }
   }
 
   const verification = computeOcrVerification({
+    activeStatus: outcome.data?.activeStatus,
+    isActive: outcome.data?.isActive,
+    isHdhAccepted: outcome.data?.isHdhAccepted,
     hrStatus: outcome.data?.hrStatus,
     department: outcome.data?.department,
     personOrgScreenshot: outcome.data?.personOrgScreenshot,
+    terminationDate: outcome.data?.terminationDate,
   });
   rec.verification = verification;
-  // Only auto-deselect on a hard "don't process" verification. Soft fails
-  // (`lookup-failed`) leave the record selected so the operator can decide.
-  if (verification.state === "inactive" || verification.state === "non-hdh") {
+
+  if (kind === "name") {
+    if (verification.state === "inactive" || verification.state === "non-hdh") {
+      rec.selected = false;
+    }
+    return;
+  }
+
+  if (verification.state === "inactive" || verification.state === "non-hdh" || verification.state === "lookup-failed") {
     rec.selected = false;
+  } else if (verification.state === "verified") {
+    rec.selected = true;
   }
 }
 

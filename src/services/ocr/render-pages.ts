@@ -20,13 +20,10 @@ export async function renderPdfPagesToPngs(
     await fs.mkdir(outDir, { recursive: true });
     const pdfBuffer = await fs.readFile(pdfPath);
     const { pdf } = await import("pdf-to-img");
-    // scale=0.75 gives ~190KB PNGs (vs ~697KB at 1.5x) — ~3.7x faster to
-    // serve + decode. For 50-page PDFs that's the difference between
-    // 10MB and 35MB total. LLM extraction quality is unchanged because
-    // the LLM gets the high-resolution PDF page, not these previews.
-    // (The OCR pipeline reads the PNG file, but the prompt-driven
-    // extraction is robust to scale.)
-    const document = await pdf(pdfBuffer, { scale: 0.75 });
+    // Render review previews at a higher scale so operators can manually
+    // verify handwriting and small printed labels without opening the PDF
+    // separately.
+    const document = await pdf(pdfBuffer, { scale: 1.5 });
     const filenames: string[] = [];
     let i = 1;
     for await (const image of document) {

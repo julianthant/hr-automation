@@ -4,13 +4,8 @@ import type { Ctx } from "../../core/kernel/types.js";
 import { loginToUCPath } from "../../infra/auth/login.js";
 import { PATHS } from "../../config.js";
 import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
-import { isAcceptedHdhDepartment } from "../../domain/hdh/departments.js";
-import { toLastFirstName } from "../../domain/identity/person-name.js";
-import {
-  searchByEid,
-  searchByName,
-  type EidResult,
-} from "../../systems/ucpath/person-org-summary.js";
+import { deriveActiveCheckOutcome } from "../../domain/active-check-outcome.js";
+import { searchByEid, searchByName } from "../../systems/ucpath/person-org-summary.js";
 import { allocateLowestBatchDisplayOrdinal } from "../../tracker/batch-display-ordinal.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 import { errorMessage } from "../../utils/errors.js";
@@ -25,103 +20,6 @@ import {
 } from "./schema.js";
 
 const steps = ["checking"] as const;
-
-export type ActiveCheckStatus = "active" | "inactive" | "not-found" | "non-hdh" | "ambiguous";
-
-export interface ActiveCheckOutcome {
-  activeStatus: ActiveCheckStatus;
-  isActive: boolean;
-  isHdhAccepted: boolean;
-  searchName: string;
-  emplId: string;
-  name: string;
-  department: string;
-  hrStatus: string;
-  effdt: string;
-  terminationDate: string;
-  expectedJobEndDate: string;
-  candidateEids: string[];
-}
-
-export function deriveActiveCheckOutcome(
-  input: ActiveCheckItem,
-  results: EidResult[],
-): ActiveCheckOutcome {
-  const searchName = displayActiveCheckInput(input);
-  if (results.length === 0) {
-    return {
-      activeStatus: "not-found",
-      isActive: false,
-      isHdhAccepted: false,
-      searchName,
-      emplId: isActiveCheckEidInput(input) ? input.emplId : "",
-      name: "",
-      department: "",
-      hrStatus: "Not found",
-      effdt: "",
-      terminationDate: "",
-      expectedJobEndDate: "",
-      candidateEids: [],
-    };
-  }
-
-  if (!isActiveCheckEidInput(input) && results.length > 1) {
-    return {
-      activeStatus: "ambiguous",
-      isActive: false,
-      isHdhAccepted: false,
-      searchName,
-      emplId: "",
-      name: "",
-      department: "",
-      hrStatus: "Ambiguous",
-      effdt: "",
-      terminationDate: "",
-      expectedJobEndDate: "",
-      candidateEids: results.map((result) => result.emplId),
-    };
-  }
-
-  const result = results[0];
-  const terminationDate = normalizeDate(
-    result.terminationDate ?? legacyTerminationDate(result.expectedEndDate),
-  );
-  const expectedJobEndDate = normalizeDate(result.expectedJobEndDate);
-  const hrStatus = result.hrStatus || "";
-  const isInactiveStatus = /inactive|terminated|separated/i.test(hrStatus);
-  const isActive = !terminationDate && !isInactiveStatus;
-  const isHdhAccepted = isAcceptedHdhDepartment(result.department);
-  const activeStatus: ActiveCheckStatus = !isActive
-    ? "inactive"
-    : isHdhAccepted
-      ? "active"
-      : "non-hdh";
-
-  return {
-    activeStatus,
-    isActive,
-    isHdhAccepted,
-    searchName,
-    emplId: result.emplId,
-    name: toLastFirstName(result.name, result.lastName),
-    department: result.department ?? "",
-    hrStatus,
-    effdt: normalizeDate(result.effectiveDate),
-    terminationDate,
-    expectedJobEndDate,
-    candidateEids: [result.emplId],
-  };
-}
-
-function normalizeDate(value: string | undefined): string {
-  const trimmed = value?.trim() ?? "";
-  return trimmed && trimmed !== "Active" ? trimmed : "";
-}
-
-function legacyTerminationDate(expectedEndDate: string | undefined): string {
-  const trimmed = expectedEndDate?.trim() ?? "";
-  return trimmed && trimmed !== "Active" ? trimmed : "";
-}
 
 async function captureAndStampScreenshot<TSteps extends readonly string[]>(
   ctx: Ctx<TSteps, ActiveCheckItem>,
@@ -176,7 +74,10 @@ export const activeCheckWorkflow = defineWorkflow({
       const results = isActiveCheckEidInput(input)
         ? await searchByEid(page, input.emplId).then((result) => (result ? [result] : []))
         : (await searchByName(page, input.name, { keepNonHdh: true })).sdcmpResults;
-      const outcome = deriveActiveCheckOutcome(input, results);
+      const deriveIn = isActiveCheckEidInput(input)
+        ? ({ kind: "by-eid", emplId: input.emplId } as const)
+        : ({ kind: "by-name", name: input.name } as const);
+      const outcome = deriveActiveCheckOutcome(deriveIn, results);
       ctx.updateData({
         ...outcome,
         isActive: String(outcome.isActive),
@@ -246,3 +147,6 @@ export async function runActiveCheckCli(
     },
   );
 }
+
+export type { ActiveCheckOutcome, ActiveCheckStatus } from "../../domain/active-check-outcome.js";
+export { deriveActiveCheckOutcome };

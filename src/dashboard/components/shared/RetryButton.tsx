@@ -10,6 +10,8 @@ interface RetryButtonProps {
   id: string;
   /** When set, targets this run for SQLite-backed daemon retries. */
   runId?: string;
+  /** Tracker date selected in the dashboard. */
+  date?: string;
   size?: "sm" | "md";
   className?: string;
 }
@@ -24,6 +26,7 @@ export function RetryButton({
   workflow,
   id,
   runId,
+  date,
   size = "sm",
   className,
 }: RetryButtonProps) {
@@ -43,6 +46,7 @@ export function RetryButton({
           workflow,
           id,
           ...(runId ? { runId } : {}),
+          ...(date ? { date } : {}),
           ...(batchParentRunId ? { parentRunId: batchParentRunId } : {}),
         }),
       });

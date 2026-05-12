@@ -10,6 +10,8 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
+type LazySlot = ReactNode | (() => ReactNode);
+
 interface LogStreamProps {
   logs: CollapsedLogEntry[];
   events?: RunEvent[];
@@ -25,9 +27,17 @@ interface LogStreamProps {
   /** Whether the workflow has any editable fields — gates the Edit Data tab. */
   editDataAvailable?: boolean;
   /** Rendered in place of the log list when the Preview tab is active. */
-  previewSlot?: ReactNode;
+  previewSlot?: LazySlot;
+  /**
+   * Sticky-style chrome directly under the tab bar when Preview is active
+   * (e.g. OCR prep filename + actions). Scrollable preview content stays in
+   * {@link previewSlot} below.
+   */
+  previewHeaderSlot?: LazySlot;
   /** Whether this row has a previewable payload — gates the Preview tab. */
   previewAvailable?: boolean;
+  /** Notifies the parent when the Preview tab is actually visible. */
+  onPreviewVisibleChange?: (visible: boolean) => void;
   /** Compact controls for run history and row actions, rendered in the footer. */
   runControlsSlot?: ReactNode;
   /** Default-active when first mounted — used to deep-link into Preview from another row. */
@@ -66,6 +76,10 @@ export function emptyStreamMessage(source?: "events" | "screenshots" | "edit-dat
   return source === "events" ? "No run events for this row" : "No log entries for this row";
 }
 
+function renderMaybeFactory(node: LazySlot | undefined): ReactNode {
+  return typeof node === "function" ? node() : node;
+}
+
 export function LogStream({
   logs,
   events = [],
@@ -74,7 +88,9 @@ export function LogStream({
   editDataSlot,
   editDataAvailable,
   previewSlot,
+  previewHeaderSlot,
   previewAvailable,
+  onPreviewVisibleChange,
   runControlsSlot,
   initialTab,
   maximized,
@@ -91,6 +107,7 @@ export function LogStream({
   const prevLenRef = useRef(0);
 
   const tab = FILTER_TABS.find((t) => t.key === filter);
+  const previewVisible = tab?.source === "preview";
   const nonDebugLogs = useMemo(() => logs.filter((l) => !isDebugLog(l)), [logs]);
   const debugLogs = useMemo(() => logs.filter(isDebugLog), [logs]);
 
@@ -152,8 +169,15 @@ export function LogStream({
       (t.key !== "preview" || previewAvailable),
   );
 
+  useEffect(() => {
+    onPreviewVisibleChange?.(previewVisible);
+  }, [onPreviewVisibleChange, previewVisible]);
+
+  const previewHeader = previewVisible ? renderMaybeFactory(previewHeaderSlot) : undefined;
+  const previewBody = previewVisible ? renderMaybeFactory(previewSlot) : undefined;
+
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {/* Filter tabs + maximize toggle */}
       <div className="flex items-center gap-0.5 px-6 py-2 border-b border-border flex-shrink-0">
         {visibleTabs.map((tab) => (
@@ -186,15 +210,22 @@ export function LogStream({
         )}
       </div>
 
-      {/* Preview slot — shown when Preview tab is active */}
-      {tab?.source === "preview" && (
-        <div className="flex-1 overflow-y-auto border-b border-border">
-          {previewSlot ?? (
-            <div className="px-6 py-4 text-sm text-muted-foreground">
-              Preview is unavailable for this row.
+      {/* Preview: optional header chrome + scroll body (two-column content lives in previewSlot). */}
+      {previewVisible && (
+        <>
+          {previewHeader ? (
+            <div className="flex-shrink-0 border-b border-border bg-card/95 px-6 py-4 backdrop-blur">
+              {previewHeader}
             </div>
-          )}
-        </div>
+          ) : null}
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-b border-border bg-secondary/30">
+            {previewBody ?? (
+              <div className="px-6 py-4 text-sm text-muted-foreground">
+                Preview is unavailable for this row.
+              </div>
+            )}
+          </div>
+        </>
       )}
 
       {/* Screenshots slot — shown when Screenshots tab is active */}
@@ -313,6 +344,6 @@ export function LogStream({
           )}
         </div>
       </div>
-    </>
+    </div>
   );
 }

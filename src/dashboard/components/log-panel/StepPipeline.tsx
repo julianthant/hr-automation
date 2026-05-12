@@ -310,9 +310,15 @@ export function StepPipeline({ steps, currentStep, status, stepDurations }: Step
   // row of indistinguishable pending.
   const currentIdx = isFailed && resolvedIdx < 0 ? 0 : resolvedIdx;
 
+  const awaitingIdx = steps.indexOf("awaiting-approval");
+  const gateAwaitingApproval =
+    awaitingIdx >= 0 &&
+    status === "done" &&
+    normalizedStep === "awaiting-approval";
+
   // Build StepView array for all steps
   const stepViews: StepView[] = steps.map((step, i) => {
-    const isComplete = isDone || i < currentIdx;
+    const isComplete = gateAwaitingApproval ? i < awaitingIdx : isDone || i < currentIdx;
     const isActive = !isDone && !isFailed && i === currentIdx;
     const isFailedStep = isFailed && i === currentIdx;
     const isPending = !isComplete && !isActive && !isFailedStep;

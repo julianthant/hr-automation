@@ -9,6 +9,10 @@ import { log } from '../../utils/log.js'
 import { classifyPlaywrightError, errorMessage } from '../../utils/errors.js'
 import { PATHS } from '../../config.js'
 
+const UCPATH_SYSTEM_ID = 'ucpath' as const
+const DEFAULT_UCPATH_IDLE_THRESHOLD_MS = 5 * 60 * 1000
+const DEFAULT_UCPATH_IDLE_TICK_MS = 30 * 1000
+
 export function formatCaptureFilename(args: {
   workflow: string
   itemId: string
@@ -35,6 +39,7 @@ interface SessionState {
   systems: SystemConfig[]
   browsers: Map<string, SystemSlot>
   readyPromises: Map<string, Promise<void>>
+  screenshotDir?: string
 }
 
 export interface LaunchOpts {
@@ -60,6 +65,11 @@ export interface LaunchOpts {
    * daemon stop paths so a Duo wait does not keep the worker alive.
    */
   abortSignal?: AbortSignal
+  /**
+   * UCPath idle reload cadence override (primarily for tests). When set,
+   * both values must be positive.
+   */
+  ucpathIdleRefresh?: { thresholdMs: number; tickMs: number }
 }
 
 interface LaunchOneOpts {
@@ -68,6 +78,14 @@ interface LaunchOneOpts {
 
 export class Session {
   private parent: Session | null = null
+  private ucpathIdleTimer: ReturnType<typeof setInterval> | null = null
+  private lastUcpathTouchMs = Date.now()
+  /** When true, skip idle reload (handler is inside `ctx.step` body). */
+  private ucpathIdleGuard: () => boolean = () => false
+  private ucpathIdleReloadChain: Promise<void> = Promise.resolve()
+  private ucpathIdleReloadInFlight = false
+  private ucpathIdleThresholdMs = DEFAULT_UCPATH_IDLE_THRESHOLD_MS
+  private ucpathIdleTickMs = DEFAULT_UCPATH_IDLE_TICK_MS
 
   private constructor(private state: SessionState) {}
 
@@ -87,8 +105,16 @@ export class Session {
   static forWorker(parent: Session): Session {
     const browsers = new Map<string, SystemSlot>()
     const readyPromises = new Map(parent.state.readyPromises)
-    const session = new Session({ systems: parent.state.systems, browsers, readyPromises })
+    const session = new Session({
+      systems: parent.state.systems,
+      browsers,
+      readyPromises,
+      screenshotDir: parent.state.screenshotDir,
+    })
     session.parent = parent
+    session.ucpathIdleThresholdMs = parent.ucpathIdleThresholdMs
+    session.ucpathIdleTickMs = parent.ucpathIdleTickMs
+    session.startUcpathIdleRefreshIfNeeded()
     return session
   }
 
@@ -248,7 +274,17 @@ export class Session {
       }
     }
 
+    session.applyUcpathIdleOpts(opts.ucpathIdleRefresh)
+    session.startUcpathIdleRefreshIfNeeded()
     return session
+  }
+
+  /**
+   * Called from `makeCtx` so idle reload never runs while a `ctx.step` body
+   * is executing (avoids reload mid-automation).
+   */
+  setUcpathIdleGuard(guard: () => boolean): void {
+    this.ucpathIdleGuard = guard
   }
 
   systemIds(): string[] {
@@ -325,10 +361,12 @@ export class Session {
       this.state.browsers.set(id, slot)
     }
     if (!slot) throw new Error(`no browser for system: ${id}`)
+    if (id === UCPATH_SYSTEM_ID) this.noteUcpathAutomationActivity()
     return slot.page
   }
 
   async close(): Promise<void> {
+    this.stopUcpathIdleRefreshTimer()
     for (const slot of this.state.browsers.values()) {
       await slot.context.close()
       if (slot.browser) await slot.browser.close()
@@ -341,6 +379,7 @@ export class Session {
    * Best-effort: a close failure on one page never blocks siblings.
    */
   async closeWorkerPages(): Promise<void> {
+    this.stopUcpathIdleRefreshTimer()
     for (const slot of this.state.browsers.values()) {
       try {
         if (!slot.page.isClosed()) await slot.page.close()
@@ -356,6 +395,7 @@ export class Session {
     const slot = this.state.browsers.get(id)
     if (!slot) return
     await slot.page.goto(sys.resetUrl)
+    if (id === UCPATH_SYSTEM_ID) this.noteUcpathAutomationActivity()
   }
 
   /**
@@ -529,14 +569,15 @@ export class Session {
    */
   async screenshotAll(prefix: string): Promise<string[]> {
     const paths: string[] = []
+    const outDir = this.state.screenshotDir ?? PATHS.screenshotDir
     try {
-      await fs.mkdir(PATHS.screenshotDir, { recursive: true })
+      await fs.mkdir(outDir, { recursive: true })
     } catch { /* best-effort */ }
     for (const [id, slot] of this.state.browsers.entries()) {
       try {
         if (slot.page.isClosed()) continue
       } catch { continue }
-      const path = join(PATHS.screenshotDir, `${prefix}-${id}-${Date.now()}.png`)
+      const path = join(outDir, `${prefix}-${id}-${Date.now()}.png`)
       try {
         // captureFullPage: expand inner scroll containers (Kuali modals,
         // PeopleSoft frames) before `fullPage: true`, then restore. A
@@ -557,7 +598,7 @@ export class Session {
    * for each file successfully written.
    */
   async captureAll(opts: CaptureFileOpts): Promise<Array<{ system: string; path: string; bytes: number }>> {
-    const outDir = PATHS.screenshotDir
+    const outDir = this.state.screenshotDir ?? PATHS.screenshotDir
     try {
       await fs.mkdir(outDir, { recursive: true })
     } catch { /* best-effort */ }
@@ -595,6 +636,83 @@ export class Session {
       }
     }
     return results
+  }
+
+  private applyUcpathIdleOpts(override?: { thresholdMs: number; tickMs: number }): void {
+    if (override && override.thresholdMs > 0 && override.tickMs > 0) {
+      this.ucpathIdleThresholdMs = override.thresholdMs
+      this.ucpathIdleTickMs = override.tickMs
+    }
+  }
+
+  private noteUcpathAutomationActivity(): void {
+    this.lastUcpathTouchMs = Date.now()
+  }
+
+  private startUcpathIdleRefreshIfNeeded(): void {
+    if (!this.state.systems.some((s) => s.id === UCPATH_SYSTEM_ID)) return
+    if (this.ucpathIdleTimer) return
+    this.lastUcpathTouchMs = Date.now()
+    this.ucpathIdleTimer = setInterval(() => {
+      this.tickUcpathIdleRefresh()
+    }, this.ucpathIdleTickMs)
+    this.ucpathIdleTimer.unref()
+  }
+
+  private stopUcpathIdleRefreshTimer(): void {
+    if (this.ucpathIdleTimer) {
+      clearInterval(this.ucpathIdleTimer)
+      this.ucpathIdleTimer = null
+    }
+  }
+
+  private tickUcpathIdleRefresh(): void {
+    try {
+      if (!this.state.systems.some((s) => s.id === UCPATH_SYSTEM_ID)) return
+      if (this.ucpathIdleGuard()) return
+      if (this.ucpathIdleReloadInFlight) return
+      const slot = this.state.browsers.get(UCPATH_SYSTEM_ID)
+      if (!slot) return
+      try {
+        if (slot.page.isClosed()) return
+      } catch {
+        return
+      }
+      if (Date.now() - this.lastUcpathTouchMs < this.ucpathIdleThresholdMs) return
+      this.ucpathIdleReloadInFlight = true
+      void this.scheduleUcpathIdleReload()
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  private scheduleUcpathIdleReload(): void {
+    this.ucpathIdleReloadChain = this.ucpathIdleReloadChain.then(async () => {
+      let recordActivity = false
+      try {
+        const slot = this.state.browsers.get(UCPATH_SYSTEM_ID)
+        if (!slot) return
+        try {
+          if (slot.page.isClosed()) return
+        } catch {
+          return
+        }
+        if (this.ucpathIdleGuard()) return
+        if (Date.now() - this.lastUcpathTouchMs < this.ucpathIdleThresholdMs) return
+        log.step('[Session: ucpath] Idle refresh — reloading page after automation idle')
+        try {
+          await slot.page.reload({ waitUntil: 'domcontentloaded', timeout: 90_000 })
+        } catch (err) {
+          log.warn(`[Session: ucpath] Idle refresh reload failed: ${errorMessage(err)}`)
+        }
+        recordActivity = true
+      } finally {
+        this.ucpathIdleReloadInFlight = false
+        if (recordActivity) this.lastUcpathTouchMs = Date.now()
+      }
+    }).catch(() => {
+      this.ucpathIdleReloadInFlight = false
+    })
   }
 }
 

@@ -15,6 +15,9 @@ import type { TrackerEntry, RunInfo } from "@/components/shared/types";
 import { formatTrackerValue, isMonospaceKey } from "@/components/shared/types";
 import { deriveTrackerFallbackLog } from "./log-fallback";
 import { useWorkflow } from "@/lib/workflows-context";
+import { queueStatusDisplayLabel } from "../../../domain/tracker-terminal-display.js";
+
+type LazySlot = ReactNode | (() => ReactNode);
 
 interface LogPanelProps {
   entry: TrackerEntry | null;
@@ -33,10 +36,14 @@ interface LogPanelProps {
   siblings?: TrackerEntry[];
   /** Default-active LogStream tab (e.g. "preview" when opening from an OcrQueueRow click). */
   defaultTab?: string;
-  /** Optional preview content for the LogStream's Preview tab (e.g. OcrReviewPane body). */
-  previewSlot?: ReactNode;
+  /** Optional preview content for the LogStream's Preview tab (e.g. OCR two-column body). */
+  previewSlot?: LazySlot;
+  /** Optional chrome row under the Preview tab strip (e.g. OCR filename + actions). */
+  previewHeaderSlot?: LazySlot;
   /** Whether the Preview tab is shown. */
   previewAvailable?: boolean;
+  /** Reports whether the Preview tab is currently selected. */
+  onPreviewVisibleChange?: (visible: boolean) => void;
   /** Called when the operator triggers a hard-delete from the RunSelector toolbar. */
   onDeleteEntry?: () => void;
 }
@@ -46,7 +53,7 @@ interface LogPanelProps {
 // type-aware formatter can't handle them — we branch on the key.
 const COMPUTED_KEYS = new Set(["__started", "__elapsed"]);
 
-export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultTab, previewSlot, previewAvailable, onDeleteEntry }: LogPanelProps) {
+export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultTab, previewSlot, previewHeaderSlot, previewAvailable, onPreviewVisibleChange, onDeleteEntry }: LogPanelProps) {
   const [runs, setRuns] = useState<RunInfo[]>([]);
   const [activeRunId, setActiveRunId] = useState<string | null>(entry?.runId || null);
   const registered = useWorkflow(workflow);
@@ -59,7 +66,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
   const childEntries: TrackerEntry[] = entry?.runId && allEntries
     ? allEntries.filter((e) => e.parentRunId === entry.runId && e.id !== entry.id)
     : [];
-  const steps = registered?.steps ?? [];
+  const registeredSteps = registered?.steps ?? [];
   const detailFields = registered?.detailFields ?? [];
 
   // Stable key for the sibling list so we don't refetch on every parent
@@ -192,6 +199,14 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
   const runStep = isViewingLiveRun
     ? (entry?.step || activeRun?.step || null)
     : (activeRun?.step || null);
+  const runStepDurations = activeRun?.stepDurations ?? entry?.stepDurations;
+  const steps =
+    workflow === "ocr"
+      ? registeredSteps.filter((step) => {
+          if (step === "awaiting-approval") return Boolean(entry?.parentRunId);
+          return true;
+        })
+      : registeredSteps;
 
   // Prefer the per-run timestamps on the selected RunInfo; fall back to the
   // deduped entry's fields so the live (latest) run keeps working even
@@ -268,6 +283,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
 
   // Show skeleton while logs are loading and we have no data yet
   const showSkeleton = logsLoading && displayedLogs.length === 0;
+  const hideDetailGrid = logSourceWorkflow === "ocr";
 
   return (
     <div className="flex-1 flex flex-col bg-card min-w-0 min-h-0 overflow-hidden">
@@ -279,37 +295,39 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
           auto-adapts to any workflow's detailFields declaration. Wraps to
           rows of 4. Special __started / __elapsed keys are synthesized from
           entry timestamps. */}
-      <div className="grid grid-cols-4 flex-shrink-0">
-        {allDetailFields.map((f) => {
-          const value = renderDetailValue(f.key);
-          const isComputed = COMPUTED_KEYS.has(f.key);
-          // Monospace treatment for id-like fields + computed timestamps
-          const mono = isComputed || isMonospaceKey(f.key);
-          const isRunningElapsed = f.key === "__elapsed" && runStatus === "running";
-          return (
-            <div
-              key={f.key}
-              style={{ height: "69.5px" }}
-              className="px-6 flex flex-col justify-center gap-1 overflow-hidden border-b border-r border-border"
-            >
-              <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium leading-none">
-                {f.label}
-              </div>
-              {showSkeleton ? (
-                <Skeleton className="h-4 w-20" />
-              ) : (
-                <div className={cn(
-                  "text-sm truncate leading-tight",
-                  mono ? "font-mono" : "font-medium",
-                  isRunningElapsed && "text-primary",
-                )} title={value}>
-                  {value}
+      {!hideDetailGrid && (
+        <div className="grid grid-cols-4 flex-shrink-0">
+          {allDetailFields.map((f) => {
+            const value = renderDetailValue(f.key);
+            const isComputed = COMPUTED_KEYS.has(f.key);
+            // Monospace treatment for id-like fields + computed timestamps
+            const mono = isComputed || isMonospaceKey(f.key);
+            const isRunningElapsed = f.key === "__elapsed" && runStatus === "running";
+            return (
+              <div
+                key={f.key}
+                style={{ height: "69.5px" }}
+                className="px-6 flex flex-col justify-center gap-1 overflow-hidden border-b border-r border-border"
+              >
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium leading-none">
+                  {f.label}
                 </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+                {showSkeleton ? (
+                  <Skeleton className="h-4 w-20" />
+                ) : (
+                  <div className={cn(
+                    "text-sm truncate leading-tight",
+                    mono ? "font-mono" : "font-medium",
+                    isRunningElapsed && "text-primary",
+                  )} title={value}>
+                    {value}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Step pipeline */}
       {showSkeleton ? (
@@ -327,7 +345,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
           steps={steps}
           currentStep={runStep}
           status={runStatus}
-          stepDurations={activeRun?.stepDurations ?? entry?.stepDurations}
+          stepDurations={runStepDurations}
           entry={entry ?? undefined}
         />
       )}
@@ -340,7 +358,13 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
             Delegated runs ({childEntries.length})
           </h3>
           <ul className="space-y-1">
-            {childEntries.map((c) => (
+            {childEntries.map((c) => {
+              const childDisplay = queueStatusDisplayLabel({
+                workflow: c.workflow,
+                status: c.status,
+                data: c.data,
+              });
+              return (
               <li
                 key={`${c.workflow}#${c.id}#${c.runId}`}
                 className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground"
@@ -349,15 +373,17 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
                 <span className="truncate">{c.id}</span>
                 <span className={cn(
                   "ml-auto px-1.5 py-px rounded text-[10px]",
-                  c.status === "done" && "bg-success/10 text-success",
+                  childDisplay === "Not found" && "bg-secondary/90 text-muted-foreground",
+                  childDisplay !== "Not found" && c.status === "done" && "bg-success/10 text-success",
                   c.status === "failed" && "bg-destructive/10 text-destructive",
                   c.status === "running" && "bg-primary/10 text-primary",
                   c.status === "pending" && "bg-warning/10 text-warning",
                 )}>
-                  {c.status}
+                  {childDisplay}
                 </span>
               </li>
-            ))}
+              );
+            })}
           </ul>
         </section>
       )}
@@ -368,9 +394,10 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
         loading={logsLoading}
         screenshotsSlot={
           <ScreenshotsPanel
-            workflow={workflow}
+            workflow={logSourceWorkflow}
             itemId={activeItemId}
             screenshotEventCount={screenshotEventCount}
+            runId={activeRunId}
           />
         }
         editDataAvailable={detailFields.some((f) => f.editable)}
@@ -383,16 +410,20 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
           />
         }
         previewSlot={previewSlot}
+        previewHeaderSlot={previewHeaderSlot}
         previewAvailable={previewAvailable}
+        onPreviewVisibleChange={onPreviewVisibleChange}
         runControlsSlot={
           <RunSelector
             runs={runs}
             activeRunId={activeRunId}
             onSelect={setActiveRunId}
+            workflow={logSourceWorkflow}
             retryTarget={{
               workflow: logSourceWorkflow,
               id: activeItemId ?? entry.id,
               runId: activeRunId ?? undefined,
+              date,
             }}
             deleteTarget={onDeleteEntry && activeRunId ? {
               workflow: entry.workflow,

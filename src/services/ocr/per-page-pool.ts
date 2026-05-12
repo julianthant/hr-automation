@@ -64,23 +64,55 @@ async function callGemini(
     model: modelName,
     generationConfig: { responseMimeType: "application/json" },
   });
-  // Stream so each chunk lands in the dashboard's Events tab as it arrives.
-  // Operators can see the model's output building up in real time.
-  const stream = (await model.generateContentStream([
+  const parts = [
     { text: prompt },
     { inlineData: { mimeType: "image/png", data: png.toString("base64") } },
-  ])) as { stream: AsyncIterable<{ text(): string }>; response: Promise<{ text(): string }> };
-  let full = "";
-  let chunkCount = 0;
-  for await (const chunk of stream.stream) {
-    const piece = chunk.text();
-    if (!piece) continue;
-    full += piece;
-    chunkCount += 1;
-    log.step(`[ocr/gemini] chunk ${chunkCount} (+${piece.length}c, total ${full.length}c): ${piece.slice(0, 120).replace(/\n/g, " ")}`);
+  ] as const;
+
+  function logComplete(full: string, chunkCount: number, mode: "stream" | "single") {
+    const detail =
+      mode === "stream"
+        ? `${chunkCount} chunks, ${full.length}c`
+        : `non-streaming, ${full.length}c`;
+    log.success(
+      `[ocr/gemini] response complete (${detail}) — raw: ${full.slice(0, 400).replace(/\n/g, " ")}${full.length > 400 ? "…" : ""}`,
+    );
   }
-  log.success(`[ocr/gemini] response complete (${chunkCount} chunks, ${full.length}c) — raw: ${full.slice(0, 400).replace(/\n/g, " ")}${full.length > 400 ? "…" : ""}`);
-  return parseJsonLoose(full);
+
+  // Prefer streaming so chunks appear in dashboard logs; fall back to a single
+  // `generateContent` when the SDK's SSE parser hits leftover buffer at EOF
+  // ("Failed to parse stream") — seen with preview models + @google/generative-ai.
+  try {
+    const stream = (await model.generateContentStream([...parts])) as {
+      stream: AsyncIterable<{ text(): string }>;
+    };
+    let full = "";
+    let chunkCount = 0;
+    for await (const chunk of stream.stream) {
+      const piece = chunk.text();
+      if (!piece) continue;
+      full += piece;
+      chunkCount += 1;
+      log.step(
+        `[ocr/gemini] chunk ${chunkCount} (+${piece.length}c, total ${full.length}c): ${piece.slice(0, 120).replace(/\n/g, " ")}`,
+      );
+    }
+    logComplete(full, chunkCount, "stream");
+    return parseJsonLoose(full);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const streamParseFailed =
+      /Failed to parse stream/i.test(msg) || /Error parsing JSON response/i.test(msg);
+    if (!streamParseFailed) throw err;
+
+    log.warn(`[ocr/gemini] stream ended unparsable for SDK (${msg.slice(0, 160)}); using generateContent`);
+    const raw = (await model.generateContent([...parts])) as {
+      response: { text(): string };
+    };
+    const full = raw.response.text();
+    logComplete(full, 0, "single");
+    return parseJsonLoose(full);
+  }
 }
 
 async function callOpenAICompatVision(args: {

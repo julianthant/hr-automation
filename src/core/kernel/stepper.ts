@@ -39,6 +39,8 @@ export interface StepperOpts {
 export class Stepper {
   private data: Record<string, unknown> = {}
   private currentStep: string | null = null
+  /** Nesting depth of `step()` bodies currently executing (0 = no active step). */
+  private stepDepth = 0
 
   constructor(private opts: StepperOpts) {}
 
@@ -56,6 +58,7 @@ export class Stepper {
     }
     this.currentStep = name
     this.opts.emitStep(name)
+    this.stepDepth++
     try {
       return await fn()
     } catch (err) {
@@ -89,6 +92,8 @@ export class Stepper {
       const classified = classifyError(err)
       this.opts.emitFailed(name, classified)
       throw err
+    } finally {
+      this.stepDepth--
     }
   }
 
@@ -163,5 +168,10 @@ export class Stepper {
 
   getCurrentStep(): string | null {
     return this.currentStep
+  }
+
+  /** True while a `step(name, fn)` body is executing (including awaiting inside `fn`). */
+  isInsideStep(): boolean {
+    return this.stepDepth > 0
   }
 }

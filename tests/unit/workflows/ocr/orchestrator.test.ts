@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { mkdirSync, rmSync, readFileSync, existsSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, readFileSync, existsSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runOcrOrchestrator } from "../../../../src/workflows/ocr/orchestrator.js";
@@ -191,15 +191,199 @@ test("orchestrator uses SQLite dependencies for initial eid-lookup fan-out", asy
 
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(dependencyBatchCreated, true);
-  assert.equal(watcherCalled, false);
+  assert.equal(watcherCalled, true);
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("orchestrator dispatches active-check for records that already have an EID", async () => {
+test("orchestrator waits for eid-lookup results before completing awaiting-approval", async () => {
+  const { dir, rosterPath } = setup();
+  const writtenEntries: object[] = [];
+  let watcherCalled = false;
+
+  await runOcrOrchestrator(
+    {
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      formType: "oath",
+      sessionId: "session-wait-eid",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-wait-eid",
+      trackerDir: dir,
+      _emitOverride: (entry: any) => writtenEntries.push(entry),
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          sourcePage: 1,
+          rowIndex: 0,
+          printedName: "Carlos D. Barahona Martell",
+          employeeSigned: true,
+          officerSigned: true,
+          dateSigned: "05/01/2026",
+          notes: [],
+          documentType: "expected",
+          originallyMissing: [],
+        }],
+        provider: "stub",
+        attempts: 1,
+        cached: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000001", name: "Different Person" }],
+      _enqueueEidLookupOverride: async () => {},
+      _watchChildRunsOverride: async () => {
+        watcherCalled = true;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return [{
+          workflow: "eid-lookup",
+          itemId: "ocr-oath-run-wait-eid-r0",
+          runId: "eid-run-1",
+          status: "done" as const,
+          data: {
+            emplId: "10873698",
+            hrStatus: "Active",
+            department: "HDH Dining",
+            personOrgScreenshot: "person-org.png",
+          },
+        }];
+      },
+      _disableSqliteDependencies: true,
+    },
+  );
+
+  assert.equal(watcherCalled, true);
+  const doneApproval = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
+    (entry) => entry.status === "done" && entry.step === "awaiting-approval",
+  );
+  assert.ok(doneApproval, "awaiting-approval should be marked done after child lookup returns");
+  const records = JSON.parse(doneApproval.data?.records ?? "[]") as Array<Record<string, unknown>>;
+  assert.equal(records[0]?.employeeId, "10873698");
+  assert.deepEqual((records[0]?.verification as Record<string, unknown>)?.state, "verified");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("orchestrator patches child outcomes once when progress and final outcomes both include a failure", async () => {
+  const { dir, rosterPath } = setup();
+  const writtenEntries: object[] = [];
+  const outcome = {
+    workflow: "eid-lookup",
+    itemId: "ocr-oath-run-single-patch-r0",
+    runId: "eid-run-failed",
+    status: "failed" as const,
+    data: {},
+    error: "failed",
+  };
+
+  await runOcrOrchestrator(
+    {
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      formType: "oath",
+      sessionId: "session-single-patch",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-single-patch",
+      trackerDir: dir,
+      _emitOverride: (entry: any) => writtenEntries.push(entry),
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          sourcePage: 1,
+          rowIndex: 0,
+          printedName: "Carlos D. Barahona Martell",
+          employeeSigned: true,
+          officerSigned: true,
+          dateSigned: "05/01/2026",
+          notes: [],
+          documentType: "expected",
+          originallyMissing: [],
+        }],
+        provider: "stub",
+        attempts: 1,
+        cached: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000001", name: "Different Person" }],
+      _enqueueEidLookupOverride: async () => {},
+      _disableSqliteDependencies: true,
+      _watchChildRunsOverride: async (opts: any) => {
+        opts.onProgress?.(outcome, 0);
+        return [outcome];
+      },
+    },
+  );
+
+  const doneApproval = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
+    (entry) => entry.status === "done" && entry.step === "awaiting-approval",
+  );
+  assert.ok(doneApproval, "awaiting-approval should be marked done after child lookup returns");
+  const records = JSON.parse(doneApproval.data?.records ?? "[]") as Array<{ warnings?: string[] }>;
+  assert.equal(records[0]?.warnings?.filter((warning) => warning === "eid-lookup failed").length, 1);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("orchestrator pre-emits delegated eid-lookup pending rows before daemon auth", async () => {
+  const { dir, rosterPath } = setup();
+  const writtenEntries: object[] = [];
+
+  await runOcrOrchestrator(
+    {
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      formType: "oath",
+      sessionId: "session-preemit-eid",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-preemit-eid",
+      trackerDir: dir,
+      _emitOverride: (entry: any) => writtenEntries.push(entry),
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          sourcePage: 1,
+          rowIndex: 0,
+          printedName: "Carlos D. Barahona Martell",
+          employeeSigned: true,
+          officerSigned: true,
+          dateSigned: "05/01/2026",
+          notes: [],
+          documentType: "expected",
+          originallyMissing: [],
+        }],
+        provider: "stub",
+        attempts: 1,
+        cached: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000001", name: "Different Person" }],
+      _enqueueEidLookupOverride: async () => {},
+      _disableSqliteDependencies: true,
+      _watchChildRunsOverride: async () => [{
+        workflow: "eid-lookup",
+        itemId: "ocr-oath-run-preemit-eid-r0",
+        runId: "eid-run-1",
+        status: "done" as const,
+        data: { emplId: "10873698", hrStatus: "Active", department: "HDH" },
+      }],
+    },
+  );
+
+  const eidFileName = readdirSync(dir).find((file) => /^eid-lookup-\d{4}-\d{2}-\d{2}\.jsonl$/.test(file));
+  assert.ok(eidFileName, "expected an eid-lookup tracker file");
+  const eidFile = join(dir, eidFileName);
+  assert.equal(existsSync(eidFile), true, "delegated eid-lookup pending row should be written immediately");
+  const entries = readFileSync(eidFile, "utf-8").trim().split("\n").map((line) => JSON.parse(line));
+  const pending = entries.find((entry: any) => entry.status === "pending" && entry.id === "ocr-oath-run-preemit-eid-r0");
+  assert.ok(pending, "expected pre-emitted pending eid-lookup row");
+  assert.equal(pending.data.searchName, "Barahona Martell, Carlos D");
+  assert.equal(writtenEntries.some((entry: any) => entry.status === "done" && entry.step === "awaiting-approval"), true);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("orchestrator dispatches eid-lookup by EID when roster supplies a UCPath employee id", async () => {
   const { dir, rosterPath } = setup();
   const writtenEntries: object[] = [];
   let eidLookupItems: Array<{ name?: string; emplId?: string; itemId: string }> = [];
-  let activeCheckItems: Array<{ name?: string; emplId?: string; itemId: string }> = [];
 
   await runOcrOrchestrator(
     {
@@ -234,23 +418,83 @@ test("orchestrator dispatches active-check for records that already have an EID"
       _enqueueEidLookupOverride: async (items: Array<{ name?: string; emplId?: string; itemId: string }>) => {
         eidLookupItems = items;
       },
-      _enqueueActiveCheckOverride: async (items: Array<{ name?: string; emplId?: string; itemId: string }>) => {
-        activeCheckItems = items;
-      },
       _disableSqliteDependencies: true,
+      _watchChildRunsOverride: async ({ expectedItemIds }) =>
+        expectedItemIds.map((itemId) => ({
+          workflow: "eid-lookup",
+          itemId,
+          runId: "eid-run-active-mock",
+          status: "done" as const,
+          data: {
+            emplId: "10000001",
+            hrStatus: "Active",
+            department: "Housing Dining Hospitality",
+            activeStatus: "active",
+            isActive: "true",
+            isHdhAccepted: "true",
+          },
+        })),
     } as never,
   );
 
-  assert.equal(eidLookupItems.length, 0, "records that already have an EID should not run eid-lookup");
-  assert.equal(activeCheckItems.length, 1);
-  assert.equal(activeCheckItems[0].emplId, "10000001");
-  assert.match(activeCheckItems[0].itemId, /^ocr-active-run-active-r0$/);
+  assert.equal(eidLookupItems.length, 1);
+  assert.equal(eidLookupItems[0].emplId, "10000001");
+  assert.match(eidLookupItems[0].itemId, /^ocr-oath-run-active-r0$/);
   const steps = writtenEntries.map((e: any) => `${e.status}/${e.step ?? ""}`);
-  assert.ok(steps.some((s) => s.includes("active-check")), `steps: ${steps.join(", ")}`);
+  assert.ok(steps.some((s) => s.includes("eid-lookup")), `steps: ${steps.join(", ")}`);
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("orchestrator records SQLite dependencies for active-check fan-out", async () => {
+test("orchestrator treats non-UCPath employee ids as missing and falls back to name lookup", async () => {
+  const { dir, rosterPath } = setup();
+  let eidLookupItems: Array<{ name?: string; emplId?: string; itemId: string }> = [];
+
+  await runOcrOrchestrator(
+    {
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      formType: "oath",
+      sessionId: "session-invalid-eid",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-invalid-eid",
+      trackerDir: dir,
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          sourcePage: 1,
+          rowIndex: 0,
+          printedName: "Carlos Barahona",
+          employeeId: "12345",
+          employeeSigned: true,
+          officerSigned: true,
+          dateSigned: "05/01/2026",
+          notes: [],
+          documentType: "expected",
+          originallyMissing: [],
+        }],
+        provider: "stub",
+        attempts: 1,
+        cached: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000001", name: "Unrelated Person" }],
+      _enqueueEidLookupOverride: async (items: Array<{ name?: string; emplId?: string; itemId: string }>) => {
+        eidLookupItems = items;
+      },
+      _lookupSuggestionOverride: async () => [],
+      _disableSqliteDependencies: true,
+      _watchChildRunsOverride: async () => [],
+    } as never,
+  );
+
+  assert.equal(eidLookupItems.length, 1);
+  assert.equal(eidLookupItems[0].name, "Barahona, Carlos");
+  assert.equal(eidLookupItems[0].emplId, undefined);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("orchestrator records SQLite dependencies for eid-lookup fan-out (verify-by-EID)", async () => {
   const { dir, rosterPath } = setup();
   let watcherCalled = false;
   let dependencyBatchCreated = false;
@@ -284,15 +528,15 @@ test("orchestrator records SQLite dependencies for active-check fan-out", async 
         cached: false,
       }),
       _loadRosterOverride: async () => [{ eid: "10000001", name: "Liam Kustenbauder" }],
-      _enqueueActiveCheckOverride: async () => {},
-      _createActiveCheckDependencyBatchOverride: async ({ parent, children }) => {
+      _enqueueEidLookupOverride: async () => {},
+      _createDependencyBatchOverride: async ({ parent, children }) => {
         dependencyBatchCreated = true;
         assert.equal(parent.workflow, "ocr");
         assert.equal(parent.itemId, "session-active-deps");
         assert.equal(parent.runId, "run-active-deps");
         assert.equal(children.length, 1);
-        assert.equal(children[0].workflow, "active-check");
-        assert.equal(children[0].itemId, "ocr-active-run-active-deps-r0");
+        assert.equal(children[0].workflow, "eid-lookup");
+        assert.equal(children[0].itemId, "ocr-oath-run-active-deps-r0");
         assert.equal(children[0].recordIndex, 0);
         assert.equal(children[0].lookupKind, "verify");
       },
@@ -306,14 +550,13 @@ test("orchestrator records SQLite dependencies for active-check fan-out", async 
 
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(dependencyBatchCreated, true);
-  assert.equal(watcherCalled, false);
+  assert.equal(watcherCalled, true);
   rmSync(dir, { recursive: true, force: true });
 });
 
 test("orchestrator uses LLM lookup suggestions when fuzzy roster matching has no candidates", async () => {
   const { dir, rosterPath } = setup();
   let eidLookupItems: Array<{ name?: string; emplId?: string; itemId: string }> = [];
-  let activeCheckItems: Array<{ name?: string; emplId?: string; itemId: string }> = [];
 
   await runOcrOrchestrator(
     {
@@ -351,17 +594,14 @@ test("orchestrator uses LLM lookup suggestions when fuzzy roster matching has no
       _enqueueEidLookupOverride: async (items: Array<{ name?: string; emplId?: string; itemId: string }>) => {
         eidLookupItems = items;
       },
-      _enqueueActiveCheckOverride: async (items: Array<{ name?: string; emplId?: string; itemId: string }>) => {
-        activeCheckItems = items;
-      },
       _disableSqliteDependencies: true,
       _watchChildRunsOverride: async () => [],
     } as never,
   );
 
-  assert.ok(eidLookupItems.some((item) => item.name === "Johnnie Battistessa"));
-  assert.ok(eidLookupItems.some((item) => item.name === "jhn batistessa"));
-  assert.ok(activeCheckItems.some((item) => item.emplId === "10873698"));
+  assert.ok(eidLookupItems.some((item) => item.name === "Battistessa, Johnnie"));
+  assert.ok(eidLookupItems.some((item) => item.name === "Batistessa, Jhn"));
+  assert.ok(eidLookupItems.some((item) => item.emplId === "10873698"));
   rmSync(dir, { recursive: true, force: true });
 });
 

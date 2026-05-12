@@ -32,6 +32,7 @@ export function useRunScreenshots(
   workflow: string | null,
   itemId: string | null,
   screenshotEventCount: number,
+  runId?: string | null,
 ): { entries: ScreenshotEntry[] } {
   const [entries, setEntries] = useState<ScreenshotEntry[]>([]);
   const fetchGeneration = useRef(0);
@@ -46,8 +47,9 @@ export function useRunScreenshots(
 
     void (async () => {
       try {
+        const runQs = runId ? `&runId=${encodeURIComponent(runId)}` : "";
         const res = await fetch(
-          `/api/screenshots?workflow=${encodeURIComponent(workflow)}&itemId=${encodeURIComponent(itemId)}`,
+          `/api/screenshots?workflow=${encodeURIComponent(workflow)}&itemId=${encodeURIComponent(itemId)}${runQs}`,
         );
         if (myGen !== fetchGeneration.current) return;
         if (!res.ok) return;
@@ -60,7 +62,7 @@ export function useRunScreenshots(
     })();
     // screenshotEventCount intentionally drives refetch — it changes when a
     // new screenshot session_event arrives in useRunEvents.
-  }, [workflow, itemId, screenshotEventCount]);
+  }, [workflow, itemId, screenshotEventCount, runId]);
 
   return { entries };
 }

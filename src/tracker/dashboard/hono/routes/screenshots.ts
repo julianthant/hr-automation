@@ -17,10 +17,11 @@ export function registerScreenshotRoutes(app: Hono, deps: DashboardHonoDeps): vo
   app.get("/api/screenshots", async (c) => {
     const workflow = c.req.query("workflow") ?? getDefaultWorkflow(deps);
     const id = c.req.query("itemId") ?? c.req.query("id") ?? "";
+    const runId = c.req.query("runId")?.trim() || undefined;
     if (!workflow || !id) return jsonResponse([]);
     try {
       const groupedHandler = buildScreenshotsHandler({ dir: deps.dir, screenshotsDir });
-      return jsonResponse(await groupedHandler({ workflow, itemId: id }));
+      return jsonResponse(await groupedHandler({ workflow, itemId: id, runId }));
     } catch {
       return jsonResponse([]);
     }

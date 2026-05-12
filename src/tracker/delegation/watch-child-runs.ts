@@ -108,14 +108,19 @@ async function maybeWatchSqliteChildRuns(
         if (!fresh) continue;
         const status = sqliteTaskStatus(fresh);
         if (!status) continue;
+        const projected = readLatestRunFromProjection(taskStore, {
+          workflow: fresh.workflow,
+          itemId: fresh.itemId,
+          runId: fresh.currentRunId ?? fresh.runId ?? undefined,
+        });
         const synthetic: TrackerEntry = {
           workflow: fresh.workflow,
           id: fresh.itemId,
           runId: fresh.currentRunId ?? fresh.runId,
           timestamp: new Date().toISOString(),
           status,
-          data: {},
-          error: fresh.error,
+          data: projected?.data ?? {},
+          error: projected?.error ?? fresh.error,
         };
         const isTerminal = opts.isTerminal ?? ((e: TrackerEntry) => e.status === "done" || e.status === "failed");
         if (!isTerminal(synthetic)) continue;
@@ -125,7 +130,7 @@ async function maybeWatchSqliteChildRuns(
           runId: fresh.currentRunId ?? fresh.runId ?? "",
           status,
           data: synthetic.data,
-          error: fresh.error,
+          error: synthetic.error,
         };
         outcomes.push(outcome);
         seen.add(fresh.itemId);
@@ -144,6 +149,46 @@ async function maybeWatchSqliteChildRuns(
     }
   } finally {
     controlDb.close();
+  }
+}
+
+function readLatestRunFromProjection(
+  taskStore: ReturnType<typeof createTaskStore>,
+  args: { workflow: string; itemId: string; runId?: string },
+): { data: Record<string, string>; error?: string } | null {
+  const row = taskStore.db.prepare(`
+    SELECT latest_data_json, latest_error
+    FROM runs
+    WHERE workflow = @workflow
+      AND item_id = @itemId
+      AND (@runId IS NULL OR run_id = @runId)
+    ORDER BY latest_tracker_ts DESC
+    LIMIT 1
+  `).get({
+    workflow: args.workflow,
+    itemId: args.itemId,
+    runId: args.runId ?? null,
+  }) as { latest_data_json: string | null; latest_error: string | null } | undefined;
+  if (!row) return null;
+  return {
+    data: parseStringRecord(row.latest_data_json),
+    ...(row.latest_error ? { error: row.latest_error } : {}),
+  };
+}
+
+function parseStringRecord(raw: string | null): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === "string") out[key] = value;
+      else if (value !== undefined && value !== null) out[key] = String(value);
+    }
+    return out;
+  } catch {
+    return {};
   }
 }
 

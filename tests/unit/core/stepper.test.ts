@@ -155,3 +155,24 @@ test('stepper does not call screenshotFn on success', async () => {
   assert.equal(result, 42)
   assert.deepEqual(captured, [])
 })
+
+test('stepper.isInsideStep: false outside step; true inside step fn', async () => {
+  const { stepper } = mkStepper()
+  assert.equal(stepper.isInsideStep(), false)
+  await stepper.step('one', async () => {
+    assert.equal(stepper.isInsideStep(), true)
+  })
+  assert.equal(stepper.isInsideStep(), false)
+})
+
+test('stepper.isInsideStep: nested steps', async () => {
+  const { stepper } = mkStepper()
+  await stepper.step('outer', async () => {
+    assert.equal(stepper.isInsideStep(), true)
+    await stepper.step('inner', async () => {
+      assert.equal(stepper.isInsideStep(), true)
+    })
+    assert.equal(stepper.isInsideStep(), true)
+  })
+  assert.equal(stepper.isInsideStep(), false)
+})

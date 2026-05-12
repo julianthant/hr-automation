@@ -18,8 +18,8 @@ export interface ScreenshotListEntry {
 }
 
 /**
- * Grouped screenshot entry - one per screenshot tracker event (or one
- * synthetic entry for all "legacy" files that have no matching event).
+ * Grouped screenshot entry — one per emitted screenshot session event that
+ * still has files on disk (SQLite path joins `files` rows to those events).
  * Returned by the `{ dir, screenshotsDir }` overload of
  * `buildScreenshotsHandler`.
  */
@@ -40,9 +40,9 @@ export interface ScreenshotGroupedEntry {
  * `ts` heuristically so the UI can show useful captions.
  *
  * Overloaded: when called with `{ dir, screenshotsDir }` it returns an async
- * handler that reads `sessions.jsonl` and groups files by screenshot events,
- * surfacing unmatched / legacy files under a synthetic `kind=error label=legacy`
- * entry. When called with a string (or no args) it returns the legacy sync
+ * handler that lists only screenshots tied to emitted screenshot session events
+ * (plus SQLite `files` rows matched to those events). Orphan PNGs on disk are
+ * ignored. When called with a string (or no args) it returns the legacy sync
  * flat-list handler - this overload is retained for backward compat with the
  * SSE enrichment loop.
  */
@@ -52,7 +52,12 @@ export function buildScreenshotsHandler(
 export function buildScreenshotsHandler(deps: {
   dir: string;
   screenshotsDir: string;
-}): (query: { workflow: string; itemId: string }) => Promise<ScreenshotGroupedEntry[]>;
+}): (query: {
+  workflow: string;
+  itemId: string;
+  /** When set, only screenshots registered to this tracker run (strict SQLite + filtered session events; skips unattributed disk orphans). */
+  runId?: string | null;
+}) => Promise<ScreenshotGroupedEntry[]>;
 export function buildScreenshotsHandler(
   arg: string | { dir: string; screenshotsDir: string } | undefined = SCREENSHOTS_DIR,
 ): unknown {
@@ -60,45 +65,44 @@ export function buildScreenshotsHandler(
   if (arg !== null && typeof arg === "object") {
     const { dir, screenshotsDir } = arg;
     return async function groupedHandler(
-      query: { workflow: string; itemId: string },
+      query: { workflow: string; itemId: string; runId?: string | null },
     ): Promise<ScreenshotGroupedEntry[]> {
       const { workflow, itemId } = query;
+      const runId = query.runId?.trim() || undefined;
 
       // Prefer SQLite when ready and populated.
       if (isStateDbReady(dir)) {
         const db = openStateDb(dir);
-        const rows = queryScreenshotsForItem(db, { workflow, itemId });
+        const rows = queryScreenshotsForItem(db, { workflow, itemId, runId });
         if (rows.length > 0) {
-          // Recover group labels from screenshot session_events for every run
-          // that has file rows — not only the newest run (otherwise prior-run
-          // metadata is wrong and paths only on disk vanish from the grouped UI).
-          const runIds = [
-            ...new Set(rows.map((r) => r.run_id).filter((id): id is string => Boolean(id))),
-          ];
           const screenshotEvents: ScreenshotSessionEvent[] = [];
-          for (const rid of runIds) {
-            for (const e of querySessionEventsForRun(db, { runId: rid })) {
+          if (runId) {
+            for (const e of querySessionEventsForRun(db, { runId })) {
               if (e.type === "screenshot") {
                 screenshotEvents.push(e as unknown as ScreenshotSessionEvent);
               }
             }
+          } else {
+            const runIds = [
+              ...new Set(rows.map((r) => r.run_id).filter((id): id is string => Boolean(id))),
+            ];
+            for (const rid of runIds) {
+              for (const e of querySessionEventsForRun(db, { runId: rid })) {
+                if (e.type === "screenshot") {
+                  screenshotEvents.push(e as unknown as ScreenshotSessionEvent);
+                }
+              }
+            }
           }
-          let grouped = groupScreenshotRows(
+          const grouped = groupScreenshotRows(
             rows.filter((r) => existsSync(r.storage_path)),
             screenshotEvents,
           );
-          // Match groupedHandlerLegacy: PNGs on disk matching the prefix must
-          // appear even when they have no `files` row (pre-projection captures,
-          // failed registration, etc.). Without this merge, a new run that
-          // adds SQLite rows caused the handler to return early and hide
-          // older on-disk shots.
-          grouped = mergeDiskOnlyScreenshotFiles(grouped, { screenshotsDir, workflow, itemId });
           if (grouped.length > 0) return grouped;
         }
       }
 
-      // Fallback: original JSONL + disk implementation, unchanged.
-      return groupedHandlerLegacy({ dir, screenshotsDir, workflow, itemId });
+      return groupedHandlerLegacy({ dir, screenshotsDir, workflow, itemId, runId });
     };
   }
 
@@ -161,73 +165,7 @@ export function buildScreenshotsHandler(
 // ── Private helpers ─────────────────────────────────────────────────────────
 
 /**
- * Append any `.png` files under `screenshotsDir` with the workflow+itemId
- * prefix whose paths are not already represented in `grouped` (same rule as
- * step 3 of `groupedHandlerLegacy`).
- */
-function mergeDiskOnlyScreenshotFiles(
-  grouped: ScreenshotGroupedEntry[],
-  opts: { screenshotsDir: string; workflow: string; itemId: string },
-): ScreenshotGroupedEntry[] {
-  const prefix = `${opts.workflow}-${opts.itemId}-`;
-  const covered = new Set<string>();
-  for (const g of grouped) {
-    for (const f of g.files) {
-      covered.add(f.path);
-    }
-  }
-  const additions: ScreenshotGroupedEntry["files"] = [];
-  let legacyTs = 0;
-  if (!existsSync(opts.screenshotsDir)) return grouped;
-  for (const f of readdirSync(opts.screenshotsDir)) {
-    if (!f.endsWith(".png")) continue;
-    if (!f.startsWith(prefix)) continue;
-    const fullPath = join(opts.screenshotsDir, f);
-    if (covered.has(fullPath)) continue;
-    const tsMatch = f.match(/-(\d+)\.png$/);
-    const fileTsNum = tsMatch ? Number(tsMatch[1]) : 0;
-    const stripped = f.slice(prefix.length, -".png".length);
-    const segs = stripped.split("-");
-    let system = "unknown";
-    if (segs.length >= 2) {
-      system = segs[segs.length - 2];
-    }
-    if (fileTsNum > legacyTs) legacyTs = fileTsNum;
-    additions.push({
-      system,
-      path: fullPath,
-      url: `/screenshots/${encodeURIComponent(f)}`,
-    });
-  }
-  if (additions.length === 0) return grouped;
-  const legacyIdx = grouped.findIndex((e) => e.label === "legacy" && e.kind === "error");
-  let out: ScreenshotGroupedEntry[];
-  if (legacyIdx >= 0) {
-    out = [...grouped];
-    const prev = out[legacyIdx];
-    out[legacyIdx] = {
-      ...prev,
-      files: [...prev.files, ...additions],
-      ts: Math.max(prev.ts, legacyTs),
-    };
-  } else {
-    out = [
-      ...grouped,
-      {
-        ts: legacyTs,
-        kind: "error",
-        label: "legacy",
-        step: null,
-        files: additions,
-      },
-    ];
-  }
-  out.sort((a, b) => b.ts - a.ts);
-  return out;
-}
-
-/**
- * Legacy grouped handler: reads sessions.jsonl and uses readdirSync.
+ * Legacy grouped handler: reads sessions.jsonl (no SQLite disk orphan merge).
  * Extracted so both the SQLite path and this path are unit-testable.
  */
 async function groupedHandlerLegacy(opts: {
@@ -235,8 +173,9 @@ async function groupedHandlerLegacy(opts: {
   screenshotsDir: string;
   workflow: string;
   itemId: string;
+  runId?: string;
 }): Promise<ScreenshotGroupedEntry[]> {
-  const { dir, screenshotsDir, workflow, itemId } = opts;
+  const { dir, workflow, itemId, runId } = opts;
   const prefix = `${workflow}-${itemId}-`;
 
   // 1. Read every session file (legacy sessions.jsonl + dated
@@ -251,6 +190,7 @@ async function groupedHandlerLegacy(opts: {
       "files" in ev
     ) {
       const screenshotEv = ev as unknown as ScreenshotSessionEvent;
+      if (runId && screenshotEv.runId !== runId) continue;
       const matches = screenshotEv.files.some((f) => {
         const base = f.path.split(/[/\\]/).pop() ?? "";
         return base.startsWith(prefix);
@@ -259,16 +199,12 @@ async function groupedHandlerLegacy(opts: {
     }
   }
 
-  // 2. Build grouped entries from events. Track which file paths are covered.
-  //    Only include files that still exist on disk - sessions.jsonl persists
-  //    across cleanup cycles so stale references are common.
-  const coveredPaths = new Set<string>();
+  // 2. Build grouped entries from events (skip stale paths missing from disk).
   const grouped: ScreenshotGroupedEntry[] = [];
   for (const ev of events) {
     const files: ScreenshotGroupedEntry["files"] = [];
     for (const f of ev.files) {
       if (!existsSync(f.path)) continue;
-      coveredPaths.add(f.path);
       files.push({
         system: f.system,
         path: f.path,
@@ -286,56 +222,15 @@ async function groupedHandlerLegacy(opts: {
     });
   }
 
-  // 3. Enumerate files in screenshotsDir; any not already covered become
-  //    synthetic legacy entries (grouped all under one label="legacy").
-  const legacyFiles: ScreenshotGroupedEntry["files"] = [];
-  let legacyTs = 0;
-  if (existsSync(screenshotsDir)) {
-    for (const f of readdirSync(screenshotsDir)) {
-      if (!f.endsWith(".png")) continue;
-      if (!f.startsWith(prefix)) continue;
-      const fullPath = join(screenshotsDir, f);
-      if (coveredPaths.has(fullPath)) continue;
-
-      // Parse TS from trailing numeric segment before .png
-      const tsMatch = f.match(/-(\d+)\.png$/);
-      const fileTsNum = tsMatch ? Number(tsMatch[1]) : 0;
-
-      // Determine system: second-to-last dash-segment before the ts
-      const stripped = f.slice(prefix.length, -".png".length);
-      const segs = stripped.split("-");
-      let system = "unknown";
-      if (segs.length >= 2) {
-        system = segs[segs.length - 2];
-      }
-
-      if (fileTsNum > legacyTs) legacyTs = fileTsNum;
-      legacyFiles.push({
-        system,
-        path: fullPath,
-        url: `/screenshots/${encodeURIComponent(f)}`,
-      });
-    }
-  }
-  if (legacyFiles.length > 0) {
-    grouped.push({
-      ts: legacyTs,
-      kind: "error",
-      label: "legacy",
-      step: null,
-      files: legacyFiles,
-    });
-  }
-
-  // 4. Sort newest-first.
+  // 3. Sort newest-first.
   grouped.sort((a, b) => b.ts - a.ts);
   return grouped;
 }
 
 /**
  * Build grouped `ScreenshotGroupedEntry[]` from SQLite `FileRow[]` and
- * matching screenshot session events. Files without a matching event are
- * grouped under a synthetic `kind=error label=legacy` entry.
+ * matching screenshot session events. Rows with no matching event are dropped
+ * (projection drift); they are not listed as orphan “legacy” captures.
  */
 function groupScreenshotRows(
   rows: FileRow[],
@@ -363,46 +258,31 @@ function groupScreenshotRows(
     }
   }
   const groupedByTs = new Map<number, ScreenshotGroupedEntry>();
-  const legacyFiles: ScreenshotGroupedEntry["files"] = [];
-  let legacyTs = 0;
 
   for (const row of rows) {
     const ev = eventByPath.get(row.storage_path);
+    if (!ev) continue;
+
     const fileEntry = {
-      system: ev?.system ?? "unknown",
+      system: ev.system,
       path: row.storage_path,
       url: `/screenshots/${encodeURIComponent(row.storage_path.split(/[/\\]/).pop() ?? "")}`,
     };
-    if (ev) {
-      const existing = groupedByTs.get(ev.ts);
-      if (existing) {
-        existing.files.push(fileEntry);
-      } else {
-        groupedByTs.set(ev.ts, {
-          ts: ev.ts,
-          kind: ev.kind,
-          label: ev.label,
-          step: ev.step,
-          files: [fileEntry],
-        });
-      }
+    const existing = groupedByTs.get(ev.ts);
+    if (existing) {
+      existing.files.push(fileEntry);
     } else {
-      const fileTs = Date.parse(row.created_at);
-      if (Number.isFinite(fileTs) && fileTs > legacyTs) legacyTs = fileTs;
-      legacyFiles.push(fileEntry);
+      groupedByTs.set(ev.ts, {
+        ts: ev.ts,
+        kind: ev.kind,
+        label: ev.label,
+        step: ev.step,
+        files: [fileEntry],
+      });
     }
   }
 
   const out = [...groupedByTs.values()];
-  if (legacyFiles.length > 0) {
-    out.push({
-      ts: legacyTs,
-      kind: "error",
-      label: "legacy",
-      step: null,
-      files: legacyFiles,
-    });
-  }
   out.sort((a, b) => b.ts - a.ts);
   return out;
 }

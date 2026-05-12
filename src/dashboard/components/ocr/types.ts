@@ -270,7 +270,7 @@ export type OathMatchState =
   | "resolved"
   | "unresolved";
 
-export type OathMatchSource = "roster" | "eid-lookup" | "llm";
+export type OathMatchSource = "roster" | "eid-lookup" | "llm" | "form-eid" | "manual";
 
 export interface OathPreviewRecord {
   sourcePage: number;
