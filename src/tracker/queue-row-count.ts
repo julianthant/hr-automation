@@ -71,12 +71,106 @@ export function dedupeLatestByIdWithCarriedEmplId(raw: TrackerEntry[]): TrackerE
   });
 }
 
-/** Rail badge count: dedupe by item id → drop resolved prep rows → merge by emplId. */
+function isPrepareMode(e: TrackerEntry): boolean {
+  return e.data?.mode === "prepare";
+}
+
+function isDiscardedPrepForQueueStrip(e: TrackerEntry): boolean {
+  if (!isPrepareMode(e)) return false;
+  return e.status === "failed" && e.step === "discarded";
+}
+
+function isApprovedPrepForQueueStrip(e: TrackerEntry): boolean {
+  if (!isPrepareMode(e)) return false;
+  return e.status === "done" && e.step === "approved";
+}
+
+function isAuthRunningForQueueStrip(e: TrackerEntry): boolean {
+  return e.status === "running" && Boolean(e.step?.startsWith("auth:"));
+}
+
+function isQueueLikeForQueueStrip(e: TrackerEntry): boolean {
+  return e.status === "pending" || e.status === "skipped" || isAuthRunningForQueueStrip(e);
+}
+
+/**
+ * One synthetic row per `parentRunId` batch (daemon / OCR delegation batch row),
+ * matching daemon batch rollup + StatPills semantics.
+ */
+function rollupBatchMembersToQueueStripSynth(
+  parentRunId: string,
+  members: readonly TrackerEntry[],
+): TrackerEntry {
+  const wf = members[0]?.workflow ?? "";
+  const ts = members[0]?.timestamp ?? new Date().toISOString();
+
+  let status: TrackerEntry["status"];
+  if (members.some((m) => isQueueLikeForQueueStrip(m))) {
+    status = "pending";
+  } else if (members.some((m) => m.status === "running")) {
+    status = "running";
+  } else if (members.some((m) => m.status === "failed")) {
+    status = "failed";
+  } else {
+    status = "done";
+  }
+
+  return {
+    workflow: wf || "workflow",
+    id: `__queue-strip-batch:${parentRunId}`,
+    runId: parentRunId,
+    timestamp: ts,
+    status,
+    data: {},
+  };
+}
+
+/**
+ * Canonical “queue strip” row list: one visible row per surface card in the
+ * left panel / stat pills / sidebar badges. Call on **merge primaries** (one
+ * entry per person after {@link groupMergedTrackerEntries}).
+ *
+ * - Discarded prep rows are dropped.
+ * - Entries with a shared `parentRunId` collapse to one synthetic row.
+ * - Approved prep primaries are omitted when that batch has members (children
+ *   carry `parentRunId`; the prep anchor is not double-counted).
+ */
+export function collapseMergedPrimariesForQueueStrip(entries: readonly TrackerEntry[]): TrackerEntry[] {
+  const visible = entries.filter((e) => !isDiscardedPrepForQueueStrip(e));
+
+  const batchMembersByParent = new Map<string, TrackerEntry[]>();
+  for (const e of visible) {
+    if (!e.parentRunId) continue;
+    const list = batchMembersByParent.get(e.parentRunId) ?? [];
+    list.push(e);
+    batchMembersByParent.set(e.parentRunId, list);
+  }
+
+  const synthBatches: TrackerEntry[] = [];
+  for (const [parentRunId, members] of batchMembersByParent) {
+    synthBatches.push(rollupBatchMembersToQueueStripSynth(parentRunId, members));
+  }
+
+  const standalone: TrackerEntry[] = [];
+  for (const e of visible) {
+    if (e.parentRunId && batchMembersByParent.has(e.parentRunId)) continue;
+    if (isApprovedPrepForQueueStrip(e)) continue;
+    standalone.push(e);
+  }
+
+  return [...standalone, ...synthBatches];
+}
+
+/**
+ * Rail badge + cross-workflow sidebar count: dedupe by item id → drop resolved
+ * prep → merge by emplId → collapse delegation batches (`parentRunId`).
+ */
 export function countSidebarRowsFromTrackerHistory(
   raw: TrackerEntry[],
   isExcluded: (e: TrackerEntry) => boolean,
 ): number {
   const deduped = dedupeLatestByIdWithCarriedEmplId(raw);
   const visible = deduped.filter((e) => !isExcluded(e));
-  return groupMergedTrackerEntries(visible).length;
+  const primaries = groupMergedTrackerEntries(visible).map((g) => g.primary);
+  return collapseMergedPrimariesForQueueStrip(primaries).length;
 }

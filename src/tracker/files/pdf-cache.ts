@@ -6,6 +6,8 @@ import { transaction, type Database } from "../../infra/sqlite/index.js";
 
 import { renderPdfPagesToPngs } from "../../services/ocr/render-pages.js";
 
+const PDF_PAGE_RENDER_VERSION = 2;
+
 export interface EnsurePdfPageCacheOpts {
   trackerDir: string;
   fileId: string;
@@ -59,9 +61,9 @@ async function ensurePdfPageCacheInner(
   const existing = db.prepare(`
     SELECT file_id, page, status, image_path, mime_type, bytes, error
     FROM file_pages
-    WHERE file_id = ? AND render_version = 1 AND status = 'ready'
+    WHERE file_id = ? AND render_version = ? AND status = 'ready'
     ORDER BY page
-  `).all(opts.fileId) as Array<{
+  `).all(opts.fileId, PDF_PAGE_RENDER_VERSION) as Array<{
     file_id: string;
     page: number;
     status: "ready";
@@ -90,12 +92,12 @@ async function ensurePdfPageCacheInner(
   if (filenames.length === 0) {
     db.prepare(`
       INSERT INTO file_pages (file_id, page, render_version, status, error, created_at, updated_at)
-      VALUES (?, 1, 1, 'failed', 'PDF render returned no pages', ?, ?)
+      VALUES (?, 1, ?, 'failed', 'PDF render returned no pages', ?, ?)
       ON CONFLICT(file_id, page, render_version) DO UPDATE SET
         status = 'failed',
         error = excluded.error,
         updated_at = excluded.updated_at
-    `).run(opts.fileId, now, now);
+    `).run(opts.fileId, PDF_PAGE_RENDER_VERSION, now, now);
     return [{ fileId: opts.fileId, page: 1, status: "failed", error: "PDF render returned no pages" }];
   }
 
@@ -103,7 +105,7 @@ async function ensurePdfPageCacheInner(
     INSERT INTO file_pages (
       file_id, page, render_version, status, image_path, mime_type, bytes, created_at, updated_at
     ) VALUES (
-      @fileId, @page, 1, 'ready', @imagePath, 'image/png', @bytes, @createdAt, @updatedAt
+      @fileId, @page, @renderVersion, 'ready', @imagePath, 'image/png', @bytes, @createdAt, @updatedAt
     )
     ON CONFLICT(file_id, page, render_version) DO UPDATE SET
       status = 'ready',
@@ -123,6 +125,7 @@ async function ensurePdfPageCacheInner(
       upsert.run({
         fileId: opts.fileId,
         page,
+        renderVersion: PDF_PAGE_RENDER_VERSION,
         imagePath,
         bytes,
         createdAt: now,
@@ -144,8 +147,8 @@ export function getCachedPage(
   const row = db.prepare(`
     SELECT file_id, page, status, image_path, mime_type, bytes, error
     FROM file_pages
-    WHERE file_id = ? AND page = ? AND render_version = 1
-  `).get(fileId, page) as {
+    WHERE file_id = ? AND page = ? AND render_version = ?
+  `).get(fileId, page, PDF_PAGE_RENDER_VERSION) as {
     file_id: string;
     page: number;
     status: "pending" | "ready" | "failed";

@@ -10,10 +10,9 @@ import { queryProjectionHealth } from "../../../src/tracker/state/queries.js";
 import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
 import { __resetPreflightThrottleForTests } from "../../../src/tracker/dashboard/hono/routes/base.js";
 import { registerLocalFile } from "../../../src/tracker/files/files.js";
-import { trackEventForDate } from "../../../src/tracker/jsonl.js";
+import { trackEventForDate, trackEvent, emitScreenshotEvent } from "../../../src/tracker/jsonl.js";
 import { clear, defineDashboardMetadata } from "../../../src/core/kernel/registry.js";
 import { defineWorkflow } from "../../../src/core/kernel/workflow.js";
-import { SCREENSHOTS_DIR } from "../../../src/tracker/dashboard/screenshots.js";
 
 test("Hono /api/v2/projection/health returns projection metadata", async () => {
   const dir = mkdtempSync(join(tmpdir(), "hono-state-"));
@@ -201,18 +200,44 @@ test("Hono /api/search returns JSONL search results", async () => {
 
 test("Hono screenshot routes list grouped screenshots and stream image files", async () => {
   const dir = mkdtempSync(join(tmpdir(), "hono-screenshots-"));
+  const shotsDir = join(dir, "screenshots");
   const filename = `onboarding-hono-phase1-step-ucpath-${Date.now()}.png`;
-  const screenshotPath = join(SCREENSHOTS_DIR, filename);
+  const screenshotPath = join(shotsDir, filename);
   try {
     const db = openStateDb(dir);
-    mkdirSync(SCREENSHOTS_DIR, { recursive: true });
+    mkdirSync(shotsDir, { recursive: true });
     writeFileSync(screenshotPath, Buffer.from("png bytes"));
-    const app = createDashboardHonoApp({ dir, stateDb: db, workflow: "onboarding" });
+    trackEvent(
+      {
+        workflow: "onboarding",
+        timestamp: new Date().toISOString(),
+        id: "hono-phase1",
+        runId: "hono-run-1",
+        status: "running",
+        data: {},
+      },
+      dir,
+    );
+    emitScreenshotEvent(
+      {
+        type: "screenshot",
+        runId: "hono-run-1",
+        ts: Date.now(),
+        timestamp: new Date().toISOString(),
+        kind: "form",
+        label: "step-capture",
+        step: "step",
+        files: [{ system: "ucpath", path: screenshotPath }],
+      },
+      { dir },
+    );
+
+    const app = createDashboardHonoApp({ dir, stateDb: db, workflow: "onboarding", screenshotsDir: shotsDir });
 
     const list = await app.request("/api/screenshots?workflow=onboarding&id=hono-phase1");
     assert.equal(list.status, 200);
     const rows = await list.json() as Array<{ label: string; files: Array<{ url: string }> }>;
-    assert.equal(rows[0].label, "legacy");
+    assert.equal(rows[0].label, "step-capture");
     assert.equal(rows[0].files[0].url, `/screenshots/${encodeURIComponent(filename)}`);
 
     const image = await app.request(`/screenshots/${encodeURIComponent(filename)}`);
@@ -295,7 +320,7 @@ test("Hono /api/files routes stream registered local files and cached pages", as
       INSERT INTO file_pages (
         file_id, page, render_version, status, image_path, mime_type, bytes, error, created_at, updated_at
       ) VALUES (
-        @fileId, 1, 1, 'ready', @imagePath, 'image/png', @bytes, NULL, @now, @now
+        @fileId, 1, 2, 'ready', @imagePath, 'image/png', @bytes, NULL, @now, @now
       )
     `).run({ fileId: file.fileId, imagePath: pagePath, bytes: statSync(pagePath).size, now });
 
@@ -310,6 +335,22 @@ test("Hono /api/files routes stream registered local files and cached pages", as
     assert.equal(page.headers.get("content-type"), "image/png");
     assert.equal(page.headers.get("cache-control"), "public, max-age=31536000, immutable");
     assert.equal(Buffer.from(await page.arrayBuffer()).toString("utf8"), "page image bytes");
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Hono /api/files page route rejects invalid page params", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hono-file-pages-invalid-"));
+  try {
+    const db = openStateDb(dir);
+    const app = createDashboardHonoApp({ dir, stateDb: db });
+    for (const page of ["NaN", "0", "-1", "100000"]) {
+      const res = await app.request(`/api/files/test-file/pages/${page}`);
+      assert.equal(res.status, 400);
+      assert.equal(await res.text(), "invalid page");
+    }
   } finally {
     closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });

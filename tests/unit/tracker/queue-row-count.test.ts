@@ -65,6 +65,44 @@ test("countSidebarRowsFromTrackerHistory: merges + excludes resolved prep", () =
   assert.equal(n, 1, "prep row excluded; two active-check rows collapse to one");
 });
 
+test("countSidebarRowsFromTrackerHistory: delegation batch collapses many children to one", () => {
+  const raw: TrackerEntry[] = Array.from({ length: 75 }, (_, i) => ({
+    workflow: "active-check",
+    timestamp: `2026-05-09T12:${String(i).padStart(2, "0")}:00.000Z`,
+    id: `employee-${i}`,
+    runId: `run-${i}`,
+    parentRunId: "ocr-batch-parent",
+    status: "done" as const,
+    step: "checking",
+    data: {},
+  }));
+  assert.equal(countSidebarRowsFromTrackerHistory(raw, isResolvedPrepEntry), 1);
+});
+
+test("countSidebarRowsFromTrackerHistory: two distinct parent batches → two strip rows", () => {
+  const raw: TrackerEntry[] = [
+    {
+      workflow: "active-check",
+      timestamp: "2026-05-09T12:00:00.000Z",
+      id: "a",
+      runId: "a#1",
+      parentRunId: "p1",
+      status: "done",
+      data: {},
+    },
+    {
+      workflow: "active-check",
+      timestamp: "2026-05-09T12:01:00.000Z",
+      id: "b",
+      runId: "b#1",
+      parentRunId: "p2",
+      status: "done",
+      data: {},
+    },
+  ];
+  assert.equal(countSidebarRowsFromTrackerHistory(raw, isResolvedPrepEntry), 2);
+});
+
 test("dedupeLatestByIdWithCarriedEmplId: carries emplId from older line", () => {
   const raw: TrackerEntry[] = [
     {

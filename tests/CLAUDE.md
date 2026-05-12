@@ -33,6 +33,7 @@ Two test files for the same source module are allowed when they test distinct be
 - Filename mirrors the source file: `src/systems/ucpath/types.ts` → `tests/unit/systems/ucpath/types.test.ts`. Do not invent descriptive test names (`transaction-types.test.ts` was wrong — the source is `types.ts`).
 - Each `describe` block covers one exported function or type.
 - Prefer characterization tests for pure logic: cover documented behavior, edge cases, and any JS quirk that's been pinned (e.g. `Date.setMonth` overflow — see `workflows/separations/schema.test.ts`).
+- Screenshot tests must use temp directories or per-file cleanup only. Never remove `PATHS.screenshotDir` recursively; it can contain operator audit screenshots that should survive dev-server restarts and test runs.
 
 ## Architecture tests
 

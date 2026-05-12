@@ -508,7 +508,7 @@ These patterns existed pre-kernel and are intentionally removed. Do not reintrod
 <claude-mem-context>
 # Memory Context
 
-# [hr-automation] recent context, 2026-05-11 11:43pm PDT
+# [hr-automation] recent context, 2026-05-12 12:41pm PDT
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
@@ -517,7 +517,6 @@ Fetch details: get_observations([IDs]) | Search: mem-search skill
 Stats: 50 obs (19,915t read) | 1,732,198t work | 99% savings
 
 ### May 8, 2026
-S154 Dashboard cancellation overhaul — force-stop event, window/session lifecycle detection, and queue row status on cancel (May 8 at 7:44 PM)
 S155 Multi-person check UI conditional display + entry merging/grouping architecture design for a log viewer queue (May 8 at 7:45 PM)
 S156 Implement merged-entry-group UI for HR automation dashboard — collapsed queue rows per person + run pooling across EID/name checks (May 8 at 7:48 PM)
 S157 Dashboard cancellation overhaul — force-stop as absolute event, chrome-preserving interruption, daemon window liveness detection, and pending/running queue rows marked cancelled on stop (May 8 at 7:55 PM)
@@ -528,6 +527,7 @@ S160 Push all changes to git — commit and open PR for dashboard SQLite stateDb
 S161 Push all to git — commit, PR, merge, and branch cleanup for hr-automation dashboard fixes (May 9 at 2:07 PM)
 S162 Shorten the SearchBar and reposition it to the right of the employee grid (not EID column) in the HR Automation dashboard TopBar (May 9 at 2:08 PM)
 ### May 11, 2026
+S163 Screenshots deleted on dev server restart — investigate why and enforce correct retention policy (delete only on run deletion or after 30 days) (May 11 at 3:23 PM)
 1121 3:36p ⚖️ Preview Panel Naming Convention and Scope Decision
 1122 " 🔵 Dashboard Architecture: Existing "Preview" Tab vs New Batch Preview Panel
 1123 " 🔵 LogStream Tab Architecture and Batch Queue State for Preview Panel Implementation
@@ -578,14 +578,30 @@ S162 Shorten the SearchBar and reposition it to the right of the employee grid (
 1168 4:26p 🔴 TypeScript TS2339 fix: explicit type annotation on items variable in delete bulk handler
 1169 " 🔵 Full changeset scope: 45+ modified files plus 6 new files across the code review
 1170 5:54p 🔵 Screenshots Deleted on Dev Server Restart — Persistence Bug
-S163 Screenshots deleted on dev server restart — investigate why and enforce correct retention policy (delete only on run deletion or after 30 days) (May 11 at 5:54 PM)
-**Investigated**: Checked the two expected screenshot storage folders for PNG files — both are currently empty. Verified git tracking status for screenshot files — none are tracked. Searched ~/.Trash for any recently deleted screenshot PNGs — none found there either.
+### May 12, 2026
+S164 Fix OCR workflow retry button in LogPanel footer — retry oath1 OCR run using latest roster, downloading new roster if unavailable (May 12 at 12:57 AM)
+**Investigated**: Deep code investigation across the retry pipeline for OCR workflows:
+    - `RetryButton` component in `src/dashboard/components/shared/RetryButton.tsx` — POSTs to `/api/retry` with workflow/id/runId
+    - `LogPanel.tsx` (line 410) — passes `retryTarget` to `RunSelector`, which renders `RetryButton` in the log stream footer
+    - `src/tracker/dashboard/ops/retry.ts` — `reEnqueueEntry` → `IN_PROCESS_WORKFLOWS.has("ocr")` → `reEnqueueInProcessEntry` → `reEnqueueOcrEntry`
+    - `reEnqueueOcrEntry` in `retry.ts` (lines 291–341) — merges all tracker rows for the session id, extracts `pdfPath`, `pdfOriginalName`, `formType`, `rosterMode`, `rosterPath`, then calls `buildOcrPrepareHandler`
+    - `buildOcrPrepareHandler` in `src/tracker/dashboard/ocr/prepare.ts` — validates rosterMode/rosterPath before launching orchestrator
+    - `src/workflows/ocr/orchestrator.ts` — orchestrator `rosterMode=download` path delegates to sharepoint-download
+    - `src/workflows/ocr/schema.ts` — `OcrInput` schema with `rosterMode: enum(["existing","download"]).default("existing")`
+    - There are 36 modified but uncommitted files in the working tree (large feature branch in progress)
 
-**Learned**: Screenshots are not surviving dev server restarts. The root cause is not yet confirmed, but the files are genuinely absent (not just moved to trash or untracked by git). The deletion is happening somewhere in the server lifecycle, likely during initialization or cleanup routines triggered on startup.
+**Learned**: Key discovery about the retry path for OCR:
+    1. OCR is an "in-process workflow" (not daemon queue) — retry routes through `reEnqueueOcrEntry` NOT the standard `enqueueFromHttp` daemon path
+    2. `reEnqueueOcrEntry` merges ALL tracker rows for the sessionId, takes `rosterMode` from merged data (defaulting to `"existing"` if absent: `merged.rosterMode ?? "existing"`)
+    3. CRITICAL: If the original run had `rosterMode="existing"` with a specific `rosterPath`, the retry will attempt to reuse that same roster path — if that file is stale/moved/expired, the retry fails
+    4. The retry passes `rosterMode` and `rosterPath` verbatim to `buildOcrPrepareHandler` which validates: `rosterMode="existing"` requires `rosterPath` to be set
+    5. The user wants the retry to use `rosterMode="download"` to fetch a fresh roster when the existing one is unavailable
+    6. There's a PDF existence check: `if (!existsSync(pdfPath))` — returns error if PDF is gone
+    7. The LogPanel currently always shows the retry button regardless of whether the entry has valid retryable data
 
-**Completed**: Nothing has been fixed yet — this is still in the investigation/root cause phase.
+**Completed**: Nothing has been changed yet — session is still in root cause investigation (Phase 1 of systematic debugging). No code modifications.
 
-**Next Steps**: Check tracker/session references to identify what screenshot filenames existed previously. Look for any alternate file registry or backup copy that still references the screenshots. Trace the server startup/shutdown code to find where screenshot cleanup is being triggered incorrectly.
+**Next Steps**: Determine exact root cause: is the retry failing because (a) rosterMode="existing" but the rosterPath file is stale/missing, or (b) some other condition. Then implement fix so that OCR retry uses rosterMode="download" when the roster file no longer exists at the stored rosterPath, or always uses "download" to get the latest. Need to check if the current working-tree changes (36 modified files) include any partial work on this issue.
 
 
 Access 1732k tokens of past work via get_observations([IDs]) or mem-search skill.

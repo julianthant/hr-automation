@@ -1,4 +1,4 @@
-import { readEntries, type TrackerEntry } from "../tracker/jsonl.js";
+import { readEntries, readEntriesForDate, type TrackerEntry } from "../tracker/jsonl.js";
 import { createTaskStore } from "./task-store/index.js";
 import { openControlDb } from "./control-db.js";
 
@@ -13,8 +13,10 @@ export function readEntriesForRetryItem(
   id: string,
   runId: string | undefined,
   dir: string,
+  date?: string,
 ): { allForId: TrackerEntry[]; scoped: TrackerEntry[] } {
-  const allForId = readEntries(workflow, dir).filter((e) => e.id === id);
+  const source = date ? readEntriesForDate(workflow, date, dir) : readEntries(workflow, dir);
+  const allForId = source.filter((e) => e.id === id);
   const scoped = runId ? allForId.filter((e) => e.runId === runId) : allForId;
   return { allForId, scoped };
 }
@@ -69,13 +71,14 @@ export function findInputForRetry(
   id: string,
   runId: string | undefined,
   dir: string,
+  date?: string,
 ): Record<string, unknown> | undefined {
   if (runId) {
     const fromTask = findTaskInput(runId, dir);
     if (fromTask) return fromTask;
   }
 
-  const { scoped } = readEntriesForRetryItem(workflow, id, runId, dir);
+  const { scoped } = readEntriesForRetryItem(workflow, id, runId, dir, date);
   return selectRetryInputFromEntries(scoped);
 }
 

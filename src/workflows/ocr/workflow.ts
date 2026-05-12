@@ -10,7 +10,6 @@ const ocrSteps = [
   "matching",
   "disambiguating",
   "eid-lookup",
-  "active-check",
   "verification",
   "awaiting-approval",
 ] as const;
@@ -25,12 +24,7 @@ export const ocrWorkflow = defineWorkflow({
   steps: ocrSteps,
   schema: OcrInputSchema,
   authChain: "sequential",
-  detailFields: [
-    { key: "formType",        label: "Form" },
-    { key: "pdfOriginalName", label: "PDF" },
-    { key: "recordCount",     label: "Records" },
-    { key: "verifiedCount",   label: "Verified" },
-  ],
+  detailFields: [{ key: "recordCount", label: "Records" }],
   getName: (d) => d.pdfOriginalName ?? "",
   getId:   (d) => d.sessionId ?? "",
   operatorSubject: (input) =>

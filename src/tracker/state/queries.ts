@@ -5,7 +5,7 @@ import { computeStepDurations } from "../dashboard/run-timelines.js";
 import type { ProjectionEntriesPayload, ProjectionHealth } from "./types.js";
 import { stateDbPath } from "./db.js";
 import type { SessionEvent } from "../session-events.js";
-import { groupMergedTrackerEntries } from "../queue-row-count.js";
+import { collapseMergedPrimariesForQueueStrip, groupMergedTrackerEntries } from "../queue-row-count.js";
 import type { TrackerEntry } from "../jsonl.js";
 
 function parseJsonObject<T>(raw: string | null | undefined, fallback: T): T {
@@ -168,15 +168,22 @@ export function queryEntriesPayload(
 
   const wfCounts: Record<string, number> = {};
   const wfCountRows = db.prepare(`
-    SELECT workflow, item_id AS id, latest_run_id AS runId,
-           latest_status AS status, latest_step AS step, latest_ts AS timestamp,
-           latest_data_json AS data_json, latest_error AS error
-    FROM items
-    WHERE tracker_date = @date AND resolved_prep = 0
+    SELECT i.workflow, i.item_id AS id, i.latest_run_id AS runId,
+           r.parent_run_id AS parent_run_id,
+           i.latest_status AS status, i.latest_step AS step, i.latest_ts AS timestamp,
+           i.latest_data_json AS data_json, i.latest_error AS error
+    FROM items i
+    LEFT JOIN runs r
+      ON r.workflow = i.workflow
+     AND r.tracker_date = i.tracker_date
+     AND r.item_id = i.item_id
+     AND r.run_id = i.latest_run_id
+    WHERE i.tracker_date = @date AND i.resolved_prep = 0
   `).all({ date: opts.date }) as Array<{
     workflow: string;
     id: string;
     runId: string;
+    parent_run_id: string | null;
     status: "pending" | "running" | "done" | "failed" | "skipped";
     step: string | null;
     timestamp: string;
@@ -198,6 +205,7 @@ export function queryEntriesPayload(
       timestamp: row.timestamp,
       id: row.id,
       runId: row.runId,
+      ...(row.parent_run_id ? { parentRunId: row.parent_run_id } : {}),
       status: row.status,
       ...(row.step ? { step: row.step } : {}),
       data: patchItemDataWithCarriedEmpl(
@@ -208,7 +216,8 @@ export function queryEntriesPayload(
       ),
       ...(row.error ? { error: row.error } : {}),
     }));
-    wfCounts[wf] = groupMergedTrackerEntries(asTracker).length;
+    const primaries = groupMergedTrackerEntries(asTracker).map((g) => g.primary);
+    wfCounts[wf] = collapseMergedPrimariesForQueueStrip(primaries).length;
   }
 
   const failureCounts: Record<string, number> = {};

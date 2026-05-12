@@ -7,7 +7,11 @@ import { collapseEntriesForStatStrip } from "./components/queue-panel/stat-strip
 import { resolveDaemonBatchQueueTitle } from "./components/queue-panel/batch-queue-view";
 import { LogPanel } from "./components/log-panel/LogPanel";
 import { BatchScreenshotsPanel } from "./components/log-panel/BatchScreenshotsPanel";
-import { OcrReviewPane } from "./components/ocr/OcrReviewPane";
+import {
+  OcrReviewPrepProvider,
+  OcrReviewPrepToolbar,
+  OcrReviewPrepBody,
+} from "./components/ocr/OcrReviewPane";
 import { TerminalDrawer } from "./components/terminal-drawer/TerminalDrawer";
 import { TerminalDrawerProvider } from "./components/hooks/useTerminalDrawer";
 import { BatchQueueParentRunIdProvider } from "./components/hooks/useBatchQueueContext";
@@ -75,6 +79,7 @@ export default function App() {
   const [workflow, setWorkflow] = useState(initial.workflow);
   const [selectedId, setSelectedId] = useState<string | null>(initial.selectedId);
   const [reviewingPrepId, setReviewingPrepId] = useState<string | null>(null);
+  const [ocrPreviewVisible, setOcrPreviewVisible] = useState(false);
   const [batchQueueParentRunId, setBatchQueueParentRunId] = useState<string | null>(null);
   const [runModalOpen, setRunModalOpen] = useState(false);
   const [runModalReuploadFor, setRunModalReuploadFor] = useState<{ sessionId: string; previousRunId: string } | undefined>(undefined);
@@ -479,7 +484,21 @@ export default function App() {
         onFailureSelect={handleFailureSelect}
         failureCounts={failureCounts ?? {}}
       />
-      <div className="flex flex-1 overflow-hidden">
+      <OcrReviewPrepProvider
+        active={Boolean(
+          selectedEntry &&
+            selectedEntry.workflow === "ocr" &&
+            selectedEntry.data?.mode === "prepare" &&
+            ocrPreviewVisible,
+        )}
+        entry={selectedEntry ?? null}
+        onClose={() => setReviewingPrepId(null)}
+        onReupload={(reuploadFor) => {
+          setRunModalReuploadFor(reuploadFor);
+          setRunModalOpen(true);
+        }}
+      >
+      <div className="flex flex-1 overflow-hidden pt-3">
         <WorkflowRail
           workflow={workflow}
           workflows={workflows}
@@ -488,6 +507,7 @@ export default function App() {
         />
         <QueuePanel
           entries={dedupedEntries}
+          delegationSourceEntries={entries}
           statPanelEntries={statPanelEntries}
           workflow={workflow}
           workflowLabel={wfLabel}
@@ -514,6 +534,7 @@ export default function App() {
               <RetryAllButton
                 workflow={workflow}
                 ids={retryAllIds}
+                date={date}
                 parentRunId={batchQueueParentRunId ?? undefined}
               />
               <StopAllButton workflow={workflow} items={stopAllTargets} />
@@ -563,23 +584,15 @@ export default function App() {
               siblings={selectedEntry ? siblingsByPrimaryId.get(selectedEntry.id) ?? [] : []}
               onDeleteEntry={() => handleDeleteEntry(selectedEntry?.id ?? "")}
               previewAvailable={isPrepEntry}
-              previewSlot={
-                isPrepEntry && selectedEntry ? (
-                  <OcrReviewPane
-                    entry={selectedEntry}
-                    onClose={() => setReviewingPrepId(null)}
-                    onReupload={(reuploadFor) => {
-                      setRunModalReuploadFor(reuploadFor);
-                      setRunModalOpen(true);
-                    }}
-                  />
-                ) : undefined
-              }
+              previewHeaderSlot={isPrepEntry ? () => <OcrReviewPrepToolbar /> : undefined}
+              previewSlot={isPrepEntry ? () => <OcrReviewPrepBody /> : undefined}
+              onPreviewVisibleChange={setOcrPreviewVisible}
               defaultTab={wantsPreview && reviewingPrepId ? "preview" : undefined}
             />
           );
         })()}
       </div>
+      </OcrReviewPrepProvider>
       <TerminalDrawer connected={connected} />
       {/* Reupload RunModal — opened by OcrQueueRow's Reupload button */}
       <RunModal

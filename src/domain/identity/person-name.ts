@@ -16,23 +16,30 @@ export function titleCasePersonToken(token: string): string {
     .join("");
 }
 
+/** Drops a single trailing "." (common after middle initials in OCR/CRM text). */
+function stripTrailingDisplayPeriod(s: string): string {
+  return s.replace(/\.\s*$/, "").trim();
+}
+
 export function displayPersonName(raw: string | null | undefined): string {
   if (!raw) return "";
   const trimmed = raw.trim().replace(/\s+/g, " ");
   const commaIdx = trimmed.indexOf(",");
   if (commaIdx === -1) {
-    return trimmed
-      .split(" ")
-      .filter(Boolean)
-      .map(titleCasePersonToken)
-      .join(" ");
+    return stripTrailingDisplayPeriod(
+      trimmed
+        .split(" ")
+        .filter(Boolean)
+        .map(titleCasePersonToken)
+        .join(" "),
+    );
   }
   const lastRaw = trimmed.slice(0, commaIdx).trim();
   const restRaw = trimmed.slice(commaIdx + 1).trim();
-  if (!lastRaw || !restRaw) return trimmed;
+  if (!lastRaw || !restRaw) return stripTrailingDisplayPeriod(trimmed);
   const last = lastRaw.split(/\s+/).map(titleCasePersonToken).join(" ");
   const rest = restRaw.split(/\s+/).filter(Boolean).map(titleCasePersonToken).join(" ");
-  return `${last}, ${rest}`;
+  return stripTrailingDisplayPeriod(`${last}, ${rest}`);
 }
 
 /**
@@ -57,6 +64,40 @@ export function toLastFirstName(
   const rest = fn.replace(trailing, "").trim();
   if (!rest) return displayPersonName(fn);
   return displayPersonName(`${ln}, ${rest}`);
+}
+
+/**
+ * Best-effort formatter for OCR/search text headed into PeopleSoft's Person
+ * Org Summary, which expects "Last, First Middle". OCR often returns either
+ * extra-comma variants ("Last, First, M") or natural full names
+ * ("First M Last Last"). This keeps already-valid comma input stable and
+ * applies a conservative full-name heuristic for delegated lookup.
+ */
+export function toLastFirstSearchName(raw: string | null | undefined): string {
+  const display = displayPersonName(raw);
+  if (!display) return "";
+  if (display.includes(",")) {
+    const [last, ...rest] = display.split(",").map((part) => part.trim()).filter(Boolean);
+    if (!last || rest.length === 0) return display;
+    return displayPersonName(`${last}, ${rest.join(" ")}`);
+  }
+
+  const parts = display.split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return display;
+  if (parts.length === 2) return displayPersonName(`${parts[1]}, ${parts[0]}`);
+
+  const first = parts[0];
+  const second = parts[1];
+  const secondLooksLikeMiddleInitial = /^[A-Z]\.?$/i.test(second);
+  if (secondLooksLikeMiddleInitial) {
+    return displayPersonName(`${parts.slice(2).join(" ")}, ${first} ${second}`);
+  }
+
+  if (parts.length >= 4) {
+    return displayPersonName(`${parts.slice(-2).join(" ")}, ${parts.slice(0, -2).join(" ")}`);
+  }
+
+  return displayPersonName(`${parts.slice(-1).join(" ")}, ${parts.slice(0, -1).join(" ")}`);
 }
 
 export function parseLastFirstName(raw: string | null | undefined): ParsedLastFirstName | null {

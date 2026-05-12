@@ -73,6 +73,27 @@ async function searchCrm(
   return results;
 }
 
+export function buildCrmNameSearchQueries(lastName: string, firstName: string): string[] {
+  const queries: string[] = [];
+  const seen = new Set<string>();
+  const add = (query: string): void => {
+    const normalized = query.trim().replace(/\s+/g, " ");
+    if (!normalized) return;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    queries.push(normalized);
+  };
+  add(lastName);
+  add(firstName);
+  for (const token of `${lastName} ${firstName}`.split(/\s+/)) {
+    const letters = token.replace(/[^A-Za-z]/g, "");
+    if (letters.length < 2) continue;
+    add(token);
+  }
+  return queries;
+}
+
 /**
  * Extract key fields from a CRM record page.
  *
@@ -134,46 +155,40 @@ export async function searchCrmByName(
   page: Page,
   lastName: string,
   firstName: string,
+  options: {
+    onAfterSearch?: (query: string, rows: Array<{ name: string; offerSentOn: string; processStage: string; recordUrl: string }>) => Promise<void>;
+  } = {},
 ): Promise<CrmRecord[]> {
   const records: CrmRecord[] = [];
+  const requiredTokens = `${lastName} ${firstName}`
+    .split(/\s+/)
+    .map((token) => token.replace(/[^A-Za-z]/g, "").toLowerCase())
+    .filter((token) => token.length >= 2);
+  const selected = new Map<string, { name: string; offerSentOn: string; processStage: string; recordUrl: string }>();
 
-  // Strategy 1: Search by last name, find matching first name
-  const lastNameResults = await searchCrm(page, lastName);
-  const firstNameLower = firstName.toLowerCase();
-  const lastNameLower = lastName.toLowerCase();
-
-  const matchingRows = lastNameResults.filter((r) => {
-    const nameLower = r.name.toLowerCase();
-    return nameLower.includes(firstNameLower) && nameLower.includes(lastNameLower);
-  });
-
-  if (matchingRows.length > 0) {
-    log.step(`CRM: ${matchingRows.length} name match(es) found`);
-    for (const row of matchingRows) {
-      if (!row.recordUrl) continue;
-      const record = await extractCrmRecord(page, row.recordUrl);
-      if (record) records.push(record);
+  for (const query of buildCrmNameSearchQueries(lastName, firstName)) {
+    const rows = await searchCrm(page, query);
+    await options.onAfterSearch?.(query, rows);
+    const matchingRows = rows.filter((r) => {
+      const nameLower = r.name.toLowerCase();
+      return requiredTokens.every((token) => nameLower.includes(token));
+    });
+    if (matchingRows.length > 0) {
+      log.step(`CRM: ${matchingRows.length} name match(es) found via query "${query}"`);
+      for (const row of matchingRows) {
+        const key = row.recordUrl || row.name;
+        if (!selected.has(key)) selected.set(key, row);
+      }
     }
-    return records;
+    if (selected.size > 0) break;
   }
 
-  // Strategy 2: Search by first name, find matching last name
-  log.step(`CRM: No match by last name, trying first name...`);
-  const firstNameResults = await searchCrm(page, firstName);
-  const matchingRows2 = firstNameResults.filter((r) => {
-    const nameLower = r.name.toLowerCase();
-    return nameLower.includes(firstNameLower) && nameLower.includes(lastNameLower);
-  });
-
-  if (matchingRows2.length > 0) {
-    log.step(`CRM: ${matchingRows2.length} name match(es) found via first name search`);
-    for (const row of matchingRows2) {
-      if (!row.recordUrl) continue;
-      const record = await extractCrmRecord(page, row.recordUrl);
-      if (record) records.push(record);
-    }
-    return records;
+  for (const row of selected.values()) {
+    if (!row.recordUrl) continue;
+    const record = await extractCrmRecord(page, row.recordUrl);
+    if (record) records.push(record);
   }
+  if (records.length > 0) return records;
 
   log.step(`CRM: No matching records found for "${lastName}, ${firstName}"`);
   return records;

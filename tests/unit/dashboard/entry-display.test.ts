@@ -74,20 +74,24 @@ test("buildDisplayNameMap falls back to the workflow label when no employee name
   assert.equal(resolveEntryName(row, displayNames), "Separation separation-doc-1");
 });
 
-test("buildDisplayNameMap still ordinals workflow-level rows such as OCR batches", () => {
-  const first = entry("ocr-session-1", { __name: "OCR", __id: "ocr-session-1" }, "2026-05-05T12:00:00.000Z");
-  const second = entry("ocr-session-2", { __name: "OCR", __id: "ocr-session-2" }, "2026-05-05T12:01:00.000Z");
+test("buildDisplayNameMap ordinals OCR prep rows using OATH / EMPL prefixes from formType", () => {
+  const first = entry("ocr-session-1", { __id: "ocr-session-1", formType: "oath" }, "2026-05-05T12:00:00.000Z");
+  first.workflow = "ocr";
+  const second = entry("ocr-session-2", { __id: "ocr-session-2", formType: "emergency-contact" }, "2026-05-05T12:01:00.000Z");
+  second.workflow = "ocr";
 
   const displayNames = buildDisplayNameMap([second, first], "OCR");
 
-  assert.equal(resolveEntryName(first, displayNames), "OCR 1");
-  assert.equal(resolveEntryName(second, displayNames), "OCR 2");
+  assert.equal(resolveEntryName(first, displayNames), "OATH 1");
+  assert.equal(resolveEntryName(second, displayNames), "EMPL 1");
 });
 
 test("delegated rows inherit the parent display name", () => {
-  const firstParent = entry("ocr-session-1", { __name: "OCR", __id: "ocr-session-1" }, "2026-05-05T12:00:00.000Z");
+  const firstParent = entry("ocr-session-1", { __id: "ocr-session-1", formType: "oath" }, "2026-05-05T12:00:00.000Z");
+  firstParent.workflow = "ocr";
   firstParent.runId = "ocr-run-1";
-  const secondParent = entry("ocr-session-2", { __name: "OCR", __id: "ocr-session-2" }, "2026-05-05T12:01:00.000Z");
+  const secondParent = entry("ocr-session-2", { __id: "ocr-session-2", formType: "emergency-contact" }, "2026-05-05T12:01:00.000Z");
+  secondParent.workflow = "ocr";
   secondParent.runId = "ocr-run-2";
   const child = entry("ocr-oath-run-1-r0-n0", {
     name: "Barahona Martell, Carlos D",
@@ -98,9 +102,9 @@ test("delegated rows inherit the parent display name", () => {
 
   const displayNames = buildDisplayNameMap([child, secondParent, firstParent], "OCR");
 
-  assert.equal(resolveEntryName(firstParent, displayNames), "OCR 1");
-  assert.equal(resolveEntryName(secondParent, displayNames), "OCR 2");
-  assert.equal(resolveEntryName(child, displayNames), "OCR 1");
+  assert.equal(resolveEntryName(firstParent, displayNames), "OATH 1");
+  assert.equal(resolveEntryName(secondParent, displayNames), "EMPL 1");
+  assert.equal(resolveEntryName(child, displayNames), "OATH 1");
 });
 
 test("collectEntriesForMergedScope includes hidden merged siblings for bulk controls", () => {

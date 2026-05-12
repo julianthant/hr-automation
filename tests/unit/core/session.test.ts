@@ -305,9 +305,42 @@ test('session.healthCheck: returns false when missing system id', async () => {
   assert.equal(await s.healthCheck('nope'), false)
 })
 
+test('session.screenshotAll honors configured screenshot dir for test isolation', async () => {
+  const { existsSync, mkdtempSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const shotDir = mkdtempSync(join(tmpdir(), 'session-shots-'))
+  const mkPage = () => ({
+    isClosed: () => false,
+    evaluate: async (_fn: unknown) => undefined,
+    waitForTimeout: async (_ms: number) => undefined,
+    screenshot: async (_opts: { path: string }) => undefined,
+  }) as unknown as import('playwright').Page
+
+  const s = Session.forTesting({
+    systems: [{ id: 'ucpath', login: async () => {} }],
+    browsers: new Map([
+      ['ucpath', { page: mkPage(), browser: null as never, context: null as never }],
+    ]),
+    readyPromises: new Map(),
+    screenshotDir: shotDir,
+  })
+
+  try {
+    const paths = await s.screenshotAll('isolated-prefix')
+    assert.equal(paths.length, 1)
+    assert.equal(paths[0].startsWith(`${shotDir}/`), true)
+    assert.equal(existsSync(shotDir), true)
+  } finally {
+    rmSync(shotDir, { recursive: true, force: true })
+  }
+})
+
 test('session.screenshotAll: writes one PNG per open page, skips closed, returns paths', async () => {
-  const { existsSync, rmSync } = await import('node:fs')
-  const { PATHS } = await import('../../../src/config.js')
+  const { existsSync, mkdtempSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const shotDir = mkdtempSync(join(tmpdir(), 'session-shots-'))
   const shotCalls: Array<{ id: string; path: string }> = []
   const mkPage = (id: string, closed: boolean) => ({
     isClosed: () => closed,
@@ -333,15 +366,15 @@ test('session.screenshotAll: writes one PNG per open page, skips closed, returns
       ['closed-one', { page: mkPage('closed-one', true), browser: null as never, context: null as never }],
     ]),
     readyPromises: new Map(),
+    screenshotDir: shotDir,
   })
 
-  // Pre-clean in case a previous run left the dir around.
   const paths = await s.screenshotAll('test-prefix')
   try {
     assert.equal(paths.length, 2, 'only 2 open pages → 2 paths')
-    assert.ok(existsSync(PATHS.screenshotDir), `${PATHS.screenshotDir} directory created`)
+    assert.ok(existsSync(shotDir), `${shotDir} directory created`)
     // Each path matches `<screenshotDir>/<prefix>-<systemId>-<timestamp>.png`
-    const escapedDir = PATHS.screenshotDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const escapedDir = shotDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const pathRe = new RegExp(`^${escapedDir}[\\\\/]test-prefix-(ucpath|kuali)-\\d+\\.png$`)
     for (const p of paths) {
       assert.match(p, pathRe)
@@ -351,15 +384,15 @@ test('session.screenshotAll: writes one PNG per open page, skips closed, returns
     const ids = shotCalls.map((c) => c.id).sort()
     assert.deepEqual(ids, ['kuali', 'ucpath'])
   } finally {
-    // Best-effort cleanup — files under src/data/screenshots/ are gitignored so
-    // leftovers are fine, but we clean per-test to stay tidy across runs.
-    try { rmSync(PATHS.screenshotDir, { recursive: true, force: true }) } catch { /* ignore */ }
+    rmSync(shotDir, { recursive: true, force: true })
   }
 })
 
 test('session.screenshotAll: a failed screenshot does not skip siblings', async () => {
-  const { rmSync } = await import('node:fs')
-  const { PATHS } = await import('../../../src/config.js')
+  const { mkdtempSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const shotDir = mkdtempSync(join(tmpdir(), 'session-shots-'))
   const mkOk = (id: string) => ({
     isClosed: () => false,
     evaluate: async (_fn: unknown) => undefined,
@@ -385,6 +418,7 @@ test('session.screenshotAll: a failed screenshot does not skip siblings', async 
       ['c', { page: mkOk('c'), browser: null as never, context: null as never }],
     ]),
     readyPromises: new Map(),
+    screenshotDir: shotDir,
   })
 
   const paths = await s.screenshotAll('sibling-test')
@@ -395,13 +429,21 @@ test('session.screenshotAll: a failed screenshot does not skip siblings', async 
     assert.ok(paths.some((p) => p.includes('-c-')))
     assert.ok(!paths.some((p) => p.includes('-b-bad-')))
   } finally {
-    try { rmSync(PATHS.screenshotDir, { recursive: true, force: true }) } catch { /* ignore */ }
+    rmSync(shotDir, { recursive: true, force: true })
   }
 })
 
 // Fake launch helper used in tests — returns a stub Page/Browser/Context.
 function fakeLaunch() {
-  const page = { close: async () => {}, bringToFront: async () => {}, goto: async () => {}, waitForTimeout: async () => {} } as unknown as import('playwright').Page
+  const page = {
+    close: async () => {},
+    bringToFront: async () => {},
+    goto: async () => {},
+    waitForTimeout: async () => {},
+    isClosed: () => false,
+    url: () => 'https://example.test/',
+    reload: async () => {},
+  } as unknown as import('playwright').Page
   const context = { close: async () => {} } as unknown as import('playwright').BrowserContext
   const browser = { close: async () => {} } as unknown as import('playwright').Browser
   return Promise.resolve({ page, context, browser })
@@ -466,4 +508,83 @@ test('session.launch: observer onAuthFailed fires after all retries exhaust', as
   // onAuthStart fires once (before retry loop), onAuthFailed fires once (after exhaustion),
   // onAuthComplete never fires.
   assert.deepEqual(events, ['start:flaky', 'failed:flaky'])
+})
+
+test('session: UCPath idle reload fires after idle threshold', async () => {
+  const reloads: number[] = []
+  const page = {
+    close: async () => {},
+    bringToFront: async () => {},
+    goto: async () => {},
+    waitForTimeout: async () => {},
+    isClosed: () => false,
+    url: () => 'https://example.test/psp',
+    reload: async () => {
+      reloads.push(1)
+    },
+  } as unknown as import('playwright').Page
+  const context = {
+    close: async () => {},
+    newPage: async () => page,
+  } as unknown as import('playwright').BrowserContext
+
+  const s = await Session.launch(
+    [{ id: 'ucpath', login: async () => {} }],
+    {
+      launchFn: async () => ({
+        page,
+        context,
+        browser: { close: async () => {} } as import('playwright').Browser,
+      }),
+      // Longer threshold vs. wait window so exactly one reload fits (timer keeps firing).
+      ucpathIdleRefresh: { thresholdMs: 200, tickMs: 40 },
+    },
+  )
+  try {
+    await s.page('ucpath')
+    s.setUcpathIdleGuard(() => false)
+    await new Promise((r) => setTimeout(r, 280))
+    assert.equal(reloads.length, 1)
+  } finally {
+    await s.close()
+  }
+})
+
+test('session: UCPath idle reload suppressed when idle guard is busy', async () => {
+  const reloads: number[] = []
+  const page = {
+    close: async () => {},
+    bringToFront: async () => {},
+    goto: async () => {},
+    waitForTimeout: async () => {},
+    isClosed: () => false,
+    url: () => 'https://example.test/psp',
+    reload: async () => {
+      reloads.push(1)
+    },
+  } as unknown as import('playwright').Page
+  const context = {
+    close: async () => {},
+    newPage: async () => page,
+  } as unknown as import('playwright').BrowserContext
+
+  const s = await Session.launch(
+    [{ id: 'ucpath', login: async () => {} }],
+    {
+      launchFn: async () => ({
+        page,
+        context,
+        browser: { close: async () => {} } as import('playwright').Browser,
+      }),
+      ucpathIdleRefresh: { thresholdMs: 200, tickMs: 40 },
+    },
+  )
+  try {
+    await s.page('ucpath')
+    s.setUcpathIdleGuard(() => true)
+    await new Promise((r) => setTimeout(r, 280))
+    assert.equal(reloads.length, 0)
+  } finally {
+    await s.close()
+  }
 })

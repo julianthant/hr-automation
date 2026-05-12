@@ -10,6 +10,7 @@ export function ScreenshotsPanel({
   workflow,
   itemId,
   screenshotEventCount,
+  runId,
 }: {
   workflow: string | null;
   itemId: string | null;
@@ -17,8 +18,10 @@ export function ScreenshotsPanel({
    *  parent owns the SSE subscription so we don't open a duplicate one
    *  here (HTTP/1.1 slot exhaustion, see useRunScreenshots). */
   screenshotEventCount: number;
+  /** When set, list only PNGs tied to this tracker run (matches RunSelector tab). */
+  runId?: string | null;
 }) {
-  const { entries } = useRunScreenshots(workflow, itemId, screenshotEventCount);
+  const { entries } = useRunScreenshots(workflow, itemId, screenshotEventCount, runId);
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
 
   const { errors, others, flat } = useMemo(() => {

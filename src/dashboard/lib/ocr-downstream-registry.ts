@@ -37,7 +37,7 @@ export interface OcrDownstreamConfig {
   cursorKey: (ids: { sessionId: string; runId: string }) => string;
   /** Records carry signature fields → renders signature badges + banners. */
   hasSignature: boolean;
-  /** Pane shows the "Re-research all" toolbar (only for the OCR workflow). */
+  /** Enables per-record force-research (`/api/ocr/force-research`) when true. */
   supportsForceResearch: boolean;
   /** Display name for a record — drives the form-card header. */
   recordName: (record: AnyOcrPreviewRecord) => string;
@@ -49,6 +49,9 @@ export interface OcrDownstreamConfig {
   renderEditor: (args: {
     record: AnyOcrPreviewRecord;
     onChange: (next: AnyOcrPreviewRecord) => void;
+    /** Re-run lookups for this record (OCR pane only — `/api/ocr/force-research`). */
+    onForceResearch?: (record: AnyOcrPreviewRecord) => void;
+    isResearching?: boolean;
   }) => ReactNode;
 }
 
@@ -82,8 +85,8 @@ export function hasOcrDownstream(workflow: string): boolean {
  * The OCR workflow hosts multiple form types (oath, emergency-contact);
  * the records on a row are shaped per `data.formType`, so we route to
  * oath-signature's or emergency-contact's parser+renderer accordingly.
- * Force-research is OCR-workflow-only — overlay it onto the resolved
- * per-form config so the toolbar still appears.
+ * Force-research is OCR-workflow-only — overlay onto the resolved
+ * per-form config so `/api/ocr/force-research` is offered per record.
  */
 export function resolveOcrConfigForEntry(entry: {
   workflow: string;
@@ -119,7 +122,7 @@ export function setOcrDownstreamRenderer(
 
 // ─── Built-in registrations ──────────────────────────────────────────────
 
-const noopRenderer: OcrDownstreamConfig["renderEditor"] = () => null;
+const noopRenderer: OcrDownstreamConfig["renderEditor"] = (_args) => null;
 
 /**
  * The OCR workflow's own prep row. Uses the EC record shape (current

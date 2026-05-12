@@ -31,7 +31,15 @@ import { QueueSortDropdown } from "./QueueSortDropdown";
 import { collapseEntriesForStatStrip } from "./stat-strip-collapse";
 
 interface QueuePanelProps {
+  /**
+   * Visible queue rows — merge-collapsed primaries from `App` (`dedupedEntries`).
+   */
   entries: TrackerEntry[];
+  /**
+   * Latest row per tracker `id` **before** merge grouping. Must include merge siblings so
+   * `parentRunId` batches and batch delete enumerate every delegated item.
+   */
+  delegationSourceEntries: TrackerEntry[];
   /**
    * Row set for StatPills before batch collapse (merged excluding operator-resolved prep).
    * Parent-run batches count as **one** row in the pills; omit to use discarded-prep-filtered entries.
@@ -103,6 +111,7 @@ interface QueuePanelProps {
  */
 export function QueuePanel({
   entries,
+  delegationSourceEntries,
   statPanelEntries,
   workflow,
   workflowLabel,
@@ -135,6 +144,11 @@ export function QueuePanel({
     [entries],
   );
 
+  const visibleDelegationSources = useMemo(
+    () => delegationSourceEntries.filter((e) => !isDiscardedPrepRow(e)),
+    [delegationSourceEntries],
+  );
+
   // Prep rows are split out so they render as {@link DelegationRow} above the
   // flat list. StatPills still filter them when any member (or the parent prep
   // row) matches the active status.
@@ -154,14 +168,14 @@ export function QueuePanel({
    */
   const batchMembersByParentRunId = useMemo(() => {
     const map = new Map<string, TrackerEntry[]>();
-    for (const e of visibleEntries) {
+    for (const e of visibleDelegationSources) {
       if (!e.parentRunId) continue;
       const list = map.get(e.parentRunId) ?? [];
       list.push(e);
       map.set(e.parentRunId, list);
     }
     return map;
-  }, [visibleEntries]);
+  }, [visibleDelegationSources]);
 
   /**
    * Toolbar title row for batch-queue mode: OCR prep anchor row if present,

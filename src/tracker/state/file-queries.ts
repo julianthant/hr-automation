@@ -22,8 +22,19 @@ export interface FileRow {
  */
 export function queryScreenshotsForItem(
   db: Database,
-  opts: { workflow: string; itemId: string },
+  opts: { workflow: string; itemId: string; runId?: string | null },
 ): FileRow[] {
+  const runId = opts.runId?.trim();
+  if (runId) {
+    return db.prepare(`
+      SELECT file_id, kind, storage_path, workflow, item_id, run_id, source, bytes,
+             created_at, last_accessed_at
+      FROM files
+      WHERE workflow = @workflow AND item_id = @itemId AND kind = 'screenshot'
+        AND run_id = @runId
+      ORDER BY created_at DESC
+    `).all({ workflow: opts.workflow, itemId: opts.itemId, runId }) as FileRow[];
+  }
   return db.prepare(`
     SELECT file_id, kind, storage_path, workflow, item_id, run_id, source, bytes,
            created_at, last_accessed_at

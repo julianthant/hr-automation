@@ -49,6 +49,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       workflow: String(parsed.body.workflow ?? ""),
       id: String(parsed.body.id ?? ""),
       runId: parsed.body.runId ? String(parsed.body.runId) : undefined,
+      date: parsed.body.date ? String(parsed.body.date) : undefined,
       ...(parentRunId ? { parentRunId } : {}),
     });
     return jsonResponse(result, result.ok ? 202 : 400);
@@ -66,6 +67,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
     const result = await buildRetryBulkHandler(deps.dir)({
       workflow: String(parsed.body.workflow ?? ""),
       ids,
+      date: parsed.body.date ? String(parsed.body.date) : undefined,
       ...(parentRunId ? { parentRunId } : {}),
     });
     return jsonResponse(result, 202);
@@ -86,6 +88,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       workflow: String(parsed.body.workflow ?? ""),
       id: String(parsed.body.id ?? ""),
       runId: parsed.body.runId ? String(parsed.body.runId) : undefined,
+      date: parsed.body.date ? String(parsed.body.date) : undefined,
       data,
       ...(parentRunId ? { parentRunId } : {}),
     });

@@ -11,19 +11,17 @@ import { openStateDb, closeStateDbForTests, stateDbPath } from '../../../src/tra
 import { trackEvent } from '../../../src/tracker/jsonl.js'
 import { emitScreenshotEvent } from '../../../src/tracker/jsonl.js'
 
-test('returns grouped entries matching screenshot events, legacy files under kind:error label:legacy', async () => {
+test('returns grouped entries only for screenshot session events (ignores orphan disk PNGs)', async () => {
   const trackerDir = await fs.mkdtemp(path.join(os.tmpdir(), 'scr-dash-'))
   const shotsDir = path.join(trackerDir, 'screenshots')
   await fs.mkdir(shotsDir, { recursive: true })
 
   const ts = 1776712000000
-  // new-convention files
   await fs.writeFile(path.join(shotsDir, `separations-3907-form-kuali-saved-kuali-${ts}.png`), 'x')
   await fs.writeFile(path.join(shotsDir, `separations-3907-form-kuali-saved-ucpath-${ts}.png`), 'x')
-  // legacy filename
+  // No session event for this file — must not appear in grouped API output.
   await fs.writeFile(path.join(shotsDir, 'separations-3907-kuali-extraction-old-kronos-1776709123932.png'), 'x')
 
-  // matching tracker event for the new files (sessions.jsonl)
   const sessionsJsonl = path.join(trackerDir, 'sessions.jsonl')
   await fs.writeFile(sessionsJsonl, JSON.stringify({
     type: 'screenshot', runId: 'r1', ts, kind: 'form', label: 'kuali-saved', step: 'kuali-finalization',
@@ -39,8 +37,7 @@ test('returns grouped entries matching screenshot events, legacy files under kin
   const byKey = Object.fromEntries(res.map(e => [e.label, e]))
   assert.equal(byKey['kuali-saved'].kind, 'form')
   assert.equal(byKey['kuali-saved'].files.length, 2)
-  assert.equal(byKey['legacy'].kind, 'error')
-  assert.equal(byKey['legacy'].files.length, 1)
+  assert.equal(res.some((e) => e.label === 'legacy'), false)
 
   closeStateDbForTests(trackerDir)
   rmSync(trackerDir, { recursive: true, force: true })
@@ -123,7 +120,7 @@ describe('grouped handler SQLite vs JSONL parity', () => {
     assert.equal({ ...sqliteEntry }.files.length, { ...legacyEntry }.files.length)
   })
 
-  it('SQLite path still lists on-disk PNGs without a files row (survives new run / projection)', async () => {
+  it('SQLite path lists only files rows matched to session events (hides orphan disk PNGs)', async () => {
     const tsOld = 1776700000000
     const tsNew = 1776712000000
     const orphanName = `separations-3907-error-pre-sqlite-kuali-${tsOld}.png`
@@ -157,10 +154,10 @@ describe('grouped handler SQLite vs JSONL parity', () => {
     const byLabel = Object.fromEntries(res.map((e) => [e.label, e]))
     assert.ok(byLabel['kuali-saved'], 'registered screenshot entry missing')
     assert.equal(byLabel['kuali-saved'].files.length, 1)
-    assert.ok(byLabel['legacy'], 'disk-only orphan should appear under legacy')
-    assert.ok(
-      byLabel['legacy'].files.some((f) => f.path.endsWith(orphanName)),
-      'orphan PNG must remain visible after SQLite rows exist',
+    assert.equal(
+      res.some((e) => e.files.some((f) => f.path.endsWith(orphanName))),
+      false,
+      'orphan PNG on disk without matching screenshot event must not appear',
     )
   })
 })

@@ -61,7 +61,7 @@ export function FailedPageCard({ failedPage, totalPages, sessionId, runId, onRet
 
   return (
     <div className={cn(
-      "mx-4 my-3 rounded-md border bg-card p-4",
+      "rounded-md border bg-card p-4",
       skipped ? "border-border/40 opacity-50" : "border-destructive/40",
     )}>
       <div className="flex items-start gap-3">

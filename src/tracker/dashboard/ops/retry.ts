@@ -1,5 +1,7 @@
 import { existsSync } from "fs";
-import { readEntries, trackEvent, type TrackerEntry } from "../../jsonl.js";
+import { resolve } from "path";
+import { listRosters } from "../../../services/matching/roster-loader.js";
+import { readEntries, readEntriesForDate, trackEvent, type TrackerEntry } from "../../jsonl.js";
 import { enqueueFromHttp } from "../../../core/daemon/enqueue-dispatch.js";
 import {
   findRetryInputFromTaskStore,
@@ -16,6 +18,8 @@ export interface RetryRequest {
   workflow: string;
   id: string;
   runId?: string;
+  /** Tracker date selected in the dashboard. Used for retrying prior-day rows. */
+  date?: string;
   /** When set, stamps the new run under this batch / delegation parent. */
   parentRunId?: string;
 }
@@ -25,12 +29,14 @@ export interface RunWithDataRequest {
   id: string;
   data: Record<string, unknown>;
   runId?: string;
+  date?: string;
   parentRunId?: string;
 }
 
 export interface RetryBulkRequest {
   workflow: string;
   ids: string[];
+  date?: string;
   parentRunId?: string;
 }
 
@@ -41,6 +47,22 @@ type ReEnqueueResult = { ok: true } | { ok: false; error: string };
  * See `src/workflows/CLAUDE.md` ("Existing Workflows" table) for the
  * non-daemon rationale. */
 const IN_PROCESS_WORKFLOWS = new Set(["ocr", "sharepoint-download"]);
+
+export function resolveRetryRosterPath(dir: string, storedRosterPath: string | undefined): string | undefined {
+  if (storedRosterPath && existsSync(storedRosterPath)) return storedRosterPath;
+  return findLatestDownloadedRosterPath(dir);
+}
+
+function findLatestDownloadedRosterPath(dir: string): string | undefined {
+  const rosterDirs = [
+    resolve(process.cwd(), dir, "rosters"),
+    resolve(process.cwd(), "src/data/sharepoint"),
+  ];
+  const latest = rosterDirs
+    .flatMap((rosterDir) => listRosters(rosterDir))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
+  return latest?.path;
+}
 
 export type FindEntryInputResult =
   | {
@@ -89,13 +111,14 @@ export function findEntryInput(
   id: string,
   runId: string | undefined,
   dir: string,
+  date?: string,
 ): FindEntryInputResult {
   let input: Record<string, unknown> | undefined;
   if (runId) {
     const fromTask = findRetryInputFromTaskStore(runId, dir);
     if (fromTask) input = fromTask;
   }
-  const { allForId, scoped } = readEntriesForRetryItem(workflow, id, runId, dir);
+  const { allForId, scoped } = readEntriesForRetryItem(workflow, id, runId, dir, date);
   if (!input) {
     input = selectRetryInputFromEntries(scoped);
   }
@@ -189,6 +212,7 @@ async function reEnqueueEntry(
   runId: string | undefined,
   dir: string,
   options?: ReEnqueueOptions,
+  date?: string,
 ): Promise<ReEnqueueResult> {
   const prefilledData = options?.prefilledData;
   const requestedParent = options?.parentRunId;
@@ -210,7 +234,7 @@ async function reEnqueueEntry(
         const resolvedParent =
           requestedParent ??
           task.parentRunId ??
-          extractLatestParentRunId(readEntriesForRetryItem(wf, id, runId, dir).scoped);
+          extractLatestParentRunId(readEntriesForRetryItem(wf, id, runId, dir, date).scoped);
         const retried = stores.taskStore.retryTaskFromAttempt({ runId });
         if (resolvedParent) {
           stores.taskStore.db
@@ -246,10 +270,10 @@ async function reEnqueueEntry(
   }
 
   if (IN_PROCESS_WORKFLOWS.has(wf)) {
-    return reEnqueueInProcessEntry(wf, id, runId, dir);
+    return reEnqueueInProcessEntry(wf, id, runId, dir, date);
   }
 
-  const lookup = findEntryInput(wf, id, runId, dir);
+  const lookup = findEntryInput(wf, id, runId, dir, date);
   if ("error" in lookup) return { ok: false, error: lookup.error };
 
   let input: Record<string, unknown> = lookup.input;
@@ -279,9 +303,10 @@ async function reEnqueueInProcessEntry(
   id: string,
   runId: string | undefined,
   dir: string,
+  date?: string,
 ): Promise<ReEnqueueResult> {
-  if (workflow === "ocr") return reEnqueueOcrEntry(id, runId, dir);
-  if (workflow === "sharepoint-download") return reEnqueueSharePointEntry(id, runId, dir);
+  if (workflow === "ocr") return reEnqueueOcrEntry(id, runId, dir, date);
+  if (workflow === "sharepoint-download") return reEnqueueSharePointEntry(id, runId, dir, date);
   return { ok: false, error: `in-process retry not implemented for "${workflow}"` };
 }
 
@@ -289,12 +314,14 @@ async function reEnqueueOcrEntry(
   id: string,
   runId: string | undefined,
   dir: string,
+  date?: string,
 ): Promise<ReEnqueueResult> {
   // The OCR orchestrator only writes pdfPath/pdfOriginalName on the pending
   // row — later rows (loading-roster, ocr, awaiting-approval, failed) drop
   // them. findEntryInput's latest-row fallback would miss them, so merge
   // across every row for this id and keep the latest non-empty value per key.
-  const entries = readEntries("ocr", dir).filter((e) => e.id === id);
+  const source = date ? readEntriesForDate("ocr", date, dir) : readEntries("ocr", dir);
+  const entries = source.filter((e) => e.id === id);
   if (entries.length === 0) {
     return { ok: false, error: `no tracker entry found for id=${id}` };
   }
@@ -314,10 +341,8 @@ async function reEnqueueOcrEntry(
   const pdfOriginalName = merged.pdfOriginalName ?? "";
   const formType = merged.formType ?? "";
   const sessionId = merged.sessionId || id;
-  const rosterModeRaw = merged.rosterMode ?? "existing";
-  const rosterMode: "existing" | "download" =
-    rosterModeRaw === "download" ? "download" : "existing";
-  const rosterPath = merged.rosterPath || undefined;
+  const retryRosterPath = resolveRetryRosterPath(dir, merged.rosterPath || undefined);
+  const rosterMode: "existing" | "download" = retryRosterPath ? "existing" : "download";
 
   if (!pdfPath || !pdfOriginalName || !formType) {
     return {
@@ -337,7 +362,7 @@ async function reEnqueueOcrEntry(
     formType,
     sessionId,
     rosterMode,
-    ...(rosterPath ? { rosterPath } : {}),
+    ...(retryRosterPath ? { rosterPath: retryRosterPath } : {}),
   });
   if (!result.body.ok) return { ok: false, error: result.body.error };
   return { ok: true };
@@ -347,8 +372,9 @@ async function reEnqueueSharePointEntry(
   id: string,
   runId: string | undefined,
   dir: string,
+  date?: string,
 ): Promise<ReEnqueueResult> {
-  const lookup = findEntryInput("sharepoint-download", id, runId, dir);
+  const lookup = findEntryInput("sharepoint-download", id, runId, dir, date);
   // Fall back to the entry id when input lookup fails — sharepoint-download
   // uses the spec id as the tracker id, so we can launch a retry from id alone.
   const specId =
@@ -372,7 +398,7 @@ export function buildRetryHandler(dir: string) {
   return (req: RetryRequest): Promise<ReEnqueueResult> =>
     reEnqueueEntry(req.workflow, req.id, req.runId, dir, {
       parentRunId: req.parentRunId,
-    });
+    }, req.date);
 }
 
 export function buildRunWithDataHandler(dir: string) {
@@ -383,7 +409,7 @@ export function buildRunWithDataHandler(dir: string) {
     return reEnqueueEntry(req.workflow, req.id, req.runId, dir, {
       prefilledData: req.data,
       parentRunId: req.parentRunId,
-    });
+    }, req.date);
   };
 }
 
@@ -395,7 +421,7 @@ export function buildRetryBulkHandler(dir: string) {
     const errors: Array<{ id: string; error: string }> = [];
     let count = 0;
     for (const id of req.ids ?? []) {
-      const r = await retry({ workflow: req.workflow, id, parentRunId: req.parentRunId });
+      const r = await retry({ workflow: req.workflow, id, date: req.date, parentRunId: req.parentRunId });
       if (r.ok) count++;
       else errors.push({ id, error: r.error });
     }

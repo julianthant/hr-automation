@@ -1,15 +1,12 @@
-import { useState } from "react";
+import type { ReactNode } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
   Clock,
-  FileText,
   Loader2,
   UploadCloud,
-  X as XIcon,
   type LucideIcon,
 } from "lucide-react";
-import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "@/components/shared/types";
 import { resolveOcrConfigForEntry } from "@/lib/ocr-downstream-registry";
@@ -55,62 +52,19 @@ interface DerivedState {
 export function OcrQueueRow({ entry, isReviewing, onOpenReview, onReupload }: OcrQueueRowProps) {
   const cfg = resolveOcrConfigForEntry(entry);
   const data = cfg?.parseRow(entry.data) ?? null;
-  const [discarding, setDiscarding] = useState(false);
 
   if (!cfg || !data) return null;
   const runId = entry.runId ?? entry.id;
-  const sessionId = entry.id;
+
   const state = deriveState(entry, isReviewing);
 
   const recordCount = data.records.length;
-  const verifiedCount = data.records.filter(
-    (r) =>
-      (r.matchState === "matched" || r.matchState === "resolved") &&
-      r.documentType !== "unknown" &&
-      (!r.verification || r.verification.state === "verified"),
-  ).length;
-  const needsReviewCount = data.records.filter(
-    (r) =>
-      r.documentType !== "unknown" &&
-      ((r.verification && r.verification.state !== "verified") ||
-        (r.matchState !== "matched" && r.matchState !== "resolved")),
-  ).length;
-  const toRemoveCount = data.records.filter((r) => r.documentType === "unknown")
-    .length;
+  const toRemoveCount = data.records.filter((r) => r.documentType === "unknown").length;
 
   const subline = renderSubline(state.stateKey, entry, data, {
-    verifiedCount,
-    needsReviewCount,
     toRemoveCount,
     recordCount,
   });
-
-  async function handleDiscard(): Promise<void> {
-    if (discarding || !cfg) return;
-    setDiscarding(true);
-    try {
-      const resp = await fetch(cfg.discardUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parentRunId: runId, reason: "User clicked discard" }),
-      });
-      const body = (await resp.json()) as { ok?: boolean; error?: string };
-      if (!resp.ok || !body.ok) {
-        toast.error("Couldn't discard prep row", {
-          description: body.error ?? "Server error",
-        });
-        setDiscarding(false);
-        return;
-      }
-      toast.success("Discarded prep row");
-      window.localStorage.removeItem(cfg.editsKey({ sessionId, runId }));
-    } catch (err) {
-      toast.error("Couldn't discard prep row", {
-        description: err instanceof Error ? err.message : "Network error",
-      });
-      setDiscarding(false);
-    }
-  }
 
   const clickable = state.stateKey === "ready" || state.stateKey === "reviewing";
 
@@ -149,7 +103,6 @@ export function OcrQueueRow({ entry, isReviewing, onOpenReview, onReupload }: Oc
             className={cn("h-3.5 w-3.5 shrink-0", state.iconClass, state.iconColor)}
             aria-hidden
           />
-          <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
           <span className="truncate text-sm font-medium">
             {data.pdfOriginalName || "Prep upload"}
           </span>
@@ -183,30 +136,14 @@ export function OcrQueueRow({ entry, isReviewing, onOpenReview, onReupload }: Oc
                 e.stopPropagation();
                 onReupload({ sessionId: entry.id, previousRunId: entry.runId ?? entry.id });
               }}
-              disabled={discarding}
               className={cn(
                 "inline-flex h-6 items-center gap-1 rounded-md border border-border px-1.5 text-[11px] text-muted-foreground hover:bg-muted",
-                "disabled:cursor-not-allowed disabled:opacity-50",
               )}
               title="Re-upload corrected PDF — carries forward resolved EIDs from this run"
             >
               <UploadCloud className="h-3 w-3" /> Reupload
             </button>
           )}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              void handleDiscard();
-            }}
-            disabled={discarding}
-            className={cn(
-              "inline-flex h-6 items-center gap-1 rounded-md border border-border px-1.5 text-[11px] text-muted-foreground hover:bg-muted",
-              "disabled:cursor-not-allowed disabled:opacity-50",
-            )}
-            title="Discard this prep row"
-          >
-            <XIcon className="h-3 w-3" /> Discard
-          </button>
         </div>
       </div>
     </div>
@@ -271,12 +208,10 @@ function renderSubline(
   entry: TrackerEntry,
   _data: { records: unknown[] },
   counts: {
-    verifiedCount: number;
-    needsReviewCount: number;
     toRemoveCount: number;
     recordCount: number;
   },
-): React.ReactNode {
+): ReactNode {
   if (stateKey === "failed") {
     return (
       <span className="text-destructive">
@@ -306,10 +241,7 @@ function renderSubline(
       </div>
     );
   }
-  // ready or reviewing → counts summary
-  const parts: string[] = [];
-  parts.push(`${counts.verifiedCount} verified`);
-  if (counts.needsReviewCount > 0) parts.push(`${counts.needsReviewCount} needs review`);
+  const parts: string[] = [`${counts.recordCount} records`];
   if (counts.toRemoveCount > 0) parts.push(`${counts.toRemoveCount} to remove`);
   return <span>{parts.join(" · ")}</span>;
 }
