@@ -5,6 +5,7 @@ import {
   countEntriesByQueueStatus,
   entryMatchesStatusFilter,
   isQueueLikeEntry,
+  queueGroupMatchesStatusFilter,
 } from "../../../src/dashboard/components/queue-panel/queue-status.js";
 import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
 
@@ -38,4 +39,19 @@ test("countEntriesByQueueStatus includes Duo-waiting auth rows in Queue count", 
 
   assert.equal(counts.pending, 2);
   assert.equal(counts.running, 2);
+});
+
+test("queueGroupMatchesStatusFilter shows batch when any member matches", () => {
+  const parent = entry("done");
+  assert.equal(
+    queueGroupMatchesStatusFilter("failed", [entry("running"), entry("failed")]),
+    true,
+  );
+  assert.equal(queueGroupMatchesStatusFilter("failed", [entry("done")]), false);
+  assert.equal(queueGroupMatchesStatusFilter(null, [entry("pending")]), true);
+  assert.equal(
+    queueGroupMatchesStatusFilter("pending", [], parent),
+    false,
+  );
+  assert.equal(queueGroupMatchesStatusFilter("done", [], parent), true);
 });

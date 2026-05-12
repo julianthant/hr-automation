@@ -192,6 +192,23 @@
 }
 
 @layer components {
+  /* Search history dropdown — fixed width avoids Tailwind arbitrary `w-*` not
+     winning over other layout in some builds; breakpoints mirror QueuePanel. */
+  .dashboard-search-results-panel {
+    box-sizing: border-box;
+    width: 300px;
+  }
+  @media (min-width: 1440px) {
+    .dashboard-search-results-panel {
+      width: 380px;
+    }
+  }
+  @media (min-width: 1536px) {
+    .dashboard-search-results-panel {
+      width: 460px;
+    }
+  }
+
   /* Shared input style for the prep review pane forms (EcReviewForm,
      OathReviewForm). Tighter than the search input — these grids are
      dense and the operator scans many fields per record. */

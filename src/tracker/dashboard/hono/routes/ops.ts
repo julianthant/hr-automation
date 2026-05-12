@@ -2,11 +2,13 @@ import type { Hono } from "hono";
 
 import { listWorkflows } from "../../../jsonl.js";
 import {
+  buildCancelActiveBulkHandler,
   buildCancelQueuedHandler,
   buildCancelRunningHandler,
   buildDaemonsListHandler,
   buildDaemonsSpawnHandler,
   buildDaemonsStopHandler,
+  buildDeleteBulkHandler,
   buildDeleteEntryHandler,
   buildDrainWorkerHandler,
   buildFindPriorByKeyHandler,
@@ -25,6 +27,14 @@ import { log } from "../../../../utils/log.js";
 import type { DashboardHonoDeps } from "../context.js";
 import { PARENT_RUN_ID_VALIDATION_HINT, parseOptionalParentRunId } from "../parent-run-id.js";
 import { jsonResponse, readJsonRequest } from "../responses.js";
+import type { CancelActiveBulkItem } from "../../ops/cancel.js";
+
+/** Full success vs partial (207) vs all rows failed (422). Caller validates non-empty workload before invoke. */
+function bulkMutationHttpStatus(succeededCount: number, errorCount: number): number {
+  if (errorCount === 0) return 200;
+  if (succeededCount === 0) return 422;
+  return 207;
+}
 
 export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
   app.post("/api/retry", async (c) => {
@@ -132,6 +142,35 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
     return jsonResponse(result, result.ok ? 200 : (result.status ?? 400));
   });
 
+  app.post("/api/cancel-active-bulk", async (c) => {
+    const parsed = await readJsonRequest(c.req.raw);
+    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
+    const workflow = String(parsed.body.workflow ?? "").trim();
+    if (!workflow) return jsonResponse({ ok: false, error: "workflow is required" }, 400);
+    const rawItems = Array.isArray(parsed.body.items) ? (parsed.body.items as unknown[]) : [];
+    const items: CancelActiveBulkItem[] = rawItems
+      .map((row) => {
+        if (!row || typeof row !== "object") return null;
+        const o = row as Record<string, unknown>;
+        const id = typeof o.id === "string" ? o.id : "";
+        const status = o.status === "pending" || o.status === "running" ? o.status : null;
+        if (!id || !status) return null;
+        const runId = typeof o.runId === "string" && o.runId.length > 0 ? o.runId : undefined;
+        const item: CancelActiveBulkItem = runId ? { id, status, runId } : { id, status };
+        return item;
+      })
+      .filter((x): x is CancelActiveBulkItem => x !== null);
+    if (items.length === 0) {
+      return jsonResponse({ ok: false, error: "items must be a non-empty array of { id, status }" }, 400);
+    }
+    const result = await buildCancelActiveBulkHandler(deps.dir)({
+      workflow,
+      items,
+    });
+    const status = bulkMutationHttpStatus(result.count, result.errors.length);
+    return jsonResponse(result, status);
+  });
+
   app.post("/api/task/force-stop", async (c) => {
     const parsed = await readJsonRequest(c.req.raw);
     if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
@@ -224,12 +263,48 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
   app.post("/api/delete-entry", async (c) => {
     const parsed = await readJsonRequest(c.req.raw);
     if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const result = buildDeleteEntryHandler(deps.dir)({
+    const result = buildDeleteEntryHandler(deps.dir, { screenshotsDir: deps.screenshotsDir })({
       workflow: String(parsed.body.workflow ?? ""),
       id: String(parsed.body.id ?? ""),
       date: String(parsed.body.date ?? ""),
       runId: parsed.body.runId ? String(parsed.body.runId) : undefined,
     });
     return jsonResponse(result, result.ok ? 200 : (result.status ?? 400));
+  });
+
+  app.post("/api/delete-bulk", async (c) => {
+    const parsed = await readJsonRequest(c.req.raw);
+    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
+    const workflow = String(parsed.body.workflow ?? "").trim();
+    const date = String(parsed.body.date ?? "").trim();
+    const ids = Array.isArray(parsed.body.ids) ? (parsed.body.ids as unknown[]).map(String) : [];
+    const rawItems = Array.isArray(parsed.body.items) ? (parsed.body.items as unknown[]) : [];
+    const items = rawItems
+      .map((row) => {
+        if (!row || typeof row !== "object") return null;
+        const o = row as Record<string, unknown>;
+        const id = typeof o.id === "string" ? o.id : "";
+        if (!id) return null;
+        const runId = typeof o.runId === "string" && o.runId.length > 0 ? o.runId : undefined;
+        return runId ? { id, runId } : { id };
+      })
+      .filter((item): item is { id: string; runId?: string } => item !== null);
+    if (!workflow || !date) {
+      return jsonResponse({ ok: false, error: "workflow and date are required" }, 400);
+    }
+    if (items.length === 0 && ids.length === 0) {
+      return jsonResponse(
+        { ok: false, error: "ids or items must be non-empty — provide at least one entry to delete" },
+        400,
+      );
+    }
+    const result = buildDeleteBulkHandler(deps.dir, { screenshotsDir: deps.screenshotsDir })({
+      workflow,
+      date,
+      ids,
+      items,
+    });
+    const status = bulkMutationHttpStatus(result.count, result.errors.length);
+    return jsonResponse(result, status);
   });
 }

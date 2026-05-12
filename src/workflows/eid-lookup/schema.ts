@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { displayPersonName } from "../../domain/identity/person-name.js";
+import { normalizeUcpathEmployeeId } from "../../domain/identity/eid.js";
 
 /** Common input shape for both no-CRM and CRM-on lookups. */
 export const EidLookupInputSchema = z.object({
@@ -35,7 +36,9 @@ export const EidLookupNameInputSchema = z.object({
 });
 
 export const EidLookupEidInputSchema = z.object({
-  emplId: z.string().regex(/^\d{5,}$/, "Empl ID must be 5+ digits"),
+  emplId: z.string()
+    .transform((value) => normalizeUcpathEmployeeId(value))
+    .pipe(z.string().regex(/^10\d{6}$/, "Empl ID must be 8 digits starting with 10")),
   keepNonHdh: z.boolean().optional(),
 });
 

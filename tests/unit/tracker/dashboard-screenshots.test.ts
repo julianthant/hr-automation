@@ -122,4 +122,45 @@ describe('grouped handler SQLite vs JSONL parity', () => {
     assert.equal({ ...sqliteEntry }.step, { ...legacyEntry }.step)
     assert.equal({ ...sqliteEntry }.files.length, { ...legacyEntry }.files.length)
   })
+
+  it('SQLite path still lists on-disk PNGs without a files row (survives new run / projection)', async () => {
+    const tsOld = 1776700000000
+    const tsNew = 1776712000000
+    const orphanName = `separations-3907-error-pre-sqlite-kuali-${tsOld}.png`
+    const registeredName = `separations-3907-form-kuali-saved-kuali-${tsNew}.png`
+    writeFileSync(join(shotsDir, orphanName), 'old-png')
+    writeFileSync(join(shotsDir, registeredName), 'new-png')
+
+    openStateDb(trackerDir)
+    trackEvent({
+      workflow: 'separations',
+      timestamp: new Date(tsNew).toISOString(),
+      id: '3907',
+      runId: 'run-after-rerun',
+      status: 'running',
+      data: {},
+    }, trackerDir)
+
+    emitScreenshotEvent({
+      type: 'screenshot',
+      runId: 'run-after-rerun',
+      ts: tsNew,
+      timestamp: new Date(tsNew).toISOString(),
+      kind: 'form',
+      label: 'kuali-saved',
+      step: 'kuali-finalization',
+      files: [{ system: 'kuali', path: join(shotsDir, registeredName) }],
+    }, { dir: trackerDir })
+
+    const handler = buildScreenshotsHandler({ dir: trackerDir, screenshotsDir: shotsDir })
+    const res = await handler({ workflow: 'separations', itemId: '3907' })
+    const byLabel = Object.fromEntries(res.map((e) => [e.label, e]))
+    assert.ok(byLabel['kuali-saved'], 'registered screenshot entry missing')
+    assert.equal(byLabel['kuali-saved'].files.length, 1)
+    assert.ok(byLabel['legacy'], 'disk-only orphan should appear under legacy')
+    assert.ok(
+      byLabel['legacy'].files.some((f) => f.path.endsWith(orphanName)),
+      'orphan PNG must remain visible after SQLite rows exist',
+    )
+  })
 })

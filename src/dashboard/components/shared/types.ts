@@ -99,6 +99,8 @@ export interface SearchResultRow {
   id: string;
   runId: string;
   status: "pending" | "running" | "done" | "failed" | "skipped";
+  /** Same family as `status`, or "Not found" when UCPath had no matching row. */
+  displayStatus: string;
   /** Latest timestamp for this (workflow, id, runId). */
   lastTs: string;
   /** YYYY-MM-DD the match lives in — used by the UI to navigate. */

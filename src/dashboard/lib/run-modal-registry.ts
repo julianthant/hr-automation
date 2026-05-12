@@ -6,7 +6,7 @@
  * Adding a file-upload workflow:
  *   1. Add an entry here with a title / description / submitUrl /
  *      sections / buildSuccessToast.
- *   2. That's it — `RunModal` and `TopBarRunButton` derive their behavior
+ *   2. That's it — `RunModal` and `TopBarRunButton` (queue toolbar) derive their behavior
  *      and visibility from this map automatically. No edits to either
  *      component file are needed.
  *

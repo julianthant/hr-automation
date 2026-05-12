@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
@@ -8,6 +8,7 @@ import { z } from "zod";
 import { openStateDb, closeStateDbForTests } from "../../../src/tracker/state/db.js";
 import { queryProjectionHealth } from "../../../src/tracker/state/queries.js";
 import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
+import { __resetPreflightThrottleForTests } from "../../../src/tracker/dashboard/hono/routes/base.js";
 import { registerLocalFile } from "../../../src/tracker/files/files.js";
 import { trackEventForDate } from "../../../src/tracker/jsonl.js";
 import { clear, defineDashboardMetadata } from "../../../src/core/kernel/registry.js";
@@ -220,6 +221,35 @@ test("Hono screenshot routes list grouped screenshots and stream image files", a
     assert.equal(Buffer.from(await image.arrayBuffer()).toString("utf8"), "png bytes");
   } finally {
     rmSync(screenshotPath, { force: true });
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Hono /api/preflight prunes the configured screenshots directory", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hono-preflight-"));
+  const shotsDir = join(dir, "shots");
+  const oldTs = Date.now() - 40 * 24 * 60 * 60 * 1000;
+  const filename = `onboarding-hono-old-error-step-ucpath-${oldTs}.png`;
+  const screenshotPath = join(shotsDir, filename);
+  try {
+    __resetPreflightThrottleForTests();
+    const db = openStateDb(dir);
+    mkdirSync(shotsDir, { recursive: true });
+    writeFileSync(screenshotPath, Buffer.from("png bytes"));
+    const app = createDashboardHonoApp({
+      dir,
+      stateDb: db,
+      workflow: "onboarding",
+      screenshotsDir: shotsDir,
+    });
+
+    const res = await app.request("/api/preflight");
+
+    assert.equal(res.status, 200);
+    assert.equal(existsSync(screenshotPath), false, "old screenshot in configured dir pruned");
+  } finally {
+    __resetPreflightThrottleForTests();
     closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });
   }

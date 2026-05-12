@@ -212,6 +212,24 @@ describe("buildSearchHandler", () => {
     assert.ok(!ids.includes("old@ucsd.edu"));
   });
 
+  it("includes displayStatus for queue/search pills", () => {
+    const bucket = {
+      "eid-lookup": {
+        "2026-04-15": [
+          entry({
+            workflow: "eid-lookup",
+            id: "Nobody, Jane",
+            data: { emplId: "Not found", searchName: "Nobody, Jane" },
+          }),
+        ],
+      },
+    };
+    const rows = buildSearchHandler(makeDeps(bucket))("nobody");
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].status, "done");
+    assert.equal(rows[0].displayStatus, "Not found");
+  });
+
   it("includes the date field so the UI can deep-link to that day's tracker", () => {
     const bucket = {
       onboarding: {

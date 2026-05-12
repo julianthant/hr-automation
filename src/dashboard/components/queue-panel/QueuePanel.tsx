@@ -1,9 +1,14 @@
-import { useMemo, useState, useEffect, useRef, type ReactNode } from "react";
+import {
+  useMemo,
+  useState,
+  useEffect,
+  useRef,
+  type ReactNode,
+} from "react";
 import { Inbox } from "lucide-react";
 import { StatPills } from "./StatPills";
 import { EntryItem } from "./EntryItem";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { cn } from "@/lib/utils";
 import {
   BatchQueueMemberList,
   BatchQueueToolbar,
@@ -16,11 +21,21 @@ import {
   isApprovedPrepRow,
   isDiscardedPrepRow,
 } from "@/components/ocr/types";
-import { entryMatchesStatusFilter } from "./queue-status";
+import { entryMatchesStatusFilter, queueGroupMatchesStatusFilter } from "./queue-status";
+import {
+  sortDaemonBatchParentIds,
+  sortQueueEntriesForDisplay,
+  type QueueSortMode,
+} from "./queue-sort";
+import { QueueSortDropdown } from "./QueueSortDropdown";
+import { collapseEntriesForStatStrip } from "./stat-strip-collapse";
 
 interface QueuePanelProps {
   entries: TrackerEntry[];
-  /** Row set for StatPills (merged EXCLUDING operator-resolved prep). Defaults to discarded-prep-filtered entries when omitted. */
+  /**
+   * Row set for StatPills before batch collapse (merged excluding operator-resolved prep).
+   * Parent-run batches count as **one** row in the pills; omit to use discarded-prep-filtered entries.
+   */
   statPanelEntries?: TrackerEntry[];
   workflow: string;
   /** Registry label for batch summary cards / synthetic batch toolbar titles. */
@@ -33,6 +48,8 @@ interface QueuePanelProps {
   date?: string;
   /** Called after a hard-delete so App.tsx can remove the row from state. */
   onDelete?: (id: string) => void;
+  /** Bulk delete callback for daemon batch cards (same shape as DeleteAllButton). */
+  onBulkDeleted?: (ids: string[]) => void;
   /** Run-id of the prep row currently open in the right-pane review. */
   reviewingPrepId?: string | null;
   /** Open the right-pane review for this prep row. */
@@ -48,16 +65,22 @@ interface QueuePanelProps {
   onEnterBatchQueue?: (parentRunId: string) => void;
   /** Leave batch-queue mode and return to the main queue list. */
   onExitBatchQueue?: () => void;
+  /** Open the right-pane batch screenshot preview. */
+  onOpenBatchPreview?: () => void;
   loading: boolean;
   /**
-   * Optional cluster of run controls (QuickRunPanel + Capture / Oath /
-   * Run buttons) rendered in the panel's bottom footer, mirroring the
-   * LogStream's "Streaming · N entries" footer on the right side. The
-   * cluster is right-aligned within the footer when its contents are
-   * narrower than the panel; QuickRunPanel's input naturally fills the
-   * leading space when present.
+   * Run/upload (`TopBarRunButton`), Capture (`TopBarCaptureButton`) when registered,
+   * then retry-all / stop-active / delete-all — beside the queue sort control.
+   */
+  queueBulkActionsSlot?: ReactNode;
+  /**
+   * Quick-run enqueue strip (`QuickRunPanel`: text input + play) in the panel
+   * footer only — bulk actions live in {@link queueBulkActionsSlot}.
    */
   runControlsSlot?: ReactNode;
+  /** Controlled sort mode (persisted at App level — matches batch screenshot preview). */
+  queueSortMode: QueueSortMode;
+  onQueueSortModeChange: (mode: QueueSortMode) => void;
 }
 
 /**
@@ -65,7 +88,7 @@ interface QueuePanelProps {
  *
  *   [ Status filter strip ]    ← top of panel; tab-like pills
  *   [ Entry list ]             ← scrollable
- *   [ Run controls footer ]    ← matches LogStream footer height
+ *   [ Quick-run footer ]       ← input + play only
  *
  * The cross-workflow search lives in the TopBar (centered) — there is no
  * panel-internal search input. The previous "Search by name, email, or
@@ -88,14 +111,19 @@ export function QueuePanel({
   onSelect,
   date,
   onDelete,
+  onBulkDeleted,
   reviewingPrepId,
   onOpenReview,
   onReupload,
   batchQueueParentRunId,
   onEnterBatchQueue,
   onExitBatchQueue,
+  onOpenBatchPreview,
   loading,
+  queueBulkActionsSlot,
   runControlsSlot,
+  queueSortMode,
+  onQueueSortModeChange,
 }: QueuePanelProps) {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
@@ -107,13 +135,17 @@ export function QueuePanel({
     [entries],
   );
 
-  // Prep rows are split out so they can render at the top of the panel
-  // regardless of search/filter. The user always wants to see "what's
-  // currently being prepared" — hiding it behind a status filter would be
-  // surprising.
+  // Prep rows are split out so they render as {@link DelegationRow} above the
+  // flat list. StatPills still filter them when any member (or the parent prep
+  // row) matches the active status.
   const approvedPrepEntries = useMemo(
     () => visibleEntries.filter(isApprovedPrepRow),
     [visibleEntries],
+  );
+
+  const sortedApprovedPrepEntries = useMemo(
+    () => sortQueueEntriesForDisplay(approvedPrepEntries, queueSortMode, displayNames),
+    [approvedPrepEntries, queueSortMode, displayNames],
   );
 
   /**
@@ -188,13 +220,43 @@ export function QueuePanel({
     for (const pid of batchMembersByParentRunId.keys()) {
       if (!approvedParentRunIds.has(pid)) ids.push(pid);
     }
-    ids.sort((a, b) => {
-      const ta = batchMembersByParentRunId.get(a)?.[0]?.timestamp ?? "";
-      const tb = batchMembersByParentRunId.get(b)?.[0]?.timestamp ?? "";
-      return tb.localeCompare(ta);
-    });
-    return ids;
-  }, [batchMembersByParentRunId, approvedParentRunIds]);
+    return sortDaemonBatchParentIds(
+      ids,
+      batchMembersByParentRunId,
+      queueSortMode,
+      workflowLabel,
+      displayNames,
+    );
+  }, [
+    batchMembersByParentRunId,
+    approvedParentRunIds,
+    queueSortMode,
+    workflowLabel,
+    displayNames,
+  ]);
+
+  /** Delegation cards respect StatPills — show when parent or any child matches. */
+  const visibleSortedApprovedPrepEntries = useMemo(
+    () =>
+      sortedApprovedPrepEntries.filter((e) => {
+        const runId = e.runId ?? e.id;
+        const members = batchMembersByParentRunId.get(runId) ?? [];
+        return queueGroupMatchesStatusFilter(statusFilter, members, e);
+      }),
+    [sortedApprovedPrepEntries, statusFilter, batchMembersByParentRunId],
+  );
+
+  /** Daemon batch cards: visible when any member matches the status filter. */
+  const visibleDaemonBatchParentIds = useMemo(
+    () =>
+      daemonBatchParentIds.filter((id) =>
+        queueGroupMatchesStatusFilter(
+          statusFilter,
+          batchMembersByParentRunId.get(id) ?? [],
+        ),
+      ),
+    [daemonBatchParentIds, statusFilter, batchMembersByParentRunId],
+  );
 
   const filtered = useMemo(() => {
     let result = visibleEntries.filter(
@@ -216,14 +278,35 @@ export function QueuePanel({
     batchMembersByParentRunId,
   ]);
 
+  const sortedFiltered = useMemo(
+    () => sortQueueEntriesForDisplay(filtered, queueSortMode, displayNames),
+    [filtered, queueSortMode, displayNames],
+  );
+
+  const sortedBatchMembers = useMemo(
+    () =>
+      sortQueueEntriesForDisplay(batchQueueMembers, queueSortMode, displayNames),
+    [batchQueueMembers, queueSortMode, displayNames],
+  );
+
+  /** Batch/delegation cards are not included in {@link sortedFiltered}; avoid empty-state under them. */
+  const hasBatchOrDelegationQueueCards =
+    visibleSortedApprovedPrepEntries.length > 0 || visibleDaemonBatchParentIds.length > 0;
+
   const statPillSource = statPanelEntries ?? visibleEntries;
+
+  /** Stat strip counts each delegation/daemon batch as one surface row, not N members. */
+  const collapsedStatPillEntries = useMemo(
+    () => collapseEntriesForStatStrip(statPillSource),
+    [statPillSource],
+  );
 
   /** Same order as rendered `EntryItem` rows — used for ↑/↓ keyboard selection. */
   const navigableIds = useMemo(() => {
     if (loading) return [];
-    if (batchQueueParentRunId) return batchQueueMembers.map((e) => e.id);
-    return filtered.map((e) => e.id);
-  }, [loading, batchQueueParentRunId, batchQueueMembers, filtered]);
+    if (batchQueueParentRunId) return sortedBatchMembers.map((e) => e.id);
+    return sortedFiltered.map((e) => e.id);
+  }, [loading, batchQueueParentRunId, sortedBatchMembers, sortedFiltered]);
 
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const navigableIdsRef = useRef(navigableIds);
@@ -282,7 +365,10 @@ export function QueuePanel({
         <BatchQueueToolbar
           batchAnchor={resolvedBatchToolbarEntry}
           anchorKind={batchAnchorIsPrep ? "prep" : "daemon"}
+          memberCount={batchQueueMembers.length}
+          batchPreviewActive={selectedId === null}
           onBack={() => onExitBatchQueue?.()}
+          onOpenBatchPreview={onOpenBatchPreview}
           onOpenPrepReview={
             batchAnchorIsPrep
               ? () => {
@@ -294,19 +380,50 @@ export function QueuePanel({
           }
         />
       ) : (
-        <div className="h-[69.5px] flex items-center px-3 min-[1440px]:px-4 py-2 border-b border-border bg-card/60 flex-shrink-0">
-          <StatPills
-            entries={statPillSource}
-            activeFilter={statusFilter}
-            onFilter={setStatusFilter}
-          />
+        <div className="flex flex-col flex-shrink-0 border-b border-border bg-card/60">
+          <div className="h-[69.5px] flex items-center px-3 min-[1440px]:px-4 py-2">
+            <StatPills
+              entries={collapsedStatPillEntries}
+              activeFilter={statusFilter}
+              onFilter={setStatusFilter}
+            />
+          </div>
+          <div className="px-3 min-[1440px]:px-4 py-2 border-t border-border/60">
+            <div className="flex min-h-8 items-center gap-1.5 min-w-0">
+              <QueueSortDropdown
+                value={queueSortMode}
+                onChange={onQueueSortModeChange}
+                disabled={loading}
+                className="flex-1 min-w-0"
+              />
+              {queueBulkActionsSlot ? (
+                <div className="flex flex-shrink-0 items-center gap-1">{queueBulkActionsSlot}</div>
+              ) : null}
+            </div>
+          </div>
         </div>
       )}
+
+      {batchQueueParentRunId ? (
+        <div className="flex-shrink-0 px-3 min-[1440px]:px-4 py-2 border-b border-border bg-card/50">
+          <div className="flex min-h-8 items-center gap-1.5 min-w-0">
+            <QueueSortDropdown
+              value={queueSortMode}
+              onChange={onQueueSortModeChange}
+              disabled={loading}
+              className="flex-1 min-w-0"
+            />
+            {queueBulkActionsSlot ? (
+              <div className="flex flex-shrink-0 items-center gap-1">{queueBulkActionsSlot}</div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       <div ref={scrollAreaRef} className="flex-1 overflow-y-auto border-b border-border">
         {batchQueueParentRunId ? (
           <BatchQueueMemberList
-            members={batchQueueMembers}
+            members={sortedBatchMembers}
             selectedId={selectedId}
             onSelect={onSelect}
             displayNames={displayNames}
@@ -315,7 +432,7 @@ export function QueuePanel({
           />
         ) : (
           <>
-            {approvedPrepEntries.map((e) => {
+            {visibleSortedApprovedPrepEntries.map((e) => {
               const runId = e.runId ?? e.id;
               return (
                 <DelegationRow
@@ -324,17 +441,22 @@ export function QueuePanel({
                   delegatedEntries={batchMembersByParentRunId.get(runId) ?? []}
                   isBatchQueueFocused={batchQueueParentRunId === runId}
                   onEnterBatchQueue={(rid) => onEnterBatchQueue?.(rid)}
+                  batchDrillInEnabled={!batchQueueParentRunId}
                 />
               );
             })}
-            {daemonBatchParentIds.map((batchId) => (
+            {visibleDaemonBatchParentIds.map((batchId) => (
               <DaemonBatchRow
                 key={`daemon-batch-${batchId}`}
+                workflow={workflow}
+                date={date}
                 batchParentRunId={batchId}
                 workflowLabel={workflowLabel}
                 memberEntries={batchMembersByParentRunId.get(batchId) ?? []}
                 isBatchQueueFocused={batchQueueParentRunId === batchId}
                 onEnterBatchQueue={(rid) => onEnterBatchQueue?.(rid)}
+                batchDrillInEnabled={!batchQueueParentRunId}
+                onDeletedIds={onBulkDeleted}
               />
             ))}
             {/* Prep rows render as regular EntryItem (same size + behavior
@@ -354,14 +476,15 @@ export function QueuePanel({
                   </div>
                 ))}
               </div>
-            ) : filtered.length === 0 ? (
+            ) : sortedFiltered.length === 0 &&
+              !hasBatchOrDelegationQueueCards ? (
               <EmptyState
                 icon={Inbox}
                 title="No entries yet"
                 description="Data will appear here as workflows run"
               />
             ) : (
-              filtered.map((entry) => (
+              sortedFiltered.map((entry) => (
                 <EntryItem
                   key={entry.id}
                   entry={entry}
@@ -378,12 +501,7 @@ export function QueuePanel({
       </div>
 
       {runControlsSlot && (
-        <div
-          className={cn(
-            "h-12 flex items-center gap-2 px-3 min-[1440px]:px-4 bg-card/40 flex-shrink-0",
-            batchQueueParentRunId ? "justify-between" : "justify-end",
-          )}
-        >
+        <div className="flex h-12 w-full min-w-0 items-center gap-2 px-3 min-[1440px]:px-4 bg-card/40 flex-shrink-0">
           {runControlsSlot}
         </div>
       )}

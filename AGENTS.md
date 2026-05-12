@@ -508,17 +508,15 @@ These patterns existed pre-kernel and are intentionally removed. Do not reintrod
 <claude-mem-context>
 # Memory Context
 
-# [hr-automation] recent context, 2026-05-11 2:55pm PDT
+# [hr-automation] recent context, 2026-05-11 11:43pm PDT
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (19,519t read) | 912,908t work | 98% savings
+Stats: 50 obs (19,915t read) | 1,732,198t work | 99% savings
 
 ### May 8, 2026
-S152 HR Automation Dashboard — 5 UI enhancements: delete buttons, run navigation arrows, debug log wiring (May 8 at 7:41 PM)
-S153 Complete dashboard UI refinements for delete button alignment and RunSelector button sizing consistency (May 8 at 7:42 PM)
 S154 Dashboard cancellation overhaul — force-stop event, window/session lifecycle detection, and queue row status on cancel (May 8 at 7:44 PM)
 S155 Multi-person check UI conditional display + entry merging/grouping architecture design for a log viewer queue (May 8 at 7:45 PM)
 S156 Implement merged-entry-group UI for HR automation dashboard — collapsed queue rows per person + run pooling across EID/name checks (May 8 at 7:48 PM)
@@ -526,59 +524,69 @@ S157 Dashboard cancellation overhaul — force-stop as absolute event, chrome-pr
 S158 Fix unfilled grid squares for first/successful runs in LogPanel (user reference 10874572) (May 8 at 8:10 PM)
 S159 Fix "SQLite database is not open" error causing SSE endpoint fallbacks to JSONL in hr-automation dashboard, plus fix related sidebar wfCounts accuracy and pre-existing test failures (May 8 at 8:41 PM)
 ### May 9, 2026
-1053 1:54p 🔵 watch-child-runs test deletes/recreates dir without closing cached stateDb — gets stale rows from old connection
-1054 " 🔵 Failing test is "closes SQLite watcher connection after terminal outcomes" — test premise invalidated by the fix
-1055 1:55p 🔴 watch-child-runs.test.ts updated to import closeStateDbForTests for explicit test teardown
-1056 " 🔴 watch-child-runs test renamed to reflect new teardown contract
-1057 1:56p 🔴 watch-child-runs test body updated: closeStateDbForTests called before dir-delete-and-reopen
-1058 " 🔵 New test failure in jsonl.test.ts line 368 after watch-child-runs fix: expected 64, got 0
-1059 " 🔵 Test suite: 1349/1354 passing, 4 failures remain after control-db.ts fix
-1060 1:57p 🔵 Four remaining test failures identified across entry-display, dashboard-hono-retirement, and jsonl test files
-1061 " 🔵 entry-display test fails on label format ("Separation separation-doc-1" vs "Separation 1") — unrelated to SQLite fix
-1062 1:58p 🔵 jsonl.test.ts failures at :308 and :368 both assert 0 !== 64 — likely pre-existing JSONL file-watch MRU cache behavior failure
-1063 " 🔵 jsonl.test.ts LRU cache tests use __getParseCacheSizeForTests() which returns 0 instead of 64 — pre-existing JSONL parse cache failure
-1064 " 🔵 entry-display.test.ts failure: resolveEntryName returns raw __subject instead of ordinal "Separation 1" for document-kind entries
-1065 " 🔵 entry-display.ts refactored: groupMergedEntries implementation moved to queue-row-count.ts and re-exported
-1066 1:59p 🔴 entries-payload.ts JSONL wfCounts calculation also updated to use countSidebarRowsFromTrackerHistory
-1067 " 🔵 buildDisplayNameMap skips ordinal for single-entry groups — entry-display test was written against an older behavior
-1068 " 🔵 git HEAD confirms entry-display buildDisplayNameMap was unchanged — all 4 remaining test failures are pre-existing
-1069 2:01p 🔵 jsonl.ts parse cache implementation confirmed correct — LRU test failures likely ESM module isolation issue
-1070 " 🔵 jsonl LRU "caps at 64" test passes (uses <=) while "evicts oldest" and "re-parse MRU" tests fail (use ===) — all get cache size 0
-1071 2:02p 🔵 Root cause of jsonl LRU test failures: seedWorkflowFile hardcodes 2026-05-07 but readEntries uses dateLocal() (today = 2026-05-09)
-1072 " 🔵 Hono manifest test fails because actual registered routes don't match the manifest snapshot — v2 routes may be newly added
-1073 " 🔵 Hono manifest test: actual and expected route lists match through POST /api/ocr/discard-prepare — mismatch is in routes after that point (truncated by test output)
-1074 2:03p 🔵 Hono manifest expected list ends at POST /api/ocr/discard-prepare — actual app has additional routes registered after that point
-1075 " 🔵 Full Hono manifest diff: POST /api/delete-entry missing from actual; 14 POST routes in actual not in manifest
-1076 " 🔵 POST /api/delete-entry registered in ops.ts but absent from actual test routes and from manifest.ts — route not being mounted in test Hono app
-1077 2:04p 🔴 manifest.ts updated to add POST /api/delete-entry — fixes Hono manifest test mismatch
-1078 " 🔵 Confirmed: jsonl LRU test root cause is hardcoded 2026-05-07 date; readEntries and cache helpers are from the same module instance
 S160 Push all changes to git — commit and open PR for dashboard SQLite stateDb fixes (May 9 at 2:04 PM)
-1079 2:06p ✅ New fix branch created for dashboard SQLite statedb entry groups
-1080 2:07p 🔴 StateDb poisoning fix: shared DB close() now no-op, entry groups refactored
-1081 " ✅ PR #3 opened for stateDb poisoning fix and entry groups refactor
-1082 " ✅ Both feature branches merged into local master with --no-ff
-S161 Push all to git — commit, PR, merge, and branch cleanup for hr-automation dashboard fixes (May 9 at 2:08 PM)
+S161 Push all to git — commit, PR, merge, and branch cleanup for hr-automation dashboard fixes (May 9 at 2:07 PM)
+S162 Shorten the SearchBar and reposition it to the right of the employee grid (not EID column) in the HR Automation dashboard TopBar (May 9 at 2:08 PM)
 ### May 11, 2026
-1083 2:32p 🟣 Delegation Row Refactor + Batch Queue Feature in HR Automation Dashboard
-1084 2:33p 🟣 parentRunId Threading Through All Enqueue/Retry/Ops HTTP Routes
-1085 " 🟣 Batch Queue Architecture: DelegationRow + DaemonBatchRow + BatchQueueToolbar/MemberList
-1086 " 🔴 Daemon-Stop: Zombie PIDs Prevented Phantom Session Drawer Closure
-1087 " 🔴 streamFileResponse: Raw fs.ReadStream as BodyInit Breaks Node 26 + Vite Proxy
-1088 " 🟣 EntryItem: Active-Check Status Badges (A/IA) for UCPath Active-Check Workflow
-1089 " 🔴 useRunScreenshots: AbortController Replaced with Cancelled Flag to Avoid Node/Browser Stream Race
-1090 2:35p 🔵 TypeCheck Clean and New Tests Passing After Batch Queue + parentRunId Refactor
-1091 " 🔵 parentRunId is a Deep System-Wide Concept in hr-automation, Not New to This PR
-1092 2:50p 🔄 Queue Panel Batch-Queue Refactor: drill → BatchQueue rename + DaemonBatchRow support
-1093 " 🟣 parentRunId propagation through all enqueue/retry API routes and core dispatch
-1094 " 🔄 find-input.ts decomposed into composable exported functions
-1095 " 🟣 BatchQueueParentRunId context consumed by all dashboard action components
-1096 " 🔴 streamFileResponse fixed for Node 26 + Vite proxy: ReadStream replaced with Readable.toWeb
-1097 " 🔵 Test file locations: retry ops tests live in dashboard-ops.test.ts, not a dedicated retry.test.ts
-1098 2:54p 🔵 Daemon retry parentRunId stamped via raw SQL UPDATE after retryTaskFromAttempt
-1099 " 🔵 tasks.parent_run_id column pre-existed; retryTaskFromAttempt silently drops it on retry
-1100 2:55p 🟣 Two new test cases added for parentRunId scoping on retry — standalone runs must not inherit older batch parentRunId
-1101 " 🔴 extractLatestParentRunId scoped to runId rows when runId is supplied — prevents stale batch inheritance
-1102 " ✅ All 34 dashboard-ops tests pass after parentRunId scoping fix; TypeScript typecheck clean
+1121 3:36p ⚖️ Preview Panel Naming Convention and Scope Decision
+1122 " 🔵 Dashboard Architecture: Existing "Preview" Tab vs New Batch Preview Panel
+1123 " 🔵 LogStream Tab Architecture and Batch Queue State for Preview Panel Implementation
+1124 3:37p 🔵 Screenshot Backend Handler Architecture and Reusable Display Components
+1125 " 🟣 BatchScreenshotsPanel Component Created
+1126 3:38p 🟣 Batch Preview Button Added to BatchQueueToolbar
+1127 " 🟣 QueuePanel Wired with Batch Preview Props
+1128 " 🟣 App.tsx Wired: BatchScreenshotsPanel Renders When No Row Selected in Batch Mode
+1129 " 🟣 Batch Preview Panel Feature: TypeCheck Passes Clean
+1130 3:39p 🟣 Bulk Action Controls (StopAll, DeleteAll) Wired into App.tsx Alongside Batch Preview
+1131 " 🟣 Batch Preview Panel Feature: Full Test Suite Passes
+1132 " ⚖️ Batch Row Preview Panel — Naming Convention and New Panel Design
+1133 3:44p 🔵 Existing "Preview" Tab Already Lives in Batch Queue View, Not Log Panel
+1134 3:51p 🟣 UI: Replace Click-to-View with Inline Scrollable View Mode
+1135 " 🔵 BatchScreenshotsPanel Uses Click-to-Open Lightbox for Screenshot Viewing
+1136 " 🟣 BatchScreenshotsPanel: Replaced Lightbox with Inline Scrollable Image View
+1137 " ✅ BatchScreenshotsPanel Inline View: TypeCheck and Build Pass Clean
+1138 " 🔵 hr-automation Dashboard Dev Server Port Configuration
+1139 3:52p 🔵 Playwright Confirms Inline Screenshots Render Correctly in Dashboard
+1140 " 🔵 BatchScreenshotsPanel.tsx is Untracked (New File); Three Other Dashboard Files Also Modified
+1141 " ✅ batch-queue-view: Toolbar Buttons Condensed to Icon-Only with Accessibility Labels
+1142 3:59p 🔵 Screenshots Deleted on Dev Server Restart — Retention Policy Required
+1143 " 🔵 Screenshot Auto-Deletion Root Cause: startDashboard() Prunes on Every Startup
+1144 4:00p 🔵 Screenshot Directory Mismatch: PATHS.screenshotDir vs CLI Default
+1145 " 🔵 Screenshots Deleted on Dev Server Restart — Bug Reported
+1146 4:15p 🔴 Screenshots No Longer Deleted on Dev Server Restart — Retention Tied to Run Lifecycle
+1147 " 🟣 New Hono API Routes: /api/cancel-active-bulk and /api/delete-bulk
+1148 4:16p 🟣 Large unstaged changeset in hr-automation — batch ops, screenshots, and dashboard expansion
+1149 4:17p 🟣 Bulk cancel and bulk delete backend APIs added to dashboard Hono server
+1150 " 🔴 Screenshots handler fixed to load events for ALL run IDs and merge disk-only PNGs
+1151 " 🟣 New domain modules: tracker-terminal-display and batch-display-ordinal
+1152 " 🟣 StopAllButton, DeleteAllButton, and BatchScreenshotsPanel added to dashboard UI
+1153 " 🟣 "Not found" status surfaced throughout queue UI and search results
+1154 " 🟣 UCPath EID validation enforced as 8-digit 10XXXXXX format across OCR and workflow schemas
+1155 " 🔴 buildDisplayNameMap now excludes delegated rows from ordinal counting and assigns them their parent's label
+1156 4:21p 🔵 Screenshot directories are empty in hr-automation project
+1157 " 🔵 Screenshots referenced in tracker logs are permanently missing from filesystem
+1158 4:22p 🔵 E2E test screenshots exist in `generated/.e2e-screenshots/` — distinct from missing workflow screenshots
+1159 4:23p 🔄 DeleteAllButton and DaemonBatchRow enriched delete payload with runId
+1160 " 🔄 delete-bulk backend updated to accept and forward runId per item
+1161 4:24p 🔵 Full test suite passes after delete-bulk runId enrichment changes
+1162 " 🟣 Full test suite passes and typecheck clean after all changes
+1163 " 🟣 DaemonBatchRow gets inline delete-batch and retry-failed-in-batch actions
+1164 " 🟣 App.tsx adds StopAllButton, DeleteAllButton, BatchScreenshotsPanel, and bulk-action entry collection
+1165 " 🟣 active-check schema normalizes EID input and CLI batches are grouped by parentRunId
+1166 " 🟣 deleteScreenshotsForEntry extracted and scoped by runId when deleting entries
+1167 " 🟣 buildCancelActiveBulkHandler added for bulk cancellation of pending and running items
+1168 4:26p 🔴 TypeScript TS2339 fix: explicit type annotation on items variable in delete bulk handler
+1169 " 🔵 Full changeset scope: 45+ modified files plus 6 new files across the code review
+1170 5:54p 🔵 Screenshots Deleted on Dev Server Restart — Persistence Bug
+S163 Screenshots deleted on dev server restart — investigate why and enforce correct retention policy (delete only on run deletion or after 30 days) (May 11 at 5:54 PM)
+**Investigated**: Checked the two expected screenshot storage folders for PNG files — both are currently empty. Verified git tracking status for screenshot files — none are tracked. Searched ~/.Trash for any recently deleted screenshot PNGs — none found there either.
 
-Access 913k tokens of past work via get_observations([IDs]) or mem-search skill.
+**Learned**: Screenshots are not surviving dev server restarts. The root cause is not yet confirmed, but the files are genuinely absent (not just moved to trash or untracked by git). The deletion is happening somewhere in the server lifecycle, likely during initialization or cleanup routines triggered on startup.
+
+**Completed**: Nothing has been fixed yet — this is still in the investigation/root cause phase.
+
+**Next Steps**: Check tracker/session references to identify what screenshot filenames existed previously. Look for any alternate file registry or backup copy that still references the screenshots. Trace the server startup/shutdown code to find where screenshot cleanup is being triggered incorrectly.
+
+
+Access 1732k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

@@ -16,6 +16,22 @@ export function entryMatchesStatusFilter(entry: TrackerEntry, statusFilter: stri
   return entry.status === statusFilter;
 }
 
+/**
+ * Whether a queue “group” row (delegation parent + members, or daemon batch
+ * members-only) should remain visible under the StatPills filter. Matches if
+ * {@link entryMatchesStatusFilter} holds for the optional anchor (OCR prep
+ * parent) or for any member row.
+ */
+export function queueGroupMatchesStatusFilter(
+  statusFilter: string | null,
+  members: readonly TrackerEntry[],
+  anchorEntry?: TrackerEntry,
+): boolean {
+  if (!statusFilter) return true;
+  if (anchorEntry && entryMatchesStatusFilter(anchorEntry, statusFilter)) return true;
+  return members.some((m) => entryMatchesStatusFilter(m, statusFilter));
+}
+
 export function countEntriesByQueueStatus(entries: TrackerEntry[]): QueueStatusCounts {
   const counts: QueueStatusCounts = { total: entries.length };
   for (const entry of entries) {

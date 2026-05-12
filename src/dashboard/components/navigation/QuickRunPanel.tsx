@@ -11,22 +11,20 @@ interface QuickRunPanelProps {
 }
 
 /**
- * QuickRunPanel — host-agnostic input + run cluster, mounted in the TopBar's
- * queue zone. Contains an input + an icon-only Run button.
+ * QuickRunPanel — workflow quick-enqueue input + play button (mounted in
+ * `QueuePanel`'s footer).
  *
  * Visible only for workflows registered in
  * `src/dashboard/lib/quick-run-registry.ts`. Workflows without a quick-run
- * config (e.g. emergency-contact, which needs YAML input) render null so
- * the queue zone in TopBar stays blank for them.
+ * config (e.g. emergency-contact, which needs YAML input) render null.
  *
  * On submit: parses the text into typed inputs via the registry, POSTs
  * `/api/enqueue`, shows a sonner toast with the result. If no daemon is
  * alive for the target workflow, the backend spawns one — the operator
  * will see a Duo prompt in the freshly-launched browser.
  *
- * Retry-all is its own component (`RetryAllButton`) mounted independently
- * so it surfaces on every workflow when failed entries exist, not just on
- * workflows with a quick-run config.
+ * Bulk retry/stop/delete buttons sit beside the queue sort control in the
+ * panel header (`queueBulkActionsSlot` in `App`).
  */
 export function QuickRunPanel({ workflow }: QuickRunPanelProps) {
   const config = getQuickRunConfig(workflow);
@@ -54,8 +52,7 @@ export function QuickRunPanel({ workflow }: QuickRunPanelProps) {
     setSubmitting(true);
     try {
       const parentRunId =
-        batchQueueParentRunId ??
-        (parsed.inputs.length > 1 ? crypto.randomUUID() : undefined);
+        batchQueueParentRunId;
       const res = await fetch("/api/enqueue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

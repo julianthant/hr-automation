@@ -44,7 +44,12 @@ export function SearchResults({ rows, query, onPick }: SearchResultsProps) {
   const labelFor = (wf: string): string =>
     registered.find((r) => r.name === wf)?.label ?? autoLabel(wf);
 
-  const wrapperClass = "absolute top-full left-0 right-0 mt-1.5 min-w-[440px] bg-popover border border-border rounded-lg shadow-md z-50 overflow-hidden";
+  // Width via `.dashboard-search-results-panel` in index.css — matches
+  // QueuePanel columns; narrower than TopBar SearchBar input span.
+  const wrapperClass = cn(
+    "dashboard-search-results-panel",
+    "absolute top-full left-0 mt-1.5 z-50 overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-xl",
+  );
 
   if (rows.length === 0) {
     return (
@@ -81,10 +86,10 @@ export function SearchResults({ rows, query, onPick }: SearchResultsProps) {
               <span
                 className={cn(
                   "text-[10px] font-semibold px-2 py-0.5 rounded-xl uppercase tracking-wide font-mono flex-shrink-0",
-                  statusBadgeClass(row.status) || "bg-secondary text-muted-foreground",
+                  statusBadgeClass(row.displayStatus) || "bg-secondary text-muted-foreground",
                 )}
               >
-                {row.status}
+                {row.displayStatus}
               </span>
             </div>
 

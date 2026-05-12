@@ -4,6 +4,7 @@ import {
   ActiveCheckEidInputSchema,
   ActiveCheckItemSchema,
   ActiveCheckNameInputSchema,
+  buildActiveCheckCliInput,
   deriveActiveCheckItemId,
   isActiveCheckEidInput,
 } from "../../../../src/workflows/active-check/schema.js";
@@ -42,5 +43,23 @@ describe("deriveActiveCheckItemId", () => {
 
   it("uses the display name as the stable item id for name inputs", () => {
     assert.equal(deriveActiveCheckItemId({ name: "zaw, hein thant" }), "Zaw, Hein Thant");
+  });
+});
+
+describe("buildActiveCheckCliInput", () => {
+  it("routes digit-only queries through EID validation only when they normalize to a UCPath EID", () => {
+    assert.deepEqual(buildActiveCheckCliInput("10706431"), { emplId: "10706431" });
+    assert.deepEqual(buildActiveCheckCliInput("10-706431"), { emplId: "10-706431" });
+    assert.deepEqual(buildActiveCheckCliInput(" 10870001 "), { emplId: " 10870001 " });
+  });
+
+  it("treats short or non-10xxxxxx digit strings as name queries", () => {
+    assert.deepEqual(buildActiveCheckCliInput("12345"), { name: "12345" });
+    assert.deepEqual(buildActiveCheckCliInput("20706431"), { name: "20706431" });
+  });
+
+  it("never treats strings with letters as bare EID queries", () => {
+    assert.deepEqual(buildActiveCheckCliInput("Room 101"), { name: "Room 101" });
+    assert.deepEqual(buildActiveCheckCliInput("Zaw, Hein Thant"), { name: "Zaw, Hein Thant" });
   });
 });

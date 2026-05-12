@@ -8,6 +8,7 @@
 import { z } from "zod/v4";
 import { matchAgainstRoster } from "../../matching/index.js";
 import { log } from "../../../utils/log.js";
+import { normalizeUcpathEmployeeId } from "../../../domain/identity/eid.js";
 import { normalizePersonNameForCompare } from "../../../domain/identity/person-name.js";
 import type { OcrFormSpec, LookupKind } from "../../../workflows/ocr/types.js";
 import type { OathSignatureInput } from "../../../workflows/oath-signature/schema.js";
@@ -144,7 +145,7 @@ export const oathOcrFormSpec: OcrFormSpec<
       log.step(`[oath/match] → extracted (deselected): row not signed, kept for visibility but not approvable`);
       return {
         ...record,
-        employeeId: (record.employeeId ?? "").trim(),
+        employeeId: normalizeUcpathEmployeeId(record.employeeId),
         matchState: "extracted",
         documentType: "expected",
         originallyMissing: [],
@@ -157,7 +158,7 @@ export const oathOcrFormSpec: OcrFormSpec<
     // (UPAY585/586 has an "Employee ID" field), trust the structured value
     // over the handwritten name. Roster-exact match → auto-accept; no roster
     // match → flag for eid-lookup-by-EID (verify-only branch).
-    const formEid = formEidRaw;
+    const formEid = normalizeUcpathEmployeeId(formEidRaw);
     if (formEid.length > 0) {
       const rosterHit = roster.find((row) => row.eid === formEid);
       if (rosterHit) {
@@ -258,7 +259,8 @@ export const oathOcrFormSpec: OcrFormSpec<
   },
 
   applyDisambiguation({ record, result }): OathPreviewRecord {
-    if (result.eid === null || result.eid.length === 0) {
+    const resultEid = normalizeUcpathEmployeeId(result.eid);
+    if (resultEid.length === 0) {
       // LLM said "none of these" — operator must intervene.
       return {
         ...record,
@@ -275,20 +277,20 @@ export const oathOcrFormSpec: OcrFormSpec<
     if (result.confidence < LLM_HIGH_CONFIDENCE) {
       return {
         ...record,
-        employeeId: result.eid,
+        employeeId: resultEid,
         matchState: "lookup-pending",
         matchSource: "llm",
         matchConfidence: result.confidence,
         warnings: [
           ...(record.warnings ?? []),
-          `LLM picked EID ${result.eid} but low confidence (${result.confidence.toFixed(2)}) — review`,
+          `LLM picked EID ${resultEid} but low confidence (${result.confidence.toFixed(2)}) — review`,
         ],
       };
     }
 
     return {
       ...record,
-      employeeId: result.eid,
+      employeeId: resultEid,
       matchState: "matched",
       matchSource: "llm",
       matchConfidence: result.confidence,
@@ -310,7 +312,7 @@ export const oathOcrFormSpec: OcrFormSpec<
       }
       return "name";
     }
-    if (record.matchState === "matched" && record.employeeId) {
+    if (record.matchState === "matched" && normalizeUcpathEmployeeId(record.employeeId)) {
       if (record.verification) return null;
       return "verify";
     }

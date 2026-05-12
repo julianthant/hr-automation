@@ -28,6 +28,12 @@ export interface CancelRunningRequest {
   runId: string;
 }
 
+export interface CancelActiveBulkItem {
+  id: string;
+  status: "pending" | "running";
+  runId?: string;
+}
+
 export type CancelRunningResult =
   | { ok: true; accepted: true; mode: "worker-command"; commandId: string }
   | { ok: true; accepted: true; mode: "in-process"; alreadyCancelled?: boolean }
@@ -296,6 +302,54 @@ export function buildCancelRunningHandler(dir: string) {
         "item not currently owned by any SQLite worker and no in-process run registered — likely already finished or never started",
       status: 410,
     };
+  };
+}
+
+/**
+ * Cancel many in-flight queue rows: **running** first (cooperative daemon cancel),
+ * then **pending** (queued SQLite / legacy queue). Matches per-row `/api/cancel-running`
+ * and `/api/cancel-queued` behavior.
+ */
+export function buildCancelActiveBulkHandler(dir: string) {
+  const cancelQueued = buildCancelQueuedHandler(dir);
+  const cancelRunning = buildCancelRunningHandler(dir);
+  return async (req: {
+    workflow: string;
+    items: CancelActiveBulkItem[];
+  }): Promise<{
+    ok: true;
+    count: number;
+    errors: Array<{ id: string; error: string }>;
+  }> => {
+    const errors: Array<{ id: string; error: string }> = [];
+    let count = 0;
+    const workflow = req.workflow;
+    const running = req.items.filter((i) => i.status === "running");
+    const pending = req.items.filter((i) => i.status === "pending");
+
+    for (const item of running) {
+      if (!item.runId) {
+        errors.push({
+          id: item.id,
+          error:
+            "runId is required for running items — the dashboard must send each row's tracker run id (UUID or legacy id#N)",
+        });
+        continue;
+      }
+      const r = await cancelRunning({ workflow, id: item.id, runId: item.runId });
+      if (r.ok) count++;
+      else errors.push({ id: item.id, error: r.error });
+    }
+    for (const item of pending) {
+      const r = await cancelQueued({
+        workflow,
+        id: item.id,
+        ...(item.runId ? { runId: item.runId } : {}),
+      });
+      if (r.ok) count++;
+      else errors.push({ id: item.id, error: r.error });
+    }
+    return { ok: true as const, count, errors };
   };
 }
 

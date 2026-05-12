@@ -13,10 +13,12 @@
  * it in `workflow-loaders.ts` plus a frontend registry entry; no
  * workflow-specific backend wiring.
  */
+import { randomUUID } from "node:crypto";
 import { loadWorkflow } from "../workflow-loaders.js";
 import type { RegisteredWorkflow } from "../kernel/types.js";
 import { buildInitialTrackerData, splitPrefilled } from "../kernel/workflow.js";
-import { trackEvent } from "../../tracker/jsonl.js";
+import { allocateLowestBatchDisplayOrdinal } from "../../tracker/batch-display-ordinal.js";
+import { DEFAULT_DIR, trackEvent } from "../../tracker/jsonl.js";
 import { log } from "../../utils/log.js";
 
 export interface EnqueueHttpResult {
@@ -168,6 +170,14 @@ export async function enqueueFromHttp(
     return { ok: false, workflow: workflowName, enqueued: 0, error: `unknown workflow: ${workflowName}` };
   }
 
+  const resolvedTrackerDir = trackerDir ?? DEFAULT_DIR;
+  let effectiveParentRunId = parentRunId;
+  let batchDisplayOrdinal: number | undefined;
+  if (inputs.length > 1 && !effectiveParentRunId) {
+    effectiveParentRunId = randomUUID();
+    batchDisplayOrdinal = allocateLowestBatchDisplayOrdinal(workflowName, resolvedTrackerDir);
+  }
+
   // Fail-fast schema validation here (ensureDaemonsAndEnqueue also does this,
   // but surfacing it early lets us return 400 with a precise message instead
   // of a generic 500 for schema mismatches).
@@ -205,13 +215,16 @@ export async function enqueueFromHttp(
       {},
       {
         trackerDir,
-        ...(parentRunId ? { parentRunId } : {}),
+        ...(effectiveParentRunId ? { parentRunId: effectiveParentRunId } : {}),
         ...(deriveItemId ? { deriveItemId } : {}),
         onPreEmitPending: (item, runId, passedParentRunId, itemId) => {
           const data = buildHttpPendingData(wf, item);
+          if (batchDisplayOrdinal !== undefined) {
+            data.batchDisplayOrdinal = String(batchDisplayOrdinal);
+          }
           const id = itemId;
           /** Pending + spawn-failure rows share stamp; `??` tolerates enqueue-client vs HTTP-option drift. */
-          const stampedParentRunId = passedParentRunId ?? parentRunId;
+          const stampedParentRunId = passedParentRunId ?? effectiveParentRunId;
           // Persist the original input verbatim on the pending row so the
           // dashboard's retry / edit-and-resume features can reconstruct
           // the call without per-workflow input-shaping logic. See the
@@ -231,7 +244,7 @@ export async function enqueueFromHttp(
               ...(stampedParentRunId ? { parentRunId: stampedParentRunId } : {}),
               ...(input ? { input } : {}),
             },
-            trackerDir,
+            resolvedTrackerDir,
           );
         },
         onPreEmitFailed: (item, runId, error, itemId) => {
@@ -243,6 +256,9 @@ export async function enqueueFromHttp(
           // pending emit so prefilledData (edit-and-resume) values stay
           // visible on the failed row.
           const data = buildHttpPendingData(wf, item);
+          if (batchDisplayOrdinal !== undefined) {
+            data.batchDisplayOrdinal = String(batchDisplayOrdinal);
+          }
           const id = itemId;
           trackEvent(
             {
@@ -252,10 +268,10 @@ export async function enqueueFromHttp(
               runId,
               status: "failed",
               data,
-              ...(parentRunId ? { parentRunId } : {}),
+              ...(effectiveParentRunId ? { parentRunId: effectiveParentRunId } : {}),
               error: `Spawn failed before enqueue: ${error}`,
             },
-            trackerDir,
+            resolvedTrackerDir,
           );
         },
       },

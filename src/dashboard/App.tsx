@@ -3,7 +3,10 @@ import { Toaster, toast } from "sonner";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { TopBar } from "./components/navigation/TopBar";
 import { QueuePanel } from "./components/queue-panel/QueuePanel";
+import { collapseEntriesForStatStrip } from "./components/queue-panel/stat-strip-collapse";
+import { resolveDaemonBatchQueueTitle } from "./components/queue-panel/batch-queue-view";
 import { LogPanel } from "./components/log-panel/LogPanel";
+import { BatchScreenshotsPanel } from "./components/log-panel/BatchScreenshotsPanel";
 import { OcrReviewPane } from "./components/ocr/OcrReviewPane";
 import { TerminalDrawer } from "./components/terminal-drawer/TerminalDrawer";
 import { TerminalDrawerProvider } from "./components/hooks/useTerminalDrawer";
@@ -16,11 +19,14 @@ import { useTelegramToasts } from "./components/hooks/useTelegramToasts";
 import { useCaptureToasts } from "./components/hooks/useCaptureToasts";
 import { resolveActionToastsForEntry } from "./components/hooks/useActionToasts";
 import { useWorkflow, useWorkflows, autoLabel } from "./lib/workflows-context";
-import { resolveEntryName, buildDisplayNameMap, groupMergedEntries } from "./components/shared/entry-display";
+import { resolveEntryName, buildDisplayNameMap, groupMergedEntries, collectEntriesForMergedScope } from "./components/shared/entry-display";
 import type { TrackerEntry, SearchResultRow, FailureRow } from "./components/shared/types";
 import { WorkflowRail } from "./components/navigation/WorkflowRail";
 import { QuickRunPanel } from "./components/navigation/QuickRunPanel";
+import { getQuickRunConfig } from "./lib/quick-run-registry";
 import { RetryAllButton } from "./components/queue-panel/RetryAllButton";
+import { StopAllButton } from "./components/queue-panel/StopAllButton";
+import { DeleteAllButton } from "./components/queue-panel/DeleteAllButton";
 import { TopBarRunButton } from "./components/navigation/TopBarRunButton";
 import { TopBarCaptureButton } from "./components/navigation/TopBarCaptureButton";
 import { parsePrepareRowData, isResolvedPrepRow } from "./components/ocr/types";
@@ -28,6 +34,13 @@ import { RunModal } from "./components/run-modal/RunModal";
 import { dateLocal } from "./lib/utils";
 import type { TrackerEntry as TrackerEntryJsonl } from "../tracker/jsonl.js";
 import { isResolvedPrepEntry } from "../tracker/dashboard/prep-rows.js";
+import { isTerminalNotFoundEntry } from "../domain/tracker-terminal-display.js";
+import {
+  QUEUE_SORT_STORAGE_KEY,
+  readStoredQueueSortMode,
+  sortQueueEntriesForDisplay,
+  type QueueSortMode,
+} from "./components/queue-panel/queue-sort";
 
 /** Default workflow when ?wf= is missing or unknown. Must always exist
  *  in the registry; if it doesn't, we fall through to the first registered
@@ -67,6 +80,9 @@ export default function App() {
   const [runModalReuploadFor, setRunModalReuploadFor] = useState<{ sessionId: string; previousRunId: string } | undefined>(undefined);
   const [date, setDate] = useState(initial.date);
   const [availableDates, setAvailableDates] = useState<string[]>([]);
+  const [queueSortMode, setQueueSortMode] = useState<QueueSortMode>(() =>
+    readStoredQueueSortMode(),
+  );
   // Status map for the currently-watched (workflow, date). Reset whenever
   // the user navigates to a different key so each viewing session starts
   // fresh — only LIVE transitions observed during continuous viewing fire
@@ -114,6 +130,14 @@ export default function App() {
     syncUrlState(workflow, selectedId, date);
   }, [workflow, selectedId, date]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(QUEUE_SORT_STORAGE_KEY, queueSortMode);
+    } catch {
+      /* ignore */
+    }
+  }, [queueSortMode]);
+
   // SSE entries
   const { entries, entriesKey, workflows, wfCounts, failureCounts, connected, loading } = useEntries(workflow, date);
 
@@ -146,6 +170,11 @@ export default function App() {
   const statPanelEntries = useMemo(
     () => dedupedEntries.filter((e) => !isResolvedPrepEntry(e as TrackerEntryJsonl)),
     [dedupedEntries],
+  );
+
+  const collapsedStatPanelEntries = useMemo(
+    () => collapseEntriesForStatStrip(statPanelEntries),
+    [statPanelEntries],
   );
 
   // Lookup: primary entry id → its siblings. Passed to LogPanel so it can
@@ -231,10 +260,17 @@ export default function App() {
       const name = resolveEntryName(entry, displayNames);
       const isCancelled = entry.status === "failed" && entry.step === "cancelled";
       if (entry.status === "done") {
-        toast.success(`${name} completed`, {
-          description: `${wfLabel} finished`,
-          duration: 5000,
-        });
+        if (isTerminalNotFoundEntry(entry)) {
+          toast.message(`${name} not found`, {
+            description: `${wfLabel} finished with no UCPath match`,
+            duration: 5000,
+          });
+        } else {
+          toast.success(`${name} completed`, {
+            description: `${wfLabel} finished`,
+            duration: 5000,
+          });
+        }
       } else if (isCancelled) {
         // The action-toast resolver already updated the loading toast
         // with a specific "Cancelled" message. The generic flow doesn't
@@ -305,18 +341,41 @@ export default function App() {
     [],
   );
   const handleEnterBatchQueue = useCallback((parentRunId: string) => {
+    // One batch view at a time — drilling into another batch while scoped would
+    // nest batch context and break toolbar / bulk actions expectations.
+    if (batchQueueParentRunId !== null) {
+      if (batchQueueParentRunId === parentRunId) return;
+      toast.warning("Already viewing a batch", {
+        description: "Use Back to return to the queue before opening another batch.",
+        duration: 5000,
+      });
+      return;
+    }
     // Batch queue mode exits any open prep review and clears any selected child.
     setReviewingPrepId(null);
     setSelectedId(null);
     setBatchQueueParentRunId(parentRunId);
-  }, []);
+  }, [batchQueueParentRunId]);
   const handleExitBatchQueue = useCallback(() => {
     setBatchQueueParentRunId(null);
+  }, []);
+  const handleOpenBatchPreview = useCallback(() => {
+    setReviewingPrepId(null);
+    setSelectedId(null);
   }, []);
 
   const handleDeleteEntry = useCallback((id: string) => {
     if (selectedId === id) setSelectedId(null);
   }, [selectedId]);
+
+  const handleBulkDeleted = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return;
+      const removed = new Set(ids);
+      if (selectedId && removed.has(selectedId)) setSelectedId(null);
+    },
+    [selectedId],
+  );
 
   // Rail badges: other workflows use SSE `wfCounts`; the **active** workflow
   // uses the same merged + resolved-prep exclusion as the StatPills strip so
@@ -328,37 +387,74 @@ export default function App() {
   const entryCounts = useMemo(
     () => ({
       ...wfCounts,
-      ...(entriesMatchWorkflow ? { [workflow]: statPanelEntries.length } : {}),
+      ...(entriesMatchWorkflow ? { [workflow]: collapsedStatPanelEntries.length } : {}),
     }),
-    [wfCounts, workflow, statPanelEntries, entriesMatchWorkflow],
+    [wfCounts, workflow, collapsedStatPanelEntries, entriesMatchWorkflow],
   );
 
   const selectedEntry = dedupedEntries.find((e) => e.id === selectedId) || null;
-
-  // Failed IDs across the current workflow + date — feeds RetryAllButton.
-  // Excludes operator-discarded prep rows via `isResolvedPrepRow` so retry-bulk
-  // doesn't try to re-enqueue rows whose `data.mode === "prepare"` (no valid
-  // emplId/docId for schema validation). Mirrors `computeFailureCounts` on the
-  // backend — same predicate drives FailureBell badge + WorkflowRail counts.
-  const failedIds = useMemo(
+  const batchPreviewMembers = useMemo(
     () =>
-      dedupedEntries
-        .filter((e) => e.status === "failed" && !isResolvedPrepRow(e))
-        .map((e) => e.id),
-    [dedupedEntries],
+      batchQueueParentRunId
+        ? dedupedEntries.filter((e) => e.parentRunId === batchQueueParentRunId)
+        : [],
+    [batchQueueParentRunId, dedupedEntries],
   );
 
-  const retryAllFailedIds = useMemo(() => {
-    if (!batchQueueParentRunId) return failedIds;
-    return dedupedEntries
-      .filter(
+  const sortedBatchPreviewMembers = useMemo(
+    () =>
+      batchQueueParentRunId
+        ? sortQueueEntriesForDisplay(batchPreviewMembers, queueSortMode, displayNames)
+        : [],
+    [batchQueueParentRunId, batchPreviewMembers, queueSortMode, displayNames],
+  );
+
+  const batchPreviewPanelTitle = useMemo(() => {
+    if (!batchQueueParentRunId) return `${wfLabel} batch preview`;
+    return `${resolveDaemonBatchQueueTitle(wfLabel, batchPreviewMembers, batchQueueParentRunId)} preview`;
+  }, [batchQueueParentRunId, batchPreviewMembers, wfLabel]);
+
+  const primariesForBulkActions = useMemo(() => {
+    if (!batchQueueParentRunId) return dedupedEntries;
+    return dedupedEntries.filter((e) => e.parentRunId === batchQueueParentRunId);
+  }, [batchQueueParentRunId, dedupedEntries]);
+
+  const bulkActionEntries = useMemo(
+    () => collectEntriesForMergedScope(mergeGroups, primariesForBulkActions),
+    [mergeGroups, primariesForBulkActions],
+  );
+
+  /** All item ids in the same scope as Delete all / Stop — any status (done, not-found, failed, …). */
+  const retryAllIds = useMemo(() => {
+    const entries = bulkActionEntries.filter((e) => !isResolvedPrepRow(e));
+    return [...new Set(entries.map((e) => e.id))];
+  }, [bulkActionEntries]);
+
+  const stopAllTargets = useMemo(
+    () =>
+      bulkActionEntries
+        .filter(
+          (e) =>
+            e.workflow === workflow &&
+            (e.status === "pending" || e.status === "running"),
+        )
+        .map((e) => ({
+          id: e.id,
+          status: e.status as "pending" | "running",
+          ...(e.runId ? { runId: e.runId } : {}),
+        })),
+    [bulkActionEntries, workflow],
+  );
+
+  const prepareBusyCount = useMemo(
+    () =>
+      dedupedEntries.filter(
         (e) =>
-          e.parentRunId === batchQueueParentRunId &&
-          e.status === "failed" &&
-          !isResolvedPrepRow(e),
-      )
-      .map((e) => e.id);
-  }, [batchQueueParentRunId, dedupedEntries, failedIds]);
+          (e.status === "pending" || e.status === "running") &&
+          parsePrepareRowData(e.data) !== null,
+      ).length,
+    [dedupedEntries],
+  );
 
   return (
     <BatchQueueParentRunIdProvider parentRunId={batchQueueParentRunId}>
@@ -400,40 +496,59 @@ export default function App() {
           onSelect={handleSelectEntry}
           date={date}
           onDelete={handleDeleteEntry}
+          onBulkDeleted={handleBulkDeleted}
           reviewingPrepId={reviewingPrepId}
           onOpenReview={handleOpenReview}
           onReupload={handleReupload}
           batchQueueParentRunId={batchQueueParentRunId}
           onEnterBatchQueue={handleEnterBatchQueue}
           onExitBatchQueue={handleExitBatchQueue}
+          onOpenBatchPreview={handleOpenBatchPreview}
           loading={loading}
-          runControlsSlot={
+          queueSortMode={queueSortMode}
+          onQueueSortModeChange={setQueueSortMode}
+          queueBulkActionsSlot={
             <>
-              <QuickRunPanel workflow={workflow} />
-              <TopBarRunButton
-                activeWorkflow={workflow}
-                busyCount={
-                  dedupedEntries.filter(
-                    (e) =>
-                      (e.status === "pending" || e.status === "running") &&
-                      parsePrepareRowData(e.data) !== null,
-                  ).length
-                }
-              />
+              <TopBarRunButton activeWorkflow={workflow} busyCount={prepareBusyCount} />
+              <TopBarCaptureButton workflow={workflow} />
               <RetryAllButton
                 workflow={workflow}
-                failedIds={retryAllFailedIds}
+                ids={retryAllIds}
                 parentRunId={batchQueueParentRunId ?? undefined}
               />
-              <TopBarCaptureButton workflow={workflow} />
+              <StopAllButton workflow={workflow} items={stopAllTargets} />
+              <DeleteAllButton
+                workflow={workflow}
+                date={date}
+                entries={bulkActionEntries.map((e) => ({
+                  id: e.id,
+                  ...(e.runId ? { runId: e.runId } : {}),
+                }))}
+                onDeleted={handleBulkDeleted}
+              />
             </>
+          }
+          runControlsSlot={
+            getQuickRunConfig(workflow) ? <QuickRunPanel workflow={workflow} /> : undefined
           }
         />
         {(() => {
-          // Preview lives as a tab inside the LogPanel and is OCR-only.
+          if (batchQueueParentRunId && !selectedEntry) {
+            return (
+              <BatchScreenshotsPanel
+                members={sortedBatchPreviewMembers}
+                displayNames={displayNames}
+                title={batchPreviewPanelTitle}
+              />
+            );
+          }
+
+          // The OCR review surface lives as the Preview tab inside the
+          // LogPanel. Keep that tab separate from the batch screenshot
+          // preview panel above.
           // Downstream workflows (oath-signature, emergency-contact) get
           // their own kernel queue rows after Approve and must NOT show the
-          // preview tab — only the OCR parent row owns the preview UI.
+          // Preview tab — only the OCR parent row owns the review UI.
           const isPrepEntry =
             selectedEntry?.workflow === "ocr" &&
             selectedEntry?.data?.mode === "prepare";

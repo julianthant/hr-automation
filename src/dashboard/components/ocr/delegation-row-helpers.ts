@@ -68,10 +68,29 @@ export function pickPreviewChildren(
   return sorted.slice(0, n).map((c) => ({
     id: c.id,
     runId: c.runId,
-    name: c.data?.name || c.id,
-    emplId: c.data?.emplId ?? c.data?.eid,
+    name: resolveChildLabel(c),
+    emplId: validEmployeeId(c.data?.emplId) || validEmployeeId(c.data?.eid) || undefined,
     status: c.status,
   }));
+}
+
+function validEmployeeId(value: string | undefined): string {
+  const normalized = (value ?? "").replace(/\D+/g, "");
+  return /^10\d{6}$/.test(normalized) ? normalized : "";
+}
+
+function resolveChildLabel(child: TrackerEntry): string {
+  const data = child.data ?? {};
+  const subject = typeof data.__subject === "string" ? data.__subject.trim() : "";
+  if (subject.length > 0) return subject;
+  const named =
+    (typeof data.name === "string" && data.name.trim()) ||
+    (typeof data.searchName === "string" && data.searchName.trim()) ||
+    (typeof data.__name === "string" && data.__name.trim()) ||
+    "";
+  if (named.length > 0) return named;
+  const eid = validEmployeeId(data.emplId) || validEmployeeId(data.eid);
+  return eid || child.id;
 }
 
 /**
