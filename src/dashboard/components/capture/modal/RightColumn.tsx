@@ -3,7 +3,7 @@ import { CapturePhotoTile } from "../CapturePhotoTile.js";
 import type { StartedSession } from "./index.js";
 import { ActionRow } from "./ActionRow.js";
 import { ValidationBanner } from "./ValidationBanner.js";
-import { isTerminal } from "./utils.js";
+import { isTerminal } from "./capture-state-terminal.js";
 
 const photoSrc = (sessionId: string, index: number) =>
   `/api/capture/photos/${encodeURIComponent(sessionId)}/${index}`;

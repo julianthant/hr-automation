@@ -1,8 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert";
+import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, readFileSync, existsSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import type { WatchChildRunsOpts } from "../../../../src/tracker/delegation/watch-child-runs.js";
 import { runOcrOrchestrator } from "../../../../src/workflows/ocr/orchestrator.js";
 
 function setup(): { dir: string; uploadsDir: string; rosterPath: string } {
@@ -419,7 +421,7 @@ test("orchestrator dispatches eid-lookup by EID when roster supplies a UCPath em
         eidLookupItems = items;
       },
       _disableSqliteDependencies: true,
-      _watchChildRunsOverride: async ({ expectedItemIds }) =>
+      _watchChildRunsOverride: async ({ expectedItemIds }: WatchChildRunsOpts) =>
         expectedItemIds.map((itemId) => ({
           workflow: "eid-lookup",
           itemId,
@@ -496,6 +498,7 @@ test("orchestrator treats non-UCPath employee ids as missing and falls back to n
 
 test("orchestrator records SQLite dependencies for eid-lookup fan-out (verify-by-EID)", async () => {
   const { dir, rosterPath } = setup();
+  const runId = randomUUID();
   let watcherCalled = false;
   let dependencyBatchCreated = false;
 
@@ -509,7 +512,7 @@ test("orchestrator records SQLite dependencies for eid-lookup fan-out (verify-by
       rosterMode: "existing",
     },
     {
-      runId: "run-active-deps",
+      runId,
       trackerDir: dir,
       _ocrPipelineOverride: async () => ({
         data: [{
@@ -533,10 +536,10 @@ test("orchestrator records SQLite dependencies for eid-lookup fan-out (verify-by
         dependencyBatchCreated = true;
         assert.equal(parent.workflow, "ocr");
         assert.equal(parent.itemId, "session-active-deps");
-        assert.equal(parent.runId, "run-active-deps");
+        assert.equal(parent.runId, runId);
         assert.equal(children.length, 1);
         assert.equal(children[0].workflow, "eid-lookup");
-        assert.equal(children[0].itemId, "ocr-oath-run-active-deps-r0");
+        assert.equal(children[0].itemId, `ocr-oath-${runId}-r0`);
         assert.equal(children[0].recordIndex, 0);
         assert.equal(children[0].lookupKind, "verify");
       },

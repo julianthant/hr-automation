@@ -122,10 +122,17 @@ export interface PrepareRowData {
 }
 
 /**
- * Workflow-agnostic predicate — both emergency-contact and oath-signature
- * stamp `mode: "prepare"` on parent prep rows.
+ * Workflow-agnostic predicate — downstream parent prep rows stamp
+ * `mode: "prepare"`, while the OCR workflow itself is always a prep/review
+ * surface and may emit terminal discard rows without carrying data forward.
  */
-export function isPrepareRow(e: { data?: Record<string, string> }): boolean {
+export function isPrepareRow(e: {
+  workflow?: string;
+  id?: string;
+  data?: Record<string, string>;
+}): boolean {
+  if (e.workflow === "ocr") return true;
+  if (e.id?.startsWith("ocr-prep-")) return true;
   return e.data?.mode === "prepare";
 }
 
@@ -141,10 +148,12 @@ export function isPrepareRow(e: { data?: Record<string, string> }): boolean {
  *     (they have `data.mode === "prepare"`, no schema-valid emplId/docId)
  */
 export function isResolvedPrepRow(e: {
+  workflow?: string;
   status: string;
   step?: string;
   data?: Record<string, string>;
 }): boolean {
+  if (e.workflow === "ocr") return isDiscardedPrepRow(e);
   return isApprovedPrepRow(e) || isDiscardedPrepRow(e);
 }
 
@@ -154,6 +163,7 @@ export function isResolvedPrepRow(e: {
  * rendering in the QueuePanel.
  */
 export function isApprovedPrepRow(e: {
+  workflow?: string;
   status: string;
   step?: string;
   data?: Record<string, string>;
@@ -168,6 +178,7 @@ export function isApprovedPrepRow(e: {
  * visible as an `OcrQueueRow` so the operator can retry.
  */
 export function isDiscardedPrepRow(e: {
+  workflow?: string;
   status: string;
   step?: string;
   data?: Record<string, string>;

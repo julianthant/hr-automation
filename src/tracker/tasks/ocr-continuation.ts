@@ -249,9 +249,13 @@ function verificationMatchesChildOutcome(raw: unknown, childRun: ProjectedRun): 
   const actual = asRecord(raw);
   if (!actual) return false;
   const expected = computeOcrVerification({
+    activeStatus: childRun.data?.activeStatus,
+    isActive: childRun.data?.isActive,
+    isHdhAccepted: childRun.data?.isHdhAccepted,
     hrStatus: childRun.data?.hrStatus,
     department: childRun.data?.department,
     personOrgScreenshot: childRun.data?.personOrgScreenshot,
+    terminationDate: childRun.data?.terminationDate,
   });
   return actual.state === expected.state
     && optionalString(actual.hrStatus) === optionalString(expected.hrStatus)

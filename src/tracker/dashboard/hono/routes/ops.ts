@@ -307,6 +307,9 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       ids,
       items,
     });
+    if (!result.ok) {
+      return jsonResponse({ ok: false, error: result.errors[0]?.error ?? "invalid request" }, 400);
+    }
     const status = bulkMutationHttpStatus(result.count, result.errors.length);
     return jsonResponse(result, status);
   });

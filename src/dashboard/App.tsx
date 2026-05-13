@@ -23,7 +23,13 @@ import { useTelegramToasts } from "./components/hooks/useTelegramToasts";
 import { useCaptureToasts } from "./components/hooks/useCaptureToasts";
 import { resolveActionToastsForEntry } from "./components/hooks/useActionToasts";
 import { useWorkflow, useWorkflows, autoLabel } from "./lib/workflows-context";
-import { resolveEntryName, buildDisplayNameMap, groupMergedEntries, collectEntriesForMergedScope } from "./components/shared/entry-display";
+import {
+  resolveEntryName,
+  buildDisplayNameMap,
+  groupMergedEntries,
+  collectEntriesForMergedScope,
+  mergedGroupPeersForLogPanel,
+} from "./components/shared/entry-display";
 import type { TrackerEntry, SearchResultRow, FailureRow } from "./components/shared/types";
 import { WorkflowRail } from "./components/navigation/WorkflowRail";
 import { QuickRunPanel } from "./components/navigation/QuickRunPanel";
@@ -108,6 +114,9 @@ export default function App() {
     prefetchFormTypes();
   }, []);
 
+  const renderOcrPrepToolbar = useCallback(() => <OcrReviewPrepToolbar />, []);
+  const renderOcrPrepBody = useCallback(() => <OcrReviewPrepBody />, []);
+
   // Fail-loud on unknown workflow in `?wf=`. Once the registry has loaded,
   // if the URL workflow isn't a known name, warn and reset to the default
   // (or to the first registered workflow if the default itself is missing).
@@ -182,28 +191,54 @@ export default function App() {
     [statPanelEntries],
   );
 
-  // Lookup: primary entry id → its siblings. Passed to LogPanel so it can
-  // pool runs across the merged group.
-  const siblingsByPrimaryId = useMemo(() => {
-    const m = new Map<string, TrackerEntry[]>();
-    for (const g of mergeGroups) m.set(g.primary.id, g.siblings);
-    return m;
-  }, [mergeGroups]);
+  /** Tracker item ids delegated under the active batch-queue parent (if any). */
+  const batchMemberIds = useMemo(() => {
+    if (!batchQueueParentRunId) return null;
+    const ids = new Set<string>();
+    for (const e of entries) {
+      if (e.parentRunId === batchQueueParentRunId) ids.add(e.id);
+    }
+    return ids;
+  }, [batchQueueParentRunId, entries]);
 
   // If the URL `?id=` points to a sibling that's been folded into a primary,
   // redirect to the primary so the LogPanel actually loads. Without this,
   // bookmarking/refreshing on a now-merged sibling would land on an empty
   // log panel (the sibling no longer appears in the queue).
+  //
+  // Batch queue drill-in lists every delegated row by id — including merge
+  // siblings — so never rewrite selection away from those ids while scoped.
   useEffect(() => {
     if (!selectedId) return;
     if (dedupedEntries.some((e) => e.id === selectedId)) return;
+    if (batchMemberIds?.has(selectedId)) return;
     for (const g of mergeGroups) {
       if (g.siblings.some((s) => s.id === selectedId)) {
         setSelectedId(g.primary.id);
         return;
       }
     }
-  }, [selectedId, dedupedEntries, mergeGroups]);
+  }, [selectedId, dedupedEntries, mergeGroups, batchMemberIds]);
+
+  const selectedEntry = useMemo(() => {
+    if (!selectedId) return null;
+    if (
+      batchQueueParentRunId &&
+      batchMemberIds?.has(selectedId)
+    ) {
+      const hit = entries.find(
+        (e) => e.id === selectedId && e.parentRunId === batchQueueParentRunId,
+      );
+      if (hit) return hit;
+    }
+    return dedupedEntries.find((e) => e.id === selectedId) ?? null;
+  }, [
+    selectedId,
+    batchQueueParentRunId,
+    batchMemberIds,
+    entries,
+    dedupedEntries,
+  ]);
 
   // Fetch available dates when workflow changes. The selected date is
   // preserved across workflow switches — operators want to stay on the date
@@ -397,7 +432,6 @@ export default function App() {
     [wfCounts, workflow, collapsedStatPanelEntries, entriesMatchWorkflow],
   );
 
-  const selectedEntry = dedupedEntries.find((e) => e.id === selectedId) || null;
   const batchPreviewMembers = useMemo(
     () =>
       batchQueueParentRunId
@@ -581,11 +615,15 @@ export default function App() {
               workflow={workflow}
               date={date}
               displayNames={displayNames}
-              siblings={selectedEntry ? siblingsByPrimaryId.get(selectedEntry.id) ?? [] : []}
+              siblings={
+                selectedEntry
+                  ? mergedGroupPeersForLogPanel(selectedEntry.id, mergeGroups)
+                  : []
+              }
               onDeleteEntry={() => handleDeleteEntry(selectedEntry?.id ?? "")}
               previewAvailable={isPrepEntry}
-              previewHeaderSlot={isPrepEntry ? () => <OcrReviewPrepToolbar /> : undefined}
-              previewSlot={isPrepEntry ? () => <OcrReviewPrepBody /> : undefined}
+              previewHeaderSlot={isPrepEntry ? renderOcrPrepToolbar : undefined}
+              previewSlot={isPrepEntry ? renderOcrPrepBody : undefined}
               onPreviewVisibleChange={setOcrPreviewVisible}
               defaultTab={wantsPreview && reviewingPrepId ? "preview" : undefined}
             />

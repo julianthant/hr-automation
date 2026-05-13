@@ -202,3 +202,23 @@ export function collectEntriesForMergedScope(
   }
   return out;
 }
+
+/**
+ * Merge-group peers for {@link LogPanel} run pooling — everyone in the same
+ * `groupMergedEntries` bucket except the row currently selected.
+ *
+ * When the operator picks the primary, this matches `group.siblings`. When they
+ * pick a sibling (visible only in delegation batch drill-in), returns the
+ * primary plus the other siblings so pooled history stays complete.
+ */
+export function mergedGroupPeersForLogPanel(
+  selectedEntryId: string,
+  mergeGroups: MergedEntryGroup[],
+): TrackerEntry[] {
+  for (const g of mergeGroups) {
+    const members = [g.primary, ...g.siblings];
+    if (!members.some((m) => m.id === selectedEntryId)) continue;
+    return members.filter((m) => m.id !== selectedEntryId);
+  }
+  return [];
+}

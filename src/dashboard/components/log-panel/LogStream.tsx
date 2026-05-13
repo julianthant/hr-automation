@@ -141,7 +141,10 @@ export function LogStream({
       .map((l) => ({ kind: "log" as const, entry: l }));
   }, [filter, tab, nonDebugLogs, debugLogs, events]);
 
-  const collapsedCount = nonDebugLogs.reduce((acc, l) => acc + (l.count > 1 ? l.count - 1 : 0), 0);
+  const collapsedCount = useMemo(
+    () => nonDebugLogs.reduce((acc, l) => acc + (l.count > 1 ? l.count - 1 : 0), 0),
+    [nonDebugLogs],
+  );
 
   // Snap to bottom before paint when logs first appear (no visible scroll)
   useLayoutEffect(() => {
@@ -163,10 +166,14 @@ export function LogStream({
     toast.success("Copied to clipboard", { duration: 1500 });
   }, []);
 
-  const visibleTabs = FILTER_TABS.filter(
-    (t) =>
-      (t.key !== "edit-data" || editDataAvailable) &&
-      (t.key !== "preview" || previewAvailable),
+  const visibleTabs = useMemo(
+    () =>
+      FILTER_TABS.filter(
+        (t) =>
+          (t.key !== "edit-data" || editDataAvailable) &&
+          (t.key !== "preview" || previewAvailable),
+      ),
+    [editDataAvailable, previewAvailable],
   );
 
   useEffect(() => {

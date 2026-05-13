@@ -35,10 +35,6 @@ import {
   type TaskDependencyChild,
 } from "@/components/hooks/useTaskDependencies";
 import {
-  derivePreviewApprovalGate,
-  type PreviewPageStatus,
-} from "./preview-gate";
-import {
   resolveOcrConfigForEntry,
   setOcrDownstreamRenderer,
   type AnyOcrPreviewRecord,
@@ -113,6 +109,21 @@ type MergedPrepRecordRow = {
   record: AnyPreviewRecord;
 };
 
+/** Continuation/server patches win over stale localStorage prep snapshots — operator edits keep form fields only. */
+function overlayServerOwnedPrepFields(
+  baseRecord: AnyPreviewRecord | undefined,
+  local: AnyPreviewRecord,
+): AnyPreviewRecord {
+  if (!baseRecord) return local;
+  return {
+    ...local,
+    verification: baseRecord.verification,
+    matchState: baseRecord.matchState,
+    matchSource: baseRecord.matchSource,
+    warnings: baseRecord.warnings,
+  };
+}
+
 function loadPrepStorage(rawKey: string): { edits: Record<number, AnyPreviewRecord>; removed: Set<number> } {
   if (!rawKey) return { edits: {}, removed: new Set() };
   try {
@@ -141,9 +152,16 @@ function mergePrepRecordRows(
     if (Number.isFinite(i)) indexSet.add(i);
   }
   const out: MergedPrepRecordRow[] = [];
-  for (const originalIndex of [...indexSet].sort((a, b) => a - b)) {
+  const sortedIndices = Array.from(indexSet);
+  sortedIndices.sort((a, b) => a - b);
+  for (const originalIndex of sortedIndices) {
     if (removed.has(originalIndex)) continue;
-    const record = edits[originalIndex] ?? baseRecords[originalIndex];
+    const baseRow = baseRecords[originalIndex];
+    const edited = edits[originalIndex];
+    const record =
+      edited !== undefined
+        ? overlayServerOwnedPrepFields(baseRow, edited)
+        : baseRow;
     if (record === undefined) continue;
     out.push({ originalIndex, record });
   }
@@ -241,7 +259,6 @@ function useOcrReviewPrepApi(
   const [submitting, setSubmitting] = useState(false);
   const [researchingIndices, setResearchingIndices] = useState<Set<number>>(new Set());
   const [markedBlankPages, setMarkedBlankPages] = useState<Set<number>>(new Set());
-  const [previewStatusByPage, setPreviewStatusByPage] = useState<Record<number, PreviewPageStatus>>({});
   const { children: dependencyChildren } = useTaskDependencies(
     prepActive && entry ? (entry.runId ?? entry.id) : undefined,
   );
@@ -297,16 +314,6 @@ function useOcrReviewPrepApi(
     () => recordRows.map((e) => e.record),
     [recordRows],
   );
-
-  useEffect(() => {
-    setPreviewStatusByPage({});
-  }, [entry?.id, runId, data?.pdfFileId]);
-
-  const handlePreviewStatusChange = useCallback((page: number, status: PreviewPageStatus): void => {
-    setPreviewStatusByPage((prev) => (
-      prev[page] === status ? prev : { ...prev, [page]: status }
-    ));
-  }, []);
 
   const setRecord = (index: number, next: AnyPreviewRecord): void => {
     setLocalEdits((prev) => ({ ...prev, [index]: next }));
@@ -409,30 +416,13 @@ function useOcrReviewPrepApi(
     () => records.filter((r) => isApprovable(r)),
     [records],
   );
-  const selectedCount = approvableRecords.filter((r) => r.selected).length;
-  const requiredPreviewPages = useMemo(
-    () => Array.from(
-      new Set(
-        renderList
-          .filter((item) => item.kind !== "failed")
-          .map((item) => item.page),
-      ),
-    ).sort((a, b) => a - b),
-    [renderList],
-  );
-  const previewGate = useMemo(
-    () => derivePreviewApprovalGate({
-      requiredPages: requiredPreviewPages,
-      previewStatusByPage,
-      selectedCount,
-    }),
-    [requiredPreviewPages, previewStatusByPage, selectedCount],
-  );
-  // How many approvable records aren't yet selected — drives the "Select
-  // all" affordance. Records that aren't approvable (inactive / non-hdh /
-  // unmatched / no EID) are intentionally excluded so this never auto-
-  // selects something the operator can't dispatch.
-  const unselectedApprovableCount = approvableRecords.length - selectedCount;
+  const { selectedCount, unselectedApprovableCount } = useMemo(() => {
+    const selected = approvableRecords.filter((r) => r.selected).length;
+    return {
+      selectedCount: selected,
+      unselectedApprovableCount: approvableRecords.length - selected,
+    };
+  }, [approvableRecords]);
 
   function selectAllApprovable(): void {
     setLocalEdits((prev) => {
@@ -502,10 +492,8 @@ function useOcrReviewPrepApi(
 
   async function handleApprove() {
     if (submitting || !cfg) return;
-    if (previewGate.blocked) {
-      toast.error("Preview required before approval", {
-        description: previewGate.reason,
-      });
+    if (selectedCount <= 0) {
+      toast.error("Select at least one reviewed record before approving.");
       return;
     }
     setSubmitting(true);
@@ -517,8 +505,6 @@ function useOcrReviewPrepApi(
           sessionId,
           runId,
           records: recordRows.map((e) => e.record),
-          previewReady: true,
-          previewPageCount: previewGate.totalCount,
         }),
       });
       const body = (await resp.json()) as {
@@ -603,9 +589,9 @@ function useOcrReviewPrepApi(
                 }
                 disabled={submitting}
                 title="Re-upload corrected PDF — carries forward resolved EIDs from this run"
-                className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-3 text-xs text-muted-foreground hover:bg-muted disabled:opacity-50"
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-medium leading-none text-muted-foreground hover:bg-muted disabled:opacity-50"
               >
-                <UploadCloud className="h-3 w-3" /> Reupload
+                <UploadCloud className="h-3 w-3" aria-hidden /> Reupload
               </button>
             )}
             {isDelegation && unselectedApprovableCount > 0 && (
@@ -614,34 +600,28 @@ function useOcrReviewPrepApi(
                 onClick={selectAllApprovable}
                 disabled={submitting}
                 title="Select every approvable record (matched/resolved with a valid EID, not inactive/non-HDH)"
-                className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-3 text-xs text-muted-foreground hover:bg-muted disabled:opacity-50"
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-medium leading-none text-muted-foreground hover:bg-muted disabled:opacity-50"
               >
                 Select all ({unselectedApprovableCount})
               </button>
             )}
-            {isDelegation && (previewGate.approveVisible ? (
+            {isDelegation && (
               <button
+                type="button"
                 onClick={handleApprove}
-                disabled={submitting}
+                disabled={submitting || selectedCount <= 0}
+                title={selectedCount <= 0 ? "Select at least one approvable record (checkbox)." : undefined}
                 className={cn(
-                  "inline-flex h-7 items-center gap-1.5 rounded-md border border-primary bg-primary px-3 text-xs font-semibold text-primary-foreground",
+                  "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-primary bg-primary px-2.5 text-xs font-medium text-primary-foreground",
+                  "leading-none hover:bg-primary/90",
                   "disabled:cursor-not-allowed disabled:opacity-50",
                 )}
               >
-                {submitting && <Loader2 className="h-3 w-3 animate-spin" />}
+                {submitting && <Loader2 className="h-3 w-3 animate-spin" aria-hidden />}
                 Approve {selectedCount}
               </button>
-            ) : (
-              <button
-                type="button"
-                disabled
-                title={previewGate.reason}
-                className="inline-flex h-7 cursor-not-allowed items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground opacity-70"
-              >
-                Preview required
-              </button>
-            ))}
-            <span className="rounded border border-border bg-secondary/40 px-2 py-0.5 text-[11px] font-mono text-muted-foreground">
+            )}
+            <span className="inline-flex h-8 shrink-0 items-center rounded-md border border-border bg-secondary/40 px-2.5 font-mono text-[11px] font-medium leading-none tabular-nums text-muted-foreground">
               {recordRows.length} records
             </span>
           </div>
@@ -680,7 +660,6 @@ function useOcrReviewPrepApi(
                         parentRunId={sessionId}
                         page={renderEntry.page}
                         fileId={data.pdfFileId}
-                        onStatusChange={handlePreviewStatusChange}
                       />
                     </div>
                     <div>
@@ -711,7 +690,6 @@ function useOcrReviewPrepApi(
                       parentRunId={sessionId}
                       page={page}
                       fileId={data.pdfFileId}
-                      onPreviewStatusChange={handlePreviewStatusChange}
                       titleBar={renderFormCardNav({
                         record,
                         cfg,
@@ -776,7 +754,6 @@ function useOcrReviewPrepApi(
                   parentRunId={sessionId}
                   page={page}
                   fileId={data.pdfFileId}
-                  onPreviewStatusChange={handlePreviewStatusChange}
                   formCards={cards}
                   onAddRow={addBlankRow}
                 />
@@ -825,7 +802,7 @@ function ReocrWholePdfButton({ sessionId, runId, storageKey, onSuccess }: { sess
       <DialogTrigger asChild>
         <button
           type="button"
-          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-3 text-xs text-muted-foreground hover:bg-muted"
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground hover:bg-muted"
         >
           <FileScan className="h-3 w-3" />
           Re-OCR whole PDF
@@ -866,13 +843,13 @@ function ReocrWholePdfButton({ sessionId, runId, storageKey, onSuccess }: { sess
 function isApprovable(record: AnyPreviewRecord): boolean {
   const matchOk = record.matchState === "matched" || record.matchState === "resolved";
   const notUnknown = record.documentType !== "unknown";
-  // Verification gate: only HARD-block states that mean "definitely don't
-  // process" — `inactive` (employee terminated) and `non-hdh` (wrong dept).
+  // Verification gate: only HARD-block inactive employees. Non-HDH is still
+  // HR-active, so the operator can approve when the EID and form data are right.
   // `lookup-failed` (Person Org Summary returned nothing) and absent-yet
   // states fall through as approvable. An EID resolved by eid-lookup is enough
   // signal to dispatch — verification is auxiliary.
   const v = record.verification?.state;
-  const verifyOk = v !== "inactive" && v !== "non-hdh";
+  const verifyOk = v !== "inactive";
   // Tighten: when selected, require a non-empty 5+ digit EID. Blocks
   // approving a manually-added row before the operator types an EID.
   const eid = String(
@@ -1059,17 +1036,28 @@ function renderEmploymentStatusBadge(v: Verification | undefined): ReactNode {
       </span>
     );
   }
+  if (v.state === "non-hdh") {
+    return (
+      <span
+        className="font-mono text-[10px] font-semibold uppercase tracking-wide text-warning"
+        title={v.department ? `HR status: ${v.hrStatus}; non-HDH dept: ${v.department}` : `HR status: ${v.hrStatus}; non-HDH dept`}
+      >
+        Active
+      </span>
+    );
+  }
+  if (v.state === "lookup-failed") {
+    return (
+      <span
+        className="font-mono text-[10px] uppercase tracking-wide text-warning"
+        title={v.error ?? "Lookup did not classify active status"}
+      >
+        Unverified
+      </span>
+    );
+  }
   return (
-    <span
-      className="font-mono text-[10px] uppercase tracking-wide text-warning"
-      title={
-        v.state === "lookup-failed"
-          ? v.error
-          : v.state === "non-hdh"
-            ? `Not HDH (${v.department})`
-            : undefined
-      }
-    >
+    <span className="font-mono text-[10px] uppercase tracking-wide text-warning">
       Pending
     </span>
   );

@@ -12,7 +12,7 @@ src/workflows/{name}/
   workflow.ts    # defineWorkflow(...) + CLI adapter (runMyWorkflow)
   enter.ts       # ActionPlan builder (UCPath workflows) — optional
   config.ts      # Workflow-specific constants
-  index.ts       # Barrel exports (legacy workflows also call defineDashboardMetadata here)
+  index.ts       # Barrel exports
   CLAUDE.md      # This module's doc (template: what / data flow / kernel config / gotchas / lessons)
 ```
 
@@ -79,7 +79,7 @@ Workflows where daemon mode is **not** appropriate (do NOT convert):
 - **Non-CLI workflows** like `sharepoint-download` (dashboard button, fire-and-forget `runWorkflow`) — daemon mode solves "avoid re-Duo on repeated CLI runs," which doesn't apply when the dashboard holds one long-lived session.
 - **Workflows invoked programmatically from other workflows** — daemon mode is client/daemon IPC; an in-process caller should keep using `runWorkflow` / `runWorkflowBatch` directly.
 
-Currently converted: `separations`, `work-study`, `eid-lookup`, `onboarding`, `oath-signature`, `emergency-contact`. Pending: `old-kronos-reports`. No behavior change intended — daemon mode wraps the same `runOneItem` kernel primitive, so per-item tracker output is byte-identical to the legacy path.
+Currently converted (registered in `src/core/workflow-loaders.ts` for daemon spawn / dashboard enqueue): `separations`, `work-study`, `eid-lookup`, `onboarding`, `oath-signature`, `emergency-contact`, `oath-upload`, `active-check`. Pending: `old-kronos-reports`. No behavior change intended — daemon mode wraps the same `runOneItem` kernel primitive, so per-item tracker output is byte-identical to the legacy path.
 
 **Emergency-contact note** — the CLI adapter reads YAML + runs roster preflight in-process (before any daemon work), then enqueues each `EmergencyContactRecord` as a separate queue item. Pass a custom `deriveItemId` to `ensureDaemonsAndEnqueue` because the EID is nested under `input.employee.employeeId` and the composite `p{NN}-{emplId}` id shape is what the legacy path already writes.
 

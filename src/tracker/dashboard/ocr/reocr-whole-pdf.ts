@@ -121,6 +121,7 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
               : { emplId: extractEidLocal(e.record), keepNonHdh: true },
           );
           await ensureDaemonsAndEnqueue(eidLookupCrmWorkflow, inputs as never, {}, {
+            trackerDir,
             deriveItemId: (inp: { name?: string; emplId?: string }) => {
               const matched = enqueueItems.find((e) => {
                 if ("name" in inp && inp.name)

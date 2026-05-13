@@ -21,6 +21,23 @@ function rel(path: string): string {
   return relative(ROOT, path);
 }
 
+/** Kebab-case file stem + .ts / .tsx (no uppercase). */
+const KEBAB_TS = /^[a-z0-9][a-z0-9.-]*\.(ts|tsx)$/;
+
+/** Dashboard: PascalCase component modules. */
+const DASHBOARD_PASCAL_TSX = /^[A-Z][a-zA-Z0-9]*\.tsx$/;
+
+/** Dashboard: useThing hook modules. */
+const DASHBOARD_HOOK = /^use[A-Z][a-zA-Z0-9]*\.(ts|tsx)$/;
+
+function isAllowedDashboardBasename(basename: string): boolean {
+  return (
+    KEBAB_TS.test(basename) ||
+    DASHBOARD_PASCAL_TSX.test(basename) ||
+    DASHBOARD_HOOK.test(basename)
+  );
+}
+
 describe("codebase conventions", () => {
   it("does not add default exports in src", () => {
     const violations = walk(SRC)
@@ -59,5 +76,22 @@ describe("codebase conventions", () => {
       .map(rel)
       .sort();
     assert.deepEqual(violations, []);
+  });
+
+  it("keeps src filenames aligned with naming rules (kebab-case outside dashboard; React patterns inside dashboard)", () => {
+    const violations: string[] = [];
+    for (const file of walk(SRC)) {
+      const path = rel(file);
+      const basename = path.split("/").pop() ?? "";
+      const inDashboard = path.startsWith("src/dashboard/");
+      if (inDashboard) {
+        if (!isAllowedDashboardBasename(basename)) {
+          violations.push(`${path} — use PascalCase.tsx, useHook.ts, or kebab-case`);
+        }
+      } else if (!KEBAB_TS.test(basename)) {
+        violations.push(`${path} — use kebab-case only under src/ (not inside src/dashboard/)`);
+      }
+    }
+    assert.deepEqual(violations.sort(), []);
   });
 });

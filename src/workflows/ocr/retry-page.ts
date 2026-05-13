@@ -1,6 +1,7 @@
 /**
  * Single-page retry for the OCR workflow. Scoped mini-orchestrator:
- * load the row's prior state from JSONL, re-OCR just one page through
+ * load the row's prior state from SQLite projection (when present) or
+ * OCR JSONL, re-OCR just one page through
  * the multi-provider pool, match new records against the roster, fan
  * out eid-lookup for any that need it, and emit a fresh
  * awaiting-approval row with patched records + failedPages.
@@ -9,8 +10,9 @@
  * watchChildRuns, eid-lookup daemon dispatch). Test escape hatches
  * mirror those on `runOcrOrchestrator`.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, openSync, closeSync, statSync, readSync } from "node:fs";
 import { join, basename, dirname } from "node:path";
+import { openStateDb, stateDbPath } from "../../tracker/state/db.js";
 import type { ZodType } from "zod/v4";
 import { runOcrPerPage } from "../../services/ocr/per-page.js";
 import { buildVisionPool } from "../../services/ocr/per-page-pool.js";
@@ -18,7 +20,7 @@ import { loadRoster as realLoadRoster } from "../../services/matching/index.js";
 import type { RosterRow as MatchRosterRow } from "../../services/matching/match.js";
 import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
 import { trackEvent, dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
-import { isAcceptedHdhDepartment } from "../../domain/hdh/departments.js";
+import { patchOcrRecordFromEidLookupOutcome } from "./eid-lookup-results.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
 import type { AnyOcrFormSpec, RosterRow as OcrRosterRow } from "./types.js";
 
@@ -176,14 +178,24 @@ export async function runOcrRetryPage(
           ? { name: extractName(e.record, spec) }
           : { emplId: extractEid(e.record), keepNonHdh: true },
       );
+      const nameKeyToItemId = new Map<string, string>();
+      const eidKeyToItemId = new Map<string, string>();
+      const fallbackItemId = `ocr-retry-fallback-${input.runId}-p${input.pageNum}`;
+      for (const e of enqueueItems) {
+        if (e.kind === "name") {
+          const nk = extractName(e.record, spec);
+          if (nk) nameKeyToItemId.set(nk, e.itemId);
+        } else {
+          const ek = extractEid(e.record);
+          if (ek) eidKeyToItemId.set(ek, e.itemId);
+        }
+      }
       await ensureDaemonsAndEnqueue(eidLookupCrmWorkflow, inputs as never, {}, {
+        trackerDir,
         deriveItemId: (inp: { name?: string; emplId?: string }) => {
-          const matched = enqueueItems.find((e) => {
-            if ("name" in inp && inp.name) return extractName(e.record, spec) === inp.name;
-            if ("emplId" in inp && inp.emplId) return extractEid(e.record) === inp.emplId;
-            return false;
-          });
-          return matched?.itemId ?? `ocr-retry-fallback-${input.runId}-p${input.pageNum}`;
+          if ("name" in inp && inp.name) return nameKeyToItemId.get(inp.name) ?? fallbackItemId;
+          if ("emplId" in inp && inp.emplId) return eidKeyToItemId.get(inp.emplId) ?? fallbackItemId;
+          return fallbackItemId;
         },
       });
     }
@@ -204,7 +216,7 @@ export async function runOcrRetryPage(
         patchUnresolved(newRecords, idx);
         continue;
       }
-      patchFromOutcome(newRecords, idx, outcome, enq.kind);
+      patchOcrRecordFromEidLookupOutcome(newRecords, idx, outcome, enq.kind);
     }
   }
 
@@ -250,7 +262,77 @@ interface FailedPageEntry {
   attempts: number;
 }
 
-function readLatestRow(
+function coerceLatestDataJson(raw: string | null): Record<string, string> | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (v === undefined || v === null) continue;
+      if (typeof v === "string") out[k] = v;
+      else if (typeof v === "number" || typeof v === "boolean") out[k] = String(v);
+      else try { out[k] = JSON.stringify(v); } catch { out[k] = String(v); }
+    }
+    return out;
+  } catch {
+    return undefined;
+  }
+}
+
+function readLatestRowFromSqlite(
+  sessionId: string,
+  runId: string,
+  trackerDir: string | undefined,
+  date: string,
+): TrackerEntry | null {
+  const dir = trackerDir ?? ".tracker";
+  if (!existsSync(stateDbPath(dir))) return null;
+  try {
+    const db = openStateDb(dir);
+    const row = db.prepare(`
+      SELECT workflow, item_id, run_id, parent_run_id, latest_tracker_ts, latest_status, latest_step, latest_data_json, latest_error
+      FROM runs
+      WHERE workflow = @workflow AND tracker_date = @date AND item_id = @itemId AND run_id = @runId
+      LIMIT 1
+    `).get({
+      workflow: WORKFLOW,
+      date,
+      itemId: sessionId,
+      runId,
+    }) as {
+      workflow: string;
+      item_id: string;
+      run_id: string;
+      parent_run_id: string | null;
+      latest_tracker_ts: string;
+      latest_status: string;
+      latest_step: string | null;
+      latest_data_json: string | null;
+      latest_error: string | null;
+    } | undefined;
+    if (!row) return null;
+    const data = coerceLatestDataJson(row.latest_data_json);
+    const status = row.latest_status as TrackerEntry["status"];
+    return {
+      workflow: row.workflow,
+      id: row.item_id,
+      runId: row.run_id,
+      ...(row.parent_run_id ? { parentRunId: row.parent_run_id } : {}),
+      timestamp: row.latest_tracker_ts,
+      status,
+      ...(row.latest_step ? { step: row.latest_step } : {}),
+      ...(data ? { data } : {}),
+      ...(row.latest_error ? { error: row.latest_error } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+const OCR_JSONL_TAIL_BYTES = 512 * 1024;
+
+function readLatestRowFromJsonl(
   sessionId: string,
   runId: string,
   trackerDir: string | undefined,
@@ -258,16 +340,62 @@ function readLatestRow(
 ): TrackerEntry | null {
   const file = join(trackerDir ?? ".tracker", `ocr-${date}.jsonl`);
   if (!existsSync(file)) return null;
-  const raw = readFileSync(file, "utf-8");
-  const lines = raw.split("\n").filter(Boolean);
+  let st;
+  try {
+    st = statSync(file);
+  } catch {
+    return null;
+  }
   let latest: TrackerEntry | null = null;
-  for (const line of lines) {
+  const considerLine = (line: string): void => {
+    if (!line) return;
     try {
       const e: TrackerEntry = JSON.parse(line);
       if (e.id === sessionId && e.runId === runId) latest = e;
     } catch { /* tolerate */ }
+  };
+
+  if (st.size <= OCR_JSONL_TAIL_BYTES) {
+    const raw = readFileSync(file, "utf-8");
+    for (const line of raw.split("\n")) considerLine(line);
+    return latest;
   }
+
+  const fd = openSync(file, "r");
+  try {
+    const start = st.size - OCR_JSONL_TAIL_BYTES;
+    const byteLen = st.size - start;
+    const buf = Buffer.alloc(byteLen);
+    let total = 0;
+    while (total < byteLen) {
+      const n = readSync(fd, buf, total, byteLen - total, start + total);
+      if (n === 0) break;
+      total += n;
+    }
+    const chunk = buf.subarray(0, total).toString("utf8");
+    const firstNl = chunk.indexOf("\n");
+    const text = firstNl === -1 ? chunk : chunk.slice(firstNl + 1);
+    for (const line of text.split("\n")) considerLine(line);
+  } finally {
+    closeSync(fd);
+  }
+
+  if (latest) return latest;
+
+  const raw = readFileSync(file, "utf-8");
+  latest = null;
+  for (const line of raw.split("\n")) considerLine(line);
   return latest;
+}
+
+function readLatestRow(
+  sessionId: string,
+  runId: string,
+  trackerDir: string | undefined,
+  date: string,
+): TrackerEntry | null {
+  return readLatestRowFromSqlite(sessionId, runId, trackerDir, date)
+    ?? readLatestRowFromJsonl(sessionId, runId, trackerDir, date);
 }
 
 function parseRecords(data: Record<string, string> | undefined): unknown[] {
@@ -414,37 +542,6 @@ function patchUnresolved(records: unknown[], idx: number): void {
   }
 }
 
-function patchFromOutcome(records: unknown[], idx: number, outcome: ChildOutcome, kind: "name" | "verify" | "verify-only"): void {
-  const rec = records[idx] as Record<string, unknown>;
-  const eid = (outcome.data?.emplId ?? "").trim();
-  const looksLikeEid = /^\d{5,}$/.test(eid);
-
-  if (kind === "name") {
-    if (outcome.status === "done" && looksLikeEid) {
-      if ("employee" in rec) {
-        (rec.employee as Record<string, unknown>).employeeId = eid;
-      } else {
-        rec.employeeId = eid;
-      }
-      rec.matchState = "resolved";
-      rec.matchSource = "eid-lookup";
-    } else {
-      rec.matchState = "unresolved";
-      const warnings = (rec.warnings as string[]) ?? [];
-      warnings.push(`eid-lookup ${outcome.status === "done" ? `returned "${eid || "no result"}"` : "failed"}`);
-      rec.warnings = warnings;
-    }
-  }
-
-  const v = computeVerification({
-    hrStatus: outcome.data?.hrStatus,
-    department: outcome.data?.department,
-    personOrgScreenshot: outcome.data?.personOrgScreenshot,
-  });
-  rec.verification = v;
-  if (v.state !== "verified") rec.selected = false;
-}
-
 function countVerified(records: unknown[]): number {
   let n = 0;
   for (const r of records) {
@@ -452,22 +549,4 @@ function countVerified(records: unknown[]): number {
     if (v?.state === "verified") n++;
   }
   return n;
-}
-
-function computeVerification(d: { hrStatus?: string; department?: string; personOrgScreenshot?: string }): {
-  state: "verified" | "inactive" | "non-hdh" | "lookup-failed";
-  hrStatus?: string;
-  department?: string;
-  screenshotFilename: string;
-  checkedAt: string;
-  error?: string;
-} {
-  const checkedAt = new Date().toISOString();
-  const screenshotFilename = d.personOrgScreenshot ?? "";
-  if (!d.hrStatus) return { state: "lookup-failed", error: "no result", checkedAt, screenshotFilename };
-  const active = d.hrStatus === "Active";
-  const hdh = isAcceptedHdhDepartment(d.department ?? null);
-  if (!active) return { state: "inactive", hrStatus: d.hrStatus, department: d.department, screenshotFilename, checkedAt };
-  if (!hdh) return { state: "non-hdh", hrStatus: d.hrStatus, department: d.department ?? "", screenshotFilename, checkedAt };
-  return { state: "verified", hrStatus: d.hrStatus, department: d.department ?? "", screenshotFilename, checkedAt };
 }

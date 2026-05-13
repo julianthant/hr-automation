@@ -191,6 +191,79 @@ test("runOcrRetryPage preserves rosterPath in the emitted row", async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("runOcrRetryPage keeps row selected when eid-lookup verification is non-hdh (matches main orchestrator)", async () => {
+  const { dir } = setup();
+  const ocrFile = join(dir, "ocr-2026-05-01.jsonl");
+  writeFileSync(ocrFile, JSON.stringify({
+    workflow: "ocr",
+    id: "session-nh",
+    runId: "run-nh",
+    status: "done",
+    step: "awaiting-approval",
+    timestamp: "2026-05-01T00:00:00Z",
+    data: {
+      formType: "oath",
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      sessionId: "session-nh",
+      recordCount: 0,
+      verifiedCount: 0,
+      records: JSON.stringify([]),
+      failedPages: JSON.stringify([
+        { page: 1, error: "rate limit", attemptedKeys: ["gemini-1"], pageImagePath: join(dir, "page-images", "session-nh", "page-01.png"), attempts: 1 },
+      ]),
+      pageStatusSummary: JSON.stringify({ total: 1, succeeded: 0, failed: 1 }),
+    },
+  }) + "\n", "utf-8");
+
+  const writtenEntries: Array<{ status: string; step?: string; data?: Record<string, string> }> = [];
+  await runOcrRetryPage(
+    { sessionId: "session-nh", runId: "run-nh", pageNum: 1 },
+    {
+      trackerDir: dir,
+      date: "2026-05-01",
+      _emitOverride: (e) => writtenEntries.push(e as never),
+      _ocrPageOverride: async () => ({
+        records: [{
+          sourcePage: 1, rowIndex: 0,
+          printedName: "Pat",
+          employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        stillFailed: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000009", name: "Pat" }],
+      _enqueueEidLookupOverride: async () => {},
+      _watchChildRunsOverride: async (opts) => {
+        const itemId = opts.expectedItemIds[0];
+        assert.ok(itemId);
+        return [{
+          workflow: "eid-lookup",
+          itemId,
+          runId: "lr",
+          status: "done",
+          data: {
+            emplId: "10000009",
+            activeStatus: "non-hdh",
+            hrStatus: "Active",
+            department: "NOT-HDH",
+          },
+        }];
+      },
+    },
+  );
+
+  const approval = writtenEntries.find((e) => (e.status === "running" || e.status === "done") && e.step === "awaiting-approval");
+  assert.ok(approval);
+  const records = JSON.parse(approval!.data!.records!) as Array<{ printedName?: string; selected?: boolean; verification?: { state?: string } }>;
+  const pat = records.find((r) => r.printedName === "Pat");
+  assert.ok(pat);
+  assert.equal(pat!.verification?.state, "non-hdh");
+  assert.equal(pat!.selected, true);
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("runOcrRetryPage clamps succeeded to 0 when summary.total is 0 (old rows)", async () => {
   const { dir } = setup();
   const ocrFile = join(dir, "ocr-2026-05-01.jsonl");

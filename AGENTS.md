@@ -96,7 +96,10 @@ src/
     onboarding/        # Kernel (single mode). CRM → UCPath + I9. Daemon mode for repeated runs.
     separations/       # Kernel (4 systems, interleaved auth, sequential batch via runWorkflowBatch).
     old-kronos-reports/# Kernel (pool mode, N workers, per-worker sessionDir via opts.launchFn).
+    oath-signature/    # Kernel + daemon-mode. UCPath oath signature transaction.
     oath-upload/       # Kernel + daemon-mode. ServiceNow + delegated OCR + delegated oath-signature.
+    ocr/               # Kernel (dashboard HTTP only). Upload PDF → OCR → match → delegate downstream.
+    sharepoint-download/ # Kernel helper: headed roster download from SharePoint (dashboard / CLI script).
   infra/               # Runtime infrastructure that makes automation possible.
     auth/              # Per-system login flows + duo-poll + sso-fields (shared).
     browser/           # launchBrowser, tiling math. Kernel-internal.
@@ -269,7 +272,7 @@ Dupe-protection: the kernel provides no tracker-side idempotency cache or step-c
 
 ## Daemon mode (persistent workflow processes)
 
-Kernel workflows exposed on the CLI (`npm run separation <ids>`, `npm run work-study <emplId> <date>`, `npm run eid-lookup <names...>`, `npm run active-check <names-or-eids...>`, `npm run onboarding <emails...>`) default to **daemon mode**:
+Kernel workflows exposed on the CLI (`npm run separation <ids>`, `npm run work-study <emplId> <date>`, `npm run eid-lookup <names...>`, `npm run active-check <names-or-eids...>`, `npm run onboarding <emails...>`, `npm run oath-signature …`, `npm run oath-upload …`, `npm run emergency-contact …`) default to **daemon mode**:
 
 - **First invocation with no alive daemon** → spawns one detached daemon (`tsx src/cli-daemon.ts <workflow>`), waits for auth (Duo once), enqueues the item. Daemon stays alive after processing.
 - **Subsequent invocations** → enqueue tasks in SQLite, append the same queue event to `.tracker/daemons/{workflow}.queue.jsonl` as audit/history, and `POST /wake` every alive daemon. No re-Duo.
@@ -278,7 +281,7 @@ Kernel workflows exposed on the CLI (`npm run separation <ids>`, `npm run work-s
 - **Dashboard controls**: cancel, retry, drain, stop, and browser-kill actions write `worker_commands` rows. Browser kills target recorded `browser_processes.pid` rows, not every Chromium process on the machine.
 - **Keepalive**: every 15 min idle, each daemon runs `session.healthCheck(system)` per system so SAML/Duo sessions don't silently expire between items.
 
-Flags (on `separation`, `work-study`, `eid-lookup`, `active-check`, `onboarding`):
+Flags (on `separation`, `work-study`, `eid-lookup`, `active-check`, `onboarding`, `oath-signature`, `oath-upload`, `emergency-contact`):
 - `-n, --new` — spawn one **additional** daemon even if others are alive.
 - `-p, --parallel <N>` — ensure ≥N daemons are alive before enqueueing (spawns `max(0, N - alive)`).
 
@@ -286,10 +289,10 @@ Flags (on `separation`, `work-study`, `eid-lookup`, `active-check`, `onboarding`
 
 `onboarding` daemon runs the standard `onboardingWorkflow` (CRM + UCPath + I9, 2 Duos per session since I9 is SSO no-2FA). For throughput, start N daemons with `-p N`. Pass multiple emails positionally to fan them across alive daemons via the shared queue.
 
-Lifecycle commands (converted workflows: `separations`, `work-study`, `eid-lookup`, `active-check`, `onboarding`, `oath-signature`, `emergency-contact`):
+Lifecycle commands (converted workflows: `separations`, `work-study`, `eid-lookup`, `active-check`, `onboarding`, `oath-signature`, `oath-upload`, `emergency-contact`):
 - `npm run <workflow>:stop` — soft-stop (drain in-flight, re-queue). Use `-- --force` to mark in-flight as failed and exit immediately.
 
-Converting a new workflow to daemon mode is mechanical — see `src/workflows/AGENTS.md#daemon-mode-conversion-template`. Implementation: `src/core/daemon-{types,registry,queue,client}.ts` + `src/core/daemon.ts` (main loop) + `src/cli-daemon.ts` (entry). Full design doc: `docs/superpowers/specs/2026-04-22-workflow-daemon-mode-design.md`.
+Converting a new workflow to daemon mode is mechanical — see `src/workflows/CLAUDE.md#daemon-mode-conversion-template`. Implementation: `src/core/daemon-{types,registry,queue,client}.ts` + `src/core/daemon.ts` (main loop) + `src/cli-daemon.ts` (entry). Full design doc: `docs/superpowers/specs/2026-04-22-workflow-daemon-mode-design.md`.
 
 When changing queue/control behavior, update SQLite state and JSONL audit together. SQLite is live truth; JSONL is audit/history. Never add a dashboard control that only mutates process-local state.
 
@@ -391,13 +394,13 @@ Current step tracking per workflow. Steps prefixed with `auth:` are auto-prepend
 | active-check | auth:ucpath → checking |
 | ocr | loading-roster → ocr → matching → disambiguating → active-check → eid-lookup → verification → awaiting-approval |
 
-As of 2026-04-18, the dashboard is **observation-only**. The previous "⚡ RUN" drawer + `RunnerLauncher` button + `SchemaForm` + `runner-recents` localStorage helper + the backend `buildSpawnHandler`/`buildCancelHandler`/`buildActiveRunsHandler`/`buildWorkflowSchemaHandler` factories + the child-process registry were all removed. Workflows are launched via the npm scripts above (or whatever replacement launcher the user wires up later — out of scope for this pass). Live session monitoring (`TerminalDrawer`), selector-warning aggregation (`SelectorWarningsPanel`), screenshot browsing (`ScreenshotsPanel` — replaced the inline `FailureDrillDown` on 2026-04-21), step-timing chips (`StepPipeline`), and cross-workflow search (`SearchBar`) all keep working — they read kernel-emitted events from `src/tracker/jsonl.ts`, independent of any launcher.
+As of 2026-04-18, the **generic schema runner** is gone: the "⚡ RUN" drawer + `RunnerLauncher` + `SchemaForm` + `runner-recents` + `buildSpawnHandler`/`buildCancelHandler`/`buildActiveRunsHandler`/`buildWorkflowSchemaHandler` + the child-process registry were removed. **Daemon-mode and Compose workflows** still start from CLI `npm run …` scripts. The dashboard runs **selected** flows in-process via HTTP and modals — e.g. OCR (`RunModal` → `/api/ocr/prepare`), emergency-contact prep, SharePoint roster download, and oath-upload steps — without reviving the old per-workflow spawn registry. Live session monitoring (`TerminalDrawer`), selector warnings (`SelectorWarningsPanel`), screenshots (`ScreenshotsPanel`), step timing (`StepPipeline`), and search (`SearchBar`) consume kernel-emitted events from `src/tracker/jsonl.ts`.
 
 **OCR workflow + delegation primitive (2026-05-01; active-check updated 2026-05-05).** The operator selects the `ocr` workflow (Run button appears), picks a form type (oath / emergency-contact), uploads a PDF. The dashboard backend runs OCR via `src/services/ocr/`, matches against the roster, takes exactly one fuzzy roster candidate, uses LLM disambiguation for multiple candidates, asks the LLM for 2-3 lookup suggestions when no fuzzy candidate exists, enqueues eid-lookup for name candidates, and enqueues active-check for EID candidates before approval. When all rows reach a terminal match state the row shows `step=awaiting-approval` in the QueuePanel; the operator reviews/edits per-row data inline, clicks Approve to fan out N kernel queue items to the downstream daemon (oath-signature or emergency-contact). SharePoint roster download delegates as a child workflow (`parentRunId` links the child row back). Reupload carries forward resolved EIDs from the previous run. Implementation: `src/workflows/ocr/`, `src/tracker/ocr-http.ts`, `src/dashboard/components/ocr/`, `src/tracker/delegation/watch-child-runs.ts`.
 
 **SQLite task dependencies cutover (2026-05-04; active-check added 2026-05-05).** OCR's initial `eid-lookup` and `active-check` delegation now records parent/child task rows in SQLite and lets the dependency scheduler patch OCR records from projected child run state. `watchChildRuns` remains as fallback and still owns non-migrated waits such as force-research, whole-PDF re-OCR, SharePoint roster wait, oath-upload OCR approval, and downstream signature waits.
 
-Implementation details live in `src/dashboard/AGENTS.md` (frontend) and `src/tracker/AGENTS.md` (backend).
+Implementation details: `src/dashboard/CLAUDE.md` (frontend), `src/dashboard/components/AGENTS.md` (component placement), `src/tracker/CLAUDE.md` (backend / tracker).
 
 ## Pending follow-ups (deferred)
 
@@ -496,7 +499,7 @@ After mapping, add the selector to the relevant `src/systems/<system>/selectors.
 These patterns existed pre-kernel and are intentionally removed. Do not reintroduce them:
 
 - **`WorkflowSession.create()`** — pre-kernel shared-auth abstraction. Replaced by `Session.launch()` inside `src/core/`. Workflows access it only as an escape hatch via `ctx.session`.
-- **Inline `withTrackedWorkflow` / `withLogContext`** — handlers now wrap nothing; the kernel wraps each item automatically. No remaining in-repo callers — all 6 workflows delegate to the kernel's per-item wrapping.
+- **Inline `withTrackedWorkflow` / `withLogContext`** — workflow handlers never wrap these; the kernel wraps each item (`runWorkflow`, batch/pool, daemon) via `withLogContext` + `withTrackedWorkflow`.
 - **Inline `launchBrowser` from handlers** — kernel owns browser lifecycle. Use `ctx.page(id)`.
 - **Hand-rolled auth-ready promises** — `authChain: "interleaved"` in the kernel does this. Older docs showed ~140 lines of promise-chain recipes; they are obsolete.
 - **`WF_CONFIG` in the frontend** — deleted in subsystem D. Dashboard UI metadata is now server-side in the kernel registry.
@@ -508,7 +511,7 @@ These patterns existed pre-kernel and are intentionally removed. Do not reintrod
 <claude-mem-context>
 # Memory Context
 
-# [hr-automation] recent context, 2026-05-12 12:41pm PDT
+# [hr-automation] recent context, 2026-05-12 5:46pm PDT
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE

@@ -72,7 +72,7 @@ export function dedupeLatestByIdWithCarriedEmplId(raw: TrackerEntry[]): TrackerE
 }
 
 function isPrepareMode(e: TrackerEntry): boolean {
-  return e.data?.mode === "prepare";
+  return e.workflow === "ocr" || e.data?.mode === "prepare" || e.id.startsWith("ocr-prep-");
 }
 
 function isDiscardedPrepForQueueStrip(e: TrackerEntry): boolean {
@@ -81,6 +81,7 @@ function isDiscardedPrepForQueueStrip(e: TrackerEntry): boolean {
 }
 
 function isApprovedPrepForQueueStrip(e: TrackerEntry): boolean {
+  if (e.workflow === "ocr") return false;
   if (!isPrepareMode(e)) return false;
   return e.status === "done" && e.step === "approved";
 }
@@ -140,6 +141,7 @@ export function collapseMergedPrimariesForQueueStrip(entries: readonly TrackerEn
 
   const batchMembersByParent = new Map<string, TrackerEntry[]>();
   for (const e of visible) {
+    if (e.workflow === "ocr") continue;
     if (!e.parentRunId) continue;
     const list = batchMembersByParent.get(e.parentRunId) ?? [];
     list.push(e);

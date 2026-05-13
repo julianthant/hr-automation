@@ -28,6 +28,12 @@ export function patchOcrRecordFromEidLookupOutcome(
   if (!rec) return;
   const eid = (outcome.data?.emplId ?? "").trim();
   const looksLikeEid = /^\d{5,}$/.test(eid);
+  const existingEid = getRecordEmployeeId(rec);
+  const existingVerification = rec.verification as { state?: string } | undefined;
+  const alreadyResolved =
+    rec.matchState === "resolved" &&
+    existingEid &&
+    existingVerification?.state !== "inactive";
 
   if (kind === "name") {
     if (outcome.status === "done" && looksLikeEid) {
@@ -40,6 +46,7 @@ export function patchOcrRecordFromEidLookupOutcome(
       rec.matchSource = "eid-lookup";
       rec.selected = true;
     } else {
+      if (alreadyResolved) return;
       rec.matchState = "unresolved";
       const warnings = Array.isArray(rec.warnings) ? rec.warnings as string[] : [];
       warnings.push(`eid-lookup ${outcome.status === "done" ? `returned "${eid || "no result"}"` : "failed"}`);
@@ -69,15 +76,15 @@ export function patchOcrRecordFromEidLookupOutcome(
   rec.verification = verification;
 
   if (kind === "name") {
-    if (verification.state === "inactive" || verification.state === "non-hdh") {
+    if (verification.state === "inactive") {
       rec.selected = false;
     }
     return;
   }
 
-  if (verification.state === "inactive" || verification.state === "non-hdh" || verification.state === "lookup-failed") {
+  if (verification.state === "inactive" || verification.state === "lookup-failed") {
     rec.selected = false;
-  } else if (verification.state === "verified") {
+  } else if (verification.state === "verified" || verification.state === "non-hdh") {
     rec.selected = true;
   }
 }
@@ -107,11 +114,35 @@ export function patchOcrRecordFromActiveCheckOutcome(
     terminationDate: outcome.data?.terminationDate,
   });
   rec.verification = verification;
-  if (verification.state === "inactive" || verification.state === "non-hdh" || verification.state === "lookup-failed") {
+  if (verification.state === "inactive" || verification.state === "lookup-failed") {
     rec.selected = false;
-  } else if (verification.state === "verified") {
+  } else if (verification.state === "verified" || verification.state === "non-hdh") {
     rec.selected = true;
   }
+}
+
+function getRecordEmployeeId(record: Record<string, unknown>): string {
+  if (typeof record.employeeId === "string") return record.employeeId.trim();
+  const employee = record.employee as Record<string, unknown> | undefined;
+  if (employee && typeof employee.employeeId === "string") return employee.employeeId.trim();
+  return "";
+}
+
+function looksInactiveHrLabel(hr: string): boolean {
+  return /inactive|terminated|separated/i.test(hr);
+}
+
+function parseBoolish(v: unknown): boolean | undefined {
+  if (v === true || v === "true") return true;
+  if (v === false || v === "false") return false;
+  return undefined;
+}
+
+function looksActiveHrCell(hrRaw: string | undefined): boolean {
+  const hr = hrRaw?.trim() ?? "";
+  if (!hr || looksInactiveHrLabel(hr)) return false;
+  if (/^active\b/i.test(hr)) return true;
+  return /\bactive\b/i.test(hr);
 }
 
 export function computeOcrVerification(d: {
@@ -132,21 +163,58 @@ export function computeOcrVerification(d: {
 } {
   const checkedAt = new Date().toISOString();
   const screenshotFilename = d.personOrgScreenshot ?? "";
-  const activeStatus = d.activeStatus?.trim();
-  if (activeStatus) {
-    if (activeStatus === "active") {
+  const activeSummary = d.activeStatus?.trim().toLowerCase() ?? "";
+  if (activeSummary) {
+    if (activeSummary === "active") {
       return { state: "verified", hrStatus: d.hrStatus, department: d.department ?? "", screenshotFilename, checkedAt };
     }
-    if (activeStatus === "non-hdh") {
+    if (activeSummary === "non-hdh") {
       return { state: "non-hdh", hrStatus: d.hrStatus, department: d.department ?? "", screenshotFilename, checkedAt };
     }
-    if (activeStatus === "inactive") {
+    if (activeSummary === "inactive") {
       return { state: "inactive", hrStatus: d.hrStatus, department: d.department, screenshotFilename, checkedAt };
     }
-    return { state: "lookup-failed", error: activeStatus, checkedAt, screenshotFilename };
+    return {
+      state: "lookup-failed",
+      error: d.activeStatus?.trim() || activeSummary,
+      checkedAt,
+      screenshotFilename,
+    };
   }
-  if (!d.hrStatus) return { state: "lookup-failed", error: "no result", checkedAt, screenshotFilename };
-  const active = d.hrStatus === "Active";
+
+  const iso = parseBoolish(d.isActive);
+  const hdhOk = parseBoolish(d.isHdhAccepted);
+  if (iso === true && hdhOk === true) {
+    return {
+      state: "verified",
+      hrStatus: d.hrStatus,
+      department: d.department ?? "",
+      screenshotFilename,
+      checkedAt,
+    };
+  }
+  if (iso === false) {
+    return {
+      state: "inactive",
+      hrStatus: d.hrStatus,
+      department: d.department,
+      screenshotFilename,
+      checkedAt,
+    };
+  }
+  if (iso === true && hdhOk === false) {
+    return {
+      state: "non-hdh",
+      hrStatus: d.hrStatus,
+      department: d.department ?? "",
+      screenshotFilename,
+      checkedAt,
+    };
+  }
+
+  const hr = (d.hrStatus ?? "").trim();
+  if (!hr) return { state: "lookup-failed", error: "no result", checkedAt, screenshotFilename };
+  const active = looksActiveHrCell(hr);
   const hdh = isAcceptedHdhDepartment(d.department ?? null);
   if (!active) return { state: "inactive", hrStatus: d.hrStatus, department: d.department, screenshotFilename, checkedAt };
   if (!hdh) return { state: "non-hdh", hrStatus: d.hrStatus, department: d.department ?? "", screenshotFilename, checkedAt };
