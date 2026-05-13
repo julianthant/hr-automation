@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import type { ReactNode } from "react";
 import { TerminalSquare } from "lucide-react";
 import { StepPipeline } from "./StepPipeline";
@@ -9,7 +9,6 @@ import { ScreenshotsPanel } from "./ScreenshotsPanel";
 import { EditDataTab } from "./EditDataTab";
 import { useLogs } from "@/components/hooks/useLogs";
 import { useRunEvents } from "@/components/hooks/useRunEvents";
-import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry, RunInfo } from "@/components/shared/types";
 import { formatTrackerValue, isMonospaceKey } from "@/components/shared/types";
@@ -48,11 +47,6 @@ interface LogPanelProps {
   onDeleteEntry?: () => void;
 }
 
-// Special virtual keys the generic detail renderer recognizes. These come
-// from the entry's timestamp metadata rather than tracker data, so the
-// type-aware formatter can't handle them — we branch on the key.
-const COMPUTED_KEYS = new Set(["__started", "__elapsed"]);
-
 export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultTab, previewSlot, previewHeaderSlot, previewAvailable, onPreviewVisibleChange, onDeleteEntry }: LogPanelProps) {
   const [runs, setRuns] = useState<RunInfo[]>([]);
   const [activeRunId, setActiveRunId] = useState<string | null>(entry?.runId || null);
@@ -63,16 +57,23 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
   useEffect(() => { setMaximized(false); }, [entry?.id, entry?.runId]);
 
   // Compute child entries (other entries where parentRunId === this run's runId).
-  const childEntries: TrackerEntry[] = entry?.runId && allEntries
-    ? allEntries.filter((e) => e.parentRunId === entry.runId && e.id !== entry.id)
-    : [];
+  const childEntries: TrackerEntry[] = useMemo(
+    () =>
+      entry?.runId && allEntries
+        ? allEntries.filter((e) => e.parentRunId === entry.runId && e.id !== entry.id)
+        : [],
+    [allEntries, entry?.id, entry?.runId],
+  );
   const registeredSteps = registered?.steps ?? [];
   const detailFields = registered?.detailFields ?? [];
 
   // Stable key for the sibling list so we don't refetch on every parent
   // re-render — the siblings array reference may differ each tick even
   // when its contents are identical.
-  const siblingIdsKey = (siblings ?? []).map((s) => s.id).sort().join("|");
+  const siblingIdsKey = useMemo(
+    () => (siblings ?? []).map((s) => s.id).sort().join("|"),
+    [siblings],
+  );
 
   // Fetch runs when entry changes or a new run appears. When siblings are
   // present (merged-entry group), fetch each member's runs and pool them
@@ -173,16 +174,21 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
   };
   const { logs, loading: logsLoading } = useLogs(logSourceWorkflow, activeItemId, activeRunId, date);
   const { events } = useRunEvents(logSourceWorkflow, activeItemId, activeRunId, date);
-  // Count screenshot events for the screenshots tab; ScreenshotsPanel uses
-  // this to refetch /api/screenshots without opening its own SSE.
-  const screenshotEventCount = events.reduce(
-    (n, e) => (e.type === "screenshot" ? n + 1 : n),
-    0,
+  const screenshotEventCount = useMemo(
+    () => events.reduce((n, e) => (e.type === "screenshot" ? n + 1 : n), 0),
+    [events],
   );
-  const trackerFallbackLog = deriveTrackerFallbackLog(entry, activeRunId);
-  const displayedLogs = !logsLoading && logs.length === 0 && trackerFallbackLog
-    ? [trackerFallbackLog]
-    : logs;
+  const trackerFallbackLog = useMemo(
+    () => deriveTrackerFallbackLog(entry, activeRunId),
+    [entry, activeRunId],
+  );
+  const displayedLogs = useMemo(
+    () =>
+      !logsLoading && logs.length === 0 && trackerFallbackLog
+        ? [trackerFallbackLog]
+        : logs,
+    [logs, logsLoading, trackerFallbackLog],
+  );
 
   // Derive step/status from active run when viewing a HISTORICAL run via the
   // RunSelector. For the LIVE run (activeRun matches the SSE-delivered entry's
@@ -200,31 +206,21 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
     ? (entry?.step || activeRun?.step || null)
     : (activeRun?.step || null);
   const runStepDurations = activeRun?.stepDurations ?? entry?.stepDurations;
-  const steps =
-    workflow === "ocr"
-      ? registeredSteps.filter((step) => {
-          if (step === "awaiting-approval") return Boolean(entry?.parentRunId);
-          return true;
-        })
-      : registeredSteps;
+  const steps = useMemo(
+    () =>
+      workflow === "ocr"
+        ? registeredSteps.filter((step) => {
+            if (step === "awaiting-approval") return Boolean(entry?.parentRunId);
+            return true;
+          })
+        : registeredSteps,
+    [entry?.parentRunId, registeredSteps, workflow],
+  );
 
-  // Prefer the per-run timestamps on the selected RunInfo; fall back to the
-  // deduped entry's fields so the live (latest) run keeps working even
-  // before /api/runs has returned. Using the run-scoped values means
-  // "Started" + "Elapsed" actually switch when the operator picks an older
-  // run in the RunSelector, instead of always mirroring the latest run.
-  const firstTs =
-    activeRun?.firstLogTs ||
-    entry?.firstLogTs ||
-    entry?.startTimestamp ||
-    entry?.timestamp ||
-    null;
-  const lastTs =
-    activeRun?.lastLogTs || entry?.lastLogTs || entry?.timestamp || null;
-  const elapsed = useElapsed(runStatus === "running" ? firstTs : null);
-  const duration = runStatus !== "running" && firstTs && lastTs && firstTs !== lastTs
-    ? formatDuration(firstTs, lastTs)
-    : null;
+  const allDetailFields = useMemo(
+    () => detailFields.filter((f) => f.displayInGrid !== false),
+    [detailFields],
+  );
 
   if (!entry) {
     return (
@@ -238,26 +234,10 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
     );
   }
 
-  const displayTs = firstTs || entry.timestamp;
-  const startTime = displayTs
-    ? new Date(displayTs).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" })
-    : "";
-
-  // Compose the full detail-field list: registered workflow fields whose
-  // `displayInGrid` isn't explicitly false + the two synthesized
-  // (Started/Elapsed) cells. Edit-only fields (e.g. separations'
-  // separationDate) stay declared on the workflow but are hidden here —
-  // they only render in the Edit Data tab.
-  const allDetailFields: Array<{ key: string; label: string }> = [
-    ...detailFields.filter((f) => f.displayInGrid !== false),
-    { key: "__started", label: "Started" },
-    { key: "__elapsed", label: "Elapsed" },
-  ];
-
   // The detail grid renders fields off `formatTrackerValue(entry, key)`,
-  // which reads `entry.data[key]`. When the operator is viewing a HISTORICAL
-  // run via the RunSelector, the deduped entry's data is the LATEST run's
-  // data (often null/empty for cancelled rows) \u2014 not the data captured by
+  // which reads `entry.data[key]`. `allDetailFields` is memoized above.
+  // When the operator is viewing a HISTORICAL run via the RunSelector, the deduped entry's data is the LATEST run's
+  // data (often null/empty for cancelled rows) — not the data captured by
   // the run they actually selected. Use the per-run `data` carried on
   // `RunInfo` (server-side `runs.latest_data_json` via `/api/runs`) so
   // switching the run pill repaints the grid with that run's own values.
@@ -271,11 +251,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
     ? { ...entry, data: activeRun.data as TrackerEntry["data"], typedData: undefined }
     : entry;
 
-  const renderDetailValue = (key: string): string => {
-    if (key === "__started") return startTime;
-    if (key === "__elapsed") return elapsed || duration || "\u2014";
-    return formatTrackerValue(detailEntry, key);
-  };
+  const renderDetailValue = (key: string): string => formatTrackerValue(detailEntry, key);
 
   const Skeleton = ({ className }: { className?: string }) => (
     <div className={cn("rounded bg-muted animate-pulse", className)} />
@@ -293,16 +269,12 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
       {!maximized && (<>
       {/* Detail grid — rendered from registry metadata via formatTrackerValue;
           auto-adapts to any workflow's detailFields declaration. Wraps to
-          rows of 4. Special __started / __elapsed keys are synthesized from
-          entry timestamps. */}
+          rows of 4. */}
       {!hideDetailGrid && (
         <div className="grid grid-cols-4 flex-shrink-0">
           {allDetailFields.map((f) => {
             const value = renderDetailValue(f.key);
-            const isComputed = COMPUTED_KEYS.has(f.key);
-            // Monospace treatment for id-like fields + computed timestamps
-            const mono = isComputed || isMonospaceKey(f.key);
-            const isRunningElapsed = f.key === "__elapsed" && runStatus === "running";
+            const mono = isMonospaceKey(f.key);
             return (
               <div
                 key={f.key}
@@ -318,7 +290,6 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
                   <div className={cn(
                     "text-sm truncate leading-tight",
                     mono ? "font-mono" : "font-medium",
-                    isRunningElapsed && "text-primary",
                   )} title={value}>
                     {value}
                   </div>

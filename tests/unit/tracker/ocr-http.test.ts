@@ -140,6 +140,33 @@ test("POST /api/ocr/discard-prepare emits failed step=discarded", async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("POST /api/ocr/discard-prepare mirrors explicit parent row without OCR history", async () => {
+  const dir = setup();
+  const handler = buildOcrDiscardHandler({ trackerDir: dir });
+  const resp = await handler({
+    sessionId: "s-parent",
+    runId: "r-ocr",
+    reason: "Cancelled from oath-signature queue",
+    parentWorkflow: "oath-signature",
+    parentRunId: "r-parent",
+    parentItemId: "ocr-prep-s-parent",
+    formType: "oath",
+  });
+  assert.equal(resp.status, 200);
+
+  const parentFile = join(dir, `oath-signature-${todayLocal()}.jsonl`);
+  assert.ok(existsSync(parentFile));
+  const parentLines = readFileSync(parentFile, "utf-8").split("\n").filter(Boolean);
+  const lastParent = JSON.parse(parentLines[parentLines.length - 1]);
+  assert.equal(lastParent.workflow, "oath-signature");
+  assert.equal(lastParent.id, "ocr-prep-s-parent");
+  assert.equal(lastParent.runId, "r-parent");
+  assert.equal(lastParent.status, "failed");
+  assert.equal(lastParent.step, "discarded");
+  assert.equal(lastParent.error, "Cancelled from oath-signature queue");
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("sweepStuckOcrRows marks running rows failed", () => {
   const dir = setup();
   const file = join(dir, `ocr-${todayLocal()}.jsonl`);
@@ -407,8 +434,6 @@ test("buildOcrApproveHandler forwards parentRunId to ensureDaemonsAndEnqueueOver
     const resp = await handler({
       sessionId: "session-approve-1",
       runId: "run-approve-1",
-      previewReady: true,
-      previewPageCount: 2,
       records,
     });
 
@@ -424,11 +449,99 @@ test("buildOcrApproveHandler forwards parentRunId to ensureDaemonsAndEnqueueOver
     const approvedEntry = lines.find((e: { step?: string }) => e.step === "approved");
     assert.ok(approvedEntry, "post-approve entry should exist");
     assert.equal(approvedEntry.parentRunId, "oath-upload-run-1", "post-approve entry should carry parentRunId");
+    assert.equal(approvedEntry.data?.mode, "prepare", "approved OCR row should remain a prep/review row");
+    assert.equal(approvedEntry.data?.formType, "oath");
+    assert.equal(approvedEntry.data?.pdfOriginalName, "fake.pdf");
+    assert.equal(approvedEntry.data?.recordCount, "2");
+    const approvedRecords = JSON.parse(approvedEntry.data.records as string) as Array<{ printedName?: string }>;
+    assert.equal(approvedRecords.length, 2);
+    assert.equal(approvedRecords[0].printedName, "Alice One");
     assert.ok(approvedEntry.data?.fannedOutItemIds, "post-approve entry should have fannedOutItemIds");
     const parsedIds = JSON.parse(approvedEntry.data.fannedOutItemIds as string) as string[];
     assert.equal(parsedIds.length, 2, "fannedOutItemIds should have 2 elements");
     assert.equal(typeof parsedIds[0], "string");
     assert.equal(typeof parsedIds[1], "string");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("buildOcrApproveHandler preserves origin parent prep metadata when marking approved", async () => {
+  const dir = join(tmpdir(), `ocr-approve-origin-parent-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  try {
+    const parentRunId = "origin-parent-run";
+    const sessionId = "session-origin-parent";
+    const runId = "run-origin-parent";
+    const parentItemId = `ocr-prep-${sessionId}`;
+    const parentFile = join(dir, `oath-signature-${dateLocalForTest()}.jsonl`);
+    writeFileSync(parentFile, JSON.stringify({
+      workflow: "oath-signature",
+      id: parentItemId,
+      runId: parentRunId,
+      status: "running",
+      step: "ocr",
+      timestamp: "2026-05-01T00:00:00Z",
+      data: {
+        __name: "OCR Prep · fake.pdf",
+        __id: parentItemId,
+        mode: "prepare",
+        pdfOriginalName: "fake.pdf",
+        ocrSessionId: sessionId,
+        ocrRunId: runId,
+      },
+    }) + "\n", "utf-8");
+
+    const ocrFile = join(dir, `ocr-${dateLocalForTest()}.jsonl`);
+    writeFileSync(ocrFile, JSON.stringify({
+      workflow: "ocr",
+      id: sessionId,
+      runId,
+      status: "done",
+      step: "awaiting-approval",
+      timestamp: "2026-05-01T00:00:00Z",
+      parentRunId,
+      data: {
+        formType: "oath",
+        pdfPath: "/tmp/fake.pdf",
+        pdfOriginalName: "fake.pdf",
+        sessionId,
+        records: JSON.stringify([]),
+      },
+    }) + "\n", "utf-8");
+
+    const handler = buildOcrApproveHandler({
+      trackerDir: dir,
+      ensureDaemonsAndEnqueueOverride: async () => {},
+    });
+
+    const resp = await handler({
+      sessionId,
+      runId,
+      records: [
+        {
+          employeeId: "10000001",
+          printedName: "Alice One",
+          selected: true,
+          matchState: "matched",
+          employeeSigned: true,
+          officerSigned: true,
+          dateSigned: "05/01/2026",
+          sourcePage: 1,
+          rowIndex: 0,
+        },
+      ],
+    });
+
+    assert.equal(resp.status, 200);
+    const parentLines = readFileSync(parentFile, "utf-8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const approvedParent = parentLines[parentLines.length - 1] as { status: string; step?: string; data?: Record<string, string> };
+    assert.equal(approvedParent.status, "done");
+    assert.equal(approvedParent.step, "approved");
+    assert.equal(approvedParent.data?.mode, "prepare");
+    assert.equal(approvedParent.data?.ocrSessionId, sessionId);
+    assert.equal(approvedParent.data?.ocrRunId, runId);
+    assert.equal(approvedParent.data?.fannedOutCount, "1");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -467,8 +580,6 @@ test("buildOcrApproveHandler propagates dryRun from OCR row to downstream inputs
     const resp = await handler({
       sessionId: "session-approve-dry",
       runId: "run-approve-dry",
-      previewReady: true,
-      previewPageCount: 1,
       records: [
         {
           employeeId: "10000001",
@@ -536,8 +647,6 @@ test("buildOcrApproveHandler creates SQLite dependency rows from approval fan-ou
     const resp = await handler({
       sessionId: "session-approve-deps",
       runId: "run-approve-deps",
-      previewReady: true,
-      previewPageCount: 1,
       records: [
         {
           employeeId: "10000001",
@@ -619,8 +728,6 @@ test("buildOcrApproveHandler back-compat: no parentRunId on OCR row → spy call
     const resp = await handler({
       sessionId: "session-approve-2",
       runId: "run-approve-2",
-      previewReady: true,
-      previewPageCount: 1,
       records,
     });
 
@@ -643,15 +750,14 @@ test("buildOcrApproveHandler back-compat: no parentRunId on OCR row → spy call
   }
 });
 
-test("buildOcrApproveHandler rejects approval when source preview readiness is missing", async () => {
-  const dir = join(tmpdir(), `ocr-approve-preview-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+test("buildOcrApproveHandler approves without preview readiness props", async () => {
+  const dir = join(tmpdir(), `ocr-approve-skip-preview-props-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
   try {
-    const ocrFile = join(dir, `ocr-${dateLocalForTest()}.jsonl`);
-    writeFileSync(ocrFile, JSON.stringify({
+    writeFileSync(join(dir, `ocr-${dateLocalForTest()}.jsonl`), JSON.stringify({
       workflow: "ocr",
-      id: "session-preview-required",
-      runId: "run-preview-required",
+      id: "session-preview-props-removed",
+      runId: "run-preview-props-removed",
       status: "done",
       step: "awaiting-approval",
       timestamp: "2026-05-01T00:00:00Z",
@@ -659,7 +765,7 @@ test("buildOcrApproveHandler rejects approval when source preview readiness is m
         formType: "oath",
         pdfPath: "/tmp/fake.pdf",
         pdfOriginalName: "fake.pdf",
-        sessionId: "session-preview-required",
+        sessionId: "session-preview-props-removed",
         records: JSON.stringify([]),
       },
     }) + "\n", "utf-8");
@@ -673,8 +779,8 @@ test("buildOcrApproveHandler rejects approval when source preview readiness is m
     });
 
     const resp = await handler({
-      sessionId: "session-preview-required",
-      runId: "run-preview-required",
+      sessionId: "session-preview-props-removed",
+      runId: "run-preview-props-removed",
       records: [
         {
           employeeId: "10000001",
@@ -690,132 +796,8 @@ test("buildOcrApproveHandler rejects approval when source preview readiness is m
       ],
     });
 
-    assert.equal(resp.status, 400);
-    assert.equal(enqueueCalled, false);
-    assert.match((resp.body as { ok: false; error: string }).error, /Source preview is not available/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-// Case (g): previewReady=false → 400 with actionable message
-test("buildOcrApproveHandler rejects when previewReady is explicitly false", async () => {
-  const dir = join(tmpdir(), `ocr-approve-preview-false-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
-  try {
-    let enqueueCalled = false;
-    const handler = buildOcrApproveHandler({
-      trackerDir: dir,
-      ensureDaemonsAndEnqueueOverride: async () => {
-        enqueueCalled = true;
-      },
-    });
-
-    const resp = await handler({
-      sessionId: "session-preview-false",
-      runId: "run-preview-false",
-      previewReady: false,
-      previewPageCount: 2,
-      records: [
-        {
-          employeeId: "10000001",
-          printedName: "Alice One",
-          selected: true,
-          matchState: "matched",
-          employeeSigned: true,
-          officerSigned: true,
-          dateSigned: "05/01/2026",
-          sourcePage: 1,
-          rowIndex: 0,
-        },
-      ],
-    });
-
-    assert.equal(resp.status, 400);
-    assert.equal(enqueueCalled, false);
-    assert.match((resp.body as { ok: false; error: string }).error, /Source preview is not available/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-// Case (h): previewReady=true but previewPageCount<=0 → 400 with actionable message
-test("buildOcrApproveHandler rejects when previewReady is true but previewPageCount is 0", async () => {
-  const dir = join(tmpdir(), `ocr-approve-preview-zero-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
-  try {
-    let enqueueCalled = false;
-    const handler = buildOcrApproveHandler({
-      trackerDir: dir,
-      ensureDaemonsAndEnqueueOverride: async () => {
-        enqueueCalled = true;
-      },
-    });
-
-    const resp = await handler({
-      sessionId: "session-preview-zero",
-      runId: "run-preview-zero",
-      previewReady: true,
-      previewPageCount: 0,
-      records: [
-        {
-          employeeId: "10000001",
-          printedName: "Alice One",
-          selected: true,
-          matchState: "matched",
-          employeeSigned: true,
-          officerSigned: true,
-          dateSigned: "05/01/2026",
-          sourcePage: 1,
-          rowIndex: 0,
-        },
-      ],
-    });
-
-    assert.equal(resp.status, 400);
-    assert.equal(enqueueCalled, false);
-    assert.match((resp.body as { ok: false; error: string }).error, /Source preview is not available/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-// Case (h): previewReady=true but previewPageCount is negative → 400
-test("buildOcrApproveHandler rejects when previewPageCount is negative", async () => {
-  const dir = join(tmpdir(), `ocr-approve-preview-neg-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
-  try {
-    let enqueueCalled = false;
-    const handler = buildOcrApproveHandler({
-      trackerDir: dir,
-      ensureDaemonsAndEnqueueOverride: async () => {
-        enqueueCalled = true;
-      },
-    });
-
-    const resp = await handler({
-      sessionId: "session-preview-neg",
-      runId: "run-preview-neg",
-      previewReady: true,
-      previewPageCount: -1,
-      records: [
-        {
-          employeeId: "10000001",
-          printedName: "Alice One",
-          selected: true,
-          matchState: "matched",
-          employeeSigned: true,
-          officerSigned: true,
-          dateSigned: "05/01/2026",
-          sourcePage: 1,
-          rowIndex: 0,
-        },
-      ],
-    });
-
-    assert.equal(resp.status, 400);
-    assert.equal(enqueueCalled, false);
-    assert.match((resp.body as { ok: false; error: string }).error, /Source preview is not available/);
+    assert.equal(resp.status, 200);
+    assert.ok(enqueueCalled);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

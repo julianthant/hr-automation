@@ -19,10 +19,34 @@ describe("isApprovedPrepRow", () => {
     );
   });
 
+  it("returns true for legacy approved ocr-prep parent rows without carried data", () => {
+    assert.equal(
+      isApprovedPrepRow({
+        id: "ocr-prep-session-1",
+        status: "done",
+        step: "approved",
+        data: { fannedOutCount: "1" },
+      }),
+      true,
+    );
+  });
+
   it("returns false when not a prep row", () => {
     assert.equal(
       isApprovedPrepRow({ status: "done", step: "approved", data: {} }),
       false,
+    );
+  });
+
+  it("returns true for approved OCR rows so they can render as approval delegations", () => {
+    assert.equal(
+      isApprovedPrepRow({
+        workflow: "ocr",
+        status: "done",
+        step: "approved",
+        data: { mode: "prepare" },
+      }),
+      true,
     );
   });
 
@@ -56,6 +80,18 @@ describe("isDiscardedPrepRow", () => {
         status: "failed",
         step: "discarded",
         data: { mode: "prepare" },
+      }),
+      true,
+    );
+  });
+
+  it("returns true for discarded OCR rows without carried data", () => {
+    assert.equal(
+      isDiscardedPrepRow({
+        workflow: "ocr",
+        status: "failed",
+        step: "discarded",
+        data: {},
       }),
       true,
     );
@@ -104,6 +140,18 @@ describe("isResolvedPrepRow", () => {
         data: { mode: "prepare" },
       }),
       true,
+    );
+  });
+
+  it("returns false for approved OCR rows so the approval delegation remains visible", () => {
+    assert.equal(
+      isResolvedPrepRow({
+        workflow: "ocr",
+        status: "done",
+        step: "approved",
+        data: { mode: "prepare" },
+      }),
+      false,
     );
   });
 

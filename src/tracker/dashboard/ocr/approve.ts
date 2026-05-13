@@ -1,4 +1,4 @@
-import { trackEvent, appendLogEntry } from "../../jsonl.js";
+import { trackEvent, appendLogEntry, readEntries } from "../../jsonl.js";
 import { log } from "../../../utils/log.js";
 import { errorMessage } from "../../../utils/errors.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
@@ -14,9 +14,8 @@ export interface ApproveInput {
   sessionId: string;
   runId: string;
   records: unknown[];
-  previewReady?: boolean;
-  previewPageCount?: number;
 }
+
 export interface ApproveResponse {
   status: 200 | 400 | 500;
   body:
@@ -41,12 +40,6 @@ export function buildOcrApproveHandler(
     if (!input.sessionId || !input.runId || !Array.isArray(input.records)) {
       return { status: 400, body: { ok: false, error: "Missing sessionId/runId/records" } };
     }
-    if (input.previewReady !== true || !Number.isFinite(input.previewPageCount) || Number(input.previewPageCount) <= 0) {
-      return {
-        status: 400,
-        body: { ok: false, error: "Source preview is not available yet; reopen the Preview tab or retry OCR before approving." },
-      };
-    }
     const formType = readFormType(input.sessionId, trackerDir);
     if (!formType) {
       return { status: 400, body: { ok: false, error: "Could not resolve formType for session" } };
@@ -58,6 +51,7 @@ export function buildOcrApproveHandler(
 
     const parentRunId = readParentRunId(input.sessionId, trackerDir);
     const dryRun = readDryRun(input.sessionId, trackerDir);
+    const latestReviewData = readLatestOcrReviewData(input.sessionId, input.runId, trackerDir);
 
     // Only fan out records the operator selected in the preview pane.
     // Unsigned rows / unverified rows / unknown-doc rows are kept in the
@@ -102,6 +96,12 @@ export function buildOcrApproveHandler(
         status: "done",
         step: "approved",
         data: {
+          ...latestReviewData,
+          mode: "prepare",
+          formType,
+          sessionId: input.sessionId,
+          records: JSON.stringify(input.records),
+          recordCount: String(input.records.length),
           fannedOutCount: String(fannedOut.length),
           fannedOutItemIds: JSON.stringify(itemIds),
           ...(dryRun ? { dryRun: "true" } : {}),
@@ -147,6 +147,7 @@ export function buildOcrApproveHandler(
             enqueueInputs as never,
             {},
             {
+              trackerDir,
               deriveItemId: (inp: unknown) => inputToItemId.get(JSON.stringify(inp)) ?? `ocr-fallback-${input.runId}-r0`,
               ...(parentRunId ? { parentRunId } : {}),
             },
@@ -211,10 +212,24 @@ export function buildOcrApproveHandler(
   };
 }
 
+function readLatestOcrReviewData(
+  sessionId: string,
+  runId: string,
+  trackerDir?: string,
+): Record<string, string> {
+  const rows = readEntries(WORKFLOW, trackerDir);
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i];
+    if (row.id !== sessionId || row.runId !== runId || !row.data) continue;
+    return { ...row.data };
+  }
+  return {};
+}
+
 /**
  * Emit the terminal step transition on the origin parent row when OCR is
- * approved. After this fires, the kernel daemon items (children with the
- * same parentRunId) take over and surface as their own queue rows.
+ * approved. Keep the parent tagged as `mode=prepare` so the dashboard can
+ * fold it together with delegated daemon children under one queue row.
  */
 function writeOriginParentApproved(args: {
   originWorkflow: string;
@@ -224,6 +239,7 @@ function writeOriginParentApproved(args: {
   trackerDir?: string;
 }): void {
   const ts = new Date().toISOString();
+  const latestParentData = readLatestEntryData(args.originWorkflow, args.parentItemId, args.parentRunId, args.trackerDir);
   trackEvent(
     {
       workflow: args.originWorkflow,
@@ -232,7 +248,11 @@ function writeOriginParentApproved(args: {
       runId: args.parentRunId,
       status: "done",
       step: "approved",
-      data: { fannedOutCount: String(args.fannedOutCount) },
+      data: {
+        ...latestParentData,
+        mode: "prepare",
+        fannedOutCount: String(args.fannedOutCount),
+      },
     },
     args.trackerDir,
   );
@@ -247,6 +267,21 @@ function writeOriginParentApproved(args: {
     },
     args.trackerDir,
   );
+}
+
+function readLatestEntryData(
+  workflow: string,
+  id: string,
+  runId: string,
+  trackerDir?: string,
+): Record<string, string> {
+  const rows = readEntries(workflow, trackerDir);
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i];
+    if (row.id !== id || row.runId !== runId || !row.data) continue;
+    return { ...row.data };
+  }
+  return {};
 }
 
 function isSelectedRecord(record: unknown): boolean {

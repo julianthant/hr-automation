@@ -1,5 +1,8 @@
 import { trackEvent, appendLogEntry } from "../../jsonl.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
+import {
+  requestOcrPrepareAbort,
+} from "../../ocr-prepare-abort.js";
 import { readFormType, readParentRunId } from "./shared.js";
 
 const WORKFLOW = "ocr";
@@ -10,6 +13,10 @@ export interface DiscardInput {
   sessionId: string;
   runId: string;
   reason?: string;
+  parentWorkflow?: string;
+  parentRunId?: string;
+  parentItemId?: string;
+  formType?: string;
 }
 export interface DiscardResponse {
   status: 200 | 400;
@@ -23,6 +30,7 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
     if (!input.sessionId || !input.runId) {
       return { status: 400, body: { ok: false, error: "Missing sessionId/runId" } };
     }
+    requestOcrPrepareAbort(input.sessionId, input.runId);
     trackEvent(
       {
         workflow: WORKFLOW,
@@ -39,16 +47,17 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
     // modal, mirror the discard onto the parent row so it doesn't sit at
     // "delegated-to-ocr running" indefinitely. Parent's downstream
     // workflow is derived from formType → spec.approveTo.workflow.
-    const parentRunId = readParentRunId(input.sessionId, opts.trackerDir);
+    const parentRunId = input.parentRunId || readParentRunId(input.sessionId, opts.trackerDir);
     if (parentRunId) {
-      const formType = readFormType(input.sessionId, opts.trackerDir);
+      const formType = input.formType || readFormType(input.sessionId, opts.trackerDir);
       const spec = formType ? getFormSpec(formType) : null;
-      if (spec) {
+      const parentWorkflow = input.parentWorkflow || spec?.approveTo.workflow;
+      if (parentWorkflow) {
         const ts = new Date().toISOString();
-        const parentItemId = `ocr-prep-${input.sessionId}`;
+        const parentItemId = input.parentItemId || `ocr-prep-${input.sessionId}`;
         trackEvent(
           {
-            workflow: spec.approveTo.workflow,
+            workflow: parentWorkflow,
             timestamp: ts,
             id: parentItemId,
             runId: parentRunId,
@@ -60,7 +69,7 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
         );
         appendLogEntry(
           {
-            workflow: spec.approveTo.workflow,
+            workflow: parentWorkflow,
             itemId: parentItemId,
             runId: parentRunId,
             level: "error",

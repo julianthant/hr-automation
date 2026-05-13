@@ -3,11 +3,15 @@ import type { TrackerEntry } from "../jsonl.js";
 export function isPrepEntry(e: TrackerEntry): boolean {
   if (e.data?.mode === "prepare") return true;
   if (e.workflow === "ocr") return true;
+  if (isOcrPrepParentId(e.id)) return true;
   return false;
 }
 
 export function isResolvedPrepEntry(e: TrackerEntry): boolean {
   if (!isPrepEntry(e)) return false;
+  if (e.workflow === "ocr") {
+    return e.status === "failed" && e.step === "discarded";
+  }
   if (e.status === "done" && e.step === "approved") return true;
   if (e.status === "failed" && e.step === "discarded") return true;
   return false;
@@ -35,4 +39,8 @@ export function countRecords(e: TrackerEntry): number | undefined {
   } catch {
     return undefined;
   }
+}
+
+function isOcrPrepParentId(id: string): boolean {
+  return id.startsWith("ocr-prep-");
 }

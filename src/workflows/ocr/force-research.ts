@@ -81,7 +81,10 @@ export async function runForceResearch(input: ForceResearchInput, trackerDir?: s
     eidLookupCrmWorkflow,
     enqueueInputs as never,
     {},
-    { deriveItemId: (inp: unknown) => inputToItemId.get(JSON.stringify(inp)) ?? "" },
+    {
+      trackerDir,
+      deriveItemId: (inp: unknown) => inputToItemId.get(JSON.stringify(inp)) ?? "",
+    },
   );
   const outcomes = await watchChildRuns({
     workflow: "eid-lookup",

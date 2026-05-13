@@ -22,23 +22,70 @@ If code is used by two workflows, or one workflow plus tracker/dashboard/core/OC
 
 ## Naming
 
-- Files and directories use kebab-case: `person-org-summary.ts`, `task-control.ts`.
-- Types, interfaces, classes, and Zod schemas use PascalCase. Zod schemas end in `Schema`; inferred types usually use the same name without `Schema`.
-- Workflow ids are stable kebab-case strings and should not encode delegation. Use task role metadata for `root`, `delegator`, `child`, `utility`, or `approval`.
-- Functions use action-oriented names:
+### Paths and directories
+
+- Under `src/` **outside** `src/dashboard/`, all directories and `.ts` files use **kebab-case** only (e.g. `person-org-summary.ts`, `task-control.ts`). `.tsx` under `src/` today lives under `src/dashboard/` only.
+- **Tests** mirror those paths: `tests/unit/<mirrored-path>.test.ts` (see `tests/CLAUDE.md`).
+
+### Dashboard (`src/dashboard/`) file names
+
+The SPA follows typical React patterns; file names may be:
+
+| Pattern | Example | Use for |
+|--------|---------|--------|
+| **PascalCase** + `.tsx` | `QueuePanel.tsx` | Components that render JSX |
+| **`use` + PascalCase** + `.ts` / `.tsx` | `useEntries.ts`, `useBatchQueueContext.tsx` | Hooks (no JSX or rare JSX — prefer `.ts` when no JSX) |
+| **kebab-case** + `.ts` / `.tsx` | `batch-queue-view.tsx`, `entry-display.ts`, `workflows-context.tsx` | Multi-export modules, small views, context providers, pure helpers co-located with UI |
+
+Exception: **`src/dashboard/lib/utils.ts`** is the Tailwind/shadcn-style **`cn()`** home and may hold one or two tiny cross-cutting browser helpers (e.g. `dateLocal`) that are not worth splitting. Do not turn it into a junk drawer; domain logic stays in `src/domain/` or feature modules.
+
+### File stems by role (kernel, tracker, workflows)
+
+Use consistent stems so imports hint at responsibility:
+
+| Stem / pattern | Typical location | Contents |
+|----------------|------------------|----------|
+| `schema.ts` | workflow folder | Zod `*Schema` + inferred input types |
+| `workflow.ts` | workflow folder | `defineWorkflow(...)` export |
+| `config.ts` | workflow folder | workflow-local constants / env re-exports |
+| `index.ts` | workflow folder | public exports for composition |
+| `orchestrator.ts`, `prepare.ts`, `approve.ts` | workflow or `tracker/.../ocr/` | multi-step coordinators or HTTP-backed phases |
+| `*-http.ts`, `routes/*.ts` | `src/tracker/` | HTTP handlers, Hono route modules |
+| `selectors.ts` | `src/systems/<sys>/` | Playwright selector registry |
+| `navigate.ts`, `extract.ts`, `transaction.ts` | `src/systems/<sys>/` | grouped driver verbs (existing convention) |
+| `types.ts` | anywhere | shared interfaces for that folder |
+| `build*Handler` factories | `src/tracker/dashboard/`, `src/workflows/*/handler.ts` | **return** route handlers or `() => Response` closures (see Functions below) |
+
+Avoid new catch-all names such as `helpers.ts` or `misc.ts`. Prefer a **verb or domain noun** in kebab-case (`delegation-row-helpers.ts`, `tracker-terminal-display.ts`).
+
+### Types, classes, and schemas
+
+- Types, interfaces, and classes use **PascalCase**.
+- Zod schemas end with **`Schema`**; the inferred type is usually the same name without `Schema` (e.g. `export type Foo = z.infer<typeof FooSchema>`).
+- Workflow ids are stable **kebab-case** strings and should not encode delegation. Use task role metadata for `root`, `delegator`, `child`, `utility`, or `approval`.
+
+### Functions and methods
+
+- Functions use **action-oriented** names:
   - `parseX` converts text into structured parts and may throw on invalid syntax.
   - `normalizeX` returns a comparison/storage-safe value.
   - `displayX` or `formatX` returns operator-facing text.
   - `deriveX` computes a deterministic value from input.
   - `resolveX` chooses the best value from multiple possible sources.
   - `buildX` constructs a plain object or plan without side effects.
-  - `createX` constructs a stateful object, handler, server, or store.
+  - **`buildXHandler`** returns a dashboard/HTTP handler closure (see below); **`createX`** constructs other stateful objects (servers, stores, long-lived clients).
   - `readX`, `writeX`, `listX`, and `findX` perform persistence or lookup.
   - `isX`, `hasX`, `canX`, and `shouldX` return booleans.
   - `ensureX` performs a side effect to make a condition true or throws.
   - `assertX` validates an invariant and throws if false.
-  - `runX` executes a workflow or top-level process.
-- Avoid vague names such as `handleThing`, `processData`, `doWork`, `helper`, or `utils` unless the surrounding API makes the action specific.
+  - `runX` executes a workflow or top-level process (CLI entrypoints, orchestrators).
+- **HTTP / dashboard handlers:** prefer **`buildOcrPrepareHandler`**, **`buildDeleteEntryHandler`**, etc. Inner functions that map directly to a single verb+noun may use **`handleUpload`**, **`handleManifest`** when the name is specific (not `handleRequest`).
+- Avoid vague names such as `processData`, `doWork`, or `helper` unless the scope is tiny and local.
+
+### Enforcement
+
+- **Default exports**, **`console.*`** in server workflows, and **workflow import boundaries** are checked in `tests/unit/architecture/`.
+- **Kebab-case paths** under `src/` excluding `src/dashboard/` (and dashboard’s React/hook patterns above) are checked in `tests/unit/architecture/code-conventions.test.ts`.
 
 ## Exports And Imports
 

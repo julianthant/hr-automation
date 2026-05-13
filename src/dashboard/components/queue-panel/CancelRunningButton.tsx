@@ -35,7 +35,11 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, class
     entry?.data?.mode === "prepare"
       && typeof entry.data.ocrSessionId === "string"
       && typeof entry.data.ocrRunId === "string"
-      ? { ocrSessionId: entry.data.ocrSessionId, ocrRunId: entry.data.ocrRunId }
+      ? {
+          ocrSessionId: entry.data.ocrSessionId,
+          ocrRunId: entry.data.ocrRunId,
+          formType: entry.data.formType,
+        }
       : null;
 
   const fire = async () => {
@@ -57,6 +61,10 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, class
           sessionId: ocrPrep.ocrSessionId,
           runId: ocrPrep.ocrRunId,
           reason: `Cancelled from ${workflow} queue`,
+          parentWorkflow: workflow,
+          parentRunId: runId,
+          parentItemId: id,
+          formType: ocrPrep.formType,
         }),
       });
       const body = (await res.json()) as { ok?: boolean; error?: string };

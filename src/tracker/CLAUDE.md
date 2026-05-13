@@ -2,13 +2,13 @@
 
 Two-tier tracking: JSONL for live dashboard streaming, Excel for persistent historical records.
 
-> **Kernel-internal.** `withTrackedWorkflow`, `appendLogEntry`, and the SIGINT handler are wrapped by `src/core/runWorkflow` / `runWorkflowBatch` / `runWorkflowPool` — kernel workflows never call them directly. Legacy workflows (`separations`, `old-kronos-reports`) still call `withTrackedWorkflow` manually because they predate the kernel. If you're writing a new workflow, use `ctx.step(...)` / `ctx.updateData(...)` in `src/core/` instead.
+> **Kernel-internal.** `withTrackedWorkflow`, `appendLogEntry`, and the SIGINT handler are invoked by `src/core/runWorkflow` / `runWorkflowBatch` / `runWorkflowPool` / daemon `runOneItem` — workflow handlers never call them directly. Use `ctx.step(...)` / `ctx.updateData(...)` inside the handler.
 
 ## Files
 
 - `jsonl.ts` — JSONL append-only tracker + `withTrackedWorkflow` lifecycle wrapper, `cleanOldTrackerFiles`/`cleanOldScreenshots`, PII-aware `serializeValue` + `toTypedValue`
 - `dashboard.ts` — SSE API server (port 3838) — serves `/api/*` and `/events/*` endpoints only (no HTML). Owns session-state rebuild, screenshots endpoint, search endpoint, selector-warnings endpoint
-- `session-events.ts` — `emitWorkflowStart` / `emitWorkflowEnd` / `emitSessionCreate` / `emitBrowserLaunch` / `emitAuthStart` / `emitAuthComplete` / `emitItemStart` / etc. Append `SessionEvent` lines to `.tracker/sessions.jsonl`. `rebuildSessionState` (in `dashboard.ts`) reduces them into a live `SessionState`
+- `session-events.ts` — `emitWorkflowStart` / `emitWorkflowEnd` / `emitSessionCreate` / `emitBrowserLaunch` / `emitAuthStart` / `emitAuthComplete` / `emitItemStart` / etc. Append `SessionEvent` lines to rotated `sessions-*.jsonl` (and legacy `sessions.jsonl`). `rebuildSessionState` in `src/tracker/dashboard/session-state.ts` reduces them into a live `SessionState` (re-exported from `dashboard.ts` for tests)
 - `sessions/duo-queue.ts` — `requestDuoApproval(page, options)` — wraps `pollDuoApproval` with queue semantics (emit `duo_waiting` browser overlay, register in the global Duo queue, swap to `duo_active` when this request becomes head-of-line). Used by every login flow in `src/infra/auth/login.ts`
 - `sessions/auth-observer.ts` — builds a `SessionObserver` that turns kernel auth lifecycle callbacks into tracker step events and failure screenshots.
 - `files/files.ts` — SQLite-backed file registry helpers (`registerLocalFile`, `getRegisteredFile`) for PDFs, screenshots, page images, and related dashboard downloads.
@@ -55,7 +55,7 @@ After each `/events` SSE poll cycle, `scanFailurePatterns()` runs today's tracke
 - `cleanOldTrackerFiles(maxAgeDays, dir)` — deletes JSONL files whose filename date (YYYY-MM-DD) is older than `maxAgeDays`. Returns count deleted.
 - `cleanOldScreenshots(maxAgeDays, dir)` — deletes PNGs in `.screenshots/` whose filename-embedded ms timestamp (trailing segment before `.png`) is older than `maxAgeDays`. Returns count deleted. Malformed names (no numeric trailing segment) are skipped — never accidentally deleted.
 - `npm run clean:tracker` — CLI wrapper in `src/scripts/clean-tracker.ts`. By default cleans tracker JSONL + screenshots. Accepts `--days N` (default 7), `--dir PATH`, `--screenshots-dir PATH`, `--no-screenshots`, `--screenshots-only`.
-- `startDashboard()` runs a one-time startup prune at 30 days for tracker JSONL + screenshots (per-request `/api/preflight` still handles the 7-day ongoing prune for tracker files). Pass `{ noClean: true }` or `--no-clean` CLI flag to skip.
+- `startDashboard()` runs a one-time startup prune at **30 days** for tracker JSONL + screenshots. Each `GET /api/preflight` uses the same **30-day** threshold (`cleanOldTrackerFiles` / `cleanOldScreenshots`). Pass `{ noClean: true }` or `--no-clean` CLI flag to skip startup prune. **`npm run clean:tracker`** is separate (default **7** days) for manual maintenance.
 
 ## `withTrackedWorkflow(workflow, id, data, fn)`
 
@@ -77,7 +77,7 @@ await withTrackedWorkflow("separations", docId, {}, async (setStep, updateData) 
 
 - `setStep(step)` — emits a `running` event with the step name
 - `updateData(d)` — merges data into the entry (e.g. employee name discovered mid-workflow)
-- All 5 workflows use this wrapper nested inside `withLogContext`
+- The kernel nests this wrapper inside `withLogContext` for every production run path
 - Tracker functions (`updateOnboardingTracker`, etc.) are Excel-only — they no longer call `trackEvent()`
 - `opts.onCleanup` — callback for resource teardown (e.g. closing browsers) on both success and failure
 - `opts.preAssignedRunId` — pre-assigned runId for batch mode (caller pre-emits pending for all items, then processes sequentially)
@@ -138,15 +138,9 @@ Appends a single row to an `.xlsx` file. Creates the file and/or worksheet if mi
 
 ## Adding Tracking for a New Workflow
 
-Kernel workflows get tracking for free — `defineWorkflow({ ... })` registers dashboard metadata and `runWorkflow` wraps each run in `withTrackedWorkflow`. Do NOT call `withTrackedWorkflow`, `trackEvent`, or `setStep` from a handler; use `ctx.step(...)` / `ctx.markStep(...)` / `ctx.updateData(...)` instead.
+Kernel workflows get tracking for free — `defineWorkflow({ ... })` registers dashboard metadata and `runWorkflow` (or batch/pool/daemon runners) wraps each run in `withLogContext` + `withTrackedWorkflow`. Do NOT call `withTrackedWorkflow`, `trackEvent`, or `setStep` from a handler; use `ctx.step(...)` / `ctx.markStep(...)` / `ctx.updateData(...)` instead.
 
-Legacy workflows (only `separations`, `old-kronos-reports` as of 2026-04-17) wrap execution manually:
-
-1. In the workflow's `workflow.ts`, wrap execution in `withTrackedWorkflow(workflowName, id, data, fn)`
-2. Use `setStep(step)` at each major phase transition
-3. Use `updateData(d)` to add discovered data (e.g., employee name)
-4. Create a `tracker.ts` in the workflow folder for Excel tracking if the workflow needs persistent historical records (Excel-only — no `trackEvent` calls)
-5. Call `defineDashboardMetadata({ name, label, steps, systems, detailFields })` at module load in the workflow's `index.ts` so the dashboard registry has its UI metadata
+If you ever add a **non-kernel** one-off workflow, it would need an explicit `defineDashboardMetadata` registration and a custom outer wrapper — no such workflows ship under `src/workflows/*` today; use `defineWorkflow` for all new work.
 
 ## Lessons Learned
 
@@ -169,7 +163,7 @@ Legacy workflows (only `separations`, `old-kronos-reports` as of 2026-04-17) wra
 - **2026-04-14: `readRunsForId` missed past-date runs** — was calling `readEntries(workflow)` which only reads today's JSONL. When viewing a past date in the dashboard, `/api/runs` returned an empty list and the RunSelector showed only the latest run. Fix: added optional `date` param; backend (`/api/runs`) and frontend (`LogPanel`) now forward the selected date so runs from that day's JSONL are returned.
 - **2026-04-14: Preflight deleted fresh `sessions.jsonl` on every refresh** — `/api/preflight` checked if any `workflow_start` PID was alive and deleted the entire file if none were, wiping fake/mock demo data on refresh. Replaced with age-gated deletion (only if file untouched >24h) + dead-PID enrichment in `rebuildSessionState` (crashed workflows are marked `active: false` at read time — no file mutation). Preserves recent activity AND provides immediate crash-recovery UX.
 - **2026-04-14: Async mutex broke sync reads-after-writes** — `trackEvent` and `appendLogEntry` wrapped their `appendFileSync` calls in `writeMutex.runExclusive(() => …)` and returned `void` without awaiting. The write became fire-and-forget, so tests (and any caller reading back immediately) saw no data. Removed the mutex entirely — `appendFileSync` is already atomic. Restored true synchronous semantics.
-- **2026-04-18: Removed runner endpoints + child-process registry** — `src/tracker/runner.ts` and the `/api/workflows/:name/run`, `/api/workflows/:name/schema`, `/api/runs/:runId/cancel`, `/api/runs/active` route registrations + `buildSpawnHandler` / `buildCancelHandler` / `buildActiveRunsHandler` / `buildWorkflowSchemaHandler` factories were deleted from `dashboard.ts`. The dashboard is observation-only — workflows launch via `npm run …` scripts (or whatever replacement launcher lands later). The unrelated `/api/runs?workflow=X&id=Y` endpoint (used by `RunSelector` to list past runs for an itemId) is preserved — that's a separate read-only endpoint backed by `readRunsForId`.
+- **2026-04-18: Removed runner endpoints + child-process registry** — `src/tracker/runner.ts` and the `/api/workflows/:name/run`, `/api/workflows/:name/schema`, `/api/runs/:runId/cancel`, `/api/runs/active` route registrations + `buildSpawnHandler` / `buildCancelHandler` / `buildActiveRunsHandler` / `buildWorkflowSchemaHandler` factories were deleted from `dashboard.ts`. There is no generic "type JSON and spawn workflow" UI anymore; daemons and composable flows still start from CLI `npm run …`, and the dashboard uses targeted HTTP handlers (OCR prepare, emergency-contact prep, SharePoint download, etc.). The read-only `/api/runs?workflow=X&id=Y` endpoint (used by `RunSelector` to list past runs for an itemId) is preserved — backed by `readRunsForId`.
 - **2026-04-19: Session events now carry runId.** `emitSessionEvent` reads from `AsyncLocalStorage` (via `getLogRunId()`) so events emitted during a tracked workflow item are attributable to that run. Events emitted outside a per-item `withLogContext` (batch-scope `Session.launch`) still carry `workflowInstance`, which is used for fallback attribution — see the 2026-04-23 lesson below.
 - **2026-04-19: `step_change` dedupe.** When `markStep` fires both a `step` log entry and a `step_change` session event for the same `(workflow, runId, step)` within 50ms, the session event is suppressed. Prevents duplicate "advanced to step X" lines in the dashboard's Events tab.
 - **2026-04-19: `createDashboardServer(opts)` factory.** Extracted from `startDashboard` so tests can spin up isolated servers on random ports with per-test tracker directories. `startDashboard` is now a thin wrapper that preserves the CLI singleton behavior.

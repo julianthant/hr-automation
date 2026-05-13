@@ -50,6 +50,11 @@ npm run emergency-contact:stop             # Soft-stop all daemons
 npm run eid-lookup "Last, First Middle"    # Enqueue to an alive daemon or spawn one (CRM-on variant)
 npm run eid-lookup:stop                    # Soft-stop all daemons
 
+# Active Check (daemon mode by default — see "Daemon mode" below)
+npm run active-check "Last, First Middle"  # Check UCPath Person Org Summary active status by name
+npm run active-check 10873698               # Same check by EID (8-digit)
+npm run active-check:stop                   # Soft-stop all daemons
+
 # Oath Signature (daemon mode by default — see "Daemon mode" below)
 npm run oath-signature <emplId> [emplId ...]     # Enqueue to an alive daemon or spawn one (UCPath only)
 npm run oath-signature:stop                      # Soft-stop all daemons
@@ -108,10 +113,14 @@ src/
     work-study/        # Kernel. UCPath PayPath work-study update.
     emergency-contact/ # Kernel (batch, preEmitPending). UCPath Emergency Contact fill.
     eid-lookup/        # Kernel. Person Org Summary lookup + optional CRM cross-verify.
+    active-check/      # Kernel. Person Org Summary active/inactive check by name or EID.
     onboarding/        # Kernel (single mode). CRM → UCPath + I9. Daemon mode for repeated runs.
     separations/       # Kernel (4 systems, interleaved auth, sequential batch via runWorkflowBatch).
     old-kronos-reports/# Kernel (pool mode, N workers, per-worker sessionDir via opts.launchFn).
+    oath-signature/    # Kernel + daemon-mode. UCPath oath signature transaction.
     oath-upload/       # Kernel + daemon-mode. ServiceNow + delegated OCR + delegated oath-signature.
+    ocr/               # Kernel (dashboard HTTP only). Upload PDF → OCR → match → delegate downstream.
+    sharepoint-download/ # Kernel helper: headed roster download from SharePoint (dashboard / CLI script).
   infra/               # Runtime infrastructure that makes automation possible.
     auth/              # Per-system login flows + duo-poll + sso-fields (shared).
     browser/           # launchBrowser, tiling math. Kernel-internal.
@@ -327,14 +336,14 @@ All production workflows are kernel-based as of 2026-04-17. No `defineDashboardM
 
 ## Daemon mode (persistent workflow processes)
 
-Kernel workflows exposed on the CLI (`npm run separation <ids>`, `npm run work-study <emplId> <date>`, `npm run eid-lookup <names...>`, `npm run onboarding <emails...>`) default to **daemon mode**:
+Kernel workflows exposed on the CLI (`npm run separation <ids>`, `npm run work-study <emplId> <date>`, `npm run eid-lookup <names...>`, `npm run active-check <names-or-eids...>`, `npm run onboarding <emails...>`, `npm run oath-signature …`, `npm run oath-upload …`, `npm run emergency-contact …`) default to **daemon mode**:
 
 - **First invocation with no alive daemon** → spawns one detached daemon (`tsx src/cli-daemon.ts <workflow>`), waits for auth (Duo once), enqueues the item. Daemon stays alive after processing.
 - **Subsequent invocations** → insert into the shared SQLite queue (`tasks` table in `.tracker/state.db`, audit-appended to `.tracker/daemons/{workflow}.queue.jsonl` for `tail -f` debugging) and `POST /wake` every alive daemon. No re-Duo.
 - **Multi-daemon dispatch**: all alive daemons for a workflow race to claim the next queued row via a single `UPDATE … RETURNING` against `tasks` indexed by `tasks_control_claimable_idx (workflow, control_state, priority DESC, enqueued_at ASC)`, run inside a `transaction(...)`. Whichever daemon's `UPDATE` wins grabs the row — dynamic load balancing without a coordinator. (No filesystem mutex; the JSONL `.queue.jsonl` is audit-only.)
 - **Keepalive**: every 15 min idle, each daemon runs `session.healthCheck(system)` per system so SAML/Duo sessions don't silently expire between items.
 
-Flags (on `separation`, `work-study`, `eid-lookup`, `onboarding`):
+Flags (on `separation`, `work-study`, `eid-lookup`, `active-check`, `onboarding`, `oath-signature`, `oath-upload`, `emergency-contact`):
 - `-n, --new` — spawn one **additional** daemon even if others are alive.
 - `-p, --parallel <N>` — ensure ≥N daemons are alive before enqueueing (spawns `max(0, N - alive)`).
 
@@ -342,7 +351,7 @@ Flags (on `separation`, `work-study`, `eid-lookup`, `onboarding`):
 
 `onboarding` daemon runs the standard `onboardingWorkflow` (CRM + UCPath + I9, 2 Duos per session since I9 is SSO no-2FA). For throughput, start N daemons with `-p N`. Pass multiple emails positionally to fan them across alive daemons via the shared queue.
 
-Lifecycle commands (converted workflows: `separations`, `work-study`, `eid-lookup`, `onboarding`, `oath-signature`, `emergency-contact`):
+Lifecycle commands (converted workflows: `separations`, `work-study`, `eid-lookup`, `active-check`, `onboarding`, `oath-signature`, `oath-upload`, `emergency-contact`):
 - `npm run <workflow>:stop` — soft-stop (drain in-flight, re-queue). Use `-- --force` to mark in-flight as failed and exit immediately.
 
 Converting a new workflow to daemon mode is mechanical — see `src/workflows/CLAUDE.md#daemon-mode-conversion-template`. Implementation: `src/core/daemon-{types,registry,queue,client}.ts` + `src/core/daemon.ts` (main loop) + `src/cli-daemon.ts` (entry). Full design doc: `docs/superpowers/specs/2026-04-22-workflow-daemon-mode-design.md`.

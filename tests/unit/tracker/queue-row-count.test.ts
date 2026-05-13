@@ -65,6 +65,37 @@ test("countSidebarRowsFromTrackerHistory: merges + excludes resolved prep", () =
   assert.equal(n, 1, "prep row excluded; two active-check rows collapse to one");
 });
 
+test("countSidebarRowsFromTrackerHistory: approved OCR review rows stay visible", () => {
+  const raw: TrackerEntry[] = [
+    {
+      workflow: "ocr",
+      timestamp: "2026-05-09T10:00:00.000Z",
+      id: "ocr-session-1",
+      runId: "ocr-run-1",
+      status: "done",
+      step: "approved",
+      parentRunId: "origin-parent-run",
+      data: { mode: "prepare", formType: "oath" },
+    },
+  ];
+  assert.equal(countSidebarRowsFromTrackerHistory(raw, isResolvedPrepEntry), 1);
+});
+
+test("countSidebarRowsFromTrackerHistory: discarded OCR review rows are hidden", () => {
+  const raw: TrackerEntry[] = [
+    {
+      workflow: "ocr",
+      timestamp: "2026-05-09T10:00:00.000Z",
+      id: "ocr-session-1",
+      runId: "ocr-run-1",
+      status: "failed",
+      step: "discarded",
+      data: {},
+    },
+  ];
+  assert.equal(countSidebarRowsFromTrackerHistory(raw, isResolvedPrepEntry), 0);
+});
+
 test("countSidebarRowsFromTrackerHistory: delegation batch collapses many children to one", () => {
   const raw: TrackerEntry[] = Array.from({ length: 75 }, (_, i) => ({
     workflow: "active-check",
@@ -76,6 +107,30 @@ test("countSidebarRowsFromTrackerHistory: delegation batch collapses many childr
     step: "checking",
     data: {},
   }));
+  assert.equal(countSidebarRowsFromTrackerHistory(raw, isResolvedPrepEntry), 1);
+});
+
+test("countSidebarRowsFromTrackerHistory: legacy approved OCR parent plus child counts as one row", () => {
+  const raw: TrackerEntry[] = [
+    {
+      workflow: "oath-signature",
+      timestamp: "2026-05-09T12:00:00.000Z",
+      id: "ocr-prep-session-1",
+      runId: "parent-run-1",
+      status: "done",
+      step: "approved",
+      data: { fannedOutCount: "1" },
+    },
+    {
+      workflow: "oath-signature",
+      timestamp: "2026-05-09T12:01:00.000Z",
+      id: "ocr-oath-run-1-r0",
+      runId: "child-run-1",
+      parentRunId: "parent-run-1",
+      status: "done",
+      data: { emplId: "10000001" },
+    },
+  ];
   assert.equal(countSidebarRowsFromTrackerHistory(raw, isResolvedPrepEntry), 1);
 });
 

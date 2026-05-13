@@ -372,3 +372,26 @@ test("abortIfRowState: rejects immediately when sentinel is pre-written before w
   assert.ok(elapsed < 100, `expected immediate abort but took ${elapsed}ms`);
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("shouldAbort: rejects when predicate flips during JSONL polling", async () => {
+  const dir = setupTrackerDir();
+  const date = "2026-05-01";
+  const file = join(dir, `eid-lookup-${date}.jsonl`);
+  writeFileSync(file, "");
+  let flag = false;
+  const promise = watchChildRuns({
+    workflow: "eid-lookup",
+    expectedItemIds: ["never-arrives"],
+    trackerDir: dir,
+    date,
+    timeoutMs: 5000,
+    shouldAbort: () => flag,
+  });
+  setTimeout(() => { flag = true; }, 80);
+  await assert.rejects(
+    promise,
+    (err: unknown) =>
+      Boolean(err instanceof Error && err.name === "OcrPrepareOperatorDiscardAbort"),
+  );
+  rmSync(dir, { recursive: true, force: true });
+});

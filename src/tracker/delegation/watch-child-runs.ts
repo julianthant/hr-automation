@@ -8,9 +8,17 @@
  * Filters by explicit `expectedItemIds` (deterministic at spawn time), NOT by
  * `parentRunId` — parentRunId is purely for dashboard visualization.
  */
-import { existsSync, readFileSync, statSync, watch as fsWatch } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  openSync,
+  readSync,
+  statSync,
+  watch as fsWatch,
+} from "node:fs";
 import { join } from "node:path";
 import type { TrackerEntry } from "../jsonl.js";
+import { createOperatorDiscardError } from "../ocr-prepare-abort.js";
 import { openControlDb } from "../../core/control-db.js";
 import { createTaskStore, type TaskRow } from "../../core/task-store/index.js";
 
@@ -51,9 +59,119 @@ export interface WatchChildRunsOpts {
     id: string;
     step: string;
   };
+  /**
+   * Dashboard-process OCR prepare: rejects when `/api/ocr/discard-prepare`
+   * set the abort flag for this session (same-event-loop as the watcher).
+   */
+  shouldAbort?: () => boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 60 * 60_000;
+/** JSONL fallback and SQLite poll cadence — keep both paths aligned. */
+const WATCH_CHILD_POLL_MS = 200;
+
+interface AbortFileCache {
+  path: string;
+  size: number;
+  mtimeMs: number;
+  result: boolean;
+  readOffset: number;
+  utf8Pending: string;
+  lastStepForId: string | undefined;
+}
+
+function readAbortRequestedCached(
+  opts: WatchChildRunsOpts,
+  dir: string,
+  date: string,
+  cache: { current: AbortFileCache | null },
+): boolean {
+  if (!opts.abortIfRowState) return false;
+  const sentinel = opts.abortIfRowState;
+  const abortFile = join(dir, `${sentinel.workflow}-${date}.jsonl`);
+  if (!existsSync(abortFile)) {
+    cache.current = null;
+    return false;
+  }
+  let st;
+  try {
+    st = statSync(abortFile);
+  } catch {
+    return false;
+  }
+  const prev = cache.current;
+  if (
+    prev &&
+    prev.path === abortFile &&
+    prev.size === st.size &&
+    prev.mtimeMs === st.mtimeMs
+  ) {
+    return prev.result;
+  }
+
+  let readOffset = 0;
+  let utf8Pending = "";
+  let lastStepForId: string | undefined;
+  const sameFile = prev?.path === abortFile;
+  if (sameFile && prev && st.size >= prev.readOffset) {
+    readOffset = prev.readOffset;
+    utf8Pending = prev.utf8Pending;
+    lastStepForId = prev.lastStepForId;
+  }
+  if (sameFile && prev && st.size < prev.readOffset) {
+    readOffset = 0;
+    utf8Pending = "";
+    lastStepForId = undefined;
+  }
+
+  if (st.size > readOffset) {
+    try {
+      const fd = openSync(abortFile, "r");
+      try {
+        const byteLen = st.size - readOffset;
+        const buf = Buffer.alloc(byteLen);
+        let total = 0;
+        while (total < byteLen) {
+          const n = readSync(fd, buf, total, byteLen - total, readOffset + total);
+          if (n === 0) break;
+          total += n;
+        }
+        const chunk = buf.subarray(0, total).toString("utf8");
+        const combined = utf8Pending + chunk;
+        const lines = combined.split("\n");
+        utf8Pending = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line) continue;
+          let entry: TrackerEntry;
+          try {
+            entry = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (entry.id !== sentinel.id) continue;
+          lastStepForId = entry.step;
+        }
+      } finally {
+        closeSync(fd);
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  readOffset = st.size;
+  const result = lastStepForId === sentinel.step;
+  cache.current = {
+    path: abortFile,
+    size: st.size,
+    mtimeMs: st.mtimeMs,
+    result,
+    readOffset,
+    utf8Pending,
+    lastStepForId,
+  };
+  return result;
+}
 
 function dateLocal(): string {
   const d = new Date();
@@ -90,14 +208,17 @@ async function maybeWatchSqliteChildRuns(
   }
 
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const pollMs = 500;
+  const pollMs = WATCH_CHILD_POLL_MS;
   const started = Date.now();
   const outcomes: ChildOutcome[] = [];
   const seen = new Set<string>();
+  const abortCache: { current: AbortFileCache | null } = { current: null };
+  const dateForAbort = opts.date ?? dateLocal();
 
   try {
     for (;;) {
-      if (isAbortRequested(opts, dir)) {
+      rejectIfDiscardRequested(opts);
+      if (readAbortRequestedCached(opts, dir, dateForAbort, abortCache)) {
         throw new Error(
           `watchChildRuns aborted by parent row state (${opts.abortIfRowState!.workflow}/${opts.abortIfRowState!.id} step="${opts.abortIfRowState!.step}")`,
         );
@@ -213,21 +334,8 @@ function findBlockedParent(taskStore: ReturnType<typeof createTaskStore>, tasks:
   return null;
 }
 
-function isAbortRequested(opts: WatchChildRunsOpts, dir: string): boolean {
-  if (!opts.abortIfRowState) return false;
-  const date = opts.date ?? dateLocal();
-  const abortFile = join(dir, `${opts.abortIfRowState.workflow}-${date}.jsonl`);
-  if (!existsSync(abortFile)) return false;
-  let raw;
-  try { raw = readFileSync(abortFile, "utf-8"); } catch { return false; }
-  const lines = raw.split("\n").filter(Boolean);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    let entry: TrackerEntry;
-    try { entry = JSON.parse(lines[i]); } catch { continue; }
-    if (entry.id !== opts.abortIfRowState.id) continue;
-    return entry.step === opts.abortIfRowState.step;
-  }
-  return false;
+function rejectIfDiscardRequested(opts: WatchChildRunsOpts): void {
+  if (opts.shouldAbort?.()) throw createOperatorDiscardError();
 }
 
 export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOutcome[]> {
@@ -244,20 +352,15 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
 
   const outcomes: ChildOutcome[] = [];
   let lastSize = 0;
+  /** Incomplete UTF-8 line prefix from the last incremental read. */
+  let utf8Pending = "";
 
   return new Promise<ChildOutcome[]>((resolve, reject) => {
     let finalized = false;
     let watcher: ReturnType<typeof fsWatch> | undefined;
-    let pollHandle = setInterval(() => {
-      checkFile();
-    }, 200);
-    let timeoutHandle = setTimeout(() => {
-      if (!finalized) {
-        finalized = true;
-        cleanup();
-        reject(new Error(`wait timeout — still waiting on ${expected.size} item(s) after ${opts.timeoutMs}ms`));
-      }
-    }, opts.timeoutMs);
+    let pollHandle: ReturnType<typeof setInterval> | undefined;
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const abortCache: { current: AbortFileCache | null } = { current: null };
 
     const cleanup = (): void => {
       finalized = true;
@@ -266,18 +369,15 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
       if (timeoutHandle) clearTimeout(timeoutHandle);
     };
 
-    const checkFile = (): void => {
-      if (finalized) return;
-      if (!existsSync(file)) return;
-      let cur;
-      try { cur = statSync(file); } catch { return; }
-      if (cur.size <= lastSize) return;
-      let raw;
-      try { raw = readFileSync(file, "utf-8"); } catch { return; }
-      const lines = raw.split("\n").filter(Boolean);
+    const ingestLines = (lines: string[]): void => {
       for (const line of lines) {
+        if (!line) continue;
         let entry: TrackerEntry;
-        try { entry = JSON.parse(line); } catch { continue; }
+        try {
+          entry = JSON.parse(line);
+        } catch {
+          continue;
+        }
         if (!entry.id || !expected.has(entry.id)) continue;
         if (!isTerminal(entry)) continue;
         const outcome: ChildOutcome = {
@@ -295,6 +395,58 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
           try { opts.onProgress(outcome, remaining); } catch { /* swallow */ }
         }
       }
+    };
+
+    const checkFile = (): void => {
+      if (finalized) return;
+      try {
+        rejectIfDiscardRequested(opts);
+      } catch (err) {
+        cleanup();
+        reject(err);
+        return;
+      }
+      if (!existsSync(file)) return;
+      let cur;
+      try {
+        cur = statSync(file);
+      } catch {
+        return;
+      }
+      if (cur.size < lastSize) {
+        lastSize = 0;
+        utf8Pending = "";
+      }
+      if (cur.size <= lastSize) return;
+
+      try {
+        const fd = openSync(file, "r");
+        try {
+          const byteLen = cur.size - lastSize;
+          const buf = Buffer.alloc(byteLen);
+          let total = 0;
+          while (total < byteLen) {
+            const n = readSync(fd, buf, total, byteLen - total, lastSize + total);
+            if (n === 0) break;
+            total += n;
+          }
+          const chunk = buf.subarray(0, total).toString("utf8");
+          const combined = utf8Pending + chunk;
+          const lastNl = combined.lastIndexOf("\n");
+          if (lastNl === -1) {
+            utf8Pending = combined;
+          } else {
+            const complete = combined.slice(0, lastNl + 1);
+            utf8Pending = combined.slice(lastNl + 1);
+            ingestLines(complete.split("\n"));
+          }
+        } finally {
+          closeSync(fd);
+        }
+      } catch {
+        return;
+      }
+
       lastSize = cur.size;
       if (expected.size === 0) {
         cleanup();
@@ -304,36 +456,43 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
 
     const checkAbort = (): void => {
       if (finalized) return;
-      if (!opts.abortIfRowState) return;
-      const abortFile = join(
-        dir,
-        `${opts.abortIfRowState.workflow}-${date}.jsonl`,
-      );
-      if (!existsSync(abortFile)) return;
-      let raw;
-      try { raw = readFileSync(abortFile, "utf-8"); } catch { return; }
-      const lines = raw.split("\n").filter(Boolean);
-      for (let i = lines.length - 1; i >= 0; i--) {
-        let entry: TrackerEntry;
-        try { entry = JSON.parse(lines[i]); } catch { continue; }
-        if (entry.id !== opts.abortIfRowState.id) continue;
-        if (entry.step === opts.abortIfRowState.step) {
-          cleanup();
-          reject(new Error(
-            `watchChildRuns aborted by parent row state (${opts.abortIfRowState.workflow}/${opts.abortIfRowState.id} step="${opts.abortIfRowState.step}")`,
-          ));
-        }
+      try {
+        rejectIfDiscardRequested(opts);
+      } catch (err) {
+        cleanup();
+        reject(err);
         return;
       }
+      const sentinel = opts.abortIfRowState;
+      if (!sentinel) return;
+      if (!readAbortRequestedCached(opts, dir, date, abortCache)) return;
+      cleanup();
+      reject(new Error(
+        `watchChildRuns aborted by parent row state (${sentinel.workflow}/${sentinel.id} step="${sentinel.step}")`,
+      ));
     };
 
-    // Initial pass — file may already have terminal entries.
-    checkFile();
-    if (finalized) return;
-    checkAbort();          // NEW — abort immediately if sentinel already present
-    if (finalized) return;
+    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+    timeoutHandle = setTimeout(() => {
+      if (finalized) return;
+      cleanup();
+      const stillWaiting = Array.from(expected).join(", ");
+      reject(new Error(`watchChildRuns timeout (${timeoutMs}ms) — still waiting for: ${stillWaiting}`));
+    }, timeoutMs);
+    timeoutHandle.unref?.();
 
-    // fs.watch on the file (best effort).
+    if (pollHandle !== undefined) clearInterval(pollHandle);
+    pollHandle = setInterval(() => {
+      checkFile();
+      checkAbort();
+      if (!watcher && existsSync(file)) {
+        try {
+          watcher = fsWatch(file, { persistent: false }, () => checkFile());
+        } catch { /* tolerate */ }
+      }
+    }, WATCH_CHILD_POLL_MS);
+    pollHandle.unref?.();
+
     try {
       if (existsSync(file)) {
         watcher = fsWatch(file, { persistent: false }, () => checkFile());
@@ -343,25 +502,8 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
       // covers; not fatal.
     }
 
-    // Poll fallback — also handles the "file doesn't exist yet" case.
-    pollHandle = setInterval(() => {
-      checkFile();
-      checkAbort();        // NEW
-      // Re-arm watcher once the file appears.
-      if (!watcher && existsSync(file)) {
-        try {
-          watcher = fsWatch(file, { persistent: false }, () => checkFile());
-        } catch { /* tolerate */ }
-      }
-    }, 200);
-    pollHandle.unref?.();
-
-    timeoutHandle = setTimeout(() => {
-      if (finalized) return;
-      cleanup();
-      const stillWaiting = Array.from(expected).join(", ");
-      reject(new Error(`watchChildRuns timeout (${timeoutMs}ms) — still waiting for: ${stillWaiting}`));
-    }, timeoutMs);
-    timeoutHandle.unref?.();
+    checkFile();
+    if (finalized) return;
+    checkAbort();
   });
 }

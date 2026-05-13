@@ -14,7 +14,7 @@ import { ModalChrome } from "./ModalChrome.js";
 import { LeftColumn } from "./LeftColumn.js";
 import { RightColumn } from "./RightColumn.js";
 import { ExpiryFooter } from "./ExpiryFooter.js";
-import { isTerminal } from "./utils.js";
+import { isTerminal } from "./capture-state-terminal.js";
 
 /**
  * Operator-side capture modal — wider 2-column layout.

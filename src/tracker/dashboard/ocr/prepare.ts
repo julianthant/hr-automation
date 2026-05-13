@@ -5,6 +5,7 @@ import { getFormSpec } from "../../../services/ocr/forms/registry.js";
 import { runOcrOrchestrator, type OcrOrchestratorOpts } from "../../../workflows/ocr/orchestrator.js";
 import { errorMessage } from "../../../utils/errors.js";
 import { hasSessionLock, acquireSessionLock, releaseSessionLock } from "./lock.js";
+import { clearOcrPrepareAbort } from "../../ocr-prepare-abort.js";
 
 const WORKFLOW = "ocr";
 
@@ -156,6 +157,7 @@ export function buildOcrPrepareHandler(
       } catch (err) {
         log.error(`[ocr-http] orchestrator threw: ${errorMessage(err)}`);
       } finally {
+        clearOcrPrepareAbort(sessionId, runId);
         releaseSessionLock(sessionId);
       }
     })();

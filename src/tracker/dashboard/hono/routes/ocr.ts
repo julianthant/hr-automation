@@ -41,8 +41,6 @@ export function registerOcrRoutes(app: Hono, deps: DashboardHonoDeps): void {
       sessionId: String(parsed.body.sessionId ?? ""),
       runId: String(parsed.body.runId ?? ""),
       records: Array.isArray(parsed.body.records) ? parsed.body.records : [],
-      previewReady: parsed.body.previewReady === true,
-      previewPageCount: Number(parsed.body.previewPageCount ?? 0),
     });
     return jsonResponse(result.body, result.status);
   });
@@ -54,6 +52,10 @@ export function registerOcrRoutes(app: Hono, deps: DashboardHonoDeps): void {
       sessionId: String(parsed.body.sessionId ?? ""),
       runId: String(parsed.body.runId ?? ""),
       reason: parsed.body.reason ? String(parsed.body.reason) : undefined,
+      parentWorkflow: parsed.body.parentWorkflow ? String(parsed.body.parentWorkflow) : undefined,
+      parentRunId: parsed.body.parentRunId ? String(parsed.body.parentRunId) : undefined,
+      parentItemId: parsed.body.parentItemId ? String(parsed.body.parentItemId) : undefined,
+      formType: parsed.body.formType ? String(parsed.body.formType) : undefined,
     });
     return jsonResponse(result.body, result.status);
   });

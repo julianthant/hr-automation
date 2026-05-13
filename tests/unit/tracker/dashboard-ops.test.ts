@@ -332,6 +332,97 @@ describe("findLatestEntryData", () => {
 });
 
 describe("buildDeleteEntryHandler", () => {
+  it("cascades delete to delegated child rows across workflows", () => {
+    openStateDb(tmp);
+    trackEventForDate(
+      {
+        workflow: "ocr",
+        timestamp: "2026-05-09T10:00:00.000Z",
+        id: "ocr-session-1",
+        runId: "ocr-run-1",
+        parentRunId: "oath-upload-run-1",
+        status: "running",
+        step: "awaiting-approval",
+      },
+      "2026-05-09",
+      tmp,
+    );
+    trackEventForDate(
+      {
+        workflow: "eid-lookup",
+        timestamp: "2026-05-09T10:01:00.000Z",
+        id: "ocr-session-1-r0",
+        runId: "eid-run-1",
+        parentRunId: "ocr-run-1",
+        status: "done",
+      },
+      "2026-05-09",
+      tmp,
+    );
+    trackEventForDate(
+      {
+        workflow: "eid-lookup",
+        timestamp: "2026-05-09T10:02:00.000Z",
+        id: "unrelated",
+        runId: "eid-run-2",
+        parentRunId: "other-parent",
+        status: "done",
+      },
+      "2026-05-09",
+      tmp,
+    );
+
+    const store = createTaskStore(openControlDb({ trackerDir: tmp }));
+    const [parent] = store.enqueueTasks({
+      workflow: "ocr",
+      inputs: [{ sessionId: "ocr-session-1" }],
+      deriveItemId: () => "ocr-session-1",
+      runIds: ["ocr-run-1"],
+    });
+    const [child] = store.enqueueTasks({
+      workflow: "eid-lookup",
+      inputs: [{ searchName: "Doe, Jane" }],
+      deriveItemId: () => "ocr-session-1-r0",
+      runIds: ["eid-run-1"],
+      parentRunId: "ocr-run-1",
+    });
+    store.createDependency({
+      parentTaskId: parent.taskId,
+      childTaskId: child.taskId,
+      onChildFailed: "block_parent",
+    });
+
+    const result = buildDeleteEntryHandler(tmp)({
+      workflow: "ocr",
+      id: "ocr-session-1",
+      date: "2026-05-09",
+      runId: "ocr-run-1",
+    });
+
+    assert.equal(result.ok, true);
+    const ocrLines = readFileSync(join(tmp, "ocr-2026-05-09.jsonl"), "utf8").trim();
+    assert.equal(ocrLines, "");
+    const eidLines = readFileSync(join(tmp, "eid-lookup-2026-05-09.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(eidLines.map((line) => line.id), ["unrelated"]);
+
+    const db = openStateDb(tmp);
+    const remainingRuns = db.prepare("SELECT workflow, item_id, run_id FROM runs ORDER BY workflow, item_id").all() as Array<{
+      workflow: string;
+      item_id: string;
+      run_id: string;
+    }>;
+    assert.deepEqual(
+      remainingRuns.map((row) => ({ ...row })),
+      [{ workflow: "eid-lookup", item_id: "unrelated", run_id: "eid-run-2" }],
+    );
+    assert.equal(store.getTask(parent.taskId), null);
+    assert.equal(store.getTask(child.taskId), null);
+  });
+
   it("deletes screenshots for the deleted item", () => {
     const shotsDir = join(tmp, "screenshots");
     mkdirSync(shotsDir, { recursive: true });
@@ -729,6 +820,17 @@ describe("buildDeleteBulkHandler", () => {
       .split("\n")
       .map((line) => JSON.parse(line));
     assert.deepEqual(trackerLines.map((line) => `${line.id}:${line.runId}`), ["a:run-old"]);
+  });
+
+  it("returns ok false when workflow or date is missing (direct factory use)", () => {
+    const bad = buildDeleteBulkHandler(tmp)({
+      workflow: "",
+      date: "2026-05-09",
+      ids: ["a"],
+    });
+    assert.equal(bad.ok, false);
+    assert.equal(bad.count, 0);
+    assert.match(bad.errors[0]?.error ?? "", /workflow and date/);
   });
 });
 

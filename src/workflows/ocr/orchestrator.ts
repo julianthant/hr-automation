@@ -34,6 +34,12 @@ import type { LookupSuggestion } from "../../services/ocr/lookup-suggestions.js"
 import { normalizeUcpathEmployeeId } from "../../domain/identity/eid.js";
 import { toLastFirstSearchName } from "../../domain/identity/person-name.js";
 import { buildHttpPendingData } from "../../core/daemon/enqueue-dispatch.js";
+import {
+  createOperatorDiscardError,
+  isOcrPrepareAbortRequested,
+  isOperatorDiscardAbortError,
+  raceOcrPrepWithDiscard,
+} from "./prepare-abort.js";
 
 const WORKFLOW = "ocr";
 
@@ -167,6 +173,9 @@ export async function runOcrOrchestrator(
     step?: string,
     error?: string,
   ): void => {
+    if (isOcrPrepareAbortRequested(id, runId)) {
+      throw createOperatorDiscardError();
+    }
     // Stamp __id so the dashboard's resolveEntryId surfaces a stable handle
     // on every row. Kernel runWorkflow computes this via getId; this
     // orchestrator writes via trackEvent directly so we replicate it here.
@@ -256,6 +265,7 @@ export async function runOcrOrchestrator(
         trackerDir,
         date,
         timeoutMs: 5 * 60_000,
+        shouldAbort: () => isOcrPrepareAbortRequested(id, runId),
       });
       const result = outcomes[0];
       if (!result || result.status !== "done") {
@@ -277,25 +287,40 @@ export async function runOcrOrchestrator(
     const { renderPdfPagesToPngs } = await import("../../services/ocr/render-pages.js");
     let preRenderedPages: string[];
     if (input.pdfFileId && pageImagePad === 3) {
+      const pdfFileId = input.pdfFileId;
       try {
-        const { openStateDb } = await import("../../tracker/state/db.js");
-        const { ensurePdfPageCache } = await import("../../tracker/files/pdf-cache.js");
-        const cachedPages = await ensurePdfPageCache(openStateDb(trackerBaseDir), {
-          trackerDir: trackerBaseDir,
-          fileId: input.pdfFileId,
-          pdfPath: input.pdfPath,
-        });
-        preRenderedPages = cachedPages
-          .filter((page) => page.status === "ready" && page.imagePath)
-          .map((page) => basename(page.imagePath!));
+        preRenderedPages = await raceOcrPrepWithDiscard(
+          id,
+          runId,
+          (async () => {
+            const { openStateDb } = await import("../../tracker/state/db.js");
+            const { ensurePdfPageCache } = await import("../../tracker/files/pdf-cache.js");
+            const cachedPages = await ensurePdfPageCache(openStateDb(trackerBaseDir), {
+              trackerDir: trackerBaseDir,
+              fileId: pdfFileId,
+              pdfPath: input.pdfPath,
+            });
+            return cachedPages
+              .filter((page) => page.status === "ready" && page.imagePath)
+              .map((page) => basename(page.imagePath!));
+          })(),
+        );
       } catch (err) {
         log.warn(`[ocr] PDF file cache unavailable, falling back to legacy page images: ${errorMessage(err)}`);
         pageImagesDir = legacyPageImagesDir;
         pageImagePad = 2;
-        preRenderedPages = await renderPdfPagesToPngs(input.pdfPath, pageImagesDir);
+        preRenderedPages = await raceOcrPrepWithDiscard(
+          id,
+          runId,
+          renderPdfPagesToPngs(input.pdfPath, pageImagesDir),
+        );
       }
     } else {
-      preRenderedPages = await renderPdfPagesToPngs(input.pdfPath, pageImagesDir);
+      preRenderedPages = await raceOcrPrepWithDiscard(
+        id,
+        runId,
+        renderPdfPagesToPngs(input.pdfPath, pageImagesDir),
+      );
     }
     const knownPageCount = preRenderedPages.length;
     log.success(`[ocr] rendered ${knownPageCount} page(s) — Preview tab now shows blank inputs ready to fill in`);
@@ -347,13 +372,17 @@ export async function runOcrOrchestrator(
 
     // 2. OCR
     log.step(`[ocr] running OCR pipeline against ${input.pdfOriginalName}`);
-    const ocrResult = await runOcr({
-      pdfPath: input.pdfPath,
-      formType: input.formType,
-      spec,
-      sessionId: input.sessionId,
-      preRenderedPages,
-    });
+    const ocrResult = await raceOcrPrepWithDiscard(
+      id,
+      runId,
+      runOcr({
+        pdfPath: input.pdfPath,
+        formType: input.formType,
+        spec,
+        sessionId: input.sessionId,
+        preRenderedPages,
+      }),
+    );
     log.success(`[ocr] OCR complete (provider=${ocrResult.provider}, attempts=${ocrResult.attempts}, records=${(ocrResult.data as unknown[]).length})`);
     // Per-record extraction summary so operator can see exactly what came
     // out of the LLM before any matching/disambiguation runs on top.
@@ -413,9 +442,13 @@ export async function runOcrOrchestrator(
     // 3. Match
     log.step(`[ocr] matching ${(ocrResult.data as unknown[]).length} OCR record(s) against roster`);
     log.step(`[ocr] roster has ${roster.length} row(s) loaded from ${resolvedRosterPath.split("/").pop()}`);
-    let records = await Promise.all(
-      (ocrResult.data as unknown[]).map((r) =>
-        spec.matchRecord({ record: r, roster }),
+    let records = await raceOcrPrepWithDiscard(
+      id,
+      runId,
+      Promise.all(
+        (ocrResult.data as unknown[]).map((r) =>
+          spec.matchRecord({ record: r, roster }),
+        ),
       ),
     );
     // Per-record match outcome summary.
@@ -482,7 +515,7 @@ export async function runOcrOrchestrator(
           }
         }
       });
-      await Promise.all(workers);
+      await raceOcrPrepWithDiscard(id, runId, Promise.all(workers));
 
       disambigTargets.forEach((t, i) => {
         records[t.index] = spec.applyDisambiguation({
@@ -509,7 +542,7 @@ export async function runOcrOrchestrator(
     if (suggestionTargets.length > 0) {
       log.step(`[ocr] asking LLM for lookup suggestions for ${suggestionTargets.length} record(s) with no fuzzy roster candidates`);
       const { suggestLookupCandidates } = await import("../../services/ocr/lookup-suggestions.js");
-      await Promise.all(suggestionTargets.map(async (target) => {
+      await raceOcrPrepWithDiscard(id, runId, Promise.all(suggestionTargets.map(async (target) => {
         try {
           const suggestions = opts._lookupSuggestionOverride
             ? await opts._lookupSuggestionOverride({
@@ -531,7 +564,7 @@ export async function runOcrOrchestrator(
         } catch (err) {
           log.warn(`[ocr] lookup suggestions failed for record ${target.index + 1}: ${errorMessage(err)}`);
         }
-      }));
+      })));
     }
 
     // 4. EID lookup fan-out — UCPath + CRM name resolution and active / HDH disposition.
@@ -691,6 +724,7 @@ export async function runOcrOrchestrator(
             inputs as never,
             {},
             {
+              trackerDir,
               deriveItemId: deriveChildItemId,
               parentRunId: runId,
               onPreparedItems,
@@ -763,6 +797,10 @@ export async function runOcrOrchestrator(
       pageStatusSummary,
     });
   } catch (err) {
+    if (isOperatorDiscardAbortError(err)) {
+      log.step(`[ocr] preparation stopped (${input.sessionId}) — operator discarded while prep was running`);
+      return;
+    }
     writeTracker("failed", { formType: input.formType, sessionId: input.sessionId }, undefined, errorMessage(err));
     throw err;
   }
@@ -864,6 +902,7 @@ async function runFanOutPhase(fanOpts: FanOutOpts): Promise<void> {
       trackerDir,
       date,
       timeoutMs: eidLookupTimeoutMs ?? 60 * 60_000,
+      shouldAbort: () => isOcrPrepareAbortRequested(id, runId),
       onProgress: (outcome, remaining) => {
         const enq = enqueueItems.find((e) => e.itemId === outcome.itemId);
         if (!enq) return;

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildDisplayNameMap,
   collectEntriesForMergedScope,
+  mergedGroupPeersForLogPanel,
   resolveEntryName,
 } from "../../../src/dashboard/components/shared/entry-display.js";
 import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
@@ -124,4 +125,24 @@ test("collectEntriesForMergedScope includes hidden merged siblings for bulk cont
   ];
 
   assert.deepEqual(collectEntriesForMergedScope(groups, [primary]), [primary, sibling]);
+});
+
+test("mergedGroupPeersForLogPanel returns siblings when primary selected", () => {
+  const primary = entry("name-search", { emplId: "10874100" });
+  const sibling = entry("10874100", { emplId: "10874100" });
+  const groups = [{ primary, siblings: [sibling] }];
+
+  assert.deepEqual(mergedGroupPeersForLogPanel(primary.id, groups), [sibling]);
+});
+
+test("mergedGroupPeersForLogPanel returns primary plus other siblings when a sibling selected", () => {
+  const primary = entry("name-search", { emplId: "10874100" });
+  const siblingA = entry("Alt spelling", { emplId: "10874100" });
+  const siblingB = entry("10874100", { emplId: "10874100" });
+  const groups = [{ primary, siblings: [siblingA, siblingB] }];
+
+  assert.deepEqual(
+    mergedGroupPeersForLogPanel(siblingA.id, groups),
+    [primary, siblingB],
+  );
 });
