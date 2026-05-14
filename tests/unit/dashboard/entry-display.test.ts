@@ -88,6 +88,37 @@ test("buildDisplayNameMap ordinals OCR prep rows using OATH / EMPL prefixes from
   assert.equal(resolveEntryName(second, displayNames), "EMPL 1");
 });
 
+test("OCR rows with parentSubject use the batch label instead of OATH/EMPL", () => {
+  const ocrRow = entry(
+    "ocr-session-1",
+    {
+      __id: "ocr-session-1",
+      formType: "oath",
+      parentSubject: "Oath Signature · #1234",
+    },
+    "2026-05-05T12:00:00.000Z",
+  );
+  ocrRow.workflow = "ocr";
+  ocrRow.runId = "ocr-run-1";
+
+  const child = entry(
+    "ocr-oath-run-1-r0-n0",
+    {
+      name: "Barahona Martell, Carlos D",
+      __name: "Oath Signature · #1234",
+      parentSubject: "Oath Signature · #1234",
+    },
+    "2026-05-05T12:02:00.000Z",
+  );
+  child.workflow = "eid-lookup";
+  child.parentRunId = "ocr-run-1";
+
+  const displayNames = buildDisplayNameMap([child, ocrRow], "OCR");
+
+  assert.equal(resolveEntryName(ocrRow, displayNames), "Oath Signature · #1234");
+  assert.equal(resolveEntryName(child, displayNames), "Oath Signature · #1234");
+});
+
 test("delegated rows inherit the parent display name", () => {
   const firstParent = entry("ocr-session-1", { __id: "ocr-session-1", formType: "oath" }, "2026-05-05T12:00:00.000Z");
   firstParent.workflow = "ocr";
