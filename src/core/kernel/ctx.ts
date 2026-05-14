@@ -13,6 +13,7 @@ export interface MakeCtxOpts {
   workflow: string
   itemId: string
   emitScreenshotEvent: (event: ScreenshotEvent) => void
+  trackerDir?: string
 }
 
 /**
@@ -48,7 +49,7 @@ async function retry<R>(fn: () => Promise<R>, opts: RetryOpts = {}): Promise<R> 
 export function makeCtx<TSteps extends readonly string[], TData>(
   opts: MakeCtxOpts,
 ): Ctx<TSteps, TData> {
-  const { session, stepper, isBatch, runId, workflow, itemId, emitScreenshotEvent } = opts
+  const { session, stepper, isBatch, runId, workflow, itemId, emitScreenshotEvent, trackerDir } = opts
 
   session.setUcpathIdleGuard(() => stepper.isInsideStep())
 
@@ -83,6 +84,7 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     isBatch,
     runId,
     screenshot,
+    trackerDir,
   }
   // `data` is a live getter — each access returns a fresh shallow copy of
   // the stepper's accumulated data, including anything pre-merged from the

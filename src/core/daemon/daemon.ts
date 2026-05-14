@@ -26,11 +26,20 @@ import {
   emitItemStart,
   emitItemComplete,
   emitItemCancelled,
+  emitDaemonPhase,
+  emitUcpathIdleSignal,
 } from '../../tracker/session-events.js'
-import { trackEvent } from '../../tracker/jsonl.js'
+import {
+  trackEvent,
+  dateLocal,
+  DEFAULT_DIR,
+  findLatestEntryForRunOnDate,
+  isTerminalTrackerEntryStatus,
+} from '../../tracker/jsonl.js'
 import { buildTrackerDataForInput } from './enqueue-dispatch.js'
 import { openControlDb } from '../control-db.js'
 import { createTaskStore } from '../task-store/index.js'
+import { isStateDbReady, openStateDb } from '../../tracker/state/db.js'
 import { createWorkerStore, type ControlWorkerStore, type WorkerCommandRow } from './worker-store.js'
 import { startDaemonHttpServer } from './http.js'
 import { runKeepaliveTick } from './keepalive.js'
@@ -130,6 +139,9 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     const prev = phase
     phase = next
     log.step(`[Daemon ${wf.config.name}/${instanceId}] phase: ${prev} → ${next}`)
+    if (workflowInstanceForCleanup && (next === 'idle' || next === 'keepalive')) {
+      emitDaemonPhase(workflowInstanceForCleanup, next, trackerDir)
+    }
   }
 
   const abortLaunchAndKillSession = (reason: string): void => {
@@ -498,6 +510,9 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           for (const sys of wf.config.systems) {
             await session.page(sys.id)
           }
+          if (wf.config.systems.some((s) => s.id === 'ucpath')) {
+            emitUcpathIdleSignal(instance, trackerDir, 'touch')
+          }
         } catch (e) {
           if (shuttingDown && launchAbort.signal.aborted) {
             log.warn(
@@ -629,6 +644,9 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
               })
               emitItemComplete(instance, item.id, trackerDir, runId)
+              if (wf.config.systems.some((s) => s.id === 'ucpath')) {
+                emitUcpathIdleSignal(instance, trackerDir, 'touch')
+              }
               markTerminated(runId)
               const taskStateAfterRun = item.taskId ? taskStore.getTask(item.taskId)?.state : null
               // Cancellation precedence: if a cancel was requested at any
@@ -794,11 +812,59 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
       } | null
       if (inFlightSnapshot) {
         const existingTask = inFlightSnapshot.taskId ? taskStore.getTask(inFlightSnapshot.taskId) : null
+        const trackerRoot = trackerDir ?? DEFAULT_DIR
+        let skipShutdownEmit = existingTask?.state === 'done'
         if (
-          existingTask?.state === 'cancelled' ||
-          existingTask?.state === 'done' ||
-          existingTask?.state === 'failed'
+          !skipShutdownEmit &&
+          (existingTask?.state === 'cancelled' || existingTask?.state === 'failed')
         ) {
+          // Prefer SQLite projection over a full-day JSONL scan: shutdown
+          // runs inside the SIGINT grace window, and today's JSONL can be
+          // tens of MB on a busy daemon. The indexed `run_events` query
+          // returns the latest terminal status in O(log N).
+          const today = dateLocal()
+          let latestTerminal = false
+          if (isStateDbReady(trackerRoot)) {
+            try {
+              const stateDb = openStateDb(trackerRoot)
+              const row = stateDb.prepare(`
+                SELECT status FROM run_events
+                WHERE workflow = @workflow AND tracker_date = @date
+                  AND item_id = @itemId AND run_id = @runId
+                ORDER BY event_ms DESC, id DESC
+                LIMIT 1
+              `).get({
+                workflow: wf.config.name,
+                date: today,
+                itemId: inFlightSnapshot.itemId,
+                runId: inFlightSnapshot.runId,
+              }) as { status?: string } | undefined
+              if (row?.status === 'done' || row?.status === 'failed' || row?.status === 'skipped') {
+                latestTerminal = true
+              }
+            } catch {
+              /* fall through to JSONL */
+            }
+          }
+          if (!latestTerminal) {
+            const latest = findLatestEntryForRunOnDate(
+              wf.config.name,
+              inFlightSnapshot.itemId,
+              inFlightSnapshot.runId,
+              today,
+              trackerRoot,
+            )
+            if (latest && isTerminalTrackerEntryStatus(latest)) latestTerminal = true
+          }
+          if (latestTerminal) skipShutdownEmit = true
+        }
+        // Successful SQLite completion (`done`): never emit shutdown cancel.
+        // SQLite `cancelled` / `failed` with a terminal JSONL row for this run:
+        // suppress duplicate tracker/session churn (avoid layering shutdown
+        // `cancelled` on top of an authoritative failure row).
+        // Otherwise emit shutdown cleanup — including repair when SQLite is
+        // terminal but JSONL still shows pending/running (crash window).
+        if (skipShutdownEmit) {
           inFlight = null
         } else {
         // Daemon shutdown while processing — mark the in-flight item as

@@ -66,6 +66,9 @@ export interface SessionObserver {
   onAuthComplete?: (systemId: string, browserId: string) => void
   /** Fires once when all retry attempts have failed. */
   onAuthFailed?: (systemId: string, browserId: string) => void
+  /** UCPath idle-refresh observability — wired to session JSONL for dashboard countdown. */
+  onUcpathIdleTouch?: () => void
+  onUcpathIdleRefresh?: (phase: 'start' | 'end') => void
 }
 
 export interface BatchConfig {
@@ -263,6 +266,12 @@ export interface Ctx<TSteps extends readonly string[], TData> {
    * return the capture record. Constructed by `makeCtx` via `makeScreenshotFn`.
    */
   screenshot: ScreenshotFn
+  /**
+   * Tracker directory for this run (from `RunOpts.trackerDir`). Orchestrators and
+   * nested `runWorkflow` calls must use this so isolated test dirs aren't mixed
+   * with `.tracker`.
+   */
+  trackerDir?: string
 }
 
 export interface SessionHandle {
