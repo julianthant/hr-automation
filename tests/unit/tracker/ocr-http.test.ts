@@ -14,6 +14,7 @@ import {
   _resetSessionLockForTests,
   type ApproveHandlerOpts,
 } from "../../../src/tracker/dashboard/ocr/index.js";
+import { trackEventForDate } from "../../../src/tracker/jsonl.js";
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
 
@@ -137,6 +138,50 @@ test("POST /api/ocr/discard-prepare emits failed step=discarded", async () => {
   const last = JSON.parse(lines[lines.length - 1]);
   assert.equal(last.status, "failed");
   assert.equal(last.step, "discarded");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("POST /api/ocr/discard-prepare deletes delegated EID lookup child rows", async () => {
+  const dir = setup();
+  const date = todayLocal();
+  trackEventForDate(
+    {
+      workflow: "ocr",
+      timestamp: new Date().toISOString(),
+      id: "ocr-session-children",
+      runId: "ocr-run-children",
+      status: "running",
+      step: "awaiting-approval",
+    },
+    date,
+    dir,
+  );
+  trackEventForDate(
+    {
+      workflow: "eid-lookup",
+      timestamp: new Date().toISOString(),
+      id: "ocr-oath-ocr-run-children-r0",
+      runId: "eid-child-run",
+      parentRunId: "ocr-run-children",
+      status: "done",
+    },
+    date,
+    dir,
+  );
+
+  const handler = buildOcrDiscardHandler({ trackerDir: dir });
+  const resp = await handler({
+    sessionId: "ocr-session-children",
+    runId: "ocr-run-children",
+    reason: "operator discarded OCR row",
+  });
+
+  assert.equal(resp.status, 200);
+  const eidFile = join(dir, `eid-lookup-${date}.jsonl`);
+  const eidLines = existsSync(eidFile)
+    ? readFileSync(eidFile, "utf-8").split("\n").filter(Boolean)
+    : [];
+  assert.deepEqual(eidLines, []);
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -483,7 +528,7 @@ test("buildOcrApproveHandler preserves origin parent prep metadata when marking 
       step: "ocr",
       timestamp: "2026-05-01T00:00:00Z",
       data: {
-        __name: "OCR Prep · fake.pdf",
+        __name: "Oath Signature · #-run",
         __id: parentItemId,
         mode: "prepare",
         pdfOriginalName: "fake.pdf",
