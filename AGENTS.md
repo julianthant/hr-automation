@@ -511,101 +511,75 @@ These patterns existed pre-kernel and are intentionally removed. Do not reintrod
 <claude-mem-context>
 # Memory Context
 
-# [hr-automation] recent context, 2026-05-12 5:46pm PDT
+# [hr-automation] recent context, 2026-05-14 1:19am PDT
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (19,915t read) | 1,732,198t work | 99% savings
+Stats: 50 obs (21,277t read) | 704,484t work | 97% savings
 
-### May 8, 2026
-S155 Multi-person check UI conditional display + entry merging/grouping architecture design for a log viewer queue (May 8 at 7:45 PM)
-S156 Implement merged-entry-group UI for HR automation dashboard — collapsed queue rows per person + run pooling across EID/name checks (May 8 at 7:48 PM)
-S157 Dashboard cancellation overhaul — force-stop as absolute event, chrome-preserving interruption, daemon window liveness detection, and pending/running queue rows marked cancelled on stop (May 8 at 7:55 PM)
-S158 Fix unfilled grid squares for first/successful runs in LogPanel (user reference 10874572) (May 8 at 8:10 PM)
-S159 Fix "SQLite database is not open" error causing SSE endpoint fallbacks to JSONL in hr-automation dashboard, plus fix related sidebar wfCounts accuracy and pre-existing test failures (May 8 at 8:41 PM)
-### May 9, 2026
-S160 Push all changes to git — commit and open PR for dashboard SQLite stateDb fixes (May 9 at 2:04 PM)
-S161 Push all to git — commit, PR, merge, and branch cleanup for hr-automation dashboard fixes (May 9 at 2:07 PM)
-S162 Shorten the SearchBar and reposition it to the right of the employee grid (not EID column) in the HR Automation dashboard TopBar (May 9 at 2:08 PM)
-### May 11, 2026
-S163 Screenshots deleted on dev server restart — investigate why and enforce correct retention policy (delete only on run deletion or after 30 days) (May 11 at 3:23 PM)
-1121 3:36p ⚖️ Preview Panel Naming Convention and Scope Decision
-1122 " 🔵 Dashboard Architecture: Existing "Preview" Tab vs New Batch Preview Panel
-1123 " 🔵 LogStream Tab Architecture and Batch Queue State for Preview Panel Implementation
-1124 3:37p 🔵 Screenshot Backend Handler Architecture and Reusable Display Components
-1125 " 🟣 BatchScreenshotsPanel Component Created
-1126 3:38p 🟣 Batch Preview Button Added to BatchQueueToolbar
-1127 " 🟣 QueuePanel Wired with Batch Preview Props
-1128 " 🟣 App.tsx Wired: BatchScreenshotsPanel Renders When No Row Selected in Batch Mode
-1129 " 🟣 Batch Preview Panel Feature: TypeCheck Passes Clean
-1130 3:39p 🟣 Bulk Action Controls (StopAll, DeleteAll) Wired into App.tsx Alongside Batch Preview
-1131 " 🟣 Batch Preview Panel Feature: Full Test Suite Passes
-1132 " ⚖️ Batch Row Preview Panel — Naming Convention and New Panel Design
-1133 3:44p 🔵 Existing "Preview" Tab Already Lives in Batch Queue View, Not Log Panel
-1134 3:51p 🟣 UI: Replace Click-to-View with Inline Scrollable View Mode
-1135 " 🔵 BatchScreenshotsPanel Uses Click-to-Open Lightbox for Screenshot Viewing
-1136 " 🟣 BatchScreenshotsPanel: Replaced Lightbox with Inline Scrollable Image View
-1137 " ✅ BatchScreenshotsPanel Inline View: TypeCheck and Build Pass Clean
-1138 " 🔵 hr-automation Dashboard Dev Server Port Configuration
-1139 3:52p 🔵 Playwright Confirms Inline Screenshots Render Correctly in Dashboard
-1140 " 🔵 BatchScreenshotsPanel.tsx is Untracked (New File); Three Other Dashboard Files Also Modified
-1141 " ✅ batch-queue-view: Toolbar Buttons Condensed to Icon-Only with Accessibility Labels
-1142 3:59p 🔵 Screenshots Deleted on Dev Server Restart — Retention Policy Required
-1143 " 🔵 Screenshot Auto-Deletion Root Cause: startDashboard() Prunes on Every Startup
-1144 4:00p 🔵 Screenshot Directory Mismatch: PATHS.screenshotDir vs CLI Default
-1145 " 🔵 Screenshots Deleted on Dev Server Restart — Bug Reported
-1146 4:15p 🔴 Screenshots No Longer Deleted on Dev Server Restart — Retention Tied to Run Lifecycle
-1147 " 🟣 New Hono API Routes: /api/cancel-active-bulk and /api/delete-bulk
-1148 4:16p 🟣 Large unstaged changeset in hr-automation — batch ops, screenshots, and dashboard expansion
-1149 4:17p 🟣 Bulk cancel and bulk delete backend APIs added to dashboard Hono server
-1150 " 🔴 Screenshots handler fixed to load events for ALL run IDs and merge disk-only PNGs
-1151 " 🟣 New domain modules: tracker-terminal-display and batch-display-ordinal
-1152 " 🟣 StopAllButton, DeleteAllButton, and BatchScreenshotsPanel added to dashboard UI
-1153 " 🟣 "Not found" status surfaced throughout queue UI and search results
-1154 " 🟣 UCPath EID validation enforced as 8-digit 10XXXXXX format across OCR and workflow schemas
-1155 " 🔴 buildDisplayNameMap now excludes delegated rows from ordinal counting and assigns them their parent's label
-1156 4:21p 🔵 Screenshot directories are empty in hr-automation project
-1157 " 🔵 Screenshots referenced in tracker logs are permanently missing from filesystem
-1158 4:22p 🔵 E2E test screenshots exist in `generated/.e2e-screenshots/` — distinct from missing workflow screenshots
-1159 4:23p 🔄 DeleteAllButton and DaemonBatchRow enriched delete payload with runId
-1160 " 🔄 delete-bulk backend updated to accept and forward runId per item
-1161 4:24p 🔵 Full test suite passes after delete-bulk runId enrichment changes
-1162 " 🟣 Full test suite passes and typecheck clean after all changes
-1163 " 🟣 DaemonBatchRow gets inline delete-batch and retry-failed-in-batch actions
-1164 " 🟣 App.tsx adds StopAllButton, DeleteAllButton, BatchScreenshotsPanel, and bulk-action entry collection
-1165 " 🟣 active-check schema normalizes EID input and CLI batches are grouped by parentRunId
-1166 " 🟣 deleteScreenshotsForEntry extracted and scoped by runId when deleting entries
-1167 " 🟣 buildCancelActiveBulkHandler added for bulk cancellation of pending and running items
-1168 4:26p 🔴 TypeScript TS2339 fix: explicit type annotation on items variable in delete bulk handler
-1169 " 🔵 Full changeset scope: 45+ modified files plus 6 new files across the code review
-1170 5:54p 🔵 Screenshots Deleted on Dev Server Restart — Persistence Bug
-### May 12, 2026
-S164 Fix OCR workflow retry button in LogPanel footer — retry oath1 OCR run using latest roster, downloading new roster if unavailable (May 12 at 12:57 AM)
-**Investigated**: Deep code investigation across the retry pipeline for OCR workflows:
-    - `RetryButton` component in `src/dashboard/components/shared/RetryButton.tsx` — POSTs to `/api/retry` with workflow/id/runId
-    - `LogPanel.tsx` (line 410) — passes `retryTarget` to `RunSelector`, which renders `RetryButton` in the log stream footer
-    - `src/tracker/dashboard/ops/retry.ts` — `reEnqueueEntry` → `IN_PROCESS_WORKFLOWS.has("ocr")` → `reEnqueueInProcessEntry` → `reEnqueueOcrEntry`
-    - `reEnqueueOcrEntry` in `retry.ts` (lines 291–341) — merges all tracker rows for the session id, extracts `pdfPath`, `pdfOriginalName`, `formType`, `rosterMode`, `rosterPath`, then calls `buildOcrPrepareHandler`
-    - `buildOcrPrepareHandler` in `src/tracker/dashboard/ocr/prepare.ts` — validates rosterMode/rosterPath before launching orchestrator
-    - `src/workflows/ocr/orchestrator.ts` — orchestrator `rosterMode=download` path delegates to sharepoint-download
-    - `src/workflows/ocr/schema.ts` — `OcrInput` schema with `rosterMode: enum(["existing","download"]).default("existing")`
-    - There are 36 modified but uncommitted files in the working tree (large feature branch in progress)
+### May 14, 2026
+S187 Post-plan follow-up: fix OCR row display label override in entry-display.ts so parentSubject wins over OATH/EMPL short-circuit (May 14 at 12:21 AM)
+S189 OCR pipeline improvements: strip bracket prefixes from log display, add OCR confidence gate to skip disambiguation, and auto-select longest name variant for EID lookup (May 14 at 12:23 AM)
+S188 Dashboard UI fixes: date format, match status labels, retry button position, nav spacing, image quality (May 14 at 12:27 AM)
+S190 Group row footer style update — change batch/delegation row footers from `prep#xxxx`/`batch#xxxx` to `#{runNumber}` + optional secondary ID, matching EntryItem footer style (May 14 at 12:30 AM)
+S191 Dashboard queue panel group row footer style update + DelegationRow footer actions (retry/delete) (May 14 at 12:32 AM)
+S192 Debug "Failed to fetch" error in dashboard — stopping daemons and investigating the stop/API path (May 14 at 12:34 AM)
+S193 Why oath-signature row doesn't appear immediately after starting an OCR upload — investigation into queue visibility delay and row delegation architecture (May 14 at 12:35 AM)
+S194 Remove trailing "1" from queue entry names — batch anchor rows showing "Oath Signature · #7596 1" instead of just "Oath Signature · #7596" (May 14 at 12:39 AM)
+1396 12:39a 🔵 SQLite items table shows oath-signature prep rows with resolved_prep=0 — correctly counted in wfCounts
+1397 12:44a 🔵 UI Row Population Timing Issue — Rows Should Appear Before Auth Completes
+1398 " 🔵 Queue Depth Architecture — `useQueueDepth` Hook and `/api/queue-depth` Endpoint
+1399 " 🔵 Row Pre-Emission Architecture — Pending Rows Visible Before Auth Via `onPreEmitPending`
+1400 " 🔵 `eidLookupCrmWorkflow` Uses `preEmitPending: true` — EID Lookup Rows Appear Before Auth
+1401 12:45a 🔵 Root Cause Confirmed: `buildOcrApproveHandler` Calls `ensureDaemonsAndEnqueue` Without `onPreEmitPending` for Oath-Signature
+1402 " 🟣 TDD Test Added: `buildOcrApproveHandler` Must Provide `onPreEmitPending` Hook Before Daemon Auth
+1403 12:46a 🔵 Test Run Confirms: New TDD Test Fails (Red), Plus Pre-Existing Search Endpoint Failure
+1404 12:50a 🔵 OCR HTTP Tests Pass; Search-Endpoint Test Failure Remains in Worktree
+1405 12:51a 🔵 search-endpoint.test.ts Fails Due to Stale Hardcoded Fixture Dates Now Outside 30-Day Window
+1406 12:52a 🔴 search-endpoint.test.ts Fixed: Hardcoded Dates Replaced with days:365 Window
+1407 12:53a 🔵 OAuth Signature Workflow Not Appearing in Queue Panel
+1408 12:55a 🔵 Queue Panel Run Number Defaults to 1 When runId Has No #N Suffix
+1409 " 🔵 resolveDaemonBatchQueueTitle Appends batchDisplayOrdinal as Numeric Suffix to Workflow Label
+1410 12:56a 🔵 data.__name Set by Kernel from wf.config.getName at Queue Entry Creation
+1411 " 🔵 oath-signature Workflow Sets data.__name to parentSubject for Batch Dashboard Display
+1412 " 🔵 QueuePanel Renders DaemonBatchRow with workflowLabel and surface.parentRunId — No titleOverride Passed
+1413 12:58a 🔵 batchAnchorName Generates "WorkflowLabel · #shortId" Titles for OCR Batch Anchor Rows
+1414 " 🔵 DaemonBatchRow Passes No footerRunOrdinal to GroupRowBase — Causes Footer to Always Show "#1"
+1415 12:59a 🔵 batchDisplayOrdinal Allocated at Enqueue Time via allocateLowestBatchDisplayOrdinal — Stamped on All Member Rows
+1416 1:00a 🔵 batchDisplayOrdinal Only Allocated for Multi-Item Enqueues Without Existing parentRunId
+1417 " 🔵 QueueGroupSurface "batch" Kind Has titleOverride Field — Currently Left Undefined at Classification Time
+1418 1:01a 🔵 queue-surface-classifier Groups by parentRunId — "batch" Kind Gets titleOverride=undefined While "passive-delegation" Gets parentSubject
+1419 1:02a 🔵 buildDisplayNameMap Forces Ordinal Suffix on explicitWorkflowName Entries Even When Only One Exists
+1420 1:04a 🔴 Removed Trailing "1" from Non-OCR Prepare Batch Anchor Rows in buildDisplayNameMap
+1421 1:07a 🔴 Delegated Child Rows Now Show Resolved Employee Name Instead of Parent Batch Label
+1422 " 🔵 Two Unit Test Failures After entry-display.ts Changes — Tests Assert Old Ordinal and Parent-Label Behavior
+1423 " 🔵 entry-display.test.ts Has 7+ Assertions Encoding Pre-Fix Display Label Behavior That Need Updating
+1424 " 🔵 Test Context Clarifies Exact Expected Value Changes for Both Failing Assertions
+1425 1:08a ⚖️ Global Queue Row Naming Scheme Design
+1427 " 🔵 Existing Queue Row Naming Architecture in hr-automation
+1426 " 🔵 Test "delegated rows inherit a single visible parent label even when the child has its own employee name" — Shows Fix May Be Too Broad
+1428 " 🔵 Deep Code Map: Queue Row Title Resolution Chain
+1429 1:09a 🔵 parentSubject Propagation Pattern Across All Workflows
+1430 " 🔴 Reverted Employee-Name-Priority Fix in buildDisplayNameMap Final Pass
+1432 1:10a ✅ Updated entry-display.test.ts to Reflect prepare-Mode No-Ordinal Behavior
+1431 " 🔵 Test Coverage Map for Queue Row Naming Behavior
+1433 " ✅ All 1503 Dashboard Unit Tests Pass After prepare-Mode Ordinal Fix
+S195 Design a global naming scheme for queue rows with three types: single (person-linked), batch (workflow + 4-digit run ID), and delegation (inherits parent name) (May 14 at 1:10 AM)
+S196 Design a global naming scheme for queue rows with three types: single (person-linked), batch (workflow + 4-digit run ID), and delegation (inherits parent name) (May 14 at 1:11 AM)
+1434 1:12a 🔵 Large Uncommitted Work-in-Progress Across Core and Dashboard
+1435 " 🔵 queue-surface-classifier.ts Already Implemented — Full Surface Type System Exists
+1436 1:16a ⚖️ Global Queue Row Naming Scheme — Three-Type Template
+1437 " 🟣 Implementation Plan Written: Global Queue Row Naming (5 Tasks)
+1438 " ✅ Queue Row Naming Plan Refined — Removed Stale run-one-item.ts Reference
+1439 1:17a 🔵 docs/superpowers/ Is Gitignored — Plan Files Cannot Be Committed Normally
+1440 " ✅ Queue Row Naming Plan Committed to Master via git add -f
+1441 1:18a ⚖️ Global Queue-Row Title Contract Established for EID Lookup and Batch Views
+1442 " ⚖️ Queue Title Domain Primitive API Design: `src/domain/queue-title.ts`
+1443 " 🔵 Large Pre-Existing Working Tree Modification Set Prior to Queue Title Plan Execution
+1444 1:19a ⚖️ Full 5-Task Plan for Global Queue Title Rollout: Kernel, Workflows, Dashboard, and Docs
+1445 " 🔵 Pre-Existing Uncommitted Changes in Key Queue Title Plan Target Files
 
-**Learned**: Key discovery about the retry path for OCR:
-    1. OCR is an "in-process workflow" (not daemon queue) — retry routes through `reEnqueueOcrEntry` NOT the standard `enqueueFromHttp` daemon path
-    2. `reEnqueueOcrEntry` merges ALL tracker rows for the sessionId, takes `rosterMode` from merged data (defaulting to `"existing"` if absent: `merged.rosterMode ?? "existing"`)
-    3. CRITICAL: If the original run had `rosterMode="existing"` with a specific `rosterPath`, the retry will attempt to reuse that same roster path — if that file is stale/moved/expired, the retry fails
-    4. The retry passes `rosterMode` and `rosterPath` verbatim to `buildOcrPrepareHandler` which validates: `rosterMode="existing"` requires `rosterPath` to be set
-    5. The user wants the retry to use `rosterMode="download"` to fetch a fresh roster when the existing one is unavailable
-    6. There's a PDF existence check: `if (!existsSync(pdfPath))` — returns error if PDF is gone
-    7. The LogPanel currently always shows the retry button regardless of whether the entry has valid retryable data
-
-**Completed**: Nothing has been changed yet — session is still in root cause investigation (Phase 1 of systematic debugging). No code modifications.
-
-**Next Steps**: Determine exact root cause: is the retry failing because (a) rosterMode="existing" but the rosterPath file is stale/missing, or (b) some other condition. Then implement fix so that OCR retry uses rosterMode="download" when the roster file no longer exists at the stored rosterPath, or always uses "download" to get the latest. Need to check if the current working-tree changes (36 modified files) include any partial work on this issue.
-
-
-Access 1732k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 704k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>
