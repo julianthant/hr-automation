@@ -15,7 +15,7 @@ import type { ZodType } from "zod/v4";
 import { loadRoster as realLoadRoster } from "../../services/matching/index.js";
 import type { RosterRow as MatchRosterRow } from "../../services/matching/match.js";
 import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
-import { trackEvent, dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
+import { trackEvent, dateLocal, readEntries, type TrackerEntry } from "../../tracker/jsonl.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
 import { createOcrEidLookupDependencyBatch } from "../../tracker/tasks/store.js";
@@ -193,7 +193,13 @@ export async function runOcrOrchestrator(
       mode: "prepare",
     });
     flat.__id = input.sessionId ?? "";
-    flat.__name = "OCR";
+    const parentSubject = resolveParentSubject({
+      parentRunId: input.parentRunId,
+      originWorkflow: input.originWorkflow,
+      trackerDir,
+    });
+    flat.__name = parentSubject ?? "OCR";
+    if (parentSubject) flat.parentSubject = parentSubject;
     emit({
       workflow: WORKFLOW,
       timestamp: new Date().toISOString(),
@@ -628,6 +634,12 @@ export async function runOcrOrchestrator(
       const eidLookupSqliteDepsEnabled =
         process.env.OCR_SQLITE_DEPENDENCIES !== "0" && !opts._disableSqliteDependencies;
 
+      const eidParentSubject = resolveParentSubject({
+        parentRunId: input.parentRunId,
+        originWorkflow: input.originWorkflow,
+        trackerDir,
+      });
+
       await runFanOutPhase({
         kind: "eid-lookup",
         enqueueItems: eidLookupEnqueueItems,
@@ -659,6 +671,7 @@ export async function runOcrOrchestrator(
                   taskRole: "child",
                   originWorkflow: "ocr",
                   taskGroupId: input.sessionId,
+                  ...(eidParentSubject ? { parentSubject: eidParentSubject } : {}),
                 })),
               );
             }
@@ -672,6 +685,7 @@ export async function runOcrOrchestrator(
                   taskRole: "child",
                   originWorkflow: "ocr",
                   taskGroupId: input.sessionId,
+                  ...(eidParentSubject ? { parentSubject: eidParentSubject } : {}),
                 }
               : {
                   emplId: lookupEnqueueEmplId(e),
@@ -679,6 +693,7 @@ export async function runOcrOrchestrator(
                   taskRole: "child",
                   originWorkflow: "ocr",
                   taskGroupId: input.sessionId,
+                  ...(eidParentSubject ? { parentSubject: eidParentSubject } : {}),
                 };
             trackEvent({
               workflow: eidLookupCrmWorkflow.config.name,
@@ -702,6 +717,7 @@ export async function runOcrOrchestrator(
                   taskRole: "child",
                   originWorkflow: "ocr",
                   taskGroupId: input.sessionId,
+                  ...(eidParentSubject ? { parentSubject: eidParentSubject } : {}),
                 }
               : {
                   emplId: lookupEnqueueEmplId(e),
@@ -709,6 +725,7 @@ export async function runOcrOrchestrator(
                   taskRole: "child",
                   originWorkflow: "ocr",
                   taskGroupId: input.sessionId,
+                  ...(eidParentSubject ? { parentSubject: eidParentSubject } : {}),
                 },
           );
           const deriveChildItemId = (inp: { name?: string; emplId?: string }): string => {
@@ -1083,4 +1100,20 @@ function countVerified(records: unknown[]): number {
     if (v?.state === "verified") n++;
   }
   return n;
+}
+
+export function resolveParentSubject(args: {
+  parentRunId: string | undefined;
+  originWorkflow: string | undefined;
+  trackerDir?: string;
+}): string | undefined {
+  if (!args.parentRunId || !args.originWorkflow) return undefined;
+  const rows = readEntries(args.originWorkflow, args.trackerDir ?? ".tracker");
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i];
+    if (row.runId !== args.parentRunId) continue;
+    const name = row.data?.__name;
+    if (typeof name === "string" && name.length > 0) return name;
+  }
+  return undefined;
 }

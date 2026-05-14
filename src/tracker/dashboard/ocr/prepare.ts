@@ -176,6 +176,7 @@ export function buildOcrPrepareHandler(
               previousRunId: input.previousRunId,
               dryRun: input.dryRun,
               ...(originPrep ? { parentRunId: originPrep.parentRunId } : {}),
+              ...(originPrep ? { originWorkflow: originPrep.originWorkflow } : {}),
             },
             { runId, trackerDir },
           );
