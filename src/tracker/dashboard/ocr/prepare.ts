@@ -5,7 +5,20 @@ import { getFormSpec } from "../../../services/ocr/forms/registry.js";
 import { runOcrOrchestrator, type OcrOrchestratorOpts } from "../../../workflows/ocr/orchestrator.js";
 import { errorMessage } from "../../../utils/errors.js";
 import { hasSessionLock, acquireSessionLock, releaseSessionLock } from "./lock.js";
-import { clearOcrPrepareAbort } from "../../ocr-prepare-abort.js";
+import { clearOcrPrepareAbort, isOperatorDiscardAbortError } from "../../ocr-prepare-abort.js";
+import { getByName, autoLabel } from "../../../core/index.js";
+
+function workflowDisplayLabel(workflowName: string): string {
+  return getByName(workflowName)?.label ?? autoLabel(workflowName);
+}
+
+function shortRunIdSuffix(runId: string): string {
+  return runId.slice(-4);
+}
+
+function batchAnchorName(workflowName: string, runId: string): string {
+  return `${workflowDisplayLabel(workflowName)} · #${shortRunIdSuffix(runId)}`;
+}
 
 const WORKFLOW = "ocr";
 
@@ -47,6 +60,14 @@ export interface PrepareResponse {
 export interface PrepareHandlerOpts {
   trackerDir?: string;
   runOrchestrator?: (input: import("../../../workflows/ocr/schema.js").OcrInput, opts: OcrOrchestratorOpts) => Promise<void>;
+}
+
+/** Parent row synthesized on `oath-signature` / `emergency-contact` when OCR starts from Run modal. */
+interface OriginPrepContext {
+  originWorkflow: string;
+  parentItemId: string;
+  parentRunId: string;
+  pdfOriginalName: string;
 }
 
 export function buildOcrPrepareHandler(
@@ -99,14 +120,18 @@ export function buildOcrPrepareHandler(
     const origin = input.originWorkflow && input.originWorkflow !== WORKFLOW
       ? input.originWorkflow
       : null;
-    let parentRunId: string | undefined;
+    let originPrep: OriginPrepContext | null = null;
     if (origin) {
-      parentRunId = randomUUID();
-      const parentItemId = `ocr-prep-${sessionId}`;
-      writeOriginParentPending({
+      originPrep = {
         originWorkflow: origin,
-        parentItemId,
-        parentRunId,
+        parentItemId: `ocr-prep-${sessionId}`,
+        parentRunId: randomUUID(),
+        pdfOriginalName: input.pdfOriginalName,
+      };
+      writeOriginParentPending({
+        originWorkflow: originPrep.originWorkflow,
+        parentItemId: originPrep.parentItemId,
+        parentRunId: originPrep.parentRunId,
         pdfOriginalName: input.pdfOriginalName,
         ocrSessionId: sessionId,
         ocrRunId: runId,
@@ -149,13 +174,26 @@ export function buildOcrPrepareHandler(
               rosterMode: input.rosterMode,
               previousRunId: input.previousRunId,
               dryRun: input.dryRun,
-              ...(parentRunId ? { parentRunId } : {}),
+              ...(originPrep ? { parentRunId: originPrep.parentRunId } : {}),
             },
             { runId, trackerDir },
           );
         }, trackerDir);
       } catch (err) {
         log.error(`[ocr-http] orchestrator threw: ${errorMessage(err)}`);
+        // Orchestrator emits the OCR-side `failed` row before rethrow;
+        // discard-prepare emits both rows synchronously — only sync the origin
+        // parent when OCR failed without a mirrored parent update yet.
+        if (isOperatorDiscardAbortError(err)) {
+          /* discard handler already mirrored */
+        } else if (originPrep) {
+          writeOriginParentPrepFailed({
+            ...originPrep,
+            ocrSessionId: sessionId,
+            trackerDir,
+            detail: errorMessage(err),
+          });
+        }
       } finally {
         clearOcrPrepareAbort(sessionId, runId);
         releaseSessionLock(sessionId);
@@ -164,7 +202,12 @@ export function buildOcrPrepareHandler(
 
     return {
       status: 202,
-      body: { ok: true, sessionId, runId, ...(parentRunId ? { parentRunId } : {}) },
+      body: {
+        ok: true,
+        sessionId,
+        runId,
+        ...(originPrep ? { parentRunId: originPrep.parentRunId } : {}),
+      },
     };
   };
 }
@@ -194,7 +237,7 @@ function writeOriginParentPending(args: {
   // parentRunId from the OCR fan-out path). Pre-approval the row renders
   // as a standard EntryItem in the queue.
   const baseData: Record<string, string> = {
-    __name: `OCR Prep · ${args.pdfOriginalName}`,
+    __name: batchAnchorName(args.originWorkflow, args.parentRunId),
     __id: args.parentItemId,
     mode: "prepare",
     pdfOriginalName: args.pdfOriginalName,
@@ -264,3 +307,44 @@ function writeOriginParentPending(args: {
     args.trackerDir,
   );
 }
+
+function writeOriginParentPrepFailed(args: OriginPrepContext & {
+  ocrSessionId: string;
+  trackerDir?: string;
+  detail: string;
+}): void {
+  const ts = new Date().toISOString();
+  const baseData: Record<string, string> = {
+    __name: batchAnchorName(args.originWorkflow, args.parentRunId),
+    __id: args.parentItemId,
+    mode: "prepare",
+    pdfOriginalName: args.pdfOriginalName,
+    ocrSessionId: args.ocrSessionId,
+  };
+  trackEvent(
+    {
+      workflow: args.originWorkflow,
+      timestamp: ts,
+      id: args.parentItemId,
+      runId: args.parentRunId,
+      status: "failed",
+      error: `OCR prep failed — ${args.detail}`,
+      data: baseData,
+    },
+    args.trackerDir,
+  );
+  appendLogEntry(
+    {
+      workflow: args.originWorkflow,
+      itemId: args.parentItemId,
+      runId: args.parentRunId,
+      level: "error",
+      message: `OCR prep failed — ${args.detail}`,
+      ts,
+    },
+    args.trackerDir,
+  );
+}
+
+export const __test_writeOriginParentPending = writeOriginParentPending;
+export const __test_writeOriginParentPrepFailed = writeOriginParentPrepFailed;
