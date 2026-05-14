@@ -113,6 +113,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       workflow: wf.config.name,
       itemId,
       emitScreenshotEvent: () => {},
+      trackerDir: args.trackerDir,
     })
     stepper.setScreenshotFn(ctx.screenshot)
     try {
@@ -223,6 +224,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
             workflow: wf.config.name,
             itemId,
             emitScreenshotEvent: (ev) => emitScreenshotEvent(ev, { dir: trackerDir }),
+            trackerDir,
           })
           stepper.setScreenshotFn(ctx.screenshot)
           if (args.preHandler) {

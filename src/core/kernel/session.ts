@@ -80,12 +80,16 @@ export class Session {
   private parent: Session | null = null
   private ucpathIdleTimer: ReturnType<typeof setInterval> | null = null
   private lastUcpathTouchMs = Date.now()
+  private lastUcpathTouchCbMs = 0
   /** When true, skip idle reload (handler is inside `ctx.step` body). */
   private ucpathIdleGuard: () => boolean = () => false
   private ucpathIdleReloadChain: Promise<void> = Promise.resolve()
   private ucpathIdleReloadInFlight = false
   private ucpathIdleThresholdMs = DEFAULT_UCPATH_IDLE_THRESHOLD_MS
   private ucpathIdleTickMs = DEFAULT_UCPATH_IDLE_TICK_MS
+  /** Set by `Session.launch` — observability for UCPath idle refresh UI. */
+  private ucpathIdleTouchCb?: () => void
+  private ucpathIdleRefreshCb?: (phase: 'start' | 'end') => void
 
   private constructor(private state: SessionState) {}
 
@@ -114,6 +118,8 @@ export class Session {
     session.parent = parent
     session.ucpathIdleThresholdMs = parent.ucpathIdleThresholdMs
     session.ucpathIdleTickMs = parent.ucpathIdleTickMs
+    session.ucpathIdleTouchCb = parent.ucpathIdleTouchCb
+    session.ucpathIdleRefreshCb = parent.ucpathIdleRefreshCb
     session.startUcpathIdleRefreshIfNeeded()
     return session
   }
@@ -129,6 +135,12 @@ export class Session {
     const browsers = new Map<string, SystemSlot>()
     const readyPromises = new Map<string, Promise<void>>()
     const session = new Session({ systems, browsers, readyPromises })
+    session.ucpathIdleTouchCb = (): void => {
+      opts.observer?.onUcpathIdleTouch?.()
+    }
+    session.ucpathIdleRefreshCb = (phase: 'start' | 'end'): void => {
+      opts.observer?.onUcpathIdleRefresh?.(phase)
+    }
     opts.onReady?.(session)
     throwIfAborted(abortSignal)
 
@@ -646,7 +658,19 @@ export class Session {
   }
 
   private noteUcpathAutomationActivity(): void {
-    this.lastUcpathTouchMs = Date.now()
+    const now = Date.now()
+    this.lastUcpathTouchMs = now
+    // Debounce the observability callback: UCPath-heavy workflows call
+    // `ctx.page("ucpath")` many times per item, and each call writes a session
+    // event to `sessions-*.jsonl` via `appendFileSync`. The dashboard idle
+    // countdown only needs ~1s granularity, so suppress sub-second emits.
+    if (now - this.lastUcpathTouchCbMs < 1000) return
+    this.lastUcpathTouchCbMs = now
+    try {
+      this.ucpathIdleTouchCb?.()
+    } catch {
+      /* observability must not break automation */
+    }
   }
 
   private startUcpathIdleRefreshIfNeeded(): void {
@@ -689,6 +713,7 @@ export class Session {
   private scheduleUcpathIdleReload(): void {
     this.ucpathIdleReloadChain = this.ucpathIdleReloadChain.then(async () => {
       let recordActivity = false
+      let refreshCbFired = false
       try {
         const slot = this.state.browsers.get(UCPATH_SYSTEM_ID)
         if (!slot) return
@@ -701,6 +726,12 @@ export class Session {
         if (Date.now() - this.lastUcpathTouchMs < this.ucpathIdleThresholdMs) return
         log.step('[Session: ucpath] Idle refresh — reloading page after automation idle')
         try {
+          this.ucpathIdleRefreshCb?.('start')
+          refreshCbFired = true
+        } catch {
+          /* ignore */
+        }
+        try {
           await slot.page.reload({ waitUntil: 'domcontentloaded', timeout: 90_000 })
         } catch (err) {
           log.warn(`[Session: ucpath] Idle refresh reload failed: ${errorMessage(err)}`)
@@ -708,6 +739,13 @@ export class Session {
         recordActivity = true
       } finally {
         this.ucpathIdleReloadInFlight = false
+        if (refreshCbFired) {
+          try {
+            this.ucpathIdleRefreshCb?.('end')
+          } catch {
+            /* ignore */
+          }
+        }
         if (recordActivity) this.lastUcpathTouchMs = Date.now()
       }
     }).catch(() => {

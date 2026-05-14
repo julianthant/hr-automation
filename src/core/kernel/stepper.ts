@@ -1,4 +1,5 @@
 import { classifyError } from '../../utils/errors.js'
+import { log } from '../../utils/log.js'
 import { CancelledError, type ScreenshotFn } from './types.js'
 
 export interface StepperOpts {
@@ -57,6 +58,7 @@ export class Stepper {
       throw new CancelledError(name)
     }
     this.currentStep = name
+    log.step(`Phase: ${name}`)
     this.opts.emitStep(name)
     this.stepDepth++
     try {
@@ -105,6 +107,7 @@ export class Stepper {
    */
   markStep(name: string): void {
     this.currentStep = name
+    log.step(`Phase: ${name}`)
     this.opts.emitStep(name)
   }
 
@@ -118,6 +121,7 @@ export class Stepper {
    */
   skipStep(name: string): void {
     this.currentStep = name
+    log.step(`Phase: ${name}`)
     this.opts.emitSkipped?.(name)
   }
 

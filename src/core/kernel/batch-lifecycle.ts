@@ -9,6 +9,7 @@ import {
   emitAuthStart,
   emitAuthComplete,
   emitAuthFailed,
+  emitUcpathIdleSignal,
 } from '../../tracker/session-events.js'
 
 /**
@@ -91,6 +92,12 @@ export function createBatchObserver(
       pendingStart.delete(systemId)
       timings.push({ systemId, startTs, endTs: Date.now() })
       emitAuthFailed(instance, browserId, systemId, trackerDir)
+    },
+    onUcpathIdleTouch: () => {
+      emitUcpathIdleSignal(instance, trackerDir, 'touch')
+    },
+    onUcpathIdleRefresh: (phase) => {
+      emitUcpathIdleSignal(instance, trackerDir, phase === 'start' ? 'refresh_start' : 'refresh_end')
     },
   }
 

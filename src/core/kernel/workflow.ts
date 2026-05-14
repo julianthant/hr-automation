@@ -13,6 +13,7 @@ import { runWorkflowSharedContextPool } from './shared-context-pool.js'
 import { withBatchLifecycle } from './batch-lifecycle.js'
 import { validateAndPrepareItems, callerPreEmitsPending, awaitAllSystemsReady } from './batch-helpers.js'
 import { makeAuthObserver } from '../../tracker/sessions/auth-observer.js'
+import { emitUcpathIdleSignal } from '../../tracker/session-events.js'
 import { registerInProcessRun, unregisterInProcessRun } from '../daemon/in-process-runs.js'
 import { operatorSubjectData } from '../../domain/operator-subject.js'
 import { queueTitleData } from '../../domain/queue-title.js'
@@ -148,6 +149,7 @@ export function buildSessionObserver<TData, TSteps extends readonly string[]>(
   boundScreenshot: { fn: import('./types.js').ScreenshotFn } = {
     fn: async () => ({ kind: 'error', label: '', step: null, ts: Date.now(), files: [] }),
   },
+  trackerDir?: string,
 ): import('./types.js').SessionObserver {
   const sessionId = '1'
   let registered = false
@@ -187,6 +189,12 @@ export function buildSessionObserver<TData, TSteps extends readonly string[]>(
     onAuthFailed: (systemId, browserId) => {
       void authObs.onAuthFailed!(systemId, browserId)
       sessionCtx.setAuthState(browserId, systemId, 'failed')
+    },
+    onUcpathIdleTouch: () => {
+      emitUcpathIdleSignal(sessionCtx.instance, trackerDir, 'touch')
+    },
+    onUcpathIdleRefresh: (phase) => {
+      emitUcpathIdleSignal(sessionCtx.instance, trackerDir, phase === 'start' ? 'refresh_start' : 'refresh_end')
     },
   }
 }
@@ -443,6 +451,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
         workflow: wf.config.name,
         itemId: String(itemId),
         emitScreenshotEvent: (ev) => emitScreenshotEvent(ev, { dir: opts.trackerDir }),
+        trackerDir: opts.trackerDir,
       })
       stepper.setScreenshotFn(ctx.screenshot)
 
@@ -510,7 +519,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
         const boundScreenshot: { fn: import('./types.js').ScreenshotFn } = {
           fn: async () => ({ kind: 'error', label: '', step: null, ts: Date.now(), files: [] }),
         }
-        const observer = buildSessionObserver(wf, sessionCtx, setStep, emitFailed, boundScreenshot)
+        const observer = buildSessionObserver(wf, sessionCtx, setStep, emitFailed, boundScreenshot, opts.trackerDir)
         // Thread tracker's runId into run() so Stepper + screenshot events
         // share the same id as the JSONL rows (fixed 2026-04-23 — previously
         // the inner `run()` generated its own UUID while the tracker wrote
