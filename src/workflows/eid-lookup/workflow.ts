@@ -443,6 +443,42 @@ export function deriveEidLookupItemId(input: EidLookupItem): string {
 }
 
 /**
+ * Pre-emit pending tracker row for an eid-lookup queue item. Exported for
+ * tests + reuse via the OCR orchestrator. When `parentSubject` is present on
+ * the item, `data.__name` is overwritten with it so the dashboard row displays
+ * the batch label (e.g. "Oath Signature · #abcd") rather than the per-name
+ * identity. `parentRunId` is forwarded when present so OCR-delegated rows
+ * nest correctly.
+ */
+export function eidLookupPreEmitPending(
+  item: EidLookupItem & { parentSubject?: string },
+  runId: string,
+  parentRunId: string | undefined,
+  itemId: string,
+  trackerDir?: string,
+): void {
+  const n = "name" in item ? item.name : item.emplId;
+  const subject = eidLookupCrmWorkflow.config.operatorSubject?.(item);
+  const parentSubject = item.parentSubject;
+  const displayName = parentSubject ?? n ?? "";
+  trackEvent({
+    workflow: "eid-lookup",
+    timestamp: new Date().toISOString(),
+    id: itemId,
+    runId,
+    ...(parentRunId ? { parentRunId } : {}),
+    status: "pending",
+    data: {
+      searchName: n,
+      __name: displayName,
+      __id: n ?? itemId,
+      ...(parentSubject ? { parentSubject } : {}),
+      ...operatorSubjectData(subject),
+    },
+  }, trackerDir);
+}
+
+/**
  * Daemon-mode CLI adapter for `npm run eid-lookup <names...>`.
  *
  * Mirrors `runSeparationCli` / `runWorkStudyCli`: enqueues one `{name}` item
@@ -475,7 +511,6 @@ export async function runEidLookupCli(
 
   const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
   const inputs = uniqueNames.map((name) => ({ name }));
-  const now = new Date().toISOString();
   await ensureDaemonsAndEnqueue(
     eidLookupCrmWorkflow,
     inputs,
@@ -485,26 +520,8 @@ export async function runEidLookupCli(
     },
     {
       deriveItemId: deriveEidLookupItemId,
-      // Match the existing `runEidLookupBatch` pre-emit payload so the
-      // dashboard queue panel shows the same `{searchName, __name, __id}`
-      // shape whether the user runs the daemon CLI or `--direct`. The
-      // runId here is the pre-assigned one from `enqueueItems`, so the
-      // eventual running/done rows pair 1:1.
-      onPreEmitPending: (item, runId, _parentRunId, itemId) => {
-        // CLI adapter only enqueues `{ name }` items, but the workflow
-        // schema accepts the union — narrow to the name shape we just
-        // constructed at line `inputs.map((name) => ({ name }))`.
-        const n = "name" in item ? item.name : item.emplId;
-        const subject = eidLookupCrmWorkflow.config.operatorSubject?.(item);
-        trackEvent({
-          workflow: "eid-lookup",
-          timestamp: now,
-          id: itemId,
-          runId,
-          status: "pending",
-          data: { searchName: n, __name: n, __id: n, ...operatorSubjectData(subject) },
-        });
-      },
+      onPreEmitPending: (item, runId, parentRunId, itemId) =>
+        eidLookupPreEmitPending(item, runId, parentRunId, itemId),
     },
   );
 }

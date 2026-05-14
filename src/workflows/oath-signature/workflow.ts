@@ -142,6 +142,40 @@ export async function runOathSignature(input: OathSignatureInput): Promise<void>
 }
 
 /**
+ * Pre-emit pending tracker row for an oath-signature queue item. Exported for
+ * tests + reuse via the OCR orchestrator. When `parentSubject` is present,
+ * `data.__name` is set to the batch label so the dashboard row displays the
+ * prep context (e.g. "Oath Signature · #abcd") rather than the bare EID.
+ * When absent, `__name` is omitted and the dashboard falls back to its
+ * standard field resolution — preserving back-compat for direct CLI runs.
+ */
+export function oathSignaturePreEmitPending(
+  item: OathSignatureInput,
+  runId: string,
+  parentRunId: string | undefined,
+  itemId: string | undefined,
+  trackerDir?: string,
+): void {
+  const subject = oathSignatureWorkflow.config.operatorSubject?.(item);
+  const parentSubject = item.parentSubject;
+  trackEvent({
+    workflow: WORKFLOW,
+    timestamp: new Date().toISOString(),
+    id: itemId ?? item.emplId,
+    runId,
+    ...(parentRunId ? { parentRunId } : {}),
+    status: "pending",
+    data: {
+      emplId: item.emplId,
+      ...(item.date ? { date: item.date } : {}),
+      ...(item.dryRun ? { dryRun: "true" } : {}),
+      ...(parentSubject ? { __name: parentSubject, parentSubject } : {}),
+      ...operatorSubjectData(subject),
+    },
+  }, trackerDir);
+}
+
+/**
  * Daemon-mode CLI adapter.
  *
  * One invocation can carry N EIDs — they enqueue 1:1 to the shared daemon
@@ -164,29 +198,13 @@ export async function runOathSignatureCli(
     return;
   }
   const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
-  const now = new Date().toISOString();
   await ensureDaemonsAndEnqueue(
     oathSignatureWorkflow,
     inputs,
     { new: options.new, parallel: options.parallel },
     {
-      onPreEmitPending: (item, runId, parentRunId) => {
-        const subject = oathSignatureWorkflow.config.operatorSubject?.(item);
-        trackEvent({
-          workflow: WORKFLOW,
-          timestamp: now,
-          id: item.emplId,
-          runId,
-          ...(parentRunId ? { parentRunId } : {}),
-          status: "pending",
-          data: {
-            emplId: item.emplId,
-            ...(item.date ? { date: item.date } : {}),
-            ...(item.dryRun ? { dryRun: "true" } : {}),
-            ...operatorSubjectData(subject),
-          },
-        });
-      },
+      onPreEmitPending: (item, runId, parentRunId, itemId) =>
+        oathSignaturePreEmitPending(item, runId, parentRunId, itemId),
     },
   );
 }

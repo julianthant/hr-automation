@@ -16,6 +16,7 @@ export const OathSignatureInputSchema = z.object({
     .regex(/^\d{2}\/\d{2}\/\d{4}$/, "Date must be in MM/DD/YYYY format")
     .optional(),
   dryRun: z.boolean().optional(),
+  parentSubject: z.string().optional(),
 });
 
 export type OathSignatureInput = z.infer<typeof OathSignatureInputSchema>;
