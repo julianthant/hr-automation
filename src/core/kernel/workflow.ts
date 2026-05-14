@@ -15,6 +15,7 @@ import { validateAndPrepareItems, callerPreEmitsPending, awaitAllSystemsReady } 
 import { makeAuthObserver } from '../../tracker/sessions/auth-observer.js'
 import { registerInProcessRun, unregisterInProcessRun } from '../daemon/in-process-runs.js'
 import { operatorSubjectData } from '../../domain/operator-subject.js'
+import { queueTitleData } from '../../domain/queue-title.js'
 import { openControlDb } from '../control-db.js'
 import { createTaskStore } from '../task-store/index.js'
 import { createWorkerStore } from '../daemon/worker-store.js'
@@ -103,7 +104,23 @@ export function buildInitialTrackerData<TData, TSteps extends readonly string[]>
 ): Record<string, string> {
   const initial = wf.config.initialData ? stringifyMap(wf.config.initialData(input)) : {}
   const subject = wf.config.operatorSubject ? operatorSubjectData(wf.config.operatorSubject(input)) : {}
-  return { ...initial, ...subject }
+  const seed = { ...initial, ...subject }
+  return { ...seed, ...buildQueueTitleForInput(wf, input, seed) }
+}
+
+function buildQueueTitleForInput<TData, TSteps extends readonly string[]>(
+  wf: RegisteredWorkflow<TData, TSteps>,
+  input: TData,
+  seed: Record<string, string>,
+): Record<string, string> {
+  const config = wf.config.queueTitle
+  if (!config) return {}
+  if (config.kind === 'single') {
+    const title = seed.__subject || seed.__name || wf.config.getName?.(seed) || ''
+    return queueTitleData({ kind: 'single', title })
+  }
+  const title = config.labelFromInput?.(input) ?? config.label ?? wf.config.label ?? wf.config.name
+  return queueTitleData({ kind: 'batch', title })
 }
 
 /**

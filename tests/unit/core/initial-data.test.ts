@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { defineWorkflow, runWorkflow } from '../../../src/core/index.js'
+import { buildInitialTrackerData } from '../../../src/core/kernel/workflow.js'
 import type { SystemConfig } from '../../../src/core/kernel/types.js'
 
 const TMP = () => mkdtempSync(join(tmpdir(), 'hrauto-initdata-'))
@@ -73,4 +74,21 @@ test('runWorkflow: without initialData, pending data.__name is empty', async () 
   const pending = lines.find((l: any) => l.status === 'pending')
   assert.ok(pending)
   assert.equal(pending.data.__name, '')
+})
+
+test('buildInitialTrackerData stamps single queue titles from operator subject', () => {
+  const wf = defineWorkflow({
+    name: 'queue-title-test',
+    systems: [],
+    steps: ['done'] as const,
+    schema: z.object({ name: z.string() }),
+    queueTitle: { kind: 'single' },
+    operatorSubject: (input) => ({ kind: 'person', label: input.name }),
+    handler: async () => {},
+  })
+
+  const data = buildInitialTrackerData(wf, { name: 'Doe, Jane' })
+
+  assert.equal(data.__queueTitle, 'Doe, Jane')
+  assert.equal(data.__queueTitleKind, 'single')
 })

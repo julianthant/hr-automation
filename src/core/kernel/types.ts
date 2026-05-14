@@ -93,6 +93,10 @@ export type DetailField<TData> =
   | (keyof TData & string)
   | { key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean }
 
+export type WorkflowQueueTitleConfig<TData> =
+  | { kind: 'single' }
+  | { kind: 'batch'; label?: string; labelFromInput?: (input: TData) => string | undefined }
+
 export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   name: string
   version?: string
@@ -169,6 +173,12 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
    * `updateData` calls in the handler take precedence.
    */
   initialData?: (input: TData) => Record<string, unknown>
+  /**
+   * Global queue-row title policy. This only controls display titles today,
+   * but it is intentionally metadata so future queue naming surfaces can
+   * reuse the same classification.
+   */
+  queueTitle?: WorkflowQueueTitleConfig<TData>
   /**
    * Derive a stable tracker/queue item id from raw workflow input. The kernel
    * has a generic top-level id/docId/email fallback, but dashboard HTTP
