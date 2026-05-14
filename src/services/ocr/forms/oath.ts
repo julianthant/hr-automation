@@ -20,6 +20,7 @@ export const OathRosterOcrRecordSchema = z.object({
   sourcePage: z.number().int().positive(),
   rowIndex: z.number().int().nonnegative().optional(),
   printedName: z.string().optional(),
+  confidence: z.number().min(0).max(1).optional(),
   employeeId: z.string().nullable().optional(),
   employeeSigned: z.boolean().optional(),
   officerSigned: z.boolean().nullable().optional(),
@@ -100,6 +101,7 @@ Output ONLY the valid JSON array. No commentary, no markdown fences, no wrapper 
 
 const NAME_AUTO_ACCEPT_GAP = 0.10;
 const NAME_DISAMBIG_FLOOR = 0.40;
+const OCR_NAME_CONFIDENCE_DISAMBIG_SKIP = 0.85;
 const LLM_HIGH_CONFIDENCE = 0.6;
 
 // ─── Spec implementation ────────────────────────────────────
@@ -121,7 +123,9 @@ export const oathOcrFormSpec: OcrFormSpec<
   async matchRecord({ record, roster }): Promise<OathPreviewRecord> {
     const printedName = (record.printedName ?? "").trim();
     const formEidRaw = (record.employeeId ?? "").trim();
-    log.step(`[oath/match] page ${record.sourcePage} row ${record.rowIndex ?? "?"}: name="${printedName || "(empty)"}" eid="${formEidRaw || "(empty)"}" signed=${record.employeeSigned} doc=${record.documentType ?? "expected"}`);
+    const ocrConfidence = typeof record.confidence === "number" ? record.confidence : undefined;
+    const confidenceText = ocrConfidence === undefined ? "" : ` confidence=${ocrConfidence.toFixed(2)}`;
+    log.step(`[oath/match] page ${record.sourcePage} row ${record.rowIndex ?? "?"}: name="${printedName || "(empty)"}" eid="${formEidRaw || "(empty)"}" signed=${record.employeeSigned} doc=${record.documentType ?? "expected"}${confidenceText}`);
 
     // Empty printedName + no form-EID means the LLM gave us nothing usable.
     // Surface as a manual record so the operator sees it in the preview pane
@@ -235,6 +239,24 @@ export const oathOcrFormSpec: OcrFormSpec<
         warnings: top.score < 1.0
           ? [`Single roster candidate "${top.name}" accepted (score ${top.score.toFixed(2)}); active-check will verify`]
           : [],
+      };
+    }
+
+    if (ocrConfidence !== undefined && ocrConfidence >= OCR_NAME_CONFIDENCE_DISAMBIG_SKIP) {
+      log.step(`[oath/match] → lookup-pending (skip LLM disambiguation): OCR name confidence ${ocrConfidence.toFixed(2)} >= ${OCR_NAME_CONFIDENCE_DISAMBIG_SKIP}`);
+      return {
+        ...record,
+        employeeId: "",
+        matchState: "lookup-pending",
+        matchSource: "manual",
+        matchConfidence: ocrConfidence,
+        rosterCandidates: topCandidates,
+        documentType: "expected",
+        originallyMissing: [],
+        selected: true,
+        warnings: [
+          `High OCR name confidence (${ocrConfidence.toFixed(2)}) — skipping LLM disambiguation; eid-lookup will search by name`,
+        ],
       };
     }
 

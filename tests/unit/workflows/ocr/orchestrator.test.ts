@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, readFileSync, existsSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -498,7 +497,7 @@ test("orchestrator treats non-UCPath employee ids as missing and falls back to n
 
 test("orchestrator records SQLite dependencies for eid-lookup fan-out (verify-by-EID)", async () => {
   const { dir, rosterPath } = setup();
-  const runId = randomUUID();
+  const runId = "00000000-0000-4000-8000-0000000000ab";
   let watcherCalled = false;
   let dependencyBatchCreated = false;
 
@@ -557,7 +556,7 @@ test("orchestrator records SQLite dependencies for eid-lookup fan-out (verify-by
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("orchestrator uses LLM lookup suggestions when fuzzy roster matching has no candidates", async () => {
+test("orchestrator uses LLM suggestion EIDs but enqueues only OCR name when fuzzy roster matching has no candidates", async () => {
   const { dir, rosterPath } = setup();
   let eidLookupItems: Array<{ name?: string; emplId?: string; itemId: string }> = [];
 
@@ -602,9 +601,60 @@ test("orchestrator uses LLM lookup suggestions when fuzzy roster matching has no
     } as never,
   );
 
-  assert.ok(eidLookupItems.some((item) => item.name === "Battistessa, Johnnie"));
   assert.ok(eidLookupItems.some((item) => item.name === "Batistessa, Jhn"));
   assert.ok(eidLookupItems.some((item) => item.emplId === "10873698"));
+  assert.equal(eidLookupItems.filter((item) => item.name !== undefined).length, 1);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("orchestrator collapses lookup name variants to the candidate with the most words", async () => {
+  const { dir, rosterPath } = setup();
+  let eidLookupItems: Array<{ name?: string; emplId?: string; itemId: string }> = [];
+
+  await runOcrOrchestrator(
+    {
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      formType: "oath",
+      sessionId: "session-name-variants",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-name-variants",
+      trackerDir: dir,
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          sourcePage: 1,
+          rowIndex: 0,
+          printedName: "Barahona Martell, Carlos",
+          employeeSigned: true,
+          officerSigned: true,
+          dateSigned: "05/01/2026",
+          notes: [],
+          documentType: "expected",
+          originallyMissing: [],
+        }],
+        provider: "stub",
+        attempts: 1,
+        cached: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000001", name: "Unrelated Person" }],
+      _lookupSuggestionOverride: async () => [
+        { name: "Barahona Martell, Carlos D", confidence: 0.85 },
+        { name: "Barahona Martell, Carlos", confidence: 0.74 },
+        { name: "Barahona, Carlos D", confidence: 0.73 },
+      ],
+      _enqueueEidLookupOverride: async (items: Array<{ name?: string; emplId?: string; itemId: string }>) => {
+        eidLookupItems = items;
+      },
+      _disableSqliteDependencies: true,
+      _watchChildRunsOverride: async () => [],
+    } as never,
+  );
+
+  const nameItems = eidLookupItems.filter((item) => item.name !== undefined);
+  assert.deepEqual(nameItems.map((item) => item.name), ["Barahona Martell, Carlos D"]);
   rmSync(dir, { recursive: true, force: true });
 });
 

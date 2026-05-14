@@ -43,5 +43,5 @@ export const ocrWorkflow = defineWorkflow({
 async function ocrKernelHandler(ctx: Ctx<typeof ocrSteps, OcrInput>, input: OcrInput): Promise<void> {
   // Thin wrapper. Orchestrator owns its own tracker emissions because the
   // kernel's per-step machinery doesn't model "wait for user, mid-handler."
-  await runOcrOrchestrator(input, { runId: ctx.runId });
+  await runOcrOrchestrator(input, { runId: ctx.runId, trackerDir: ctx.trackerDir });
 }

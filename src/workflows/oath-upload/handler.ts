@@ -61,18 +61,28 @@ export async function oathUploadHandler(
     ...(input.pdfFileId ? { pdfFileId: input.pdfFileId } : {}),
     sessionId: input.sessionId,
     pdfHash: input.pdfHash,
+    mode: input.mode,
     status: "running",
-    taskRole: "delegator",
+    taskRole: input.mode === "upload-only" ? "root" : "delegator",
     taskGroupId: ctx.runId,
     ...(input.dryRun ? { dryRun: true } : {}),
   });
 
   const ocrSessionId = `oath-upload-${ctx.runId}-ocr`;
-  ctx.updateData({ ocrSessionId });
+  if (input.mode !== "upload-only") {
+    ctx.updateData({ ocrSessionId });
+  }
 
   let fannedOutItemIds: string[] = [];
-  const priorApproval = readPriorOcrApproval(ocrSessionId, trackerDir);
-  if (priorApproval) {
+  const priorApproval = input.mode === "upload-only" ? null : readPriorOcrApproval(ocrSessionId, trackerDir);
+  if (input.mode === "upload-only") {
+    log.step("[oath-upload] upload-only mode: skipping OCR and oath-signature delegation");
+    ctx.skipStep("delegate-ocr");
+    ctx.skipStep("wait-ocr-approval");
+    ctx.skipStep("delegate-signatures");
+    ctx.skipStep("wait-signatures");
+    ctx.updateData({ signerCount: "skipped" });
+  } else if (priorApproval) {
     log.step(
       `[oath-upload] recovery: prior approved OCR found for ${ocrSessionId}; skipping delegate-ocr + wait-ocr-approval`,
     );
@@ -99,7 +109,7 @@ export async function oathUploadHandler(
         rosterPath: input.rosterPath,
         dryRun: input.dryRun,
         parentRunId: ctx.runId,
-      } as never).catch((err) =>
+      } as never, { trackerDir: ctx.trackerDir ?? trackerDir }).catch((err) =>
         log.warn(`[oath-upload] OCR child crashed: ${errorMessage(err)}`),
       );
     });
@@ -121,23 +131,25 @@ export async function oathUploadHandler(
     });
   }
 
-  ctx.markStep("delegate-signatures");
+  if (input.mode !== "upload-only") {
+    ctx.markStep("delegate-signatures");
 
-  await ctx.step("wait-signatures", async () => {
-    const fn = opts._watchChildRunsOverride ?? watchChildRuns;
-    await fn({
-      workflow: "oath-signature",
-      expectedItemIds: fannedOutItemIds,
-      trackerDir,
-      timeoutMs: SEVEN_DAYS_MS,
-      isTerminal: (e) => e.status === "done",
-      abortIfRowState: {
-        workflow: "oath-upload",
-        id: input.sessionId,
-        step: "cancel-requested",
-      },
+    await ctx.step("wait-signatures", async () => {
+      const fn = opts._watchChildRunsOverride ?? watchChildRuns;
+      await fn({
+        workflow: "oath-signature",
+        expectedItemIds: fannedOutItemIds,
+        trackerDir,
+        timeoutMs: SEVEN_DAYS_MS,
+        isTerminal: (e) => e.status === "done",
+        abortIfRowState: {
+          workflow: "oath-upload",
+          id: input.sessionId,
+          step: "cancel-requested",
+        },
+      });
     });
-  });
+  }
 
   const page = await ctx.page("servicenow");
 

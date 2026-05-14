@@ -167,6 +167,7 @@ export async function runOcrOrchestrator(
     };
   });
 
+  let lastAnnouncedPhase: string | undefined;
   const writeTracker = (
     status: TrackerEntry["status"],
     data: Record<string, unknown>,
@@ -175,6 +176,10 @@ export async function runOcrOrchestrator(
   ): void => {
     if (isOcrPrepareAbortRequested(id, runId)) {
       throw createOperatorDiscardError();
+    }
+    if (status === "running" && step && step !== lastAnnouncedPhase) {
+      lastAnnouncedPhase = step;
+      log.step(`Phase: ${step}`);
     }
     // Stamp __id so the dashboard's resolveEntryId surfaces a stable handle
     // on every row. Kernel runWorkflow computes this via getId; this
@@ -259,7 +264,7 @@ export async function runOcrOrchestrator(
             ...(spec0.filenameBase ? { filenameBase: spec0.filenameBase } : {}),
             parentRunId: runId,
           },
-          { itemId: childItemId },
+          { itemId: childItemId, trackerDir },
         )
           .catch((err) => log.warn(`[ocr] sharepoint download crashed: ${errorMessage(err)}`))
           .finally(() => _setPendingLandingUrl(null));
@@ -512,7 +517,7 @@ export async function runOcrOrchestrator(
           const t = disambigTargets[i];
           try {
             results[i] = await disambiguateMatch({
-              query: t.rec.printedName ?? "",
+              query: disambigQueryFromRecord(records[t.index]),
               candidates: t.rec.rosterCandidates!.slice(0, 5),
             });
           } catch (err) {
@@ -574,7 +579,7 @@ export async function runOcrOrchestrator(
     }
 
     // 4. EID lookup fan-out — UCPath + CRM name resolution and active / HDH disposition.
-    // "name"        → lookup by printed name (CRM cross-verify path)
+    // "name"        → lookup by OCR-printed name only (LLM name suggestions are logged for ops context, not enqueued)
     // "verify"      → roster-derived EID
     // "verify-only" → form-extracted EID or LLM suggestion EID
     const lookupTargets: Array<{
@@ -591,23 +596,16 @@ export async function runOcrOrchestrator(
         if ((kind === "verify" || kind === "verify-only") && !extractEid(rec).trim()) return;
         if (kind === "name") {
           const suggestions = lookupSuggestionsByIndex.get(index) ?? [];
-          const seenNames = new Set<string>();
-          const addNameTarget = (name: string): void => {
-            const normalized = name.trim();
-            if (!normalized) return;
-            const key = normalized.toLowerCase();
-            if (seenNames.has(key)) return;
-            seenNames.add(key);
-            lookupTargets.push({ rec, index, kind, name: normalized });
-          };
           for (const suggestion of suggestions) {
-            if (suggestion.name) addNameTarget(formatLookupName(suggestion.name));
             const suggestionEid = normalizeUcpathEmployeeId(suggestion.emplId);
             if (suggestionEid) {
               lookupTargets.push({ rec, index, kind: "verify-only", eid: suggestionEid });
             }
           }
-          addNameTarget(formatLookupName(extractName(rec, spec)));
+          const primaryName = selectLookupName(extractName(rec, spec), suggestions).trim();
+          if (primaryName) {
+            lookupTargets.push({ rec, index, kind, name: primaryName });
+          }
         } else {
           lookupTargets.push({ rec, index, kind });
         }
@@ -1069,6 +1067,53 @@ function formatLookupName(raw: string): string {
   return toLastFirstSearchName(raw) || raw.trim();
 }
 
+function selectLookupName(rawPrimary: string, suggestions: LookupSuggestion[]): string {
+  const primary = rawPrimary.trim();
+  const suggestedNames = suggestions
+    .map((suggestion) => suggestion.name?.trim() ?? "")
+    .filter((name) => name.length > 0);
+  const options = uniqueStrings([primary, ...suggestedNames].filter((name) => name.length > 0));
+  if (options.length > 1 && areLookupNameVariants(options)) {
+    return formatLookupName(
+      [...options].sort((a, b) => {
+        const tokenDelta = nameTokens(b).length - nameTokens(a).length;
+        if (tokenDelta !== 0) return tokenDelta;
+        return b.length - a.length;
+      })[0],
+    );
+  }
+  return formatLookupName(primary);
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const key = nameTokens(value).join(" ");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(value);
+  }
+  return out;
+}
+
+function areLookupNameVariants(names: string[]): boolean {
+  const tokenSets = names.map((name) => new Set(nameTokens(name))).filter((tokens) => tokens.size > 0);
+  if (tokenSets.length < 2) return false;
+  const common = [...tokenSets[0]].filter((token) => tokenSets.every((tokens) => tokens.has(token)));
+  const shortest = Math.min(...tokenSets.map((tokens) => tokens.size));
+  if (common.length < Math.min(2, shortest)) return false;
+  return tokenSets.every((tokens) => common.length / tokens.size >= 0.5);
+}
+
+function nameTokens(name: string): string[] {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
 function countTargetsByRecord(targets: Array<{ index: number }>): Map<number, number> {
   const counts = new Map<number, number>();
   for (const target of targets) {
@@ -1083,6 +1128,15 @@ function countTargetRecords(targets: Array<{ index: number }>): number {
 
 function extractName(record: unknown, spec: AnyOcrFormSpec): string {
   return spec.carryForwardKey(record as never);
+}
+
+/** Name string fed to LLM roster disambiguation (oath: printedName; EC: employee.name). */
+function disambigQueryFromRecord(record: unknown): string {
+  const r = record as Record<string, unknown>;
+  if (typeof r.printedName === "string" && r.printedName.trim()) return r.printedName.trim();
+  const employee = r.employee as Record<string, unknown> | undefined;
+  if (employee && typeof employee.name === "string") return employee.name.trim();
+  return "";
 }
 
 function extractEid(record: unknown): string {

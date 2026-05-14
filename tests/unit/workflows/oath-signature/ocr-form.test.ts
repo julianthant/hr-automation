@@ -66,6 +66,49 @@ test("matchRecord: signed row with no roster match → lookup-pending", async ()
   assert.equal(preview.employeeId, "");
 });
 
+test("matchRecord: high OCR name confidence skips roster LLM disambiguation", async () => {
+  const ocr = {
+    sourcePage: 1, rowIndex: 0,
+    printedName: "Carlos D Barahona Martell",
+    confidence: 0.94,
+    employeeSigned: true, officerSigned: true,
+    dateSigned: "05/01/2026",
+    notes: [], documentType: "expected" as const, originallyMissing: [],
+  };
+  const preview = await oathOcrFormSpec.matchRecord({
+    record: ocr,
+    roster: [
+      { eid: "10000010", name: "Barahona Martell, Carlos" },
+      { eid: "10000011", name: "Barahona, Carlos D" },
+    ],
+  });
+  assert.equal(preview.matchState, "lookup-pending");
+  assert.equal(preview.matchSource, "manual");
+  assert.equal(preview.employeeId, "");
+  assert.match(preview.warnings.join(" "), /high OCR name confidence/i);
+});
+
+test("matchRecord: low OCR name confidence keeps roster LLM disambiguation path", async () => {
+  const ocr = {
+    sourcePage: 1, rowIndex: 0,
+    printedName: "Carlos D Barahona Martell",
+    confidence: 0.42,
+    employeeSigned: true, officerSigned: true,
+    dateSigned: "05/01/2026",
+    notes: [], documentType: "expected" as const, originallyMissing: [],
+  };
+  const preview = await oathOcrFormSpec.matchRecord({
+    record: ocr,
+    roster: [
+      { eid: "10000010", name: "Barahona Martell, Carlos" },
+      { eid: "10000011", name: "Barahona, Carlos D" },
+    ],
+  });
+  assert.equal(preview.matchState, "lookup-pending");
+  assert.notEqual(preview.matchSource, "manual");
+  assert.ok((preview.rosterCandidates?.length ?? 0) > 0);
+});
+
 test("needsLookup: lookup-pending → 'name'", async () => {
   const r = { matchState: "lookup-pending", employeeId: "" } as any;
   assert.equal(oathOcrFormSpec.needsLookup(r), "name");

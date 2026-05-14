@@ -41,6 +41,7 @@ test("oathUploadHandler: walks delegate-ocr → wait-ocr-approval → wait-signa
       pdfOriginalName: "test.pdf",
       sessionId: "session-1",
       pdfHash: "a".repeat(64),
+      mode: "full",
       rosterMode: "download",
     }, {
       trackerDir: dir,
@@ -135,6 +136,7 @@ test("oathUploadHandler: skips delegate-ocr + wait-ocr-approval when prior appro
       pdfOriginalName: "x.pdf",
       sessionId: "session-X",
       pdfHash: "a".repeat(64),
+      mode: "full",
       rosterMode: "download",
     }, {
       trackerDir: dir,
@@ -196,6 +198,7 @@ test("oathUploadHandler: dryRun propagates to OCR and skips ServiceNow submit", 
       pdfOriginalName: "dry.pdf",
       sessionId: "session-dry",
       pdfHash: "a".repeat(64),
+      mode: "full",
       rosterMode: "download",
       dryRun: true,
     }, {
@@ -220,6 +223,80 @@ test("oathUploadHandler: dryRun propagates to OCR and skips ServiceNow submit", 
     assert.ok(stepCalls.includes("submit"));
     assert.ok(updates.some((u) => u.status === "dry-run-complete"));
     assert.ok(updates.some((u) => u.ticketNumber === "DRY RUN - not submitted"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("oathUploadHandler: upload-only mode skips OCR and signature delegation then submits ServiceNow", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oath-upload-handler-upload-only-"));
+  try {
+    const stepCalls: string[] = [];
+    const updates: Record<string, unknown>[] = [];
+    let runOcrCalled = false;
+    let waitOcrCalled = false;
+    let watchChildCalled = false;
+    let fillFormCalled = false;
+    let submitCalled = false;
+
+    const fakeCtx = {
+      runId: "oath-upload-run-upload-only",
+      data: {} as Record<string, unknown>,
+      page: async () => ({ url: () => "x", title: async () => "x" }),
+      step: async (name: string, fn: () => Promise<void>) => {
+        stepCalls.push(name);
+        await fn();
+      },
+      markStep: (name: string) => { stepCalls.push(`mark:${name}`); },
+      skipStep: (name: string) => { stepCalls.push(`skip:${name}`); },
+      updateData: (d: Record<string, unknown>) => {
+        updates.push(d);
+        Object.assign(fakeCtx.data, d);
+      },
+      screenshot: async () => undefined,
+    };
+
+    await oathUploadHandler(fakeCtx as never, {
+      pdfPath: "/tmp/upload-only.pdf",
+      pdfOriginalName: "upload-only.pdf",
+      sessionId: "session-upload-only",
+      pdfHash: "a".repeat(64),
+      mode: "upload-only",
+      rosterMode: "download",
+    }, {
+      trackerDir: dir,
+      _runOcrOverride: async () => { runOcrCalled = true; },
+      _waitForOcrApprovalOverride: async () => {
+        waitOcrCalled = true;
+        return { step: "approved" as const, fannedOutItemIds: ["should-not-run"] };
+      },
+      _watchChildRunsOverride: async () => {
+        watchChildCalled = true;
+        return [];
+      },
+      _gotoOverride: async () => undefined,
+      _verifyOverride: async () => undefined,
+      _fillFormOverride: async () => { fillFormCalled = true; },
+      _submitOverride: async () => {
+        submitCalled = true;
+        return "HRC0099999";
+      },
+    });
+
+    assert.equal(runOcrCalled, false);
+    assert.equal(waitOcrCalled, false);
+    assert.equal(watchChildCalled, false);
+    assert.equal(fillFormCalled, true);
+    assert.equal(submitCalled, true);
+    assert.ok(stepCalls.includes("skip:delegate-ocr"));
+    assert.ok(stepCalls.includes("skip:wait-ocr-approval"));
+    assert.ok(stepCalls.includes("skip:delegate-signatures"));
+    assert.ok(stepCalls.includes("skip:wait-signatures"));
+    assert.ok(stepCalls.includes("open-hr-form"));
+    assert.ok(stepCalls.includes("fill-form"));
+    assert.ok(stepCalls.includes("submit"));
+    assert.equal(updates.find((u) => u.ticketNumber)?.ticketNumber, "HRC0099999");
+    assert.equal(updates.find((u) => u.mode)?.mode, "upload-only");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
