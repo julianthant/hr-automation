@@ -26,6 +26,7 @@ import { useWorkflow, useWorkflows, autoLabel } from "./lib/workflows-context";
 import {
   resolveEntryName,
   buildDisplayNameMap,
+  buildDisplayNameEntries,
   groupMergedEntries,
   collectEntriesForMergedScope,
   mergedGroupPeersForLogPanel,
@@ -231,7 +232,11 @@ export default function App() {
       );
       if (hit) return hit;
     }
-    return dedupedEntries.find((e) => e.id === selectedId) ?? null;
+    return (
+      dedupedEntries.find((e) => e.id === selectedId) ??
+      entries.find((e) => e.id === selectedId) ??
+      null
+    );
   }, [
     selectedId,
     batchQueueParentRunId,
@@ -261,9 +266,18 @@ export default function App() {
   // Recomputed whenever entries or the workflow's label change so a row's
   // ordinal stays stable as more rows arrive (the map is keyed by entry id;
   // older rows keep their #1, the newest gets #N).
+  const displayNameEntries = useMemo(
+    () =>
+      buildDisplayNameEntries({
+        visibleEntries: dedupedEntries,
+        sourceEntries: entries,
+      }),
+    [dedupedEntries, entries],
+  );
+
   const displayNames = useMemo(
-    () => buildDisplayNameMap(dedupedEntries, wfLabel),
-    [dedupedEntries, wfLabel],
+    () => buildDisplayNameMap(displayNameEntries, wfLabel),
+    [displayNameEntries, wfLabel],
   );
 
   // Toast on completion/failure for LIVE transitions only — i.e. an entry
@@ -532,7 +546,7 @@ export default function App() {
           setRunModalOpen(true);
         }}
       >
-      <div className="flex flex-1 overflow-hidden pt-3">
+      <div className="flex flex-1 overflow-hidden">
         <WorkflowRail
           workflow={workflow}
           workflows={workflows}
@@ -614,6 +628,7 @@ export default function App() {
               entry={selectedEntry}
               workflow={workflow}
               date={date}
+              allEntries={entries}
               displayNames={displayNames}
               siblings={
                 selectedEntry

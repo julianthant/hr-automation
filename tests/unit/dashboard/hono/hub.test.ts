@@ -9,6 +9,7 @@ import { parseSubsQuery } from "../../../../src/tracker/dashboard/hono/topics.js
 import { createDashboardServer } from "../../../../src/tracker/dashboard.js";
 import { closeStateDbForTests } from "../../../../src/tracker/state/db.js";
 import { emitSessionEvent } from "../../../../src/tracker/session-events.js";
+import { dateLocal } from "../../../../src/tracker/jsonl.js";
 
 // ── parseSubsQuery validation tests ──────────────────────────────────────────
 
@@ -374,7 +375,7 @@ describe("/events/hub logs + runEvents topics", () => {
   let dir: string;
   let server: Server;
   let port: number;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = dateLocal();
   const testWorkflow = "onboarding";
   const testItemId = "test-item-1";
   const testRunId = `${testItemId}#1`;

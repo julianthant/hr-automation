@@ -204,7 +204,7 @@ test("delegated rows inherit a single visible parent label even when the child h
   assert.equal(resolveEntryName(child, displayNames), "OATH 1");
 });
 
-test("nested delegated rows inherit the root parent display name", () => {
+test("nested delegated rows inherit the root parent display name (prepare-mode parent gets no ordinal suffix)", () => {
   const parent = entry(
     "ocr-prep-session-nested",
     {
@@ -241,9 +241,9 @@ test("nested delegated rows inherit the root parent display name", () => {
 
   const displayNames = buildDisplayNameMap([eidGrandchild, ocrChild, parent], "Oath Signature");
 
-  assert.equal(resolveEntryName(parent, displayNames), "Oath Signature · #sted 1");
-  assert.equal(resolveEntryName(ocrChild, displayNames), "Oath Signature · #sted 1");
-  assert.equal(resolveEntryName(eidGrandchild, displayNames), "Oath Signature · #sted 1");
+  assert.equal(resolveEntryName(parent, displayNames), "Oath Signature · #sted");
+  assert.equal(resolveEntryName(ocrChild, displayNames), "Oath Signature · #sted");
+  assert.equal(resolveEntryName(eidGrandchild, displayNames), "Oath Signature · #sted");
 });
 
 test("buildDisplayNameEntries includes delegated parents for visible single child rows", () => {

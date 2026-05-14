@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   filterLogsForDebugVisibility,
+  formatLogMessageForDisplay,
   isDebugLog,
 } from "../../../src/dashboard/components/log-panel/log-display";
 
@@ -32,5 +33,17 @@ describe("dashboard log display filtering", () => {
   it("classifies debug by structured level instead of message text", () => {
     assert.equal(isDebugLog({ level: "debug", message: "anything" }), true);
     assert.equal(isDebugLog({ level: "warn", message: "debug details are available" }), false);
+  });
+
+  it("strips leading bracket source prefixes from displayed log messages", () => {
+    assert.equal(
+      formatLogMessageForDisplay("[ocr] matching 1 OCR record(s) against roster"),
+      "matching 1 OCR record(s) against roster",
+    );
+    assert.equal(
+      formatLogMessageForDisplay("[oath/match] roster scan: 3 candidates above threshold"),
+      "roster scan: 3 candidates above threshold",
+    );
+    assert.equal(formatLogMessageForDisplay("Phase: matching"), "Phase: matching");
   });
 });

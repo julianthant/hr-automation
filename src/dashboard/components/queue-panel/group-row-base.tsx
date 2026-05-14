@@ -28,7 +28,7 @@ const STATUS_ICON: Record<string, { Icon: LucideIcon; color: string; spin: boole
   failed: { Icon: AlertTriangle, color: "text-destructive", spin: false },
 };
 
-export type GroupRowVariant = "approval-delegation" | "batch";
+export type GroupRowVariant = "approval-delegation" | "passive-delegation" | "batch";
 
 export interface GroupRowBaseProps {
   variant: GroupRowVariant;
@@ -37,6 +37,8 @@ export interface GroupRowBaseProps {
   members: TrackerEntry[];
   countTone: "warning" | "neutral";
   footerLabelPrefix: "prep" | "batch";
+  footerRunOrdinal?: number;
+  footerSecondaryId?: string;
   firstTimestamp?: string;
   isFocused: boolean;
   drillInEnabled?: boolean;
@@ -50,7 +52,9 @@ export function GroupRowBase({
   parentRunId,
   members,
   countTone,
-  footerLabelPrefix,
+  footerLabelPrefix: _footerLabelPrefix,
+  footerRunOrdinal,
+  footerSecondaryId,
   firstTimestamp,
   isFocused,
   drillInEnabled = true,
@@ -75,6 +79,7 @@ export function GroupRowBase({
     : "";
 
   const rowTime = firstTimestamp ? formatTime(firstTimestamp) : "";
+  const runNumber = footerRunOrdinal && footerRunOrdinal > 0 ? footerRunOrdinal : 1;
   const segs = computeProgressSegments(counts);
   const interactive = drillInEnabled;
   const drillInProps = interactive
@@ -198,9 +203,17 @@ export function GroupRowBase({
             )}
           >
             <span className="tabular-nums flex-shrink-0">{rowTime}</span>
-            <span className="bg-secondary/80 px-1.5 py-px rounded font-medium flex-shrink-0">
-              {footerLabelPrefix}#{parentRunId.slice(-4)}
+            <span className="bg-secondary/80 px-1.5 py-px rounded font-medium flex-shrink-0 tabular-nums">
+              #{runNumber}
             </span>
+            {footerSecondaryId && (
+              <span
+                className="truncate text-foreground/80 flex-shrink min-w-0 tabular-nums"
+                title={footerSecondaryId}
+              >
+                {footerSecondaryId}
+              </span>
+            )}
             <span className="flex-1" />
             {elapsedLabel && (
               <span
@@ -214,11 +227,7 @@ export function GroupRowBase({
             )}
           </div>
           {footerActions ? (
-            <div
-              className="flex items-center gap-1 flex-shrink-0 [&_button]:min-h-11 [&_button]:min-w-11"
-            >
-              {footerActions}
-            </div>
+            <div className="flex items-center gap-1 flex-shrink-0">{footerActions}</div>
           ) : null}
         </div>
       </div>

@@ -28,7 +28,7 @@ async function sha256OfFile(file: File): Promise<string> {
  * File-upload "Run" modal — drives every workflow whose Run affordance
  * uploads a PDF (emergency-contact, ocr, oath-upload as of writing).
  *
- * Per-workflow behavior (title, description, submit URL, which sections
+ * Per-workflow behavior (title, submit URL, which sections
  * to render, success-toast shape) is declared in
  * `src/dashboard/lib/run-modal-registry.ts`. Adding a new file-upload
  * workflow needs only an entry there — this component does not change.
@@ -62,7 +62,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
   const showFormType = (config?.sections.formType ?? false) || Boolean(effectiveLockedFormType);
   const showDuplicateCheck = config?.sections.duplicateCheck ?? false;
   const showDryRun = config?.sections.dryRun ?? false;
-  const ctx = { reuploadFor, lockedFormType: effectiveLockedFormType };
+  const showOathUploadMode = config?.sections.oathUploadMode ?? false;
 
   const [file, setFile] = useState<File | null>(null);
   const [pageCount, setPageCount] = useState<number | null>(null);
@@ -76,6 +76,9 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
   const formOptions: FormTypeOption[] = formOptionsCache ?? [];
   const [priorRuns, setPriorRuns] = useState<PriorRunSummary[]>([]);
   const [dryRun, setDryRun] = useState(false);
+  const [oathUploadMode, setOathUploadMode] = useState<"full" | "upload-only">("full");
+  const effectiveShowRoster = showRoster && oathUploadMode === "full";
+  const ctx = { reuploadFor, lockedFormType: effectiveLockedFormType, oathUploadMode };
 
   useEffect(() => {
     if (open && effectiveLockedFormType) setFormType(effectiveLockedFormType);
@@ -112,9 +115,9 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
   // (`useRosters`) already serves any pre-warmed data instantly — this is
   // belt-and-braces for staleness.
   useEffect(() => {
-    if (!open || !showRoster) return;
+    if (!open || !effectiveShowRoster) return;
     refreshRosters();
-  }, [open, showRoster]);
+  }, [open, effectiveShowRoster]);
 
   // Auto-flip to "download" mode when the listing comes back empty.
   useEffect(() => {
@@ -182,6 +185,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
     setPriorRuns([]);
     setRosterMode("existing");
     setDryRun(false);
+    setOathUploadMode("full");
   }, [open]);
 
   if (!config) {
@@ -219,7 +223,8 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
 
     const fd = new FormData();
     fd.append("pdf", file, file.name);
-    if (showRoster) {
+    if (showOathUploadMode) fd.append("mode", oathUploadMode);
+    if (effectiveShowRoster) {
       fd.append("rosterMode", rosterMode);
       if (rosterMode === "existing" && latestRoster) {
         fd.append("rosterPath", latestRoster.path);
@@ -317,12 +322,12 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
         }
       >
         <DialogHeader className="relative grid gap-3 px-[38px] pt-[36px] pb-0 space-y-0 border-b-0">
-          <div className="flex flex-col gap-1.5" style={{ maxWidth: 360 }}>
+          <div className="flex flex-col" style={{ maxWidth: 360 }}>
             <DialogTitle className="text-[15px] font-normal tracking-[-0.005em]">
               {config.title(ctx)}
             </DialogTitle>
-            <DialogDescription className="text-[12px] leading-[1.55] text-muted-foreground">
-              {config.description(ctx)}
+            <DialogDescription className="sr-only">
+              {config.srDescription(ctx)}
             </DialogDescription>
           </div>
           <button
@@ -344,6 +349,30 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
         </DialogHeader>
 
         <div className="px-[38px] pt-[24px] pb-0 space-y-6">
+          {showOathUploadMode && (
+            <section>
+              <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground/70">
+                Mode
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <ModeButton
+                  active={oathUploadMode === "full"}
+                  disabled={submitting}
+                  label="Full process"
+                  hint="OCR, signatures, then HR ticket"
+                  onClick={() => setOathUploadMode("full")}
+                />
+                <ModeButton
+                  active={oathUploadMode === "upload-only"}
+                  disabled={submitting}
+                  label="Upload only"
+                  hint="HR ticket only"
+                  onClick={() => setOathUploadMode("upload-only")}
+                />
+              </div>
+            </section>
+          )}
+
           {showFormType && !effectiveLockedFormType && !reuploadFor && formOptions.length > 0 && (
             <section>
               <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground/70">
@@ -385,7 +414,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
             )}
           </section>
 
-          {showRoster && (
+          {effectiveShowRoster && (
             <section>
               <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-1 text-muted-foreground/70">
                 Roster
@@ -542,6 +571,42 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function ModeButton({
+  active,
+  disabled,
+  label,
+  hint,
+  onClick,
+}: {
+  active: boolean;
+  disabled: boolean;
+  label: string;
+  hint: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "grid min-h-16 gap-0.5 rounded-[8px] border px-3 py-2.5 text-left transition-colors",
+        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border",
+        "disabled:cursor-not-allowed disabled:opacity-60",
+        disabled ? "" : "cursor-pointer hover:bg-muted/25",
+      )}
+      style={{
+        borderColor: active ? "var(--capture-border-cta)" : "var(--capture-border-subtle)",
+        backgroundColor: active ? "var(--capture-bg-raised)" : "transparent",
+      }}
+    >
+      <span className="text-[13px] font-medium text-foreground">{label}</span>
+      <span className="text-[11px] leading-[1.35] text-muted-foreground">{hint}</span>
+    </button>
   );
 }
 

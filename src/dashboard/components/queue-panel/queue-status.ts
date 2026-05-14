@@ -1,4 +1,5 @@
 import type { TrackerEntry } from "@/components/shared/types";
+import { isOcrAwaitingApprovalEntry } from "../../../tracker/dashboard/prep-rows.js";
 
 export type QueueStatusCounts = Record<string, number>;
 
@@ -13,6 +14,12 @@ export function isQueueLikeEntry(entry: TrackerEntry): boolean {
 export function entryMatchesStatusFilter(entry: TrackerEntry, statusFilter: string | null): boolean {
   if (!statusFilter) return true;
   if (statusFilter === "pending") return isQueueLikeEntry(entry);
+  if (statusFilter === "running") {
+    return entry.status === "running" || isOcrAwaitingApprovalEntry(entry);
+  }
+  if (statusFilter === "done") {
+    return entry.status === "done" && !isOcrAwaitingApprovalEntry(entry);
+  }
   return entry.status === statusFilter;
 }
 
@@ -35,6 +42,10 @@ export function queueGroupMatchesStatusFilter(
 export function countEntriesByQueueStatus(entries: TrackerEntry[]): QueueStatusCounts {
   const counts: QueueStatusCounts = { total: entries.length };
   for (const entry of entries) {
+    if (isOcrAwaitingApprovalEntry(entry)) {
+      counts.running = (counts.running || 0) + 1;
+      continue;
+    }
     counts[entry.status] = (counts[entry.status] || 0) + 1;
     if (entry.status !== "pending" && isQueueLikeEntry(entry)) {
       counts.pending = (counts.pending || 0) + 1;

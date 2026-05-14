@@ -298,6 +298,10 @@ export interface WorkflowInstanceState {
   currentStep: string | null;
   finalStatus: "done" | "failed" | null;
   sessions: SessionInfo[];
+  /** Daemon-mode phase from `daemon_phase` session events (idle vs keepalive). */
+  daemonPhase?: "idle" | "keepalive";
+  /** UCPath idle refresh — from `ucpath_idle_signal` session events. */
+  ucpathIdle?: { lastTouchAt: string; refreshing: boolean };
 }
 
 export interface DuoQueueEntry {
@@ -325,7 +329,9 @@ export type RunEventType =
   | "item_start" | "item_complete"
   | "step_change"
   | "screenshot"
-  | "telegram_sent";
+  | "telegram_sent"
+  | "ucpath_idle_signal"
+  | "daemon_phase";
 
 export interface RunEvent {
   type: RunEventType;

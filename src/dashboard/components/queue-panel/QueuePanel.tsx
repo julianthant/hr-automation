@@ -391,6 +391,8 @@ export function QueuePanel({
             delegatedEntries={surface.members}
             isBatchQueueFocused={batchQueueParentRunId === surface.parentRunId}
             onEnterBatchQueue={(runId) => onEnterBatchQueue?.(runId)}
+            date={date}
+            onDelete={onDelete}
             batchDrillInEnabled={!batchQueueParentRunId}
           />
         );
@@ -419,6 +421,7 @@ export function QueuePanel({
             members={surface.members}
             countTone="neutral"
             footerLabelPrefix="batch"
+            footerSecondaryId={surface.parentRunId}
             firstTimestamp={surface.members[0]?.timestamp}
             isFocused={batchQueueParentRunId === surface.parentRunId}
             drillInEnabled={!batchQueueParentRunId}

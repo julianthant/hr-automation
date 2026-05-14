@@ -50,7 +50,8 @@ interface LogPanelProps {
 export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultTab, previewSlot, previewHeaderSlot, previewAvailable, onPreviewVisibleChange, onDeleteEntry }: LogPanelProps) {
   const [runs, setRuns] = useState<RunInfo[]>([]);
   const [activeRunId, setActiveRunId] = useState<string | null>(entry?.runId || null);
-  const registered = useWorkflow(workflow);
+  const effectiveWorkflow = entry?.workflow ?? workflow;
+  const registered = useWorkflow(effectiveWorkflow);
   const [maximized, setMaximized] = useState(false);
   // Reset maximized whenever we switch to a different entry — operator's
   // intent for "fullscreen the tab" is per-row, not session-wide.
@@ -156,7 +157,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
   // prep rows surface in oath-signature/emergency-contact queues, but
   // their logs live in ocr-logs.jsonl). Falls back to the topbar workflow
   // when no entry is selected (skeleton state).
-  const logSourceWorkflow = entry?.workflow ?? workflow;
+  const logSourceWorkflow = effectiveWorkflow;
   // When the active run came from a merged sibling, fetch logs against
   // the run's TRUE itemId rather than the primary's id — JSONL keys logs
   // per (workflow, itemId, runId) and the sibling's logs live under its
@@ -208,13 +209,13 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
   const runStepDurations = activeRun?.stepDurations ?? entry?.stepDurations;
   const steps = useMemo(
     () =>
-      workflow === "ocr"
+      effectiveWorkflow === "ocr"
         ? registeredSteps.filter((step) => {
             if (step === "awaiting-approval") return Boolean(entry?.parentRunId);
             return true;
           })
         : registeredSteps,
-    [entry?.parentRunId, registeredSteps, workflow],
+    [effectiveWorkflow, entry?.parentRunId, registeredSteps],
   );
 
   const allDetailFields = useMemo(
@@ -374,7 +375,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
         editDataAvailable={detailFields.some((f) => f.editable)}
         editDataSlot={
           <EditDataTab
-            workflow={workflow}
+            workflow={logSourceWorkflow}
             entry={entry ?? null}
             runId={activeRunId}
             date={date}

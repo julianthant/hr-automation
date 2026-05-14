@@ -1,5 +1,7 @@
 import type { TrackerEntry } from "@/components/shared/types";
 import { GroupRowBase } from "@/components/queue-panel/group-row-base";
+import { RetryButton } from "@/components/shared/RetryButton";
+import { DeleteButton } from "@/components/shared/DeleteButton";
 
 /**
  * Summary card for an approval delegation: an approved prep row and its
@@ -14,6 +16,10 @@ export interface DelegationRowProps {
   /** Whether the batch queue view is showing this parent's members. */
   isBatchQueueFocused: boolean;
   onEnterBatchQueue: (parentRunId: string) => void;
+  /** Tracker date — required for delete. */
+  date?: string;
+  /** Called after deleting the prep parent row. */
+  onDelete?: (id: string) => void;
   /**
    * When false, the row is display-only (no drill-in). Nested batch navigation
    * is unsupported; keep this true only on the main queue list.
@@ -26,10 +32,31 @@ export function DelegationRow({
   delegatedEntries,
   isBatchQueueFocused,
   onEnterBatchQueue,
+  date,
+  onDelete,
   batchDrillInEnabled = true,
 }: DelegationRowProps) {
   const runId = parent.runId ?? parent.id;
   const title = parent.data?.pdfOriginalName || "Prep batch";
+  const footerActions = (
+    <>
+      <RetryButton
+        workflow={parent.workflow}
+        id={parent.id}
+        runId={parent.runId}
+        date={date}
+      />
+      {date && onDelete ? (
+        <DeleteButton
+          workflow={parent.workflow}
+          id={parent.id}
+          runId={parent.runId}
+          date={date}
+          onDeleted={onDelete}
+        />
+      ) : null}
+    </>
+  );
 
   return (
     <GroupRowBase
@@ -39,10 +66,13 @@ export function DelegationRow({
       members={delegatedEntries}
       countTone="warning"
       footerLabelPrefix="prep"
+      footerRunOrdinal={parent.runOrdinal}
+      footerSecondaryId={parent.id}
       firstTimestamp={parent.timestamp}
       isFocused={isBatchQueueFocused}
       drillInEnabled={batchDrillInEnabled}
       onEnter={onEnterBatchQueue}
+      footerActions={footerActions}
     />
   );
 }

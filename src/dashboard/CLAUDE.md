@@ -154,6 +154,8 @@ Raw log entries for a run
   → Result: "Extracted field data x4" instead of 4 identical lines
 ```
 
+Dashboard display strips one leading bracketed source prefix from each log message (for example `[ocr]` or `[oath/match]`) while leaving the stored JSONL message untouched. Keep new operator-facing phase context in plain text (`Phase: matching`) rather than relying on repeated source tags.
+
 ### Run Isolation
 
 When re-running the same ID (e.g. a failed separation re-run):
