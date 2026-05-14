@@ -132,6 +132,8 @@ export function buildDisplayNameMap(
     const d = e.data ?? {};
     const personName = resolveEmployeeLabel(d);
     if (personName) return { base: personName, ordinal: false, explicitWorkflowName: false };
+    const parentSubject = firstNonBlank(d.parentSubject);
+    if (parentSubject) return { base: parentSubject, ordinal: false, explicitWorkflowName: true };
     const ocrBase = ocrQueueDisplayBase(e);
     if (ocrBase) return { base: ocrBase, ordinal: true, explicitWorkflowName: true };
     const workflowName = firstNonBlank(d.__name);
@@ -169,18 +171,78 @@ export function buildDisplayNameMap(
     result.set(e.id, `${base} ${next}`);
   }
 
-  // Final pass: delegated rows always use their parent's display label.
-  const parentLabelByRunId = new Map<string, string>();
+  // Final pass: delegated rows use the root parent's display label. This is
+  // intentionally transitive: a parent workflow can delegate to OCR, and OCR
+  // can delegate onward to EID lookup / downstream daemon rows.
+  //
+  // Single-pass walk with path compression: build runId → parentRunId, then
+  // for each delegated entry walk up to a labeled root and cache the result
+  // back onto every visited runId. Bounded by parentRunId chain depth (≤3 in
+  // practice), O(N) overall — replaces a former O(N × depth) fixed-point loop
+  // that fired on every SSE tick.
+  const labelByRunId = new Map<string, string>();
+  const parentByRunId = new Map<string, string>();
   for (const e of sorted) {
-    if (!e.runId || e.parentRunId) continue;
-    parentLabelByRunId.set(e.runId, result.get(e.id) ?? resolveEntryName(e, result));
+    if (!e.runId) continue;
+    if (e.parentRunId) {
+      parentByRunId.set(e.runId, e.parentRunId);
+    } else {
+      labelByRunId.set(e.runId, result.get(e.id) ?? resolveEntryName(e, result));
+    }
   }
+  const MAX_CHAIN_DEPTH = 16;
+  const resolveRootLabel = (startRunId: string): string | undefined => {
+    const visited: string[] = [];
+    let cursor: string | undefined = startRunId;
+    let label: string | undefined;
+    while (cursor && visited.length < MAX_CHAIN_DEPTH) {
+      const cached = labelByRunId.get(cursor);
+      if (cached) { label = cached; break; }
+      visited.push(cursor);
+      cursor = parentByRunId.get(cursor);
+    }
+    if (label) {
+      for (const runId of visited) labelByRunId.set(runId, label);
+    }
+    return label;
+  };
   for (const e of sorted) {
     if (!e.parentRunId) continue;
-    const parentLabel = parentLabelByRunId.get(e.parentRunId);
+    const parentLabel = resolveRootLabel(e.parentRunId);
     if (parentLabel) result.set(e.id, parentLabel);
   }
   return result;
+}
+
+export function buildDisplayNameEntries({
+  visibleEntries,
+  sourceEntries,
+}: {
+  visibleEntries: readonly TrackerEntry[];
+  sourceEntries: readonly TrackerEntry[];
+}): TrackerEntry[] {
+  const delegatedParentRunIds = new Set<string>();
+  for (const entry of sourceEntries) {
+    if (entry.parentRunId) delegatedParentRunIds.add(entry.parentRunId);
+  }
+
+  const byKey = new Map<string, TrackerEntry>();
+  const add = (entry: TrackerEntry) => {
+    byKey.set(`${entry.workflow}\0${entry.id}\0${entry.runId ?? ""}`, entry);
+  };
+
+  for (const entry of visibleEntries) add(entry);
+  for (const entry of sourceEntries) {
+    if (entry.parentRunId) {
+      add(entry);
+      continue;
+    }
+    if (entry.runId && delegatedParentRunIds.has(entry.runId)) {
+      add(entry);
+    }
+  }
+
+  return [...byKey.values()];
 }
 
 /** Expand visible merged primaries to their hidden siblings for bulk queue controls. */
