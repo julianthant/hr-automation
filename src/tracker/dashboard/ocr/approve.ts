@@ -52,6 +52,14 @@ export function buildOcrApproveHandler(
     const parentRunId = readParentRunId(input.sessionId, trackerDir);
     const dryRun = readDryRun(input.sessionId, trackerDir);
     const latestReviewData = readLatestOcrReviewData(input.sessionId, input.runId, trackerDir);
+    const parentSubject = parentRunId
+      ? readParentSubjectFromParentRow(
+          spec.approveTo.workflow,
+          `ocr-prep-${input.sessionId}`,
+          parentRunId,
+          trackerDir,
+        )
+      : undefined;
 
     // Only fan out records the operator selected in the preview pane.
     // Unsigned rows / unverified rows / unknown-doc rows are kept in the
@@ -62,9 +70,14 @@ export function buildOcrApproveHandler(
     input.records.forEach((rec, index) => {
       if (!isSelectedRecord(rec)) return;
       const baseFanInput = spec.approveTo.deriveInput(rec as never);
-      const fanInput = dryRun && baseFanInput && typeof baseFanInput === "object"
-        ? { ...(baseFanInput as Record<string, unknown>), dryRun: true }
-        : baseFanInput;
+      const fanInput =
+        baseFanInput && typeof baseFanInput === "object"
+          ? {
+              ...(baseFanInput as Record<string, unknown>),
+              ...(dryRun ? { dryRun: true } : {}),
+              ...(parentSubject ? { parentSubject } : {}),
+            }
+          : baseFanInput;
       const itemId = spec.approveTo.deriveItemId(rec as never, input.runId, index);
       enqueueInputs.push(fanInput);
       itemIds.push(itemId);
@@ -282,6 +295,17 @@ function readLatestEntryData(
     return { ...row.data };
   }
   return {};
+}
+
+function readParentSubjectFromParentRow(
+  workflow: string,
+  parentItemId: string,
+  parentRunId: string,
+  trackerDir?: string,
+): string | undefined {
+  const data = readLatestEntryData(workflow, parentItemId, parentRunId, trackerDir);
+  const name = data.__name;
+  return typeof name === "string" && name.length > 0 ? name : undefined;
 }
 
 function isSelectedRecord(record: unknown): boolean {
