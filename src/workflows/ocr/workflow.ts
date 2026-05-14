@@ -23,6 +23,10 @@ export const ocrWorkflow = defineWorkflow({
   authSteps: false,
   steps: ocrSteps,
   schema: OcrInputSchema,
+  queueTitle: {
+    kind: "batch",
+    labelFromInput: (input) => input.formType === "emergency-contact" ? "Emergency Contact" : "Oath",
+  },
   authChain: "sequential",
   detailFields: [{ key: "recordCount", label: "Records" }],
   getName: (d) => d.pdfOriginalName ?? "",

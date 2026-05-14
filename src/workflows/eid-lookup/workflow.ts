@@ -14,6 +14,7 @@ import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath, loginToACTCrm } from "../../infra/auth/login.js";
 import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
+import { rootQueueTitleData } from "../../domain/queue-title.js";
 import {
   deriveActiveCheckOutcome,
   type ActiveCheckOutcome,
@@ -369,6 +370,7 @@ export const eidLookupCrmWorkflow = defineWorkflow({
   authSteps: true,
   steps: stepsCrm,
   schema: EidLookupItemSchema,
+  queueTitle: { kind: "single" },
   authChain: "sequential",
   batch: { mode: "shared-context-pool", poolSize: 4, preEmitPending: true },
   detailFields: [
@@ -461,6 +463,7 @@ export function eidLookupPreEmitPending(
   const subject = eidLookupCrmWorkflow.config.operatorSubject?.(item);
   const parentSubject = item.parentSubject;
   const displayName = parentSubject ?? n ?? "";
+  const queueFields = parentSubject ? rootQueueTitleData(parentSubject) : {};
   trackEvent({
     workflow: "eid-lookup",
     timestamp: new Date().toISOString(),
@@ -472,7 +475,7 @@ export function eidLookupPreEmitPending(
       searchName: n,
       __name: displayName,
       __id: n ?? itemId,
-      ...(parentSubject ? { parentSubject } : {}),
+      ...queueFields,
       ...operatorSubjectData(subject),
     },
   }, trackerDir);

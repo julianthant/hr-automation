@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { trackEvent, appendLogEntry } from "../../jsonl.js";
-import { parentSubjectData } from "../../../domain/operator-subject.js";
+import { batchQueueTitle, queueTitleData, rootQueueTitleData } from "../../../domain/queue-title.js";
 import { log, withLogContext, setLogRunId } from "../../../utils/log.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
 import { runOcrOrchestrator, type OcrOrchestratorOpts } from "../../../workflows/ocr/orchestrator.js";
@@ -13,12 +13,14 @@ function workflowDisplayLabel(workflowName: string): string {
   return getByName(workflowName)?.label ?? autoLabel(workflowName);
 }
 
-function shortRunIdSuffix(runId: string): string {
-  return runId.slice(-4);
+function batchTypeLabelForForm(formType: string | undefined): string {
+  if (formType === "oath") return "Oath";
+  if (formType === "emergency-contact") return "Emergency Contact";
+  return "OCR";
 }
 
-function batchAnchorName(workflowName: string, runId: string): string {
-  return `${workflowDisplayLabel(workflowName)} · #${shortRunIdSuffix(runId)}`;
+function prepBatchQueueTitle(formType: string | undefined, runId: string): string {
+  return batchQueueTitle(batchTypeLabelForForm(formType), runId);
 }
 
 const WORKFLOW = "ocr";
@@ -69,6 +71,7 @@ interface OriginPrepContext {
   parentItemId: string;
   parentRunId: string;
   pdfOriginalName: string;
+  formType: string;
 }
 
 export function buildOcrPrepareHandler(
@@ -128,12 +131,14 @@ export function buildOcrPrepareHandler(
         parentItemId: `ocr-prep-${sessionId}`,
         parentRunId: randomUUID(),
         pdfOriginalName: input.pdfOriginalName,
+        formType: input.formType,
       };
       writeOriginParentPending({
         originWorkflow: originPrep.originWorkflow,
         parentItemId: originPrep.parentItemId,
         parentRunId: originPrep.parentRunId,
         pdfOriginalName: input.pdfOriginalName,
+        formType: input.formType,
         ocrSessionId: sessionId,
         ocrRunId: runId,
         pdfFileId: input.pdfFileId,
@@ -226,6 +231,7 @@ function writeOriginParentPending(args: {
   parentItemId: string;
   parentRunId: string;
   pdfOriginalName: string;
+  formType?: string;
   ocrSessionId: string;
   ocrRunId: string;
   pdfFileId?: string;
@@ -233,15 +239,19 @@ function writeOriginParentPending(args: {
   dryRun?: boolean;
 }): void {
   const ts = new Date().toISOString();
+  const queueTitle = prepBatchQueueTitle(args.formType, args.parentRunId);
   // mode: "prepare" hooks the parent into the existing prep-row machinery
   // so post-approval the row is auto-extracted from the regular queue and
   // folded into a DelegationRow with its kernel children (which inherit
   // parentRunId from the OCR fan-out path). Pre-approval the row renders
   // as a standard EntryItem in the queue.
   const baseData: Record<string, string> = {
-    __name: batchAnchorName(args.originWorkflow, args.parentRunId),
+    __name: queueTitle,
     __id: args.parentItemId,
     mode: "prepare",
+    ...queueTitleData({ kind: "batch", title: queueTitle }),
+    __queueRootTitle: queueTitle,
+    parentSubject: queueTitle,
     pdfOriginalName: args.pdfOriginalName,
     ...(args.pdfFileId ? { pdfFileId: args.pdfFileId } : {}),
     ...(args.dryRun ? { dryRun: "true" } : {}),
@@ -318,7 +328,7 @@ function writeOriginParentPending(args: {
   const requestData: Record<string, string> = {
     __name: requestName,
     __id: requestItemId,
-    ...parentSubjectData(batchAnchorName(args.originWorkflow, args.parentRunId)),
+    ...rootQueueTitleData(queueTitle),
     pdfOriginalName: args.pdfOriginalName,
     ocrSessionId: args.ocrSessionId,
     ocrRunId: args.ocrRunId,
@@ -368,10 +378,14 @@ function writeOriginParentPrepFailed(args: OriginPrepContext & {
   detail: string;
 }): void {
   const ts = new Date().toISOString();
+  const queueTitle = prepBatchQueueTitle(args.formType, args.parentRunId);
   const baseData: Record<string, string> = {
-    __name: batchAnchorName(args.originWorkflow, args.parentRunId),
+    __name: queueTitle,
     __id: args.parentItemId,
     mode: "prepare",
+    ...queueTitleData({ kind: "batch", title: queueTitle }),
+    __queueRootTitle: queueTitle,
+    parentSubject: queueTitle,
     pdfOriginalName: args.pdfOriginalName,
     ocrSessionId: args.ocrSessionId,
   };
