@@ -59,3 +59,32 @@ test("emergency-contact prep uses the registry label too", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("writeOriginParentPending emits a 'Oath Signature Request' child row marked done", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ocr-prep-req-"));
+  try {
+    writeOriginParentPending({
+      originWorkflow: "oath-signature",
+      parentItemId: "ocr-prep-abc",
+      parentRunId: "parent-run-9999",
+      pdfOriginalName: "test.pdf",
+      ocrSessionId: "sess",
+      ocrRunId: "ocr-run",
+      trackerDir: dir,
+    });
+    const rows = readJsonl(join(dir, `oath-signature-${todayLocal()}.jsonl`));
+    // Find the request child rows by parentRunId
+    const childRows = rows.filter(
+      (r) => (r as { parentRunId?: string }).parentRunId === "parent-run-9999",
+    );
+    assert.ok(childRows.length >= 2, "expected at least pending+done child rows");
+    const doneChild = childRows.find(
+      (r) => (r as { status?: string }).status === "done",
+    ) as { status: string; parentRunId: string; data: Record<string, string> } | undefined;
+    assert.ok(doneChild, "expected a done child row");
+    assert.equal(doneChild!.data.__name, "Oath Signature Request");
+    assert.equal(doneChild!.data.parentSubject, "Oath Signature · #9999");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

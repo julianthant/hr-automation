@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { trackEvent, appendLogEntry } from "../../jsonl.js";
+import { parentSubjectData } from "../../../domain/operator-subject.js";
 import { log, withLogContext, setLogRunId } from "../../../utils/log.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
 import { runOcrOrchestrator, type OcrOrchestratorOpts } from "../../../workflows/ocr/orchestrator.js";
@@ -302,6 +303,58 @@ function writeOriginParentPending(args: {
       runId: args.parentRunId,
       level: "waiting",
       message: "Awaiting OCR approval. Once approved in the OCR queue, this row will fan out automatically.",
+      ts,
+    },
+    args.trackerDir,
+  );
+
+  // Emit a child "Request" row that marks the delegation dispatch as done.
+  // This row nests under the parent (parentRunId) and inherits parentSubject
+  // so future siblings (fan-out items) can display the anchor name in their data.
+  const requestItemId = `${args.parentItemId}-request`;
+  const requestRunId = `${args.parentRunId}-req`;
+  const requestName = `${workflowDisplayLabel(args.originWorkflow)} Request`;
+  const requestData: Record<string, string> = {
+    __name: requestName,
+    __id: requestItemId,
+    ...parentSubjectData(batchAnchorName(args.originWorkflow, args.parentRunId)),
+    pdfOriginalName: args.pdfOriginalName,
+    ocrSessionId: args.ocrSessionId,
+    ocrRunId: args.ocrRunId,
+    requestRole: "delegation-dispatch",
+  };
+  trackEvent(
+    {
+      workflow: args.originWorkflow,
+      timestamp: ts,
+      id: requestItemId,
+      runId: requestRunId,
+      parentRunId: args.parentRunId,
+      status: "pending",
+      data: requestData,
+    },
+    args.trackerDir,
+  );
+  trackEvent(
+    {
+      workflow: args.originWorkflow,
+      timestamp: ts,
+      id: requestItemId,
+      runId: requestRunId,
+      parentRunId: args.parentRunId,
+      status: "done",
+      step: "delegated",
+      data: requestData,
+    },
+    args.trackerDir,
+  );
+  appendLogEntry(
+    {
+      workflow: args.originWorkflow,
+      itemId: requestItemId,
+      runId: requestRunId,
+      level: "success",
+      message: `Dispatched OCR delegation (session=${args.ocrSessionId.slice(0, 8)}…).`,
       ts,
     },
     args.trackerDir,
