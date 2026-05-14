@@ -33,6 +33,7 @@ export type EidLookupCrmInput = EidLookupInput;
 export const EidLookupNameInputSchema = z.object({
   name: z.string().min(1),
   keepNonHdh: z.boolean().optional(),
+  parentSubject: z.string().optional(),
 });
 
 export const EidLookupEidInputSchema = z.object({
@@ -40,6 +41,7 @@ export const EidLookupEidInputSchema = z.object({
     .transform((value) => normalizeUcpathEmployeeId(value))
     .pipe(z.string().regex(/^10\d{6}$/, "Empl ID must be 8 digits starting with 10")),
   keepNonHdh: z.boolean().optional(),
+  parentSubject: z.string().optional(),
 });
 
 export const EidLookupItemSchema = z.union([
