@@ -51,7 +51,7 @@ test("eidLookupPreEmitPending falls back to searchName without parentSubject", (
       dir,
     );
     const rows = readJsonl(join(dir, `eid-lookup-${todayLocal()}.jsonl`));
-    assert.equal(rows[0]!.data.__name, "Solo Search");
+    assert.equal((rows[0]!.data as Record<string, unknown>).__name, "Solo Search");
     assert.equal((rows[0]!.data as Record<string, unknown>).parentSubject, undefined);
   } finally {
     rmSync(dir, { recursive: true, force: true });

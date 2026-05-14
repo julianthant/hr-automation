@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildDisplayNameMap,
+  buildDisplayNameEntries,
   collectEntriesForMergedScope,
   mergedGroupPeersForLogPanel,
   resolveEntryName,
@@ -105,6 +106,113 @@ test("delegated rows inherit the parent display name", () => {
 
   assert.equal(resolveEntryName(firstParent, displayNames), "OATH 1");
   assert.equal(resolveEntryName(secondParent, displayNames), "EMPL 1");
+  assert.equal(resolveEntryName(child, displayNames), "OATH 1");
+});
+
+test("delegated rows inherit a single visible parent label even when the child has its own employee name", () => {
+  const parent = entry(
+    "ocr-session-single",
+    { __id: "ocr-session-single", formType: "oath" },
+    "2026-05-05T12:00:00.000Z",
+  );
+  parent.workflow = "ocr";
+  parent.runId = "ocr-run-single";
+  const child = entry(
+    "10000001",
+    {
+      emplId: "10000001",
+      name: "Barahona Martell, Carlos D",
+      __name: "Barahona Martell, Carlos D",
+    },
+    "2026-05-05T12:02:00.000Z",
+  );
+  child.workflow = "oath-signature";
+  child.parentRunId = "ocr-run-single";
+
+  const displayNames = buildDisplayNameMap([child, parent], "OCR");
+
+  assert.equal(resolveEntryName(parent, displayNames), "OATH 1");
+  assert.equal(resolveEntryName(child, displayNames), "OATH 1");
+});
+
+test("nested delegated rows inherit the root parent display name", () => {
+  const parent = entry(
+    "ocr-prep-session-nested",
+    {
+      __name: "Oath Signature · #sted",
+      __id: "ocr-prep-session-nested",
+      mode: "prepare",
+      pdfOriginalName: "oath-packet.pdf",
+    },
+    "2026-05-05T12:00:00.000Z",
+  );
+  parent.workflow = "oath-signature";
+  parent.runId = "origin-run-nested";
+
+  const ocrChild = entry(
+    "session-nested",
+    { __id: "session-nested", formType: "oath" },
+    "2026-05-05T12:01:00.000Z",
+  );
+  ocrChild.workflow = "ocr";
+  ocrChild.runId = "ocr-run-nested";
+  ocrChild.parentRunId = "origin-run-nested";
+
+  const eidGrandchild = entry(
+    "ocr-oath-ocr-run-nested-r0",
+    {
+      searchName: "Barahona Martell, Carlos D",
+      __name: "Barahona Martell, Carlos D",
+    },
+    "2026-05-05T12:02:00.000Z",
+  );
+  eidGrandchild.workflow = "eid-lookup";
+  eidGrandchild.runId = "eid-run-nested";
+  eidGrandchild.parentRunId = "ocr-run-nested";
+
+  const displayNames = buildDisplayNameMap([eidGrandchild, ocrChild, parent], "Oath Signature");
+
+  assert.equal(resolveEntryName(parent, displayNames), "Oath Signature · #sted 1");
+  assert.equal(resolveEntryName(ocrChild, displayNames), "Oath Signature · #sted 1");
+  assert.equal(resolveEntryName(eidGrandchild, displayNames), "Oath Signature · #sted 1");
+});
+
+test("buildDisplayNameEntries includes delegated parents for visible single child rows", () => {
+  const parent = entry(
+    "ocr-session-single",
+    { __id: "ocr-session-single", formType: "oath" },
+    "2026-05-05T12:00:00.000Z",
+  );
+  parent.workflow = "ocr";
+  parent.runId = "ocr-run-single";
+  const child = entry(
+    "10000001",
+    {
+      emplId: "10000001",
+      name: "Barahona Martell, Carlos D",
+      __name: "Barahona Martell, Carlos D",
+    },
+    "2026-05-05T12:02:00.000Z",
+  );
+  child.workflow = "oath-signature";
+  child.parentRunId = "ocr-run-single";
+  const unrelatedSibling = entry(
+    "alternate-search",
+    { emplId: "10000001", searchName: "Alternate, Search" },
+    "2026-05-05T12:03:00.000Z",
+  );
+  unrelatedSibling.workflow = "oath-signature";
+
+  const entriesForNames = buildDisplayNameEntries({
+    visibleEntries: [child],
+    sourceEntries: [child, parent, unrelatedSibling],
+  });
+  const displayNames = buildDisplayNameMap(entriesForNames, "OCR");
+
+  assert.deepEqual(
+    new Set(entriesForNames.map((row) => row.runId)),
+    new Set(["ocr-run-single", "10000001#1"]),
+  );
   assert.equal(resolveEntryName(child, displayNames), "OATH 1");
 });
 
