@@ -26,8 +26,7 @@ This workflow touches three systems: **crm**, **ucpath**, **i9**.
 - `extract.ts` — CRM field extraction from UCPath Entry Sheet using `FIELD_MAP` label mapping; also extracts dept/recruitment numbers from record page
 - `enter.ts` — Builds `ActionPlan` for the 14-step Smart HR transaction (personal data, job data, comments, save/submit)
 - `config.ts` — Constants: `UC_FULL_HIRE` template, `UCHRLY` comp rate code, `JOB_END_DATE` sourced from `ANNUAL_DATES.jobEndDate` (override via `ANNUAL_DATES_END` env var)
-- `download.ts` — Fetches CRM record PDFs (Doc 1 + Doc 3) directly from iDocs document server URL. Saves to `~/Downloads/onboarding/{Last, First Middle} EID/`
-- `workflow.ts` — Kernel definition (`onboardingWorkflow`) + CLI adapters: `runOnboarding` (in-process single — for tests/scripts), `runOnboardingCli` (daemon-mode default — wraps `ensureDaemonsAndEnqueue`). Handler runs 5 phases across CRM / UCPath / I9 with `ctx.step` wrapping.
+- `workflow.ts` — CRM extraction, passive delegation to `crm-doc-download`, UCPath/I-9 onboarding transaction. Kernel definition (`onboardingWorkflow`) + CLI adapters: `runOnboarding` (in-process single — for tests/scripts), `runOnboardingCli` (daemon-mode default — wraps `ensureDaemonsAndEnqueue`). Handler runs 5 phases across CRM / UCPath / I9 with `ctx.step` wrapping.
 - `positional.ts` — CLI adapter for in-process multi-email mode (`runOnboardingPositional`). Takes emails directly and delegates to `runWorkflowBatch` with `poolSize = min(N, 4)`. Used internally; not wired to the default CLI path.
 - `index.ts` — Barrel exports
 
@@ -61,7 +60,7 @@ CLI: npm run onboarding <email> [<email2> ...]
 runWorkflow(onboardingWorkflow, { email })
   → Kernel Session.launch: 3 browsers, sequential auth chain (2 Duos: CRM + UCPath; I9 SSO no-Duo)
   → Handler phase 1 "crm-auth" + CRM search + "extraction" + updateData
-  → Handler phase 2 "pdf-download" (non-fatal)
+  → Handler phase 2 "pdf-download" delegates `crm-doc-download` as a passive child row (non-fatal)
   → Handler phase 3 "ucpath-auth" + "person-search"
     → rehire? return early with status: "Rehire"
   → Handler phase 4 "i9-creation"
@@ -81,7 +80,7 @@ runWorkflow(onboardingWorkflow, { email })
 - SSN/DOB are optional (international students) but wage requires `$` prefix
 - Appointment field: extracts just the number from "Casual/Restricted 5" → `"5"`
 - Department number parsed from parenthesized text: `"Computer Science (000412)"` → `"000412"`
-- PDF download failures are non-fatal — the workflow logs and continues (the transaction still needs to run even if PDFs are missing)
+- PDF downloads are now delegated to `crm-doc-download` under `parentRunId = onboarding runId`. Onboarding does not wait for completion; failed delegation is non-fatal and UCPath/I-9 continue.
 - I-9 creation requires SSN, DOB, and departmentNumber — the workflow throws a clear error if any is missing for non-rehires
 - Job end date defaults to `06/30/2026` in `src/config.ts` (`ANNUAL_DATES.jobEndDate`) — override via `ANNUAL_DATES_END` env var when the fiscal year rolls; onboarding `config.ts` re-exports it as `JOB_END_DATE`
 - Rehire short-circuit: if `searchPerson` returns a match, the workflow records `rehire: "Yes"` + existing EIDs and exits before I-9/transaction
@@ -120,7 +119,7 @@ Visualforce table layout — `<tr>` with `<th class="labelCol">` label followed 
 
 ## Lessons Learned
 
-- **2026-04-23: Removed step-cache + idempotency primitives in favor of live-page probes.** The `extraction` step no longer uses `stepCacheGet`/`stepCacheSet` — CRM record scraping runs on every retry (~2 min cost, deemed acceptable vs the correctness risk of serving stale data when the user fixed a bad CRM record between runs). The `transaction` step no longer uses `hashKey`/`hasRecentlySucceeded`/`recordSuccess` — there is no tracker-side dupe-protection on the UCPath Smart HR submit. If this becomes a problem in practice, the replacement pattern is a pre-submit scan of the Smart HR Transactions list (see separations' `findExistingTerminationTransaction`). `pdf-download`'s `Doc{N}-*.pdf` skip-if-all-present branch inside `downloadCrmDocuments` is preserved — that's a filesystem-level check, not tracker-side state.
+- **2026-04-23: Removed step-cache + idempotency primitives in favor of live-page probes.** The `extraction` step no longer uses `stepCacheGet`/`stepCacheSet` — CRM record scraping runs on every retry (~2 min cost, deemed acceptable vs the correctness risk of serving stale data when the user fixed a bad CRM record between runs). The `transaction` step no longer uses `hashKey`/`hasRecentlySucceeded`/`recordSuccess` — there is no tracker-side dupe-protection on the UCPath Smart HR submit. If this becomes a problem in practice, the replacement pattern is a pre-submit scan of the Smart HR Transactions list (see separations' `findExistingTerminationTransaction`). CRM PDF downloads now happen in the delegated `crm-doc-download` workflow; its system-layer iDocs driver still uses a filesystem-level skip-if-all-present check for `Doc{N}-*.pdf`.
 - **2026-04-21: Batch-level instance + per-worker authTimings.** `runWorkflowPool` now runs inside `withBatchLifecycle` (`src/core/batch-lifecycle.ts`). One `workflow_start` / `workflow_end` per batch invocation — the dashboard session drawer now shows ONE `Onboarding N` row for a batch of N instead of N separate rows. Each worker gets its own `SessionObserver` (via `makeObserver('w${i}')`) and its own `authTimings[]` snapshot taken AFTER awaiting `session.page(sys.id)` for every declared system (guarantees interleaved-auth completion before snapshot). Those per-worker timings are passed to every `runOneItem` call that worker processes, so each per-item row shows real `auth:crm` / `auth:ucpath` / `auth:i9` durations. SIGINT fans out `failed` rows for every un-terminated item. No change to parallel semantics — topology is still per-worker browsers.
 - **2026-04-14: iDocs PDFs fetch faster than they render** — Driving the PDF.js viewer UI (click Next Doc, scroll, trigger download) is brittle across Salesforce Canvas + nested iframes + PDF.js state. The viewer loads each PDF from `/iDocsForSalesforceDocumentServer?i=<idx>&h=<hash>` using context cookies — `page.context().request.get(url)` returns the raw PDF directly. One HTTP round-trip replaces ~5 UI steps and ~3s/doc of wait time. Extract `h` from the PDF.js iframe URL in `page.frames()` after the record page loads.
 - **2026-04-14: I-9 creation is no longer mocked** — The `MOCK_I9` hardcode was removed. Real `createI9Employee()` runs between `person-search` and `transaction`; the returned `profileId` flows into `buildTransactionPlan()` so the UCPath Comments/Personal Data steps reference the actual I-9. I-9 login has no Duo — pre-authenticate once per worker in parallel mode, fall back to per-run login in single mode.

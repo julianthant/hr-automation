@@ -5,6 +5,7 @@ import {
   defineWorkflow,
   runWorkflow,
 } from "../../core/index.js";
+import { ensureDaemonsAndEnqueue } from "../../core/daemon/client.js";
 import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 import { loginToUCPath, loginToACTCrm } from "../../infra/auth/login.js";
 import {
@@ -21,7 +22,11 @@ import { validateEmployeeData } from "./schema.js";
 import type { EmployeeData } from "./schema.js";
 import { buildTransactionPlan } from "./enter.js";
 import { TEMPLATE_ID } from "./config.js";
-import { buildDownloadPath, downloadCrmDocuments } from "./download.js";
+import {
+  buildCrmDocumentDownloadPath,
+  downloadCrmIdocsDocuments,
+} from "../../systems/crm/idocs-download.js";
+import type { CrmDocDownloadInput } from "../crm-doc-download/index.js";
 import { z } from "zod/v4";
 
 /** Input schema for the onboarding kernel workflow. `email` is the only CLI-supplied field. */
@@ -35,6 +40,24 @@ function maskSsn(ssn: string | undefined | null): string {
   const digits = ssn.replace(/-/g, "");
   if (digits.length < 4) return "***";
   return `***-**-${digits.slice(-4)}`;
+}
+
+export function buildCrmDocDownloadDelegationInput(args: {
+  email: string;
+  data: EmployeeData;
+  parentSubject?: string;
+  taskGroupId: string;
+}): CrmDocDownloadInput {
+  return {
+    email: args.email,
+    firstName: args.data.firstName,
+    lastName: args.data.lastName,
+    middleName: args.data.middleName,
+    originWorkflow: "onboarding",
+    parentSubject: args.parentSubject,
+    parentRunId: args.taskGroupId,
+    taskGroupId: args.taskGroupId,
+  };
 }
 
 const onboardingSteps = [
@@ -199,39 +222,38 @@ export const onboardingWorkflow = defineWorkflow({
     });
 
     // --- Phase 2: PDF download (non-fatal) ---
+    //
+    // Downloads run in-process against the already-authenticated CRM page.
+    // The standalone `crm-doc-download` daemon exists for explicit CLI use;
+    // delegating from onboarding would force a fresh CRM Duo + extra Chromium
+    // launch per item (~30-90s wall) since the onboarding daemon's CRM session
+    // can't be shared across daemons.
 
     await ctx.step("pdf-download", async () => {
       const t0 = Date.now();
-      log.debug(`[Step: pdf-download] START`);
+      log.debug("[Step: pdf-download] START");
       if (!data) throw new Error("extraction did not produce data");
-      const folderPath = buildDownloadPath(data.firstName, data.lastName, data.middleName);
-      let fileCount = 0;
-      let downloadErr = "";
       try {
-        await ctx.retry(
-          async () => {
-            await crmPage.goBack({ waitUntil: "domcontentloaded", timeout: 15_000 });
-          },
-          { attempts: 2 },
-        );
-        const saved = await ctx.retry(
-          () => downloadCrmDocuments(crmPage, folderPath, {}),
-          { attempts: 2, backoffMs: 2_000 },
-        );
-        fileCount = saved.length;
+        const folderPath = buildCrmDocumentDownloadPath({
+          firstName: data.firstName,
+          lastName: data.lastName,
+          middleName: data.middleName,
+        });
+        const saved = await downloadCrmIdocsDocuments(crmPage, folderPath, {
+          workflow: "onboarding",
+          itemId: email,
+          runId: ctx.runId,
+        });
         ctx.updateData({
           pdfDownload: `${saved.length} file(s)`,
           pdfFolder: folderPath,
         });
       } catch (err) {
-        downloadErr = errorMessage(err);
+        const downloadErr = errorMessage(err);
         log.error(`PDF download failed (continuing without PDFs): ${downloadErr}`);
         ctx.updateData({ pdfDownload: `Failed: ${downloadErr.slice(0, 80)}` });
       }
-      log.step(
-        `[Step: pdf-download] END took=${Date.now() - t0}ms `
-        + `fileCount=${fileCount} error='${downloadErr || "<empty>"}'`,
-      );
+      log.step(`[Step: pdf-download] END took=${Date.now() - t0}ms`);
     });
 
     // --- Phase 3: UCPath auth + person search (rehire short-circuit) ---
@@ -462,7 +484,6 @@ export async function runOnboardingCli(
     return;
   }
 
-  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
   const inputs = emails.map((email) => ({ email }));
   const now = new Date().toISOString();
   await ensureDaemonsAndEnqueue(
