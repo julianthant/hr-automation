@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 
 import { openStateDb, closeStateDbForTests } from "../../../src/tracker/state/db.js";
 import { rebuildProjectionForDate } from "../../../src/tracker/state/rebuild.js";
+import { applyTrackerEntry } from "../../../src/tracker/state/apply.js";
+import { dateLocal } from "../../../src/tracker/jsonl.js";
 
 function tmpTracker(): string {
   return mkdtempSync(join(tmpdir(), "state-rebuild-"));
@@ -45,6 +47,37 @@ test("rebuildProjectionForDate replays tracker and log JSONL into SQLite", () =>
       latest_step: "extraction",
       last_log_message: "Extracting",
     });
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("applyTrackerEntry derives fallback tracker_date in local time", () => {
+  const dir = tmpTracker();
+  const timestamp = "2026-05-14T05:08:05.215Z";
+  try {
+    const db = openStateDb(dir);
+    applyTrackerEntry(
+      db,
+      {
+        workflow: "eid-lookup",
+        timestamp,
+        id: "queued-name",
+        runId: "run-1",
+        status: "pending",
+      },
+      {
+        sourceKind: "tracker",
+        path: join(dir, "synthetic.jsonl"),
+        offset: 0,
+      },
+    );
+
+    const row = db.prepare("SELECT tracker_date FROM items WHERE item_id = ?").get("queued-name") as {
+      tracker_date: string;
+    };
+    assert.equal(row.tracker_date, dateLocal(new Date(timestamp)));
   } finally {
     closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });

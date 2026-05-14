@@ -7,6 +7,26 @@ export function isPrepEntry(e: TrackerEntry): boolean {
   return false;
 }
 
+/**
+ * OCR uses `status: "done"` for the preview-ready row (`step: awaiting-approval`)
+ * so approve/discard semantics stay orthogonal — use this predicate anywhere a
+ * done-looking row still needs operator action.
+ */
+export function isOcrAwaitingApprovalEntry(e: TrackerEntry): boolean {
+  return e.workflow === "ocr" && e.status === "done" && e.step === "awaiting-approval";
+}
+
+/**
+ * True when OCR is delegated from another workflow (`parentRunId` set —
+ * oath-upload / similar). The tracker step may still be `awaiting-approval`,
+ * but the queue sidebar should treat only these rows as "Needs review" /
+ * upstream approval surfacing — standalone OCR prep uses the same step
+ * without `parentRunId` and renders as ordinary completed prep in the queue.
+ */
+export function isDelegatedOcrAwaitingApprovalEntry(e: TrackerEntry): boolean {
+  return isOcrAwaitingApprovalEntry(e) && Boolean(e.parentRunId);
+}
+
 export function isResolvedPrepEntry(e: TrackerEntry): boolean {
   if (!isPrepEntry(e)) return false;
   if (e.workflow === "ocr") {
@@ -19,7 +39,7 @@ export function isResolvedPrepEntry(e: TrackerEntry): boolean {
 
 export function isReadyForReview(latest: TrackerEntry): boolean {
   if (latest.workflow === "ocr") {
-    return latest.status === "done" && latest.step === "awaiting-approval";
+    return isOcrAwaitingApprovalEntry(latest);
   }
   if (latest.status !== "done") return false;
   if (latest.step === "approved" || latest.step === "discarded") return false;

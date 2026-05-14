@@ -72,9 +72,10 @@ export function registerOathUploadRoutes(app: Hono, deps: DashboardHonoDeps): vo
     }
 
     const rosterMode = (multipart.parsed.fields.rosterMode?.trim() ?? "download") as "existing" | "download";
+    const mode = (multipart.parsed.fields.mode?.trim() ?? "full") as "full" | "upload-only";
     const dryRun = multipart.parsed.fields.dryRun === "true" || multipart.parsed.fields.dryRun === "1";
     let rosterPath: string | undefined;
-    if (rosterMode === "existing") {
+    if (mode === "full" && rosterMode === "existing") {
       const rosterDirs = [
         resolve(process.cwd(), ".tracker/rosters"),
         resolve(process.cwd(), "src/data"),
@@ -94,6 +95,7 @@ export function registerOathUploadRoutes(app: Hono, deps: DashboardHonoDeps): vo
       pdfFileId: registered?.fileId,
       pdfHash,
       sessionId,
+      mode,
       rosterMode,
       rosterPath,
       dryRun,

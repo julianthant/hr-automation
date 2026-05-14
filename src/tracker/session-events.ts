@@ -21,7 +21,9 @@ export type SessionEventType =
   | "item_start" | "item_complete" | "item_cancelled"
   | "step_change"
   | "screenshot"
-  | "telegram_sent";
+  | "telegram_sent"
+  | "ucpath_idle_signal"
+  | "daemon_phase";
 
 export interface ScreenshotSessionEvent {
   type: "screenshot";
@@ -335,6 +337,28 @@ export function emitAuthComplete(instance: string, browserId: string, system: st
 
 export function emitAuthFailed(instance: string, browserId: string, system: string, dir?: string): void {
   emitSessionEvent({ type: "auth_failed", workflowInstance: instance, browserId, system }, dir);
+}
+
+export type UcpathIdleSignalKind = "touch" | "refresh_start" | "refresh_end";
+
+/** Dashboard UCPath idle-refresh ring — keep kinds aligned with `rebuildSessionState`. */
+export function emitUcpathIdleSignal(
+  instance: string,
+  dir: string | undefined,
+  kind: UcpathIdleSignalKind,
+): void {
+  emitSessionEvent(
+    { type: "ucpath_idle_signal", workflowInstance: instance, data: { kind } },
+    dir,
+  );
+}
+
+/** Daemon drawer status — only `idle` and `keepalive` are emitted (low noise). */
+export function emitDaemonPhase(instance: string, phase: "idle" | "keepalive", dir?: string): void {
+  emitSessionEvent(
+    { type: "daemon_phase", workflowInstance: instance, data: { phase } },
+    dir,
+  );
 }
 
 export function emitItemStart(instance: string, itemId: string, dir?: string, runId?: string): void {

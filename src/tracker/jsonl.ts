@@ -629,6 +629,28 @@ export function readEntriesForDate(
   return readJsonlCached<TrackerEntry>(join(dir, `${workflow}-${date}.jsonl`));
 }
 
+/** Whether this tracker row is terminal for UX/dedupe purposes (not pending/running). */
+export function isTerminalTrackerEntryStatus(e: TrackerEntry): boolean {
+  return e.status === "done" || e.status === "failed" || e.status === "skipped";
+}
+
+/**
+ * Latest JSONL line for an item/run on a given calendar date (local filename date).
+ * Used by daemon shutdown to avoid duplicate terminal rows when SQLite already
+ * reflects cancel/fail but we'd otherwise emit another shutdown cancel.
+ */
+export function findLatestEntryForRunOnDate(
+  workflow: string,
+  itemId: string,
+  runId: string,
+  date: string,
+  dir: string = DEFAULT_DIR,
+): TrackerEntry | undefined {
+  const rows = readEntriesForDate(workflow, date, dir).filter((e) => e.id === itemId && e.runId === runId);
+  if (rows.length === 0) return undefined;
+  return rows.reduce((a, b) => (a.timestamp >= b.timestamp ? a : b));
+}
+
 /** Read log entries for a specific date (not just today). */
 export function readLogEntriesForDate(
   workflow: string,

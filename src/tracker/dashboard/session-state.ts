@@ -172,6 +172,16 @@ export interface WorkflowInstanceState {
   currentStep: string | null;
   finalStatus: "done" | "failed" | null;
   sessions: SessionInfo[];
+  /**
+   * Populated from `daemon_phase` session events (daemon mode only).
+   * Refines the session-drawer subline between queued items.
+   */
+  daemonPhase?: "idle" | "keepalive";
+  /**
+   * UCPath idle-refresh observability (`ucpath_idle_signal` events).
+   * Drives the countdown ring on the ucpath browser chip.
+   */
+  ucpathIdle?: { lastTouchAt: string; refreshing: boolean };
 }
 
 export interface DuoQueueEntry {
@@ -249,6 +259,19 @@ export function rebuildSessionState(dir?: string): SessionState {
     if (e.type === "auth_complete" && e.browserId) {
       const b = findBrowser(wfMap, inst, e.browserId);
       if (b) b.authState = "authed";
+      const isUcpathAuth =
+        e.system === "ucpath" || b?.system === "ucpath";
+      if (isUcpathAuth) {
+        const wf = wfMap.get(inst);
+        if (wf) {
+          const ts = e.timestamp;
+          const cur = wf.ucpathIdle;
+          const refreshing = cur?.refreshing ?? false;
+          if (!cur?.lastTouchAt || ts.localeCompare(cur.lastTouchAt) >= 0) {
+            wf.ucpathIdle = { lastTouchAt: ts, refreshing };
+          }
+        }
+      }
     }
     if (e.type === "auth_failed" && e.browserId) {
       const b = findBrowser(wfMap, inst, e.browserId);
@@ -272,6 +295,22 @@ export function rebuildSessionState(dir?: string): SessionState {
     if (e.type === "item_complete") {
       const wf = wfMap.get(inst);
       if (wf) wf.itemInFlight = false;
+    }
+    if (e.type === "daemon_phase" && e.data?.phase) {
+      const wf = wfMap.get(inst);
+      const p = e.data.phase;
+      if (wf && (p === "idle" || p === "keepalive")) wf.daemonPhase = p;
+    }
+    if (e.type === "ucpath_idle_signal") {
+      const wf = wfMap.get(inst);
+      if (!wf) continue;
+      const kind = e.data?.kind;
+      if (kind === "touch" || kind === "refresh_end") {
+        wf.ucpathIdle = { lastTouchAt: e.timestamp, refreshing: false };
+      } else if (kind === "refresh_start") {
+        const prevTouch = wf.ucpathIdle?.lastTouchAt ?? e.timestamp;
+        wf.ucpathIdle = { lastTouchAt: prevTouch, refreshing: true };
+      }
     }
     // Intentionally do NOT clear currentItemId on item_complete - the dashboard
     // keeps the last item visible after the workflow ends so users can see which

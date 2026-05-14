@@ -190,6 +190,95 @@ describe("rebuildSessionState — workflows", () => {
     assert.equal(rebuildSessionState(dir).workflows[0].currentItemId, "DOC-1");
   });
 
+  it("bootstraps ucpathIdle.lastTouchAt from auth_complete for ucpath (with system field)", () => {
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "EID Lookup 1" }, dir);
+    emitSessionEvent({
+      type: "session_create",
+      workflowInstance: "EID Lookup 1",
+      sessionId: "S1",
+    }, dir);
+    emitSessionEvent({
+      type: "browser_launch",
+      workflowInstance: "EID Lookup 1",
+      sessionId: "S1",
+      browserId: "b-u",
+      system: "ucpath",
+    }, dir);
+    emitSessionEvent({
+      type: "auth_complete",
+      workflowInstance: "EID Lookup 1",
+      browserId: "b-u",
+      system: "ucpath",
+    }, dir);
+    const state = rebuildSessionState(dir);
+    assert.ok(state.workflows[0].ucpathIdle?.lastTouchAt);
+    assert.match(state.workflows[0].ucpathIdle!.lastTouchAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(state.workflows[0].ucpathIdle!.refreshing, false);
+  });
+
+  it("bootstraps ucpathIdle from auth_complete when system omitted but browser is ucpath", () => {
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "Oath Signature 1" }, dir);
+    emitSessionEvent({
+      type: "session_create",
+      workflowInstance: "Oath Signature 1",
+      sessionId: "S1",
+    }, dir);
+    emitSessionEvent({
+      type: "browser_launch",
+      workflowInstance: "Oath Signature 1",
+      sessionId: "S1",
+      browserId: "b1",
+      system: "ucpath",
+    }, dir);
+    emitSessionEvent({
+      type: "auth_complete",
+      workflowInstance: "Oath Signature 1",
+      browserId: "b1",
+    }, dir);
+    const state = rebuildSessionState(dir);
+    assert.ok(state.workflows[0].ucpathIdle?.lastTouchAt);
+    assert.equal(state.workflows[0].ucpathIdle!.refreshing, false);
+  });
+
+  it("records ucpath_idle_signal refresh lifecycle + daemon_phase on workflow state", () => {
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "EID Lookup 1" }, dir);
+    emitSessionEvent(
+      { type: "ucpath_idle_signal", workflowInstance: "EID Lookup 1", data: { kind: "touch" } },
+      dir,
+    );
+    let state = rebuildSessionState(dir);
+    assert.ok(state.workflows[0].ucpathIdle);
+    assert.equal(state.workflows[0].ucpathIdle!.refreshing, false);
+
+    emitSessionEvent(
+      { type: "ucpath_idle_signal", workflowInstance: "EID Lookup 1", data: { kind: "refresh_start" } },
+      dir,
+    );
+    state = rebuildSessionState(dir);
+    assert.equal(state.workflows[0].ucpathIdle!.refreshing, true);
+
+    emitSessionEvent(
+      { type: "ucpath_idle_signal", workflowInstance: "EID Lookup 1", data: { kind: "refresh_end" } },
+      dir,
+    );
+    state = rebuildSessionState(dir);
+    assert.equal(state.workflows[0].ucpathIdle!.refreshing, false);
+
+    emitSessionEvent(
+      { type: "daemon_phase", workflowInstance: "EID Lookup 1", data: { phase: "keepalive" } },
+      dir,
+    );
+    state = rebuildSessionState(dir);
+    assert.equal(state.workflows[0].daemonPhase, "keepalive");
+
+    emitSessionEvent(
+      { type: "daemon_phase", workflowInstance: "EID Lookup 1", data: { phase: "idle" } },
+      dir,
+    );
+    state = rebuildSessionState(dir);
+    assert.equal(state.workflows[0].daemonPhase, "idle");
+  });
+
   it("marks workflow's pidAlive=false when start PID is dead (crash recovery)", () => {
     // Emit workflow_start, then overwrite the file with a fake dead PID (PID 1 is typically
     // the init process; on Windows it does not exist and process.kill(1, 0) throws).

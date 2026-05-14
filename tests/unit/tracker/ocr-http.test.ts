@@ -485,9 +485,10 @@ test("buildOcrApproveHandler forwards parentRunId to ensureDaemonsAndEnqueueOver
     assert.equal(resp.status, 200, `Expected 200 but got ${resp.status}: ${JSON.stringify(resp.body)}`);
     assert.ok((resp.body as { ok: boolean }).ok);
 
-    // Assert spy was called with 4th arg = { parentRunId: 'oath-upload-run-1' }
+    // Assert spy was called with parentRunId plus the pre-auth child row emitter.
     assert.ok(capturedSpyArgs, "spy should have been called");
-    assert.deepEqual(capturedSpyArgs![3], { parentRunId: "oath-upload-run-1" });
+    assert.equal((capturedSpyArgs![3] as any).parentRunId, "oath-upload-run-1");
+    assert.equal(typeof (capturedSpyArgs![3] as any).onPreEmitPending, "function");
 
     // Read back the post-approve JSONL entry
     const lines = readFileSync(ocrFile, "utf-8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
@@ -506,6 +507,81 @@ test("buildOcrApproveHandler forwards parentRunId to ensureDaemonsAndEnqueueOver
     assert.equal(parsedIds.length, 2, "fannedOutItemIds should have 2 elements");
     assert.equal(typeof parsedIds[0], "string");
     assert.equal(typeof parsedIds[1], "string");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("buildOcrApproveHandler provides downstream pre-emit hook before daemon auth", async () => {
+  const dir = join(tmpdir(), `ocr-approve-preemit-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  try {
+    const today = dateLocalForTest();
+    const ocrFile = join(dir, `ocr-${today}.jsonl`);
+    const oathFile = join(dir, `oath-signature-${today}.jsonl`);
+    writeFileSync(ocrFile, JSON.stringify({
+      workflow: "ocr",
+      id: "session-preemit-approve",
+      runId: "run-preemit-approve",
+      status: "done",
+      step: "awaiting-approval",
+      timestamp: "2026-05-01T00:00:00Z",
+      parentRunId: "parent-preemit-approve",
+      data: {
+        formType: "oath",
+        sessionId: "session-preemit-approve",
+        records: JSON.stringify([]),
+      },
+    }) + "\n", "utf-8");
+    writeFileSync(oathFile, JSON.stringify({
+      workflow: "oath-signature",
+      id: "ocr-prep-session-preemit-approve",
+      runId: "parent-preemit-approve",
+      status: "running",
+      step: "ocr",
+      timestamp: "2026-05-01T00:00:00Z",
+      data: {
+        __name: "Oath Signature · #1234",
+        __id: "ocr-prep-session-preemit-approve",
+        mode: "prepare",
+      },
+    }) + "\n", "utf-8");
+
+    const handler = buildOcrApproveHandler({
+      trackerDir: dir,
+      ensureDaemonsAndEnqueueOverride: async (_workflow, inputs, deriveItemId, opts) => {
+        assert.equal(typeof (opts as any)?.onPreEmitPending, "function");
+        (opts as any).onPreEmitPending(inputs[0], "child-run-preauth", opts?.parentRunId, deriveItemId(inputs[0], 0));
+        return { enqueued: [{ id: deriveItemId(inputs[0], 0), runId: "child-run-preauth" }] };
+      },
+    });
+
+    const resp = await handler({
+      sessionId: "session-preemit-approve",
+      runId: "run-preemit-approve",
+      records: [{
+        employeeId: "10874100",
+        printedName: "Alice One",
+        selected: true,
+        matchState: "matched",
+        employeeSigned: true,
+        officerSigned: true,
+        dateSigned: "05/01/2026",
+        sourcePage: 1,
+        rowIndex: 0,
+      }],
+    });
+
+    assert.equal(resp.status, 200);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const oathRows = readFileSync(oathFile, "utf-8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    const childPending = oathRows.find((row: any) => row.runId === "child-run-preauth" && row.status === "pending");
+    assert.ok(childPending, "downstream oath-signature child pending row should be emitted before daemon auth");
+    assert.equal(childPending.workflow, "oath-signature");
+    assert.equal(childPending.parentRunId, "parent-preemit-approve");
+    assert.equal(childPending.data.emplId, "10874100");
+    assert.equal(childPending.data.parentSubject, "Oath Signature · #1234");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -778,9 +854,10 @@ test("buildOcrApproveHandler back-compat: no parentRunId on OCR row → spy call
 
     assert.equal(resp.status, 200, `Expected 200 but got ${resp.status}: ${JSON.stringify(resp.body)}`);
 
-    // 4th arg should be undefined when no parentRunId
+    // 4th arg still carries the pre-auth child row emitter when no parentRunId exists.
     assert.ok(capturedSpyArgs, "spy should have been called");
-    assert.equal(capturedSpyArgs![3], undefined, "4th arg should be undefined when no parentRunId");
+    assert.equal((capturedSpyArgs![3] as any).parentRunId, undefined);
+    assert.equal(typeof (capturedSpyArgs![3] as any).onPreEmitPending, "function");
 
     // Read back the post-approve JSONL entry
     const lines = readFileSync(ocrFile, "utf-8").split("\n").filter(Boolean).map((l) => JSON.parse(l));

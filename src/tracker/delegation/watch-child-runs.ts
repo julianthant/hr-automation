@@ -358,15 +358,13 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
   return new Promise<ChildOutcome[]>((resolve, reject) => {
     let finalized = false;
     let watcher: ReturnType<typeof fsWatch> | undefined;
-    let pollHandle: ReturnType<typeof setInterval> | undefined;
-    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     const abortCache: { current: AbortFileCache | null } = { current: null };
 
     const cleanup = (): void => {
       finalized = true;
       try { watcher?.close(); } catch { /* ignore */ }
-      if (pollHandle) clearInterval(pollHandle);
-      if (timeoutHandle) clearTimeout(timeoutHandle);
+      clearInterval(pollHandle);
+      clearTimeout(timeoutHandle);
     };
 
     const ingestLines = (lines: string[]): void => {
@@ -472,8 +470,7 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
       ));
     };
 
-    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
-    timeoutHandle = setTimeout(() => {
+    const timeoutHandle = setTimeout(() => {
       if (finalized) return;
       cleanup();
       const stillWaiting = Array.from(expected).join(", ");
@@ -481,8 +478,7 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
     }, timeoutMs);
     timeoutHandle.unref?.();
 
-    if (pollHandle !== undefined) clearInterval(pollHandle);
-    pollHandle = setInterval(() => {
+    const pollHandle = setInterval(() => {
       checkFile();
       checkAbort();
       if (!watcher && existsSync(file)) {

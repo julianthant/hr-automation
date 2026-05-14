@@ -283,7 +283,7 @@ test("Hono /api/preflight prunes the configured screenshots directory", async ()
 test("Hono /api/prep/pdf-page streams legacy prepared page image", async () => {
   const dir = mkdtempSync(join(tmpdir(), "hono-pdf-page-"));
   const parentRunId = `hono-phase1-${Date.now()}`;
-  const pageDir = join(process.cwd(), ".tracker", "uploads", parentRunId);
+  const pageDir = join(dir, "uploads", parentRunId);
   try {
     const db = openStateDb(dir);
     mkdirSync(pageDir, { recursive: true });

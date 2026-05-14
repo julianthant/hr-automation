@@ -3,6 +3,7 @@ import { basename } from "node:path";
 import { transaction, type Database, type Statement } from "../../infra/sqlite/index.js";
 
 import type { TrackerEntry, LogEntry } from "../jsonl.js";
+import { dateLocal } from "../jsonl.js";
 import type { SessionEvent, ScreenshotSessionEvent } from "../session-events.js";
 import { registerLocalFile } from "../files/files.js";
 import type { ProjectionSourceRef } from "./types.js";
@@ -170,7 +171,7 @@ function toMs(ts: string | undefined, fallback = 0): number {
 }
 
 function trackerDateFromTimestamp(ts: string): string {
-  return ts.slice(0, 10);
+  return dateLocal(new Date(ts));
 }
 
 function runIdFor(entry: Pick<TrackerEntry, "id" | "runId">): string {

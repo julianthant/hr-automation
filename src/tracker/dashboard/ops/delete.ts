@@ -87,7 +87,7 @@ function applyDeleteTargets(
 export function buildDeleteEntryHandler(dir: string, opts: DeleteEntryOptions = {}) {
   const screenshotsDir = opts.screenshotsDir ?? PATHS.screenshotDir;
   return function deleteEntry(req: DeleteEntryRequest): DeleteEntryResult {
-    const { workflow, id, date, runId } = req;
+    const { workflow, id, date } = req;
     if (!workflow || !id || !date) {
       return { ok: false, error: "workflow, id, date are required", status: 400 };
     }
@@ -143,7 +143,19 @@ export function buildDeleteBulkHandler(dir: string, opts: DeleteEntryOptions = {
   };
 }
 
-interface DeleteTarget extends DeleteEntryRequest {}
+export function deleteDelegatedChildrenForRun(
+  dir: string,
+  parentRunId: string,
+  opts: DeleteEntryOptions = {},
+): void {
+  if (!parentRunId) return;
+  const db = openStateDb(dir);
+  const targets = collectDescendantDeleteTargets(db, dir, [parentRunId]);
+  if (targets.length === 0) return;
+  applyDeleteTargets(db, dir, targets, opts.screenshotsDir ?? PATHS.screenshotDir);
+}
+
+type DeleteTarget = DeleteEntryRequest;
 
 function collectDeleteTargetsBulk(
   db: ReturnType<typeof openStateDb>,
@@ -171,6 +183,22 @@ function collectDeleteTargets(
   add(req);
 
   const queue = collectRootRunIds(db, dir, req);
+  for (const target of collectDescendantDeleteTargets(db, dir, queue)) {
+    add(target);
+  }
+  return [...targets.values()];
+}
+
+function collectDescendantDeleteTargets(
+  db: ReturnType<typeof openStateDb>,
+  dir: string,
+  rootRunIds: string[],
+): DeleteTarget[] {
+  const targets = new Map<string, DeleteTarget>();
+  const add = (target: DeleteTarget) => {
+    targets.set(deleteTargetKey(target), target);
+  };
+  const queue = [...rootRunIds];
   const seenRunIds = new Set<string>();
   while (queue.length > 0) {
     const parentRunId = queue.shift()!;
