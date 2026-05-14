@@ -149,6 +149,7 @@ export function isPrepareRow(e: {
  */
 export function isResolvedPrepRow(e: {
   workflow?: string;
+  id?: string;
   status: string;
   step?: string;
   data?: Record<string, string>;
@@ -164,6 +165,7 @@ export function isResolvedPrepRow(e: {
  */
 export function isApprovedPrepRow(e: {
   workflow?: string;
+  id?: string;
   status: string;
   step?: string;
   data?: Record<string, string>;
@@ -173,12 +175,34 @@ export function isApprovedPrepRow(e: {
 }
 
 /**
+ * Any tracker row whose `data.mode === "prepare"` and that is NOT discarded is
+ * the persistent batch anchor for an upload-driven workflow (oath-signature,
+ * emergency-contact, oath-upload). It owns the dashboard group regardless of
+ * pre/post-approval state. OCR-workflow rows are intentionally excluded: those
+ * remain flat review surfaces until approved via `isApprovedPrepRow`.
+ */
+export function isPrepBatchAnchor(e: {
+  workflow?: string;
+  id?: string;
+  status: string;
+  step?: string;
+  data?: Record<string, string>;
+}): boolean {
+  if (e.workflow === "ocr") return false;
+  // Use only the data.mode stamp — not the id-prefix heuristic — to avoid false
+  // positives on child rows whose ids happen to start with "ocr-prep-".
+  if (e.data?.mode !== "prepare") return false;
+  return !isDiscardedPrepRow(e);
+}
+
+/**
  * A prep row the operator discarded. Filtered out of the QueuePanel entirely.
  * Distinct from a genuinely-failed prep row (e.g. OCR error), which stays
  * visible as an `OcrQueueRow` so the operator can retry.
  */
 export function isDiscardedPrepRow(e: {
   workflow?: string;
+  id?: string;
   status: string;
   step?: string;
   data?: Record<string, string>;
