@@ -149,6 +149,13 @@ export const QUICK_RUN_REGISTRY: Record<string, QuickRunConfig> = {
     }),
     runEmptyAction: { modalWorkflow: "ocr", lockedFormType: "oath" },
   },
+  "crm-doc-download": {
+    placeholder: "Enter EIDs, comma-separated (e.g. 10873611, 10873075)",
+    parseInput: parseCommaSeparated("emplId", {
+      regex: /^\d{5,}$/,
+      message: "EID must be numeric (5+ digits)",
+    }),
+  },
 };
 
 export function getQuickRunConfig(workflow: string): QuickRunConfig | undefined {

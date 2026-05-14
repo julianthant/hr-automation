@@ -8,6 +8,7 @@ import type { LogCategory, RunEvent } from "@/components/shared/types";
 import { resolveRunEventTimestamp } from "@/components/shared/types";
 import { getLogCategory } from "@/components/shared/types";
 import type { CollapsedLogEntry } from "@/components/hooks/useLogs";
+import { formatLogMessageForDisplay } from "./log-display";
 
 const ICON_MAP: Record<LogCategory, { icon: typeof Check; color: string }> = {
   fill: { icon: Pencil, color: "text-cyan-400" },
@@ -43,6 +44,7 @@ function LogLineImpl({ entry, isCurrent, onCopy }: LogLineProps) {
   const ts = entry.ts
     ? new Date(entry.ts).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
     : "";
+  const message = formatLogMessageForDisplay(entry.message);
 
   return (
     <div
@@ -51,7 +53,7 @@ function LogLineImpl({ entry, isCurrent, onCopy }: LogLineProps) {
         "transition-colors hover:bg-foreground/[0.02]",
         isCurrent && "bg-primary/[0.05]",
       )}
-      onClick={() => onCopy(`${ts} ${entry.message}`)}
+      onClick={() => onCopy(`${ts} ${message}`)}
     >
       <span className="text-muted-foreground text-xs whitespace-nowrap min-w-[72px]">{ts}</span>
       <Icon className={cn("w-[14px] h-[14px] flex-shrink-0", color)} />
@@ -63,7 +65,7 @@ function LogLineImpl({ entry, isCurrent, onCopy }: LogLineProps) {
         isCurrent && "text-primary",
         category !== "success" && category !== "error" && category !== "debug" && !isCurrent && "text-secondary-foreground",
       )}>
-        {entry.message}
+        {message}
       </span>
       {entry.count > 1 && (
         <span className="text-[11px] bg-accent text-accent-foreground px-1.5 py-px rounded font-semibold flex-shrink-0">
@@ -98,6 +100,8 @@ const EVENT_VISUAL: Record<RunEvent["type"], { glyph: string; color: string }> =
   step_change:      { glyph: "→", color: "#6b7280" },
   screenshot:       { glyph: "⬛", color: "#a78bfa" },
   telegram_sent:    { glyph: "✉", color: "#0ea5e9" },
+  ucpath_idle_signal: { glyph: "◔", color: "#22c55e" },
+  daemon_phase:     { glyph: "◉", color: "#64748b" },
 };
 
 // Fallback for any event type the backend ships before the frontend registers

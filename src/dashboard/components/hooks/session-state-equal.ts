@@ -30,6 +30,9 @@ export function workflowEqual(a: WorkflowInstanceState, b: WorkflowInstanceState
     a.currentStep === b.currentStep &&
     a.finalStatus === b.finalStatus &&
     a.startedAt === b.startedAt &&
+    a.daemonPhase === b.daemonPhase &&
+    a.ucpathIdle?.lastTouchAt === b.ucpathIdle?.lastTouchAt &&
+    a.ucpathIdle?.refreshing === b.ucpathIdle?.refreshing &&
     sessionsEqual(a.sessions, b.sessions)
   );
 }

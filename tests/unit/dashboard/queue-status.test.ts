@@ -55,3 +55,33 @@ test("queueGroupMatchesStatusFilter shows batch when any member matches", () => 
   );
   assert.equal(queueGroupMatchesStatusFilter("done", [], parent), true);
 });
+
+test("OCR awaiting-approval rows count under Active, not Done", () => {
+  const ocrAwaiting: TrackerEntry = {
+    workflow: "ocr",
+    id: "ocr-session-1",
+    runId: "ocr-run-1",
+    timestamp: "2026-05-12T12:00:00.000Z",
+    status: "done",
+    step: "awaiting-approval",
+    data: { mode: "prepare" },
+  };
+  const counts = countEntriesByQueueStatus([ocrAwaiting, entry("done")]);
+
+  assert.equal(counts.running, 1);
+  assert.equal(counts.done, 1);
+});
+
+test("entryMatchesStatusFilter maps OCR awaiting-approval to Active pill, not Done", () => {
+  const ocrAwaiting: TrackerEntry = {
+    workflow: "ocr",
+    id: "ocr-session-2",
+    runId: "ocr-run-2",
+    timestamp: "2026-05-12T12:00:00.000Z",
+    status: "done",
+    step: "awaiting-approval",
+    data: {},
+  };
+  assert.equal(entryMatchesStatusFilter(ocrAwaiting, "running"), true);
+  assert.equal(entryMatchesStatusFilter(ocrAwaiting, "done"), false);
+});

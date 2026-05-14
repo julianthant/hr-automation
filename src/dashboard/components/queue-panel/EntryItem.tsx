@@ -8,6 +8,7 @@ import {
   X,
   Ban,
   SearchX,
+  ClipboardList,
 } from "lucide-react";
 import { memo, type ComponentType, type SVGProps } from "react";
 import type { TrackerEntry } from "@/components/shared/types";
@@ -16,6 +17,9 @@ import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
 import { RetryButton } from "@/components/shared/RetryButton";
 import { DeleteButton } from "@/components/shared/DeleteButton";
 import { isTerminalNotFoundEntry } from "../../../domain/tracker-terminal-display.js";
+import {
+  isDelegatedOcrAwaitingApprovalEntry,
+} from "../../../tracker/dashboard/prep-rows.js";
 import { QueueItemControls } from "./QueueItemControls";
 import { CancelRunningButton } from "./CancelRunningButton";
 
@@ -80,6 +84,14 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
     iconColor: "text-muted-foreground",
     label: "Skipped",
   },
+  /** Delegated OCR only (`parentRunId`) — trackers use `status: done` + `awaiting-approval`. */
+  needsReview: {
+    badge: "bg-sky-500/12 text-sky-600 dark:text-sky-400 border border-sky-500/35",
+    icon: ClipboardList,
+    iconClass: "",
+    iconColor: "text-sky-600 dark:text-sky-400",
+    label: "Needs review",
+  },
   /** EID lookup / Active Check — UCPath had no matching row (tracker status is still `done`). */
   notFound: {
     badge: "bg-secondary/90 text-muted-foreground border border-border/80",
@@ -116,22 +128,26 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
   // discriminator. Kernel writes step="cancelled" via Stepper.step's pre-emit
   // when the daemon's cancel flag is set; cancel-queued's handler does the
   // same on a queued item.
+  const isOcrDelegatedNeedsReview = isDelegatedOcrAwaitingApprovalEntry(entry);
+  const isDaemonRunning = entry.status === "running";
   const isCancelled = entry.status === "failed" && entry.step === "cancelled";
   // Cancelled entries: prefer entry.id over an ordinal label ("Active Check 1")
   // when they differ — the concrete identifier is more useful than a sequence
   // number once the run is terminal, and it avoids duplicating the value in
   // both the header and the footer.
   const name = isCancelled && entry.id && entry.id !== resolvedName ? entry.id : resolvedName;
-  const isRunning = entry.status === "running";
+  const isRunning = isDaemonRunning;
   const isFailed = entry.status === "failed" && !isCancelled;
-  const isDone = entry.status === "done";
+  const isDone = entry.status === "done" && !isOcrDelegatedNeedsReview;
   const isPending = entry.status === "pending";
   const isNotFoundTerminal = isDone && isTerminalNotFoundEntry(entry);
   const cfg = isCancelled
     ? STATUS_CONFIG.cancelled
     : isNotFoundTerminal
       ? STATUS_CONFIG.notFound
-      : STATUS_CONFIG[entry.status] ?? STATUS_CONFIG.pending;
+      : isOcrDelegatedNeedsReview
+        ? STATUS_CONFIG.needsReview
+        : STATUS_CONFIG[entry.status] ?? STATUS_CONFIG.pending;
   const StatusIcon = cfg.icon;
 
   const firstTs = entry.firstLogTs || entry.startTimestamp || entry.timestamp;
@@ -156,7 +172,11 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
 
   const subject = typeof entry.data?.__subject === "string" ? entry.data.__subject : undefined;
   const footerSecondaryId = resolveEntryId(entry);
-  const showLiveRow = (isFailed && entry.error) || (isRunning && entry.lastLogMessage);
+  const showLiveRow =
+    (isFailed && Boolean(entry.error)) ||
+    Boolean(
+      (isDaemonRunning || isPending || isOcrDelegatedNeedsReview) && entry.lastLogMessage,
+    );
 
   const activeCheckStatus =
     entry.workflow === "active-check" && typeof entry.data?.activeStatus === "string"
@@ -297,7 +317,7 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
               className="flex-shrink-0"
             />
           )}
-          {isRunning && entry.runId && (
+          {isDaemonRunning && entry.runId && (
             <CancelRunningButton
               workflow={entry.workflow}
               id={entry.id}

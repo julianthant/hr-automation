@@ -9,6 +9,10 @@ export function isDebugLog(log: LogDisplayLike): boolean {
   return getLogCategory(log.level, log.message) === "debug";
 }
 
+export function formatLogMessageForDisplay(message: string): string {
+  return message.replace(/^\[[^\]]+\]\s*/, "");
+}
+
 export function filterLogsForDebugVisibility<T extends LogDisplayLike>(
   logs: T[],
   showDebug: boolean,

@@ -147,6 +147,12 @@ export function buildDisplayNameMap(
     if (parentSubject) return { base: parentSubject, ordinal: false, explicitWorkflowName: true };
     const ocrBase = ocrQueueDisplayBase(e);
     if (ocrBase) return { base: ocrBase, ordinal: true, explicitWorkflowName: true };
+    // Non-OCR prepare rows are batch anchors — their __name already encodes a
+    // unique batch id (e.g. "Oath Signature · #7596"). No ordinal suffix needed.
+    if (d.mode === "prepare") {
+      const workflowName = firstNonBlank(d.__name);
+      return { base: workflowName || workflowLabel, ordinal: false, explicitWorkflowName: Boolean(workflowName) };
+    }
     const workflowName = firstNonBlank(d.__name);
     return { base: workflowName || workflowLabel, ordinal: true, explicitWorkflowName: Boolean(workflowName) };
   };

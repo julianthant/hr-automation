@@ -1,4 +1,4 @@
-import type { CaptureState } from "../capture-types.js";
+import type { CaptureState } from "../capture-types";
 
 export function isTerminal(state: CaptureState): boolean {
   return (

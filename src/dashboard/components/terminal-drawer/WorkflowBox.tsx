@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -16,6 +16,9 @@ import { useQueueDepth } from "@/components/hooks/useQueueDepth";
 import { useDaemons } from "@/components/hooks/useDaemons";
 import { useWorkflow } from "@/lib/workflows-context";
 import { getWorkflowIcon } from "@/lib/workflow-icons";
+
+/** Mirrors `DEFAULT_UCPATH_IDLE_THRESHOLD_MS` in `src/core/kernel/session.ts`. */
+const UCPATH_IDLE_REFRESH_MS = 5 * 60 * 1000;
 
 /* ----------------------------------------------------------------------
  * Auth-state visual tokens. Single source of truth for every system tile
@@ -59,6 +62,164 @@ function AuthIcon({ state, className }: { state: AuthState; className?: string }
     default:
       return <Hourglass className={cls} />;
   }
+}
+
+function UcpathIdleCountdownRing({
+  lastTouchAt,
+  refreshing,
+  cycling,
+}: {
+  lastTouchAt: string;
+  refreshing: boolean;
+  cycling: boolean;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  if (refreshing) {
+    return (
+      <Loader2
+        className="w-[13px] h-[13px] flex-shrink-0 animate-spin text-zinc-300/85"
+        aria-label="UCPath idle refresh in progress"
+      />
+    );
+  }
+  const startMs = Date.parse(lastTouchAt);
+  if (!Number.isFinite(startMs)) return null;
+
+  const elapsedMs = Math.max(0, now - startMs);
+  const cycleElapsedMs =
+    cycling && elapsedMs >= UCPATH_IDLE_REFRESH_MS
+      ? elapsedMs % UCPATH_IDLE_REFRESH_MS
+      : elapsedMs;
+  const overdue = !cycling && elapsedMs >= UCPATH_IDLE_REFRESH_MS;
+  /** 1 → just touched, 0 → idle reload due. */
+  const remainingRatio = overdue
+    ? 0
+    : Math.max(0, Math.min(1, 1 - cycleElapsedMs / UCPATH_IDLE_REFRESH_MS));
+  const remainingMs = Math.max(0, UCPATH_IDLE_REFRESH_MS - cycleElapsedMs);
+
+  const size = 13;
+  const stroke = 2;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const dashOffset = c * (1 - remainingRatio);
+  const secsLeft = Math.ceil(remainingMs / 1000);
+  const aria = overdue
+    ? "UCPath idle interval complete; page refresh pending"
+    : `UCPath idle: ${secsLeft}s until 5-minute page refresh`;
+  const title = overdue
+    ? "5 min idle window complete — refresh pending"
+    : `Elapsed toward 5 min UCPath refresh · ${secsLeft}s left`;
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      className="flex-shrink-0 -rotate-90"
+      aria-label={aria}
+      role="img"
+    >
+      <title>{title}</title>
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={r}
+        fill="none"
+        strokeWidth={stroke}
+        className="stroke-muted-foreground/30"
+      />
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={r}
+        fill="none"
+        strokeWidth={stroke}
+        strokeLinecap="round"
+        className={cn(
+          "transition-[stroke-dashoffset,stroke] duration-300",
+          overdue ? "stroke-[#fbbf24]/80" : "stroke-zinc-100/90",
+        )}
+        strokeDasharray={c}
+        strokeDashoffset={dashOffset}
+      />
+    </svg>
+  );
+}
+
+function deriveSessionCardCopy(args: {
+  active: boolean;
+  finalStatus: "done" | "failed" | null;
+  itemInFlight: boolean;
+  currentItemId: string | null;
+  currentStep: string | null;
+  authedBrowsers: number;
+  totalBrowsers: number;
+  daemonPhase?: "idle" | "keepalive";
+  queued: number;
+}): { subline: string; footerStep: string } {
+  const {
+    active,
+    finalStatus,
+    itemInFlight,
+    currentItemId,
+    currentStep,
+    authedBrowsers,
+    totalBrowsers,
+    daemonPhase,
+    queued,
+  } = args;
+
+  if (!active) {
+    const sub =
+      finalStatus === "failed"
+        ? "Run failed"
+        : finalStatus === "done"
+          ? "Run complete"
+          : "Daemon ended";
+    const foot =
+      finalStatus === "done" ? "complete" : finalStatus === "failed" ? "failed" : "ended";
+    return { subline: sub, footerStep: foot };
+  }
+
+  if (itemInFlight) {
+    const sub = currentItemId ?? (currentStep ? formatStepName(currentStep) : "processing…");
+    const foot = currentStep ? formatStepName(currentStep) : currentItemId ?? "running…";
+    return { subline: sub, footerStep: foot };
+  }
+
+  if (daemonPhase === "keepalive") {
+    return {
+      subline: "keepalive — checking browsers",
+      footerStep: "keepalive — checking browsers",
+    };
+  }
+
+  if (daemonPhase === "idle") {
+    if (queued > 0) {
+      const q = `${queued} queued — ready`;
+      return { subline: q, footerStep: q };
+    }
+    const idle = "idle — waiting for work";
+    return { subline: idle, footerStep: idle };
+  }
+
+  if (authedBrowsers !== totalBrowsers || totalBrowsers === 0) {
+    return {
+      subline: `Authenticating ${authedBrowsers}/${totalBrowsers}`,
+      footerStep: "authenticating",
+    };
+  }
+
+  if (queued > 0) {
+    const q = `${queued} queued — waiting for next item`;
+    return { subline: q, footerStep: q };
+  }
+
+  const wait = "waiting for next item";
+  return { subline: wait, footerStep: "idle" };
 }
 
 /**
@@ -213,6 +374,8 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
     currentStep,
     finalStatus,
     sessions,
+    daemonPhase,
+    ucpathIdle,
   } = workflow;
   const { focusedInstance, setFocusedInstance } = useTerminalDrawer();
   const meta = useWorkflow(workflowName ?? "");
@@ -232,6 +395,8 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
   const totalDaemonsForWorkflow = workflowName
     ? daemons.filter((d) => d.workflow === workflowName).length
     : 0;
+
+  const queued = workflowName ? queueDepth[workflowName] ?? 0 : 0;
 
   if (workflow.crashedOnLaunch) {
     return (
@@ -260,17 +425,17 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
   const browsers = sessions.flatMap((s) => s.browsers);
   const totalBrowsers = browsers.length;
   const authedBrowsers = browsers.filter((b) => b.authState === "authed").length;
-  const subline = !active
-    ? finalStatus === "failed"
-      ? "Run failed"
-      : finalStatus === "done"
-        ? "Run complete"
-        : "Daemon ended"
-    : itemInFlight && currentItemId
-      ? currentItemId
-      : authedBrowsers === totalBrowsers && totalBrowsers > 0
-        ? "waiting for next item"
-        : `Authenticating ${authedBrowsers}/${totalBrowsers}`;
+  const { subline, footerStep } = deriveSessionCardCopy({
+    active: !!active,
+    finalStatus: finalStatus ?? null,
+    itemInFlight: !!itemInFlight,
+    currentItemId: currentItemId ?? null,
+    currentStep: currentStep ?? null,
+    authedBrowsers,
+    totalBrowsers,
+    daemonPhase,
+    queued,
+  });
 
   // Card border tint reflects "current state" — in-flight cards get a
   // subtle cyan ring so an operator can pick out the working session
@@ -281,37 +446,24 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
       ? "border-[#22d3ee]/30 shadow-[0_0_0_1px_rgba(34,211,238,0.10)]"
       : "border-border";
 
-  // Footer right slot — current step in mono, color-coded by lifecycle
-  // family. Falls back to the same subline copy when no step is set.
-  const stepLabel = !active
-    ? finalStatus === "done"
-      ? "complete"
-      : finalStatus === "failed"
-        ? "failed"
-        : "ended"
-    : currentStep
-      ? formatStepName(currentStep)
-      : authedBrowsers === totalBrowsers && totalBrowsers > 0
-        ? "waiting for next item"
-        : "authenticating";
+  // Footer right slot — lifecycle descriptor (matches header subline semantics).
+  const stepLabel = footerStep;
 
   const stepClass = !active
     ? "text-muted-foreground"
     : itemInFlight
       ? "text-[#22d3ee]"
-      : currentStep && /auth/i.test(currentStep)
-        ? "text-[#60a5fa]"
-        : authedBrowsers === totalBrowsers && totalBrowsers > 0
-          ? "text-muted-foreground"
-          : "text-[#60a5fa]";
+      : daemonPhase === "keepalive" || daemonPhase === "idle"
+        ? "text-muted-foreground"
+        : currentStep && /auth/i.test(currentStep)
+          ? "text-[#60a5fa]"
+          : authedBrowsers === totalBrowsers && totalBrowsers > 0
+            ? "text-muted-foreground"
+            : "text-[#60a5fa]";
 
   // Workflow icon — resolved from the registry's `iconName` declaration,
   // with a generic `Workflow` fallback + console.warn for missing entries.
   const Icon = getWorkflowIcon(meta?.iconName);
-
-  // Queue depth for this workflow (per-workflow scope; shows aggregate
-  // queue not just this daemon's slice — fine for at-a-glance signal).
-  const queued = workflowName ? queueDepth[workflowName] ?? 0 : 0;
 
   // Step list for micro pipeline — pulled from registry. Cap at ~10 dots
   // so wide step lists don't blow out the card. Highlight current step.
@@ -397,16 +549,33 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
                   "rounded-md border px-1.5 py-1 min-w-0 transition-colors",
                   authBg[b.authState],
                 )}
-                title={`${b.system} · ${authLabel[b.authState]}`}
+                title={
+                  b.system === "ucpath" && b.authState === "authed" && ucpathIdle?.lastTouchAt
+                    ? `${b.system} · ${authLabel[b.authState]} · idle page reload timer`
+                    : `${b.system} · ${authLabel[b.authState]}`
+                }
               >
-                <div className="flex items-center gap-1 min-w-0">
-                  <AuthIcon
-                    state={b.authState}
-                    className={cn("w-3 h-3 flex-shrink-0", authColor[b.authState])}
-                  />
-                  <span className="text-[11px] font-mono text-foreground truncate leading-none">
-                    {b.system}
-                  </span>
+                <div className="flex items-center gap-1 min-w-0 justify-between">
+                  <div className="flex items-center gap-1 min-w-0">
+                    <AuthIcon
+                      state={b.authState}
+                      className={cn("w-3 h-3 flex-shrink-0", authColor[b.authState])}
+                    />
+                    <span className="text-[11px] font-mono text-foreground truncate leading-none">
+                      {b.system}
+                    </span>
+                  </div>
+                  {b.system === "ucpath" &&
+                    b.authState === "authed" &&
+                    !itemInFlight &&
+                    ucpathIdle?.lastTouchAt != null &&
+                    ucpathIdle.lastTouchAt.length > 0 && (
+                      <UcpathIdleCountdownRing
+                        lastTouchAt={ucpathIdle.lastTouchAt}
+                        refreshing={!!ucpathIdle.refreshing}
+                        cycling={active && !itemInFlight}
+                      />
+                    )}
                 </div>
                 <div
                   className={cn(

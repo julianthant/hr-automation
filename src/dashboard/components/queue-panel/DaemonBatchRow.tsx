@@ -220,6 +220,7 @@ export function DaemonBatchRow({
       members={memberEntries}
       countTone="neutral"
       footerLabelPrefix="batch"
+      footerSecondaryId={batchParentRunId}
       firstTimestamp={firstTimestamp}
       isFocused={isBatchQueueFocused}
       drillInEnabled={batchDrillInEnabled}
