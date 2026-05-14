@@ -21,7 +21,7 @@ test("eidLookupPreEmitPending stamps __name from parentSubject when present", ()
     eidLookupPreEmitPending(
       {
         name: "Barahona Martell, Carlos",
-        parentSubject: "Oath Signature · #abcd",
+        parentSubject: "Oath · #abcd",
       } as never,
       "eid-run-1",
       "parent-run-9999",
@@ -32,8 +32,11 @@ test("eidLookupPreEmitPending stamps __name from parentSubject when present", ()
     assert.equal(rows.length, 1);
     const r = rows[0] as { parentRunId?: string; data: Record<string, string> };
     assert.equal(r.parentRunId, "parent-run-9999");
-    assert.equal(r.data.__name, "Oath Signature · #abcd");
-    assert.equal(r.data.parentSubject, "Oath Signature · #abcd");
+    assert.equal(r.data.__name, "Oath · #abcd");
+    assert.equal(r.data.parentSubject, "Oath · #abcd");
+    assert.equal(r.data.__queueTitle, "Oath · #abcd");
+    assert.equal(r.data.__queueTitleKind, "delegation");
+    assert.equal(r.data.__queueRootTitle, "Oath · #abcd");
     assert.equal(r.data.searchName, "Barahona Martell, Carlos");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -53,6 +56,7 @@ test("eidLookupPreEmitPending falls back to searchName without parentSubject", (
     const rows = readJsonl(join(dir, `eid-lookup-${todayLocal()}.jsonl`));
     assert.equal((rows[0]!.data as Record<string, unknown>).__name, "Solo Search");
     assert.equal((rows[0]!.data as Record<string, unknown>).parentSubject, undefined);
+    assert.equal((rows[0]!.data as Record<string, unknown>).__queueRootTitle, undefined);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

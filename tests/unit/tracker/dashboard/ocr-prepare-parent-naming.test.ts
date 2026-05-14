@@ -18,7 +18,7 @@ function todayLocal(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-test("writeOriginParentPending writes __name as 'Oath Signature · #<id>'", () => {
+test("writeOriginParentPending writes Oath batch queue title fields", () => {
   const dir = mkdtempSync(join(tmpdir(), "ocr-prep-naming-"));
   try {
     writeOriginParentPending({
@@ -26,6 +26,7 @@ test("writeOriginParentPending writes __name as 'Oath Signature · #<id>'", () =
       parentItemId: "ocr-prep-abc123",
       parentRunId: "1234567890ab",
       pdfOriginalName: "Xerox Scan.pdf",
+      formType: "oath",
       ocrSessionId: "sess-1",
       ocrRunId: "ocr-run-1",
       trackerDir: dir,
@@ -33,7 +34,10 @@ test("writeOriginParentPending writes __name as 'Oath Signature · #<id>'", () =
     const rows = readJsonl(join(dir, `oath-signature-${todayLocal()}.jsonl`));
     assert.ok(rows.length >= 1);
     const pending = rows[0] as { data: Record<string, string> };
-    assert.equal(pending.data.__name, "Oath Signature · #90ab");
+    assert.equal(pending.data.__name, "Oath · #90ab");
+    assert.equal(pending.data.__queueTitle, "Oath · #90ab");
+    assert.equal(pending.data.__queueTitleKind, "batch");
+    assert.equal(pending.data.__queueRootTitle, "Oath · #90ab");
     assert.equal(pending.data.pdfOriginalName, "Xerox Scan.pdf");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -48,6 +52,7 @@ test("emergency-contact prep uses the registry label too", () => {
       parentItemId: "ocr-prep-xyz",
       parentRunId: "abcdef123456",
       pdfOriginalName: "ec.pdf",
+      formType: "emergency-contact",
       ocrSessionId: "sess-2",
       ocrRunId: "ocr-run-2",
       trackerDir: dir,
@@ -55,6 +60,9 @@ test("emergency-contact prep uses the registry label too", () => {
     const rows = readJsonl(join(dir, `emergency-contact-${todayLocal()}.jsonl`));
     const pending = rows[0] as { data: Record<string, string> };
     assert.equal(pending.data.__name, "Emergency Contact · #3456");
+    assert.equal(pending.data.__queueTitle, "Emergency Contact · #3456");
+    assert.equal(pending.data.__queueTitleKind, "batch");
+    assert.equal(pending.data.__queueRootTitle, "Emergency Contact · #3456");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -68,6 +76,7 @@ test("writeOriginParentPending emits a 'Oath Signature Request' child row marked
       parentItemId: "ocr-prep-abc",
       parentRunId: "parent-run-9999",
       pdfOriginalName: "test.pdf",
+      formType: "oath",
       ocrSessionId: "sess",
       ocrRunId: "ocr-run",
       trackerDir: dir,
@@ -83,7 +92,9 @@ test("writeOriginParentPending emits a 'Oath Signature Request' child row marked
     ) as { status: string; parentRunId: string; data: Record<string, string> } | undefined;
     assert.ok(doneChild, "expected a done child row");
     assert.equal(doneChild!.data.__name, "Oath Signature Request");
-    assert.equal(doneChild!.data.parentSubject, "Oath Signature · #9999");
+    assert.equal(doneChild!.data.parentSubject, "Oath · #9999");
+    assert.equal(doneChild!.data.__queueRootTitle, "Oath · #9999");
+    assert.equal(doneChild!.data.__queueTitleKind, "delegation");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

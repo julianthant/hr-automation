@@ -49,6 +49,7 @@ export const activeCheckWorkflow = defineWorkflow({
   ],
   steps,
   schema: ActiveCheckItemSchema,
+  queueTitle: { kind: "single" },
   authChain: "sequential",
   batch: { mode: "shared-context-pool", poolSize: 4, preEmitPending: true },
   detailFields: [

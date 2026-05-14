@@ -4,6 +4,8 @@ import { errorMessage } from "../../../utils/errors.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
 import { openControlDb } from "../../../core/control-db.js";
 import { createTaskStore } from "../../../core/task-store/index.js";
+import { buildHttpPendingData } from "../../../core/daemon/enqueue-dispatch.js";
+import { readQueueTitle, rootQueueTitleData } from "../../../domain/queue-title.js";
 import { readFormType, readParentRunId, readDryRun } from "./shared.js";
 
 const WORKFLOW = "ocr";
@@ -28,7 +30,15 @@ export interface ApproveHandlerOpts {
     workflow: string,
     inputs: unknown[],
     deriveItemId: (input: unknown, idx: number) => string,
-    opts?: { parentRunId?: string },
+    opts?: {
+      parentRunId?: string;
+      onPreEmitPending?: (
+        item: unknown,
+        runId: string,
+        parentRunId: string | undefined,
+        itemId: string,
+      ) => void;
+    },
   ) => Promise<void | { enqueued?: Array<{ id: string; taskId?: string; runId?: string }> }>;
 }
 
@@ -135,12 +145,42 @@ export function buildOcrApproveHandler(
     void (async () => {
       try {
         let dispatchResult: void | { enqueued?: Array<{ id: string; taskId?: string; runId?: string }> };
+        const emitFallbackChildPending = (
+          item: unknown,
+          childRunId: string,
+          passedParentRunId: string | undefined,
+          itemId: string,
+        ): void => {
+          const childInput =
+            item && typeof item === "object" && !Array.isArray(item)
+              ? (item as Record<string, unknown>)
+              : undefined;
+          trackEvent(
+            {
+              workflow: spec.approveTo.workflow,
+              timestamp: new Date().toISOString(),
+              id: itemId,
+              runId: childRunId,
+              status: "pending",
+              data: {
+                ...buildFallbackPendingData(item),
+                ...rootQueueTitleData(readParentSubjectFromInput(item)),
+              },
+              ...(passedParentRunId ? { parentRunId: passedParentRunId } : {}),
+              ...(childInput ? { input: childInput } : {}),
+            },
+            trackerDir,
+          );
+        };
         if (opts.ensureDaemonsAndEnqueueOverride) {
           dispatchResult = await opts.ensureDaemonsAndEnqueueOverride(
             spec.approveTo.workflow,
             enqueueInputs,
             (_inp, idx) => itemIds[idx],
-            parentRunId ? { parentRunId } : undefined,
+            {
+              ...(parentRunId ? { parentRunId } : {}),
+              onPreEmitPending: emitFallbackChildPending,
+            },
           );
         } else {
           const { ensureDaemonsAndEnqueue } = await import("../../../core/daemon/client.js");
@@ -163,6 +203,28 @@ export function buildOcrApproveHandler(
               trackerDir,
               deriveItemId: (inp: unknown) => inputToItemId.get(JSON.stringify(inp)) ?? `ocr-fallback-${input.runId}-r0`,
               ...(parentRunId ? { parentRunId } : {}),
+              onPreEmitPending: (item, childRunId, passedParentRunId, itemId) => {
+                const childInput =
+                  item && typeof item === "object" && !Array.isArray(item)
+                    ? (item as Record<string, unknown>)
+                    : undefined;
+                trackEvent(
+                  {
+                    workflow: childWf.config.name,
+                    timestamp: new Date().toISOString(),
+                    id: itemId,
+                    runId: childRunId,
+                    status: "pending",
+                    data: {
+                      ...buildHttpPendingData(childWf, item),
+                      ...rootQueueTitleData(readParentSubjectFromInput(item)),
+                    },
+                    ...(passedParentRunId ? { parentRunId: passedParentRunId } : {}),
+                    ...(childInput ? { input: childInput } : {}),
+                  },
+                  trackerDir,
+                );
+              },
             },
           );
         }
@@ -239,6 +301,30 @@ function readLatestOcrReviewData(
   return {};
 }
 
+function buildFallbackPendingData(input: unknown): Record<string, string> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  const data: Record<string, string> = {};
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === "object") {
+      try {
+        data[key] = JSON.stringify(value);
+      } catch {
+        data[key] = String(value);
+      }
+      continue;
+    }
+    data[key] = String(value);
+  }
+  return data;
+}
+
+function readParentSubjectFromInput(input: unknown): string | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+  const value = (input as Record<string, unknown>).parentSubject;
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
 /**
  * Emit the terminal step transition on the origin parent row when OCR is
  * approved. Keep the parent tagged as `mode=prepare` so the dashboard can
@@ -304,7 +390,7 @@ function readParentSubjectFromParentRow(
   trackerDir?: string,
 ): string | undefined {
   const data = readLatestEntryData(workflow, parentItemId, parentRunId, trackerDir);
-  const name = data.__name;
+  const name = readQueueTitle(data) ?? data.__name;
   return typeof name === "string" && name.length > 0 ? name : undefined;
 }
 

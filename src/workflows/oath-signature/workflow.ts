@@ -7,6 +7,7 @@ import { errorMessage } from "../../utils/errors.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 import { loginToUCPath } from "../../infra/auth/login.js";
 import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
+import { rootQueueTitleData } from "../../domain/queue-title.js";
 import { buildOathSignaturePlan, type OathSignatureContext } from "./enter.js";
 import { OathSignatureInputSchema, type OathSignatureInput } from "./schema.js";
 
@@ -47,6 +48,7 @@ export const oathSignatureWorkflow = defineWorkflow({
   authSteps: false,
   steps: oathSignatureSteps,
   schema: OathSignatureInputSchema,
+  queueTitle: { kind: "single" },
   authChain: "sequential",
   batch: {
     mode: "sequential",
@@ -158,6 +160,7 @@ export function oathSignaturePreEmitPending(
 ): void {
   const subject = oathSignatureWorkflow.config.operatorSubject?.(item);
   const parentSubject = item.parentSubject;
+  const queueFields = parentSubject ? rootQueueTitleData(parentSubject) : {};
   trackEvent({
     workflow: WORKFLOW,
     timestamp: new Date().toISOString(),
@@ -169,7 +172,8 @@ export function oathSignaturePreEmitPending(
       emplId: item.emplId,
       ...(item.date ? { date: item.date } : {}),
       ...(item.dryRun ? { dryRun: "true" } : {}),
-      ...(parentSubject ? { __name: parentSubject, parentSubject } : {}),
+      ...(parentSubject ? { __name: parentSubject } : {}),
+      ...queueFields,
       ...operatorSubjectData(subject),
     },
   }, trackerDir);

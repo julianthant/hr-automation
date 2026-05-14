@@ -84,6 +84,7 @@ export const emergencyContactWorkflow = defineWorkflow({
   authSteps: false,
   steps: emergencyContactSteps,
   schema: RecordSchema,
+  queueTitle: { kind: "single" },
   authChain: "sequential",
   batch: {
     mode: "sequential",
