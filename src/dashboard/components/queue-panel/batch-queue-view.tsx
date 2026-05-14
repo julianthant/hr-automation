@@ -8,12 +8,18 @@ import { cn } from "@/lib/utils";
  * Display title for daemon / dashboard batch cards and batch-queue toolbar
  * (`Active Check 1`, `EID Lookup 2`, …). Uses `data.batchDisplayOrdinal` from
  * members when present; otherwise a short parent id suffix for pre-ordinal rows.
+ *
+ * When `titleOverride` is provided and non-empty (e.g. the prep parent's
+ * `data.__name` like `"Oath Signature · #1234"`), it takes precedence over all
+ * computed fallbacks.
  */
 export function resolveDaemonBatchQueueTitle(
   workflowLabel: string,
   members: TrackerEntry[],
   batchParentRunId: string,
+  titleOverride?: string,
 ): string {
+  if (titleOverride && titleOverride.length > 0) return titleOverride;
   const raw = members.map((m) => m.data?.batchDisplayOrdinal).find((v) => v != null && v !== "");
   const n = raw !== undefined ? Number.parseInt(String(raw), 10) : Number.NaN;
   if (Number.isFinite(n) && n > 0) {

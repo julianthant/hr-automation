@@ -16,6 +16,7 @@ import {
 } from "./batch-queue-view";
 import { DaemonBatchRow } from "./DaemonBatchRow";
 import { DelegationRow } from "@/components/ocr/DelegationRow";
+import { GroupRowBase } from "./group-row-base";
 import type { TrackerEntry } from "@/components/shared/types";
 import { isDiscardedPrepRow } from "@/components/ocr/types";
 import {
@@ -281,11 +282,12 @@ export function QueuePanel({
 
   const visiblePassiveDelegationSurfaces = useMemo(
     () =>
-      queueSurfaces.groupRows.filter(
-        (surface): surface is QueueGroupSurface & { kind: "passive-delegation" } =>
+      queueSurfaces.groupRows
+        .filter((surface): surface is QueueGroupSurface & { kind: "passive-delegation" } =>
           surface.kind === "passive-delegation",
-      ),
-    [queueSurfaces],
+        )
+        .filter((surface) => queueGroupMatchesStatusFilter(statusFilter, surface.members)),
+    [queueSurfaces, statusFilter],
   );
 
   const filtered = useMemo(() => {
@@ -309,7 +311,9 @@ export function QueuePanel({
 
   /** Batch/delegation cards are not included in {@link sortedFiltered}; avoid empty-state under them. */
   const hasBatchOrDelegationQueueCards =
-    visibleApprovalDelegationSurfaces.length > 0 || visibleBatchSurfaces.length > 0;
+    visibleApprovalDelegationSurfaces.length > 0 ||
+    visibleBatchSurfaces.length > 0 ||
+    visiblePassiveDelegationSurfaces.length > 0;
 
   const statPillSource = statPanelEntries ?? visibleEntries;
 
@@ -406,7 +410,21 @@ export function QueuePanel({
           />
         );
       case "passive-delegation":
-        return null;
+        return (
+          <GroupRowBase
+            key={`passive-delegation-${surface.parentRunId}`}
+            variant="passive-delegation"
+            title={surface.titleOverride ?? "Delegated utility work"}
+            parentRunId={surface.parentRunId}
+            members={surface.members}
+            countTone="neutral"
+            footerLabelPrefix="batch"
+            firstTimestamp={surface.members[0]?.timestamp}
+            isFocused={batchQueueParentRunId === surface.parentRunId}
+            drillInEnabled={!batchQueueParentRunId}
+            onEnter={(runId) => onEnterBatchQueue?.(runId)}
+          />
+        );
       default:
         return assertNeverSurface(surface);
     }
@@ -423,6 +441,7 @@ export function QueuePanel({
       {batchQueueParentRunId && resolvedBatchToolbarEntry ? (
         <BatchQueueToolbar
           batchAnchor={resolvedBatchToolbarEntry}
+          titleOverride={resolvedBatchToolbarEntry.data?.__name as string | undefined}
           anchorKind={batchAnchorIsPrep ? "prep" : "daemon"}
           memberCount={batchQueueMembers.length}
           batchPreviewActive={selectedId === null}
