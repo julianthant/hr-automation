@@ -119,6 +119,44 @@ test("OCR rows with parentSubject use the batch label instead of OATH/EMPL", () 
   assert.equal(resolveEntryName(child, displayNames), "Oath Signature · #1234");
 });
 
+test("batch rows display the global queue title", () => {
+  const row = entry("ocr-session-1", {
+    __queueTitle: "Oath · #90ab",
+    __queueTitleKind: "batch",
+    __queueRootTitle: "Oath · #90ab",
+    __name: "Legacy Name",
+  });
+  row.workflow = "ocr";
+
+  const displayNames = buildDisplayNameMap([row], "OCR");
+
+  assert.equal(resolveEntryName(row, displayNames), "Oath · #90ab");
+});
+
+test("delegated rows inherit root queue title even with employee name", () => {
+  const parent = entry("ocr-session-1", {
+    __queueTitle: "Emergency Contact · #3456",
+    __queueTitleKind: "batch",
+    __queueRootTitle: "Emergency Contact · #3456",
+  });
+  parent.workflow = "ocr";
+  parent.runId = "parent-run-1";
+
+  const child = entry("10000001", {
+    name: "Doe, Jane",
+    __queueTitle: "Doe, Jane",
+    __queueTitleKind: "delegation",
+    __queueRootTitle: "Emergency Contact · #3456",
+  });
+  child.workflow = "active-check";
+  child.parentRunId = "parent-run-1";
+
+  const displayNames = buildDisplayNameMap([child, parent], "OCR");
+
+  assert.equal(resolveEntryName(parent, displayNames), "Emergency Contact · #3456");
+  assert.equal(resolveEntryName(child, displayNames), "Emergency Contact · #3456");
+});
+
 test("delegated rows inherit the parent display name", () => {
   const firstParent = entry("ocr-session-1", { __id: "ocr-session-1", formType: "oath" }, "2026-05-05T12:00:00.000Z");
   firstParent.workflow = "ocr";

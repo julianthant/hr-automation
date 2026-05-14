@@ -1,5 +1,6 @@
 import type { TrackerEntry } from "./types";
 import type { MergedEntryGroup } from "../../../tracker/queue-row-count.js";
+import { readQueueTitle } from "../../../domain/queue-title.js";
 export {
   groupMergedTrackerEntries as groupMergedEntries,
   type MergedEntryGroup,
@@ -53,6 +54,8 @@ export function resolveEntryName(
   const fromMap = displayNames?.get(entry.id);
   if (fromMap) return fromMap;
   const d = entry.data ?? {};
+  const queueTitle = readQueueTitle(d);
+  if (queueTitle) return queueTitle;
   return resolveEmployeeLabel(d) || d.__name || d.__subject || "";
 }
 
@@ -130,6 +133,14 @@ export function buildDisplayNameMap(
 ): Map<string, string> {
   const displayFor = (e: TrackerEntry): { base: string; ordinal: boolean; explicitWorkflowName: boolean } => {
     const d = e.data ?? {};
+    const queueTitle = readQueueTitle(d);
+    if (queueTitle) {
+      return {
+        base: queueTitle,
+        ordinal: false,
+        explicitWorkflowName: d.__queueTitleKind === "batch" || d.__queueTitleKind === "delegation",
+      };
+    }
     const personName = resolveEmployeeLabel(d);
     if (personName) return { base: personName, ordinal: false, explicitWorkflowName: false };
     const parentSubject = firstNonBlank(d.parentSubject);
