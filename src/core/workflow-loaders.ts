@@ -31,6 +31,10 @@ export const WORKFLOW_LOADERS: Record<string, () => Promise<AnyRegisteredWorkflo
     const mod = await import("../workflows/onboarding/index.js");
     return mod.onboardingWorkflow as unknown as AnyRegisteredWorkflow;
   },
+  "crm-doc-download": async () => {
+    const mod = await import("../workflows/crm-doc-download/index.js");
+    return mod.crmDocDownloadWorkflow as unknown as AnyRegisteredWorkflow;
+  },
   "oath-signature": async () => {
     const mod = await import("../workflows/oath-signature/index.js");
     return mod.oathSignatureWorkflow as unknown as AnyRegisteredWorkflow;

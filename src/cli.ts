@@ -6,6 +6,7 @@ import { launchBrowser } from "./infra/browser/launch.js";
 import { loginToUCPath, loginToACTCrm } from "./infra/auth/login.js";
 import type { AuthResult } from "./infra/auth/types.js";
 import { runOnboardingCli } from "./workflows/onboarding/index.js";
+import { runCrmDocDownloadCli } from "./workflows/crm-doc-download/index.js";
 import { runWorkStudyCli, WorkStudyInputSchema } from "./workflows/work-study/index.js";
 import { runEmergencyContactCli } from "./workflows/emergency-contact/index.js";
 import { runParallelKronos, DEFAULT_WORKERS } from "./workflows/old-kronos-reports/index.js";
@@ -126,6 +127,39 @@ program
       await runOnboardingCli(emails, { new: options.new, parallel: options.parallel });
     } catch (error) {
       log.error(`Onboarding failed: ${errorMessage(error)}`);
+      process.exit(1);
+    }
+  });
+
+// ─── crm-doc-download ───
+
+program
+  .command("crm-doc-download")
+  .description(
+    "Download onboarding iDocs PDFs from ACT CRM by employee email. Daemon mode -- CRM session persists.",
+  )
+  .argument("<emails...>", "Employee email(s)")
+  .option("-n, --new", "Spawn an additional daemon even if one is alive")
+  .option("-p, --parallel <N>", "Fan out across N CRM download daemons", parseInt)
+  .action(async (
+    emails: string[],
+    options: { new?: boolean; parallel?: number },
+  ) => {
+    try {
+      validateEnv();
+    } catch {
+      process.exit(1);
+    }
+
+    if (options.parallel !== undefined && (options.parallel < 1 || !Number.isFinite(options.parallel))) {
+      log.error("--parallel must be a positive integer.");
+      process.exit(1);
+    }
+
+    try {
+      await runCrmDocDownloadCli(emails, { new: options.new, parallel: options.parallel });
+    } catch (error) {
+      log.error(`CRM document download failed: ${errorMessage(error)}`);
       process.exit(1);
     }
   });
@@ -380,6 +414,7 @@ program
       pdfOriginalName: string;
       sessionId: string;
       pdfHash: string;
+      mode: "full";
       rosterMode: "existing" | "download";
       rosterPath?: string;
       dryRun?: boolean;
@@ -396,6 +431,7 @@ program
           pdfOriginalName: basename(p),
           sessionId: randomUUID(),
           pdfHash: hash,
+          mode: "full",
           // CLI defaults to fresh SharePoint download; dashboard modal lets the
           // operator pick "use latest local" instead.
           rosterMode: "download",
@@ -486,6 +522,7 @@ program
       import("./workflows/onboarding/index.js"),
       import("./workflows/separations/index.js"),
       import("./workflows/work-study/index.js"),
+      import("./workflows/crm-doc-download/index.js"),
       import("./workflows/eid-lookup/index.js"),
       import("./workflows/active-check/index.js"),
       import("./workflows/emergency-contact/index.js"),

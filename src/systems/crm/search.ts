@@ -12,24 +12,32 @@ import { search as searchSelectors } from "./selectors.js";
 const SEARCH_URL = CRM_SEARCH_URL;
 
 /**
- * Search for an employee by email on the ACT CRM onboarding portal.
+ * Search for an employee on the ACT CRM onboarding portal.
  * Navigates directly to the search results page via URL query param.
- *
- * IMPORTANT: Does NOT log the email value (PII). Only logs step names.
  */
-export async function searchByEmail(
+export async function searchCrmOnboardingRecords(
   page: Page,
-  email: string,
+  query: string,
 ): Promise<void> {
   // Direct URL navigation with query param — faster and avoids hidden search
   // input issues.
   log.step("Searching for employee...");
-  const searchUrl = `${SEARCH_URL}?q=${encodeURIComponent(email)}`;
+  const searchUrl = `${SEARCH_URL}?q=${encodeURIComponent(query)}`;
   await page.goto(searchUrl, {
     waitUntil: "domcontentloaded",
     timeout: 15_000,
   });
   await page.waitForLoadState("networkidle", { timeout: 15_000 });
+}
+
+/**
+ * Search for an employee by email on the ACT CRM onboarding portal.
+ */
+export async function searchByEmail(
+  page: Page,
+  email: string,
+): Promise<void> {
+  await searchCrmOnboardingRecords(page, email);
 }
 
 /**
@@ -67,7 +75,9 @@ export async function selectLatestResult(page: Page): Promise<void> {
   }
 
   if (latestIndex === -1) {
-    throw new ExtractionError("No search results found");
+    throw new ExtractionError(
+      "CRM returned search rows but no parsable Offer Sent On date — check table format or locale.",
+    );
   }
 
   // Click the name link in the first column to navigate to the employee
