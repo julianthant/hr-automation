@@ -62,6 +62,7 @@ export interface StartInput {
   pdfFileId?: string;
   pdfHash: string;
   sessionId?: string;
+  mode?: "full" | "upload-only";
   /** Roster source for the delegated OCR step. Defaults to "download". */
   rosterMode?: "existing" | "download";
   /** Required when `rosterMode === "existing"`. Resolved by the route from disk. */
@@ -100,8 +101,12 @@ export function buildOathUploadStartHandler(
     if (!/^[0-9a-f]{64}$/.test(input.pdfHash ?? "")) {
       return { status: 400, body: { ok: false, error: "invalid pdfHash" } };
     }
+    const mode = input.mode ?? "full";
+    if (mode !== "full" && mode !== "upload-only") {
+      return { status: 400, body: { ok: false, error: "invalid mode" } };
+    }
     const rosterMode = input.rosterMode ?? "download";
-    if (rosterMode === "existing" && !input.rosterPath) {
+    if (mode === "full" && rosterMode === "existing" && !input.rosterPath) {
       return {
         status: 400,
         body: { ok: false, error: 'rosterMode="existing" requires rosterPath' },
@@ -115,6 +120,7 @@ export function buildOathUploadStartHandler(
         pdfFileId: input.pdfFileId,
         sessionId,
         pdfHash: input.pdfHash,
+        mode,
         rosterMode,
         rosterPath: input.rosterPath,
         dryRun: input.dryRun,

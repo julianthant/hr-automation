@@ -3,6 +3,7 @@ import { getFormSpec } from "../../../services/ocr/forms/registry.js";
 import {
   requestOcrPrepareAbort,
 } from "../../ocr-prepare-abort.js";
+import { deleteDelegatedChildrenForRun } from "../ops/delete.js";
 import { readFormType, readParentRunId } from "./shared.js";
 
 const WORKFLOW = "ocr";
@@ -31,6 +32,7 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
       return { status: 400, body: { ok: false, error: "Missing sessionId/runId" } };
     }
     requestOcrPrepareAbort(input.sessionId, input.runId);
+    deleteDelegatedChildrenForRun(opts.trackerDir ?? ".tracker", input.runId);
     trackEvent(
       {
         workflow: WORKFLOW,

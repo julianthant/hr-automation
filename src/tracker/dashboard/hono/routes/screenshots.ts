@@ -42,13 +42,14 @@ export function registerScreenshotRoutes(app: Hono, deps: DashboardHonoDeps): vo
       return textResponse("invalid page", 400);
     }
 
+    const trackerRoot = resolve(deps.dir);
     const filename = `page-${String(page).padStart(2, "0")}.png`;
     const candidates = [
-      resolve(process.cwd(), ".tracker", "uploads", parentRunId, filename),
-      resolve(process.cwd(), ".tracker", "page-images", parentRunId, filename),
+      resolve(trackerRoot, "uploads", parentRunId, filename),
+      resolve(trackerRoot, "page-images", parentRunId, filename),
     ];
-    const safeBaseUploads = resolve(process.cwd(), ".tracker", "uploads", parentRunId);
-    const safeBasePageImages = resolve(process.cwd(), ".tracker", "page-images", parentRunId);
+    const safeBaseUploads = resolve(trackerRoot, "uploads", parentRunId);
+    const safeBasePageImages = resolve(trackerRoot, "page-images", parentRunId);
     if (
       !candidates[0].startsWith(safeBaseUploads + sep) ||
       !candidates[1].startsWith(safeBasePageImages + sep)

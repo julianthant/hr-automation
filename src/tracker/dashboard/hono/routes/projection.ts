@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 
+import { dateLocal } from "../../../jsonl.js";
 import { queryEntriesPayload, queryProjectionHealth, queryRunsForItem } from "../../../state/queries.js";
 import type { DashboardHonoDeps } from "../context.js";
 import { jsonResponse } from "../responses.js";
@@ -11,14 +12,14 @@ export function registerProjectionRoutes(app: Hono, deps: DashboardHonoDeps): vo
 
   app.get("/api/v2/entries", (c) => {
     const workflow = c.req.query("workflow") ?? "onboarding";
-    const date = c.req.query("date") ?? new Date().toISOString().slice(0, 10);
+    const date = c.req.query("date") ?? dateLocal();
     return jsonResponse(queryEntriesPayload(deps.stateDb, { workflow, date }));
   });
 
   app.get("/api/v2/runs", (c) => {
     const workflow = c.req.query("workflow") ?? "";
     const itemId = c.req.query("id") ?? "";
-    const date = c.req.query("date") ?? new Date().toISOString().slice(0, 10);
+    const date = c.req.query("date") ?? dateLocal();
     if (!workflow || !itemId) {
       return jsonResponse({ ok: false, error: "workflow and id are required" }, 400);
     }

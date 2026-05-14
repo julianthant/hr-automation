@@ -98,7 +98,7 @@ describe("readRunsForId data carry-over (LogPanel detail-grid fix)", () => {
   });
 
   it("returns the latest non-empty data per run, not the latest tracker line's data", () => {
-    const date = new Date().toISOString().slice(0, 10);
+    const date = dateLocal();
     // Run 1 progresses through pending→running→done with full data on done.
     trackEvent({ workflow: "ac", timestamp: `${date}T10:00:00.000Z`, id: "id-1", runId: "run-1", status: "pending", data: {} }, TEST_DIR);
     trackEvent({ workflow: "ac", timestamp: `${date}T10:00:01.000Z`, id: "id-1", runId: "run-1", status: "running", step: "checking", data: { name: "Alice" } }, TEST_DIR);
@@ -123,7 +123,7 @@ describe("readRunsForId data carry-over (LogPanel detail-grid fix)", () => {
   });
 
   it("omits data when no run-tracker line ever carried it", () => {
-    const date = new Date().toISOString().slice(0, 10);
+    const date = dateLocal();
     trackEvent({ workflow: "ac", timestamp: `${date}T12:00:00.000Z`, id: "id-2", runId: "run-3", status: "pending" } as TrackerEntry, TEST_DIR);
     const runs = readRunsForId("ac", "id-2", date, TEST_DIR);
     assert.equal(runs.length, 1);

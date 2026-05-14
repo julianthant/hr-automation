@@ -36,7 +36,7 @@ function resolvedEmplIdMapFromRunEvents(db: Database, trackerDate: string): Map<
   for (const row of rows) {
     const data = parseJsonObject(row.data_json, {} as Record<string, unknown>);
     const raw = data.emplId;
-    let emplId =
+    const emplId =
       typeof raw === "string" && raw.trim().length > 0
         ? raw.trim()
         : typeof raw === "number" && Number.isFinite(raw)

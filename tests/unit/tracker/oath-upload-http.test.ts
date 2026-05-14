@@ -98,6 +98,25 @@ test("buildOathUploadStartHandler: passes dryRun to runOathUploadCli input", asy
   assert.equal(dryRun, true);
 });
 
+test("buildOathUploadStartHandler: passes upload-only mode to runOathUploadCli input", async () => {
+  let mode: string | undefined;
+  const h = buildOathUploadStartHandler({
+    runOathUploadCli: async (inputs) => {
+      mode = inputs[0]?.mode;
+    },
+  });
+  const r = await h({
+    pdfPath: "/tmp/oath.pdf",
+    pdfOriginalName: "oath.pdf",
+    pdfHash: "a".repeat(64),
+    sessionId: "session-upload-only",
+    mode: "upload-only",
+  });
+  assert.equal(r.status, 202);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(mode, "upload-only");
+});
+
 test("buildOathUploadCancelHandler: returns 400 when no active row for sessionId", async () => {
   const dir = mkdtempSync(join(tmpdir(), "oath-upload-cancel-noid-"));
   try {

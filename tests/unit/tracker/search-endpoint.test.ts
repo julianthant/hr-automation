@@ -73,23 +73,23 @@ describe("buildSearchHandler", () => {
     const handler = buildSearchHandler(makeDeps(bucket));
 
     // Name match across workflows
-    const smithResults = handler("smith");
+    const smithResults = handler("smith", { days: 365 });
     assert.equal(smithResults.length, 2);
     assert.ok(smithResults.some((r) => r.id === "jane@ucsd.edu"));
     assert.ok(smithResults.some((r) => r.id === "DOC-123"));
 
     // emplId match
-    const empResults = handler("EMP-998");
+    const empResults = handler("EMP-998", { days: 365 });
     assert.equal(empResults.length, 1);
     assert.equal(empResults[0].id, "bob@ucsd.edu");
 
     // docId match
-    const docResults = handler("doc-123");
+    const docResults = handler("doc-123", { days: 365 });
     assert.equal(docResults.length, 1);
     assert.equal(docResults[0].id, "DOC-123");
 
     // id (email) match — case-insensitive
-    const emailResults = handler("JANE@UCSD");
+    const emailResults = handler("JANE@UCSD", { days: 365 });
     assert.equal(emailResults.length, 1);
     assert.equal(emailResults[0].id, "jane@ucsd.edu");
   });
@@ -104,7 +104,7 @@ describe("buildSearchHandler", () => {
         ],
       },
     };
-    const rows = buildSearchHandler(makeDeps(bucket))("alice");
+    const rows = buildSearchHandler(makeDeps(bucket))("alice", { days: 365 });
     assert.equal(rows.length, 3);
     assert.equal(rows[0].id, "b@ucsd.edu"); // 12:00
     assert.equal(rows[1].id, "c@ucsd.edu"); // 10:30
@@ -120,7 +120,7 @@ describe("buildSearchHandler", () => {
       }),
     );
     const handler = buildSearchHandler(makeDeps({ onboarding: { "2026-04-15": entries } }));
-    const rows = handler("alice", { limit: 5 });
+    const rows = handler("alice", { limit: 5, days: 365 });
     assert.equal(rows.length, 5);
     // Newest-first ordering
     assert.equal(rows[0].id, "u11@ucsd.edu");
@@ -136,7 +136,7 @@ describe("buildSearchHandler", () => {
       },
     };
     const handler = buildSearchHandler(makeDeps(bucket));
-    const rows = handler("shared", { workflow: "separations" });
+    const rows = handler("shared", { workflow: "separations", days: 365 });
     assert.equal(rows.length, 1);
     assert.equal(rows[0].workflow, "separations");
   });
@@ -154,7 +154,7 @@ describe("buildSearchHandler", () => {
         ],
       },
     };
-    const rows = buildSearchHandler(makeDeps(bucket))("jane");
+    const rows = buildSearchHandler(makeDeps(bucket))("jane", { days: 365 });
     assert.equal(rows.length, 1);
     assert.equal(rows[0].status, "done");
     assert.equal(rows[0].lastTs, "2026-04-15T09:02:00.000Z");
@@ -172,7 +172,7 @@ describe("buildSearchHandler", () => {
         ],
       },
     };
-    const rows = buildSearchHandler(makeDeps(bucket))("jane");
+    const rows = buildSearchHandler(makeDeps(bucket))("jane", { days: 365 });
     assert.equal(rows.length, 1);
     assert.equal(rows[0].runId, "jane@ucsd.edu#2");
     assert.equal(rows[0].status, "done");
@@ -224,7 +224,7 @@ describe("buildSearchHandler", () => {
         ],
       },
     };
-    const rows = buildSearchHandler(makeDeps(bucket))("nobody");
+    const rows = buildSearchHandler(makeDeps(bucket))("nobody", { days: 365 });
     assert.equal(rows.length, 1);
     assert.equal(rows[0].status, "done");
     assert.equal(rows[0].displayStatus, "Not found");
@@ -236,7 +236,7 @@ describe("buildSearchHandler", () => {
         "2026-04-15": [entry({ id: "jane@ucsd.edu", data: { name: "Jane" } })],
       },
     };
-    const rows = buildSearchHandler(makeDeps(bucket))("jane");
+    const rows = buildSearchHandler(makeDeps(bucket))("jane", { days: 365 });
     assert.equal(rows.length, 1);
     assert.equal(rows[0].date, "2026-04-15");
   });

@@ -1,4 +1,5 @@
 import type { TrackerEntry } from "./jsonl.js";
+import { isDelegatedOcrAwaitingApprovalEntry } from "./dashboard/prep-rows.js";
 
 /** SSE payloads may enrich rows; JSONL replay may omit this — both are valid. */
 function activityTimestamp(e: TrackerEntry): string {
@@ -91,7 +92,17 @@ function isAuthRunningForQueueStrip(e: TrackerEntry): boolean {
 }
 
 function isQueueLikeForQueueStrip(e: TrackerEntry): boolean {
-  return e.status === "pending" || e.status === "skipped" || isAuthRunningForQueueStrip(e);
+  return (
+    e.status === "pending" ||
+    e.status === "skipped" ||
+    isAuthRunningForQueueStrip(e) ||
+    // Only delegated (parentRunId-bearing) awaiting-approval rows belong in
+    // the upstream queue surface. Standalone OCR previews persist as
+    // "awaiting-approval" indefinitely until the operator acts on them; if
+    // included here they'd inflate the per-rebuild scan monotonically with
+    // review backlog.
+    isDelegatedOcrAwaitingApprovalEntry(e)
+  );
 }
 
 /**
