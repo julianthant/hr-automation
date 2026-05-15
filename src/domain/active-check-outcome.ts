@@ -41,17 +41,8 @@ function outcomeSearchName(input: DeriveActiveOutcomeInput): string {
   return display || input.name.trim();
 }
 
-function isByEid(input: DeriveActiveOutcomeInput): input is { kind: "by-eid"; emplId: string } {
-  return input.kind === "by-eid";
-}
-
 function normalizeDate(value: string | undefined): string {
   const trimmed = value?.trim() ?? "";
-  return trimmed && trimmed !== "Active" ? trimmed : "";
-}
-
-function legacyTerminationDate(expectedEndDate: string | undefined): string {
-  const trimmed = expectedEndDate?.trim() ?? "";
   return trimmed && trimmed !== "Active" ? trimmed : "";
 }
 
@@ -66,7 +57,7 @@ export function deriveActiveCheckOutcome(
       isActive: false,
       isHdhAccepted: false,
       searchName,
-      emplId: isByEid(input) ? input.emplId : "",
+      emplId: input.kind === "by-eid" ? input.emplId : "",
       name: "",
       department: "",
       hrStatus: "Not found",
@@ -77,7 +68,7 @@ export function deriveActiveCheckOutcome(
     };
   }
 
-  if (!isByEid(input) && results.length > 1) {
+  if (input.kind !== "by-eid" && results.length > 1) {
     return {
       activeStatus: "ambiguous",
       isActive: false,
@@ -95,19 +86,20 @@ export function deriveActiveCheckOutcome(
   }
 
   const result = results[0];
-  const terminationDate = normalizeDate(
-    result.terminationDate ?? legacyTerminationDate(result.expectedEndDate),
-  );
+  const terminationDate = normalizeDate(result.terminationDate ?? result.expectedEndDate);
   const expectedJobEndDate = normalizeDate(result.expectedJobEndDate);
   const hrStatus = result.hrStatus || "";
   const isInactiveStatus = /inactive|terminated|separated/i.test(hrStatus);
   const isActive = !terminationDate && !isInactiveStatus;
   const isHdhAccepted = isAcceptedHdhDepartment(result.department);
-  const activeStatus: ActiveCheckStatus = !isActive
-    ? "inactive"
-    : isHdhAccepted
-      ? "active"
-      : "non-hdh";
+  let activeStatus: ActiveCheckStatus;
+  if (!isActive) {
+    activeStatus = "inactive";
+  } else if (isHdhAccepted) {
+    activeStatus = "active";
+  } else {
+    activeStatus = "non-hdh";
+  }
 
   return {
     activeStatus,

@@ -5,7 +5,7 @@ import { levenshteinDistance } from "./levenshtein.js";
 export interface NameMatchResult {
   /** 0..1 confidence. */
   score: number;
-  reason: "exact" | "token-set" | "swap" | "fuzzy" | "none";
+  reason: "exact" | "token-set" | "fuzzy" | "none";
 }
 
 function tokenize(s: string): string[] {
@@ -31,8 +31,8 @@ export function scoreNameMatch(a: string, b: string): NameMatchResult {
   const at = tokenize(a);
   const bt = tokenize(b);
   return scoreNameMatchFromTokens(
-    at, [...at].sort().join(" "), new Set(at), a,
-    bt, [...bt].sort().join(" "), new Set(bt), b,
+    at, [...at].sort().join(" "), new Set(at),
+    bt, [...bt].sort().join(" "), new Set(bt),
   );
 }
 
@@ -44,11 +44,9 @@ function scoreNameMatchFromTokens(
   at: readonly string[],
   aSorted: string,
   aSet: ReadonlySet<string>,
-  a: string,
   bt: readonly string[],
   bSorted: string,
   bSet: ReadonlySet<string>,
-  b: string,
 ): NameMatchResult {
   if (at.length === 0 || bt.length === 0) return { score: 0, reason: "none" };
   if (aSorted === bSorted) return { score: 1.0, reason: "exact" };
@@ -66,15 +64,7 @@ function scoreNameMatchFromTokens(
     return { score: 0.9, reason: "token-set" };
   }
 
-  if (a.includes(",") || b.includes(",")) {
-    const flip = (s: string): string =>
-      s.includes(",") ? s.split(",").map((x) => x.trim()).reverse().join(" ") : s;
-    if (tokenize(flip(a)).sort().join(" ") === tokenize(flip(b)).sort().join(" ")) {
-      return { score: 0.85, reason: "swap" };
-    }
-  }
-
-  const d = levenshteinDistance(at.join(" "), bt.join(" "));
+const d = levenshteinDistance(at.join(" "), bt.join(" "));
   if (d <= 2) return { score: 0.7, reason: "fuzzy" };
 
   return { score: 0, reason: "none" };
@@ -285,7 +275,7 @@ export function matchAgainstRoster(
       const at = pre._nameTokens ?? tokenize(row.name);
       const aSorted = pre._nameSorted ?? [...at].sort().join(" ");
       const aSet = pre._nameSet ?? new Set(at);
-      const m = scoreNameMatchFromTokens(at, aSorted, aSet, row.name, bt, bSorted, bSet, targetName);
+      const m = scoreNameMatchFromTokens(at, aSorted, aSet, bt, bSorted, bSet);
       return { eid: row.eid, name: row.name, score: m.score, reason: m.reason };
     })
     .filter((r) => r.score > 0)
