@@ -29,9 +29,13 @@ import { searchCrmByName, datesWithinDays } from "./crm-search.js";
 import {
   EidLookupItemSchema,
   isEidInput,
-  normalizeName,
   type EidLookupItem,
 } from "./schema.js";
+import {
+  normalizeName,
+  dedupeNames,
+  prepareNames,
+} from "../../domain/identity/person-name.js";
 
 export interface LookupResult {
   name: string;
@@ -409,36 +413,7 @@ export const eidLookupCrmWorkflow = defineWorkflow({
   },
 });
 
-/**
- * Dedupe preserving first-seen order. Duplicate names would collide on the
- * name-derived itemId (`deriveItemId: item => item.name`); dedupe at the
- * CLI boundary so the kernel never sees two items with the same id.
- *
- * Comparison is case-insensitive *after* `normalizeName` is applied upstream,
- * but we keep a belt-and-suspenders Set on the already-normalized strings.
- */
-export function dedupeNames(names: string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const n of names) {
-    if (seen.has(n)) {
-      log.warn(`Duplicate name skipped: "${n}"`);
-      continue;
-    }
-    seen.add(n);
-    out.push(n);
-  }
-  return out;
-}
-
-/**
- * Normalize every input name to "Last, First Middle" title-case + dedupe
- * duplicates post-normalization. Applied at every CLI entry point so the
- * daemon-mode path feeds the search pipeline normalized strings.
- */
-export function prepareNames(names: string[]): string[] {
-  return dedupeNames(names.map((n) => normalizeName(n)));
-}
+export { dedupeNames, prepareNames } from "../../domain/identity/person-name.js";
 
 export function deriveEidLookupItemId(input: EidLookupItem): string {
   return isEidInput(input) ? input.emplId : normalizeName(input.name);
