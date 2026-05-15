@@ -94,15 +94,22 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
   const { cleaned: cleanedItem, prefilled } = splitPrefilled(item)
   const handlerInput = cleanedItem as TData
 
-  if (args.trackerStub) {
+  const runInner = async (emitters: {
+    setStep: (step: string) => void
+    updateData: (data: Record<string, unknown>) => void
+    emitFailed: (step: string, error: string) => void
+    emitSkipped: (step: string) => void
+    emitScreenshotEvent: Parameters<typeof makeCtx<TSteps, TData>>[0]['emitScreenshotEvent']
+    markCancelledStepOnCancelRequested?: boolean
+  }): Promise<void> => {
     const stepper = new Stepper({
       workflow: wf.config.name,
       itemId,
       runId,
-      emitStep: () => {},
-      emitData: () => {},
-      emitFailed: () => {},
-      emitSkipped: () => {},
+      emitStep: emitters.setStep,
+      emitData: emitters.updateData,
+      emitFailed: emitters.emitFailed,
+      emitSkipped: emitters.emitSkipped,
       isCancelRequested: args.isCancelRequested,
     })
     const ctx = makeCtx<TSteps, TData>({
@@ -112,28 +119,48 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       runId,
       workflow: wf.config.name,
       itemId,
-      emitScreenshotEvent: () => {},
+      emitScreenshotEvent: emitters.emitScreenshotEvent,
       trackerDir: args.trackerDir,
     })
     stepper.setScreenshotFn(ctx.screenshot)
-    try {
-      if (args.preHandler) await args.preHandler()
-      if (prefilled) ctx.updateData(prefilled as Partial<TData & Record<string, unknown>>)
+    if (args.preHandler) {
       try {
-        await wf.config.handler(ctx, handlerInput)
+        await args.preHandler()
       } catch (err) {
-        // CancelledError: skip the diagnostic screenshot — the cancel
-        // is intentional, no state worth capturing. Rethrow so the
-        // outer catch surfaces the kind discriminator.
-        if (err instanceof CancelledError) throw err
-        // Capture state for any throw that escapes ctx.step. In-step throws
-        // already get a screenshot via Stepper.step's catch, so in that
-        // path we see two files — different labels (`step:<name>` vs
-        // `handler-throw`) keep them distinguishable. Best-effort: a
-        // screenshot failure must never mask the original error.
-        await tryScreenshot(ctx, 'handler-throw')
+        if (emitters.markCancelledStepOnCancelRequested && args.isCancelRequested?.()) {
+          emitters.setStep('cancelled')
+          throw new CancelledError('force-stop')
+        }
         throw err
       }
+    }
+    if (prefilled) ctx.updateData(prefilled as Partial<TData & Record<string, unknown>>)
+    try {
+      await wf.config.handler(ctx, handlerInput)
+    } catch (err) {
+      // CancelledError: no diagnostic screenshot — the cancel was intentional
+      // and the daemon's claim loop owns reset/accounting.
+      if (err instanceof CancelledError) throw err
+      if (emitters.markCancelledStepOnCancelRequested && args.isCancelRequested?.()) {
+        emitters.setStep('cancelled')
+        throw new CancelledError('force-stop')
+      }
+      // Capture state for throws that escape ctx.step. In-step throws already
+      // get a screenshot via Stepper.step's catch.
+      await tryScreenshot(ctx, 'handler-throw')
+      throw err
+    }
+  }
+
+  if (args.trackerStub) {
+    try {
+      await runInner({
+        setStep: () => {},
+        updateData: () => {},
+        emitFailed: () => {},
+        emitSkipped: () => {},
+        emitScreenshotEvent: () => {},
+      })
       return { ok: true }
     } catch (err) {
       if (err instanceof CancelledError) {
@@ -206,58 +233,14 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
         wf.config.name,
         itemId,
         async (setStep, updateData, _onCleanup, _sessionCtx, emitFailed, _trackerRunId, emitSkipped) => {
-          const stepper = new Stepper({
-            workflow: wf.config.name,
-            itemId,
-            runId,
-            emitStep: setStep,
-            emitData: updateData,
+          await runInner({
+            setStep,
+            updateData,
             emitFailed,
             emitSkipped,
-            isCancelRequested: args.isCancelRequested,
-          })
-          const ctx = makeCtx<TSteps, TData>({
-            session,
-            stepper,
-            isBatch: true,
-            runId,
-            workflow: wf.config.name,
-            itemId,
             emitScreenshotEvent: (ev) => emitScreenshotEvent(ev, { dir: trackerDir }),
-            trackerDir,
+            markCancelledStepOnCancelRequested: true,
           })
-          stepper.setScreenshotFn(ctx.screenshot)
-          if (args.preHandler) {
-            try {
-              await args.preHandler()
-            } catch (err) {
-              if (args.isCancelRequested?.()) {
-                setStep('cancelled')
-                throw new CancelledError('force-stop')
-              }
-              throw err
-            }
-          }
-          if (prefilled) ctx.updateData(prefilled as Partial<TData & Record<string, unknown>>)
-          try {
-            await wf.config.handler(ctx, handlerInput)
-          } catch (err) {
-            // CancelledError: no diagnostic screenshot — the cancel was
-            // intentional and the page state is already being reset by
-            // the daemon's claim loop. Rethrow so the outer catch in
-            // runOneItem surfaces the kind discriminator.
-            if (err instanceof CancelledError) throw err
-            if (args.isCancelRequested?.()) {
-              setStep('cancelled')
-              throw new CancelledError('force-stop')
-            }
-            // Covers throws that escape ctx.step (e.g. separations'
-            // resolveJobSummaryResult unwrap or the post-step
-            // submittedWithoutTxnNumber guard). Stepper.step already
-            // screenshots in-step throws; same label convention applies.
-            await tryScreenshot(ctx, 'handler-throw')
-            throw err
-          }
         },
         {
           ...buildTrackerOpts(wf),
