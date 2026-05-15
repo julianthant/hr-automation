@@ -135,6 +135,7 @@ export async function oathUploadHandler(
     ctx.markStep("delegate-signatures");
 
     await ctx.step("wait-signatures", async () => {
+      ctx.updateData({ status: "waiting-signatures", signerItemIds: fannedOutItemIds.join(", ") });
       const fn = opts._watchChildRunsOverride ?? watchChildRuns;
       await fn({
         workflow: "oath-signature",
