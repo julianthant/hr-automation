@@ -10,6 +10,25 @@ import { debugScreenshot } from "../../utils/screenshot.js";
 import { hrInquiry } from "../../systems/servicenow/selectors.js";
 import { HR_INQUIRY_FORM_URL } from "../../systems/servicenow/navigate.js";
 
+type SsoPrepareResult = boolean | "already_logged_in";
+
+type SsoLoginConfig<TArgs extends unknown[]> = {
+  id: string;
+  prepare?: (page: Page, ...args: TArgs) => Promise<SsoPrepareResult>;
+  submit: (page: Page, ...args: TArgs) => Promise<boolean>;
+};
+
+export function defineSsoLogin<TArgs extends unknown[]>(
+  cfg: SsoLoginConfig<TArgs>,
+): (page: Page, ...args: TArgs) => Promise<boolean> {
+  return async (page, ...args) => {
+    const prep = cfg.prepare ? await cfg.prepare(page, ...args) : true;
+    if (prep === "already_logged_in") return true;
+    if (!prep) return false;
+    return await cfg.submit(page, ...args);
+  };
+}
+
 /**
  * Authenticate to UCPath through UCSD Shibboleth SSO with Duo MFA.
  *
@@ -148,15 +167,11 @@ export async function ucpathSubmitAndWaitForDuo(
  * All-in-one wrapper for workflows that don't use the parallel-prepare
  * optimization — just composes navigateAndFill + submitAndWaitForDuo.
  */
-export async function loginToUCPath(
-  page: Page,
-  instance?: string,
-  abortSignal?: AbortSignal,
-): Promise<boolean> {
-  const filled = await ucpathNavigateAndFill(page);
-  if (!filled) return false;
-  return await ucpathSubmitAndWaitForDuo(page, instance, abortSignal);
-}
+export const loginToUCPath = defineSsoLogin<[instance?: string, abortSignal?: AbortSignal]>({
+  id: "UCPath",
+  prepare: (page) => ucpathNavigateAndFill(page),
+  submit: ucpathSubmitAndWaitForDuo,
+});
 
 /**
  * Authenticate to ACT CRM onboarding portal via Salesforce Active Directory login.
@@ -171,7 +186,7 @@ export async function loginToUCPath(
  * "Login" in its text, causing getByRole("button", { name: "LOGIN" }) to match it
  * instead of the actual form submit button. Fix: target button[name="_eventId_proceed"].
  */
-export async function loginToACTCrm(
+async function loginToACTCrmFlow(
   page: Page,
   instance?: string,
   abortSignal?: AbortSignal,
@@ -261,6 +276,11 @@ export async function loginToACTCrm(
   return true;
 }
 
+export const loginToACTCrm = defineSsoLogin<[instance?: string, abortSignal?: AbortSignal]>({
+  id: "CRM",
+  submit: loginToACTCrmFlow,
+});
+
 /**
  * Authenticate to UKG (Kronos) via UCSD SSO.
  *
@@ -272,16 +292,11 @@ export async function loginToACTCrm(
  * @param page - Playwright page instance (from persistent context)
  * @returns true if authenticated (or already was), false on failure
  */
-export async function loginToUKG(
-  page: Page,
-  instance?: string,
-  abortSignal?: AbortSignal,
-): Promise<boolean> {
-  const filled = await ukgNavigateAndFill(page);
-  if (filled === "already_logged_in") return true;
-  if (!filled) return false;
-  return await ukgSubmitAndWaitForDuo(page, instance, abortSignal);
-}
+export const loginToUKG = defineSsoLogin<[instance?: string, abortSignal?: AbortSignal]>({
+  id: "OldKronos",
+  prepare: (page) => ukgNavigateAndFill(page),
+  submit: ukgSubmitAndWaitForDuo,
+});
 
 /**
  * Navigate to UKG and fill SSO credentials without clicking login.
@@ -454,17 +469,15 @@ export async function kualiSubmitAndWaitForDuo(
 /**
  * All-in-one wrapper preserving the legacy callsite contract.
  */
-export async function loginToKuali(
-  page: Page,
+export const loginToKuali = defineSsoLogin<[
   url: string,
   instance?: string,
   abortSignal?: AbortSignal,
-): Promise<boolean> {
-  const prep = await kualiNavigateAndFill(page, url);
-  if (prep === "already_logged_in") return true;
-  if (!prep) return false;
-  return await kualiSubmitAndWaitForDuo(page, url, instance, abortSignal);
-}
+]>({
+  id: "Kuali",
+  prepare: kualiNavigateAndFill,
+  submit: kualiSubmitAndWaitForDuo,
+});
 
 /**
  * Authenticate to new Kronos (WFD) through UCSD Shibboleth SSO with Duo MFA.
@@ -553,16 +566,11 @@ export async function newKronosSubmitAndWaitForDuo(
 /**
  * All-in-one wrapper preserving the legacy callsite contract.
  */
-export async function loginToNewKronos(
-  page: Page,
-  instance?: string,
-  abortSignal?: AbortSignal,
-): Promise<boolean> {
-  const prep = await newKronosNavigateAndFill(page);
-  if (prep === "already_logged_in") return true;
-  if (!prep) return false;
-  return await newKronosSubmitAndWaitForDuo(page, instance, abortSignal);
-}
+export const loginToNewKronos = defineSsoLogin<[instance?: string, abortSignal?: AbortSignal]>({
+  id: "NewKronos",
+  prepare: (page) => newKronosNavigateAndFill(page),
+  submit: newKronosSubmitAndWaitForDuo,
+});
 
 /**
  * Authenticate to UCSD's HR Employee Center on support.ucsd.edu (ServiceNow).
@@ -576,7 +584,7 @@ export async function loginToNewKronos(
  *
  * @returns true on success, false on failure (kernel's loginWithRetry handles retries)
  */
-export async function loginToServiceNow(
+async function loginToServiceNowFlow(
   page: Page,
   instance?: string,
   abortSignal?: AbortSignal,
@@ -655,3 +663,8 @@ export async function loginToServiceNow(
   log.success("ServiceNow authenticated");
   return true;
 }
+
+export const loginToServiceNow = defineSsoLogin<[instance?: string, abortSignal?: AbortSignal]>({
+  id: "ServiceNow",
+  submit: loginToServiceNowFlow,
+});
