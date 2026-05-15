@@ -277,7 +277,7 @@ function stampActiveCheckFields<TSteps extends readonly string[]>(
   }
 }
 
-export function resolveActiveStatusResultsForEidLookup(args: {
+function resolveActiveStatusResultsForEidLookup(args: {
   input: EidLookupItem;
   sdcmpFromSearch: EidResult[];
   crmMatchedEmplId?: string;
