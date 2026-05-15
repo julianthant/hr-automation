@@ -20,5 +20,6 @@ if (files.length === 0) {
   process.exit(1);
 }
 
-const result = spawnSync("tsx", ["--test", "--test-force-exit", ...files], { stdio: "inherit" });
+const setupFile = join(process.cwd(), "tests/setup.ts");
+const result = spawnSync("tsx", ["--test", "--import", setupFile, "--test-force-exit", ...files], { stdio: "inherit" });
 process.exit(result.status ?? 1);
