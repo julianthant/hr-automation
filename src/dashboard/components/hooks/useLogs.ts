@@ -6,6 +6,17 @@ export interface CollapsedLogEntry extends LogEntry {
   count: number;
 }
 
+export const RAW_LOGS_CAP = 5000;
+
+export function capLogWindow(logs: LogEntry[]): LogEntry[] {
+  if (logs.length <= RAW_LOGS_CAP) return logs;
+  return logs.slice(logs.length - RAW_LOGS_CAP);
+}
+
+export function appendCappedLogs(prev: LogEntry[], next: LogEntry[]): LogEntry[] {
+  return capLogWindow([...prev, ...next]);
+}
+
 /**
  * Fetch initial logs + SSE stream for live updates.
  * Returns collapsed logs (consecutive duplicates merged with count badge).
@@ -61,11 +72,11 @@ export function useLogs(
           // First tick carries the full (possibly-empty) history. Dismiss
           // the loading skeleton even when empty, so runs with no logs
           // (orphan-failed items, pre-start entries) don't hang forever.
-          setRawLogs(newEntries);
+          setRawLogs(capLogWindow(newEntries));
           setLoading(false);
           gotSseData = true;
         } else if (newEntries.length > 0) {
-          setRawLogs((prev) => [...prev, ...newEntries]);
+          setRawLogs((prev) => appendCappedLogs(prev, newEntries));
         }
       },
       () => {
