@@ -231,9 +231,10 @@ export function buildCancelQueuedHandler(dir: string) {
         runId: runId ?? "",
         error: DASHBOARD_CANCEL_ERROR,
       };
-      writeFileSync(path, text.endsWith("\n") || text === "" ? text : text + "\n", { flag: "w" });
-      // Use append-style write — the lock guarantees exclusion.
-      writeFileSync(path, JSON.stringify(cancelEvent) + "\n", { flag: "a" });
+      const finalText =
+        (text.endsWith("\n") || text === "" ? text : text + "\n") +
+        JSON.stringify(cancelEvent) + "\n";
+      writeFileSync(path, finalText, { flag: "w" });
 
       // Mirror the cancellation onto tracker + logs so selecting the row
       // never lands on an unexplained "No logs yet" panel.
