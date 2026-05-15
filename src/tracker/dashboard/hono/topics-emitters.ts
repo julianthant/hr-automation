@@ -17,6 +17,7 @@ import {
 } from "../session-state.js";
 import { log } from "../../../utils/log.js";
 import { getDefaultWorkflow } from "./context.js";
+import { ttlMemoize } from "./_memo.js";
 import { registerTopic, type TopicEmitter } from "./topics.js";
 import { captureStore, serializeCaptureSession } from "../capture-state.js";
 
@@ -32,36 +33,58 @@ async function readSessionEventsTolerant(dir: string) {
   }
 }
 
+function resolveWorkflow(
+  params: { workflow?: string },
+  deps: Parameters<TopicEmitter<Record<string, never>>>[2],
+): string {
+  return params.workflow && params.workflow.length > 0
+    ? params.workflow
+    : getDefaultWorkflow(deps);
+}
+
+function makeDeltaTopic<T>(
+  fetcher: () => T[] | Promise<T[]>,
+  send: (data: T[]) => void,
+  intervalMs: number,
+): () => void {
+  let sentCount = 0;
+  let firstTick = true;
+
+  const tick = async () => {
+    const events = await fetcher();
+    if (firstTick) {
+      send(events);
+      sentCount = events.length;
+      firstTick = false;
+    } else if (events.length > sentCount) {
+      send(events.slice(sentCount));
+      sentCount = events.length;
+    }
+  };
+
+  void tick();
+  const interval = setInterval(() => void tick(), intervalMs);
+  interval.unref?.();
+  return () => clearInterval(interval);
+}
+
 // ── sessions state cache ──────────────────────────────────────────────────────
 
 const SESSION_STATE_TTL_MS = 1_000;
-let sessionStateCache:
-  | { state: ReturnType<typeof rebuildSessionState>; computedAt: number; key: string }
-  | null = null;
-
 /**
  * 1s TTL cache around `rebuildSessionState`.  Mirrors the pattern used by
  * the legacy `/events/sessions` handler in routes/events.ts (now delegated
  * here).  Without caching, every 1 Hz SSE tick × N connected clients would
  * re-aggregate all dated `sessions-YYYY-MM-DD.jsonl` files on every call.
  */
-function getCachedSessionState(dir: string): ReturnType<typeof rebuildSessionState> {
-  const key = dir;
-  const now = Date.now();
-  if (
-    sessionStateCache &&
-    sessionStateCache.key === key &&
-    now - sessionStateCache.computedAt < SESSION_STATE_TTL_MS
-  ) {
-    return sessionStateCache.state;
-  }
-  const state = rebuildSessionState(dir);
-  sessionStateCache = { state, computedAt: now, key };
-  return state;
-}
+const getCachedSessionState = ttlMemoize(
+  SESSION_STATE_TTL_MS,
+  (dir: string) => dir,
+  rebuildSessionState,
+);
 
 export function __resetSessionStateCacheForTests(): void {
-  sessionStateCache = null;
+  getCachedSessionState.reset();
 }
 
 // ── telegram topic ────────────────────────────────────────────────────────────
@@ -78,27 +101,13 @@ export const telegramTopic: TopicEmitter<Record<string, never>> = (
   send,
   deps,
 ) => {
-  let sentCount = 0;
-  let firstTick = true;
-
-  const tick = async () => {
-    const events = (await readSessionEventsTolerant(deps.dir)).filter(
+  return makeDeltaTopic(
+    async () => (await readSessionEventsTolerant(deps.dir)).filter(
       (event) => event.type === "telegram_sent",
-    );
-    if (firstTick) {
-      send(events);
-      sentCount = events.length;
-      firstTick = false;
-    } else if (events.length > sentCount) {
-      send(events.slice(sentCount));
-      sentCount = events.length;
-    }
-  };
-
-  void tick();
-  const interval = setInterval(() => void tick(), 1_000);
-  interval.unref?.();
-  return () => clearInterval(interval);
+    ),
+    send,
+    1_000,
+  );
 };
 
 registerTopic("telegram", telegramTopic);
@@ -119,10 +128,7 @@ export const entriesTopic: TopicEmitter<{ workflow?: string; date?: string }> = 
   send,
   deps,
 ) => {
-  const workflow =
-    params.workflow && params.workflow.length > 0
-      ? params.workflow
-      : getDefaultWorkflow(deps);
+  const workflow = resolveWorkflow(params, deps);
   const date = params.date ?? "";
   const today = dateLocal();
 
@@ -187,19 +193,13 @@ export const logsTopic: TopicEmitter<{
   runId?: string;
   date?: string;
 }> = (params, send, deps) => {
-  const workflow =
-    params.workflow && params.workflow.length > 0
-      ? params.workflow
-      : getDefaultWorkflow(deps);
+  const workflow = resolveWorkflow(params, deps);
   const itemId = params.id ?? "";
   const runId = params.runId ?? "";
   const date = params.date ?? "";
   const today = dateLocal();
 
-  let sentCount = 0;
-  let firstTick = true;
-
-  const tick = () => {
+  return makeDeltaTopic(() => {
     let entries = date && date !== today
       ? readLogEntriesForDate(workflow, itemId || undefined, date, deps.dir)
       : readLogEntries(workflow, itemId || undefined, deps.dir);
@@ -208,23 +208,8 @@ export const logsTopic: TopicEmitter<{
         entry.runId ? entry.runId === runId : runId.endsWith("#1"),
       );
     }
-    if (firstTick) {
-      send(entries);
-      sentCount = entries.length;
-      firstTick = false;
-    } else if (entries.length > sentCount) {
-      const delta = entries.slice(sentCount);
-      send(delta);
-      sentCount = entries.length;
-    }
-  };
-
-  tick();
-  const interval = setInterval(tick, 500);
-  interval.unref?.();
-  return () => {
-    clearInterval(interval);
-  };
+    return entries;
+  }, send, 500);
 };
 
 registerTopic("logs", logsTopic);
@@ -256,18 +241,12 @@ export const runEventsTopic: TopicEmitter<{
   runId?: string;
   date?: string;
 }> = (params, send, deps) => {
-  const workflow =
-    params.workflow && params.workflow.length > 0
-      ? params.workflow
-      : getDefaultWorkflow(deps);
+  const workflow = resolveWorkflow(params, deps);
   const requestedRunId = params.runId ?? "";
   const date = params.date ?? "";
   const today = dateLocal();
 
-  let sentCount = 0;
-  let firstTick = true;
-
-  const tick = async () => {
+  return makeDeltaTopic(async () => {
     let trackerEntries: TrackerEntry[] = [];
     try {
       trackerEntries = readTrackerEntriesForRunEvents(workflow, date, today, deps.dir);
@@ -302,23 +281,8 @@ export const runEventsTopic: TopicEmitter<{
       allEvents = await readSessionEventsTolerant(deps.dir);
     }
     const filtered = filterEventsForRun(allEvents, trackerEntries, requestedRunId);
-    if (firstTick) {
-      send(filtered);
-      sentCount = filtered.length;
-      firstTick = false;
-    } else if (filtered.length > sentCount) {
-      const delta = filtered.slice(sentCount);
-      send(delta);
-      sentCount = filtered.length;
-    }
-  };
-
-  void tick();
-  const interval = setInterval(() => void tick(), 500);
-  interval.unref?.();
-  return () => {
-    clearInterval(interval);
-  };
+    return filtered;
+  }, send, 500);
 };
 
 registerTopic("runEvents", runEventsTopic);

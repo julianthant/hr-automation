@@ -33,18 +33,10 @@ import { isResolvedPrepEntry } from "../../prep-rows.js";
 import { computeFailureCounts } from "../../failures.js";
 import { SCREENSHOTS_DIR } from "../../screenshots.js";
 import { countSidebarRowsFromTrackerHistory } from "../../../queue-row-count.js";
+import { ttlMemoize } from "../_memo.js";
 
 // ── Cross-workflow counts cache ───────────────────────────────────────────────
 
-interface CrossWorkflowCountsCache {
-  workflows: string[];
-  wfCounts: Record<string, number>;
-  failureCounts: Record<string, number>;
-  computedAt: number;
-  key: string;
-}
-
-let countsCache: CrossWorkflowCountsCache | null = null;
 const CROSS_WORKFLOW_COUNTS_TTL_MS = 1_000;
 
 /**
@@ -62,38 +54,28 @@ const CROSS_WORKFLOW_COUNTS_TTL_MS = 1_000;
  * The cache key includes (dir, targetDate) so date switches and test
  * isolation directories don't share state.
  */
-function getCrossWorkflowCounts(
-  targetDate: string,
-  dir: string,
-): { workflows: string[]; wfCounts: Record<string, number>; failureCounts: Record<string, number> } {
-  const key = `${dir}::${targetDate}`;
-  const now = Date.now();
-  if (
-    countsCache &&
-    countsCache.key === key &&
-    now - countsCache.computedAt < CROSS_WORKFLOW_COUNTS_TTL_MS
-  ) {
-    return {
-      workflows: countsCache.workflows,
-      wfCounts: countsCache.wfCounts,
-      failureCounts: countsCache.failureCounts,
-    };
-  }
-  const workflows = listWorkflows(dir);
-  const wfCounts: Record<string, number> = {};
-  const failureCounts: Record<string, number> = {};
-  for (const wf of workflows) {
-    const all = readEntriesForDate(wf, targetDate, dir);
-    wfCounts[wf] = countSidebarRowsFromTrackerHistory(all, isResolvedPrepEntry);
-    const failures = computeFailureCounts(all);
-    if (failures > 0) failureCounts[wf] = failures;
-  }
-  countsCache = { workflows, wfCounts, failureCounts, computedAt: now, key };
-  return { workflows, wfCounts, failureCounts };
-}
+const getCrossWorkflowCounts = ttlMemoize(
+  CROSS_WORKFLOW_COUNTS_TTL_MS,
+  (targetDate: string, dir: string) => `${dir}::${targetDate}`,
+  function getCrossWorkflowCounts(
+    targetDate: string,
+    dir: string,
+  ): { workflows: string[]; wfCounts: Record<string, number>; failureCounts: Record<string, number> } {
+    const workflows = listWorkflows(dir);
+    const wfCounts: Record<string, number> = {};
+    const failureCounts: Record<string, number> = {};
+    for (const wf of workflows) {
+      const all = readEntriesForDate(wf, targetDate, dir);
+      wfCounts[wf] = countSidebarRowsFromTrackerHistory(all, isResolvedPrepEntry);
+      const failures = computeFailureCounts(all);
+      if (failures > 0) failureCounts[wf] = failures;
+    }
+    return { workflows, wfCounts, failureCounts };
+  },
+);
 
 export function __resetCrossWorkflowCountsCacheForTests(): void {
-  countsCache = null;
+  getCrossWorkflowCounts.reset();
 }
 
 // ── Payload builder ───────────────────────────────────────────────────────────
