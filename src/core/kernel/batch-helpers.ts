@@ -77,11 +77,11 @@ export async function awaitAllSystemsReady(
   session: Session,
   systems: readonly SystemConfig[],
 ): Promise<void> {
-  for (const sys of systems) {
+  await Promise.all(systems.map(async (sys) => {
     try {
       await session.page(sys.id)
     } catch {
       // intentional swallow — see JSDoc above
     }
-  }
+  }))
 }
