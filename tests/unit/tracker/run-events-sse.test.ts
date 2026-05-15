@@ -122,16 +122,13 @@ describe("/events/run-events SSE", () => {
     assert.equal(tick2[0].type, "auth_complete");
   });
 
-  it("falls back to JSONL when SQLite is open but returns zero rows", async () => {
-    // Regression test for the run-events handler's missing zero-rows-fallback
-    // (added 2026-05-07). When the projection is initialised but the query
-    // happens to return no rows (e.g. mid-rebuild, or the run row hasn't
-    // been applied yet), the handler used to assign `[]` unconditionally and
-    // serve an empty stream. It now falls through to the rotation-aware
-    // JSONL aggregation.
+  it("does not fall back to JSONL when projection-ready SQLite returns zero rows", async () => {
+    // Projection-ready SQLite is authoritative. A zero-row result means the
+    // run currently has no projected session events; falling back to JSONL
+    // would reintroduce a full session-file scan on every empty tick.
     emitSessionEvent({ type: "workflow_start", workflowInstance: "I", runId: "Z" }, tmp);
     // Clear SQLite while leaving JSONL intact. The handler's SQLite branch
-    // will see `[]` and must fall back to the JSONL path.
+    // sees `[]` and should keep that result.
     const db = openStateDb(tmp);
     db.exec("DELETE FROM session_events");
 
@@ -140,10 +137,7 @@ describe("/events/run-events SSE", () => {
       { stopAfter: 1, timeoutMs: 1500 },
     );
     const allEvents = messages.flatMap((m) => JSON.parse(m));
-    // The event survives via the JSONL fallback even though SQLite is empty.
-    assert.equal(allEvents.length, 1);
-    assert.equal(allEvents[0].type, "workflow_start");
-    assert.equal(allEvents[0].runId, "Z");
+    assert.equal(allEvents.length, 0);
   });
 
   it("falls back to JSONL when the SQLite query throws", async () => {

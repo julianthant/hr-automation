@@ -18,12 +18,23 @@ function parseJsonObject<T>(raw: string | null | undefined, fallback: T): T {
 }
 
 const WF_ITEM_KEY_SEP = "\u0000";
+const RESOLVED_EMPL_CACHE_TTL_MS = 1_000;
+const resolvedEmplCache = new WeakMap<Database, { trackerDate: string; computedAt: number; value: Map<string, string> }>();
 
 /**
  * Chronological snapshots that carry non-empty data.emplId — last match per
  * `(workflow,item_id)` mirrors `useEntries` carry-forward across the JSONL replay.
  */
 function resolvedEmplIdMapFromRunEvents(db: Database, trackerDate: string): Map<string, string> {
+  const cached = resolvedEmplCache.get(db);
+  const now = Date.now();
+  if (
+    cached &&
+    cached.trackerDate === trackerDate &&
+    now - cached.computedAt < RESOLVED_EMPL_CACHE_TTL_MS
+  ) {
+    return cached.value;
+  }
   const out = new Map<string, string>();
   const rows = db.prepare(`
     SELECT workflow, item_id, data_json
@@ -45,6 +56,7 @@ function resolvedEmplIdMapFromRunEvents(db: Database, trackerDate: string): Map<
     if (!emplId?.length) continue;
     out.set(`${row.workflow}${WF_ITEM_KEY_SEP}${row.item_id}`, emplId);
   }
+  resolvedEmplCache.set(db, { trackerDate, computedAt: now, value: out });
   return out;
 }
 

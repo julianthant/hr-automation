@@ -62,7 +62,10 @@ export function registerSearchRoutes(app: Hono, deps: DashboardHonoDeps): void {
   app.get("/api/selector-warnings", (c) => {
     const days = parsePositiveInt(c.req.query("days"), 7);
     try {
-      return jsonResponse(buildSelectorWarningsHandler()(days));
+      return jsonResponse(buildSelectorWarningsHandler(deps.dir, {
+        projectionReady: deps.projectionReady === true,
+        stateDb: deps.stateDb,
+      })(days));
     } catch {
       return jsonResponse([]);
     }

@@ -519,7 +519,7 @@ export async function withTrackedWorkflow<T>(
     const encoded = `${step}:failed:${error}`
     lastStep = step
     emit("running", { step: encoded })
-    emitStepChange(instanceName, encoded, dir)
+    emitStepChange(instanceName, encoded, dir, workflow)
   }
 
   // emitSkipped: announce a bypassed step. Writes a single `skipped` tracker
@@ -534,7 +534,7 @@ export async function withTrackedWorkflow<T>(
 
   try {
     const result = await fn(
-      (step) => { lastStep = step; emit("running", { step }); emitStepChange(instanceName, step, dir); },
+      (step) => { lastStep = step; emit("running", { step }); emitStepChange(instanceName, step, dir, workflow); },
       (d) => {
         // Stringify rich values at the write boundary — data stays Record<string, string>
         // on disk, but callers can pass Date/object/etc. without losing fidelity.
