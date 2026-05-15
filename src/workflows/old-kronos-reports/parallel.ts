@@ -28,6 +28,7 @@ import {
   TRACKER_PATH,
   type KronosTrackerRow,
 } from "./tracker.js";
+import type { RunOpts } from "../../core/index.js";
 
 /**
  * Load employee IDs from the batch YAML file.
@@ -112,7 +113,8 @@ export async function runParallelKronos(
   // so each launchFn call corresponds to a distinct worker.
   const sessionDirs: string[] = [];
   let workerCounter = 0;
-  const launchFn: NonNullable<Parameters<typeof runWorkflowBatch<KronosItem, typeof kronosReportsWorkflow.config.steps>>[2]>["launchFn"] =
+  type LaunchOutput = Awaited<ReturnType<NonNullable<RunOpts["launchFn"]>>>;
+  const launchFn: NonNullable<RunOpts["launchFn"]> =
     async ({ system: _system }) => {
       workerCounter += 1;
       const workerId = workerCounter;
@@ -128,7 +130,7 @@ export async function runParallelKronos(
         args: [`--window-position=0,0`, `--window-size=${SCREEN.width},${SCREEN.height}`],
         acceptDownloads: true,
       });
-      return { browser: browser as never, context, page };
+      return { browser, context, page } satisfies LaunchOutput;
     };
 
   const now = new Date().toISOString();
