@@ -62,6 +62,7 @@ export function buildCrmDocDownloadDelegationInput(args: {
 
 const onboardingSteps = [
   "crm-auth",
+  "crm-search",
   "extraction",
   "pdf-download",
   "ucpath-auth",
@@ -148,30 +149,37 @@ export const onboardingWorkflow = defineWorkflow({
 
     const crmPage = await ctx.page("crm");
 
-    await ctx.retry(
-      async () => {
-        log.step(`Searching for ${email}...`);
-        await searchByEmail(crmPage, email);
-      },
-      { attempts: 3 },
-    );
+    let crmRecordFields: { departmentNumber: string | null; recruitmentNumber: string | null } = {
+      departmentNumber: null,
+      recruitmentNumber: null,
+    };
 
-    await ctx.retry(
-      () => selectLatestResult(crmPage),
-      { attempts: 3 },
-    );
+    await ctx.step("crm-search", async () => {
+      await ctx.retry(
+        async () => {
+          log.step(`Searching for ${email}...`);
+          await searchByEmail(crmPage, email);
+        },
+        { attempts: 3 },
+      );
 
-    const recordFields = await ctx.retry(
-      () => extractRecordPageFields(crmPage),
-      { attempts: 2 },
-    );
-    if (recordFields.departmentNumber) ctx.updateData({ departmentNumber: recordFields.departmentNumber });
-    if (recordFields.recruitmentNumber) ctx.updateData({ recruitmentNumber: recordFields.recruitmentNumber });
+      await ctx.retry(
+        () => selectLatestResult(crmPage),
+        { attempts: 3 },
+      );
 
-    await ctx.retry(
-      () => navigateToSection(crmPage, "UCPath Entry Sheet"),
-      { attempts: 2 },
-    );
+      crmRecordFields = await ctx.retry(
+        () => extractRecordPageFields(crmPage),
+        { attempts: 2 },
+      );
+      if (crmRecordFields.departmentNumber) ctx.updateData({ departmentNumber: crmRecordFields.departmentNumber });
+      if (crmRecordFields.recruitmentNumber) ctx.updateData({ recruitmentNumber: crmRecordFields.recruitmentNumber });
+
+      await ctx.retry(
+        () => navigateToSection(crmPage, "UCPath Entry Sheet"),
+        { attempts: 2 },
+      );
+    });
 
     const buildDetailFieldsPayload = (d: EmployeeData) => ({
       firstName: d.firstName,
@@ -206,8 +214,8 @@ export const onboardingWorkflow = defineWorkflow({
         } catch (e) {
           throw new ExtractionError(`Schema validation failed: ${errorMessage(e)}`);
         }
-        if (recordFields.departmentNumber) data = { ...data, departmentNumber: recordFields.departmentNumber };
-        if (recordFields.recruitmentNumber) data = { ...data, recruitmentNumber: recordFields.recruitmentNumber };
+        if (crmRecordFields.departmentNumber) data = { ...data, departmentNumber: crmRecordFields.departmentNumber };
+        if (crmRecordFields.recruitmentNumber) data = { ...data, recruitmentNumber: crmRecordFields.recruitmentNumber };
 
         ctx.updateData(buildDetailFieldsPayload(data));
         log.success("Employee data extracted and validated");
