@@ -100,7 +100,7 @@ export function LogStream({
   // When parent flips initialTab (e.g. opening review from a queue-row click),
   // adopt the new tab. Operator can still switch away after.
   useEffect(() => {
-    if (initialTab) setFilter(initialTab);
+    setFilter(initialTab ?? "all");
   }, [initialTab]);
   const [autoScroll, setAutoScroll] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
