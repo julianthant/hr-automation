@@ -102,14 +102,15 @@ async function parseSearchResults(page: Page): Promise<I9SearchResult[]> {
 
     if (cellCount < 5) continue; // Skip malformed rows
 
-    const lastName = await cells.nth(0).textContent() ?? "";
-    const firstName = await cells.nth(1).textContent() ?? "";
-    const employer = await cells.nth(2).textContent() ?? "";
-    const worksite = await cells.nth(3).textContent() ?? "";
-    const profileId = await cells.nth(4).textContent() ?? "";
-    const i9Id = await cells.nth(5).textContent() ?? "";
-    const nextAction = await cells.nth(6).textContent() ?? "";
-    const startDate = await cells.nth(7).textContent() ?? "";
+    const cellTexts = await cells.allTextContents();
+    const lastName = cellTexts[0] ?? "";
+    const firstName = cellTexts[1] ?? "";
+    const employer = cellTexts[2] ?? "";
+    const worksite = cellTexts[3] ?? "";
+    const profileId = cellTexts[4] ?? "";
+    const i9Id = cellTexts[5] ?? "";
+    const nextAction = cellTexts[6] ?? "";
+    const startDate = cellTexts[7] ?? "";
 
     // Extract nav URL from the link in the row
     const link = row.getByRole("link"); // allow-inline-selector -- row-scoped link readback
