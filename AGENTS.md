@@ -49,7 +49,7 @@ npm run dashboard:prod       # Serve pre-built dashboard from the Hono dashboard
 
 # Export / Utilities
 tsx --env-file=.env src/cli.ts export <workflow>   # Dump JSONL tracker to xlsx
-npm run clean:tracker                              # Prune .tracker/*.jsonl older than 7 days
+npm run clean:tracker                              # Prune .tracker/*.jsonl older than 30 days (default)
 npm run clean:tracker -- --days 30 --dir .tracker  # Custom age + dir
 npm run test-login                                 # Smoke test UCPath + CRM auth
 npm run setup                                      # First-use environment validation wizard
