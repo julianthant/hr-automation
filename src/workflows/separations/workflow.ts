@@ -384,11 +384,16 @@ export const separationsWorkflow = defineWorkflow({
       oldKronosDate, newKronosDate,
     );
 
-    const chosenDateSource = resolved.changed
-      ? (oldKronosDate && newKronosDate
-          ? (oldKronosDate >= newKronosDate ? "Old Kronos" : "New Kronos")
-          : (oldKronosDate ? "Old Kronos" : "New Kronos"))
-      : "Kuali (no change)";
+    const prefilledOverridesKuali =
+      lastDayWorkedPrefilled &&
+      (ctx.data.lastDayWorked as string | undefined) !== kualiData.lastDayWorked;
+    const chosenDateSource = prefilledOverridesKuali
+      ? "Operator-prefilled (overrides Kuali)"
+      : resolved.changed
+        ? (oldKronosDate && newKronosDate
+            ? (oldKronosDate >= newKronosDate ? "Old Kronos" : "New Kronos")
+            : (oldKronosDate ? "Old Kronos" : "New Kronos"))
+        : "Kuali (no change)";
     log.step(`[Old Kronos / New Kronos] Resolved dates — using ${chosenDateSource}`);
 
     // Position the New Kronos timecard view so the chosen Last Day Worked
