@@ -1,4 +1,5 @@
 import { createServer, type Server } from 'node:http'
+import { setTimeout as sleep } from 'node:timers/promises'
 import type { DaemonPhase } from './daemon.js'
 import type { Session } from '../kernel/session.js'
 import type { ControlWorkerStore } from './worker-store.js'
@@ -260,7 +261,7 @@ export function startDaemonHttpServer(opts: DaemonHttpOpts): { server: Server; l
           // 50ms grace so the HTTP response fully flushes before we tear
           // chrome down (otherwise the caller might see an aborted socket
           // even though the kill went through cleanly).
-          await new Promise((r) => setTimeout(r, 50))
+          await sleep(50)
           abortLaunchAndKillSession('Daemon stop requested')
         })().catch(() => {
           /* best-effort — the natural shutdown path runs regardless */

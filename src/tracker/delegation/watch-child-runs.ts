@@ -17,6 +17,7 @@ import {
   watch as fsWatch,
 } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import type { TrackerEntry } from "../jsonl.js";
 import { createOperatorDiscardError } from "../ocr-prepare-abort.js";
 import { openControlDb } from "../../core/control-db.js";
@@ -266,7 +267,7 @@ async function maybeWatchSqliteChildRuns(
         const waiting = tasks.filter((task) => !seen.has(task.itemId)).map((task) => task.itemId).join(", ");
         throw new Error(`watchChildRuns timeout (${timeoutMs}ms) — still waiting for: ${waiting}`);
       }
-      await new Promise((resolve) => setTimeout(resolve, pollMs));
+      await sleep(pollMs);
     }
   } finally {
     controlDb.close();
