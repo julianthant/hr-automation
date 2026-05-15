@@ -35,7 +35,8 @@ test("matchRecord: no form-EID, high roster name match → matched (roster)", as
   assert.equal(preview.employee.employeeId, "10001234");
 });
 
-test("matchRecord: no form-EID, one fuzzy roster candidate → matched", async () => {
+test("matchRecord: no form-EID, one fuzzy roster candidate below ROSTER_AUTO_ACCEPT → lookup-pending", async () => {
+  // "James Womg" vs "James Wong" → Levenshtein-1 → score 0.7 < 0.85 threshold
   const ocr = {
     sourcePage: 2,
     employee: { name: "James Womg", employeeId: "" },
@@ -43,10 +44,8 @@ test("matchRecord: no form-EID, one fuzzy roster candidate → matched", async (
     notes: [], documentType: "expected" as const, originallyMissing: [],
   };
   const preview = await emergencyContactOcrFormSpec.matchRecord({ record: ocr, roster });
-  assert.equal(preview.matchState, "matched");
-  assert.equal(preview.matchSource, "roster");
-  assert.equal(preview.employee.employeeId, "10005678");
-  assert.match(preview.warnings.join(" "), /single roster candidate/i);
+  assert.equal(preview.matchState, "lookup-pending");
+  assert.equal(preview.employee.employeeId, "");
 });
 
 test("matchRecord: no form-EID, multiple fuzzy roster candidates → LLM disambiguation can pick", async () => {
