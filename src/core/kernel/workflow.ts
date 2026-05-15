@@ -26,19 +26,6 @@ export { runOneItem } from './run-one-item.js'
 export type { RunOneItemOpts, RunOneItemResult } from './run-one-item.js'
 
 /**
- * Coerce an arbitrary key → unknown map into the `Record<string, string>`
- * shape that withTrackedWorkflow's `initialData` expects. Non-string values
- * are stringified via String(); null/undefined become empty string.
- */
-function stringifyMap(d: Record<string, unknown>): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const [k, v] of Object.entries(d)) {
-    out[k] = v == null ? '' : String(v)
-  }
-  return out
-}
-
-/**
  * Best-effort coercion of an arbitrary input into a `Record<string, unknown>`
  * so it can ride on the `pending` tracker row's `input` field. Non-objects
  * become `null` (caller skips writing the field). Does NOT clone — the
@@ -103,7 +90,12 @@ export function buildInitialTrackerData<TData, TSteps extends readonly string[]>
   wf: RegisteredWorkflow<TData, TSteps>,
   input: TData,
 ): Record<string, string> {
-  const initial = wf.config.initialData ? stringifyMap(wf.config.initialData(input)) : {}
+  const initial: Record<string, string> = {}
+  if (wf.config.initialData) {
+    for (const [key, value] of Object.entries(wf.config.initialData(input))) {
+      initial[key] = value == null ? '' : String(value)
+    }
+  }
   const subject = wf.config.operatorSubject ? operatorSubjectData(wf.config.operatorSubject(input)) : {}
   const seed = { ...initial, ...subject }
   return { ...seed, ...buildQueueTitleForInput(wf, input, seed) }
