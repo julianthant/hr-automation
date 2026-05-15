@@ -21,8 +21,8 @@ import type { Page, FrameLocator } from "playwright";
 import { isAcceptedHdhDepartment } from "../../domain/hdh/departments.js";
 import { displayPersonName, parseLastFirstName } from "../../domain/identity/person-name.js";
 import { log } from "../../utils/log.js";
-import { getContentFrame, waitForPeopleSoftProcessing } from "./navigate.js";
-import { hrTasks, personOrgSummary, smartHR } from "./selectors.js";
+import { collapseSidebar, getContentFrame, waitForPeopleSoftProcessing } from "./navigate.js";
+import { hrTasks, personOrgSummary } from "./selectors.js";
 
 /** Direct URL to Person Org Summary — opens in the HR Tasks iframe. */
 const PERSON_ORG_SUMMARY_URL =
@@ -248,18 +248,8 @@ async function navigateToPersonOrgSummary(page: Page): Promise<FrameLocator> {
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   log.step("Person Org Summary page loaded");
 
-  // Collapse sidebar to avoid click interception on iframe buttons
-  // SELECTOR: verified v1.0 — Navigation Area button
-  try {
-    const navBtn = smartHR.sidebarNavigationToggle(page);
-    if (await navBtn.getAttribute("aria-expanded") === "true") {
-      await navBtn.click({ timeout: 5_000 });
-      await page.waitForTimeout(1_000);
-      log.step("Sidebar collapsed");
-    }
-  } catch {
-    // Sidebar may already be collapsed
-  }
+  // Collapse sidebar to avoid click interception on iframe buttons.
+  await collapseSidebar(page, { onlyIfExpanded: true, quiet: true });
 
   return getContentFrame(page);
 }

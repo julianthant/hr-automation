@@ -3,7 +3,7 @@ import { log } from "../../utils/log.js";
 import { UCPATH_SMART_HR_URL } from "../../config.js";
 import { errorMessage } from "../../utils/errors.js";
 import { debugScreenshot } from "../../utils/screenshot.js";
-import { personSearch, hrTasks } from "./selectors.js";
+import { personSearch, hrTasks, smartHR } from "./selectors.js";
 
 // Re-exports for API stability — selectors.ts is the source of truth.
 export { getContentFrame } from "./selectors.js";
@@ -49,6 +49,22 @@ export async function waitForPeopleSoftProcessing(
       .waitFor({ state: "hidden", timeout: timeoutMs });
   } catch {
     // Spinner did not appear or already disappeared -- that is fine
+  }
+}
+
+export async function collapseSidebar(
+  page: Page,
+  opts: { onlyIfExpanded?: boolean; quiet?: boolean } = {},
+): Promise<void> {
+  try {
+    const navBtn = smartHR.sidebarNavigationToggle(page);
+    if (!opts.onlyIfExpanded || await navBtn.getAttribute("aria-expanded") === "true") {
+      await navBtn.click({ timeout: 5_000 });
+      await page.waitForTimeout(1_000);
+      if (!opts.quiet) log.step("Sidebar collapsed");
+    }
+  } catch {
+    if (!opts.quiet) log.step("Sidebar collapse failed (non-fatal) — may already be collapsed");
   }
 }
 
