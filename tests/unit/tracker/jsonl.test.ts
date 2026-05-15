@@ -13,6 +13,7 @@ import {
   toTypedValue,
   withTrackedWorkflow,
   dateLocal,
+  trackerDateForTimestamp,
   __resetParseCacheForTests,
   __getParseCacheSizeForTests,
   type TrackerEntry,
@@ -88,6 +89,12 @@ describe("JSONL tracker", () => {
       active: { type: "boolean", value: "true" },
       start: { type: "date", value: "2026-04-17T00:00:00.000Z" },
     });
+  });
+});
+
+describe("tracker date selection", () => {
+  it("derives SIGINT/SIGTERM file dates in local time, not UTC", () => {
+    assert.equal(trackerDateForTimestamp("2026-05-15T06:30:00.000Z"), "2026-05-14");
   });
 });
 
