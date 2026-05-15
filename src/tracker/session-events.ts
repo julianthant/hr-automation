@@ -272,22 +272,27 @@ function recentStepLogExists(
   return false;
 }
 
-export function emitStepChange(instance: string, step: string, dir?: string): void {
+export function emitStepChange(instance: string, step: string, dir?: string, workflow?: string): void {
   const resolvedDir = dir ?? DEFAULT_DIR;
   const runId = getLogRunId();
   if (runId) {
+    if (workflow && recentStepLogExists(workflow, runId, step, resolvedDir)) {
+      return;
+    }
     // Scan all today's *-logs.jsonl files in resolvedDir (since we don't have
     // the workflow name here, only the instance label). Constant-cost: each
     // scan reads the tail of one or two small JSONL files.
-    let workflowFiles: string[] = [];
-    const dateSuffix = `-${dateLocal()}-logs.jsonl`;
-    try {
-      workflowFiles = readdirSync(resolvedDir).filter((f) => f.endsWith(dateSuffix));
-    } catch { /* dir might not exist yet */ }
-    for (const f of workflowFiles) {
-      const wf = f.slice(0, f.length - dateSuffix.length);
-      if (recentStepLogExists(wf, runId, step, resolvedDir)) {
-        return; // dedupe
+    if (!workflow) {
+      let workflowFiles: string[] = [];
+      const dateSuffix = `-${dateLocal()}-logs.jsonl`;
+      try {
+        workflowFiles = readdirSync(resolvedDir).filter((f) => f.endsWith(dateSuffix));
+      } catch { /* dir might not exist yet */ }
+      for (const f of workflowFiles) {
+        const wf = f.slice(0, f.length - dateSuffix.length);
+        if (recentStepLogExists(wf, runId, step, resolvedDir)) {
+          return; // dedupe
+        }
       }
     }
   }

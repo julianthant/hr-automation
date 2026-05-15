@@ -286,7 +286,7 @@ export const runEventsTopic: TopicEmitter<{
       // Tracker read failure only disables workflowInstance fallback for this tick.
     }
     let allEvents: Awaited<ReturnType<typeof readSessionEventsTolerant>> = [];
-    let usedSqlite = false;
+    let usedSqlite = deps.projectionReady && deps.stateDb !== undefined;
     if (deps.projectionReady && deps.stateDb) {
       // Use `resolveInstanceForRun` (not `Array.find`) so we keep walking past
       // pending rows that lack `data.instance` and pick up the first row that
@@ -300,13 +300,9 @@ export const runEventsTopic: TopicEmitter<{
           runId: requestedRunId,
           ...(wfInstance ? { workflowInstance: wfInstance } : {}),
         });
-        // Treat zero rows as "projection not yet caught up" and fall back
-        // to the rotation-aware JSONL aggregation.
-        if (sqliteEvents.length > 0) {
-          allEvents = sqliteEvents;
-          usedSqlite = true;
-        }
+        allEvents = sqliteEvents;
       } catch (err) {
+        usedSqlite = false;
         const msg = err instanceof Error ? err.message : String(err);
         log.warn(
           `run-events SQLite query failed (runId=${requestedRunId}): ${msg} — falling back to JSONL`,

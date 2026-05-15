@@ -11,12 +11,12 @@ import type { ProjectionSourceRef } from "./types.js";
 interface CachedStatements {
   insertRunEvent: Statement;
   upsertRun: Statement;
+  selectRunExists: Statement;
   upsertItem: Statement;
   insertLog: Statement;
   updateRunLogTs: Statement;
   insertSessionEvent: Statement;
   selectRunForScreenshot: Statement;
-  countScreenshotsForRun: Statement;
   updateRunScreenshotCount: Statement;
   recomputeRunOrdinalsForItem: Statement;
 }
@@ -66,6 +66,15 @@ function stmts(db: Database): CachedStatements {
         latest_input_json = COALESCE(runs.latest_input_json, excluded.latest_input_json),
         latest_error = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_error ELSE runs.latest_error END,
         updated_at = excluded.updated_at
+    `),
+    selectRunExists: db.prepare(`
+      SELECT 1
+      FROM runs
+      WHERE workflow = @workflow
+        AND tracker_date = @trackerDate
+        AND item_id = @itemId
+        AND run_id = @runId
+      LIMIT 1
     `),
     upsertItem: db.prepare(`
       INSERT INTO items (
@@ -129,15 +138,10 @@ function stmts(db: Database): CachedStatements {
     selectRunForScreenshot: db.prepare(
       "SELECT workflow, item_id FROM runs WHERE run_id = ? LIMIT 1",
     ),
-    countScreenshotsForRun: db.prepare(`
-      SELECT COUNT(*) AS count
-      FROM files
-      WHERE kind = 'screenshot' AND run_id = ?
-    `),
     updateRunScreenshotCount: db.prepare(`
       UPDATE runs
-      SET screenshot_count = ?, updated_at = ?
-      WHERE run_id = ?
+      SET screenshot_count = screenshot_count + @delta, updated_at = @updatedAt
+      WHERE run_id = @runId
     `),
     // Mirror of the rebuild path's recomputeRunOrdinals, scoped to one
     // (workflow, tracker_date, item_id) bucket so it's cheap enough to call
@@ -222,6 +226,13 @@ export function applyTrackerEntry(
       appliedAt: now,
     });
 
+    const existingRun = s.selectRunExists.get({
+      workflow: entry.workflow,
+      trackerDate,
+      itemId: entry.id,
+      runId,
+    });
+
     s.upsertRun.run({
       workflow: entry.workflow,
       trackerDate,
@@ -253,11 +264,13 @@ export function applyTrackerEntry(
       updatedAt: now,
     });
 
-    s.recomputeRunOrdinalsForItem.run({
-      workflow: entry.workflow,
-      date: trackerDate,
-      itemId: entry.id,
-    });
+    if (!existingRun) {
+      s.recomputeRunOrdinalsForItem.run({
+        workflow: entry.workflow,
+        date: trackerDate,
+        itemId: entry.id,
+      });
+    }
   });
 }
 
@@ -308,7 +321,7 @@ export function applySessionEvent(
   const timestamp = "timestamp" in event && event.timestamp ? event.timestamp : new Date((event as ScreenshotSessionEvent).ts).toISOString();
   const tsMs = "ts" in event && typeof event.ts === "number" ? event.ts : toMs(timestamp);
   const trackerDate = source.trackerDate ?? trackerDateFromTimestamp(timestamp);
-  stmts(db).insertSessionEvent.run({
+  const inserted = stmts(db).insertSessionEvent.run({
     sourcePath: source.path,
     sourceLine: source.line ?? 0,
     sourceOffset: source.offset,
@@ -321,7 +334,7 @@ export function applySessionEvent(
     rawJson: JSON.stringify(event),
     appliedAt: new Date().toISOString(),
   });
-  if (event.type === "screenshot") {
+  if (event.type === "screenshot" && inserted.changes > 0) {
     applyScreenshotFiles(db, event as ScreenshotSessionEvent);
   }
 }
@@ -339,6 +352,7 @@ function applyScreenshotFiles(db: Database, event: ScreenshotSessionEvent): void
       itemId = run.item_id;
     }
   }
+  let registeredCount = 0;
   for (const file of files) {
     if (!file.path || !existsSync(file.path)) continue;
     registerLocalFile(db, {
@@ -357,8 +371,13 @@ function applyScreenshotFiles(db: Database, event: ScreenshotSessionEvent): void
         kind: event.kind,
       },
     });
+    registeredCount++;
   }
-  const s = stmts(db);
-  const row = s.countScreenshotsForRun.get(event.runId) as { count: number } | undefined;
-  s.updateRunScreenshotCount.run(row?.count ?? 0, new Date().toISOString(), event.runId);
+  if (registeredCount > 0) {
+    stmts(db).updateRunScreenshotCount.run({
+      delta: registeredCount,
+      updatedAt: new Date().toISOString(),
+      runId: event.runId,
+    });
+  }
 }

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { dateLocal } from "../jsonl.js";
+import type { Database } from "../../infra/sqlite/index.js";
 
 /**
  * A single aggregated selector-fallback warning row. `label` is the text
@@ -46,9 +47,9 @@ const SELECTOR_FALLBACK_RE = /selector fallback triggered:\s*([^(]+?)\s*(?:\(.*)
  */
 export function buildSelectorWarningsHandler(
   dir: string = ".tracker",
+  opts: { projectionReady?: boolean; stateDb?: Database } = {},
 ): (days: number) => SelectorWarningRow[] {
   return (days: number) => {
-    if (!existsSync(dir)) return [];
     const daysNormalized = Math.max(1, Math.floor(days));
     const today = new Date();
     // Collect the list of YYYY-MM-DD dates to scan (today + prior days).
@@ -58,12 +59,39 @@ export function buildSelectorWarningsHandler(
       d.setDate(d.getDate() - i);
       dates.push(dateLocal(d));
     }
+    const cutoff = dates.at(-1) ?? dateLocal(today);
 
     // Aggregate by label. Track distinct workflow set per label.
     const aggregated = new Map<
       string,
       { count: number; firstTs: string; lastTs: string; workflows: Set<string> }
     >();
+
+    if (opts.projectionReady && opts.stateDb) {
+      const rows = opts.stateDb.prepare(`
+        SELECT workflow, level, message, ts
+        FROM logs
+        WHERE tracker_date >= @cutoff
+          AND level IN ('warn', 'error')
+          AND message LIKE '%selector fallback triggered%'
+      `).all({ cutoff }) as Array<{
+        workflow: string | null;
+        level: string | null;
+        message: string | null;
+        ts: string | null;
+      }>;
+      for (const entry of rows) {
+        addSelectorWarningRow(aggregated, {
+          workflow: entry.workflow ?? "",
+          level: entry.level ?? "",
+          message: entry.message ?? "",
+          ts: entry.ts ?? "",
+        });
+      }
+      return sortSelectorWarningRows(aggregated);
+    }
+
+    if (!existsSync(dir)) return [];
 
     for (const f of readdirSync(dir)) {
       if (!f.endsWith("-logs.jsonl")) continue;
@@ -87,47 +115,60 @@ export function buildSelectorWarningsHandler(
         } catch {
           continue;
         }
-        // Accept both warn (slow-success) and error (failure) - they share
-        // the `selector fallback triggered:` marker. See safe.ts for shapes.
-        if (
-          (entry.level !== "warn" && entry.level !== "error") ||
-          typeof entry.message !== "string"
-        )
-          continue;
-        const match = entry.message.match(SELECTOR_FALLBACK_RE);
-        if (!match) continue;
-        const label = match[1].trim();
-        if (!label) continue;
-        const ts = typeof entry.ts === "string" ? entry.ts : "";
-        const workflow = typeof entry.workflow === "string" ? entry.workflow : "";
-        const prev = aggregated.get(label);
-        if (prev) {
-          prev.count += 1;
-          if (ts && (!prev.firstTs || ts < prev.firstTs)) prev.firstTs = ts;
-          if (ts && (!prev.lastTs || ts > prev.lastTs)) prev.lastTs = ts;
-          if (workflow) prev.workflows.add(workflow);
-        } else {
-          aggregated.set(label, {
-            count: 1,
-            firstTs: ts,
-            lastTs: ts,
-            workflows: new Set(workflow ? [workflow] : []),
-          });
-        }
+        addSelectorWarningRow(aggregated, entry);
       }
     }
 
-    // Emit rows, sorted by count desc then lastTs desc.
-    return [...aggregated.entries()]
-      .map(([label, agg]) => ({
-        label,
-        count: agg.count,
-        firstTs: agg.firstTs,
-        lastTs: agg.lastTs,
-        workflows: [...agg.workflows].sort(),
-      }))
-      .sort((a, b) =>
-        b.count - a.count || (a.lastTs < b.lastTs ? 1 : a.lastTs > b.lastTs ? -1 : 0),
-      );
+    return sortSelectorWarningRows(aggregated);
   };
+}
+
+function addSelectorWarningRow(
+  aggregated: Map<string, { count: number; firstTs: string; lastTs: string; workflows: Set<string> }>,
+  entry: { workflow?: string; level?: string; message?: string; ts?: string },
+): void {
+  // Accept both warn (slow-success) and error (failure) - they share
+  // the `selector fallback triggered:` marker. See safe.ts for shapes.
+  if (
+    (entry.level !== "warn" && entry.level !== "error") ||
+    typeof entry.message !== "string"
+  )
+    return;
+  const match = entry.message.match(SELECTOR_FALLBACK_RE);
+  if (!match) return;
+  const label = match[1].trim();
+  if (!label) return;
+  const ts = typeof entry.ts === "string" ? entry.ts : "";
+  const workflow = typeof entry.workflow === "string" ? entry.workflow : "";
+  const prev = aggregated.get(label);
+  if (prev) {
+    prev.count += 1;
+    if (ts && (!prev.firstTs || ts < prev.firstTs)) prev.firstTs = ts;
+    if (ts && (!prev.lastTs || ts > prev.lastTs)) prev.lastTs = ts;
+    if (workflow) prev.workflows.add(workflow);
+  } else {
+    aggregated.set(label, {
+      count: 1,
+      firstTs: ts,
+      lastTs: ts,
+      workflows: new Set(workflow ? [workflow] : []),
+    });
+  }
+}
+
+function sortSelectorWarningRows(
+  aggregated: Map<string, { count: number; firstTs: string; lastTs: string; workflows: Set<string> }>,
+): SelectorWarningRow[] {
+  // Emit rows, sorted by count desc then lastTs desc.
+  return [...aggregated.entries()]
+    .map(([label, agg]) => ({
+      label,
+      count: agg.count,
+      firstTs: agg.firstTs,
+      lastTs: agg.lastTs,
+      workflows: [...agg.workflows].sort(),
+    }))
+    .sort((a, b) =>
+      b.count - a.count || (a.lastTs < b.lastTs ? 1 : a.lastTs > b.lastTs ? -1 : 0),
+    );
 }

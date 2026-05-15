@@ -9,6 +9,10 @@
  * co-located with the code that uses them.
  */
 import {
+  existsSync,
+  readdirSync,
+} from "node:fs";
+import {
   listWorkflows,
   readEntries,
   readEntriesForDate,
@@ -26,7 +30,7 @@ import {
 } from "../../run-timelines.js";
 import { isResolvedPrepEntry } from "../../prep-rows.js";
 import { computeFailureCounts } from "../../failures.js";
-import { buildScreenshotsHandler } from "../../screenshots.js";
+import { SCREENSHOTS_DIR } from "../../screenshots.js";
 import { countSidebarRowsFromTrackerHistory } from "../../../queue-row-count.js";
 
 // ── Cross-workflow counts cache ───────────────────────────────────────────────
@@ -104,6 +108,22 @@ function readTrackerEntriesForStream(
     : readEntries(workflow, dir);
 }
 
+function countScreenshotsForItems(workflow: string, itemIds: Set<string>): Map<string, number> {
+  const counts = new Map<string, number>();
+  if (itemIds.size === 0 || !existsSync(SCREENSHOTS_DIR)) return counts;
+  for (const id of itemIds) counts.set(id, 0);
+  const ids = [...itemIds].sort((a, b) => b.length - a.length);
+  for (const f of readdirSync(SCREENSHOTS_DIR)) {
+    if (!f.endsWith(".png")) continue;
+    for (const id of ids) {
+      if (!f.startsWith(`${workflow}-${id}-`)) continue;
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+      break;
+    }
+  }
+  return counts;
+}
+
 export function buildJsonlEventsPayload(
   workflow: string,
   date: string,
@@ -167,24 +187,14 @@ export function buildJsonlEventsPayload(
     timelinesByItem.set(itemId, buildRunTimelines(rows));
   }
 
-  const screenshotCountByItem = new Map<string, number>();
-  const screenshotsHandler = buildScreenshotsHandler();
+  const failedItemIds = new Set(entries.filter((entry) => entry.status === "failed").map((entry) => entry.id));
+  const screenshotCountByItem = countScreenshotsForItems(workflow, failedItemIds);
   const enriched = entries.map((entry) => {
     const runId = entry.runId || `${entry.id}#1`;
     const key = `${entry.id}::${runId}`;
     let screenshotCount: number | undefined;
     if (entry.status === "failed") {
-      const screenshotKey = `${entry.workflow}::${entry.id}`;
-      let count = screenshotCountByItem.get(screenshotKey);
-      if (count === undefined) {
-        try {
-          count = screenshotsHandler(entry.workflow, entry.id).length;
-        } catch {
-          count = 0;
-        }
-        screenshotCountByItem.set(screenshotKey, count);
-      }
-      screenshotCount = count;
+      screenshotCount = screenshotCountByItem.get(entry.id) ?? 0;
     }
 
     const timeline = timelinesByItem.get(entry.id)?.get(runId);
