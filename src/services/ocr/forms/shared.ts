@@ -1,5 +1,8 @@
 import { z } from "zod/v4";
 
+/** Minimum LLM confidence to auto-accept a disambiguation result as `matched`. */
+export const LLM_HIGH_CONFIDENCE = 0.6;
+
 export const VerificationSchema = z.discriminatedUnion("state", [
   z.object({
     state: z.literal("verified"),
