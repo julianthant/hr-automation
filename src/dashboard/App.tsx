@@ -81,6 +81,14 @@ function syncUrlState(workflow: string, selectedId: string | null, date: string)
   window.history.replaceState(null, "", url);
 }
 
+function mapsEqual(a: Map<string, string>, b: Map<string, string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [key, value] of a) {
+    if (b.get(key) !== value) return false;
+  }
+  return true;
+}
+
 export function App() {
   const initial = useMemo(readUrlState, []);
   const [workflow, setWorkflow] = useState(initial.workflow);
@@ -275,10 +283,14 @@ export function App() {
     [dedupedEntries, entries],
   );
 
-  const displayNames = useMemo(
-    () => buildDisplayNameMap(displayNameEntries, wfLabel),
-    [displayNameEntries, wfLabel],
-  );
+  const displayNamesRef = useRef<Map<string, string>>(new Map());
+  const displayNames = useMemo(() => {
+    const next = buildDisplayNameMap(displayNameEntries, wfLabel);
+    const prev = displayNamesRef.current;
+    if (mapsEqual(prev, next)) return prev;
+    displayNamesRef.current = next;
+    return next;
+  }, [displayNameEntries, wfLabel]);
 
   // Toast on completion/failure for LIVE transitions only — i.e. an entry
   // whose status changed while the user was continuously watching the
