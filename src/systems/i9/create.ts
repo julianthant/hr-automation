@@ -4,6 +4,7 @@ import { errorMessage, classifyPlaywrightError } from "../../utils/errors.js";
 import type { I9EmployeeInput, I9Result } from "./types.js";
 import { profile, remoteI9, dashboard } from "./selectors.js";
 import { closeAllKendoWindows, snapshotKendoWindows } from "./navigate.js";
+import { I9_URL } from "../../config.js";
 
 /**
  * Create a new I-9 employee record in I9 Complete.
@@ -83,7 +84,7 @@ export async function createI9Employee(
         return { success: false, profileId: null, error: "Could not extract profile ID after duplicate selection" };
       }
       // Navigate with saveAndContinue param to reveal the Create I-9 radio section
-      await page.goto(`https://wwwe.i9complete.com/employee/profile/${profileId}?saveAndContinue=true`, { timeout: 10_000 });
+      await page.goto(`${I9_URL.replace("stse.", "wwwe.")}/employee/profile/${profileId}?saveAndContinue=true`, { timeout: 10_000 });
       await page.waitForTimeout(1_000);
       log.step(`Using existing profile: ${profileId}`);
     } else if (isOk) {
