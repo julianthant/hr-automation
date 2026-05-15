@@ -1,10 +1,11 @@
 import { validateEnv } from "./utils/env.js";
+import { log } from "./utils/log.js";
 
 export function requireEnv(): void {
   try {
     validateEnv();
   } catch (err) {
-    console.error(err instanceof Error ? err.message : String(err));
+    log.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
   }
 }

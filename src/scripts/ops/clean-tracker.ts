@@ -21,7 +21,7 @@ import {
 import { pruneStateDb } from "../../tracker/state/cleanup.js";
 import { PATHS } from "../../config.js";
 import { log } from "../../utils/log.js";
-import { isMainModule } from "../_main.js";
+import { isMainModule } from "../main-module.js";
 
 /**
  * Sweep `.tracker/uploads/` for parentRunId-named subdirectories that

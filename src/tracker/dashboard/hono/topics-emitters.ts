@@ -17,7 +17,7 @@ import {
 } from "../session-state.js";
 import { log } from "../../../utils/log.js";
 import { getDefaultWorkflow } from "./context.js";
-import { ttlMemoize } from "./_memo.js";
+import { ttlMemoize } from "./memo.js";
 import { registerTopic, type TopicEmitter } from "./topics.js";
 import { captureStore, serializeCaptureSession } from "../capture-state.js";
 
