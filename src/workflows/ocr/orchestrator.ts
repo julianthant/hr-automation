@@ -167,6 +167,14 @@ export async function runOcrOrchestrator(
     };
   });
 
+  // Resolved once per orchestrator run — scanning the parent workflow's JSONL
+  // file on every writeTracker call would be O(emits × file-size).
+  const cachedParentSubject = resolveParentSubject({
+    parentRunId: input.parentRunId,
+    originWorkflow: input.originWorkflow,
+    trackerDir,
+  });
+
   let lastAnnouncedPhase: string | undefined;
   const writeTracker = (
     status: TrackerEntry["status"],
@@ -198,13 +206,8 @@ export async function runOcrOrchestrator(
       mode: "prepare",
     });
     flat.__id = input.sessionId ?? "";
-    const parentSubject = resolveParentSubject({
-      parentRunId: input.parentRunId,
-      originWorkflow: input.originWorkflow,
-      trackerDir,
-    });
-    flat.__name = parentSubject ?? "OCR";
-    if (parentSubject) flat.parentSubject = parentSubject;
+    flat.__name = cachedParentSubject ?? "OCR";
+    if (cachedParentSubject) flat.parentSubject = cachedParentSubject;
     emit({
       workflow: WORKFLOW,
       timestamp: new Date().toISOString(),
@@ -643,12 +646,6 @@ export async function runOcrOrchestrator(
       const eidLookupSqliteDepsEnabled =
         process.env.OCR_SQLITE_DEPENDENCIES !== "0" && !opts._disableSqliteDependencies;
 
-      const eidParentSubject = resolveParentSubject({
-        parentRunId: input.parentRunId,
-        originWorkflow: input.originWorkflow,
-        trackerDir,
-      });
-
       await runFanOutPhase({
         kind: "eid-lookup",
         enqueueItems: eidLookupEnqueueItems,
@@ -680,7 +677,7 @@ export async function runOcrOrchestrator(
                   taskRole: "child",
                   originWorkflow: "ocr",
                   taskGroupId: input.sessionId,
-                  ...(eidParentSubject ? { parentSubject: eidParentSubject } : {}),
+                  ...(cachedParentSubject ? { parentSubject: cachedParentSubject } : {}),
                 })),
               );
             }
@@ -694,7 +691,7 @@ export async function runOcrOrchestrator(
                   taskRole: "child",
                   originWorkflow: "ocr",
                   taskGroupId: input.sessionId,
-                  ...(eidParentSubject ? { parentSubject: eidParentSubject } : {}),
+                  ...(cachedParentSubject ? { parentSubject: cachedParentSubject } : {}),
                 }
               : {
                   emplId: lookupEnqueueEmplId(e),
@@ -702,7 +699,7 @@ export async function runOcrOrchestrator(
                   taskRole: "child",
                   originWorkflow: "ocr",
                   taskGroupId: input.sessionId,
-                  ...(eidParentSubject ? { parentSubject: eidParentSubject } : {}),
+                  ...(cachedParentSubject ? { parentSubject: cachedParentSubject } : {}),
                 };
             trackEvent({
               workflow: eidLookupCrmWorkflow.config.name,
@@ -726,7 +723,7 @@ export async function runOcrOrchestrator(
                   taskRole: "child",
                   originWorkflow: "ocr",
                   taskGroupId: input.sessionId,
-                  ...(eidParentSubject ? { parentSubject: eidParentSubject } : {}),
+                  ...(cachedParentSubject ? { parentSubject: cachedParentSubject } : {}),
                 }
               : {
                   emplId: lookupEnqueueEmplId(e),
@@ -734,7 +731,7 @@ export async function runOcrOrchestrator(
                   taskRole: "child",
                   originWorkflow: "ocr",
                   taskGroupId: input.sessionId,
-                  ...(eidParentSubject ? { parentSubject: eidParentSubject } : {}),
+                  ...(cachedParentSubject ? { parentSubject: cachedParentSubject } : {}),
                 },
           );
           const deriveChildItemId = (inp: { name?: string; emplId?: string }): string => {
