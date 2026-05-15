@@ -244,9 +244,9 @@ function registerInProcessControl<TData>(
   if (!trackerDir) return null
   const workerId = `dashboard:${process.pid}`
   return swallowSqliteErr(`in-process control registration for ${wf.config.name}/${itemId}`, () => {
-    const control = openControlDb({ trackerDir })
-    const taskStore = createTaskStore(control)
-    const workerStore = createWorkerStore(control)
+    const controlDb = openControlDb({ trackerDir })
+    const taskStore = createTaskStore(controlDb)
+    const workerStore = createWorkerStore(controlDb)
     workerStore.registerWorker({
       workerId,
       workflow: wf.config.name,
@@ -272,9 +272,20 @@ function registerInProcessControl<TData>(
           source: 'in-process',
           metadata: { workerId },
         })[0]
-    if (!task?.attemptId) return null
+    if (!task?.attemptId) {
+      controlDb.close()
+      return null
+    }
     taskStore.markTaskRunning({ taskId: task.taskId, attemptId: task.attemptId, workerId })
-    return { trackerDir, workerId, taskId: task.taskId, attemptId: task.attemptId }
+    return {
+      trackerDir,
+      workerId,
+      taskId: task.taskId,
+      attemptId: task.attemptId,
+      controlDb,
+      taskStore,
+      workerStore,
+    }
   }, null)
 }
 
@@ -285,10 +296,9 @@ function registerInProcessBrowsers<TData>(
 ): void {
   if (!control) return
   swallowSqliteErr(`in-process browser registration for ${wf.config.name}`, () => {
-    const workerStore = createWorkerStore(openControlDb({ trackerDir: control.trackerDir }))
     for (const [systemId, pid] of Object.entries(session.chromePids)) {
       const sys = wf.config.systems.find((s) => s.id === systemId)
-      workerStore.upsertBrowserProcess({
+      control.workerStore.upsertBrowserProcess({
         workerId: control.workerId,
         workflow: wf.config.name,
         taskId: control.taskId,
@@ -309,11 +319,10 @@ function markInProcessControlTerminal(
 ): void {
   if (!control) return
   swallowSqliteErr(`in-process terminal update for task=${control.taskId}`, () => {
-    const taskStore = createTaskStore(openControlDb({ trackerDir: control.trackerDir }))
     if (ok) {
-      taskStore.markTaskDone({ taskId: control.taskId, attemptId: control.attemptId })
+      control.taskStore.markTaskDone({ taskId: control.taskId, attemptId: control.attemptId })
     } else {
-      taskStore.markTaskFailed({
+      control.taskStore.markTaskFailed({
         taskId: control.taskId,
         attemptId: control.attemptId,
         error: error instanceof Error ? error.message : String(error ?? 'in-process run failed'),
@@ -469,6 +478,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
     } finally {
       if (completed && !terminalWritten) markInProcessControlTerminal(inProcessControl, true)
       if (cancelRegistered) unregisterInProcessRun(cancelIdent)
+      inProcessControl?.controlDb.close()
     }
   }
 
