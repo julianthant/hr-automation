@@ -30,14 +30,29 @@ function tokenize(s: string): string[] {
 export function scoreNameMatch(a: string, b: string): NameMatchResult {
   const at = tokenize(a);
   const bt = tokenize(b);
-  if (at.length === 0 || bt.length === 0) return { score: 0, reason: "none" };
+  return scoreNameMatchFromTokens(
+    at, [...at].sort().join(" "), new Set(at), a,
+    bt, [...bt].sort().join(" "), new Set(bt), b,
+  );
+}
 
-  const aSorted = [...at].sort().join(" ");
-  const bSorted = [...bt].sort().join(" ");
+/**
+ * Scoring kernel — accepts pre-tokenized inputs so callers that scan many
+ * rows (e.g. matchAgainstRoster) avoid re-tokenizing the same string N times.
+ */
+function scoreNameMatchFromTokens(
+  at: readonly string[],
+  aSorted: string,
+  aSet: ReadonlySet<string>,
+  a: string,
+  bt: readonly string[],
+  bSorted: string,
+  bSet: ReadonlySet<string>,
+  b: string,
+): NameMatchResult {
+  if (at.length === 0 || bt.length === 0) return { score: 0, reason: "none" };
   if (aSorted === bSorted) return { score: 1.0, reason: "exact" };
 
-  const aSet = new Set(at);
-  const bSet = new Set(bt);
   const inter = [...aSet].filter((x) => bSet.has(x));
   // Require both sides to have at least 2 distinct tokens before entering
   // the token-set tier. Without this guard, "John John" collapses to a
@@ -220,6 +235,25 @@ export interface RosterRow {
   zip?: string;
 }
 
+/** Pre-tokenized roster row — produced by precomputeRoster(). */
+export interface TokenizedRosterRow extends RosterRow {
+  readonly _nameTokens: string[];
+  readonly _nameSorted: string;
+  readonly _nameSet: Set<string>;
+}
+
+/**
+ * Pre-tokenize every row's name so matchAgainstRoster avoids re-tokenizing
+ * the same roster name for each OCR record. Call once after loadRoster and
+ * pass the result wherever matchAgainstRoster is called in a loop.
+ */
+export function precomputeRoster(roster: readonly RosterRow[]): TokenizedRosterRow[] {
+  return roster.map((row) => {
+    const tokens = tokenize(row.name);
+    return { ...row, _nameTokens: tokens, _nameSorted: [...tokens].sort().join(" "), _nameSet: new Set(tokens) };
+  });
+}
+
 export interface RosterMatchResult {
   candidates: Array<{
     eid: string;
@@ -234,14 +268,24 @@ export interface RosterMatchResult {
  * Score every roster row against `targetName` and return non-zero matches
  * sorted by score (DESC). The caller applies the auto-accept threshold
  * (0.85): >= 0.85 → use top candidate's EID; below → mark "needs review".
+ *
+ * Accepts TokenizedRosterRow (from precomputeRoster) to avoid re-tokenizing
+ * roster names for every query when called in a per-record loop.
  */
 export function matchAgainstRoster(
   roster: readonly RosterRow[],
   targetName: string,
 ): RosterMatchResult {
+  const bt = tokenize(targetName);
+  const bSorted = [...bt].sort().join(" ");
+  const bSet = new Set(bt);
   const scored = roster
     .map((row) => {
-      const m = scoreNameMatch(row.name, targetName);
+      const pre = row as Partial<TokenizedRosterRow>;
+      const at = pre._nameTokens ?? tokenize(row.name);
+      const aSorted = pre._nameSorted ?? [...at].sort().join(" ");
+      const aSet = pre._nameSet ?? new Set(at);
+      const m = scoreNameMatchFromTokens(at, aSorted, aSet, row.name, bt, bSorted, bSet, targetName);
       return { eid: row.eid, name: row.name, score: m.score, reason: m.reason };
     })
     .filter((r) => r.score > 0)
