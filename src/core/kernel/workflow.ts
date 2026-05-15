@@ -229,13 +229,11 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
  */
 export function deriveItemId<TData>(data: TData, fallback: string): string {
   const d = data as unknown as Record<string, unknown>
-  return (
-    (typeof d?.emplId === 'string' ? d.emplId : undefined) ??
-    (typeof d?.docId === 'string' ? d.docId : undefined) ??
-    (typeof d?.email === 'string' ? d.email : undefined) ??
-    (typeof d?.sessionId === 'string' ? d.sessionId : undefined) ??
-    fallback
-  )
+  for (const key of ['emplId', 'docId', 'email', 'sessionId']) {
+    const value = d[key]
+    if (typeof value === 'string' && value.length > 0) return value
+  }
+  return fallback
 }
 
 function swallowSqliteErr<T>(label: string, fn: () => T, fallback: T): T {
