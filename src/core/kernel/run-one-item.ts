@@ -2,11 +2,11 @@ import type { RegisteredWorkflow } from './types.js'
 import { CancelledError } from './types.js'
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
-import { makeCtx, tryScreenshot } from './ctx.js'
 import { trackEvent, withTrackedWorkflow, emitScreenshotEvent } from '../../tracker/jsonl.js'
 import { withLogContext } from '../../utils/log.js'
 import { classifyError } from '../../utils/errors.js'
 import { splitPrefilled, buildInitialTrackerData, buildTrackerOpts, toRecord } from './workflow.js'
+import { runWorkflowHandler } from './handler-runner.js'
 
 export interface RunOneItemOpts<TData, TSteps extends readonly string[]> {
   wf: RegisteredWorkflow<TData, TSteps>
@@ -99,7 +99,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
     updateData: (data: Record<string, unknown>) => void
     emitFailed: (step: string, error: string) => void
     emitSkipped: (step: string) => void
-    emitScreenshotEvent: Parameters<typeof makeCtx<TSteps, TData>>[0]['emitScreenshotEvent']
+    emitScreenshotEvent: Parameters<typeof runWorkflowHandler<TData, TSteps>>[0]['emitScreenshotEvent']
     markCancelledStepOnCancelRequested?: boolean
   }): Promise<void> => {
     const stepper = new Stepper({
@@ -112,44 +112,32 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       emitSkipped: emitters.emitSkipped,
       isCancelRequested: args.isCancelRequested,
     })
-    const ctx = makeCtx<TSteps, TData>({
+    await runWorkflowHandler({
+      wf,
       session,
       stepper,
       isBatch: true,
       runId,
-      workflow: wf.config.name,
       itemId,
-      emitScreenshotEvent: emitters.emitScreenshotEvent,
+      handlerInput,
+      prefilled,
       trackerDir: args.trackerDir,
-    })
-    stepper.setScreenshotFn(ctx.screenshot)
-    if (args.preHandler) {
-      try {
-        await args.preHandler()
-      } catch (err) {
+      emitScreenshotEvent: emitters.emitScreenshotEvent,
+      preHandler: args.preHandler,
+      skipCancelledScreenshot: true,
+      onPreHandlerError: (err) => {
         if (emitters.markCancelledStepOnCancelRequested && args.isCancelRequested?.()) {
           emitters.setStep('cancelled')
           throw new CancelledError('force-stop')
         }
         throw err
-      }
-    }
-    if (prefilled) ctx.updateData(prefilled as Partial<TData & Record<string, unknown>>)
-    try {
-      await wf.config.handler(ctx, handlerInput)
-    } catch (err) {
-      // CancelledError: no diagnostic screenshot — the cancel was intentional
-      // and the daemon's claim loop owns reset/accounting.
-      if (err instanceof CancelledError) throw err
-      if (emitters.markCancelledStepOnCancelRequested && args.isCancelRequested?.()) {
+      },
+      mapEscapedHandlerError: () => {
+        if (!emitters.markCancelledStepOnCancelRequested || !args.isCancelRequested?.()) return undefined
         emitters.setStep('cancelled')
-        throw new CancelledError('force-stop')
-      }
-      // Capture state for throws that escape ctx.step. In-step throws already
-      // get a screenshot via Stepper.step's catch.
-      await tryScreenshot(ctx, 'handler-throw')
-      throw err
-    }
+        return new CancelledError('force-stop')
+      },
+    })
   }
 
   if (args.trackerStub) {
