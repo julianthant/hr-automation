@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDownToLine, Maximize2, Minimize2 } from "lucide-react";
 import { LogLine } from "./LogLine";
 import type { CollapsedLogEntry } from "@/components/hooks/useLogs";
@@ -80,6 +81,30 @@ function renderMaybeFactory(node: LazySlot | undefined): ReactNode {
   return typeof node === "function" ? node() : node;
 }
 
+function displayItemTimestamp(item: DisplayItem): string {
+  if (item.kind === "log") return item.entry.ts ?? "";
+  return item.entry.timestamp ?? (typeof item.entry.ts === "number" ? new Date(item.entry.ts).toISOString() : "");
+}
+
+function mergeDisplayItems(logs: CollapsedLogEntry[], events: RunEvent[]): DisplayItem[] {
+  const logItems = logs.map((entry) => ({ kind: "log" as const, entry }));
+  const eventItems = events.map((entry) => ({ kind: "event" as const, entry }));
+  const result: DisplayItem[] = [];
+  let i = 0;
+  let j = 0;
+
+  while (i < logItems.length && j < eventItems.length) {
+    if (displayItemTimestamp(logItems[i]!) <= displayItemTimestamp(eventItems[j]!)) {
+      result.push(logItems[i++]!);
+    } else {
+      result.push(eventItems[j++]!);
+    }
+  }
+  while (i < logItems.length) result.push(logItems[i++]!);
+  while (j < eventItems.length) result.push(eventItems[j++]!);
+  return result;
+}
+
 export function LogStream({
   logs,
   events = [],
@@ -119,22 +144,7 @@ export function LogStream({
       return debugLogs.map((l) => ({ kind: "log" as const, entry: l }));
     }
     if (filter === "all") {
-      const merged: DisplayItem[] = [
-        ...nonDebugLogs.map((l) => ({ kind: "log" as const, entry: l })),
-        ...events.map((e) => ({ kind: "event" as const, entry: e })),
-      ];
-      merged.sort((a, b) => {
-        const ta = a.kind === "log"
-          ? a.entry.ts
-          : (a.entry.timestamp ?? (typeof a.entry.ts === "number" ? new Date(a.entry.ts).toISOString() : ""));
-        const tb = b.kind === "log"
-          ? b.entry.ts
-          : (b.entry.timestamp ?? (typeof b.entry.ts === "number" ? new Date(b.entry.ts).toISOString() : ""));
-        const sa = ta ?? "";
-        const sb = tb ?? "";
-        return sa < sb ? -1 : sa > sb ? 1 : 0;
-      });
-      return merged;
+      return mergeDisplayItems(nonDebugLogs, events);
     }
     return nonDebugLogs
       .filter((l) => tab?.categories.includes(getLogCategory(l.level, l.message)))
@@ -146,20 +156,28 @@ export function LogStream({
     [nonDebugLogs],
   );
 
+  const virtualizer = useVirtualizer({
+    count: displayed.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 30,
+    overscan: 20,
+  });
+  const virtualItems = virtualizer.getVirtualItems();
+
   // Snap to bottom before paint when logs first appear (no visible scroll)
   useLayoutEffect(() => {
-    if (scrollRef.current && displayed.length > 0 && prevLenRef.current === 0) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (displayed.length > 0 && prevLenRef.current === 0) {
+      virtualizer.scrollToIndex(displayed.length - 1, { align: "end" });
     }
-  }, [displayed.length]);
+  }, [displayed.length, virtualizer]);
 
   // Auto-scroll on new entries
   useEffect(() => {
-    if (autoScroll && scrollRef.current && displayed.length > prevLenRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (autoScroll && displayed.length > prevLenRef.current) {
+      virtualizer.scrollToIndex(displayed.length - 1, { align: "end" });
     }
     prevLenRef.current = displayed.length;
-  }, [displayed.length, autoScroll]);
+  }, [displayed.length, autoScroll, virtualizer]);
 
   const handleCopy = useCallback((text: string) => {
     void navigator.clipboard.writeText(text);
@@ -274,25 +292,50 @@ export function LogStream({
             {emptyStreamMessage(tab?.source)}
           </div>
         ) : (
-          displayed.map((item, i) =>
-            item.kind === "log" ? (
-              <LogLine
-                key={`log-${item.entry.ts}-${i}`}
-                entry={{ ...item.entry, kind: "log" }}
-                isCurrent={
-                  i === displayed.length - 1 && item.entry.level === "step"
-                }
-                onCopy={handleCopy}
-              />
-            ) : (
-              <LogLine
-                key={`evt-${item.entry.timestamp ?? item.entry.ts ?? "noTs"}-${i}`}
-                entry={{ ...item.entry, kind: "event" }}
-                isCurrent={false}
-                onCopy={handleCopy}
-              />
-            ),
-          )
+          <div
+            style={{
+              height: virtualizer.getTotalSize(),
+              position: "relative",
+            }}
+          >
+            {virtualItems.map((virtualRow) => {
+              const item = displayed[virtualRow.index]!;
+              const key =
+                item.kind === "log"
+                  ? `log-${item.entry.ts}-${virtualRow.index}`
+                  : `evt-${item.entry.timestamp ?? item.entry.ts ?? "noTs"}-${virtualRow.index}`;
+              return (
+                <div
+                  key={key}
+                  data-index={virtualRow.index}
+                  ref={virtualizer.measureElement}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                >
+                  {item.kind === "log" ? (
+                    <LogLine
+                      entry={{ ...item.entry, kind: "log" }}
+                      isCurrent={
+                        virtualRow.index === displayed.length - 1 && item.entry.level === "step"
+                      }
+                      onCopy={handleCopy}
+                    />
+                  ) : (
+                    <LogLine
+                      entry={{ ...item.entry, kind: "event" }}
+                      isCurrent={false}
+                      onCopy={handleCopy}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
 
