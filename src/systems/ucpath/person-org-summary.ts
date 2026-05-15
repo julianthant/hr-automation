@@ -208,6 +208,25 @@ export function deriveAssignmentDetailsFromCells(cells: string[]): PersonOrgAssi
   };
 }
 
+async function extractAssignmentCellsFromBody(frame: FrameLocator): Promise<string[] | null> {
+  return personOrgSummary.body(frame).evaluate((body) => {
+    const tables = body.querySelectorAll("table");
+    for (const table of Array.from(tables)) {
+      for (const row of Array.from(table.rows)) {
+        const cells = Array.from(row.cells);
+        if (cells.length >= 12) {
+          const buCell = cells[3]?.textContent?.trim() ?? "";
+          const deptCell = cells[6]?.textContent?.trim() ?? "";
+          if (/^[A-Z]{4,5}\d?$/.test(buCell) && deptCell && deptCell !== "Department Description") {
+            return cells.map((cell) => cell.textContent?.trim() ?? "");
+          }
+        }
+      }
+    }
+    return null;
+  }).catch(() => null);
+}
+
 /**
  * Navigate to Person Org Summary and wait for the search form to load.
  * Collapses the sidebar so the Search button is clickable.
@@ -335,22 +354,7 @@ async function extractSingleResultDetail(
   const fullName = selectPersonName(candidates, PERSON_ORG_NAME_LABELS);
 
   // Extract assignment details (same logic as drillInAndGetDetails)
-  const assignmentCells = await personOrgSummary.body(frame).evaluate((body) => {
-    const tables = body.querySelectorAll("table");
-    for (const table of Array.from(tables)) {
-      for (const row of Array.from(table.rows)) {
-        const cells = Array.from(row.cells);
-        if (cells.length >= 12) {
-          const buCell = cells[3]?.textContent?.trim() ?? "";
-          const deptCell = cells[6]?.textContent?.trim() ?? "";
-          if (/^[A-Z]{4,5}\d?$/.test(buCell) && deptCell && deptCell !== "Department Description") {
-            return cells.map((cell) => cell.textContent?.trim() ?? "");
-          }
-        }
-      }
-    }
-    return null;
-  }).catch(() => null);
+  const assignmentCells = await extractAssignmentCellsFromBody(frame);
   const assignment = assignmentCells ? deriveAssignmentDetailsFromCells(assignmentCells) : null;
 
   const endDate = termDate || "Active";
@@ -530,22 +534,7 @@ async function drillInAndGetDetails(
 
   // Extract assignment details from the Assignments grid.
   // Scan all tables for rows with 10+ cells where cell[3] is a business unit code.
-  const assignmentCells = await personOrgSummary.body(frame).evaluate((body) => {
-    const tables = body.querySelectorAll("table");
-    for (const table of Array.from(tables)) {
-      for (const row of Array.from(table.rows)) {
-        const cells = Array.from(row.cells);
-        if (cells.length >= 12) {
-          const buCell = cells[3]?.textContent?.trim() ?? "";
-          const deptCell = cells[6]?.textContent?.trim() ?? "";
-          if (/^[A-Z]{4,5}\d?$/.test(buCell) && deptCell && deptCell !== "Department Description") {
-            return cells.map((cell) => cell.textContent?.trim() ?? "");
-          }
-        }
-      }
-    }
-    return null;
-  }).catch(() => null);
+  const assignmentCells = await extractAssignmentCellsFromBody(frame);
   const assignment = assignmentCells ? deriveAssignmentDetailsFromCells(assignmentCells) : null;
 
   if (assignment) {
