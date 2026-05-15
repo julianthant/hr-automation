@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Loader2, Square } from "lucide-react";
+import { Square } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { IconActionButton } from "@/components/shared/IconActionButton";
 
 export interface StopAllItem {
   id: string;
@@ -70,11 +70,12 @@ export function StopAllButton({ workflow, items }: StopAllButtonProps) {
   }
 
   return (
-    <button
-      type="button"
+    <IconActionButton
+      size="md"
+      tone="warning"
       onClick={stopAll}
-      disabled={pending}
-      aria-label={
+      pending={pending}
+      label={
         n === 0
           ? "Stop all pending and running entries (none in view)"
           : `Stop ${n} pending or running ${n === 1 ? "entry" : "entries"}`
@@ -84,19 +85,8 @@ export function StopAllButton({ workflow, items }: StopAllButtonProps) {
           ? "Stop pending + running entries in this view"
           : `Cancel ${n} pending/queued or in-progress ${n === 1 ? "run" : "runs"}`
       }
-      className={cn(
-        "flex-shrink-0 h-8 w-8 flex items-center justify-center rounded-lg transition-colors outline-none",
-        "bg-warning/15 text-warning border border-warning/45",
-        "hover:bg-warning/25 hover:border-warning/65",
-        "focus-visible:ring-2 focus-visible:ring-warning focus-visible:ring-offset-1 focus-visible:ring-offset-card",
-        "disabled:opacity-50 disabled:cursor-wait cursor-pointer",
-      )}
-    >
-      {pending ? (
-        <Loader2 aria-hidden className="w-3.5 h-3.5 animate-spin" />
-      ) : (
-        <Square aria-hidden className="w-3.5 h-3.5 fill-current" />
-      )}
-    </button>
+      icon={<Square aria-hidden className="w-3.5 h-3.5 fill-current" />}
+      className="rounded-lg"
+    />
   );
 }

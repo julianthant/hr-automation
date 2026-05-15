@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Square, Loader2 } from "lucide-react";
+import { Square } from "lucide-react";
 import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "@/components/shared/types";
+import { IconActionButton } from "@/components/shared/IconActionButton";
 
 interface CancelRunningButtonProps {
   workflow: string;
@@ -123,32 +124,19 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, class
     void fire();
   };
 
-  const buttonClass = cn(
-    "h-6 w-6 inline-flex items-center justify-center rounded-md cursor-pointer",
-    "text-muted-foreground bg-transparent",
-    "transition-colors duration-150",
-    "hover:text-destructive hover:bg-muted",
-    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40",
-    "disabled:opacity-60 disabled:cursor-wait",
-  );
-
   return (
     <span className={cn("inline-flex items-center gap-0.5", className)}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <button
-            type="button"
-            aria-label={ocrPrep ? "Discard OCR prep" : "Stop running item"}
-            disabled={pending}
+          <IconActionButton
+            tone="destructive"
+            label={ocrPrep ? "Discard OCR prep" : "Stop running item"}
+            pending={pending}
             onClick={onClick}
-            className={buttonClass}
-          >
-            {pending ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-destructive" />
-            ) : (
-              <Square className="h-3.5 w-3.5" />
-            )}
-          </button>
+            icon={<Square className="h-3.5 w-3.5" />}
+            className="text-muted-foreground bg-transparent hover:text-destructive hover:bg-muted focus-visible:ring-destructive/40"
+            spinnerClassName="text-destructive"
+          />
         </TooltipTrigger>
         <TooltipContent side="top" sideOffset={4}>
           {ocrPrep ? "Discard OCR prep" : "Stop running item"}
