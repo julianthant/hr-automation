@@ -58,8 +58,8 @@ async function callGemini(
   //   OCR_GEMINI_MODEL=gemini-2.5-flash-lite  (low latency / high volume)
   //   OCR_GEMINI_MODEL=gemini-3-pro-preview   (highest quality, slower)
   const modelName = process.env.OCR_GEMINI_MODEL ?? "gemini-3-flash-preview";
-  log.step(`[ocr/gemini] sending page ${imagePath.split("/").pop()} → model=${modelName}, prompt=${prompt.length}c, image=${(await fs.stat(imagePath)).size}B`);
   const png = await fs.readFile(imagePath);
+  log.step(`[ocr/gemini] sending page ${imagePath.split("/").pop()} → model=${modelName}, prompt=${prompt.length}c, image=${png.length}B`);
   const genai = new GoogleGenerativeAI(apiKey);
   const model = genai.getGenerativeModel({
     model: modelName,
