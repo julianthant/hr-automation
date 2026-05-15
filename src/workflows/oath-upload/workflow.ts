@@ -65,7 +65,7 @@ export async function runOathUpload(input: OathUploadInput): Promise<void> {
     log.success("oath-upload workflow completed");
   } catch (err) {
     log.error(`oath-upload failed: ${errorMessage(err)}`);
-    process.exit(1);
+    throw err;
   }
 }
 
