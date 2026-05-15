@@ -1,6 +1,7 @@
 import type { Page, Frame } from "playwright";
-import { join } from "path";
-import { readdir } from "fs/promises";
+import { join } from "node:path";
+import { readdir, rename, unlink } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { log } from "../../utils/log.js";
 import { debugScreenshot } from "../../utils/screenshot.js";
 import { PATHS } from "../../config.js";
@@ -204,7 +205,12 @@ export async function waitForReportAndDownload(
     return false;
   }
 
-  return await downloadReportRow(page, statusFrame!, myRowId, employeeId, employeeName, reportsDir);
+  if (!statusFrame) {
+    log.error(`[${employeeId}] Report completed but status frame was not captured`);
+    return false;
+  }
+
+  return await downloadReportRow(page, statusFrame, myRowId, employeeId, employeeName, reportsDir);
 }
 
 /**
@@ -306,9 +312,6 @@ async function downloadReportRow(
   // Filesystem fallback: diff snapshots to find new PDFs
   log.step(`[${employeeId}] Download event not captured. Checking filesystem...`);
   await page.waitForTimeout(3_000);
-
-  const { rename, unlink } = await import("fs/promises");
-  const { existsSync } = await import("fs");
 
   for (const checkDir of [downloadsDir, reportsDir]) {
     try {
