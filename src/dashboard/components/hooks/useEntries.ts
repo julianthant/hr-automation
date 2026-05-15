@@ -22,6 +22,8 @@ interface UseEntriesResult {
   loading: boolean;
 }
 
+type WithFirstLog = TrackerEntry & { firstLogTs?: string; lastLogTs?: string };
+
 export function shouldApplyEntriesUpdate(args: {
   previousHash: string;
   nextHash: string;
@@ -29,6 +31,14 @@ export function shouldApplyEntriesUpdate(args: {
   targetKey: string;
 }): boolean {
   return args.previousHash !== args.nextHash || args.activeKey !== args.targetKey;
+}
+
+export function buildEntriesHash(raw: TrackerEntry[]): string {
+  let hash = "";
+  for (const r of raw as WithFirstLog[]) {
+    hash += `${r.id}|${r.status}|${r.step ?? ""}|${r.timestamp}|${r.firstLogTs ?? ""}|${r.lastLogTs ?? ""}|${r.runId ?? ""}|${r.error ?? ""};`;
+  }
+  return hash;
 }
 
 /**
@@ -92,9 +102,7 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
         // Deliberately omits `data` and `lastLogMessage` — neither affects
         // queue rendering identity, and including them caused per-log-line
         // hash churn that forced displayNames to rebuild every tick.
-        const hash = raw.map((r) =>
-          `${r.id}|${r.status}|${r.step ?? ""}|${r.timestamp}|${(r as any).firstLogTs ?? ""}|${(r as any).lastLogTs ?? ""}|${r.runId ?? ""}|${r.error ?? ""}`
-        ).join(";");
+        const hash = buildEntriesHash(raw);
         const targetKey = `${workflow}|${date}`;
         if (!shouldApplyEntriesUpdate({
           previousHash: prevHashRef.current,
@@ -108,7 +116,6 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
 
         const dedupedBase = dedupeLatestByIdWithCarriedEmplId(raw as TrackerEntry[]);
 
-        type WithFirstLog = TrackerEntry & { firstLogTs?: string };
         // Sort by running start time (firstLogTs), pending entries at bottom
         const deduped = [...dedupedBase]
           .sort((a, b) => {

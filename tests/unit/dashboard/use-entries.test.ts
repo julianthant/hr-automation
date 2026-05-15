@@ -4,7 +4,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
-import { shouldApplyEntriesUpdate } from "../../../src/dashboard/components/hooks/useEntries.js";
+import { buildEntriesHash, shouldApplyEntriesUpdate } from "../../../src/dashboard/components/hooks/useEntries.js";
+import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -39,4 +40,24 @@ test("useEntries updates aggregate SSE state only once per delivery", () => {
   assert.equal(source.match(/\bsetWorkflows\(/g)?.length ?? 0, 1);
   assert.equal(source.match(/\bsetWfCounts\(/g)?.length ?? 0, 1);
   assert.equal(source.match(/\bsetFailureCounts\(/g)?.length ?? 0, 1);
+});
+
+test("buildEntriesHash fingerprints entries in one stable pass", () => {
+  const entries: TrackerEntry[] = [
+    {
+      workflow: "ocr",
+      id: "item-1",
+      runId: "item-1#1",
+      status: "running",
+      step: "matching",
+      timestamp: "2026-05-14T10:00:00.000Z",
+      firstLogTs: "2026-05-14T10:00:01.000Z",
+      lastLogTs: "2026-05-14T10:00:02.000Z",
+    },
+  ];
+
+  assert.equal(
+    buildEntriesHash(entries),
+    "item-1|running|matching|2026-05-14T10:00:00.000Z|2026-05-14T10:00:01.000Z|2026-05-14T10:00:02.000Z|item-1#1|;",
+  );
 });
