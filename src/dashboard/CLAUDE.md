@@ -233,6 +233,9 @@ Current consumption:
 npm run dev:dashboard     # Vite dev on :5173, proxies /api + /events to :3838
 npm run build:dashboard   # Single-file HTML to dist/dashboard/index.html
 npm run dashboard         # Starts SSE backend (:3838) + Vite dev (:5173)
+npm run dashboard:watch   # Same as dashboard, but tsx watch restarts SSE backend on src/ changes (full restart, not HMR)
+npm run dashboard:prod    # Serve pre-built dashboard from SSE only (no Vite)
+npm run dashboard:tunneled  # Dashboard with tunnel support (expose SSE to external clients)
 ```
 
 ## Adding a New Workflow to the Dashboard
