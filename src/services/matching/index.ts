@@ -1,11 +1,11 @@
 export { levenshteinDistance } from "./levenshtein.js";
+export { normalizeEid } from "../../domain/identity/eid.js";
 export {
   scoreNameMatch,
   normalizeUsAddress,
   compareUsAddresses,
   matchAgainstRoster,
   precomputeRoster,
-  normalizeEid,
 } from "./match.js";
 export type {
   NameMatchResult,

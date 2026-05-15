@@ -299,10 +299,6 @@ export function matchAgainstRoster(
  * (e.g. `"A10877384"` → `"10877384"`, `"10877384."` → `"10877384"`).
  * Returns `""` for null/undefined/non-stringy input.
  */
-export function normalizeEid(raw: unknown): string {
-  return String(raw ?? "").replace(/[^\d]/g, "");
-}
-
 // ─── Hybrid roster match: algorithmic + LLM disambiguation ─
 
 export interface DisambiguatorInput {
