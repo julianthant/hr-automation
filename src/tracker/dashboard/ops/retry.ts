@@ -41,6 +41,7 @@ export interface RetryBulkRequest {
 }
 
 type ReEnqueueResult = { ok: true } | { ok: false; error: string };
+type EntryReEnqueueRequest = RetryRequest | RunWithDataRequest;
 
 /** In-process workflows that don't run via the daemon queue — retry routes
  * through their existing in-process launchers instead of `enqueueFromHttp`.
@@ -390,23 +391,25 @@ async function reEnqueueSharePointEntry(
   return { ok: true };
 }
 
-export function buildRetryHandler(dir: string) {
-  return (req: RetryRequest): Promise<ReEnqueueResult> =>
-    reEnqueueEntry(req.workflow, req.id, req.runId, dir, {
-      parentRunId: req.parentRunId,
-    }, req.date);
-}
-
-export function buildRunWithDataHandler(dir: string) {
-  return (req: RunWithDataRequest): Promise<ReEnqueueResult> => {
-    if (!req.data || typeof req.data !== "object") {
+export function buildEntryReEnqueueHandler(dir: string, opts: { withData?: boolean } = {}) {
+  return (req: EntryReEnqueueRequest): Promise<ReEnqueueResult> => {
+    const prefilledData = opts.withData && "data" in req ? req.data : undefined;
+    if (opts.withData && (!prefilledData || typeof prefilledData !== "object")) {
       return Promise.resolve({ ok: false, error: "data is required" });
     }
     return reEnqueueEntry(req.workflow, req.id, req.runId, dir, {
-      prefilledData: req.data,
+      ...(prefilledData ? { prefilledData } : {}),
       parentRunId: req.parentRunId,
     }, req.date);
   };
+}
+
+export function buildRetryHandler(dir: string) {
+  return buildEntryReEnqueueHandler(dir);
+}
+
+export function buildRunWithDataHandler(dir: string) {
+  return buildEntryReEnqueueHandler(dir, { withData: true });
 }
 
 export function buildRetryBulkHandler(dir: string) {
