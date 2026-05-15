@@ -10,11 +10,6 @@ import {
   type ClaimedTask,
   type EnqueuedTask,
   type EnqueueTasksRequest,
-  type TaskDbRow,
-  type AttemptDbRow,
-  mapTaskRow,
-  mapAttemptRow,
-  parseJson,
 } from './types.js'
 import { enqueueTasks } from './enqueue.js'
 import {
@@ -37,6 +32,16 @@ import {
   waitForDependencies,
 } from './child-state.js'
 import { retryTaskFromAttempt } from './retry.js'
+import {
+  getTask,
+  getAttempt,
+  getTaskByRunId,
+  findTaskByIdentity,
+  findInputForRunId,
+  listTasksForWorkflow,
+  listAttemptsForTask,
+  countQueued,
+} from './queries.js'
 
 export type {
   TaskState,
@@ -87,115 +92,40 @@ export interface ControlTaskStore {
 
 export function createTaskStore(control: ControlDb): ControlTaskStore {
   const db = control.db
+  const bindControl = <TRequest, TResult>(
+    fn: (db: Database, control: ControlDb, request: TRequest) => TResult,
+  ) => (request: TRequest) => fn(db, control, request)
+  const bindDb = <TRequest, TResult>(
+    fn: (db: Database, request: TRequest) => TResult,
+  ) => (request: TRequest) => fn(db, request)
 
   const store: ControlTaskStore = {
     control,
     db,
     close: () => control.close(),
-    enqueueTasks: (request) => enqueueTasks(db, control, request),
-    claimNextTask: (request) => claimNextTask(db, control, request),
-    markTaskRunning: (request) => markTaskRunning(db, control, request),
-    markTaskDone: (request) => markTaskDone(db, control, request),
-    markTaskFailed: (request) => markTaskFailed(db, control, request),
-    markTaskCancelled: (request) => markTaskCancelled(db, control, request),
-    requestCancelTask: (request) => requestCancelTask(db, control, request),
-    retryTaskFromAttempt: (request) => retryTaskFromAttempt(db, control, request),
-    createDependency: (request) => createDependency(db, control, request),
-    markDependencyFromChildTerminal: (request) => markDependencyFromChildTerminal(db, control, request),
-    releaseParentsIfDependenciesSatisfied: (request) => releaseParentsIfDependenciesSatisfied(db, control, request),
-    requestCancelParentAndChildren: (request) => requestCancelParentAndChildren(db, control, request),
-    waitForDependencies: (request) => waitForDependencies(db, request),
-    getTask: (taskId) => {
-      const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as TaskDbRow | undefined
-      return row ? mapTaskRow(row) : null
-    },
-    getAttempt: (attemptId) => {
-      const row = db.prepare('SELECT * FROM task_attempts WHERE id = ?').get(attemptId) as AttemptDbRow | undefined
-      return row ? mapAttemptRow(row) : null
-    },
-    getTaskByRunId: (runId) => getTaskByRunId(db, runId),
-    findTaskByIdentity: (request) => findTaskByIdentity(db, request),
-    findInputForRunId: (runId) => {
-      const row = db.prepare(`
-        SELECT t.input_json
-        FROM task_attempts a
-        JOIN tasks t ON t.id = a.task_id
-        WHERE a.run_id = ?
-        LIMIT 1
-      `).get(runId) as { input_json: string } | undefined
-      return row ? parseJson(row.input_json) : null
-    },
-    listTasksForWorkflow: (workflow) => listTasksForWorkflow(db, workflow),
-    listAttemptsForTask: (taskId) => {
-      const rows = db.prepare(`
-        SELECT *
-        FROM task_attempts
-        WHERE task_id = ?
-        ORDER BY attempt_no ASC
-      `).all(taskId) as AttemptDbRow[]
-      return rows.map(mapAttemptRow)
-    },
-    returnTaskToQueued: (request) => returnTaskToQueued(db, control, request),
-    recoverClaimsForDeadWorkers: (request) => recoverClaimsForDeadWorkers(db, control, request),
-    countQueued: (workflow) => countQueued(db, workflow),
+    enqueueTasks: <T>(request: EnqueueTasksRequest<T>) => enqueueTasks(db, control, request),
+    claimNextTask: bindControl(claimNextTask),
+    markTaskRunning: bindControl(markTaskRunning),
+    markTaskDone: bindControl(markTaskDone),
+    markTaskFailed: bindControl(markTaskFailed),
+    markTaskCancelled: bindControl(markTaskCancelled),
+    requestCancelTask: bindControl(requestCancelTask),
+    retryTaskFromAttempt: bindControl(retryTaskFromAttempt),
+    createDependency: bindControl(createDependency),
+    markDependencyFromChildTerminal: bindControl(markDependencyFromChildTerminal),
+    releaseParentsIfDependenciesSatisfied: bindControl(releaseParentsIfDependenciesSatisfied),
+    requestCancelParentAndChildren: bindControl(requestCancelParentAndChildren),
+    waitForDependencies: bindDb(waitForDependencies),
+    getTask: bindDb(getTask),
+    getAttempt: bindDb(getAttempt),
+    getTaskByRunId: bindDb(getTaskByRunId),
+    findTaskByIdentity: bindDb(findTaskByIdentity),
+    findInputForRunId: bindDb(findInputForRunId),
+    listTasksForWorkflow: bindDb(listTasksForWorkflow),
+    listAttemptsForTask: bindDb(listAttemptsForTask),
+    returnTaskToQueued: bindControl(returnTaskToQueued),
+    recoverClaimsForDeadWorkers: bindControl(recoverClaimsForDeadWorkers),
+    countQueued: bindDb(countQueued),
   }
   return store
-}
-
-function getTaskByRunId(db: Database, runId: string): TaskRow | null {
-  const row = db.prepare(`
-    SELECT t.*
-    FROM task_attempts a
-    JOIN tasks t ON t.id = a.task_id
-    WHERE a.run_id = ?
-    LIMIT 1
-  `).get(runId) as TaskDbRow | undefined
-  return row ? mapTaskRow(row) : null
-}
-
-function findTaskByIdentity(
-  db: Database,
-  request: { workflow: string; itemId: string; runId?: string },
-): TaskRow | null {
-  const row = request.runId
-    ? db.prepare(`
-        SELECT t.*
-        FROM task_attempts a
-        JOIN tasks t ON t.id = a.task_id
-        WHERE t.workflow = @workflow
-          AND t.item_id = @itemId
-          AND a.run_id = @runId
-        ORDER BY a.attempt_no DESC
-        LIMIT 1
-      `).get(request) as TaskDbRow | undefined
-    : db.prepare(`
-        SELECT *
-        FROM tasks
-        WHERE workflow = @workflow AND item_id = @itemId
-        ORDER BY COALESCE(enqueued_at, created_at) DESC
-        LIMIT 1
-      `).get(request) as TaskDbRow | undefined
-  return row ? mapTaskRow(row) : null
-}
-
-function listTasksForWorkflow(db: Database, workflow: string): TaskRow[] {
-  const rows = db.prepare(`
-    SELECT *
-    FROM tasks
-    WHERE workflow = ?
-    ORDER BY COALESCE(enqueued_at, created_at) ASC, rowid ASC
-  `).all(workflow) as TaskDbRow[]
-  return rows.map(mapTaskRow)
-}
-
-function countQueued(db: Database, workflow: string): number {
-  const row = db.prepare(`
-    SELECT COUNT(*) AS depth
-    FROM tasks
-    WHERE workflow = @workflow
-      AND task_kind = 'workflow_item'
-      AND source = 'daemon'
-      AND control_state = 'queued'
-  `).get({ workflow }) as { depth: number } | undefined
-  return row?.depth ?? 0
 }
