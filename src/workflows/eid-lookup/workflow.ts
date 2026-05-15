@@ -398,7 +398,7 @@ export const eidLookupCrmWorkflow = defineWorkflow({
     }
     const sdcmp = await ctx.step("searching", async () => searchingStep(ctx, input));
     if (isEidInput(input)) {
-      ctx.skipStep?.("cross-verification");
+      ctx.skipStep("cross-verification");
       await ctx.step("active-status", async () => activeStatusStep(ctx, input, sdcmp));
       return;
     }
