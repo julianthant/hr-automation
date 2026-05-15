@@ -19,7 +19,7 @@ import {
   EmergencyContactSchema,
   type EmergencyContactRecord,
 } from "../../../workflows/emergency-contact/schema.js";
-import { MatchStateSchema, VerificationSchema } from "./shared.js";
+import { LLM_HIGH_CONFIDENCE, MatchStateSchema, VerificationSchema } from "./shared.js";
 
 // ─── Permissive OCR-pass schema ────────────────────────────
 
@@ -93,7 +93,6 @@ Field-level rules:
 - Output ONLY valid JSON matching the schema. No commentary.`;
 
 const ROSTER_AUTO_ACCEPT = 0.85;
-const LLM_HIGH_CONFIDENCE = 0.6;
 
 // ─── Spec ──────────────────────────────────────────────────
 

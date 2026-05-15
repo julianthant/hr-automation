@@ -12,7 +12,7 @@ import { normalizeUcpathEmployeeId } from "../../../domain/identity/eid.js";
 import { normalizePersonNameForCompare } from "../../../domain/identity/person-name.js";
 import type { OcrFormSpec, LookupKind } from "../../../workflows/ocr/types.js";
 import type { OathSignatureInput } from "../../../workflows/oath-signature/schema.js";
-import { MatchStateSchema, VerificationSchema } from "./shared.js";
+import { LLM_HIGH_CONFIDENCE, MatchStateSchema, VerificationSchema } from "./shared.js";
 
 // ─── OCR-pass record (one row of a paper roster) ──────────
 
@@ -102,7 +102,6 @@ Output ONLY the valid JSON array. No commentary, no markdown fences, no wrapper 
 const NAME_AUTO_ACCEPT_GAP = 0.10;
 const NAME_DISAMBIG_FLOOR = 0.40;
 const OCR_NAME_CONFIDENCE_DISAMBIG_SKIP = 0.85;
-const LLM_HIGH_CONFIDENCE = 0.6;
 
 // ─── Spec implementation ────────────────────────────────────
 
