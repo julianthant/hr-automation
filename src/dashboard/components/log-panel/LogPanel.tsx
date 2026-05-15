@@ -75,6 +75,13 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
     () => (siblings ?? []).map((s) => s.id).sort().join("|"),
     [siblings],
   );
+  const siblingStatusKey = useMemo(
+    () => [
+      entry ? `${entry.id}:${entry.runId ?? ""}:${entry.status}:${entry.step ?? ""}` : "",
+      ...(siblings ?? []).map((s) => `${s.id}:${s.runId ?? ""}:${s.status}:${s.step ?? ""}`),
+    ].sort().join("|"),
+    [entry?.id, entry?.runId, entry?.status, entry?.step, siblings],
+  );
 
   // Fetch runs when entry changes or a new run appears. When siblings are
   // present (merged-entry group), fetch each member's runs and pool them
@@ -143,15 +150,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
     };
 
     fetchRuns();
-    // Poll for new runs while ANY member of the group is running/pending —
-    // a sibling can transition while this primary is terminal, and the
-    // pooled run list needs to reflect that.
-    const anyLive =
-      entry.status === "running" || entry.status === "pending" ||
-      (siblings ?? []).some((s) => s.status === "running" || s.status === "pending");
-    const interval = anyLive ? setInterval(fetchRuns, 2_000) : undefined;
-    return () => { if (interval) clearInterval(interval); };
-  }, [entry?.id, entry?.runId, entry?.status, entry?.workflow, workflow, date, siblingIdsKey]);
+  }, [entry?.id, entry?.runId, entry?.workflow, workflow, date, siblingIdsKey, siblingStatusKey]);
 
   // Use the entry's own workflow when present (cross-workflow rows: OCR
   // prep rows surface in oath-signature/emergency-contact queues, but
