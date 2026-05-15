@@ -504,7 +504,10 @@ export class Session {
           minHeight: string
         }
         const saved: Saved[] = []
-        for (const el of Array.from(document.querySelectorAll<HTMLElement>('*'))) {
+        const candidates = document.querySelectorAll<HTMLElement>(
+          '[style*=overflow], .modal, iframe, [class*=scroll], [class*=Scroll]',
+        )
+        for (const el of Array.from(candidates)) {
           const s = getComputedStyle(el)
           const scrolls =
             (s.overflowY === 'auto' || s.overflowY === 'scroll' || s.overflowX === 'auto' || s.overflowX === 'scroll') &&
@@ -562,10 +565,10 @@ export class Session {
           })
         } catch { /* best-effort */ }
       }
-      // 800ms settle: Kuali's modal has a CSS height transition that 300ms
-      // (the previous value) clipped intermittently. The capture is between
-      // discrete Playwright actions, not during typing — extra 500ms is fine.
-      await page.waitForTimeout(800)
+      const maybeWaitForLoadState = page as unknown as {
+        waitForLoadState?: (state: 'networkidle', options: { timeout: number }) => Promise<void>
+      }
+      await maybeWaitForLoadState.waitForLoadState?.('networkidle', { timeout: 1_000 }).catch(() => {})
       const buf = await page.screenshot({ path, fullPage: true })
       return buf
     } finally {
