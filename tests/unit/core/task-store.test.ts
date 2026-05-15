@@ -123,6 +123,29 @@ test('retryTaskFromAttempt creates a new attempt on the same task', () => {
   }
 })
 
+test('retryTaskFromAttempt preserves parentRunId for delegated child tasks', () => {
+  const { dir, store } = openTempStore()
+  try {
+    const parentRunId = 'ocr-parent-run#1'
+    const [queued] = store.enqueueTasks({
+      workflow: 'wf',
+      inputs: [{ id: 'child' }],
+      deriveItemId: (x) => x.id,
+      parentRunId,
+      now: iso(0),
+    })
+    store.markTaskFailed({ taskId: queued.taskId, attemptId: queued.attemptId, error: 'boom', now: iso(1) })
+
+    const retry = store.retryTaskFromAttempt({ runId: queued.runId, now: iso(2) })
+
+    assert.equal(retry.parentRunId, parentRunId)
+    assert.equal(store.getTask(queued.taskId)?.parentRunId, parentRunId)
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('dependency waiting blocks parent claim and releases after child success', () => {
   const { dir, store } = openTempStore()
   try {

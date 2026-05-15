@@ -70,6 +70,7 @@ export interface EnqueuedTask {
   attemptId: string
   runId: string
   position: number
+  parentRunId?: string
 }
 
 export interface EnqueueTasksRequest<T> {

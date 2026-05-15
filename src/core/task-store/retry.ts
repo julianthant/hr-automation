@@ -13,12 +13,17 @@ export function retryTaskFromAttempt(
   const now = request.now ?? new Date().toISOString()
   return control.transaction(() => {
     const prior = db.prepare(`
-      SELECT a.*, t.workflow, t.item_id, t.input_json
+      SELECT a.*, t.workflow, t.item_id, t.input_json, t.parent_run_id
       FROM task_attempts a
       JOIN tasks t ON t.id = a.task_id
       WHERE a.run_id = @runId
       LIMIT 1
-    `).get({ runId: request.runId }) as (AttemptDbRow & { workflow: string; item_id: string; input_json: string }) | undefined
+    `).get({ runId: request.runId }) as (AttemptDbRow & {
+      workflow: string
+      item_id: string
+      input_json: string
+      parent_run_id: string | null
+    }) | undefined
     if (!prior) throw new Error(`No task attempt found for runId ${request.runId}`)
     const nextAttemptNo = ((db.prepare(`
       SELECT COALESCE(MAX(attempt_no), 0) AS n
@@ -57,6 +62,7 @@ export function retryTaskFromAttempt(
           cancel_reason = NULL,
           terminal_at = NULL,
           terminal_error = NULL,
+          parent_run_id = parent_run_id,
           updated_at = @now
       WHERE id = @taskId
     `).run({ taskId: prior.task_id, runId, attemptId, now })
@@ -75,6 +81,7 @@ export function retryTaskFromAttempt(
       attemptId,
       runId,
       position,
+      ...(prior.parent_run_id ? { parentRunId: prior.parent_run_id } : {}),
     }
   })
 }
