@@ -27,7 +27,7 @@ const oathSignatureSteps = ["ocr", "ucpath-auth", "transaction"] as const;
  * `{emplId, date?}` item, and the daemon processes them sequentially on one
  * browser — or fans out across N daemons with `--parallel`.
  *
- * `betweenItems: ["reset-browsers"]` keeps the browser but resets it to
+ * `betweenItems: ["reset"]` keeps the browser but resets it to
  * `about:blank` between items so a stuck Person Profile page from item N
  * doesn't leak into item N+1's navigation.
  */
@@ -53,7 +53,7 @@ export const oathSignatureWorkflow = defineWorkflow({
   batch: {
     mode: "sequential",
     preEmitPending: true,
-    betweenItems: ["reset-browsers"],
+    betweenItems: ["reset"],
   },
   detailFields: [
     { key: "name", label: "Employee" },

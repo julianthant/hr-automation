@@ -116,7 +116,7 @@ export async function runUcpathTransaction(
 
     // In batch mode, navigate UCPath back to Smart HR base URL so the next
     // doc's transaction starts from a clean page. Kernel's between-items
-    // reset-browsers also does this via the resetUrl SystemConfig field, but
+    // reset also does this via the resetUrl SystemConfig field, but
     // we do it immediately here so the current phase3 step doesn't collide
     // with a confirmation modal left over on the page.
     if (ctx.isBatch) {

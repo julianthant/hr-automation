@@ -71,7 +71,7 @@ Person Profile mounts inside `#ptifrmtgtframe` (name `TargetContent`), **not**
 | `systems`     | `[ucpath]`                                                                     | One auth domain, one Duo.                                                             |
 | `steps`       | `["ucpath-auth", "transaction"]`                                               | Matches `work-study` — auth phase + the single PeopleSoft transaction.                |
 | `schema`      | `{ emplId, date? }`                                                            | EID is required; `date` defaults to UCPath's today-prefill on the detail form.        |
-| `batch`       | `{ mode: "sequential", preEmitPending: true, betweenItems: ["reset-browsers"] }` | Daemon reuses the browser across items; `reset-browsers` prevents page-state leak.   |
+| `batch`       | `{ mode: "sequential", preEmitPending: true, betweenItems: ["reset"] }` | Daemon reuses the browser across items; `reset` prevents page-state leak.   |
 | `tiling`      | `"single"`                                                                     | One browser window.                                                                   |
 | `authChain`   | `"sequential"`                                                                 | Single system, no chain to interleave.                                                |
 | `detailFields`| Employee / Empl ID / Signature Date                                            | Dashboard detail panel populates via `ctx.updateData` in the handler.                 |

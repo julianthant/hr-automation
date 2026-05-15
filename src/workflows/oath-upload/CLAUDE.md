@@ -64,7 +64,7 @@ Before mapping a new selector, run `npm run selector:search "<intent>"`.
 | `authSteps`   | `false` (we declare `servicenow-auth` ourselves)                               |
 | `steps`       | `["servicenow-auth", "delegate-ocr", "wait-ocr-approval", "delegate-signatures", "wait-signatures", "open-hr-form", "fill-form", "submit"]` |
 | `schema`      | `{ pdfPath, pdfOriginalName, sessionId, pdfHash }`                             |
-| `batch`       | `{ mode: "sequential", preEmitPending: true, betweenItems: ["reset-browsers"] }` |
+| `batch`       | `{ mode: "sequential", preEmitPending: true, betweenItems: ["reset"] }` |
 | `tiling`      | `"single"`                                                                     |
 | `authChain`   | `"sequential"`                                                                 |
 | `detailFields`| PDF / OCR session / Signers / HR ticket # / Filed / Status                     |

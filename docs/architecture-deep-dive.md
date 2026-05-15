@@ -493,7 +493,7 @@ SIGINT handling is **owned by `withTrackedWorkflow`** in this mode — it writes
 3. Optionally pre-emit `pending` rows for every item (if preEmitPending)
 4. Session.launch(systems) ONCE — shared across all items
 5. For each item i:
-   a. If i > 0 and betweenItems hooks set: reset-browsers / navigate-home / health-check
+   a. If i > 0 and betweenItems hooks set: reset / health-check
    b. withLogContext → withTrackedWorkflow → new Stepper → makeCtx → handler(ctx, item)
    c. Catch per-item errors so the batch continues
 6. session.close() when done

@@ -173,7 +173,7 @@ export const separationsWorkflow = defineWorkflow({
   authChain: "parallel-staggered",
   batch: {
     mode: "sequential",
-    betweenItems: ["reset-browsers"],
+    betweenItems: ["reset"],
   },
   // EID is the dashboard's "Copy from prior run" lookup key. When an
   // operator opens the Edit Data tab on a row whose `data.eid` is
