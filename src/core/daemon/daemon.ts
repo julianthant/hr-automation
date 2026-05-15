@@ -77,6 +77,26 @@ export type DaemonPhase =
   | 'draining'       // shutdown, finishing in-flight teardown
   | 'exited'         // terminal
 
+type DaemonInFlight = { itemId: string; runId: string; taskId?: string; attemptId?: string }
+
+interface DaemonState {
+  wakeResolve: (() => void) | null
+  shutdownResolve: (() => void) | null
+  forceShutdown: boolean
+  drainOnlyShutdown: boolean
+  shuttingDown: boolean
+  inFlight: DaemonInFlight | null
+  queueDepthCache: number
+  lastActivity: number
+  phase: DaemonPhase
+  activeSession: Session | null
+  launchAbort: AbortController
+  workerStore: ControlWorkerStore | null
+  exitError: unknown
+  cancelTarget: { itemId: string; runId: string } | null
+  workflowInstanceForCleanup: string | null
+}
+
 /**
  * Long-running daemon loop. Must be invoked from a DETACHED process via
  * `src/cli-daemon.ts`. Owns:
@@ -105,50 +125,52 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   ensureDaemonsDir(trackerDir)
   const instanceId = randomInstanceId(wf.config.name)
 
-  let wakeResolve: (() => void) | null = null
-  let shutdownResolve: (() => void) | null = null
-  let forceShutdown = false
-  let drainOnlyShutdown = false
-  let shuttingDown = false
-  let inFlight: { itemId: string; runId: string; taskId?: string; attemptId?: string } | null = null
-  let queueDepthCache = 0
-  let lastActivity = Date.now()
-  let phase: DaemonPhase = 'launching'
-  // Session reference exposed to the /status handler so the dashboard
-  // (and the spawn pre-check in `daemon-registry`) can inventory which
-  // chromium PIDs belong to this daemon. Assigned inside the
-  // `withBatchLifecycle` body once `Session.launch` resolves; remains
-  // null during `phase === 'launching'`. Force-stop paths can also read
-  // it to SIGTERM/SIGKILL chromium directly.
-  let activeSession: Session | null = null
-  const launchAbort = new AbortController()
-  let workerStore: ControlWorkerStore | null = null
-  let exitError: unknown = null
-  // Cooperative-cancel signal for the in-flight item. Set by the
-  // POST /cancel-current handler when itemId+runId match the current
-  // in-flight item; cleared after the next item starts. Stepper checks
-  // this at every step boundary and throws CancelledError.
-  let cancelTarget: { itemId: string; runId: string } | null = null
-  // Captured from the withBatchLifecycle body callback so the outer
-  // finally cleanup can emit `item_cancelled` session events for any
-  // in-flight or queued items it marks as cancelled. Stays null if the
-  // body never ran (e.g. session.launch threw before the callback).
-  let workflowInstanceForCleanup: string | null = null
+  const state: DaemonState = {
+    wakeResolve: null,
+    shutdownResolve: null,
+    forceShutdown: false,
+    drainOnlyShutdown: false,
+    shuttingDown: false,
+    inFlight: null,
+    queueDepthCache: 0,
+    lastActivity: Date.now(),
+    phase: 'launching',
+    // Session reference exposed to the /status handler so the dashboard
+    // (and the spawn pre-check in `daemon-registry`) can inventory which
+    // chromium PIDs belong to this daemon. Assigned inside the
+    // `withBatchLifecycle` body once `Session.launch` resolves; remains
+    // null during `phase === 'launching'`. Force-stop paths can also read
+    // it to SIGTERM/SIGKILL chromium directly.
+    activeSession: null,
+    launchAbort: new AbortController(),
+    workerStore: null,
+    exitError: null,
+    // Cooperative-cancel signal for the in-flight item. Set by the
+    // POST /cancel-current handler when itemId+runId match the current
+    // in-flight item; cleared after the next item starts. Stepper checks
+    // this at every step boundary and throws CancelledError.
+    cancelTarget: null,
+    // Captured from the withBatchLifecycle body callback so the outer
+    // finally cleanup can emit `item_cancelled` session events for any
+    // in-flight or queued items it marks as cancelled. Stays null if the
+    // body never ran (e.g. session.launch threw before the callback).
+    workflowInstanceForCleanup: null,
+  }
   const setPhase = (next: DaemonPhase): void => {
-    if (phase === next) return
-    const prev = phase
-    phase = next
+    if (state.phase === next) return
+    const prev = state.phase
+    state.phase = next
     log.step(`[Daemon ${wf.config.name}/${instanceId}] phase: ${prev} → ${next}`)
-    if (workflowInstanceForCleanup && (next === 'idle' || next === 'keepalive')) {
-      emitDaemonPhase(workflowInstanceForCleanup, next, trackerDir)
+    if (state.workflowInstanceForCleanup && (next === 'idle' || next === 'keepalive')) {
+      emitDaemonPhase(state.workflowInstanceForCleanup, next, trackerDir)
     }
   }
 
   const abortLaunchAndKillSession = (reason: string): void => {
-    if (!launchAbort.signal.aborted) {
-      launchAbort.abort(new Error(reason))
+    if (!state.launchAbort.signal.aborted) {
+      state.launchAbort.abort(new Error(reason))
     }
-    const session = activeSession
+    const session = state.activeSession
     if (!session) return
     session.killChromeHard(2_000).catch((err) => {
       log.warn(
@@ -169,7 +191,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
    * work continue silently."
    */
   const interruptInFlightWork = (): void => {
-    const session = activeSession
+    const session = state.activeSession
     if (!session) return
     for (const sys of wf.config.systems) {
       ;(async (): Promise<void> => {
@@ -190,18 +212,18 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   const { listenPromise } = startDaemonHttpServer({
     workflowName: wf.config.name,
     instanceId,
-    getPhase: () => phase,
-    getQueueDepthCache: () => queueDepthCache,
-    getInFlight: () => inFlight,
-    getLastActivity: () => lastActivity,
-    getActiveSession: () => activeSession,
-    getWorkerStore: () => workerStore,
-    setCancelTarget: (target) => { cancelTarget = target },
-    setForceShutdown: (value) => { forceShutdown = value },
-    setDrainOnlyShutdown: (value) => { drainOnlyShutdown = value },
-    setShuttingDown: (value) => { shuttingDown = value },
-    resolveWake: () => { wakeResolve?.() },
-    resolveShutdown: () => { shutdownResolve?.() },
+    getPhase: () => state.phase,
+    getQueueDepthCache: () => state.queueDepthCache,
+    getInFlight: () => state.inFlight,
+    getLastActivity: () => state.lastActivity,
+    getActiveSession: () => state.activeSession,
+    getWorkerStore: () => state.workerStore,
+    setCancelTarget: (target) => { state.cancelTarget = target },
+    setForceShutdown: (value) => { state.forceShutdown = value },
+    setDrainOnlyShutdown: (value) => { state.drainOnlyShutdown = value },
+    setShuttingDown: (value) => { state.shuttingDown = value },
+    resolveWake: () => { state.wakeResolve?.() },
+    resolveShutdown: () => { state.shutdownResolve?.() },
     abortLaunchAndKillSession,
     interruptInFlightWork,
   })
@@ -222,8 +244,8 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   writeLockfile(lock, lockPath)
   const controlDb = openControlDb({ trackerDir })
   const taskStore = createTaskStore(controlDb)
-  workerStore = createWorkerStore(controlDb)
-  workerStore.registerWorker({
+  state.workerStore = createWorkerStore(controlDb)
+  state.workerStore.registerWorker({
     workerId: instanceId,
     workflow: wf.config.name,
     kind: 'daemon',
@@ -233,7 +255,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     port,
     instanceId,
     lockfilePath: lockPath,
-    phase,
+    phase: state.phase,
     // Short TTL so the dashboard's stale-daemon detection drops dead
     // workers from the session panel within ~15s instead of ~30s. Daemon
     // emits a heartbeat every 5s (heartbeatIntervalMs default), so 15s =
@@ -255,7 +277,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   // lockfile within a beat; the writeLockfile cost is ~1KB synchronous
   // disk I/O on a 10s cadence — negligible.
   const lockHealInterval = setInterval(() => {
-    if (shuttingDown) return
+    if (state.shuttingDown) return
     try {
       if (!existsSync(lockPath)) {
         log.warn(
@@ -274,13 +296,13 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   lockHealInterval.unref()
   const emitWorkerHeartbeat = (): void => {
     try {
-      workerStore?.heartbeatWorker({
+      state.workerStore?.heartbeatWorker({
         workerId: instanceId,
-        phase,
-        currentTaskId: inFlight?.taskId ?? null,
-        currentAttemptId: inFlight?.attemptId ?? null,
-        queueDepth: queueDepthCache,
-        payload: { itemId: inFlight?.itemId ?? null, runId: inFlight?.runId ?? null },
+        phase: state.phase,
+        currentTaskId: state.inFlight?.taskId ?? null,
+        currentAttemptId: state.inFlight?.attemptId ?? null,
+        queueDepth: state.queueDepthCache,
+        payload: { itemId: state.inFlight?.itemId ?? null, runId: state.inFlight?.runId ?? null },
       })
     } catch (err) {
       log.warn(
@@ -294,12 +316,12 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
 
   const sigHandler = (sig: string): void => {
     log.warn(`[Daemon ${wf.config.name}/${instanceId}] received ${sig}; shutting down`)
-    shuttingDown = true
-    forceShutdown = true
-    drainOnlyShutdown = false
+    state.shuttingDown = true
+    state.forceShutdown = true
+    state.drainOnlyShutdown = false
     abortLaunchAndKillSession(`Daemon received ${sig}`)
-    shutdownResolve?.()
-    wakeResolve?.()
+    state.shutdownResolve?.()
+    state.wakeResolve?.()
   }
   const onSigint = (): void => sigHandler('SIGINT')
   const onSigterm = (): void => sigHandler('SIGTERM')
@@ -323,80 +345,81 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   let lastRegisteredInFlight: { itemId: string; runId: string; taskId?: string; attemptId?: string } | null | undefined = undefined
   let browsersRegistered = false
   const registerBrowserProcesses = (): void => {
-    if (!activeSession || !workerStore) return
+    if (!state.activeSession || !state.workerStore) return
     // Skip if pids are already registered for the same inFlight task.
-    if (browsersRegistered && inFlight === lastRegisteredInFlight) return
-    for (const [systemId, pid] of Object.entries(activeSession.chromePids)) {
+    if (browsersRegistered && state.inFlight === lastRegisteredInFlight) return
+    for (const [systemId, pid] of Object.entries(state.activeSession.chromePids)) {
       const sys = wf.config.systems.find((s) => s.id === systemId)
-      workerStore.upsertBrowserProcess({
+      state.workerStore.upsertBrowserProcess({
         workerId: instanceId,
         workflow: wf.config.name,
         systemId,
         browserId: systemId,
         pid,
-        ...(inFlight?.taskId ? { taskId: inFlight.taskId } : {}),
-        ...(inFlight?.attemptId ? { attemptId: inFlight.attemptId } : {}),
+        ...(state.inFlight?.taskId ? { taskId: state.inFlight.taskId } : {}),
+        ...(state.inFlight?.attemptId ? { attemptId: state.inFlight.attemptId } : {}),
         ...(sys?.sessionDir ? { sessionDir: sys.sessionDir } : {}),
       })
     }
     browsersRegistered = true
-    lastRegisteredInFlight = inFlight
+    lastRegisteredInFlight = state.inFlight
   }
 
   const handleCommand = async (command: WorkerCommandRow): Promise<void> => {
+    const workerStore = state.workerStore
     if (!workerStore) return
     try {
       if (command.commandType === 'cancel_task') {
         if (
-          !inFlight ||
-          (command.targetTaskId && command.targetTaskId !== inFlight.taskId) ||
-          (command.targetAttemptId && command.targetAttemptId !== inFlight.attemptId)
+          !state.inFlight ||
+          (command.targetTaskId && command.targetTaskId !== state.inFlight.taskId) ||
+          (command.targetAttemptId && command.targetAttemptId !== state.inFlight.attemptId)
         ) {
           workerStore.failCommand(command.commandId, 'task not in flight on this worker')
           return
         }
         workerStore.acknowledgeCommand(command.commandId, instanceId)
-        cancelTarget = { itemId: inFlight.itemId, runId: inFlight.runId }
+        state.cancelTarget = { itemId: state.inFlight.itemId, runId: state.inFlight.runId }
         workerStore.completeCommand(command.commandId)
         return
       }
       if (command.commandType === 'force_stop_task') {
         if (
-          !inFlight ||
-          (command.targetTaskId && command.targetTaskId !== inFlight.taskId) ||
-          (command.targetAttemptId && command.targetAttemptId !== inFlight.attemptId)
+          !state.inFlight ||
+          (command.targetTaskId && command.targetTaskId !== state.inFlight.taskId) ||
+          (command.targetAttemptId && command.targetAttemptId !== state.inFlight.attemptId)
         ) {
           workerStore.failCommand(command.commandId, 'task not in flight on this worker')
           return
         }
         workerStore.acknowledgeCommand(command.commandId, instanceId)
-        cancelTarget = { itemId: inFlight.itemId, runId: inFlight.runId }
-        forceShutdown = true
-        drainOnlyShutdown = false
-        shuttingDown = true
+        state.cancelTarget = { itemId: state.inFlight.itemId, runId: state.inFlight.runId }
+        state.forceShutdown = true
+        state.drainOnlyShutdown = false
+        state.shuttingDown = true
         workerStore.markWorkerStatus({ workerId: instanceId, status: 'draining', phase: 'draining' })
         abortLaunchAndKillSession('Daemon force-stop task requested')
-        shutdownResolve?.()
-        wakeResolve?.()
+        state.shutdownResolve?.()
+        state.wakeResolve?.()
         workerStore.completeCommand(command.commandId)
         return
       }
       if (command.commandType === 'drain_worker') {
         workerStore.acknowledgeCommand(command.commandId, instanceId)
         workerStore.markWorkerStatus({ workerId: instanceId, status: 'draining', phase: 'draining' })
-        drainOnlyShutdown = true
-        shuttingDown = true
-        wakeResolve?.()
+        state.drainOnlyShutdown = true
+        state.shuttingDown = true
+        state.wakeResolve?.()
         workerStore.completeCommand(command.commandId)
         return
       }
       if (command.commandType === 'stop_worker') {
         workerStore.acknowledgeCommand(command.commandId, instanceId)
-        forceShutdown = true
-        drainOnlyShutdown = false
-        shuttingDown = true
-        wakeResolve?.()
-        shutdownResolve?.()
+        state.forceShutdown = true
+        state.drainOnlyShutdown = false
+        state.shuttingDown = true
+        state.wakeResolve?.()
+        state.shutdownResolve?.()
         abortLaunchAndKillSession('Daemon worker stop requested')
         workerStore.completeCommand(command.commandId)
         return
@@ -426,9 +449,9 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
       }
       if (command.commandType === 'health_check') {
         workerStore.acknowledgeCommand(command.commandId, instanceId)
-        if (!activeSession) throw new Error('session not ready')
+        if (!state.activeSession) throw new Error('session not ready')
         for (const sys of wf.config.systems) {
-          await activeSession.healthCheck(sys.id)
+          await state.activeSession.healthCheck(sys.id)
         }
         workerStore.completeCommand(command.commandId)
       }
@@ -438,8 +461,8 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   }
 
   const pollWorkerCommands = async (): Promise<void> => {
-    if (!workerStore) return
-    const commands = workerStore.listQueuedCommandsForWorker(instanceId)
+    if (!state.workerStore) return
+    const commands = state.workerStore.listQueuedCommandsForWorker(instanceId)
     for (const command of commands) {
       await handleCommand(command)
     }
@@ -449,11 +472,11 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     const alive = await findAliveDaemons(wf.config.name, trackerDir)
     const aliveSet = new Set(alive.map((d) => d.instanceId))
     aliveSet.add(instanceId)
-    const staleWorkers = workerStore
-      ? workerStore.listStaleWorkers({}).filter((w) => w.workflow === wf.config.name && w.workerId !== instanceId)
+    const staleWorkers = state.workerStore
+      ? state.workerStore.listStaleWorkers({}).filter((w) => w.workflow === wf.config.name && w.workerId !== instanceId)
       : []
     for (const stale of staleWorkers) {
-      workerStore?.markWorkerStatus({ workerId: stale.workerId, status: 'stale', phase: stale.phase })
+      state.workerStore?.markWorkerStatus({ workerId: stale.workerId, status: 'stale', phase: stale.phase })
       aliveSet.delete(stale.workerId)
     }
     return recoverOrphanedClaims(wf.config.name, aliveSet, trackerDir)
@@ -481,7 +504,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         ownSigint: false,
       },
       async ({ instance, markTerminated, makeObserver }) => {
-        workflowInstanceForCleanup = instance
+        state.workflowInstanceForCleanup = instance
         const { observer, getAuthTimings } = makeObserver('1')
         setPhase('authenticating')
         let session: Session
@@ -489,16 +512,16 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           session = await launchFn(wf.config.systems, {
             authChain: wf.config.authChain,
             observer,
-            abortSignal: launchAbort.signal,
+            abortSignal: state.launchAbort.signal,
             onReady: (readySession) => {
-              activeSession = readySession
+              state.activeSession = readySession
               registerBrowserProcesses()
             },
           })
           // Expose to the /status handler + force-stop path. Cleared in
           // the outer `finally` to avoid a stale reference outliving the
           // session's lifetime.
-          activeSession = session
+          state.activeSession = session
           registerBrowserProcesses()
           // Force every system's auth to complete at daemon startup so the
           // claim loop doesn't race with in-progress Duo prompts. Rejections
@@ -513,11 +536,11 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
             emitUcpathIdleSignal(instance, trackerDir, 'touch')
           }
         } catch (e) {
-          if (shuttingDown && launchAbort.signal.aborted) {
+          if (state.shuttingDown && state.launchAbort.signal.aborted) {
             log.warn(
               `[Daemon ${wf.config.name}/${instanceId}] auth/launch aborted by shutdown`,
             )
-            activeSession = null
+            state.activeSession = null
             return
           }
           // Surface the failure with structured context so `npm run <wf>:attach`
@@ -526,7 +549,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           // launch fault (ProcessSingleton, etc.).
           const summary = e instanceof Error ? (e.message ?? String(e)) : String(e)
           log.error(
-            `[Daemon ${wf.config.name}/${instanceId}] auth/launch failed during phase='${phase}' — ${summary}`,
+            `[Daemon ${wf.config.name}/${instanceId}] auth/launch failed during phase='${state.phase}' — ${summary}`,
           )
           throw e
         }
@@ -554,13 +577,13 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           // bother resetting browsersRegistered / lastRegisteredInFlight
           // here (they'd be dead-code resets). The disconnect just
           // triggers shutdown; the OS reclaims the daemon's state.
-          if (shuttingDown) return
+          if (state.shuttingDown) return
           log.warn(
             `[Daemon ${wf.config.name}/${instanceId}] browser disconnected (${systemId}); shutting down`,
           )
-          shuttingDown = true
-          shutdownResolve?.()
-          wakeResolve?.()
+          state.shuttingDown = true
+          state.shutdownResolve?.()
+          state.wakeResolve?.()
         })
 
         // Orphan recovery on startup: include self in alive set so we don't
@@ -575,11 +598,11 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         try {
           setPhase('idle')
           emitWorkerHeartbeat()
-          while (!shuttingDown) {
+          while (!state.shuttingDown) {
             await pollWorkerCommands()
-            queueDepthCache = taskStore.countQueued(wf.config.name)
+            state.queueDepthCache = taskStore.countQueued(wf.config.name)
 
-            const item = shuttingDown
+            const item = state.shuttingDown
               ? null
               : await claimNextItem(
                   wf.config.name,
@@ -598,7 +621,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 throw new Error(`Queue invariant violated: task ${item.id} missing runId at claim time`)
               }
               const runId = item.runId
-              inFlight = {
+              state.inFlight = {
                 itemId: item.id,
                 runId,
                 ...(item.taskId ? { taskId: item.taskId } : {}),
@@ -613,7 +636,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
               }
               registerBrowserProcesses()
               emitWorkerHeartbeat()
-              lastActivity = Date.now()
+              state.lastActivity = Date.now()
               // First item gets the real startup auth timings; subsequent
               // items get zero-duration synthetic timings anchored at claim
               // time so the step pipeline tiles "Authenticating (4) — 0s"
@@ -641,7 +664,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 preAssignedInstance: instance,
                 authTimings: itemAuthTimings,
                 isCancelRequested: () =>
-                  cancelTarget?.itemId === item.id && cancelTarget?.runId === runId,
+                  state.cancelTarget?.itemId === item.id && state.cancelTarget?.runId === runId,
                 ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
               })
               emitItemComplete(instance, item.id, trackerDir, runId)
@@ -660,7 +683,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
               // gets overwritten. Cancel always wins over both done and
               // failure.
               const cancelRequestedForThisItem =
-                (cancelTarget?.itemId === item.id && cancelTarget?.runId === runId) ||
+                (state.cancelTarget?.itemId === item.id && state.cancelTarget?.runId === runId) ||
                 taskStateAfterRun === 'cancelled' ||
                 taskStateAfterRun === 'cancel_requested' ||
                 taskStateAfterRun === 'cancelling'
@@ -733,8 +756,8 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                   }
                 }
               }
-              cancelTarget = null
-              inFlight = null
+              state.cancelTarget = null
+              state.inFlight = null
               setPhase('idle')
               emitWorkerHeartbeat()
               continue
@@ -742,22 +765,22 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
 
             // Idle: wait for wake OR keepalive OR shutdown.
             await new Promise<void>((resolve) => {
-              wakeResolve = (): void => {
-                wakeResolve = null
+              state.wakeResolve = (): void => {
+                state.wakeResolve = null
                 resolve()
               }
-              shutdownResolve = (): void => {
-                shutdownResolve = null
+              state.shutdownResolve = (): void => {
+                state.shutdownResolve = null
                 resolve()
               }
               setTimeout(() => {
-                wakeResolve = null
-                shutdownResolve = null
+                state.wakeResolve = null
+                state.shutdownResolve = null
                 resolve()
               }, idleTimeoutMs).unref()
             })
 
-            if (shuttingDown) break
+            if (state.shuttingDown) break
             await pollWorkerCommands()
 
             // Keepalive tick: recover orphans + healthCheck each system.
@@ -781,12 +804,12 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           // Clear the /status reference so a request that races between
           // session close and lockfile unlink doesn't see a stale Session
           // and try to read its (now-empty) chromePids.
-          activeSession = null
+          state.activeSession = null
         }
       },
     )
   } catch (err) {
-    exitError = err
+    state.exitError = err
     throw err
   } finally {
     // Orphan-queue cleanup runs here (outer finally) instead of inside the
@@ -805,12 +828,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
       // see assignments inside the async body callback (different closure),
       // so without the local + cast it narrows `inFlight` to `null` here
       // even though the body may have set it.
-      const inFlightSnapshot = inFlight as {
-        itemId: string
-        runId: string
-        taskId?: string
-        attemptId?: string
-      } | null
+      const inFlightSnapshot = state.inFlight
       if (inFlightSnapshot) {
         const existingTask = inFlightSnapshot.taskId ? taskStore.getTask(inFlightSnapshot.taskId) : null
         const trackerRoot = trackerDir ?? DEFAULT_DIR
@@ -866,74 +884,74 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         // Otherwise emit shutdown cleanup — including repair when SQLite is
         // terminal but JSONL still shows pending/running (crash window).
         if (skipShutdownEmit) {
-          inFlight = null
+          state.inFlight = null
         } else {
-        // Daemon shutdown while processing — mark the in-flight item as
-        // cancelled (not failed). All shutdown paths are user-initiated
-        // (force-stop, terminal close, SIGINT, browser disconnect), so
-        // semantically these are intentional cancellations rather than
-        // crashes. Cancelled rows display with the orange Cancelled badge
-        // (status:failed + step:cancelled is the existing tracker
-        // convention dashboards already render that way).
-        const nowIso = new Date().toISOString()
-        const cancelReason = forceShutdown
-          ? 'Daemon force-stopped while processing this item.'
-          : 'Daemon stopped while processing this item (browser closed or crashed).'
-        try {
-          await markItemCancelled(
-            wf.config.name,
-            inFlightSnapshot.itemId,
-            cancelReason,
-            inFlightSnapshot.runId,
-            trackerDir,
-          )
-        } catch {
-          /* best-effort — queue event append; tracker row below is the user-visible signal */
-        }
-        try {
-          trackEvent(
-            {
-              workflow: wf.config.name,
-              timestamp: nowIso,
-              id: inFlightSnapshot.itemId,
-              runId: inFlightSnapshot.runId,
-              status: 'failed',
-              step: 'cancelled',
-              error: cancelReason,
-            },
-            trackerDir,
-          )
-        } catch {
-          /* best-effort */
-        }
-        try {
-          // Best-effort emit; if the daemon never reached the
-          // withBatchLifecycle body (e.g. session.launch threw), the
-          // closure variable was never assigned and we skip the event —
-          // the tracker row above is the authoritative user-visible signal.
-          if (workflowInstanceForCleanup) {
-            emitItemCancelled(
-              workflowInstanceForCleanup,
+          // Daemon shutdown while processing — mark the in-flight item as
+          // cancelled (not failed). All shutdown paths are user-initiated
+          // (force-stop, terminal close, SIGINT, browser disconnect), so
+          // semantically these are intentional cancellations rather than
+          // crashes. Cancelled rows display with the orange Cancelled badge
+          // (status:failed + step:cancelled is the existing tracker
+          // convention dashboards already render that way).
+          const nowIso = new Date().toISOString()
+          const cancelReason = state.forceShutdown
+            ? 'Daemon force-stopped while processing this item.'
+            : 'Daemon stopped while processing this item (browser closed or crashed).'
+          try {
+            await markItemCancelled(
+              wf.config.name,
               inFlightSnapshot.itemId,
               cancelReason,
-              trackerDir,
               inFlightSnapshot.runId,
+              trackerDir,
             )
+          } catch {
+            /* best-effort — queue event append; tracker row below is the user-visible signal */
           }
-        } catch {
-          /* best-effort */
-        }
-        inFlight = null
+          try {
+            trackEvent(
+              {
+                workflow: wf.config.name,
+                timestamp: nowIso,
+                id: inFlightSnapshot.itemId,
+                runId: inFlightSnapshot.runId,
+                status: 'failed',
+                step: 'cancelled',
+                error: cancelReason,
+              },
+              trackerDir,
+            )
+          } catch {
+            /* best-effort */
+          }
+          try {
+            // Best-effort emit; if the daemon never reached the
+            // withBatchLifecycle body (e.g. session.launch threw), the
+            // closure variable was never assigned and we skip the event —
+            // the tracker row above is the authoritative user-visible signal.
+            if (state.workflowInstanceForCleanup) {
+              emitItemCancelled(
+                state.workflowInstanceForCleanup,
+                inFlightSnapshot.itemId,
+                cancelReason,
+                trackerDir,
+                inFlightSnapshot.runId,
+              )
+            }
+          } catch {
+            /* best-effort */
+          }
+          state.inFlight = null
         }
       }
 
       const otherAlive = (await findAliveDaemons(wf.config.name, trackerDir))
         .filter((d) => d.instanceId !== instanceId)
-      if (otherAlive.length === 0 && !drainOnlyShutdown) {
-        const state = await readQueueState(wf.config.name, trackerDir)
-        if (state.queued.length > 0) {
+      if (otherAlive.length === 0 && !state.drainOnlyShutdown) {
+        const queueState = await readQueueState(wf.config.name, trackerDir)
+        if (queueState.queued.length > 0) {
           log.warn(
-            `[Daemon ${wf.config.name}/${instanceId}] last daemon exiting with ${state.queued.length} unclaimed queue item(s); marking cancelled`,
+            `[Daemon ${wf.config.name}/${instanceId}] last daemon exiting with ${queueState.queued.length} unclaimed queue item(s); marking cancelled`,
           )
           const nowIso = new Date().toISOString()
           const cancelReason =
@@ -944,10 +962,10 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           // cancelled are no longer in `freshState.queued`, so we skip
           // them and their cancel reason is preserved on the dashboard.
           const freshState = await readQueueState(wf.config.name, trackerDir).catch(
-            () => state,
+            () => queueState,
           )
           const stillQueued = new Set(freshState.queued.map((q) => q.id))
-          for (const item of state.queued) {
+          for (const item of queueState.queued) {
             if (!stillQueued.has(item.id)) {
               // Concurrent cancel-queued already terminated this item.
               // Don't overwrite — the cancel handler's tracker row stays
@@ -991,9 +1009,9 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
               /* best-effort */
             }
             try {
-              if (workflowInstanceForCleanup) {
+              if (state.workflowInstanceForCleanup) {
                 emitItemCancelled(
-                  workflowInstanceForCleanup,
+                  state.workflowInstanceForCleanup,
                   item.id,
                   cancelReason,
                   trackerDir,
@@ -1027,9 +1045,9 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     await httpHandle.stop()
     setPhase('exited')
     try {
-      workerStore?.markWorkerStatus({
+      state.workerStore?.markWorkerStatus({
         workerId: instanceId,
-        status: forceShutdown || exitError ? 'dead' : 'stopped',
+        status: state.forceShutdown || state.exitError ? 'dead' : 'stopped',
         phase: 'exited',
       })
     } catch {
