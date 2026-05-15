@@ -49,17 +49,19 @@ test("matchRecord: no form-EID, one fuzzy roster candidate below ROSTER_AUTO_ACC
 });
 
 test("matchRecord: no form-EID, multiple fuzzy roster candidates → LLM disambiguation can pick", async () => {
+  // Two-token search name required for token-set matching. Single-token names
+  // ("Maria") no longer qualify after the duplicate-token-collapse fix.
   const ocr = {
     sourcePage: 2,
-    employee: { name: "Maria", employeeId: "" },
+    employee: { name: "Maria Garcia", employeeId: "" },
     emergencyContact: { name: "Sara Garcia", relationship: "Sister", primary: true, sameAddressAsEmployee: true, cellPhone: "(555) 123-4567" },
     notes: [], documentType: "expected" as const, originallyMissing: [],
   };
   const preview = await emergencyContactOcrFormSpec.matchRecord({
     record: ocr,
     roster: [
-      { eid: "10001234", name: "Maria Garcia" },
-      { eid: "10009999", name: "Maria Gonzalez" },
+      { eid: "10001234", name: "Maria Garcia Rodriguez" },
+      { eid: "10009999", name: "Maria Garcia Hernandez" },
     ],
   });
   assert.equal(preview.matchState, "lookup-pending");
