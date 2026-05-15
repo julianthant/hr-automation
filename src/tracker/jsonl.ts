@@ -37,6 +37,10 @@ export function dateLocal(d: Date = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+export function trackerDateForTimestamp(timestamp: string): string {
+  return dateLocal(new Date(timestamp));
+}
+
 export interface LogEntry extends Omit<Partial<StructuredLogEvent>, "level" | "message"> {
   workflow: string;
   itemId: string;
@@ -488,7 +492,7 @@ export async function withTrackedWorkflow<T>(
     if (!opts.preAssignedInstance) emitWorkflowEnd(instanceName, "failed", dir);
     const error = `Process terminated (${signal})`;
     const now = ts();
-    const date = now.slice(0, 10);
+    const date = trackerDateForTimestamp(now);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const logEntry: LogEntry = { workflow, itemId: id, runId, level: "error", message: error, ts: now };
     const trackEntry: TrackerEntry = {
