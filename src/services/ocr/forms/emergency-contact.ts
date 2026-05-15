@@ -134,7 +134,11 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
     // through to the eid-lookup branch so the downstream daemon resolves
     // the EID instead of trusting an empty string.
     const result = matchAgainstRoster(roster, record.employee.name);
-    if (result.candidates.length === 1 && result.candidates[0].eid) {
+    if (
+      result.candidates.length === 1 &&
+      result.candidates[0].eid &&
+      result.candidates[0].score >= ROSTER_AUTO_ACCEPT
+    ) {
       const top = result.candidates[0];
       const rosterRow = roster.find((r) => r.eid === top.eid);
       const addressMatch =
