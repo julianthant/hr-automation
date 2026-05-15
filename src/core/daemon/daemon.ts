@@ -596,7 +596,10 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
 
             if (item) {
               setPhase('processing')
-              const runId = item.runId ?? randomUUID()
+              if (!item.runId) {
+                throw new Error(`Queue invariant violated: task ${item.id} missing runId at claim time`)
+              }
+              const runId = item.runId
               inFlight = {
                 itemId: item.id,
                 runId,
