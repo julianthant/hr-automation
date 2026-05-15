@@ -9,6 +9,7 @@ import {
   readLogEntries,
   appendLogEntry,
   readRunsForId,
+  findLatestEntryForRunOnDate,
   serializeValue,
   toTypedValue,
   withTrackedWorkflow,
@@ -95,6 +96,22 @@ describe("JSONL tracker", () => {
 describe("tracker date selection", () => {
   it("derives SIGINT/SIGTERM file dates in local time, not UTC", () => {
     assert.equal(trackerDateForTimestamp("2026-05-15T06:30:00.000Z"), "2026-05-14");
+  });
+});
+
+describe("findLatestEntryForRunOnDate", () => {
+  beforeEach(() => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+    __resetParseCacheForTests();
+  });
+
+  it("returns the last appended matching row", () => {
+    const date = dateLocal();
+    trackEvent({ workflow: "ac", timestamp: `${date}T10:00:02.000Z`, id: "id-1", runId: "run-1", status: "running" }, TEST_DIR);
+    trackEvent({ workflow: "ac", timestamp: `${date}T10:00:01.000Z`, id: "id-1", runId: "run-1", status: "failed" }, TEST_DIR);
+
+    const latest = findLatestEntryForRunOnDate("ac", "id-1", "run-1", date, TEST_DIR);
+    assert.equal(latest?.status, "failed");
   });
 });
 

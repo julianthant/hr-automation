@@ -631,7 +631,7 @@ export function findLatestEntryForRunOnDate(
 ): TrackerEntry | undefined {
   const rows = readEntriesForDate(workflow, date, dir).filter((e) => e.id === itemId && e.runId === runId);
   if (rows.length === 0) return undefined;
-  return rows.reduce((a, b) => (a.timestamp >= b.timestamp ? a : b));
+  return rows[rows.length - 1];
 }
 
 /** Read log entries for a specific date (not just today). */
