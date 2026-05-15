@@ -1,7 +1,8 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from "fs";
+import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from "fs";
 import { join } from "path";
 import { execSync } from "child_process";
 import { randomUUID } from "node:crypto";
+import { createInterface } from "node:readline";
 import { log, setLogRunId } from "../utils/log.js";
 import { classifyError } from "../utils/errors.js";
 import { PATHS } from "../config.js";
@@ -97,6 +98,22 @@ function readJsonlCached<T>(path: string): T[] {
     if (oldestKey !== undefined) parseCache.delete(oldestKey);
   }
   return entries as T[];
+}
+
+export async function* readJsonlStream<T>(path: string): AsyncIterable<T> {
+  if (!existsSync(path)) return;
+  const lines = createInterface({
+    input: createReadStream(path, { encoding: "utf-8" }),
+    crlfDelay: Infinity,
+  });
+  try {
+    for await (const line of lines) {
+      if (!line) continue;
+      yield JSON.parse(line) as T;
+    }
+  } finally {
+    lines.close();
+  }
 }
 
 /** Test-only — reset between cases. */

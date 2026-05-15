@@ -6,7 +6,7 @@
 //   npm run clean:tracker -- --no-screenshots       # tracker only
 //   npm run clean:tracker -- --screenshots-only     # screenshots only
 
-import { existsSync, readdirSync, rmSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs as parseNodeArgs } from "node:util";
 
@@ -16,6 +16,7 @@ import {
   cleanOldScreenshots,
   dateLocal,
   DEFAULT_DIR,
+  readJsonlStream,
 } from "../../tracker/jsonl.js";
 import { pruneStateDb } from "../../tracker/state/cleanup.js";
 import { PATHS } from "../../config.js";
@@ -36,13 +37,13 @@ import { isMainModule } from "../_main.js";
  * Errors during enumeration / deletion are logged at warn and don't
  * throw — startup must never fail because of disk hygiene.
  */
-export function sweepOrphanUploadDirs(dir: string): number {
+export async function sweepOrphanUploadDirs(dir: string): Promise<number> {
   const uploadsRoot = join(dir, "uploads");
   if (!existsSync(uploadsRoot)) return 0;
   let removed = 0;
   let knownRunIds: Set<string>;
   try {
-    knownRunIds = readPrepRunIds(dir);
+    knownRunIds = await readPrepRunIds(dir);
   } catch (err) {
     log.warn(
       `sweepOrphanUploadDirs: failed to read prep tracker rows: ${err instanceof Error ? err.message : String(err)}`,
@@ -76,7 +77,7 @@ export function sweepOrphanUploadDirs(dir: string): number {
  * entry across the two prep-using workflows. Used by the orphan-upload
  * sweep to decide which `.tracker/uploads/<runId>/` dirs are still live.
  */
-function readPrepRunIds(dir: string): Set<string> {
+async function readPrepRunIds(dir: string): Promise<Set<string>> {
   const runIds = new Set<string>();
   if (!existsSync(dir)) return runIds;
   let files: string[];
@@ -91,25 +92,17 @@ function readPrepRunIds(dir: string): Set<string> {
     return runIds;
   }
   for (const file of files) {
-    let raw: string;
     try {
-      raw = readFileSync(join(dir, file), "utf-8");
-    } catch {
-      continue;
-    }
-    for (const line of raw.split("\n")) {
-      if (!line) continue;
-      try {
-        const entry = JSON.parse(line) as {
-          runId?: string;
-          data?: { mode?: string };
-        };
+      for await (const entry of readJsonlStream<{
+        runId?: string;
+        data?: { mode?: string };
+      }>(join(dir, file))) {
         if (entry.data?.mode === "prepare" && entry.runId) {
           runIds.add(entry.runId);
         }
-      } catch {
-        continue;
       }
+    } catch {
+      continue;
     }
   }
   return runIds;
@@ -172,12 +165,12 @@ function parseArgs(argv: string[]): Args {
   };
 }
 
-export function cleanTrackerMain(argv: string[] = process.argv.slice(2)): {
+export async function cleanTrackerMain(argv: string[] = process.argv.slice(2)): Promise<{
   trackerDeleted: number;
   screenshotsDeleted: number;
   sessionsDeleted: number;
   sqlRowsDeleted: number;
-} {
+}> {
   const {
     days,
     dir,
@@ -232,7 +225,7 @@ export function cleanTrackerMain(argv: string[] = process.argv.slice(2)): {
     }
     // Orphan upload-dir sweep runs alongside the tracker prune — same
     // working-directory assumption, same target.
-    const uploadsRemoved = sweepOrphanUploadDirs(dir);
+    const uploadsRemoved = await sweepOrphanUploadDirs(dir);
     if (uploadsRemoved > 0) {
       log.success(
         `Removed ${uploadsRemoved} orphan upload dir${uploadsRemoved === 1 ? "" : "s"} from ${dir}/uploads`
@@ -250,6 +243,10 @@ export function cleanTrackerMain(argv: string[] = process.argv.slice(2)): {
 
 // Only run when invoked directly (not when imported by tests)
 if (isMainModule(import.meta.url)) {
-  cleanTrackerMain();
-  process.exit(0);
+  cleanTrackerMain()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      log.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    });
 }

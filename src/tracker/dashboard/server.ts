@@ -97,14 +97,13 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     } catch (err) {
       log.step(`oath-upload sweep skipped: ${err instanceof Error ? err.message : String(err)}`);
     }
-    try {
-      const removed = sweepOrphanUploadDirs(dir);
+    void sweepOrphanUploadDirs(dir).then((removed) => {
       if (removed > 0) {
         log.step(`Removed ${removed} orphan upload dir${removed === 1 ? "" : "s"} from ${dir}/uploads`);
       }
-    } catch (err) {
+    }).catch((err) => {
       log.step(`Orphan upload-dir sweep skipped: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    });
   }
 
   let projectionReady = false;
