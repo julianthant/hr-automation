@@ -1,8 +1,7 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { promises as fsp } from "node:fs";
-import { join } from "node:path";
 import { createHash } from "node:crypto";
-import type { TrackerEntry } from "../../tracker/jsonl.js";
+import { readEntriesForDate, type TrackerEntry } from "../../tracker/jsonl.js";
 
 export interface PriorRunSummary {
   sessionId: string;
@@ -41,19 +40,13 @@ export function findPriorRunsForHash(opts: FindPriorRunsOpts): PriorRunSummary[]
   // Pass 1: collect latest entry per (id, runId).
   const latestByRunKey = new Map<string, TrackerEntry>();
   for (const f of files) {
-    const path = join(dir, f);
-    let stat;
-    try { stat = statSync(path); } catch { continue; }
-    if (stat.mtimeMs < cutoffTs) break;
-    let raw;
-    try { raw = readFileSync(path, "utf-8"); } catch { continue; }
-    for (const line of raw.split("\n")) {
-      if (!line) continue;
-      let entry: TrackerEntry;
-      try { entry = JSON.parse(line); } catch { continue; }
+    const dateMatch = f.match(/^oath-upload-(\d{4}-\d{2}-\d{2})\.jsonl$/);
+    if (!dateMatch) continue;
+    const fileDate = dateMatch[1];
+    if (new Date(fileDate).getTime() < cutoffTs) break;
+    for (const entry of readEntriesForDate("oath-upload", fileDate, dir)) {
       if (!entry.id || !entry.runId) continue;
-      const key = `${entry.id}#${entry.runId}`;
-      latestByRunKey.set(key, entry);
+      latestByRunKey.set(`${entry.id}#${entry.runId}`, entry);
     }
   }
 
