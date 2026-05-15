@@ -94,7 +94,9 @@ export const crmDocDownloadWorkflow = defineWorkflow({
 });
 
 export function deriveCrmDocDownloadItemId(input: CrmDocDownloadInput): string {
-  return input.email ?? input.emplId ?? "";
+  if (input.email) return input.email;
+  if (input.emplId) return input.emplId;
+  throw new Error("crm-doc-download requires email or emplId");
 }
 
 function resolveCrmDocDownloadSearchQuery(input: CrmDocDownloadInput): string {
