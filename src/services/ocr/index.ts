@@ -1,5 +1,6 @@
 import { KeyRotation } from "./rotation.js";
 import { GeminiProvider } from "./providers/gemini.js";
+import { readGeminiKeys } from "./env-keys.js";
 import {
   OcrAllKeysExhaustedError,
   OcrProviderError,
@@ -44,22 +45,6 @@ function getProvider(): OcrProvider {
   return _provider ?? new GeminiProvider();
 }
 
-function getGeminiKeys(): string[] {
-  const keys: string[] = [];
-  for (const name of [
-    "GEMINI_API_KEY",
-    "GEMINI_API_KEY2",
-    "GEMINI_API_KEY3",
-    "GEMINI_API_KEY4",
-    "GEMINI_API_KEY5",
-    "GEMINI_API_KEY6",
-  ]) {
-    const v = process.env[name];
-    if (v && v.trim()) keys.push(v.trim());
-  }
-  return keys;
-}
-
 const MAX_VALIDATION_RETRIES = 1; // 1 retry = 2 total attempts
 
 /**
@@ -80,7 +65,7 @@ export async function ocrDocument<T>(req: OcrRequest<T>): Promise<OcrResult<T>> 
   const cacheDir = getCacheDir(); // KeyRotation persists per-key state here.
 
   const provider = getProvider();
-  const keys = provider.id === "gemini" ? getGeminiKeys() : [];
+  const keys = provider.id === "gemini" ? readGeminiKeys() : [];
   if (keys.length === 0) {
     throw new Error(`ocrDocument: no API keys configured for provider "${provider.id}"`);
   }

@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { log } from "../../utils/log.js";
+import { readGeminiKeys } from "./env-keys.js";
 
 export interface DisambiguateInput {
   query: string;
@@ -69,21 +70,6 @@ export function parseDisambiguationResponse(text: string): DisambiguateResult {
   }
 }
 
-function getGeminiKeys(): string[] {
-  const keys: string[] = [];
-  for (const name of [
-    "GEMINI_API_KEY",
-    "GEMINI_API_KEY2",
-    "GEMINI_API_KEY3",
-    "GEMINI_API_KEY4",
-    "GEMINI_API_KEY5",
-    "GEMINI_API_KEY6",
-  ]) {
-    const v = process.env[name];
-    if (v && v.trim()) keys.push(v.trim());
-  }
-  return keys;
-}
 
 /**
  * Send a disambiguation request to Gemini. Returns null EID on any
@@ -98,7 +84,7 @@ function getGeminiKeys(): string[] {
 export async function disambiguateMatch(
   input: DisambiguateInput,
 ): Promise<DisambiguateResult> {
-  const keys = getGeminiKeys();
+  const keys = readGeminiKeys();
   if (keys.length === 0) {
     log.warn(
       "disambiguateMatch: no GEMINI_API_KEY* configured, skipping LLM call",
