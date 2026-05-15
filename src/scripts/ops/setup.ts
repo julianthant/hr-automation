@@ -30,7 +30,7 @@ import { execSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
-import { isMainModule } from "../_main.js";
+import { isMainModule } from "../main-module.js";
 
 export type CheckStatus = "ok" | "warn" | "fail";
 

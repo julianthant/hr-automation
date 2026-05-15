@@ -26,7 +26,7 @@
 import { toJSONSchema } from "zod/v4";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { isMainModule } from "../_main.js";
+import { isMainModule } from "../main-module.js";
 
 // Workflow index imports populate the kernel registry as a side-effect.
 // Listed alphabetically; no need to actually use their exports here beyond the

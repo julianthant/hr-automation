@@ -227,11 +227,9 @@ describe("Duo verification code helpers", () => {
       locator: () => emptyLocator,
       getByRole: () => emptyLocator,
       getByText: () => emptyLocator,
-      waitForTimeout: async () => {
-        controller.abort(new Error("stop requested during Duo"));
-        await new Promise(() => {});
-      },
+      waitForTimeout: async () => {},
     } as unknown as import("playwright").Page;
+    setTimeout(() => controller.abort(new Error("stop requested during Duo")), 25);
 
     await assert.rejects(
       () => Promise.race([

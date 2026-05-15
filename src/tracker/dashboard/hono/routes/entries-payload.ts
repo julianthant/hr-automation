@@ -33,7 +33,7 @@ import { isResolvedPrepEntry } from "../../prep-rows.js";
 import { computeFailureCounts } from "../../failures.js";
 import { SCREENSHOTS_DIR } from "../../screenshots.js";
 import { countSidebarRowsFromTrackerHistory } from "../../../queue-row-count.js";
-import { ttlMemoize } from "../_memo.js";
+import { ttlMemoize } from "../memo.js";
 
 // ── Cross-workflow counts cache ───────────────────────────────────────────────
 
