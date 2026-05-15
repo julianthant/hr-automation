@@ -33,7 +33,7 @@ export const oathUploadWorkflow = defineWorkflow({
   batch: {
     mode: "sequential",
     preEmitPending: true,
-    betweenItems: ["reset-browsers"],
+    betweenItems: ["reset"],
   },
   detailFields: [
     { key: "pdfOriginalName", label: "PDF" },

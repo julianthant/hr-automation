@@ -127,7 +127,7 @@ test("separations shape: runWorkflowBatch (sequential) + deriveItemId threads do
     ] as const,
     schema: z.object({ docId: z.string().min(1) }),
     authChain: "interleaved",
-    batch: { mode: "sequential", preEmitPending: true, betweenItems: ["reset-browsers"] },
+    batch: { mode: "sequential", preEmitPending: true, betweenItems: ["reset"] },
     detailFields: [
       { key: "name", label: "Employee" },
       { key: "eid", label: "EID" },

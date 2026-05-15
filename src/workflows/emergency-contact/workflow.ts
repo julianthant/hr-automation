@@ -63,7 +63,7 @@ function recordItemId(r: EmergencyContactRecord): string {
  * emit the initial `pending` row with rich display fields; `withTrackedWorkflow`
  * then reuses that runId and skips its duplicate pending emit.
  *
- * `betweenItems: ["reset-browsers"]` resets UCPath to `about:blank` between
+ * `betweenItems: ["reset"]` resets UCPath to `about:blank` between
  * records so a stuck page from record N doesn't leak into record N+1's
  * `navigateToEmergencyContact`.
  */
@@ -89,7 +89,7 @@ export const emergencyContactWorkflow = defineWorkflow({
   batch: {
     mode: "sequential",
     preEmitPending: true,
-    betweenItems: ["reset-browsers"],
+    betweenItems: ["reset"],
   },
   // The batch adapter's onPreEmitPending populates all four fields up front
   // (see runEmergencyContact below) so the dashboard shows rich rows from

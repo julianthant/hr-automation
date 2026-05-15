@@ -74,7 +74,7 @@ export interface SessionObserver {
 export interface BatchConfig {
   mode: 'sequential' | 'pool' | 'shared-context-pool'
   poolSize?: number
-  betweenItems?: Array<'health-check' | 'reset-browsers' | 'navigate-home'>
+  betweenItems?: Array<'health-check' | 'reset'>
   preEmitPending?: boolean
 }
 

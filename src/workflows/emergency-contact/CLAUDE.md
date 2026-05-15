@@ -2,7 +2,7 @@
 
 Fills the Emergency Contact form in UCPath HR Tasks → Personal Data Related for every record in a batch YAML. Fully autonomous after verification: you verify the YAML once (pre-extracted by Claude reading the handwritten PDF), then the workflow runs unattended for all records.
 
-**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflowBatch` (sequential mode, `preEmitPending: true`, `betweenItems: ["reset-browsers"]`). The kernel owns browser launch, UCPath auth, per-record tracker entries, SIGINT cleanup. The CLI adapter `runEmergencyContact` owns pre-kernel phases: YAML load, optional SharePoint roster download + verify. **Add-New contact flow (when the target employee has zero existing emergency contacts) is NOT YET IMPLEMENTED** — `navigateToEmergencyContact` throws `NoExistingContactError`, the kernel records the record as `failed`, batch continues.
+**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflowBatch` (sequential mode, `preEmitPending: true`, `betweenItems: ["reset"]`). The kernel owns browser launch, UCPath auth, per-record tracker entries, SIGINT cleanup. The CLI adapter `runEmergencyContact` owns pre-kernel phases: YAML load, optional SharePoint roster download + verify. **Add-New contact flow (when the target employee has zero existing emergency contacts) is NOT YET IMPLEMENTED** — `navigateToEmergencyContact` throws `NoExistingContactError`, the kernel records the record as `failed`, batch continues.
 
 ## Selector intelligence
 
@@ -35,7 +35,7 @@ No `tracker.ts` — dashboard JSONL only (see `src/workflows/CLAUDE.md`).
 | `schema` | `RecordSchema` — each batch record is a kernel TData |
 | `authChain` | `"sequential"` |
 | `tiling` | `"single"` |
-| `batch` | `{ mode: "sequential", preEmitPending: true, betweenItems: ["reset-browsers"] }` |
+| `batch` | `{ mode: "sequential", preEmitPending: true, betweenItems: ["reset"] }` |
 | `detailFields` | `[]` — rich fields populated via `onPreEmitPending` + `updateData` |
 
 ## Data Flow

@@ -567,17 +567,18 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
         if (i === 0 || !batch?.betweenItems) return undefined
         return async () => {
           for (const hook of batch.betweenItems!) {
-            if (hook === 'reset-browsers') {
+            if (hook === 'reset') {
               const t0 = Date.now()
-              for (const s of wf.config.systems) await session.reset(s.id)
-              log.step(`[Batch] Reset browsers (took ${Date.now() - t0}ms)`)
-            } else if (hook === 'navigate-home') {
-              for (const s of wf.config.systems) await session.reset(s.id)
+              await Promise.all(wf.config.systems.map((s) => session.reset(s.id)))
+              log.step(`[Batch] Reset systems (took ${Date.now() - t0}ms)`)
             } else if (hook === 'health-check') {
-              for (const s of wf.config.systems) {
-                if (!(await session.healthCheck(s.id))) {
-                  throw new Error(`health-check failed for ${s.id}`)
-                }
+              const results = await Promise.all(wf.config.systems.map(async (s) => ({
+                id: s.id,
+                ok: await session.healthCheck(s.id),
+              })))
+              const failed = results.find((result) => !result.ok)
+              if (failed) {
+                throw new Error(`health-check failed for ${failed.id}`)
               }
             }
           }
