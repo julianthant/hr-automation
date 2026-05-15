@@ -52,7 +52,8 @@ export async function runWorkflowPool<TData, TSteps extends readonly string[]>(
       const queue: PoolItem<TData>[] = [...perItem]
 
       async function worker(index: number): Promise<void> {
-        log.step(`[Pool W${index}] Starting`)
+        const logPrefix = `[Pool W${index}]`
+        log.step(`${logPrefix} Starting`)
         const { observer, getAuthTimings } = makeObserver(`w${index}`)
         const session = await Session.launch(wf.config.systems, {
           authChain: wf.config.authChain,
@@ -64,13 +65,13 @@ export async function runWorkflowPool<TData, TSteps extends readonly string[]>(
         // own auth start/complete events; items this worker processes get
         // THIS worker's timings (matches reality — one auth per worker).
         const authTimings = wf.config.authSteps !== false ? getAuthTimings() : undefined
-        log.success(`[Pool W${index}] Session ready`)
+        log.success(`${logPrefix} Session ready`)
         try {
           while (queue.length > 0) {
             const next = queue.shift()
             if (next === undefined) break
             const remaining = queue.length
-            log.step(`[Pool W${index}] Taking item (${remaining} remaining in queue)`)
+            log.step(`${logPrefix} Taking item (${remaining} remaining in queue)`)
             const { item, itemId, runId } = next
             const r = await runOneItem({
               wf,
@@ -88,7 +89,7 @@ export async function runWorkflowPool<TData, TSteps extends readonly string[]>(
             if (r.ok) result.succeeded++
             else { result.failed++; result.errors.push({ item, error: r.error }) }
           }
-          log.step(`[Pool W${index}] Queue empty — exiting`)
+          log.step(`${logPrefix} Queue empty — exiting`)
         } finally {
           await session.close()
         }
