@@ -106,17 +106,21 @@ async function handlePrepare(
   const file = multipart.parsed.files.pdf;
   if (!file) return jsonResponse({ ok: false, error: "missing 'pdf' file part" }, 400);
 
+  const fields = multipart.parsed.fields;
+  const requestedSessionId = fields.sessionId?.trim() || undefined;
+  if (isReupload && !requestedSessionId) {
+    return jsonResponse({ ok: false, error: "sessionId required for reupload" }, 400);
+  }
+
   const uploadsDir = join(deps.dir, "uploads");
   mkdirSync(uploadsDir, { recursive: true });
   const pdfFilename = `${randomUUID()}.pdf`;
   const pdfPath = join(uploadsDir, pdfFilename);
   writeFileSync(pdfPath, file.data);
 
-  const fields = multipart.parsed.fields;
   const formType = fields.formType?.trim() ?? "";
   const rosterMode = (fields.rosterMode?.trim() ?? "existing") as "existing" | "download";
   const rosterPath = fields.rosterPath?.trim() || undefined;
-  const requestedSessionId = fields.sessionId?.trim() || undefined;
   const sessionId = requestedSessionId ?? (isReupload ? undefined : randomUUID());
   const previousRunId = fields.previousRunId?.trim() || undefined;
   const originWorkflow = fields.originWorkflow?.trim() || undefined;
