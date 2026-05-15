@@ -1,9 +1,10 @@
-import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
+import { existsSync, readdirSync, readFileSync, unlinkSync } from "fs";
 import { basename, join, resolve, sep } from "path";
 import { PATHS } from "../../../config.js";
 import { readSessionEvents } from "../../session-events.js";
 import { openStateDb } from "../../state/db.js";
 import { transaction } from "../../../infra/sqlite/index.js";
+import { rewriteJsonlFile } from "../../jsonl-rewrite.js";
 
 export interface DeleteEntryRequest {
   workflow: string;
@@ -45,31 +46,15 @@ function applyDeleteTargets(
   targets: DeleteTarget[],
   screenshotsDir: string,
 ): void {
-  const rewriteJsonl = (path: string, keep: (line: string) => boolean) => {
-    if (!existsSync(path)) return;
-    const lines = readFileSync(path, "utf-8").split("\n").filter(Boolean).filter(keep);
-    writeFileSync(path, lines.length > 0 ? lines.join("\n") + "\n" : "", "utf-8");
-  };
-
   const byFile = groupDeleteTargetsByFile(targets);
   for (const [fileKey, fileTargets] of byFile) {
     const [targetWorkflow, targetDate] = fileKey.split("\0") as [string, string];
-    rewriteJsonl(join(dir, `${targetWorkflow}-${targetDate}.jsonl`), (line) => {
-      try {
-        const row = JSON.parse(line) as { id?: string; runId?: string };
-        return !matchesAnyDeleteTarget(row.id, row.runId, fileTargets);
-      } catch {
-        return true;
-      }
+    rewriteJsonlFile(join(dir, `${targetWorkflow}-${targetDate}.jsonl`), (row) => {
+      return !matchesAnyDeleteTarget(asString(row.id), asString(row.runId), fileTargets);
     });
 
-    rewriteJsonl(join(dir, `${targetWorkflow}-${targetDate}-logs.jsonl`), (line) => {
-      try {
-        const row = JSON.parse(line) as { itemId?: string; runId?: string };
-        return !matchesAnyDeleteTarget(row.itemId, row.runId, fileTargets);
-      } catch {
-        return true;
-      }
+    rewriteJsonlFile(join(dir, `${targetWorkflow}-${targetDate}-logs.jsonl`), (row) => {
+      return !matchesAnyDeleteTarget(asString(row.itemId), asString(row.runId), fileTargets);
     });
   }
 
@@ -156,6 +141,10 @@ export function deleteDelegatedChildrenForRun(
 }
 
 type DeleteTarget = DeleteEntryRequest;
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
 
 function collectDeleteTargetsBulk(
   db: ReturnType<typeof openStateDb>,
