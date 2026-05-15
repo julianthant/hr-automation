@@ -9,8 +9,8 @@ import {
   emitAuthStart,
   emitAuthComplete,
   emitAuthFailed,
-  emitUcpathIdleSignal,
 } from '../../tracker/session-events.js'
+import { buildUcpathIdleHooks } from './ucpath-idle-hooks.js'
 
 /**
  * Per-system auth duration captured by `createBatchObserver`. `startTs` and
@@ -93,12 +93,7 @@ export function createBatchObserver(
       timings.push({ systemId, startTs, endTs: Date.now() })
       emitAuthFailed(instance, browserId, systemId, trackerDir)
     },
-    onUcpathIdleTouch: () => {
-      emitUcpathIdleSignal(instance, trackerDir, 'touch')
-    },
-    onUcpathIdleRefresh: (phase) => {
-      emitUcpathIdleSignal(instance, trackerDir, phase === 'start' ? 'refresh_start' : 'refresh_end')
-    },
+    ...buildUcpathIdleHooks(instance, trackerDir),
   }
 
   return {

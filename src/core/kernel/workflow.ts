@@ -13,7 +13,6 @@ import { runWorkflowSharedContextPool } from './shared-context-pool.js'
 import { withBatchLifecycle } from './batch-lifecycle.js'
 import { validateAndPrepareItems, callerPreEmitsPending, awaitAllSystemsReady } from './batch-helpers.js'
 import { makeAuthObserver } from '../../tracker/sessions/auth-observer.js'
-import { emitUcpathIdleSignal } from '../../tracker/session-events.js'
 import { registerInProcessRun, unregisterInProcessRun } from '../daemon/in-process-runs.js'
 import { operatorSubjectData } from '../../domain/operator-subject.js'
 import { queueTitleData } from '../../domain/queue-title.js'
@@ -22,6 +21,7 @@ import { createTaskStore } from '../task-store/index.js'
 import { createWorkerStore } from '../daemon/worker-store.js'
 import type { InProcessRunControl } from '../daemon/in-process-runs.js'
 import { runOneItem } from './run-one-item.js'
+import { buildUcpathIdleHooks } from './ucpath-idle-hooks.js'
 export { runOneItem } from './run-one-item.js'
 export type { RunOneItemOpts, RunOneItemResult } from './run-one-item.js'
 
@@ -184,12 +184,7 @@ export function buildSessionObserver<TData, TSteps extends readonly string[]>(
       void authObs.onAuthFailed!(systemId, browserId)
       sessionCtx.setAuthState(browserId, systemId, 'failed')
     },
-    onUcpathIdleTouch: () => {
-      emitUcpathIdleSignal(sessionCtx.instance, trackerDir, 'touch')
-    },
-    onUcpathIdleRefresh: (phase) => {
-      emitUcpathIdleSignal(sessionCtx.instance, trackerDir, phase === 'start' ? 'refresh_start' : 'refresh_end')
-    },
+    ...buildUcpathIdleHooks(sessionCtx.instance, trackerDir),
   }
 }
 
