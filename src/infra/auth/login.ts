@@ -29,6 +29,35 @@ export function defineSsoLogin<TArgs extends unknown[]>(
   };
 }
 
+async function selectUcSanDiegoCampus(page: Page, label: string): Promise<void> {
+  log.step(`${label}: selecting UC San Diego...`);
+  await page.getByRole("link", { name: "University of California, San Diego" }).click({ timeout: 10_000 });
+  log.step(`${label}: after campus select | URL: ${page.url()}`);
+}
+
+async function retrySelectCampus(
+  page: Page,
+  label: string,
+  onChromeErrorRetry: () => Promise<void>,
+  attempts = 3,
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    await selectUcSanDiegoCampus(page, `${label} (attempt ${attempt})`);
+    try {
+      await page.waitForURL((url) => url.hostname.includes("a5.ucsd.edu"), { timeout: 15_000 });
+      return true;
+    } catch {
+      if (page.url().includes("chrome-error") && attempt < attempts) {
+        log.step("SSO redirect failed (chrome-error) — retrying navigation...");
+        await onChromeErrorRetry();
+        continue;
+      }
+      return false;
+    }
+  }
+  return false;
+}
+
 /**
  * Authenticate to UCPath through UCSD Shibboleth SSO with Duo MFA.
  *
@@ -59,26 +88,11 @@ export async function ucpathNavigateAndFill(page: Page): Promise<boolean> {
   await loginButton.first().click({ timeout: 10_000 });
   log.step(`After "Log in" click | URL: ${page.url()}`);
 
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    log.step(`Selecting UC San Diego... (attempt ${attempt})`);
-    const campusLink = page.getByRole("link", {
-      name: "University of California, San Diego",
-    });
-    await campusLink.click({ timeout: 10_000 });
-    log.step(`After campus select | URL: ${page.url()}`);
-    try {
-      await page.waitForURL((url) => url.hostname.includes("a5.ucsd.edu"), { timeout: 15_000 });
-      break;
-    } catch {
-      if (page.url().includes("chrome-error") && attempt < 3) {
-        log.step(`SSO redirect failed (chrome-error) — retrying navigation...`);
-        await page.goto("https://ucpath.ucsd.edu", { waitUntil: "domcontentloaded", timeout: 15_000 });
-        await loginButton.first().click({ timeout: 10_000 });
-        continue;
-      }
-      return false;
-    }
-  }
+  const selected = await retrySelectCampus(page, "UCPath", async () => {
+    await page.goto("https://ucpath.ucsd.edu", { waitUntil: "domcontentloaded", timeout: 15_000 });
+    await loginButton.first().click({ timeout: 10_000 });
+  });
+  if (!selected) return false;
   log.step(`SSO login page loaded | URL: ${page.url()}`);
 
   try {
@@ -144,11 +158,7 @@ export async function ucpathSubmitAndWaitForDuo(
   for (let attempt = 0; attempt < 3; attempt++) {
     if (page.url().includes("ucpathdiscovery/disco")) {
       log.step(`Campus discovery page detected (attempt ${attempt + 1}) -- re-selecting UC San Diego...`);
-      const campusLinkRetry = page.getByRole("link", {
-        name: "University of California, San Diego",
-      });
-      await campusLinkRetry.click({ timeout: 10_000 });
-      log.step(`After re-selection click | URL: ${page.url()}`);
+      await selectUcSanDiegoCampus(page, "UCPath rediscovery");
       await page.waitForTimeout(5_000);
       await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
       log.step(`After re-selection settle | URL: ${page.url()}`);
