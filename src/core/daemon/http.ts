@@ -272,8 +272,10 @@ export function startDaemonHttpServer(opts: DaemonHttpOpts): { server: Server; l
     res.end()
   })
 
-  const listenPromise = new Promise<DaemonHttpHandle>((resolve) => {
+  const listenPromise = new Promise<DaemonHttpHandle>((resolve, reject) => {
+    server.once('error', reject)
     server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject)
       const address = server.address()
       const port = typeof address === 'object' && address ? address.port : 0
       resolve({
