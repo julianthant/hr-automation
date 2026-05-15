@@ -430,6 +430,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
       : registerInProcessControl(wf, handlerInput, String(itemId), runId, opts.trackerDir)
     let cancelRegistered = false
     let completed = false
+    let terminalWritten = false
     try {
       const session = await Session.launch(wf.config.systems, {
         authChain: wf.config.authChain,
@@ -486,9 +487,10 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
       }
     } catch (err) {
       markInProcessControlTerminal(inProcessControl, false, err)
+      terminalWritten = true
       throw err
     } finally {
-      if (completed) markInProcessControlTerminal(inProcessControl, true)
+      if (completed && !terminalWritten) markInProcessControlTerminal(inProcessControl, true)
       if (cancelRegistered) unregisterInProcessRun(cancelIdent)
     }
   }
