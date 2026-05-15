@@ -205,13 +205,13 @@ describe("cleanTrackerMain sessionsDeleted field", () => {
     if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
   });
 
-  it("returns sessionsDeleted field in result", () => {
-    const result = cleanTrackerMain(["--days", "30", "--dir", dir, "--no-screenshots"]);
+  it("returns sessionsDeleted field in result", async () => {
+    const result = await cleanTrackerMain(["--days", "30", "--dir", dir, "--no-screenshots"]);
     assert.ok("sessionsDeleted" in result, "sessionsDeleted field present");
     assert.equal(typeof result.sessionsDeleted, "number");
   });
 
-  it("deletes old sessions-YYYY-MM-DD.jsonl files and returns count", () => {
+  it("deletes old sessions-YYYY-MM-DD.jsonl files and returns count", async () => {
     // Write an old dated sessions file (40 days ago).
     const oldDate = isoDate(40);
     const oldFile = join(dir, `sessions-${oldDate}.jsonl`);
@@ -221,7 +221,7 @@ describe("cleanTrackerMain sessionsDeleted field", () => {
     const recentFile = join(dir, `sessions-${recentDate}.jsonl`);
     writeFileSync(recentFile, '{"type":"workflow_start","workflowInstance":"recent"}\n');
 
-    const result = cleanTrackerMain(["--days", "30", "--dir", dir, "--no-screenshots"]);
+    const result = await cleanTrackerMain(["--days", "30", "--dir", dir, "--no-screenshots"]);
     assert.equal(result.sessionsDeleted, 1, "only the 40-day-old file deleted");
     assert.ok(!existsSync(oldFile), "old file deleted");
     assert.ok(existsSync(recentFile), "recent file kept");
@@ -239,7 +239,7 @@ describe("cleanTrackerMain SQLite prune", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("deletes SQLite rows whose tracker_date is older than --days", () => {
+  it("deletes SQLite rows whose tracker_date is older than --days", async () => {
     // Initialize the DB before seeding — applyTrackerEntryLive skips SQLite
     // when the DB file doesn't exist yet (isStateDbReady returns false).
     const db = openStateDb(dir);
@@ -261,7 +261,7 @@ describe("cleanTrackerMain SQLite prune", () => {
       2,
     );
 
-    cleanTrackerMain(["--days", "30", "--dir", dir, "--no-screenshots"]);
+    await cleanTrackerMain(["--days", "30", "--dir", dir, "--no-screenshots"]);
 
     const remaining = db.prepare("SELECT item_id FROM run_events").all() as Array<{ item_id: string }>;
     assert.deepEqual(
@@ -270,7 +270,7 @@ describe("cleanTrackerMain SQLite prune", () => {
     );
   });
 
-  it("prunes terminal task_attempts rows by created_at but preserves non-terminal ones", () => {
+  it("prunes terminal task_attempts rows by created_at but preserves non-terminal ones", async () => {
     // Open the DB so the schema is migrated. We then seed `task_attempts`
     // rows directly via SQL — the daemon path that normally creates them
     // isn't reachable from a unit test. The test pins both:
@@ -298,7 +298,7 @@ describe("cleanTrackerMain SQLite prune", () => {
         "('a-today-done','t3',1,'r3','done','x','i3',@today,@today)",
     ).run({ old: oldIso, today: todayIso });
 
-    cleanTrackerMain(["--days", "30", "--dir", dir, "--no-screenshots"]);
+    await cleanTrackerMain(["--days", "30", "--dir", dir, "--no-screenshots"]);
 
     const remaining = db.prepare(
       "SELECT id FROM task_attempts ORDER BY id",
@@ -308,7 +308,7 @@ describe("cleanTrackerMain SQLite prune", () => {
     assert.deepEqual(ids, ["a-old-running", "a-today-done"]);
   });
 
-  it("returns sqlRowsDeleted count in result", () => {
+  it("returns sqlRowsDeleted count in result", async () => {
     // Initialize the DB before seeding so applyTrackerEntryLive writes to it.
     openStateDb(dir);
 
@@ -318,7 +318,7 @@ describe("cleanTrackerMain SQLite prune", () => {
       dir,
     );
 
-    const result = cleanTrackerMain(["--days", "30", "--dir", dir, "--no-screenshots"]);
+    const result = await cleanTrackerMain(["--days", "30", "--dir", dir, "--no-screenshots"]);
     assert.ok(
       "sqlRowsDeleted" in result,
       "cleanTrackerMain result should include sqlRowsDeleted",
