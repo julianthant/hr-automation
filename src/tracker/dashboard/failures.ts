@@ -1,4 +1,4 @@
-import type { TrackerEntry } from "../jsonl.js";
+import { getRunIdOr, type TrackerEntry } from "../jsonl.js";
 import { isResolvedPrepEntry } from "./prep-rows.js";
 import { buildSearchSummary } from "./search.js";
 
@@ -34,7 +34,7 @@ export function buildFailuresHandler(deps: FailuresDeps) {
       // Aggregate by (id, runId) -> latest entry per run.
       const latestPerRun = new Map<string, TrackerEntry>();
       for (const e of all) {
-        const runId = e.runId || `${e.id}#1`;
+        const runId = getRunIdOr(e);
         const key = `${e.id}::${runId}`;
         const prev = latestPerRun.get(key);
         if (!prev || e.timestamp >= prev.timestamp) latestPerRun.set(key, e);
@@ -54,7 +54,7 @@ export function buildFailuresHandler(deps: FailuresDeps) {
         failures.push({
           workflow: wf,
           id: e.id,
-          runId: e.runId || `${e.id}#1`,
+          runId: getRunIdOr(e),
           summary: buildSearchSummary(e),
           error: e.error || "Unknown error",
           ts: e.timestamp,
@@ -76,7 +76,7 @@ export function computeFailureCounts(entries: TrackerEntry[]): number {
   // Aggregate by (id, runId) -> latest entry per run.
   const latestPerRun = new Map<string, TrackerEntry>();
   for (const e of entries) {
-    const runId = e.runId || `${e.id}#1`;
+    const runId = getRunIdOr(e);
     const key = `${e.id}::${runId}`;
     const prev = latestPerRun.get(key);
     if (!prev || e.timestamp >= prev.timestamp) latestPerRun.set(key, e);

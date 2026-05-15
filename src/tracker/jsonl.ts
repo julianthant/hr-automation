@@ -50,12 +50,12 @@ export interface LogEntry extends Omit<Partial<StructuredLogEvent>, "level" | "m
   ts: string;
 }
 
-function getLogFilePath(workflow: string, dir: string): string {
+function getLogsJsonlPath(workflow: string, dir: string): string {
   return join(dir, `${workflow}-${dateLocal()}-logs.jsonl`);
 }
 
 export function appendLogEntry(entry: LogEntry, dir: string = DEFAULT_DIR): void {
-  const logPath = getLogFilePath(entry.workflow, dir);
+  const logPath = getLogsJsonlPath(entry.workflow, dir);
   const scrubbed: LogEntry = { ...entry, message: String(entry.message ?? "") };
   const source = appendJsonlWithSource(logPath, scrubbed, {
     sourceKind: "log",
@@ -114,7 +114,7 @@ export function readLogEntries(
   itemId?: string,
   dir: string = DEFAULT_DIR,
 ): LogEntry[] {
-  const all = readJsonlCached<LogEntry>(getLogFilePath(workflow, dir));
+  const all = readJsonlCached<LogEntry>(getLogsJsonlPath(workflow, dir));
   if (itemId) return all.filter((e) => e.itemId === itemId);
   return all;
 }
@@ -183,7 +183,7 @@ export interface TrackerEntry {
   error?: string;
 }
 
-function getLogPath(workflow: string, dir: string): string {
+function getTrackerJsonlPath(workflow: string, dir: string): string {
   return join(dir, `${workflow}-${dateLocal()}.jsonl`);
 }
 
@@ -209,7 +209,7 @@ export function trackEventForDate(
 }
 
 export function trackEvent(entry: TrackerEntry, dir: string = DEFAULT_DIR): void {
-  const logPath = getLogPath(entry.workflow, dir);
+  const logPath = getTrackerJsonlPath(entry.workflow, dir);
   const source = appendJsonlWithSource(logPath, entry, {
     sourceKind: "tracker",
     workflow: entry.workflow,
@@ -249,6 +249,21 @@ export function serializeValue(v: unknown, key?: string): string {
   } catch {
     return String(v);
   }
+}
+
+export function getRunIdOr(e: Pick<TrackerEntry, "id" | "runId">): string {
+  return e.runId || `${e.id}#1`;
+}
+
+export function byTimestampAsc<T extends { timestamp: string }>(a: T, b: T): number {
+  return a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0;
+}
+
+export function parseTrackerFilename(name: string): { workflow: string; date: string } | null {
+  if (name.endsWith("-logs.jsonl")) return null;
+  const m = name.match(/^(.+)-(\d{4}-\d{2}-\d{2})\.jsonl$/);
+  if (!m) return null;
+  return { workflow: m[1], date: m[2] };
 }
 
 /** Session context passed to workflow callbacks for registering sessions/browsers. */
@@ -556,7 +571,7 @@ export async function withTrackedWorkflow<T>(
 }
 
 export function readEntries(workflow: string, dir: string = DEFAULT_DIR): TrackerEntry[] {
-  return readJsonlCached<TrackerEntry>(getLogPath(workflow, dir));
+  return readJsonlCached<TrackerEntry>(getTrackerJsonlPath(workflow, dir));
 }
 
 /**
@@ -571,9 +586,8 @@ export function listWorkflows(dir: string = DEFAULT_DIR): string[] {
   if (!existsSync(dir)) return [];
   const out = new Set<string>();
   for (const f of readdirSync(dir)) {
-    if (f.endsWith("-logs.jsonl")) continue;
-    const m = f.match(/^(.+)-\d{4}-\d{2}-\d{2}\.jsonl$/);
-    if (m) out.add(m[1]);
+    const parsed = parseTrackerFilename(f);
+    if (parsed) out.add(parsed.workflow);
   }
   return [...out];
 }
@@ -581,14 +595,10 @@ export function listWorkflows(dir: string = DEFAULT_DIR): string[] {
 /** List all dates that have tracker data for a given workflow. */
 export function listDatesForWorkflow(workflow: string, dir: string = DEFAULT_DIR): string[] {
   if (!existsSync(dir)) return [];
-  const prefix = `${workflow}-`;
   return readdirSync(dir)
-    .filter((f) => f.startsWith(prefix) && f.endsWith(".jsonl") && !f.includes("-logs.jsonl"))
-    .map((f) => {
-      const match = f.match(/(\d{4}-\d{2}-\d{2})\.jsonl$/);
-      return match ? match[1] : "";
-    })
-    .filter(Boolean)
+    .map(parseTrackerFilename)
+    .filter((parsed): parsed is { workflow: string; date: string } => parsed?.workflow === workflow)
+    .map((parsed) => parsed.date)
     .sort()
     .reverse();
 }
@@ -770,7 +780,7 @@ export function readRunsForId(
   // observed across the run's history.
   const lastData = new Map<string, Record<string, unknown>>();
   for (const e of entries) {
-    const rid = e.runId || `${e.id}#1`;
+    const rid = getRunIdOr(e);
     runMap.set(rid, e);
     if (e.step) lastStep.set(rid, e.step);
     if (e.data && Object.keys(e.data).length > 0) lastData.set(rid, e.data);
@@ -779,14 +789,14 @@ export function readRunsForId(
   // chronological order regardless of runId shape.
   const runFirstTs = new Map<string, string>();
   for (const e of entries) {
-    const rid = e.runId || `${e.id}#1`;
+    const rid = getRunIdOr(e);
     const existing = runFirstTs.get(rid);
     if (!existing || e.timestamp < existing) runFirstTs.set(rid, e.timestamp);
   }
 
   const raw = [...runMap.values()]
     .map((e) => {
-      const rid = e.runId || `${e.id}#1`;
+      const rid = getRunIdOr(e);
       const data = lastData.get(rid);
       return {
         runId: rid,
@@ -802,7 +812,7 @@ export function readRunsForId(
     .sort((a, b) => {
       const at = runFirstTs.get(a.runId) ?? a.timestamp;
       const bt = runFirstTs.get(b.runId) ?? b.timestamp;
-      return at.localeCompare(bt);
+      return at < bt ? -1 : at > bt ? 1 : 0;
     });
 
   if (raw.length <= 1) return raw;

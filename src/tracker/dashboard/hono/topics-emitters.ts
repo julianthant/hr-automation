@@ -25,7 +25,8 @@ import { captureStore, serializeCaptureSession } from "../capture-state.js";
 async function readSessionEventsTolerant(dir: string) {
   try {
     return readSessionEvents(dir);
-  } catch {
+  } catch (err) {
+    log.debug(`session events read failed: ${err instanceof Error ? err.message : String(err)}`);
     // Transient read failures recover on the next tick.
     return [];
   }

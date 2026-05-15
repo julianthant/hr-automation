@@ -18,6 +18,7 @@ import {
   readEntriesForDate,
   readLogEntries,
   readLogEntriesForDate,
+  getRunIdOr,
   type TrackerEntry,
 } from "../../../jsonl.js";
 import {
@@ -160,7 +161,7 @@ export function buildJsonlEventsPayload(
 
   const runHistory = new Map<string, StepDurationEntry[]>();
   for (const entry of entries) {
-    const runId = entry.runId || `${entry.id}#1`;
+    const runId = getRunIdOr(entry);
     const key = `${entry.id}::${runId}`;
     const slim: StepDurationEntry = {
       timestamp: entry.timestamp,
@@ -190,7 +191,7 @@ export function buildJsonlEventsPayload(
   const failedItemIds = new Set(entries.filter((entry) => entry.status === "failed").map((entry) => entry.id));
   const screenshotCountByItem = countScreenshotsForItems(workflow, failedItemIds);
   const enriched = entries.map((entry) => {
-    const runId = entry.runId || `${entry.id}#1`;
+    const runId = getRunIdOr(entry);
     const key = `${entry.id}::${runId}`;
     let screenshotCount: number | undefined;
     if (entry.status === "failed") {
@@ -205,7 +206,7 @@ export function buildJsonlEventsPayload(
 
     return {
       ...entry,
-      runId: entry.runId || `${entry.id}#1`,
+      runId,
       firstLogTs: spanFirstTs,
       lastLogTs: spanLastTs,
       lastLogMessage: logLastMsg.get(key),

@@ -1,5 +1,5 @@
 import { queueStatusDisplayLabel } from "../../domain/tracker-terminal-display.js";
-import { dateLocal, type TrackerEntry } from "../jsonl.js";
+import { dateLocal, getRunIdOr, type TrackerEntry } from "../jsonl.js";
 import { isResolvedPrepEntry } from "./prep-rows.js";
 
 /**
@@ -134,7 +134,7 @@ export function buildSearchHandler(deps: SearchDeps) {
         const entries = deps.readEntriesForDate(wf, date);
         for (const e of entries) {
           if (!matches(e)) continue;
-          const runId = e.runId || `${e.id}#1`;
+          const runId = getRunIdOr(e);
           const key = `${wf}::${e.id}`;
           const prev = byId.get(key);
           // Keep the latest entry for this id across all runs. Ties by
