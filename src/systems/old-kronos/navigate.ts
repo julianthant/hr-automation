@@ -13,6 +13,7 @@ import {
   timecard,
   workspace,
 } from "./selectors.js";
+import { safeClick, safeFill } from "../common/index.js";
 
 /**
  * Dismiss any OK/Close modal dialog in the iframe.
@@ -25,7 +26,7 @@ export async function dismissModal(page: Page, iframe: Frame): Promise<void> {
   const okBtn = modalDismiss.okButton(iframe);
   if (await okBtn.count() > 0) {
     try {
-      await okBtn.first().click({ timeout: 3_000 });
+      await safeClick(okBtn.first(), { timeout: 3_000, label: "old kronos modal ok button" });
       log.step("Dismissed modal (OK)");
       await page.waitForTimeout(2_000);
     } catch {
@@ -37,7 +38,7 @@ export async function dismissModal(page: Page, iframe: Frame): Promise<void> {
   const closeBtn = modalDismiss.closeButton(iframe);
   if (await closeBtn.count() > 0) {
     try {
-      await closeBtn.first().click({ timeout: 3_000 });
+      await safeClick(closeBtn.first(), { timeout: 3_000, label: "old kronos modal close button" });
       log.step("Dismissed modal (Close)");
       await page.waitForTimeout(2_000);
     } catch {
@@ -128,7 +129,7 @@ export async function setDateRange(
 
   // Click calendar icon (2-way .or() fallback)
   const calBtn = dateRange.calendarButton(iframe);
-  await calBtn.first().click();
+  await safeClick(calBtn.first(), { label: "old kronos date range calendar button" });
   await page.waitForTimeout(3_000);
   await debugScreenshot(page, "ukg-date-01-popup");
 
@@ -173,7 +174,9 @@ export async function setDateRange(
   log.step(`Start: ${startVal}, End: ${endVal}`);
 
   // Click Apply (2-way .or() fallback)
-  await dateRange.applyButton(iframe).first().click();
+  await safeClick(dateRange.applyButton(iframe).first(), {
+    label: "old kronos date range apply button",
+  });
   await page.waitForTimeout(5_000);
   log.step("Date range applied");
   await dismissModal(page, iframe);
@@ -191,10 +194,12 @@ export async function searchEmployee(
   await dismissModal(page, iframe);
 
   const searchInput = employeeGrid.quickFindInput(iframe);
-  await searchInput.click();
-  await searchInput.fill(employeeId);
+  await safeClick(searchInput, { label: "old kronos quick find input" });
+  await safeFill(searchInput, employeeId, { label: "old kronos quick find input" });
   await page.waitForTimeout(1_000);
-  await employeeGrid.quickFindSubmitButton(iframe).click();
+  await safeClick(employeeGrid.quickFindSubmitButton(iframe), {
+    label: "old kronos quick find submit button",
+  });
   await page.waitForTimeout(5_000);
   await dismissModal(page, iframe);
 }
@@ -239,7 +244,7 @@ export async function clickEmployeeRow(
   const firstRow = employeeGrid.firstRow(iframe);
   if (await firstRow.count() > 0) {
     const empName = await getEmployeeName(iframe, employeeId);
-    await firstRow.click();
+    await safeClick(firstRow, { label: "old kronos first employee row" });
     await page.waitForTimeout(2_000);
     log.step(`Row selected. Employee name: ${empName}`);
     return empName;
@@ -251,7 +256,7 @@ export async function clickEmployeeRow(
   for (let i = 0; i < rowCount; i++) {
     const text = (await gridRows.nth(i).innerText()).trim();
     if (text.includes(employeeId)) {
-      await gridRows.nth(i).click();
+      await safeClick(gridRows.nth(i), { label: "old kronos employee grid row" });
       await page.waitForTimeout(2_000);
       return text.includes("\t") ? text.split("\t")[0].trim() : null;
     }
@@ -260,7 +265,7 @@ export async function clickEmployeeRow(
   // Strategy 3: gridcell containing employee ID
   const cell = employeeGrid.cellByEmployeeId(iframe, employeeId);
   if (await cell.count() > 0) {
-    await cell.click();
+    await safeClick(cell, { label: "old kronos employee id cell" });
     await page.waitForTimeout(2_000);
     return null;
   }
@@ -281,11 +286,11 @@ export async function clickGoToReports(
   // Strategy 1: Direct text match
   const gotoEl = goToMenu.goToTrigger(iframe);
   if (await gotoEl.count() > 0) {
-    await gotoEl.click();
+    await safeClick(gotoEl, { label: "old kronos go to trigger" });
     await page.waitForTimeout(3_000);
     const reportsItem = goToMenu.reportsItem(iframe);
     if (await reportsItem.count() > 0) {
-      await reportsItem.click();
+      await safeClick(reportsItem, { label: "old kronos reports menu item" });
       await page.waitForTimeout(5_000);
       log.step("Navigated to Reports");
       return true;
@@ -301,9 +306,11 @@ export async function clickGoToReports(
         (el) => (el as HTMLElement).parentElement?.innerText?.trim() ?? "",
       );
       if (parentText.toLowerCase().includes("go to")) {
-        await dropdowns.nth(i).click();
+        await safeClick(dropdowns.nth(i), { label: "old kronos go to dropdown toggle" });
         await page.waitForTimeout(3_000);
-        await goToMenu.reportsItem(iframe).click();
+        await safeClick(goToMenu.reportsItem(iframe), {
+          label: "old kronos reports menu item fallback",
+        });
         await page.waitForTimeout(5_000);
         return true;
       }
@@ -315,7 +322,7 @@ export async function clickGoToReports(
   // Strategy 3: Sidebar Reports link
   const sidebarReports = goToMenu.sidebarReports(page);
   if (await sidebarReports.count() > 0) {
-    await sidebarReports.first().click();
+    await safeClick(sidebarReports.first(), { label: "old kronos sidebar reports link" });
     await page.waitForTimeout(5_000);
     return true;
   }
@@ -335,13 +342,13 @@ export async function clickGoToTimecard(
 
   const gotoEl = goToMenu.goToTrigger(iframe);
   if (await gotoEl.count() > 0) {
-    await gotoEl.click();
+    await safeClick(gotoEl, { label: "old kronos go to timecard trigger" });
     await page.waitForTimeout(3_000);
 
     // Menu item is "Timecards" (plural) — must use exact match to avoid "Approve Timecards"
     const timecardItem = goToMenu.timecardsItem(iframe);
     if (await timecardItem.count() > 0) {
-      await timecardItem.click();
+      await safeClick(timecardItem, { label: "old kronos timecards menu item" });
       await page.waitForTimeout(5_000);
       log.success("[Old Kronos] Navigated to Timecards");
       return true;
@@ -382,7 +389,7 @@ export async function switchToPreviousPayPeriod(
 
     const prevLink = timecard.previousPayPeriodLink(f);
     if (await prevLink.count() > 0) {
-      await prevLink.click({ timeout: 5_000 });
+      await safeClick(prevLink, { timeout: 5_000, label: "old kronos previous pay period link" });
       await page.waitForTimeout(5_000);
       log.step("[Old Kronos] Switched to Previous Pay Period");
       return true;
@@ -488,7 +495,7 @@ export async function goBackToMain(page: Page): Promise<void> {
   // Try tab first
   const tab = workspace.manageDeptTab(page);
   if (await tab.count() > 0) {
-    await tab.first().click();
+    await safeClick(tab.first(), { label: "old kronos manage department tab" });
     await page.waitForTimeout(3_000);
     return;
   }
@@ -496,7 +503,7 @@ export async function goBackToMain(page: Page): Promise<void> {
   // Fallback: li tab
   const liTab = workspace.manageDeptLi(page);
   if (await liTab.count() > 0) {
-    await liTab.first().click();
+    await safeClick(liTab.first(), { label: "old kronos manage department li tab" });
     await page.waitForTimeout(3_000);
     return;
   }

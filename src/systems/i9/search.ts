@@ -2,7 +2,12 @@ import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
 import type { I9SearchCriteria, I9SearchResult } from "./types.js";
 import { dashboard, search as searchSelectors } from "./selectors.js";
-import { closeAllKendoWindows, snapshotKendoWindows } from "./navigate.js";
+import {
+  clickWithKendoRecovery,
+  closeAllKendoWindows,
+  snapshotKendoWindows,
+} from "./navigate.js";
+import { safeClick, safeFill } from "../common/index.js";
 
 /**
  * Search for an existing employee in I9 Complete.
@@ -30,43 +35,59 @@ export async function searchI9Employee(
 ): Promise<I9SearchResult[]> {
   // Open search dialog by clicking "Search Options"
   log.step("Opening I9 search dialog...");
-  await dashboard.searchOptionsButton(page).click({ timeout: 5_000 });
+  await clickWithKendoRecovery(page, dashboard.searchOptionsButton(page), "search options", 5_000);
 
   // Wait for dialog to appear
   const dialog = searchSelectors.dialog(page);
   await dialog.waitFor({ state: "visible", timeout: 5_000 });
 
   // Clear any previous search
-  await searchSelectors.clearFiltersLink(page).click({ timeout: 3_000 });
+  await safeClick(searchSelectors.clearFiltersLink(page), {
+    timeout: 3_000,
+    label: "i9 clear filters link",
+  });
 
   // Fill whichever fields are provided
   if (criteria.lastName) {
-    await searchSelectors.lastNameInput(page).fill(criteria.lastName);
+    await safeFill(searchSelectors.lastNameInput(page), criteria.lastName, {
+      label: "i9 search last name",
+    });
     log.step(`Search: Last Name = ${criteria.lastName}`);
   }
 
   if (criteria.firstName) {
-    await searchSelectors.firstNameInput(page).fill(criteria.firstName);
+    await safeFill(searchSelectors.firstNameInput(page), criteria.firstName, {
+      label: "i9 search first name",
+    });
     log.step(`Search: First Name = ${criteria.firstName}`);
   }
 
   if (criteria.ssn) {
-    await searchSelectors.ssnInput(page).fill(criteria.ssn);
+    await safeFill(searchSelectors.ssnInput(page), criteria.ssn, {
+      label: "i9 search ssn",
+    });
     log.step("Search: SSN = ***");
   }
 
   if (criteria.profileId) {
-    await searchSelectors.profileIdInput(page).fill(criteria.profileId);
+    await safeFill(searchSelectors.profileIdInput(page), criteria.profileId, {
+      label: "i9 search profile id",
+    });
     log.step(`Search: Profile ID = ${criteria.profileId}`);
   }
 
   if (criteria.employeeId) {
-    await searchSelectors.employeeIdInput(page).fill(criteria.employeeId);
+    await safeFill(searchSelectors.employeeIdInput(page), criteria.employeeId, {
+      label: "i9 search employee id",
+    });
     log.step(`Search: Employee ID = ${criteria.employeeId}`);
   }
 
   // Click Search
-  await searchSelectors.submitButton(page).click({ timeout: 5_000 });
+  await safeClick(searchSelectors.submitButton(page), {
+    timeout: 5_000,
+    label: "i9 search submit button",
+  });
   log.step("Search submitted");
 
   // Wait for results to load

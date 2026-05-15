@@ -23,28 +23,20 @@ import { displayPersonName, parseLastFirstName } from "../../domain/identity/per
 import { log } from "../../utils/log.js";
 import { collapseSidebar, getContentFrame, waitForPeopleSoftProcessing } from "./navigate.js";
 import { hrTasks, personOrgSummary } from "./selectors.js";
+import { safeClick, safeFill } from "../common/index.js";
 
 /** Direct URL to Person Org Summary — opens in the HR Tasks iframe. */
 const PERSON_ORG_SUMMARY_URL =
   "https://ucphrprdpub.universityofcalifornia.edu/psc/ucphrprd/EMPLOYEE/HRMS/c/NUI_FRAMEWORK.PT_AGSTARTPAGE_NUI.GBL?CONTEXTIDPARAMS=TEMPLATE_ID%3aPTPPNAVCOL&scname=ADMN_UC_ADMIN_LOC_HIRE_NAVCOLL&PanelCollapsible=Y&PTPPB_GROUPLET_ID=UC_HIRE_TASKS_TILE_FL&CRefName=UC_HIRE_TASKS_TILE_FL&AJAXTRANSFER=Y";
 
 /**
- * Substring labels rendered as 2-word leaf spans on the Person Org Summary
- * detail page. Any candidate text whose normalized form (case-insensitive,
- * whitespace-collapsed) contains one of these is rejected from name detection.
- *
- * Background: PeopleSoft renders some labels with non-breaking spaces, and
- * earlier code did a case-sensitive, whitespace-literal `text.includes(label)`
- * which let "Person ID" leak through as the picked name. `selectPersonName`
- * normalizes both sides before comparison.
- *
- * TODO: replace with a registry selector targeting the actual name span
- * (likely `#PERSON_NPC_VW_NAME_DISPL` or similar) once verified live.
+ * UI labels rendered as 2-word leaf spans on older Person Org Summary detail
+ * pages. Kept only as a fallback behind the registry selector.
  */
 export const PERSON_ORG_NAME_LABELS: readonly string[] = [
   "Search Criteria", "Recent Searches", "Saved Searches", "Employment Instances",
   "Person Organizational Summary", "Return to Search", "Show fewer options",
-  "Navigation Area", "Julian Zaw",
+  "Navigation Area",
   "Person ID", "Benefit Eligibility", "Limited Hours", "Floater Hours",
   "HR Status", "Payroll Status", "Last Hire", "Termination Date",
   "ORG Instance", "Primary Job", "Empl Record", "Position Number",
@@ -83,6 +75,28 @@ export function selectPersonName(
     return text;
   }
   return null;
+}
+
+async function readPersonNameFromDetail(frame: FrameLocator): Promise<string | null> {
+  const selected = await personOrgSummary.personNameValue(frame)
+    .first()
+    .textContent({ timeout: 3_000 })
+    .then((text) => selectPersonName([text ?? ""]))
+    .catch(() => null);
+  if (selected) return selected;
+
+  const candidates = await personOrgSummary.body(frame).evaluate((body) => {
+    const out: string[] = [];
+    const els = body.querySelectorAll("span, div");
+    for (const el of Array.from(els)) {
+      if (el.children.length !== 0) continue;
+      const text = el.textContent?.trim() ?? "";
+      if (text.length === 0 || text.length >= 60) continue;
+      out.push(text);
+    }
+    return out;
+  }).catch(() => [] as string[]);
+  return selectPersonName(candidates, PERSON_ORG_NAME_LABELS);
 }
 
 export interface EidResult {
@@ -243,7 +257,10 @@ async function navigateToPersonOrgSummary(page: Page): Promise<FrameLocator> {
   // Click "Person Organizational Summary" in sidebar nav
   // SELECTOR: verified v1.0 — link text in HR Tasks sidebar
   const posLink = hrTasks.personOrgSummaryLink(page);
-  await posLink.click({ timeout: 10_000 });
+  await safeClick(posLink, {
+    timeout: 10_000,
+    label: "ucpath person org summary sidebar link",
+  });
   await page.waitForTimeout(3_000);
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   log.step("Person Org Summary page loaded");
@@ -271,13 +288,22 @@ async function executeSearch(
   log.step(`Searching: Last Name="${lastName}", Name="${name}"`);
 
   // Fill Last Name
-  await personOrgSummary.lastNameInput(frame).fill(lastName, { timeout: 10_000 });
+  await safeFill(personOrgSummary.lastNameInput(frame), lastName, {
+    timeout: 10_000,
+    label: "ucpath person org last name",
+  });
 
   // Fill Name (first/middle)
-  await personOrgSummary.nameInput(frame).fill(name, { timeout: 10_000 });
+  await safeFill(personOrgSummary.nameInput(frame), name, {
+    timeout: 10_000,
+    label: "ucpath person org name",
+  });
 
   // Click Search
-  await personOrgSummary.searchButton(frame).click({ timeout: 10_000 });
+  await safeClick(personOrgSummary.searchButton(frame), {
+    timeout: 10_000,
+    label: "ucpath person org search button",
+  });
   await page.waitForTimeout(3_000);
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   await waitForPeopleSoftProcessing(frame);
@@ -328,20 +354,7 @@ async function extractSingleResultDetail(
   const termDate = await personOrgSummary.terminationDate(frame)
     .textContent({ timeout: 5_000 }).then((t) => t?.trim() ?? "").catch(() => "");
 
-  // Extract name from the page. Two-stage: collect leaf-element candidate texts
-  // in the browser, then pick the name in Node where it can be unit-tested.
-  const candidates = await personOrgSummary.body(frame).evaluate((body) => {
-    const out: string[] = [];
-    const els = body.querySelectorAll("span, div");
-    for (const el of Array.from(els)) {
-      if (el.children.length !== 0) continue;
-      const text = el.textContent?.trim() ?? "";
-      if (text.length === 0 || text.length >= 60) continue;
-      out.push(text);
-    }
-    return out;
-  }).catch(() => [] as string[]);
-  const fullName = selectPersonName(candidates, PERSON_ORG_NAME_LABELS);
+  const fullName = await readPersonNameFromDetail(frame);
 
   // Extract assignment details (same logic as drillInAndGetDetails)
   const assignmentCells = await extractAssignmentCellsFromBody(frame);
@@ -411,7 +424,10 @@ async function extractResults(page: Page, frame: FrameLocator): Promise<EidResul
     const viewAll = personOrgSummary.viewAllLink(frame);
     if (await viewAll.count() > 0) {
       log.step("Clicking View All to load all results...");
-      await viewAll.click({ timeout: 10_000 });
+      await safeClick(viewAll, {
+        timeout: 10_000,
+        label: "ucpath person org view all link",
+      });
       await page.waitForTimeout(3_000);
       await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
       await waitForPeopleSoftProcessing(frame);
@@ -511,7 +527,10 @@ async function drillInAndGetDetails(
   rowIndex: number,
 ): Promise<DrillInDetails | null> {
   log.step(`Drilling into row ${rowIndex}...`);
-  await personOrgSummary.drillInButton(frame, rowIndex).click({ timeout: 10_000 });
+  await safeClick(personOrgSummary.drillInButton(frame, rowIndex), {
+    timeout: 10_000,
+    label: "ucpath person org drill-in button",
+  });
   await page.waitForTimeout(3_000);
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   await waitForPeopleSoftProcessing(frame);
@@ -545,7 +564,10 @@ async function drillInAndGetDetails(
  * Re-clicks "View All" if results are paginated (row index > 9).
  */
 async function returnToSearch(page: Page, frame: FrameLocator, needsViewAll: boolean): Promise<void> {
-  await personOrgSummary.returnToSearchButton(frame).click({ timeout: 10_000 });
+  await safeClick(personOrgSummary.returnToSearchButton(frame), {
+    timeout: 10_000,
+    label: "ucpath person org return to search button",
+  });
   await page.waitForTimeout(3_000);
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   await waitForPeopleSoftProcessing(frame);
@@ -556,7 +578,10 @@ async function returnToSearch(page: Page, frame: FrameLocator, needsViewAll: boo
       const viewAll = personOrgSummary.viewAllLink(frame);
       if (await viewAll.count() > 0) {
         log.step("Re-clicking View All after return...");
-        await viewAll.click({ timeout: 10_000 });
+        await safeClick(viewAll, {
+          timeout: 10_000,
+          label: "ucpath person org view all after return link",
+        });
         await page.waitForTimeout(3_000);
         await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
         await waitForPeopleSoftProcessing(frame);
@@ -769,21 +794,36 @@ export async function searchByEid(
   // and fill the Empl ID textbox. PeopleSoft's Person Org Summary search form
   // exposes Empl ID alongside Last Name / Name.
   try {
-    await personOrgSummary.lastNameInput(frame).fill("", { timeout: 5_000 });
+    await safeFill(personOrgSummary.lastNameInput(frame), "", {
+      timeout: 5_000,
+      label: "ucpath person org clear last name",
+    });
   } catch {
     // Form may have re-rendered; carry on.
   }
   try {
-    await personOrgSummary.nameInput(frame).fill("", { timeout: 5_000 });
+    await safeFill(personOrgSummary.nameInput(frame), "", {
+      timeout: 5_000,
+      label: "ucpath person org clear name",
+    });
   } catch {
     /* same */
   }
 
   const emplIdInput = personOrgSummary.emplIdInput(frame);
-  await emplIdInput.fill("", { timeout: 10_000 }).catch(() => {});
-  await emplIdInput.fill(emplId, { timeout: 10_000 });
+  await safeFill(emplIdInput, "", {
+    timeout: 10_000,
+    label: "ucpath person org clear empl id",
+  }).catch(() => {});
+  await safeFill(emplIdInput, emplId, {
+    timeout: 10_000,
+    label: "ucpath person org empl id",
+  });
 
-  await personOrgSummary.searchButton(frame).click({ timeout: 10_000 });
+  await safeClick(personOrgSummary.searchButton(frame), {
+    timeout: 10_000,
+    label: "ucpath person org eid search button",
+  });
   await page.waitForTimeout(3_000);
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   await waitForPeopleSoftProcessing(frame);

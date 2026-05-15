@@ -2,6 +2,7 @@ import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
 import { CRM_SECTION_URLS } from "../../config.js";
 import { sectionNav } from "./selectors.js";
+import { safeClick } from "../common/index.js";
 
 /**
  * Known section URL mappings. The onboarding record ID from the ViewOnboarding
@@ -36,7 +37,10 @@ export async function navigateToSection(
     });
   } else {
     // Fallback: click the section link/tab/button (3-deep .or() chain)
-    await sectionNav.byName(page, sectionName).first().click({ timeout: 10_000 });
+    await safeClick(sectionNav.byName(page, sectionName).first(), {
+      timeout: 10_000,
+      label: `crm ${sectionName} section nav`,
+    });
   }
 
   await page.waitForLoadState("networkidle", { timeout: 15_000 });

@@ -9,6 +9,7 @@ import {
   transactionResults,
   save,
 } from "./selectors.js";
+import { safeClick, safeFill } from "../common/index.js";
 
 const KUALI_SPACE_URL = "https://ucsd.kualibuild.com/build/space/5e47518b90adda9474c14adb";
 
@@ -23,7 +24,7 @@ export async function fillWithVerify(
   value: string,
   label: string,
 ): Promise<void> {
-  await locator.fill(value, { timeout: 5_000 })
+  await safeFill(locator, value, { timeout: 5_000, label })
   const actual = await locator.inputValue()
   if (actual === value) return
   log.warn(`[Kuali] ${label} fill silently dropped — retrying with type()`)
@@ -50,7 +51,10 @@ export async function openActionList(page: Page): Promise<void> {
   await page.waitForTimeout(3_000);
 
   log.step("Clicking Action List...");
-  await actionList.menuItem(page).click({ timeout: 15_000 });
+  await safeClick(actionList.menuItem(page), {
+    timeout: 15_000,
+    label: "kuali action list menu item",
+  });
   await page.waitForTimeout(3_000);
   log.success("Action List loaded");
 }
@@ -71,7 +75,7 @@ export async function clickDocument(page: Page, docNumber: string): Promise<stri
   }
 
   log.step(`Found document #${docNumber}, clicking...`);
-  await docLink.first().click({ timeout: 10_000 });
+  await safeClick(docLink.first(), { timeout: 10_000, label: "kuali document link" });
   await page.waitForTimeout(3_000);
 
   const url = page.url();
@@ -179,7 +183,10 @@ export async function fillTimekeeperTasks(
 
   // Fill Timekeeper Name
   log.step(`  Filling Timekeeper Name: ${timekeeperName}`);
-  await timekeeperTasks.timekeeperName(page).fill(timekeeperName, { timeout: 5_000 });
+  await safeFill(timekeeperTasks.timekeeperName(page), timekeeperName, {
+    timeout: 5_000,
+    label: "kuali timekeeper name",
+  });
 
   log.success("Timekeeper Tasks filled");
 }
@@ -229,13 +236,19 @@ export async function fillFinalTransactions(
   // Fill Payroll Title Code (skip if empty)
   if (opts.payrollTitleCode) {
     log.step(`  Payroll Title Code: ${opts.payrollTitleCode}`);
-    await finalTransactions.payrollTitleCode(page).fill(opts.payrollTitleCode, { timeout: 5_000 });
+    await safeFill(finalTransactions.payrollTitleCode(page), opts.payrollTitleCode, {
+      timeout: 5_000,
+      label: "kuali payroll title code",
+    });
   }
 
   // Fill Payroll Title (skip if empty)
   if (opts.payrollTitle) {
     log.step(`  Payroll Title: ${opts.payrollTitle}`);
-    await finalTransactions.payrollTitle(page).fill(opts.payrollTitle, { timeout: 5_000 });
+    await safeFill(finalTransactions.payrollTitle(page), opts.payrollTitle, {
+      timeout: 5_000,
+      label: "kuali payroll title",
+    });
   }
 
   log.success("Final Transactions filled");
@@ -295,7 +308,10 @@ export async function fillTimekeeperComments(
     `Filling Timekeeper/Approver Comments `
     + `(existing=${existing.length} chars, appending=${comments.length} chars)`,
   );
-  await field.fill(combined, { timeout: 5_000 });
+  await safeFill(field, combined, {
+    timeout: 5_000,
+    label: "kuali timekeeper comments",
+  });
   log.success("Timekeeper comments filled");
 }
 
@@ -348,7 +364,7 @@ export async function verifyTxnNumberFilled(
   log.warn(
     `[Kuali] Txn # unexpectedly '${firstRead}' before save — refilling to '${expected}'`,
   )
-  await field.fill(expected, { timeout: 5_000 })
+  await safeFill(field, expected, { timeout: 5_000, label: "kuali transaction number refill" })
   await page.waitForTimeout(300)
   const secondRead = await field.inputValue()
   if (secondRead !== expected) {
@@ -375,7 +391,10 @@ export async function clickSave(page: Page): Promise<void> {
   await page.waitForTimeout(500);
 
   // Target the navbar save button — registry carries the 3-deep .or() fallback.
-  await save.navbarSaveButton(page).first().click({ timeout: 10_000 });
+  await safeClick(save.navbarSaveButton(page).first(), {
+    timeout: 10_000,
+    label: "kuali navbar save button",
+  });
 
   // Wait for the save request to complete
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});

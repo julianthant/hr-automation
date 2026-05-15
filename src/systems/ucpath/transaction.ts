@@ -15,6 +15,7 @@ import {
   getContentFrame,
 } from "./selectors.js";
 import { log } from "../../utils/log.js";
+import { safeClick, safeFill } from "../common/index.js";
 
 // ─── STEP 1: Navigate sidebar → Smart HR Templates → Smart HR Transactions ───
 
@@ -28,11 +29,17 @@ import { log } from "../../utils/log.js";
 export async function clickSmartHRTransactions(page: Page): Promise<void> {
   log.step("Clicking Smart HR Templates in sidebar...");
 
-  await smartHR.sidebarTemplatesLink(page).click({ timeout: 10_000 });
+  await safeClick(smartHR.sidebarTemplatesLink(page), {
+    timeout: 10_000,
+    label: "ucpath smart hr templates sidebar link",
+  });
   await page.waitForTimeout(1_000);
 
   log.step("Clicking Smart HR Transactions...");
-  await smartHR.sidebarTransactionsLink(page).click({ timeout: 10_000 });
+  await safeClick(smartHR.sidebarTransactionsLink(page), {
+    timeout: 10_000,
+    label: "ucpath smart hr transactions sidebar link",
+  });
   await page.waitForTimeout(5_000);
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 
@@ -54,8 +61,10 @@ export async function selectTemplate(
 ): Promise<void> {
   log.step(`Selecting template: ${templateId}`);
 
-  await smartHR.templateInput(frame).fill(templateId, { timeout: 10_000 });
-  log.step(`Template input filled: ${templateId}`);
+  await safeFill(smartHR.templateInput(frame), templateId, {
+    timeout: 10_000,
+    label: "ucpath smart hr template input",
+  });
 
   log.step(`Template: "${templateId}" selected for this transaction`);
   log.success(`Template "${templateId}" selected`);
@@ -73,8 +82,10 @@ export async function enterEffectiveDate(
 ): Promise<void> {
   log.step(`Entering effective date: ${date}`);
 
-  await smartHR.effectiveDateInput(frame).fill(date, { timeout: 10_000 });
-  log.step("Effective date filled");
+  await safeFill(smartHR.effectiveDateInput(frame), date, {
+    timeout: 10_000,
+    label: "ucpath smart hr effective date",
+  });
 
   log.success("Effective date entered");
 }
@@ -91,7 +102,10 @@ export async function clickCreateTransaction(
 ): Promise<TransactionResult> {
   log.step("Clicking Create Transaction...");
 
-  await smartHR.createTransactionButton(frame).click({ timeout: 10_000 });
+  await safeClick(smartHR.createTransactionButton(frame), {
+    timeout: 10_000,
+    label: "ucpath create transaction button",
+  });
 
   // Wait for PeopleSoft server round-trip
   log.step("Waiting for PeopleSoft to process transaction creation...");
@@ -142,7 +156,10 @@ export async function selectReasonCode(
   // Click Continue — may need force or JS due to sidebar overlay
   log.step("Clicking Continue...");
   try {
-    await smartHR.continueButton(frame).click({ timeout: 5_000 });
+    await safeClick(smartHR.continueButton(frame), {
+      timeout: 5_000,
+      label: "ucpath reason continue button",
+    });
   } catch {
     // Fallback: use PeopleSoft submitAction if sidebar overlay blocks click
     log.step("Regular click blocked — using JS submitAction...");
@@ -191,88 +208,90 @@ export async function fillPersonalData(
 
   // --- Legal Name ---
   log.step("Filling legal first name...");
-  await personalDataSelectors
-    .legalFirstName(frame)
-    .fill(data.firstName, { timeout: 10_000 });
-  log.step("Legal first name filled");
+  await safeFill(personalDataSelectors.legalFirstName(frame), data.firstName, {
+    timeout: 10_000,
+    label: "ucpath legal first name",
+  });
 
   log.step("Filling legal last name...");
-  await personalDataSelectors
-    .legalLastName(frame)
-    .fill(data.lastName, { timeout: 10_000 });
-  log.step("Legal last name filled");
+  await safeFill(personalDataSelectors.legalLastName(frame), data.lastName, {
+    timeout: 10_000,
+    label: "ucpath legal last name",
+  });
 
   if (data.middleName) {
     log.step("Filling legal middle name...");
-    await personalDataSelectors
-      .legalMiddleName(frame)
-      .fill(data.middleName, { timeout: 10_000 });
-    log.step("Legal middle name filled");
+    await safeFill(personalDataSelectors.legalMiddleName(frame), data.middleName, {
+      timeout: 10_000,
+      label: "ucpath legal middle name",
+    });
   }
 
   // --- Preferred / Lived Name (mirror legal names when no lived name available) ---
   log.step("Filling preferred first name...");
-  await personalDataSelectors
-    .preferredFirstName(frame)
-    .fill(data.firstName, { timeout: 10_000 });
-  log.step("Preferred first name filled");
+  await safeFill(personalDataSelectors.preferredFirstName(frame), data.firstName, {
+    timeout: 10_000,
+    label: "ucpath preferred first name",
+  });
 
   log.step("Filling preferred last name...");
-  await personalDataSelectors
-    .preferredLastName(frame)
-    .fill(data.lastName, { timeout: 10_000 });
-  log.step("Preferred last name filled");
+  await safeFill(personalDataSelectors.preferredLastName(frame), data.lastName, {
+    timeout: 10_000,
+    label: "ucpath preferred last name",
+  });
 
   if (data.middleName) {
     log.step("Filling preferred middle name...");
-    await personalDataSelectors
-      .preferredMiddleName(frame)
-      .fill(data.middleName, { timeout: 10_000 });
-    log.step("Preferred middle name filled");
+    await safeFill(personalDataSelectors.preferredMiddleName(frame), data.middleName, {
+      timeout: 10_000,
+      label: "ucpath preferred middle name",
+    });
   }
 
   // --- Date of Birth ---
   log.step("Filling date of birth...");
-  await personalDataSelectors
-    .dateOfBirth(frame)
-    .fill(data.dob, { timeout: 10_000 });
-  log.step("DOB filled");
+  await safeFill(personalDataSelectors.dateOfBirth(frame), data.dob, {
+    timeout: 10_000,
+    label: "ucpath date of birth",
+  });
 
   // --- National ID (SSN) ---
   if (data.ssn) {
     log.step("Filling national ID...");
-    await personalDataSelectors
-      .nationalId(frame)
-      .fill(data.ssn, { timeout: 10_000 });
-    log.step("National ID filled");
+    await safeFill(personalDataSelectors.nationalId(frame), data.ssn, {
+      timeout: 10_000,
+      label: "ucpath national id",
+    });
   } else {
     log.step("No SSN — skipping national ID field");
   }
 
   // --- Address ---
   log.step("Filling address...");
-  await personalDataSelectors
-    .addressLine1(frame)
-    .fill(data.address, { timeout: 10_000 });
-  log.step("Address filled");
+  await safeFill(personalDataSelectors.addressLine1(frame), data.address, {
+    timeout: 10_000,
+    label: "ucpath address line 1",
+  });
 
   if (data.city) {
-    await personalDataSelectors.city(frame).fill(data.city, { timeout: 10_000 });
-    log.step("City filled");
+    await safeFill(personalDataSelectors.city(frame), data.city, {
+      timeout: 10_000,
+      label: "ucpath city",
+    });
   }
 
   if (data.state) {
-    await personalDataSelectors
-      .state(frame)
-      .fill(data.state, { timeout: 10_000 });
-    log.step("State filled");
+    await safeFill(personalDataSelectors.state(frame), data.state, {
+      timeout: 10_000,
+      label: "ucpath state",
+    });
   }
 
   if (data.postalCode) {
-    await personalDataSelectors
-      .postalCode(frame)
-      .fill(data.postalCode, { timeout: 10_000 });
-    log.step("Postal code filled");
+    await safeFill(personalDataSelectors.postalCode(frame), data.postalCode, {
+      timeout: 10_000,
+      label: "ucpath postal code",
+    });
   }
 
   // --- Phone ---
@@ -286,10 +305,10 @@ export async function fillPersonalData(
     log.step("Phone type selected");
 
     log.step("Filling phone number...");
-    await personalDataSelectors
-      .phoneNumberInput(frame)
-      .fill(data.phone, { timeout: 10_000 });
-    log.step("Phone number filled");
+    await safeFill(personalDataSelectors.phoneNumberInput(frame), data.phone, {
+      timeout: 10_000,
+      label: "ucpath phone number",
+    });
 
     log.step("Checking Preferred checkbox...");
     await personalDataSelectors
@@ -309,19 +328,19 @@ export async function fillPersonalData(
     log.step("Email type selected");
 
     log.step("Filling email address...");
-    await personalDataSelectors
-      .emailAddressInput(frame)
-      .fill(data.email, { timeout: 10_000 });
-    log.step("Email address filled");
+    await safeFill(personalDataSelectors.emailAddressInput(frame), data.email, {
+      timeout: 10_000,
+      label: "ucpath email address",
+    });
   }
 
   // --- Tracker Profile ID (I9) ---
   if (data.i9ProfileId) {
     log.step("Filling tracker profile ID...");
-    await personalDataSelectors
-      .trackerProfileIdInput(frame)
-      .fill(data.i9ProfileId, { timeout: 10_000 });
-    log.step("Tracker profile ID filled");
+    await safeFill(personalDataSelectors.trackerProfileIdInput(frame), data.i9ProfileId, {
+      timeout: 10_000,
+      label: "ucpath tracker profile id",
+    });
   }
 
   log.success("Personal data filled");
@@ -341,16 +360,16 @@ export async function fillComments(
 ): Promise<void> {
   log.step("Filling comments...");
 
-  await commentsSelectors
-    .commentsTextarea(frame)
-    .fill(commentsText, { timeout: 10_000 });
-  log.step("Comments filled");
+  await safeFill(commentsSelectors.commentsTextarea(frame), commentsText, {
+    timeout: 10_000,
+    label: "ucpath comments textarea",
+  });
 
   log.step("Filling initiator comments...");
-  await commentsSelectors
-    .initiatorCommentsTextarea(frame)
-    .fill(commentsText, { timeout: 10_000 });
-  log.step("Initiator comments filled");
+  await safeFill(commentsSelectors.initiatorCommentsTextarea(frame), commentsText, {
+    timeout: 10_000,
+    label: "ucpath initiator comments textarea",
+  });
 
   log.success("Comments filled");
 }
@@ -370,7 +389,10 @@ export async function clickJobDataTab(
   log.step("Clicking Job Data tab...");
   await dismissModalMask(page);
 
-  await smartHR.tab.jobData(frame).click({ timeout: 10_000 });
+  await safeClick(smartHR.tab.jobData(frame), {
+    timeout: 10_000,
+    label: "ucpath job data tab",
+  });
   await page.waitForTimeout(5_000);
   await waitForPeopleSoftProcessing(frame, 15_000);
 
@@ -403,63 +425,63 @@ export async function fillJobData(
   log.step("Filling Job Data...");
 
   log.step("Filling position number...");
-  await jobDataSelectors
-    .positionNumberInput(frame)
-    .fill(data.positionNumber, { timeout: 10_000 });
+  await safeFill(jobDataSelectors.positionNumberInput(frame), data.positionNumber, {
+    timeout: 10_000,
+    label: "ucpath position number",
+  });
   // Position number fill triggers PeopleSoft refresh — wait for it
   await page.waitForTimeout(5_000);
   await waitForPeopleSoftProcessing(frame, 15_000);
   log.step("Position number filled — page refreshed, grid indices may have changed");
-  log.step("Position number filled");
 
   log.step("Filling employee classification...");
-  await jobDataSelectors
-    .employeeClassificationInput(frame)
-    .fill(data.employeeClassification, { timeout: 10_000 });
+  await safeFill(jobDataSelectors.employeeClassificationInput(frame), data.employeeClassification, {
+    timeout: 10_000,
+    label: "ucpath employee classification",
+  });
   await page.waitForTimeout(2_000);
-  log.step("Employee classification filled");
 
   log.step("Filling comp rate code: UCHRLY...");
-  await jobDataSelectors
-    .compRateCodeInput(frame)
-    .first()
-    .fill(data.compRateCode, { timeout: 10_000 });
+  await safeFill(jobDataSelectors.compRateCodeInput(frame).first(), data.compRateCode, {
+    timeout: 10_000,
+    label: "ucpath comp rate code",
+  });
   await page.waitForTimeout(1_000);
   // Blur to trigger PeopleSoft validation
   await page.keyboard.press("Tab");
   await page.waitForTimeout(2_000);
-  log.step(`Comp Rate Code: filled "${data.compRateCode}"`);
 
   log.step("Filling compensation rate...");
-  await jobDataSelectors
-    .compensationRateInput(frame)
-    .first()
-    .fill(data.compensationRate, { timeout: 10_000 });
+  await safeFill(jobDataSelectors.compensationRateInput(frame).first(), data.compensationRate, {
+    timeout: 10_000,
+    label: "ucpath compensation rate",
+  });
   await page.waitForTimeout(1_000);
   // Blur to trigger PeopleSoft validation + auto-fill Compensation Frequency
   await page.keyboard.press("Tab");
   await page.waitForTimeout(2_000);
-  log.step(`Compensation Rate: $${data.compensationRate} filled`);
 
   // Fill Compensation Frequency ("H" for Hourly) — required field, sometimes not auto-populated
   log.step("Filling compensation frequency: H (Hourly)...");
   const compFreq = jobDataSelectors.compensationFrequencyInput(frame);
   const freqValue = await compFreq.inputValue().catch(() => "");
   if (!freqValue || freqValue.trim() === "") {
-    await compFreq.fill("H", { timeout: 10_000 });
+    await safeFill(compFreq, "H", {
+      timeout: 10_000,
+      label: "ucpath compensation frequency",
+    });
     await page.waitForTimeout(1_000);
     await page.keyboard.press("Tab");
     await page.waitForTimeout(2_000);
-    log.step("Compensation Frequency filled: H");
   } else {
     log.step(`Compensation Frequency already set: ${freqValue}`);
   }
 
   log.step("Filling expected job end date...");
-  await jobDataSelectors
-    .expectedJobEndDateInput(frame)
-    .fill(data.expectedJobEndDate, { timeout: 10_000 });
-  log.step("Expected job end date filled");
+  await safeFill(jobDataSelectors.expectedJobEndDateInput(frame), data.expectedJobEndDate, {
+    timeout: 10_000,
+    label: "ucpath expected job end date",
+  });
 
   log.success("Job Data filled");
 }
@@ -473,12 +495,7 @@ export async function clickEarnsDistTab(
   page: Page,
   frame: FrameLocator,
 ): Promise<void> {
-  log.step("Clicking Earns Dist tab...");
-  await dismissModalMask(page);
-  await smartHR.tab.earnsDist(frame).click({ timeout: 10_000 });
-  await page.waitForTimeout(3_000);
-  await waitForPeopleSoftProcessing(frame, 10_000);
-  log.success("Earns Dist tab loaded");
+  await clickTransactionTab(page, frame, "Earns Dist", smartHR.tab.earnsDist(frame));
 }
 
 /**
@@ -488,12 +505,24 @@ export async function clickEmployeeExperienceTab(
   page: Page,
   frame: FrameLocator,
 ): Promise<void> {
-  log.step("Clicking Employee Experience tab...");
+  await clickTransactionTab(page, frame, "Employee Experience", smartHR.tab.employeeExperience(frame));
+}
+
+async function clickTransactionTab(
+  page: Page,
+  frame: FrameLocator,
+  tabName: string,
+  locator: Locator,
+): Promise<void> {
+  log.step(`Clicking ${tabName} tab...`);
   await dismissModalMask(page);
-  await smartHR.tab.employeeExperience(frame).click({ timeout: 10_000 });
+  await safeClick(locator, {
+    timeout: 10_000,
+    label: `ucpath ${tabName.toLowerCase()} tab`,
+  });
   await page.waitForTimeout(3_000);
   await waitForPeopleSoftProcessing(frame, 10_000);
-  log.success("Employee Experience tab loaded");
+  log.success(`${tabName} tab loaded`);
 }
 
 // ─── STEP 8: Save and Submit ───
@@ -535,7 +564,10 @@ export async function clickSaveAndSubmit(
   // onboarding / etc can attach their own labeling + kind without
   // teaching this low-level function about the kernel.
   await waitForSaveEnabled(btn, { timeoutMs: 15_000 });
-  await btn.click({ timeout: 10_000 });
+  await safeClick(btn, {
+    timeout: 10_000,
+    label: "ucpath save and submit button",
+  });
   await page.waitForTimeout(5_000);
   await waitForPeopleSoftProcessing(frame, 30_000);
 
@@ -569,7 +601,10 @@ export async function clickSaveAndSubmit(
 
     if ((await okButton.count()) > 0) {
       log.step("Clicking OK on confirmation page...");
-      await okButton.click({ timeout: 5_000 });
+      await safeClick(okButton, {
+        timeout: 5_000,
+        label: "ucpath save confirmation ok button",
+      });
       await page.waitForTimeout(3_000);
 
       if (employeeId) {
@@ -638,13 +673,19 @@ export async function readLatestTransactionNumber(
     log.warn(`[Txn Readback] Row matched but link '${linkText}' disappeared before click`);
     return "";
   }
-  await link.first().click({ timeout: 5_000 });
+  await safeClick(link.first(), {
+    timeout: 5_000,
+    label: "ucpath transaction row link",
+  });
   await page.waitForTimeout(5_000);
 
   // Click Continue on transaction details page
   const continueBtn = smartHR.continueButton(txnFrame);
   if ((await continueBtn.count()) === 0) return "";
-  await continueBtn.click({ timeout: 5_000 });
+  await safeClick(continueBtn, {
+    timeout: 5_000,
+    label: "ucpath transaction detail continue button",
+  });
   await page.waitForTimeout(8_000);
 
   // Extract "Transaction ID: T002XXXXXX" from the re-opened form
@@ -716,12 +757,18 @@ export async function findExistingTerminationTransaction(
       log.warn(`[Txn Lookup] Row matched but link '${linkText}' disappeared before click — treating as no match`);
       return null;
     }
-    await link.first().click({ timeout: 5_000 });
+    await safeClick(link.first(), {
+      timeout: 5_000,
+      label: "ucpath existing transaction row link",
+    });
     await page.waitForTimeout(4_000);
 
     const continueBtn = smartHR.continueButton(frame);
     if ((await continueBtn.count()) > 0) {
-      await continueBtn.click({ timeout: 5_000 });
+      await safeClick(continueBtn, {
+        timeout: 5_000,
+        label: "ucpath existing transaction continue button",
+      });
       await page.waitForTimeout(6_000);
     }
 

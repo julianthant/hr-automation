@@ -8,6 +8,7 @@ import {
   goToMenu,
   timecard,
 } from "./selectors.js";
+import { safeClick, safeFill } from "../common/index.js";
 
 export const NEW_KRONOS_URL = "https://ucsd-sso.prd.mykronos.com/wfd/home";
 
@@ -34,19 +35,28 @@ export async function searchEmployee(
 
   // Click the Employee Search button in the navbar
   log.step("[New Kronos] Opening Employee Search sidebar...");
-  await navbar.employeeSearchButton(page).click({ timeout: 10_000 });
+  await safeClick(navbar.employeeSearchButton(page), {
+    timeout: 10_000,
+    label: "new kronos employee search button",
+  });
   await page.waitForTimeout(2_000);
 
   const frame = searchFrame(page);
 
   // Fill the search input
   log.step(`[New Kronos] Filling search: ${employeeId}`);
-  await searchSelectors.searchInput(frame).fill(employeeId, { timeout: 5_000 });
+  await safeFill(searchSelectors.searchInput(frame), employeeId, {
+    timeout: 5_000,
+    label: "new kronos employee search input",
+  });
   await page.waitForTimeout(500);
 
   // Click the Search button (inside the iframe)
   log.step("[New Kronos] Clicking Search...");
-  await searchSelectors.searchSubmitButton(frame).click({ timeout: 5_000 });
+  await safeClick(searchSelectors.searchSubmitButton(frame), {
+    timeout: 5_000,
+    label: "new kronos search submit button",
+  });
   await page.waitForTimeout(3_000);
 
   // Check for "There are no items to display" — means not found
@@ -81,7 +91,7 @@ export async function selectEmployeeResult(page: Page): Promise<boolean> {
   // Fallback: click the employee name/row directly
   const resultRow = searchSelectors.firstResultRow(frame);
   if ((await resultRow.count()) > 0) {
-    await resultRow.click({ timeout: 5_000 });
+    await safeClick(resultRow, { timeout: 5_000, label: "new kronos search result row" });
     await page.waitForTimeout(1_000);
     log.step("[New Kronos] Employee row clicked");
     return true;
@@ -106,10 +116,10 @@ export async function clickGoToTimecard(page: Page): Promise<boolean> {
 
   let clicked = false;
   if ((await gotoInFrame.count()) > 0) {
-    await gotoInFrame.first().click({ timeout: 5_000 });
+    await safeClick(gotoInFrame.first(), { timeout: 5_000, label: "new kronos go to button in frame" });
     clicked = true;
   } else if ((await gotoOnPage.count()) > 0) {
-    await gotoOnPage.first().click({ timeout: 5_000 });
+    await safeClick(gotoOnPage.first(), { timeout: 5_000, label: "new kronos go to button" });
     clicked = true;
   }
 
@@ -124,7 +134,7 @@ export async function clickGoToTimecard(page: Page): Promise<boolean> {
   const timecardItem = goToMenu.timecardItem(page);
 
   if ((await timecardItem.count()) > 0) {
-    await timecardItem.first().click({ timeout: 5_000 });
+    await safeClick(timecardItem.first(), { timeout: 5_000, label: "new kronos timecard menu item" });
     await page.waitForTimeout(5_000);
     log.success("[New Kronos] Navigated to Timecard");
     return true;
@@ -144,12 +154,12 @@ export async function switchToPreviousPayPeriod(page: Page): Promise<boolean> {
   // then click option "Previous Pay Period"
   const periodBtn = timecard.currentPayPeriodButton(page);
   if ((await periodBtn.count()) > 0) {
-    await periodBtn.click({ timeout: 5_000 });
+    await safeClick(periodBtn, { timeout: 5_000, label: "new kronos current pay period button" });
     await page.waitForTimeout(2_000);
 
     const prevOption = timecard.previousPayPeriodOption(page);
     if ((await prevOption.count()) > 0) {
-      await prevOption.click({ timeout: 5_000 });
+      await safeClick(prevOption, { timeout: 5_000, label: "new kronos previous pay period option" });
       await page.waitForTimeout(5_000);
       log.step("[New Kronos] Switched to Previous Pay Period");
       return true;
@@ -329,23 +339,38 @@ export async function setDateRange(
 
   // Step 1: Click the timeframe button to open the dropdown
   // The button text varies: "Current Pay Period", "Previous Pay Period", or a date range string
-  await timecard.payPeriodTriggerButton(page).click({ timeout: 10_000 });
+  await safeClick(timecard.payPeriodTriggerButton(page), {
+    timeout: 10_000,
+    label: "new kronos pay period trigger button",
+  });
   await page.waitForTimeout(2_000);
 
   // Step 2: Click "Select range" to switch to custom date range mode
-  await timecard.selectRangeButton(page).click({ timeout: 5_000 });
+  await safeClick(timecard.selectRangeButton(page), {
+    timeout: 5_000,
+    label: "new kronos select range button",
+  });
   await page.waitForTimeout(1_000);
 
   // Step 3: Fill start date
-  await timecard.startDateInput(page).fill(startDate, { timeout: 5_000 });
+  await safeFill(timecard.startDateInput(page), startDate, {
+    timeout: 5_000,
+    label: "new kronos start date",
+  });
   await page.waitForTimeout(500);
 
   // Step 4: Fill end date
-  await timecard.endDateInput(page).fill(endDate, { timeout: 5_000 });
+  await safeFill(timecard.endDateInput(page), endDate, {
+    timeout: 5_000,
+    label: "new kronos end date",
+  });
   await page.waitForTimeout(500);
 
   // Step 5: Click Apply
-  await timecard.applyButton(page).click({ timeout: 5_000 });
+  await safeClick(timecard.applyButton(page), {
+    timeout: 5_000,
+    label: "new kronos date range apply button",
+  });
   await page.waitForTimeout(5_000);
   log.step("[New Kronos] Date range applied");
 }
@@ -358,7 +383,7 @@ export async function closeEmployeeSearch(page: Page): Promise<void> {
     const frame = searchFrame(page);
     const closeBtn = searchSelectors.closeButton(frame);
     if ((await closeBtn.count()) > 0) {
-      await closeBtn.click({ timeout: 3_000 });
+      await safeClick(closeBtn, { timeout: 3_000, label: "new kronos search sidebar close button" });
       log.step("[New Kronos] Search sidebar closed");
     }
   } catch {

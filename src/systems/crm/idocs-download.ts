@@ -4,6 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { log } from "../../utils/log.js";
+import { tryRegisterDownloadedFile } from "../../tracker/files/register-download.js";
 
 const IDOCS_VIEWER_HOST = "crickportal-ext.bfs.ucsd.edu";
 const IDOCS_VIEWER_PATH = "/iDocsForSalesforce/Content/pdfjs/web/PDFjsViewer.aspx";
@@ -238,9 +239,9 @@ export async function downloadCrmIdocsDocuments(
     const savedName = `Doc${idx + 1}-${filename}`;
     const savedPath = join(folderPath, savedName);
     await writeFile(savedPath, body);
-    await registerDownloadedCrmDocument({
-      savedPath,
-      savedName,
+    registerDownloadedCrmDocument({
+      path: savedPath,
+      originalName: savedName,
       workflow: options.workflow ?? "crm-doc-download",
       itemId: options.itemId,
       runId: options.runId,
@@ -272,32 +273,14 @@ export async function downloadCrmIdocsDocumentsFromFrame(
   return downloadCrmIdocsDocuments(frame.page(), folderPath, options);
 }
 
-async function registerDownloadedCrmDocument(input: {
-  savedPath: string;
-  savedName: string;
+function registerDownloadedCrmDocument(input: {
+  path: string;
+  originalName: string;
   workflow: string;
   itemId?: string;
   runId?: string;
   parentRunId?: string;
   trackerDir: string;
-}): Promise<void> {
-  try {
-    const { openStateDb, isStateDbReady } = await import("../../tracker/state/db.js");
-    const { registerLocalFile } = await import("../../tracker/files/files.js");
-    if (isStateDbReady(input.trackerDir)) {
-      registerLocalFile(openStateDb(input.trackerDir), {
-        kind: "pdf",
-        mimeType: "application/pdf",
-        path: input.savedPath,
-        originalName: input.savedName,
-        source: "crm-idocs-download",
-        workflow: input.workflow,
-        itemId: input.itemId,
-        runId: input.runId,
-        parentRunId: input.parentRunId,
-      });
-    }
-  } catch {
-    // File registry is best-effort; a saved PDF still counts as download success.
-  }
+}): void {
+  tryRegisterDownloadedFile({ kind: "crm-document", ...input });
 }

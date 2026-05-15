@@ -4,13 +4,18 @@ let now = Date.now();
 const subscribers = new Set<(n: number) => void>();
 let intervalId: ReturnType<typeof setInterval> | null = null;
 
+type HotImportMeta = ImportMeta & {
+  hot?: { dispose: (cb: () => void) => void };
+};
+
 function tick(): void {
   now = Date.now();
   for (const sub of subscribers) sub(now);
 }
 
-if (import.meta.hot) {
-  import.meta.hot.dispose(() => {
+const hot = (import.meta as HotImportMeta).hot;
+if (hot) {
+  hot.dispose(() => {
     if (intervalId) {
       clearInterval(intervalId);
       intervalId = null;

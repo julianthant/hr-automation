@@ -4,6 +4,7 @@ import { errorMessage, classifyPlaywrightError } from "../../utils/errors.js";
 import { jobSummary } from "./selectors.js";
 import { waitForPeopleSoftProcessing } from "./navigate.js";
 import { dismissPeopleSoftModalMask } from "../common/modal.js";
+import { safeClick, safeFill } from "../common/index.js";
 
 /** Direct URL — skips sidebar, no iframe wrapper. */
 const JOB_SUMMARY_URL =
@@ -53,7 +54,10 @@ export async function navigateToWorkforceJobSummary(page: Page): Promise<void> {
   // Handle campus discovery redirect
   if (page.url().includes("ucpathdiscovery")) {
     log.step("[Job Summary] Campus discovery page — selecting UCSD...");
-    await jobSummary.campusDiscoveryUcsdLink(page).click({ timeout: 10_000 });
+    await safeClick(jobSummary.campusDiscoveryUcsdLink(page), {
+      timeout: 10_000,
+      label: "ucpath job summary campus discovery ucsd link",
+    });
     await page.waitForTimeout(5_000);
   }
 
@@ -82,8 +86,14 @@ export async function searchJobSummary(page: Page, emplId: string): Promise<bool
   const root = await getFormRoot(page);
 
   log.step(`[Job Summary] Searching for Empl ID: ${emplId}`);
-  await jobSummary.emplIdInput(root).fill(emplId, { timeout: 10_000 });
-  await jobSummary.searchButton(root).click({ timeout: 10_000 });
+  await safeFill(jobSummary.emplIdInput(root), emplId, {
+    timeout: 10_000,
+    label: "ucpath job summary empl id",
+  });
+  await safeClick(jobSummary.searchButton(root), {
+    timeout: 10_000,
+    label: "ucpath job summary search button",
+  });
 
   await page.waitForTimeout(5_000);
 
@@ -144,7 +154,10 @@ async function handleMultiRowGrid(
     if (isTerminated) continue;
 
     log.step(`[Job Summary] Drilling into row ${i + 1}/${total} (status='${statusText || "unknown"}')`);
-    await jobSummary.rowDrillInLink(row).first().click({ timeout: 10_000 });
+    await safeClick(jobSummary.rowDrillInLink(row).first(), {
+      timeout: 10_000,
+      label: "ucpath job summary row drill-in link",
+    });
     await page.waitForTimeout(2_000);
     return;
   }
@@ -189,7 +202,10 @@ export async function extractWorkLocation(
     // iframe loads).
     await dismissPeopleSoftModalMask(page);
     const attemptRoot = await getFormRoot(page);
-    await jobSummary.workLocationTab(attemptRoot).click({ timeout: 15_000 });
+    await safeClick(jobSummary.workLocationTab(attemptRoot), {
+      timeout: 15_000,
+      label: "ucpath job summary work location tab",
+    });
   };
 
   try {
@@ -246,7 +262,10 @@ export async function extractJobInfo(
   // click can flake on the same transparent overlay.
   await dismissPeopleSoftModalMask(page);
   const root = await getFormRoot(page);
-  await jobSummary.jobInformationTab(root).click({ timeout: 10_000 });
+  await safeClick(jobSummary.jobInformationTab(root), {
+    timeout: 10_000,
+    label: "ucpath job summary job information tab",
+  });
   await page.waitForTimeout(3_000);
 
   // Job Information grid columns: Job Code(0), Description(1), Classified Ind(2),
