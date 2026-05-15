@@ -99,7 +99,7 @@ export function registerBaseRoutes(app: Hono, deps: DashboardHonoDeps): void {
     const id = c.req.query("id") ?? "";
     const date = c.req.query("date") ?? undefined;
 
-    if ((deps.projectionReady ?? true) && deps.stateDb && date) {
+    if (deps.projectionReady && deps.stateDb && date) {
       try {
         return jsonResponse(queryRunsForItem(deps.stateDb, { workflow, itemId: id, date }));
       } catch (err) {
