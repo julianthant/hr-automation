@@ -648,12 +648,10 @@ export async function readLatestTransactionNumber(
   await page.waitForTimeout(8_000);
 
   // Extract "Transaction ID: T002XXXXXX" from the re-opened form
-  const bodyText = await txnFrame.locator("body").innerText({ timeout: 5_000 }).catch(() => ""); // allow-inline-selector -- body innerText readback for regex scrape
-  const tMatch = bodyText.match(/Transaction ID:\s*(T\d+)/)
-    ?? bodyText.match(/Transaction:\s*(T\d+)/i);
-  if (tMatch) {
-    log.step(`Transaction number: ${tMatch[1]}`);
-    return tMatch[1];
+  const transactionId = await readTransactionIdFromDetailPage(txnFrame);
+  if (transactionId) {
+    log.step(`Transaction number: ${transactionId}`);
+    return transactionId;
   }
   return "";
 }
@@ -727,12 +725,10 @@ export async function findExistingTerminationTransaction(
       await page.waitForTimeout(6_000);
     }
 
-    const bodyText = await frame.locator("body").innerText({ timeout: 5_000 }).catch(() => ""); // allow-inline-selector -- body innerText readback for regex scrape
-    const tMatch = bodyText.match(/Transaction ID:\s*(T\d+)/)
-      ?? bodyText.match(/Transaction:\s*(T\d+)/i);
-    if (tMatch) {
-      log.success(`[Txn Lookup] Existing transaction #${tMatch[1]} found for eid=${employeeId}`);
-      return tMatch[1];
+    const transactionId = await readTransactionIdFromDetailPage(frame);
+    if (transactionId) {
+      log.success(`[Txn Lookup] Existing transaction #${transactionId} found for eid=${employeeId}`);
+      return transactionId;
     }
     log.warn(`[Txn Lookup] Matched row but couldn't extract Transaction ID from detail page — treating as no match`);
     return null;
@@ -740,6 +736,13 @@ export async function findExistingTerminationTransaction(
     log.warn(`[Txn Lookup] Lookup threw (treating as no match): ${e instanceof Error ? e.message : String(e)}`);
     return null;
   }
+}
+
+async function readTransactionIdFromDetailPage(frame: FrameLocator): Promise<string | null> {
+  const bodyText = await frame.locator("body").innerText({ timeout: 5_000 }).catch(() => ""); // allow-inline-selector -- body innerText readback for regex scrape
+  const match = bodyText.match(/Transaction ID:\s*(T\d+)/)
+    ?? bodyText.match(/Transaction:\s*(T\d+)/i);
+  return match?.[1] ?? null;
 }
 
 /**
