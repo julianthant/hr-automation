@@ -1,13 +1,14 @@
 # HR Automation
 
-UCPath HR automation tool for UCSD. Automates onboarding, separations, EID lookups, work-study updates, and UKG report downloads via Playwright browser automation.
+UCPath HR automation for UCSD. Playwright-driven workflows for onboarding, separations, EID lookups, work-study updates, oath signatures, oath uploads, emergency contacts, and UKG report downloads.
 
 ## Setup
 
 ```bash
 npm install
 npx playwright install chromium
-cp .env.example .env   # fill in your UCSD credentials
+cp .env.example .env   # fill in credentials
+npm run setup          # validates environment
 ```
 
 ### Environment Variables
@@ -16,150 +17,137 @@ cp .env.example .env   # fill in your UCSD credentials
 |----------|-------------|
 | `UCPATH_USER_ID` | UCSD SSO username |
 | `UCPATH_PASSWORD` | UCSD SSO password |
-| `NAME` | Your timekeeper name (for Kuali forms) |
+| `NAME` | Your timekeeper name (used in Kuali separation forms) |
+
+Duo MFA is manual — the automation pauses and polls until you approve on your phone.
 
 ## Commands
 
-### Onboarding
+Most commands use **daemon mode**: the first invocation spawns a persistent process (Duo once), subsequent invocations enqueue without re-authenticating. Use `:stop` to drain and shut down, `-n` to force-spawn an additional daemon, `-p N` to ensure N daemons are alive.
 
+### Onboarding
 ```bash
-npm run onboarding <email>                   # Full onboarding for one employee
-npm run onboarding <email1> <email2> ...     # Pool mode (min(N, 4) workers; override with --workers)
-npm run onboarding:dry <email>               # Dry-run (preview, no UCPath changes)
-npm run onboarding:batch -- --workers <N>    # Batch mode — reads src/workflows/onboarding/batch.yaml (N workers)
-npm run extract <email>                      # Extract employee data from CRM only
+npm run onboarding <email> [<email> ...]     # Enqueue; auto-spawns a daemon (CRM + UCPath + I9 Duo once)
+npm run onboarding:stop                      # Soft-stop all onboarding daemons
+npm run extract <email>                      # Extract employee data from CRM only (no UCPath)
 ```
 
 ### Separations
-
 ```bash
-npm run separation <docId>             # Kuali -> Kronos -> UCPath termination
-npm run separation:dry <docId>         # Dry-run (extract data only)
-```
-
-### Kronos Reports
-
-```bash
-npm run kronos                         # Download Time Detail PDFs (4 workers)
-npm run kronos:dry                     # Dry-run (preview employee list)
-npm run kronos -- --workers 8          # Custom worker count
+npm run separation <docId> [docId ...]       # Enqueue; auto-spawns a daemon
+npm run separation:stop                      # Soft-stop all separation daemons
 ```
 
 ### Work Study
-
 ```bash
-npm run work-study <emplId> <date>     # Update position pool via PayPath
-npm run work-study:dry <emplId> <date> # Dry-run
+npm run work-study <emplId> <date>           # Enqueue UCPath PayPath update
+npm run work-study:stop
 ```
 
 ### EID Lookup
-
 ```bash
-npx tsx --env-file=.env src/cli.ts eid-lookup "Last, First Middle"
-npx tsx --env-file=.env src/cli.ts eid-lookup --workers 4 "Name1" "Name2"
+npm run eid-lookup "Last, First Middle"      # Enqueue; auto-spawns a daemon
+npm run eid-lookup:stop
+```
+
+### Active Check
+```bash
+npm run active-check "Last, First Middle"    # Check UCPath active status by name
+npm run active-check 10873698                # Check by 8-digit EID
+npm run active-check:stop
+```
+
+### Oath Signature
+```bash
+npm run oath-signature <emplId> [emplId ...] # Enqueue UCPath oath signature
+npm run oath-signature:stop
+```
+
+### Oath Upload
+```bash
+npm run oath-upload <pdfPath> [pdfPath ...]  # OCR → fan out signatures → HR ticket
+npm run oath-upload:stop
+```
+
+### Emergency Contact
+```bash
+npm run emergency-contact <batchYaml>        # Load YAML → preflight → enqueue each record
+npm run emergency-contact:stop
+# Flags: --roster-url "<sp-url>" | --roster-path <xlsx> | --ignore-roster-mismatch | -p N | -n
+```
+
+### CRM Doc Download
+```bash
+npm run crm-doc-download                     # Download iDocs PDFs from CRM (delegation target)
+npm run crm-doc-download:stop
+```
+
+### Kronos Reports
+```bash
+npm run kronos                               # Download Time Detail PDFs (4 parallel workers)
 ```
 
 ### Dashboard
-
 ```bash
-npm run dashboard                      # SSE backend + Vite dev server
-npm run dashboard:prod                 # Serve pre-built dashboard only
-npm run dashboard -- -p 4000           # Custom SSE port
+npm run dashboard                            # SSE backend (:3838) + Vite dev (:5173)
+npm run dashboard:watch                      # Same, but tsx watch restarts SSE backend on src/ changes
+npm run dashboard:prod                       # Serve pre-built dashboard from SSE only
+npm run dashboard:tunneled                   # Dashboard with tunnel support
 ```
 
-Open **http://localhost:5173** to see real-time workflow progress.
+Open **http://localhost:5173** to monitor live workflow progress.
 
-### Export
-
+### Export / Utilities
 ```bash
-npx tsx --env-file=.env src/cli.ts export <workflow>
-npx tsx --env-file=.env src/cli.ts export onboarding -o out.xlsx
+tsx --env-file=.env src/cli.ts export <workflow>   # Dump JSONL tracker to xlsx
+npm run clean:tracker                              # Prune .tracker/*.jsonl older than 30 days
+npm run test-login                                 # Smoke test UCPath + CRM auth
+npm run setup                                      # First-use environment validation wizard
+npm run schemas:export                             # Write each workflow's Zod input schema as JSON Schema
+npm run selectors:catalog                          # Regenerate per-system SELECTORS.md
+npm run selector:search "<intent>"                 # Fuzzy search across SELECTORS.md + LESSONS.md
+npm run typecheck                                  # Type-check src/
+npm run typecheck:all                              # Type-check src/ + tests
+npm run lint                                       # ESLint
+npm run test                                       # Unit tests
+npm run test:architecture                          # Static architecture/convention guards
+npm run build:dashboard                            # Single-file dashboard build
 ```
 
-### Utilities
-
-```bash
-npm run test-login                     # Test UCPath + CRM auth
-npm run typecheck                      # TypeScript type checking
-npm run test                           # Run unit tests
-```
-
-> If `npm` is blocked by group policy, run tsx directly: `.\node_modules\.bin\tsx --env-file=.env src/cli.ts <command>`
+> If `npm run` is blocked, invoke tsx directly: `./node_modules/.bin/tsx --env-file=.env src/cli.ts <command>`
 
 ## Architecture
 
+See `CLAUDE.md` for the full architecture reference, kernel API, daemon mode design, and workflow authoring guide.
+
 ```
 src/
-  cli.ts              # Commander CLI entry point
-  config.ts           # Centralized URLs, paths, timeouts, screen dimensions
-  auth/               # SSO login flows (UCPath, CRM, UKG, Kuali, New Kronos)
-  browser/            # Playwright browser launch, session management, window tiling
-  crm/                # ACT CRM search, navigation, field extraction
-  i9/                 # I9 Complete employee record creation
-  kuali/              # Kuali Build separation form automation
-  new-kronos/         # New Kronos (WFD) employee search
-  old-kronos/         # Old Kronos (UKG) search, reports, iframe handling
-  ucpath/             # UCPath PeopleSoft navigation, Smart HR transactions
-  tracker/            # JSONL streaming + Excel tracking + SSE dashboard server
-  dashboard/          # React SPA (Vite + Tailwind + shadcn/ui)
-  utils/              # Env validation, logging, error helpers, worker pool
-  workflows/
-    onboarding/       # CRM extraction -> UCPath hire transaction
-    separations/      # Kuali -> Kronos -> UCPath termination (5 browsers)
-    eid-lookup/       # Person Org Summary search + CRM cross-verification
-    old-kronos-reports/ # Batch Time Detail PDF downloads
-    work-study/       # UCPath PayPath position pool updates
-  scripts/            # Dev tools: selector exploration, batch testing
+  core/          # Workflow kernel (kernel/, daemon/, task-store/)
+  systems/       # Playwright drivers: crm, ucpath, i9, kuali, old-kronos, new-kronos, servicenow, sharepoint
+  workflows/     # Composed workflows: onboarding, separations, eid-lookup, active-check, work-study,
+                 #   oath-signature, oath-upload, emergency-contact, ocr, old-kronos-reports,
+                 #   sharepoint-download, crm-doc-download
+  infra/         # Auth flows + browser launch
+  services/      # OCR, roster matching, mobile photo capture
+  tracker/       # JSONL append + SSE + Excel export
+  dashboard/     # React SPA (Vite + shadcn/ui)
+  domain/        # Pure HR business logic (identity, names, EIDs, etc.)
+  utils/         # log, errors, env
+  cli.ts         # Commander entry point
+  config.ts      # URLs, PATHS, TIMEOUTS, SCREEN, ANNUAL_DATES
 ```
 
 ## How It Works
 
-All workflows run **headed Chromium browsers** so you can see the automation and approve Duo MFA prompts on your phone. Browsers stay open after completion for inspection.
-
-### Workflow Data Flows
-
-**Onboarding**: CRM (extract employee data) -> UCPath (person search + Smart HR hire transaction) -> Excel tracker
-
-**Separations**: Kuali (extract termination data) -> Old/New Kronos (timecard check) -> UCPath (termination transaction) -> Kuali (write back transaction ID)
-
-**EID Lookup**: UCPath Person Org Summary (name search) -> SDCMP/HDH filter -> optional CRM cross-verification -> Excel tracker
-
-**Kronos Reports**: UKG (search employee -> run Time Detail report -> download PDF) in parallel across N workers
-
-**Work Study**: UCPath PayPath Actions (search by ID -> update position pool/compensation)
-
-## Dashboard
-
-The live monitoring dashboard shows real-time workflow progress:
-
-- **SSE backend** (port 3838) reads `.tracker/` JSONL files and streams updates
-- **React frontend** (port 5173) displays queue status, log streams, and step progress
-
-Workflows emit events via `withTrackedWorkflow()`. The dashboard deduplicates entries by ID and sorts by status: running > pending > failed > done.
-
-## Key Concepts
-
-- **Separate auth flows** — Each system (UCPath, CRM, UKG, Kuali, New Kronos) has its own login. Never share browser sessions.
-- **Sequential Duo MFA** — When multiple browsers need auth, Duo prompts are staggered one at a time.
-- **ActionPlan pattern** — UCPath transactions are built as step queues supporting dry-run preview and error isolation.
-- **Persistent sessions** — UKG/Kronos reuse login state via `sessionDir`. UCPath/CRM always login fresh.
-- **`withTrackedWorkflow`** — Lifecycle wrapper that auto-emits JSONL events for dashboard streaming.
-
-## Development
-
-```bash
-npm run typecheck        # Type check
-npm run test             # Run tests
-npm run dev:dashboard    # Dashboard dev server with hot reload
-```
+All workflows run headed Chromium browsers so you can approve Duo MFA prompts. In **daemon mode**, browsers stay open between items — Duo fires once per daemon spawn, not per item. Subsequent enqueues claim work from a shared SQLite queue without re-authentication.
 
 ### Selector Discovery
 
-Use [playwright-cli](https://www.npmjs.com/package/@anthropic-ai/playwright-cli) to map selectors before writing automation code:
-
 ```bash
 npm install -g @playwright/cli@latest
-playwright-cli -s=mysession open --headed "https://example.com"
+playwright-cli -s=mysession open --headed "<url>"
 playwright-cli -s=mysession snapshot    # accessibility tree with ref IDs
 playwright-cli -s=mysession click e40   # interact by ref
 ```
+
+After mapping, add to `src/systems/<system>/selectors.ts` with `// verified YYYY-MM-DD`. Run `npm run selectors:catalog` to sync.
