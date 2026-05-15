@@ -1,8 +1,9 @@
 import type { Session } from '../kernel/session.js'
 import { log } from '../../utils/log.js'
 import { errorMessage } from '../../utils/errors.js'
-import { openControlDb } from '../control-db.js'
-import { createWorkerStore } from './worker-store.js'
+import type { ControlDb } from '../control-db.js'
+import type { ControlTaskStore } from '../task-store/index.js'
+import type { ControlWorkerStore } from './worker-store.js'
 
 /**
  * Module-level registry of fire-and-forget kernel runs that live INSIDE the
@@ -52,6 +53,9 @@ export interface InProcessRunControl {
   workerId: string
   taskId: string
   attemptId: string
+  controlDb: ControlDb
+  taskStore: ControlTaskStore
+  workerStore: ControlWorkerStore
 }
 
 export function registerInProcessRun(
@@ -117,8 +121,7 @@ function markSqliteInProcessCancel(
 ): void {
   if (!control) return
   try {
-    const workerStore = createWorkerStore(openControlDb({ trackerDir: control.trackerDir }))
-    workerStore.enqueueWorkerCommand({
+    control.workerStore.enqueueWorkerCommand({
       commandType: 'cancel_task',
       workflow: ident.workflow,
       targetWorkerId: control.workerId,
@@ -127,12 +130,12 @@ function markSqliteInProcessCancel(
       state: 'completed',
       payload: { itemId: ident.itemId, runId: ident.runId, source: 'in-process' },
     })
-    const browsers = workerStore.listBrowserProcessesForTask({
+    const browsers = control.workerStore.listBrowserProcessesForTask({
       taskId: control.taskId,
       attemptId: control.attemptId,
     })
     for (const browser of browsers) {
-      const commandId = workerStore.enqueueWorkerCommand({
+      const commandId = control.workerStore.enqueueWorkerCommand({
         commandType: 'kill_browser',
         workflow: ident.workflow,
         targetWorkerId: browser.workerId,
@@ -142,7 +145,7 @@ function markSqliteInProcessCancel(
         state: 'completed',
         payload: { pid: browser.pid, systemId: browser.systemId, source: 'in-process' },
       })
-      workerStore.markBrowserProcessKillRequested({
+      control.workerStore.markBrowserProcessKillRequested({
         browserProcessId: browser.browserProcessId,
         commandId,
       })

@@ -132,6 +132,9 @@ test('in-process-runs: SQLite-backed cancel marks browser rows kill_requested', 
       workerId: 'dashboard:123',
       taskId: task.taskId,
       attemptId: task.attemptId,
+      controlDb: control,
+      taskStore,
+      workerStore,
     })
 
     const result = await cancelInProcessRun(ident)
@@ -155,6 +158,7 @@ test('in-process-runs: unregister clears local map but leaves SQLite attempts as
   try {
     const control = openControlDb({ trackerDir: dir })
     const taskStore = createTaskStore(control)
+    const workerStore = createWorkerStore(control)
     const [task] = taskStore.enqueueTasks({
       workflow: 'ocr',
       inputs: [{ sessionId: 'ocr-2' }],
@@ -167,6 +171,9 @@ test('in-process-runs: unregister clears local map but leaves SQLite attempts as
       workerId: 'dashboard:123',
       taskId: task.taskId,
       attemptId: task.attemptId,
+      controlDb: control,
+      taskStore,
+      workerStore,
     })
     unregisterInProcessRun(ident)
 
