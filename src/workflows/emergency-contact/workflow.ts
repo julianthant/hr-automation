@@ -9,6 +9,7 @@ import { TransactionError } from "../../systems/ucpath/types.js";
 import {
   navigateToEmergencyContact,
   demoteExistingContact,
+  hidePeopleSoftModalMask,
 } from "../../systems/ucpath/personal-data.js";
 import { downloadSharePointFile } from "../sharepoint-download/index.js";
 import { verifyBatchAgainstRoster } from "./roster-verify.js";
@@ -187,15 +188,11 @@ export const emergencyContactWorkflow = defineWorkflow({
 
     await ctx.step("fill-form", async () => {
       const planCtx: EmergencyContactContext = { employeeName: record.employee.name };
-      const plan = buildEmergencyContactPlan(record, page, planCtx, {
-        beforeCommit: async () => {
-          await ctx.screenshot({ kind: "form", label: "emergency-contact-dry-run-pre-save" });
-        },
-      });
+      const plan = buildEmergencyContactPlan(record, page, planCtx);
       try {
         await plan.execute();
-        if (!record.dryRun) {
-          await ctx.screenshot({ kind: "form", label: "emergency-contact-saved" });
+        if (record.dryRun) {
+          await ctx.screenshot({ kind: "form", label: "emergency-contact-dry-run-pre-save" });
         }
       } catch (err) {
         if (err instanceof TransactionError) {
@@ -214,6 +211,14 @@ export const emergencyContactWorkflow = defineWorkflow({
         log.success(`Dry run complete for ${record.employee.name} — UCPath Save was skipped.`);
         return;
       }
+      await hidePeopleSoftModalMask(page);
+      await page
+        .getByRole("button", { name: "Save", exact: true })
+        .first()
+        .click({ timeout: 10_000 });
+      await page.waitForTimeout(3_000);
+      await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+      await ctx.screenshot({ kind: "form", label: "emergency-contact-saved" });
       log.success(`Saved emergency contact for ${record.employee.name}`);
     });
   },
