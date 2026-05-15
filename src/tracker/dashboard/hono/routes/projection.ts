@@ -7,16 +7,25 @@ import { jsonResponse } from "../responses.js";
 
 export function registerProjectionRoutes(app: Hono, deps: DashboardHonoDeps): void {
   app.get("/api/v2/projection/health", () => {
+    if (!deps.stateDb) {
+      return jsonResponse({ ok: false, error: "projection not ready" }, 503);
+    }
     return jsonResponse(queryProjectionHealth(deps.stateDb, deps.dir));
   });
 
   app.get("/api/v2/entries", (c) => {
+    if (!deps.stateDb) {
+      return jsonResponse({ ok: false, error: "projection not ready" }, 503);
+    }
     const workflow = c.req.query("workflow") ?? "onboarding";
     const date = c.req.query("date") ?? dateLocal();
     return jsonResponse(queryEntriesPayload(deps.stateDb, { workflow, date }));
   });
 
   app.get("/api/v2/runs", (c) => {
+    if (!deps.stateDb) {
+      return jsonResponse({ ok: false, error: "projection not ready" }, 503);
+    }
     const workflow = c.req.query("workflow") ?? "";
     const itemId = c.req.query("id") ?? "";
     const date = c.req.query("date") ?? dateLocal();
