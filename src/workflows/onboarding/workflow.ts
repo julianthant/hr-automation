@@ -26,7 +26,6 @@ import {
   buildCrmDocumentDownloadPath,
   downloadCrmIdocsDocuments,
 } from "../../systems/crm/idocs-download.js";
-import type { CrmDocDownloadInput } from "../crm-doc-download/index.js";
 import { z } from "zod/v4";
 
 /** Input schema for the onboarding kernel workflow. `email` is the only CLI-supplied field. */
@@ -40,24 +39,6 @@ function maskSsn(ssn: string | undefined | null): string {
   const digits = ssn.replace(/-/g, "");
   if (digits.length < 4) return "***";
   return `***-**-${digits.slice(-4)}`;
-}
-
-export function buildCrmDocDownloadDelegationInput(args: {
-  email: string;
-  data: EmployeeData;
-  parentSubject?: string;
-  taskGroupId: string;
-}): CrmDocDownloadInput {
-  return {
-    email: args.email,
-    firstName: args.data.firstName,
-    lastName: args.data.lastName,
-    middleName: args.data.middleName,
-    originWorkflow: "onboarding",
-    parentSubject: args.parentSubject,
-    parentRunId: args.taskGroupId,
-    taskGroupId: args.taskGroupId,
-  };
 }
 
 const onboardingSteps = [
