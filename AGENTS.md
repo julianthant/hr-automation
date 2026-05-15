@@ -511,75 +511,75 @@ These patterns existed pre-kernel and are intentionally removed. Do not reintrod
 <claude-mem-context>
 # Memory Context
 
-# [hr-automation] recent context, 2026-05-14 1:19am PDT
+# [hr-automation] recent context, 2026-05-15 12:25am PDT
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (21,277t read) | 704,484t work | 97% savings
+Stats: 50 obs (15,953t read) | 424,668t work | 96% savings
 
 ### May 14, 2026
-S187 Post-plan follow-up: fix OCR row display label override in entry-display.ts so parentSubject wins over OATH/EMPL short-circuit (May 14 at 12:21 AM)
-S189 OCR pipeline improvements: strip bracket prefixes from log display, add OCR confidence gate to skip disambiguation, and auto-select longest name variant for EID lookup (May 14 at 12:23 AM)
-S188 Dashboard UI fixes: date format, match status labels, retry button position, nav spacing, image quality (May 14 at 12:27 AM)
-S190 Group row footer style update — change batch/delegation row footers from `prep#xxxx`/`batch#xxxx` to `#{runNumber}` + optional secondary ID, matching EntryItem footer style (May 14 at 12:30 AM)
-S191 Dashboard queue panel group row footer style update + DelegationRow footer actions (retry/delete) (May 14 at 12:32 AM)
-S192 Debug "Failed to fetch" error in dashboard — stopping daemons and investigating the stop/API path (May 14 at 12:34 AM)
-S193 Why oath-signature row doesn't appear immediately after starting an OCR upload — investigation into queue visibility delay and row delegation architecture (May 14 at 12:35 AM)
 S194 Remove trailing "1" from queue entry names — batch anchor rows showing "Oath Signature · #7596 1" instead of just "Oath Signature · #7596" (May 14 at 12:39 AM)
-1396 12:39a 🔵 SQLite items table shows oath-signature prep rows with resolved_prep=0 — correctly counted in wfCounts
-1397 12:44a 🔵 UI Row Population Timing Issue — Rows Should Appear Before Auth Completes
-1398 " 🔵 Queue Depth Architecture — `useQueueDepth` Hook and `/api/queue-depth` Endpoint
-1399 " 🔵 Row Pre-Emission Architecture — Pending Rows Visible Before Auth Via `onPreEmitPending`
-1400 " 🔵 `eidLookupCrmWorkflow` Uses `preEmitPending: true` — EID Lookup Rows Appear Before Auth
-1401 12:45a 🔵 Root Cause Confirmed: `buildOcrApproveHandler` Calls `ensureDaemonsAndEnqueue` Without `onPreEmitPending` for Oath-Signature
-1402 " 🟣 TDD Test Added: `buildOcrApproveHandler` Must Provide `onPreEmitPending` Hook Before Daemon Auth
-1403 12:46a 🔵 Test Run Confirms: New TDD Test Fails (Red), Plus Pre-Existing Search Endpoint Failure
-1404 12:50a 🔵 OCR HTTP Tests Pass; Search-Endpoint Test Failure Remains in Worktree
-1405 12:51a 🔵 search-endpoint.test.ts Fails Due to Stale Hardcoded Fixture Dates Now Outside 30-Day Window
-1406 12:52a 🔴 search-endpoint.test.ts Fixed: Hardcoded Dates Replaced with days:365 Window
-1407 12:53a 🔵 OAuth Signature Workflow Not Appearing in Queue Panel
-1408 12:55a 🔵 Queue Panel Run Number Defaults to 1 When runId Has No #N Suffix
-1409 " 🔵 resolveDaemonBatchQueueTitle Appends batchDisplayOrdinal as Numeric Suffix to Workflow Label
-1410 12:56a 🔵 data.__name Set by Kernel from wf.config.getName at Queue Entry Creation
-1411 " 🔵 oath-signature Workflow Sets data.__name to parentSubject for Batch Dashboard Display
-1412 " 🔵 QueuePanel Renders DaemonBatchRow with workflowLabel and surface.parentRunId — No titleOverride Passed
-1413 12:58a 🔵 batchAnchorName Generates "WorkflowLabel · #shortId" Titles for OCR Batch Anchor Rows
-1414 " 🔵 DaemonBatchRow Passes No footerRunOrdinal to GroupRowBase — Causes Footer to Always Show "#1"
-1415 12:59a 🔵 batchDisplayOrdinal Allocated at Enqueue Time via allocateLowestBatchDisplayOrdinal — Stamped on All Member Rows
-1416 1:00a 🔵 batchDisplayOrdinal Only Allocated for Multi-Item Enqueues Without Existing parentRunId
-1417 " 🔵 QueueGroupSurface "batch" Kind Has titleOverride Field — Currently Left Undefined at Classification Time
-1418 1:01a 🔵 queue-surface-classifier Groups by parentRunId — "batch" Kind Gets titleOverride=undefined While "passive-delegation" Gets parentSubject
-1419 1:02a 🔵 buildDisplayNameMap Forces Ordinal Suffix on explicitWorkflowName Entries Even When Only One Exists
-1420 1:04a 🔴 Removed Trailing "1" from Non-OCR Prepare Batch Anchor Rows in buildDisplayNameMap
-1421 1:07a 🔴 Delegated Child Rows Now Show Resolved Employee Name Instead of Parent Batch Label
-1422 " 🔵 Two Unit Test Failures After entry-display.ts Changes — Tests Assert Old Ordinal and Parent-Label Behavior
-1423 " 🔵 entry-display.test.ts Has 7+ Assertions Encoding Pre-Fix Display Label Behavior That Need Updating
-1424 " 🔵 Test Context Clarifies Exact Expected Value Changes for Both Failing Assertions
-1425 1:08a ⚖️ Global Queue Row Naming Scheme Design
-1427 " 🔵 Existing Queue Row Naming Architecture in hr-automation
-1426 " 🔵 Test "delegated rows inherit a single visible parent label even when the child has its own employee name" — Shows Fix May Be Too Broad
-1428 " 🔵 Deep Code Map: Queue Row Title Resolution Chain
-1429 1:09a 🔵 parentSubject Propagation Pattern Across All Workflows
-1430 " 🔴 Reverted Employee-Name-Priority Fix in buildDisplayNameMap Final Pass
-1432 1:10a ✅ Updated entry-display.test.ts to Reflect prepare-Mode No-Ordinal Behavior
-1431 " 🔵 Test Coverage Map for Queue Row Naming Behavior
-1433 " ✅ All 1503 Dashboard Unit Tests Pass After prepare-Mode Ordinal Fix
 S195 Design a global naming scheme for queue rows with three types: single (person-linked), batch (workflow + 4-digit run ID), and delegation (inherits parent name) (May 14 at 1:10 AM)
-S196 Design a global naming scheme for queue rows with three types: single (person-linked), batch (workflow + 4-digit run ID), and delegation (inherits parent name) (May 14 at 1:11 AM)
-1434 1:12a 🔵 Large Uncommitted Work-in-Progress Across Core and Dashboard
-1435 " 🔵 queue-surface-classifier.ts Already Implemented — Full Surface Type System Exists
-1436 1:16a ⚖️ Global Queue Row Naming Scheme — Three-Type Template
-1437 " 🟣 Implementation Plan Written: Global Queue Row Naming (5 Tasks)
-1438 " ✅ Queue Row Naming Plan Refined — Removed Stale run-one-item.ts Reference
-1439 1:17a 🔵 docs/superpowers/ Is Gitignored — Plan Files Cannot Be Committed Normally
-1440 " ✅ Queue Row Naming Plan Committed to Master via git add -f
-1441 1:18a ⚖️ Global Queue-Row Title Contract Established for EID Lookup and Batch Views
-1442 " ⚖️ Queue Title Domain Primitive API Design: `src/domain/queue-title.ts`
-1443 " 🔵 Large Pre-Existing Working Tree Modification Set Prior to Queue Title Plan Execution
-1444 1:19a ⚖️ Full 5-Task Plan for Global Queue Title Rollout: Kernel, Workflows, Dashboard, and Docs
-1445 " 🔵 Pre-Existing Uncommitted Changes in Key Queue Title Plan Target Files
+S196 Design a global naming scheme for queue rows with three types: single (person-linked), batch (workflow + 4-digit run ID), and delegation (inherits parent name) (May 14 at 1:10 AM)
+S197 Try again — re-execute a large batch of hr-automation feature work that was previously drafted, culminating in 6 commits pushed to origin/master (May 14 at 1:11 AM)
+S199 Full codebase /review-code + /simplify parallel agent run on hr-automation — aggregate findings compilation and delivery (May 14 at 10:12 AM)
+S198 Redesign /review-code skill to use code-reviewer:code-reviewer agent, add code-simplifier subagent, and enforce read-only reporting with orchestrator synthesis (May 14 at 10:21 AM)
+S200 Multi-agent code review + simplify pass across entire codebase — planning scope of simplification handoffs (May 14 at 10:25 AM)
+S201 Multi-agent /review-code + /simplify pass across entire codebase — consolidated findings delivered, user choosing how to split into execution plans (May 14 at 10:30 AM)
+S202 2026-05-14 full codebase review: generate 3 implementation plans + 3 handoff briefs for parallel execution in separate sessions (May 14 at 10:36 AM)
+S203 Execute Plan 1 of 3 review-fix plans (core/tracker/infra) — session start, baseline verification, plan load (May 14 at 8:47 PM)
+1528 9:10p 🔵 Remaining runId Fallback and localeCompare Uses Are Canonical, Not Bugs
+1529 " 🔄 getRunIdOr Refactor Passes Typecheck and 404 Tracker Unit Tests
+1530 " 🔵 setTimeout Usage Survey Across Backend Modules
+1531 9:11p 🔄 Shared Script Utilities: isMainModule Helper, parseArgs, and timers/promises sleep
+1532 " 🔵 clean-tracker.ts Import Order Differs From Expected — Patch Context Mismatch
+1533 " 🔄 clean-tracker.ts argv Parser Migrated to node:util parseArgs with try/catch and --help Flag
+1534 9:12p 🔵 Core setTimeout Patterns Inspected and Confirmed As Intentional
+1535 " 🔄 timers/promises sleep() Refactor Extended to Core Kernel and Daemon Modules
+1536 9:13p 🔄 duo-poll.ts Uses AbortSignal.throwIfAborted() Instead of Custom duoAbortReason Helper
+1537 " 🔵 runId Generation Already Uses UUID Slice — No Race on Assignment
+1538 " 🔄 log.ts: Extracted envBool() and appendFromContext() to Eliminate Duplication
+1539 " 🔴 Typecheck Failures After duo-poll.ts and clean-tracker.ts Refactors
+1540 9:14p 🔴 Fixed Typecheck Errors: throwIfDuoAborted Call Sites and parseArgs Union Type Narrowing
+1541 " ✅ Scripts Refactor Verified: Typecheck Clean, clean-tracker and setup Run Correctly
+1542 " ⚖️ Codebase Review Plan: Core + Tracker + Infra (Plan 1 of 3)
+1543 " ⚖️ ANNUAL_DATES in config.ts intentionally excluded from review fixes
+1544 " ⚖️ UUID recommended over SQLite counter for runId race fix in jsonl.ts (Task A7)
+1545 9:27p ⚖️ Code Review Fix Plan: Core + Tracker + Infra (Plan 1 of 3)
+1546 " 🔴 Fixed findLatestEntryForRunOnDate to use append-order instead of timestamp comparison
+1547 " 🔵 readRunsForId data carry-over pattern in jsonl.ts
+1548 " 🔄 readRunsForId collapsed four Maps into one unified runs Map
+1549 9:28p 🔄 readRunsForId single-pass map population committed as 0e078f5c
+1550 " 🔵 IN_PROCESS_WORKFLOWS set gates retry routing in retry.ts
+1551 " 🔄 Extracted resolveRosterDirs helper to eliminate duplicated roster path logic
+1552 " 🔄 resolveRosterDirs made to derive paths from ROSTER_DIRS constant
+1553 9:29p 🔄 Roster directory consolidation committed as 98f04b65
+1554 " 🔵 handler-throw diagnostic screenshot is duplicated across three kernel entry points
+1555 " 🔵 Ctx type requires two generic arguments — cannot be used bare in helper functions
+1556 " 🔄 tryScreenshot helper extracted to ctx.ts with widened Ctx generic instantiation
+1557 9:30p 🔄 tryScreenshot helper committed as f9ea8674
+1558 " 🔵 In-process workflow control registration pattern in workflow.ts
+1559 " 🔄 Extracted swallowSqliteErr helper to deduplicate in-process control try/catch blocks
+1560 " 🔵 apply_patch fails when write_file has already applied the same patch to workflow.ts
+1561 " 🔵 InProcessRunControl is defined in in-process-runs.ts and imported into workflow.ts
+1562 " 🔵 swallowSqliteErr refactor caused TS2554 — log.warn called with 2 arguments but accepts 1
+1563 9:31p 🔵 log.warn accepts string OR structured object — never (string, context) two-arg form
+1564 " 🔵 StructuredLogEvent has a closed set of known fields — no arbitrary extra properties allowed
+1565 " 🔄 swallowSqliteErr committed (884dfcb6) and deriveItemId simplified to loop
+1566 " ⚖️ 2026-05-14 Codebase Review Split into Three Parallel Plans
+1567 " ✅ Plan 1 Phase Structure: Core + Tracker + Infra Review Fixes
+1568 9:40p ⚖️ Code Review Fix Plan 1 Committed — Core/Tracker/Infra
+1569 " ⚖️ ANNUAL_DATES in config.ts Intentionally Not Updated
+1570 " ⚖️ Task A7 RunId Race Fix — UUID vs SQLite Counter
+1571 9:41p 🔴 A1: InProcessRunControl Refactored to Carry Shared DB/Store Instances
+1572 " 🔵 Test Failure: SQLite Cancel Does Not Mark Browser Rows kill_requested
+1573 " 🔴 Test Fixture Updated to Pass controlDb/taskStore/workerStore to registerInProcessRun
+1574 9:42p 🔴 Task A1 Complete: All 210 Core Unit Tests Green, Committed
+1575 " 🔄 runOneItem: Extracted runInner Helper to Eliminate Duplicated Stepper/Handler Logic
+1576 " 🔄 runOneItem runInner Refactor Verified Green — 210/210 Tests Pass
+1577 9:43p 🔄 run-one-item Unification Committed as 5d3265a
 
-Access 704k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 425k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>
