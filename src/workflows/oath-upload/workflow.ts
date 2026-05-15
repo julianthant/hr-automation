@@ -1,4 +1,5 @@
 import { defineWorkflow, runWorkflow } from "../../core/index.js";
+import { runCliEntry } from "../../core/cli-adapter.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
@@ -74,11 +75,7 @@ export async function runOathUploadCli(
   inputs: OathUploadInput[],
   options: { new?: boolean; parallel?: number } = {},
 ): Promise<void> {
-  if (inputs.length === 0) {
-    log.error("runOathUploadCli: no inputs provided");
-    process.exitCode = 1;
-    return;
-  }
+  if (!runCliEntry(inputs.length > 0, "runOathUploadCli: no inputs provided")) return;
   const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
   const now = new Date().toISOString();
   await ensureDaemonsAndEnqueue(

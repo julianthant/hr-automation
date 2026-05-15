@@ -1,12 +1,11 @@
 import { log } from "../../utils/log.js";
-import { trackEvent } from "../../tracker/jsonl.js";
 import { errorMessage, classifyPlaywrightError } from "../../utils/errors.js";
 import {
   defineWorkflow,
   runWorkflow,
 } from "../../core/index.js";
-import { ensureDaemonsAndEnqueue } from "../../core/daemon/client.js";
-import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
+import { buildCliAdapter } from "../../core/cli-adapter.js";
+import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { loginToUCPath, loginToACTCrm } from "../../infra/auth/login.js";
 import {
   searchByEmail,
@@ -455,37 +454,13 @@ export async function runOnboardingCli(
   emails: string[],
   options: { new?: boolean; parallel?: number } = {},
 ): Promise<void> {
-  if (emails.length === 0) {
-    log.error("runOnboardingCli: no emails provided");
-    process.exitCode = 1;
-    return;
-  }
-
-  const inputs = emails.map((email) => ({ email }));
-  const now = new Date().toISOString();
-  await ensureDaemonsAndEnqueue(
-    onboardingWorkflow,
-    inputs,
-    {
-      new: options.new,
-      parallel: options.parallel,
-    },
-    {
-      // Match the positional-mode pre-emit payload (`positional.ts`) so
-      // daemon mode and legacy `--direct` pool mode surface the same shape
-      // to the dashboard. runId pre-assigned by `enqueueItems` pairs 1:1
-      // with the downstream running/done rows emitted by the daemon.
-      onPreEmitPending: (item, runId) => {
-        const subject = onboardingWorkflow.config.operatorSubject?.(item);
-        trackEvent({
-          workflow: "onboarding",
-          timestamp: now,
-          id: item.email,
-          runId,
-          status: "pending",
-          data: { email: item.email, ...operatorSubjectData(subject) },
-        });
-      },
-    },
-  );
+  await runOnboardingDaemonCli(emails, options);
 }
+
+const runOnboardingDaemonCli = buildCliAdapter<[string[]], { email: string }>({
+  workflow: onboardingWorkflow,
+  emptyMessage: "runOnboardingCli: no emails provided",
+  buildInputs: (emails) => emails.map((email) => ({ email })),
+  deriveItemId: (item) => item.email,
+  buildPendingData: (item) => ({ email: item.email }),
+});

@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
+import { createServer } from "vite";
 import { log } from "./utils/log.js";
 import { errorMessage } from "./utils/errors.js";
 import { parsePositiveInt, requireEnv } from "./cli-helpers.js";
@@ -26,6 +27,8 @@ import {
 } from "./workflows/oath-upload/index.js";
 import "./workflows/ocr/index.js";
 import { exportToExcel } from "./tracker/exports/export-excel.js";
+import { startDashboard } from "./tracker/dashboard.js";
+import { stopDaemons } from "./core/index.js";
 
 const program = new Command();
 
@@ -444,7 +447,6 @@ program
   .option("--prod", "Serve built dashboard instead of Vite dev server")
   .option("--no-clean", "Skip the one-time startup prune of old tracker files")
   .action(async (opts: { port?: number; prod?: boolean; clean?: boolean }) => {
-    const { startDashboard } = await import("./tracker/dashboard.js");
     const port = opts.port ?? 3838;
     // Commander's --no-clean sets opts.clean === false; default is `undefined` → clean = true.
     startDashboard("all", port, {
@@ -458,7 +460,6 @@ program
       log.step("Press Ctrl+C to stop.");
     } else {
       // Dev mode: start Vite dev server with proxy to SSE backend
-      const { createServer } = await import("vite");
       const vite = await createServer({
         configFile: "vite.dashboard.config.ts",
         server: { open: true },
@@ -489,7 +490,6 @@ program
   .description("Stop all alive daemons for a workflow. Default: soft (drain in-flight, re-queue on exit).")
   .option("-f, --force", "Mark in-flight items as failed instead of re-queueing")
   .action(async (workflow: string, opts: { force?: boolean }) => {
-    const { stopDaemons } = await import("./core/index.js");
     const n = await stopDaemons(workflow, !!opts.force);
     console.log(`Sent stop to ${n} daemon(s) for '${workflow}'.`);
   });

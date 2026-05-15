@@ -1,9 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   fillHrInquiryForm,
   parseTicketNumberFromUrl,
 } from "../../../../src/workflows/oath-upload/fill-form.js";
+import { withLogContext } from "../../../../src/utils/log.js";
 
 test("parseTicketNumberFromUrl: parses HRC0XXXXXX number= param", () => {
   assert.equal(
@@ -91,4 +95,57 @@ test("fillHrInquiryForm: fills subject, description, attaches file, drives Speci
     calls.some((c) => c.includes("Category")),
     `expected Category interaction: ${calls.join(" | ")}`,
   );
+});
+
+test("fillHrInquiryForm: ServiceNow fields emit selector-health warnings through safeFill/safeClick", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "servicenow-safe-"));
+  try {
+    type FakeLocator = {
+      fill: (v: string) => Promise<void>;
+      click: (opts?: { timeout?: number }) => Promise<void>;
+      setInputFiles: (p: string) => Promise<void>;
+      selectOption: (v: unknown, opts?: { timeout?: number }) => Promise<void>;
+      first: () => FakeLocator;
+    };
+    const fakeLocator = (label: string): FakeLocator => ({
+      fill: async () => {
+        if (label === "Subject") throw new Error("Subject fill failed");
+      },
+      click: async () => {},
+      setInputFiles: async () => {},
+      selectOption: async () => {},
+      first: () => fakeLocator(`${label}[0]`),
+    });
+    const fakePage = {
+      getByRole: (_role: string, opts: { name: string }) => fakeLocator(opts.name),
+      locator: (sel: string) => fakeLocator(sel),
+      waitForTimeout: (_ms: number) => Promise.resolve(),
+    };
+
+    await assert.rejects(
+      () => withLogContext("oath-upload", "servicenow-safe", () =>
+        fillHrInquiryForm(fakePage as never, {
+          subject: "HDH New Hire Oaths",
+          description: "Please see attached oaths for employees hired under HDH.",
+          specifically: "Signing Ceremony (Oath)",
+          category: "Payroll",
+          attachmentPath: "/tmp/oaths.pdf",
+        }), dir),
+      /Subject fill failed/,
+    );
+
+    const logLines = readdirSync(dir)
+      .filter((file) => file.endsWith(".jsonl"))
+      .flatMap((file) => readFileSync(join(dir, file), "utf-8").trim().split("\n").filter(Boolean))
+      .map((line) => JSON.parse(line) as { level: string; message: string });
+    assert.ok(
+      logLines.some((line) =>
+        line.level === "error" &&
+        line.message.includes("selector fallback triggered: servicenow hr inquiry subject"),
+      ),
+      `expected ServiceNow safeFill selector warning, got ${JSON.stringify(logLines)}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

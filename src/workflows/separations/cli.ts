@@ -1,5 +1,5 @@
-import { log } from "../../utils/log.js";
 import { runWorkflow, runWorkflowBatch } from "../../core/index.js";
+import { buildCliAdapter } from "../../core/cli-adapter.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 import { operatorSubjectData } from "../../domain/operator-subject.js";
 import { PATHS } from "../../config.js";
@@ -77,39 +77,11 @@ export async function runSeparationCli(
   docIds: string[],
   options: { new?: boolean; parallel?: number } = {},
 ): Promise<void> {
-  if (docIds.length === 0) {
-    log.error("runSeparationCli: no doc IDs provided");
-    process.exitCode = 1;
-    return;
-  }
-  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
-  const inputs = docIds.map((docId) => ({ docId }));
-  const now = new Date().toISOString();
-  await ensureDaemonsAndEnqueue(
-    separationsWorkflow,
-    inputs,
-    {
-      new: options.new,
-      parallel: options.parallel,
-    },
-    {
-      // Emit a `pending` tracker row per docId at enqueue time so the
-      // dashboard queue panel populates BEFORE the daemon finishes Duo.
-      // Matches the `runSeparationBatch` pre-emit payload (shape is
-      // read back by the session drawer + QueuePanel); runId is pre-assigned
-      // by enqueueItems so the eventual running/done rows pair 1:1.
-      onPreEmitPending: (item, runId) => {
-        const { docId } = item;
-        const subject = separationsWorkflow.config.operatorSubject?.(item);
-        trackEvent({
-          workflow: "separations",
-          timestamp: now,
-          id: docId,
-          runId,
-          status: "pending",
-          data: { docId, ...operatorSubjectData(subject) },
-        });
-      },
-    },
-  );
+  await buildCliAdapter<[string[]], SeparationInput>({
+    workflow: separationsWorkflow,
+    emptyMessage: "runSeparationCli: no doc IDs provided",
+    buildInputs: (ids) => ids.map((docId) => ({ docId })),
+    deriveItemId: (item) => item.docId,
+    buildPendingData: (item) => ({ docId: item.docId }),
+  })(docIds, options);
 }

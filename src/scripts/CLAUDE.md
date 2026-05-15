@@ -59,7 +59,7 @@ src/workflows/emergency-contact/scripts/   ← workflow-specific dev tools
 
 - **Tests mirror source layout one-for-one** (per `tests/CLAUDE.md`). `src/scripts/selectors/catalog.ts` → `tests/unit/scripts/selectors/catalog.test.ts`.
 - **Pure logic exported for tests, I/O confined to `main()`.** Every script that has unit tests follows this split — see `selectors/search-lib.ts` (pure index/scoring) vs `selectors/search.ts` (CLI + file I/O).
-- **`isMainModule` guard** at the bottom uses a three-way check (`import.meta.url` match, `.ts` filename match, `.js` filename match) so the script behaves the same when run via tsx or compiled output, and is safe to import from tests without firing `main()`.
+- **`isMainModule` guard** at the bottom uses a three-way check (`import.meta.url` match, `.ts` filename match, `.js` filename match) so the script behaves the same when run via tsx or compiled output, and is safe to import from tests without firing `main()`. Import from `src/scripts/main-module.ts`; do not add underscore-prefixed script helpers because the filename architecture guard rejects them.
 
 ## Usage
 

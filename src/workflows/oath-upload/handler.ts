@@ -1,12 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { Ctx } from "../../core/kernel/types.js";
 import { runWorkflow } from "../../core/index.js";
 import { ocrWorkflow } from "../ocr/index.js";
 import { watchChildRuns } from "../../tracker/delegation/watch-child-runs.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
-import { dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
+import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import {
   fillHrInquiryForm,
   submitAndCaptureTicketNumber,
@@ -191,35 +189,23 @@ function readPriorOcrApproval(
   ocrSessionId: string,
   trackerDir: string | undefined,
 ): { fannedOutItemIds: string[] } | null {
-  const dir = trackerDir ?? ".tracker";
-  const today = new Date();
-  for (let i = 0; i < LOOKBACK_DAYS; i++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - i);
-    const file = join(dir, `ocr-${dateLocal(d)}.jsonl`);
-    if (!existsSync(file)) continue;
-    const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
-    for (let j = lines.length - 1; j >= 0; j--) {
-      try {
-        const e = JSON.parse(lines[j]) as TrackerEntry;
-        if (
-          e.id === ocrSessionId &&
-          e.step === "approved" &&
-          typeof e.data?.fannedOutItemIds === "string"
-        ) {
-          try {
-            const ids = JSON.parse(e.data.fannedOutItemIds);
-            if (Array.isArray(ids) && ids.every((s) => typeof s === "string")) {
-              return { fannedOutItemIds: ids as string[] };
-            }
-          } catch {
-            /* tolerate malformed payload */
-          }
-        }
-      } catch {
-        /* tolerate malformed line */
-      }
+  const entry = findLatestEntryForPredicate({
+    workflow: "ocr",
+    trackerDir,
+    lookbackDays: LOOKBACK_DAYS,
+    predicate: (e) =>
+      e.id === ocrSessionId &&
+      e.step === "approved" &&
+      typeof e.data?.fannedOutItemIds === "string",
+  });
+  if (!entry || typeof entry.data?.fannedOutItemIds !== "string") return null;
+  try {
+    const ids = JSON.parse(entry.data.fannedOutItemIds);
+    if (Array.isArray(ids) && ids.every((s) => typeof s === "string")) {
+      return { fannedOutItemIds: ids as string[] };
     }
+  } catch {
+    /* tolerate malformed payload */
   }
   return null;
 }

@@ -3,6 +3,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import type { Session } from './session.js'
 import type { Stepper } from './stepper.js'
 import { log } from '../../utils/log.js'
+import { errorMessage } from '../../utils/errors.js'
 import { makeScreenshotFn } from './screenshot.js'
 import type { ScreenshotEvent } from './screenshot.js'
 
@@ -92,6 +93,17 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     screenshot,
     trackerDir,
   }
+  Object.assign(ctx, {
+    captureAndStampScreenshot: async (label: string, dataKey: string) => {
+      try {
+        const cap = await ctx.screenshot({ kind: 'form', label })
+        const filename = cap.files?.[0]?.path.split('/').pop()
+        if (filename) stepper.updateData({ [dataKey]: filename })
+      } catch (err) {
+        log.warn(`Screenshot capture failed for ${label}: ${errorMessage(err)}`)
+      }
+    },
+  })
   // `data` is a live getter — each access returns a fresh shallow copy of
   // the stepper's accumulated data, including anything pre-merged from the
   // input's `prefilledData` channel before the handler started.

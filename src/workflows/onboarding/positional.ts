@@ -1,6 +1,7 @@
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { runWorkflowBatch } from "../../core/index.js";
+import { runCliEntry } from "../../core/cli-adapter.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 import { operatorSubjectData } from "../../domain/operator-subject.js";
 import { onboardingWorkflow } from "./workflow.js";
@@ -45,8 +46,7 @@ export async function runOnboardingPositional(
         .slice(0, 3)
         .map((e) => `  - ${errorMessage(e.error)}`)
         .join("\n");
-      log.error(`Failures (first 3):\n${summary}`);
-      process.exitCode = 1;
+      runCliEntry(false, `Failures (first 3):\n${summary}`);
     }
   } catch (error) {
     log.error(`Onboarding batch failed: ${errorMessage(error)}`);

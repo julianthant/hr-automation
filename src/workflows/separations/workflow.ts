@@ -1,7 +1,6 @@
 import { z } from "zod/v4";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
-import { classifyPlaywrightError } from "../../utils/errors.js";
 import { defineWorkflow } from "../../core/index.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 
@@ -56,6 +55,7 @@ import { getProcessIsolatedSessionDir } from "../../core/kernel/session.js";
 // Step functions
 import { runKualiExtract } from "./steps/kuali-extract.js";
 import { runKronosSearch } from "./steps/kronos-search.js";
+import { logSettledRejection, unwrapSettled } from "./settled.js";
 import { runUcpathJobSummary } from "./steps/ucpath-job-summary.js";
 import { runUcpathTransaction } from "./steps/ucpath-transaction.js";
 import { runKualiFinalize } from "./steps/kuali-finalize.js";
@@ -104,8 +104,7 @@ const separationsSteps = [
 export function resolveJobSummaryResult(
   result: PromiseSettledResult<JobSummaryData | undefined>,
 ): JobSummaryData | undefined {
-  if (result.status === "fulfilled") return result.value;
-  throw new Error(`UCPath Job Summary extraction failed: ${errorMessage(result.reason)}`);
+  return unwrapSettled("UCPath Job Summary extraction", result);
 }
 
 export const separationsWorkflow = defineWorkflow({
@@ -348,31 +347,19 @@ export const separationsWorkflow = defineWorkflow({
       oldKronosFound = phase1.oldK.value.found;
       oldKronosDate = phase1.oldK.value.date;
     } else {
-      const classified = classifyPlaywrightError(phase1.oldK.reason);
-      log.error(`[Old Kronos] ${classified.kind}: ${classified.summary}`);
-      log.debug(`[Old Kronos] full error: ${errorMessage(phase1.oldK.reason)}`);
+      logSettledRejection("Old Kronos", phase1.oldK);
     }
     if (phase1.newK.status === "fulfilled") {
       newKronosFound = phase1.newK.value.found;
       newKronosDate = phase1.newK.value.date;
     } else {
-      const classified = classifyPlaywrightError(phase1.newK.reason);
-      log.error(`[New Kronos] ${classified.kind}: ${classified.summary}`);
-      log.debug(`[New Kronos] full error: ${errorMessage(phase1.newK.reason)}`);
+      logSettledRejection("New Kronos", phase1.newK);
     }
-    if (phase1.jobSummary.status === "rejected") {
-      const classified = classifyPlaywrightError(phase1.jobSummary.reason);
-      log.error(`[UCPath Job Summary] ${classified.kind}: ${classified.summary}`);
-      log.debug(`[UCPath Job Summary] full error: ${errorMessage(phase1.jobSummary.reason)}`);
-    }
+    logSettledRejection("UCPath Job Summary", phase1.jobSummary);
     // resolveJobSummaryResult throws on rejection (classified log emitted above);
     // no duplicate log.error here — the rejection is fatal and the throw propagates.
     jobSummaryData = resolveJobSummaryResult(phase1.jobSummary);
-    if (phase1.kualiTimekeeper.status === "rejected") {
-      const classified = classifyPlaywrightError(phase1.kualiTimekeeper.reason);
-      log.error(`[Kuali Timekeeper] ${classified.kind}: ${classified.summary}`);
-      log.debug(`[Kuali Timekeeper] full error: ${errorMessage(phase1.kualiTimekeeper.reason)}`);
-    }
+    logSettledRejection("Kuali Timekeeper", phase1.kualiTimekeeper);
 
     log.step(`[Old Kronos] ${oldKronosFound ? "Found" : "Not found"} (${oldKronosDate ?? "no time"})`);
     log.step(`[New Kronos] ${newKronosFound ? "Found" : "Not found"} (${newKronosDate ?? "no time"})`);
