@@ -16,6 +16,10 @@ export function titleCasePersonToken(token: string): string {
     .join("");
 }
 
+function titleCaseTokens(s: string): string {
+  return s.split(/\s+/).filter(Boolean).map(titleCasePersonToken).join(" ");
+}
+
 /** Drops a single trailing "." (common after middle initials in OCR/CRM text). */
 function stripTrailingDisplayPeriod(s: string): string {
   return s.replace(/\.\s*$/, "").trim();
@@ -26,20 +30,12 @@ export function displayPersonName(raw: string | null | undefined): string {
   const trimmed = raw.trim().replace(/\s+/g, " ");
   const commaIdx = trimmed.indexOf(",");
   if (commaIdx === -1) {
-    return stripTrailingDisplayPeriod(
-      trimmed
-        .split(" ")
-        .filter(Boolean)
-        .map(titleCasePersonToken)
-        .join(" "),
-    );
+    return stripTrailingDisplayPeriod(titleCaseTokens(trimmed));
   }
   const lastRaw = trimmed.slice(0, commaIdx).trim();
   const restRaw = trimmed.slice(commaIdx + 1).trim();
   if (!lastRaw || !restRaw) return stripTrailingDisplayPeriod(trimmed);
-  const last = lastRaw.split(/\s+/).map(titleCasePersonToken).join(" ");
-  const rest = restRaw.split(/\s+/).filter(Boolean).map(titleCasePersonToken).join(" ");
-  return stripTrailingDisplayPeriod(`${last}, ${rest}`);
+  return stripTrailingDisplayPeriod(`${titleCaseTokens(lastRaw)}, ${titleCaseTokens(restRaw)}`);
 }
 
 /**

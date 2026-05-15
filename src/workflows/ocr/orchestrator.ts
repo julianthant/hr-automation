@@ -149,7 +149,6 @@ export async function runOcrOrchestrator(
       pdfPath,
       pageImagesDir,
       recordSchema: s.ocrRecordSchema as ZodType<unknown>,
-      arraySchema: s.ocrArraySchema as ZodType<unknown[]>,
       schemaName: s.schemaName,
       prompt: s.prompt,
       // Skip re-rendering when we already rendered to seed placeholders.

@@ -25,37 +25,60 @@ function genShortcode(): string {
   return `${out.slice(0, 2)}-${out.slice(2, 4)}`;
 }
 
+const MIME_BY_EXT: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  heic: "image/heic",
+  heif: "image/heif",
+};
+
 function mimeFromExt(name: string): string {
   const m = name.match(/\.([a-z0-9]+)$/i);
   if (!m) return "application/octet-stream";
-  switch (m[1].toLowerCase()) {
-    case "jpg":
-    case "jpeg":
-      return "image/jpeg";
-    case "png":
-      return "image/png";
-    case "heic":
-      return "image/heic";
-    case "heif":
-      return "image/heif";
-    default:
-      return "application/octet-stream";
-  }
+  return MIME_BY_EXT[m[1].toLowerCase()] ?? "application/octet-stream";
 }
 
 function extFromMime(mime: string, fallback: string): string {
-  switch (mime) {
-    case "image/jpeg":
-      return ".jpg";
-    case "image/png":
-      return ".png";
-    case "image/heic":
-      return ".heic";
-    case "image/heif":
-      return ".heif";
-    default:
-      return fallback;
+  const entry = Object.entries(MIME_BY_EXT).find(([, m]) => m === mime);
+  return entry ? `.${entry[0]}` : fallback;
+}
+
+type PhotoStoreMeta = {
+  filename: string;
+  sizeBytes: number;
+  mime: string;
+  blurScore?: number;
+  blurFlagged?: boolean;
+};
+
+/**
+ * Write `bytes` to `fullPath`, build the store-ready photo metadata, and call
+ * `storeOp`. If the store op returns null (session went terminal mid-flight),
+ * the file is unlinked and null is returned so the caller can emit 409.
+ */
+async function persistPhoto<T>(
+  fullPath: string,
+  bytes: Uint8Array,
+  meta: { filename: string; mime: string },
+  blurScore: number | undefined,
+  storeOp: (m: PhotoStoreMeta) => T | null,
+): Promise<T | null> {
+  await writeFile(fullPath, bytes);
+  const blurFlagged = typeof blurScore === "number" ? blurScore < 80 : undefined;
+  const storeMeta: PhotoStoreMeta = {
+    filename: meta.filename,
+    sizeBytes: bytes.length,
+    mime: meta.mime,
+    ...(typeof blurScore === "number" ? { blurScore } : {}),
+    ...(blurFlagged !== undefined ? { blurFlagged } : {}),
+  };
+  const result = storeOp(storeMeta);
+  if (result === null) {
+    await unlink(fullPath).catch(() => {});
+    return null;
   }
+  return result;
 }
 
 // ─── handleStart ────────────────────────────────────────────
@@ -226,26 +249,10 @@ export async function handleUpload(
   const provisionalIndex = session.photos.length;
   const filename = `${String(provisionalIndex).padStart(3, "0")}${ext}`;
   const fullPath = join(dir, filename);
-  await writeFile(fullPath, input.bytes);
-
-  const blurFlagged =
-    typeof input.blurScore === "number" ? input.blurScore < 80 : undefined;
-  const photo = ctx.store.addPhoto(session.sessionId, {
-    filename,
-    sizeBytes: input.bytes.length,
-    mime,
-    ...(typeof input.blurScore === "number" ? { blurScore: input.blurScore } : {}),
-    ...(blurFlagged !== undefined ? { blurFlagged } : {}),
-  });
-
+  const photo = await persistPhoto(fullPath, input.bytes, { filename, mime }, input.blurScore,
+    (m) => ctx.store.addPhoto(session.sessionId, m));
   if (!photo) {
-    // Race: session went terminal between getByToken and addPhoto. Roll
-    // back the file so we don't leave an orphan.
-    await unlink(fullPath).catch(() => {});
-    return {
-      status: 409,
-      body: { ok: false, error: "session no longer open" },
-    };
+    return { status: 409, body: { ok: false, error: "session no longer open" } };
   }
 
   return {
@@ -255,9 +262,7 @@ export async function handleUpload(
       photoIndex: photo.index,
       totalPhotos: session.photos.length,
       ...(typeof photo.blurScore === "number" ? { blurScore: photo.blurScore } : {}),
-      ...(typeof photo.blurFlagged === "boolean"
-        ? { blurFlagged: photo.blurFlagged }
-        : {}),
+      ...(typeof photo.blurFlagged === "boolean" ? { blurFlagged: photo.blurFlagged } : {}),
     },
   };
 }
@@ -348,36 +353,18 @@ export async function handleReplacePhoto(
   // an orphaned old copy.
   const filename = `${String(input.index).padStart(3, "0")}-${Date.now()}${ext}`;
   const fullPath = join(dir, filename);
-  await writeFile(fullPath, input.bytes);
-
-  const blurFlagged =
-    typeof input.blurScore === "number" ? input.blurScore < 80 : undefined;
-  const result = ctx.store.replacePhoto(session.sessionId, input.index, {
-    filename,
-    sizeBytes: input.bytes.length,
-    mime,
-    ...(typeof input.blurScore === "number" ? { blurScore: input.blurScore } : {}),
-    ...(blurFlagged !== undefined ? { blurFlagged } : {}),
-  });
-
+  const result = await persistPhoto(fullPath, input.bytes, { filename, mime }, input.blurScore,
+    (m) => ctx.store.replacePhoto(session.sessionId, input.index, m));
   if (!result) {
-    await unlink(fullPath).catch(() => {});
-    return {
-      status: 409,
-      body: { ok: false, error: "session no longer open" },
-    };
+    return { status: 409, body: { ok: false, error: "session no longer open" } };
   }
 
   return {
     status: 200,
     body: {
       ok: true,
-      ...(typeof result.replaced.blurScore === "number"
-        ? { blurScore: result.replaced.blurScore }
-        : {}),
-      ...(typeof result.replaced.blurFlagged === "boolean"
-        ? { blurFlagged: result.replaced.blurFlagged }
-        : {}),
+      ...(typeof result.replaced.blurScore === "number" ? { blurScore: result.replaced.blurScore } : {}),
+      ...(typeof result.replaced.blurFlagged === "boolean" ? { blurFlagged: result.replaced.blurFlagged } : {}),
     },
   };
 }

@@ -18,7 +18,6 @@ export interface OcrPipelineInput<T> {
   pdfPath: string;
   pageImagesDir: string;
   recordSchema: ZodType<T>;
-  arraySchema: ZodType<T[]>;
   prompt: string;
   schemaName: string;
   /** Test escape: skip the actual pdf-to-img render. */
