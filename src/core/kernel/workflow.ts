@@ -238,6 +238,15 @@ export function deriveItemId<TData>(data: TData, fallback: string): string {
   )
 }
 
+function swallowSqliteErr<T>(label: string, fn: () => T, fallback: T): T {
+  try {
+    return fn()
+  } catch (err) {
+    log.warn(`SQLite ${label} skipped: ${String(err)}`)
+    return fallback
+  }
+}
+
 function registerInProcessControl<TData>(
   wf: RegisteredWorkflow<TData, readonly string[]>,
   input: TData,
@@ -247,7 +256,7 @@ function registerInProcessControl<TData>(
 ): InProcessRunControl | null {
   if (!trackerDir) return null
   const workerId = `dashboard:${process.pid}`
-  try {
+  return swallowSqliteErr(`in-process control registration for ${wf.config.name}/${itemId}`, () => {
     const control = openControlDb({ trackerDir })
     const taskStore = createTaskStore(control)
     const workerStore = createWorkerStore(control)
@@ -279,14 +288,7 @@ function registerInProcessControl<TData>(
     if (!task?.attemptId) return null
     taskStore.markTaskRunning({ taskId: task.taskId, attemptId: task.attemptId, workerId })
     return { trackerDir, workerId, taskId: task.taskId, attemptId: task.attemptId }
-  } catch (err) {
-    log.warn(
-      `[runWorkflow] SQLite in-process control registration skipped for ${wf.config.name}/${itemId}: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    )
-    return null
-  }
+  }, null)
 }
 
 function registerInProcessBrowsers<TData>(
@@ -295,7 +297,7 @@ function registerInProcessBrowsers<TData>(
   control: InProcessRunControl | null,
 ): void {
   if (!control) return
-  try {
+  swallowSqliteErr(`in-process browser registration for ${wf.config.name}`, () => {
     const workerStore = createWorkerStore(openControlDb({ trackerDir: control.trackerDir }))
     for (const [systemId, pid] of Object.entries(session.chromePids)) {
       const sys = wf.config.systems.find((s) => s.id === systemId)
@@ -310,13 +312,7 @@ function registerInProcessBrowsers<TData>(
         ...(sys?.sessionDir ? { sessionDir: sys.sessionDir } : {}),
       })
     }
-  } catch (err) {
-    log.warn(
-      `[runWorkflow] SQLite in-process browser registration skipped for ${wf.config.name}: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    )
-  }
+  }, undefined)
 }
 
 function markInProcessControlTerminal(
@@ -325,7 +321,7 @@ function markInProcessControlTerminal(
   error?: unknown,
 ): void {
   if (!control) return
-  try {
+  swallowSqliteErr(`in-process terminal update for task=${control.taskId}`, () => {
     const taskStore = createTaskStore(openControlDb({ trackerDir: control.trackerDir }))
     if (ok) {
       taskStore.markTaskDone({ taskId: control.taskId, attemptId: control.attemptId })
@@ -336,13 +332,7 @@ function markInProcessControlTerminal(
         error: error instanceof Error ? error.message : String(error ?? 'in-process run failed'),
       })
     }
-  } catch (err) {
-    log.warn(
-      `[runWorkflow] SQLite in-process terminal update skipped for task=${control.taskId}: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    )
-  }
+  }, undefined)
 }
 
 export async function runWorkflow<TData, TSteps extends readonly string[]>(
