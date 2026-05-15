@@ -123,42 +123,47 @@ export async function scanOrphanedQueueItems(dir = DEFAULT_DIR): Promise<void> {
       const nowIso = new Date().toISOString();
       const failError =
         "No alive daemon available to process this item. Start a daemon and retry.";
-      const taskStore = createTaskStore(openControlDb({ trackerDir: dir }));
-      for (const item of stale) {
-        const runId = item.runId ?? `${item.id}#1`;
-        try {
-          await markItemFailed(wf, item.id, failError, runId, dir);
-          if (item.taskId) {
-            taskStore.markDependencyFromChildTerminal({
-              childTaskId: item.taskId,
-              childState: "failed",
-            });
+      const controlDb = openControlDb({ trackerDir: dir });
+      try {
+        const taskStore = createTaskStore(controlDb);
+        for (const item of stale) {
+          const runId = item.runId ?? `${item.id}#1`;
+          try {
+            await markItemFailed(wf, item.id, failError, runId, dir);
+            if (item.taskId) {
+              taskStore.markDependencyFromChildTerminal({
+                childTaskId: item.taskId,
+                childState: "failed",
+              });
+            }
+          } catch {
+            /* best-effort */
           }
-        } catch {
-          /* best-effort */
+          try {
+            // Same shape as the pending row from `onPreEmitPending` so
+            // prefilledData (edit-and-resume) lands as flat top-level keys.
+            // Otherwise the failed row's barer `data` overrides the pending
+            // row in the dashboard's latest-per-id dedupe and the user's
+            // edits disappear from the detail grid.
+            const data = buildTrackerDataForInput(item.input);
+            trackEvent(
+              {
+                workflow: wf,
+                timestamp: nowIso,
+                id: item.id,
+                runId,
+                status: "failed",
+                data,
+                error: failError,
+              },
+              dir,
+            );
+          } catch {
+            /* best-effort */
+          }
         }
-        try {
-          // Same shape as the pending row from `onPreEmitPending` so
-          // prefilledData (edit-and-resume) lands as flat top-level keys.
-          // Otherwise the failed row's barer `data` overrides the pending
-          // row in the dashboard's latest-per-id dedupe and the user's
-          // edits disappear from the detail grid.
-          const data = buildTrackerDataForInput(item.input);
-          trackEvent(
-            {
-              workflow: wf,
-              timestamp: nowIso,
-              id: item.id,
-              runId,
-              status: "failed",
-              data,
-              error: failError,
-            },
-            dir,
-          );
-        } catch {
-          /* best-effort */
-        }
+      } finally {
+        controlDb.close();
       }
     }
   } catch (err) {
