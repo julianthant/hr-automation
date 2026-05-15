@@ -11,13 +11,12 @@ import {
   buildDeleteBulkHandler,
   buildDeleteEntryHandler,
   buildDrainWorkerHandler,
+  buildEntryReEnqueueHandler,
   buildFindPriorByKeyHandler,
   buildForceStopTaskHandler,
   buildKillBrowserHandler,
   buildQueueBumpHandler,
   buildRetryBulkHandler,
-  buildRetryHandler,
-  buildRunWithDataHandler,
   buildSaveDataHandler,
   buildStopWorkerHandler,
   readQueueDepth,
@@ -69,7 +68,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         date: body.date ? String(body.date) : undefined,
         ...(parent.parentRunId ? { parentRunId: parent.parentRunId } : {}),
       };
-    }, buildRetryHandler(deps.dir), 202);
+    }, buildEntryReEnqueueHandler(deps.dir), 202);
   });
 
   app.post("/api/retry-bulk", async (c) => {
@@ -101,7 +100,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         data,
         ...(parent.parentRunId ? { parentRunId: parent.parentRunId } : {}),
       };
-    }, buildRunWithDataHandler(deps.dir), 202);
+    }, buildEntryReEnqueueHandler(deps.dir, { withData: true }), 202);
   });
 
   app.post("/api/save-data", async (c) => {
