@@ -16,6 +16,16 @@ const subscribers = new Set<(depth: Record<string, number>) => void>();
 let interval: ReturnType<typeof setInterval> | null = null;
 let inflight = false;
 
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    if (interval !== null) {
+      clearInterval(interval);
+      interval = null;
+    }
+    subscribers.clear();
+  });
+}
+
 async function fetchDepth(): Promise<void> {
   if (inflight) return;
   inflight = true;
