@@ -50,6 +50,15 @@ export async function dismissModal(page: Page, iframe: Frame): Promise<void> {
  * Locate the Genies iframe (main employee grid) in UKG.
  * The frame is named `widgetFrame804` but falls back to any `widgetFrame*`.
  */
+async function reloadOnNetworkError(page: Page, frame: Frame, label: string): Promise<boolean> {
+  const hasNetworkError = await employeeGrid.networkChangeError(frame).count().catch(() => 0);
+  if (hasNetworkError === 0) return false;
+  log.step(`Network change detected in ${label} — reloading page...`);
+  await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 });
+  await page.waitForTimeout(10_000);
+  return true;
+}
+
 export async function getGeniesIframe(page: Page): Promise<Frame> {
   for (let attempt = 0; attempt < 15; attempt++) {
     // Check if page redirected to SSO login (session expired after refresh)
@@ -66,14 +75,7 @@ export async function getGeniesIframe(page: Page): Promise<Frame> {
     // Try exact name first
     const iframe = page.frame({ name: "widgetFrame804" });
     if (iframe) {
-      // Check for "network change detected" error inside iframe — reload if found
-      const hasNetworkError = await employeeGrid.networkChangeError(iframe).count().catch(() => 0);
-      if (hasNetworkError > 0) {
-        log.step("Network change detected in iframe — reloading page...");
-        await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 });
-        await page.waitForTimeout(10_000);
-        continue;
-      }
+      if (await reloadOnNetworkError(page, iframe, "iframe")) continue;
       return iframe;
     }
 
@@ -85,14 +87,7 @@ export async function getGeniesIframe(page: Page): Promise<Frame> {
     // Fallback: any widgetFrame
     for (const f of page.frames()) {
       if (f.name().startsWith("widgetFrame")) {
-        // Also check this frame for network error
-        const hasNetworkError = await employeeGrid.networkChangeError(f).count().catch(() => 0);
-        if (hasNetworkError > 0) {
-          log.step("Network change detected in widget frame — reloading page...");
-          await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 });
-          await page.waitForTimeout(10_000);
-          break; // restart the loop
-        }
+        if (await reloadOnNetworkError(page, f, "widget frame")) break;
         log.step(`Found widget frame: ${f.name()} -> ${f.url().slice(0, 80)}`);
         return f;
       }
