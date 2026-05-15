@@ -18,7 +18,7 @@ export interface OcrApprovalOutcome {
   fannedOutItemIds: string[];
 }
 
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60_000;
+export const SEVEN_DAYS_MS = 7 * 24 * 60 * 60_000;
 
 /**
  * Wait for the OCR row identified by `sessionId` to reach a terminal

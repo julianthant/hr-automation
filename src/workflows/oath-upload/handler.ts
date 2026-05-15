@@ -15,10 +15,8 @@ import {
   gotoHrInquiryForm,
   verifyOnInquiryForm,
 } from "../../systems/servicenow/navigate.js";
-import { waitForOcrApproval } from "./wait-ocr-approval.js";
+import { waitForOcrApproval, SEVEN_DAYS_MS } from "./wait-ocr-approval.js";
 import type { OathUploadInput } from "./schema.js";
-
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60_000;
 
 export const oathUploadStepList = [
   "delegate-ocr",
