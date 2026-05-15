@@ -513,6 +513,10 @@ export function QueuePanel({
           />
         ) : (
           <>
+            {/* Queue virtualization is intentionally deferred: operator-visible
+                lists are dominated by grouped/batch rows and are normally well
+                below the ~50-row threshold where virtualization pays for its
+                added keyboard/focus complexity. LogStream is the hot path. */}
             {visibleGroupSurfaces.map(renderQueueGroupSurface)}
             {/* Prep rows render as regular EntryItem (same size + behavior
                 as other workflow rows). The only differentiator is the
