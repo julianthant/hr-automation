@@ -480,33 +480,6 @@ async function extractResults(page: Page, frame: FrameLocator): Promise<EidResul
   return results;
 }
 
-/**
- * Clear the search form for a new search.
- * If the form is unresponsive (PeopleSoft stale after failed searches),
- * re-navigates to Person Org Summary and returns the fresh frame.
- */
-// TODO: consider using this function for multi-search fallback or just delete if not needed
-async function _clearSearch(page: Page, frame: FrameLocator): Promise<FrameLocator> {
-  // Click Clear button
-  try {
-    await personOrgSummary.clearButton(frame).click({ timeout: 5_000 });
-    await page.waitForTimeout(2_000);
-    await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
-    return frame;
-  } catch {
-    // Clear button may not be available; try filling empty values
-    try {
-      await personOrgSummary.lastNameInput(frame).fill("", { timeout: 5_000 });
-      await personOrgSummary.nameInput(frame).fill("", { timeout: 5_000 });
-      return frame;
-    } catch {
-      // Form is stale — re-navigate to get a fresh page
-      log.step("Form unresponsive, re-navigating to Person Org Summary...");
-      return navigateToPersonOrgSummary(page);
-    }
-  }
-}
-
 /** Details extracted from the drill-in detail page. */
 interface DrillInDetails {
   emplRecord: string;
