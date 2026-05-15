@@ -50,3 +50,27 @@ export async function callGeminiJsonText(
   log.warn(`${logTag} failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
   return null;
 }
+
+/**
+ * Tolerant JSON parser — accepts raw JSON, JSON wrapped in ```json fences,
+ * or JSON with leading/trailing prose. Throws if no JSON can be extracted.
+ */
+export function parseJsonLoose(text: string): unknown {
+  const trimmed = text.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch { /* fall through */ }
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (fenced) {
+    try { return JSON.parse(fenced[1]); } catch { /* fall through */ }
+  }
+  const objMatch = trimmed.match(/\{[\s\S]*\}/);
+  if (objMatch) {
+    try { return JSON.parse(objMatch[0]); } catch { /* fall through */ }
+  }
+  const arrMatch = trimmed.match(/\[[\s\S]*\]/);
+  if (arrMatch) {
+    try { return JSON.parse(arrMatch[0]); } catch { /* fall through */ }
+  }
+  throw new Error(`OCR provider returned non-JSON: ${trimmed.slice(0, 200)}`);
+}

@@ -15,7 +15,7 @@
 import fs from "node:fs/promises";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { log } from "../../utils/log.js";
-import { readGeminiKeys } from "./env-keys.js";
+import { readGeminiKeys, parseJsonLoose } from "./env-keys.js";
 
 export interface PoolKey {
   /** Stable id for logging — e.g. `"gemini-1"`, `"mistral-2"`. */
@@ -163,49 +163,6 @@ async function callOpenAICompatVision(args: {
   };
   const text = data.choices?.[0]?.message?.content ?? "";
   return parseJsonLoose(text);
-}
-
-/**
- * Tolerant JSON parser — accepts raw JSON, JSON wrapped in ```json fences,
- * or JSON with leading/trailing prose. OCR models occasionally include a
- * sentence before the JSON ("Here's the data:"), and code fences ship
- * with some Groq/Sambanova outputs.
- */
-function parseJsonLoose(text: string): unknown {
-  const trimmed = text.trim();
-  // First try: plain JSON.
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    /* fall through */
-  }
-  // Strip ```json fences.
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  if (fenced) {
-    try {
-      return JSON.parse(fenced[1]);
-    } catch {
-      /* fall through */
-    }
-  }
-  // Find the first `{...}` or `[...]` block.
-  const objMatch = trimmed.match(/\{[\s\S]*\}/);
-  if (objMatch) {
-    try {
-      return JSON.parse(objMatch[0]);
-    } catch {
-      /* fall through */
-    }
-  }
-  const arrMatch = trimmed.match(/\[[\s\S]*\]/);
-  if (arrMatch) {
-    try {
-      return JSON.parse(arrMatch[0]);
-    } catch {
-      /* fall through */
-    }
-  }
-  throw new Error(`OCR provider returned non-JSON: ${trimmed.slice(0, 200)}`);
 }
 
 // ─── Pool builder ────────────────────────────────────────────
