@@ -26,12 +26,7 @@ import {
   buildCrmDocumentDownloadPath,
   downloadCrmIdocsDocuments,
 } from "../../systems/crm/idocs-download.js";
-import { z } from "zod/v4";
-
-/** Input schema for the onboarding kernel workflow. `email` is the only CLI-supplied field. */
-const OnboardingInputSchema = z.object({
-  email: z.string().email(),
-});
+import { OnboardingInputSchema } from "./schema.js";
 
 /** Mask SSN for dashboard display. */
 function maskSsn(ssn: string | undefined | null): string {
