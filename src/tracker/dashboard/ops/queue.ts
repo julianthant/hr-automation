@@ -77,37 +77,33 @@ export function buildQueueBumpHandler(dir: string) {
   ): Promise<{ ok: true } | { ok: false; error: string; status?: number }> => {
     if (!req.workflow || !req.id) return { ok: false, error: "workflow and id are required" };
     const stores = openControlStores(dir);
-    try {
-      const task = resolveControlTask(stores.taskStore, req.workflow, req.id, req.runId);
-      if (task) {
-        if (task.state !== "queued") {
-          return {
-            ok: false as const,
-            error: `cannot bump item in state ${task.state}`,
-            status: 409,
-          };
-        }
-        const now = new Date().toISOString();
-        const bumpFn = (): number => transaction(stores.taskStore.db, () => {
-          const row = stores.taskStore.db.prepare(`
-            SELECT COALESCE(MAX(priority), 0) + 1 AS priority
-            FROM tasks
-            WHERE workflow = @workflow AND control_state = 'queued'
-          `).get({ workflow: req.workflow }) as { priority: number };
-          const info = stores.taskStore.db.prepare(`
-            UPDATE tasks
-            SET priority = @priority,
-                updated_at = @now
-            WHERE id = @taskId AND control_state = 'queued'
-          `).run({ taskId: task.taskId, priority: row.priority, now });
-          return info.changes;
-        });
-        return bumpFn() === 1
-          ? { ok: true as const }
-          : { ok: false as const, error: "item already claimed by a daemon", status: 409 };
+    const task = resolveControlTask(stores.taskStore, req.workflow, req.id, req.runId);
+    if (task) {
+      if (task.state !== "queued") {
+        return {
+          ok: false as const,
+          error: `cannot bump item in state ${task.state}`,
+          status: 409,
+        };
       }
-    } finally {
-      stores.close();
+      const now = new Date().toISOString();
+      const bumpFn = (): number => transaction(stores.taskStore.db, () => {
+        const row = stores.taskStore.db.prepare(`
+          SELECT COALESCE(MAX(priority), 0) + 1 AS priority
+          FROM tasks
+          WHERE workflow = @workflow AND control_state = 'queued'
+        `).get({ workflow: req.workflow }) as { priority: number };
+        const info = stores.taskStore.db.prepare(`
+          UPDATE tasks
+          SET priority = @priority,
+              updated_at = @now
+          WHERE id = @taskId AND control_state = 'queued'
+        `).run({ taskId: task.taskId, priority: row.priority, now });
+        return info.changes;
+      });
+      return bumpFn() === 1
+        ? { ok: true as const }
+        : { ok: false as const, error: "item already claimed by a daemon", status: 409 };
     }
     return withQueueLock(req.workflow, dir, async () => {
       const path = queueFilePath(req.workflow, dir);

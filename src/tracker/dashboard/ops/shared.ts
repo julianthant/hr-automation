@@ -19,16 +19,11 @@ export const DASHBOARD_CANCEL_ERROR = "cancelled by user from dashboard";
 export function openControlStores(dir: string): {
   taskStore: ControlTaskStore;
   workerStore: ControlWorkerStore;
-  close: () => void;
 } {
   const control = openControlDb({ trackerDir: dir });
   return {
     taskStore: createTaskStore(control),
     workerStore: createWorkerStore(control),
-    // openStateDb caches one connection per tracker directory. Dashboard
-    // request helpers must not close it out from under other stores in the
-    // same process.
-    close: () => {},
   };
 }
 

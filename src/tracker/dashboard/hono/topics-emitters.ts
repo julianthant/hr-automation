@@ -195,9 +195,6 @@ export const logsTopic: TopicEmitter<{
   const date = params.date ?? "";
   const today = dateLocal();
 
-  // E2E-TEMP: SSE first-tick + delta logging for FE/BE sync verification
-  log.e2e("sse:logs:open", { wf: workflow, id: itemId, runId, date });
-
   let sentCount = 0;
   let firstTick = true;
 
@@ -212,15 +209,11 @@ export const logsTopic: TopicEmitter<{
     }
     if (firstTick) {
       send(entries);
-      // E2E-TEMP
-      log.e2e("sse:logs:firstTick", { wf: workflow, id: itemId, runId, count: entries.length });
       sentCount = entries.length;
       firstTick = false;
     } else if (entries.length > sentCount) {
       const delta = entries.slice(sentCount);
       send(delta);
-      // E2E-TEMP
-      log.e2e("sse:logs:delta", { wf: workflow, id: itemId, runId, deltaCount: delta.length, total: entries.length });
       sentCount = entries.length;
     }
   };
@@ -230,8 +223,6 @@ export const logsTopic: TopicEmitter<{
   interval.unref?.();
   return () => {
     clearInterval(interval);
-    // E2E-TEMP
-    log.e2e("sse:logs:close", { wf: workflow, id: itemId, runId });
   };
 };
 
@@ -271,9 +262,6 @@ export const runEventsTopic: TopicEmitter<{
   const requestedRunId = params.runId ?? "";
   const date = params.date ?? "";
   const today = dateLocal();
-
-  // E2E-TEMP
-  log.e2e("sse:run-events:open", { wf: workflow, runId: requestedRunId, date });
 
   let sentCount = 0;
   let firstTick = true;
@@ -315,15 +303,11 @@ export const runEventsTopic: TopicEmitter<{
     const filtered = filterEventsForRun(allEvents, trackerEntries, requestedRunId);
     if (firstTick) {
       send(filtered);
-      // E2E-TEMP
-      log.e2e("sse:run-events:firstTick", { wf: workflow, runId: requestedRunId, count: filtered.length });
       sentCount = filtered.length;
       firstTick = false;
     } else if (filtered.length > sentCount) {
       const delta = filtered.slice(sentCount);
       send(delta);
-      // E2E-TEMP
-      log.e2e("sse:run-events:delta", { wf: workflow, runId: requestedRunId, deltaCount: delta.length, total: filtered.length });
       sentCount = filtered.length;
     }
   };
@@ -333,8 +317,6 @@ export const runEventsTopic: TopicEmitter<{
   interval.unref?.();
   return () => {
     clearInterval(interval);
-    // E2E-TEMP
-    log.e2e("sse:run-events:close", { wf: workflow, runId: requestedRunId });
   };
 };
 

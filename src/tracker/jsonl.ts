@@ -4,7 +4,6 @@ import { execSync } from "child_process";
 import { randomUUID } from "node:crypto";
 import { log, setLogRunId } from "../utils/log.js";
 import { classifyError } from "../utils/errors.js";
-import { maskSsn, maskDob, redactPii } from "../utils/pii.js";
 import { PATHS } from "../config.js";
 import type { StructuredLogEvent } from "../domain/log-events.js";
 import { appendJsonlWithSource } from "./state/jsonl-source.js";
@@ -57,18 +56,7 @@ function getLogFilePath(workflow: string, dir: string): string {
 
 export function appendLogEntry(entry: LogEntry, dir: string = DEFAULT_DIR): void {
   const logPath = getLogFilePath(entry.workflow, dir);
-  // Scrub free-form PII (SSN, DOB) from the message before it hits disk.
-  // Errors like `Error: SSN 123-45-6789 not found in I9` get normalized to
-  // `Error: SSN ***-**-**** not found in I9` automatically.
-  const scrubbed: LogEntry = { ...entry, message: redactPii(entry.message) };
-  // E2E-TEMP: log every log emit (after PII scrub) for FE/BE sync verification
-  log.e2e("appendLog", {
-    wf: scrubbed.workflow,
-    id: scrubbed.itemId,
-    runId: scrubbed.runId,
-    level: scrubbed.level,
-    msg: scrubbed.message.slice(0, 80),
-  });
+  const scrubbed: LogEntry = { ...entry, message: String(entry.message ?? "") };
   const source = appendJsonlWithSource(logPath, scrubbed, {
     sourceKind: "log",
     workflow: scrubbed.workflow,
@@ -221,15 +209,6 @@ export function trackEventForDate(
 }
 
 export function trackEvent(entry: TrackerEntry, dir: string = DEFAULT_DIR): void {
-  // E2E-TEMP: log every tracker emit for FE/BE sync verification
-  log.e2e("trackEvent", {
-    wf: entry.workflow,
-    id: entry.id,
-    runId: entry.runId,
-    status: entry.status,
-    step: entry.step,
-    parentRunId: entry.parentRunId,
-  });
   const logPath = getLogPath(entry.workflow, dir);
   const source = appendJsonlWithSource(logPath, entry, {
     sourceKind: "tracker",
@@ -239,9 +218,7 @@ export function trackEvent(entry: TrackerEntry, dir: string = DEFAULT_DIR): void
   applyTrackerEntryLive(entry, source, dir);
 }
 
-/** Keys whose values are always masked as SSN. */
 const SSN_KEYS: ReadonlySet<string> = new Set(["ssn"]);
-/** Keys whose values are always masked as DOB, preserving the year. */
 const DOB_KEYS: ReadonlySet<string> = new Set(["dob", "dateOfBirth", "birthdate"]);
 
 /**
@@ -252,22 +229,15 @@ const DOB_KEYS: ReadonlySet<string> = new Set(["dob", "dateOfBirth", "birthdate"
  *   - primitive (string/number/boolean/bigint) → String(v)
  *   - object/array → JSON.stringify(v) (falls back to String(v) if circular)
  *
- * When `key` is provided, field-aware PII masks trigger:
- *   - `ssn` → maskSsn(...)           e.g. "123-45-6789" becomes "x-x-6789" pattern
- *   - `dob`/`dateOfBirth`/`birthdate` → maskDob(...)  year preserved, month+day masked
- *
- * Other fields pass through unchanged — we can't blanket-redact every value
- * (would mangle `effectiveDate`, ISO timestamps, etc.).
+ * SSN/DOB-like fields pass through unchanged; tracker/log dirs are local and gitignored.
  */
 export function serializeValue(v: unknown, key?: string): string {
   if (v === null || v === undefined) return "";
-  // Field-aware masking runs FIRST so Date instances passed as a DOB still get
-  // formatted via the mask path rather than leaking the ISO year-month-day.
   if (key && SSN_KEYS.has(key)) {
-    return maskSsn(v instanceof Date ? v.toISOString() : String(v));
+    return v instanceof Date ? v.toISOString() : String(v ?? "");
   }
   if (key && DOB_KEYS.has(key)) {
-    return maskDob(v instanceof Date ? v.toISOString().slice(0, 10) : String(v));
+    return v instanceof Date ? v.toISOString().slice(0, 10) : String(v ?? "");
   }
   if (v instanceof Date) return v.toISOString();
   if (typeof v === "string") return v;
@@ -479,9 +449,11 @@ export async function withTrackedWorkflow<T>(
     if (cleaned) return;
     cleaned = true;
     // Kill all Playwright-launched Chrome processes (Windows-safe)
-    try {
-      execSync('wmic process where "name=\'chrome.exe\' and CommandLine like \'%--enable-automation%\'" call terminate', { stdio: "ignore" });
-    } catch { /* best-effort */ }
+    if (process.platform === "win32") {
+      try {
+        execSync('wmic process where "name=\'chrome.exe\' and CommandLine like \'%--enable-automation%\'" call terminate', { stdio: "ignore" });
+      } catch { /* best-effort */ }
+    }
     for (const cb of cleanupFns) { try { cb(); } catch { /* best-effort */ } }
     // Skip the end-emit when a batch runner owns the lifecycle — it writes
     // its own `workflow_end(failed)` in its SIGINT path so the orphan-start

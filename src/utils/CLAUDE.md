@@ -15,10 +15,7 @@ Environment validation, error helpers, error classification, and colored logging
   - `setLogRunId(runId)` — inject `runId` into current `AsyncLocalStorage` log context (called by `withTrackedWorkflow`)
   - `getLogRunId()` — read the runId from the current `AsyncLocalStorage` log context (used by `emitSessionEvent` so kernel events carry the runId of the running workflow item)
   - `withLogContext(workflow, itemId, fn, dir?)` — wraps `fn` in `AsyncLocalStorage` context so all `log.*()` calls emit to JSONL
-- `pii.ts` — PII masking helpers used by `serializeValue` in `src/tracker/jsonl.ts`:
-  - `maskSsn(value)` — `123-45-6789` → `***-**-6789`
-  - `maskDob(value)` — `01/15/1992` → `**/**/1992` (also handles ISO dates)
-  - `redactPii(text)` — bulk text scrub for log-message safety
+- PII masking — the old pass-through `pii.ts` module was removed on 2026-05-15. Tracker/log values stringify directly at the write boundary; tracker/log dirs are local and gitignored.
 - `screenshot.ts` — `debugScreenshot(page, label, dir?)` — best-effort screenshot to `.screenshots/`; never throws (so a screenshot failure can't mask the original error). Used by `Stepper.step` on failure via `Session.screenshotAll`.
 - `worker-pool.ts` — `runWorkerPool({ items, workerCount, setup, process })` — generic queue-based fan-out helper. NOT a kernel mode (kernel pool launches one Session per worker; this helper shares one Session/Context across N tabs). Used by eid-lookup for the "1 Duo, N searches" pattern.
 
