@@ -351,7 +351,6 @@ export function StepPipeline({ steps, currentStep, status, stepDurations }: Step
 
           // Normal chip — unchanged from original
           const { name: step, status: stepStatus, durationMs } = node;
-          const isCached = false; // legacy — cache display removed
           const isComplete = stepStatus === "completed";
           const isActive = stepStatus === "running";
           const isFailedStep = stepStatus === "failed";
@@ -359,16 +358,13 @@ export function StepPipeline({ steps, currentStep, status, stepDurations }: Step
 
           const durationLabel =
             typeof durationMs === "number" ? formatStepDuration(durationMs) : "";
-          const cacheTooltip: string | undefined = undefined;
 
           return (
             <div
               key={step}
               className="flex-1 min-w-[86px] flex flex-col justify-center items-start gap-1.5"
               data-state={
-                isCached
-                  ? "cached"
-                  : isActive
+                isActive
                     ? "active"
                     : isFailedStep
                       ? "failed"
@@ -380,13 +376,11 @@ export function StepPipeline({ steps, currentStep, status, stepDurations }: Step
               <span
                 className={cn(
                   "text-[11.5px] tracking-tight leading-none truncate w-full transition-colors",
-                  !isCached && isComplete && "text-[#4ade80] font-medium",
-                  !isCached && isActive && "text-primary font-semibold",
-                  !isCached && isFailedStep && "text-destructive font-semibold",
-                  !isCached && isPending && "text-muted-foreground/50 font-medium",
-                  isCached && "font-medium",
+                  isComplete && "text-[#4ade80] font-medium",
+                  isActive && "text-primary font-semibold",
+                  isFailedStep && "text-destructive font-semibold",
+                  isPending && "text-muted-foreground/50 font-medium",
                 )}
-                style={isCached ? { color: "#3b82f6" } : undefined}
                 title={formatStepName(step)}
               >
                 {formatStepName(step)}
@@ -394,34 +388,9 @@ export function StepPipeline({ steps, currentStep, status, stepDurations }: Step
 
               <div
                 data-testid={`step-dot-${step}`}
-                title={cacheTooltip}
                 className="relative w-full h-[3px] rounded-full"
-                style={
-                  isCached
-                    ? {
-                        backgroundColor: "#3b82f6",
-                        boxShadow: "0 0 0 3px rgba(59, 130, 246, 0.15)",
-                      }
-                    : undefined
-                }
               >
-                {isCached ? (
-                  <span
-                    aria-hidden
-                    style={{
-                      position: "absolute",
-                      top: "50%",
-                      left: "50%",
-                      transform: "translate(-50%, -50%)",
-                      color: "#ffffff",
-                      fontSize: 9,
-                      lineHeight: 1,
-                      pointerEvents: "none",
-                    }}
-                  >
-                    {"\u2744"}
-                  </span>
-                ) : isPending ? (
+                {isPending ? (
                   // Dashed rail — "not yet run". Made with a repeating linear
                   // gradient so the dashes read clearly at 3 px without
                   // needing a border (which would also violate the
@@ -444,7 +413,7 @@ export function StepPipeline({ steps, currentStep, status, stepDurations }: Step
                     )}
                   />
                 )}
-                {!isCached && isActive && (
+                {isActive && (
                   <div
                     aria-hidden
                     className="absolute inset-y-0 left-0 w-1/2 rounded-full bg-primary animate-[pulse_1.6s_ease-in-out_infinite]"
@@ -455,45 +424,19 @@ export function StepPipeline({ steps, currentStep, status, stepDurations }: Step
               <span
                 className={cn(
                   "text-[10px] font-mono tabular-nums leading-none h-[10px] transition-colors",
-                  !isCached && isComplete && (durationLabel ? "text-[#4ade80]/70" : "text-[#4ade80]/40"),
-                  !isCached && isFailedStep && (durationLabel ? "text-destructive/70" : "text-destructive/40"),
-                  !isCached && isActive && "text-primary/70",
-                  !isCached && isPending && "text-muted-foreground/35",
+                  isComplete && (durationLabel ? "text-[#4ade80]/70" : "text-[#4ade80]/40"),
+                  isFailedStep && (durationLabel ? "text-destructive/70" : "text-destructive/40"),
+                  isActive && "text-primary/70",
+                  isPending && "text-muted-foreground/35",
                 )}
-                aria-hidden={isCached || (!durationLabel && !isPending)}
+                aria-hidden={!durationLabel && !isPending}
               >
-                {isCached ? "" : durationLabel || (isPending ? "—" : isActive ? "…" : "—")}
+                {durationLabel || (isPending ? "—" : isActive ? "…" : "—")}
               </span>
             </div>
           );
         })}
       </div>
-
-      {false && (
-        <div
-          style={{
-            marginTop: 16,
-            marginLeft: 24,
-            marginRight: 24,
-            marginBottom: 12,
-            padding: "10px 14px",
-            background: "rgba(59, 130, 246, 0.06)",
-            border: "1px solid rgba(59, 130, 246, 0.2)",
-            borderRadius: 4,
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            fontFamily: "system-ui, sans-serif",
-            fontSize: 11,
-          }}
-          className="text-foreground"
-        >
-          <span style={{ fontSize: 14, color: "#3b82f6", lineHeight: 1 }}>{"\u2744"}</span>
-          <span>
-            {0} of {steps.length} steps reused from cache
-          </span>
-        </div>
-      )}
     </div>
   );
 }
