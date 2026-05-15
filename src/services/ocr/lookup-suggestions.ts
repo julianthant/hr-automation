@@ -40,7 +40,7 @@ export function parseLookupSuggestionResponse(text: string): LookupSuggestion[] 
   for (const raw of rawSuggestions) {
     if (!isRecord(raw)) continue;
     const name = typeof raw.name === "string" ? raw.name.trim() : "";
-    const emplId = normalizeEid(raw.emplId);
+    const emplId = normalizeEid(raw.emplId as string | number | null | undefined);
     if (!name && !emplId) continue;
     const key = emplId ? `eid:${emplId}` : `name:${name.toLowerCase()}`;
     if (seen.has(key)) continue;
