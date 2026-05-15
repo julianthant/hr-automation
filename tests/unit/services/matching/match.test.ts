@@ -24,6 +24,11 @@ describe("scoreNameMatch", () => {
     const r = scoreNameMatch("John Doee", "John Doe");
     assert.ok(r.score >= 0.7 && r.score < 0.85, `expected 0.7..0.85, got ${r.score}`);
   });
+  it("does not apply token-set when either side has duplicate tokens (e.g. 'John John')", () => {
+    // "John John" → Set{john} (size 1) — must not match "John X" via token-set ratio 1/1
+    const r = scoreNameMatch("John John", "John Smith");
+    assert.ok(r.score < 0.85, `expected score < 0.85 (below auto-accept), got ${r.score}`);
+  });
   it("scores 0 for no match", () => {
     assert.equal(scoreNameMatch("Alice Wonderland", "John Doe").score, 0);
   });

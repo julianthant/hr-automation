@@ -39,12 +39,15 @@ export function scoreNameMatch(a: string, b: string): NameMatchResult {
   const aSet = new Set(at);
   const bSet = new Set(bt);
   const inter = [...aSet].filter((x) => bSet.has(x));
+  // Require both sides to have at least 2 distinct tokens before entering
+  // the token-set tier. Without this guard, "John John" collapses to a
+  // 1-element set and would match "John X" at ratio 1/1 = 1.0.
   // Require token-set to be a near-subset on the smaller side — i.e. all
   // (or nearly all) tokens of the shorter name appear in the longer one.
   // This keeps "John Michael Doe" vs "John Doe" as a strong match while
   // rejecting "John Doee" vs "John Doe" (only 1/2 tokens match — the
   // difference is a Levenshtein-1 case caught by the fuzzy tier below).
-  if (inter.length / Math.min(aSet.size, bSet.size) >= 0.8) {
+  if (aSet.size >= 2 && bSet.size >= 2 && inter.length / Math.min(aSet.size, bSet.size) >= 0.8) {
     return { score: 0.9, reason: "token-set" };
   }
 
