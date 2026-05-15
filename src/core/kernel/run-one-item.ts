@@ -2,7 +2,7 @@ import type { RegisteredWorkflow } from './types.js'
 import { CancelledError } from './types.js'
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
-import { makeCtx } from './ctx.js'
+import { makeCtx, tryScreenshot } from './ctx.js'
 import { trackEvent, withTrackedWorkflow, emitScreenshotEvent } from '../../tracker/jsonl.js'
 import { withLogContext } from '../../utils/log.js'
 import { classifyError } from '../../utils/errors.js'
@@ -131,7 +131,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
         // path we see two files — different labels (`step:<name>` vs
         // `handler-throw`) keep them distinguishable. Best-effort: a
         // screenshot failure must never mask the original error.
-        try { await ctx.screenshot({ kind: 'error', label: 'handler-throw' }) } catch { /* best-effort */ }
+        await tryScreenshot(ctx, 'handler-throw')
         throw err
       }
       return { ok: true }
@@ -255,7 +255,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
             // resolveJobSummaryResult unwrap or the post-step
             // submittedWithoutTxnNumber guard). Stepper.step already
             // screenshots in-step throws; same label convention applies.
-            try { await ctx.screenshot({ kind: 'error', label: 'handler-throw' }) } catch { /* best-effort */ }
+            await tryScreenshot(ctx, 'handler-throw')
             throw err
           }
         },

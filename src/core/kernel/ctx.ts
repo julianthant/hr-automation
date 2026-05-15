@@ -42,6 +42,17 @@ async function retry<R>(fn: () => Promise<R>, opts: RetryOpts = {}): Promise<R> 
   throw lastErr
 }
 
+export async function tryScreenshot(
+  ctx: Ctx<readonly string[], Record<string, unknown>>,
+  label: string,
+): Promise<void> {
+  try {
+    await ctx.screenshot({ kind: 'error', label })
+  } catch {
+    /* best-effort */
+  }
+}
+
 /**
  * Construct a handler Ctx from a Session + Stepper. Shared by runWorkflow,
  * runWorkflowBatch, and runWorkflowPool so all three modes have identical

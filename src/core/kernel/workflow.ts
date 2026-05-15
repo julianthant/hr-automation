@@ -4,7 +4,7 @@ import type { WorkflowConfig, RegisteredWorkflow, WorkflowMetadata, RunOpts, Bat
 import { register, autoLabel, normalizeDetailField } from './registry.js'
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
-import { makeCtx } from './ctx.js'
+import { makeCtx, tryScreenshot } from './ctx.js'
 import { withTrackedWorkflow, emitScreenshotEvent, type WithTrackedWorkflowOpts } from '../../tracker/jsonl.js'
 import { makeScreenshotFn } from './screenshot.js'
 import { withLogContext, log } from '../../utils/log.js'
@@ -478,7 +478,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
         } catch (err) {
           // Same screenshot-on-handler-throw hoist as runOneItem (see the
           // two other call sites). Best-effort; original throw always wins.
-          try { await ctx.screenshot({ kind: 'error', label: 'handler-throw' }) } catch { /* best-effort */ }
+          await tryScreenshot(ctx, 'handler-throw')
           throw err
         }
       } finally {
