@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useMemo } from "react";
 import { RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { IconActionButton } from "@/components/shared/IconActionButton";
 import { cn } from "@/lib/utils";
+import { usePostAction } from "@/components/hooks/usePostAction";
 
 interface RetryAllButtonProps {
   workflow: string;
@@ -15,7 +16,28 @@ interface RetryAllButtonProps {
 }
 
 export function RetryAllButton({ workflow, ids, date, parentRunId }: RetryAllButtonProps) {
-  const [retrying, setRetrying] = useState(false);
+  const n = ids.length;
+  const retryToasts = useMemo(() => ({
+    loading: `Retrying ${n} items...`,
+    success: (body: { count: number }) => ({
+      message: "Retry scheduled",
+      description: `${body.count} of ${n} items re-added to queue`,
+    }),
+    partial: (body: { count: number; errors: Array<{ error: string }> }) => ({
+      message: "Some retries failed",
+      description: `${body.count} succeeded · ${body.errors.length} failed (${body.errors[0]?.error})`,
+    }),
+    error: (msg: string) => ({
+      message: "Couldn't retry items",
+      description: msg,
+    }),
+    isPartial: (body: { errors?: unknown[] }) => Boolean(body.errors?.length),
+  }), [n]);
+  const { pending: retrying, run: postRetryAll } = usePostAction<{
+    ok: boolean;
+    count: number;
+    errors: Array<{ id: string; error: string }>;
+  }>("/api/retry-bulk", retryToasts);
 
   async function retryAll() {
     if (retrying) return;
@@ -23,46 +45,13 @@ export function RetryAllButton({ workflow, ids, date, parentRunId }: RetryAllBut
       toast.message("Nothing to retry", { description: "No entries in the current view." });
       return;
     }
-    setRetrying(true);
-    const t = toast.loading(`Retrying ${ids.length} items…`);
-    try {
-      const res = await fetch("/api/retry-bulk", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          workflow,
-          ids,
-          ...(date ? { date } : {}),
-          ...(parentRunId ? { parentRunId } : {}),
-        }),
-      });
-      const body = (await res.json()) as {
-        ok: boolean;
-        count: number;
-        errors: Array<{ id: string; error: string }>;
-      };
-      if (body.errors.length === 0) {
-        toast.success(`Retry scheduled`, {
-          id: t,
-          description: `${body.count} of ${ids.length} items re-added to queue`,
-        });
-      } else {
-        toast.warning(`Some retries failed`, {
-          id: t,
-          description: `${body.count} succeeded · ${body.errors.length} failed (${body.errors[0].error})`,
-        });
-      }
-    } catch (err) {
-      toast.error(`Couldn't retry items`, {
-        id: t,
-        description: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setRetrying(false);
-    }
+    await postRetryAll({
+      workflow,
+      ids,
+      ...(date ? { date } : {}),
+      ...(parentRunId ? { parentRunId } : {}),
+    });
   }
-
-  const n = ids.length;
 
   return (
     <IconActionButton

@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useMemo } from "react";
 import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { IconActionButton } from "@/components/shared/IconActionButton";
+import { usePostAction } from "@/components/hooks/usePostAction";
 
 interface DeleteAllButtonProps {
   workflow: string;
@@ -12,9 +13,29 @@ interface DeleteAllButtonProps {
 }
 
 export function DeleteAllButton({ workflow, date, entries, onDeleted }: DeleteAllButtonProps) {
-  const [pending, setPending] = useState(false);
   const n = entries.length;
   const entryIds = entries.map((entry) => entry.id);
+  const deleteToasts = useMemo(() => ({
+    loading: `Deleting ${n} ${n === 1 ? "entry" : "entries"}...`,
+    success: (body: { count?: number }) => ({
+      message: `Deleted ${body.count} ${body.count === 1 ? "entry" : "entries"}`,
+    }),
+    partial: (body: { count?: number; errors: Array<{ error: string }> }) => ({
+      message: "Some deletes failed",
+      description: `${body.count} removed · ${body.errors.length} failed (${body.errors[0]?.error})`,
+    }),
+    error: (msg: string, status?: number) => ({
+      message: status === 422 ? "Couldn't delete any entries" : "Couldn't delete entries",
+      description: msg,
+    }),
+    isPartial: (body: { errors?: unknown[] }) => Boolean(body.errors?.length),
+  }), [n]);
+  const { pending, run: postDeleteAll } = usePostAction<{
+    ok?: boolean;
+    count?: number;
+    errors?: Array<{ id: string; error: string }>;
+    error?: string;
+  }>("/api/delete-bulk", deleteToasts);
 
   async function deleteAll() {
     if (pending) return;
@@ -30,49 +51,15 @@ export function DeleteAllButton({ workflow, date, entries, onDeleted }: DeleteAl
     ) {
       return;
     }
-    setPending(true);
-    const t = toast.loading(`Deleting ${n} ${n === 1 ? "entry" : "entries"}…`);
-    try {
-      const res = await fetch("/api/delete-bulk", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workflow, date, items: entries }),
-      });
-      const body = (await res.json()) as {
-        ok?: boolean;
-        count?: number;
-        errors?: Array<{ id: string; error: string }>;
-        error?: string;
-      };
-      const errors = body.errors ?? [];
-      if (!res.ok) {
-        toast.error(res.status === 422 ? "Couldn't delete any entries" : "Couldn't delete entries", {
-          id: t,
-          description:
-            errors.length > 0
-              ? `${errors[0]!.error}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ""}`
-              : body.error ?? `HTTP ${res.status}`,
-        });
-        return;
-      }
+    const result = await postDeleteAll({ workflow, date, items: entries });
+    if (result.ok && result.body) {
+      const errors = result.body.errors ?? [];
       if (errors.length === 0) {
-        toast.success(`Deleted ${body.count} ${body.count === 1 ? "entry" : "entries"}`, { id: t });
         onDeleted(entryIds);
       } else {
-        toast.warning(`Some deletes failed`, {
-          id: t,
-          description: `${body.count} removed · ${errors.length} failed (${errors[0]!.error})`,
-        });
         const failed = new Set(errors.map((e) => e.id));
         onDeleted(entryIds.filter((id) => !failed.has(id)));
       }
-    } catch (err) {
-      toast.error(`Couldn't delete entries`, {
-        id: t,
-        description: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setPending(false);
     }
   }
 

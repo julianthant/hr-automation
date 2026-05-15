@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ArrowUp, X } from "lucide-react";
 import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
+import { cn, compact } from "@/lib/utils";
 import { IconActionButton } from "@/components/shared/IconActionButton";
 
 interface QueueItemControlsProps {
@@ -31,7 +31,7 @@ export function QueueItemControls({ workflow, id, runId, subject, className }: Q
       const res = await fetch(path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(runId ? { workflow, id, runId } : { workflow, id }),
+        body: JSON.stringify(compact({ workflow, id, runId })),
       });
       const body = (await res.json()) as { ok: boolean; error?: string };
       if (body.ok) {

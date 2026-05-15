@@ -1,6 +1,14 @@
 type Listener = (data: unknown, event?: string) => void;
 type ErrorHandler = () => void;
 
+/**
+ * Multiplexes dashboard SSE topics over one EventSource. Subscription changes
+ * intentionally rebuild the connection instead of sending subscribe deltas:
+ * the backend's first tick for every topic is a full history snapshot, and
+ * consumers reset their first-tick guards in `onError`, so reconnect replay
+ * replaces local history rather than appending duplicate rows.
+ */
+
 interface Sub {
   id: string;
   topic: string;

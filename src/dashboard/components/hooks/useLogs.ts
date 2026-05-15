@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useMemo } from "react";
 import type { LogEntry } from "@/components/shared/types";
-import { sseHub } from "@/lib/sse-hub";
+import { useSseHistoryStream } from "./useSseHistoryStream";
 
 export interface CollapsedLogEntry extends LogEntry {
   count: number;
@@ -32,68 +32,15 @@ export function useLogs(
   runId: string | null,
   date: string,
 ): { logs: CollapsedLogEntry[]; loading: boolean } {
-  const [rawLogs, setRawLogs] = useState<LogEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  // Track which itemId we're showing so we only clear when switching entries
-  const prevItemIdRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!itemId) {
-      setRawLogs([]);
-      setLoading(false);
-      prevItemIdRef.current = null;
-      return;
-    }
-
-    // Only clear logs when switching to a different entry entirely.
-    // When runId changes (null → value, or run switch), keep showing
-    // current logs until the SSE delivers the replacement set.
-    if (itemId !== prevItemIdRef.current) {
-      setRawLogs([]);
-      prevItemIdRef.current = itemId;
-    }
-    setLoading(true);
-
-    // Build hub params
-    const hubParams: { workflow: string; id: string; runId?: string; date?: string } = { workflow, id: itemId };
-    if (runId) hubParams.runId = runId;
-    if (date) hubParams.date = date;
-
-    let gotSseData = false;
-
-    const unsubscribe = sseHub.subscribe<LogEntry[]>(
-      "logs",
-      hubParams,
-      (newEntries) => {
-        if (!Array.isArray(newEntries)) return;
-
-        if (!gotSseData) {
-          // First tick carries the full (possibly-empty) history. Dismiss
-          // the loading skeleton even when empty, so runs with no logs
-          // (orphan-failed items, pre-start entries) don't hang forever.
-          setRawLogs(capLogWindow(newEntries));
-          setLoading(false);
-          gotSseData = true;
-        } else if (newEntries.length > 0) {
-          setRawLogs((prev) => appendCappedLogs(prev, newEntries));
-        }
-      },
-      () => {
-        // Browser EventSource auto-reconnects on network blips or sleep+wake.
-        // The backend sends a full history snapshot on the new connection's
-        // first tick. Reset gotSseData so that first message replaces (not
-        // appends) the current log state — without this, full history arrives
-        // into the "delta" branch and duplicates every prior log line.
-        gotSseData = false;
-        setLoading(false);
-      },
-    );
-
-    return () => {
-      unsubscribe();
-    };
-  }, [workflow, itemId, runId, date]);
+  const { entries: rawLogs, loading } = useSseHistoryStream<LogEntry>("logs", {
+    workflow,
+    itemId,
+    runId,
+    date,
+  }, {
+    replaceFn: capLogWindow,
+    appendFn: appendCappedLogs,
+  });
 
   // Collapse consecutive duplicate messages (memoized so it doesn't re-run on every parent render)
   const collapsed = useMemo(() => {

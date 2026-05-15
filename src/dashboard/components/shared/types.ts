@@ -32,6 +32,8 @@ export interface TrackerEntry {
   lastLogTs?: string;
   /** Last log message (enriched by backend SSE, for queue display). */
   lastLogMessage?: string;
+  /** Frontend render hash assigned by useEntries; used by queue-row memoization. */
+  _hash?: string;
   /**
    * 1-indexed chronological run number for this item (enriched by backend
    * SSE + /api/runs). Derived from the earliest tracker entry timestamp, so

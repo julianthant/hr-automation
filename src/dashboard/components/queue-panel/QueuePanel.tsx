@@ -31,6 +31,7 @@ import {
 } from "./queue-sort";
 import { QueueSortDropdown } from "./QueueSortDropdown";
 import { collapseEntriesForStatStrip } from "./stat-strip-collapse";
+import { isEditableFocus } from "@/lib/utils";
 
 interface QueuePanelProps {
   /**
@@ -91,6 +92,68 @@ interface QueuePanelProps {
   /** Controlled sort mode (persisted at App level — matches batch screenshot preview). */
   queueSortMode: QueueSortMode;
   onQueueSortModeChange: (mode: QueueSortMode) => void;
+}
+
+function pickSurfaces<K extends QueueGroupSurface["kind"]>(
+  surfaces: QueueGroupSurface[],
+  kind: K,
+): Extract<QueueGroupSurface, { kind: K }>[] {
+  return surfaces.filter(
+    (surface): surface is Extract<QueueGroupSurface, { kind: K }> =>
+      surface.kind === kind,
+  );
+}
+
+function reorderByIds<T>(
+  items: T[],
+  idFn: (item: T) => string,
+  sortedIds: string[],
+): T[] {
+  const byId = new Map(items.map((item) => [idFn(item), item]));
+  return sortedIds.map((id) => byId.get(id)).filter((item): item is T => item !== undefined);
+}
+
+function QueueSortToolbar({
+  value,
+  onChange,
+  disabled,
+  actions,
+}: {
+  value: QueueSortMode;
+  onChange: (mode: QueueSortMode) => void;
+  disabled: boolean;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="flex min-h-8 items-center gap-1.5 min-w-0">
+      <QueueSortDropdown
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        className="flex-1 min-w-0"
+      />
+      {actions ? (
+        <div className="flex flex-shrink-0 items-center gap-1">{actions}</div>
+      ) : null}
+    </div>
+  );
+}
+
+function QueueLoadingSkeleton() {
+  return (
+    <div className="space-y-0">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} className="px-5 py-3.5 border-b border-border">
+          <div className="flex justify-between mb-2">
+            <div className="h-4 w-32 rounded bg-muted animate-pulse" />
+            <div className="h-4 w-16 rounded bg-muted animate-pulse" />
+          </div>
+          <div className="h-3 w-48 rounded bg-muted animate-pulse mt-1" />
+          <div className="h-3 w-24 rounded bg-muted animate-pulse mt-2" />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 /**
@@ -214,41 +277,32 @@ export function QueuePanel({
 
   const approvalDelegationSurfaces = useMemo(
     () =>
-      queueSurfaces.groupRows.filter(
-        (surface): surface is QueueGroupSurface & { kind: "approval-delegation"; parent: TrackerEntry } =>
-          surface.kind === "approval-delegation" && Boolean(surface.parent),
-      ),
+      pickSurfaces(queueSurfaces.groupRows, "approval-delegation")
+        .filter((surface): surface is Extract<QueueGroupSurface, { kind: "approval-delegation" }> & { parent: TrackerEntry } =>
+          Boolean(surface.parent),
+        ),
     [queueSurfaces],
   );
 
   const sortedApprovalDelegationSurfaces = useMemo(() => {
-    const byRunId = new Map(
-      approvalDelegationSurfaces.map((surface) => [surface.parentRunId, surface]),
-    );
-    return sortQueueEntriesForDisplay(
+    const sortedParents = sortQueueEntriesForDisplay(
       approvalDelegationSurfaces.map((surface) => surface.parent),
       queueSortMode,
       displayNames,
-    ).flatMap((parent) => {
-      const runId = parent.runId ?? parent.id;
-      const surface = byRunId.get(runId);
-      return surface ? [surface] : [];
-    });
+    );
+    return reorderByIds(
+      approvalDelegationSurfaces,
+      (surface) => surface.parentRunId,
+      sortedParents.map((parent) => parent.runId ?? parent.id),
+    );
   }, [approvalDelegationSurfaces, queueSortMode, displayNames]);
 
   const batchSurfaces = useMemo(
-    () =>
-      queueSurfaces.groupRows.filter(
-        (surface): surface is QueueGroupSurface & { kind: "batch" } =>
-          surface.kind === "batch",
-      ),
+    () => pickSurfaces(queueSurfaces.groupRows, "batch"),
     [queueSurfaces],
   );
 
   const sortedBatchSurfaces = useMemo(() => {
-    const byParentRunId = new Map(
-      batchSurfaces.map((surface) => [surface.parentRunId, surface]),
-    );
     const ids = sortDaemonBatchParentIds(
       batchSurfaces.map((surface) => surface.parentRunId),
       batchMembersByParentRunId,
@@ -256,10 +310,7 @@ export function QueuePanel({
       workflowLabel,
       displayNames,
     );
-    return ids.flatMap((id) => {
-      const surface = byParentRunId.get(id);
-      return surface ? [surface] : [];
-    });
+    return reorderByIds(batchSurfaces, (surface) => surface.parentRunId, ids);
   }, [batchSurfaces, batchMembersByParentRunId, queueSortMode, workflowLabel, displayNames]);
 
   /** Delegation cards respect StatPills — show when parent or any child matches. */
@@ -282,10 +333,7 @@ export function QueuePanel({
 
   const visiblePassiveDelegationSurfaces = useMemo(
     () =>
-      queueSurfaces.groupRows
-        .filter((surface): surface is QueueGroupSurface & { kind: "passive-delegation" } =>
-          surface.kind === "passive-delegation",
-        )
+      pickSurfaces(queueSurfaces.groupRows, "passive-delegation")
         .filter((surface) => queueGroupMatchesStatusFilter(statusFilter, surface.members)),
     [queueSurfaces, statusFilter],
   );
@@ -339,14 +387,6 @@ export function QueuePanel({
   onSelectRef.current = onSelect;
 
   useEffect(() => {
-    const isEditableFocus = (el: EventTarget | null): boolean => {
-      if (!(el instanceof HTMLElement)) return false;
-      if (el.isContentEditable) return true;
-      const tag = el.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
-      return Boolean(el.closest("[role='textbox'][contenteditable='true']"));
-    };
-
     const scrollEntryIntoView = (id: string) => {
       const root = scrollAreaRef.current;
       if (!root) return;
@@ -420,7 +460,6 @@ export function QueuePanel({
             parentRunId={surface.parentRunId}
             members={surface.members}
             countTone="neutral"
-            footerLabelPrefix="batch"
             footerSecondaryId={surface.parentRunId}
             firstTimestamp={surface.members[0]?.timestamp}
             isFocused={batchQueueParentRunId === surface.parentRunId}
@@ -470,34 +509,24 @@ export function QueuePanel({
             />
           </div>
           <div className="px-3 min-[1440px]:px-4 py-2 border-t border-border/60">
-            <div className="flex min-h-8 items-center gap-1.5 min-w-0">
-              <QueueSortDropdown
-                value={queueSortMode}
-                onChange={onQueueSortModeChange}
-                disabled={loading}
-                className="flex-1 min-w-0"
-              />
-              {queueBulkActionsSlot ? (
-                <div className="flex flex-shrink-0 items-center gap-1">{queueBulkActionsSlot}</div>
-              ) : null}
-            </div>
+            <QueueSortToolbar
+              value={queueSortMode}
+              onChange={onQueueSortModeChange}
+              disabled={loading}
+              actions={queueBulkActionsSlot}
+            />
           </div>
         </div>
       )}
 
       {batchQueueParentRunId ? (
         <div className="flex-shrink-0 px-3 min-[1440px]:px-4 py-2 border-b border-border bg-card/50">
-          <div className="flex min-h-8 items-center gap-1.5 min-w-0">
-            <QueueSortDropdown
-              value={queueSortMode}
-              onChange={onQueueSortModeChange}
-              disabled={loading}
-              className="flex-1 min-w-0"
-            />
-            {queueBulkActionsSlot ? (
-              <div className="flex flex-shrink-0 items-center gap-1">{queueBulkActionsSlot}</div>
-            ) : null}
-          </div>
+          <QueueSortToolbar
+            value={queueSortMode}
+            onChange={onQueueSortModeChange}
+            disabled={loading}
+            actions={queueBulkActionsSlot}
+          />
         </div>
       ) : null}
 
@@ -523,18 +552,7 @@ export function QueuePanel({
                 Preview tab inside LogPanel, gated on data.mode === "prepare".
                 Reupload + Discard live in OcrReviewPane's header. */}
             {loading ? (
-              <div className="space-y-0">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className="px-5 py-3.5 border-b border-border">
-                    <div className="flex justify-between mb-2">
-                      <div className="h-4 w-32 rounded bg-muted animate-pulse" />
-                      <div className="h-4 w-16 rounded bg-muted animate-pulse" />
-                    </div>
-                    <div className="h-3 w-48 rounded bg-muted animate-pulse mt-1" />
-                    <div className="h-3 w-24 rounded bg-muted animate-pulse mt-2" />
-                  </div>
-                ))}
-              </div>
+              <QueueLoadingSkeleton />
             ) : sortedFiltered.length === 0 &&
               !hasBatchOrDelegationQueueCards ? (
               <EmptyState

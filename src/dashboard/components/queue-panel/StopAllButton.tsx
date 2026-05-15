@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useMemo } from "react";
 import { Square } from "lucide-react";
 import { toast } from "sonner";
 import { IconActionButton } from "@/components/shared/IconActionButton";
+import { usePostAction } from "@/components/hooks/usePostAction";
 
 export interface StopAllItem {
   id: string;
@@ -15,8 +16,28 @@ interface StopAllButtonProps {
 }
 
 export function StopAllButton({ workflow, items }: StopAllButtonProps) {
-  const [pending, setPending] = useState(false);
   const n = items.length;
+  const stopToasts = useMemo(() => ({
+    loading: `Stopping ${n} ${n === 1 ? "entry" : "entries"}...`,
+    success: (body: { count?: number }) => ({
+      message: `Stopped ${body.count} ${body.count === 1 ? "entry" : "entries"}`,
+    }),
+    partial: (body: { count?: number; errors: Array<{ error: string }> }) => ({
+      message: "Some stops failed",
+      description: `${body.count} stopped · ${body.errors.length} failed (${body.errors[0]?.error})`,
+    }),
+    error: (msg: string, status?: number) => ({
+      message: status === 422 ? "Couldn't stop any entries" : "Couldn't stop entries",
+      description: msg,
+    }),
+    isPartial: (body: { errors?: unknown[] }) => Boolean(body.errors?.length),
+  }), [n]);
+  const { pending, run: postStopAll } = usePostAction<{
+    ok?: boolean;
+    count?: number;
+    errors?: Array<{ id: string; error: string }>;
+    error?: string;
+  }>("/api/cancel-active-bulk", stopToasts);
 
   async function stopAll() {
     if (pending) return;
@@ -26,47 +47,7 @@ export function StopAllButton({ workflow, items }: StopAllButtonProps) {
       });
       return;
     }
-    setPending(true);
-    const t = toast.loading(`Stopping ${n} ${n === 1 ? "entry" : "entries"}…`);
-    try {
-      const res = await fetch("/api/cancel-active-bulk", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workflow, items }),
-      });
-      const body = (await res.json()) as {
-        ok?: boolean;
-        count?: number;
-        errors?: Array<{ id: string; error: string }>;
-        error?: string;
-      };
-      const errors = body.errors ?? [];
-      if (!res.ok) {
-        toast.error(res.status === 422 ? "Couldn't stop any entries" : "Couldn't stop entries", {
-          id: t,
-          description:
-            errors.length > 0
-              ? `${errors[0]!.error}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ""}`
-              : body.error ?? `HTTP ${res.status}`,
-        });
-        return;
-      }
-      if (errors.length === 0) {
-        toast.success(`Stopped ${body.count} ${body.count === 1 ? "entry" : "entries"}`, { id: t });
-      } else {
-        toast.warning(`Some stops failed`, {
-          id: t,
-          description: `${body.count} stopped · ${errors.length} failed (${errors[0]!.error})`,
-        });
-      }
-    } catch (err) {
-      toast.error(`Couldn't stop entries`, {
-        id: t,
-        description: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setPending(false);
-    }
+    await postStopAll({ workflow, items });
   }
 
   return (

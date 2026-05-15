@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Play, Loader2, Save, RefreshCcw, Copy, Check, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -18,6 +18,16 @@ interface EditDataTabProps {
   /** Date filter currently shown by the dashboard (YYYY-MM-DD). Forwarded
    * to the entry-data endpoint so the lookup hits the right JSONL file. */
   date?: string;
+}
+
+type PendingAction = null | "run" | "save" | "refresh";
+
+function EmptyEditState({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex-1 px-6 py-4 text-sm text-muted-foreground">
+      {children}
+    </div>
+  );
 }
 
 /**
@@ -53,9 +63,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
   }, [editableFields, entry]);
 
   const [values, setValues] = useState<Record<string, string>>(initial);
-  const [pending, setPending] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
+  const [pending, setPending] = useState<PendingAction>(null);
 
   // Reset when the entry / editable set changes (e.g. user picks a different row).
   useEffect(() => {
@@ -64,18 +72,18 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
 
   if (!entry) {
     return (
-      <div className="flex-1 px-6 py-4 text-sm text-muted-foreground">
+      <EmptyEditState>
         Select an entry to edit its data.
-      </div>
+      </EmptyEditState>
     );
   }
   if (editableFields.length === 0) {
     return (
-      <div className="flex-1 px-6 py-4 text-sm text-muted-foreground">
+      <EmptyEditState>
         This workflow has no editable fields. Edit-and-resume is opt-in
         per workflow — see the workflow's <span className="font-mono">detailFields</span>{" "}
         metadata.
-      </div>
+      </EmptyEditState>
     );
   }
 
@@ -86,8 +94,8 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
   };
 
   const onRefresh = async (): Promise<void> => {
-    if (refreshing || !entry) return;
-    setRefreshing(true);
+    if (pending || !entry) return;
+    setPending("refresh");
     const t = toast.loading(`Loading latest data…`);
     try {
       const params = new URLSearchParams({ workflow, id: entry.id });
@@ -136,13 +144,13 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
         description: err instanceof Error ? err.message : String(err),
       });
     } finally {
-      setRefreshing(false);
+      setPending(null);
     }
   };
 
   const onSave = async (): Promise<void> => {
-    if (saving || pending) return;
-    setSaving(true);
+    if (pending) return;
+    setPending("save");
     const t = toast.loading(`Saving changes for ${entry.id}…`);
     try {
       const res = await fetch("/api/save-data", {
@@ -168,13 +176,13 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
         description: err instanceof Error ? err.message : String(err),
       });
     } finally {
-      setSaving(false);
+      setPending(null);
     }
   };
 
   const onSubmit = async (): Promise<void> => {
     if (pending) return;
-    setPending(true);
+    setPending("run");
     const t = toast.loading(`Starting ${entry.id} with edited data…`);
     try {
       const res = await fetch("/api/run-with-data", {
@@ -207,7 +215,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
         description: err instanceof Error ? err.message : String(err),
       });
     } finally {
-      setPending(false);
+      setPending(null);
     }
   };
 
@@ -271,7 +279,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
             keyValue={matchValue}
             excludeId={entry.id}
             editableFields={editableFields.map((f) => f.key)}
-            disabled={refreshing || pending || saving}
+            disabled={pending !== null}
             onApply={(picked) => {
               const next: Record<string, string> = { ...values };
               let filled = 0;
@@ -293,7 +301,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
         <button
           type="button"
           onClick={onRefresh}
-          disabled={refreshing || pending || saving}
+          disabled={pending !== null}
           title="Pull the latest values for this run from tracker entries. Falls back to the richest data across runs of this id when the active run has none."
           className={cn(
             "inline-flex items-center gap-1.5 h-8 px-3 rounded-md cursor-pointer",
@@ -304,7 +312,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
             "disabled:opacity-50 disabled:cursor-not-allowed",
           )}
         >
-          {refreshing ? (
+          {pending === "refresh" ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : (
             <RefreshCcw className="h-3.5 w-3.5" />
@@ -314,7 +322,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
         <button
           type="button"
           onClick={onReset}
-          disabled={!dirty || pending || saving}
+          disabled={!dirty || pending !== null}
           className={cn(
             "inline-flex items-center h-8 px-3 rounded-md cursor-pointer",
             "text-xs font-medium border border-border/60",
@@ -329,7 +337,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
         <button
           type="button"
           onClick={onSave}
-          disabled={!dirty || pending || saving}
+          disabled={!dirty || pending !== null}
           title="Persist these values without running. Survives dashboard refresh."
           className={cn(
             "inline-flex items-center gap-1.5 h-8 px-3 rounded-md cursor-pointer",
@@ -340,7 +348,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
             "disabled:opacity-50 disabled:cursor-not-allowed",
           )}
         >
-          {saving ? (
+          {pending === "save" ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : (
             <Save className="h-3.5 w-3.5" />
@@ -350,7 +358,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
         <button
           type="button"
           onClick={onSubmit}
-          disabled={pending || saving}
+          disabled={pending !== null}
           className={cn(
             "inline-flex items-center gap-1.5 h-8 px-3 rounded-md cursor-pointer",
             "bg-primary text-primary-foreground text-xs font-medium",
@@ -360,7 +368,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
             "disabled:opacity-60 disabled:cursor-wait",
           )}
         >
-          {pending ? (
+          {pending === "run" ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : (
             <Play className="h-3.5 w-3.5" />
