@@ -1,6 +1,6 @@
 import { normalizeEid } from "../matching/index.js";
 import { log } from "../../utils/log.js";
-import { readGeminiKeys, callGeminiJsonText } from "./env-keys.js";
+import { readGeminiKeys, callGeminiJsonText, parseJsonLoose } from "./env-keys.js";
 
 export interface LookupSuggestion {
   name?: string;
@@ -28,7 +28,8 @@ If nothing is plausible, return {"suggestions":[]}.`;
 }
 
 export function parseLookupSuggestionResponse(text: string): LookupSuggestion[] {
-  const parsed = parseJsonish(text);
+  let parsed: unknown;
+  try { parsed = parseJsonLoose(text); } catch { return []; }
   const rawSuggestions = Array.isArray(parsed)
     ? parsed
     : isRecord(parsed) && Array.isArray(parsed.suggestions)
@@ -72,30 +73,6 @@ export async function suggestLookupCandidates(input: {
   const text = await callGeminiJsonText(keys, prompt, "suggestLookupCandidates");
   if (text === null) return [];
   return parseLookupSuggestionResponse(text);
-}
-
-function parseJsonish(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    const objectMatch = text.match(/\{[\s\S]*\}/);
-    if (objectMatch) {
-      try {
-        return JSON.parse(objectMatch[0]);
-      } catch {
-        return null;
-      }
-    }
-    const arrayMatch = text.match(/\[[\s\S]*\]/);
-    if (arrayMatch) {
-      try {
-        return JSON.parse(arrayMatch[0]);
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
