@@ -273,9 +273,9 @@ export const separationsWorkflow = defineWorkflow({
         // The empty fallback is only reachable on the txnNumberPrefilled path
         // where mapReasonCode (the only consumer) won't run.
         terminationType:
-          (ctx.data.rawTerminationType as string | undefined) ??
-          (ctx.data.terminationType as string | undefined) ??
-          "",
+          // Use raw Kuali string only — display values ("Vol"/"Invol") must not
+          // reach isVoluntaryTermination(), which only knows raw Kuali strings.
+          (ctx.data.rawTerminationType as string | undefined) ?? "",
         separationDate: ctx.data.separationDate as string,
         lastDayWorked: ctx.data.lastDayWorked as string,
         // `location` isn't read downstream — empty string is safe and keeps
