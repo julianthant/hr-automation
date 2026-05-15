@@ -8,6 +8,7 @@
 
 import { existsSync, readdirSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseArgs as parseNodeArgs } from "node:util";
 
 import {
   cleanOldTrackerFiles,
@@ -19,6 +20,7 @@ import {
 import { pruneStateDb } from "../../tracker/state/cleanup.js";
 import { PATHS } from "../../config.js";
 import { log } from "../../utils/log.js";
+import { isMainModule } from "../_main.js";
 
 /**
  * Sweep `.tracker/uploads/` for parentRunId-named subdirectories that
@@ -124,62 +126,49 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  let days = 30;
-  let dir = DEFAULT_DIR;
-  let screenshotsDir: string = DEFAULT_SCREENSHOTS_DIR;
-  let cleanTracker = true;
-  let cleanScreenshots = true;
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--days") {
-      const next = argv[++i];
-      const parsed = Number.parseInt(next ?? "", 10);
-      if (!Number.isFinite(parsed) || parsed < 0) {
-        log.error(`--days requires a non-negative integer, got: ${next}`);
-        process.exit(1);
-      }
-      days = parsed;
-    } else if (a === "--dir") {
-      const next = argv[++i];
-      if (!next) {
-        log.error("--dir requires a directory path");
-        process.exit(1);
-      }
-      dir = next;
-    } else if (a === "--screenshots-dir") {
-      const next = argv[++i];
-      if (!next) {
-        log.error("--screenshots-dir requires a directory path");
-        process.exit(1);
-      }
-      screenshotsDir = next;
-    } else if (a === "--no-screenshots") {
-      cleanScreenshots = false;
-    } else if (a === "--screenshots-only") {
-      cleanTracker = false;
-      cleanScreenshots = true;
-    } else if (a === "--help" || a === "-h") {
-      console.log(
-        "Usage: clean-tracker [--days N] [--dir path] [--screenshots-dir path]\n" +
-          "                    [--no-screenshots | --screenshots-only]\n" +
-          "  --days N               delete entries older than N days (default: 30)\n" +
-          "  --dir P                tracker directory to scan (default: .tracker)\n" +
-          "  --screenshots-dir P    screenshots directory to scan (default: .screenshots)\n" +
-          "  --no-screenshots       skip screenshot prune\n" +
-          "  --screenshots-only     only prune screenshots"
-      );
-      process.exit(0);
-    } else if (a) {
-      log.error(`Unknown argument: ${a}`);
-      process.exit(1);
-    }
+  let parsedArgs: ReturnType<typeof parseNodeArgs>;
+  try {
+    parsedArgs = parseNodeArgs({
+      args: argv,
+      options: {
+        days: { type: "string" },
+        dir: { type: "string" },
+        "screenshots-dir": { type: "string" },
+        "no-screenshots": { type: "boolean", default: false },
+        "screenshots-only": { type: "boolean", default: false },
+        help: { type: "boolean", short: "h", default: false },
+      },
+    });
+  } catch (err) {
+    log.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
   }
+  const { values } = parsedArgs;
+  if (values.help) {
+    console.log(
+      "Usage: clean-tracker [--days N] [--dir path] [--screenshots-dir path]\n" +
+        "                    [--no-screenshots | --screenshots-only]\n" +
+        "  --days N               delete entries older than N days (default: 30)\n" +
+        "  --dir P                tracker directory to scan (default: .tracker)\n" +
+        "  --screenshots-dir P    screenshots directory to scan (default: .screenshots)\n" +
+        "  --no-screenshots       skip screenshot prune\n" +
+        "  --screenshots-only     only prune screenshots"
+    );
+    process.exit(0);
+  }
+  const rawDays = typeof values.days === "string" ? values.days : undefined;
+  const days = rawDays === undefined ? 30 : Number.parseInt(rawDays, 10);
+  if (!Number.isFinite(days) || days < 0) {
+    log.error(`--days requires a non-negative integer, got: ${rawDays}`);
+    process.exit(1);
+  }
+  const screenshotsOnly = values["screenshots-only"] === true;
   return {
     days,
-    dir,
-    screenshotsDir,
-    cleanTracker,
-    cleanScreenshots,
+    dir: typeof values.dir === "string" ? values.dir : DEFAULT_DIR,
+    screenshotsDir: typeof values["screenshots-dir"] === "string" ? values["screenshots-dir"] : DEFAULT_SCREENSHOTS_DIR,
+    cleanTracker: !screenshotsOnly,
+    cleanScreenshots: screenshotsOnly || values["no-screenshots"] !== true,
   };
 }
 
@@ -260,12 +249,7 @@ export function cleanTrackerMain(argv: string[] = process.argv.slice(2)): {
 }
 
 // Only run when invoked directly (not when imported by tests)
-const isMainModule =
-  import.meta.url === `file://${process.argv[1]}` ||
-  process.argv[1]?.endsWith("clean-tracker.ts") ||
-  process.argv[1]?.endsWith("clean-tracker.js");
-
-if (isMainModule) {
+if (isMainModule(import.meta.url)) {
   cleanTrackerMain();
   process.exit(0);
 }

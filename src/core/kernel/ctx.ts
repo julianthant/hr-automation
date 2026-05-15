@@ -1,4 +1,5 @@
 import type { Ctx, RetryOpts } from './types.js'
+import { setTimeout as sleep } from 'node:timers/promises'
 import type { Session } from './session.js'
 import type { Stepper } from './stepper.js'
 import { log } from '../../utils/log.js'
@@ -34,7 +35,7 @@ async function retry<R>(fn: () => Promise<R>, opts: RetryOpts = {}): Promise<R> 
       lastErr = err
       opts.onAttempt?.(i, err)
       if (i < attempts && backoffMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, backoffMs * i))
+        await sleep(backoffMs * i)
       }
     }
   }

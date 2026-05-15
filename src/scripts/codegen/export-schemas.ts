@@ -26,6 +26,7 @@
 import { toJSONSchema } from "zod/v4";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { isMainModule } from "../_main.js";
 
 // Workflow index imports populate the kernel registry as a side-effect.
 // Listed alphabetically; no need to actually use their exports here beyond the
@@ -112,11 +113,7 @@ export function exportSchemas(outDir: string): ExportResult[] {
 
 // CLI entry point — skipped when the file is imported (tests only import the
 // exported `exportSchemas` function).
-const isMain =
-  import.meta.url === `file://${process.argv[1]}` ||
-  process.argv[1]?.endsWith("export-schemas.ts") ||
-  process.argv[1]?.endsWith("export-schemas.js");
-if (isMain) {
+if (isMainModule(import.meta.url)) {
   const outDir = path.resolve(process.cwd(), "generated", "schemas");
   const results = exportSchemas(outDir);
   for (const r of results) {

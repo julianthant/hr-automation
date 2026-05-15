@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { setTimeout as sleep } from 'node:timers/promises'
 
 import { type Database } from '../../infra/sqlite/index.js'
 
@@ -149,7 +150,7 @@ export async function waitForDependencies(
     if (Date.now() - started > timeoutMs) {
       throw new Error(`Timed out waiting for dependencies for task ${request.parentTaskId}`)
     }
-    await new Promise((resolve) => setTimeout(resolve, pollMs))
+    await sleep(pollMs)
   }
 }
 

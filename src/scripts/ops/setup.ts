@@ -17,6 +17,7 @@
 //     and the log module would emit colored prefixes we don't want for checks.
 
 import { styleText } from "node:util";
+import { setTimeout as sleep } from "node:timers/promises";
 import {
   existsSync,
   mkdirSync,
@@ -29,6 +30,7 @@ import { execSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
+import { isMainModule } from "../_main.js";
 
 export type CheckStatus = "ok" | "warn" | "fail";
 
@@ -375,7 +377,7 @@ export async function discoverChatId(
         // If we have retries left, wait and try again.
         if (attempt < maxAttempts) {
           opts.onRetry?.(attempt, maxAttempts);
-          await new Promise((r) => setTimeout(r, intervalMs));
+          await sleep(intervalMs);
           continue;
         }
         return {
@@ -398,7 +400,7 @@ export async function discoverChatId(
       // On network errors during retries, keep trying.
       if (attempt < maxAttempts) {
         opts.onRetry?.(attempt, maxAttempts);
-        await new Promise((r) => setTimeout(r, intervalMs));
+        await sleep(intervalMs);
         continue;
       }
       return { ok: false, reason: (err as Error).message };
@@ -634,12 +636,7 @@ export async function runTelegramSetup(cwd: string = process.cwd()): Promise<num
 }
 
 // Only run when invoked directly (not when imported by tests).
-const isMainModule =
-  import.meta.url === `file://${process.argv[1]}` ||
-  process.argv[1]?.endsWith("setup.ts") ||
-  process.argv[1]?.endsWith("setup.js");
-
-if (isMainModule) {
+if (isMainModule(import.meta.url)) {
   const arg = process.argv[2];
   if (arg === "--telegram" || arg === "telegram") {
     runTelegramSetup().then((code) => process.exit(code));

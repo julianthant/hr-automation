@@ -12,10 +12,12 @@ interface LogContext {
 
 const logStore = new AsyncLocalStorage<LogContext>();
 
-const DEBUG_ENABLED = process.env.DEBUG === "true" || process.env.DEBUG === "1";
-// E2E-TEMP: Gate verbose E2E debug logs behind E2E_DEBUG=1 env. Branch-local
-// scaffolding for dashboard/backend sync verification; not for master.
-const E2E_DEBUG_ENABLED = process.env.E2E_DEBUG === "true" || process.env.E2E_DEBUG === "1";
+function envBool(name: string): boolean {
+  return process.env[name] === "true" || process.env[name] === "1";
+}
+
+const DEBUG_ENABLED = envBool("DEBUG");
+const E2E_DEBUG_ENABLED = envBool("E2E_DEBUG");
 
 type LogMessage = string | Omit<StructuredLogEvent, "level">;
 
@@ -27,6 +29,27 @@ function structuredFields(input: LogMessage): Omit<StructuredLogEvent, "level" |
   if (typeof input === "string") return {};
   const { message: _message, ...rest } = input;
   return rest;
+}
+
+function appendFromContext(
+  level: LogEntry["level"],
+  message: string,
+  extra: Omit<StructuredLogEvent, "level" | "message"> = {},
+): void {
+  const ctx = logStore.getStore();
+  if (!ctx) return;
+  appendLogEntry(
+    {
+      workflow: ctx.workflow,
+      itemId: ctx.itemId,
+      ...(ctx.runId ? { runId: ctx.runId } : {}),
+      level,
+      message,
+      ...extra,
+      ts: new Date().toISOString(),
+    },
+    ctx.dir,
+  );
 }
 
 function emit(
@@ -43,45 +66,16 @@ function emit(
     console.log(prefix + " " + msg);
   }
 
-  const ctx = logStore.getStore();
-  if (ctx) {
-    appendLogEntry(
-      {
-        workflow: ctx.workflow,
-        itemId: ctx.itemId,
-        ...(ctx.runId ? { runId: ctx.runId } : {}),
-        level,
-        message: msg,
-        ...extra,
-        ts: new Date().toISOString(),
-      },
-      ctx.dir,
-    );
-  }
+  appendFromContext(level, msg, extra);
 }
 
 function emitDebug(msg: string): void {
   if (DEBUG_ENABLED) {
     console.log(styleText("gray", "\u00B7 " + msg));
   }
-  const ctx = logStore.getStore();
-  if (ctx) {
-    appendLogEntry(
-      {
-        workflow: ctx.workflow,
-        itemId: ctx.itemId,
-        ...(ctx.runId ? { runId: ctx.runId } : {}),
-        level: "debug",
-        message: msg,
-        ts: new Date().toISOString(),
-      },
-      ctx.dir,
-    );
-  }
+  appendFromContext("debug", msg);
 }
 
-// E2E-TEMP: Verbose, no-op when E2E_DEBUG is unset. Stdout-only (does NOT
-// write to JSONL \u2014 keeps tracker files clean during E2E reruns).
 function emitE2e(category: string, payload: string | Record<string, unknown>): void {
   if (!E2E_DEBUG_ENABLED) return;
   const ts = new Date().toISOString().slice(11, 23); // HH:MM:SS.sss
@@ -96,7 +90,6 @@ export const log = {
   warn: (msg: LogMessage): void => emit("warn", styleText("yellow", "!"), msg),
   error: (msg: LogMessage): void => emit("error", styleText("red", "\u2717"), msg, true),
   debug: (msg: string): void => emitDebug(msg),
-  // E2E-TEMP: log.e2e(category, payload) \u2014 no-op unless E2E_DEBUG=1.
   e2e: (category: string, payload: string | Record<string, unknown>): void =>
     emitE2e(category, payload),
 };

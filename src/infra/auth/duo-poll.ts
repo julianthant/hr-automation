@@ -73,7 +73,7 @@ export async function readDuoVerificationCodeWhenVisible(
   let lastVisibleCode: string | undefined;
 
   do {
-    throwIfDuoAborted(opts.abortSignal);
+    opts.abortSignal?.throwIfAborted();
     const code = await readDuoVerificationCode(page);
     if (code) {
       lastVisibleCode = code;
@@ -99,23 +99,17 @@ async function readDuoVerificationCodeAfterResend(
   });
 }
 
-function duoAbortReason(signal: AbortSignal): Error {
-  const reason = signal.reason;
-  if (reason instanceof Error) return reason;
-  return new Error(reason ? String(reason) : "Duo polling aborted");
-}
-
-function throwIfDuoAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) throw duoAbortReason(signal);
-}
-
 function waitForDuoPoll(
   page: Page,
   ms: number,
   abortSignal?: AbortSignal,
 ): Promise<void> {
   if (!abortSignal) return page.waitForTimeout(ms);
-  if (abortSignal.aborted) return Promise.reject(duoAbortReason(abortSignal));
+  try {
+    abortSignal.throwIfAborted();
+  } catch (err) {
+    return Promise.reject(err);
+  }
   return new Promise<void>((resolve, reject) => {
     let settled = false;
     const cleanup = (): void => {
@@ -128,7 +122,15 @@ function waitForDuoPoll(
       fn();
     };
     const onAbort = (): void => {
-      finish(() => reject(duoAbortReason(abortSignal)));
+      finish(() => {
+        try {
+          abortSignal.throwIfAborted();
+        } catch (err) {
+          reject(err);
+          return;
+        }
+        reject(new Error("Duo polling aborted"));
+      });
     };
     abortSignal.addEventListener("abort", onAbort, { once: true });
     page.waitForTimeout(ms).then(
@@ -313,7 +315,7 @@ export async function pollDuoApproval(
   if (preCheckMs > 0) {
     const preCheckDeadline = Date.now() + preCheckMs;
     while (Date.now() < preCheckDeadline) {
-      throwIfDuoAborted(options.abortSignal);
+      options.abortSignal?.throwIfAborted();
       try {
         if (urlMatches(page.url())) {
           const verified =
@@ -356,7 +358,7 @@ export async function pollDuoApproval(
   );
 
   for (let elapsed = 0; elapsed < timeoutSeconds; elapsed += pollIntervalSec) {
-    throwIfDuoAborted(options.abortSignal);
+    options.abortSignal?.throwIfAborted();
     try {
       // Run optional recovery callback to handle mid-auth errors (e.g., SAML redirects)
       if (recovery) {

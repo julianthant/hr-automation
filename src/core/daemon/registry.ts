@@ -11,6 +11,7 @@ import {
 } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { setTimeout as sleep } from 'node:timers/promises'
 import type { Daemon, DaemonLockfile } from './types.js'
 
 /**
@@ -205,9 +206,7 @@ export async function findAliveDaemons(workflow: string, trackerDir?: string): P
   return alive
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms))
-}
+const delay = sleep
 
 /**
  * SIGKILL any Chromium processes whose parent process is dead. These are

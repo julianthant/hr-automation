@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { stopDaemons } from "../../../../core/daemon/client.js";
 import { readQueueState } from "../../../../core/daemon/queue.js";
@@ -59,7 +60,7 @@ export function registerDaemonStopRoute(app: Hono, deps: DashboardHonoDeps): voi
       // workflow's workers are toast").
       let phantomsCleared = 0;
       if (daemonPids.size > 0) {
-        await new Promise<void>((r) => setTimeout(r, 250));
+        await sleep(250);
         const aliveAfterStop = await findAliveDaemons(workflow, deps.dir);
         const survivedDaemonPids = new Set(aliveAfterStop.map((d) => d.pid));
         for (const daemonPid of daemonPids) {
