@@ -69,3 +69,10 @@ export function validateEmployeeData(
 
   return result.data;
 }
+
+
+/** Input schema for the onboarding kernel workflow. `email` is the only CLI-supplied field. */
+export const OnboardingInputSchema = z.object({
+  email: z.string().email(),
+});
+export type OnboardingInput = z.infer<typeof OnboardingInputSchema>;

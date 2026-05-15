@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v4";
 
 /** Schema for a single employee ID (5+ digit numeric string). */
 export const EmployeeIdSchema = z
