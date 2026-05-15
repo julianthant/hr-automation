@@ -2,6 +2,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 import { normalizeEid } from "../matching/index.js";
 import { log } from "../../utils/log.js";
+import { readGeminiKeys } from "./env-keys.js";
 
 export interface LookupSuggestion {
   name?: string;
@@ -61,7 +62,7 @@ export async function suggestLookupCandidates(input: {
   formType: string;
   record: unknown;
 }): Promise<LookupSuggestion[]> {
-  const keys = getGeminiKeys();
+  const keys = readGeminiKeys();
   if (keys.length === 0) {
     log.warn("suggestLookupCandidates: no GEMINI_API_KEY* configured, skipping LLM suggestions");
     return [];
@@ -133,18 +134,3 @@ function stringifyRecord(record: unknown): string {
   }
 }
 
-function getGeminiKeys(): string[] {
-  const keys: string[] = [];
-  for (const name of [
-    "GEMINI_API_KEY",
-    "GEMINI_API_KEY2",
-    "GEMINI_API_KEY3",
-    "GEMINI_API_KEY4",
-    "GEMINI_API_KEY5",
-    "GEMINI_API_KEY6",
-  ]) {
-    const v = process.env[name];
-    if (v && v.trim()) keys.push(v.trim());
-  }
-  return keys;
-}

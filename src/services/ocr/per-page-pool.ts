@@ -15,6 +15,7 @@
 import fs from "node:fs/promises";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { log } from "../../utils/log.js";
+import { readGeminiKeys } from "./env-keys.js";
 
 export interface PoolKey {
   /** Stable id for logging — e.g. `"gemini-1"`, `"mistral-2"`. */
@@ -228,7 +229,7 @@ export function buildVisionPool(): PoolKey[] {
   const pool: PoolKey[] = [];
 
   // Gemini — direct SDK, JSON mode native, model env-overridable.
-  const geminiKeys = readKeys("GEMINI_API_KEY");
+  const geminiKeys = readGeminiKeys();
   geminiKeys.forEach((key, i) => {
     const idx = i + 1;
     pool.push({
