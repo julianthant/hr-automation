@@ -1,6 +1,7 @@
 import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
 import { dismissPeopleSoftModalMask as hidePeopleSoftModalMask } from "../common/modal.js";
+import { safeClick, safeFill } from "../common/index.js";
 import { emergencyContact } from "./selectors.js";
 
 /**
@@ -38,12 +39,16 @@ export async function navigateToEmergencyContact(
   await hidePeopleSoftModalMask(page);
 
   log.step(`Filling Empl ID ${emplId} and searching...`);
-  await emergencyContact
-    .emplIdInput(page)
-    .fill(emplId, { timeout: 10_000 });
+  await safeFill(emergencyContact.emplIdInput(page), emplId, {
+    timeout: 10_000,
+    label: "ucpath emergency contact empl id",
+  });
 
   await hidePeopleSoftModalMask(page);
-  await emergencyContact.searchButton(page).click({ timeout: 10_000 });
+  await safeClick(emergencyContact.searchButton(page), {
+    timeout: 10_000,
+    label: "ucpath emergency contact search button",
+  });
 
   await page.waitForTimeout(3_000);
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
@@ -59,7 +64,10 @@ export async function navigateToEmergencyContact(
   const drillIn = emergencyContact.drillInLink(page);
   if ((await drillIn.count().catch(() => 0)) > 0) {
     log.step("Clicking Drill in...");
-    await drillIn.first().click({ timeout: 10_000 });
+    await safeClick(drillIn.first(), {
+      timeout: 10_000,
+      label: "ucpath emergency contact drill in link",
+    });
     await page.waitForTimeout(3_000);
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   }
@@ -148,7 +156,10 @@ export async function demoteExistingContact(
   }
 
   await hidePeopleSoftModalMask(page);
-  await emergencyContact.saveButton(page).click({ timeout: 10_000 });
+  await safeClick(emergencyContact.saveButton(page), {
+    timeout: 10_000,
+    label: "ucpath emergency contact save button",
+  });
   await page.waitForTimeout(2_000);
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 

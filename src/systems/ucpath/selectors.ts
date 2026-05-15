@@ -851,6 +851,18 @@ export const personOrgSummary = {
     ),
 
   /**
+   * Employee display name on the detail page header. The primary PeopleSoft
+   * ID is the stable NPC header field; fallback variants cover older grid
+   * renderings seen on single-result redirects. verified 2026-05-15
+   * @tags name, display, header, detail, person-org-summary
+   */
+  personNameValue: (f: FrameLocator): Locator =>
+    f.locator("#PERSON_NPC_VW_NAME_DISPLAY")
+      .or(f.locator("#PERSON_NPC_VW_NAME_DISPL"))
+      .or(f.locator("#PERSON_NPC_VW_NAME"))
+      .or(f.locator("[id*='PERSON_NPC_VW'][id*='NAME']").first()),
+
+  /**
    * Body of the Person Org Summary iframe, used for DOM extraction where the
    * page renders values as label-adjacent text nodes. verified 2026-04-24
    * @tags body, evaluate, detail, person-org-summary

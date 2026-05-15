@@ -82,3 +82,11 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Fix:** After `searchJobSummary` passes the "No matching values were found" check, `handleMultiRowGrid(page, root, emplId)` probes `jobSummary.searchResultsGrid(root).count()`. Zero → single-row auto-redirect, proceed. Non-zero → enumerate rows via `jobSummary.searchResultRows(root)`, read each `rowHrStatusCell` text, skip rows where `/terminat/i` matches, drill in via `rowDrillInLink` on the first non-terminated row. Throws with a "verify EID in Kuali Build" message if every row is terminated — that's a data problem, not a retry case.
 **Selector:** see `jobSummary.searchResultsGrid`, `jobSummary.searchResultRows`, `jobSummary.rowHrStatusCell`, `jobSummary.rowDrillInLink` in selectors.ts (added 2026-04-23).
 **Tags:** multi-row, grid, terminated, job-summary, drill-in, work-location
+
+## 2026-05-15 — Person Org Summary name detection must use the header selector
+
+**Tried:** Picking the employee name from generic two-word leaf text and excluding a growing list of UI labels.
+**Failed because:** The heuristic could only be made to pass by adding a personal-name exclusion, which is brittle and risks rejecting a real employee if the name later appears as data.
+**Fix:** Read `personOrgSummary.personNameValue` first, then use the old leaf-text heuristic only as a fallback for legacy renderings. The fallback label list now contains UI copy only.
+**Selector:** `personOrgSummary.personNameValue` in `selectors.ts`
+**Tags:** person-org-summary, name, detail, header, heuristic, selector

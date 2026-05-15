@@ -3,6 +3,7 @@ import { log } from "../../utils/log.js";
 import { validateEnv } from "../../utils/env.js";
 import { I9_URL } from "../../config.js";
 import { login as loginSelectors } from "./selectors.js";
+import { safeClick, safeFill } from "../common/index.js";
 
 /**
  * Authenticate to I9 Complete (Tracker I-9 by Mitratech).
@@ -23,13 +24,25 @@ export async function loginToI9(page: Page): Promise<boolean> {
   log.step(`Login page loaded | URL: ${page.url()}`);
 
   // Step 1: Fill email and click Next
-  await loginSelectors.usernameInput(page).fill(email, { timeout: 5_000 });
-  await loginSelectors.nextButton(page).click({ timeout: 5_000 });
+  await safeFill(loginSelectors.usernameInput(page), email, {
+    timeout: 5_000,
+    label: "i9 login username",
+  });
+  await safeClick(loginSelectors.nextButton(page), {
+    timeout: 5_000,
+    label: "i9 login next button",
+  });
   log.step("Email entered, clicked Next");
 
   // Step 2: Fill password and click Log in
-  await loginSelectors.passwordInput(page).fill(password, { timeout: 5_000 });
-  await loginSelectors.loginButton(page).click({ timeout: 10_000 });
+  await safeFill(loginSelectors.passwordInput(page), password, {
+    timeout: 5_000,
+    label: "i9 login password",
+  });
+  await safeClick(loginSelectors.loginButton(page), {
+    timeout: 10_000,
+    label: "i9 login button",
+  });
   log.step("Password entered, clicking Log in...");
 
   // Wait for post-login navigation (domain changes to wwwe.i9complete.com)
@@ -50,11 +63,14 @@ export async function loginToI9(page: Page): Promise<boolean> {
 async function dismissTrainingNotification(page: Page): Promise<void> {
   try {
     const dismissBtn = loginSelectors.dismissNotificationButton(page);
-    await dismissBtn.click({ timeout: 5_000 });
+    await safeClick(dismissBtn, { timeout: 5_000, label: "i9 training dismiss button" });
     log.step("Dismissing training notification...");
 
     // Confirm the dismiss dialog
-    await loginSelectors.confirmYesButton(page).click({ timeout: 5_000 });
+    await safeClick(loginSelectors.confirmYesButton(page), {
+      timeout: 5_000,
+      label: "i9 confirm yes button",
+    });
     log.step("Training notification dismissed");
 
     // Wait for dashboard to load

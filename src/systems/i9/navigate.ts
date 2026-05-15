@@ -1,4 +1,6 @@
-import type { Page } from "playwright";
+import type { Locator, Page } from "playwright";
+import { log } from "../../utils/log.js";
+import { classifyPlaywrightError } from "../../utils/errors.js";
 
 /**
  * Force-close every visible Kendo UI window modal on the page. Idempotent.
@@ -45,4 +47,22 @@ export async function snapshotKendoWindows(page: Page): Promise<string> {
     });
     return `k-windows=${windows.length} [${summaries.join(",")}]`;
   }).catch(() => "k-windows=<evaluate-failed>");
+}
+
+export async function clickWithKendoRecovery(
+  page: Page,
+  locator: Locator,
+  label: string,
+  timeout = 10_000,
+): Promise<void> {
+  try {
+    await locator.click({ timeout });
+  } catch (err) {
+    const classified = classifyPlaywrightError(err);
+    log.warn(
+      `I9 ${label} click blocked (${classified.kind}: ${classified.summary}) — state: ${await snapshotKendoWindows(page)}`,
+    );
+    await closeAllKendoWindows(page);
+    await locator.click({ timeout });
+  }
 }

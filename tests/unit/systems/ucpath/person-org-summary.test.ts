@@ -159,5 +159,6 @@ describe("selectPersonName", () => {
   it("PERSON_ORG_NAME_LABELS is the default label list", () => {
     assert.ok(PERSON_ORG_NAME_LABELS.includes("Person ID"));
     assert.ok(PERSON_ORG_NAME_LABELS.includes("HR Status"));
+    assert.equal(PERSON_ORG_NAME_LABELS.includes("Julian Zaw"), false);
   });
 });

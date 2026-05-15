@@ -237,7 +237,7 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
           "hover:border-primary/40 hover:shadow-lg hover:shadow-black/20",
           "focus-visible:ring-2 focus-visible:ring-primary",
           selected && "ring-2 ring-primary border-primary/50 shadow-lg shadow-black/20",
-          isRunning && "border-primary/30",
+          isDaemonRunning && "border-primary/30",
         )}
       >
         {/* Header zone — name + status badge, optional live log inside */}
@@ -306,7 +306,7 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
             </span>
           )}
           <span className="flex-1" />
-          {isRunning && elapsed && (
+          {isDaemonRunning && elapsed && (
             <span className="text-primary tabular-nums flex-shrink-0">{elapsed}</span>
           )}
           {(isDone || isFailed) && duration && (

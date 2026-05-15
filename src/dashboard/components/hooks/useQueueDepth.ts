@@ -16,8 +16,13 @@ const subscribers = new Set<(depth: Record<string, number>) => void>();
 let interval: ReturnType<typeof setInterval> | null = null;
 let inflight = false;
 
-if (import.meta.hot) {
-  import.meta.hot.dispose(() => {
+type HotImportMeta = ImportMeta & {
+  hot?: { dispose: (cb: () => void) => void };
+};
+
+const hot = (import.meta as HotImportMeta).hot;
+if (hot) {
+  hot.dispose(() => {
     if (interval !== null) {
       clearInterval(interval);
       interval = null;

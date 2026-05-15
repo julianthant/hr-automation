@@ -1,10 +1,15 @@
 import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
-import { errorMessage, classifyPlaywrightError } from "../../utils/errors.js";
+import { errorMessage } from "../../utils/errors.js";
 import type { I9EmployeeInput, I9Result } from "./types.js";
 import { profile, remoteI9, dashboard } from "./selectors.js";
-import { closeAllKendoWindows, snapshotKendoWindows } from "./navigate.js";
+import {
+  clickWithKendoRecovery,
+  closeAllKendoWindows,
+  snapshotKendoWindows,
+} from "./navigate.js";
 import { I9_URL } from "../../config.js";
+import { safeClick, safeFill } from "../common/index.js";
 
 /**
  * Create a new I-9 employee record in I9 Complete.
@@ -31,14 +36,7 @@ export async function createI9Employee(
     log.step("Clicking 'Create New I-9 : New Employee'...");
     await closeAllKendoWindows(page);
     log.debug(`I9 create — pre-click state: ${await snapshotKendoWindows(page)}`);
-    try {
-      await dashboard.createNewI9Link(page).click({ timeout: 10_000 });
-    } catch (e) {
-      const classified = classifyPlaywrightError(e);
-      log.warn(`I9 create — click blocked (${classified.kind}: ${classified.summary}) — state: ${await snapshotKendoWindows(page)}`);
-      await closeAllKendoWindows(page);
-      await dashboard.createNewI9Link(page).click({ timeout: 10_000 });
-    }
+    await clickWithKendoRecovery(page, dashboard.createNewI9Link(page), "create new I-9");
     await page.waitForURL("**/employee/profile", { timeout: 10_000 });
     log.step("Employee Profile form loaded");
 
@@ -47,7 +45,10 @@ export async function createI9Employee(
 
     // Step 3: Save profile and handle post-save dialog
     log.step("Clicking Save & Continue...");
-    await profile.saveContinueButton(page).click({ timeout: 10_000 });
+    await safeClick(profile.saveContinueButton(page), {
+      timeout: 10_000,
+      label: "i9 save and continue button",
+    });
 
     await profile
       .loaderOverlay(page)
@@ -76,8 +77,14 @@ export async function createI9Employee(
 
     if (isDuplicate) {
       log.step("Duplicate employee found — selecting existing record...");
-      await profile.duplicateFirstRow(page).click({ timeout: 5_000 });
-      await profile.viewEditSelectedButton(page).click({ timeout: 5_000 });
+      await safeClick(profile.duplicateFirstRow(page), {
+        timeout: 5_000,
+        label: "i9 duplicate first row",
+      });
+      await safeClick(profile.viewEditSelectedButton(page), {
+        timeout: 5_000,
+        label: "i9 view edit selected button",
+      });
       await page.waitForURL("**/employee/profile/*", { timeout: 10_000 });
       profileId = extractProfileId(page.url());
       if (!profileId) {
@@ -88,7 +95,7 @@ export async function createI9Employee(
       await page.waitForTimeout(1_000);
       log.step(`Using existing profile: ${profileId}`);
     } else if (isOk) {
-      await okBtn.click({ timeout: 5_000 });
+      await safeClick(okBtn, { timeout: 5_000, label: "i9 profile ok button" });
       await page.waitForURL("**/employee/profile/*", { timeout: 15_000 }).catch(() => {});
       await page.waitForTimeout(1_000);
       profileId = extractProfileId(page.url());
@@ -102,18 +109,30 @@ export async function createI9Employee(
 
     // Step 5: Select Remote - Section 1 Only
     log.step("Selecting 'Remote - Section 1 Only'...");
-    await remoteI9.remoteSection1OnlyRadio(page).click({ timeout: 5_000 });
+    await safeClick(remoteI9.remoteSection1OnlyRadio(page), {
+      timeout: 5_000,
+      label: "i9 remote section 1 only radio",
+    });
 
     // Step 6: Fill start date (email is pre-filled from profile)
     log.step("Filling start date...");
-    await remoteI9.startDateInput(page).fill(input.startDate, { timeout: 5_000 });
+    await safeFill(remoteI9.startDateInput(page), input.startDate, {
+      timeout: 5_000,
+      label: "i9 start date",
+    });
 
     // Step 7: Create I-9
     log.step("Clicking Create I-9...");
-    await remoteI9.createI9Button(page).click({ timeout: 10_000 });
+    await safeClick(remoteI9.createI9Button(page), {
+      timeout: 10_000,
+      label: "i9 create i9 button",
+    });
 
     // Confirm creation dialog
-    await remoteI9.createI9OkButton(page).click({ timeout: 10_000 });
+    await safeClick(remoteI9.createI9OkButton(page), {
+      timeout: 10_000,
+      label: "i9 create i9 ok button",
+    });
     log.success(`I-9 created for profile ${profileId}`);
 
     return { success: true, profileId };
@@ -128,23 +147,38 @@ export async function createI9Employee(
  * Fill the Employee Profile form fields.
  */
 async function fillEmployeeProfile(page: Page, input: I9EmployeeInput): Promise<void> {
-  await profile.firstName(page).fill(input.firstName, { timeout: 5_000 });
+  await safeFill(profile.firstName(page), input.firstName, {
+    timeout: 5_000,
+    label: "i9 first name",
+  });
   log.step(`First Name: filled`);
 
   if (input.middleName) {
-    await profile.middleName(page).fill(input.middleName, { timeout: 5_000 });
+    await safeFill(profile.middleName(page), input.middleName, {
+      timeout: 5_000,
+      label: "i9 middle name",
+    });
     log.step(`Middle Name: filled`);
   }
 
-  await profile.lastName(page).fill(input.lastName, { timeout: 5_000 });
+  await safeFill(profile.lastName(page), input.lastName, {
+    timeout: 5_000,
+    label: "i9 last name",
+  });
   log.step(`Last Name: filled`);
 
   // SSN: 9 digits, no dashes
   const ssnDigits = input.ssn.replace(/-/g, "");
-  await profile.ssn(page).fill(ssnDigits, { timeout: 5_000 });
+  await safeFill(profile.ssn(page), ssnDigits, {
+    timeout: 5_000,
+    label: "i9 ssn",
+  });
   log.step(`SSN: filled`);
 
-  await profile.dob(page).fill(input.dob, { timeout: 5_000 });
+  await safeFill(profile.dob(page), input.dob, {
+    timeout: 5_000,
+    label: "i9 dob",
+  });
   log.step(`DOB: filled`);
 
   // Hide the jQuery datepicker that opens after DOB fill — Escape doesn't dismiss it,
@@ -154,7 +188,10 @@ async function fillEmployeeProfile(page: Page, input: I9EmployeeInput): Promise<
     if (dp) dp.style.display = "none";
   });
 
-  await profile.email(page).fill(input.email, { timeout: 5_000 });
+  await safeFill(profile.email(page), input.email, {
+    timeout: 5_000,
+    label: "i9 email",
+  });
   log.step(`Email: filled`);
 
   // Select worksite by department number (format: "6-{deptNum} DESCRIPTION")
@@ -167,7 +204,7 @@ async function fillEmployeeProfile(page: Page, input: I9EmployeeInput): Promise<
  */
 async function selectWorksite(page: Page, departmentNumber: string): Promise<void> {
   const worksiteDropdown = profile.worksiteListbox(page);
-  await worksiteDropdown.click({ timeout: 5_000 });
+  await safeClick(worksiteDropdown, { timeout: 5_000, label: "i9 worksite dropdown" });
 
   // Find and click the option matching the department number prefix
   const optionPattern = new RegExp(`6-${departmentNumber}`);
@@ -180,7 +217,10 @@ async function selectWorksite(page: Page, departmentNumber: string): Promise<voi
     throw new Error(`No worksite found matching department number: ${departmentNumber}`);
   }
 
-  await option.first().click({ timeout: 5_000 });
+  await safeClick(option.first(), {
+    timeout: 5_000,
+    label: "i9 worksite option",
+  });
   log.step(`Worksite selected: dept ${departmentNumber}`);
 }
 

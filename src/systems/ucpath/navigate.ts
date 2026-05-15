@@ -4,6 +4,7 @@ import { UCPATH_SMART_HR_URL } from "../../config.js";
 import { errorMessage } from "../../utils/errors.js";
 import { debugScreenshot } from "../../utils/screenshot.js";
 import { personSearch, hrTasks, smartHR } from "./selectors.js";
+import { safeClick, safeFill } from "../common/index.js";
 
 // Re-exports for API stability — selectors.ts is the source of truth.
 export { getContentFrame } from "./selectors.js";
@@ -36,17 +37,12 @@ export async function waitForPeopleSoftProcessing(
     "#processing, #WAIT_win0, .ps_box-processing, [id*='PROCESSING']"; // allow-inline-selector
 
   try {
+    const probe = frame.locator(processingSelector).first(); // allow-inline-selector
     // Wait for spinner to appear (short timeout -- it may not appear at all)
-    await frame
-      .locator(processingSelector) // allow-inline-selector
-      .first()
-      .waitFor({ state: "visible", timeout: 2_000 });
+    await probe.waitFor({ state: "visible", timeout: 2_000 });
 
     // Spinner appeared -- wait for it to disappear
-    await frame
-      .locator(processingSelector) // allow-inline-selector
-      .first()
-      .waitFor({ state: "hidden", timeout: timeoutMs });
+    await probe.waitFor({ state: "hidden", timeout: timeoutMs });
   } catch {
     // Spinner did not appear or already disappeared -- that is fine
   }
@@ -59,7 +55,7 @@ export async function collapseSidebar(
   try {
     const navBtn = smartHR.sidebarNavigationToggle(page);
     if (!opts.onlyIfExpanded || await navBtn.getAttribute("aria-expanded") === "true") {
-      await navBtn.click({ timeout: 5_000 });
+      await safeClick(navBtn, { timeout: 5_000, label: "ucpath sidebar navigation toggle" });
       await page.waitForTimeout(1_000);
       if (!opts.quiet) log.step("Sidebar collapsed");
     }
@@ -106,25 +102,47 @@ export async function searchPerson(
   await page.waitForTimeout(5_000);
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
 
-  await personSearch
-    .parameterCodeInput(frame)
-    .fill("PERSON_SEARCH", { timeout: 10_000 });
-  await personSearch.loadFormButton(frame).click({ timeout: 10_000 });
+  await safeFill(personSearch.parameterCodeInput(frame), "PERSON_SEARCH", {
+    timeout: 10_000,
+    label: "ucpath person search parameter code",
+  });
+  await safeClick(personSearch.loadFormButton(frame), {
+    timeout: 10_000,
+    label: "ucpath load person search form button",
+  });
   await page.waitForTimeout(5_000);
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
   log.step("Person search form loaded");
 
   // PAGE 2: Fill search criteria
-  await personSearch.resultCodeInput(frame).fill("PERSON_RESULTS", { timeout: 10_000 });
-  await personSearch.ssnInput(frame).fill(ssn, { timeout: 10_000 });
-  await personSearch.firstNameInput(frame).fill(firstName, { timeout: 10_000 });
-  await personSearch.lastNameInput(frame).fill(lastName, { timeout: 10_000 });
-  await personSearch.dobInput(frame).fill(dob, { timeout: 10_000 });
+  await safeFill(personSearch.resultCodeInput(frame), "PERSON_RESULTS", {
+    timeout: 10_000,
+    label: "ucpath person search result code",
+  });
+  await safeFill(personSearch.ssnInput(frame), ssn, {
+    timeout: 10_000,
+    label: "ucpath person search ssn",
+  });
+  await safeFill(personSearch.firstNameInput(frame), firstName, {
+    timeout: 10_000,
+    label: "ucpath person search first name",
+  });
+  await safeFill(personSearch.lastNameInput(frame), lastName, {
+    timeout: 10_000,
+    label: "ucpath person search last name",
+  });
+  await safeFill(personSearch.dobInput(frame), dob, {
+    timeout: 10_000,
+    label: "ucpath person search dob",
+  });
   log.step("Search criteria filled");
 
   // Click National Id magnifying glass — triggers PeopleSoft validation
   log.step("Clicking National Id lookup...");
-  await personSearch.ssnLookupButton(frame).click({ timeout: 10_000 });
+  await safeClick(personSearch.ssnLookupButton(frame), {
+    timeout: 10_000,
+    label: "ucpath national id lookup button",
+  });
   await page.waitForTimeout(5_000);
   await debugScreenshot(page, "debug-ps-after-magnify", { fullPage: true });
 
@@ -155,7 +173,10 @@ export async function searchPerson(
 
   // Click Search
   log.step("Clicking Search...");
-  await personSearch.searchSubmitButton(frame).click({ timeout: 10_000 });
+  await safeClick(personSearch.searchSubmitButton(frame), {
+    timeout: 10_000,
+    label: "ucpath person search submit button",
+  });
   await page.waitForTimeout(5_000);
   await debugScreenshot(page, "debug-ps-after-search", { fullPage: true });
 
@@ -222,15 +243,21 @@ export async function navigateToSmartHR(page: Page): Promise<void> {
 
   // Strategy B: Menu navigation fallback
   log.step("Clicking HR Tasks tile...");
-  await hrTasks.tile(page).first().click({ timeout: 15_000 });
+  await safeClick(hrTasks.tile(page).first(), { timeout: 15_000, label: "ucpath hr tasks tile" });
   await page.waitForLoadState("networkidle", { timeout: 15_000 });
 
   log.step("Clicking Smart HR Templates...");
-  await hrTasks.smartHRTemplatesLink(page).click({ timeout: 15_000 });
+  await safeClick(hrTasks.smartHRTemplatesLink(page), {
+    timeout: 15_000,
+    label: "ucpath smart hr templates menu link",
+  });
   await page.waitForLoadState("networkidle", { timeout: 15_000 });
 
   log.step("Clicking Smart HR Transactions...");
-  await hrTasks.smartHRTransactionsLink(page).click({ timeout: 15_000 });
+  await safeClick(hrTasks.smartHRTransactionsLink(page), {
+    timeout: 15_000,
+    label: "ucpath smart hr transactions menu link",
+  });
   await page.waitForLoadState("networkidle", { timeout: 15_000 });
 
   log.success("Smart HR Transactions page loaded via menu navigation");

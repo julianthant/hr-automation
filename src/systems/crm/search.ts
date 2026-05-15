@@ -3,6 +3,7 @@ import { log } from "../../utils/log.js";
 import { ExtractionError } from "./types.js";
 import { CRM_SEARCH_URL } from "../../config.js";
 import { search as searchSelectors } from "./selectors.js";
+import { safeClick } from "../common/index.js";
 
 /**
  * Search results page -- accepts email as query param.
@@ -90,14 +91,16 @@ export async function selectLatestResult(page: Page): Promise<void> {
   const hasLink = (await nameLink.count()) > 0;
 
   if (hasLink) {
-    await nameLink.click();
+    await safeClick(nameLink, { label: "crm latest result name link" });
   } else {
     // Fallback: click the name cell text directly
-    await searchSelectors
-      .nthResultRow(page, latestIndex)
-      .locator("td") // allow-inline-selector -- compound cell click fallback
-      .first()
-      .click();
+    await safeClick(
+      searchSelectors
+        .nthResultRow(page, latestIndex)
+        .locator("td") // allow-inline-selector -- compound cell click fallback
+        .first(),
+      { label: "crm latest result name cell" },
+    );
   }
 
   await page.waitForLoadState("domcontentloaded", { timeout: 15_000 });
