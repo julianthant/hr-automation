@@ -1,5 +1,5 @@
 import { existsSync, statSync, unlinkSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { Hono } from "hono";
 
 import {
@@ -16,7 +16,7 @@ import {
   type TrackerEntry,
 } from "../../../jsonl.js";
 import { queryRunsForItem } from "../../../state/queries.js";
-import { listRosters } from "../../../../services/matching/roster-loader.js";
+import { listRosters, resolveRosterDirs } from "../../../../services/matching/roster-loader.js";
 import { log } from "../../../../utils/log.js";
 import {
   buildRunTimelines,
@@ -146,11 +146,7 @@ export function registerBaseRoutes(app: Hono, deps: DashboardHonoDeps): void {
   });
 
   app.get("/api/rosters", () => {
-    const rosterDirs = [
-      resolve(process.cwd(), ".tracker/rosters"),
-      resolve(process.cwd(), "src/data"),
-    ];
-    const merged = rosterDirs.flatMap((dir) => listRosters(dir));
+    const merged = resolveRosterDirs(deps.dir).flatMap((dir) => listRosters(dir));
     merged.sort((a, b) => b.mtimeMs - a.mtimeMs);
     return jsonResponse(merged.map((roster) => ({
       filename: roster.filename,

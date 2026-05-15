@@ -1,6 +1,5 @@
 import { existsSync } from "fs";
-import { resolve } from "path";
-import { listRosters } from "../../../services/matching/roster-loader.js";
+import { listRosters, resolveRosterDirs } from "../../../services/matching/roster-loader.js";
 import { byTimestampAsc, readEntries, readEntriesForDate, trackEvent, type TrackerEntry } from "../../jsonl.js";
 import { enqueueFromHttp } from "../../../core/daemon/enqueue-dispatch.js";
 import {
@@ -55,11 +54,7 @@ export function resolveRetryRosterPath(dir: string, storedRosterPath: string | u
 }
 
 function findLatestDownloadedRosterPath(dir: string): string | undefined {
-  const rosterDirs = [
-    resolve(process.cwd(), dir, "rosters"),
-    resolve(process.cwd(), "src/data/sharepoint"),
-  ];
-  const latest = rosterDirs
+  const latest = resolveRosterDirs(dir)
     .flatMap((rosterDir) => listRosters(rosterDir))
     .sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
   return latest?.path;
