@@ -26,7 +26,8 @@ import { errorMessage } from "../../../../utils/errors.js";
 import { log } from "../../../../utils/log.js";
 import type { DashboardHonoDeps } from "../context.js";
 import { PARENT_RUN_ID_VALIDATION_HINT, parseOptionalParentRunId } from "../parent-run-id.js";
-import { jsonResponse, readJsonRequest } from "../responses.js";
+import { postJson } from "../post-helper.js";
+import { jsonResponse } from "../responses.js";
 import type { CancelActiveBulkItem } from "../../ops/cancel.js";
 
 /** Full success vs partial (207) vs all rows failed (422). Caller validates non-empty workload before invoke. */
@@ -36,77 +37,84 @@ function bulkMutationHttpStatus(succeededCount: number, errorCount: number): num
   return 207;
 }
 
+function parseParentRunIdFromBody(body: Record<string, unknown>):
+  | { ok: true; parentRunId?: string }
+  | { ok: false; error: string } {
+  const parentRunId = parseOptionalParentRunId(body.parentRunId);
+  if (body.parentRunId !== undefined && body.parentRunId !== null && !parentRunId) {
+    return { ok: false, error: PARENT_RUN_ID_VALIDATION_HINT };
+  }
+  return parentRunId ? { ok: true, parentRunId } : { ok: true };
+}
+
+function parseItemsFromBody<T>(
+  raw: unknown,
+  parseRow: (row: Record<string, unknown>) => T | null,
+): T[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((row) => row && typeof row === "object" ? parseRow(row as Record<string, unknown>) : null)
+    .filter((item): item is T => item !== null);
+}
+
 export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
   app.post("/api/retry", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const body = parsed.body as { parentRunId?: unknown };
-    const parentRunId = parseOptionalParentRunId(body.parentRunId);
-    if (body.parentRunId !== undefined && body.parentRunId !== null && !parentRunId) {
-      return jsonResponse({ ok: false, error: PARENT_RUN_ID_VALIDATION_HINT }, 400);
-    }
-    const result = await buildRetryHandler(deps.dir)({
-      workflow: String(parsed.body.workflow ?? ""),
-      id: String(parsed.body.id ?? ""),
-      runId: parsed.body.runId ? String(parsed.body.runId) : undefined,
-      date: parsed.body.date ? String(parsed.body.date) : undefined,
-      ...(parentRunId ? { parentRunId } : {}),
-    });
-    return jsonResponse(result, result.ok ? 202 : 400);
+    return postJson(c, (body) => {
+      const parent = parseParentRunIdFromBody(body);
+      if (!parent.ok) return parent;
+      return {
+        workflow: String(body.workflow ?? ""),
+        id: String(body.id ?? ""),
+        runId: body.runId ? String(body.runId) : undefined,
+        date: body.date ? String(body.date) : undefined,
+        ...(parent.parentRunId ? { parentRunId: parent.parentRunId } : {}),
+      };
+    }, buildRetryHandler(deps.dir), 202);
   });
 
   app.post("/api/retry-bulk", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const body = parsed.body as { parentRunId?: unknown };
-    const parentRunId = parseOptionalParentRunId(body.parentRunId);
-    if (body.parentRunId !== undefined && body.parentRunId !== null && !parentRunId) {
-      return jsonResponse({ ok: false, error: PARENT_RUN_ID_VALIDATION_HINT }, 400);
-    }
-    const ids = Array.isArray(parsed.body.ids) ? (parsed.body.ids as unknown[]).map(String) : [];
-    const result = await buildRetryBulkHandler(deps.dir)({
-      workflow: String(parsed.body.workflow ?? ""),
-      ids,
-      date: parsed.body.date ? String(parsed.body.date) : undefined,
-      ...(parentRunId ? { parentRunId } : {}),
-    });
-    return jsonResponse(result, 202);
+    return postJson(c, (body) => {
+      const parent = parseParentRunIdFromBody(body);
+      if (!parent.ok) return parent;
+      const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
+      return {
+        workflow: String(body.workflow ?? ""),
+        ids,
+        date: body.date ? String(body.date) : undefined,
+        ...(parent.parentRunId ? { parentRunId: parent.parentRunId } : {}),
+      };
+    }, buildRetryBulkHandler(deps.dir), 202);
   });
 
   app.post("/api/run-with-data", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const body = parsed.body as { parentRunId?: unknown };
-    const parentRunId = parseOptionalParentRunId(body.parentRunId);
-    if (body.parentRunId !== undefined && body.parentRunId !== null && !parentRunId) {
-      return jsonResponse({ ok: false, error: PARENT_RUN_ID_VALIDATION_HINT }, 400);
-    }
-    const data = parsed.body.data && typeof parsed.body.data === "object"
-      ? parsed.body.data as Record<string, unknown>
-      : {};
-    const result = await buildRunWithDataHandler(deps.dir)({
-      workflow: String(parsed.body.workflow ?? ""),
-      id: String(parsed.body.id ?? ""),
-      runId: parsed.body.runId ? String(parsed.body.runId) : undefined,
-      date: parsed.body.date ? String(parsed.body.date) : undefined,
-      data,
-      ...(parentRunId ? { parentRunId } : {}),
-    });
-    return jsonResponse(result, result.ok ? 202 : 400);
+    return postJson(c, (body) => {
+      const parent = parseParentRunIdFromBody(body);
+      if (!parent.ok) return parent;
+      const data = body.data && typeof body.data === "object"
+        ? body.data as Record<string, unknown>
+        : {};
+      return {
+        workflow: String(body.workflow ?? ""),
+        id: String(body.id ?? ""),
+        runId: body.runId ? String(body.runId) : undefined,
+        date: body.date ? String(body.date) : undefined,
+        data,
+        ...(parent.parentRunId ? { parentRunId: parent.parentRunId } : {}),
+      };
+    }, buildRunWithDataHandler(deps.dir), 202);
   });
 
   app.post("/api/save-data", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const data = parsed.body.data && typeof parsed.body.data === "object"
-      ? parsed.body.data as Record<string, unknown>
-      : {};
-    const result = await buildSaveDataHandler(deps.dir)({
-      workflow: String(parsed.body.workflow ?? ""),
-      id: String(parsed.body.id ?? ""),
-      data,
-    });
-    return jsonResponse(result, result.ok ? 200 : 400);
+    return postJson(c, (body) => {
+      const data = body.data && typeof body.data === "object"
+        ? body.data as Record<string, unknown>
+        : {};
+      return {
+        workflow: String(body.workflow ?? ""),
+        id: String(body.id ?? ""),
+        data,
+      };
+    }, buildSaveDataHandler(deps.dir));
   });
 
   app.get("/api/find-prior-by-key", (c) => {
@@ -122,107 +130,76 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
   });
 
   app.post("/api/cancel-queued", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const result = await buildCancelQueuedHandler(deps.dir)({
-      workflow: String(parsed.body.workflow ?? ""),
-      id: String(parsed.body.id ?? ""),
-      runId: parsed.body.runId ? String(parsed.body.runId) : undefined,
-    });
-    return jsonResponse(result, result.ok ? 200 : (result.status ?? 400));
+    return postJson(c, (body) => ({
+      workflow: String(body.workflow ?? ""),
+      id: String(body.id ?? ""),
+      runId: body.runId ? String(body.runId) : undefined,
+    }), buildCancelQueuedHandler(deps.dir));
   });
 
   app.post("/api/cancel-running", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const workflow = String(parsed.body.workflow ?? "");
-    const id = String(parsed.body.id ?? "");
-    const runId = String(parsed.body.runId ?? "");
-    if (!workflow || !id || !runId) {
-      return jsonResponse({ ok: false, error: "workflow, id, runId are required" }, 400);
-    }
-    const result = await buildCancelRunningHandler(deps.dir)({ workflow, id, runId });
-    return jsonResponse(result, result.ok ? 200 : (result.status ?? 400));
+    return postJson(c, (body) => {
+      const workflow = String(body.workflow ?? "");
+      const id = String(body.id ?? "");
+      const runId = String(body.runId ?? "");
+      if (!workflow || !id || !runId) {
+        return { ok: false, error: "workflow, id, runId are required" };
+      }
+      return { workflow, id, runId };
+    }, buildCancelRunningHandler(deps.dir));
   });
 
   app.post("/api/cancel-active-bulk", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const workflow = String(parsed.body.workflow ?? "").trim();
-    if (!workflow) return jsonResponse({ ok: false, error: "workflow is required" }, 400);
-    const rawItems = Array.isArray(parsed.body.items) ? (parsed.body.items as unknown[]) : [];
-    const items: CancelActiveBulkItem[] = rawItems
-      .map((row) => {
-        if (!row || typeof row !== "object") return null;
-        const o = row as Record<string, unknown>;
+    return postJson(c, (body) => {
+      const workflow = String(body.workflow ?? "").trim();
+      if (!workflow) return { ok: false, error: "workflow is required" };
+      const items = parseItemsFromBody<CancelActiveBulkItem>(body.items, (o) => {
         const id = typeof o.id === "string" ? o.id : "";
         const status = o.status === "pending" || o.status === "running" ? o.status : null;
         if (!id || !status) return null;
         const runId = typeof o.runId === "string" && o.runId.length > 0 ? o.runId : undefined;
-        const item: CancelActiveBulkItem = runId ? { id, status, runId } : { id, status };
-        return item;
-      })
-      .filter((x): x is CancelActiveBulkItem => x !== null);
-    if (items.length === 0) {
-      return jsonResponse({ ok: false, error: "items must be a non-empty array of { id, status }" }, 400);
-    }
-    const result = await buildCancelActiveBulkHandler(deps.dir)({
-      workflow,
-      items,
-    });
-    const status = bulkMutationHttpStatus(result.count, result.errors.length);
-    return jsonResponse(result, status);
+        return runId ? { id, status, runId } : { id, status };
+      });
+      if (items.length === 0) {
+        return { ok: false, error: "items must be a non-empty array of { id, status }" };
+      }
+      return { workflow, items };
+    }, buildCancelActiveBulkHandler(deps.dir), (result) => bulkMutationHttpStatus(result.count, result.errors.length));
   });
 
   app.post("/api/task/force-stop", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const result = await buildForceStopTaskHandler(deps.dir)({
-      workflow: String(parsed.body.workflow ?? ""),
-      id: String(parsed.body.id ?? ""),
-      runId: parsed.body.runId ? String(parsed.body.runId) : undefined,
-    });
-    return jsonResponse(result, result.ok ? 202 : (result.status ?? 400));
+    return postJson(c, (body) => ({
+      workflow: String(body.workflow ?? ""),
+      id: String(body.id ?? ""),
+      runId: body.runId ? String(body.runId) : undefined,
+    }), buildForceStopTaskHandler(deps.dir), 202);
   });
 
   app.post("/api/browser/kill", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const pid = typeof parsed.body.pid === "number" ? parsed.body.pid : undefined;
-    const result = await buildKillBrowserHandler(deps.dir)({
-      browserProcessId: parsed.body.browserProcessId ? String(parsed.body.browserProcessId) : undefined,
-      pid,
-    });
-    return jsonResponse(result, result.ok ? 202 : (result.status ?? 400));
+    return postJson(c, (body) => ({
+      browserProcessId: body.browserProcessId ? String(body.browserProcessId) : undefined,
+      pid: typeof body.pid === "number" ? body.pid : undefined,
+    }), buildKillBrowserHandler(deps.dir), 202);
   });
 
   app.post("/api/worker/drain", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const result = await buildDrainWorkerHandler(deps.dir)({
-      workerId: String(parsed.body.workerId ?? ""),
-    });
-    return jsonResponse(result, result.ok ? 202 : (result.status ?? 400));
+    return postJson(c, (body) => ({
+      workerId: String(body.workerId ?? ""),
+    }), buildDrainWorkerHandler(deps.dir), 202);
   });
 
   app.post("/api/worker/stop", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const result = await buildStopWorkerHandler(deps.dir)({
-      workerId: String(parsed.body.workerId ?? ""),
-    });
-    return jsonResponse(result, result.ok ? 202 : (result.status ?? 400));
+    return postJson(c, (body) => ({
+      workerId: String(body.workerId ?? ""),
+    }), buildStopWorkerHandler(deps.dir), 202);
   });
 
   app.post("/api/queue/bump", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const result = await buildQueueBumpHandler(deps.dir)({
-      workflow: String(parsed.body.workflow ?? ""),
-      id: String(parsed.body.id ?? ""),
-      runId: parsed.body.runId ? String(parsed.body.runId) : undefined,
-    });
-    return jsonResponse(result, result.ok ? 200 : (result.status ?? 400));
+    return postJson(c, (body) => ({
+      workflow: String(body.workflow ?? ""),
+      id: String(body.id ?? ""),
+      runId: body.runId ? String(body.runId) : undefined,
+    }), buildQueueBumpHandler(deps.dir));
   });
 
   app.get("/api/daemons", async (c) => {
@@ -231,27 +208,23 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
   });
 
   app.post("/api/daemons/spawn", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const count = typeof parsed.body.count === "number" ? parsed.body.count : 1;
-    const handler = buildDaemonsSpawnHandler(deps.dir);
-    void handler({
-      workflow: String(parsed.body.workflow ?? ""),
-      count,
-    }).catch((err) => {
-      log.error(`[POST /api/daemons/spawn] background spawn failed: ${errorMessage(err)}`);
-    });
-    return jsonResponse({ ok: true, queued: count }, 202);
+    return postJson(c, (body) => ({
+      workflow: String(body.workflow ?? ""),
+      count: typeof body.count === "number" ? body.count : 1,
+    }), (body) => {
+      const handler = buildDaemonsSpawnHandler(deps.dir);
+      void handler(body).catch((err) => {
+        log.error(`[POST /api/daemons/spawn] background spawn failed: ${errorMessage(err)}`);
+      });
+      return { ok: true, queued: body.count };
+    }, 202);
   });
 
   app.post("/api/daemons/stop", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const result = await buildDaemonsStopHandler(deps.dir)({
-      workflow: parsed.body.workflow ? String(parsed.body.workflow) : undefined,
-      force: parsed.body.force === true,
-    });
-    return jsonResponse(result);
+    return postJson(c, (body) => ({
+      workflow: body.workflow ? String(body.workflow) : undefined,
+      force: body.force === true,
+    }), buildDaemonsStopHandler(deps.dir));
   });
 
   app.get("/api/queue-depth", () => {
@@ -264,53 +237,43 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
   });
 
   app.post("/api/delete-entry", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const result = buildDeleteEntryHandler(deps.dir, { screenshotsDir: deps.screenshotsDir })({
-      workflow: String(parsed.body.workflow ?? ""),
-      id: String(parsed.body.id ?? ""),
-      date: String(parsed.body.date ?? ""),
-      runId: parsed.body.runId ? String(parsed.body.runId) : undefined,
-    });
-    return jsonResponse(result, result.ok ? 200 : (result.status ?? 400));
+    return postJson(c, (body) => ({
+      workflow: String(body.workflow ?? ""),
+      id: String(body.id ?? ""),
+      date: String(body.date ?? ""),
+      runId: body.runId ? String(body.runId) : undefined,
+    }), buildDeleteEntryHandler(deps.dir, { screenshotsDir: deps.screenshotsDir }));
   });
 
   app.post("/api/delete-bulk", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const workflow = String(parsed.body.workflow ?? "").trim();
-    const date = String(parsed.body.date ?? "").trim();
-    const ids = Array.isArray(parsed.body.ids) ? (parsed.body.ids as unknown[]).map(String) : [];
-    const rawItems = Array.isArray(parsed.body.items) ? (parsed.body.items as unknown[]) : [];
-    const items = rawItems
-      .map((row) => {
-        if (!row || typeof row !== "object") return null;
-        const o = row as Record<string, unknown>;
+    return postJson(c, (body) => {
+      const workflow = String(body.workflow ?? "").trim();
+      const date = String(body.date ?? "").trim();
+      const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
+      const items = parseItemsFromBody<{ id: string; runId?: string }>(body.items, (o) => {
         const id = typeof o.id === "string" ? o.id : "";
         if (!id) return null;
         const runId = typeof o.runId === "string" && o.runId.length > 0 ? o.runId : undefined;
         return runId ? { id, runId } : { id };
-      })
-      .filter((item): item is { id: string; runId?: string } => item !== null);
-    if (!workflow || !date) {
-      return jsonResponse({ ok: false, error: "workflow and date are required" }, 400);
-    }
-    if (items.length === 0 && ids.length === 0) {
-      return jsonResponse(
-        { ok: false, error: "ids or items must be non-empty — provide at least one entry to delete" },
-        400,
-      );
-    }
-    const result = buildDeleteBulkHandler(deps.dir, { screenshotsDir: deps.screenshotsDir })({
-      workflow,
-      date,
-      ids,
-      items,
-    });
-    if (!result.ok) {
-      return jsonResponse({ ok: false, error: result.errors[0]?.error ?? "invalid request" }, 400);
-    }
-    const status = bulkMutationHttpStatus(result.count, result.errors.length);
-    return jsonResponse(result, status);
+      });
+      if (!workflow || !date) {
+        return { ok: false, error: "workflow and date are required" };
+      }
+      if (items.length === 0 && ids.length === 0) {
+        return { ok: false, error: "ids or items must be non-empty — provide at least one entry to delete" };
+      }
+      return { workflow, date, ids, items };
+    }, (body) => {
+      const result = buildDeleteBulkHandler(deps.dir, { screenshotsDir: deps.screenshotsDir })(body as {
+        workflow: string;
+        date: string;
+        ids: string[];
+        items: Array<{ id: string; runId?: string }>;
+      });
+      if (!result.ok) {
+        return { ok: false, error: result.errors[0]?.error ?? "invalid request", count: 0, errors: result.errors };
+      }
+      return result;
+    }, (result) => result.ok ? bulkMutationHttpStatus(result.count, result.errors.length) : 400);
   });
 }
