@@ -13,60 +13,68 @@ import type { Page, Locator } from "playwright";
  */
 
 export const hrInquiry = {
-  /** Subject textbox (required). @verified 2026-05-01 */
+  /** Subject textbox (required). */
+  // verified 2026-05-01
   subjectInput: (page: Page): Locator =>
     page.getByRole("textbox", { name: "Subject" }),
 
-  /** Description textbox (required). @verified 2026-05-01 */
+  /** Description textbox (required). */
+  // verified 2026-05-01
   descriptionInput: (page: Page): Locator =>
     page.getByRole("textbox", { name: "Description" }),
 
   /**
    * "Specifically:" combobox — ServiceNow typeahead. Implementation: type
    * search term, wait for suggestion list, click matching option.
-   * @verified 2026-05-01
    */
+  // verified 2026-05-01
   specificallyInput: (page: Page): Locator =>
     page.getByRole("combobox", { name: "Specifically:" }),
 
   /**
    * "Category:" combobox — placeholder "-- None --".
-   * @verified 2026-05-01
    */
+  // verified 2026-05-01
   categoryInput: (page: Page): Locator =>
     page.getByRole("combobox", { name: "Category:" }),
 
   /**
    * Native file input adjacent to the "Choose a file" button. Use
    * `setInputFiles` on this rather than clicking the visible button.
-   * @verified 2026-05-01
    */
+  // verified 2026-05-01
   fileInput: (page: Page): Locator =>
     page.locator('input[type="file"]').first(),
 
-  /** Choose-a-file button (visible affordance). @verified 2026-05-01 */
+  /** Choose-a-file button (visible affordance). */
+  // verified 2026-05-01
   chooseFileButton: (page: Page): Locator =>
     page.getByRole("button", { name: "Choose a file" }),
 
-  /** Submit the inquiry. @verified 2026-05-01 */
+  /** Submit the inquiry. */
+  // verified 2026-05-01
   submitButton: (page: Page): Locator =>
     page.getByRole("button", { name: "Submit" }),
 
-  /** Save without submitting. Escape hatch — not used by the handler. @verified 2026-05-01 */
+  /** Save without submitting. Escape hatch — not used by the handler. */
+  // verified 2026-05-01
   saveAsDraftButton: (page: Page): Locator =>
     page.getByRole("button", { name: "Save as Draft" }),
 };
 
 export const ssoFields = {
-  /** UCSD SSO username field (TritON SAML). @verified 2026-05-01 */
+  /** UCSD SSO username field (TritON SAML). */
+  // verified 2026-05-01
   usernameInput: (page: Page): Locator =>
     page.getByRole("textbox", { name: /username|user id/i }),
 
-  /** UCSD SSO password field (TritON SAML). @verified 2026-05-01 */
+  /** UCSD SSO password field (TritON SAML). */
+  // verified 2026-05-01
   passwordInput: (page: Page): Locator =>
     page.getByRole("textbox", { name: /password/i }),
 
-  /** UCSD SSO submit button. @verified 2026-05-01 */
+  /** UCSD SSO submit button. */
+  // verified 2026-05-01
   loginButton: (page: Page): Locator =>
     page.getByRole("button", { name: /log ?in|sign ?in/i }),
 };
