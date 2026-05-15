@@ -24,13 +24,16 @@ export function validateAndPrepareItems<TData, TSteps extends readonly string[]>
   opts: RunOpts,
   validate: (item: TData) => void,
 ): PerItem<TData>[] {
-  items.forEach((item) => {
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]!
     try {
       validate(item)
     } catch (err) {
-      throw new Error(`validation error: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
+      throw new Error(`validation error at item ${i}: ${err instanceof Error ? err.message : String(err)}`, {
+        cause: err,
+      })
     }
-  })
+  }
 
   const itemIdFn =
     opts.deriveItemId ??
