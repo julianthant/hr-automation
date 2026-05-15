@@ -27,14 +27,7 @@ import {
   downloadCrmIdocsDocuments,
 } from "../../systems/crm/idocs-download.js";
 import { OnboardingInputSchema } from "./schema.js";
-
-/** Mask SSN for dashboard display. */
-function maskSsn(ssn: string | undefined | null): string {
-  if (!ssn) return "";
-  const digits = ssn.replace(/-/g, "");
-  if (digits.length < 4) return "***";
-  return `***-**-${digits.slice(-4)}`;
-}
+import { maskSsn } from "../../domain/identity/ssn.js";
 
 const onboardingSteps = [
   "crm-auth",
