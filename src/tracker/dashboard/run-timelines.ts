@@ -1,4 +1,4 @@
-import type { TrackerEntry } from "../jsonl.js";
+import { getRunIdOr, type TrackerEntry } from "../jsonl.js";
 
 /**
  * Minimal TrackerEntry shape needed for step-duration computation. Kept
@@ -153,7 +153,7 @@ export function buildRunTimelines(
     { earliestWorkTs: string | null; earliestAnyTs: string; latestTs: string }
   >();
   for (const e of entries) {
-    const rid = e.runId || `${e.id}#1`;
+    const rid = getRunIdOr(e);
     const isWork = e.status !== "pending";
     const prev = spans.get(rid);
     if (!prev) {

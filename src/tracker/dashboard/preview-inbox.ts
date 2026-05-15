@@ -1,4 +1,4 @@
-import { dateLocal, type TrackerEntry } from "../jsonl.js";
+import { dateLocal, getRunIdOr, type TrackerEntry } from "../jsonl.js";
 import { countRecords, isPrepEntry, isReadyForReview, previewSummary } from "./prep-rows.js";
 
 /** One row in the navbar approval inbox. See frontend types.ts for the full JSDoc. */
@@ -52,7 +52,7 @@ export function buildPreviewInboxHandler(deps: PreviewInboxDeps) {
         if (date < cutoffStr) continue;
         for (const e of deps.readEntriesForDate(wf, date)) {
           if (!isPrepEntry(e)) continue;
-          const runId = e.runId || `${e.id}#1`;
+          const runId = getRunIdOr(e);
           const key = `${wf}::${e.id}::${runId}`;
           const prev = byRun.get(key);
           if (!prev || e.timestamp >= prev.latest.timestamp) {
@@ -68,7 +68,7 @@ export function buildPreviewInboxHandler(deps: PreviewInboxDeps) {
       rows.push({
         workflow: latest.workflow,
         id: latest.id,
-        runId: latest.runId || `${latest.id}#1`,
+        runId: getRunIdOr(latest),
         summary: previewSummary(latest),
         ts: latest.timestamp,
         date,

@@ -1,7 +1,7 @@
 import { existsSync } from "fs";
 import { resolve } from "path";
 import { listRosters } from "../../../services/matching/roster-loader.js";
-import { readEntries, readEntriesForDate, trackEvent, type TrackerEntry } from "../../jsonl.js";
+import { byTimestampAsc, readEntries, readEntriesForDate, trackEvent, type TrackerEntry } from "../../jsonl.js";
 import { enqueueFromHttp } from "../../../core/daemon/enqueue-dispatch.js";
 import {
   findRetryInputFromTaskStore,
@@ -78,7 +78,7 @@ export type FindEntryInputResult =
 function mergeAccumulatedTrackerStrings(rows: TrackerEntry[]): Record<string, string> {
   const entries = rows.filter((e) => e.data);
   if (entries.length === 0) return {};
-  entries.sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
+  entries.sort(byTimestampAsc);
   const merged: Record<string, string> = {};
   for (const e of entries) {
     for (const [k, v] of Object.entries(e.data ?? {})) {
@@ -93,7 +93,7 @@ function mergeAccumulatedTrackerStrings(rows: TrackerEntry[]): Record<string, st
 /** Latest non-empty `parentRunId` among `rows` (sorted by tracker `timestamp`). */
 function extractLatestParentRunId(rows: TrackerEntry[]): string | undefined {
   if (rows.length === 0) return undefined;
-  const sorted = [...rows].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const sorted = [...rows].sort(byTimestampAsc);
   for (let i = sorted.length - 1; i >= 0; i--) {
     const p = sorted[i]!.parentRunId;
     if (typeof p === "string" && p.length > 0) return p;
@@ -326,7 +326,7 @@ async function reEnqueueOcrEntry(
     return { ok: false, error: `no tracker entry found for id=${id} runId=${runId}` };
   }
   const merged: Record<string, string> = {};
-  [...matching].sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1)).forEach((e) => {
+  [...matching].sort(byTimestampAsc).forEach((e) => {
     for (const [k, v] of Object.entries(e.data ?? {})) {
       if (v === undefined || v === null || v === "") continue;
       merged[k] = String(v);

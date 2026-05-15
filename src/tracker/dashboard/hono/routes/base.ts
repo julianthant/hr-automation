@@ -12,6 +12,7 @@ import {
   readLogEntries,
   readLogEntriesForDate,
   readRunsForId,
+  getRunIdOr,
   type TrackerEntry,
 } from "../../../jsonl.js";
 import { queryRunsForItem } from "../../../state/queries.js";
@@ -113,7 +114,7 @@ export function registerBaseRoutes(app: Hono, deps: DashboardHonoDeps): void {
       : readEntries(workflow, deps.dir).filter((entry) => entry.id === id);
     const historyByRun = new Map<string, StepDurationEntry[]>();
     for (const entry of allForItem) {
-      const runId = entry.runId || `${entry.id}#1`;
+      const runId = getRunIdOr(entry);
       const bucket = historyByRun.get(runId);
       const slim: StepDurationEntry = { timestamp: entry.timestamp, status: entry.status, step: entry.step };
       if (bucket) bucket.push(slim);
