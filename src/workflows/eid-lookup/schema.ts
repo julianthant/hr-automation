@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { displayPersonName } from "../../domain/identity/person-name.js";
+export { normalizeName } from "../../domain/identity/person-name.js";
 import { normalizeUcpathEmployeeId } from "../../domain/identity/eid.js";
 
 /** Common input shape for both no-CRM and CRM-on lookups. */
@@ -58,24 +58,3 @@ export function isEidInput(input: EidLookupItem): input is EidLookupEidInput {
   return "emplId" in input;
 }
 
-/**
- * Normalize a raw "Last, First Middle" input string to a consistent display
- * format: title-cased parts separated by a single `", "`.
- *
- * Intended to be applied at the CLI boundary so every downstream consumer
- * (search form fields, tracker `searchName`, dashboard detail cell) sees the
- * same casing regardless of how the user typed it. UCPath and CRM forms are
- * case-insensitive so title-casing doesn't affect matching.
- *
- * Behavior:
- *   - "zaw, hein thant"    → "Zaw, Hein Thant"
- *   - "SMITH, JOHN"        → "Smith, John"
- *   - "  smith , john  "   → "Smith, John"   (trim + single-space collapse)
- *   - "plain string"       → "plain string"  (no comma → unchanged; search.ts
- *                            will throw its own format error downstream)
- *   - "smith,"             → "smith,"        (empty first → unchanged)
- */
-export function normalizeName(raw: string): string {
-  const display = displayPersonName(raw);
-  return display || raw;
-}
