@@ -340,6 +340,11 @@ export async function runOcrOrchestrator(
     // current `records` array. Called at every phase transition so the
     // Preview tab updates progressively as OCR / matching / disambig /
     // eid-lookup / verification each complete.
+    // Running-status emits are deduplicated by a quick fingerprint
+    // (step + length + verifiedCount + last-record eid) so back-to-back
+    // phase-transition calls with unchanged content don't produce extra
+    // JSONL writes.
+    let lastSnapshotKey = "";
     const emitSnapshot = (
       records: unknown[],
       step: string,
@@ -347,6 +352,12 @@ export async function runOcrOrchestrator(
       extras: Record<string, unknown> = {},
     ): void => {
       const verifiedCount = countVerified(records);
+      if (status === "running") {
+        const lastRec = (records as Record<string, unknown>[]).at(-1);
+        const key = `${step}|${records.length}|${verifiedCount}|${lastRec?.employeeId ?? lastRec?.eid ?? ""}`;
+        if (key === lastSnapshotKey) return;
+        lastSnapshotKey = key;
+      }
       writeTracker(status, {
         formType: input.formType,
         pdfOriginalName: input.pdfOriginalName,
@@ -909,6 +920,10 @@ async function runFanOutPhase(fanOpts: FanOutOpts): Promise<void> {
     await runDependencySchedulerTickForTrackerDir(trackerDir);
   };
 
+  // Debounce per-outcome snapshots — batches rapid eid-lookup completions into
+  // a single JSONL write instead of one write per outcome.
+  let progressDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
   const waitForChildRuns = async (): Promise<void> => {
     const progressed = new Set<string>();
     const outcomes = await watchChildren({
@@ -924,11 +939,11 @@ async function runFanOutPhase(fanOpts: FanOutOpts): Promise<void> {
         progressed.add(outcome.itemId);
         patchRecord(records, enq.index, outcome, enq.kind);
         log.step(`[ocr] ${kind} outcome for rec ${enq.index + 1}: kind=${enq.kind} status=${outcome.status} → record patched (${remaining} remaining)`);
-        emitSnapshot(records, kind, "running", {
-          failedPages,
-          emptyPages,
-          pageStatusSummary,
-        });
+        if (progressDebounceTimer !== null) clearTimeout(progressDebounceTimer);
+        progressDebounceTimer = setTimeout(() => {
+          progressDebounceTimer = null;
+          emitSnapshot(records, kind, "running", { failedPages, emptyPages, pageStatusSummary });
+        }, 250);
       },
     });
     for (const outcome of outcomes) {
@@ -945,6 +960,7 @@ async function runFanOutPhase(fanOpts: FanOutOpts): Promise<void> {
     }
     const verifiedCount = countVerified(records);
     log.success(`[ocr] ${kind} complete — ${outcomes.length}/${enqueueItems.length} records resolved, ${verifiedCount} verified`);
+    if (progressDebounceTimer !== null) { clearTimeout(progressDebounceTimer); progressDebounceTimer = null; }
     emitSnapshot(records, kind, "running", {
       failedPages,
       emptyPages,
