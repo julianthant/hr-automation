@@ -272,9 +272,7 @@ export function buildVisionPool(): PoolKey[] {
  * material — only the per-provider count.
  */
 export function summarizePool(pool: PoolKey[]): string {
-  const counts = new Map<string, number>();
-  for (const k of pool) counts.set(k.providerId, (counts.get(k.providerId) ?? 0) + 1);
-  const parts: string[] = [];
-  for (const [provider, count] of counts) parts.push(`${provider}=${count}`);
+  const grouped = Object.groupBy(pool, (k) => k.providerId);
+  const parts = Object.entries(grouped).map(([p, keys]) => `${p}=${keys!.length}`);
   return parts.length > 0 ? parts.join(" ") : "(empty)";
 }

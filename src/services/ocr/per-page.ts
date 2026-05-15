@@ -266,26 +266,17 @@ async function callSinglePage(args: {
 function makeLimiter(n: number) {
   let active = 0;
   const queue: Array<() => void> = [];
-  return <T>(fn: () => Promise<T>): Promise<T> =>
-    new Promise<T>((resolve, reject) => {
-      const run = (): void => {
-        active += 1;
-        fn().then(
-          (val) => {
-            active -= 1;
-            const next = queue.shift();
-            if (next) next();
-            resolve(val);
-          },
-          (err) => {
-            active -= 1;
-            const next = queue.shift();
-            if (next) next();
-            reject(err);
-          },
-        );
-      };
-      if (active < n) run();
-      else queue.push(run);
-    });
+  return <T>(fn: () => Promise<T>): Promise<T> => {
+    const { promise, resolve, reject } = Promise.withResolvers<T>();
+    const run = (): void => {
+      active += 1;
+      fn().then(
+        (val) => { active -= 1; queue.shift()?.(); resolve(val); },
+        (err) => { active -= 1; queue.shift()?.(); reject(err); },
+      );
+    };
+    if (active < n) run();
+    else queue.push(run);
+    return promise;
+  };
 }

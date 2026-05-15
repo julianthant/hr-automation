@@ -91,6 +91,17 @@ export function loadRoster(path: string): Promise<RosterRow[]> {
   return promise;
 }
 
+const COLUMN_PATTERNS = {
+  eid:    /^ucpath\s*id$|^empl(oyee)?\s*id$/i,
+  first:  /first\s*name/i,
+  last:   /last\s*name/i,
+  name:   /^legal\s*name$|^lived\s*name$|^name$/i,
+  street: /^street$|^address$/i,
+  city:   /^city$/i,
+  state:  /^state$/i,
+  zip:    /^zip$|^postal$/i,
+} as const;
+
 async function parseRosterFile(path: string): Promise<RosterRow[]> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(path);
@@ -107,16 +118,15 @@ async function parseRosterFile(path: string): Promise<RosterRow[]> {
       headers.push(cellToString(cell.value).trim());
     });
 
-    const idx = (target: RegExp): number =>
-      headers.findIndex((h) => target.test(h));
-    const eidCol = idx(/^ucpath\s*id$|^empl(oyee)?\s*id$/i) + 1;
-    const firstCol = idx(/first\s*name/i) + 1;
-    const lastCol = idx(/last\s*name/i) + 1;
-    const nameCol = idx(/^legal\s*name$|^lived\s*name$|^name$/i) + 1;
-    const streetCol = idx(/^street$|^address$/i) + 1;
-    const cityCol = idx(/^city$/i) + 1;
-    const stateCol = idx(/^state$/i) + 1;
-    const zipCol = idx(/^zip$|^postal$/i) + 1;
+    const idx = (pat: RegExp): number => headers.findIndex((h) => pat.test(h)) + 1;
+    const eidCol    = idx(COLUMN_PATTERNS.eid);
+    const firstCol  = idx(COLUMN_PATTERNS.first);
+    const lastCol   = idx(COLUMN_PATTERNS.last);
+    const nameCol   = idx(COLUMN_PATTERNS.name);
+    const streetCol = idx(COLUMN_PATTERNS.street);
+    const cityCol   = idx(COLUMN_PATTERNS.city);
+    const stateCol  = idx(COLUMN_PATTERNS.state);
+    const zipCol    = idx(COLUMN_PATTERNS.zip);
 
     // Sheet without any name-bearing column can't contribute usable rows.
     if (nameCol === 0 && (firstCol === 0 || lastCol === 0)) continue;
