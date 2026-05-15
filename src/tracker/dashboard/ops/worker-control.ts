@@ -79,22 +79,18 @@ async function enqueueWorkerLifecycleCommand(
 ): Promise<{ ok: true; commandId: string } | { ok: false; error: string; status?: number }> {
   if (!workerId) return { ok: false, error: "workerId is required", status: 400 };
   const stores = openControlStores(dir);
-  try {
-    const worker = stores.workerStore.getWorker(workerId);
-    if (!worker) return { ok: false, error: "worker not found", status: 404 };
-    const commandId = stores.workerStore.enqueueWorkerCommand({
-      commandType,
-      workflow: worker.workflow,
-      targetWorkerId: worker.workerId,
-      payload: { pid: worker.pid, instanceId: worker.instanceId },
-    });
-    if (commandType === "stop_worker") {
-      void requestDaemonStopWorker(worker);
-    }
-    return { ok: true, commandId };
-  } finally {
-    stores.close();
+  const worker = stores.workerStore.getWorker(workerId);
+  if (!worker) return { ok: false, error: "worker not found", status: 404 };
+  const commandId = stores.workerStore.enqueueWorkerCommand({
+    commandType,
+    workflow: worker.workflow,
+    targetWorkerId: worker.workerId,
+    payload: { pid: worker.pid, instanceId: worker.instanceId },
+  });
+  if (commandType === "stop_worker") {
+    void requestDaemonStopWorker(worker);
   }
+  return { ok: true, commandId };
 }
 
 export function buildDrainWorkerHandler(dir: string) {
@@ -257,25 +253,24 @@ export function buildDaemonsListHandler(dir: string) {
     const workflows = workflow ? [workflow] : [...new Set([...lockfileWorkflows, ...workerWorkflows])];
     const out: DaemonInfo[] = [];
     const aliveByWorkflow = new Map<string, Daemon[]>();
-    try {
-      // Parallelize findAliveDaemons across workflows — each probe is independent.
-      const aliveResults = await Promise.all(
-        workflows.map(async (wf) => [wf, await findAliveDaemons(wf, dir)] as const),
-      );
-      for (const [wf, alive] of aliveResults) aliveByWorkflow.set(wf, alive);
+    // Parallelize findAliveDaemons across workflows — each probe is independent.
+    const aliveResults = await Promise.all(
+      workflows.map(async (wf) => [wf, await findAliveDaemons(wf, dir)] as const),
+    );
+    for (const [wf, alive] of aliveResults) aliveByWorkflow.set(wf, alive);
 
-      // Hoist queue JSONL reads: one read per workflow instead of one per daemon.
-      const queueLinesByWorkflow = new Map<string, string[]>();
-      for (const wf of workflows) {
-        try {
-          const text = readFileSync(queueFilePath(wf, dir), "utf-8");
-          queueLinesByWorkflow.set(wf, text.split("\n").filter(Boolean));
-        } catch {
-          queueLinesByWorkflow.set(wf, []);
-        }
+    // Hoist queue JSONL reads: one read per workflow instead of one per daemon.
+    const queueLinesByWorkflow = new Map<string, string[]>();
+    for (const wf of workflows) {
+      try {
+        const text = readFileSync(queueFilePath(wf, dir), "utf-8");
+        queueLinesByWorkflow.set(wf, text.split("\n").filter(Boolean));
+      } catch {
+        queueLinesByWorkflow.set(wf, []);
       }
+    }
 
-      for (const worker of workers) {
+    for (const worker of workers) {
         const wf = worker.workflow ?? "";
         const alive = aliveByWorkflow.get(wf) ?? [];
         const matchingLock = alive.find((d) =>
@@ -300,42 +295,39 @@ export function buildDaemonsListHandler(dir: string) {
             : 0,
           browserProcesses,
         }));
-      }
+    }
 
-      // Collect lockfile-only daemons (no SQLite worker row) then probe all in parallel.
-      const lockfileOnlyDaemons: Array<{ wf: string; d: Daemon }> = [];
-      for (const wf of workflows) {
-        for (const d of aliveByWorkflow.get(wf) ?? []) {
-          if (workers.some((worker) => worker.instanceId === d.instanceId || worker.pid === d.pid)) continue;
-          lockfileOnlyDaemons.push({ wf, d });
-        }
+    // Collect lockfile-only daemons (no SQLite worker row) then probe all in parallel.
+    const lockfileOnlyDaemons: Array<{ wf: string; d: Daemon }> = [];
+    for (const wf of workflows) {
+      for (const d of aliveByWorkflow.get(wf) ?? []) {
+        if (workers.some((worker) => worker.instanceId === d.instanceId || worker.pid === d.pid)) continue;
+        lockfileOnlyDaemons.push({ wf, d });
       }
-      const statuses = await Promise.all(lockfileOnlyDaemons.map(({ d }) => probeDaemonStatus(d)));
-      for (let i = 0; i < lockfileOnlyDaemons.length; i++) {
-        const { wf, d } = lockfileOnlyDaemons[i];
-        const status = statuses[i];
-        out.push({
-          workflow: d.workflow,
-          workerId: d.instanceId,
-          pid: d.pid,
-          port: d.port,
-          instanceId: d.instanceId,
-          startedAt: d.startedAt,
-          uptimeMs: Date.now() - new Date(d.startedAt).getTime(),
-          itemsProcessed: countItemsProcessed(d.instanceId, queueLinesByWorkflow.get(wf) ?? []),
-          currentItem: status.currentItem ?? null,
-          currentRunId: status.currentRunId ?? null,
-          currentTaskId: null,
-          currentAttemptId: null,
-          phase: status.phase ?? "unknown",
-          status: "alive",
-          heartbeatAgeMs: null,
-          browserProcesses: [],
-          lockfileAlive: true,
-        });
-      }
-    } finally {
-      stores.close();
+    }
+    const statuses = await Promise.all(lockfileOnlyDaemons.map(({ d }) => probeDaemonStatus(d)));
+    for (let i = 0; i < lockfileOnlyDaemons.length; i++) {
+      const { wf, d } = lockfileOnlyDaemons[i];
+      const status = statuses[i];
+      out.push({
+        workflow: d.workflow,
+        workerId: d.instanceId,
+        pid: d.pid,
+        port: d.port,
+        instanceId: d.instanceId,
+        startedAt: d.startedAt,
+        uptimeMs: Date.now() - new Date(d.startedAt).getTime(),
+        itemsProcessed: countItemsProcessed(d.instanceId, queueLinesByWorkflow.get(wf) ?? []),
+        currentItem: status.currentItem ?? null,
+        currentRunId: status.currentRunId ?? null,
+        currentTaskId: null,
+        currentAttemptId: null,
+        phase: status.phase ?? "unknown",
+        status: "alive",
+        heartbeatAgeMs: null,
+        browserProcesses: [],
+        lockfileAlive: true,
+      });
     }
     return out;
   };

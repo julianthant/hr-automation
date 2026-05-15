@@ -224,48 +224,44 @@ async function reEnqueueEntry(
 
   if (runId && !prefilledData) {
     const stores = openControlStores(dir);
-    try {
-      const task = resolveControlTask(stores.taskStore, wf, id, runId);
-      if (task) {
-        const input = asRecordInput(task.input);
-        if (!input) {
-          return { ok: false, error: "stored task input is unavailable for retry" };
-        }
-        const resolvedParent =
-          requestedParent ??
-          task.parentRunId ??
-          extractLatestParentRunId(readEntriesForRetryItem(wf, id, runId, dir, date).scoped);
-        const retried = stores.taskStore.retryTaskFromAttempt({ runId });
-        if (resolvedParent) {
-          stores.taskStore.db
-            .prepare(`UPDATE tasks SET parent_run_id = @p WHERE id = @tid`)
-            .run({ p: resolvedParent, tid: retried.taskId });
-        }
-        stores.workerStore.enqueueWorkerCommand({
-          commandType: "retry_task",
-          workflow: wf,
-          targetTaskId: retried.taskId,
-          targetAttemptId: retried.attemptId,
-          state: "completed",
-          payload: { fromRunId: runId, runId: retried.runId },
-        });
-        appendQueueEnqueueAudit(wf, retried.itemId, input, retried.runId, dir);
-        trackEvent(
-          {
-            workflow: wf,
-            timestamp: new Date().toISOString(),
-            id: retried.itemId,
-            runId: retried.runId,
-            status: "pending",
-            input,
-            ...(resolvedParent ? { parentRunId: resolvedParent } : {}),
-          },
-          dir,
-        );
-        return { ok: true };
+    const task = resolveControlTask(stores.taskStore, wf, id, runId);
+    if (task) {
+      const input = asRecordInput(task.input);
+      if (!input) {
+        return { ok: false, error: "stored task input is unavailable for retry" };
       }
-    } finally {
-      stores.close();
+      const resolvedParent =
+        requestedParent ??
+        task.parentRunId ??
+        extractLatestParentRunId(readEntriesForRetryItem(wf, id, runId, dir, date).scoped);
+      const retried = stores.taskStore.retryTaskFromAttempt({ runId });
+      if (resolvedParent) {
+        stores.taskStore.db
+          .prepare(`UPDATE tasks SET parent_run_id = @p WHERE id = @tid`)
+          .run({ p: resolvedParent, tid: retried.taskId });
+      }
+      stores.workerStore.enqueueWorkerCommand({
+        commandType: "retry_task",
+        workflow: wf,
+        targetTaskId: retried.taskId,
+        targetAttemptId: retried.attemptId,
+        state: "completed",
+        payload: { fromRunId: runId, runId: retried.runId },
+      });
+      appendQueueEnqueueAudit(wf, retried.itemId, input, retried.runId, dir);
+      trackEvent(
+        {
+          workflow: wf,
+          timestamp: new Date().toISOString(),
+          id: retried.itemId,
+          runId: retried.runId,
+          status: "pending",
+          input,
+          ...(resolvedParent ? { parentRunId: resolvedParent } : {}),
+        },
+        dir,
+      );
+      return { ok: true };
     }
   }
 

@@ -1,4 +1,7 @@
 import { Command } from "commander";
+import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { basename } from "node:path";
 import { validateEnv } from "./utils/env.js";
 import { log } from "./utils/log.js";
 import { errorMessage } from "./utils/errors.js";
@@ -21,6 +24,7 @@ import {
   runOathUploadCli,
   sha256OfFile,
 } from "./workflows/oath-upload/index.js";
+import "./workflows/ocr/index.js";
 import { exportToExcel } from "./tracker/exports/export-excel.js";
 
 const program = new Command();
@@ -403,10 +407,6 @@ program
       process.exit(1);
     }
 
-    const { existsSync } = await import("node:fs");
-    const { basename } = await import("node:path");
-    const { randomUUID } = await import("node:crypto");
-
     // Validate every path up front (existence + readable) and pre-hash so a
     // malformed tail doesn't fire ServiceNow Duo prompts.
     const inputs: Array<{
@@ -513,25 +513,6 @@ program
   .option("--prod", "Serve built dashboard instead of Vite dev server")
   .option("--no-clean", "Skip the one-time startup prune of old tracker files")
   .action(async (opts: { port?: number; prod?: boolean; clean?: boolean }) => {
-    // Trigger workflow metadata registration for every workflow — the dashboard's
-    // /api/workflow-definitions endpoint reads from the registry, and that
-    // registry is populated at module load via defineWorkflow (kernel) /
-    // defineDashboardMetadata (legacy). Without these side-effect imports the
-    // dashboard would only know about whichever workflow the user just ran.
-    await Promise.all([
-      import("./workflows/onboarding/index.js"),
-      import("./workflows/separations/index.js"),
-      import("./workflows/work-study/index.js"),
-      import("./workflows/crm-doc-download/index.js"),
-      import("./workflows/eid-lookup/index.js"),
-      import("./workflows/active-check/index.js"),
-      import("./workflows/emergency-contact/index.js"),
-      import("./workflows/old-kronos-reports/index.js"),
-      import("./workflows/oath-signature/index.js"),
-      import("./workflows/oath-upload/index.js"),
-      import("./workflows/ocr/index.js"),
-    ]);
-
     const { startDashboard } = await import("./tracker/dashboard.js");
     const port = opts.port ?? 3838;
     // Commander's --no-clean sets opts.clean === false; default is `undefined` → clean = true.

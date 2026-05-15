@@ -5,7 +5,6 @@ import { cancelInProcessRun } from "../../../core/daemon/in-process-runs.js";
 import { queueFilePath, queueLockDirPath } from "../../../core/daemon/queue.js";
 import type { QueueEvent } from "../../../core/daemon/types.js";
 import type { BrowserProcessRow, ControlWorkerStore } from "../../../core/daemon/worker-store.js";
-import { log } from "../../../utils/log.js"; // E2E-TEMP
 import {
   DASHBOARD_CANCEL_ERROR,
   openControlStores,
@@ -137,48 +136,43 @@ export function buildCancelQueuedHandler(dir: string) {
     req: CancelQueuedRequest,
   ): Promise<{ ok: true } | { ok: false; error: string; status?: number }> => {
     if (!req.workflow || !req.id) return { ok: false, error: "workflow and id are required" };
-    log.e2e("cancel:queued", { ...req }); // E2E-TEMP
     const stores = openControlStores(dir);
-    try {
-      const task = resolveControlTask(stores.taskStore, req.workflow, req.id, req.runId);
-      if (task) {
-        if (task.state === "claimed" || task.state === "running" || task.state === "cancel_requested" || task.state === "cancelling") {
-          return {
-            ok: false as const,
-            error: "item already claimed by a daemon — use cancel running",
-            status: 409,
-          };
-        }
-        if (task.state === "done" || task.state === "failed" || task.state === "cancelled") {
-          return { ok: false as const, error: `item is already ${task.state}`, status: 410 };
-        }
-        if (task.state !== "queued") {
-          return { ok: false as const, error: `cannot cancel item in state ${task.state}`, status: 409 };
-        }
-        stores.workerStore.enqueueWorkerCommand({
-          commandType: "cancel_task",
-          workflow: req.workflow,
-          targetTaskId: task.taskId,
-          ...(task.currentAttemptId ? { targetAttemptId: task.currentAttemptId } : {}),
-          state: "completed",
-          payload: { itemId: req.id, runId: req.runId ?? task.currentRunId ?? task.runId },
-        });
-        stores.taskStore.markTaskCancelled({
-          taskId: task.taskId,
-          ...(task.currentAttemptId ? { attemptId: task.currentAttemptId } : {}),
-          reason: DASHBOARD_CANCEL_ERROR,
-        });
-        stores.taskStore.markDependencyFromChildTerminal({
-          childTaskId: task.taskId,
-          childState: "cancelled",
-        });
-        const auditRunId = req.runId ?? task.currentRunId ?? task.runId;
-        appendQueueFailedAudit(req.workflow, req.id, auditRunId, DASHBOARD_CANCEL_ERROR, dir);
-        emitDashboardCancelTrackerRow(req.workflow, req.id, auditRunId, dir);
-        return { ok: true as const };
+    const task = resolveControlTask(stores.taskStore, req.workflow, req.id, req.runId);
+    if (task) {
+      if (task.state === "claimed" || task.state === "running" || task.state === "cancel_requested" || task.state === "cancelling") {
+        return {
+          ok: false as const,
+          error: "item already claimed by a daemon — use cancel running",
+          status: 409,
+        };
       }
-    } finally {
-      stores.close();
+      if (task.state === "done" || task.state === "failed" || task.state === "cancelled") {
+        return { ok: false as const, error: `item is already ${task.state}`, status: 410 };
+      }
+      if (task.state !== "queued") {
+        return { ok: false as const, error: `cannot cancel item in state ${task.state}`, status: 409 };
+      }
+      stores.workerStore.enqueueWorkerCommand({
+        commandType: "cancel_task",
+        workflow: req.workflow,
+        targetTaskId: task.taskId,
+        ...(task.currentAttemptId ? { targetAttemptId: task.currentAttemptId } : {}),
+        state: "completed",
+        payload: { itemId: req.id, runId: req.runId ?? task.currentRunId ?? task.runId },
+      });
+      stores.taskStore.markTaskCancelled({
+        taskId: task.taskId,
+        ...(task.currentAttemptId ? { attemptId: task.currentAttemptId } : {}),
+        reason: DASHBOARD_CANCEL_ERROR,
+      });
+      stores.taskStore.markDependencyFromChildTerminal({
+        childTaskId: task.taskId,
+        childState: "cancelled",
+      });
+      const auditRunId = req.runId ?? task.currentRunId ?? task.runId;
+      appendQueueFailedAudit(req.workflow, req.id, auditRunId, DASHBOARD_CANCEL_ERROR, dir);
+      emitDashboardCancelTrackerRow(req.workflow, req.id, auditRunId, dir);
+      return { ok: true as const };
     }
     return withQueueLock(req.workflow, dir, async () => {
       const path = queueFilePath(req.workflow, dir);
@@ -249,38 +243,33 @@ export function buildCancelRunningHandler(dir: string) {
     if (!req.workflow || !req.id || !req.runId) {
       return { ok: false, error: "workflow, id, runId are required", status: 400 };
     }
-    log.e2e("cancel:running", { ...req }); // E2E-TEMP
     const stores = openControlStores(dir);
-    try {
-      const task = resolveControlTask(stores.taskStore, req.workflow, req.id, req.runId);
-      if (task) {
-        if (task.state === "queued" || task.state === "waiting_dependencies" || task.state === "blocked") {
-          return { ok: false, error: "item is queued — use cancel queued", status: 409 };
-        }
-        if (task.state === "done" || task.state === "failed" || task.state === "cancelled") {
-          return { ok: false, error: `item is already ${task.state}`, status: 410 };
-        }
-        const { workerId, attemptId } = currentAttemptWorker(stores.taskStore, stores.workerStore, task);
-        if (!workerId || !attemptId) {
-          return { ok: false, error: "task has no owning worker", status: 410 };
-        }
-        stores.taskStore.requestCancelTask({
-          taskId: task.taskId,
-          reason: DASHBOARD_CANCEL_ERROR,
-        });
-        const commandId = stores.workerStore.enqueueWorkerCommand({
-          commandType: "cancel_task",
-          workflow: req.workflow,
-          targetWorkerId: workerId,
-          targetTaskId: task.taskId,
-          targetAttemptId: attemptId,
-          payload: { itemId: req.id, runId: req.runId },
-        });
-        emitDashboardCancelRequestedLog(req.workflow, req.id, req.runId, dir);
-        return { ok: true, accepted: true, mode: "worker-command", commandId };
+    const task = resolveControlTask(stores.taskStore, req.workflow, req.id, req.runId);
+    if (task) {
+      if (task.state === "queued" || task.state === "waiting_dependencies" || task.state === "blocked") {
+        return { ok: false, error: "item is queued — use cancel queued", status: 409 };
       }
-    } finally {
-      stores.close();
+      if (task.state === "done" || task.state === "failed" || task.state === "cancelled") {
+        return { ok: false, error: `item is already ${task.state}`, status: 410 };
+      }
+      const { workerId, attemptId } = currentAttemptWorker(stores.taskStore, stores.workerStore, task);
+      if (!workerId || !attemptId) {
+        return { ok: false, error: "task has no owning worker", status: 410 };
+      }
+      stores.taskStore.requestCancelTask({
+        taskId: task.taskId,
+        reason: DASHBOARD_CANCEL_ERROR,
+      });
+      const commandId = stores.workerStore.enqueueWorkerCommand({
+        commandType: "cancel_task",
+        workflow: req.workflow,
+        targetWorkerId: workerId,
+        targetTaskId: task.taskId,
+        targetAttemptId: attemptId,
+        payload: { itemId: req.id, runId: req.runId },
+      });
+      emitDashboardCancelRequestedLog(req.workflow, req.id, req.runId, dir);
+      return { ok: true, accepted: true, mode: "worker-command", commandId };
     }
 
     const inProcess = await cancelInProcessRun({
@@ -359,14 +348,12 @@ export function buildForceStopTaskHandler(dir: string) {
     req: ForceStopTaskRequest,
   ): Promise<{ ok: true; commandId: string; killCommands: string[] } | { ok: false; error: string; status?: number }> => {
     if (!req.workflow || !req.id) return { ok: false, error: "workflow and id are required", status: 400 };
-    log.e2e("cancel:force-stop", { ...req }); // E2E-TEMP
     const stores = openControlStores(dir);
-    try {
-      const task = resolveControlTask(stores.taskStore, req.workflow, req.id, req.runId);
-      if (!task) return { ok: false, error: "task not found", status: 404 };
-      const { workerId, attemptId } = currentAttemptWorker(stores.taskStore, stores.workerStore, task);
-      const worker = workerId ? stores.workerStore.getWorker(workerId) : null;
-      const runId = req.runId ?? task.currentRunId ?? task.runId;
+    const task = resolveControlTask(stores.taskStore, req.workflow, req.id, req.runId);
+    if (!task) return { ok: false, error: "task not found", status: 404 };
+    const { workerId, attemptId } = currentAttemptWorker(stores.taskStore, stores.workerStore, task);
+    const worker = workerId ? stores.workerStore.getWorker(workerId) : null;
+    const runId = req.runId ?? task.currentRunId ?? task.runId;
       // Chrome-preserving force-cancel:
       // - Mark the SQLite task cancelled so the daemon's claim-loop
       //   precedence check sees it and writes a cancelled tracker row even
@@ -382,38 +369,35 @@ export function buildForceStopTaskHandler(dir: string) {
       // - DO NOT enqueue kill_browser commands or SIGTERM browser PIDs;
       //   the operator explicitly does not want chrome torn down on a
       //   per-item cancel.
-      const commandId = stores.workerStore.enqueueWorkerCommand({
-        commandType: "cancel_task",
-        workflow: req.workflow,
-        ...(workerId ? { targetWorkerId: workerId } : {}),
-        targetTaskId: task.taskId,
-        ...(attemptId ? { targetAttemptId: attemptId } : {}),
-        payload: { itemId: req.id, runId, source: "dashboard-force-stop" },
-      });
-      stores.taskStore.markTaskCancelled({
-        taskId: task.taskId,
-        ...(attemptId ? { attemptId } : {}),
-        reason: DASHBOARD_CANCEL_ERROR,
-      });
-      stores.taskStore.markDependencyFromChildTerminal({
-        childTaskId: task.taskId,
-        childState: "cancelled",
-      });
-      appendQueueFailedAudit(req.workflow, req.id, runId, DASHBOARD_CANCEL_ERROR, dir);
-      emitDashboardCancelTrackerRow(req.workflow, req.id, runId, dir);
-      const daemonAccepted = await requestDaemonForceCurrent(worker, req.id, runId);
-      if (!daemonAccepted) {
-        const { log } = await import("../../../utils/log.js");
-        log.warn(
-          `[force-stop] task ${req.workflow}/${req.id} could not reach daemon /force-current — marked cancelled in control state; daemon will pick up the worker_command on next poll`,
-        );
-      }
-      // Return shape preserved for back-compat — `killCommands` always
-      // empty now (chrome is no longer killed on per-item force-stop).
-      return { ok: true, commandId, killCommands: [] };
-    } finally {
-      stores.close();
+    const commandId = stores.workerStore.enqueueWorkerCommand({
+      commandType: "cancel_task",
+      workflow: req.workflow,
+      ...(workerId ? { targetWorkerId: workerId } : {}),
+      targetTaskId: task.taskId,
+      ...(attemptId ? { targetAttemptId: attemptId } : {}),
+      payload: { itemId: req.id, runId, source: "dashboard-force-stop" },
+    });
+    stores.taskStore.markTaskCancelled({
+      taskId: task.taskId,
+      ...(attemptId ? { attemptId } : {}),
+      reason: DASHBOARD_CANCEL_ERROR,
+    });
+    stores.taskStore.markDependencyFromChildTerminal({
+      childTaskId: task.taskId,
+      childState: "cancelled",
+    });
+    appendQueueFailedAudit(req.workflow, req.id, runId, DASHBOARD_CANCEL_ERROR, dir);
+    emitDashboardCancelTrackerRow(req.workflow, req.id, runId, dir);
+    const daemonAccepted = await requestDaemonForceCurrent(worker, req.id, runId);
+    if (!daemonAccepted) {
+      const { log } = await import("../../../utils/log.js");
+      log.warn(
+        `[force-stop] task ${req.workflow}/${req.id} could not reach daemon /force-current — marked cancelled in control state; daemon will pick up the worker_command on next poll`,
+      );
     }
+    // Return shape preserved for back-compat — `killCommands` always
+    // empty now (chrome is no longer killed on per-item force-stop).
+    return { ok: true, commandId, killCommands: [] };
   };
 }
 
@@ -425,20 +409,16 @@ export function buildKillBrowserHandler(dir: string) {
       return { ok: false, error: "browserProcessId or pid is required", status: 400 };
     }
     const stores = openControlStores(dir);
-    try {
-      const browser = req.browserProcessId
-        ? stores.workerStore.findBrowserProcessById(req.browserProcessId)
-        : stores.workerStore.findBrowserProcessByPid(req.pid!);
-      if (!browser) return { ok: false, error: "browser process not found", status: 404 };
-      const commandId = enqueueKillBrowserCommand(stores.workerStore, browser);
-      stores.workerStore.markBrowserProcessKillRequested({
-        browserProcessId: browser.browserProcessId,
-        commandId,
-      });
-      signalBrowserPid(browser.pid);
-      return { ok: true, commandId };
-    } finally {
-      stores.close();
-    }
+    const browser = req.browserProcessId
+      ? stores.workerStore.findBrowserProcessById(req.browserProcessId)
+      : stores.workerStore.findBrowserProcessByPid(req.pid!);
+    if (!browser) return { ok: false, error: "browser process not found", status: 404 };
+    const commandId = enqueueKillBrowserCommand(stores.workerStore, browser);
+    stores.workerStore.markBrowserProcessKillRequested({
+      browserProcessId: browser.browserProcessId,
+      commandId,
+    });
+    signalBrowserPid(browser.pid);
+    return { ok: true, commandId };
   };
 }
