@@ -4,6 +4,7 @@ export {
   normalizeUsAddress,
   compareUsAddresses,
   matchAgainstRoster,
+  precomputeRoster,
   normalizeEid,
 } from "./match.js";
 export type {
@@ -11,6 +12,7 @@ export type {
   AddressLike,
   NormalizedAddress,
   RosterRow,
+  TokenizedRosterRow,
   RosterMatchResult,
 } from "./match.js";
 export { findLatestRoster, listRosters, loadRoster } from "./roster-loader.js";

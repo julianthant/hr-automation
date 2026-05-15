@@ -12,7 +12,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ZodType } from "zod/v4";
-import { loadRoster as realLoadRoster } from "../../services/matching/index.js";
+import { loadRoster as realLoadRoster, precomputeRoster } from "../../services/matching/index.js";
 import type { RosterRow as MatchRosterRow } from "../../services/matching/match.js";
 import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
 import { trackEvent, dateLocal, readEntries, type TrackerEntry } from "../../tracker/jsonl.js";
@@ -293,7 +293,7 @@ export async function runOcrOrchestrator(
     if (!resolvedRosterPath) {
       throw new Error("OCR: no roster path resolved");
     }
-    const roster = (await loadRosterFn(resolvedRosterPath)) as OcrRosterRow[];
+    const roster = precomputeRoster((await loadRosterFn(resolvedRosterPath)) as MatchRosterRow[]) as OcrRosterRow[];
 
     // 1b. Pre-render PDF pages so we know page count + can show the page
     // image in the Preview tab before OCR finishes.
