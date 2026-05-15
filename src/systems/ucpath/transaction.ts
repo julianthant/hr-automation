@@ -502,11 +502,11 @@ export async function clickEmployeeExperienceTab(
 // ─── STEP 8: Save and Submit ───
 
 export async function waitForSaveEnabled(
-  btn: Pick<Locator, "isEnabled" | "waitFor">,
+  btn: Locator,
   opts: { timeoutMs?: number; pollMs?: number } = {},
 ): Promise<void> {
   const { timeoutMs = 15_000, pollMs = 500 } = opts;
-  await btn.waitFor({ state: "visible", timeout: Math.min(timeoutMs, 10_000) } as never).catch(() => {});
+  await btn.waitFor({ state: "visible", timeout: Math.min(timeoutMs, 10_000) }).catch(() => {});
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await btn.isEnabled().catch(() => false)) return;
