@@ -32,18 +32,22 @@ describe("exportSchemas", () => {
     // Spot-check a few expected workflow names — matches the SCHEMA_REGISTRY.
     const byName = new Set(results.map((r) => r.workflowName));
     for (const expected of [
-      "work-study",
+      "active-check",
+      "crm-doc-download",
+      "eid-lookup",
       "emergency-contact",
+      "kronos-reports",
+      "oath-signature",
+      "oath-upload",
       "onboarding",
       "separations",
-      "eid-lookup",
-      "kronos-reports",
+      "work-study",
     ]) {
       assert.ok(byName.has(expected), `expected schema for ${expected}`);
     }
   });
 
-  it("each generated file is valid JSON with $schema + type:object", () => {
+  it("each generated file is valid JSON with $schema + object-shaped schema", () => {
     // Re-run fine — exportSchemas is idempotent.
     mkdirSync(TMP_DIR, { recursive: true });
     const results = exportSchemas(TMP_DIR);
@@ -56,11 +60,9 @@ describe("exportSchemas", () => {
         "https://json-schema.org/draft/2020-12/schema",
         `${r.workflowName} missing $schema`,
       );
-      assert.equal(parsed["type"], "object", `${r.workflowName} is not type:object`);
-      assert.ok(
-        parsed["properties"] !== undefined,
-        `${r.workflowName} missing properties`,
-      );
+      const hasObjectShape = parsed["type"] === "object" && parsed["properties"] !== undefined;
+      const hasUnionShape = Array.isArray(parsed["anyOf"]) || Array.isArray(parsed["oneOf"]);
+      assert.ok(hasObjectShape || hasUnionShape, `${r.workflowName} is not object-shaped`);
     }
   });
 
