@@ -291,8 +291,6 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     }
   }
   emitWorkerHeartbeat()
-  const heartbeatInterval = setInterval(emitWorkerHeartbeat, opts.heartbeatIntervalMs ?? 5_000)
-  heartbeatInterval.unref()
 
   const sigHandler = (sig: string): void => {
     log.warn(`[Daemon ${wf.config.name}/${instanceId}] received ${sig}; shutting down`)
@@ -461,7 +459,8 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     return recoverOrphanedClaims(wf.config.name, aliveSet, trackerDir)
   }
 
-  const commandPollInterval = setInterval(() => {
+  const workerTickInterval = setInterval(() => {
+    emitWorkerHeartbeat()
     void pollWorkerCommands().catch((err) => {
       log.warn(
         `[Daemon ${wf.config.name}/${instanceId}] command poll failed: ${
@@ -470,7 +469,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
       )
     })
   }, opts.commandPollIntervalMs ?? opts.heartbeatIntervalMs ?? 5_000)
-  commandPollInterval.unref()
+  workerTickInterval.unref()
 
   try {
     await withBatchLifecycle(
@@ -578,8 +577,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           emitWorkerHeartbeat()
           while (!shuttingDown) {
             await pollWorkerCommands()
-            const state = await readQueueState(wf.config.name, trackerDir)
-            queueDepthCache = state.queued.length
+            queueDepthCache = taskStore.countQueued(wf.config.name)
 
             const item = shuttingDown
               ? null
@@ -1020,8 +1018,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     process.off('SIGTERM', onSigterm)
     process.off('SIGHUP', onSighup)
     clearInterval(lockHealInterval)
-    clearInterval(heartbeatInterval)
-    clearInterval(commandPollInterval)
+    clearInterval(workerTickInterval)
     try {
       unlinkSync(lockPath)
     } catch {

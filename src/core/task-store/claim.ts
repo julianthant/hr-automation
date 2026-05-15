@@ -3,8 +3,10 @@ import { type Database } from '../../infra/sqlite/index.js'
 import type { ControlDb } from '../control-db.js'
 import {
   type ClaimedTask,
+  type TaskRow,
   type TaskDbRow,
   getTaskRaw,
+  mapTaskRow,
   parseJson,
 } from './types.js'
 
@@ -174,11 +176,11 @@ export function recoverClaimsForDeadWorkers(
   db: Database,
   control: ControlDb,
   request: { workflow: string; aliveWorkerIds: Set<string>; now?: string },
-): number {
+): TaskRow[] {
   const now = request.now ?? new Date().toISOString()
   return control.transaction(() => {
     const rows = db.prepare(`
-      SELECT id, claimed_by_worker_id
+      SELECT *
       FROM tasks
       WHERE workflow = @workflow
         AND task_kind = 'workflow_item'
@@ -193,12 +195,12 @@ export function recoverClaimsForDeadWorkers(
             AND c.command_type IN ('cancel_task', 'force_stop_task')
             AND c.state IN ('queued', 'acknowledged')
         )
-    `).all({ workflow: request.workflow }) as Array<{ id: string; claimed_by_worker_id: string }>
-    let recovered = 0
+    `).all({ workflow: request.workflow }) as TaskDbRow[]
+    const recovered: TaskRow[] = []
     for (const row of rows) {
-      if (request.aliveWorkerIds.has(row.claimed_by_worker_id)) continue
+      if (!row.claimed_by_worker_id || request.aliveWorkerIds.has(row.claimed_by_worker_id)) continue
+      recovered.push(mapTaskRow(row))
       returnTaskToQueued(db, control, { taskId: row.id, now })
-      recovered++
     }
     return recovered
   })

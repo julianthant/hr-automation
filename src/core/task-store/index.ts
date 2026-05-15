@@ -81,7 +81,8 @@ export interface ControlTaskStore {
   listTasksForWorkflow(workflow: string): TaskRow[]
   listAttemptsForTask(taskId: string): AttemptRow[]
   returnTaskToQueued(request: { taskId: string; now?: string }): void
-  recoverClaimsForDeadWorkers(request: { workflow: string; aliveWorkerIds: Set<string>; now?: string }): number
+  recoverClaimsForDeadWorkers(request: { workflow: string; aliveWorkerIds: Set<string>; now?: string }): TaskRow[]
+  countQueued(workflow: string): number
 }
 
 export function createTaskStore(control: ControlDb): ControlTaskStore {
@@ -136,6 +137,7 @@ export function createTaskStore(control: ControlDb): ControlTaskStore {
     },
     returnTaskToQueued: (request) => returnTaskToQueued(db, control, request),
     recoverClaimsForDeadWorkers: (request) => recoverClaimsForDeadWorkers(db, control, request),
+    countQueued: (workflow) => countQueued(db, workflow),
   }
   return store
 }
@@ -184,4 +186,16 @@ function listTasksForWorkflow(db: Database, workflow: string): TaskRow[] {
     ORDER BY COALESCE(enqueued_at, created_at) ASC, rowid ASC
   `).all(workflow) as TaskDbRow[]
   return rows.map(mapTaskRow)
+}
+
+function countQueued(db: Database, workflow: string): number {
+  const row = db.prepare(`
+    SELECT COUNT(*) AS depth
+    FROM tasks
+    WHERE workflow = @workflow
+      AND task_kind = 'workflow_item'
+      AND source = 'daemon'
+      AND control_state = 'queued'
+  `).get({ workflow }) as { depth: number } | undefined
+  return row?.depth ?? 0
 }

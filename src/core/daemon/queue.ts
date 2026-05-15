@@ -255,15 +255,10 @@ export async function recoverOrphanedClaims(
 ): Promise<number> {
   const store = openQueueTaskStore(trackerDir)
   const recovered = store.recoverClaimsForDeadWorkers({ workflow, aliveWorkerIds: aliveInstanceIds })
-  if (recovered > 0) {
-    const state = await readQueueState(workflow, trackerDir)
-    for (const item of state.queued) {
-      if (item.claimedBy && !aliveInstanceIds.has(item.claimedBy)) {
-        appendEvent(workflow, { type: 'unclaim', id: item.id, reason: 'recovered', ts: nowIso() }, trackerDir)
-      }
-    }
+  for (const task of recovered) {
+    appendEvent(workflow, { type: 'unclaim', id: task.itemId, reason: 'recovered', ts: nowIso() }, trackerDir)
   }
-  return recovered
+  return recovered.length
 }
 
 function taskToQueueItem(task: TaskRow): QueueItem {
