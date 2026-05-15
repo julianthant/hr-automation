@@ -79,7 +79,9 @@ export class KeyRotation {
     if (e.dailyEpochDay !== today) {
       e.dailyCount = 0;
       e.dailyEpochDay = today;
-      if (e.state.kind === "quota-exhausted" && e.state.untilMs <= Date.now()) {
+      if (e.state.kind === "quota-exhausted") {
+        // A new UTC day unconditionally clears quota — untilMs reflects when
+        // the quota was hit, not when it resets (reset is always at midnight).
         e.state = { kind: "available" };
       }
     }

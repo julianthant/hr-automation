@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { KeyRotation } from "../../../../src/services/ocr/rotation.js";
@@ -68,6 +68,28 @@ describe("KeyRotation", () => {
     // r2 reads persisted state and should rotate past k1.
     const k = r2.pickNext();
     assert.equal(k.value, "k2");
+  });
+
+  it("clears quota-exhausted state on new UTC day even when untilMs is still in the future", () => {
+    // Simulate a key exhausted at 11:59pm yesterday. Its untilMs is 24h in
+    // the future, but a new calendar day should unconditionally free it.
+    const r1 = new KeyRotation("gemini", ["k1"], tmp);
+    const k1 = r1.pickNext();
+    r1.markQuotaExhausted(k1, Date.now() + 24 * 3600_000); // untilMs far in future
+    r1.flush();
+
+    // Patch dailyEpochDay to yesterday so the next load triggers the rollover.
+    const statePath = join(tmp, "rotation-state-gemini.json");
+    const state = JSON.parse(readFileSync(statePath, "utf-8"));
+    for (const entry of Object.values(state.keys) as { dailyEpochDay: number }[]) {
+      entry.dailyEpochDay -= 1;
+    }
+    writeFileSync(statePath, JSON.stringify(state));
+
+    const r2 = new KeyRotation("gemini", ["k1"], tmp);
+    // Must not throw — the quota-exhausted state should have been cleared.
+    const freed = r2.pickNext();
+    assert.equal(freed.value, "k1");
   });
 
   it("picks key with smallest dailyCount when multiple are available", () => {
