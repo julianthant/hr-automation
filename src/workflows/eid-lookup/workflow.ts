@@ -31,11 +31,7 @@ import {
   isEidInput,
   type EidLookupItem,
 } from "./schema.js";
-import {
-  normalizeName,
-  dedupeNames,
-  prepareNames,
-} from "../../domain/identity/person-name.js";
+import { normalizeName, prepareNames } from "../../domain/identity/person-name.js";
 
 export interface LookupResult {
   name: string;
@@ -277,7 +273,7 @@ function stampActiveCheckFields<TSteps extends readonly string[]>(
   }
 }
 
-function resolveActiveStatusResultsForEidLookup(args: {
+export function resolveActiveStatusResultsForEidLookup(args: {
   input: EidLookupItem;
   sdcmpFromSearch: EidResult[];
   crmMatchedEmplId?: string;

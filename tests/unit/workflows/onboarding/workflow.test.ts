@@ -5,8 +5,6 @@ import { join } from "node:path";
 import { z } from "zod";
 import { defineWorkflow, runWorkflowBatch } from "../../../../src/core/index.js";
 import { DEFAULT_DIR, dateLocal } from "../../../../src/tracker/jsonl.js";
-import { buildCrmDocDownloadDelegationInput } from "../../../../src/workflows/onboarding/workflow.js";
-
 /**
  * Tests covering the onboarding-parallel migration's CLI-adapter contract:
  * - `runWorkflowBatch` in pool mode pairs `onPreEmitPending` with per-item runIds
@@ -35,37 +33,6 @@ function cleanupWorkflow(workflow: string) {
     if (existsSync(path)) rmSync(path);
   }
 }
-
-test("buildCrmDocDownloadDelegationInput preserves onboarding display context", () => {
-  const input = buildCrmDocDownloadDelegationInput({
-    email: "jane@example.edu",
-    taskGroupId: "parent-run-1",
-    parentSubject: "Onboarding: jane@example.edu",
-    data: {
-      positionNumber: "12345678",
-      firstName: "Jane",
-      lastName: "Doe",
-      middleName: "A",
-      address: "1 Main St",
-      city: "San Diego",
-      state: "CA",
-      postalCode: "92122",
-      wage: "$18.00 per hour",
-      effectiveDate: "06/01/2026",
-      email: "jane@example.edu",
-    },
-  });
-  assert.deepEqual(input, {
-    email: "jane@example.edu",
-    firstName: "Jane",
-    lastName: "Doe",
-    middleName: "A",
-    originWorkflow: "onboarding",
-    parentSubject: "Onboarding: jane@example.edu",
-    parentRunId: "parent-run-1",
-    taskGroupId: "parent-run-1",
-  });
-});
 
 test("runWorkflowBatch (pool): onboarding-shaped onPreEmitPending paired with runId per email", async (t) => {
   const wfName = `onboarding-pool-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

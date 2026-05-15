@@ -8,7 +8,6 @@ import { runOcrPipeline } from "../../../../src/services/ocr/pipeline.js";
 import { __setPerPageCallForTests } from "../../../../src/services/ocr/per-page.js";
 
 const RecordSchema = z.object({ name: z.string() });
-const ArraySchema = z.array(RecordSchema);
 
 function makeTmpPdfDir(): { pdfPath: string; pageImagesDir: string; cleanup: () => void } {
   const dir = join(tmpdir(), `ocr-pipeline-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -38,7 +37,7 @@ test("runOcrPipeline returns per-page status with success and failure flags", as
       pdfPath,
       pageImagesDir,
       recordSchema: RecordSchema,
-      arraySchema: ArraySchema,
+
       prompt: "test",
       schemaName: "Test",
       _renderOverride: async () => ["page-01.png", "page-02.png", "page-03.png"],
@@ -68,7 +67,7 @@ test("runOcrPipeline returns all-failed result instead of falling back to whole-
       pdfPath,
       pageImagesDir,
       recordSchema: RecordSchema,
-      arraySchema: ArraySchema,
+
       prompt: "test",
       schemaName: "Test",
       _renderOverride: async () => ["page-01.png", "page-02.png"],
@@ -95,7 +94,7 @@ test("runOcrPipeline fails the row when zero pages render", async () => {
         pdfPath,
         pageImagesDir,
         recordSchema: RecordSchema,
-        arraySchema: ArraySchema,
+  
         prompt: "test",
         schemaName: "Test",
         _renderOverride: async () => [],
@@ -118,7 +117,7 @@ test("runOcrPipeline fails the row when pool is empty", async () => {
         pdfPath,
         pageImagesDir,
         recordSchema: RecordSchema,
-        arraySchema: ArraySchema,
+  
         prompt: "test",
         schemaName: "Test",
         _renderOverride: async () => ["page-01.png"],
