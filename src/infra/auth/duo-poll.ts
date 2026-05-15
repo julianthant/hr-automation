@@ -1,4 +1,5 @@
 import type { Page } from "playwright";
+import { setTimeout as sleep } from "node:timers/promises";
 import { getLogRunId, getLogWorkflow, log } from "../../utils/log.js";
 import { cueDuo } from "./voice-cue.js";
 import {
@@ -80,7 +81,7 @@ export async function readDuoVerificationCodeWhenVisible(
       if (!opts.previousCode || code !== opts.previousCode) return code;
     }
     if (Date.now() >= deadline) break;
-    await waitForDuoPoll(page, intervalMs, opts.abortSignal);
+    await waitForDuoPoll(intervalMs, opts.abortSignal);
   } while (Date.now() < deadline);
 
   return lastVisibleCode;
@@ -99,45 +100,8 @@ async function readDuoVerificationCodeAfterResend(
   });
 }
 
-function waitForDuoPoll(
-  page: Page,
-  ms: number,
-  abortSignal?: AbortSignal,
-): Promise<void> {
-  if (!abortSignal) return page.waitForTimeout(ms);
-  try {
-    abortSignal.throwIfAborted();
-  } catch (err) {
-    return Promise.reject(err);
-  }
-  return new Promise<void>((resolve, reject) => {
-    let settled = false;
-    const cleanup = (): void => {
-      abortSignal.removeEventListener("abort", onAbort);
-    };
-    const finish = (fn: () => void): void => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      fn();
-    };
-    const onAbort = (): void => {
-      finish(() => {
-        try {
-          abortSignal.throwIfAborted();
-        } catch (err) {
-          reject(err);
-          return;
-        }
-        reject(new Error("Duo polling aborted"));
-      });
-    };
-    abortSignal.addEventListener("abort", onAbort, { once: true });
-    page.waitForTimeout(ms).then(
-      () => finish(resolve),
-      (err) => finish(() => reject(err)),
-    );
-  });
+async function waitForDuoPoll(ms: number, abortSignal?: AbortSignal): Promise<void> {
+  await sleep(ms, undefined, { signal: abortSignal });
 }
 
 /**
@@ -329,7 +293,7 @@ export async function pollDuoApproval(
       } catch {
         // Page may be navigating — swallow and retry.
       }
-      await waitForDuoPoll(page, preCheckIntervalMs, options.abortSignal);
+      await waitForDuoPoll(preCheckIntervalMs, options.abortSignal);
     }
   }
 
@@ -391,7 +355,7 @@ export async function pollDuoApproval(
           resentDetail,
           instance,
         );
-        await waitForDuoPoll(page, pollIntervalMs, options.abortSignal);
+        await waitForDuoPoll(pollIntervalMs, options.abortSignal);
         continue;
       }
 
@@ -430,7 +394,7 @@ export async function pollDuoApproval(
         if (successCheck) {
           const verified = await successCheck(page);
           if (!verified) {
-            await waitForDuoPoll(page, pollIntervalMs, options.abortSignal);
+            await waitForDuoPoll(pollIntervalMs, options.abortSignal);
             continue;
           }
         }
@@ -449,7 +413,7 @@ export async function pollDuoApproval(
       // Page may be navigating — swallow and retry
     }
 
-    await waitForDuoPoll(page, pollIntervalMs, options.abortSignal);
+    await waitForDuoPoll(pollIntervalMs, options.abortSignal);
   }
 
   log.error("Duo approval timed out");
