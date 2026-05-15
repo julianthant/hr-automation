@@ -1,4 +1,5 @@
 import type { Page, FrameLocator, Locator } from "playwright";
+import { setTimeout as sleep } from "node:timers/promises";
 import type { TransactionResult } from "./types.js";
 import {
   waitForPeopleSoftProcessing,
@@ -510,7 +511,7 @@ export async function waitForSaveEnabled(
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await btn.isEnabled().catch(() => false)) return;
-    await new Promise((r) => setTimeout(r, pollMs));
+    await sleep(pollMs);
   }
   throw new Error(
     "Save and Submit remained disabled after 15 s — tab walk likely incomplete (visit all 4 Smart HR tabs + fill Initiator Comments + re-click Personal Data before save)",
