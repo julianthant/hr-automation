@@ -25,6 +25,10 @@ import { runOneItem } from './run-one-item.js'
 export { runOneItem } from './run-one-item.js'
 export type { RunOneItemOpts, RunOneItemResult } from './run-one-item.js'
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
 /**
  * Best-effort coercion of an arbitrary input into a `Record<string, unknown>`
  * so it can ride on the `pending` tracker row's `input` field. Non-objects
@@ -34,8 +38,7 @@ export type { RunOneItemOpts, RunOneItemResult } from './run-one-item.js'
  * by the handler can't reach back into the file.
  */
 export function toRecord(input: unknown): Record<string, unknown> | null {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return null
-  return input as Record<string, unknown>
+  return isPlainObject(input) ? input : null
 }
 
 /**
@@ -55,15 +58,14 @@ export function splitPrefilled(input: unknown): {
   cleaned: unknown
   prefilled: Record<string, unknown> | null
 } {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+  if (!isPlainObject(input)) {
     return { cleaned: input, prefilled: null }
   }
-  const obj = input as Record<string, unknown>
-  if (!('prefilledData' in obj)) return { cleaned: input, prefilled: null }
-  const { prefilledData, ...rest } = obj
+  if (!('prefilledData' in input)) return { cleaned: input, prefilled: null }
+  const { prefilledData, ...rest } = input
   const prefilled =
-    prefilledData && typeof prefilledData === 'object' && !Array.isArray(prefilledData)
-      ? (prefilledData as Record<string, unknown>)
+    isPlainObject(prefilledData)
+      ? prefilledData
       : null
   return { cleaned: rest, prefilled }
 }
