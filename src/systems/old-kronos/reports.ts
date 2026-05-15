@@ -323,6 +323,31 @@ async function registerDownloadedReportPdf(
   }
 }
 
+async function selectWorkspaceDropdown(
+  wsFrame: Frame,
+  predicate: (option: { rowText: string; optionText: string; optionIndex: number }) => boolean,
+): Promise<string | null> {
+  const selects = wsFrame.locator("select"); // allow-inline-selector -- unlabeled dropdown enumeration
+  const selectCount = await selects.count();
+  for (let i = 0; i < selectCount; i++) {
+    const select = selects.nth(i);
+    const rowText = await select.evaluate((el) => {
+      const row = el.closest("tr") ?? el.closest("div") ?? el.parentElement;
+      return row ? (row as HTMLElement).innerText.substring(0, 200) : "";
+    });
+    const options = select.locator("option"); // allow-inline-selector -- enumerating option elements inside a dropdown
+    const optCount = await options.count();
+    for (let j = 0; j < optCount; j++) {
+      const optionText = await options.nth(j).innerText();
+      if (predicate({ rowText, optionText, optionIndex: j })) {
+        await select.selectOption({ index: j });
+        return optionText;
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * Handle the full reports page flow for a single employee:
  * expand Timecard → click Time Detail → set dropdowns → run report → download.
@@ -401,38 +426,24 @@ export async function handleReportsPage(
   log.step("Setting Actual/Adjusted dropdown...");
   const wsFrame = page.frame({ name: "khtmlReportWorkspace" });
   if (wsFrame) {
-    const selects = wsFrame.locator("select"); // allow-inline-selector -- unlabeled dropdown enumeration
-    const selectCount = await selects.count();
-    for (let i = 0; i < selectCount; i++) {
-      const labelText: string = await selects.nth(i).evaluate((el) => {
-        const row = el.closest("tr") ?? el.closest("div") ?? el.parentElement;
-        return row ? (row as HTMLElement).innerText.substring(0, 200) : "";
-      });
-      if (labelText.toLowerCase().includes("actual") || labelText.toLowerCase().includes("adjusted")) {
-        await selects.nth(i).selectOption({ index: 1 });
-        log.step("Actual/Adjusted set");
-        break;
-      }
-    }
+    const selected = await selectWorkspaceDropdown(
+      wsFrame,
+      ({ rowText, optionIndex }) =>
+        optionIndex === 1 &&
+        (rowText.toLowerCase().includes("actual") || rowText.toLowerCase().includes("adjusted")),
+    );
+    if (selected) log.step("Actual/Adjusted set");
   }
 
   // Step 4: Set Output Format to PDF — same pattern as Step 3.
   log.step("Setting Output Format to PDF...");
   if (wsFrame) {
-    const selects = wsFrame.locator("select"); // allow-inline-selector -- unlabeled dropdown enumeration
-    const selectCount = await selects.count();
-    for (let i = 0; i < selectCount; i++) {
-      const options = selects.nth(i).locator("option"); // allow-inline-selector -- enumerating option elements inside a dropdown
-      const optCount = await options.count();
-      for (let j = 0; j < optCount; j++) {
-        const txt = await options.nth(j).innerText();
-        if (txt.toLowerCase().includes("pdf") || txt.toLowerCase().includes("acrobat")) {
-          await selects.nth(i).selectOption({ index: j });
-          log.step(`Output format: ${txt}`);
-          break;
-        }
-      }
-    }
+    const selected = await selectWorkspaceDropdown(
+      wsFrame,
+      ({ optionText }) =>
+        optionText.toLowerCase().includes("pdf") || optionText.toLowerCase().includes("acrobat"),
+    );
+    if (selected) log.step(`Output format: ${selected}`);
   }
 
   await page.waitForTimeout(2_000);
