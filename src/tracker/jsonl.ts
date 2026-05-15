@@ -771,47 +771,40 @@ export function readRunsForId(
   dir: string = DEFAULT_DIR,
 ): { runId: string; status: string; step?: string; timestamp: string; data?: Record<string, unknown> }[] {
   const all = date ? readEntriesForDate(workflow, date, dir) : readEntries(workflow, dir);
-  const entries = all.filter((e) => e.id === id);
-  const runMap = new Map<string, TrackerEntry>();
-  // Track the last known step per run (the "failed"/"done" event may have no step)
-  const lastStep = new Map<string, string>();
-  // Track the richest-known data per run. The last tracker entry's data may
-  // be null (e.g. a post-cancel row), so keep the latest non-empty data
-  // observed across the run's history.
-  const lastData = new Map<string, Record<string, unknown>>();
-  for (const e of entries) {
+  const runs = new Map<string, {
+    entry: TrackerEntry;
+    firstTs: string;
+    step?: string;
+    data?: Record<string, unknown>;
+  }>();
+  for (const e of all) {
+    if (e.id !== id) continue;
     const rid = getRunIdOr(e);
-    runMap.set(rid, e);
-    if (e.step) lastStep.set(rid, e.step);
-    if (e.data && Object.keys(e.data).length > 0) lastData.set(rid, e.data);
-  }
-  // Earliest tracker timestamp per run (the pending emit) — defines
-  // chronological order regardless of runId shape.
-  const runFirstTs = new Map<string, string>();
-  for (const e of entries) {
-    const rid = getRunIdOr(e);
-    const existing = runFirstTs.get(rid);
-    if (!existing || e.timestamp < existing) runFirstTs.set(rid, e.timestamp);
+    const existing = runs.get(rid);
+    const next = existing ?? { entry: e, firstTs: e.timestamp };
+    next.entry = e;
+    if (e.timestamp < next.firstTs) next.firstTs = e.timestamp;
+    if (e.step) next.step = e.step;
+    if (e.data && Object.keys(e.data).length > 0) next.data = e.data;
+    runs.set(rid, next);
   }
 
-  const raw = [...runMap.values()]
-    .map((e) => {
-      const rid = getRunIdOr(e);
-      const data = lastData.get(rid);
+  const raw = [...runs.entries()]
+    .map(([rid, run]) => {
       return {
         runId: rid,
-        status: e.status,
-        step: lastStep.get(rid),
-        timestamp: e.timestamp,
-        ...(data ? { data } : {}),
+        status: run.entry.status,
+        step: run.step,
+        timestamp: run.entry.timestamp,
+        ...(run.data ? { data: run.data } : {}),
       };
     })
     // Chronological asc (oldest first, newest last — callers rely on
     // data[length-1] to be the latest run). Both legacy `{id}#N` and UUID
     // runIds use tracker timestamps so the sort is shape-agnostic.
     .sort((a, b) => {
-      const at = runFirstTs.get(a.runId) ?? a.timestamp;
-      const bt = runFirstTs.get(b.runId) ?? b.timestamp;
+      const at = runs.get(a.runId)?.firstTs ?? a.timestamp;
+      const bt = runs.get(b.runId)?.firstTs ?? b.timestamp;
       return at < bt ? -1 : at > bt ? 1 : 0;
     });
 
