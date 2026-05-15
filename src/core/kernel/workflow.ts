@@ -12,6 +12,7 @@ import { runWorkflowSharedContextPool } from './shared-context-pool.js'
 import { withBatchLifecycle } from './batch-lifecycle.js'
 import { validateAndPrepareItems, callerPreEmitsPending, awaitAllSystemsReady } from './batch-helpers.js'
 import { makeAuthObserver } from '../../tracker/sessions/auth-observer.js'
+import type { ScreenshotFn } from './types.js'
 import { registerInProcessRun, unregisterInProcessRun } from '../daemon/in-process-runs.js'
 import { operatorSubjectData } from '../../domain/operator-subject.js'
 import { queueTitleData } from '../../domain/queue-title.js'
@@ -134,15 +135,9 @@ export function buildSessionObserver<TData, TSteps extends readonly string[]>(
   sessionCtx: import('../../tracker/jsonl.js').SessionContext,
   setStep: (step: string) => void,
   emitFailed: (step: string, error: string) => void = () => {},
-  /**
-   * Mutable screenshot holder (Strategy B). Starts as a no-op; onReady swaps
-   * in a real makeScreenshotFn once the Session reference is available.
-   * The observer calls `boundScreenshot.fn(...)` at invocation time so it
-   * always picks up the latest value — not the one captured at construction.
-   */
-  boundScreenshot: { fn: import('./types.js').ScreenshotFn } = {
-    fn: async () => ({ kind: 'error', label: '', step: null, ts: Date.now(), files: [] }),
-  },
+  screenshotFnPromise: Promise<ScreenshotFn> = Promise.resolve(
+    async () => ({ kind: 'error', label: '', step: null, ts: Date.now(), files: [] }),
+  ),
   trackerDir?: string,
 ): import('./types.js').SessionObserver {
   const sessionId = '1'
@@ -151,8 +146,6 @@ export function buildSessionObserver<TData, TSteps extends readonly string[]>(
   // entries) so the guard reflects what the registry actually declared.
   const effectiveSteps = new Set<string>(wf.metadata.steps)
 
-  // Build the auth-step observer — screenshot is indirected through
-  // boundScreenshot.fn so onReady can swap in the real fn after construction.
   const authObs = makeAuthObserver({
     emitStep: (stepName) => {
       if (effectiveSteps.has(stepName)) setStep(stepName)
@@ -160,7 +153,7 @@ export function buildSessionObserver<TData, TSteps extends readonly string[]>(
     emitFailed: (stepName, error) => {
       if (effectiveSteps.has(stepName)) emitFailed(stepName, error)
     },
-    screenshot: (opts) => boundScreenshot.fn(opts),
+    screenshot: async (opts) => (await screenshotFnPromise)(opts),
   })
 
   return {
@@ -495,24 +488,21 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
       wf.config.name,
       String(itemId),
       async (setStep, updateData, _onCleanup, sessionCtx, emitFailed, trackerRunId, emitSkipped) => {
-        // Strategy B: mutable holder so onReady can swap in a real ScreenshotFn.
-        const boundScreenshot: { fn: import('./types.js').ScreenshotFn } = {
-          fn: async () => ({ kind: 'error', label: '', step: null, ts: Date.now(), files: [] }),
-        }
-        const observer = buildSessionObserver(wf, sessionCtx, setStep, emitFailed, boundScreenshot, opts.trackerDir)
+        const screenshotFn = Promise.withResolvers<ScreenshotFn>()
+        const observer = buildSessionObserver(wf, sessionCtx, setStep, emitFailed, screenshotFn.promise, opts.trackerDir)
         // Thread tracker's runId into run() so Stepper + screenshot events
         // share the same id as the JSONL rows (fixed 2026-04-23 — previously
         // the inner `run()` generated its own UUID while the tracker wrote
         // `{id}#N`, desyncing screenshot-to-run correlation).
         await run(setStep, updateData, false, observer, (session, runId, stepper, trackerDir) => {
-          boundScreenshot.fn = makeScreenshotFn({
+          screenshotFn.resolve(makeScreenshotFn({
             session,
             runId,
             workflow: wf.config.name,
             itemId: String(itemId),
             emit: (ev) => emitScreenshotEvent(ev, { dir: trackerDir }),
             currentStep: () => stepper.getCurrentStep(),
-          })
+          }))
         }, trackerRunId, emitSkipped)
       },
       {
