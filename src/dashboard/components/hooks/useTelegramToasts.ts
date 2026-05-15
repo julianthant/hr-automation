@@ -74,6 +74,7 @@ export function useTelegramToasts(): void {
         }
       },
       () => {
+        initializedRef.current = false;
         // Sonner reconnect notifications are noisy for an aux channel;
         // the EventSource browser default is to retry automatically.
       },
