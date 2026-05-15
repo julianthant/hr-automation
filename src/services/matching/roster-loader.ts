@@ -1,13 +1,23 @@
 import { readdirSync, statSync } from "node:fs";
-import { extname, join } from "node:path";
+import { extname, join, resolve } from "node:path";
 import ExcelJS from "exceljs";
 import type { RosterRow } from "./match.js";
+
+export const ROSTER_DIRS = [".tracker/rosters", "src/data"] as const;
 
 export interface RosterFileRef {
   path: string;
   mtimeMs: number;
   sizeBytes: number;
   filename: string;
+}
+
+export function resolveRosterDirs(trackerDir = ".tracker"): string[] {
+  return ROSTER_DIRS.map((dir) =>
+    dir === ".tracker/rosters"
+      ? resolve(process.cwd(), trackerDir, "rosters")
+      : resolve(process.cwd(), dir),
+  );
 }
 
 /** Newest .xlsx in `dir` by mtime, or null if dir is empty / missing / has no .xlsx. */
