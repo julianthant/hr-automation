@@ -5,6 +5,7 @@ import {
   waitForPeopleSoftProcessing,
   navigateToSmartHR,
   dismissModalMask,
+  collapseSidebar,
 } from "./navigate.js";
 import {
   smartHR,
@@ -37,12 +38,7 @@ export async function clickSmartHRTransactions(page: Page): Promise<void> {
 
   // Collapse the sidebar navigation to prevent overlay blocking iframe buttons
   log.step("Collapsing sidebar navigation...");
-  try {
-    await smartHR.sidebarNavigationToggle(page).click({ timeout: 5_000 });
-    await page.waitForTimeout(1_000);
-  } catch {
-    log.step("Sidebar collapse failed (non-fatal) — may already be collapsed");
-  }
+  await collapseSidebar(page);
 
   log.success("Smart HR Transactions page loaded");
 }
