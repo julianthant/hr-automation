@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bell } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -34,16 +34,19 @@ export function FailureBell({ failureCounts, date, onSelect }: FailureBellProps)
 
   const total = Object.values(failureCounts).reduce((s, n) => s + n, 0);
   const unreadCount = Math.max(0, total - readCount);
+  const totalRef = useRef(total);
+  totalRef.current = total;
 
   useEffect(() => {
     if (!open) return;
+    const openedTotal = totalRef.current;
     // Mark as read when popover opens
     try {
-      localStorage.setItem(FAILURE_BELL_STORAGE_KEY, String(total));
+      localStorage.setItem(FAILURE_BELL_STORAGE_KEY, String(openedTotal));
     } catch {
       // Ignore localStorage errors
     }
-    setReadCount(total);
+    setReadCount(openedTotal);
 
     let cancelled = false;
     setLoading(true);
@@ -61,7 +64,7 @@ export function FailureBell({ failureCounts, date, onSelect }: FailureBellProps)
     return () => {
       cancelled = true;
     };
-  }, [open, date, total]);
+  }, [open, date]);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
