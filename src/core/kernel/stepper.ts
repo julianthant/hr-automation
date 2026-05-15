@@ -45,6 +45,18 @@ export class Stepper {
 
   constructor(private opts: StepperOpts) {}
 
+  private throwCancelled(reason: string): never {
+    this.currentStep = 'cancelled'
+    this.opts.emitStep('cancelled')
+    throw new CancelledError(reason)
+  }
+
+  private announce(name: string, emit: (name: string) => void = this.opts.emitStep): void {
+    this.currentStep = name
+    log.step(`Phase: ${name}`)
+    emit(name)
+  }
+
   async step<R>(name: string, fn: () => Promise<R>): Promise<R> {
     // Cooperative-cancel check at step boundary. If the daemon set the
     // cancel flag for the in-flight item, mark step="cancelled" on the
@@ -53,13 +65,9 @@ export class Stepper {
     // daemon's claim loop catches `CancelledError`, resets pages, and
     // claims the next item.
     if (this.opts.isCancelRequested?.()) {
-      this.currentStep = 'cancelled'
-      this.opts.emitStep('cancelled')
-      throw new CancelledError(name)
+      this.throwCancelled(name)
     }
-    this.currentStep = name
-    log.step(`Phase: ${name}`)
-    this.opts.emitStep(name)
+    this.announce(name)
     this.stepDepth++
     try {
       return await fn()
@@ -81,9 +89,7 @@ export class Stepper {
       // outer boundary) — operator-visible cancel messages stay
       // consistent regardless of where the cancellation got intercepted.
       if (this.opts.isCancelRequested?.()) {
-        this.currentStep = 'cancelled'
-        this.opts.emitStep('cancelled')
-        throw new CancelledError('force-stop')
+        this.throwCancelled('force-stop')
       }
       // Best-effort screenshot BEFORE emitFailed so the filename correlates with
       // the failed-step event. Errors inside screenshotFn are swallowed — the
@@ -106,9 +112,7 @@ export class Stepper {
    * resolved by Session.launch before the first `ctx.page()` call).
    */
   markStep(name: string): void {
-    this.currentStep = name
-    log.step(`Phase: ${name}`)
-    this.opts.emitStep(name)
+    this.announce(name)
   }
 
   /**
@@ -120,9 +124,7 @@ export class Stepper {
    * intentionally not executed.
    */
   skipStep(name: string): void {
-    this.currentStep = name
-    log.step(`Phase: ${name}`)
-    this.opts.emitSkipped?.(name)
+    this.announce(name, (step) => this.opts.emitSkipped?.(step))
   }
 
   updateData(patch: Record<string, unknown>): void {
@@ -135,11 +137,9 @@ export class Stepper {
   ): Promise<{ [K in keyof T]: PromiseSettledResult<Awaited<ReturnType<T[K]>>> }> {
     const entries = Object.entries(tasks) as Array<[keyof T, () => Promise<unknown>]>
     const settled = await Promise.allSettled(entries.map(([, fn]) => fn()))
-    const result = {} as { [K in keyof T]: PromiseSettledResult<Awaited<ReturnType<T[K]>>> }
-    entries.forEach(([key], i) => {
-      ;(result as Record<string, unknown>)[key as string] = settled[i]
-    })
-    return result
+    return Object.fromEntries(
+      entries.map(([key], i) => [key, settled[i]]),
+    ) as { [K in keyof T]: PromiseSettledResult<Awaited<ReturnType<T[K]>>> }
   }
 
   /**
@@ -153,11 +153,9 @@ export class Stepper {
   ): Promise<{ [K in keyof T]: Awaited<ReturnType<T[K]>> }> {
     const entries = Object.entries(tasks) as Array<[keyof T, () => Promise<unknown>]>
     const values = await Promise.all(entries.map(([, fn]) => fn()))
-    const result = {} as { [K in keyof T]: Awaited<ReturnType<T[K]>> }
-    entries.forEach(([key], i) => {
-      ;(result as Record<string, unknown>)[key as string] = values[i]
-    })
-    return result
+    return Object.fromEntries(
+      entries.map(([key], i) => [key, values[i]]),
+    ) as { [K in keyof T]: Awaited<ReturnType<T[K]>> }
   }
 
   /** Back-patch the screenshot callable after construction. Used by makeCtx to
