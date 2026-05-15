@@ -7,6 +7,13 @@ import {
 } from "playwright";
 import { log } from "../../utils/log.js";
 
+const RETRYABLE_NAVIGATION_PATTERNS = [
+  "ERR_NETWORK",
+  "chrome-error",
+  "ERR_CONNECTION",
+  "verification failed",
+] as const;
+
 /**
  * Navigate to a URL with network error retry and page load verification.
  *
@@ -45,7 +52,7 @@ export async function gotoWithRetry(
       return; // success
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (attempt < retries && (msg.includes("ERR_NETWORK") || msg.includes("chrome-error") || msg.includes("ERR_CONNECTION") || msg.includes("verification failed"))) {
+      if (attempt < retries && RETRYABLE_NAVIGATION_PATTERNS.some((pattern) => msg.includes(pattern))) {
         log.step(`Navigation failed (attempt ${attempt}/${retries}): ${msg.slice(0, 80)} — retrying in 5s...`);
         await page.waitForTimeout(5_000);
         continue;
