@@ -1,8 +1,6 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
 import { normalizeEid } from "../matching/index.js";
 import { log } from "../../utils/log.js";
-import { readGeminiKeys } from "./env-keys.js";
+import { readGeminiKeys, callGeminiJsonText } from "./env-keys.js";
 
 export interface LookupSuggestion {
   name?: string;
@@ -71,31 +69,9 @@ export async function suggestLookupCandidates(input: {
     formType: input.formType,
     recordJson: stringifyRecord(input.record),
   });
-  let lastError: unknown;
-  for (const key of keys) {
-    try {
-      const genai = new GoogleGenerativeAI(key);
-      const model = genai.getGenerativeModel({
-        model: "gemini-2.5-flash",
-        generationConfig: { responseMimeType: "application/json" },
-      });
-      const raw = (await model.generateContent([{ text: prompt }])) as {
-        response: { text(): string };
-      };
-      return parseLookupSuggestionResponse(raw.response.text());
-    } catch (err) {
-      lastError = err;
-      const message = err instanceof Error ? err.message : String(err);
-      if (/401|unauthor|invalid\s*api\s*key/i.test(message)) {
-        log.warn(`suggestLookupCandidates: auth error on Gemini key — ${message}`);
-        break;
-      }
-    }
-  }
-  log.warn(
-    `suggestLookupCandidates failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
-  );
-  return [];
+  const text = await callGeminiJsonText(keys, prompt, "suggestLookupCandidates");
+  if (text === null) return [];
+  return parseLookupSuggestionResponse(text);
 }
 
 function parseJsonish(text: string): unknown {

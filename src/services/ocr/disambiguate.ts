@@ -1,6 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { log } from "../../utils/log.js";
-import { readGeminiKeys } from "./env-keys.js";
+import { readGeminiKeys, callGeminiJsonText } from "./env-keys.js";
 
 export interface DisambiguateInput {
   query: string;
@@ -86,38 +84,9 @@ export async function disambiguateMatch(
 ): Promise<DisambiguateResult> {
   const keys = readGeminiKeys();
   if (keys.length === 0) {
-    log.warn(
-      "disambiguateMatch: no GEMINI_API_KEY* configured, skipping LLM call",
-    );
     return { eid: null, confidence: 0 };
   }
-  const prompt = buildDisambiguationPrompt(input);
-  let lastError: unknown;
-  for (const key of keys) {
-    try {
-      const genai = new GoogleGenerativeAI(key);
-      const model = genai.getGenerativeModel({
-        model: "gemini-2.5-flash",
-        generationConfig: { responseMimeType: "application/json" },
-      });
-      const raw = (await model.generateContent([{ text: prompt }])) as {
-        response: { text(): string };
-      };
-      const text = raw.response.text();
-      return parseDisambiguationResponse(text);
-    } catch (err) {
-      lastError = err;
-      const message = err instanceof Error ? err.message : String(err);
-      // Auth / quota errors won't recover by retrying — log once and bail.
-      if (/401|unauthor|invalid\s*api\s*key/i.test(message)) {
-        log.warn(`disambiguateMatch: auth error on Gemini key — ${message}`);
-        break;
-      }
-      // For rate-limit / quota / transient, try the next key.
-    }
-  }
-  log.warn(
-    `disambiguateMatch failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
-  );
-  return { eid: null, confidence: 0 };
+  const text = await callGeminiJsonText(keys, buildDisambiguationPrompt(input), "disambiguateMatch");
+  if (text === null) return { eid: null, confidence: 0 };
+  return parseDisambiguationResponse(text);
 }
