@@ -124,9 +124,6 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
         setEntries(deduped);
         activeKeyRef.current = targetKey;
         setEntriesKey(targetKey);
-        setWorkflows(wfs || []);
-        if (counts) setWfCounts(counts);
-        setFailureCounts(fcounts ?? {});
       },
       () => {
         setConnected(false);
