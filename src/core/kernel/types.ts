@@ -320,7 +320,7 @@ export interface RunOpts {
   preAssignedRunId?: string
   launchFn?: (opts: {
     system: SystemConfig
-  }) => Promise<{ page: import('playwright').Page; context: import('playwright').BrowserContext; browser: import('playwright').Browser }>
+  }) => Promise<{ page: import('playwright').Page; context: import('playwright').BrowserContext; browser: import('playwright').Browser | null }>
   /** Skip withLogContext + withTrackedWorkflow wrapping (tests — use no-op emitters). */
   trackerStub?: boolean
   /**
