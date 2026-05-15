@@ -4,7 +4,6 @@ import type { WorkflowConfig, RegisteredWorkflow, WorkflowMetadata, RunOpts, Bat
 import { register, autoLabel, normalizeDetailField } from './registry.js'
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
-import { makeCtx, tryScreenshot } from './ctx.js'
 import { withTrackedWorkflow, emitScreenshotEvent, type WithTrackedWorkflowOpts } from '../../tracker/jsonl.js'
 import { makeScreenshotFn } from './screenshot.js'
 import { withLogContext, log } from '../../utils/log.js'
@@ -22,6 +21,7 @@ import { createWorkerStore } from '../daemon/worker-store.js'
 import type { InProcessRunControl } from '../daemon/in-process-runs.js'
 import { runOneItem } from './run-one-item.js'
 import { buildUcpathIdleHooks } from './ucpath-idle-hooks.js'
+import { runWorkflowHandler } from './handler-runner.js'
 export { runOneItem } from './run-one-item.js'
 export type { RunOneItemOpts, RunOneItemResult } from './run-one-item.js'
 
@@ -430,18 +430,6 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
       })
       registerInProcessBrowsers(wf, session, inProcessControl)
 
-      const ctx = makeCtx<TSteps, TData>({
-        session,
-        stepper,
-        isBatch: false,
-        runId,
-        workflow: wf.config.name,
-        itemId: String(itemId),
-        emitScreenshotEvent: (ev) => emitScreenshotEvent(ev, { dir: opts.trackerDir }),
-        trackerDir: opts.trackerDir,
-      })
-      stepper.setScreenshotFn(ctx.screenshot)
-
       let sigintHandler: (() => void) | null = null
       if (installSigint) {
         sigintHandler = () => {
@@ -457,16 +445,19 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
       }
 
       try {
-        try {
-          if (prefilled) ctx.updateData(prefilled as Partial<TData & Record<string, unknown>>)
-          await wf.config.handler(ctx, handlerInput)
-          completed = true
-        } catch (err) {
-          // Same screenshot-on-handler-throw hoist as runOneItem (see the
-          // two other call sites). Best-effort; original throw always wins.
-          await tryScreenshot(ctx, 'handler-throw')
-          throw err
-        }
+        await runWorkflowHandler({
+          wf,
+          session,
+          stepper,
+          handlerInput,
+          prefilled,
+          isBatch: false,
+          runId,
+          itemId: String(itemId),
+          trackerDir: opts.trackerDir,
+          emitScreenshotEvent: (ev) => emitScreenshotEvent(ev, { dir: opts.trackerDir }),
+        })
+        completed = true
       } finally {
         if (sigintHandler) process.off('SIGINT', sigintHandler)
         await session.close()
