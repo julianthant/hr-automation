@@ -276,8 +276,6 @@ export interface Ctx<TSteps extends readonly string[], TData> {
 
 export interface SessionHandle {
   page(id: string): Promise<Page>
-  newWindow(id: string): Promise<Page>
-  closeWindow(id: string): Promise<void>
 }
 
 export interface WorkflowMetadata {

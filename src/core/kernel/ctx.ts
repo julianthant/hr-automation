@@ -85,12 +85,6 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     updateData: (patch: Record<string, unknown>) => stepper.updateData(patch),
     session: {
       page: (id: string) => session.page(id),
-      newWindow: async () => {
-        throw new Error('newWindow not yet implemented')
-      },
-      closeWindow: async () => {
-        throw new Error('closeWindow not yet implemented')
-      },
     },
     log,
     isBatch,

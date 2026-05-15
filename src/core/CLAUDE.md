@@ -47,7 +47,7 @@ See root `CLAUDE.md` for a user-facing kernel primer + minimal example. This doc
 
 Workflows that need capabilities the declarative shape doesn't express reach for:
 
-- **`ctx.session.page(id)` / `ctx.session.newWindow(id)`** — the `Session` handle. `newWindow` and `closeWindow` are not yet implemented (stubs throw). Use `session.page` to get raw Pages.
+- **`ctx.session.page(id)`** — the raw authenticated Playwright `Page` for a system. Add new session escape hatches deliberately in `makeCtx` instead of leaving throwing stubs in the public surface.
 - **`ctx.isBatch` / `ctx.runId`** — conditional logic for batch-only cleanup or runId-correlated external writes.
 - **`runWorkerPool` from `src/utils/`** — in-handler fan-out that shares one `Session` across N tabs (used by eid-lookup for the "1 Duo, N searches" pattern the kernel's `pool` mode doesn't support — `pool` launches one Session per worker, which re-triggers Duo per worker).
 
