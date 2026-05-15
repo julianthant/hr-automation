@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { ArrowUp, X, Loader2 } from "lucide-react";
+import { ArrowUp, X } from "lucide-react";
 import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { IconActionButton } from "@/components/shared/IconActionButton";
 
 interface QueueItemControlsProps {
   workflow: string;
@@ -72,26 +73,20 @@ export function QueueItemControls({ workflow, id, runId, subject, className }: Q
     <div className={cn("flex items-center gap-0.5", className)}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <button
-            type="button"
-            aria-label="Bump to top of queue"
+          <IconActionButton
+            tone="primary"
+            label="Bump to top of queue"
+            pending={pending === "bump"}
             disabled={pending !== null}
             onClick={onBumpClick}
+            icon={<ArrowUp className="h-3.5 w-3.5" />}
             className={cn(
-              "h-6 w-6 inline-flex items-center justify-center rounded-md cursor-pointer",
               "text-muted-foreground bg-transparent",
-              "transition-colors duration-150",
               "hover:text-primary hover:bg-muted",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-              "disabled:opacity-60 disabled:cursor-wait",
+              "focus-visible:ring-primary/40",
             )}
-          >
-            {pending === "bump" ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-            ) : (
-              <ArrowUp className="h-3.5 w-3.5" />
-            )}
-          </button>
+            spinnerClassName="text-primary"
+          />
         </TooltipTrigger>
         <TooltipContent side="top" sideOffset={4}>
           Bump to top of queue
@@ -99,26 +94,20 @@ export function QueueItemControls({ workflow, id, runId, subject, className }: Q
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
-          <button
-            type="button"
-            aria-label="Cancel queued item"
+          <IconActionButton
+            tone="destructive"
+            label="Cancel queued item"
+            pending={pending === "cancel"}
             disabled={pending !== null}
             onClick={onCancelClick}
+            icon={<X className="h-3.5 w-3.5" />}
             className={cn(
-              "h-6 w-6 inline-flex items-center justify-center rounded-md cursor-pointer",
               "text-muted-foreground bg-transparent",
-              "transition-colors duration-150",
               "hover:text-destructive hover:bg-muted",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40",
-              "disabled:opacity-60 disabled:cursor-wait",
+              "focus-visible:ring-destructive/40",
             )}
-          >
-            {pending === "cancel" ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-destructive" />
-            ) : (
-              <X className="h-3.5 w-3.5" />
-            )}
-          </button>
+            spinnerClassName="text-destructive"
+          />
         </TooltipTrigger>
         <TooltipContent side="top" sideOffset={4}>
           Cancel queued item

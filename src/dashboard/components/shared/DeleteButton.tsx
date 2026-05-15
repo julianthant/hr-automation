@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Trash2, Loader2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { IconActionButton } from "@/components/shared/IconActionButton";
 
 interface DeleteButtonProps {
   workflow: string;
@@ -51,42 +52,33 @@ export function DeleteButton({ workflow, id, date, runId, onDeleted, size = "sm"
     }
   };
 
-  const sizeClass = size === "md" ? "h-8 w-8" : "h-6 w-6";
   const iconClass = "h-3.5 w-3.5";
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
-          type="button"
-          aria-label={label}
-          disabled={pending}
+        <IconActionButton
+          size={size}
+          tone="destructive"
+          label={label}
+          pending={pending}
           onClick={onClick}
+          icon={<Trash2 className={iconClass} />}
           className={cn(
-            sizeClass,
-            "inline-flex items-center justify-center cursor-pointer transition-colors outline-none",
             size === "md"
               ? cn(
                   "rounded-lg bg-destructive/10 text-destructive border border-destructive/40",
                   "hover:bg-destructive/20 hover:border-destructive/60",
-                  "focus-visible:ring-2 focus-visible:ring-destructive focus-visible:ring-offset-1 focus-visible:ring-offset-card",
-                  "disabled:opacity-50 disabled:cursor-not-allowed",
+                  "focus-visible:ring-destructive",
                 )
               : cn(
                   "rounded-md text-muted-foreground bg-transparent",
                   "hover:text-destructive hover:bg-destructive/10",
-                  "focus-visible:ring-2 focus-visible:ring-destructive/40",
-                  "disabled:opacity-60 disabled:cursor-wait",
+                  "focus-visible:ring-destructive/40",
                 ),
             className,
           )}
-        >
-          {pending ? (
-            <Loader2 className={cn(iconClass, "animate-spin")} />
-          ) : (
-            <Trash2 className={iconClass} />
-          )}
-        </button>
+        />
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={4}>
         {runId ? "Delete run permanently" : "Delete entry permanently"}

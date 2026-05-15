@@ -1,10 +1,11 @@
 import { useState, useMemo, type MouseEvent } from "react";
-import { Loader2, RotateCcw, Trash2 } from "lucide-react";
+import { RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "@/components/shared/types";
 import { resolveDaemonBatchQueueTitle } from "./batch-queue-view";
 import { GroupRowBase } from "./group-row-base";
+import { IconActionButton } from "@/components/shared/IconActionButton";
 
 export interface DaemonBatchRowProps {
   workflow: string;
@@ -166,48 +167,35 @@ export function DaemonBatchRow({
   const footerActions = (
     <>
       {memberIds.length > 0 && (
-        <button
-          type="button"
-          aria-label={`Retry all ${memberIds.length} ${memberIds.length === 1 ? "item" : "items"} in this batch`}
+        <IconActionButton
+          tone="muted"
+          label={`Retry all ${memberIds.length} ${memberIds.length === 1 ? "item" : "items"} in this batch`}
           title="Re-queue every row in this batch (any status)"
-          disabled={retrying}
+          pending={retrying}
           onClick={retryAllInBatch}
+          icon={<RotateCcw className="h-3.5 w-3.5" aria-hidden />}
           className={cn(
-            "inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors outline-none",
             "text-muted-foreground bg-transparent",
             "hover:text-foreground hover:bg-muted",
-            "focus-visible:ring-2 focus-visible:ring-primary/40",
-            "disabled:opacity-60 disabled:cursor-wait",
+            "focus-visible:ring-primary/40",
           )}
-        >
-          {retrying ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" aria-hidden />
-          ) : (
-            <RotateCcw className="h-3.5 w-3.5" aria-hidden />
-          )}
-        </button>
+          spinnerClassName="text-primary"
+        />
       )}
       {memberIds.length > 0 && date ? (
-        <button
-          type="button"
-          aria-label="Delete all entries in this batch"
+        <IconActionButton
+          tone="destructive"
+          label="Delete all entries in this batch"
           title="Delete entire batch"
-          disabled={deleting}
+          pending={deleting}
           onClick={deleteEntireBatch}
+          icon={<Trash2 className="h-3.5 w-3.5" aria-hidden />}
           className={cn(
-            "inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors outline-none",
             "text-muted-foreground bg-transparent",
             "hover:text-destructive hover:bg-destructive/10",
-            "focus-visible:ring-2 focus-visible:ring-destructive/40",
-            "disabled:opacity-60 disabled:cursor-wait",
+            "focus-visible:ring-destructive/40",
           )}
-        >
-          {deleting ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-          ) : (
-            <Trash2 className="h-3.5 w-3.5" aria-hidden />
-          )}
-        </button>
+        />
       ) : null}
     </>
   );

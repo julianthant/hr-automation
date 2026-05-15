@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Loader2, RotateCcw } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import { toast } from "sonner";
+import { IconActionButton } from "@/components/shared/IconActionButton";
 import { cn } from "@/lib/utils";
 
 interface RetryAllButtonProps {
@@ -64,11 +65,12 @@ export function RetryAllButton({ workflow, ids, date, parentRunId }: RetryAllBut
   const n = ids.length;
 
   return (
-    <button
-      type="button"
+    <IconActionButton
+      size="md"
+      tone="destructive"
       onClick={retryAll}
-      disabled={retrying}
-      aria-label={
+      pending={retrying}
+      label={
         n === 0 ? "Retry all entries (none in view)" : `Retry all ${n} entries in this view`
       }
       title={
@@ -76,19 +78,13 @@ export function RetryAllButton({ workflow, ids, date, parentRunId }: RetryAllBut
           ? "Re-queue every row in this view (any status)"
           : `Retry ${n} ${n === 1 ? "entry" : "entries"} (any status)`
       }
+      icon={<RotateCcw aria-hidden className="w-3.5 h-3.5" />}
       className={cn(
-        "flex-shrink-0 h-8 w-8 flex items-center justify-center rounded-lg transition-colors outline-none",
+        "rounded-lg",
         "bg-destructive/10 text-destructive border border-destructive/40",
         "hover:bg-destructive/20 hover:border-destructive/60",
-        "focus-visible:ring-2 focus-visible:ring-destructive focus-visible:ring-offset-1 focus-visible:ring-offset-card",
-        "disabled:opacity-50 disabled:cursor-wait cursor-pointer",
+        "focus-visible:ring-destructive",
       )}
-    >
-      {retrying ? (
-        <Loader2 aria-hidden className="w-3.5 h-3.5 animate-spin" />
-      ) : (
-        <RotateCcw aria-hidden className="w-3.5 h-3.5" />
-      )}
-    </button>
+    />
   );
 }

@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Loader2, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { IconActionButton } from "@/components/shared/IconActionButton";
 
 interface DeleteAllButtonProps {
   workflow: string;
@@ -76,25 +77,20 @@ export function DeleteAllButton({ workflow, date, entries, onDeleted }: DeleteAl
   }
 
   return (
-    <button
-      type="button"
+    <IconActionButton
+      size="md"
+      tone="destructive"
       onClick={deleteAll}
-      disabled={pending}
-      aria-label={n === 0 ? "Delete all queue entries (none in view)" : `Delete all ${n} queue entries in view`}
+      pending={pending}
+      label={n === 0 ? "Delete all queue entries (none in view)" : `Delete all ${n} queue entries in view`}
       title={n === 0 ? "Delete all entries in this view" : `Delete ${n} ${n === 1 ? "entry" : "entries"} in this view`}
+      icon={<Trash2 aria-hidden className="w-3.5 h-3.5" />}
       className={cn(
-        "flex-shrink-0 h-8 w-8 flex items-center justify-center rounded-lg transition-colors outline-none",
+        "rounded-lg",
         "bg-destructive/15 text-destructive border border-destructive/50",
         "hover:bg-destructive/25 hover:border-destructive/70",
-        "focus-visible:ring-2 focus-visible:ring-destructive focus-visible:ring-offset-1 focus-visible:ring-offset-card",
-        "disabled:opacity-50 disabled:cursor-wait cursor-pointer",
+        "focus-visible:ring-destructive",
       )}
-    >
-      {pending ? (
-        <Loader2 aria-hidden className="w-3.5 h-3.5 animate-spin" />
-      ) : (
-        <Trash2 aria-hidden className="w-3.5 h-3.5" />
-      )}
-    </button>
+    />
   );
 }
