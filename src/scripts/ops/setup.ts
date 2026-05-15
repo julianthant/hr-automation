@@ -80,7 +80,7 @@ export function checkEnvFile(cwd: string = process.cwd()): CheckResult {
 }
 
 /**
- * Check Node.js major version ≥ 20. Uses `process.versions.node` rather than
+ * Check Node.js major version ≥ 26. Uses `process.versions.node` rather than
  * shelling out so the check works uniformly across Unix + Windows.
  */
 export function checkNodeVersion(
@@ -92,16 +92,16 @@ export function checkNodeVersion(
       name: "Node.js version",
       status: "fail",
       message: `unrecognized node version: ${versionString}`,
-      fix: "Install Node.js 20 or later from https://nodejs.org.",
+      fix: "Install Node.js 26 or later from https://nodejs.org.",
     };
   }
   const major = Number(match[1]);
-  if (major < 20) {
+  if (major < 26) {
     return {
       name: "Node.js version",
       status: "fail",
-      message: `node ${versionString} is too old (need ≥ 20)`,
-      fix: "Install Node.js 20 or later from https://nodejs.org.",
+      message: "Node.js 26 or later is required (project uses node:sqlite + Node 26 features).",
+      fix: "Install Node.js 26 or later from https://nodejs.org.",
     };
   }
   return {

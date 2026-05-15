@@ -93,13 +93,15 @@ describe("checkEnvFile", () => {
 });
 
 describe("checkNodeVersion", () => {
-  it("passes for Node 20+", () => {
-    assert.equal(checkNodeVersion("20.0.0").status, "ok");
-    assert.equal(checkNodeVersion("22.11.0").status, "ok");
-    assert.equal(checkNodeVersion("24.9.0").status, "ok");
+  it("passes for Node 26+", () => {
+    assert.equal(checkNodeVersion("26.0.0").status, "ok");
+    assert.equal(checkNodeVersion("27.1.0").status, "ok");
   });
 
-  it("fails for Node 18 or older", () => {
+  it("fails for Node 24 or older", () => {
+    assert.equal(checkNodeVersion("24.9.0").status, "fail");
+    assert.equal(checkNodeVersion("22.11.0").status, "fail");
+    assert.equal(checkNodeVersion("20.0.0").status, "fail");
     assert.equal(checkNodeVersion("18.20.0").status, "fail");
     assert.equal(checkNodeVersion("16.0.0").status, "fail");
   });
