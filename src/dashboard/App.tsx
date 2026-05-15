@@ -81,7 +81,7 @@ function syncUrlState(workflow: string, selectedId: string | null, date: string)
   window.history.replaceState(null, "", url);
 }
 
-export default function App() {
+export function App() {
   const initial = useMemo(readUrlState, []);
   const [workflow, setWorkflow] = useState(initial.workflow);
   const [selectedId, setSelectedId] = useState<string | null>(initial.selectedId);
@@ -622,7 +622,7 @@ export default function App() {
             selectedEntry?.workflow === "ocr" &&
             selectedEntry?.data?.mode === "prepare";
           const wantsPreview =
-            isPrepEntry && (reviewingPrepId === (selectedEntry?.runId ?? selectedEntry?.id) || true);
+            isPrepEntry && reviewingPrepId === (selectedEntry?.runId ?? selectedEntry?.id);
           return (
             <LogPanel
               entry={selectedEntry}
