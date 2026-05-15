@@ -9,13 +9,12 @@
  * Returns when the row reaches `awaiting-approval`. The user's approve /
  * discard / reupload click is handled via separate HTTP endpoints.
  */
-import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ZodType } from "zod/v4";
 import { loadRoster as realLoadRoster, precomputeRoster } from "../../services/matching/index.js";
 import type { RosterRow as MatchRosterRow } from "../../services/matching/match.js";
 import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
-import { trackEvent, dateLocal, readEntries, type TrackerEntry } from "../../tracker/jsonl.js";
+import { trackEvent, dateLocal, readEntries, readEntriesForDate, type TrackerEntry } from "../../tracker/jsonl.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
 import { createOcrEidLookupDependencyBatch } from "../../tracker/tasks/store.js";
@@ -1047,19 +1046,8 @@ function readPreviousRecords(
   trackerDir: string | undefined,
   date: string,
 ): unknown[] {
-  const file = join(trackerDir ?? ".tracker", `ocr-${date}.jsonl`);
-  if (!existsSync(file)) return [];
-  const raw = readFileSync(file, "utf-8");
-  const lines = raw.split("\n").filter(Boolean);
-  let latest: TrackerEntry | undefined;
-  for (const line of lines) {
-    try {
-      const entry: TrackerEntry = JSON.parse(line);
-      if (entry.id === sessionId && entry.runId === previousRunId) {
-        latest = entry;
-      }
-    } catch { /* tolerate */ }
-  }
+  const entries = readEntriesForDate("ocr", date, trackerDir ?? ".tracker");
+  const latest = entries.findLast((e) => e.id === sessionId && e.runId === previousRunId);
   if (!latest?.data?.records) return [];
   try {
     const parsed = JSON.parse(latest.data.records as unknown as string);
