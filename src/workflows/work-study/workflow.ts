@@ -116,7 +116,7 @@ export async function runWorkStudy(input: WorkStudyInput): Promise<void> {
     }
 
     log.error(`Work study failed: ${errorMessage(err)}`);
-    process.exit(1);
+    throw err;
   }
 }
 

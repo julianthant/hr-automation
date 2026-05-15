@@ -139,7 +139,7 @@ export async function runOathSignature(input: OathSignatureInput): Promise<void>
     log.success("Oath signature workflow completed");
   } catch (err) {
     log.error(`Oath signature failed: ${errorMessage(err)}`);
-    process.exit(1);
+    throw err;
   }
 }
 
