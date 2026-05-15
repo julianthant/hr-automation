@@ -187,33 +187,40 @@ export async function oathUploadHandler(
   });
 }
 
+const LOOKBACK_DAYS = 7;
+
 function readPriorOcrApproval(
   ocrSessionId: string,
   trackerDir: string | undefined,
 ): { fannedOutItemIds: string[] } | null {
   const dir = trackerDir ?? ".tracker";
-  const file = join(dir, `ocr-${dateLocal()}.jsonl`);
-  if (!existsSync(file)) return null;
-  const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    try {
-      const e = JSON.parse(lines[i]) as TrackerEntry;
-      if (
-        e.id === ocrSessionId &&
-        e.step === "approved" &&
-        typeof e.data?.fannedOutItemIds === "string"
-      ) {
-        try {
-          const ids = JSON.parse(e.data.fannedOutItemIds);
-          if (Array.isArray(ids) && ids.every((s) => typeof s === "string")) {
-            return { fannedOutItemIds: ids as string[] };
+  const today = new Date();
+  for (let i = 0; i < LOOKBACK_DAYS; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() - i);
+    const file = join(dir, `ocr-${dateLocal(d)}.jsonl`);
+    if (!existsSync(file)) continue;
+    const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
+    for (let j = lines.length - 1; j >= 0; j--) {
+      try {
+        const e = JSON.parse(lines[j]) as TrackerEntry;
+        if (
+          e.id === ocrSessionId &&
+          e.step === "approved" &&
+          typeof e.data?.fannedOutItemIds === "string"
+        ) {
+          try {
+            const ids = JSON.parse(e.data.fannedOutItemIds);
+            if (Array.isArray(ids) && ids.every((s) => typeof s === "string")) {
+              return { fannedOutItemIds: ids as string[] };
+            }
+          } catch {
+            /* tolerate malformed payload */
           }
-        } catch {
-          /* tolerate malformed payload */
         }
+      } catch {
+        /* tolerate malformed line */
       }
-    } catch {
-      /* tolerate malformed line */
     }
   }
   return null;

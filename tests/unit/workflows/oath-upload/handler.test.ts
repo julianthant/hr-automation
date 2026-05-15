@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { oathUploadHandler } from "../../../../src/workflows/oath-upload/handler.js";
-import { trackEvent } from "../../../../src/tracker/jsonl.js";
+import { trackEvent, dateLocal } from "../../../../src/tracker/jsonl.js";
 
 test("oathUploadHandler: walks delegate-ocr → wait-ocr-approval → wait-signatures → open-hr-form → fill-form → submit", async () => {
   const dir = mkdtempSync(join(tmpdir(), "oath-upload-handler-"));
@@ -297,6 +297,69 @@ test("oathUploadHandler: upload-only mode skips OCR and signature delegation the
     assert.ok(stepCalls.includes("submit"));
     assert.equal(updates.find((u) => u.ticketNumber)?.ticketNumber, "HRC0099999");
     assert.equal(updates.find((u) => u.mode)?.mode, "upload-only");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("oathUploadHandler: reads prior OCR approval from yesterday's JSONL file (cross-day recovery)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oath-upload-crossday-"));
+  try {
+    const runId = "crossday-run-1";
+    const ocrSessionId = `oath-upload-${runId}-ocr`;
+
+    // Write the approved OCR entry into yesterday's tracker file.
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayFile = join(dir, `ocr-${dateLocal(yesterday)}.jsonl`);
+    const entry = {
+      workflow: "ocr",
+      ts: yesterday.toISOString(),
+      id: ocrSessionId,
+      runId: "ocr-prior-run",
+      status: "done",
+      step: "approved",
+      data: { fannedOutItemIds: JSON.stringify(["p", "q", "r"]) },
+    };
+    writeFileSync(yesterdayFile, JSON.stringify(entry) + "\n", "utf-8");
+
+    const stepCalls: string[] = [];
+    const fakeCtx = {
+      runId,
+      data: {} as Record<string, unknown>,
+      page: async () => ({ url: () => "x", title: async () => "x" }),
+      step: async (name: string, fn: () => Promise<void>) => { stepCalls.push(name); await fn(); },
+      markStep: (name: string) => { stepCalls.push(`mark:${name}`); },
+      skipStep: (name: string) => { stepCalls.push(`skip:${name}`); },
+      updateData: (d: Record<string, unknown>) => { Object.assign(fakeCtx.data, d); },
+      screenshot: async () => undefined,
+    };
+
+    let runOcrCalled = false;
+    await oathUploadHandler(fakeCtx as never, {
+      pdfPath: "/tmp/x.pdf",
+      pdfOriginalName: "x.pdf",
+      sessionId: "session-crossday",
+      pdfHash: "b".repeat(64),
+      mode: "full",
+      rosterMode: "download",
+    }, {
+      trackerDir: dir,
+      _runOcrOverride: async () => { runOcrCalled = true; },
+      _waitForOcrApprovalOverride: async () => { throw new Error("should not be called"); },
+      _watchChildRunsOverride: async () => [],
+      _gotoOverride: async () => undefined,
+      _verifyOverride: async () => undefined,
+      _fillFormOverride: async () => undefined,
+      _submitOverride: async () => "HRC-CROSSDAY",
+    });
+
+    assert.ok(!runOcrCalled, "delegate-ocr must be skipped when prior approval found in yesterday's file");
+    assert.ok(stepCalls.includes("skip:delegate-ocr"), `steps: ${stepCalls.join(",")}`);
+    assert.ok(stepCalls.includes("skip:wait-ocr-approval"), `steps: ${stepCalls.join(",")}`);
+    assert.ok(stepCalls.includes("wait-signatures"), `steps: ${stepCalls.join(",")}`);
+    // signerCount comes from the 3 IDs in yesterday's entry
+    assert.equal((fakeCtx.data as Record<string, unknown>).signerCount, "3");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
