@@ -1,4 +1,7 @@
-import { readGeminiKeys, callGeminiJsonText } from "./env-keys.js";
+import { OcrAllKeysExhaustedError, type ProviderKey } from "./types.js";
+import { log } from "../../utils/log.js";
+import { readGeminiKeys, callGeminiJsonTextWithKey } from "./env-keys.js";
+import { KeyRotation } from "./rotation.js";
 
 export interface DisambiguateInput {
   query: string;
@@ -9,6 +12,20 @@ export interface DisambiguateInput {
 export interface DisambiguateResult {
   eid: string | null;
   confidence: number;
+}
+
+type DisambiguateCallFn = (key: ProviderKey, prompt: string) => Promise<string>;
+
+const DEFAULT_CACHE_DIR = ".ocr-cache";
+let _cacheDir: string | undefined;
+let _callForTests: DisambiguateCallFn | undefined;
+
+export function __setDisambiguateCacheDirForTests(dir: string | undefined): void {
+  _cacheDir = dir;
+}
+
+export function __setDisambiguateCallForTests(fn: DisambiguateCallFn | undefined): void {
+  _callForTests = fn;
 }
 
 /**
@@ -75,9 +92,9 @@ export function parseDisambiguationResponse(text: string): DisambiguateResult {
  * fall back to algorithmic match (which already produced a "borderline"
  * winner) or treat the record as unresolved.
  *
- * Uses the same `GEMINI_API_KEY*` pool as the OCR module. Walks keys
- * sequentially on transient errors; gives up after the first parse
- * success or when all keys have failed.
+ * Uses the same `GEMINI_API_KEY*` pool and persisted rotation state as
+ * the OCR module. Transient/rate-limit/quota/auth failures mark only the
+ * affected key before trying the next available key.
  */
 export async function disambiguateMatch(
   input: DisambiguateInput,
@@ -86,7 +103,61 @@ export async function disambiguateMatch(
   if (keys.length === 0) {
     return { eid: null, confidence: 0 };
   }
-  const text = await callGeminiJsonText(keys, buildDisambiguationPrompt(input), "disambiguateMatch");
-  if (text === null) return { eid: null, confidence: 0 };
-  return parseDisambiguationResponse(text);
+  const prompt = buildDisambiguationPrompt(input);
+  const rotation = new KeyRotation("gemini", keys, _cacheDir ?? DEFAULT_CACHE_DIR);
+  const call = _callForTests ?? ((key: ProviderKey, textPrompt: string) =>
+    callGeminiJsonTextWithKey(key.value, textPrompt));
+  let lastError: unknown;
+
+  for (let attempts = 0; attempts < keys.length; attempts++) {
+    let key: ProviderKey;
+    try {
+      key = rotation.pickNext();
+    } catch (err) {
+      rotation.flush();
+      if (err instanceof OcrAllKeysExhaustedError) return { eid: null, confidence: 0 };
+      throw err;
+    }
+
+    try {
+      const text = await call(key, prompt);
+      rotation.markSuccess();
+      rotation.flush();
+      return parseDisambiguationResponse(text);
+    } catch (err) {
+      lastError = err;
+      markDisambiguationKeyFailure(rotation, key, err);
+    }
+  }
+
+  rotation.flush();
+  log.warn(`disambiguateMatch failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+  return { eid: null, confidence: 0 };
+}
+
+function markDisambiguationKeyFailure(
+  rotation: KeyRotation,
+  key: ProviderKey,
+  err: unknown,
+): void {
+  const message = err instanceof Error ? err.message : String(err);
+  if (/401|unauthor|invalid\s*api\s*key/i.test(message)) {
+    rotation.markDead(key);
+    log.warn(`disambiguateMatch: auth error on Gemini key ${key.index} — ${message}`);
+    return;
+  }
+  if (/quota|exhaust/i.test(message)) {
+    rotation.markQuotaExhausted(key, nextUtcMidnight());
+    return;
+  }
+  if (/429|rate|too many requests/i.test(message)) {
+    rotation.markRateLimited(key, Date.now() + 60_000);
+    return;
+  }
+  rotation.markRateLimited(key, Date.now() + 5_000);
+}
+
+function nextUtcMidnight(): number {
+  const now = new Date();
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
 }

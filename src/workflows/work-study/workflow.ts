@@ -2,11 +2,11 @@ import {
   defineWorkflow,
   runWorkflow,
 } from "../../core/index.js";
+import { buildCliAdapter } from "../../core/cli-adapter.js";
 import { log } from "../../utils/log.js";
-import { trackEvent } from "../../tracker/jsonl.js";
 import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath } from "../../infra/auth/login.js";
-import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
+import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { buildWorkStudyPlan, type WorkStudyContext } from "./enter.js";
 import { WorkStudyInputSchema, type WorkStudyInput } from "./schema.js";
 import { updateWorkStudyTracker } from "./tracker.js";
@@ -137,33 +137,13 @@ export async function runWorkStudyCli(
   effectiveDate: string,
   options: { new?: boolean; parallel?: number } = {},
 ): Promise<void> {
-  if (!emplId || !effectiveDate) {
-    log.error("runWorkStudyCli: emplId and effectiveDate are required");
-    process.exitCode = 1;
-    return;
-  }
-  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
-  const now = new Date().toISOString();
-  await ensureDaemonsAndEnqueue(
-    workStudyWorkflow,
-    [{ emplId, effectiveDate }],
-    { new: options.new, parallel: options.parallel },
-    {
-      // Pre-emit `pending` so the dashboard queue populates immediately,
-      // even if the daemon is still mid-Duo. runId is pre-assigned inside
-      // `ensureDaemonsAndEnqueue` so the eventual running/done rows pair
-      // with this pending row under the same runId.
-      onPreEmitPending: (item, runId) => {
-        const subject = workStudyWorkflow.config.operatorSubject?.(item);
-        trackEvent({
-          workflow: "work-study",
-          timestamp: now,
-          id: item.emplId,
-          runId,
-          status: "pending",
-          data: { emplId: item.emplId, effectiveDate: item.effectiveDate, ...operatorSubjectData(subject) },
-        });
-      },
-    },
-  );
+  await runWorkStudyDaemonCli(emplId, effectiveDate, options);
 }
+
+const runWorkStudyDaemonCli = buildCliAdapter<[string, string], WorkStudyInput>({
+  workflow: workStudyWorkflow,
+  emptyMessage: "runWorkStudyCli: emplId and effectiveDate are required",
+  buildInputs: (emplId, effectiveDate) => (emplId && effectiveDate ? [{ emplId, effectiveDate }] : []),
+  deriveItemId: (item) => item.emplId,
+  buildPendingData: (item) => ({ emplId: item.emplId, effectiveDate: item.effectiveDate }),
+});

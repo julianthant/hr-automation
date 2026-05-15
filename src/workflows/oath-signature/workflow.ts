@@ -2,6 +2,7 @@ import {
   defineWorkflow,
   runWorkflow,
 } from "../../core/index.js";
+import { runCliEntry } from "../../core/cli-adapter.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { trackEvent } from "../../tracker/jsonl.js";
@@ -196,11 +197,7 @@ export async function runOathSignatureCli(
   inputs: OathSignatureInput[],
   options: { new?: boolean; parallel?: number } = {},
 ): Promise<void> {
-  if (inputs.length === 0) {
-    log.error("runOathSignatureCli: no EIDs provided");
-    process.exitCode = 1;
-    return;
-  }
+  if (!runCliEntry(inputs.length > 0, "runOathSignatureCli: no EIDs provided")) return;
   const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
   await ensureDaemonsAndEnqueue(
     oathSignatureWorkflow,

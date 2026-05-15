@@ -34,6 +34,7 @@ import { computeFailureCounts } from "../../failures.js";
 import { SCREENSHOTS_DIR } from "../../screenshots.js";
 import { countSidebarRowsFromTrackerHistory } from "../../../queue-row-count.js";
 import { ttlMemoize } from "../memo.js";
+import { isStateDbReady, openStateDb } from "../../../state/db.js";
 
 // ── Cross-workflow counts cache ───────────────────────────────────────────────
 
@@ -91,10 +92,31 @@ function readTrackerEntriesForStream(
     : readEntries(workflow, dir);
 }
 
-function countScreenshotsForItems(workflow: string, itemIds: Set<string>): Map<string, number> {
+function countScreenshotsForItems(
+  workflow: string,
+  itemIds: Set<string>,
+  trackerDate: string,
+  trackerDir: string,
+): Map<string, number> {
   const counts = new Map<string, number>();
-  if (itemIds.size === 0 || !existsSync(SCREENSHOTS_DIR)) return counts;
   for (const id of itemIds) counts.set(id, 0);
+  if (itemIds.size === 0) return counts;
+
+  if (isStateDbReady(trackerDir)) {
+    const db = openStateDb(trackerDir);
+    const rows = db.prepare(`
+      SELECT item_id, SUM(screenshot_count) AS n
+      FROM runs
+      WHERE workflow = ?
+        AND tracker_date = ?
+        AND item_id IN (${[...itemIds].map(() => "?").join(",")})
+      GROUP BY item_id
+    `).all(workflow, trackerDate, ...itemIds) as Array<{ item_id: string; n: number | null }>;
+    for (const row of rows) counts.set(row.item_id, row.n ?? 0);
+    return counts;
+  }
+
+  if (!existsSync(SCREENSHOTS_DIR)) return counts;
   const ids = [...itemIds].sort((a, b) => b.length - a.length);
   for (const f of readdirSync(SCREENSHOTS_DIR)) {
     if (!f.endsWith(".png")) continue;
@@ -171,7 +193,7 @@ export function buildJsonlEventsPayload(
   }
 
   const failedItemIds = new Set(entries.filter((entry) => entry.status === "failed").map((entry) => entry.id));
-  const screenshotCountByItem = countScreenshotsForItems(workflow, failedItemIds);
+  const screenshotCountByItem = countScreenshotsForItems(workflow, failedItemIds, date, dir);
   const enriched = entries.map((entry) => {
     const runId = getRunIdOr(entry);
     const key = `${entry.id}::${runId}`;

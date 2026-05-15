@@ -29,15 +29,7 @@ export async function callGeminiJsonText(
   let lastError: unknown;
   for (const key of keys) {
     try {
-      const genai = new GoogleGenerativeAI(key);
-      const model = genai.getGenerativeModel({
-        model: "gemini-2.5-flash",
-        generationConfig: { responseMimeType: "application/json" },
-      });
-      const raw = (await model.generateContent([{ text: prompt }])) as {
-        response: { text(): string };
-      };
-      return raw.response.text();
+      return await callGeminiJsonTextWithKey(key, prompt);
     } catch (err) {
       lastError = err;
       const message = err instanceof Error ? err.message : String(err);
@@ -49,6 +41,21 @@ export async function callGeminiJsonText(
   }
   log.warn(`${logTag} failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
   return null;
+}
+
+export async function callGeminiJsonTextWithKey(
+  key: string,
+  prompt: string,
+): Promise<string> {
+  const genai = new GoogleGenerativeAI(key);
+  const model = genai.getGenerativeModel({
+    model: "gemini-2.5-flash",
+    generationConfig: { responseMimeType: "application/json" },
+  });
+  const raw = (await model.generateContent([{ text: prompt }])) as {
+    response: { text(): string };
+  };
+  return raw.response.text();
 }
 
 /**

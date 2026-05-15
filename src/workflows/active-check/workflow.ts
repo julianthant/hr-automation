@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { defineWorkflow, runWorkflow } from "../../core/index.js";
+import { runCliEntry } from "../../core/cli-adapter.js";
 import type { Ctx } from "../../core/kernel/types.js";
 import { loginToUCPath } from "../../infra/auth/login.js";
 import { PATHS } from "../../config.js";
@@ -8,7 +9,6 @@ import { deriveActiveCheckOutcome } from "../../domain/active-check-outcome.js";
 import { searchByEid, searchByName } from "../../systems/ucpath/person-org-summary.js";
 import { allocateLowestBatchDisplayOrdinal } from "../../tracker/batch-display-ordinal.js";
 import { trackEvent } from "../../tracker/jsonl.js";
-import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
 import {
   ActiveCheckItemSchema,
@@ -20,18 +20,6 @@ import {
 } from "./schema.js";
 
 const steps = ["checking"] as const;
-
-async function captureAndStampScreenshot<TSteps extends readonly string[]>(
-  ctx: Ctx<TSteps, ActiveCheckItem>,
-): Promise<void> {
-  try {
-    const cap = await ctx.screenshot({ kind: "form", label: "person-org-summary-active-check" });
-    const filename = cap.files?.[0]?.path.split("/").pop();
-    if (filename) ctx.updateData({ personOrgScreenshot: filename });
-  } catch (err) {
-    log.warn(`Active Check screenshot failed: ${errorMessage(err)}`);
-  }
-}
 
 export const activeCheckWorkflow = defineWorkflow({
   name: "active-check",
@@ -90,7 +78,7 @@ export const activeCheckWorkflow = defineWorkflow({
       } else {
         log.step(`Active Check: ${displayActiveCheckInput(input)} -> ${outcome.activeStatus}`);
       }
-      if (results.length > 0) await captureAndStampScreenshot(ctx);
+      if (results.length > 0) await ctx.captureAndStampScreenshot("person-org-summary-active-check", "personOrgScreenshot");
     });
   },
 });
@@ -103,11 +91,7 @@ export async function runActiveCheckCli(
   queries: string[],
   options: { new?: boolean; parallel?: number } = {},
 ): Promise<void> {
-  if (queries.length === 0) {
-    log.error("runActiveCheckCli: provide at least one name or EID");
-    process.exitCode = 1;
-    return;
-  }
+  if (!runCliEntry(queries.length > 0, "runActiveCheckCli: provide at least one name or EID")) return;
   const inputs = queries.map(buildActiveCheckCliInput);
   const parsed = inputs.map((input) => ActiveCheckItemSchema.parse(input));
   const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");

@@ -41,7 +41,9 @@ npm run selector:search "<intent>"
 - **Specifically combobox is a ServiceNow typeahead.** It doesn't
   support `selectOption`. Implementation: type the search term, wait
   for the dropdown suggestion list, click the matching option.
-  `oath-upload`'s `fill-form.ts` encapsulates this pattern.
+  `oath-upload`'s `fill-form.ts` encapsulates this pattern and wraps
+  registry-locator clicks/fills in `safeClick` / `safeFill` so selector
+  fallback failures surface in the dashboard's selector-health panel.
 - **Choose-a-file button drives a hidden file input.** Use
   `page.setInputFiles` on the adjacent `input[type="file"]` — clicking
   the visible button surfaces an OS file picker that Playwright would
@@ -54,4 +56,4 @@ npm run selector:search "<intent>"
 
 ## Lessons Learned
 
-(empty as of 2026-05-01)
+- **2026-05-15: ServiceNow form interactions need safe wrappers too.** The selectors live in `src/systems/servicenow/selectors.ts`, but oath-upload drives them from workflow code. Keep those workflow calls wrapped with `safeClick` / `safeFill` labels prefixed `servicenow hr inquiry ...`; otherwise ServiceNow is invisible to selector-health aggregation even though it is a system driver surface.

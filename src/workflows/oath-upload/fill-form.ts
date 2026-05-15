@@ -1,4 +1,5 @@
 import type { Page } from "playwright";
+import { safeClick, safeFill } from "../../systems/common/index.js";
 import { hrInquiry } from "../../systems/servicenow/selectors.js";
 import { log } from "../../utils/log.js";
 
@@ -16,20 +17,27 @@ export interface HrInquiryFormValues {
  * verification stays explicit.
  */
 export async function fillHrInquiryForm(page: Page, v: HrInquiryFormValues): Promise<void> {
-  await hrInquiry.subjectInput(page).fill(v.subject);
-  await hrInquiry.descriptionInput(page).fill(v.description);
+  await safeFill(hrInquiry.subjectInput(page), v.subject, {
+    label: "servicenow hr inquiry subject",
+  });
+  await safeFill(hrInquiry.descriptionInput(page), v.description, {
+    label: "servicenow hr inquiry description",
+  });
 
   // Specifically — ServiceNow typeahead. Click to focus, type, wait for
   // suggestion list, click matching option. If the option doesn't surface
   // (different ServiceNow build, layout drift), keep the typed text as
   // free-text (some configurations accept it).
   const specInput = hrInquiry.specificallyInput(page);
-  await specInput.click();
-  await specInput.fill(v.specifically);
+  await safeClick(specInput, { label: "servicenow hr inquiry specifically combobox" });
+  await safeFill(specInput, v.specifically, { label: "servicenow hr inquiry specifically" });
   await page.waitForTimeout(800);
   const specOption = page.getByRole("option", { name: v.specifically }).first();
   try {
-    await specOption.click({ timeout: 3_000 });
+    await safeClick(specOption, {
+      timeout: 3_000,
+      label: "servicenow hr inquiry specifically option",
+    });
   } catch {
     log.warn(
       `[oath-upload] Specifically dropdown didn't surface "${v.specifically}" — keeping free-text`,
@@ -42,12 +50,15 @@ export async function fillHrInquiryForm(page: Page, v: HrInquiryFormValues): Pro
   try {
     await catInput.selectOption({ label: v.category }, { timeout: 3_000 });
   } catch {
-    await catInput.click();
-    await catInput.fill(v.category);
+    await safeClick(catInput, { label: "servicenow hr inquiry category combobox" });
+    await safeFill(catInput, v.category, { label: "servicenow hr inquiry category" });
     await page.waitForTimeout(500);
     const catOption = page.getByRole("option", { name: v.category }).first();
     try {
-      await catOption.click({ timeout: 3_000 });
+      await safeClick(catOption, {
+        timeout: 3_000,
+        label: "servicenow hr inquiry category option",
+      });
     } catch {
       /* fall through — accept whatever the combobox decided */
     }
@@ -66,7 +77,9 @@ export async function fillHrInquiryForm(page: Page, v: HrInquiryFormValues): Pro
  */
 export async function submitAndCaptureTicketNumber(page: Page): Promise<string> {
   const before = page.url();
-  await hrInquiry.submitButton(page).click();
+  await safeClick(hrInquiry.submitButton(page), {
+    label: "servicenow hr inquiry submit",
+  });
   await page
     .waitForURL(
       (url) => url.toString() !== before && url.toString().includes("number="),

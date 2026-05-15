@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { watchChildRuns } from "../../tracker/delegation/watch-child-runs.js";
 import { dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
+import { SEVEN_DAYS_MS } from "../../utils/durations.js";
 
 export interface WaitForOcrApprovalOpts {
   sessionId: string;
@@ -18,7 +19,7 @@ export interface OcrApprovalOutcome {
   fannedOutItemIds: string[];
 }
 
-export const SEVEN_DAYS_MS = 7 * 24 * 60 * 60_000;
+export { SEVEN_DAYS_MS };
 
 /**
  * Wait for the OCR row identified by `sessionId` to reach a terminal

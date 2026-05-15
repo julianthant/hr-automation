@@ -267,6 +267,12 @@ export interface Ctx<TSteps extends readonly string[], TData> {
    */
   screenshot: ScreenshotFn
   /**
+   * Best-effort form screenshot helper used by workflows that need the
+   * first captured filename mirrored into tracker data for downstream
+   * verification panels.
+   */
+  captureAndStampScreenshot(label: string, dataKey: string): Promise<void>
+  /**
    * Tracker directory for this run (from `RunOpts.trackerDir`). Orchestrators and
    * nested `runWorkflow` calls must use this so isolated test dirs aren't mixed
    * with `.tracker`.

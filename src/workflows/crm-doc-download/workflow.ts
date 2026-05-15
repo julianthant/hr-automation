@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { defineWorkflow, runWorkflow } from "../../core/index.js";
+import { runCliEntry } from "../../core/cli-adapter.js";
 import { ensureDaemonsAndEnqueue } from "../../core/daemon/client.js";
 import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 import { loginToACTCrm } from "../../infra/auth/login.js";
@@ -126,11 +127,7 @@ export async function runCrmDocDownloadCli(
   emails: string[],
   options: { new?: boolean; parallel?: number } = {},
 ): Promise<void> {
-  if (emails.length === 0) {
-    log.error("runCrmDocDownloadCli: no emails provided");
-    process.exitCode = 1;
-    return;
-  }
+  if (!runCliEntry(emails.length > 0, "runCrmDocDownloadCli: no emails provided")) return;
 
   const inputs = emails.map((email) => ({ email }));
   const now = new Date().toISOString();

@@ -8,6 +8,7 @@
  */
 
 import { defineWorkflow } from "../../core/index.js";
+import { buildCliAdapter } from "../../core/cli-adapter.js";
 import type { Ctx } from "../../core/kernel/types.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 import { log } from "../../utils/log.js";
@@ -91,7 +92,7 @@ async function searchingStep<TSteps extends readonly string[]>(
       hrStatus: result.hrStatus,
       jobTitle: result.jobCodeDescription ?? "",
     });
-  await captureAndStampScreenshot(ctx, "person-org-summary", "personOrgScreenshot");
+    await ctx.captureAndStampScreenshot("person-org-summary", "personOrgScreenshot");
     return [result];
   }
 
@@ -101,7 +102,7 @@ async function searchingStep<TSteps extends readonly string[]>(
     result = await searchByName(page, input.name, {
       keepNonHdh: input.keepNonHdh,
       onAfterSearchAttempt: async () => {
-        await captureAndStampScreenshot(ctx, "person-org-summary-search-results", "personOrgSearchScreenshot");
+        await ctx.captureAndStampScreenshot("person-org-summary-search-results", "personOrgSearchScreenshot");
       },
     });
   } catch (err) {
@@ -124,37 +125,8 @@ async function searchingStep<TSteps extends readonly string[]>(
     hrStatus: first.hrStatus,
     jobTitle: first.jobCodeDescription ?? "",
   });
-    await captureAndStampScreenshot(ctx, "person-org-summary", "personOrgScreenshot");
+  await ctx.captureAndStampScreenshot("person-org-summary", "personOrgScreenshot");
   return result.sdcmpResults;
-}
-
-/**
- * Capture the current Person Org Summary detail page and stamp the
- * resulting screenshot filename into the tracker row's data so the
- * prep watcher can find it. Best-effort — failures to screenshot are
- * logged and don't break the search step.
- */
-async function captureAndStampScreenshot<TSteps extends readonly string[]>(
-  ctx: Ctx<TSteps, EidLookupItem>,
-  label = "person-org-summary",
-  dataKey = "personOrgScreenshot",
-): Promise<void> {
-  try {
-    const cap = await ctx.screenshot({
-      kind: "form",
-      label,
-    });
-    if (cap.files && cap.files.length > 0) {
-      // Take the basename — matches how `/screenshots/<filename>` resolves.
-      const fullPath = cap.files[0].path;
-      const filename = fullPath.split("/").pop() ?? fullPath;
-      ctx.updateData({ [dataKey]: filename });
-    }
-  } catch (err) {
-    log.warn(
-      `${label} screenshot failed: ${errorMessage(err)} — verification result may lack screenshotFilename`,
-    );
-  }
 }
 
 /**
@@ -189,7 +161,7 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
   try {
     crmRecords = await searchCrmByName(crmPage, parsed.lastName, parsed.first, {
       onAfterSearch: async () => {
-        await captureAndStampScreenshot(ctx, "crm-search-results", "crmSearchScreenshot");
+        await ctx.captureAndStampScreenshot("crm-search-results", "crmSearchScreenshot");
       },
     });
   } catch (err) {
@@ -325,7 +297,7 @@ async function activeStatusStep<TSteps extends readonly string[]>(
     }
     const row = await searchByEid(page, eid);
     const results = row ? [row] : [];
-    await captureAndStampScreenshot(ctx, "person-org-summary", "personOrgScreenshot");
+    await ctx.captureAndStampScreenshot("person-org-summary", "personOrgScreenshot");
     const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: eid }, results);
     stampActiveCheckFields(ctx, outcome);
     return;
@@ -475,27 +447,25 @@ export async function runEidLookupCli(
   names: string[],
   options: { new?: boolean; parallel?: number } = {},
 ): Promise<void> {
-  if (names.length === 0) {
-    log.error("runEidLookupCli: no names provided");
-    process.exitCode = 1;
-    return;
-  }
-
-  const uniqueNames = prepareNames(names);
-
-  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
-  const inputs = uniqueNames.map((name) => ({ name }));
-  await ensureDaemonsAndEnqueue(
-    eidLookupCrmWorkflow,
-    inputs,
-    {
-      new: options.new,
-      parallel: options.parallel,
-    },
-    {
-      deriveItemId: deriveEidLookupItemId,
-      onPreEmitPending: (item, runId, parentRunId, itemId) =>
-        eidLookupPreEmitPending(item, runId, parentRunId, itemId),
-    },
-  );
+  await runEidLookupDaemonCli(names, options);
 }
+
+const runEidLookupDaemonCli = buildCliAdapter<[string[]], EidLookupItem>({
+  workflow: eidLookupCrmWorkflow,
+  emptyMessage: "runEidLookupCli: no names provided",
+  buildInputs: (names) => prepareNames(names).map((name) => ({ name })),
+  deriveItemId: deriveEidLookupItemId,
+  buildPendingData: (item, itemId) => {
+    const n = "name" in item ? normalizeName(item.name) : item.emplId;
+    const subject = eidLookupCrmWorkflow.config.operatorSubject?.(item);
+    const parentSubject = "parentSubject" in item ? item.parentSubject : undefined;
+    const displayName = parentSubject ?? n ?? "";
+    return {
+      searchName: n,
+      __name: displayName,
+      __id: n ?? itemId,
+      ...(parentSubject ? rootQueueTitleData(parentSubject) : {}),
+      ...operatorSubjectData(subject),
+    };
+  },
+});
