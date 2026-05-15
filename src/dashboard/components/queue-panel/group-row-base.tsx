@@ -4,6 +4,7 @@ import type { KeyboardEvent, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "@/components/shared/types";
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
+import { formatEntryTime, getRunNumber } from "@/components/shared/entry-display";
 import {
   aggregateBatchCounts,
   pickPreviewChildren,
@@ -31,12 +32,12 @@ const STATUS_ICON: Record<string, { Icon: LucideIcon; color: string; spin: boole
 export type GroupRowVariant = "approval-delegation" | "passive-delegation" | "batch";
 
 export interface GroupRowBaseProps {
+  /** Exposed as data-queue-group-kind for visual/debug inspection. */
   variant: GroupRowVariant;
   title: string;
   parentRunId: string;
   members: TrackerEntry[];
   countTone: "warning" | "neutral";
-  footerLabelPrefix: "prep" | "batch";
   footerRunOrdinal?: number;
   footerSecondaryId?: string;
   firstTimestamp?: string;
@@ -52,7 +53,6 @@ export function GroupRowBase({
   parentRunId,
   members,
   countTone,
-  footerLabelPrefix: _footerLabelPrefix,
   footerRunOrdinal,
   footerSecondaryId,
   firstTimestamp,
@@ -66,20 +66,12 @@ export function GroupRowBase({
   const previewKids = pickPreviewChildren(members, PREVIEW_KIDS);
   const elapsed = computeBatchElapsed(members);
 
-  const liveTick = useElapsed(
-    elapsed && !elapsed.frozen ? new Date(elapsed.startMs).toISOString() : null,
-  );
-  const elapsedLabel = elapsed
-    ? elapsed.frozen
-      ? formatDuration(
-          new Date(elapsed.startMs).toISOString(),
-          new Date(elapsed.endMs).toISOString(),
-        )
-      : liveTick
-    : "";
+  const elapsedLabel = useBatchElapsedLabel(elapsed);
 
-  const rowTime = firstTimestamp ? formatTime(firstTimestamp) : "";
-  const runNumber = footerRunOrdinal && footerRunOrdinal > 0 ? footerRunOrdinal : 1;
+  const rowTime = firstTimestamp ? formatEntryTime(firstTimestamp) : "";
+  const runNumber = footerRunOrdinal && footerRunOrdinal > 0
+    ? footerRunOrdinal
+    : getRunNumber(members[0] ?? ({ id: parentRunId, workflow: "", timestamp: "", status: "pending" } as TrackerEntry));
   const segs = computeProgressSegments(counts);
   const interactive = drillInEnabled;
   const drillInProps = interactive
@@ -245,11 +237,16 @@ function computeProgressSegments(counts: ReturnType<typeof aggregateBatchCounts>
   return segs;
 }
 
-function formatTime(ts: string): string {
-  try {
-    const d = new Date(ts);
-    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  } catch {
-    return ts.slice(11, 16);
+function useBatchElapsedLabel(elapsed: ReturnType<typeof computeBatchElapsed>): string {
+  const liveTick = useElapsed(
+    elapsed && !elapsed.frozen ? new Date(elapsed.startMs).toISOString() : null,
+  );
+  if (!elapsed) return "";
+  if (elapsed.frozen) {
+    return formatDuration(
+      new Date(elapsed.startMs).toISOString(),
+      new Date(elapsed.endMs).toISOString(),
+    );
   }
+  return liveTick;
 }

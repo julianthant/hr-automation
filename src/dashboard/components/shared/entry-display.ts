@@ -109,6 +109,22 @@ export function resolveEntryId(entry: TrackerEntry): string {
   return d.__id || entry.id;
 }
 
+export function getRunNumber(entry: TrackerEntry): number {
+  if (typeof entry.runOrdinal === "number" && entry.runOrdinal > 0) {
+    return entry.runOrdinal;
+  }
+  const parsed = Number.parseInt(entry.runId?.split("#")[1] ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+export function formatEntryTime(ts: string): string {
+  try {
+    return new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  } catch {
+    return ts.slice(11, 16);
+  }
+}
+
 /**
  * Build a per-entry display label map.
  *

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
+import { cn, compact } from "@/lib/utils";
 import { useOptionalBatchQueueParentRunId } from "@/components/hooks/useBatchQueueContext";
 import { IconActionButton } from "@/components/shared/IconActionButton";
 
@@ -43,13 +43,13 @@ export function RetryButton({
       const res = await fetch("/api/retry", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: JSON.stringify(compact({
           workflow,
           id,
-          ...(runId ? { runId } : {}),
-          ...(date ? { date } : {}),
-          ...(batchParentRunId ? { parentRunId: batchParentRunId } : {}),
-        }),
+          runId,
+          date,
+          parentRunId: batchParentRunId,
+        })),
       });
       const body = (await res.json()) as { ok: boolean; error?: string };
       if (body.ok) {

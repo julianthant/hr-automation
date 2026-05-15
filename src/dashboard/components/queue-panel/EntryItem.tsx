@@ -12,7 +12,12 @@ import {
 } from "lucide-react";
 import { memo, type ComponentType, type SVGProps } from "react";
 import type { TrackerEntry } from "@/components/shared/types";
-import { resolveEntryId, resolveEntryName } from "@/components/shared/entry-display";
+import {
+  formatEntryTime,
+  getRunNumber,
+  resolveEntryId,
+  resolveEntryName,
+} from "@/components/shared/entry-display";
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
 import { RetryButton } from "@/components/shared/RetryButton";
 import { DeleteButton } from "@/components/shared/DeleteButton";
@@ -47,10 +52,10 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
     label: "Running",
   },
   done: {
-    badge: "bg-[#4ade80]/12 text-[#4ade80] border border-[#4ade80]/30",
+    badge: "bg-success/12 text-success border border-success/30",
     icon: CheckCircle2,
     iconClass: "",
-    iconColor: "text-[#4ade80]",
+    iconColor: "text-success",
     label: "Done",
   },
   failed: {
@@ -64,17 +69,17 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
   // Renders amber (matches the warning/cancel intent) so the user can tell at
   // a glance which failures are intentional cancellations vs unintended bugs.
   cancelled: {
-    badge: "bg-[#fbbf24]/12 text-[#fbbf24] border border-[#fbbf24]/40",
+    badge: "bg-warning/12 text-warning border border-warning/40",
     icon: Ban,
     iconClass: "",
-    iconColor: "text-[#fbbf24]",
+    iconColor: "text-warning",
     label: "Cancelled",
   },
   pending: {
-    badge: "bg-[#fbbf24]/12 text-[#fbbf24] border border-[#fbbf24]/30",
+    badge: "bg-warning/12 text-warning border border-warning/30",
     icon: Clock,
     iconClass: "",
-    iconColor: "text-[#fbbf24]",
+    iconColor: "text-warning",
     label: "Queued",
   },
   skipped: {
@@ -101,6 +106,54 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
     label: "Not found",
   },
 };
+
+function resolveStatusConfig(entry: TrackerEntry): StatusConfig {
+  if (entry.status === "failed" && entry.step === "cancelled") {
+    return STATUS_CONFIG.cancelled;
+  }
+  if (entry.status === "done" && isTerminalNotFoundEntry(entry)) {
+    return STATUS_CONFIG.notFound;
+  }
+  if (isDelegatedOcrAwaitingApprovalEntry(entry)) {
+    return STATUS_CONFIG.needsReview;
+  }
+  return STATUS_CONFIG[entry.status] ?? STATUS_CONFIG.pending;
+}
+
+function pickRowTitle(entry: TrackerEntry, resolvedName: string, isCancelled: boolean): string {
+  if (isCancelled && entry.id && entry.id !== resolvedName) return entry.id;
+  return resolvedName;
+}
+
+function deriveActiveCheckTag(entry: TrackerEntry, isDone: boolean): null | {
+  text: string;
+  title: string;
+  className: string;
+} {
+  const activeCheckStatus =
+    entry.workflow === "active-check" && typeof entry.data?.activeStatus === "string"
+      ? entry.data.activeStatus
+      : null;
+  if (activeCheckStatus === "inactive") {
+    return {
+      text: "IA",
+      title: "Inactive",
+      className: "bg-warning/12 text-warning border border-warning/30",
+    };
+  }
+  if (
+    activeCheckStatus === "active" ||
+    activeCheckStatus === "non-hdh" ||
+    (isDone && entry.data?.isActive === "true")
+  ) {
+    return {
+      text: "A",
+      title: activeCheckStatus === "non-hdh" ? "Active (non-HDH dept)" : "Active",
+      className: "bg-success/12 text-success border border-success/30",
+    };
+  }
+  return null;
+}
 
 interface EntryItemProps {
   entry: TrackerEntry;
@@ -131,43 +184,22 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
   const isOcrDelegatedNeedsReview = isDelegatedOcrAwaitingApprovalEntry(entry);
   const isDaemonRunning = entry.status === "running";
   const isCancelled = entry.status === "failed" && entry.step === "cancelled";
-  // Cancelled entries: prefer entry.id over an ordinal label ("Active Check 1")
-  // when they differ — the concrete identifier is more useful than a sequence
-  // number once the run is terminal, and it avoids duplicating the value in
-  // both the header and the footer.
-  const name = isCancelled && entry.id && entry.id !== resolvedName ? entry.id : resolvedName;
-  const isRunning = isDaemonRunning;
+  const name = pickRowTitle(entry, resolvedName, isCancelled);
   const isFailed = entry.status === "failed" && !isCancelled;
   const isDone = entry.status === "done" && !isOcrDelegatedNeedsReview;
   const isPending = entry.status === "pending";
-  const isNotFoundTerminal = isDone && isTerminalNotFoundEntry(entry);
-  const cfg = isCancelled
-    ? STATUS_CONFIG.cancelled
-    : isNotFoundTerminal
-      ? STATUS_CONFIG.notFound
-      : isOcrDelegatedNeedsReview
-        ? STATUS_CONFIG.needsReview
-        : STATUS_CONFIG[entry.status] ?? STATUS_CONFIG.pending;
+  const cfg = resolveStatusConfig(entry);
   const StatusIcon = cfg.icon;
 
   const firstTs = entry.firstLogTs || entry.startTimestamp || entry.timestamp;
   const lastTs = entry.lastLogTs || entry.timestamp;
-  const elapsed = useElapsed(isRunning ? firstTs : null);
+  const elapsed = useElapsed(isDaemonRunning ? firstTs : null);
   const duration =
     (isDone || isFailed) && firstTs !== lastTs ? formatDuration(firstTs, lastTs) : null;
 
-  let runNumber: number;
-  if (typeof entry.runOrdinal === "number" && entry.runOrdinal > 0) {
-    runNumber = entry.runOrdinal;
-  } else {
-    const parsed = Number.parseInt(entry.runId?.split("#")[1] ?? "", 10);
-    runNumber = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
-  }
+  const runNumber = getRunNumber(entry);
   const time = entry.firstLogTs || entry.timestamp
-    ? new Date(entry.firstLogTs || entry.timestamp).toLocaleTimeString("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-      })
+    ? formatEntryTime(entry.firstLogTs || entry.timestamp)
     : "";
 
   const subject = typeof entry.data?.__subject === "string" ? entry.data.__subject : undefined;
@@ -178,27 +210,7 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
       (isDaemonRunning || isPending || isOcrDelegatedNeedsReview) && entry.lastLogMessage,
     );
 
-  const activeCheckStatus =
-    entry.workflow === "active-check" && typeof entry.data?.activeStatus === "string"
-      ? entry.data.activeStatus
-      : null;
-  /** UCPath-active rows: HDH-accepted uses `active`; others use `non-hdh` (still not inactive). */
-  const activeCheckTag =
-    activeCheckStatus === "inactive"
-      ? {
-          text: "IA",
-          title: "Inactive",
-          className: "bg-[#fbbf24]/12 text-[#fbbf24] border border-[#fbbf24]/30",
-        }
-      : activeCheckStatus === "active" ||
-          activeCheckStatus === "non-hdh" ||
-          (isDone && entry.data?.isActive === "true")
-        ? {
-            text: "A",
-            title: activeCheckStatus === "non-hdh" ? "Active (non-HDH dept)" : "Active",
-            className: "bg-[#4ade80]/12 text-[#4ade80] border border-[#4ade80]/30",
-          }
-        : null;
+  const activeCheckTag = deriveActiveCheckTag(entry, isDone);
 
   return (
     <div className="px-3 pt-2 first:pt-3">
@@ -362,22 +374,5 @@ export const EntryItem = memo(EntryItemImpl, (prev, next) => {
   if (prev.onDelete !== next.onDelete) return false;
   if (prev.date !== next.date) return false;
   if (prev.displayNames !== next.displayNames) return false;
-  const a = prev.entry;
-  const b = next.entry;
-  return (
-    a.id === b.id &&
-    a.workflow === b.workflow &&
-    a.status === b.status &&
-    a.step === b.step &&
-    a.timestamp === b.timestamp &&
-    a.startTimestamp === b.startTimestamp &&
-    a.runId === b.runId &&
-    a.runOrdinal === b.runOrdinal &&
-    a.parentRunId === b.parentRunId &&
-    a.error === b.error &&
-    a.lastLogMessage === b.lastLogMessage &&
-    a.firstLogTs === b.firstLogTs &&
-    a.lastLogTs === b.lastLogTs &&
-    a.data === b.data
-  );
+  return prev.entry._hash === next.entry._hash;
 });

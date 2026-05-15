@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import type { TrackerEntry } from "@/components/shared/types";
-import { dateLocal } from "../../lib/utils";
+import { dateLocal, stableKey } from "../../lib/utils";
 import { sseHub } from "@/lib/sse-hub";
 import { dedupeLatestByIdWithCarriedEmplId } from "../../../tracker/queue-row-count.js";
 
@@ -36,9 +36,45 @@ export function shouldApplyEntriesUpdate(args: {
 export function buildEntriesHash(raw: TrackerEntry[]): string {
   let hash = "";
   for (const r of raw as WithFirstLog[]) {
-    hash += `${r.id}|${r.status}|${r.step ?? ""}|${r.timestamp}|${r.firstLogTs ?? ""}|${r.lastLogTs ?? ""}|${r.runId ?? ""}|${r.error ?? ""};`;
+    hash += stableKey([
+      r.id,
+      r.status,
+      r.step,
+      r.timestamp,
+      r.firstLogTs,
+      r.lastLogTs,
+      r.runId,
+      r.error,
+    ]);
+    hash += ";";
   }
   return hash;
+}
+
+function entryRenderHash(entry: WithFirstLog): string {
+  return stableKey([
+    entry.id,
+    entry.workflow,
+    entry.status,
+    entry.step,
+    entry.timestamp,
+    entry.startTimestamp,
+    entry.runId,
+    entry.runOrdinal,
+    entry.parentRunId,
+    entry.error,
+    entry.lastLogMessage,
+    entry.firstLogTs,
+    entry.lastLogTs,
+    JSON.stringify(entry.data ?? {}),
+  ]);
+}
+
+function entrySortKey(entry: WithFirstLog): number {
+  const start = entry.firstLogTs ? Date.parse(entry.firstLogTs) : Number.NaN;
+  if (Number.isFinite(start)) return -start;
+  const fallback = Date.parse(entry.timestamp);
+  return Number.isFinite(fallback) ? -fallback : 0;
 }
 
 /**
@@ -116,17 +152,12 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
 
         const dedupedBase = dedupeLatestByIdWithCarriedEmplId(raw as TrackerEntry[]);
 
-        // Sort by running start time (firstLogTs), pending entries at bottom
         const deduped = [...dedupedBase]
-          .sort((a, b) => {
-            // Pending entries (no firstLogTs) go to bottom
-            const aStart = (a as WithFirstLog).firstLogTs || "";
-            const bStart = (b as WithFirstLog).firstLogTs || "";
-            if (!aStart && bStart) return 1;
-            if (aStart && !bStart) return -1;
-            if (!aStart && !bStart) return b.timestamp.localeCompare(a.timestamp);
-            return bStart.localeCompare(aStart);
-          });
+          .sort((a, b) => entrySortKey(a as WithFirstLog) - entrySortKey(b as WithFirstLog))
+          .map((entry) => ({
+            ...entry,
+            _hash: entryRenderHash(entry as WithFirstLog),
+          }));
 
         setEntries(deduped);
         activeKeyRef.current = targetKey;

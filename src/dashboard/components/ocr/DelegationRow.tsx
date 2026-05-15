@@ -65,7 +65,6 @@ export function DelegationRow({
       parentRunId={runId}
       members={delegatedEntries}
       countTone="warning"
-      footerLabelPrefix="prep"
       footerRunOrdinal={parent.runOrdinal}
       footerSecondaryId={parent.id}
       firstTimestamp={parent.timestamp}
