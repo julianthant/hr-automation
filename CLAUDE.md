@@ -7,7 +7,7 @@ UCPath HR automation for UCSD. Playwright-driven onboarding, separations, EID lo
 **Read the relevant local CLAUDE.md FIRST — it's the source of truth for domain-specific patterns, gotchas, and verified selectors:**
 
 - **System driver work** (selectors, auth, Playwright)?  
-  → `src/systems/<system>/CLAUDE.md` (UCPath, CRM, I9, Kuali, Kronos, ServiceNow). Check `LESSONS.md` before mapping selectors.
+  → `src/systems/<system>/CLAUDE.md` (UCPath, CRM, I9, Kuali, Kronos, ServiceNow, SharePoint). Check `LESSONS.md` before mapping selectors.
 - **Workflow implementation or modification?**  
   → `src/workflows/<workflow>/CLAUDE.md`
 - **Dashboard or tracker changes?**  
@@ -26,7 +26,7 @@ Before non-trivial tasks:
 
 ```bash
 # Onboarding (daemon mode by default — see "Daemon mode" below)
-npm run onboarding <email> [<email> ...]     # Enqueue to an alive daemon or spawn one (CRM + UCPath + I9 warm)
+npm run onboarding <email> [<email> ...]     # Enqueue each email as a separate queue item; daemon processes one at a time. Use `-p N` to spawn N daemons for parallel fan-out.
 npm run onboarding:stop                      # Soft-stop all daemons
 npm run extract <email>                      # Extract employee data from CRM only
 
@@ -65,7 +65,7 @@ npm run oath-upload:stop                         # Soft-stop all daemons
 
 # Dashboard (separate terminal — auto-updates as workflows run)
 npm run dashboard            # SSE backend (:3838) + Vite dev (:5173) — open http://localhost:5173
-npm run dashboard:watch      # Same as `dashboard`, but the SSE backend hot-reloads on src/ changes via tsx watch
+npm run dashboard:watch      # Same as `dashboard`, but tsx watch restarts the SSE backend process on src/ changes (full restart, not HMR)
 npm run dashboard:prod       # Serve pre-built dashboard from SSE only
 
 # Export / Utilities
@@ -92,14 +92,18 @@ The repo is split into clear layers: business concepts (`src/domain/`), runtime 
 
 ```
 src/
-  core/                # Workflow kernel — defineWorkflow, runWorkflow(Batch|Pool), Session, Stepper, Ctx
-    types.ts           # WorkflowConfig, Ctx, SystemConfig, RunOpts, WorkflowMetadata
-    workflow.ts        # defineWorkflow + runWorkflow + runWorkflowBatch (sequential)
-    pool.ts            # runWorkflowPool (N workers each with own Session)
-    session.ts         # Session.launch: launch + tile + auth (sequential or interleaved)
-    stepper.ts         # ctx.step/markStep/parallel/updateData plumbing
-    registry.ts        # WorkflowMetadata registry; defineDashboardMetadata for legacy
-    ctx.ts             # makeCtx — builds Ctx from Session + Stepper
+  core/                # Workflow kernel, daemon mode, and SQLite control plane
+    kernel/            # defineWorkflow, Session, Stepper, Ctx, pool, batch helpers
+      types.ts, workflow.ts, pool.ts, session.ts, stepper.ts, registry.ts, ctx.ts,
+      batch-helpers.ts, batch-lifecycle.ts, shared-context-pool.ts, run-one-item.ts
+    daemon/            # Daemon mode: registry, queue, client, HTTP keepalive
+      types.ts, registry.ts, queue.ts, client.ts, daemon.ts, http.ts,
+      worker-store.ts, keepalive.ts, enqueue-dispatch.ts
+    task-store/        # SQLite control plane: enqueue, claim, retry, terminal
+      index.ts, enqueue.ts, claim.ts, retry.ts, terminal.ts, queries.ts, types.ts, child-state.ts
+    control-db.ts, control-schema.ts, workflow-loaders.ts, find-input.ts,
+    task-control.ts, task-display.ts
+    index.ts           # Barrel re-export
   systems/             # Playwright drivers, one per external system
     common/            # safeClick / safeFill / dismissPeopleSoftModalMask (cross-system)
     crm/               # ACT CRM (Salesforce) search + record-page extract
@@ -109,6 +113,7 @@ src/
     new-kronos/        # WFD/Dayforce employee search + timecard
     old-kronos/        # UKG Kronos search + Time Detail report download
     servicenow/        # support.ucsd.edu HR Inquiry form (oath-upload tickets)
+    sharepoint/        # SharePoint document download (roster files)
   workflows/           # Composed workflows — each is defineWorkflow(...) + CLI adapter
     work-study/        # Kernel. UCPath PayPath work-study update.
     emergency-contact/ # Kernel (batch, preEmitPending). UCPath Emergency Contact fill.
@@ -121,6 +126,7 @@ src/
     oath-upload/       # Kernel + daemon-mode. ServiceNow + delegated OCR + delegated oath-signature.
     ocr/               # Kernel (dashboard HTTP only). Upload PDF → OCR → match → delegate downstream.
     sharepoint-download/ # Kernel helper: headed roster download from SharePoint (dashboard / CLI script).
+    crm-doc-download/  # Kernel (delegation target). Downloads iDocs PDFs from CRM.
   infra/               # Runtime infrastructure that makes automation possible.
     auth/              # Per-system login flows + duo-poll + sso-fields (shared).
     browser/           # launchBrowser, tiling math. Kernel-internal.
@@ -177,7 +183,7 @@ Observability for every workflow: `.tracker/{workflow}-{YYYY-MM-DD}.jsonl` + `*-
 | System-specific gotchas | `src/systems/<system>/CLAUDE.md` | PeopleSoft quirks, frame navigation, auth edge cases |
 | Shared primitives & anti-patterns | `src/domain/`, `src/services/`, `src/infra/` + `docs/engineering/codebase-conventions.md` | Names, operators, logs, matching, OCR, capture, auth/browser — use before adding workflow-local |
 | Architecture guards & what they enforce | `npm run test:architecture` + test files in `tests/unit/` | No inline selectors, no default exports, lesson format, catalog sync |
-| General cross-codebase lessons | `src/LESSONS.md` | Read before every non-trivial task |
+| General cross-codebase lessons | `LESSONS.md` (project root) | Read before every non-trivial task |
 
 ## Codebase conventions
 
@@ -354,7 +360,7 @@ Flags (on `separation`, `work-study`, `eid-lookup`, `active-check`, `onboarding`
 Lifecycle commands (converted workflows: `separations`, `work-study`, `eid-lookup`, `active-check`, `onboarding`, `oath-signature`, `oath-upload`, `emergency-contact`):
 - `npm run <workflow>:stop` — soft-stop (drain in-flight, re-queue). Use `-- --force` to mark in-flight as failed and exit immediately.
 
-Converting a new workflow to daemon mode is mechanical — see `src/workflows/CLAUDE.md#daemon-mode-conversion-template`. Implementation: `src/core/daemon-{types,registry,queue,client}.ts` + `src/core/daemon.ts` (main loop) + `src/cli-daemon.ts` (entry). Full design doc: `docs/superpowers/specs/2026-04-22-workflow-daemon-mode-design.md`.
+Converting a new workflow to daemon mode is mechanical — see `src/workflows/CLAUDE.md#daemon-mode-conversion-template`. Implementation: `src/core/daemon/{types,registry,queue,client,daemon}.ts` (main loop) + `src/cli-daemon.ts` (entry). Full design doc: `docs/superpowers/specs/2026-04-22-workflow-daemon-mode-design.md`.
 
 ## Environment
 
@@ -435,7 +441,7 @@ Workflows emit JSONL to `.tracker/{workflow}-{YYYY-MM-DD}.jsonl`; SSE server str
 
 ## Deferred & Archived
 
-Pending follow-ups, design decisions, and obsolete patterns are documented in `docs/HISTORY.md` and related spec/plan files in `docs/superpowers/`. Refer to these for context on architectural decisions but don't need them for current work.
+Historical design decisions and obsolete patterns are documented in spec/plan files in `docs/superpowers/`. Refer to these for context on architectural decisions but don't need them for current work.
 
 ## Continuous improvement
 
@@ -447,7 +453,7 @@ Before any non-trivial work (planning, debugging, implementing), query prior ses
 - **mem-search:** Natural-language query wrapper (search → timeline → get_observations)
 - **knowledge-agent:** For repeated questions on the same topic in one session (build corpus, prime, query)
 
-See `src/LESSONS.md` for when to query memory. Observations are historical — verify against current code before acting on recalled facts.
+See `LESSONS.md` (project root) for when to query memory. Observations are historical — verify against current code before acting on recalled facts.
 
 **Skills:** `mem-search`, `knowledge-agent`, `smart-explore` (code structure), `timeline-report`
 
