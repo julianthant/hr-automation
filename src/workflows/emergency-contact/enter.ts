@@ -15,9 +15,6 @@ export interface EmergencyContactContext {
   employeeName: string;
 }
 
-export interface EmergencyContactPlanOptions {
-  beforeCommit?: () => Promise<void>;
-}
 
 export interface ContactMatch {
   /** The existing contact's name as it appears on the UCPath record. */
@@ -88,16 +85,17 @@ export async function findExistingContactDuplicate(
  *   5. Same Address as Employee — if batch says not-same, uncheck + open Edit
  *      Address modal + fill Address 1/City/State/Postal + OK.
  *   6. Fill Phone (cell > home > work preference).
- *   7. Click Save.
+ *   6. Fill Phone.
  *
- * The duplicate-guard is NOT in this plan — call `findExistingContactDuplicate`
+ * Save is NOT in this plan — the caller's "save" ctx.step performs the UCPath
+ * Save click so the dashboard timeline reflects actual save wall-clock time.
+ * The duplicate-guard is also NOT here — call `findExistingContactDuplicate`
  * in workflow.ts before building the plan, and skip plan execution if present.
  */
 export function buildEmergencyContactPlan(
   record: EmergencyContactRecord,
   page: Page,
   _ctx: EmergencyContactContext,
-  options: EmergencyContactPlanOptions = {},
 ): ActionPlan {
   const plan = new ActionPlan();
   const contact = record.emergencyContact;
@@ -226,22 +224,6 @@ export function buildEmergencyContactPlan(
   } else {
     log.step("No phone number in record — skipping phone fill");
   }
-
-  // 7. Save.
-  plan.add("Click Save", async () => {
-    if (record.dryRun) {
-      await options.beforeCommit?.();
-      log.success("Dry run: skipped UCPath Save for emergency contact.");
-      return;
-    }
-    await hidePeopleSoftModalMask(page);
-    await page
-      .getByRole("button", { name: "Save", exact: true })
-      .first()
-      .click({ timeout: 10_000 });
-    await page.waitForTimeout(3_000);
-    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
-  });
 
   return plan;
 }
