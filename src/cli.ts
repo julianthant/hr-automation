@@ -40,35 +40,48 @@ async function runAuthFlow(): Promise<AuthResult> {
   const result: AuthResult = { ucpath: false, actCrm: false };
 
   log.step("Starting UCPath authentication...");
-  const ucpath = await launchBrowser();
-  try {
-    const ok = await loginToUCPath(ucpath.page);
-    if (!ok) {
-      log.error("UCPath authentication failed");
+  result.ucpath = await runLogin("UCPath", async () => {
+    const ucpath = await launchBrowser();
+    try {
+      return await loginToUCPath(ucpath.page);
+    } finally {
       await ucpath.browser?.close();
-      process.exit(1);
     }
-    result.ucpath = true;
-  } finally {
-    await ucpath.browser?.close();
+  });
+  if (!result.ucpath) {
+    log.error("UCPath authentication failed");
+    process.exit(1);
   }
 
   log.step("Starting ACT CRM authentication...");
-  const actCrm = await launchBrowser();
-  try {
-    const ok = await loginToACTCrm(actCrm.page);
-    if (!ok) {
-      log.error("ACT CRM authentication failed");
+  result.actCrm = await runLogin("ACT CRM", async () => {
+    const actCrm = await launchBrowser();
+    try {
+      return await loginToACTCrm(actCrm.page);
+    } finally {
       await actCrm.browser?.close();
-      process.exit(1);
     }
-    result.actCrm = true;
-  } finally {
-    await actCrm.browser?.close();
+  });
+  if (!result.actCrm) {
+    log.error("ACT CRM authentication failed");
+    process.exit(1);
   }
 
   log.success("Authentication complete");
   return result;
+}
+
+async function runLogin(label: string, fn: () => Promise<boolean>): Promise<boolean> {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const ok = await fn();
+      if (ok) return true;
+      log.warn(`${label} login attempt ${attempt} failed`);
+    } catch (err) {
+      log.warn(`${label} login attempt ${attempt} failed: ${errorMessage(err)}`);
+    }
+  }
+  return false;
 }
 
 program
@@ -79,14 +92,9 @@ program
 
     try {
       await runAuthFlow();
-    } catch {
-      log.error("Unexpected error -- retrying...");
-      try {
-        await runAuthFlow();
-      } catch (secondError) {
-        log.error(`Authentication failed after retry: ${errorMessage(secondError)}`);
-        process.exit(1);
-      }
+    } catch (err) {
+      log.error(`Authentication failed: ${errorMessage(err)}`);
+      process.exit(1);
     }
   });
 
