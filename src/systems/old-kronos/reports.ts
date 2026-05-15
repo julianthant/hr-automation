@@ -76,62 +76,15 @@ async function jsClickText(
  */
 async function clickRunReport(page: Page): Promise<boolean> {
   const contentFrame = page.frame({ name: "khtmlReportingContentIframe" });
-
-  const selectors = reportsPage.runReportSelectors;
-
   const framesToSearch = [
     ...(contentFrame ? [contentFrame] : []),
     ...page.frames(),
   ];
 
-  for (const sel of selectors) {
-    for (const f of framesToSearch) {
-      try {
-        const loc = f.locator(sel);
-        if (await loc.count() > 0) {
-          await loc.first().click();
-          log.step(`Clicked Run Report via '${sel}' in '${f.name()}'`);
-          return true;
-        }
-      } catch {
-        // Continue
-      }
-    }
-  }
-
-  // JS fallback across all frames
-  for (const f of framesToSearch) {
-    try {
-      const clicked = await f.evaluate(() => {
-        const tags = ["input", "button", "a", "td", "div", "span", "img"];
-        for (const tag of tags) {
-          for (const el of document.querySelectorAll(tag)) {
-            const text = (
-              (el as HTMLInputElement).value ||
-              el.textContent ||
-              (el as HTMLImageElement).alt ||
-              (el as HTMLElement).title ||
-              ""
-            ).trim();
-            if (text === "Run Report") {
-              (el as HTMLElement).click();
-              return `clicked ${tag}`;
-            }
-          }
-        }
-        return null;
-      });
-      if (clicked) {
-        log.step(`${clicked} (frame: ${f.name()})`);
-        return true;
-      }
-    } catch {
-      // Continue
-    }
-  }
-
-  log.error("Run Report NOT FOUND");
-  return false;
+  if (await clickInFrames(page, [...reportsPage.runReportSelectors], framesToSearch)) return true;
+  const clicked = await jsClickText(page, "Run Report", framesToSearch);
+  if (!clicked) log.error("Run Report NOT FOUND");
+  return clicked;
 }
 
 /**
