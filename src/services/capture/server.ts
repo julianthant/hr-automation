@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import type { CaptureSession, CaptureSessionStore } from "./sessions.js";
 import { qrSvgFor } from "./qr.js";
 import { bundlePhotosToPdf } from "./pdf-bundle.js";
+import { log } from "../../utils/log.js";
 
 export interface RouteResult {
   status: number;
@@ -540,7 +541,8 @@ export async function handleFinalize(
           // Caller's pipeline failure isn't the session's failure.
         }
       }
-    } catch {
+    } catch (err) {
+      log.warn(`capture finalize bundle failed (session ${session.sessionId}): ${String(err)}`);
       ctx.store.setState(session.sessionId, "discarded");
     }
   })();
