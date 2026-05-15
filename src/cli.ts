@@ -2,9 +2,9 @@ import { Command } from "commander";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
-import { validateEnv } from "./utils/env.js";
 import { log } from "./utils/log.js";
 import { errorMessage } from "./utils/errors.js";
+import { parsePositiveInt, requireEnv } from "./cli-helpers.js";
 import { launchBrowser } from "./infra/browser/launch.js";
 import { loginToUCPath, loginToACTCrm } from "./infra/auth/login.js";
 import type { AuthResult } from "./infra/auth/types.js";
@@ -75,11 +75,7 @@ program
   .command("test-login")
   .description("Test authentication to UCPath and ACT CRM")
   .action(async () => {
-    try {
-      validateEnv();
-    } catch {
-      process.exit(1);
-    }
+    requireEnv();
 
     try {
       await runAuthFlow();
@@ -107,26 +103,17 @@ program
   )
   .argument("<emails...>", "Employee email(s)")
   .option("-n, --new", "Force spawn of a brand-new daemon (ignores alive ones for dispatch)")
-  .option("-p, --parallel <N>", "Fan out across N daemons (reuses up to N alive; spawns the rest)", parseInt)
+  .option("-p, --parallel <N>", "Fan out across N daemons (reuses up to N alive; spawns the rest)", (v) => parsePositiveInt(v, "--parallel"))
   .action(async (
     emails: string[],
     options: { new?: boolean; parallel?: number },
   ) => {
-    try {
-      validateEnv();
-    } catch {
-      process.exit(1);
-    }
+    requireEnv();
 
     if (emails.length === 0) {
       log.error("Provide at least one email.");
       process.exit(1);
     }
-    if (options.parallel !== undefined && (options.parallel < 1 || !Number.isFinite(options.parallel))) {
-      log.error("--parallel must be a positive integer.");
-      process.exit(1);
-    }
-
     try {
       await runOnboardingCli(emails, { new: options.new, parallel: options.parallel });
     } catch (error) {
@@ -144,21 +131,12 @@ program
   )
   .argument("<emails...>", "Employee email(s)")
   .option("-n, --new", "Spawn an additional daemon even if one is alive")
-  .option("-p, --parallel <N>", "Fan out across N CRM download daemons", parseInt)
+  .option("-p, --parallel <N>", "Fan out across N CRM download daemons", (v) => parsePositiveInt(v, "--parallel"))
   .action(async (
     emails: string[],
     options: { new?: boolean; parallel?: number },
   ) => {
-    try {
-      validateEnv();
-    } catch {
-      process.exit(1);
-    }
-
-    if (options.parallel !== undefined && (options.parallel < 1 || !Number.isFinite(options.parallel))) {
-      log.error("--parallel must be a positive integer.");
-      process.exit(1);
-    }
+    requireEnv();
 
     try {
       await runCrmDocDownloadCli(emails, { new: options.new, parallel: options.parallel });
@@ -176,17 +154,13 @@ program
   .argument("<emplId>", "Employee ID (e.g. 10862930)")
   .argument("<effectiveDate>", "Effective date in MM/DD/YYYY format")
   .option("-n, --new", "Spawn an additional daemon even if others are alive")
-  .option("-p, --parallel <count>", "Ensure N daemons are alive", (v) => parseInt(v, 10))
+  .option("-p, --parallel <count>", "Ensure N daemons are alive", (v) => parsePositiveInt(v, "--parallel"))
   .action(async (
     emplId: string,
     effectiveDate: string,
     options: { new?: boolean; parallel?: number },
   ) => {
-    try {
-      validateEnv();
-    } catch {
-      process.exit(1);
-    }
+    requireEnv();
 
     const parsed = WorkStudyInputSchema.safeParse({ emplId, effectiveDate });
     if (!parsed.success) {
@@ -216,7 +190,7 @@ program
   .option("--ignore-roster-mismatch", "Continue even if roster verification reports mismatches")
   .option("--dry-run", "Run through UCPath pre-save proof point, then skip Save")
   .option("-n, --new", "Spawn an additional daemon even if others are alive")
-  .option("-p, --parallel <count>", "Ensure at least N daemons are alive before enqueueing", parseInt)
+  .option("-p, --parallel <count>", "Ensure at least N daemons are alive before enqueueing", (v) => parsePositiveInt(v, "--parallel"))
   .action(async (batchYaml: string, options: {
     rosterUrl?: string;
     rosterPath?: string;
@@ -225,11 +199,7 @@ program
     new?: boolean;
     parallel?: number;
   }) => {
-    try {
-      validateEnv();
-    } catch {
-      process.exit(1);
-    }
+    requireEnv();
 
     try {
       await runEmergencyContactCli(batchYaml, {
@@ -251,7 +221,7 @@ program
 program
   .command("kronos")
   .description("Download Time Detail PDF reports from UKG for employees in batch.yaml")
-  .option("--workers <N>", "Number of parallel workers", parseInt)
+  .option("--workers <N>", "Number of parallel workers", (v) => parsePositiveInt(v, "--workers"))
   .option("--start-date <date>", "Start date (M/DD/YYYY)")
   .option("--end-date <date>", "End date (M/DD/YYYY)")
   .action(async (options: {
@@ -259,18 +229,9 @@ program
     startDate?: string;
     endDate?: string;
   }) => {
-    try {
-      validateEnv();
-    } catch {
-      process.exit(1);
-    }
+    requireEnv();
 
     const workers = options.workers ?? DEFAULT_WORKERS;
-    if (workers < 1 || !Number.isFinite(workers)) {
-      log.error("--workers must be a positive integer.");
-      process.exit(1);
-    }
-
     try {
       await runParallelKronos(workers, {
         startDate: options.startDate,
@@ -290,16 +251,12 @@ program
   .description("Process employee separation(s): Kuali → Kronos → UCPath. Daemon-mode — enqueues docIds to an alive daemon or spawns one.")
   .argument("<docIds...>", "Kuali document number(s) (e.g. 3508 or 3881 3882 3883 3884)")
   .option("-n, --new", "Spawn an additional daemon even if others are alive")
-  .option("-p, --parallel <count>", "Ensure N daemons are alive", (v) => parseInt(v, 10))
+  .option("-p, --parallel <count>", "Ensure N daemons are alive", (v) => parsePositiveInt(v, "--parallel"))
   .action(async (
     docIds: string[],
     options: { new?: boolean; parallel?: number },
   ) => {
-    try {
-      validateEnv();
-    } catch {
-      process.exit(1);
-    }
+    requireEnv();
 
     try {
       await runSeparationCli(docIds, { new: options.new, parallel: options.parallel });
@@ -322,7 +279,7 @@ program
   .option("--date <MM/DD/YYYY>", "Override the signature date (default: UCPath prefills today)")
   .option("--dry-run", "Run through UCPath pre-save proof point, then skip Save")
   .option("-n, --new", "Force spawn of a brand-new daemon (ignores alive ones for dispatch)")
-  .option("-p, --parallel <N>", "Fan out across N daemons (reuses up to N alive; spawns the rest)", parseInt)
+  .option("-p, --parallel <N>", "Fan out across N daemons (reuses up to N alive; spawns the rest)", (v) => parsePositiveInt(v, "--parallel"))
   .action(async (
     emplIds: string[],
     options: {
@@ -332,21 +289,12 @@ program
       parallel?: number;
     },
   ) => {
-    try {
-      validateEnv();
-    } catch {
-      process.exit(1);
-    }
+    requireEnv();
 
     if (emplIds.length === 0) {
       log.error("Provide at least one Empl ID.");
       process.exit(1);
     }
-    if (options.parallel !== undefined && (options.parallel < 1 || !Number.isFinite(options.parallel))) {
-      log.error("--parallel must be a positive integer.");
-      process.exit(1);
-    }
-
     // Validate every EID up front so a malformed tail doesn't fire Duo prompts.
     const inputs: Array<{ emplId: string; date?: string; dryRun?: boolean }> = [];
     for (const emplId of emplIds) {
@@ -387,26 +335,17 @@ program
   .argument("<pdfPaths...>", "One or more PDF file paths")
   .option("-n, --new", "Force spawn of a brand-new daemon (ignores alive ones for dispatch)")
   .option("--dry-run", "Run through OCR/signature/ServiceNow pre-submit proof point, then skip submit")
-  .option("-p, --parallel <N>", "Fan out across N daemons (reuses up to N alive; spawns the rest)", parseInt)
+  .option("-p, --parallel <N>", "Fan out across N daemons (reuses up to N alive; spawns the rest)", (v) => parsePositiveInt(v, "--parallel"))
   .action(async (
     pdfPaths: string[],
     options: { new?: boolean; parallel?: number; dryRun?: boolean },
   ) => {
-    try {
-      validateEnv();
-    } catch {
-      process.exit(1);
-    }
+    requireEnv();
 
     if (pdfPaths.length === 0) {
       log.error("Provide at least one PDF path.");
       process.exit(1);
     }
-    if (options.parallel !== undefined && (options.parallel < 1 || !Number.isFinite(options.parallel))) {
-      log.error("--parallel must be a positive integer.");
-      process.exit(1);
-    }
-
     // Validate every path up front (existence + readable) and pre-hash so a
     // malformed tail doesn't fire ServiceNow Duo prompts.
     const inputs: Array<{
@@ -461,20 +400,12 @@ program
   .description("Look up Employee IDs by name via Person Organizational Summary (UCPath + CRM cross-verify). Daemon-mode — keeps UCPath+CRM sessions alive across batches (no re-Duo).")
   .argument("<names...>", 'One or more names in "Last, First Middle" format')
   .option("-n, --new", "Force spawn of a brand-new daemon (ignores alive ones for dispatch)")
-  .option("-p, --parallel <N>", "Fan out across N daemons (reuses up to N alive; spawns the rest)", parseInt)
+  .option("-p, --parallel <N>", "Fan out across N daemons (reuses up to N alive; spawns the rest)", (v) => parsePositiveInt(v, "--parallel"))
   .action(async (
     names: string[],
     options: { new?: boolean; parallel?: number },
   ) => {
-    try {
-      validateEnv();
-    } catch {
-      process.exit(1);
-    }
-    if (options.parallel !== undefined && (options.parallel < 1 || !Number.isFinite(options.parallel))) {
-      log.error("--parallel must be a positive integer.");
-      process.exit(1);
-    }
+    requireEnv();
 
     await runEidLookupCli(names, { new: options.new, parallel: options.parallel });
   });
@@ -486,20 +417,12 @@ program
   .description("Check whether one or more employees are active in UCPath Person Organizational Summary. Accepts EIDs or names.")
   .argument("<queries...>", 'One or more EIDs or names in "Last, First Middle" format')
   .option("-n, --new", "Force spawn of a brand-new daemon (ignores alive ones for dispatch)")
-  .option("-p, --parallel <N>", "Fan out across N daemons (reuses up to N alive; spawns the rest)", parseInt)
+  .option("-p, --parallel <N>", "Fan out across N daemons (reuses up to N alive; spawns the rest)", (v) => parsePositiveInt(v, "--parallel"))
   .action(async (
     queries: string[],
     options: { new?: boolean; parallel?: number },
   ) => {
-    try {
-      validateEnv();
-    } catch {
-      process.exit(1);
-    }
-    if (options.parallel !== undefined && (options.parallel < 1 || !Number.isFinite(options.parallel))) {
-      log.error("--parallel must be a positive integer.");
-      process.exit(1);
-    }
+    requireEnv();
 
     await runActiveCheckCli(queries, { new: options.new, parallel: options.parallel });
   });
@@ -509,7 +432,7 @@ program
 program
   .command("dashboard")
   .description("Start the live monitoring dashboard (run in a separate terminal)")
-  .option("-p, --port <port>", "SSE server port", parseInt)
+  .option("-p, --port <port>", "SSE server port", (v) => parsePositiveInt(v, "--port"))
   .option("--prod", "Serve built dashboard instead of Vite dev server")
   .option("--no-clean", "Skip the one-time startup prune of old tracker files")
   .action(async (opts: { port?: number; prod?: boolean; clean?: boolean }) => {
