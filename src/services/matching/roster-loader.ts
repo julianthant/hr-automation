@@ -49,8 +49,15 @@ export function listRosters(dir: string): RosterFileRef[] {
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
+// Cache: key = `${absolutePath}:${mtimeMs}` → shared in-flight Promise.
+// Rejects are evicted so transient failures (locked file, temp I/O) don't stick.
+const rosterCache = new Map<string, Promise<RosterRow[]>>();
+
 /**
  * Read an xlsx roster file into a list of RosterRow.
+ *
+ * Results are cached by `path + mtime` so repeated calls within a process
+ * (e.g. OCR re-runs) skip the xlsx parse entirely when the file hasn't changed.
  *
  * The Onboarding Roster spreadsheet ships one worksheet per cohort week
  * ("July 25", "August 8", ..., "May 1") and each sheet has 0–3 preamble
@@ -70,7 +77,21 @@ export function listRosters(dir: string): RosterFileRef[] {
  * Throws only when the file has no recognizable header in any worksheet
  * (i.e. the spreadsheet shape is fundamentally different than expected).
  */
-export async function loadRoster(path: string): Promise<RosterRow[]> {
+export function loadRoster(path: string): Promise<RosterRow[]> {
+  const abs = resolve(path);
+  const mtimeMs = statSync(abs).mtimeMs;
+  const key = `${abs}:${mtimeMs}`;
+  const cached = rosterCache.get(key);
+  if (cached !== undefined) return cached;
+  const promise = parseRosterFile(abs).catch((err: unknown) => {
+    rosterCache.delete(key);
+    throw err;
+  });
+  rosterCache.set(key, promise);
+  return promise;
+}
+
+async function parseRosterFile(path: string): Promise<RosterRow[]> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(path);
 
