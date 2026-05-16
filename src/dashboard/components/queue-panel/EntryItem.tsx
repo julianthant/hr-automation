@@ -345,6 +345,7 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
               id={entry.id}
               runId={entry.runId}
               subject={subject}
+              entry={entry}
               className="flex-shrink-0 ml-1"
             />
           )}
