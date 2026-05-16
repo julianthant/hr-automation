@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -14,6 +14,7 @@ import { useElapsed } from "@/components/hooks/useElapsed";
 import { useTerminalDrawer } from "@/components/hooks/useTerminalDrawer";
 import { useQueueDepth } from "@/components/hooks/useQueueDepth";
 import { useDaemons } from "@/components/hooks/useDaemons";
+import { useNow } from "@/components/hooks/useNow";
 import { useWorkflow } from "@/lib/workflows-context";
 import { getWorkflowIcon } from "@/lib/workflow-icons";
 
@@ -73,11 +74,7 @@ function UcpathIdleCountdownRing({
   refreshing: boolean;
   cycling: boolean;
 }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, []);
+  const now = useNow();
   if (refreshing) {
     return (
       <Loader2
