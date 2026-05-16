@@ -98,39 +98,42 @@ export async function enqueueItems<T>(
     )
   }
   const store = openQueueTaskStore(trackerDir)
-  const enqueued = store.enqueueTasks({
-    workflow,
-    inputs,
-    deriveItemId: idFn,
-    runIds: preAssignedRunIds,
-    source: 'daemon',
-  })
-  const enqueuedBy = `cli-${process.pid}`
-  for (let i = 0; i < enqueued.length; i++) {
-    const task = enqueued[i]
-    const parentRunId = preAssignedParentRunIds?.[i]
-    // JSONL queue writes are audit-only. Do not use them for claim authority.
-    appendEvent(
+  const enqueued = store.control.transaction(() => {
+    const rows = store.enqueueTasks({
       workflow,
-      {
-        type: 'enqueue',
-        id: task.id,
-        workflow,
-        input: inputs[i],
-        enqueuedAt: nowIso(),
-        enqueuedBy,
-        runId: task.runId,
-        ...(parentRunId ? { parentRunId } : {}),
-      },
-      trackerDir,
-    )
-    if (parentRunId) {
-      const row = store.findTaskByIdentity({ workflow, itemId: task.id, runId: task.runId })
-      if (row) {
-        store.db.prepare('UPDATE tasks SET parent_run_id = ? WHERE id = ?').run(parentRunId, row.taskId)
+      inputs,
+      deriveItemId: idFn,
+      runIds: preAssignedRunIds,
+      source: 'daemon',
+    })
+    const enqueuedBy = `cli-${process.pid}`
+    for (let i = 0; i < rows.length; i++) {
+      const task = rows[i]
+      const parentRunId = preAssignedParentRunIds?.[i]
+      if (parentRunId) {
+        const row = store.findTaskByIdentity({ workflow, itemId: task.id, runId: task.runId })
+        if (row) {
+          store.db.prepare('UPDATE tasks SET parent_run_id = ? WHERE id = ?').run(parentRunId, row.taskId)
+        }
       }
+      // JSONL queue writes are audit-only. Do not use them for claim authority.
+      appendEvent(
+        workflow,
+        {
+          type: 'enqueue',
+          id: task.id,
+          workflow,
+          input: inputs[i],
+          enqueuedAt: nowIso(),
+          enqueuedBy,
+          runId: task.runId,
+          ...(parentRunId ? { parentRunId } : {}),
+        },
+        trackerDir,
+      )
     }
-  }
+    return rows
+  })
   return enqueued.map((task) => ({
     id: task.id,
     position: task.position,
@@ -146,26 +149,29 @@ export async function claimNextItem(
   trackerDir?: string,
 ): Promise<QueueItem | null> {
   const store = openQueueTaskStore(trackerDir)
-  const claimed = store.claimNextTask({ workflow, workerId: instanceId })
-  if (!claimed) return null
-  appendEvent(
-    workflow,
-    { type: 'claim', id: claimed.itemId, claimedBy: instanceId, claimedAt: nowIso(), runId: claimed.runId },
-    trackerDir,
-  )
-  return {
-    id: claimed.itemId,
-    workflow,
-    input: claimed.input,
-    enqueuedAt: nowIso(),
-    state: 'claimed',
-    taskId: claimed.taskId,
-    attemptId: claimed.attemptId,
-    claimedBy: instanceId,
-    claimedAt: nowIso(),
-    runId: claimed.runId,
-    ...(claimed.parentRunId ? { parentRunId: claimed.parentRunId } : {}),
-  }
+  return store.control.transaction(() => {
+    const ts = nowIso()
+    const claimed = store.claimNextTask({ workflow, workerId: instanceId, now: ts })
+    if (!claimed) return null
+    appendEvent(
+      workflow,
+      { type: 'claim', id: claimed.itemId, claimedBy: instanceId, claimedAt: ts, runId: claimed.runId },
+      trackerDir,
+    )
+    return {
+      id: claimed.itemId,
+      workflow,
+      input: claimed.input,
+      enqueuedAt: ts,
+      state: 'claimed',
+      taskId: claimed.taskId,
+      attemptId: claimed.attemptId,
+      claimedBy: instanceId,
+      claimedAt: ts,
+      runId: claimed.runId,
+      ...(claimed.parentRunId ? { parentRunId: claimed.parentRunId } : {}),
+    }
+  })
 }
 
 type TerminalStatus = 'done' | 'failed' | 'cancelled'
@@ -179,31 +185,35 @@ async function markTaskTerminal(
   trackerDir: string | undefined,
 ): Promise<void> {
   const store = openQueueTaskStore(trackerDir)
-  const task = store.findTaskByIdentity({ workflow, itemId, runId })
-  const attemptId = task ? resolveCurrentAttemptId(store, task, runId) : undefined
+  store.control.transaction(() => {
+    const ts = nowIso()
+    const task = store.findTaskByIdentity({ workflow, itemId, runId })
+    const attemptId = task ? resolveCurrentAttemptId(store, task, runId, ts) : undefined
 
-  if (task) {
-    if (status === 'done') {
-      if (attemptId) store.markTaskDone({ taskId: task.taskId, attemptId })
-      else markTaskTerminalWithoutAttempt(store, task.taskId, 'done')
-    } else if (status === 'failed') {
-      if (attemptId) store.markTaskFailed({ taskId: task.taskId, attemptId, error: payload.error ?? '' })
-      else markTaskTerminalWithoutAttempt(store, task.taskId, 'failed', payload.error)
-    } else {
-      store.markTaskCancelled({
-        taskId: task.taskId,
-        ...(attemptId ? { attemptId } : {}),
-        reason: payload.reason ?? '',
-      })
+    if (task) {
+      if (status === 'done') {
+        if (attemptId) store.markTaskDone({ taskId: task.taskId, attemptId, now: ts })
+        else markTaskTerminalWithoutAttempt(store, task.taskId, 'done', ts)
+      } else if (status === 'failed') {
+        if (attemptId) store.markTaskFailed({ taskId: task.taskId, attemptId, error: payload.error ?? '', now: ts })
+        else markTaskTerminalWithoutAttempt(store, task.taskId, 'failed', ts, payload.error)
+      } else {
+        store.markTaskCancelled({
+          taskId: task.taskId,
+          ...(attemptId ? { attemptId } : {}),
+          reason: payload.reason ?? '',
+          now: ts,
+        })
+      }
     }
-  }
 
-  if (status === 'done') {
-    appendEvent(workflow, { type: 'done', id: itemId, completedAt: nowIso(), runId }, trackerDir)
-  } else {
-    const error = status === 'failed' ? (payload.error ?? '') : (payload.reason ?? '')
-    appendEvent(workflow, { type: 'failed', id: itemId, failedAt: nowIso(), runId, error }, trackerDir)
-  }
+    if (status === 'done') {
+      appendEvent(workflow, { type: 'done', id: itemId, completedAt: ts, runId }, trackerDir)
+    } else {
+      const error = status === 'failed' ? (payload.error ?? '') : (payload.reason ?? '')
+      appendEvent(workflow, { type: 'failed', id: itemId, failedAt: ts, runId, error }, trackerDir)
+    }
+  })
 }
 
 export async function markItemDone(
@@ -243,9 +253,12 @@ export async function unclaimItem(
   runId?: string,
 ): Promise<void> {
   const store = openQueueTaskStore(trackerDir)
-  const task = store.findTaskByIdentity({ workflow, itemId, ...(runId ? { runId } : {}) })
-  if (task) store.returnTaskToQueued({ taskId: task.taskId })
-  appendEvent(workflow, { type: 'unclaim', id: itemId, reason, ts: nowIso() }, trackerDir)
+  store.control.transaction(() => {
+    const ts = nowIso()
+    const task = store.findTaskByIdentity({ workflow, itemId, ...(runId ? { runId } : {}) })
+    if (task) store.returnTaskToQueued({ taskId: task.taskId, now: ts })
+    appendEvent(workflow, { type: 'unclaim', id: itemId, reason, ts }, trackerDir)
+  })
 }
 
 export async function recoverOrphanedClaims(
@@ -254,11 +267,14 @@ export async function recoverOrphanedClaims(
   trackerDir?: string,
 ): Promise<number> {
   const store = openQueueTaskStore(trackerDir)
-  const recovered = store.recoverClaimsForDeadWorkers({ workflow, aliveWorkerIds: aliveInstanceIds })
-  for (const task of recovered) {
-    appendEvent(workflow, { type: 'unclaim', id: task.itemId, reason: 'recovered', ts: nowIso() }, trackerDir)
-  }
-  return recovered.length
+  return store.control.transaction(() => {
+    const ts = nowIso()
+    const recovered = store.recoverClaimsForDeadWorkers({ workflow, aliveWorkerIds: aliveInstanceIds, now: ts })
+    for (const task of recovered) {
+      appendEvent(workflow, { type: 'unclaim', id: task.itemId, reason: 'recovered', ts }, trackerDir)
+    }
+    return recovered.length
+  })
 }
 
 function taskToQueueItem(task: TaskRow): QueueItem {
@@ -288,6 +304,7 @@ function resolveCurrentAttemptId(
   store: ReturnType<typeof openQueueTaskStore>,
   task: TaskRow,
   runId: string,
+  now: string = nowIso(),
 ): string | undefined {
   if (task.currentAttemptId) return task.currentAttemptId
   const row = store.db.prepare(`
@@ -304,7 +321,7 @@ function resolveCurrentAttemptId(
     SET current_attempt_id = @attemptId,
         updated_at = @now
     WHERE id = @taskId
-  `).run({ taskId: task.taskId, attemptId: row.id, now: nowIso() })
+  `).run({ taskId: task.taskId, attemptId: row.id, now })
   return row.id
 }
 
@@ -312,9 +329,9 @@ function markTaskTerminalWithoutAttempt(
   store: ReturnType<typeof openQueueTaskStore>,
   taskId: string,
   state: 'done' | 'failed',
+  now: string = nowIso(),
   error?: string,
 ): void {
-  const now = nowIso()
   store.db.prepare(`
     UPDATE tasks
     SET control_state = @state,
