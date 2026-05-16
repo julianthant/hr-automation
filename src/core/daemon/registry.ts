@@ -9,7 +9,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { setTimeout as sleep } from 'node:timers/promises'
 import type { Daemon, DaemonLockfile } from './types.js'
@@ -58,8 +58,7 @@ export function randomInstanceId(workflow: string): string {
  * unlinking on clean shutdown.
  */
 export function writeLockfile(lock: DaemonLockfile, path: string): void {
-  const dir = path.slice(0, path.lastIndexOf('/'))
-  if (dir) mkdirSync(dir, { recursive: true })
+  mkdirSync(dirname(path), { recursive: true })
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`
   writeFileSync(tmp, JSON.stringify(lock))
   renameSync(tmp, path)
