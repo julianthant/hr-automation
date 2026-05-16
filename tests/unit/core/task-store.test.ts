@@ -9,6 +9,7 @@ import {
   createTaskStore,
   type ControlTaskStore,
 } from '../../../src/core/task-store/index.js'
+import { parseJson } from '../../../src/core/task-store/types.js'
 
 function iso(n: number): string {
   return `2026-05-04T12:00:${String(n).padStart(2, '0')}.000Z`
@@ -239,4 +240,11 @@ test('parent cancellation cascades to queued children', () => {
     store.close()
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('parseJson throws a clear error for malformed JSON', () => {
+  assert.throws(
+    () => parseJson('not-json'),
+    /parseJson: malformed JSON .*not-json/,
+  )
 })

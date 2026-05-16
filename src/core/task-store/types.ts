@@ -187,8 +187,9 @@ export function isTerminalTaskState(state: TaskState): boolean {
 export function parseJson(raw: string): unknown {
   try {
     return JSON.parse(raw)
-  } catch {
-    return {}
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    throw new Error(`parseJson: malformed JSON (${message}): ${raw.slice(0, 200)}`, { cause: e })
   }
 }
 

@@ -89,6 +89,7 @@ A daemon keeps one `workflowInstance` for its entire lifetime and processes many
 
 ## Lessons Learned
 
+- **2026-05-16: Task-store JSON parsing fails loud.** Malformed `tasks.input_json` should throw from `parseJson` with a clear raw-prefix diagnostic. Do not silently coerce bad persisted task input to `{}`; that hides storage corruption behind confusing workflow schema “Required” errors.
 - **2026-05-16: Snapshot one timestamp per daemon queue operation.** Queue helpers should create a single `ts` and pass it through SQLite updates plus JSONL audit events. This keeps dashboard timelines from showing tiny ordering skews between a task row and its corresponding queue audit line.
 - **2026-05-16: Browser disconnect must set the daemon cancel target for the in-flight run.** When Chrome closes mid-step, Playwright throws a browser/page-closed error from inside the step body. Set `state.cancelTarget` from `state.inFlight` before waking shutdown so `Stepper.step` reclassifies that throw as `CancelledError`; otherwise the queue row is marked failed even though the daemon is intentionally shutting down.
 - **2026-05-16: Non-recovery unclaims require runId.** `unclaimItem` must not fall back to newest-by-item lookup for voluntary or SIGINT-soft paths, because daemon items can be re-enqueued with the same `itemId`. Only recovery sweeps may omit `runId`; active in-flight teardown should pass the exact claimed run id.
