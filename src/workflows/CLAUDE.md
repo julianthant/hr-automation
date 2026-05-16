@@ -16,7 +16,7 @@ src/workflows/{name}/
   CLAUDE.md      # This module's doc (template: what / data flow / kernel config / gotchas / lessons)
 ```
 
-Do **not** create `tracker.ts` for new workflows. The kernel's JSONL emissions + dashboard are the only observability. Pre-kernel workflows that still have `tracker.ts` (onboarding, work-study, eid-lookup, kronos-reports) — leave those alone for now, but don't add new ones. Separations never had one.
+Do **not** create `tracker.ts` for new workflows. The kernel's JSONL emissions + dashboard are the only observability. **Grandfathered `tracker.ts`:** only `old-kronos-reports/tracker.ts` (Excel Kronos report log) remains — do not add new ones. Separations never had one.
 
 ## Dashboard Integration (kernel — automatic)
 
@@ -86,9 +86,11 @@ Workflows where daemon mode is **not** appropriate (do NOT convert):
 - **Non-CLI workflows** like `sharepoint-download` (dashboard button, fire-and-forget `runWorkflow`) — daemon mode solves "avoid re-Duo on repeated CLI runs," which doesn't apply when the dashboard holds one long-lived session.
 - **Workflows invoked programmatically from other workflows** — daemon mode is client/daemon IPC; an in-process caller should keep using `runWorkflow` / `runWorkflowBatch` directly.
 
-Currently converted (registered in `src/core/workflow-loaders.ts` for daemon spawn / dashboard enqueue): `separations`, `work-study`, `eid-lookup`, `onboarding`, `oath-signature`, `emergency-contact`, `oath-upload`, `active-check`. Pending: `old-kronos-reports`. No behavior change intended — daemon mode wraps the same `runOneItem` kernel primitive, so per-item tracker output is byte-identical to the legacy path.
+Daemon-capable workflows (lazy-imported in `src/core/workflow-loaders.ts` for daemon spawn and dashboard `/api/enqueue`): `separations`, `work-study`, `eid-lookup`, `onboarding`, **`crm-doc-download`**, `oath-signature`, `emergency-contact`, `oath-upload`, `active-check`.
 
-**Emergency-contact note** — the CLI adapter reads YAML + runs roster preflight in-process (before any daemon work), then enqueues each `EmergencyContactRecord` as a separate queue item. Pass a custom `deriveItemId` to `ensureDaemonsAndEnqueue` because the EID is nested under `input.employee.employeeId` and the composite `p{NN}-{emplId}` id shape is what the legacy path already writes.
+**Not** in `WORKFLOW_LOADERS`: **`old-kronos-reports`** (the `npm run kronos` / `runParallelKronos` path is pool-only in-process + not wired to daemon spawn). No behavior change intended for converted workflows — daemon mode wraps the same `runOneItem` kernel primitive, so per-item tracker output matches the in-process path.
+
+**Emergency-contact note** — default `npm run emergency-contact` uses `runEmergencyContactCli` (`buildCliAdapter` in `workflow.ts`): load YAML + roster preflight in-process, then enqueue each record with `deriveItemId: recordItemId` (`p{NN}-{emplId}`) because the EID lives under `input.employee.employeeId`, not a top-level field. In-process batch without daemon remains `runEmergencyContact` → `runWorkflowBatch`.
 
 **Onboarding note** — one alive daemon = one single-worker session with 3 browsers (CRM + UCPath + I9) and 2 Duos (I9 is SSO no-2FA). Heaviest per-daemon cost of any converted workflow, but biggest savings per repeat invocation (CRM Duo alone is ~30-60s). Daemon-mode parallelism comes from running N daemons (`-p N`), each a single worker claiming off the shared SQLite tasks queue.
 
@@ -162,15 +164,20 @@ their `detailFields` non-editable.
 
 ## Existing Workflows
 
+Representative CLI workflows (flags and full command list: `src/cli.ts`).
+
 | Workflow | CLI | Systems | Kernel? | Parallelism |
 |---|---|---|---|---|
-| onboarding | `npm run onboarding` (positional emails → daemon queue) | CRM, UCPath, I9 | Yes | Single-worker daemon per spawn; N daemons via `-p N` for parallelism |
-| separations | `npm run separation` | Kuali, Old Kronos, New Kronos, UCPath | Yes (sequential batch via runWorkflowBatch) | 4 tiled browsers, interleaved auth, ctx.parallel for Phase-1 4-way fan-out |
-| eid-lookup | `tsx src/cli.ts eid-lookup` | UCPath + optional CRM | Yes | N tabs in one shared context (runWorkerPool in handler) |
-| old-kronos-reports | `npm run kronos` | UKG | Yes | Pool mode (N workers, kernel) |
-| work-study | `npm run work-study` | UCPath | Yes | Single |
-| emergency-contact | `npm run emergency-contact` | UCPath | Yes (batch, `preEmitPending`) | Single browser, one record at a time |
-| oath-signature | `npm run oath-signature <emplId...>` | UCPath | Yes (daemon-mode by default; sequential batch + `preEmitPending`) | Single browser; N daemons via `-p N` |
+| onboarding | `npm run onboarding` (positional emails; `-n` / `-p` only) | CRM, UCPath, I9 | Yes | Single-worker daemon per spawn; scale with N daemons (`-p N`) on the shared SQLite queue |
+| crm-doc-download | `npm run crm-doc-download` (emails; `-n` / `-p`) | CRM | Yes | Pool batch config; daemon mode reuses CRM like other loaders |
+| separations | `npm run separation` (`-n` / `-p`) | Kuali, Old Kronos, New Kronos, UCPath | Yes (per-doc handler; daemon default) | 4 tiled browsers, **`authChain: "parallel-staggered"`** (Duos overlap — see `separations/workflow.ts`); `ctx.parallel` Phase-1 4-way fan-out |
+| eid-lookup | `npm run eid-lookup` (`-n` / `-p`) | UCPath + CRM | Yes | **`batch.mode: "shared-context-pool"`** — one Duo per system per batch, N worker tabs |
+| active-check | `npm run active-check` (`-n` / `-p`) | UCPath | Yes | Same shared-context pool pattern as eid-lookup |
+| old-kronos-reports | `npm run kronos` (**`--workers N`** overrides pool size) | UKG | Yes | Pool mode (N workers); **not** in `WORKFLOW_LOADERS` |
+| work-study | `npm run work-study` (`-n` / `-p`) | UCPath | Yes | Single |
+| emergency-contact | `npm run emergency-contact` | UCPath | Yes (batch, `preEmitPending`) | Single browser, one record at a time; daemon via `runEmergencyContactCli` |
+| oath-signature | `npm run oath-signature <emplId...>` | UCPath | Yes (daemon default; sequential batch + `preEmitPending`) | Single browser; N daemons via `-p N` |
+| oath-upload | `npm run oath-upload` | ServiceNow + delegated OCR / oath-signature | Yes | Sequential steps + child-run waits; daemon default |
 | sharepoint-download | _Dashboard button_ (fire-and-forget) / `tsx src/workflows/emergency-contact/scripts/download-roster.ts` (non-kernel CLI) | SharePoint | Yes (single-item, module-level URL injection) | Single (headed browser, gated by Duo) |
 | ocr | _Dashboard Run button_ (HTTP only — no CLI, no daemon) | _none_ | Yes (`systems: []`, `authSteps: false`) | In-process (single fire-and-forget via `/api/ocr/prepare`) |
 

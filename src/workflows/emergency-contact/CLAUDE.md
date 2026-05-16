@@ -2,7 +2,11 @@
 
 Fills the Emergency Contact form in UCPath HR Tasks → Personal Data Related for every record in a batch YAML. Fully autonomous after verification: you verify the YAML once (pre-extracted by Claude reading the handwritten PDF), then the workflow runs unattended for all records.
 
-**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflowBatch` (sequential mode, `preEmitPending: true`, `betweenItems: ["reset"]`). The kernel owns browser launch, UCPath auth, per-record tracker entries, SIGINT cleanup. The CLI adapter `runEmergencyContact` owns pre-kernel phases: YAML load, optional SharePoint roster download + verify. **Add-New contact flow (when the target employee has zero existing emergency contacts) is NOT YET IMPLEMENTED** — `navigateToEmergencyContact` throws `NoExistingContactError`, the kernel records the record as `failed`, batch continues.
+**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts`. **Default** `npm run emergency-contact` uses **`runEmergencyContactCli`** (`buildCliAdapter` → SQLite queue + daemons). **In-process** path: `runEmergencyContact` → `runWorkflowBatch` (sequential mode, `preEmitPending: true`, `betweenItems: ["reset"]`). The kernel owns browser launch, UCPath auth, per-record tracker entries, SIGINT cleanup.
+
+**CLI:** Default `npm run emergency-contact <batchYaml>` → **`runEmergencyContactCli`** (`buildCliAdapter` in `workflow.ts` after YAML load + optional roster preflight): enqueues each batch record to the shared daemon queue (`deriveItemId: recordItemId` → `p{NN}-{emplId}`). **`runEmergencyContact`** remains the in-process path (`runWorkflowBatch` directly — tests/scripts).
+
+**Add-New contact flow (when the target employee has zero existing emergency contacts) is NOT YET IMPLEMENTED** — `navigateToEmergencyContact` throws `NoExistingContactError`, the kernel records the record as `failed`, batch continues.
 
 ## Selector intelligence
 
@@ -18,9 +22,9 @@ This workflow touches one system: **ucpath** (HR Tasks → Personal Data Related
 - `config.ts` — `RELATIONSHIP_MAP` (raw handwritten text → UCPath dropdown value), `HR_TASKS_URL`, `TRACKER_DIR`, `ROSTERS_DIR`.
 - `enter.ts` — `buildEmergencyContactPlan(record, page, ctx)` returns an `ActionPlan`: Add → Fill name → Check Primary → Select Relationship → Same-Address toggle (fill manual address if not same) → Fill phone → Save. `findExistingContactDuplicate(page, name)` reads existing contacts and returns the duplicate's display name if any.
 - `roster-verify.ts` — Loads an xlsx/csv roster and verifies each batch record's EID + name exists. Co-located with its only consumer (moved from `src/utils/`).
-- Roster + name/address matching primitives live in [`src/services/matching/`](../../services/matching/) — `findLatestRoster`, `loadRoster`, `matchAgainstRoster`, `compareUsAddresses`, `levenshteinDistance`. Shared with `oath-signature/prepare.ts` (moved out of this directory 2026-04-28 once the second consumer landed).
+- Roster + name/address matching primitives live in [`src/services/matching/`](../../services/matching/) — shared with OCR orchestration (`formType: "emergency-contact"`) and other workflows.
 - SharePoint download lives in its own sibling workflow: [`src/workflows/sharepoint-download/`](../sharepoint-download/). Use `import { downloadSharePointFile } from "../sharepoint-download/index.js"`. (Moved out of this directory 2026-04-22 once the dashboard roster-download button made it cross-cutting.)
-- `workflow.ts` — Kernel definition (`emergencyContactWorkflow`) + CLI adapter (`runEmergencyContact`).
+- `workflow.ts` — Kernel definition (`emergencyContactWorkflow`) + **`runEmergencyContactCli`** (daemon default) + **`runEmergencyContact`** (in-process batch). Shared helpers: `buildEmergencyContactPendingData`, `recordItemId`, `buildCliAdapter` wiring for daemon enqueue.
 - `fixtures/test-batch.yaml` — Minimal 2-record fixture with fake EIDs for dry-run smoke testing.
 - `index.ts` — Barrel exports.
 
@@ -36,29 +40,23 @@ No `tracker.ts` — dashboard JSONL only (see `src/workflows/CLAUDE.md`).
 | `authChain` | `"sequential"` |
 | `tiling` | `"single"` |
 | `batch` | `{ mode: "sequential", preEmitPending: true, betweenItems: ["reset"] }` |
-| `detailFields` | `[]` — rich fields populated via `onPreEmitPending` + `updateData` |
+| `detailFields` | Six labeled fields — `employeeName`, `emplId`, `contactName`, `relationship`, `contactPhone`, `contactAddress` (all `editable: true` in `workflow.ts`) |
 
 ## Data Flow
 
 ```
-CLI: npm run emergency-contact <batchYaml>
-  → runEmergencyContact (CLI adapter)
-    → loadBatch (Zod validate whole file)
-    → runPreflight: optional SharePoint download + verify EIDs/names
-    → runWorkflowBatch(emergencyContactWorkflow, batch.records, {
-          onPreEmitPending: (record, runId) => trackEvent(pending, data)
-        })
-        → Kernel Session.launch: 1 browser, UCPath auth (Duo ×1)
-        → For each record (sequential):
-          - Emit pending row via onPreEmitPending (with runId)
-          - withTrackedWorkflow wraps the handler, reuses same runId
-          - Handler step "navigation" → navigateToEmergencyContact(emplId)
-            + extractEmployeeName + updateData({ employeeName })
-            + findExistingContactDuplicate → updateData({ skipped }) + early return
-          - Handler step "fill-form" → buildEmergencyContactPlan.execute
-          - Handler step "save" → success log (plan's own save click wraps inside fill-form)
+CLI: npm run emergency-contact <batchYaml>   (daemon default — see `src/cli.ts` for `--roster-*`, `--dry-run`, `-n`, `-p`)
+  → runEmergencyContactCli
+    → loadBatch + runPreflight (roster verify — always before enqueue)
+    → buildCliAdapter({ workflow, deriveItemId: recordItemId, buildPendingData })(records, { new, parallel })
+    → ensureDaemonsAndEnqueue → per-record `pending` rows + SQLite queue
+
+In-process (tests/scripts): `runEmergencyContact` → `runWorkflowBatch` with `deriveItemId` + `buildBatchPreEmitPending` (`src/core/pre-emit-helpers.ts`):
+
+    → Kernel Session.launch: 1 browser, UCPath auth (Duo ×1)
+    → For each record (sequential):
+          - Handler: `navigation` → `fill-form` → `save` (see `workflow.ts`)
           - Between items: session.reset("ucpath")
-      → Batch result summary: "N/M succeeded, K failed"
 ```
 
 ## Item ID shape
@@ -103,15 +101,15 @@ Optional but recommended. `--roster-url` downloads the latest roster from ShareP
 
 - Workflow name: `emergency-contact`
 - Steps (in order): `navigation` → `fill-form` → `save`
-- Detail fields (declared via `defineWorkflow({ detailFields })` → dashboard registry): Employee, Empl ID, Contact, Relationship
-- `onPreEmitPending` data keys: `batchName, sourcePage, emplId, employeeName, contactName, relationship`
-- Handler `updateData` extensions: `skipped` + `skipReason` for duplicate-guard early return
+- **`detailFields`:** six editable columns from `workflow.ts` (Employee, Empl ID, Contact, Relationship, Contact Phone, Contact Address) — populated at handler start + `onPreEmitPending` for daemon rows
+- Pending row payload: `buildEmergencyContactPendingData` (`batchName`, `sourcePage`, `emplId`, `employeeName`, `contactName`, `relationship`, optional `dryRun`)
+- Handler `updateData` extensions: `skipped` + `skipReason`, `contactPhone` / `contactAddress` summaries, optional `fuzzyDemote*` fields
 
 ## Gotchas
 
 - **Add-New path not yet implemented**: When a target employee has no existing emergency contact on file, `navigateToEmergencyContact` throws `NoExistingContactError`. The kernel's `withTrackedWorkflow` wrapping records the record as `failed` and the batch continues to the next record. A different UCPath navigation path is needed for the Add case (probably NavBar → Workforce Administration → Personal Information → Biographical → Personal Data). A separate future plan covers this.
 - **`#pt_modalMask` intercepts clicks** — must hide via `dismissPeopleSoftModalMask(page)` before every click. Already done for Search / Add-new-row / Edit Address / OK / Save in `enter.ts`.
-- **Per-record error handling**: one record failing does not abort the batch. `runWorkflowBatch` wraps each record in its own `withTrackedWorkflow` — errors land as `failed` tracker entries; the loop moves on. The final summary line reports `N/M succeeded, K failed` and prints up to 3 error messages.
+- **Per-record error handling**: one record failing does not abort the in-process batch. `runWorkflowBatch` wraps each record in its own `withTrackedWorkflow` — errors land as `failed` tracker entries; the loop moves on. The final summary line reports `N/M succeeded, K failed` and prints up to 3 error messages. (Daemon mode: each row is its own queued task; use the dashboard queue for per-record status.)
 - **Auth once, use many**: UCPath auth runs once via the kernel's `Session.launch` at the top of the batch; the same browser page is reused for all records. Between records the kernel calls `session.reset("ucpath")` (no-op here since UCPath's system config has no `resetUrl`, and `navigateToEmergencyContact` performs an absolute navigation anyway).
 - **Address "same as employee" is computed during extraction** — not on the paper form. YAML has the boolean already.
 - **Phone**: only one Phone textbox on the "Contact Address/Phone" tab. Currently fills it with `cellPhone || homePhone || workPhone`. The "Other Phone Numbers" tab exists for additional phones — not used yet.
@@ -174,55 +172,19 @@ All selectors live inside the PeopleSoft iframe returned by `getContentFrame(pag
 
 **Important**: no "Mother"/"Father"/"Mom"/"Dad" options. All parental relationships map to **Parent**. Brother/Sister → **Sibling**. Grandma/Grandpa → **Grand Parent**. Aunt/Uncle/Cousin → **Other Relative**.
 
-## Dashboard "Run" button (OCR prep — 2026-05-01)
+## Dashboard: PDF → YAML path (OCR)
 
-As of 2026-05-01 the prep flow lives entirely in the `ocr` workflow (`src/workflows/ocr/`). The operator selects the `ocr` workflow in the TopBar, picks "Emergency contact" as form type, uploads a PDF. See `src/workflows/ocr/CLAUDE.md` for the full flow. The `prepare.ts`, `preview-schema.ts`, and `src/tracker/emergency-contact-http.ts` files were deleted in this migration.
+Handwritten emergency-contact PDFs are prepped through the **`ocr` workflow** in the dashboard Run flow: select **`ocr`** in the TopBar, choose form type **Emergency contact**, upload the PDF, review extracted records, then approve to enqueue **`emergency-contact`** kernel items (daemon queue).
 
-**Legacy note (2026-04-28 — now superseded):** the original self-service flow was:
+- **HTTP:** `/api/ocr/*` — see [`src/tracker/dashboard/hono/routes/ocr.ts`](../../tracker/dashboard/hono/routes/ocr.ts) and handlers under [`src/tracker/dashboard/ocr/`](../../tracker/dashboard/ocr/).
+- **Operator narrative:** [`src/workflows/ocr/CLAUDE.md`](../ocr/CLAUDE.md).
 
-```
-TopBar Run button (emergency-contact only)
-  → RunModal (PDF upload + roster picker)
-  → POST /api/emergency-contact/prepare (multipart, fire-and-forget)
-    → runPrepare() in src/workflows/emergency-contact/prepare.ts:
-      - synchronous: writes pending tracker row → loads roster → OCR via src/services/ocr/
-      - synchronous: per-record match (form-EID > roster name match >= 0.85)
-      - async: enqueue eid-lookup daemon for unmatched records
-        + watches eid-lookup JSONL for completions, patches records progressively
-      - terminal status: done (writes the records list to data.records)
-  → PreviewRow renders at the top of QueuePanel (parsed from data.mode === "prepare")
-  → User reviews/edits records inline (per-record edit form persisted to localStorage)
-  → POST /api/emergency-contact/approve-batch:
-    - validates each PreviewRecord, strips preview-only fields
-    - runs through enqueueFromHttp → ensureDaemonsAndEnqueue (auto-spawn if needed)
-    - marks prep row done with step="approved"
-  → N child queue rows fan out, daemon claims them one at a time
-```
-
-The prep phase **bypasses the kernel** — `runPrepare` writes tracker rows directly via `trackEvent`. There is **no second workflow name**: the prep parent and its child rows all carry `workflow: "emergency-contact"`. The discriminator is `data.mode === "prepare"` on the parent vs. absent on the children.
-
-Dashboard restart sweep: `sweepStuckPrepRows(dir)` runs at startDashboard time and marks any prep row in transient state (pending/running) as failed with a "Dashboard restarted while prepare was in progress — please re-upload" error. Implemented in `src/tracker/emergency-contact-http.ts`. The HTTP endpoints + restart sweep live in that same module so dashboard.ts route bodies stay short.
-
-Frontend components (all under `src/dashboard/components/`):
-- `TopBarRunButton.tsx` — primary CTA, scoped to workflow === "emergency-contact"
-- `RunModal.tsx` — Radix Dialog with PDF dropzone + roster radio picker; XHR upload with progress
-- `PreviewRow.tsx` — pinned at top of QueuePanel for any `data.mode === "prepare"` entry
-- `PreviewRecordRow.tsx` — per-record summary + match badge + inline edit toggle
-- `PreviewRecordEditForm.tsx` — inline expanded edit form (no nested modal)
-- `preview-types.ts` — TypeScript mirrors of the backend Zod schemas (no runtime Zod in the bundle)
-
-Backend endpoints (all in `src/tracker/dashboard.ts`, handlers in `src/tracker/emergency-contact-http.ts`):
-- `GET  /api/rosters` — lists xlsx files in `.tracker/rosters/` and `src/data/`, newest first
-- `POST /api/emergency-contact/prepare` — multipart/form-data; fire-and-forgets `runPrepare` and returns `{ok, parentRunId, pdfPath}` synchronously (the pending tracker row is written before runPrepare's first await)
-- `POST /api/emergency-contact/approve-batch` — JSON; expands the user's `PreviewRecord[]` into N kernel inputs via `enqueueFromHttp`, marks prep row `done` step `approved`
-- `POST /api/emergency-contact/discard-prepare` — JSON; emits `failed` step `discarded`, best-effort unlinks the uploaded PDF
-
-Per-record edits are mirrored to localStorage at `ec-prep-edits:<parentRunId>` so a reload restores in-progress edits. Cleared on Approve / Discard.
+**Historical (do not treat as live paths):** per-workflow `/api/emergency-contact/*` routes, `src/workflows/emergency-contact/prepare.ts`, and `src/tracker/emergency-contact-http.ts` were removed when prep consolidated on OCR; old design notes may still appear under `docs/superpowers/`.
 
 ## Lessons Learned
 
-- **2026-04-28: OCR-to-Approve self-service flow shipped.** New `src/services/ocr/` primitive (Gemini multi-key + 7-provider fallback rotation, file-cached, schema-bound) generalizes the OCR concern across future workflows. Prep phase deliberately bypasses the kernel — the parent prep row carries records inline as `data.records` and only fans out to kernel items on Approve, so the dashboard sees one preview row → N child rows. Single workflow name throughout (`emergency-contact`); the `data.mode === "prepare"` discriminator distinguishes parent from children. Async EID resolution chain: prep handler enqueues into eid-lookup daemon with `ec-prep-`-prefixed itemIds (`ec-prep-<parentRunId>-r<index>`), watches the eid-lookup JSONL via `fs.watch` + 200ms polling fallback, patches the parent row's records progressively. Restart sweep in the dashboard's startup path marks stuck prep rows as failed (the OCR + eid-lookup polling lives in the dashboard's Node process, so a backend restart leaves any in-flight prep row orphaned). Three bugs ship in the same arc: fuzzy duplicate detection (Levenshtein ≤ 2 on normalized names) demotes the existing UCPath emergency contact's Primary Contact rather than skipping the new add (Leo Longley's case); same-address-when-null at the schema level via `EmergencyContactSchema.transform()` (Geonmoo Lee's blank-address case); dashboard `updateData` populates emplId / contactName / relationship / contactPhone / contactAddress at the top of the handler so the detail grid never shows "field declared but never populated". Full design + plan in `docs/superpowers/specs/2026-04-27-emergency-contact-run-button-ocr-design.md` and `docs/superpowers/plans/2026-04-27-emergency-contact-run-button-ocr-plan.md`.
-- **2026-04-17: Migrated to kernel.** `runEmergencyContact` is a CLI adapter over `runWorkflowBatch(emergencyContactWorkflow, records, { onPreEmitPending })`. Dry-run bypasses the kernel (no browser); preflight (roster download + verify) still runs in the CLI adapter BEFORE `runWorkflowBatch` launches browsers. Don't reintroduce raw `launchBrowser` / `withTrackedWorkflow` calls in the handler — those live in `src/core/`. `onPreEmitPending` paired with pre-generated runId (kernel debt #1, commit 4e89687) avoids duplicate `pending` rows. **Live run pending user verification** — UCPath Duo can't be approved this session, so only dry-run + tests validate this migration. **Add-New flow still deferred** — `NoExistingContactError` from `navigateToEmergencyContact` now surfaces as a per-record `failed` via the kernel's `withTrackedWorkflow` wrapping (same as before); a separate plan will add the Add-New UCPath navigation path.
+- **2026-04-28: OCR prep consolidated on the `ocr` workflow + `/api/ocr/*`.** Dashboard prep/review/approve for emergency-contact PDFs routes through the shared OCR handler stack (Hono: `src/tracker/dashboard/hono/routes/ocr.ts`). Downstream approve fans out to `emergency-contact` queue items with the same `data.mode === "prepare"` preview pattern where applicable — see `src/workflows/ocr/CLAUDE.md` and `src/tracker/dashboard/ocr/` for current behavior. Older `/api/emergency-contact/*` + `prepare.ts` descriptions in historical docs are not the live stack.
+- **2026-04-17: Migrated to kernel.** Default CLI **`runEmergencyContactCli`** uses **`buildCliAdapter`** (`deriveItemId: recordItemId`, `buildPendingData` from `buildEmergencyContactPendingData`) after YAML load + roster preflight. **`runEmergencyContact`** remains the in-process wrapper over `runWorkflowBatch(..., { deriveItemId, onPreEmitPending: buildBatchPreEmitPending(...) })` for tests/scripts. Preflight always runs before enqueue/browser work. Don't reintroduce raw `launchBrowser` / `withTrackedWorkflow` in the handler. **Add-New flow still deferred** — `NoExistingContactError` surfaces as per-record `failed`.
 - **2026-04-17: Co-located `roster-verify.ts` + `sharepoint-download.ts`.** Both modules moved from `src/utils/` into `src/workflows/emergency-contact/` — they had exactly one consumer each. The `src/utils/` location implied broader reuse that never materialized. Dev-script consumers (`src/scripts/verify-batch-against-roster.ts`, `src/scripts/download-sharepoint-roster.ts`) now import across workflow boundary; that's fine for dev-only scripts.
 - **2026-04-22: `sharepoint-download.ts` promoted out of this directory** into `src/workflows/sharepoint-download/` once the dashboard queue-header button made it cross-cutting (every workflow can trigger the download, not just emergency-contact). The pre-flight `runPreflight()` and the dev CLI wrapper both still import `downloadSharePointFile` directly (bypassing the kernel — preflight already runs inside this workflow's kernel run, and nesting would double-emit tracker rows). Same afternoon, sharepoint-download was promoted to a full kernel workflow so dashboard clicks get per-run logs + queue rows + session-panel boxes — see `src/workflows/sharepoint-download/CLAUDE.md`.
 - **2026-04-14: `#pt_modalMask` intercepts clicks** — PeopleSoft leaves a transparent `#pt_modalMask` element visible even when no modal is open, causing every Playwright click to fail with "subtree intercepts pointer events" and retry forever. Fix: `dismissPeopleSoftModalMask(page)` evals `document.getElementById('pt_modalMask').style.display='none'` before any click. Called before Search click, Add-new-row, Edit Address, OK, and Save.

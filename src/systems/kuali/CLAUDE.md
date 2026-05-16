@@ -31,6 +31,8 @@ Kuali Build separation form automation: extraction and form filling for employee
 
 See [`SELECTORS.md`](./SELECTORS.md) for the auto-generated catalog of every selector this module exports.
 
+Example intents for `npm run selector:search`: [`common-intents.txt`](./common-intents.txt).
+
 ## Gotchas
 
 - Hardcoded Kuali space ID: `https://ucsd.kualibuild.com/build/space/5e47518b90adda9474c14adb`

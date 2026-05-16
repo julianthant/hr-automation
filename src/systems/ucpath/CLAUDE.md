@@ -6,6 +6,7 @@ PeopleSoft HR automation: Smart HR transactions, person search, job summary extr
 
 - `action-plan.ts` — `ActionPlan` class: queue-based step collector with `add()`, `preview()` (dry-run), and `execute()` (sequential with error wrapping as `TransactionError`)
 - `navigate.ts` — `getContentFrame(page)` (iframe `#main_target_win0`), `waitForPeopleSoftProcessing(frame)`, `searchPerson(page, ssn, firstName, lastName, dob)`, `navigateToSmartHR(page)` (direct URL preferred, menu fallback)
+- `person-org-summary.ts` — Person Organizational Summary search/read helpers used by eid-lookup and related flows (registry-backed name read — see Lessons Learned)
 - `transaction.ts` — Full Smart HR flow: template selection, effective date, create transaction, reason code, personal data, comments, job data tabs, save/submit. Exports ~15 individual step functions
 - `personal-data.ts` — Emergency Contact standalone component: `navigateToEmergencyContact(page, emplId)`, `readExistingContactNames(page)`, `demoteExistingContact(page, existingName)`
 - `job-summary.ts` — `getJobSummaryData(page, emplId)`: navigates to Workforce Job Summary, searches by EID, extracts work location (deptId, description) and job info (jobCode, description). Throws with a clear "verify EID in upstream record" message when Workforce returns no results — no cross-source auto-fallback by design.
@@ -25,6 +26,8 @@ PeopleSoft HR automation: Smart HR transactions, person search, job summary extr
    d. Verify the inline-selector test still passes: `tsx --test tests/unit/systems/inline-selectors.test.ts`.
 
 See [`SELECTORS.md`](./SELECTORS.md) for the auto-generated catalog of every selector this module exports.
+
+Example intents for `npm run selector:search`: [`common-intents.txt`](./common-intents.txt).
 
 ## Iframe Rule
 

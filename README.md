@@ -17,7 +17,7 @@ npm run setup          # validates environment
 |----------|-------------|
 | `UCPATH_USER_ID` | UCSD SSO username |
 | `UCPATH_PASSWORD` | UCSD SSO password |
-| `NAME` | Your timekeeper name (used in Kuali separation forms) |
+| `TIMEKEEPER_NAME` | Operator timekeeper name for Kuali separation timekeeper fills (`src/config.ts` requires this at startup) |
 
 Duo MFA is manual — the automation pauses and polls until you approve on your phone.
 
@@ -29,7 +29,6 @@ Most commands use **daemon mode**: the first invocation spawns a persistent proc
 ```bash
 npm run onboarding <email> [<email> ...]     # Enqueue; auto-spawns a daemon (CRM + UCPath + I9 Duo once)
 npm run onboarding:stop                      # Soft-stop all onboarding daemons
-npm run extract <email>                      # Extract employee data from CRM only (no UCPath)
 ```
 
 ### Separations
@@ -100,7 +99,7 @@ Open **http://localhost:5173** to monitor live workflow progress.
 ### Export / Utilities
 ```bash
 tsx --env-file=.env src/cli.ts export <workflow>   # Dump JSONL tracker to xlsx
-npm run clean:tracker                              # Prune .tracker/*.jsonl older than 30 days
+npm run clean:tracker                              # Default 30d: prune stale .tracker JSONL and .screenshots PNGs (`--days`, `--dir`, `--no-screenshots`, `--screenshots-only` — see `src/scripts/ops/clean-tracker.ts`)
 npm run test-login                                 # Smoke test UCPath + CRM auth
 npm run setup                                      # First-use environment validation wizard
 npm run schemas:export                             # Write each workflow's Zod input schema as JSON Schema
@@ -128,7 +127,8 @@ src/
                  #   oath-signature, oath-upload, emergency-contact, ocr, old-kronos-reports,
                  #   sharepoint-download, crm-doc-download
   infra/         # Auth flows + browser launch
-  services/      # OCR, roster matching, mobile photo capture
+  services/      # OCR, roster matching, mobile photo capture,
+                 #   timecard/ — shared UKG/timecard helpers (`src/services/timecard/`)
   tracker/       # JSONL append + SSE + Excel export
   dashboard/     # React SPA (Vite + shadcn/ui)
   domain/        # Pure HR business logic (identity, names, EIDs, etc.)

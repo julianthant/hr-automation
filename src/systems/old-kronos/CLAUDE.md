@@ -23,6 +23,8 @@ Core automation for Old UKG Kronos: employee search, navigation, modal handling,
 
 See [`SELECTORS.md`](./SELECTORS.md) for the auto-generated catalog of every selector this module exports.
 
+Example intents for `npm run selector:search`: [`common-intents.txt`](./common-intents.txt).
+
 ## Frame Hierarchy
 
 UKG uses deeply nested iframes:
@@ -57,7 +59,6 @@ UKG uses deeply nested iframes:
 - Frame names may vary — multiple fallback strategies everywhere
 - JS evaluation (`clickInFrames`, `jsClickText`) used extensively because Playwright selectors are unreliable in nested frames
 - Filesystem-fallback download path comes from `PATHS.downloadsDir` (`os.homedir() + "/Downloads"`); machine-portable
-- `mkdirSync(".auth/")` called at module level for screenshot directory
 - **Session expiry on refresh**: If a page refresh causes redirect to SSO login, `getGeniesIframe` detects this and calls `loginToUKG()` to re-authenticate automatically (requires Duo MFA approval)
 
 ## Verified Selectors

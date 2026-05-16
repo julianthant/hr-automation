@@ -3,12 +3,11 @@
 Add a new **Oath Signature Date** row to a UCPath Person Profile for one or
 more employees.
 
-**Kernel-based + daemon-mode.** Declared via `defineWorkflow` in `workflow.ts`
-and enqueued to a daemon via `ensureDaemonsAndEnqueue` (default). Supports N EIDs
-per invocation — each becomes its own queue item so a single daemon processes
-them sequentially, and `--parallel K` fans out across K daemons.
+**Kernel-based + daemon-mode.** Declared via `defineWorkflow` in `workflow.ts` and enqueued via `runOathSignatureCli` (`buildCliAdapter` → `ensureDaemonsAndEnqueue`). Supports N EIDs per invocation — each becomes its own queue item. `npm run oath-signature` exposes `-n`, `-p`, optional `--date`, and `--dry-run` (see `src/cli.ts`).
 
-**OCR prep:** the paper-roster prep flow (operator uploads PDF → OCR → preview → approve) lives in the OCR workflow (`src/workflows/ocr/`). When operator approves an OCR row with formType=oath, it fans out per-EID kernel queue items to this workflow's daemon. See `src/workflows/oath-signature/ocr-form.ts` for the per-form spec (schemas + match logic). `prepare.ts` and `preview-schema.ts` were deleted 2026-05-01 as part of the OCR migration.
+**OCR / prep:** Paper-roster flows run through the **`ocr`** workflow (dashboard TopBar → form type **`oath`**) — see `src/workflows/ocr/CLAUDE.md` and `src/workflows/oath-signature/ocr-form.ts` for schemas + hybrid match. Approved OCR runs pre-emit child rows and enqueue this workflow per `{ emplId, date? }`.
+
+**Synthetic `ocr` step:** `workflow.ts` declares **`"ocr"`** as the first step; the handler calls `ctx.markStep("ocr")` (no browser work — a timeline marker so rows show upload → OCR → UCPath).
 
 ## What this workflow does
 
@@ -44,33 +43,22 @@ Person Profile mounts inside `#ptifrmtgtframe` (name `TargetContent`), **not**
 
 ## Files
 
-- `schema.ts` — `OathSignatureInputSchema` (`{ emplId, date? }`)
+- `schema.ts` — `OathSignatureInputSchema` (EID required; optional `date`, `dryRun`, delegation fields)
+- `ocr-form.ts` — OCR schemas + match logic when dashboard OCR uses **`formType: "oath"`**
 - `enter.ts` — `buildOathSignaturePlan` ActionPlan + `OathSignatureContext`
-- `workflow.ts` — Kernel definition, CLI adapters (`runOathSignature`,
-  `runOathSignatureCli`)
+- `workflow.ts` — `defineWorkflow`, `runOathSignature`, `runOathSignatureCli`
 - `config.ts` — `UCPATH_PERSON_PROFILES_URL` deep link
-- `preview-schema.ts` — Zod schemas for the paper-roster prep flow:
-  `OathRosterOcrRecordSchema` (one row per signer), `OathOcrOutputSchema`
-  (array, fed to `ocrDocument`), `MatchStateSchema`, `OathPreviewRecordSchema`
-  (OCR record + match state + selection + warnings), `OathPrepareRowDataSchema`
-  (parent prep row payload, `mode: "prepare"`).
-- `prepare.ts` — `runPaperOathPrepare(input)` — OCR-then-match orchestrator
-  for the dashboard "Run" button. Mirrors `emergency-contact/prepare.ts`:
-  pending row → load roster → `ocrDocument(OathOcrOutputSchema)` → roster
-  match (auto-accept ≥ 0.85) → enqueue eid-lookup for unmatched →
-  progressive updates → done. Unsigned rows are kept in the records list
-  with `matchState: "extracted"` and `selected: false` so the operator
-  sees the full page (catches OCR misreads of the signed/unsigned column)
-  but they never become approvable kernel inputs.
 - `index.ts` — Barrel exports
+
+(Removed 2026-05-01: `prepare.ts`, `preview-schema.ts` — prep is owned by the **`ocr`** workflow + `src/tracker/dashboard/hono/routes/ocr.ts`.)
 
 ## Kernel Config
 
 | Field         | Value                                                                          | Why                                                                                   |
 | ------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
 | `systems`     | `[ucpath]`                                                                     | One auth domain, one Duo.                                                             |
-| `steps`       | `["ucpath-auth", "transaction"]`                                               | Matches `work-study` — auth phase + the single PeopleSoft transaction.                |
-| `schema`      | `{ emplId, date? }`                                                            | EID is required; `date` defaults to UCPath's today-prefill on the detail form.        |
+| `steps`       | `["ocr", "ucpath-auth", "transaction"]` — `ocr` is **`ctx.markStep` only** (timeline marker for OCR-sourced items); live work is `ucpath-auth` + `transaction` |
+| `schema`      | `{ emplId, date?, dryRun?, … }` — see `schema.ts`                                                            |
 | `batch`       | `{ mode: "sequential", preEmitPending: true, betweenItems: ["reset"] }` | Daemon reuses the browser across items; `reset` prevents page-state leak.   |
 | `tiling`      | `"single"`                                                                     | One browser window.                                                                   |
 | `authChain`   | `"sequential"`                                                                 | Single system, no chain to interleave.                                                |
@@ -79,9 +67,9 @@ Person Profile mounts inside `#ptifrmtgtframe` (name `TargetContent`), **not**
 ## Data Flow
 
 ```
-CLI: npm run oath-signature <emplId...> [--date MM/DD/YYYY]   (daemon — default)
-  → runOathSignatureCli
-    → ensureDaemonsAndEnqueue(oathSignatureWorkflow, inputs, { new, parallel })
+CLI: npm run oath-signature <emplId...> [--date …] [--dry-run]   (daemon — default)
+  → runOathSignatureCli (`buildCliAdapter`)
+    → ensureDaemonsAndEnqueue(…)
       - Validates every {emplId, date?} via schema
       - Inserts one SQLite task row per EID and appends enqueue audit to .tracker/daemons/oath-signature.queue.jsonl
       - Pre-emits `pending` tracker row per EID (dashboard populates instantly)
@@ -108,70 +96,17 @@ Single guard (tracker-side idempotency removed 2026-04-23):
 
 ## Capture integration (mobile-photo entry)
 
-`src/services/capture/` is the alternate entry point: instead of uploading a
-pre-scanned PDF, the operator can click "Capture" on the dashboard, scan
-a QR code on their phone, and snap photos of each signed roster page.
-When the operator taps Done, capture bundles the photos into a PDF and
-fires its `onFinalize` callback. The dashboard's
-`makeCaptureFinalize(dir)` routes any session with
-`workflow: "oath-signature"` straight into `runPaperOathPrepare` — the
-same code path the file-upload "Run" flow uses, just with the PDF
-arriving from `.tracker/uploads/<sessionId>.pdf` instead of a multipart
-form.
+`makeCaptureFinalize(trackerDir)` (`src/tracker/dashboard/capture-state.ts`) maps `workflow: "oath-signature"` to OCR **`formType: "oath"`** and invokes **`buildOcrPrepareHandler`** — same HTTP implementation as `/api/ocr/prepare` (`src/tracker/dashboard/hono/routes/ocr.ts`), with the PDF path coming from bundled photos under `.tracker/uploads/`.
 
-## Dashboard "Run" button (paper-roster prep)
+## Dashboard — OCR prepare + approve (oath form type)
 
-Mirrors emergency-contact's prep flow. The operator uploads a scanned
-paper roster PDF, the dashboard OCRs it, matches each signed row against
-the SharePoint onboarding xlsx, and (for unmatched rows) fans out into
-the eid-lookup daemon to recover EIDs. Once all rows reach a terminal
-match state, the operator reviews/edits per-row date, deselects any rows
-they don't want, and clicks **Approve** — N kernel queue items fan out,
-one per `{ emplId, date? }`.
+Paper-roster **prep** is not separate HTTP under this folder anymore. Select workflow **`oath-signature`** in the TopBar Run modal (or finish a **Capture** session — see above); the dashboard POSTs to **`/api/ocr/prepare`** and related routes in **`src/tracker/dashboard/hono/routes/ocr.ts`** with `formType: "oath"`. Orchestration, roster match, eid-lookup fan-out, `/api/ocr/approve-batch`, and stuck-row sweeps live under `src/tracker/dashboard/ocr/` + `src/tracker/ocr-http.ts` (see **`src/workflows/ocr/CLAUDE.md`**).
 
-```
-TopBar Run button (oath-signature)
-  → upload PDF (no rosterMode field — the SharePoint onboarding xlsx is
-    the only matching source)
-  → POST /api/oath-signature/prepare (multipart, fire-and-forget)
-    → runPaperOathPrepare in src/workflows/oath-signature/prepare.ts:
-      - synchronous: writes pending tracker row → loads newest .xlsx in
-        .tracker/rosters/ (or src/data/) → OCR via src/services/ocr/
-      - synchronous: per-row match (signed + roster name match >= 0.85)
-      - async: enqueue eid-lookup daemon for unmatched signed rows;
-        watches eid-lookup JSONL for completions, patches records progressively
-      - terminal status: done (writes the records list to data.records)
-  → PreviewRow renders at the top of the QueuePanel (data.mode === "prepare")
-  → Operator reviews/edits each row inline (date editable; selected toggle)
-  → POST /api/oath-signature/approve-batch:
-    - validates each OathPreviewRecord, requires matched/resolved + valid EID
-    - builds OathSignatureInput[] (`{ emplId, date? }`) — dateSigned (if any)
-      becomes the kernel's `date` field
-    - enqueues via enqueueFromHttp → ensureDaemonsAndEnqueue (auto-spawn if needed)
-    - marks prep row `done` step `approved`
-  → N child queue rows fan out; daemon claims them one at a time
-```
-
-Backend handlers live in `src/tracker/oath-signature-http.ts`. Same
-single-workflow scoping as emergency-contact: parent prep row and child
-per-EID rows both carry `workflow: "oath-signature"`; the discriminator
-is `data.mode === "prepare"` on the parent. Restart sweep:
-`sweepStuckOathPrepRows(dir)` runs at dashboard startup and marks any
-prep row in pending/running as failed (the OCR + eid-lookup polling
-lives in the dashboard's Node process, so a backend restart leaves any
-in-flight prep row orphaned).
-
-EID-lookup item-id prefix is `oath-prep-` (vs emergency-contact's
-`ec-prep-`), so the two prep flows can run concurrently without seeing
-each other's completion events when watching the same eid-lookup JSONL.
+Approve still fans out **`oath-signature`** daemon queue items (`{ emplId, date? }`). Parent prep rows use `data.mode === "prepare"`; eid-lookup delegation uses item ids prefixed **`oath-prep-`** so they do not collide with emergency-contact prep.
 
 ### Shared roster + match primitives
 
-`prepare.ts` imports `findLatestRoster`, `loadRoster`, and
-`matchAgainstRoster` from `src/services/matching/` — a shared module that holds
-roster xlsx loading, name matching (with Levenshtein), and US address
-normalization. emergency-contact also consumes it. See `src/services/matching/index.ts`
-for the full export surface.
+OCR handlers import **`src/services/matching/`** for roster load + name match — shared with other workflows.
 
 ## Gotchas
 
@@ -184,32 +119,11 @@ for the full export surface.
   with the same accessible name. The selector anchors on the PeopleSoft id
   `DERIVED_JPM_JP_JPM_JP_ADD_CAT_ITM$41$$0` first, falling back to
   `getByRole("link", ...).first()`.
-- **Unsigned rows are kept in the prep payload.** `runPaperOathPrepare`
-  returns *every* OCR'd row, including ones where `signed === false`.
-  They land as `matchState: "extracted"`, `selected: false`, never get a
-  roster lookup, and are filtered out of the approve fan-out. Keeping
-  them gives the operator a full picture of what the OCR saw — if the
-  LLM misreads a column, the row will appear deselected and the operator
-  can flip the toggle rather than re-uploading.
+- **Unsigned rows in OCR prep.** The OCR orchestrator keeps every extracted row in the prep payload; unsigned rows stay deselected so operators can catch a mis-read signature column without re-uploading.
 
 ## Lessons Learned
 
-- **2026-04-28: Paper-roster OCR-prep flow shipped (extends emergency-contact's
-  pattern).** New `src/workflows/oath-signature/{preview-schema,prepare}.ts`
-  + `src/tracker/oath-signature-http.ts` mirror emergency-contact's prep
-  shape. Same `data.mode === "prepare"` discriminator on the parent row,
-  same single-workflow scoping (parent + children both
-  `workflow: "oath-signature"`), same fan-out-on-approve. Differences:
-  rosterMode is fixed (always xlsx in `.tracker/rosters/` or `src/data/` —
-  the SharePoint onboarding spreadsheet); unsigned rows surface as
-  deselected so the operator can spot OCR misreads of the signature
-  column; eid-lookup itemId prefix is `oath-prep-` (so concurrent
-  emergency-contact + oath-signature prep flows don't collide on the
-  shared eid-lookup JSONL); kernel input is `{emplId, date?}` per
-  `OathSignatureInputSchema`. Cross-workflow imports of
-  `roster-loader.ts` + `match.ts` from emergency-contact (second
-  consumer; the rule is "promote when there are three"). Async EID
-  resolution chain reuses the same prep-watch-eid-lookup pattern.
+- **2026-04-28: Paper-roster OCR prep migrated to the shared `ocr` workflow.** Oath form type (`formType: "oath"`) is handled by dashboard routes under `/api/ocr/*` (`src/tracker/dashboard/hono/routes/ocr.ts`); per-form schemas + match live in `ocr-form.ts`. Deleted workflow-local `prepare.ts` / `preview-schema.ts`. Parent rows still use `data.mode === "prepare"` where applicable; eid-lookup queue items use `oath-prep-` prefixes. Kernel input remains `{ emplId, date? }` per `OathSignatureInputSchema`.
 - **2026-04-23: Removed tracker-side idempotency guard; only the live-page
   probe remains.** `src/core/idempotency.ts` was deleted repo-wide. The
   earlier two-guard design (live-page sentinel + `hashKey({workflow,

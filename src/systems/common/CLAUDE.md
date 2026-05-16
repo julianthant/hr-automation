@@ -33,8 +33,9 @@ belong in the system that owns them, not in common.
 ## Pattern
 
 ```typescript
+// From any `src/systems/<system>/` module (not `common/` — there is no `./selectors.js` here).
 import { safeClick } from "../common/index.js";
-import { ucpathSelectors } from "./selectors.js";
+import { ucpathSelectors } from "../ucpath/selectors.js";
 
 await safeClick(
   ucpathSelectors.jobData.compRateCodeInput(frame),
@@ -82,6 +83,8 @@ registries:
 - [`src/systems/kuali/SELECTORS.md`](../kuali/SELECTORS.md) · [`LESSONS.md`](../kuali/LESSONS.md)
 - [`src/systems/new-kronos/SELECTORS.md`](../new-kronos/SELECTORS.md) · [`LESSONS.md`](../new-kronos/LESSONS.md)
 - [`src/systems/old-kronos/SELECTORS.md`](../old-kronos/SELECTORS.md) · [`LESSONS.md`](../old-kronos/LESSONS.md)
+- [`src/systems/servicenow/SELECTORS.md`](../servicenow/SELECTORS.md) · [`LESSONS.md`](../servicenow/LESSONS.md)
+- [`src/systems/sharepoint/SELECTORS.md`](../sharepoint/SELECTORS.md) · [`LESSONS.md`](../sharepoint/LESSONS.md)
 - [`src/systems/ucpath/SELECTORS.md`](../ucpath/SELECTORS.md) · [`LESSONS.md`](../ucpath/LESSONS.md)
 
 Before mapping anything new, always run `npm run selector:search "<intent>"`
