@@ -8,6 +8,14 @@ import { rmSync } from "node:fs";
 import { separationsWorkflow } from "./workflow.js";
 import type { SeparationInput } from "./workflow.js";
 
+const runSeparationDaemonCli = buildCliAdapter<[string[]], SeparationInput>({
+  workflow: separationsWorkflow,
+  emptyMessage: "runSeparationCli: no doc IDs provided",
+  buildInputs: (ids) => ids.map((docId) => ({ docId })),
+  deriveItemId: (item) => item.docId,
+  buildPendingData: (item) => ({ docId: item.docId }),
+});
+
 /**
  * CLI adapter for single-doc separation runs. Delegates to
  * `runWorkflow(separationsWorkflow, { docId })` which owns browser launch, the
@@ -77,11 +85,5 @@ export async function runSeparationCli(
   docIds: string[],
   options: { new?: boolean; parallel?: number } = {},
 ): Promise<void> {
-  await buildCliAdapter<[string[]], SeparationInput>({
-    workflow: separationsWorkflow,
-    emptyMessage: "runSeparationCli: no doc IDs provided",
-    buildInputs: (ids) => ids.map((docId) => ({ docId })),
-    deriveItemId: (item) => item.docId,
-    buildPendingData: (item) => ({ docId: item.docId }),
-  })(docIds, options);
+  await runSeparationDaemonCli(docIds, options);
 }

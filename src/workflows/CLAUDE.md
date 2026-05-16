@@ -53,21 +53,28 @@ Add a Commander subcommand to `src/cli.ts` invoking your workflow's CLI adapter.
 
 As of 2026-04-22, CLI-driven workflows should default to **daemon mode** (see root `CLAUDE.md` → "Daemon mode"). This avoids re-Duo per invocation and enables shared-queue load balancing across multiple alive daemons.
 
+As of 2026-05-16, use `buildCliAdapter` from `src/core/cli-adapter.ts` for CLI-driven daemon
+adapters. It centralizes the `ensureDaemonsAndEnqueue` call, pre-emits pending
+tracker rows with operator-subject fields, and exposes narrow hooks for
+workflow-specific shapes:
+
+- `buildPendingData(input, itemId)` — required pending-row fields.
+- `pendingExtras(input, itemId, runId, parentRunId)` — optional per-row fields
+  such as batch display ordinals.
+- `onPreEmitFailed(input, runId, error, itemId)` — optional failure cleanup for
+  rows that were pre-emitted before daemon spawn/enqueue failed.
+
 Converting a workflow is mechanical — five edits:
 
-1. **Add a `runXxxCli` adapter** to `workflow.ts` that wraps `ensureDaemonsAndEnqueue`:
+1. **Add a `runXxxCli` adapter** to `workflow.ts` using `buildCliAdapter`:
    ```ts
-   export async function runXxxCli(
-     // ...workflow-specific args...
-     options: { new?: boolean; parallel?: number } = {},
-   ): Promise<void> {
-     const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
-     const inputs = [/* ...build typed WorkflowInput[]... */];
-     await ensureDaemonsAndEnqueue(xxxWorkflow, inputs, {
-       new: options.new,
-       parallel: options.parallel,
-     });
-   }
+   export const runXxxCli = buildCliAdapter<[string[]], XxxInput>({
+     workflow: xxxWorkflow,
+     emptyMessage: "runXxxCli: no inputs provided",
+     buildInputs: (ids) => ids.map((id) => ({ id })),
+     deriveItemId: (input) => input.id,
+     buildPendingData: (input) => ({ id: input.id }),
+   });
    ```
    Do **not** remove the existing `runXxx` / `runXxxBatch` functions — they stay for in-process use (tests, composed workflows that spawn workflows from inside their handler).
 2. **Re-export `runXxxCli` from the workflow's `index.ts`** barrel so the CLI and `cli-daemon.ts` can import it.
@@ -178,5 +185,5 @@ Kernel workflow (since 2026-04-22), but with two non-standard wrinkles documente
 ## Lessons Learned
 
 - **2026-04-10: Batch mode pattern for sequential processing** — For workflows that reuse browser sessions across multiple items (e.g. separations, emergency-contact), the pattern is: (1) pre-emit `pending` for all items with pre-assigned `runId`s (kernel: `preEmitPending: true` + `onPreEmitPending` callback), (2) auth once, (3) process each item sequentially. The kernel's `runWorkflowBatch` does this declaratively; legacy workflows wire `preAssignedRunId` into `withTrackedWorkflow` manually.
-- **2026-04-22: Daemon-mode conversion template.** The `runXxxCli` adapter pattern (see above) is intentionally a thin function, not a kernel abstraction — input shaping (`docId` vs `{emplId, effectiveDate}` vs ...) is workflow-specific and a base class would just re-expose every parameter as `unknown`. The common logic IS abstracted: `ensureDaemonsAndEnqueue` handles daemon discovery, spawning, validation, enqueue, and wake in one call. Adapters are ~10 lines of boilerplate that ship typed arguments into the shared core. If that boilerplate ever grows a third concern (e.g. a cross-workflow priority field), promote the adapter into a helper — until then, keep it explicit in each workflow so the call site reads naturally.
+- **2026-05-16: `buildCliAdapter` is the canonical daemon CLI pattern.** Workflow CLI adapters now use `buildCliAdapter` instead of hand-rolled `ensureDaemonsAndEnqueue` calls when their job is "shape CLI args → enqueue typed inputs → pre-emit pending rows." Keep workflow-specific pending data in small `buildPendingData` helpers when it is reused by in-process batch paths (emergency-contact is the current example). Separations previously rebuilt its adapter per call to dodge a TDZ cycle; the safe hoist required exporting CLI runners from `src/workflows/separations/index.ts` directly instead of re-exporting them from `workflow.ts`.
 - **2026-04-10: ensurePageHealthy() before each phase (historical, legacy workflows)** — SAML errors and session expiry can happen silently between phases. Pre-kernel workflows wrapped each major phase with `ensurePageHealthy()` from `src/core/page-health.ts`. Removed 2026-04-18 — every workflow is now kernel-based, and the kernel's `Session.launch` retries failed auth up to 3 attempts. Don't reach for `ensurePageHealthy` — use `ctx.session.healthCheck(id)` if you need an explicit mid-handler probe.
