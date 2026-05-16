@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test, mock } from "node:test";
 import assert from "node:assert";
 import { mkdirSync, writeFileSync, appendFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -7,6 +7,7 @@ import { watchChildRuns } from "../../../src/tracker/delegation/watch-child-runs
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
 import { closeStateDbForTests } from "../../../src/tracker/state/db.js";
+import { log } from "../../../src/utils/log.js";
 
 function setupTrackerDir(): string {
   const dir = join(tmpdir(), `wcr-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -298,6 +299,37 @@ test("survives when target file doesn't exist initially", async () => {
   const outcomes = await promise;
   assert.equal(outcomes.length, 1);
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("backs off fs.watch creation failures while polling continues", async () => {
+  const dir = setupTrackerDir();
+  const date = "2026-05-01";
+  const file = join(dir, `eid-lookup-${date}.jsonl`);
+  writeFileSync(file, "");
+  const warn = mock.method(log, "warn", () => {});
+
+  try {
+    await assert.rejects(
+      () => watchChildRuns({
+        workflow: "eid-lookup",
+        expectedItemIds: ["never-arrives"],
+        trackerDir: dir,
+        date,
+        timeoutMs: 450,
+        watcherFactory: () => {
+          throw new Error("watch unavailable");
+        },
+      }),
+      /timeout/i,
+    );
+
+    assert.equal(warn.mock.callCount(), 1);
+    const [message] = warn.mock.calls[0]?.arguments ?? [];
+    assert.match(String(message), /fsWatch creation failed/);
+  } finally {
+    warn.mock.restore();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("abortIfRowState: rejects when parent row reaches the sentinel step", async () => {

@@ -22,6 +22,8 @@ import type { TrackerEntry } from "../jsonl.js";
 import { createOperatorDiscardError } from "../ocr-prepare-abort.js";
 import { openControlDb } from "../../core/control-db.js";
 import { createTaskStore, type TaskRow } from "../../core/task-store/index.js";
+import { errorMessage } from "../../utils/errors.js";
+import { log } from "../../utils/log.js";
 
 export interface ChildOutcome {
   workflow: string;
@@ -65,6 +67,8 @@ export interface WatchChildRunsOpts {
    * set the abort flag for this session (same-event-loop as the watcher).
    */
   shouldAbort?: () => boolean;
+  /** @internal test seam for fs.watch failure/backoff coverage. */
+  watcherFactory?: typeof fsWatch;
 }
 
 const DEFAULT_TIMEOUT_MS = 60 * 60_000;
@@ -350,6 +354,7 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
   const isTerminal =
     opts.isTerminal ?? ((e: TrackerEntry) => e.status === "done" || e.status === "failed");
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const watchFile = opts.watcherFactory ?? fsWatch;
 
   const outcomes: ChildOutcome[] = [];
   let lastSize = 0;
@@ -359,6 +364,8 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
   return new Promise<ChildOutcome[]>((resolve, reject) => {
     let finalized = false;
     let watcher: ReturnType<typeof fsWatch> | undefined;
+    let watcherCreationFailed = false;
+    let watcherCreationRetryAt = 0;
     const abortCache: { current: AbortFileCache | null } = { current: null };
 
     const cleanup = (): void => {
@@ -479,25 +486,29 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
     }, timeoutMs);
     timeoutHandle.unref?.();
 
+    const maybeCreateWatcher = (): void => {
+      if (watcher || !existsSync(file)) return;
+      const now = Date.now();
+      if (watcherCreationFailed && now < watcherCreationRetryAt) return;
+      try {
+        watcher = watchFile(file, { persistent: false }, () => checkFile());
+        watcherCreationFailed = false;
+        watcherCreationRetryAt = 0;
+      } catch (err) {
+        watcherCreationFailed = true;
+        watcherCreationRetryAt = now + 30_000;
+        log.warn(`watch-child-runs: fsWatch creation failed for ${file}: ${errorMessage(err)}`);
+      }
+    };
+
     const pollHandle = setInterval(() => {
       checkFile();
       checkAbort();
-      if (!watcher && existsSync(file)) {
-        try {
-          watcher = fsWatch(file, { persistent: false }, () => checkFile());
-        } catch { /* tolerate */ }
-      }
+      maybeCreateWatcher();
     }, WATCH_CHILD_POLL_MS);
     pollHandle.unref?.();
 
-    try {
-      if (existsSync(file)) {
-        watcher = fsWatch(file, { persistent: false }, () => checkFile());
-      }
-    } catch {
-      // fs.watch can throw on some FS (NFS, certain Linux configs). Polling
-      // covers; not fatal.
-    }
+    maybeCreateWatcher();
 
     checkFile();
     if (finalized) return;
