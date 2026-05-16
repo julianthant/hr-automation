@@ -1,6 +1,6 @@
 # Workflows — Orchestration Layer
 
-Each subdirectory is one composed workflow. As of 2026-04-17, every workflow is kernel-based: it declares its shape via `defineWorkflow` in `workflow.ts` and is run by `runWorkflow` / `runWorkflowBatch` / `runWorkflowPool` in `src/core/`. The legacy `defineDashboardMetadata` / inline `withTrackedWorkflow` shape is retained in `src/core/` only as a registration affordance for any future non-kernel workflow that lands — no caller in `src/workflows/*` uses it today.
+Each subdirectory is one composed workflow. As of 2026-04-17, every workflow is kernel-based: it declares its shape via `defineWorkflow` in `workflow.ts` and is run by `runWorkflow` / `runWorkflowBatch` / `runWorkflowPool` in `src/core/`.
 
 See the root `CLAUDE.md` "Writing a new workflow" section for the minimal `defineWorkflow` example. This file lists what's specific to this directory.
 
@@ -22,7 +22,7 @@ Do **not** create `tracker.ts` for new workflows. The kernel's JSONL emissions +
 
 Declare `label`, `getName`, `getId`, and labeled `detailFields` inside `defineWorkflow({ ... })`. Every key you list in `detailFields` should be populated by at least one `ctx.updateData({ [key]: ... })` call before the handler returns — a runtime `log.warn` fires if not. That's the entire dashboard wiring for kernel workflows.
 
-Legacy workflows would call `defineDashboardMetadata({ name, label, steps, systems, detailFields })` at module load in `index.ts`, but as of 2026-04-17, all workflows (including onboarding's parallel mode, migrated to kernel pool mode) are kernel-based — no `defineDashboardMetadata` callers remain in `src/workflows/*`. New workflows must follow the kernel path exclusively.
+All workflows are kernel-based as of 2026-04-17. New workflows must follow the kernel path exclusively.
 
 Add the workflow's step list to the "Step Tracking Per Workflow" table in root `CLAUDE.md` for documentation. Frontend requires no edits — the dashboard reads everything from the server-side registry via `/api/workflow-definitions`.
 

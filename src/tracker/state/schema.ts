@@ -3,7 +3,7 @@ export interface Migration {
   sql: string;
 }
 
-export const LATEST_SCHEMA_VERSION = 6;
+export const LATEST_SCHEMA_VERSION = 7;
 
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -453,6 +453,29 @@ CREATE INDEX IF NOT EXISTS worker_commands_worker_state_idx
 
 CREATE INDEX IF NOT EXISTS worker_commands_task_state_idx
   ON worker_commands(target_task_id, state, requested_at);
+    `,
+  },
+  {
+    // Migration 7: drop tasks.status and task_attempts.status legacy columns.
+    //
+    // These columns were the original state enum (v1/v2 schema). Migration v3
+    // added control_state as the authoritative column and kept status as a
+    // dual-write compat shim. With tracker data wiped on 2026-05-15 and all
+    // dual-writes removed from application code, the columns are now dead.
+    //
+    // SQLite supports DROP COLUMN since 3.35.0 (Node 26's bundled sqlite is
+    // new enough). The DROP rewrites the table — on a wiped DB this is
+    // near-instant.
+    //
+    // OPERATOR NOTE: delete .tracker/state.db before first boot after this
+    // change, or let the migration run automatically (it will be fast on a
+    // small/empty DB). If the DB has millions of rows, the rewrite may take
+    // tens of seconds — same as migration 6 for run_events.
+    version: 7,
+    sql: String.raw`
+DROP INDEX IF EXISTS tasks_status_idx;
+ALTER TABLE tasks DROP COLUMN status;
+ALTER TABLE task_attempts DROP COLUMN status;
     `,
   },
 ];

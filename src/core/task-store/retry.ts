@@ -34,10 +34,10 @@ export function retryTaskFromAttempt(
     const runId = randomUUID()
     db.prepare(`
       INSERT INTO task_attempts (
-        id, task_id, attempt_no, run_id, status, control_state,
+        id, task_id, attempt_no, run_id, control_state,
         tracker_workflow, tracker_item_id, data_json, created_at, updated_at
       ) VALUES (
-        @attemptId, @taskId, @attemptNo, @runId, 'queued', 'pending',
+        @attemptId, @taskId, @attemptNo, @runId, 'pending',
         @workflow, @itemId, '{}', @now, @now
       )
     `).run({
@@ -52,7 +52,6 @@ export function retryTaskFromAttempt(
     db.prepare(`
       UPDATE tasks
       SET control_state = 'queued',
-          status = 'queued',
           run_id = @runId,
           current_attempt_id = @attemptId,
           claimed_by_worker_id = NULL,

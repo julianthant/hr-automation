@@ -285,13 +285,13 @@ describe("cleanTrackerMain SQLite prune", () => {
 
     // Need parent `tasks` rows because task_attempts.task_id is a FK.
     db.prepare(
-      "INSERT INTO tasks (id, workflow, item_id, task_kind, status, created_at, updated_at) " +
+      "INSERT INTO tasks (id, workflow, item_id, task_kind, control_state, created_at, updated_at) " +
         "VALUES ('t1','x','i1','workflow_item','done',@old,@old), " +
         "       ('t2','x','i2','workflow_item','running',@old,@old), " +
         "       ('t3','x','i3','workflow_item','done',@today,@today)",
     ).run({ old: oldIso, today: todayIso });
     db.prepare(
-      "INSERT INTO task_attempts (id, task_id, attempt_no, run_id, status, " +
+      "INSERT INTO task_attempts (id, task_id, attempt_no, run_id, control_state, " +
         "tracker_workflow, tracker_item_id, created_at, updated_at) VALUES " +
         "('a-old-done','t1',1,'r1','done','x','i1',@old,@old), " +
         "('a-old-running','t2',1,'r2','running','x','i2',@old,@old), " +

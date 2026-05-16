@@ -55,12 +55,12 @@ export function enqueueTasks<T>(db: Database, control: ControlDb, request: Enque
       const attemptId = randomUUID()
       db.prepare(`
         INSERT INTO tasks (
-          id, workflow, item_id, run_id, task_kind, status, parent_task_id,
+          id, workflow, item_id, run_id, task_kind, parent_task_id,
           data_json, input_json, control_state, priority, available_at,
           enqueued_at, current_attempt_id, parent_run_id, source, metadata_json,
           created_at, updated_at, terminal_at
         ) VALUES (
-          @taskId, @workflow, @itemId, @runId, 'workflow_item', 'queued', @parentTaskId,
+          @taskId, @workflow, @itemId, @runId, 'workflow_item', @parentTaskId,
           '{}', @inputJson, 'queued', 0, @now,
           @now, NULL, @parentRunId, @source, @metadataJson,
           @now, @now, NULL
@@ -80,10 +80,10 @@ export function enqueueTasks<T>(db: Database, control: ControlDb, request: Enque
       })
       db.prepare(`
         INSERT INTO task_attempts (
-          id, task_id, attempt_no, run_id, status, control_state,
+          id, task_id, attempt_no, run_id, control_state,
           tracker_workflow, tracker_item_id, data_json, created_at, updated_at
         ) VALUES (
-          @attemptId, @taskId, 1, @runId, 'queued', 'pending',
+          @attemptId, @taskId, 1, @runId, 'pending',
           @workflow, @itemId, '{}', @now, @now
         )
       `).run({ attemptId, taskId, runId, workflow: request.workflow, itemId, now })
@@ -123,8 +123,7 @@ function adoptExistingTaskForEnqueue(
   const attemptId = ensureQueuedAttemptForTask(db, request)
   db.prepare(`
     UPDATE tasks
-    SET status = 'queued',
-        input_json = @inputJson,
+    SET input_json = @inputJson,
         control_state = 'queued',
         priority = 0,
         available_at = @now,
@@ -186,7 +185,6 @@ function ensureQueuedAttemptForTask(
     db.prepare(`
       UPDATE task_attempts
       SET task_id = @taskId,
-          status = 'queued',
           control_state = 'pending',
           tracker_workflow = @workflow,
           tracker_item_id = @itemId,
@@ -217,10 +215,10 @@ function ensureQueuedAttemptForTask(
   const attemptId = randomUUID()
   db.prepare(`
     INSERT INTO task_attempts (
-      id, task_id, attempt_no, run_id, status, control_state,
+      id, task_id, attempt_no, run_id, control_state,
       tracker_workflow, tracker_item_id, data_json, created_at, updated_at
     ) VALUES (
-      @attemptId, @taskId, @attemptNo, @runId, 'queued', 'pending',
+      @attemptId, @taskId, @attemptNo, @runId, 'pending',
       @workflow, @itemId, '{}', @now, @now
     )
   `).run({

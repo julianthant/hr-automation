@@ -1,7 +1,6 @@
 export type * from './kernel/types.js'
 export {
   register,
-  defineDashboardMetadata,
   getAll,
   getByName,
   clear,
@@ -40,7 +39,6 @@ export {
   claimNextItem,
   markItemDone,
   markItemFailed,
-  unclaimItem,
   recoverOrphanedClaims,
   readQueueState,
   queueFilePath,

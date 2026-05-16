@@ -311,7 +311,7 @@ test("scheduler marks dependency terminal after already-applied OCR continuation
       workflow: "ocr",
       itemId: "session-1",
       runId: "ocr-run-1",
-    })?.status, "awaiting_child_results");
+    })?.status, "waiting_on_children");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -422,13 +422,13 @@ test("scheduler resolves only terminal child while another dependency remains pe
       runId: "child-run-1",
     })?.status, "queued");
     const attempts = store.db.prepare(`
-      SELECT tracker_item_id AS itemId, status
+      SELECT tracker_item_id AS itemId, control_state AS status
       FROM task_attempts
       ORDER BY tracker_item_id
     `).all() as Array<{ itemId: string; status: string }>;
     assert.deepEqual(attempts.map((r) => ({ ...r })), [
       { itemId: "ocr-oath-ocr-run-1-r0", status: "done" },
-      { itemId: "ocr-oath-ocr-run-1-r1", status: "queued" },
+      { itemId: "ocr-oath-ocr-run-1-r1", status: "pending" },
     ]);
     assert.equal(emitted.length, 1);
   } finally {

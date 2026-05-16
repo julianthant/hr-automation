@@ -1,7 +1,7 @@
 // Barrel exports for the separations workflow.
 //
 // Dashboard metadata auto-registers via `defineWorkflow` in `workflow.ts` at
-// module load — no `defineDashboardMetadata` call needed.
+// module load — no separate metadata-registration call needed.
 
 export { separationsWorkflow } from "./workflow.js";
 export { runSeparation, runSeparationBatch, runSeparationCli } from "./cli.js";

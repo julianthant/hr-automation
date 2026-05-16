@@ -1,6 +1,6 @@
 // Importing workflow.ts triggers defineWorkflow side-effects that register
-// dashboard metadata in the kernel's registry — equivalent to the old
-// defineDashboardMetadata call that lived here pre-migration.
+// dashboard metadata in the kernel's registry — same outcome as the old
+// explicit metadata registration call that lived here pre-migration.
 export {
   kronosReportsWorkflow,
   KronosItemSchema,

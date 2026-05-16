@@ -11,7 +11,7 @@ import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.
 import { __resetPreflightThrottleForTests } from "../../../src/tracker/dashboard/hono/routes/base.js";
 import { registerLocalFile } from "../../../src/tracker/files/files.js";
 import { trackEventForDate, trackEvent, emitScreenshotEvent } from "../../../src/tracker/jsonl.js";
-import { clear, defineDashboardMetadata } from "../../../src/core/kernel/registry.js";
+import { clear, register } from "../../../src/core/kernel/registry.js";
 import { defineWorkflow } from "../../../src/core/kernel/workflow.js";
 
 test("Hono /api/v2/projection/health returns projection metadata", async () => {
@@ -72,7 +72,7 @@ test("Hono /api/workflow-definitions returns registered workflow metadata", asyn
       detailFields: [],
       handler: async () => {},
     });
-    defineDashboardMetadata({
+    register({
       name: "legacy-hono",
       label: "Legacy Hono",
       systems: ["crm"],

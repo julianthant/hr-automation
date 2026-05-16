@@ -340,7 +340,6 @@ function markTaskTerminalWithoutAttempt(
   store.db.prepare(`
     UPDATE tasks
     SET control_state = @state,
-        status = @state,
         terminal_error = @error,
         terminal_at = COALESCE(terminal_at, @now),
         claimed_by_worker_id = NULL,

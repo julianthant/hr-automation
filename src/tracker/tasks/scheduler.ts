@@ -181,7 +181,7 @@ export async function runDependencySchedulerTick(
         if (allDependenciesTerminal(opts.store, dep.parent.id)) {
           updateTaskStatus(opts.store, {
             taskId: dep.parent.id,
-            status: "awaiting_child_results",
+            status: "waiting_on_children",
             now,
           });
         }
