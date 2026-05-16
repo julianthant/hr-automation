@@ -22,8 +22,7 @@ systems: [{
 - `duo-poll.ts` — `pollDuoApproval(page, options)` — unified Duo polling loop with URL match, successCheck, postApproval, recovery callbacks, and optional `systemLabel` for the voice-cue + Telegram hooks
 - `voice-cue.ts` — `cueDuo(systemId)` — best-effort macOS voice cue ("Duo for UCPath") spoken via `say` when `HR_AUTOMATION_VOICE_CUES=1`. No-op on non-darwin or when the env var is unset. Per-systemId 30s cooldown prevents rapid duplicates across auth retries. Never throws. `pollDuoApproval` calls this once per auth attempt before the polling loop starts
 - `telegram-notify.ts` — `notifyAuthEvent(ev)` — best-effort Telegram DM via Bot API on Duo `waiting` / `approved` / `timeout` / `resent`. Activated only when `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` are both in env; no-op otherwise. Mirrors `voice-cue.ts` (factory `createTelegramNotifier` + default instance, never throws). Workflow + runId pulled from `AsyncLocalStorage` log context so messages name the kernel item without per-call-site plumbing
-- `session.ts` — `isOnAuthenticatedPage(page)` — URL-based check for ACT CRM auth state (not session persistence)
-- `types.ts` — `LoginOptions` (fresh flag), `AuthResult` (ucpath/actCrm booleans)
+- `types.ts` — `AuthResult` (ucpath/actCrm booleans)
 
 ## Login Flows
 

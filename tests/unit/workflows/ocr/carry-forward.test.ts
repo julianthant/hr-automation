@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert";
 import { applyCarryForward } from "../../../../src/workflows/ocr/carry-forward.js";
-import { oathOcrFormSpec } from "../../../../src/workflows/oath-signature/ocr-form.js";
+import { oathOcrFormSpec } from "../../../../src/services/ocr/forms/oath.js";
 import type { AnyOcrFormSpec } from "../../../../src/workflows/ocr/types.js";
 
 // Cast helpers: tests mix v1 ("resolved") and v2 ("lookup-pending") record

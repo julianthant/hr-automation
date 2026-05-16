@@ -22,7 +22,6 @@ const DASHBOARD_HONO_ROUTE_MANIFEST: readonly DashboardHonoRouteManifestEntry[] 
   { method: "GET", path: "/api/rosters" },
   { method: "GET", path: "/api/preflight" },
   { method: "GET", path: "/api/search" },
-  { method: "GET", path: "/api/preview-inbox" },
   { method: "GET", path: "/api/failures" },
   { method: "GET", path: "/api/selector-warnings" },
   { method: "GET", path: "/api/screenshots" },

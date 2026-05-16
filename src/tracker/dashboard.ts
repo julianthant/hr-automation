@@ -43,14 +43,6 @@ export type {
 } from "./dashboard/search.js";
 
 export {
-  buildPreviewInboxHandler,
-} from "./dashboard/preview-inbox.js";
-export type {
-  PreviewInboxDeps,
-  PreviewInboxRow,
-} from "./dashboard/preview-inbox.js";
-
-export {
   buildFailuresHandler,
   computeFailureCounts,
 } from "./dashboard/failures.js";

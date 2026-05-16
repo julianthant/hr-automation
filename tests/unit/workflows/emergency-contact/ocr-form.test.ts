@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { emergencyContactOcrFormSpec } from "../../../../src/workflows/emergency-contact/ocr-form.js";
+import { emergencyContactOcrFormSpec } from "../../../../src/services/ocr/forms/emergency-contact.js";
 import type { RosterRow } from "../../../../src/workflows/ocr/types.js";
 
 const roster: RosterRow[] = [

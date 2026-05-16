@@ -6,7 +6,6 @@ import {
   readEntriesForDate,
 } from "../../../jsonl.js";
 import { buildFailuresHandler } from "../../failures.js";
-import { buildPreviewInboxHandler } from "../../preview-inbox.js";
 import { buildSearchHandler } from "../../search.js";
 import { buildSelectorWarningsHandler } from "../../selector-warnings.js";
 import type { DashboardHonoDeps } from "../context.js";
@@ -25,19 +24,6 @@ export function registerSearchRoutes(app: Hono, deps: DashboardHonoDeps): void {
         readEntriesForDate: (wf, date) => readEntriesForDate(wf, date, deps.dir),
       });
       return jsonResponse(handler(q, { workflow, limit, days }));
-    } catch {
-      return jsonResponse([]);
-    }
-  });
-
-  app.get("/api/preview-inbox", () => {
-    try {
-      const handler = buildPreviewInboxHandler({
-        listWorkflows: () => listWorkflows(deps.dir),
-        listDates: (workflow) => listDatesForWorkflow(workflow, deps.dir),
-        readEntriesForDate: (workflow, date) => readEntriesForDate(workflow, date, deps.dir),
-      });
-      return jsonResponse(handler());
     } catch {
       return jsonResponse([]);
     }

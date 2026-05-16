@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { isAcceptedDept, parseNameInput } from "../../../../src/workflows/eid-lookup/search.js";
+import { parsePersonOrgNameInput as parseNameInput } from "../../../../src/systems/ucpath/person-org-summary.js";
+import { isAcceptedHdhDepartment as isAcceptedDept } from "../../../../src/domain/hdh/departments.js";
 
 describe("isAcceptedDept", () => {
   it("accepts HOUSING/DINING/HOSPITALITY", () => {
