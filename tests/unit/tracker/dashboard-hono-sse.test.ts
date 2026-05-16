@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -157,6 +157,47 @@ test("Hono /events/logs filters runId and treats missing runId as #1", async () 
   );
   const logs = unpack(stream.messages[0]) as Array<{ message: string }>;
   assert.deepEqual(logs.map((log) => log.message), ["legacy run one"]);
+  await stream.cancel();
+});
+
+test("Hono /events/logs replays snapshot when source length shrinks", async () => {
+  appendLog("onboarding", "2026-04-19", {
+    workflow: "onboarding",
+    itemId: "alice@example.com",
+    runId: "run-a",
+    level: "step",
+    message: "first",
+    ts: "2026-04-19T10:00:01.000Z",
+  });
+  appendLog("onboarding", "2026-04-19", {
+    workflow: "onboarding",
+    itemId: "alice@example.com",
+    runId: "run-a",
+    level: "step",
+    message: "second",
+    ts: "2026-04-19T10:00:02.000Z",
+  });
+
+  const response = await app().request(
+    hubUrl("logs", { workflow: "onboarding", id: "alice@example.com", runId: "run-a", date: "2026-04-19" }),
+  );
+  setTimeout(() => {
+    writeFileSync(
+      join(dir, "onboarding-2026-04-19-logs.jsonl"),
+      `${JSON.stringify({
+        workflow: "onboarding",
+        itemId: "alice@example.com",
+        runId: "run-a",
+        level: "step",
+        message: "replacement",
+        ts: "2026-04-19T10:00:03.000Z",
+      })}\n`,
+    );
+  }, 50);
+
+  const stream = await readSseMessages(response, 2, 1_500);
+  assert.deepEqual((unpack(stream.messages[0]) as Array<{ message: string }>).map((log) => log.message), ["first", "second"]);
+  assert.deepEqual((unpack(stream.messages[1]) as Array<{ message: string }>).map((log) => log.message), ["replacement"]);
   await stream.cancel();
 });
 
