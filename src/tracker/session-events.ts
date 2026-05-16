@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_DIR, dateLocal } from "./jsonl.js";
 import { makeTailState, tailIncremental } from "./tail-incremental.js";
@@ -73,7 +73,23 @@ export interface SessionEvent {
 
 const SESSIONS_PREFIX = "sessions-";
 const SESSIONS_SUFFIX = ".jsonl";
+const LEGACY_SESSIONS_FILE = "sessions.jsonl";
 const SESSIONS_DATE_RE = /^sessions-\d{4}-\d{2}-\d{2}\.jsonl$/;
+
+// ── readSessionEvents cache ────────────────────────────────
+// Session files are append-only. Cache parsed events per file by
+// (mtimeMs, size). If both match the cached entry, skip re-parsing.
+interface SessionFileCache {
+  mtimeMs: number;
+  size: number;
+  events: SessionEvent[];
+}
+const sessionEventsCache = new Map<string, SessionFileCache>();
+
+/** Test-only: clear the module-level session-events file cache. */
+export function __resetSessionEventsCacheForTests(): void {
+  sessionEventsCache.clear();
+}
 
 export function getSessionsFilePath(dir: string = DEFAULT_DIR): string {
   return getSessionsFilePathForDate(dateLocal(), dir);
@@ -117,28 +133,46 @@ export function readSessionEvents(dir: string = DEFAULT_DIR): SessionEvent[] {
   let files: string[];
   try {
     files = readdirSync(dir).filter(
-      // Strict YYYY-MM-DD dated names only. Loose `sessions-*.jsonl` would
-      // slurp editor temp files / malformed dates that `cleanOldSessionFiles`
-      // correctly refuses to delete, leaving them to accumulate.
-      (f) => SESSIONS_DATE_RE.test(f),
+      (f) => f === LEGACY_SESSIONS_FILE || SESSIONS_DATE_RE.test(f),
     );
   } catch {
     return out; // dir doesn't exist
   }
-  // Sort by date for deterministic ordering.
+  // Sort by date for deterministic ordering. Legacy file sorts first
+  // (no date in its name; treat as oldest).
   files.sort();
   for (const f of files) {
-    const path = join(dir, f);
-    if (!existsSync(path)) continue;
-    const raw = readFileSync(path, "utf-8");
+    const filePath = join(dir, f);
+    let stat: { mtimeMs: number; size: number };
+    try {
+      stat = statSync(filePath);
+    } catch {
+      continue; // file disappeared between readdirSync and statSync
+    }
+    const cached = sessionEventsCache.get(filePath);
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+      // File unchanged — reuse parsed events directly.
+      for (const ev of cached.events) out.push(ev);
+      continue;
+    }
+    // Parse and populate cache.
+    const events: SessionEvent[] = [];
+    let raw: string;
+    try {
+      raw = readFileSync(filePath, "utf-8");
+    } catch {
+      continue;
+    }
     for (const line of raw.split("\n")) {
       if (!line) continue;
       try {
-        out.push(JSON.parse(line) as SessionEvent);
+        events.push(JSON.parse(line) as SessionEvent);
       } catch {
-        // Skip malformed lines — same tolerance as the prior implementation.
+        // Skip malformed lines.
       }
     }
+    sessionEventsCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, events });
+    for (const ev of events) out.push(ev);
   }
   return out;
 }

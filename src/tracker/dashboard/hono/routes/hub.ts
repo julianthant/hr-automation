@@ -49,6 +49,6 @@ export function registerHubRoute(app: Hono, deps: DashboardHonoDeps): void {
       return async () => {
         await Promise.allSettled(stops.map((s) => s()));
       };
-    });
+    }, c.req.raw);
   });
 }

@@ -251,7 +251,7 @@ test("Hono screenshot routes list grouped screenshots and stream image files", a
   }
 });
 
-test("Hono /api/preflight prunes the configured screenshots directory", async () => {
+test("Hono /api/preflight does not prune screenshots (use npm run clean:tracker)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "hono-preflight-"));
   const shotsDir = join(dir, "shots");
   const oldTs = Date.now() - 40 * 24 * 60 * 60 * 1000;
@@ -272,7 +272,7 @@ test("Hono /api/preflight prunes the configured screenshots directory", async ()
     const res = await app.request("/api/preflight");
 
     assert.equal(res.status, 200);
-    assert.equal(existsSync(screenshotPath), false, "old screenshot in configured dir pruned");
+    assert.equal(existsSync(screenshotPath), true, "preflight must not delete screenshots on dashboard cadence");
   } finally {
     __resetPreflightThrottleForTests();
     closeStateDbForTests(dir);

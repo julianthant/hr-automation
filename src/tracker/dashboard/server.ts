@@ -2,7 +2,6 @@ import { createServer, type Server } from "node:http";
 import { resolve } from "node:path";
 import { getRequestListener } from "@hono/node-server";
 import {
-  cleanOldScreenshots,
   cleanOldTrackerFiles,
   DEFAULT_DIR,
   dateLocal,
@@ -78,15 +77,11 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     } catch (err) {
       log.step(`Tracker startup prune skipped: ${err instanceof Error ? err.message : String(err)}`);
     }
-    try {
-      const maxAge = opts.cleanMaxAgeDays ?? 30;
-      const deletedShots = cleanOldScreenshots(maxAge, opts.screenshotsDir);
-      if (deletedShots > 0) {
-        log.step(`Pruned ${deletedShots} screenshot${deletedShots === 1 ? "" : "s"} older than ${maxAge} days`);
-      }
-    } catch (err) {
-      log.step(`Screenshot startup prune skipped: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    // TODO(2026-05-11): Screenshot cleanup was removed from startup and preflight
+    // per the run-lifecycle lesson (screenshots should not be pruned on dashboard
+    // cadence). If retention becomes a disk concern, implement lifecycle-tied cleanup
+    // in applyTrackerEntry when a run reaches a terminal state (e.g., delete after
+    // 7 days post-completion). Manual pruning: `npm run clean:tracker`.
     try {
       sweepStuckOcrRows(dir);
     } catch (err) {

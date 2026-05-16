@@ -7,7 +7,10 @@ export function getActiveHonoSseStreamCountForTests(): number {
   return activeHonoSseStreams;
 }
 
-export function sseResponse(start: (send: SseSend) => SseCleanup | void | Promise<SseCleanup | void>): Response {
+export function sseResponse(
+  start: (send: SseSend) => SseCleanup | void | Promise<SseCleanup | void>,
+  request?: Request,
+): Response {
   const encoder = new TextEncoder();
   let cleanup: SseCleanup | undefined;
   let cleaned = false;
@@ -26,6 +29,15 @@ export function sseResponse(start: (send: SseSend) => SseCleanup | void | Promis
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       activeHonoSseStreams += 1;
+
+      // Defensive cleanup on HTTP disconnect. request.signal fires "abort"
+      // when the underlying TCP socket closes in @hono/node-server + Node 26.
+      // This is a safety net: the ReadableStream cancel() callback should also
+      // fire, but this covers cases where the pipe teardown doesn't propagate.
+      if (request?.signal) {
+        request.signal.addEventListener("abort", () => runCleanup(), { once: true });
+      }
+
       const send: SseSend = (data, event) => {
         const payload = `${event ? `event: ${event}\n` : ""}data: ${JSON.stringify(data)}\n\n`;
         try {

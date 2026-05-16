@@ -2,7 +2,6 @@
 import type { Hono } from "hono";
 
 import {
-  cleanOldScreenshots,
   cleanOldTrackerFiles,
   listDatesForWorkflow,
   listWorkflows,
@@ -32,13 +31,13 @@ import { buildWorkflowsHandler } from "../../workflows.js";
 // process. The prune is idempotent, so caching its outcome between
 // calls is safe and elides the frontend's preflight-polling cost.
 let lastPruneAtMs = 0;
-let cachedPruneResult = { deleted: 0, deletedShots: 0 };
+let cachedPruneResult = { deleted: 0, sessionsCleaned: false };
 const PRUNE_INTERVAL_MS = 60_000;
 
 /** Test-only: reset the /api/preflight prune throttle so each test sees a fresh prune. */
 export function __resetPreflightThrottleForTests(): void {
   lastPruneAtMs = 0;
-  cachedPruneResult = { deleted: 0, deletedShots: 0 };
+  cachedPruneResult = { deleted: 0, sessionsCleaned: false };
 }
 
 export function registerBaseRoutes(app: Hono, deps: DashboardHonoDeps): void {
@@ -159,16 +158,14 @@ export function registerBaseRoutes(app: Hono, deps: DashboardHonoDeps): void {
     const now = Date.now();
     if (now - lastPruneAtMs >= PRUNE_INTERVAL_MS) {
       const deleted = cleanOldTrackerFiles(30, deps.dir);
-      const deletedShots = cleanOldScreenshots(30, deps.screenshotsDir);
-      cachedPruneResult = { deleted, deletedShots };
+      cachedPruneResult = { deleted, sessionsCleaned: false };
       lastPruneAtMs = now;
     }
-    const { deleted, deletedShots } = cachedPruneResult;
+    const { deleted } = cachedPruneResult;
     return jsonResponse({
       checks: [
         { name: "Dashboard connected", passed: true, detail: "SSE server running" },
         { name: "Old logs cleaned", passed: true, detail: `${deleted} file${deleted !== 1 ? "s" : ""} removed (> 30 days)` },
-        { name: "Old screenshots cleaned", passed: true, detail: `${deletedShots} screenshot${deletedShots !== 1 ? "s" : ""} removed (> 30 days)` },
       ],
     });
   });
