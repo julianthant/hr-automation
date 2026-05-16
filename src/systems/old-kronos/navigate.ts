@@ -14,6 +14,11 @@ import {
   workspace,
 } from "./selectors.js";
 import { clickIfPresent, safeClick, safeFill } from "../common/index.js";
+import {
+  formatTimecardDate,
+  runTimecardCheck,
+  type TimecardDriver,
+} from "../../services/timecard/index.js";
 
 /**
  * Dismiss any OK/Close modal dialog in the iframe.
@@ -396,38 +401,42 @@ export async function getTimecardLastDate(
   // cells[2]=Date ("Mon 3/16"), cells[4]=In, cells[5]=Out
   // Find the last date that has a non-empty In or Out value
   for (const f of page.frames()) {
-    const result = await f.evaluate(() => {
-      let lastDate: string | null = null;
-      const year = new Date().getFullYear();
-      const rows = document.querySelectorAll("[role='row']");
+    const result = await f
+      .evaluate(() => {
+        let lastParsed: { month: number; day: number } | null = null;
+        const rows = document.querySelectorAll("[role='row']");
 
-      for (const row of rows) {
-        const cells = row.querySelectorAll("[role='gridcell']");
-        if (cells.length < 10) continue;
+        for (const row of rows) {
+          const cells = row.querySelectorAll("[role='gridcell']");
+          if (cells.length < 10) continue;
 
-        const dateText = (cells[2]?.textContent ?? "").trim();
-        if (!/^[A-Z][a-z]{2}\s+\d+\/\d+$/.test(dateText)) continue;
+          const dateText = (cells[2]?.textContent ?? "").trim();
+          if (!/^[A-Z][a-z]{2}\s+\d+\/\d+$/.test(dateText)) continue;
 
-        const inVal = (cells[4]?.textContent ?? "").trim();
-        const outVal = (cells[5]?.textContent ?? "").trim();
+          const inVal = (cells[4]?.textContent ?? "").trim();
+          const outVal = (cells[5]?.textContent ?? "").trim();
 
-        if (inVal || outVal) {
-          // Extract M/D and format as MM/DD/YYYY
-          const match = dateText.match(/(\d+)\/(\d+)/);
-          if (match) {
-            const mm = match[1].padStart(2, "0");
-            const dd = match[2].padStart(2, "0");
-            lastDate = `${mm}/${dd}/${year}`;
+          if (inVal || outVal) {
+            const match = dateText.match(/(\d+)\/(\d+)/);
+            if (match) {
+              lastParsed = {
+                month: parseInt(match[1], 10),
+                day: parseInt(match[2], 10),
+              };
+            }
           }
         }
-      }
 
-      return lastDate;
-    }).catch(() => null);
+        return lastParsed;
+      })
+      .catch(() => null);
 
     if (result) {
-      log.step(`[Old Kronos] Latest timecard date with In/Out: ${result} (frame: ${f.name()})`);
-      return result;
+      const formatted = formatTimecardDate(result.month, result.day);
+      log.step(
+        `[Old Kronos] Latest timecard date with In/Out: ${formatted} (frame: ${f.name()})`,
+      );
+      return formatted;
     }
   }
 
@@ -443,29 +452,20 @@ export async function checkTimecardDates(
   page: Page,
   iframe: Frame,
 ): Promise<string | null> {
-  const ok = await clickGoToTimecard(page, iframe);
-  if (!ok) return null;
-
-  await page.waitForTimeout(3_000);
-  await dismissModal(page, iframe);
-  await debugScreenshot(page, "ukg-timecard-01-current");
-
-  // Check current pay period
-  let lastDate = await getTimecardLastDate(page);
-  if (lastDate) {
-    log.step("[Old Kronos] Found entries in current period — no need to check previous");
-    return lastDate;
-  }
-
-  // No entries in current — try previous pay period
-  const switched = await switchToPreviousPayPeriod(page);
-  if (switched) {
-    await dismissModal(page, iframe);
-    await debugScreenshot(page, "ukg-timecard-02-previous");
-    lastDate = await getTimecardLastDate(page);
-  }
-
-  return lastDate;
+  const driver: TimecardDriver = {
+    goToTimecard: (p) => clickGoToTimecard(p, iframe),
+    afterGoTo: async (p) => {
+      await dismissModal(p, iframe);
+      await debugScreenshot(p, "ukg-timecard-01-current");
+    },
+    switchPeriod: (p) => switchToPreviousPayPeriod(p),
+    afterSwitch: async (p) => {
+      await dismissModal(p, iframe);
+      await debugScreenshot(p, "ukg-timecard-02-previous");
+    },
+    readLastDate: (p) => getTimecardLastDate(p),
+  };
+  return runTimecardCheck(page, driver);
 }
 
 /**

@@ -9,6 +9,11 @@ import {
   timecard,
 } from "./selectors.js";
 import { clickIfPresent, safeClick, safeFill } from "../common/index.js";
+import {
+  formatTimecardDate,
+  runTimecardCheck,
+  type TimecardDriver,
+} from "../../services/timecard/index.js";
 
 export const NEW_KRONOS_URL = "https://ucsd-sso.prd.mykronos.com/wfd/home";
 
@@ -176,8 +181,6 @@ export async function getTimecardLastDate(page: Page): Promise<string | null> {
   // - ui-grid-viewport (last one) has data rows (In/Out/Daily values)
   // Rows are aligned by index. Check if data row has AM/PM timestamps (In/Out punches).
   const result = await page.evaluate(() => {
-    const year = new Date().getFullYear();
-
     const viewports = document.querySelectorAll(".ui-grid-viewport");
     if (viewports.length < 2) return null;
 
@@ -199,7 +202,7 @@ export async function getTimecardLastDate(page: Page): Promise<string | null> {
     const dataRows = dataVp.querySelectorAll("[role='row']");
 
     // Find last date with In/Out punches (AM/PM timestamps)
-    let lastDate: string | null = null;
+    let lastParsed: { month: number; day: number } | null = null;
     for (let i = 0; i < dateRows.length && i < dataRows.length; i++) {
       const cells = dataRows[i].querySelectorAll("[role='gridcell']");
       const hasInOut = Array.from(cells).some((c) =>
@@ -208,23 +211,23 @@ export async function getTimecardLastDate(page: Page): Promise<string | null> {
       if (hasInOut) {
         const match = dateRows[i].match(/(\d+)\/(\d+)/);
         if (match) {
-          const mm = match[1].padStart(2, "0");
-          const dd = match[2].padStart(2, "0");
-          lastDate = `${mm}/${dd}/${year}`;
+          lastParsed = { month: parseInt(match[1], 10), day: parseInt(match[2], 10) };
         }
       }
     }
 
-    return lastDate;
+    return lastParsed;
   });
 
   if (result) {
-    log.step(`[New Kronos] Latest timecard date with In/Out: ${result}`);
+    const formatted = formatTimecardDate(result.month, result.day);
+    log.step(`[New Kronos] Latest timecard date with In/Out: ${formatted}`);
+    return formatted;
   } else {
     log.step("[New Kronos] No In/Out entries found in current pay period");
   }
 
-  return result;
+  return null;
 }
 
 /**
@@ -287,28 +290,18 @@ export async function scrollTimecardToDate(page: Page, targetDate: string): Prom
 export async function checkTimecardDates(page: Page): Promise<string | null> {
   await selectEmployeeResult(page);
 
-  const ok = await clickGoToTimecard(page);
-  if (!ok) return null;
-
-  await page.waitForTimeout(3_000);
-  await debugScreenshot(page, "new-kronos-timecard-01-current");
-
-  // Check current pay period
-  let lastDate = await getTimecardLastDate(page);
-  if (lastDate) {
-    log.step("[New Kronos] Found entries in current period — no need to check previous");
-    return lastDate;
-  }
-
-  // No entries in current — try previous pay period
-  const switched = await switchToPreviousPayPeriod(page);
-  if (switched) {
-    await page.waitForTimeout(3_000);
-    await debugScreenshot(page, "new-kronos-timecard-02-previous");
-    lastDate = await getTimecardLastDate(page);
-  }
-
-  return lastDate;
+  const driver: TimecardDriver = {
+    goToTimecard: (p) => clickGoToTimecard(p),
+    afterGoTo: async (p) => {
+      await debugScreenshot(p, "new-kronos-timecard-01-current");
+    },
+    switchPeriod: (p) => switchToPreviousPayPeriod(p),
+    afterSwitch: async (p) => {
+      await debugScreenshot(p, "new-kronos-timecard-02-previous");
+    },
+    readLastDate: (p) => getTimecardLastDate(p),
+  };
+  return runTimecardCheck(page, driver);
 }
 
 /**
