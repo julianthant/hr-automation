@@ -1,7 +1,7 @@
 import { OcrAllKeysExhaustedError, type ProviderKey } from "./types.js";
 import { log } from "../../utils/log.js";
 import { readGeminiKeys, callGeminiJsonTextWithKey } from "./env-keys.js";
-import { KeyRotation } from "./rotation.js";
+import { KeyRotation, getOrCreateKeyRotation } from "./rotation.js";
 
 export interface DisambiguateInput {
   query: string;
@@ -104,7 +104,11 @@ export async function disambiguateMatch(
     return { eid: null, confidence: 0 };
   }
   const prompt = buildDisambiguationPrompt(input);
-  const rotation = new KeyRotation("gemini", keys, _cacheDir ?? DEFAULT_CACHE_DIR);
+  const rotation = getOrCreateKeyRotation(
+    "gemini-disambiguate",
+    keys,
+    _cacheDir ?? DEFAULT_CACHE_DIR,
+  );
   const call = _callForTests ?? ((key: ProviderKey, textPrompt: string) =>
     callGeminiJsonTextWithKey(key.value, textPrompt));
   let lastError: unknown;
