@@ -3,7 +3,7 @@ import { log } from "../../utils/log.js";
 import { ExtractionError } from "./types.js";
 import { CRM_SEARCH_URL } from "../../config.js";
 import { search as searchSelectors } from "./selectors.js";
-import { safeClick } from "../common/index.js";
+import { clickIfPresent, safeClick } from "../common/index.js";
 
 /**
  * Search results page -- accepts email as query param.
@@ -88,11 +88,7 @@ export async function selectLatestResult(page: Page): Promise<void> {
     .locator("td") // allow-inline-selector -- compound .locator("td").first().locator("a")
     .first()
     .locator("a"); // allow-inline-selector -- compound path continues
-  const hasLink = (await nameLink.count()) > 0;
-
-  if (hasLink) {
-    await safeClick(nameLink, { label: "crm latest result name link" });
-  } else {
+  if (!(await clickIfPresent(nameLink, { label: "crm latest result name link" }))) {
     // Fallback: click the name cell text directly
     await safeClick(
       searchSelectors
