@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, appendFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, appendFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { UUID } from 'node:crypto'
@@ -101,6 +101,24 @@ test('claimNextItem returns first queued item and marks it claimed', async () =>
     assert.equal(state.queued.length, 0)
     assert.equal(state.claimed.length, 1)
     assert.equal(state.claimed[0].id, 'only')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('claimNextItem rolls back SQLite claim when audit append fails', async () => {
+  const dir = TMP()
+  try {
+    await enqueueItems('wf', [{}], () => 'only', dir)
+    const auditPath = queueFilePath('wf', dir)
+    unlinkSync(auditPath)
+    mkdirSync(auditPath)
+
+    await assert.rejects(claimNextItem('wf', 'w1', dir), /EISDIR|illegal operation on a directory/)
+
+    const state = await readQueueState('wf', dir)
+    assert.deepEqual(state.queued.map((item) => item.id), ['only'])
+    assert.equal(state.claimed.length, 0)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
