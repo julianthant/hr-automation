@@ -4,14 +4,12 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { openDatabase, type Database } from "../../../src/infra/sqlite/index.js";
 import {
   closeStateDbForTests,
   openStateDb,
-  runMigrations,
   stateDbPath,
 } from "../../../src/tracker/state/db.js";
-import { LATEST_SCHEMA_VERSION, MIGRATIONS } from "../../../src/tracker/state/schema.js";
+import { LATEST_SCHEMA_VERSION } from "../../../src/tracker/state/schema.js";
 
 function tmpTracker(): string {
   return mkdtempSync(join(tmpdir(), "state-db-"));
@@ -50,20 +48,15 @@ test("openStateDb is idempotent for an already migrated DB", () => {
   }
 });
 
-test("migration 4 backfills session event tracker_date from timestamp", () => {
+test("v6 baseline defines session_events.tracker_date default empty", () => {
   const dir = tmpTracker();
-  const dbPath = join(dir, "state.db");
-  let db: Database | null = null;
   try {
-    db = openDatabase(dbPath);
-    for (const migration of MIGRATIONS.filter((entry) => entry.version <= 3)) {
-      db.exec(migration.sql);
-    }
+    const db = openStateDb(dir);
+    assert.equal(
+      (db.prepare("SELECT version FROM schema_version WHERE id = 1").get() as { version: number }).version,
+      LATEST_SCHEMA_VERSION,
+    );
     db.prepare(`
-      INSERT INTO schema_version (id, version, applied_at)
-      VALUES (1, 3, '2026-05-04T12:00:00.000Z')
-    `).run();
-    const insert = db.prepare(`
       INSERT INTO session_events (
         source_path,
         source_line,
@@ -87,39 +80,19 @@ test("migration 4 backfills session event tracker_date from timestamp", () => {
         '{}',
         '2026-05-04T12:00:00.000Z'
       )
-    `);
-    insert.run({
+    `).run({
       sourcePath: "sessions.jsonl",
       sourceLine: 1,
       sourceOffset: 0,
       timestamp: "2026-05-04T12:34:56.000Z",
       tsMs: Date.parse("2026-05-04T12:34:56.000Z"),
     });
-    insert.run({
-      sourcePath: "sessions.jsonl",
-      sourceLine: 2,
-      sourceOffset: 100,
-      timestamp: "bad-value",
-      tsMs: 0,
-    });
-
-    runMigrations(db);
-
-    const version = db.prepare("SELECT version FROM schema_version WHERE id = 1").get() as { version: number };
-    assert.equal(version.version, LATEST_SCHEMA_VERSION);
-    const rows = db.prepare(`
-      SELECT source_line AS sourceLine, tracker_date AS trackerDate
-      FROM session_events
-      ORDER BY source_line
-    `).all() as Array<{ sourceLine: number; trackerDate: string }>;
-    // node:sqlite returns rows with [Object: null prototype]; spread to
-    // plain objects so deepEqual's prototype check passes.
-    assert.deepEqual(rows.map((r) => ({ ...r })), [
-      { sourceLine: 1, trackerDate: "2026-05-04" },
-      { sourceLine: 2, trackerDate: "bad-value" },
-    ]);
+    const row = db
+      .prepare(`SELECT tracker_date AS trackerDate FROM session_events WHERE source_line = 1`)
+      .get() as { trackerDate: string };
+    assert.equal(row.trackerDate, "");
   } finally {
-    db?.close();
+    closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });
   }
 });
