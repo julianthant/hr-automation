@@ -179,14 +179,14 @@ test("rebuildProjectionForDate applies only new bytes on second call (incrementa
 test("rebuildProjectionForDate only clears session events for the rebuilt date", () => {
   const dir = tmpTracker();
   try {
-    appendFileSync(join(dir, "sessions.jsonl"), JSON.stringify({
+    appendFileSync(join(dir, "sessions-2026-05-03.jsonl"), JSON.stringify({
       type: "workflow_start",
       timestamp: "2026-05-03T20:00:00.000Z",
       pid: 1,
       workflowInstance: "Yesterday 1",
       runId: "run-yesterday",
     }) + "\n");
-    appendFileSync(join(dir, "sessions.jsonl"), JSON.stringify({
+    appendFileSync(join(dir, "sessions-2026-05-04.jsonl"), JSON.stringify({
       type: "workflow_start",
       timestamp: "2026-05-04T20:00:00.000Z",
       pid: 1,

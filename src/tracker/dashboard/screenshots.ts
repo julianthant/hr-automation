@@ -165,8 +165,9 @@ export function buildScreenshotsHandler(
 // ── Private helpers ─────────────────────────────────────────────────────────
 
 /**
- * Legacy grouped handler: reads sessions.jsonl (no SQLite disk orphan merge).
- * Extracted so both the SQLite path and this path are unit-testable.
+ * Legacy grouped handler: reads session snapshots via `readSessionEvents` (no
+ * SQLite disk orphan merge). Extracted so both the SQLite path and this path
+ * are unit-testable.
  */
 async function groupedHandlerLegacy(opts: {
   dir: string;
@@ -178,8 +179,7 @@ async function groupedHandlerLegacy(opts: {
   const { dir, workflow, itemId, runId } = opts;
   const prefix = `${workflow}-${itemId}-`;
 
-  // 1. Read every session file (legacy sessions.jsonl + dated
-  //    sessions-YYYY-MM-DD.jsonl) via readSessionEvents and collect
+  // 1. Read every dated session snapshot via readSessionEvents and collect
   //    screenshot events whose files touch the requested workflow/itemId.
   const events: ScreenshotSessionEvent[] = [];
   for (const ev of readSessionEvents(dir) as unknown as Array<Record<string, unknown>>) {

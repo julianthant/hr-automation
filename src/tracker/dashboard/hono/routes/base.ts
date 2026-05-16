@@ -1,5 +1,4 @@
-import { existsSync, statSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+
 import type { Hono } from "hono";
 
 import {
@@ -33,13 +32,13 @@ import { buildWorkflowsHandler } from "../../workflows.js";
 // process. The prune is idempotent, so caching its outcome between
 // calls is safe and elides the frontend's preflight-polling cost.
 let lastPruneAtMs = 0;
-let cachedPruneResult = { deleted: 0, deletedShots: 0, sessionsCleaned: false };
+let cachedPruneResult = { deleted: 0, deletedShots: 0 };
 const PRUNE_INTERVAL_MS = 60_000;
 
 /** Test-only: reset the /api/preflight prune throttle so each test sees a fresh prune. */
 export function __resetPreflightThrottleForTests(): void {
   lastPruneAtMs = 0;
-  cachedPruneResult = { deleted: 0, deletedShots: 0, sessionsCleaned: false };
+  cachedPruneResult = { deleted: 0, deletedShots: 0 };
 }
 
 export function registerBaseRoutes(app: Hono, deps: DashboardHonoDeps): void {
@@ -161,30 +160,15 @@ export function registerBaseRoutes(app: Hono, deps: DashboardHonoDeps): void {
     if (now - lastPruneAtMs >= PRUNE_INTERVAL_MS) {
       const deleted = cleanOldTrackerFiles(30, deps.dir);
       const deletedShots = cleanOldScreenshots(30, deps.screenshotsDir);
-      let sessionsCleaned = false;
-      // Only the pre-rotation legacy `sessions.jsonl` is age-gated here.
-      // Dated `sessions-YYYY-MM-DD.jsonl` files are managed by the regular
-      // 30-day prune in `cleanOldSessionFiles`. Pointing this check at the
-      // current dated file (as `getSessionsFilePath` would) is a no-op because
-      // today's file always has a fresh mtime.
-      const legacySessionsPath = join(deps.dir, "sessions.jsonl");
-      if (existsSync(legacySessionsPath)) {
-        const ageMs = now - statSync(legacySessionsPath).mtimeMs;
-        if (ageMs > 24 * 60 * 60 * 1000) {
-          unlinkSync(legacySessionsPath);
-          sessionsCleaned = true;
-        }
-      }
-      cachedPruneResult = { deleted, deletedShots, sessionsCleaned };
+      cachedPruneResult = { deleted, deletedShots };
       lastPruneAtMs = now;
     }
-    const { deleted, deletedShots, sessionsCleaned } = cachedPruneResult;
+    const { deleted, deletedShots } = cachedPruneResult;
     return jsonResponse({
       checks: [
         { name: "Dashboard connected", passed: true, detail: "SSE server running" },
         { name: "Old logs cleaned", passed: true, detail: `${deleted} file${deleted !== 1 ? "s" : ""} removed (> 30 days)` },
         { name: "Old screenshots cleaned", passed: true, detail: `${deletedShots} screenshot${deletedShots !== 1 ? "s" : ""} removed (> 30 days)` },
-        { name: "Session state", passed: true, detail: sessionsCleaned ? "Stale session file cleaned" : "OK" },
       ],
     });
   });

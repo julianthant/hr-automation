@@ -10,6 +10,7 @@ import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.
 import { closeStateDbForTests, openStateDb, stateDbPath } from "../../../src/tracker/state/db.js";
 import { emitSessionEvent, readSessionEvents } from "../../../src/tracker/session-events.js";
 import { querySessionEventsForRun } from "../../../src/tracker/state/queries.js";
+import { dateLocal } from "../../../src/tracker/jsonl.js";
 
 /**
  * Build a hub URL for a single subscription.
@@ -161,8 +162,8 @@ describe("/events/run-events SSE", () => {
 
   it("skips malformed JSONL lines without crashing", async () => {
     emitSessionEvent({ type: "workflow_start", workflowInstance: "I", runId: "A" }, tmp);
-    // Malformed line in JSONL does not affect SQLite; both events should be readable.
-    appendFileSync(join(tmp, "sessions.jsonl"), "{not-valid-json\n");
+    const sessionDay = dateLocal();
+    appendFileSync(join(tmp, `sessions-${sessionDay}.jsonl`), "{not-valid-json\n");
     emitSessionEvent({ type: "auth_complete", workflowInstance: "I", runId: "A", system: "crm", browserId: "b1" }, tmp);
 
     const messages = await collectSSE(

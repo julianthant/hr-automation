@@ -454,7 +454,7 @@ export async function withTrackedWorkflow<T>(
   // Session tracking context. All session-event emits route to the same `dir`
   // as the tracker writes — without this, tests passing `trackerDir: TMP_DIR`
   // for entry/log isolation would still leak workflow_start/step_change/etc.
-  // into the real `.tracker/sessions.jsonl` and clutter the operator's
+  // into the real `.tracker/` session files and clutter the operator's
   // session drawer with dead test workflow instances.
   const instanceName = opts.preAssignedInstance ?? generateInstanceName(workflow, dir);
   if (!opts.preAssignedInstance) emitWorkflowStart(instanceName, dir);
@@ -605,7 +605,7 @@ export function readEntries(workflow: string, dir: string = DEFAULT_DIR): Tracke
  * `<workflow>-YYYY-MM-DD.jsonl` and returns the workflow names.
  *
  * The positive regex match (instead of "ends in .jsonl, isn't logs") rejects
- * meta files like `sessions.jsonl`, `idempotency.jsonl`, `step-cache/...`
+ * meta files like `idempotency.jsonl`, `step-cache/...`
  * that share the directory but aren't workflow tracker files.
  */
 export function listWorkflows(dir: string = DEFAULT_DIR): string[] {
@@ -716,10 +716,7 @@ export function cleanOldTrackerFiles(maxAgeDays: number = 30, dir: string = DEFA
 }
 
 /**
- * Delete `sessions-YYYY-MM-DD.jsonl` files older than `maxAgeDays`. Also
- * deletes the legacy single `sessions.jsonl` if its mtime is older than
- * `maxAgeDays` — matches the existing age-gated treatment that file
- * receives elsewhere.
+ * Delete `sessions-YYYY-MM-DD.jsonl` files older than `maxAgeDays`.
  */
 export function cleanOldSessionFiles(maxAgeDays: number, dir: string = DEFAULT_DIR): number {
   if (!existsSync(dir)) return 0;
@@ -733,16 +730,6 @@ export function cleanOldSessionFiles(maxAgeDays: number, dir: string = DEFAULT_D
   }
   for (const f of entries) {
     const full = join(dir, f);
-    if (f === "sessions.jsonl") {
-      try {
-        const stat = statSync(full);
-        if (stat.mtimeMs < cutoffMs) {
-          unlinkSync(full);
-          deleted += 1;
-        }
-      } catch { /* missing or unreadable — skip */ }
-      continue;
-    }
     const m = f.match(/^sessions-(\d{4}-\d{2}-\d{2})\.jsonl$/);
     if (!m) continue;
     const dateStr = m[1];

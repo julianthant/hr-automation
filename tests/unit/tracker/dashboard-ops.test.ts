@@ -8,7 +8,7 @@
  */
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, utimesSync } from "fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { readLogEntries, trackEvent, trackEventForDate } from "../../../src/tracker/jsonl.js";
@@ -34,7 +34,7 @@ import {
   readQueueDepth,
 } from "../../../src/tracker/dashboard/ops/index.js";
 import { resolveRetryRosterPath } from "../../../src/tracker/dashboard/ops/retry.js";
-import { queueFilePath, queueLockDirPath } from "../../../src/core/daemon/queue.js";
+import { queueFilePath } from "../../../src/core/daemon/queue.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
 import type { QueueEvent } from "../../../src/core/daemon/types.js";
 
@@ -573,18 +573,18 @@ describe("buildDeleteEntryHandler", () => {
     assert.equal(existsSync(run2Shot), false, "deleted run screenshot removed");
   });
 
-  it("deletes a scoped legacy JSONL run by its synthesized runId", () => {
+  it("deletes a scoped tracker run via explicit legacy-shaped runId", () => {
     writeFileSync(
       join(tmp, "separations-2026-05-09.jsonl"),
       [
-        JSON.stringify({ workflow: "separations", id: "3930", status: "failed" }),
+        JSON.stringify({ workflow: "separations", id: "3930", runId: "3930#1", status: "failed" }),
         JSON.stringify({ workflow: "separations", id: "other", runId: "run-2", status: "done" }),
       ].join("\n") + "\n",
     );
     writeFileSync(
       join(tmp, "separations-2026-05-09-logs.jsonl"),
       [
-        JSON.stringify({ workflow: "separations", itemId: "3930", message: "legacy" }),
+        JSON.stringify({ workflow: "separations", itemId: "3930", runId: "3930#1", message: "legacy" }),
         JSON.stringify({ workflow: "separations", itemId: "other", runId: "run-2", message: "other" }),
       ].join("\n") + "\n",
     );
@@ -970,7 +970,7 @@ describe("buildCancelQueuedHandler", () => {
     taskStore.close();
   });
 
-  it("appends a synthetic failed event for a queued item + writes a tracker row", async () => {
+  it("returns 404 cancel-queued when only queue audit JSONL exists", async () => {
     const path = queueFilePath("separations", tmp);
     mkdirSync(join(tmp, "daemons"), { recursive: true });
     const enqueueEv: QueueEvent = {
@@ -983,70 +983,34 @@ describe("buildCancelQueuedHandler", () => {
       runId: "u-1",
     };
     writeFileSync(path, JSON.stringify(enqueueEv) + "\n");
-    const handler = buildCancelQueuedHandler(tmp);
-    const result = await handler({ workflow: "separations", id: "3930" });
-    assert.equal(result.ok, true);
-    const after = readFileSync(path, "utf8");
-    assert.ok(after.includes('"type":"failed"'));
-    assert.ok(after.includes("cancelled by user from dashboard"));
-    const logs = readLogEntries("separations", "3930", tmp);
-    assert.equal(logs.length, 1);
-    assert.equal(logs[0].runId, "u-1");
-    assert.match(logs[0].message, /cancelled by user from dashboard/);
-  });
-
-  it("reclaims a stale legacy queue lock directory", async () => {
-    const path = queueFilePath("separations", tmp);
-    mkdirSync(join(tmp, "daemons"), { recursive: true });
-    const enqueueEv: QueueEvent = {
-      type: "enqueue",
-      id: "3930",
-      workflow: "separations",
-      input: { docId: "3930" },
-      enqueuedAt: "2026-04-24T12:00:00.000Z",
-      enqueuedBy: "test",
-      runId: "u-1",
-    };
-    writeFileSync(path, JSON.stringify(enqueueEv) + "\n");
-    const lockDir = queueLockDirPath("separations", tmp);
-    mkdirSync(lockDir);
-    const stale = new Date(Date.now() - 60_000);
-    utimesSync(lockDir, stale, stale);
-
     const result = await buildCancelQueuedHandler(tmp)({ workflow: "separations", id: "3930" });
-
-    assert.equal(result.ok, true);
-    assert.equal(existsSync(lockDir), false);
+    assert.equal(result.ok, false);
+    assert.equal((result as { status?: number }).status, 404);
     const after = readFileSync(path, "utf8");
-    assert.ok(after.includes('"type":"failed"'));
+    assert.ok(!after.includes('"type":"failed"'), "SQLite-only cancel must not fold the audit JSONL");
   });
 
-  it("returns 409 when the item is already claimed", async () => {
-    const path = queueFilePath("separations", tmp);
-    mkdirSync(join(tmp, "daemons"), { recursive: true });
-    const events: QueueEvent[] = [
-      {
-        type: "enqueue",
-        id: "3930",
+  it("returns 409 when a SQLite queued task is already claimed", async () => {
+    const store = createTaskStore(openControlDb({ trackerDir: tmp }));
+    try {
+      const [task] = store.enqueueTasks({
         workflow: "separations",
-        input: { docId: "3930" },
-        enqueuedAt: "2026-04-24T12:00:00.000Z",
-        enqueuedBy: "test",
-        runId: "u-1",
-      },
-      {
-        type: "claim",
+        inputs: [{ docId: "3930" }],
+        deriveItemId: (input) => input.docId,
+        runIds: ["u-1"],
+      });
+      store.claimNextTask({ workflow: "separations", workerId: "sep-abc" });
+      const runId = store.getTask(task.taskId)?.runId;
+      const result = await buildCancelQueuedHandler(tmp)({
+        workflow: "separations",
         id: "3930",
-        claimedBy: "sep-abc",
-        claimedAt: "2026-04-24T12:01:00.000Z",
-        runId: "u-1",
-      },
-    ];
-    writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
-    const handler = buildCancelQueuedHandler(tmp);
-    const result = await handler({ workflow: "separations", id: "3930" });
-    assert.equal(result.ok, false);
-    assert.equal((result as { status?: number }).status, 409);
+        ...(runId ? { runId } : {}),
+      });
+      assert.equal(result.ok, false);
+      assert.equal((result as { status?: number }).status, 409);
+    } finally {
+      store.close();
+    }
   });
 });
 
@@ -1262,14 +1226,9 @@ describe("dashboard worker command helpers", () => {
     });
 
     assert.equal(result.ok, true);
-    // Chrome-preserving force-stop (per operator request 2026-05-08): no
-    // longer enqueues kill_browser commands or SIGTERMs browsers. The
-    // command type is now `cancel_task` (not `force_stop_task`); the
-    // daemon's `/force-current` HTTP endpoint navigates pages to
-    // about:blank to interrupt in-flight Playwright work without killing
-    // chrome. Browser process row is left untouched (status stays as it
-    // was — still owned by the daemon for the next item).
-    assert.equal(result.killCommands.length, 0);
+    // Chrome-preserving force-stop: enqueues `cancel_task` (not `force_stop_task`);
+    // the daemon's `/force-current` HTTP endpoint navigates pages to about:blank
+    // without killing chrome. Browser process row is unchanged.
     assert.equal(workerStore.getCommand(result.commandId)?.commandType, "cancel_task");
     assert.equal(workerStore.getCommand(result.commandId)?.state, "queued");
     assert.equal(taskStore.getTask(enqueued.taskId)?.state, "cancelled");
@@ -1582,70 +1541,27 @@ describe("buildQueueBumpHandler", () => {
     }
   });
 
-  it("moves a queued item's enqueue event to the head of the file", async () => {
-    const path = queueFilePath("separations", tmp);
-    mkdirSync(join(tmp, "daemons"), { recursive: true });
-    const events: QueueEvent[] = [
-      {
-        type: "enqueue",
-        id: "first",
+  it("rejects bumping a claimed SQLite task with status 409", async () => {
+    const store = createTaskStore(openControlDb({ trackerDir: tmp }));
+    try {
+      const [task] = store.enqueueTasks({
         workflow: "separations",
-        input: { docId: "first" },
-        enqueuedAt: "t1",
-        enqueuedBy: "test",
-      },
-      {
-        type: "enqueue",
-        id: "second",
+        inputs: [{ docId: "3930" }],
+        deriveItemId: (input) => input.docId,
+        runIds: ["u-1"],
+      });
+      store.claimNextTask({ workflow: "separations", workerId: "sep-abc" });
+      const handler = buildQueueBumpHandler(tmp);
+      const result = await handler({
         workflow: "separations",
-        input: { docId: "second" },
-        enqueuedAt: "t2",
-        enqueuedBy: "test",
-      },
-      {
-        type: "enqueue",
-        id: "third",
-        workflow: "separations",
-        input: { docId: "third" },
-        enqueuedAt: "t3",
-        enqueuedBy: "test",
-      },
-    ];
-    writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
-    const handler = buildQueueBumpHandler(tmp);
-    const result = await handler({ workflow: "separations", id: "third" });
-    assert.equal(result.ok, true);
-    const after = readFileSync(path, "utf8").split("\n").filter((l) => l.trim());
-    assert.equal(after.length, 3);
-    const firstParsed = JSON.parse(after[0]) as QueueEvent;
-    assert.equal((firstParsed as { id: string }).id, "third");
-  });
-
-  it("rejects bumping a claimed item with status 409", async () => {
-    const path = queueFilePath("separations", tmp);
-    mkdirSync(join(tmp, "daemons"), { recursive: true });
-    const events: QueueEvent[] = [
-      {
-        type: "enqueue",
         id: "3930",
-        workflow: "separations",
-        input: { docId: "3930" },
-        enqueuedAt: "t1",
-        enqueuedBy: "test",
-      },
-      {
-        type: "claim",
-        id: "3930",
-        claimedBy: "sep-abc",
-        claimedAt: "t2",
-        runId: "u-1",
-      },
-    ];
-    writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
-    const handler = buildQueueBumpHandler(tmp);
-    const result = await handler({ workflow: "separations", id: "3930" });
-    assert.equal(result.ok, false);
-    assert.equal((result as { status?: number }).status, 409);
+        runId: store.getTask(task.taskId)?.runId,
+      });
+      assert.equal(result.ok, false);
+      assert.equal((result as { status?: number }).status, 409);
+    } finally {
+      store.close();
+    }
   });
 });
 
@@ -1663,21 +1579,21 @@ describe("readQueueDepth", () => {
     store.close();
   });
 
-  it("counts only items in the queued state", () => {
-    const path = queueFilePath("separations", tmp);
-    mkdirSync(join(tmp, "daemons"), { recursive: true });
-    const events: QueueEvent[] = [
-      { type: "enqueue", id: "a", workflow: "separations", input: {}, enqueuedAt: "t1", enqueuedBy: "test" },
-      { type: "enqueue", id: "b", workflow: "separations", input: {}, enqueuedAt: "t2", enqueuedBy: "test" },
-      { type: "enqueue", id: "c", workflow: "separations", input: {}, enqueuedAt: "t3", enqueuedBy: "test" },
-      { type: "claim", id: "a", claimedBy: "x", claimedAt: "t4", runId: "u-a" },
-      { type: "done", id: "b", completedAt: "t5", runId: "u-b" },
-    ];
-    writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+  it("counts only tasks still in queued state", () => {
+    const store = createTaskStore(openControlDb({ trackerDir: tmp }));
+    const [ta, tb, tc] = store.enqueueTasks({
+      workflow: "separations",
+      inputs: [{ docId: "a" }, { docId: "b" }, { docId: "c" }],
+      deriveItemId: (input) => input.docId,
+    });
+    store.markTaskCancelled({ taskId: ta.taskId, attemptId: ta.attemptId, reason: "x" });
+    store.markTaskCancelled({ taskId: tb.taskId, attemptId: tb.attemptId, reason: "x" });
+    assert.equal(store.getTask(tc.taskId)?.state, "queued");
     assert.equal(readQueueDepth("separations", tmp), 1);
+    store.close();
   });
 
-  it("returns 0 when the queue file does not exist", () => {
+  it("returns 0 when the workflow has no queued tasks", () => {
     assert.equal(readQueueDepth("never-existed", tmp), 0);
   });
 });

@@ -12,8 +12,10 @@ import {
 import type { SessionEvent } from "../../../src/tracker/session-events.js";
 import { dateLocal, type TrackerEntry } from "../../../src/tracker/jsonl.js";
 
-function appendEvent(dir: string, event: object): void {
-  appendFileSync(join(dir, "sessions.jsonl"), JSON.stringify(event) + "\n");
+function appendEvent(dir: string, event: object & { timestamp?: string }): void {
+  const tsStr = typeof event.timestamp === "string" ? event.timestamp : new Date().toISOString();
+  const day = dateLocal(new Date(tsStr));
+  appendFileSync(join(dir, `sessions-${day}.jsonl`), JSON.stringify(event) + "\n");
 }
 
 function appendTrackerEntry(dir: string, workflow: string, date: string, entry: TrackerEntry): void {

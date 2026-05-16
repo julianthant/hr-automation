@@ -235,7 +235,7 @@ function collectRootRunIds(db: ReturnType<typeof openStateDb>, dir: string, req:
     for (const line of readFileSync(path, "utf-8").split("\n").filter(Boolean)) {
       try {
         const row = JSON.parse(line) as { id?: string; runId?: string };
-        if (row.id === req.id) runIds.add(row.runId ?? `${row.id}#1`);
+        if (row.id === req.id && row.runId) runIds.add(row.runId);
       } catch {
         // Ignore malformed audit lines; deletion should still proceed.
       }
@@ -261,11 +261,12 @@ function readJsonlChildrenForParent(dir: string, parentRunId: string): DeleteTar
       try {
         const row = JSON.parse(line) as { id?: string; runId?: string; parentRunId?: string };
         if (!row.id || row.parentRunId !== parentRunId) continue;
+        if (!row.runId) continue;
         targets.push({
           workflow,
           date,
           id: row.id,
-          runId: row.runId ?? `${row.id}#1`,
+          runId: row.runId,
         });
       } catch {
         // Ignore malformed audit lines; deletion should still proceed.
@@ -298,8 +299,10 @@ function matchesAnyDeleteTarget(
   if (!itemId) return false;
   return targets.some((target) => {
     if (itemId !== target.id) return false;
-    const rowRunId = runId ?? `${itemId}#1`;
-    return target.runId ? rowRunId === target.runId : true;
+    if (target.runId) {
+      return runId !== undefined && runId === target.runId;
+    }
+    return true;
   });
 }
 

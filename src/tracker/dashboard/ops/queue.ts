@@ -1,6 +1,4 @@
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "fs";
-import { mkdir, rmdir } from "fs/promises";
-import { setTimeout as delay } from "timers/promises";
+import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import {
   dateLocal,
@@ -17,8 +15,6 @@ import {
 import { transaction } from "../../../infra/sqlite/index.js";
 import { openControlDb } from "../../../core/control-db.js";
 import { createTaskStore } from "../../../core/task-store/index.js";
-import { queueFilePath, queueLockDirPath } from "../../../core/daemon/queue.js";
-import type { QueueEvent } from "../../../core/daemon/types.js";
 import { openControlStores, resolveControlTask } from "./shared.js";
 import { isStateDbReady, openStateDb } from "../../state/db.js";
 import { queryPriorEntriesByKey } from "../../state/queries.js";
@@ -36,43 +32,7 @@ export interface SaveDataRequest {
   data: Record<string, unknown>;
 }
 
-/** Legacy JSONL fallback lock. SQLite-backed queue mutations use DB transactions. */
-async function withQueueLock<T>(
-  workflow: string,
-  dir: string,
-  body: () => Promise<T>,
-): Promise<T> {
-  const lockDir = queueLockDirPath(workflow, dir);
-  const start = Date.now();
-  // Match the timing characteristics of claimNextItem (10 attempts × 100ms = 1s).
-  for (let i = 0; i < 30; i++) {
-    try {
-      await mkdir(lockDir, { recursive: false });
-      try {
-        return await body();
-      } finally {
-        await rmdir(lockDir).catch(() => {});
-      }
-    } catch (err: unknown) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === "EEXIST") {
-        if (Date.now() - start > 5_000) {
-          throw new Error("queue lock acquisition timed out", { cause: err });
-        }
-        await delay(100);
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw new Error("queue lock acquisition exhausted");
-}
-
-/**
- * Move a queued item to the head of the live queue. SQLite-backed tasks use
- * priority ordering; the JSONL rewrite below remains only for migration
- * fallback rows that do not have a task record.
- */
+/** Move a queued item to the head of the live queue via SQLite task priority. */
 export function buildQueueBumpHandler(dir: string) {
   return async (
     req: QueueBumpRequest,
@@ -107,70 +67,11 @@ export function buildQueueBumpHandler(dir: string) {
         ? { ok: true as const }
         : { ok: false as const, error: "item already claimed by a daemon", status: 409 };
     }
-    return withQueueLock(req.workflow, dir, async () => {
-      const path = queueFilePath(req.workflow, dir);
-      if (!existsSync(path)) return { ok: false as const, error: "queue file does not exist" };
-      const text = readFileSync(path, "utf8");
-      const lines = text.split("\n").filter((l) => l.trim());
-
-      // Walk the events to find the target's enqueue event and confirm
-      // the item is still queued (no claim / done / failed afterwards).
-      let targetEnqueue: string | null = null;
-      let state: "queued" | "claimed" | "done" | "failed" | "missing" = "missing";
-      const otherLines: string[] = [];
-      for (const line of lines) {
-        let ev: QueueEvent;
-        try {
-          ev = JSON.parse(line) as QueueEvent;
-        } catch {
-          // Preserve unparseable lines verbatim.
-          otherLines.push(line);
-          continue;
-        }
-        if ((ev as { id?: string }).id !== req.id) {
-          otherLines.push(line);
-          continue;
-        }
-        if (ev.type === "enqueue") {
-          if (targetEnqueue !== null) {
-            // Duplicate enqueues for the same id are a queue-file
-            // corruption; preserve verbatim and abort the bump.
-            otherLines.push(line);
-          } else {
-            targetEnqueue = line;
-            state = "queued";
-          }
-        } else if (ev.type === "claim") {
-          state = "claimed";
-          otherLines.push(line);
-        } else if (ev.type === "unclaim") {
-          state = "queued";
-          otherLines.push(line);
-        } else if (ev.type === "done") {
-          state = "done";
-          otherLines.push(line);
-        } else if (ev.type === "failed") {
-          state = "failed";
-          otherLines.push(line);
-        } else {
-          otherLines.push(line);
-        }
-      }
-      if (state === "missing" || targetEnqueue === null) {
-        return { ok: false as const, error: "id not found in queue", status: 404 };
-      }
-      if (state !== "queued") {
-        return {
-          ok: false as const,
-          error: `cannot bump item in state ${state}`,
-          status: 409,
-        };
-      }
-      // Rewrite: target enqueue first, then everything else in original order.
-      const newText = [targetEnqueue, ...otherLines].join("\n") + "\n";
-      writeFileSync(path, newText);
-      return { ok: true as const };
-    });
+    return {
+      ok: false as const,
+      error: "task not found in SQLite control store",
+      status: 404,
+    };
   };
 }
 
@@ -418,35 +319,7 @@ export async function resolveDaemonLogPath(
 
 /** Per-workflow queue depth — count of `state === "queued"` items. */
 export function readQueueDepth(workflow: string, dir: string): number {
-  try {
-    const store = createTaskStore(openControlDb({ trackerDir: dir }));
-    const tasks = store.listTasksForWorkflow(workflow);
-    if (tasks.length > 0) return tasks.filter((task) => task.state === "queued").length;
-  } catch {
-    /* fall through to legacy queue-file depth */
-  }
-  const path = queueFilePath(workflow, dir);
-  if (!existsSync(path)) return 0;
-  const text = readFileSync(path, "utf8");
-  // Quick fold — count enqueues minus claims/dones/faileds for those ids.
-  const states = new Map<string, "queued" | "claimed" | "done" | "failed">();
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    let ev: QueueEvent;
-    try {
-      ev = JSON.parse(line) as QueueEvent;
-    } catch {
-      continue;
-    }
-    const id = (ev as { id?: string }).id;
-    if (!id) continue;
-    if (ev.type === "enqueue") states.set(id, "queued");
-    else if (ev.type === "claim") states.set(id, "claimed");
-    else if (ev.type === "unclaim") states.set(id, "queued");
-    else if (ev.type === "done") states.set(id, "done");
-    else if (ev.type === "failed") states.set(id, "failed");
-  }
-  let count = 0;
-  for (const s of states.values()) if (s === "queued") count++;
-  return count;
+  const store = createTaskStore(openControlDb({ trackerDir: dir }));
+  const tasks = store.listTasksForWorkflow(workflow);
+  return tasks.filter((task) => task.state === "queued").length;
 }

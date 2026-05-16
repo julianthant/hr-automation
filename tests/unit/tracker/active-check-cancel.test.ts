@@ -275,8 +275,7 @@ describe("Test D: cancel queued active-check writes tracker row + JSONL log line
     taskStore.close();
   });
 
-  it("writes a tracker failed/step:cancelled row AND a JSONL log line on queue cancel (JSONL fallback path)", async () => {
-    // Test the legacy JSONL queue fallback path (when no SQLite task exists)
+  it("returns 404 cancel-queued when queue audit JSONL exists but SQLite has no task row", async () => {
     const path = queueFilePath("active-check", tmp);
     mkdirSync(join(tmp, "daemons"), { recursive: true });
     const enqueueEv: QueueEvent = {
@@ -296,41 +295,13 @@ describe("Test D: cancel queued active-check writes tracker row + JSONL log line
       runId: "ac-jsonl-run",
     });
 
-    assert.equal(result.ok, true);
-
-    // Verify the queue file got the failed event appended
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 404);
     const queueContent = readFileSync(path, "utf8");
     assert.ok(
-      queueContent.includes('"type":"failed"'),
-      "Expected queue file to contain a failed event",
+      !queueContent.includes('"type":"failed"'),
+      "SQLite-only cancel must not mutate the append-only audit file",
     );
-    assert.ok(
-      queueContent.includes("cancelled by user from dashboard"),
-      "Expected cancel reason in queue file",
-    );
-
-    // Verify tracker row (failed + step=cancelled)
-    const trackerFile = readdirSync(tmp).find((file) =>
-      /^active-check-\d{4}-\d{2}-\d{2}\.jsonl$/.test(file),
-    );
-    assert.ok(trackerFile, "Expected an active-check tracker file");
-    const trackerEntries = readFileSync(join(tmp, trackerFile), "utf8")
-      .trim()
-      .split("\n")
-      .filter(Boolean)
-      .map((l) => JSON.parse(l));
-    const cancelledEntry = trackerEntries.find(
-      (e: { runId?: string; status?: string; step?: string }) =>
-        e.status === "failed" && e.step === "cancelled",
-    );
-    assert.ok(cancelledEntry, "Expected a failed/step=cancelled tracker entry");
-
-    // Verify JSONL log line
-    const logs = readLogEntries("active-check", "Chen, Alice", tmp);
-    assert.ok(logs.length >= 1, `Expected at least one log entry but got ${logs.length}`);
-    const cancelLog = logs.find((l) => l.runId === "ac-jsonl-run");
-    assert.ok(cancelLog, "Expected a log entry with runId=ac-jsonl-run");
-    assert.match(cancelLog.message, /cancelled by user from dashboard/);
   });
 });
 

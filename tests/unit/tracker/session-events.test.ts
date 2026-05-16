@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
 import {
   emitSessionEvent,
   generateInstanceName,
@@ -12,6 +12,7 @@ import {
   workflowNameFromInstance,
 } from "../../../src/tracker/session-events.js";
 import { filterLiveSessionState, rebuildSessionState } from "../../../src/tracker/dashboard.js";
+import { dateLocal } from "../../../src/tracker/jsonl.js";
 
 function tempDir(): string {
   const d = join(tmpdir(), `sessions-test-${randomUUID()}`);
@@ -588,10 +589,12 @@ describe("rebuildSessionState — screenshot scenario", () => {
 const TMP = () => mkdtempSync(join(tmpdir(), "hrauto-gin-"));
 
 function writeSessionsRaw(dir: string, lines: object[]): void {
-  writeFileSync(
-    join(dir, "sessions.jsonl"),
-    lines.map((l) => JSON.stringify(l)).join("\n") + "\n",
-  );
+  for (const l of lines) {
+    const rec = l as { timestamp?: string };
+    const tsStr = typeof rec.timestamp === "string" ? rec.timestamp : new Date().toISOString();
+    const path = join(dir, `sessions-${dateLocal(new Date(tsStr))}.jsonl`);
+    appendFileSync(path, `${JSON.stringify(l)}\n`);
+  }
 }
 
 test("generateInstanceName: ignores stale start whose pid is dead and >60s old", () => {

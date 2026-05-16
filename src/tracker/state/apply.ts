@@ -280,7 +280,10 @@ export function applyLogEntry(
   source: ProjectionSourceRef,
 ): void {
   const trackerDate = source.trackerDate ?? trackerDateFromTimestamp(entry.ts);
-  const runId = entry.runId || `${entry.itemId}#1`;
+  const runId = entry.runId;
+  if (!runId) {
+    return;
+  }
   const tsMs = toMs(entry.ts);
   const now = new Date().toISOString();
   const s = stmts(db);

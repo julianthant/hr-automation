@@ -71,7 +71,7 @@ test("Hono /api/cancel-queued returns not-found shape for missing queue item", a
   assert.equal(res.status, 404);
   const body = await res.json() as { ok: boolean; error: string };
   assert.equal(body.ok, false);
-  assert.equal(body.error, "id not found in queue");
+  assert.equal(body.error, "task not found in SQLite control store");
 });
 
 test("Hono /api/cancel-running requires workflow, id, and runId", async () => {
