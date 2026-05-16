@@ -10,6 +10,7 @@ import {
   __setDisambiguateCallForTests,
   __setDisambiguateCacheDirForTests,
 } from "../../../../src/services/ocr/disambiguate.js";
+import { __resetKeyRotationCacheForTests } from "../../../../src/services/ocr/rotation.js";
 
 test("buildDisambiguationPrompt includes query and candidate names", () => {
   const prompt = buildDisambiguationPrompt({
@@ -79,6 +80,61 @@ test("disambiguateMatch rotates to the next Gemini key after a rate limit", asyn
   } finally {
     __setDisambiguateCallForTests(undefined);
     __setDisambiguateCacheDirForTests(undefined);
+    rmSync(dir, { recursive: true, force: true });
+    if (oldKey1 === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = oldKey1;
+    if (oldKey2 === undefined) delete process.env.GEMINI_API_KEY2;
+    else process.env.GEMINI_API_KEY2 = oldKey2;
+  }
+});
+
+test("concurrent disambiguation calls share in-memory key throttle state", async () => {
+  const oldKey1 = process.env.GEMINI_API_KEY;
+  const oldKey2 = process.env.GEMINI_API_KEY2;
+  const dir = mkdtempSync(join(tmpdir(), "disambiguate-concurrent-"));
+  const firstCallRateLimited = Promise.withResolvers<void>();
+  const releaseFirstCall = Promise.withResolvers<void>();
+  process.env.GEMINI_API_KEY = "k1";
+  process.env.GEMINI_API_KEY2 = "k2";
+  __resetKeyRotationCacheForTests();
+  __setDisambiguateCacheDirForTests(dir);
+  const seenByQuery = new Map<string, string[]>();
+  __setDisambiguateCallForTests(async (key, prompt) => {
+    const query = prompt.includes('OCR\'d name: "Call A"') ? "A" : "B";
+    const seen = seenByQuery.get(query) ?? [];
+    seen.push(key.value);
+    seenByQuery.set(query, seen);
+    if (query === "A" && key.value === "k1") {
+      firstCallRateLimited.resolve();
+      throw new Error("429 Too Many Requests");
+    }
+    if (query === "A" && key.value === "k2") {
+      await releaseFirstCall.promise;
+    }
+    return `{"eid":"${query === "A" ? "10800001" : "10800002"}","confidence":0.91}`;
+  });
+  try {
+    const callA = disambiguateMatch({
+      query: "Call A",
+      candidates: [{ eid: "10800001", name: "Doe, Jane", score: 0.8 }],
+    });
+    await firstCallRateLimited.promise;
+    const callB = disambiguateMatch({
+      query: "Call B",
+      candidates: [{ eid: "10800002", name: "Roe, Janet", score: 0.8 }],
+    });
+    const resultB = await callB;
+    releaseFirstCall.resolve();
+    const resultA = await callA;
+
+    assert.deepEqual(seenByQuery.get("B"), ["k2"]);
+    assert.deepEqual(resultA, { eid: "10800001", confidence: 0.91 });
+    assert.deepEqual(resultB, { eid: "10800002", confidence: 0.91 });
+  } finally {
+    releaseFirstCall.resolve();
+    __setDisambiguateCallForTests(undefined);
+    __setDisambiguateCacheDirForTests(undefined);
+    __resetKeyRotationCacheForTests();
     rmSync(dir, { recursive: true, force: true });
     if (oldKey1 === undefined) delete process.env.GEMINI_API_KEY;
     else process.env.GEMINI_API_KEY = oldKey1;
