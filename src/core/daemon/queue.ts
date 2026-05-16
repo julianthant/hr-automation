@@ -252,6 +252,9 @@ export async function unclaimItem(
   trackerDir?: string,
   runId?: string,
 ): Promise<void> {
+  if (reason !== 'recovered' && !runId) {
+    throw new Error(`unclaimItem(${workflow}/${itemId}) requires runId when reason=${reason}`)
+  }
   const store = openQueueTaskStore(trackerDir)
   store.control.transaction(() => {
     const ts = nowIso()

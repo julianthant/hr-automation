@@ -214,6 +214,18 @@ test('unclaimItem transitions claimed → queued and clears claimedBy', async ()
   }
 })
 
+test('unclaimItem requires runId for non-recovered reasons', async () => {
+  const dir = TMP()
+  try {
+    await assert.rejects(
+      unclaimItem('wf', 'x', 'voluntary', dir),
+      /unclaimItem\(wf\/x\) requires runId when reason=voluntary/,
+    )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('unclaimItem uses runId to requeue the in-flight task when an item is re-enqueued', async () => {
   const dir = TMP()
   try {
