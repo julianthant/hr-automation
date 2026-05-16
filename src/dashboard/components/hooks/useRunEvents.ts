@@ -2,6 +2,17 @@ import type { RunEvent } from "@/components/shared/types";
 import { compact } from "@/lib/utils";
 import { useSseHistoryStream } from "./useSseHistoryStream";
 
+export const RAW_EVENTS_CAP = 5000;
+
+export function capRunEventWindow(events: RunEvent[]): RunEvent[] {
+  if (events.length <= RAW_EVENTS_CAP) return events;
+  return events.slice(events.length - RAW_EVENTS_CAP);
+}
+
+export function appendCappedRunEvents(prev: RunEvent[], next: RunEvent[]): RunEvent[] {
+  return capRunEventWindow([...prev, ...next]);
+}
+
 function buildRunEventParams({
   workflow,
   runId,
@@ -35,6 +46,8 @@ export function useRunEvents(
     date,
   }, {
     enabled: Boolean(itemId && runId),
+    replaceFn: capRunEventWindow,
+    appendFn: appendCappedRunEvents,
     // The run-events topic keys on workflow/runId/date; `id` is intentionally
     // omitted to match the backend topic contract.
     buildParams: buildRunEventParams,
