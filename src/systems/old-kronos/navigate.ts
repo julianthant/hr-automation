@@ -232,9 +232,8 @@ export async function clickEmployeeRow(
 
   // Strategy 1: #row0genieGrid
   const firstRow = employeeGrid.firstRow(iframe);
-  if (await firstRow.count() > 0) {
-    const empName = await getEmployeeName(iframe, employeeId);
-    await safeClick(firstRow, { label: "old kronos first employee row" });
+  const empName = await getEmployeeName(iframe, employeeId);
+  if (await clickIfPresent(firstRow, { label: "old kronos first employee row" })) {
     await page.waitForTimeout(2_000);
     log.step(`Row selected. Employee name: ${empName}`);
     return empName;
@@ -254,8 +253,7 @@ export async function clickEmployeeRow(
 
   // Strategy 3: gridcell containing employee ID
   const cell = employeeGrid.cellByEmployeeId(iframe, employeeId);
-  if (await cell.count() > 0) {
-    await safeClick(cell, { label: "old kronos employee id cell" });
+  if (await clickIfPresent(cell, { label: "old kronos employee id cell" })) {
     await page.waitForTimeout(2_000);
     return null;
   }
@@ -328,14 +326,12 @@ export async function clickGoToTimecard(
   log.step("[Old Kronos] Clicking Go To → Timecards...");
 
   const gotoEl = goToMenu.goToTrigger(iframe);
-  if (await gotoEl.count() > 0) {
-    await safeClick(gotoEl, { label: "old kronos go to timecard trigger" });
+  if (await clickIfPresent(gotoEl, { label: "old kronos go to timecard trigger" })) {
     await page.waitForTimeout(3_000);
 
     // Menu item is "Timecards" (plural) — must use exact match to avoid "Approve Timecards"
     const timecardItem = goToMenu.timecardsItem(iframe);
-    if (await timecardItem.count() > 0) {
-      await safeClick(timecardItem, { label: "old kronos timecards menu item" });
+    if (await clickIfPresent(timecardItem, { label: "old kronos timecards menu item" })) {
       await page.waitForTimeout(5_000);
       log.success("[Old Kronos] Navigated to Timecards");
       return true;
@@ -375,8 +371,7 @@ export async function switchToPreviousPayPeriod(
     await page.waitForTimeout(2_000);
 
     const prevLink = timecard.previousPayPeriodLink(f);
-    if (await prevLink.count() > 0) {
-      await safeClick(prevLink, { timeout: 5_000, label: "old kronos previous pay period link" });
+    if (await clickIfPresent(prevLink, { timeout: 5_000, label: "old kronos previous pay period link" })) {
       await page.waitForTimeout(5_000);
       log.step("[Old Kronos] Switched to Previous Pay Period");
       return true;
@@ -481,16 +476,14 @@ export async function goBackToMain(page: Page): Promise<void> {
 
   // Try tab first
   const tab = workspace.manageDeptTab(page);
-  if (await tab.count() > 0) {
-    await safeClick(tab.first(), { label: "old kronos manage department tab" });
+  if (await clickIfPresent(tab, { label: "old kronos manage department tab" })) {
     await page.waitForTimeout(3_000);
     return;
   }
 
   // Fallback: li tab
   const liTab = workspace.manageDeptLi(page);
-  if (await liTab.count() > 0) {
-    await safeClick(liTab.first(), { label: "old kronos manage department li tab" });
+  if (await clickIfPresent(liTab, { label: "old kronos manage department li tab" })) {
     await page.waitForTimeout(3_000);
     return;
   }
