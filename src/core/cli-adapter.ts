@@ -26,6 +26,13 @@ export interface BuildCliAdapterOpts<TArgs extends readonly unknown[], TInput> {
   buildInputs: (...args: TArgs) => TInput[];
   deriveItemId?: (input: TInput) => string;
   buildPendingData: (input: TInput, itemId: string) => Record<string, string>;
+  pendingExtras?: (
+    input: TInput,
+    itemId: string,
+    runId: string,
+    parentRunId?: string,
+  ) => Record<string, string>;
+  onPreEmitFailed?: (input: TInput, runId: string, error: unknown, itemId: string) => void;
   getPendingId?: (input: TInput, itemId: string) => string;
   flags?: (options: { new?: boolean; parallel?: number }) => DaemonFlags;
   track?: (entry: TrackerEntry) => void;
@@ -66,9 +73,17 @@ export function buildCliAdapter<TArgs extends readonly unknown[], TInput>(
             data: {
               ...opts.buildPendingData(item, itemId),
               ...operatorSubjectData(subject),
+              ...opts.pendingExtras?.(item, itemId, runId, parentRunId),
             },
           });
         },
+        ...(opts.onPreEmitFailed
+          ? {
+              onPreEmitFailed: (item, runId, error, itemId) => {
+                opts.onPreEmitFailed?.(item, runId, error, itemId);
+              },
+            }
+          : {}),
       },
     );
   };

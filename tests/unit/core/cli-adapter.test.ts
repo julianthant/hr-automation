@@ -48,3 +48,77 @@ test("buildCliAdapter maps args to inputs and pre-emits pending rows through inj
   );
   assert.equal((seen[0] as { data: Record<string, string> }).data.__subject, "Doc A");
 });
+
+test("buildCliAdapter merges pendingExtras after standard pending data", async () => {
+  const workflow = defineWorkflow({
+    name: "cli-adapter-extras-test",
+    systems: [],
+    steps: ["done"] as const,
+    schema: z.object({ id: z.string() }),
+    operatorSubject: (input) => ({ kind: "document", label: `Doc ${input.id}` }),
+    handler: async () => {},
+  });
+  const seen: unknown[] = [];
+  const runner = buildCliAdapter({
+    workflow,
+    emptyMessage: "no ids",
+    buildInputs: (id: string) => [{ id }],
+    deriveItemId: (item) => item.id,
+    buildPendingData: (item) => ({ id: item.id, batchDisplayOrdinal: "old" }),
+    pendingExtras: (_item, _itemId, runId, parentRunId) => ({
+      batchDisplayOrdinal: "7",
+      runIdEcho: runId,
+      parentRunId: parentRunId ?? "",
+    }),
+    enqueue: async (_workflow, inputs, _flags, opts) => {
+      opts.onPreEmitPending?.(inputs[0], "run-A", "parent-A", inputs[0].id);
+    },
+    track: (entry) => seen.push(entry),
+  });
+
+  await runner("A");
+
+  assert.deepEqual((seen[0] as { data: Record<string, string> }).data, {
+    id: "A",
+    batchDisplayOrdinal: "7",
+    __subject: "Doc A",
+    __subjectKind: "document",
+    runIdEcho: "run-A",
+    parentRunId: "parent-A",
+  });
+});
+
+test("buildCliAdapter forwards onPreEmitFailed through injected enqueue", async () => {
+  const workflow = defineWorkflow({
+    name: "cli-adapter-failed-test",
+    systems: [],
+    steps: ["done"] as const,
+    schema: z.object({ id: z.string() }),
+    handler: async () => {},
+  });
+  const seen: unknown[] = [];
+  const runner = buildCliAdapter({
+    workflow,
+    emptyMessage: "no ids",
+    buildInputs: (id: string) => [{ id }],
+    deriveItemId: (item) => item.id,
+    buildPendingData: (item) => ({ id: item.id }),
+    onPreEmitFailed: (item, runId, error, itemId) => {
+      seen.push({ item, runId, error, itemId });
+    },
+    enqueue: async (_workflow, inputs, _flags, opts) => {
+      opts.onPreEmitFailed?.(inputs[0], "run-A", "spawn failed", inputs[0].id);
+    },
+  });
+
+  await runner("A");
+
+  assert.deepEqual(seen, [
+    {
+      item: { id: "A" },
+      runId: "run-A",
+      error: "spawn failed",
+      itemId: "A",
+    },
+  ]);
+});
