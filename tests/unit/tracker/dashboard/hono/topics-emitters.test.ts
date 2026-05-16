@@ -5,8 +5,15 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout } from "node:timers/promises";
 
-import { appendLogEntry, getLogsJsonlPathForDate, type LogEntry } from "../../../../../src/tracker/jsonl.js";
-import { logsTopic } from "../../../../../src/tracker/dashboard/hono/topics-emitters.js";
+import {
+  appendLogEntry,
+  dateLocal,
+  getLogsJsonlPathForDate,
+  trackEvent,
+  type LogEntry,
+} from "../../../../../src/tracker/jsonl.js";
+import { emitSessionEvent, type SessionEvent } from "../../../../../src/tracker/session-events.js";
+import { logsTopic, runEventsTopic } from "../../../../../src/tracker/dashboard/hono/topics-emitters.js";
 import { closeStateDbForTests, openStateDb } from "../../../../../src/tracker/state/db.js";
 
 function tmpTracker(): string {
@@ -49,6 +56,51 @@ test("logsTopic uses SQLite projection when ready", async () => {
       ]);
       assert.deepEqual(payload.map((entry) => entry.message), ["Filled comp rate"]);
       assert.equal(payload[0].runId, "run-a");
+    } finally {
+      stop();
+    }
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runEventsTopic uses SQLite tracker rows for workflowInstance attribution", async () => {
+  const dir = tmpTracker();
+  try {
+    const db = openStateDb(dir);
+    const date = dateLocal();
+    const runStart = new Date(Date.now() - 1_000).toISOString();
+    trackEvent({
+      workflow: "work-study",
+      timestamp: runStart,
+      id: "10000001",
+      runId: "run-a",
+      status: "running",
+      step: "transaction",
+      data: { instance: "Work Study 1" },
+    }, dir);
+    emitSessionEvent({
+      type: "auth_start",
+      workflowInstance: "Work Study 1",
+      system: "ucpath",
+    }, dir);
+
+    rmSync(join(dir, `work-study-${date}.jsonl`), { force: true });
+
+    const firstPayload = Promise.withResolvers<SessionEvent[]>();
+    const stop = runEventsTopic(
+      { workflow: "work-study", runId: "run-a", date },
+      (data) => firstPayload.resolve(data as SessionEvent[]),
+      { dir, stateDb: db, projectionReady: true },
+    );
+    try {
+      const payload = await Promise.race([
+        firstPayload.promise,
+        setTimeout(250, [] as SessionEvent[]),
+      ]);
+      assert.deepEqual(payload.map((event) => event.type), ["auth_start"]);
+      assert.equal(payload[0].workflowInstance, "Work Study 1");
     } finally {
       stop();
     }
