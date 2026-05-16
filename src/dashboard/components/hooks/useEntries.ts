@@ -59,7 +59,8 @@ export function resetEntriesMemoRefs(
   activeKeyRef.current = "";
 }
 
-function entryRenderHash(entry: WithFirstLog): string {
+export function entryRenderHash(entry: WithFirstLog): string {
+  const d = entry.data ?? {};
   return stableKey([
     entry.id,
     entry.workflow,
@@ -74,7 +75,22 @@ function entryRenderHash(entry: WithFirstLog): string {
     entry.lastLogMessage,
     entry.firstLogTs,
     entry.lastLogTs,
-    JSON.stringify(entry.data ?? {}),
+    d.__queueRootTitle,
+    d.__queueTitle,
+    d.__queueTitleKind,
+    d.__subject,
+    d.__subjectKind,
+    d.__name,
+    d.__id,
+    d.name,
+    d.employeeName,
+    d.searchName,
+    d.emplId,
+    d.parentSubject,
+    d.formType,
+    d.activeStatus,
+    d.isActive,
+    d.mode,
   ]);
 }
 

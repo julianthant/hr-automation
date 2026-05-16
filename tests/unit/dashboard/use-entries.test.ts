@@ -6,6 +6,7 @@ import { dirname, resolve } from "node:path";
 
 import {
   buildEntriesHash,
+  entryRenderHash,
   resetEntriesMemoRefs,
   shouldApplyEntriesUpdate,
 } from "../../../src/dashboard/components/hooks/useEntries.js";
@@ -63,6 +64,36 @@ test("buildEntriesHash fingerprints entries in one stable pass", () => {
   assert.equal(
     buildEntriesHash(entries),
     "item-1|running|matching|2026-05-14T10:00:00.000Z|2026-05-14T10:00:01.000Z|2026-05-14T10:00:02.000Z|item-1#1|;",
+  );
+});
+
+test("entryRenderHash ignores unread data payload fields", () => {
+  const base: TrackerEntry = {
+    workflow: "ocr",
+    id: "ocr-prep-1",
+    runId: "ocr-prep-1#1",
+    status: "done",
+    step: "awaiting-approval",
+    timestamp: "2026-05-14T10:00:00.000Z",
+    lastLogMessage: "Awaiting approval",
+    data: {
+      __subject: "Oath Signature · #1234",
+      __name: "Oath Signature · #1234",
+      mode: "prepare",
+      records: "[{\"large\":\"payload\"}]",
+    },
+  };
+
+  assert.equal(
+    entryRenderHash({
+      ...base,
+      data: {
+        ...base.data,
+        records: "[{\"different\":\"payload\"}]",
+        someInternalDebugBlob: "unread",
+      },
+    }),
+    entryRenderHash(base),
   );
 });
 
