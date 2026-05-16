@@ -8,7 +8,7 @@ import {
   goToMenu,
   timecard,
 } from "./selectors.js";
-import { safeClick, safeFill } from "../common/index.js";
+import { clickIfPresent, safeClick, safeFill } from "../common/index.js";
 
 export const NEW_KRONOS_URL = "https://ucsd-sso.prd.mykronos.com/wfd/home";
 
@@ -90,8 +90,7 @@ export async function selectEmployeeResult(page: Page): Promise<boolean> {
 
   // Fallback: click the employee name/row directly
   const resultRow = searchSelectors.firstResultRow(frame);
-  if ((await resultRow.count()) > 0) {
-    await safeClick(resultRow, { timeout: 5_000, label: "new kronos search result row" });
+  if (await clickIfPresent(resultRow, { timeout: 5_000, label: "new kronos search result row" })) {
     await page.waitForTimeout(1_000);
     log.step("[New Kronos] Employee row clicked");
     return true;
@@ -115,11 +114,9 @@ export async function clickGoToTimecard(page: Page): Promise<boolean> {
   const gotoOnPage = goToMenu.goToButtonOnPage(page);
 
   let clicked = false;
-  if ((await gotoInFrame.count()) > 0) {
-    await safeClick(gotoInFrame.first(), { timeout: 5_000, label: "new kronos go to button in frame" });
+  if (await clickIfPresent(gotoInFrame, { timeout: 5_000, label: "new kronos go to button in frame" })) {
     clicked = true;
-  } else if ((await gotoOnPage.count()) > 0) {
-    await safeClick(gotoOnPage.first(), { timeout: 5_000, label: "new kronos go to button" });
+  } else if (await clickIfPresent(gotoOnPage, { timeout: 5_000, label: "new kronos go to button" })) {
     clicked = true;
   }
 
@@ -133,8 +130,7 @@ export async function clickGoToTimecard(page: Page): Promise<boolean> {
   // Click Timecard/Timecards in the dropdown menu (6-deep fallback)
   const timecardItem = goToMenu.timecardItem(page);
 
-  if ((await timecardItem.count()) > 0) {
-    await safeClick(timecardItem.first(), { timeout: 5_000, label: "new kronos timecard menu item" });
+  if (await clickIfPresent(timecardItem, { timeout: 5_000, label: "new kronos timecard menu item" })) {
     await page.waitForTimeout(5_000);
     log.success("[New Kronos] Navigated to Timecard");
     return true;
@@ -153,13 +149,11 @@ export async function switchToPreviousPayPeriod(page: Page): Promise<boolean> {
   // Mapped via playwright-cli: click "Current Pay Period" button to open dropdown,
   // then click option "Previous Pay Period"
   const periodBtn = timecard.currentPayPeriodButton(page);
-  if ((await periodBtn.count()) > 0) {
-    await safeClick(periodBtn, { timeout: 5_000, label: "new kronos current pay period button" });
+  if (await clickIfPresent(periodBtn, { timeout: 5_000, label: "new kronos current pay period button" })) {
     await page.waitForTimeout(2_000);
 
     const prevOption = timecard.previousPayPeriodOption(page);
-    if ((await prevOption.count()) > 0) {
-      await safeClick(prevOption, { timeout: 5_000, label: "new kronos previous pay period option" });
+    if (await clickIfPresent(prevOption, { timeout: 5_000, label: "new kronos previous pay period option" })) {
       await page.waitForTimeout(5_000);
       log.step("[New Kronos] Switched to Previous Pay Period");
       return true;
@@ -382,8 +376,7 @@ export async function closeEmployeeSearch(page: Page): Promise<void> {
   try {
     const frame = searchFrame(page);
     const closeBtn = searchSelectors.closeButton(frame);
-    if ((await closeBtn.count()) > 0) {
-      await safeClick(closeBtn, { timeout: 3_000, label: "new kronos search sidebar close button" });
+    if (await clickIfPresent(closeBtn, { timeout: 3_000, label: "new kronos search sidebar close button" })) {
       log.step("[New Kronos] Search sidebar closed");
     }
   } catch {
