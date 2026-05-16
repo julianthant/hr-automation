@@ -1,9 +1,8 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { defineWorkflow, runWorkflow } from "../../core/index.js";
-import { runCliEntry } from "../../core/cli-adapter.js";
-import { ensureDaemonsAndEnqueue } from "../../core/daemon/client.js";
-import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
+import { buildCliAdapter } from "../../core/cli-adapter.js";
+import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { loginToACTCrm } from "../../infra/auth/login.js";
 import {
   buildCrmDocumentDownloadPath,
@@ -123,53 +122,29 @@ export async function runCrmDocDownload(input: CrmDocDownloadInput): Promise<voi
   log.success("CRM document download completed successfully");
 }
 
-export async function runCrmDocDownloadCli(
-  emails: string[],
-  options: { new?: boolean; parallel?: number } = {},
-): Promise<void> {
-  if (!runCliEntry(emails.length > 0, "runCrmDocDownloadCli: no emails provided")) return;
-
-  const inputs = emails.map((email) => ({ email }));
-  const now = new Date().toISOString();
-  await ensureDaemonsAndEnqueue(
-    crmDocDownloadWorkflow,
-    inputs,
-    { new: options.new, parallel: options.parallel },
-    {
-      onPreEmitPending: (item, runId, parentRunId) => {
-        const subject = crmDocDownloadWorkflow.config.operatorSubject?.(item);
-        const id = deriveCrmDocDownloadItemId(item);
-        trackEvent({
-          workflow: WORKFLOW,
-          timestamp: now,
-          id,
-          runId,
-          ...(parentRunId ? { parentRunId } : {}),
-          status: "pending",
-          data: {
-            ...(item.email ? { email: item.email } : {}),
-            ...(item.emplId ? { emplId: item.emplId } : {}),
-            taskRole: "root",
-            ...operatorSubjectData(subject),
-          },
-        });
-      },
-      onPreEmitFailed: (item, runId, error) => {
-        const id = deriveCrmDocDownloadItemId(item);
-        trackEvent({
-          workflow: WORKFLOW,
-          timestamp: new Date().toISOString(),
-          id,
-          runId,
-          status: "failed",
-          data: {
-            ...(item.email ? { email: item.email } : {}),
-            ...(item.emplId ? { emplId: item.emplId } : {}),
-            taskRole: "root",
-          },
-          error: `Spawn failed before enqueue: ${errorMessage(error)}`,
-        });
-      },
-    },
-  );
+function buildCrmDocDownloadPendingData(input: CrmDocDownloadInput): Record<string, string> {
+  return {
+    ...(input.email ? { email: input.email } : {}),
+    ...(input.emplId ? { emplId: input.emplId } : {}),
+    taskRole: "root",
+  };
 }
+
+export const runCrmDocDownloadCli = buildCliAdapter<[string[]], CrmDocDownloadInput>({
+  workflow: crmDocDownloadWorkflow,
+  emptyMessage: "runCrmDocDownloadCli: no emails provided",
+  buildInputs: (emails) => emails.map((email) => ({ email })),
+  deriveItemId: deriveCrmDocDownloadItemId,
+  buildPendingData: (input) => buildCrmDocDownloadPendingData(input),
+  onPreEmitFailed: (input, runId, error, itemId) => {
+    trackEvent({
+      workflow: WORKFLOW,
+      timestamp: new Date().toISOString(),
+      id: itemId,
+      runId,
+      status: "failed",
+      data: buildCrmDocDownloadPendingData(input),
+      error: `Spawn failed before enqueue: ${errorMessage(error)}`,
+    });
+  },
+});
