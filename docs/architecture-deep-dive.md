@@ -794,7 +794,7 @@ Each folder under `src/systems/` is a Playwright driver for one external system.
 ```
 src/systems/ucpath/
 ├── selectors.ts           ← every page.locator(...) lives here
-├── navigate.ts            ← helpers: getContentFrame, dismissModalMask, etc.
+├── navigate.ts            ← helpers: getContentFrame, waitForPeopleSoftProcessing, etc.
 ├── login.ts               ← login flow (Duo-aware)
 ├── smartHR.ts             ← Smart HR transaction driver
 ├── jobSummary.ts          ← Job Summary extract

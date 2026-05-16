@@ -8,9 +8,7 @@ belong in the system that owns them, not in common.
 
 - `modal.ts` — `dismissPeopleSoftModalMask(page)`: hides `#pt_modalMask`,
   the transparent overlay PeopleSoft leaves visible between tab switches.
-  Used by UCPath transaction flow and emergency-contact. Legacy aliases
-  `dismissModalMask` / `hidePeopleSoftModalMask` re-export this from
-  `src/systems/ucpath/navigate.ts` and `personal-data.ts`.
+  Used by UCPath transaction flow and emergency-contact.
 - `safe.ts` — `safeClick(locator, { label })` and `safeFill(locator, value,
   { label })`: instrumented wrappers around Playwright's click/fill. Three
   tiers of instrumentation, gated on call latency:

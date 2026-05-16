@@ -1,6 +1,6 @@
 import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
-import { dismissPeopleSoftModalMask as hidePeopleSoftModalMask } from "../common/modal.js";
+import { dismissPeopleSoftModalMask } from "../common/modal.js";
 import { safeClick, safeFill } from "../common/index.js";
 import { emergencyContact } from "./selectors.js";
 
@@ -36,7 +36,7 @@ export async function navigateToEmergencyContact(
   await page.waitForTimeout(3_000);
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 
-  await hidePeopleSoftModalMask(page);
+  await dismissPeopleSoftModalMask(page);
 
   log.step(`Filling Empl ID ${emplId} and searching...`);
   await safeFill(emergencyContact.emplIdInput(page), emplId, {
@@ -44,7 +44,7 @@ export async function navigateToEmergencyContact(
     label: "ucpath emergency contact empl id",
   });
 
-  await hidePeopleSoftModalMask(page);
+  await dismissPeopleSoftModalMask(page);
   await safeClick(emergencyContact.searchButton(page), {
     timeout: 10_000,
     label: "ucpath emergency contact search button",
@@ -74,10 +74,6 @@ export async function navigateToEmergencyContact(
 
   log.success(`Emergency Contact editor loaded for Empl ID ${emplId}`);
 }
-
-// Re-export under the legacy name so existing callers still resolve.
-// Implementation lives in src/systems/common/modal.ts.
-export { hidePeopleSoftModalMask };
 
 /**
  * Read every existing Contact Name textbox on the currently loaded editor.
@@ -126,7 +122,7 @@ export async function demoteExistingContact(
 ): Promise<void> {
   log.step(`Demoting existing contact "${existingName}"...`);
 
-  await hidePeopleSoftModalMask(page);
+  await dismissPeopleSoftModalMask(page);
 
   const nameInputs = await emergencyContact.contactNameInputs(page).all();
   let targetIndex = -1;
@@ -155,7 +151,7 @@ export async function demoteExistingContact(
     log.step(`Row ${targetIndex + 1} already non-primary — skipping uncheck`);
   }
 
-  await hidePeopleSoftModalMask(page);
+  await dismissPeopleSoftModalMask(page);
   await safeClick(emergencyContact.saveButton(page), {
     timeout: 10_000,
     label: "ucpath emergency contact save button",

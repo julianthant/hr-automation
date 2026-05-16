@@ -6,9 +6,9 @@ export {
   navigateToSmartHR,
   getContentFrame,
   waitForPeopleSoftProcessing,
-  dismissModalMask,
   searchPerson,
 } from "./navigate.js";
+export { dismissPeopleSoftModalMask } from "../common/modal.js";
 export type { PersonSearchResult } from "./navigate.js";
 export {
   clickSmartHRTransactions,
