@@ -25,18 +25,16 @@ const ICON_MAP: Record<LogCategory, { icon: typeof Check; color: string }> = {
   debug: { icon: ChevronRight, color: "text-muted-foreground/40" },
 };
 
-type LogLineEntry =
-  | (CollapsedLogEntry & { kind?: "log" })
-  | (RunEvent & { kind: "event"; count?: number });
-
-interface LogLineProps {
-  entry: LogLineEntry;
+type LogLineProps = {
   isCurrent: boolean;
   onCopy: (text: string) => void;
-}
+} & (
+  | { kind: "log"; entry: CollapsedLogEntry }
+  | { kind: "event"; entry: RunEvent }
+);
 
-function LogLineImpl({ entry, isCurrent, onCopy }: LogLineProps) {
-  if (entry.kind === "event") {
+function LogLineImpl({ entry, kind, isCurrent, onCopy }: LogLineProps) {
+  if (kind === "event") {
     return <EventLine event={entry} />;
   }
   const category = getLogCategory(entry.level, entry.message);

@@ -338,7 +338,8 @@ export function LogStream({
                 >
                   {item.kind === "log" ? (
                     <LogLine
-                      entry={{ ...item.entry, kind: "log" }}
+                      entry={item.entry}
+                      kind="log"
                       isCurrent={
                         virtualRow.index === displayed.length - 1 && item.entry.level === "step"
                       }
@@ -346,7 +347,8 @@ export function LogStream({
                     />
                   ) : (
                     <LogLine
-                      entry={{ ...item.entry, kind: "event" }}
+                      entry={item.entry}
+                      kind="event"
                       isCurrent={false}
                       onCopy={handleCopy}
                     />
