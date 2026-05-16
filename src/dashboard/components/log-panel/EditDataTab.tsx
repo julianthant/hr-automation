@@ -21,6 +21,7 @@ interface EditDataTabProps {
 }
 
 type PendingAction = null | "run" | "save" | "refresh";
+type EditableFieldKey = { key: string };
 
 function EmptyEditState({ children }: { children: ReactNode }) {
   return (
@@ -28,6 +29,26 @@ function EmptyEditState({ children }: { children: ReactNode }) {
       {children}
     </div>
   );
+}
+
+export function buildEditDataResetKey(
+  entry: TrackerEntry | null,
+  editableFields: ReadonlyArray<EditableFieldKey>,
+): string {
+  const entryKey = `${entry?.id ?? ""}|${entry?.runId ?? ""}`;
+  const editableKey = editableFields.map((f) => f.key).join(",");
+  return `${entryKey}|${editableKey}`;
+}
+
+export function buildEditDataInitialValues(
+  entry: TrackerEntry | null,
+  editableFields: ReadonlyArray<EditableFieldKey>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const f of editableFields) {
+    out[f.key] = entry?.data?.[f.key] ?? "";
+  }
+  return out;
 }
 
 /**
@@ -54,21 +75,20 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
     () => (meta?.detailFields ?? []).filter((f) => f.editable),
     [meta],
   );
+  const resetKey = buildEditDataResetKey(entry, editableFields);
   const initial = useMemo(() => {
-    const out: Record<string, string> = {};
-    for (const f of editableFields) {
-      out[f.key] = entry?.data?.[f.key] ?? "";
-    }
-    return out;
-  }, [editableFields, entry]);
+    return buildEditDataInitialValues(entry, editableFields);
+    // Reset defaults only when the operator picks a different row or editable set.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetKey]);
 
   const [values, setValues] = useState<Record<string, string>>(initial);
   const [pending, setPending] = useState<PendingAction>(null);
 
-  // Reset when the entry / editable set changes (e.g. user picks a different row).
+  // Reset when the entry identity / editable set changes, not on every SSE ref.
   useEffect(() => {
     setValues(initial);
-  }, [initial]);
+  }, [initial, resetKey]);
 
   if (!entry) {
     return (
