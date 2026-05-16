@@ -22,7 +22,7 @@ import { prefetchFormTypes } from "./components/hooks/useFormTypes";
 import { useTelegramToasts } from "./components/hooks/useTelegramToasts";
 import { useCaptureToasts } from "./components/hooks/useCaptureToasts";
 import { resolveActionToastsForEntry } from "./components/hooks/useActionToasts";
-import { useWorkflow, useWorkflows, autoLabel } from "./lib/workflows-context";
+import { WorkflowsProvider, useWorkflow, useWorkflows, autoLabel } from "./lib/workflows-context";
 import {
   resolveEntryName,
   buildDisplayNameMap,
@@ -52,6 +52,7 @@ import {
   sortQueueEntriesForDisplay,
   type QueueSortMode,
 } from "./components/queue-panel/queue-sort";
+import { AppErrorBoundary } from "./components/shared/AppErrorBoundary";
 
 /** Default workflow when ?wf= is missing or unknown. Must always exist
  *  in the registry; if it doesn't, we fall through to the first registered
@@ -673,5 +674,15 @@ export function App() {
     </TerminalDrawerProvider>
     </TooltipProvider>
     </BatchQueueParentRunIdProvider>
+  );
+}
+
+export function DashboardApp() {
+  return (
+    <AppErrorBoundary>
+      <WorkflowsProvider>
+        <App />
+      </WorkflowsProvider>
+    </AppErrorBoundary>
   );
 }
