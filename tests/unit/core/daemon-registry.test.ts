@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   findAliveDaemons,
+  invalidateAliveDaemonsCache,
   writeLockfile,
   readLockfile,
   lockfilePath,
@@ -86,6 +87,34 @@ test('findAliveDaemons returns empty when no lockfiles', async () => {
     const alive = await findAliveDaemons('none', dir)
     assert.deepEqual(alive, [])
   } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('findAliveDaemons reuses the in-flight promise within the short TTL', async () => {
+  const dir = TMP()
+  try {
+    invalidateAliveDaemonsCache()
+    const first = findAliveDaemons('none', dir)
+    const second = findAliveDaemons('none', dir)
+    assert.equal(second, first)
+    assert.deepEqual(await first, [])
+  } finally {
+    invalidateAliveDaemonsCache()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('invalidateAliveDaemonsCache clears cached liveness probes', async () => {
+  const dir = TMP()
+  try {
+    const first = findAliveDaemons('none', dir)
+    invalidateAliveDaemonsCache('none', dir)
+    const second = findAliveDaemons('none', dir)
+    assert.notEqual(second, first)
+    await Promise.all([first, second])
+  } finally {
+    invalidateAliveDaemonsCache()
     rmSync(dir, { recursive: true, force: true })
   }
 })

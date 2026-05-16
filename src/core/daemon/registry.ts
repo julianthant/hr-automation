@@ -109,6 +109,27 @@ export function isProcessAlive(pid: number): boolean {
  */
 type ProbeResult = 'match' | 'mismatch' | 'unreachable'
 
+const ALIVE_DAEMONS_CACHE_TTL_MS = 2_000
+const aliveDaemonsCache = new Map<string, { value: Promise<Daemon[]>; expires: number }>()
+
+function aliveDaemonsCacheKey(workflow: string, trackerDir?: string): string {
+  return `${trackerDir ?? ''}\u0000${workflow}`
+}
+
+export function invalidateAliveDaemonsCache(workflow?: string, trackerDir?: string): void {
+  if (!workflow) {
+    aliveDaemonsCache.clear()
+    return
+  }
+  if (trackerDir !== undefined) {
+    aliveDaemonsCache.delete(aliveDaemonsCacheKey(workflow, trackerDir))
+    return
+  }
+  for (const key of aliveDaemonsCache.keys()) {
+    if (key.endsWith(`\u0000${workflow}`)) aliveDaemonsCache.delete(key)
+  }
+}
+
 async function probeWhoami(
   port: number,
   expected: { workflow: string; instanceId: string },
@@ -144,7 +165,17 @@ function safeUnlink(path: string): void {
  * lockfiles are unlinked as a side effect so they don't keep getting
  * re-probed. Results are sorted by `startedAt` ascending (oldest first).
  */
-export async function findAliveDaemons(workflow: string, trackerDir?: string): Promise<Daemon[]> {
+export function findAliveDaemons(workflow: string, trackerDir?: string): Promise<Daemon[]> {
+  const key = aliveDaemonsCacheKey(workflow, trackerDir)
+  const cached = aliveDaemonsCache.get(key)
+  const now = Date.now()
+  if (cached && cached.expires > now) return cached.value
+  const value = findAliveDaemonsUncached(workflow, trackerDir)
+  aliveDaemonsCache.set(key, { value, expires: now + ALIVE_DAEMONS_CACHE_TTL_MS })
+  return value
+}
+
+async function findAliveDaemonsUncached(workflow: string, trackerDir?: string): Promise<Daemon[]> {
   const dir = daemonsDir(trackerDir)
   if (!existsSync(dir)) return []
   const prefix = `${workflow}-`
@@ -323,7 +354,10 @@ export async function spawnDaemon(workflow: string, trackerDir?: string): Promis
     const ours = candidates.find(
       (d) => d.pid === child.pid || d.parentPid === child.pid,
     )
-    if (ours) return ours
+    if (ours) {
+      invalidateAliveDaemonsCache(workflow, trackerDir)
+      return ours
+    }
     await delay(500)
   }
   throw new Error(`daemon failed to start within 5min — check ${logPath}`)
