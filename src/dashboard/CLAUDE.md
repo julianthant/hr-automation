@@ -166,7 +166,7 @@ When re-running the same ID (e.g. a failed separation re-run):
 
 ## Workflow-Specific Configuration
 
-All dashboard UI metadata lives on the server-side `WorkflowMetadata` registry (every shipped workflow registers via `defineWorkflow`). `defineDashboardMetadata` remains in `src/core/registry.ts` for hypothetical future non-kernel workflows — there are no callers under `src/workflows/*` today. Frontend consumes via the `WorkflowsProvider` + `useWorkflow(name)` hook (`src/dashboard/lib/workflows-context.tsx`) backed by `/api/workflow-definitions`. The former `WF_CONFIG` constant was deleted in subsystem D — there is no frontend-side hardcoding of labels, name/id resolvers, or detailField arrays anywhere.
+All dashboard UI metadata lives on the server-side `WorkflowMetadata` registry (every shipped workflow registers via `defineWorkflow`). `defineDashboardMetadata` remains in `src/core/kernel/registry.ts` (re-exported from `src/core/index.ts`) for hypothetical future non-kernel workflows — there are no callers under `src/workflows/*` today. Frontend consumes via the `WorkflowsProvider` + `useWorkflow(name)` hook (`src/dashboard/lib/workflows-context.tsx`) backed by `/api/workflow-definitions`. The former `WF_CONFIG` constant was deleted in subsystem D — there is no frontend-side hardcoding of labels, name/id resolvers, or detailField arrays anywhere.
 
 Current consumption:
 
