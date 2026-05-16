@@ -11,7 +11,7 @@ import {
 } from "../../../src/tracker/session-events.js";
 import { dateLocal } from "../../../src/tracker/jsonl.js";
 
-describe("sessions.jsonl rotation", () => {
+describe("sessions-* date rotation", () => {
   let dir: string;
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "sess-rot-"));
@@ -24,13 +24,11 @@ describe("sessions.jsonl rotation", () => {
     emitSessionEvent({ type: "workflow_start", workflowInstance: "Test 1" }, dir);
     const today = dateLocal();
     assert.ok(existsSync(join(dir, `sessions-${today}.jsonl`)));
-    assert.equal(existsSync(join(dir, "sessions.jsonl")), false);
   });
 
-  it("reads from both dated files and legacy single file", () => {
-    // Seed legacy file (pre-rotation data we still need to surface).
+  it("reads from every dated snapshot file under the tracker dir", () => {
     writeFileSync(
-      join(dir, "sessions.jsonl"),
+      join(dir, "sessions-2026-01-01.jsonl"),
       JSON.stringify({
         type: "workflow_start",
         timestamp: "2026-01-01T00:00:00.000Z",
@@ -38,7 +36,7 @@ describe("sessions.jsonl rotation", () => {
         workflowInstance: "Legacy 1",
       }) + "\n",
     );
-    // Seed an old dated file.
+    // Seed another old dated file.
     writeFileSync(
       join(dir, "sessions-2026-04-01.jsonl"),
       JSON.stringify({

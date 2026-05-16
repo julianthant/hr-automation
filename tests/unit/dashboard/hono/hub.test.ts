@@ -216,16 +216,16 @@ describe("/events/hub integration", () => {
     assert.equal(res.status, 404, "legacy endpoint should return 404 after removal");
   });
 
-  test("hub emits correct envelope when sessions dir uses legacy sessions.jsonl", async () => {
-    // Also test the legacy non-dated sessions.jsonl path that readSessionEventsTolerant handles
-    const legacyFile = join(dir, "sessions.jsonl");
+  test("hub emits telegram envelope when events live in a dated sessions file", async () => {
+    const iso = new Date().toISOString();
+    const sessionsFile = join(dir, `sessions-${dateLocal(new Date(iso))}.jsonl`);
     appendFileSync(
-      legacyFile,
+      sessionsFile,
       JSON.stringify({
         type: "telegram_sent",
-        timestamp: new Date().toISOString(),
+        timestamp: iso,
         pid: process.pid,
-        message: "Legacy file message",
+        message: "Dated snapshot file message",
       }) + "\n",
     );
 

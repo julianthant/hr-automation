@@ -130,7 +130,7 @@ export function filterEventsForRun(
  * How long after a crash-on-launch the dashboard keeps rendering the red
  * "Launch failed" placeholder in the live Sessions rail. Past this window the
  * failed run is considered historical - details still live in
- * `.tracker/sessions.jsonl` and the workflow's per-day log, but the Sessions
+ * dated session snapshot files and the workflow's per-day log, but the Sessions
  * panel (which is a "live / currently happening" view) stops pinning it.
  */
 const CRASH_ON_LAUNCH_WINDOW_MS = 15 * 60 * 1000;
@@ -325,7 +325,7 @@ export function rebuildSessionState(dir?: string): SessionState {
   //
   // Age gate: the session drawer keeps crashedOnLaunch entries visible even after
   // pidAlive flips false (that's the point of the placeholder - the Node
-  // process that crashed is already gone). But sessions.jsonl is append-only
+  // process that crashed is already gone). But session snapshot files are append-only
   // across orchestrator sessions, so without a time cutoff a crash from days
   // ago would permanently pin itself to the live Sessions rail. Only flag
   // crashes whose workflow_end is within CRASH_ON_LAUNCH_WINDOW_MS.

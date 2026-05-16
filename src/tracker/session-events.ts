@@ -68,11 +68,9 @@ export interface SessionEvent {
 // ── File paths ─────────────────────────────────────────
 //
 // Sessions rotate into dated files (`sessions-YYYY-MM-DD.jsonl`) the same
-// way tracker entries do. Reads aggregate every dated file plus a legacy
-// single `sessions.jsonl` written before rotation landed; that legacy
-// file ages out via `cleanOldSessionFiles` like any other dated file.
+// way tracker entries do. Reads aggregate every dated file in the tracker
+// directory.
 
-const LEGACY_SESSIONS_FILE = "sessions.jsonl";
 const SESSIONS_PREFIX = "sessions-";
 const SESSIONS_SUFFIX = ".jsonl";
 const SESSIONS_DATE_RE = /^sessions-\d{4}-\d{2}-\d{2}\.jsonl$/;
@@ -119,17 +117,15 @@ export function readSessionEvents(dir: string = DEFAULT_DIR): SessionEvent[] {
   let files: string[];
   try {
     files = readdirSync(dir).filter(
-      // Strict YYYY-MM-DD dated names + the single legacy file. Loose
-      // `sessions-*.jsonl` would slurp editor temp files / malformed dates
-      // that `cleanOldSessionFiles` correctly refuses to delete, leaving
-      // them to accumulate.
-      (f) => f === LEGACY_SESSIONS_FILE || SESSIONS_DATE_RE.test(f),
+      // Strict YYYY-MM-DD dated names only. Loose `sessions-*.jsonl` would
+      // slurp editor temp files / malformed dates that `cleanOldSessionFiles`
+      // correctly refuses to delete, leaving them to accumulate.
+      (f) => SESSIONS_DATE_RE.test(f),
     );
   } catch {
     return out; // dir doesn't exist
   }
-  // Sort by date for deterministic ordering. Legacy file sorts first
-  // (no date in its name; treat as oldest).
+  // Sort by date for deterministic ordering.
   files.sort();
   for (const f of files) {
     const path = join(dir, f);
@@ -153,7 +149,7 @@ export function readSessionEvents(dir: string = DEFAULT_DIR): SessionEvent[] {
 // route session events to the same tracker dir they're using for entries +
 // logs. Without this, tests that pass `trackerDir: TMP_DIR` for their
 // per-workflow JSONL would still leak `workflow_start`/`step_change`/etc.
-// into the real `.tracker/sessions.jsonl` and pollute the dashboard's
+// into the real `.tracker/` session files and pollute the dashboard's
 // dashboard session drawer with dead test instances.
 
 export function emitWorkflowStart(instance: string, dir?: string): void {

@@ -8,8 +8,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { buildScreenshotsHandler } from '../../../src/tracker/dashboard.js'
 import { openStateDb, closeStateDbForTests, stateDbPath } from '../../../src/tracker/state/db.js'
-import { trackEvent } from '../../../src/tracker/jsonl.js'
-import { emitScreenshotEvent } from '../../../src/tracker/jsonl.js'
+import { trackEvent, emitScreenshotEvent, dateLocal } from '../../../src/tracker/jsonl.js'
 
 test('returns grouped entries only for screenshot session events (ignores orphan disk PNGs)', async () => {
   const trackerDir = await fs.mkdtemp(path.join(os.tmpdir(), 'scr-dash-'))
@@ -22,7 +21,8 @@ test('returns grouped entries only for screenshot session events (ignores orphan
   // No session event for this file — must not appear in grouped API output.
   await fs.writeFile(path.join(shotsDir, 'separations-3907-kuali-extraction-old-kronos-1776709123932.png'), 'x')
 
-  const sessionsJsonl = path.join(trackerDir, 'sessions.jsonl')
+  const sessionDay = dateLocal(new Date(ts))
+  const sessionsJsonl = path.join(trackerDir, `sessions-${sessionDay}.jsonl`)
   await fs.writeFile(sessionsJsonl, JSON.stringify({
     type: 'screenshot', runId: 'r1', ts, kind: 'form', label: 'kuali-saved', step: 'kuali-finalization',
     timestamp: new Date(ts).toISOString(),
@@ -79,7 +79,7 @@ describe('grouped handler SQLite vs JSONL parity', () => {
       data: {},
     }, trackerDir)
 
-    // 4. Emit the screenshot event — populates both sessions.jsonl and SQLite files table.
+    // 4. Emit the screenshot event — populates rotated session snapshots + SQLite files table.
     emitScreenshotEvent({
       type: 'screenshot',
       runId: 'run-parity-1',

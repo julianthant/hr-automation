@@ -1,4 +1,4 @@
-import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { transaction, type Database } from "../../infra/sqlite/index.js";
@@ -17,34 +17,6 @@ interface ParsedLine<T> {
   value: T;
   line: number;
   offset: number;
-}
-
-/**
- * Read all lines from a JSONL file regardless of byte offset.
- * Used only for the legacy multi-date `sessions.jsonl` where we cannot
- * skip by offset (the file spans multiple dates, so we must filter by date
- * at parse time — but INSERT OR IGNORE on UNIQUE(source_path, source_offset)
- * absorbs already-seen lines as a no-op).
- */
-function parseJsonl<T>(path: string): ParsedLine<T>[] {
-  if (!existsSync(path)) return [];
-  const text = readFileSync(path, "utf8");
-  const out: ParsedLine<T>[] = [];
-  let offset = 0;
-  let line = 1;
-  for (const rawLine of text.split("\n")) {
-    const bytes = Buffer.byteLength(rawLine + "\n");
-    if (rawLine.trim()) {
-      try {
-        out.push({ value: JSON.parse(rawLine) as T, line, offset });
-      } catch {
-        // Rebuild is tolerant so one truncated append cannot block the dashboard.
-      }
-    }
-    offset += bytes;
-    line += 1;
-  }
-  return out;
 }
 
 /**
@@ -207,37 +179,25 @@ export function rebuildProjectionForDate(db: Database, opts: RebuildProjectionOp
       recordSource(db, { path, sourceKind: "log", workflow, trackerDate: date, lineCount: parsed.length });
     }
 
-    // Aggregate session events from both the legacy sessions.jsonl and any
-    // dated sessions-YYYY-MM-DD.jsonl files. The dated file for `date` is the
-    // primary source after rotation; the legacy file holds pre-rotation data.
-    //
-    // Incremental strategy per file type:
-    //   - sessions-${date}.jsonl: single-date file → safe to use byte_offset.
-    //   - sessions.jsonl: multi-date file → must read fully and filter by date
-    //     at parse time. INSERT OR IGNORE absorbs already-seen lines as a no-op.
+    // Session events come from `sessions-YYYY-MM-DD.jsonl` only. Incremental:
+    // byte_offset on the dated file is safe (single calendar day per file).
     const datedSessionPath = join(dir, `sessions-${date}.jsonl`);
-    const legacySessionPath = join(dir, "sessions.jsonl");
-    const sessionFilePairs: Array<{ path: string; incremental: boolean }> = [
-      { path: legacySessionPath, incremental: false },
-      { path: datedSessionPath, incremental: true },
-    ].filter((f, i, arr) => arr.findIndex((x) => x.path === f.path) === i); // deduplicate
-
-    let sessionLinesAppliedTotal = 0;
-    for (const { path: sessionsPath, incremental } of sessionFilePairs) {
-      const startAt = incremental ? (existingOffsets.get(sessionsPath) ?? 0) : 0;
-      const sessions = incremental
-        ? parseJsonlFrom<SessionEvent | ScreenshotSessionEvent>(sessionsPath, startAt)
-        : parseJsonl<SessionEvent | ScreenshotSessionEvent>(sessionsPath);
-      let sessionLineCount = 0;
-      for (const row of sessions) {
-        const eventDate = sessionEventDate(row.value);
-        if (eventDate !== date) continue;
-        sessionLineCount += 1;
-        applySessionEvent(db, row.value, source(sessionsPath, "session", row.line, row.offset, eventDate));
-      }
-      sessionLinesAppliedTotal += sessionLineCount;
-      recordSource(db, { path: sessionsPath, sourceKind: "session", trackerDate: date, lineCount: sessionLineCount });
+    const sessionsStartAt = existingOffsets.get(datedSessionPath) ?? 0;
+    const sessions = parseJsonlFrom<SessionEvent | ScreenshotSessionEvent>(datedSessionPath, sessionsStartAt);
+    let sessionLineCount = 0;
+    for (const row of sessions) {
+      const eventDate = sessionEventDate(row.value);
+      if (eventDate !== date) continue;
+      sessionLineCount += 1;
+      applySessionEvent(db, row.value, source(datedSessionPath, "session", row.line, row.offset, eventDate));
     }
+    let sessionLinesAppliedTotal = sessionLineCount;
+    recordSource(db, {
+      path: datedSessionPath,
+      sourceKind: "session",
+      trackerDate: date,
+      lineCount: sessionLineCount,
+    });
 
     recomputeRunOrdinals(db, date);
 

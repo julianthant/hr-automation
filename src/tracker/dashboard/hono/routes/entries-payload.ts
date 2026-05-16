@@ -156,8 +156,8 @@ export function buildJsonlEventsPayload(
   const logLast = new Map<string, string>();
   const logLastMsg = new Map<string, string>();
   for (const entry of logs) {
-    const runId = entry.runId || `${entry.itemId}#1`;
-    const key = `${entry.itemId}::${runId}`;
+    if (!entry.runId) continue;
+    const key = `${entry.itemId}::${entry.runId}`;
     if (!logFirst.has(key)) logFirst.set(key, entry.ts);
     logLast.set(key, entry.ts);
     logLastMsg.set(key, entry.message);

@@ -127,7 +127,11 @@ export async function scanOrphanedQueueItems(dir = DEFAULT_DIR): Promise<void> {
       try {
         const taskStore = createTaskStore(controlDb);
         for (const item of stale) {
-          const runId = item.runId ?? `${item.id}#1`;
+          const runId = item.runId;
+          if (!runId) {
+            log.warn(`[orphan-sweep] ${wf}: item ${item.id} has no runId — skipping`);
+            continue;
+          }
           try {
             await markItemFailed(wf, item.id, failError, runId, dir);
             if (item.taskId) {

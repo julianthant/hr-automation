@@ -102,7 +102,7 @@ export function __resetSessionStateCacheForTests(): void {
 // ── telegram topic ────────────────────────────────────────────────────────────
 
 /**
- * Polls `sessions.jsonl` every 1 second and sends delta batches of
+ * Polls session snapshot files every 1 second and sends delta batches of
  * `telegram_sent` events.  Emits the full list on first tick, then only
  * new events on subsequent ticks.
  *
