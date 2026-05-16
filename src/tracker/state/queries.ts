@@ -2,7 +2,7 @@ import { type Database } from "../../infra/sqlite/index.js";
 
 import { computeFailureCounts } from "../dashboard/failures.js";
 import { computeStepDurations } from "../dashboard/run-timelines.js";
-import type { ProjectionEntriesPayload, ProjectionHealth } from "./types.js";
+import type { LogEntryRow, ProjectionEntriesPayload, ProjectionHealth, RunEventRow } from "./types.js";
 import { stateDbPath } from "./db.js";
 import type { SessionEvent } from "../session-events.js";
 import { collapseMergedPrimariesForQueueStrip, groupMergedTrackerEntries } from "../queue-row-count.js";
@@ -88,6 +88,38 @@ export function queryProjectionHealth(db: Database, dir: string): ProjectionHeal
     logCount: logCount.n,
     sessionEventCount: sessionEventCount.n,
   };
+}
+
+export function selectLogsForRun(
+  db: Database,
+  params: { workflow: string; trackerDate: string; itemId: string; runId: string; limit?: number },
+): LogEntryRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM logs
+    WHERE workflow = @workflow
+      AND tracker_date = @trackerDate
+      AND item_id = @itemId
+      AND run_id = @runId
+    ORDER BY ts_ms ASC, id ASC
+    LIMIT @limit
+  `).all({ ...params, limit: params.limit ?? 5_000 }) as LogEntryRow[];
+}
+
+export function selectRunEventsForRun(
+  db: Database,
+  params: { workflow: string; trackerDate: string; itemId: string; runId: string; limit?: number },
+): RunEventRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM run_events
+    WHERE workflow = @workflow
+      AND tracker_date = @trackerDate
+      AND item_id = @itemId
+      AND run_id = @runId
+    ORDER BY event_ms ASC, id ASC
+    LIMIT @limit
+  `).all({ ...params, limit: params.limit ?? 5_000 }) as RunEventRow[];
 }
 
 export function queryEntriesPayload(
