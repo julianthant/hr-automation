@@ -11,7 +11,6 @@ src/scripts/
 │   ├── search.ts         — CLI fuzzy search across SELECTORS.md + LESSONS.md
 │   └── search-lib.ts     — pure scoring/index logic (tested in isolation)
 ├── codegen/          ← code generators
-│   ├── new-workflow.ts   — scaffolds a new kernel workflow's 5 canonical files
 │   └── export-schemas.ts — per-workflow Zod → JSON Schema export to generated/schemas/
 ├── ops/              ← operational tooling
 │   ├── clean-tracker.ts  — prunes .tracker JSONL + .screenshots PNGs
@@ -34,13 +33,12 @@ src/workflows/emergency-contact/scripts/   ← workflow-specific dev tools
 
 ### `codegen/`
 
-- **`new-workflow.ts`** — Scaffolder for a new kernel workflow. Generates `schema.ts`, `workflow.ts`, `config.ts`, `index.ts`, and a templated `CLAUDE.md` with deep links to per-system LESSONS/SELECTORS/common-intents based on the `--systems crm,ucpath` flag. Pure helpers `kebabToPascal`, `kebabToCamel`, `parseArgv`, `scaffold` exported for tests. Wired as `npm run new:workflow`.
 - **`export-schemas.ts`** — Walks every `src/workflows/*/schema.ts`, exports each Zod input schema to a JSON Schema file under `generated/schemas/`. Pure `exportSchemas(outDir)` exported for tests. Wired as `npm run schemas:export`.
 
 ### `ops/`
 
 - **`clean-tracker.ts`** — Prunes `.tracker/*.jsonl` and `.screenshots/*.png` files older than N days. Flags: `--days N`, `--dir`, `--screenshots-dir`, `--no-screenshots`, `--screenshots-only`. Default cleans both. Wired as `npm run clean:tracker`. Exports `cleanTrackerMain` for tests.
-- **`setup.ts`** — First-use environment validation wizard. Fixed checks for `.env` keys (existence only, never values), Node ≥ 20, `tsx`, Playwright chromium cache, `.tracker/` + `.screenshots/` + `~/Downloads/onboarding/` writability, macOS notification capability (warn-only on non-darwin), optional `jq`. Prints `[ok]` / `[warn]` / `[fail]` per check with a fix suggestion. Exits 0 if all pass or only warnings; exits 1 on any failure. Wired as `npm run setup`. **`npm run setup:telegram`** dispatches the interactive Telegram bot wizard via the `--telegram` arg — creates a bot via @BotFather, discovers chat_id from `/getUpdates`, writes both to `.env` (idempotent), sends a confirmation DM. Exports `runAllChecks`, `setupMain`, `runTelegramSetup`, `validateBotToken`, `discoverChatId`, `writeEnvVar` for tests.
+- **`setup.ts`** — First-use environment validation wizard. Fixed checks for `.env` keys (existence only, never values), Node ≥ 26, `tsx`, Playwright chromium cache, `.tracker/` + `.screenshots/` + `~/Downloads/onboarding/` writability, macOS notification capability (warn-only on non-darwin), optional `jq`. Prints `[ok]` / `[warn]` / `[fail]` per check with a fix suggestion. Exits 0 if all pass or only warnings; exits 1 on any failure. Wired as `npm run setup`. **`npm run setup:telegram`** dispatches the interactive Telegram bot wizard via the `--telegram` arg — creates a bot via @BotFather, discovers chat_id from `/getUpdates`, writes both to `.env` (idempotent), sends a confirmation DM. Exports `runAllChecks`, `setupMain`, `runTelegramSetup`, `validateBotToken`, `discoverChatId`, `writeEnvVar` for tests.
 
 ### `debug/`
 
@@ -69,7 +67,6 @@ Operational scripts have npm aliases (preferred):
 npm run setup
 npm run clean:tracker
 npm run schemas:export
-npm run new:workflow -- <name> [--systems sys1,sys2]
 npm run selectors:catalog
 npm run selector:search "<intent>"
 ```
@@ -96,4 +93,4 @@ tsx --env-file=.env src/workflows/emergency-contact/scripts/verify-roster.ts <ba
 ## Lessons Learned
 
 - **2026-04-18: Reorganized into selectors/codegen/ops/debug subfolders.** The flat layout had grown to 17 files across 6 unrelated concerns. Moved tests in lockstep (per the `tests/CLAUDE.md` mirror convention). Dropped `-cli` suffixes (the folder gives the context). Deleted `eid-manual-lookup.sh` (superseded by the `eid-lookup` workflow), `sep-batch.ts` (Commander already supports the batch case via `npm run separation 1234 5678`), and `mock-sessions.ts` (used a Windows-only `powershell` PID lookup that fell through to the script's own short-lived PID on macOS — broken in practice). Consolidated `kronos-map.ts` + `test-kronos-timecard.ts` + `explore-kronos-selectors.ts` into one `debug/kronos.ts` with subcommands — they shared 90% of auth setup. Co-located `download-sharepoint-roster.ts` + `verify-batch-against-roster.ts` into `src/workflows/emergency-contact/scripts/` since they're workflow-specific.
-- **2026-04-18: Selector intelligence layer landed.** `selectors/catalog.ts` (TS Compiler API walker emitting per-system `SELECTORS.md`) + `selectors/search.ts` (CLI fuzzy search across catalogs + per-system `LESSONS.md`) + `selectors/search-lib.ts` (pure scoring/index logic). The pair plus the per-system `LESSONS.md` / `common-intents.txt` files give future Claude sessions a way to find existing selectors by intent and read past failure lessons before re-mapping. Generated catalog drives `npm run selector:search`; the inline-selector test guard still enforces no inline selectors outside `selectors.ts`. The `codegen/new-workflow.ts` scaffolder gained a `--systems crm,ucpath` flag and embeds links to those systems' LESSONS/SELECTORS/common-intents in the generated `CLAUDE.md` so the operator scans before mapping.
+- **2026-04-18: Selector intelligence layer landed.** `selectors/catalog.ts` (TS Compiler API walker emitting per-system `SELECTORS.md`) + `selectors/search.ts` (CLI fuzzy search across catalogs + per-system `LESSONS.md`) + `selectors/search-lib.ts` (pure scoring/index logic). The pair plus the per-system `LESSONS.md` / `common-intents.txt` files give future Claude sessions a way to find existing selectors by intent and read past failure lessons before re-mapping. Generated catalog drives `npm run selector:search`; the inline-selector test guard still enforces no inline selectors outside `selectors.ts`.
