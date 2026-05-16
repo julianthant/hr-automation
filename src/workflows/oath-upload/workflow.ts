@@ -1,10 +1,9 @@
 import { defineWorkflow, runWorkflow } from "../../core/index.js";
-import { runCliEntry } from "../../core/cli-adapter.js";
-import { trackEvent } from "../../tracker/jsonl.js";
+import { buildCliAdapter } from "../../core/cli-adapter.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { loginToServiceNow } from "../../infra/auth/login.js";
-import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
+import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { OathUploadInputSchema, type OathUploadInput } from "./schema.js";
 import { oathUploadHandler, oathUploadStepList } from "./handler.js";
 
@@ -71,38 +70,16 @@ export async function runOathUpload(input: OathUploadInput): Promise<void> {
 }
 
 /** Daemon-mode CLI adapter. */
-export async function runOathUploadCli(
-  inputs: OathUploadInput[],
-  options: { new?: boolean; parallel?: number } = {},
-): Promise<void> {
-  if (!runCliEntry(inputs.length > 0, "runOathUploadCli: no inputs provided")) return;
-  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
-  const now = new Date().toISOString();
-  await ensureDaemonsAndEnqueue(
-    oathUploadWorkflow,
-    inputs,
-    { new: options.new, parallel: options.parallel },
-    {
-      onPreEmitPending: (item, runId, parentRunId) => {
-        const subject = oathUploadWorkflow.config.operatorSubject?.(item);
-        trackEvent({
-          workflow: WORKFLOW,
-          timestamp: now,
-          id: item.sessionId,
-          runId,
-          ...(parentRunId ? { parentRunId } : {}),
-          status: "pending",
-          data: {
-            pdfPath: item.pdfPath,
-            pdfOriginalName: item.pdfOriginalName,
-            sessionId: item.sessionId,
-            pdfHash: item.pdfHash,
-            ...(item.dryRun ? { dryRun: "true" } : {}),
-            ...operatorSubjectData(subject),
-          },
-        });
-      },
-      deriveItemId: (inp) => inp.sessionId,
-    },
-  );
-}
+export const runOathUploadCli = buildCliAdapter<[OathUploadInput[]], OathUploadInput>({
+  workflow: oathUploadWorkflow,
+  emptyMessage: "runOathUploadCli: no inputs provided",
+  buildInputs: (inputs) => inputs,
+  deriveItemId: (input) => input.sessionId,
+  buildPendingData: (input) => ({
+    pdfPath: input.pdfPath,
+    pdfOriginalName: input.pdfOriginalName,
+    sessionId: input.sessionId,
+    pdfHash: input.pdfHash,
+    ...(input.dryRun ? { dryRun: "true" } : {}),
+  }),
+});
