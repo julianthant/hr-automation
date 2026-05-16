@@ -16,7 +16,6 @@ This workflow touches one system: **ucpath**.
 
 - `schema.ts` — Zod `WorkStudyInput` schema (emplId: 5+ digits, effectiveDate: MM/DD/YYYY)
 - `enter.ts` — Builds `ActionPlan` for the PayPath transaction: navigate → collapse sidebar → search by Empl ID → fill position data (reason "JRL", pool "F") → fill Job Data/Additional Pay comments → save/submit
-- `tracker.ts` — Writes to `work-study-tracker.xlsx` (Excel-only). JSONL events are emitted by the kernel — do not call `trackEvent` here
 - `workflow.ts` — Kernel definition (`workStudyWorkflow`) + CLI adapters (`runWorkStudy`, `runWorkStudyCli`). `runWorkStudyCli` is the daemon-mode entry used by `npm run work-study` — forwards `{emplId, effectiveDate}` to `ensureDaemonsAndEnqueue(workStudyWorkflow, [...], { new, parallel })`. `runWorkStudy` is the in-process path used by tests/scripts.
 - `index.ts` — Barrel exports
 
@@ -45,7 +44,6 @@ In-process path (tests/scripts — call runWorkStudy directly):
     → Kernel Session.launch: 1 browser, UCPath auth (Duo)
     → Handler step "ucpath-auth" (marker — auth already resolved by Session)
     → Handler step "transaction" → executes PayPath ActionPlan → updateData({ name })
-    → Excel tracker row written (non-fatal on failure)
 ```
 
 ## Gotchas
@@ -65,5 +63,6 @@ In-process path (tests/scripts — call runWorkStudy directly):
 
 ## Lessons Learned
 
+- **2026-05-16: Deleted `tracker.ts` (Excel writer).** Convention violation per `src/workflows/CLAUDE.md` — kernel JSONL + dashboard are the only observability. The two `updateWorkStudyTracker` call sites in `workflow.ts` (success-path handler and `runWorkStudy` failure-path catch) were removed along with the file. The `runWorkStudy` catch block now just logs + rethrows.
 - **2026-04-23: Removed tracker-side idempotency cache.** `src/core/idempotency.ts` (hashKey / hasRecentlySucceeded / recordSuccess) was deleted across the repo. The `transaction` step no longer short-circuits on a hashed-key match — re-running `npm run work-study <emplId> <date>` after a crash WILL attempt to re-submit the PayPath transaction. No live-page probe exists for work-study yet; if duplicate submits become a problem in practice, the replacement pattern is a pre-submit scan (see separations' `findExistingTerminationTransaction` against the Smart HR Transactions list).
 - **2026-04-15: Migrated to kernel.** `runWorkStudy` is now a thin wrapper over `runWorkflow(workStudyWorkflow, input)`. Do not reintroduce raw `launchBrowser` / `withTrackedWorkflow` calls in the handler — those live in `src/core/`.

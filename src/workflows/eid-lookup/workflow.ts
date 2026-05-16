@@ -427,21 +427,14 @@ export function eidLookupPreEmitPending(
 /**
  * Daemon-mode CLI adapter for `npm run eid-lookup <names...>`.
  *
- * Mirrors `runSeparationCli` / `runWorkStudyCli`: enqueues one `{name}` item
- * per unique, normalized name to any alive `eid-lookup` daemon (or spawns
- * one via `ensureDaemonsAndEnqueue`). Keeps the UCPath + CRM browser session
- * warm across batches so subsequent names don't re-Duo.
+ * Mirrors `runSeparationCli` / `runWorkStudyCli`: enqueues one `{name}` or
+ * `{emplId}` item per unique, normalized input to any alive `eid-lookup`
+ * daemon (or spawns one via `ensureDaemonsAndEnqueue`). Keeps the UCPath +
+ * CRM browser session warm across batches so subsequent names don't re-Duo.
  *
- * Constraints baked into this adapter:
- *   - The daemon's `Session` is launched with a fixed systems list at spawn
- *     time, so only ONE workflow variant can run per daemon. We hard-wire
- *     `eidLookupCrmWorkflow` (UCPath + CRM, no I-9) as the daemon default —
- *     that's the flag combo the `eid-lookup` CLI command uses when no flags
- *     are passed.
- *   - `--no-crm` (UCPath-only) and `--i9` (adds I-9) change the systems
- *     list, so those flag combos route to `runEidLookup` (legacy
- *     in-process path) instead of the daemon. The CLI wiring in
- *     `src/cli.ts` enforces this.
+ * The daemon hard-wires `eidLookupCrmWorkflow` (UCPath + CRM) — this is the
+ * only variant; the former `--no-crm` and `--i9` flag combos were removed
+ * 2026-04-28 along with the legacy `runEidLookup` in-process path.
  */
 export const runEidLookupCli = buildCliAdapter<[string[]], EidLookupItem>({
   workflow: eidLookupCrmWorkflow,

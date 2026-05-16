@@ -88,18 +88,12 @@ export async function runOcrRetryPage(
   const failedPages = parseFailedPages(row.data);
   const summary = parsePageSummary(row.data) ?? { total: 0, succeeded: 0, failed: 0 };
 
-  const failedEntry = failedPages.find((fp) => fp.page === input.pageNum);
   const pdfFileId = row.data?.pdfFileId as unknown as string | undefined;
-  const legacyPageImagePath = join(
-    trackerDir ?? ".tracker",
-    "page-images",
-    input.sessionId,
-    `page-${String(input.pageNum).padStart(2, "0")}.png`,
-  );
-  const filePageImagePath = pdfFileId
-    ? join(trackerDir ?? ".tracker", "pdf-cache", pdfFileId, `page-${String(input.pageNum).padStart(3, "0")}.png`)
-    : null;
-  const pageImagePath = filePageImagePath ?? failedEntry?.pageImagePath ?? legacyPageImagePath;
+  if (!pdfFileId) {
+    throw new RetryPageError("image-missing", `OCR retry requires pdfFileId (legacy page-images path removed)`);
+  }
+  const pageImagePath =
+    join(trackerDir ?? ".tracker", "pdf-cache", pdfFileId, `page-${String(input.pageNum).padStart(3, "0")}.png`);
 
   if (!opts._ocrPageOverride && !existsSync(pageImagePath)) {
     throw new RetryPageError("image-missing", `Page image expired at ${pageImagePath}`);

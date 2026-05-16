@@ -72,7 +72,7 @@ type AnySchema = SchemaEntry["schema"];
 const SCHEMA_REGISTRY: SchemaEntry[] = [
   { workflowName: "active-check", schema: activeCheck.ActiveCheckItemSchema as unknown as AnySchema },
   { workflowName: "crm-doc-download", schema: crmDocDownload.CrmDocDownloadInputSchema as unknown as AnySchema },
-  { workflowName: "eid-lookup", schema: eidLookup.EidLookupInputSchema as unknown as AnySchema },
+  { workflowName: "eid-lookup", schema: eidLookup.EidLookupItemSchema as unknown as AnySchema },
   { workflowName: "emergency-contact", schema: emergencyContact.BatchSchema as unknown as AnySchema },
   { workflowName: "kronos-reports", schema: oldKronosReports.KronosInputSchema as unknown as AnySchema },
   { workflowName: "oath-signature", schema: oathSignature.OathSignatureInputSchema as unknown as AnySchema },

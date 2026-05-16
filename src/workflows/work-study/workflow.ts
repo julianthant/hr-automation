@@ -9,7 +9,6 @@ import { loginToUCPath } from "../../infra/auth/login.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { buildWorkStudyPlan, type WorkStudyContext } from "./enter.js";
 import { WorkStudyInputSchema, type WorkStudyInput } from "./schema.js";
-import { updateWorkStudyTracker } from "./tracker.js";
 
 const workStudySteps = ["ucpath-auth", "transaction"] as const;
 
@@ -17,8 +16,7 @@ const workStudySteps = ["ucpath-auth", "transaction"] as const;
  * Kernel definition for the work-study PayPath workflow.
  *
  * Exports a RegisteredWorkflow. Run it via `runWorkflow(workStudyWorkflow, input)`
- * or invoke the CLI adapter `runWorkStudy` below (which handles failure-path
- * tracker writes).
+ * or invoke the CLI adapter `runWorkStudy` below.
  */
 export const workStudyWorkflow = defineWorkflow({
   name: "work-study",
@@ -71,50 +69,17 @@ export const workStudyWorkflow = defineWorkflow({
       await plan.execute();
       ctx.updateData({ name: wsCtx.employeeName });
     });
-
-    // Tracker row — non-fatal if Excel write fails.
-    try {
-      await updateWorkStudyTracker({
-        emplId: input.emplId,
-        employeeName: wsCtx.employeeName,
-        effectiveDate: input.effectiveDate,
-        positionPool: "F",
-        status: "Done",
-        error: "",
-        timestamp: new Date().toISOString(),
-      });
-      log.success("Tracker updated: work-study-tracker.xlsx");
-    } catch (trackerErr) {
-      log.error(`Tracker update failed (non-fatal): ${errorMessage(trackerErr)}`);
-    }
   },
 });
 
 /**
- * CLI adapter. Handles failure-path Excel tracker writes. Real runs delegate
- * to the kernel.
+ * CLI adapter. Real runs delegate to the kernel.
  */
 export async function runWorkStudy(input: WorkStudyInput): Promise<void> {
   try {
     await runWorkflow(workStudyWorkflow, input);
     log.success("Work study transaction completed successfully");
   } catch (err) {
-    // Failure tracker row — name is unknown here (kernel boundary), so we
-    // write "" for employeeName. Dashboard JSONL has the richer record.
-    try {
-      await updateWorkStudyTracker({
-        emplId: input.emplId,
-        employeeName: "",
-        effectiveDate: input.effectiveDate,
-        positionPool: "F",
-        status: "Failed",
-        error: errorMessage(err),
-        timestamp: new Date().toISOString(),
-      });
-    } catch {
-      // Non-fatal — original tracker error already logged.
-    }
-
     log.error(`Work study failed: ${errorMessage(err)}`);
     throw err;
   }
