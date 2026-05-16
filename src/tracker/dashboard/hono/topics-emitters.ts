@@ -7,7 +7,7 @@ import {
   readEntriesForDate,
   type TrackerEntry,
 } from "../../../tracker/jsonl.js";
-import { queryEntriesPayload, querySessionEventsForRun } from "../../../tracker/state/queries.js";
+import { mapLogRowToWire, queryEntriesPayload, querySessionEventsForRun, selectLogsForRun } from "../../../tracker/state/queries.js";
 import { buildJsonlEventsPayload } from "./routes/entries-payload.js";
 import {
   filterLiveSessionState,
@@ -205,6 +205,20 @@ export const logsTopic: TopicEmitter<{
   const today = dateLocal();
 
   return makeDeltaTopic(() => {
+    if (deps.projectionReady && deps.stateDb && runId) {
+      try {
+        return selectLogsForRun(deps.stateDb, {
+          workflow,
+          trackerDate: date || today,
+          itemId,
+          runId,
+        }).map(mapLogRowToWire);
+      } catch (err) {
+        log.warn(
+          `logs SQLite query failed (workflow=${workflow}, itemId=${itemId}, runId=${runId}): ${err instanceof Error ? err.message : String(err)} — falling back to JSONL`,
+        );
+      }
+    }
     let entries = date && date !== today
       ? readLogEntriesForDate(workflow, itemId || undefined, date, deps.dir)
       : readLogEntries(workflow, itemId || undefined, deps.dir);

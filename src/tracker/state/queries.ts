@@ -6,7 +6,7 @@ import type { LogEntryRow, ProjectionEntriesPayload, ProjectionHealth, RunEventR
 import { stateDbPath } from "./db.js";
 import type { SessionEvent } from "../session-events.js";
 import { collapseMergedPrimariesForQueueStrip, groupMergedTrackerEntries } from "../queue-row-count.js";
-import type { TrackerEntry } from "../jsonl.js";
+import type { LogEntry, TrackerEntry } from "../jsonl.js";
 
 function parseJsonObject<T>(raw: string | null | undefined, fallback: T): T {
   if (!raw) return fallback;
@@ -104,6 +104,19 @@ export function selectLogsForRun(
     ORDER BY ts_ms ASC, id ASC
     LIMIT @limit
   `).all({ ...params, limit: params.limit ?? 5_000 }) as LogEntryRow[];
+}
+
+export function mapLogRowToWire(row: LogEntryRow): LogEntry {
+  const parsed = parseJsonObject<Partial<LogEntry>>(row.raw_json, {});
+  return {
+    ...parsed,
+    workflow: row.workflow,
+    itemId: row.item_id,
+    runId: parsed.runId ?? row.run_id,
+    level: row.level as LogEntry["level"],
+    message: row.message,
+    ts: row.ts,
+  };
 }
 
 export function selectRunEventsForRun(
