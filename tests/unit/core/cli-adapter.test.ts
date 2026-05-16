@@ -65,13 +65,15 @@ test("buildCliAdapter merges pendingExtras after standard pending data", async (
     buildInputs: (id: string) => [{ id }],
     deriveItemId: (item) => item.id,
     buildPendingData: (item) => ({ id: item.id, batchDisplayOrdinal: "old" }),
+    parentRunId: () => "parent-A",
     pendingExtras: (_item, _itemId, runId, parentRunId) => ({
       batchDisplayOrdinal: "7",
       runIdEcho: runId,
       parentRunId: parentRunId ?? "",
     }),
     enqueue: async (_workflow, inputs, _flags, opts) => {
-      opts.onPreEmitPending?.(inputs[0], "run-A", "parent-A", inputs[0].id);
+      assert.equal(opts.parentRunId, "parent-A");
+      opts.onPreEmitPending?.(inputs[0], "run-A", opts.parentRunId, inputs[0].id);
     },
     track: (entry) => seen.push(entry),
   });

@@ -34,6 +34,7 @@ export interface BuildCliAdapterOpts<TArgs extends readonly unknown[], TInput> {
   ) => Record<string, string>;
   onPreEmitFailed?: (input: TInput, runId: string, error: unknown, itemId: string) => void;
   getPendingId?: (input: TInput, itemId: string) => string;
+  parentRunId?: (inputs: readonly TInput[]) => string | undefined;
   flags?: (options: { new?: boolean; parallel?: number }) => DaemonFlags;
   track?: (entry: TrackerEntry) => void;
   enqueue?: EnqueueFn<TInput>;
@@ -54,12 +55,14 @@ export function buildCliAdapter<TArgs extends readonly unknown[], TInput>(
     const enqueue = opts.enqueue ?? (ensureDaemonsAndEnqueue as unknown as EnqueueFn<TInput>);
     const track = opts.track ?? trackEvent;
     const now = new Date().toISOString();
+    const parentRunId = opts.parentRunId?.(inputs);
     await enqueue(
       opts.workflow,
       inputs,
       opts.flags?.(options) ?? { new: options.new, parallel: options.parallel },
       {
         ...(opts.deriveItemId ? { deriveItemId: opts.deriveItemId } : {}),
+        ...(parentRunId ? { parentRunId } : {}),
         onPreEmitPending: (item, runId, parentRunId, itemId) => {
           const subject = opts.workflow.config.operatorSubject?.(item);
           const id = opts.getPendingId?.(item, itemId) ?? itemId;
