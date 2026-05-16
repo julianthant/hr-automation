@@ -8,6 +8,7 @@ import {
   readEntries,
   readEntriesForDate,
   trackEvent,
+  trackEventForDate,
   type TrackerEntry,
 } from "../../jsonl.js";
 import {
@@ -31,6 +32,7 @@ export interface QueueBumpRequest {
 export interface SaveDataRequest {
   workflow: string;
   id: string;
+  date?: string;
   data: Record<string, unknown>;
 }
 
@@ -191,7 +193,9 @@ export function buildSaveDataHandler(dir: string) {
     if (!req.workflow || !req.id || !req.data || typeof req.data !== "object") {
       return { ok: false, error: "workflow, id, and data are required" };
     }
-    const entries = readEntries(req.workflow, dir).filter((e) => e.id === req.id);
+    const entries = (req.date
+      ? readEntriesForDate(req.workflow, req.date, dir)
+      : readEntries(req.workflow, dir)).filter((e) => e.id === req.id);
     if (entries.length === 0) {
       return { ok: false, error: `no tracker entry found for id=${req.id}` };
     }
@@ -223,7 +227,11 @@ export function buildSaveDataHandler(dir: string) {
       // the kernel; this synthetic row never originated from an enqueue.
       error: latest.error,
     };
-    trackEvent(entry, dir);
+    if (req.date) {
+      trackEventForDate(entry, req.date, dir);
+    } else {
+      trackEvent(entry, dir);
+    }
     return { ok: true };
   };
 }
