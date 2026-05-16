@@ -12,11 +12,8 @@ export interface ControlDb {
   db: Database
   migrate(): void
   transaction<T>(body: () => T): T
-  supportsUpdateReturning(): boolean
   close(): void
 }
-
-const updateReturningSupportByDb = new WeakMap<Database, boolean>()
 
 export function controlDbPath(trackerDir: string = DEFAULT_DIR): string {
   return stateDbPath(trackerDir)
@@ -43,28 +40,8 @@ export function openControlDb(opts: OpenControlDbOpts = {}): ControlDb {
     transaction<T>(body: () => T): T {
       return transaction(db, body)
     },
-    supportsUpdateReturning() {
-      return supportsUpdateReturning(db)
-    },
     close,
   }
-}
-
-function supportsUpdateReturning(db: Database): boolean {
-  const cached = updateReturningSupportByDb.get(db)
-  if (typeof cached === 'boolean') return cached
-  let supported: boolean
-  try {
-    db.exec('CREATE TEMP TABLE IF NOT EXISTS __returning_probe(id INTEGER PRIMARY KEY, state TEXT)')
-    db.exec('DELETE FROM __returning_probe')
-    db.exec("INSERT INTO __returning_probe(state) VALUES ('queued')")
-    const row = db.prepare("UPDATE __returning_probe SET state = 'claimed' WHERE state = 'queued' RETURNING id").get()
-    supported = Boolean(row)
-  } catch {
-    supported = false
-  }
-  updateReturningSupportByDb.set(db, supported)
-  return supported
 }
 
 function openStandaloneDb(path: string): Database {
