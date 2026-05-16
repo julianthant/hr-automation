@@ -19,7 +19,6 @@ export class GeminiProvider implements OcrProvider {
   id = "gemini";
 
   async call<T>(req: OcrRequest<T>, key: ProviderKey): Promise<OcrResult<T>> {
-    const start = Date.now();
     const pdfBytes = readFileSync(req.pdfPath);
     const prompt = buildPrompt({
       schemaName: req.schemaName,
@@ -64,13 +63,9 @@ export class GeminiProvider implements OcrProvider {
 
     return {
       data: parsed as T,
-      rawText: text,
-      pageCount: 0, // populated by the orchestrator if needed
       provider: this.id,
-      keyIndex: key.index,
       attempts: 1,
       cached: false,
-      durationMs: Date.now() - start,
     };
   }
 }

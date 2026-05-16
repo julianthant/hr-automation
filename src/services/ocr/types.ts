@@ -20,19 +20,14 @@ export interface OcrRequest<T> {
 }
 
 /**
- * Successful OCR result. `data` is the validated T. Diagnostic fields
- * (provider, keyIndex, attempts, cached, durationMs) help operators
- * inspect what happened — surface them in dashboard rows when useful.
+ * Successful OCR result. `data` is the validated T. The remaining
+ * diagnostic fields identify the provider and retry/cache behavior.
  */
 export interface OcrResult<T> {
   data: T;
-  rawText?: string;
-  pageCount: number;
   provider: string;
-  keyIndex: number;
   attempts: number;
   cached: boolean;
-  durationMs: number;
 }
 
 export interface ProviderKey {

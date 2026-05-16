@@ -321,9 +321,6 @@ test("buildOcrReocrWholePdfHandler replaces records and clears failedPages", asy
         provider: "whole-pdf-stub",
         attempts: 1,
         cached: false,
-        pageCount: 1,
-        keyIndex: 1,
-        durationMs: 0,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       })) as any,
       _loadRosterOverride: async () => [{ eid: "10000003", name: "Carla" }],
@@ -389,9 +386,6 @@ test("buildOcrReocrWholePdfHandler assigns distinct itemIds to eid-lookup fan-ou
         provider: "whole-pdf-stub",
         attempts: 1,
         cached: false,
-        pageCount: 2,
-        keyIndex: 1,
-        durationMs: 0,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       })) as any,
       _loadRosterOverride: async () => [],
