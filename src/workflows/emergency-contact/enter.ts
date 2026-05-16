@@ -1,10 +1,8 @@
 import type { Page } from "playwright";
 import { ActionPlan } from "../../systems/ucpath/action-plan.js";
 import { log } from "../../utils/log.js";
-import {
-  hidePeopleSoftModalMask,
-  readExistingContactNames,
-} from "../../systems/ucpath/personal-data.js";
+import { readExistingContactNames } from "../../systems/ucpath/personal-data.js";
+import { dismissPeopleSoftModalMask } from "../../systems/common/modal.js";
 import { normalizePersonNameForCompare } from "../../domain/identity/person-name.js";
 import { mapRelationship } from "./config.js";
 import { levenshteinDistance } from "../../services/matching/index.js";
@@ -102,7 +100,7 @@ export function buildEmergencyContactPlan(
 
   // 1. Add a new row.
   plan.add('Click "Add a new row at row 1"', async () => {
-    await hidePeopleSoftModalMask(page);
+    await dismissPeopleSoftModalMask(page);
     await page
       .getByRole("button", { name: /add a new row/i })
       .first()
@@ -183,7 +181,7 @@ export function buildEmergencyContactPlan(
       }
 
       const addr = contact.address;
-      await hidePeopleSoftModalMask(page);
+      await dismissPeopleSoftModalMask(page);
       await page.getByRole("button", { name: "Edit Address" }).first()
         .click({ timeout: 10_000 });
       await page.waitForTimeout(2_000);
@@ -203,7 +201,7 @@ export function buildEmergencyContactPlan(
           .fill(addr.zip, { timeout: 10_000 });
       }
 
-      await hidePeopleSoftModalMask(page);
+      await dismissPeopleSoftModalMask(page);
       await page.getByRole("button", { name: "OK", exact: true }).first()
         .click({ timeout: 10_000 });
       await page.waitForTimeout(2_000);

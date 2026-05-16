@@ -4,7 +4,6 @@ import type { TransactionResult } from "./types.js";
 import {
   waitForPeopleSoftProcessing,
   navigateToSmartHR,
-  dismissModalMask,
   collapseSidebar,
 } from "./navigate.js";
 import {
@@ -15,6 +14,7 @@ import {
   getContentFrame,
 } from "./selectors.js";
 import { log } from "../../utils/log.js";
+import { dismissPeopleSoftModalMask } from "../common/modal.js";
 import { safeClick, safeFill } from "../common/index.js";
 
 // ─── STEP 1: Navigate sidebar → Smart HR Templates → Smart HR Transactions ───
@@ -387,7 +387,7 @@ export async function clickJobDataTab(
   frame: FrameLocator,
 ): Promise<void> {
   log.step("Clicking Job Data tab...");
-  await dismissModalMask(page);
+  await dismissPeopleSoftModalMask(page);
 
   await safeClick(smartHR.tab.jobData(frame), {
     timeout: 10_000,
@@ -515,7 +515,7 @@ async function clickTransactionTab(
   locator: Locator,
 ): Promise<void> {
   log.step(`Clicking ${tabName} tab...`);
-  await dismissModalMask(page);
+  await dismissPeopleSoftModalMask(page);
   await safeClick(locator, {
     timeout: 10_000,
     label: `ucpath ${tabName.toLowerCase()} tab`,
@@ -556,7 +556,7 @@ export async function clickSaveAndSubmit(
   employeeId?: string,
 ): Promise<TransactionResult> {
   log.step("Clicking Save and Submit...");
-  await dismissModalMask(page);
+  await dismissPeopleSoftModalMask(page);
 
   const btn = smartHR.saveAndSubmitButton(frame);
   // Any ad-hoc save-disabled screenshot lives on the handler side via

@@ -8,10 +8,6 @@ import { safeClick, safeFill } from "../common/index.js";
 
 // Re-exports for API stability — selectors.ts is the source of truth.
 export { getContentFrame } from "./selectors.js";
-// Dismiss the PeopleSoft page-level modal mask that can linger after tab
-// switches. Legacy name alias — implementation lives in
-// src/systems/common/modal.ts.
-export { dismissPeopleSoftModalMask as dismissModalMask } from "../common/modal.js";
 
 // verified 2026-03-16 -- must use ucphrprdpub domain (same as auth session), not ucpath domain
 const SMART_HR_URL = UCPATH_SMART_HR_URL;

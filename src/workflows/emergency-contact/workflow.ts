@@ -9,8 +9,8 @@ import { TransactionError } from "../../systems/ucpath/types.js";
 import {
   navigateToEmergencyContact,
   demoteExistingContact,
-  hidePeopleSoftModalMask,
 } from "../../systems/ucpath/personal-data.js";
+import { dismissPeopleSoftModalMask } from "../../systems/common/modal.js";
 import { downloadSharePointFile } from "../sharepoint-download/index.js";
 import { verifyBatchAgainstRoster } from "./roster-verify.js";
 import {
@@ -211,7 +211,7 @@ export const emergencyContactWorkflow = defineWorkflow({
         log.success(`Dry run complete for ${record.employee.name} — UCPath Save was skipped.`);
         return;
       }
-      await hidePeopleSoftModalMask(page);
+      await dismissPeopleSoftModalMask(page);
       await page
         .getByRole("button", { name: "Save", exact: true })
         .first()
