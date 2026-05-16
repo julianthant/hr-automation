@@ -4,6 +4,8 @@
 import { homedir } from "os";
 import { join } from "path";
 
+import { EnvValidationError } from "./utils/env.js";
+
 const HOME = homedir();
 
 // ─── Paths (user-agnostic via homedir()) ─────────────────────
@@ -49,6 +51,13 @@ export const ANNUAL_DATES = {
   kronosDefaultEndDate: process.env.KRONOS_DEFAULT_END_DATE ?? "2/1/2026",
   kronosDefaultStartDate: process.env.KRONOS_DEFAULT_START_DATE ?? "1/1/2017",
 } as const;
+
+// ─── Separations ─────────────────────────────────────────────
+// TIMEKEEPER_NAME must be set in .env — used by fillTimekeeperTasks (Kuali).
+// Prior setting used shell's NAME collision-prone env binding; renamed here.
+const _timekeeperName = process.env.TIMEKEEPER_NAME ?? "";
+if (!_timekeeperName) throw new EnvValidationError(["TIMEKEEPER_NAME"]);
+export const TIMEKEEPER_NAME: string = _timekeeperName;
 
 // ─── URLs not yet centralized ───────────────────────────────
 

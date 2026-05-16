@@ -117,7 +117,7 @@ export async function clickCreateTransaction(
   try {
     const errorCount = await errorLocator.count();
     if (errorCount > 0) {
-      const errorText = await errorLocator.first().textContent({ timeout: 5_000 });
+      const errorText = await errorLocator.nth(0).textContent({ timeout: 5_000 });
       log.error(`Transaction creation error: ${errorText ?? "Unknown error"}`);
       return { success: false, error: errorText ?? "Unknown error" };
     }
@@ -442,7 +442,7 @@ export async function fillJobData(
   await page.waitForTimeout(2_000);
 
   log.step("Filling comp rate code: UCHRLY...");
-  await safeFill(jobDataSelectors.compRateCodeInput(frame).first(), data.compRateCode, {
+  await safeFill(jobDataSelectors.compRateCodeInput(frame), data.compRateCode, {
     timeout: 10_000,
     label: "ucpath comp rate code",
   });
@@ -452,7 +452,7 @@ export async function fillJobData(
   await page.waitForTimeout(2_000);
 
   log.step("Filling compensation rate...");
-  await safeFill(jobDataSelectors.compensationRateInput(frame).first(), data.compensationRate, {
+  await safeFill(jobDataSelectors.compensationRateInput(frame), data.compensationRate, {
     timeout: 10_000,
     label: "ucpath compensation rate",
   });
@@ -576,7 +576,7 @@ export async function clickSaveAndSubmit(
   try {
     const errorCount = await errorLocator.count();
     if (errorCount > 0) {
-      const errorText = await errorLocator.first().textContent({ timeout: 5_000 });
+      const errorText = await errorLocator.nth(0).textContent({ timeout: 5_000 });
       log.error(`Save and Submit error: ${errorText ?? "Unknown error"}`);
       return { success: false, error: errorText ?? "Unknown error" };
     }

@@ -145,7 +145,6 @@ async function handleMultiRowGrid(
     const statusText = (
       await jobSummary
         .rowHrStatusCell(row)
-        .first()
         .textContent({ timeout: 2_000 })
         .catch(() => "")
     )?.trim() ?? "";
@@ -154,7 +153,7 @@ async function handleMultiRowGrid(
     if (isTerminated) continue;
 
     log.step(`[Job Summary] Drilling into row ${i + 1}/${total} (status='${statusText || "unknown"}')`);
-    await safeClick(jobSummary.rowDrillInLink(row).first(), {
+    await safeClick(jobSummary.rowDrillInLink(row), {
       timeout: 10_000,
       label: "ucpath job summary row drill-in link",
     });

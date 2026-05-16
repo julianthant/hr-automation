@@ -334,7 +334,7 @@ describe("findLatestEntryData", () => {
 
 describe("buildSaveDataHandler", () => {
   it("clears a field when the operator submits an empty value", async () => {
-    trackEvent(
+    trackEventForDate(
       {
         workflow: "separations",
         timestamp: "2026-05-15T12:00:00.000Z",
@@ -343,6 +343,7 @@ describe("buildSaveDataHandler", () => {
         status: "done",
         data: { transactionNumber: "T002109055", eid: "10000001" },
       },
+      "2026-05-15",
       tmp,
     );
 

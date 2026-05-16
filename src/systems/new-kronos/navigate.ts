@@ -146,10 +146,10 @@ export async function clickGoToTimecard(page: Page): Promise<boolean> {
 export async function switchToPreviousPayPeriod(page: Page): Promise<boolean> {
   log.step("[New Kronos] Switching to previous pay period...");
 
-  // Mapped via playwright-cli: click "Current Pay Period" button to open dropdown,
-  // then click option "Previous Pay Period"
-  const periodBtn = timecard.currentPayPeriodButton(page);
-  if (await clickIfPresent(periodBtn, { timeout: 5_000, label: "new kronos current pay period button" })) {
+  // Use payPeriodTriggerButton (regex-based) so it matches regardless of whether
+  // the button shows "Current Pay Period" or a date range after setDateRange runs.
+  const periodBtn = timecard.payPeriodTriggerButton(page);
+  if (await clickIfPresent(periodBtn, { timeout: 5_000, label: "new kronos pay period trigger button" })) {
     await page.waitForTimeout(2_000);
 
     const prevOption = timecard.previousPayPeriodOption(page);

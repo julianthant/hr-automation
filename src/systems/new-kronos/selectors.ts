@@ -118,13 +118,6 @@ export const goToMenu = {
 
 export const timecard = {
   /**
-   * Current Pay Period button (first). verified 2026-04-06
-   * @tags current, pay, period, button, timecard, new-kronos
-   */
-  currentPayPeriodButton: (page: Page): Locator =>
-    page.getByRole("button", { name: "Current Pay Period" }).first(),
-
-  /**
    * Pay-period trigger button — text varies ("Current Pay Period",
    * "Previous Pay Period", or a date range). Match all three.
    * verified 2026-04-06
