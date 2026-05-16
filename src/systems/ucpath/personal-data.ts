@@ -1,7 +1,7 @@
 import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
 import { dismissPeopleSoftModalMask } from "../common/modal.js";
-import { safeClick, safeFill } from "../common/index.js";
+import { clickIfPresent, safeClick, safeFill } from "../common/index.js";
 import { emergencyContact } from "./selectors.js";
 
 /**
@@ -62,12 +62,11 @@ export async function navigateToEmergencyContact(
 
   // Multi-result grid may show a "Drill in" link per row; follow it.
   const drillIn = emergencyContact.drillInLink(page);
-  if ((await drillIn.count().catch(() => 0)) > 0) {
-    log.step("Clicking Drill in...");
-    await safeClick(drillIn.first(), {
-      timeout: 10_000,
-      label: "ucpath emergency contact drill in link",
-    });
+  if (await clickIfPresent(drillIn, {
+    timeout: 10_000,
+    label: "ucpath emergency contact drill in link",
+  })) {
+    log.step("Clicked Drill in...");
     await page.waitForTimeout(3_000);
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   }
