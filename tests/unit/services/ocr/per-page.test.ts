@@ -1,10 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod/v4";
 import {
   runOcrPerPage,
   __setPerPageCallForTests,
 } from "../../../../src/services/ocr/per-page.js";
+import type { PoolKey } from "../../../../src/services/ocr/per-page-pool.js";
+import { __resetKeyRotationCacheForTests } from "../../../../src/services/ocr/rotation.js";
 
 const RecordSchema = z.object({ name: z.string() });
 
@@ -202,5 +207,64 @@ test("runOcrPerPage still drops records that fail schema even with defaults", as
     assert.equal(out.records[0].name, "ok");
   } finally {
     __setPerPageCallForTests(undefined);
+  }
+});
+
+test("concurrent per-page Gemini runs share in-memory key throttle state", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "per-page-rotation-"));
+  const firstCallRateLimited = Promise.withResolvers<void>();
+  const releaseFirstCall = Promise.withResolvers<void>();
+  __resetKeyRotationCacheForTests();
+  const seenByPrompt = new Map<string, string[]>();
+  const makeKey = (id: "gemini-1" | "gemini-2", rotationKey: string): PoolKey =>
+    ({
+      id,
+      providerId: "gemini",
+      keyIndex: id === "gemini-1" ? 1 : 2,
+      rotationKey,
+      callOcr: async (_imagePath: string, prompt: string) => {
+        const seen = seenByPrompt.get(prompt) ?? [];
+        seen.push(id);
+        seenByPrompt.set(prompt, seen);
+        if (prompt === "Call A" && id === "gemini-1") {
+          firstCallRateLimited.resolve();
+          throw new Error("429 Too Many Requests");
+        }
+        if (prompt === "Call A" && id === "gemini-2") {
+          await releaseFirstCall.promise;
+        }
+        return [{ name: `${prompt}-${id}` }];
+      },
+    } as PoolKey);
+  const pool = [makeKey("gemini-1", "k1"), makeKey("gemini-2", "k2")];
+  try {
+    const callA = runOcrPerPage({
+      pagesAsImages: ["page-01.png"],
+      pageImagesDir: "/tmp/ignored",
+      prompt: "Call A",
+      schema: RecordSchema,
+      pool,
+      cacheDir: dir,
+    });
+    await firstCallRateLimited.promise;
+    const callB = runOcrPerPage({
+      pagesAsImages: ["page-01.png"],
+      pageImagesDir: "/tmp/ignored",
+      prompt: "Call B",
+      schema: RecordSchema,
+      pool,
+      cacheDir: dir,
+    });
+    const resultB = await callB;
+    releaseFirstCall.resolve();
+    const resultA = await callA;
+
+    assert.deepEqual(seenByPrompt.get("Call B"), ["gemini-2"]);
+    assert.equal(resultA.pages[0].success, true);
+    assert.equal(resultB.pages[0].success, true);
+  } finally {
+    releaseFirstCall.resolve();
+    __resetKeyRotationCacheForTests();
+    rmSync(dir, { recursive: true, force: true });
   }
 });

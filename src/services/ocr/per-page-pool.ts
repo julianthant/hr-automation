@@ -24,6 +24,8 @@ export interface PoolKey {
   providerId: "gemini" | "mistral" | "groq" | "sambanova";
   /** 1-based index within the provider's key set. */
   keyIndex: number;
+  /** Raw key value for in-memory rotation only. Never log this field. */
+  rotationKey?: string;
   /** Run OCR on a single PNG using this provider+key. Returns parsed JSON. */
   callOcr(imagePath: string, prompt: string): Promise<unknown>;
 }
@@ -193,6 +195,7 @@ export function buildVisionPool(): PoolKey[] {
       id: `gemini-${idx}`,
       providerId: "gemini",
       keyIndex: idx,
+      rotationKey: key,
       callOcr: (imagePath, prompt) => callGemini(key, imagePath, prompt),
     });
   });
