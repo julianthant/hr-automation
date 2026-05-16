@@ -101,6 +101,7 @@ export interface TaskDbRow {
   claimed_by_worker_id: string | null
   enqueued_at: string | null
   claimed_at: string | null
+  claim_expires_at: string | null
   terminal_at: string | null
   terminal_error: string | null
 }
