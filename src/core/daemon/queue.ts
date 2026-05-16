@@ -99,12 +99,14 @@ export async function enqueueItems<T>(
   }
   const store = openQueueTaskStore(trackerDir)
   const enqueued = store.control.transaction(() => {
+    const ts = nowIso()
     const rows = store.enqueueTasks({
       workflow,
       inputs,
       deriveItemId: idFn,
       runIds: preAssignedRunIds,
       source: 'daemon',
+      now: ts,
     })
     const enqueuedBy = `cli-${process.pid}`
     for (let i = 0; i < rows.length; i++) {
@@ -124,7 +126,7 @@ export async function enqueueItems<T>(
           id: task.id,
           workflow,
           input: inputs[i],
-          enqueuedAt: nowIso(),
+          enqueuedAt: ts,
           enqueuedBy,
           runId: task.runId,
           ...(parentRunId ? { parentRunId } : {}),
