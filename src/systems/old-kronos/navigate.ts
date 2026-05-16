@@ -13,7 +13,7 @@ import {
   timecard,
   workspace,
 } from "./selectors.js";
-import { safeClick, safeFill } from "../common/index.js";
+import { clickIfPresent, safeClick, safeFill } from "../common/index.js";
 
 /**
  * Dismiss any OK/Close modal dialog in the iframe.
@@ -24,26 +24,16 @@ export async function dismissModal(page: Page, iframe: Frame): Promise<void> {
 
   // Try OK button
   const okBtn = modalDismiss.okButton(iframe);
-  if (await okBtn.count() > 0) {
-    try {
-      await safeClick(okBtn.first(), { timeout: 3_000, label: "old kronos modal ok button" });
-      log.step("Dismissed modal (OK)");
-      await page.waitForTimeout(2_000);
-    } catch {
-      // Modal may have closed on its own
-    }
+  if (await clickIfPresent(okBtn, { timeout: 3_000, label: "old kronos modal ok button" })) {
+    log.step("Dismissed modal (OK)");
+    await page.waitForTimeout(2_000);
   }
 
   // Try Close button
   const closeBtn = modalDismiss.closeButton(iframe);
-  if (await closeBtn.count() > 0) {
-    try {
-      await safeClick(closeBtn.first(), { timeout: 3_000, label: "old kronos modal close button" });
-      log.step("Dismissed modal (Close)");
-      await page.waitForTimeout(2_000);
-    } catch {
-      // Modal may have closed on its own
-    }
+  if (await clickIfPresent(closeBtn, { timeout: 3_000, label: "old kronos modal close button" })) {
+    log.step("Dismissed modal (Close)");
+    await page.waitForTimeout(2_000);
   }
 }
 
@@ -285,12 +275,10 @@ export async function clickGoToReports(
 
   // Strategy 1: Direct text match
   const gotoEl = goToMenu.goToTrigger(iframe);
-  if (await gotoEl.count() > 0) {
-    await safeClick(gotoEl, { label: "old kronos go to trigger" });
+  if (await clickIfPresent(gotoEl, { label: "old kronos go to trigger" })) {
     await page.waitForTimeout(3_000);
     const reportsItem = goToMenu.reportsItem(iframe);
-    if (await reportsItem.count() > 0) {
-      await safeClick(reportsItem, { label: "old kronos reports menu item" });
+    if (await clickIfPresent(reportsItem, { label: "old kronos reports menu item" })) {
       await page.waitForTimeout(5_000);
       log.step("Navigated to Reports");
       return true;
@@ -321,8 +309,7 @@ export async function clickGoToReports(
 
   // Strategy 3: Sidebar Reports link
   const sidebarReports = goToMenu.sidebarReports(page);
-  if (await sidebarReports.count() > 0) {
-    await safeClick(sidebarReports.first(), { label: "old kronos sidebar reports link" });
+  if (await clickIfPresent(sidebarReports, { label: "old kronos sidebar reports link" })) {
     await page.waitForTimeout(5_000);
     return true;
   }

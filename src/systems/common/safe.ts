@@ -63,6 +63,25 @@ export async function safeClick(
 }
 
 /**
+ * Click the first matching element when a locator currently resolves.
+ * Returns false for absent elements or click failures so optional UI affordances
+ * can stay terse at call sites.
+ */
+export async function clickIfPresent(
+  locator: Locator,
+  opts: SafeActionOpts,
+): Promise<boolean> {
+  const count = await locator.count().catch(() => 0);
+  if (count === 0) return false;
+  try {
+    await safeClick(locator.first(), opts);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Fill a locator and log latency-based fallback inference. See `safeClick`
  * for the rationale; semantics are identical, substituting fill/filled/
  * "fill failed" for click/clicked/"click failed".

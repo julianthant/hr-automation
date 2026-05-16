@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Locator } from "playwright";
-import { safeClick, safeFill } from "../../../../src/systems/common/safe.js";
+import { clickIfPresent, safeClick, safeFill } from "../../../../src/systems/common/safe.js";
 import { withLogContext } from "../../../../src/utils/log.js";
 
 /**
@@ -15,10 +15,14 @@ import { withLogContext } from "../../../../src/utils/log.js";
 function fakeLocator(behavior: {
   click?: () => Promise<void>;
   fill?: (v: string) => Promise<void>;
+  count?: () => Promise<number>;
+  first?: () => Locator;
 }): Locator {
   return {
     click: behavior.click ?? (async () => {}),
     fill: behavior.fill ?? (async () => {}),
+    count: behavior.count ?? (async () => 1),
+    first: behavior.first ?? (() => fakeLocator(behavior)),
   } as unknown as Locator;
 }
 
@@ -222,5 +226,51 @@ describe("safeFill", () => {
       ),
       "expected matching error entry in JSONL (shares the 'selector fallback triggered' marker)",
     );
+  });
+});
+
+describe("clickIfPresent", () => {
+  it("returns false without clicking when the locator is absent", async () => {
+    let clicked = false;
+    const loc = fakeLocator({
+      count: async () => 0,
+      click: async () => {
+        clicked = true;
+      },
+    });
+
+    const result = await clickIfPresent(loc, { label: "absent" });
+
+    assert.equal(result, false);
+    assert.equal(clicked, false);
+  });
+
+  it("clicks the first match and returns true", async () => {
+    let clickedFirst = false;
+    const first = fakeLocator({
+      click: async () => {
+        clickedFirst = true;
+      },
+    });
+    const loc = fakeLocator({
+      count: async () => 2,
+      first: () => first,
+    });
+
+    const result = await clickIfPresent(loc, { label: "present" });
+
+    assert.equal(result, true);
+    assert.equal(clickedFirst, true);
+  });
+
+  it("returns false when the optional click fails", async () => {
+    const loc = fakeLocator({
+      count: async () => 1,
+      first: () => fakeLocator({ click: async () => { throw new Error("not clickable"); } }),
+    });
+
+    const result = await clickIfPresent(loc, { label: "flaky" });
+
+    assert.equal(result, false);
   });
 });
