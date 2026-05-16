@@ -2,6 +2,7 @@ import path from "node:path";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { defineWorkflow, runWorkflowBatch } from "../../core/index.js";
+import { buildCliAdapter } from "../../core/cli-adapter.js";
 import { loginToUCPath } from "../../infra/auth/login.js";
 import { trackEvent } from "../../tracker/jsonl.js";
 import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
@@ -54,6 +55,21 @@ export function shouldDemoteExistingContactForRun(
 function recordItemId(r: EmergencyContactRecord): string {
   const pad = String(r.sourcePage).padStart(2, "0");
   return `p${pad}-${r.employee.employeeId}`;
+}
+
+export function buildEmergencyContactPendingData(
+  record: EmergencyContactRecord,
+  batchName: string,
+): Record<string, string> {
+  return {
+    batchName,
+    sourcePage: String(record.sourcePage),
+    emplId: record.employee.employeeId,
+    employeeName: record.employee.name,
+    contactName: record.emergencyContact.name,
+    relationship: record.emergencyContact.relationship,
+    ...(record.dryRun ? { dryRun: "true" } : {}),
+  };
 }
 
 /**
@@ -267,13 +283,7 @@ export async function runEmergencyContact(
         runId,
         status: "pending",
         data: {
-          batchName: batch.batchName,
-          sourcePage: String(record.sourcePage),
-          emplId: record.employee.employeeId,
-          employeeName: record.employee.name,
-          contactName: record.emergencyContact.name,
-          relationship: record.emergencyContact.relationship,
-          ...(record.dryRun ? { dryRun: "true" } : {}),
+          ...buildEmergencyContactPendingData(record, batch.batchName),
           ...operatorSubjectData(subject),
         },
       });
@@ -324,37 +334,14 @@ export async function runEmergencyContactCli(
 
   await runPreflight(batch, options);
 
-  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
-  const now = new Date().toISOString();
-  await ensureDaemonsAndEnqueue(
-    emergencyContactWorkflow,
-    records,
-    { new: options.new, parallel: options.parallel },
-    {
-      deriveItemId: (item) => recordItemId(item as EmergencyContactRecord),
-      onPreEmitPending: (item, runId) => {
-        const record = item as EmergencyContactRecord;
-        const subject = emergencyContactWorkflow.config.operatorSubject?.(record);
-        trackEvent({
-          workflow: WORKFLOW,
-          timestamp: now,
-          id: recordItemId(record),
-          runId,
-          status: "pending",
-          data: {
-            batchName: batch.batchName,
-            sourcePage: String(record.sourcePage),
-            emplId: record.employee.employeeId,
-            employeeName: record.employee.name,
-          contactName: record.emergencyContact.name,
-          relationship: record.emergencyContact.relationship,
-          ...(record.dryRun ? { dryRun: "true" } : {}),
-          ...operatorSubjectData(subject),
-        },
-        });
-      },
-    },
-  );
+  const runEmergencyContactDaemonCli = buildCliAdapter<[EmergencyContactRecord[]], EmergencyContactRecord>({
+    workflow: emergencyContactWorkflow,
+    emptyMessage: "runEmergencyContactCli: no records provided",
+    buildInputs: (inputs) => inputs,
+    deriveItemId: recordItemId,
+    buildPendingData: (record) => buildEmergencyContactPendingData(record, batch.batchName),
+  });
+  await runEmergencyContactDaemonCli(records, { new: options.new, parallel: options.parallel });
 }
 
 async function runPreflight(

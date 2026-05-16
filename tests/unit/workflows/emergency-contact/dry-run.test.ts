@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { shouldDemoteExistingContactForRun } from "../../../../src/workflows/emergency-contact/workflow.js";
+import {
+  buildEmergencyContactPendingData,
+  shouldDemoteExistingContactForRun,
+} from "../../../../src/workflows/emergency-contact/workflow.js";
 
 describe("shouldDemoteExistingContactForRun", () => {
   it("does not demote fuzzy duplicates during dry run", () => {
@@ -23,5 +26,39 @@ describe("shouldDemoteExistingContactForRun", () => {
       false,
     );
     assert.equal(shouldDemoteExistingContactForRun(null, false), false);
+  });
+});
+
+describe("buildEmergencyContactPendingData", () => {
+  it("preserves the pending row shape used by in-process and daemon adapters", () => {
+    assert.deepEqual(
+      buildEmergencyContactPendingData(
+        {
+          sourcePage: 3,
+          dryRun: true,
+          employee: {
+            name: "Jane Doe",
+            employeeId: "10873698",
+          },
+          emergencyContact: {
+            name: "Pat Doe",
+            relationship: "Parent",
+            primary: true,
+            sameAddressAsEmployee: true,
+          },
+          notes: [],
+        },
+        "May batch",
+      ),
+      {
+        batchName: "May batch",
+        sourcePage: "3",
+        emplId: "10873698",
+        employeeName: "Jane Doe",
+        contactName: "Pat Doe",
+        relationship: "Parent",
+        dryRun: "true",
+      },
+    );
   });
 });
