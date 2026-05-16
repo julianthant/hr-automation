@@ -77,6 +77,28 @@ export function emptyStreamMessage(source?: "events" | "screenshots" | "edit-dat
   return source === "events" ? "No run events for this row" : "No log entries for this row";
 }
 
+export function buildLogStreamItemKey(item: DisplayItem): string {
+  if (item.kind === "log") {
+    return [
+      "log",
+      item.entry.itemId ?? "noItem",
+      item.entry.runId ?? "noRun",
+      item.entry.ts,
+      item.entry.count ?? 1,
+    ].join("-");
+  }
+
+  return [
+    "evt",
+    item.entry.type,
+    item.entry.runId ?? "noRun",
+    item.entry.currentItemId ?? "noItem",
+    item.entry.timestamp ?? item.entry.ts ?? "noTs",
+    item.entry.screenshotKind ?? item.entry.step ?? item.entry.system ?? "noKind",
+    item.entry.screenshotLabel ?? item.entry.currentStep ?? "noLabel",
+  ].join("-");
+}
+
 function renderMaybeFactory(node: LazySlot | undefined): ReactNode {
   return typeof node === "function" ? node() : node;
 }
@@ -300,10 +322,7 @@ export function LogStream({
           >
             {virtualItems.map((virtualRow) => {
               const item = displayed[virtualRow.index]!;
-              const key =
-                item.kind === "log"
-                  ? `log-${item.entry.ts}-${virtualRow.index}`
-                  : `evt-${item.entry.timestamp ?? item.entry.ts ?? "noTs"}-${virtualRow.index}`;
+              const key = buildLogStreamItemKey(item);
               return (
                 <div
                   key={key}
