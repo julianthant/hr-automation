@@ -84,6 +84,41 @@ test('claimNextTask fallback path claims the oldest eligible task', () => {
   }
 })
 
+test('recoverClaimsForDeadWorkers recovers expired claims even when worker is alive', () => {
+  const { dir, store } = openTempStore()
+  try {
+    const [queued] = store.enqueueTasks({
+      workflow: 'wf',
+      inputs: [{ id: 'a' }],
+      deriveItemId: (x) => x.id,
+      now: iso(0),
+    })
+    const claimed = store.claimNextTask({ workflow: 'wf', workerId: 'alive', now: iso(1), leaseMs: 60_000 })
+    assert.equal(claimed?.itemId, 'a')
+    store.db.prepare('UPDATE tasks SET claim_expires_at = @past WHERE id = @taskId').run({
+      past: iso(2),
+      taskId: queued.taskId,
+    })
+
+    const recovered = store.recoverClaimsForDeadWorkers({
+      workflow: 'wf',
+      aliveWorkerIds: new Set(['alive']),
+      now: iso(3),
+    })
+
+    assert.deepEqual(recovered.map((row) => row.itemId), ['a'])
+    const task = store.getTask(queued.taskId)
+    assert.equal(task?.state, 'queued')
+    const row = store.db.prepare('SELECT claimed_by_worker_id FROM tasks WHERE id = ?').get(queued.taskId) as {
+      claimed_by_worker_id: string | null
+    }
+    assert.equal(row.claimed_by_worker_id, null)
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('terminal update updates task and attempt', () => {
   const { dir, store } = openTempStore()
   try {

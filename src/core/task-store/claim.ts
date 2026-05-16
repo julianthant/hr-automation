@@ -198,7 +198,8 @@ export function recoverClaimsForDeadWorkers(
     `).all({ workflow: request.workflow }) as TaskDbRow[]
     const recovered: TaskRow[] = []
     for (const row of rows) {
-      if (!row.claimed_by_worker_id || request.aliveWorkerIds.has(row.claimed_by_worker_id)) continue
+      const leaseExpired = row.claim_expires_at !== null && row.claim_expires_at <= now
+      if (!row.claimed_by_worker_id || (!leaseExpired && request.aliveWorkerIds.has(row.claimed_by_worker_id))) continue
       recovered.push(mapTaskRow(row))
       returnTaskToQueued(db, control, { taskId: row.id, now })
     }
