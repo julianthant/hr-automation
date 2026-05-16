@@ -2,6 +2,8 @@ import path from "node:path";
 import type { ZodType } from "zod/v4";
 import { log } from "../../utils/log.js";
 import { buildVisionPool, summarizePool, type PoolKey } from "./per-page-pool.js";
+import { getOrCreateKeyRotation, type KeyRotation } from "./rotation.js";
+import { OcrAllKeysExhaustedError, type ProviderKey } from "./types.js";
 
 export interface PerPageOcrRequest<T> {
   /** PNG filenames inside `pageImagesDir`, 1-indexed by page (e.g. page-01.png). */
@@ -20,6 +22,8 @@ export interface PerPageOcrRequest<T> {
    * doesn't hit the network. Defaults to `buildVisionPool()`.
    */
   pool?: PoolKey[];
+  /** Override the rotation-state directory for tests. */
+  cacheDir?: string;
 }
 
 export interface PerPageOcrResult<T> {
@@ -44,6 +48,7 @@ type CallSinglePageFn = (args: {
 }) => Promise<{ json: unknown; poolKeyId: string }>;
 
 let _callSinglePageForTests: CallSinglePageFn | undefined;
+const DEFAULT_CACHE_DIR = ".ocr-cache";
 
 export function __setPerPageCallForTests(fn: CallSinglePageFn | undefined): void {
   _callSinglePageForTests = fn;
@@ -94,6 +99,7 @@ export async function runOcrPerPage<T>(
     10,
   );
   const maxRetries = Number.isFinite(maxRetriesEnv) && maxRetriesEnv >= 0 ? maxRetriesEnv : 2;
+  const geminiRotation = buildGeminiRotation(pool, req.cacheDir ?? DEFAULT_CACHE_DIR);
 
   const tasks = req.pagesAsImages.map((filename, idx) => ({
     pageNum: idx + 1,
@@ -124,7 +130,15 @@ export async function runOcrPerPage<T>(
 
         let lastError: unknown;
         let lastPoolKeyId: string | undefined;
-        for (const k of tryOrder.length > 0 ? tryOrder : [null]) {
+        let attemptsMade = 0;
+        const attemptedPoolKeyIds = new Set<string>();
+        for (const candidate of tryOrder.length > 0 ? tryOrder : [null]) {
+          const resolved = resolvePoolKey(candidate, geminiRotation);
+          if (resolved === null) continue;
+          const { key: k, rotationKey } = resolved;
+          if (k && attemptedPoolKeyIds.has(k.id)) continue;
+          if (k) attemptedPoolKeyIds.add(k.id);
+          attemptsMade += 1;
           try {
             const { json, poolKeyId } = await callSinglePage({
               imagePath: t.imagePath,
@@ -132,6 +146,10 @@ export async function runOcrPerPage<T>(
               pageNum: t.pageNum,
               key: k,
             });
+            if (rotationKey && geminiRotation) {
+              geminiRotation.rotation.markSuccess();
+              geminiRotation.rotation.flush();
+            }
             const arr = Array.isArray(json) ? (json as unknown[]) : [json];
             results[t.pageNum - 1] = {
               page: t.pageNum,
@@ -143,6 +161,10 @@ export async function runOcrPerPage<T>(
           } catch (err) {
             lastError = err;
             lastPoolKeyId = k?.id;
+            if (rotationKey && geminiRotation) {
+              markPerPageGeminiKeyFailure(geminiRotation.rotation, rotationKey, err);
+              geminiRotation.rotation.flush();
+            }
             const msg = err instanceof Error ? err.message : String(err);
             // Don't retry on auth errors — that key is dead for this run.
             // The next key in tryOrder may still be valid.
@@ -155,7 +177,7 @@ export async function runOcrPerPage<T>(
         const errMsg =
           lastError instanceof Error ? lastError.message : String(lastError);
         log.warn(
-          `runOcrPerPage page ${t.pageNum} failed after ${tryOrder.length} attempt(s): ${errMsg}`,
+          `runOcrPerPage page ${t.pageNum} failed after ${attemptsMade} attempt(s): ${errMsg}`,
         );
         results[t.pageNum - 1] = {
           page: t.pageNum,
@@ -261,6 +283,70 @@ async function callSinglePage(args: {
   }
   const json = await args.key.callOcr(args.imagePath, args.prompt);
   return { json, poolKeyId: args.key.id };
+}
+
+interface GeminiRotation {
+  rotation: KeyRotation;
+  poolKeyByRotationKey: Map<string, PoolKey>;
+}
+
+function buildGeminiRotation(pool: PoolKey[], cacheDir: string): GeminiRotation | null {
+  const geminiKeys = pool.filter((key) => key.providerId === "gemini" && key.rotationKey);
+  if (geminiKeys.length === 0) return null;
+  const rotationKeys = geminiKeys.map((key) => key.rotationKey!);
+  return {
+    rotation: getOrCreateKeyRotation("gemini-per-page", rotationKeys, cacheDir),
+    poolKeyByRotationKey: new Map(geminiKeys.map((key) => [key.rotationKey!, key])),
+  };
+}
+
+function resolvePoolKey(
+  candidate: PoolKey | null,
+  geminiRotation: GeminiRotation | null,
+): { key: PoolKey | null; rotationKey?: ProviderKey } | null {
+  if (!candidate || candidate.providerId !== "gemini" || !geminiRotation) {
+    return { key: candidate };
+  }
+  try {
+    const rotationKey = geminiRotation.rotation.pickNext();
+    const key = geminiRotation.poolKeyByRotationKey.get(rotationKey.value);
+    if (!key) {
+      geminiRotation.rotation.markDead(rotationKey);
+      return null;
+    }
+    return { key, rotationKey };
+  } catch (err) {
+    if (err instanceof OcrAllKeysExhaustedError) return null;
+    throw err;
+  }
+}
+
+function markPerPageGeminiKeyFailure(
+  rotation: KeyRotation,
+  key: ProviderKey,
+  err: unknown,
+): void {
+  const message = err instanceof Error ? err.message : String(err);
+  if (/401|unauthor|invalid\s*api\s*key/i.test(message)) {
+    rotation.markDead(key);
+    return;
+  }
+  if (/quota|exhaust/i.test(message)) {
+    rotation.markQuotaExhausted(key, nextUtcMidnight());
+    return;
+  }
+  if (/429|rate|too many requests/i.test(message)) {
+    rotation.markRateLimited(key, Date.now() + 60_000);
+    return;
+  }
+  if (/ECONNRESET|ETIMEDOUT|503|504/i.test(message)) {
+    rotation.markRateLimited(key, Date.now() + 5_000);
+  }
+}
+
+function nextUtcMidnight(): number {
+  const now = new Date();
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
 }
 
 function makeLimiter(n: number) {
