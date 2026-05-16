@@ -3,9 +3,9 @@ import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { defineWorkflow, runWorkflowBatch } from "../../core/index.js";
 import { buildCliAdapter } from "../../core/cli-adapter.js";
+import { buildBatchPreEmitPending } from "../../core/pre-emit-helpers.js";
 import { loginToUCPath } from "../../infra/auth/login.js";
-import { trackEvent } from "../../tracker/jsonl.js";
-import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
+import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { TransactionError } from "../../systems/ucpath/types.js";
 import {
   navigateToEmergencyContact,
@@ -265,7 +265,6 @@ export async function runEmergencyContact(
 
   await runPreflight(batch, options);
 
-  const now = new Date().toISOString();
   const result = await runWorkflowBatch(emergencyContactWorkflow, records, {
     // Per-record itemId shape `p{NN}-{emplId}` — the kernel's built-in
     // deriveItemId only looks at top-level emplId/docId/email, not
@@ -273,21 +272,12 @@ export async function runEmergencyContact(
     // withTrackedWorkflow a random UUID that doesn't match the pending row
     // written by onPreEmitPending below.
     deriveItemId: (item) => recordItemId(item as EmergencyContactRecord),
-    onPreEmitPending: (item, runId) => {
-      const record = item as EmergencyContactRecord;
-      const subject = emergencyContactWorkflow.config.operatorSubject?.(record);
-      trackEvent({
-        workflow: WORKFLOW,
-        timestamp: now,
-        id: recordItemId(record),
-        runId,
-        status: "pending",
-        data: {
-          ...buildEmergencyContactPendingData(record, batch.batchName),
-          ...operatorSubjectData(subject),
-        },
-      });
-    },
+    onPreEmitPending: buildBatchPreEmitPending({
+      workflow: emergencyContactWorkflow,
+      buildPendingData: (item) =>
+        buildEmergencyContactPendingData(item as EmergencyContactRecord, batch.batchName),
+      deriveId: (item) => recordItemId(item as EmergencyContactRecord),
+    }),
   });
 
   log.success(

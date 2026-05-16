@@ -5,9 +5,8 @@ import {
 import { buildCliAdapter } from "../../core/cli-adapter.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
-import { trackEvent } from "../../tracker/jsonl.js";
 import { loginToUCPath } from "../../infra/auth/login.js";
-import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
+import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { rootQueueTitleData } from "../../domain/queue-title.js";
 import { buildOathSignaturePlan, type OathSignatureContext } from "./enter.js";
 import { OathSignatureInputSchema, type OathSignatureInput } from "./schema.js";
@@ -154,36 +153,6 @@ function buildOathSignaturePendingData(item: OathSignatureInput): Record<string,
     ...(parentSubject ? { __name: parentSubject } : {}),
     ...queueFields,
   };
-}
-
-/**
- * Pre-emit pending tracker row for an oath-signature queue item. Exported for
- * tests + reuse via the OCR orchestrator. When `parentSubject` is present,
- * `data.__name` is set to the batch label so the dashboard row displays the
- * prep context (e.g. "Oath Signature · #abcd") rather than the bare EID.
- * When absent, `__name` is omitted and the dashboard falls back to its
- * standard field resolution — preserving back-compat for direct CLI runs.
- */
-export function oathSignaturePreEmitPending(
-  item: OathSignatureInput,
-  runId: string,
-  parentRunId: string | undefined,
-  itemId: string | undefined,
-  trackerDir?: string,
-): void {
-  const subject = oathSignatureWorkflow.config.operatorSubject?.(item);
-  trackEvent({
-    workflow: WORKFLOW,
-    timestamp: new Date().toISOString(),
-    id: itemId ?? item.emplId,
-    runId,
-    ...(parentRunId ? { parentRunId } : {}),
-    status: "pending",
-    data: {
-      ...buildOathSignaturePendingData(item),
-      ...operatorSubjectData(subject),
-    },
-  }, trackerDir);
 }
 
 /**

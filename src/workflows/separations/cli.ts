@@ -1,7 +1,6 @@
 import { runWorkflow, runWorkflowBatch } from "../../core/index.js";
 import { buildCliAdapter } from "../../core/cli-adapter.js";
-import { trackEvent } from "../../tracker/jsonl.js";
-import { operatorSubjectData } from "../../domain/operator-subject.js";
+import { buildBatchPreEmitPending } from "../../core/pre-emit-helpers.js";
 import { PATHS } from "../../config.js";
 import { getProcessIsolatedSessionDir } from "../../core/kernel/session.js";
 import { rmSync } from "node:fs";
@@ -46,23 +45,15 @@ export async function runSeparationBatch(
   docIds: string[],
 ): Promise<{ total: number; succeeded: number; failed: number }> {
   const sessionDir = getProcessIsolatedSessionDir(PATHS.ukgSessionSep);
-  const now = new Date().toISOString();
   const items = docIds.map((id) => ({ docId: id }));
   try {
     const result = await runWorkflowBatch(separationsWorkflow, items, {
       deriveItemId: (item) => (item as SeparationInput).docId,
-      onPreEmitPending: (item, runId) => {
-        const { docId } = item as SeparationInput;
-        const subject = separationsWorkflow.config.operatorSubject?.({ docId });
-        trackEvent({
-          workflow: "separations",
-          timestamp: now,
-          id: docId,
-          runId,
-          status: "pending",
-          data: { docId, ...operatorSubjectData(subject) },
-        });
-      },
+      onPreEmitPending: buildBatchPreEmitPending({
+        workflow: separationsWorkflow,
+        buildPendingData: (item) => ({ docId: (item as SeparationInput).docId }),
+        deriveId: (item) => (item as SeparationInput).docId,
+      }),
     });
     return { total: result.total, succeeded: result.succeeded, failed: result.failed };
   } finally {

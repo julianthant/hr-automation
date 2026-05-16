@@ -83,8 +83,8 @@ export const onboardingWorkflow = defineWorkflow({
   // Pool mode: each worker gets its own Session with 3 browsers (CRM + UCPath +
   // I9), 2 Duos per worker (I9 SSO has no 2FA). Pool size 4 matches the legacy
   // default; overridable at runtime via `RunOpts.poolSize` from the `--workers N`
-  // CLI flag. `preEmitPending: true` lets `runParallel` / `runOnboardingPositional`
-  // emit the full email queue to the dashboard before any worker's auth finishes.
+  // CLI flag. `preEmitPending: true` lets in-process pool callers emit the full
+  // email queue to the dashboard before any worker's auth finishes.
   batch: { mode: "pool", poolSize: 4, preEmitPending: true },
   // Matches pre-subsystem-D WF_CONFIG["onboarding"].detailFields. Dept/Position/
   // Wage/I9-profile are populated after extraction; email is populated from the
@@ -418,11 +418,8 @@ export const onboardingWorkflow = defineWorkflow({
  * CLI adapter for `npm run onboarding <email>` (single-email path).
  * Delegates to the kernel via `runWorkflow(onboardingWorkflow, { email })`.
  *
- * Pool-mode variants live in sibling files:
- * - `./positional.ts` (`runOnboardingPositional`) — positional CLI emails.
- *
- * Both delegate straight to `runWorkflowBatch(onboardingWorkflow, ...)` —
- * no adapter indirection through this function.
+ * For in-process pool-mode use `runWorkflowBatch(onboardingWorkflow, items)`
+ * directly — no adapter indirection through this function.
  */
 export async function runOnboarding(email: string): Promise<void> {
   await runWorkflow(onboardingWorkflow, { email });

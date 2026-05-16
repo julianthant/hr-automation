@@ -7,4 +7,3 @@ export {
   runOnboardingCli,
   onboardingWorkflow,
 } from "./workflow.js";
-export { runOnboardingPositional } from "./positional.js";
