@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { ZodType } from "zod/v4";
 import { log } from "../../utils/log.js";
+import { classifyOcrError } from "./error-classification.js";
 import { buildVisionPool, summarizePool, type PoolKey } from "./per-page-pool.js";
 import { getOrCreateKeyRotation, type KeyRotation } from "./rotation.js";
 import { OcrAllKeysExhaustedError, type ProviderKey } from "./types.js";
@@ -326,21 +327,21 @@ function markPerPageGeminiKeyFailure(
   key: ProviderKey,
   err: unknown,
 ): void {
-  const message = err instanceof Error ? err.message : String(err);
-  if (/401|unauthor|invalid\s*api\s*key/i.test(message)) {
-    rotation.markDead(key);
-    return;
-  }
-  if (/quota|exhaust/i.test(message)) {
-    rotation.markQuotaExhausted(key, nextUtcMidnight());
-    return;
-  }
-  if (/429|rate|too many requests/i.test(message)) {
-    rotation.markRateLimited(key, Date.now() + 60_000);
-    return;
-  }
-  if (/ECONNRESET|ETIMEDOUT|503|504/i.test(message)) {
-    rotation.markRateLimited(key, Date.now() + 5_000);
+  switch (classifyOcrError(err)) {
+    case "auth":
+      rotation.markDead(key);
+      return;
+    case "quota-exhausted":
+      rotation.markQuotaExhausted(key, nextUtcMidnight());
+      return;
+    case "rate-limit":
+      rotation.markRateLimited(key, Date.now() + 60_000);
+      return;
+    case "transient":
+      rotation.markRateLimited(key, Date.now() + 5_000);
+      return;
+    case "permanent":
+      return;
   }
 }
 

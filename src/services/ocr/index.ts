@@ -1,6 +1,7 @@
 import { KeyRotation } from "./rotation.js";
 import { GeminiProvider } from "./providers/gemini.js";
 import { readGeminiKeys } from "./env-keys.js";
+import { classifyOcrError } from "./error-classification.js";
 import {
   OcrAllKeysExhaustedError,
   OcrProviderError,
@@ -129,25 +130,24 @@ export async function ocrDocument<T>(req: OcrRequest<T>): Promise<OcrResult<T>> 
       return result;
     } catch (err) {
       lastError = err;
-      if (err instanceof OcrProviderError) {
-        switch (err.kind) {
-          case "rate-limit":
-            rotation.markRateLimited(key, Date.now() + 60_000);
-            break;
-          case "quota-exhausted":
-            rotation.markQuotaExhausted(key, nextUtcMidnight());
-            break;
-          case "auth":
-            rotation.markDead(key);
-            break;
-          case "transient":
-            rotation.markRateLimited(key, Date.now() + 5_000);
-            break;
-          case "unknown":
+      switch (classifyOcrError(err)) {
+        case "rate-limit":
+          rotation.markRateLimited(key, Date.now() + 60_000);
+          continue;
+        case "quota-exhausted":
+          rotation.markQuotaExhausted(key, nextUtcMidnight());
+          continue;
+        case "auth":
+          rotation.markDead(key);
+          continue;
+        case "transient":
+          rotation.markRateLimited(key, Date.now() + 5_000);
+          continue;
+        case "permanent":
+          if (err instanceof OcrProviderError) {
             rotation.markRateLimited(key, Date.now() + 30_000);
-            break;
-        }
-        continue;
+            continue;
+          }
       }
       // Non-provider error (validation, type) — flush + bubble up.
       rotation.flush();

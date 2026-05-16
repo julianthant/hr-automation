@@ -1,6 +1,7 @@
 import { OcrAllKeysExhaustedError, type ProviderKey } from "./types.js";
 import { log } from "../../utils/log.js";
 import { readGeminiKeys, callGeminiJsonTextWithKey } from "./env-keys.js";
+import { classifyOcrError } from "./error-classification.js";
 import { KeyRotation, getOrCreateKeyRotation } from "./rotation.js";
 
 export interface DisambiguateInput {
@@ -145,20 +146,21 @@ function markDisambiguationKeyFailure(
   err: unknown,
 ): void {
   const message = err instanceof Error ? err.message : String(err);
-  if (/401|unauthor|invalid\s*api\s*key/i.test(message)) {
-    rotation.markDead(key);
-    log.warn(`disambiguateMatch: auth error on Gemini key ${key.index} — ${message}`);
-    return;
+  switch (classifyOcrError(err)) {
+    case "auth":
+      rotation.markDead(key);
+      log.warn(`disambiguateMatch: auth error on Gemini key ${key.index} — ${message}`);
+      return;
+    case "quota-exhausted":
+      rotation.markQuotaExhausted(key, nextUtcMidnight());
+      return;
+    case "rate-limit":
+      rotation.markRateLimited(key, Date.now() + 60_000);
+      return;
+    case "transient":
+    case "permanent":
+      rotation.markRateLimited(key, Date.now() + 5_000);
   }
-  if (/quota|exhaust/i.test(message)) {
-    rotation.markQuotaExhausted(key, nextUtcMidnight());
-    return;
-  }
-  if (/429|rate|too many requests/i.test(message)) {
-    rotation.markRateLimited(key, Date.now() + 60_000);
-    return;
-  }
-  rotation.markRateLimited(key, Date.now() + 5_000);
 }
 
 function nextUtcMidnight(): number {
