@@ -115,6 +115,10 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
   const [loading, setLoading] = useState(true);
   const prevHashRef = useRef("");
   const activeKeyRef = useRef("");
+  // Cache: maps entry id → the last-emitted { entry, _hash } object.
+  // Reusing the same object reference for unchanged rows lets EntryItem's
+  // memo bailout on referential equality before the comparator body runs.
+  const entryRefCacheRef = useRef<Map<string, TrackerEntry & { _hash: string }>>(new Map());
 
   useEffect(() => {
     setLoading(true);
@@ -125,6 +129,9 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
     // empty. Without the key guard, switching to an empty date leaves the
     // previous date's rows on screen because both hashes are "".
     prevHashRef.current = "";
+    // Clear ref cache on workflow/date switch so stale objects from the
+    // previous subscription don't contaminate the next one.
+    entryRefCacheRef.current = new Map();
 
     const today = dateLocal();
     const params: { workflow: string; date?: string } = { workflow };
@@ -176,12 +183,29 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
 
         const dedupedBase = dedupeLatestByIdWithCarriedEmplId(raw as TrackerEntry[]);
 
-        const deduped = [...dedupedBase]
-          .sort((a, b) => entrySortKey(a as WithFirstLog) - entrySortKey(b as WithFirstLog))
-          .map((entry) => ({
-            ...entry,
-            _hash: entryRenderHash(entry as WithFirstLog),
-          }));
+        const sorted = [...dedupedBase]
+          .sort((a, b) => entrySortKey(a as WithFirstLog) - entrySortKey(b as WithFirstLog));
+
+        // Per-id ref cache: reuse the same object reference for rows whose render
+        // hash hasn't changed. This lets EntryItem's React.memo bail out on
+        // referential equality (prev.entry === next.entry) before its comparator
+        // body runs, rather than running the comparator on every row every tick.
+        const cache = entryRefCacheRef.current;
+        const nextCache = new Map<string, TrackerEntry & { _hash: string }>();
+        const deduped = sorted.map((entry) => {
+          const hash = entryRenderHash(entry as WithFirstLog);
+          const cached = cache.get(entry.id);
+          if (cached && cached._hash === hash) {
+            nextCache.set(entry.id, cached);
+            return cached;
+          }
+          const next = { ...entry, _hash: hash } as TrackerEntry & { _hash: string };
+          nextCache.set(entry.id, next);
+          return next;
+        });
+        // Replace the cache with the current set of present ids so entries that
+        // left the queue don't accumulate indefinitely.
+        entryRefCacheRef.current = nextCache;
 
         setEntries(deduped);
         activeKeyRef.current = targetKey;
@@ -192,6 +216,9 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
         setLoading(false);
         // Reset memo refs so the first post-reconnect tick is always applied.
         resetEntriesMemoRefs(prevHashRef, activeKeyRef);
+        // Clear ref cache so the reconnect tick always emits fresh objects
+        // (avoids serving stale cached refs if entries changed while disconnected).
+        entryRefCacheRef.current = new Map();
       },
     );
 
