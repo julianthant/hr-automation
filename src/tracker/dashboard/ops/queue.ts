@@ -204,13 +204,11 @@ export function buildSaveDataHandler(dir: string) {
       };
     }
     // Coerce user-supplied values to strings (TrackerEntry.data is
-    // Record<string, string>). Drop empty strings only when they would
-    // overwrite a non-empty existing value, so deliberately-cleared fields
-    // round-trip but blanks from un-touched inputs don't clobber prior data.
+    // Record<string, string>). EditDataTab posts every editable field, so an
+    // empty string means the operator intentionally cleared the value.
     const merged: Record<string, string> = { ...(latest.data ?? {}) };
     for (const [k, v] of Object.entries(req.data)) {
       const next = typeof v === "string" ? v : v == null ? "" : String(v);
-      if (next === "" && merged[k]) continue;
       merged[k] = next;
     }
     const entry: TrackerEntry = {

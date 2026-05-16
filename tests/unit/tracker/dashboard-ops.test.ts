@@ -27,6 +27,7 @@ import {
   buildForceStopTaskHandler,
   buildKillBrowserHandler,
   buildQueueBumpHandler,
+  buildSaveDataHandler,
   buildStopWorkerHandler,
   buildDaemonsListHandler,
   buildRetryHandler,
@@ -328,6 +329,37 @@ describe("findLatestEntryData", () => {
       tmp,
     );
     assert.deepEqual(findLatestEntryData("separations", "X", tmp), { transactionNumber: "T002109055" });
+  });
+});
+
+describe("buildSaveDataHandler", () => {
+  it("clears a field when the operator submits an empty value", async () => {
+    trackEvent(
+      {
+        workflow: "separations",
+        timestamp: "2026-05-15T12:00:00.000Z",
+        id: "3930",
+        runId: "run-1",
+        status: "done",
+        data: { transactionNumber: "T002109055", eid: "10000001" },
+      },
+      tmp,
+    );
+
+    const result = await buildSaveDataHandler(tmp)({
+      workflow: "separations",
+      id: "3930",
+      data: { transactionNumber: "" },
+    });
+
+    assert.equal(result.ok, true);
+    const entries = readFileSync(join(tmp, "separations-2026-05-15.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const latest = entries.at(-1);
+    assert.equal(latest.data.transactionNumber, "");
+    assert.equal(latest.data.eid, "10000001");
   });
 });
 
