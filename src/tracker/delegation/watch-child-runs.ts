@@ -9,10 +9,7 @@
  * `parentRunId` — parentRunId is purely for dashboard visualization.
  */
 import {
-  closeSync,
   existsSync,
-  openSync,
-  readSync,
   statSync,
   watch as fsWatch,
 } from "node:fs";
@@ -323,9 +320,7 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
   const watchFile = opts.watcherFactory ?? fsWatch;
 
   const outcomes: ChildOutcome[] = [];
-  let lastSize = 0;
-  /** Incomplete UTF-8 line prefix from the last incremental read. */
-  let utf8Pending = "";
+  const tailState = makeTailState();
 
   return new Promise<ChildOutcome[]>((resolve, reject) => {
     let finalized = false;
@@ -379,47 +374,8 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
         return;
       }
       if (!existsSync(file)) return;
-      let cur;
-      try {
-        cur = statSync(file);
-      } catch {
-        return;
-      }
-      if (cur.size < lastSize) {
-        lastSize = 0;
-        utf8Pending = "";
-      }
-      if (cur.size <= lastSize) return;
+      ingestLines(tailIncremental(file, tailState));
 
-      try {
-        const fd = openSync(file, "r");
-        try {
-          const byteLen = cur.size - lastSize;
-          const buf = Buffer.alloc(byteLen);
-          let total = 0;
-          while (total < byteLen) {
-            const n = readSync(fd, buf, total, byteLen - total, lastSize + total);
-            if (n === 0) break;
-            total += n;
-          }
-          const chunk = buf.subarray(0, total).toString("utf8");
-          const combined = utf8Pending + chunk;
-          const lastNl = combined.lastIndexOf("\n");
-          if (lastNl === -1) {
-            utf8Pending = combined;
-          } else {
-            const complete = combined.slice(0, lastNl + 1);
-            utf8Pending = combined.slice(lastNl + 1);
-            ingestLines(complete.split("\n"));
-          }
-        } finally {
-          closeSync(fd);
-        }
-      } catch {
-        return;
-      }
-
-      lastSize = cur.size;
       if (expected.size === 0) {
         cleanup();
         resolve(outcomes);
