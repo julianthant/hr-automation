@@ -8,18 +8,23 @@ export {
   oathSignatureWorkflow,
 } from "./workflow.js";
 
-export { oathOcrFormSpec } from "./ocr-form.js";
 export {
+  oathOcrFormSpec,
   OathRosterOcrRecordSchema,
   OathOcrOutputSchema,
   OathPreviewRecordSchema,
-  MatchStateSchema,
-  VerificationSchema,
-} from "./ocr-form.js";
+  normalizeOathDate,
+} from "../../services/ocr/forms/oath.js";
 export type {
   OathRosterOcrRecord,
   OathOcrOutput,
   OathPreviewRecord,
-  MatchState,
+} from "../../services/ocr/forms/oath.js";
+export {
+  VerificationSchema,
+  MatchStateSchema,
+} from "../../services/ocr/forms/shared.js";
+export type {
   Verification,
-} from "./ocr-form.js";
+  MatchState,
+} from "../../services/ocr/forms/shared.js";

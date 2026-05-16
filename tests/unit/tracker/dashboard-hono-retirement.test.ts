@@ -96,7 +96,6 @@ test("Hono manifest covers the dashboard public route inventory", () => {
     ["GET", "/api/rosters"],
     ["GET", "/api/preflight"],
     ["GET", "/api/search"],
-    ["GET", "/api/preview-inbox"],
     ["GET", "/api/failures"],
     ["GET", "/api/selector-warnings"],
     ["GET", "/api/screenshots"],

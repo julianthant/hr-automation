@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { oathOcrFormSpec, normalizeOathDate } from "../../../../src/workflows/oath-signature/ocr-form.js";
+import { oathOcrFormSpec, normalizeOathDate } from "../../../../src/services/ocr/forms/oath.js";
 import type { RosterRow } from "../../../../src/workflows/ocr/types.js";
 
 const roster: RosterRow[] = [
