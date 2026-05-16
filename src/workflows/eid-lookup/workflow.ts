@@ -10,7 +10,6 @@
 import { defineWorkflow } from "../../core/index.js";
 import { buildCliAdapter } from "../../core/cli-adapter.js";
 import type { Ctx } from "../../core/kernel/types.js";
-import { trackEvent } from "../../tracker/jsonl.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath, loginToACTCrm } from "../../infra/auth/login.js";
@@ -385,43 +384,6 @@ export { dedupeNames, prepareNames } from "../../domain/identity/person-name.js"
 
 export function deriveEidLookupItemId(input: EidLookupItem): string {
   return isEidInput(input) ? input.emplId : normalizeName(input.name);
-}
-
-/**
- * Pre-emit pending tracker row for an eid-lookup queue item. Exported for
- * tests + reuse via the OCR orchestrator. When `parentSubject` is present on
- * the item, `data.__name` is overwritten with it so the dashboard row displays
- * the batch label (e.g. "Oath Signature · #abcd") rather than the per-name
- * identity. `parentRunId` is forwarded when present so OCR-delegated rows
- * nest correctly.
- */
-export function eidLookupPreEmitPending(
-  item: EidLookupItem & { parentSubject?: string },
-  runId: string,
-  parentRunId: string | undefined,
-  itemId: string,
-  trackerDir?: string,
-): void {
-  const n = "name" in item ? item.name : item.emplId;
-  const subject = eidLookupCrmWorkflow.config.operatorSubject?.(item);
-  const parentSubject = item.parentSubject;
-  const displayName = parentSubject ?? n ?? "";
-  const queueFields = parentSubject ? rootQueueTitleData(parentSubject) : {};
-  trackEvent({
-    workflow: "eid-lookup",
-    timestamp: new Date().toISOString(),
-    id: itemId,
-    runId,
-    ...(parentRunId ? { parentRunId } : {}),
-    status: "pending",
-    data: {
-      searchName: n,
-      __name: displayName,
-      __id: n ?? itemId,
-      ...queueFields,
-      ...operatorSubjectData(subject),
-    },
-  }, trackerDir);
 }
 
 /**

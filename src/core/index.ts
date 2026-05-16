@@ -66,3 +66,4 @@ export type {
   DaemonFlags,
   EnqueueResult,
 } from './daemon/types.js'
+export { buildBatchPreEmitPending } from './pre-emit-helpers.js'
