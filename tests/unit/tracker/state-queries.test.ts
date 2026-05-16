@@ -6,7 +6,13 @@ import { tmpdir } from "node:os";
 
 import { openStateDb, closeStateDbForTests } from "../../../src/tracker/state/db.js";
 import { trackEvent, appendLogEntry } from "../../../src/tracker/jsonl.js";
-import { queryEntriesPayload, queryRunsForItem, queryPriorEntriesByKey } from "../../../src/tracker/state/queries.js";
+import {
+  queryEntriesPayload,
+  queryPriorEntriesByKey,
+  queryRunsForItem,
+  selectLogsForRun,
+  selectRunEventsForRun,
+} from "../../../src/tracker/state/queries.js";
 
 function tmpTracker(): string {
   return mkdtempSync(join(tmpdir(), "state-query-"));
@@ -212,6 +218,124 @@ test("queryRunsForItem assigns distinct run_ordinal in live-apply path (regressi
     assert.ok(a && b, "both runs present");
     assert.equal(a.runOrdinal, 1, "first run gets ordinal 1");
     assert.equal(b.runOrdinal, 2, "second run gets ordinal 2");
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("selectLogsForRun filters by run identity and orders by timestamp", () => {
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    appendLogEntry({
+      workflow: "work-study",
+      itemId: "10000001",
+      runId: "run-a",
+      level: "success",
+      message: "Second",
+      ts: "2026-05-04T20:00:10.000Z",
+    }, dir);
+    appendLogEntry({
+      workflow: "work-study",
+      itemId: "10000001",
+      runId: "run-a",
+      level: "step",
+      message: "First",
+      ts: "2026-05-04T20:00:00.000Z",
+    }, dir);
+    appendLogEntry({
+      workflow: "work-study",
+      itemId: "10000001",
+      runId: "run-b",
+      level: "error",
+      message: "Different run",
+      ts: "2026-05-04T20:00:05.000Z",
+    }, dir);
+    appendLogEntry({
+      workflow: "onboarding",
+      itemId: "10000001",
+      runId: "run-a",
+      level: "step",
+      message: "Different workflow",
+      ts: "2026-05-04T20:00:01.000Z",
+    }, dir);
+    const db = openStateDb(dir);
+    const rows = selectLogsForRun(db, {
+      workflow: "work-study",
+      trackerDate: "2026-05-04",
+      itemId: "10000001",
+      runId: "run-a",
+    });
+    assert.deepEqual(rows.map((row) => row.message), ["First", "Second"]);
+    assert.deepEqual(rows.map((row) => row.run_id), ["run-a", "run-a"]);
+
+    const limited = selectLogsForRun(db, {
+      workflow: "work-study",
+      trackerDate: "2026-05-04",
+      itemId: "10000001",
+      runId: "run-a",
+      limit: 1,
+    });
+    assert.deepEqual(limited.map((row) => row.message), ["First"]);
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("selectRunEventsForRun filters by run identity and orders by event timestamp", () => {
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    trackEvent({
+      workflow: "onboarding",
+      timestamp: "2026-05-04T20:00:10.000Z",
+      id: "jane",
+      runId: "run-a",
+      status: "done",
+      data: { name: "Jane" },
+    }, dir);
+    trackEvent({
+      workflow: "onboarding",
+      timestamp: "2026-05-04T20:00:00.000Z",
+      id: "jane",
+      runId: "run-a",
+      status: "running",
+      step: "extraction",
+    }, dir);
+    trackEvent({
+      workflow: "onboarding",
+      timestamp: "2026-05-04T20:00:05.000Z",
+      id: "jane",
+      runId: "run-b",
+      status: "failed",
+    }, dir);
+    trackEvent({
+      workflow: "onboarding",
+      timestamp: "2026-05-04T20:00:01.000Z",
+      id: "john",
+      runId: "run-a",
+      status: "running",
+    }, dir);
+    const db = openStateDb(dir);
+    const rows = selectRunEventsForRun(db, {
+      workflow: "onboarding",
+      trackerDate: "2026-05-04",
+      itemId: "jane",
+      runId: "run-a",
+    });
+    assert.deepEqual(rows.map((row) => row.status), ["running", "done"]);
+    assert.deepEqual(rows.map((row) => row.item_id), ["jane", "jane"]);
+
+    const limited = selectRunEventsForRun(db, {
+      workflow: "onboarding",
+      trackerDate: "2026-05-04",
+      itemId: "jane",
+      runId: "run-a",
+      limit: 1,
+    });
+    assert.deepEqual(limited.map((row) => row.status), ["running"]);
   } finally {
     closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });
