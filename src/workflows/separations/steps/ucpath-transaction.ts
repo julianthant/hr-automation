@@ -12,6 +12,7 @@ import {
   clickSaveAndSubmit,
   findExistingTerminationTransaction,
 } from "../../../systems/ucpath/index.js";
+import { ssSmartHRTransactions } from "../../../systems/ucpath/selectors.js";
 import type { KualiSeparationData } from "../../../systems/kuali/index.js";
 import type { Ctx } from "../../../core/kernel/types.js";
 
@@ -80,7 +81,7 @@ export async function runUcpathTransaction(
         return { transactionNumber, submittedWithoutTxnNumber };
       }
       log.step("[UCPath Txn] Filling Empl ID...");
-      await frame.getByRole("textbox", { name: "Empl ID" }).fill(kualiData.eid, { timeout: 10_000 }); // allow-inline-selector
+      await ssSmartHRTransactions.emplIdInput(frame).fill(kualiData.eid, { timeout: 10_000 });
       await selectReasonCode(ucpathPage, frame, ucpathReason);
       await fillComments(frame, finalComments);
 

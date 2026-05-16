@@ -27,6 +27,7 @@ import {
   dismissPeopleSoftModalMask,
 } from "../../systems/ucpath/index.js";
 import type { PersonalDataInput, JobDataInput } from "../../systems/ucpath/index.js";
+import { comments } from "../../systems/ucpath/selectors.js";
 import type { EmployeeData } from "./schema.js";
 
 /**
@@ -131,7 +132,7 @@ export function buildTransactionPlan(
     "Fill comments",
     async () => {
       const frame = getContentFrame(page);
-      await frame.locator("#HR_TBH_WRK_DESCRLONG_NOTES").fill(commentsText, { timeout: 10_000 });
+      await comments.commentsTextarea(frame).fill(commentsText, { timeout: 10_000 });
     },
   );
 
@@ -181,7 +182,7 @@ export function buildTransactionPlan(
     "Fill initiator comments",
     async () => {
       const frame = getContentFrame(page);
-      await frame.locator("#UC_SS_TRANSACT_COMMENTS").fill(commentsText, { timeout: 10_000 });
+      await comments.initiatorCommentsTextarea(frame).fill(commentsText, { timeout: 10_000 });
       log.step(`[TabWalk] Initiator Comments filled (${commentsText.length} chars)`);
     },
   );
