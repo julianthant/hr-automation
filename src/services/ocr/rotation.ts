@@ -19,6 +19,32 @@ interface PersistedState {
   keys: Record<string, KeyEntry>;
 }
 
+const rotationCache = new Map<string, KeyRotation>();
+
+function rotationCacheKey(providerId: string, cacheDir: string): string {
+  return `${providerId}::${cacheDir}`;
+}
+
+export function getOrCreateKeyRotation(
+  providerId: string,
+  rawKeys: readonly string[],
+  cacheDir: string,
+): KeyRotation {
+  const cacheKey = rotationCacheKey(providerId, cacheDir);
+  let rotation = rotationCache.get(cacheKey);
+  if (!rotation) {
+    rotation = new KeyRotation(providerId, rawKeys, cacheDir);
+    rotationCache.set(cacheKey, rotation);
+    return rotation;
+  }
+  rotation.refreshKeys(rawKeys);
+  return rotation;
+}
+
+export function __resetKeyRotationCacheForTests(): void {
+  rotationCache.clear();
+}
+
 function dayUtc(ms = Date.now()): number {
   return Math.floor(ms / (24 * 3600_000));
 }
@@ -42,11 +68,27 @@ function hashKey(value: string): string {
  */
 export class KeyRotation {
   private state = new Map<string, KeyEntry>();
-  private statePath: string;
+  private readonly statePath: string;
+  private rawKeys: string[];
 
-  constructor(public providerId: string, private rawKeys: readonly string[], cacheDir: string) {
+  constructor(public providerId: string, rawKeys: readonly string[], cacheDir: string) {
+    this.rawKeys = [...rawKeys];
     this.statePath = join(cacheDir, `rotation-state-${providerId}.json`);
     this.load();
+  }
+
+  refreshKeys(rawKeys: readonly string[]): void {
+    const nextKeys = [...rawKeys];
+    if (
+      nextKeys.length === this.rawKeys.length &&
+      nextKeys.every((key, idx) => key === this.rawKeys[idx])
+    ) {
+      return;
+    }
+    this.rawKeys = nextKeys;
+    for (const key of this.rawKeys) {
+      this.getEntry(hashKey(key));
+    }
   }
 
   private load(): void {

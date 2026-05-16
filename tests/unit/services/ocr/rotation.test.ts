@@ -3,14 +3,20 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { KeyRotation } from "../../../../src/services/ocr/rotation.js";
+import {
+  KeyRotation,
+  __resetKeyRotationCacheForTests,
+  getOrCreateKeyRotation,
+} from "../../../../src/services/ocr/rotation.js";
 
 describe("KeyRotation", () => {
   let tmp: string;
   beforeEach(() => {
+    __resetKeyRotationCacheForTests();
     tmp = mkdtempSync(join(tmpdir(), "ocr-rot-"));
   });
   afterEach(() => {
+    __resetKeyRotationCacheForTests();
     rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -105,5 +111,27 @@ describe("KeyRotation", () => {
     // Use again — counts now 1/1/1 → tie-break picks first matching ("k1").
     const d = r.pickNext();
     assert.equal(d.value, "k1");
+  });
+
+  it("returns the cached rotation for the same provider and cache directory", () => {
+    const r1 = getOrCreateKeyRotation("gemini", ["k1", "k2"], tmp);
+    const k1 = r1.pickNext();
+    r1.markRateLimited(k1, Date.now() + 60_000);
+
+    const r2 = getOrCreateKeyRotation("gemini", ["k1", "k2"], tmp);
+
+    assert.equal(r2, r1);
+    assert.equal(r2.pickNext().value, "k2");
+  });
+
+  it("refreshes cached rotation keys while preserving known key state", () => {
+    const r1 = getOrCreateKeyRotation("gemini", ["k1"], tmp);
+    const k1 = r1.pickNext();
+    r1.markRateLimited(k1, Date.now() + 60_000);
+
+    const r2 = getOrCreateKeyRotation("gemini", ["k1", "k2"], tmp);
+
+    assert.equal(r2, r1);
+    assert.equal(r2.pickNext().value, "k2");
   });
 });
