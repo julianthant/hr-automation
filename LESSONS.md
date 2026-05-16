@@ -30,7 +30,7 @@ Cross-codebase patterns and mistakes to avoid. Read this before non-trivial work
 ## Daemon Mode
 
 - **Default for most CLI commands.** `-n, --new` spawns additional; `-p, --parallel <N>` ensures N alive.
-- **Multi-daemon dispatch:** Atomic fs.mkdir mutex — whichever daemon finishes first claims the next queued row.
+- **Multi-daemon dispatch:** Atomic SQLite `UPDATE … RETURNING` claim inside a transaction. Whichever daemon's UPDATE wins grabs the row — dynamic load balancing without a coordinator. The `.queue.jsonl` audit file is informational only.
 - **Graceful drain:** `:stop` soft-stops; `-- --force` marks in-flight failed and exits immediately.
 
 ## Common Mistakes
