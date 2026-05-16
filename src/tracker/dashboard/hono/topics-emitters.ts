@@ -56,9 +56,14 @@ function makeDeltaTopic<T>(
       send(events);
       sentCount = events.length;
       firstTick = false;
-    } else if (events.length > sentCount) {
-      send(events.slice(sentCount));
-      sentCount = events.length;
+    } else {
+      if (events.length < sentCount) {
+        sentCount = 0;
+      }
+      if (events.length > sentCount) {
+        send(events.slice(sentCount));
+        sentCount = events.length;
+      }
     }
   };
 
