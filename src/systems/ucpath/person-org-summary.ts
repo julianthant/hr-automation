@@ -115,8 +115,6 @@ export interface EidResult {
   effectiveDate?: string;
   terminationDate?: string;
   expectedJobEndDate?: string;
-  /** Legacy alias historically populated with termination date or "Active". */
-  expectedEndDate?: string;
   fte?: string;
   emplClass?: string;
   rowIndex?: number;
@@ -384,7 +382,6 @@ async function extractSingleResultDetail(
     effectiveDate: startDate,
     terminationDate: termDate,
     expectedJobEndDate: assignment?.expectedJobEndDate,
-    expectedEndDate: endDate,
     fte: assignment?.fte,
     emplClass: assignment?.emplClass,
   };
@@ -608,7 +605,7 @@ async function populateDepartments(
 
     // Single-result detail pages already have department populated — skip drill-in
     if (result.department) {
-      log.step(`  EID ${result.emplId} — ${result.department} (${result.expectedEndDate || "Active"})`);
+      log.step(`  EID ${result.emplId} — ${result.department} (${result.terminationDate || "Active"})`);
       continue;
     }
 
@@ -622,7 +619,6 @@ async function populateDepartments(
       result.effectiveDate = details.startDate;
       result.terminationDate = details.terminationDate;
       result.expectedJobEndDate = details.expectedJobEndDate;
-      result.expectedEndDate = details.terminationDate || "Active";
       result.fte = details.fte;
       result.emplClass = details.emplClass;
 

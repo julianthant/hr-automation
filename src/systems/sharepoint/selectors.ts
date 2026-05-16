@@ -120,24 +120,6 @@ export const kmsi = {
       .getByRole("button", { name: /^no$/i })
       .or(page.locator('input[type="button"][value="No"]'))
       .or(page.locator('input[type="submit"][value="No"]')),
-
-  /**
-   * "Yes" button on the KMSI prompt. Not currently clicked by any workflow —
-   * kept for parity + future reuse.
-   * verified 2026-04-22
-   * @tags microsoft, kmsi, stay-signed-in, yes, button
-   */
-  yesButton: (page: Page): Locator =>
-    page.getByRole("button", { name: /^yes$/i }),
-
-  /**
-   * "Don't show this again" checkbox on the KMSI prompt. Unchecked by
-   * default — kept for parity + future reuse.
-   * verified 2026-04-22
-   * @tags microsoft, kmsi, dont-show-again, checkbox
-   */
-  dontShowAgainCheckbox: (page: Page): Locator =>
-    page.getByRole("checkbox", { name: /don.?t show this again/i }),
 };
 
 // ─── Excel Online viewer (everything below is inside the WAC iframe) ───────
@@ -162,15 +144,6 @@ export const excelOnline = {
    */
   fileButton: (f: FrameLocator): Locator =>
     f.getByRole("button", { name: "File", exact: true }),
-
-  /**
-   * Co-editing banner ("X is now editing the workbook"). Used only as a
-   * readiness probe — when visible, the ribbon has finished hydrating.
-   * verified 2026-04-22
-   * @tags excel, coedit, banner, readiness
-   */
-  coEditingBanner: (f: FrameLocator): Locator =>
-    f.getByText(/is now editing the workbook/i),
 };
 
 // ─── File menu (backstage) → Create a Copy → Download a Copy ──────────────
@@ -194,46 +167,4 @@ export const fileMenu = {
    */
   downloadACopy: (f: FrameLocator): Locator =>
     f.getByRole("menuitem", { name: "Download a Copy" }),
-
-  /**
-   * "Export" menuitem — opens a flyout with non-xlsx download options only
-   * (PDF / CSV / CSV UTF-8 / ODS). The xlsx download is NOT here despite the
-   * name — that lives under "Create a Copy → Download a Copy".
-   * verified 2026-04-22
-   * @tags excel, file-menu, export, menuitem, backstage
-   */
-  export: (f: FrameLocator): Locator =>
-    f.getByRole("menuitem", { name: "Export" }),
-
-  /**
-   * "Download as PDF" — inside the Export flyout.
-   * verified 2026-04-22
-   * @tags excel, export, download, pdf, menuitem
-   */
-  downloadAsPdf: (f: FrameLocator): Locator =>
-    f.getByRole("menuitem", { name: "Download as PDF" }),
-
-  /**
-   * "Download as CSV UTF-8" — inside the Export flyout.
-   * verified 2026-04-22
-   * @tags excel, export, download, csv, utf8, menuitem
-   */
-  downloadAsCsvUtf8: (f: FrameLocator): Locator =>
-    f.getByRole("menuitem", { name: "Download as CSV UTF-8" }),
-
-  /**
-   * "Download as CSV" — inside the Export flyout.
-   * verified 2026-04-22
-   * @tags excel, export, download, csv, menuitem
-   */
-  downloadAsCsv: (f: FrameLocator): Locator =>
-    f.getByRole("menuitem", { name: "Download as CSV" }),
-
-  /**
-   * "Download as ODS" — inside the Export flyout.
-   * verified 2026-04-22
-   * @tags excel, export, download, ods, menuitem
-   */
-  downloadAsOds: (f: FrameLocator): Locator =>
-    f.getByRole("menuitem", { name: "Download as ODS" }),
 };

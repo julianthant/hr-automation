@@ -2,7 +2,7 @@ import type { Page, FrameLocator } from "playwright";
 import { ActionPlan } from "../../systems/ucpath/action-plan.js";
 import { clickSaveAndSubmit } from "../../systems/ucpath/index.js";
 import { getContentFrame } from "../../systems/ucpath/navigate.js";
-import { payPathActions } from "../../systems/ucpath/selectors.js";
+import { payPathActions, hrTasks, smartHR } from "../../systems/ucpath/selectors.js";
 import { log } from "../../utils/log.js";
 import { UCPATH_SMART_HR_URL } from "../../config.js";
 import type { WorkStudyInput } from "./schema.js";
@@ -40,12 +40,12 @@ async function navigateToPayPathActions(page: Page): Promise<void> {
 
   // Click PayPath/Additional Pay in sidebar to expand sub-items
   log.step("Expanding PayPath/Additional Pay...");
-  await payPathActions.navigationLink(page).click({ timeout: 10_000 });
+  await hrTasks.payPathLink(page).click({ timeout: 10_000 });
   await page.waitForTimeout(2_000);
 
   // Click PayPath Actions sub-item
   log.step("Clicking PayPath Actions...");
-  await payPathActions.actionsLink(page).click({ timeout: 10_000 });
+  await hrTasks.payPathActionsLink(page).click({ timeout: 10_000 });
   await waitForPageReady(page);
   log.success("PayPath Actions search page loaded");
 }
@@ -84,7 +84,7 @@ async function searchEmployee(
 }
 
 async function collapseSidebar(page: Page): Promise<void> {
-  const sidebarBtn = payPathActions.navigationAreaButton(page);
+  const sidebarBtn = smartHR.sidebarNavigationToggle(page);
   const isExpanded = await sidebarBtn.getAttribute("aria-expanded").catch(() => null);
   if (isExpanded === "true") {
     log.step("Collapsing sidebar...");

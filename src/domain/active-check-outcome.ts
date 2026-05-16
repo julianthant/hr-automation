@@ -11,7 +11,6 @@ export interface ActiveOutcomePersonOrgResult {
   hrStatus?: string;
   effectiveDate?: string;
   terminationDate?: string;
-  expectedEndDate?: string;
   expectedJobEndDate?: string;
 }
 
@@ -86,7 +85,7 @@ export function deriveActiveCheckOutcome(
   }
 
   const result = results[0];
-  const terminationDate = normalizeDate(result.terminationDate ?? result.expectedEndDate);
+  const terminationDate = normalizeDate(result.terminationDate);
   const expectedJobEndDate = normalizeDate(result.expectedJobEndDate);
   const hrStatus = result.hrStatus || "";
   const isInactiveStatus = /inactive|terminated|separated/i.test(hrStatus);

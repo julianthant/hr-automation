@@ -1,4 +1,4 @@
-import type { Page, Frame } from "playwright";
+import type { Page } from "playwright";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -263,14 +263,6 @@ export async function downloadCrmIdocsDocuments(
 
   log.success(msg(`CRM document download complete: ${saved.length} file(s)`));
   return saved;
-}
-
-export async function downloadCrmIdocsDocumentsFromFrame(
-  frame: Frame,
-  folderPath: string,
-  options: CrmIdocsDownloadOptions = {},
-): Promise<DownloadedCrmDocument[]> {
-  return downloadCrmIdocsDocuments(frame.page(), folderPath, options);
 }
 
 function registerDownloadedCrmDocument(input: {

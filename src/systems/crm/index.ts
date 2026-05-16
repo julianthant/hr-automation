@@ -9,7 +9,6 @@ export {
   ensureCrmDocumentDownloadFolder,
   parseCrmDocumentFilename,
   downloadCrmIdocsDocuments,
-  downloadCrmIdocsDocumentsFromFrame,
 } from "./idocs-download.js";
 export type {
   CrmDocumentDownloadSubject,
