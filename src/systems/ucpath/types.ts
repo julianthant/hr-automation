@@ -1,7 +1,6 @@
 export interface TransactionResult {
   success: boolean;
   error?: string;
-  transactionId?: string;
   transactionNumber?: string;
 }
 

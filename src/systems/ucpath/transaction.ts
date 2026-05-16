@@ -8,6 +8,7 @@ import {
 } from "./navigate.js";
 import {
   smartHR,
+  hrTasks,
   personalData as personalDataSelectors,
   comments as commentsSelectors,
   jobData as jobDataSelectors,
@@ -29,14 +30,14 @@ import { clickIfPresent, safeClick, safeFill } from "../common/index.js";
 export async function clickSmartHRTransactions(page: Page): Promise<void> {
   log.step("Clicking Smart HR Templates in sidebar...");
 
-  await safeClick(smartHR.sidebarTemplatesLink(page), {
+  await safeClick(hrTasks.smartHRTemplatesLink(page), {
     timeout: 10_000,
     label: "ucpath smart hr templates sidebar link",
   });
   await page.waitForTimeout(1_000);
 
   log.step("Clicking Smart HR Transactions...");
-  await safeClick(smartHR.sidebarTransactionsLink(page), {
+  await safeClick(hrTasks.smartHRTransactionsLink(page), {
     timeout: 10_000,
     label: "ucpath smart hr transactions sidebar link",
   });
@@ -686,10 +687,10 @@ export async function readLatestTransactionNumber(
   await page.waitForTimeout(8_000);
 
   // Extract "Transaction ID: T002XXXXXX" from the re-opened form
-  const transactionId = await readTransactionIdFromDetailPage(txnFrame);
-  if (transactionId) {
-    log.step(`Transaction number: ${transactionId}`);
-    return transactionId;
+  const txnNumber = await readTxnNumberFromDetailPage(txnFrame);
+  if (txnNumber) {
+    log.step(`Transaction number: ${txnNumber}`);
+    return txnNumber;
   }
   return "";
 }
@@ -767,10 +768,10 @@ export async function findExistingTerminationTransaction(
       await page.waitForTimeout(6_000);
     }
 
-    const transactionId = await readTransactionIdFromDetailPage(frame);
-    if (transactionId) {
-      log.success(`[Txn Lookup] Existing transaction #${transactionId} found for eid=${employeeId}`);
-      return transactionId;
+    const txnNumber = await readTxnNumberFromDetailPage(frame);
+    if (txnNumber) {
+      log.success(`[Txn Lookup] Existing transaction #${txnNumber} found for eid=${employeeId}`);
+      return txnNumber;
     }
     log.warn(`[Txn Lookup] Matched row but couldn't extract Transaction ID from detail page — treating as no match`);
     return null;
@@ -780,7 +781,7 @@ export async function findExistingTerminationTransaction(
   }
 }
 
-async function readTransactionIdFromDetailPage(frame: FrameLocator): Promise<string | null> {
+async function readTxnNumberFromDetailPage(frame: FrameLocator): Promise<string | null> {
   const bodyText = await frame.locator("body").innerText({ timeout: 5_000 }).catch(() => ""); // allow-inline-selector -- body innerText readback for regex scrape
   const match = bodyText.match(/Transaction ID:\s*(T\d+)/)
     ?? bodyText.match(/Transaction:\s*(T\d+)/i);

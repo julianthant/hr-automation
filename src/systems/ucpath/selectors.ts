@@ -36,20 +36,6 @@ export function getContentFrame(page: Page): FrameLocator {
 
 export const smartHR = {
   /**
-   * Sidebar "Smart HR Templates" expand/collapse link. verified 2026-03-16
-   * @tags sidebar, templates, smart-hr, link
-   */
-  sidebarTemplatesLink: (page: Page): Locator =>
-    page.getByRole("link", { name: /Smart HR Templates/i }).first(),
-
-  /**
-   * Sidebar child link "Smart HR Transactions" (exact match). verified 2026-03-16
-   * @tags sidebar, transactions, smart-hr, link
-   */
-  sidebarTransactionsLink: (page: Page): Locator =>
-    page.getByRole("link", { name: "Smart HR Transactions", exact: true }),
-
-  /**
    * Navigation Area button that collapses the sidebar so iframe buttons aren't blocked. verified 2026-03-16
    * @tags sidebar, collapse, navigation, button
    */
@@ -1083,24 +1069,6 @@ export const payPathActions = {
   // verified 2026-03-17 (original inline comment in enter.ts)
 
   /**
-   * Sidebar parent link "PayPath/Additional Pay" — expands sub-items.
-   * Simple name match (without "select to expand" suffix); use
-   * `hrTasks.payPathLink` when the full regex variant is needed. verified 2026-03-17
-   * @tags sidebar, paypath, additional-pay, link, navigation
-   */
-  navigationLink: (page: Page): Locator =>
-    page.getByRole("link", { name: "PayPath/Additional Pay" }),
-
-  /**
-   * Sidebar sub-item "PayPath Actions" (exact). Same element as
-   * `hrTasks.payPathActionsLink`; provided here for single-import call sites.
-   * verified 2026-03-17
-   * @tags sidebar, paypath, actions, link, navigation
-   */
-  actionsLink: (page: Page): Locator =>
-    page.getByRole("link", { name: "PayPath Actions", exact: true }),
-
-  /**
    * PeopleSoft alert dialog OK button (e.g. "payroll in progress" warning).
    * verified 2026-03-17
    * @tags alert, dialog, ok, button, paypath-actions
@@ -1116,13 +1084,6 @@ export const payPathActions = {
   employeeNameDisplay: (f: FrameLocator): Locator =>
     f.locator('[id="UC_E102_PP_WRK_NAME_DISPLAY"]')
       .or(f.locator('[id*="NAME_DISPLAY"]').first()),
-
-  /**
-   * Sidebar collapse/expand toggle (Navigation Area button). verified 2026-03-17
-   * @tags sidebar, navigation, collapse, button, paypath-actions
-   */
-  navigationAreaButton: (page: Page): Locator =>
-    page.getByRole("button", { name: "Navigation Area" }),
 
   /**
    * Effective Date textbox on the Position Data tab. verified 2026-03-17
@@ -1187,7 +1148,7 @@ export const ssSmartHRTransactions = {
    * Transaction ID textbox. verified 2026-04-24
    * @tags transaction, id, textbox, ss-smart-hr
    */
-  transactionIdInput: (f: FrameLocator): Locator =>
+  txnNumberTextbox: (f: FrameLocator): Locator =>
     f.getByRole("textbox", { name: "Transaction ID" }),
 
   /**
