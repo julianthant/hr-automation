@@ -9,8 +9,9 @@ import { ScreenshotsPanel } from "./ScreenshotsPanel";
 import { EditDataTab } from "./EditDataTab";
 import { useLogs } from "@/components/hooks/useLogs";
 import { useRunEvents } from "@/components/hooks/useRunEvents";
+import { useRunsForMergedEntry } from "@/components/hooks/useRunsForMergedEntry";
 import { cn } from "@/lib/utils";
-import type { TrackerEntry, RunInfo } from "@/components/shared/types";
+import type { TrackerEntry } from "@/components/shared/types";
 import { formatTrackerValue, isMonospaceKey } from "@/components/shared/types";
 import { deriveTrackerFallbackLog } from "./log-fallback";
 import { useWorkflow } from "@/lib/workflows-context";
@@ -48,8 +49,6 @@ interface LogPanelProps {
 }
 
 export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultTab, previewSlot, previewHeaderSlot, previewAvailable, onPreviewVisibleChange, onDeleteEntry }: LogPanelProps) {
-  const [runs, setRuns] = useState<RunInfo[]>([]);
-  const [activeRunId, setActiveRunId] = useState<string | null>(entry?.runId || null);
   const effectiveWorkflow = entry?.workflow ?? workflow;
   const registered = useWorkflow(effectiveWorkflow);
   const [maximized, setMaximized] = useState(false);
@@ -68,89 +67,16 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
   const registeredSteps = registered?.steps ?? [];
   const detailFields = registered?.detailFields ?? [];
 
-  // Stable key for the sibling list so we don't refetch on every parent
-  // re-render — the siblings array reference may differ each tick even
-  // when its contents are identical.
-  const siblingIdsKey = useMemo(
-    () => (siblings ?? []).map((s) => s.id).sort().join("|"),
-    [siblings],
-  );
-  const siblingStatusKey = useMemo(
-    () => [
-      entry ? `${entry.id}:${entry.runId ?? ""}:${entry.status}:${entry.step ?? ""}` : "",
-      ...(siblings ?? []).map((s) => `${s.id}:${s.runId ?? ""}:${s.status}:${s.step ?? ""}`),
-    ].sort().join("|"),
-    [entry?.id, entry?.runId, entry?.status, entry?.step, siblings],
-  );
-
-  // Fetch runs when entry changes or a new run appears. When siblings are
-  // present (merged-entry group), fetch each member's runs and pool them
-  // into a single, globally-renumbered history. The merge ordering rule
-  // is "concat by entry first-seen, then renumber 1..N globally" — so the
-  // older entry keeps the low ordinals (1..k), siblings get k+1..N.
-  useEffect(() => {
-    if (!entry) {
-      setRuns([]);
-      setActiveRunId(null);
-      return;
-    }
-    setActiveRunId((prev) => prev || entry.runId || null);
-
-    const runsWorkflow = entry.workflow ?? workflow;
-    const members: { id: string; firstSeen: string }[] = [
-      { id: entry.id, firstSeen: entry.startTimestamp || entry.firstLogTs || entry.timestamp || "" },
-      ...((siblings ?? []).map((s) => ({
-        id: s.id,
-        firstSeen: s.startTimestamp || s.firstLogTs || s.timestamp || "",
-      }))),
-    ];
-    // Oldest-first so the older entry's ordinals come before the newer's
-    // (matches "Langley, Leo keeps 1-5, 10874572 becomes 6-7").
-    members.sort((a, b) => (a.firstSeen || "").localeCompare(b.firstSeen || ""));
-
-    const fetchRuns = () => {
-      Promise.all(
-        members.map((m) =>
-          fetch(`/api/runs?workflow=${encodeURIComponent(runsWorkflow)}&id=${encodeURIComponent(m.id)}&date=${encodeURIComponent(date)}`)
-            .then((r) => r.json())
-            .then((data: RunInfo[]) => data.map((run) => ({ ...run, itemId: m.id })))
-            .catch(() => [] as RunInfo[]),
-        ),
-      ).then((perMember) => {
-        // Concatenate in member order; within each member preserve the
-        // backend's ordinal order (chronological within an itemId).
-        const pooled = perMember.flat();
-        // Globally renumber so the dropdown reads 1..N continuously.
-        const renumbered = pooled.map((run, i) => ({ ...run, runOrdinal: i + 1 }));
-
-        setRuns((prev) => {
-          if (
-            prev.length === renumbered.length &&
-            prev.every((r, i) =>
-              r.runId === renumbered[i].runId &&
-              r.status === renumbered[i].status &&
-              r.step === renumbered[i].step &&
-              r.lastLogTs === renumbered[i].lastLogTs &&
-              r.itemId === renumbered[i].itemId,
-            )
-          ) return prev;
-          return renumbered;
-        });
-
-        setActiveRunId((prev) => {
-          if (!prev) return renumbered.length > 0 ? renumbered[renumbered.length - 1].runId : entry.runId || null;
-          const latestRunId = renumbered.length > 0 ? renumbered[renumbered.length - 1].runId : null;
-          if (latestRunId && latestRunId !== prev && !renumbered.slice(0, -1).some((r) => r.runId === latestRunId)) {
-            return latestRunId;
-          }
-          if (renumbered.some((r) => r.runId === prev)) return prev;
-          return renumbered.length > 0 ? renumbered[renumbered.length - 1].runId : entry.runId || null;
-        });
-      });
-    };
-
-    fetchRuns();
-  }, [entry?.id, entry?.runId, entry?.workflow, workflow, date, siblingIdsKey, siblingStatusKey]);
+  // Runs for this entry + siblings, pooled and globally renumbered.
+  // Keyed on (id, runId) tuples — NOT on status/step — so status updates
+  // at 1 Hz do not trigger /api/runs refetches (new runs start by runId
+  // changing, not status changing).
+  const { runs, activeRunId, setActiveRunId } = useRunsForMergedEntry({
+    entry,
+    siblings,
+    workflow,
+    date,
+  });
 
   // Use the entry's own workflow when present (cross-workflow rows: OCR
   // prep rows surface in oath-signature/emergency-contact queues, but
