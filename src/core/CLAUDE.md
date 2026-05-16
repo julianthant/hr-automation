@@ -17,7 +17,7 @@ See root `CLAUDE.md` for a user-facing kernel primer + minimal example. This doc
 - `session.ts` — `Session` class. `Session.launch(systems, opts)` does parallel browser launch → CDP tiling → auth chain (sequential / interleaved / parallel-staggered, all with 3-attempt retry). Exposes `page(id)`, `reset(id)`, `healthCheck(id)`, `killChrome`, `screenshotAll`.
 - `stepper.ts` — `Stepper` class. Owns `currentStep`, `data`, `step` (wraps `fn` with emit-start + catch-screenshot-emit-fail + rethrow), `markStep`, `parallel`/`parallelAll`, `updateData`.
 - `ctx.ts` — `makeCtx({ session, stepper, isBatch, runId })` — the only constructor for `Ctx`. Shared across all run modes.
-- `registry.ts` — In-memory `WorkflowMetadata` map. `defineWorkflow` auto-registers; `defineDashboardMetadata` is the legacy affordance.
+- `registry.ts` — In-memory `WorkflowMetadata` map. `defineWorkflow` auto-registers; `register` is the escape hatch for direct metadata injection (tests, future non-kernel callers).
 - `handler-runner.ts`, `screenshot.ts`, `ucpath-idle-hooks.ts` — handler lifecycle helpers.
 
 **`daemon/`** — daemon mode (persistent processes, SQLite queue):

@@ -96,7 +96,6 @@ export interface TaskDbRow {
   parent_run_id: string | null
   input_json: string
   control_state: TaskState | null
-  status: string
   current_attempt_id: string | null
   claimed_by_worker_id: string | null
   enqueued_at: string | null
@@ -112,7 +111,6 @@ export interface AttemptDbRow {
   attempt_no: number
   run_id: string
   control_state: AttemptState | null
-  status: string
   worker_id: string | null
 }
 
@@ -147,37 +145,14 @@ export function mapAttemptRow(row: AttemptDbRow): AttemptRow {
     taskId: row.task_id,
     attemptNo: row.attempt_no,
     runId: row.run_id,
-    state: row.control_state ?? legacyAttemptState(row.status),
+    state: row.control_state ?? 'pending',
   }
   if (row.worker_id) attempt.workerId = row.worker_id
   return attempt
 }
 
 export function normalizeTaskState(row: TaskDbRow): TaskState {
-  return row.control_state ?? legacyTaskState(row.status)
-}
-
-export function legacyTaskState(status: string): TaskState {
-  if (status === 'waiting_on_children' || status === 'awaiting_child_results') return 'waiting_dependencies'
-  if (status === 'running') return 'running'
-  if (status === 'done') return 'done'
-  if (status === 'failed') return 'failed'
-  if (status === 'cancelled') return 'cancelled'
-  return 'queued'
-}
-
-export function legacyAttemptState(status: string): AttemptState {
-  if (status === 'running') return 'running'
-  if (status === 'done') return 'done'
-  if (status === 'failed') return 'failed'
-  if (status === 'cancelled') return 'cancelled'
-  return 'pending'
-}
-
-export function legacyFailurePolicy(policy: ChildFailurePolicy): 'record_unresolved' | 'fail_parent' | 'ignore' {
-  if (policy === 'fail_parent') return 'fail_parent'
-  if (policy === 'allow_partial') return 'ignore'
-  return 'record_unresolved'
+  return row.control_state ?? 'queued'
 }
 
 export function isTerminalTaskState(state: TaskState): boolean {

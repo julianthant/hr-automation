@@ -59,30 +59,27 @@ function markTerminal(
   },
 ): void {
   const now = request.now ?? new Date().toISOString()
-  const legacyStatus = request.taskState
   control.transaction(() => {
     db.prepare(`
       UPDATE tasks
       SET control_state = @taskState,
-          status = @legacyStatus,
           terminal_error = @error,
           terminal_at = COALESCE(terminal_at, @now),
           claimed_by_worker_id = CASE WHEN @taskState IN ('done', 'failed', 'cancelled') THEN NULL ELSE claimed_by_worker_id END,
           claim_expires_at = NULL,
           updated_at = @now
       WHERE id = @taskId
-    `).run({ ...request, legacyStatus, error: request.error ?? null, now })
+    `).run({ ...request, error: request.error ?? null, now })
     if (request.attemptId) {
       db.prepare(`
         UPDATE task_attempts
         SET control_state = @attemptState,
-            status = @legacyStatus,
             failed_at = CASE WHEN @attemptState = 'failed' THEN COALESCE(failed_at, @now) ELSE failed_at END,
             terminal_at = COALESCE(terminal_at, @now),
             error = @error,
             updated_at = @now
         WHERE id = @attemptId
-      `).run({ ...request, legacyStatus, error: request.error ?? null, now })
+      `).run({ ...request, error: request.error ?? null, now })
     }
   })
 }

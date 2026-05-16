@@ -76,7 +76,7 @@ export function pruneStateDb(dir: string, cutoffDate: string): PruneResult {
     result.taskAttemptsDeleted = db
       .prepare(
         "DELETE FROM task_attempts WHERE created_at < @cutoffIso " +
-          "AND status IN ('done', 'failed', 'cancelled')",
+          "AND control_state IN ('done', 'failed', 'cancelled')",
       )
       .run({ cutoffIso }).changes;
     // worker_commands: uses requested_at TEXT ISO (not created_at — verified in schema.ts).

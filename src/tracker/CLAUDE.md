@@ -140,7 +140,7 @@ Appends a single row to an `.xlsx` file. Creates the file and/or worksheet if mi
 
 Kernel workflows get tracking for free — `defineWorkflow({ ... })` registers dashboard metadata and `runWorkflow` (or batch/pool/daemon runners) wraps each run in `withLogContext` + `withTrackedWorkflow`. Do NOT call `withTrackedWorkflow`, `trackEvent`, or `setStep` from a handler; use `ctx.step(...)` / `ctx.markStep(...)` / `ctx.updateData(...)` instead.
 
-If you ever add a **non-kernel** one-off workflow, it would need an explicit `defineDashboardMetadata` registration and a custom outer wrapper — no such workflows ship under `src/workflows/*` today; use `defineWorkflow` for all new work.
+If you ever add a **non-kernel** one-off workflow, it would need an explicit `register(metadata)` call (from `src/core/kernel/registry.ts`) and a custom outer wrapper — no such workflows ship under `src/workflows/*` today; use `defineWorkflow` for all new work.
 
 ## Lessons Learned
 

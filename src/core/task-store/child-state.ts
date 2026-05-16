@@ -8,7 +8,6 @@ import {
   type TaskState,
   type ChildFailurePolicy,
   getTaskRaw,
-  legacyFailurePolicy,
   normalizeTaskState,
 } from './types.js'
 
@@ -49,7 +48,12 @@ export function createDependency(
       id,
       parentTaskId: request.parentTaskId,
       childTaskId: request.childTaskId,
-      failurePolicy: legacyFailurePolicy(request.onChildFailed),
+      failurePolicy:
+        request.onChildFailed === 'fail_parent'
+          ? 'fail_parent'
+          : request.onChildFailed === 'allow_partial'
+            ? 'ignore'
+            : 'record_unresolved',
       onChildFailed: request.onChildFailed,
       cascadeCancel: request.cascadeCancel === false ? 0 : 1,
       resumeParentAfterChildRetry: request.resumeParentAfterChildRetry === false ? 0 : 1,
@@ -58,7 +62,6 @@ export function createDependency(
     db.prepare(`
       UPDATE tasks
       SET control_state = 'waiting_dependencies',
-          status = 'waiting_on_children',
           updated_at = @now
       WHERE id = @parentTaskId AND control_state IN ('queued', 'waiting_dependencies')
     `).run({ parentTaskId: request.parentTaskId, now })
@@ -106,7 +109,6 @@ export function markDependencyFromChildTerminal(
         db.prepare(`
           UPDATE tasks
           SET control_state = 'blocked',
-              status = 'failed',
               terminal_error = 'child task blocked parent',
               updated_at = @now
           WHERE id = @parentTaskId
@@ -164,7 +166,6 @@ function markParentTerminal(
   db.prepare(`
     UPDATE tasks
     SET control_state = @state,
-        status = @state,
         terminal_error = @error,
         terminal_at = COALESCE(terminal_at, @now),
         updated_at = @now
@@ -175,7 +176,6 @@ function markParentTerminal(
     db.prepare(`
       UPDATE task_attempts
       SET control_state = @state,
-          status = @state,
           terminal_at = COALESCE(terminal_at, @now),
           error = @error,
           updated_at = @now
@@ -217,7 +217,6 @@ function releaseParentsForChildren(db: Database, childTaskIds: string[], now: st
       db.prepare(`
         UPDATE tasks
         SET control_state = 'queued',
-            status = 'queued',
             updated_at = @now
         WHERE id = @parentTaskId
           AND control_state = 'waiting_dependencies'

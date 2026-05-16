@@ -80,7 +80,6 @@ export function markTaskRunning(
     db.prepare(`
       UPDATE tasks
       SET control_state = 'running',
-          status = 'running',
           claimed_by_worker_id = @workerId,
           current_attempt_id = @attemptId,
           updated_at = @now
@@ -89,7 +88,6 @@ export function markTaskRunning(
     db.prepare(`
       UPDATE task_attempts
       SET control_state = 'running',
-          status = 'running',
           worker_id = @workerId,
           started_at = COALESCE(started_at, @now),
           updated_at = @now
@@ -110,7 +108,6 @@ export function returnTaskToQueued(
     db.prepare(`
       UPDATE tasks
       SET control_state = 'queued',
-          status = 'queued',
           claimed_by_worker_id = NULL,
           claimed_at = NULL,
           claim_expires_at = NULL,
@@ -120,7 +117,6 @@ export function returnTaskToQueued(
     db.prepare(`
       UPDATE task_attempts
       SET control_state = 'pending',
-          status = 'queued',
           worker_id = NULL,
           claimed_at = NULL,
           updated_at = @now

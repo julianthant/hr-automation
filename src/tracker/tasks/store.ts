@@ -14,6 +14,46 @@ import type {
   TaskStatus,
 } from "./types.js";
 
+function taskSqlControlState(status: TaskStatus): string {
+  if (status === "waiting_on_children" || status === "awaiting_child_results") return "waiting_dependencies";
+  if (status === "pending") return "queued";
+  if (status === "queued") return "queued";
+  if (status === "running") return "running";
+  if (status === "done") return "done";
+  if (status === "failed") return "failed";
+  if (status === "cancelled") return "cancelled";
+  return "queued";
+}
+
+function taskStatusFromSqlControlState(controlState: string | null): TaskStatus {
+  if (!controlState) return "queued";
+  if (controlState === "waiting_dependencies") return "waiting_on_children";
+  if (controlState === "claimed" || controlState === "cancel_requested" || controlState === "cancelling") {
+    return "running";
+  }
+  if (controlState === "blocked") return "failed";
+  if (
+    controlState === "queued" ||
+    controlState === "running" ||
+    controlState === "done" ||
+    controlState === "failed" ||
+    controlState === "cancelled"
+  ) {
+    return controlState;
+  }
+  return "queued";
+}
+
+function attemptSqlControlState(status: TaskAttemptStatus): string {
+  return status === "queued" ? "pending" : status;
+}
+
+function attemptStatusFromSqlControlState(controlState: string | null): TaskAttemptStatus {
+  if (!controlState || controlState === "pending") return "queued";
+  if (controlState === "claimed" || controlState === "cancel_requested") return "running";
+  return controlState as TaskAttemptStatus;
+}
+
 export interface TaskStore {
   db: Database;
 }
@@ -48,7 +88,7 @@ interface TaskDbRow {
   item_id: string;
   run_id: string | null;
   task_kind: TaskKind;
-  status: TaskStatus;
+  control_state: string | null;
   parent_task_id: string | null;
   data_json: string;
   created_at: string;
@@ -283,7 +323,7 @@ export function listPendingDependencies(
       p.item_id AS parent_item_id,
       p.run_id AS parent_run_id,
       p.task_kind AS parent_task_kind,
-      p.status AS parent_status,
+      p.control_state AS parent_control_state,
       p.parent_task_id AS parent_parent_task_id,
       p.data_json AS parent_data_json,
       p.created_at AS parent_created_at,
@@ -294,7 +334,7 @@ export function listPendingDependencies(
       c.item_id AS child_item_id,
       c.run_id AS child_run_id,
       c.task_kind AS child_task_kind,
-      c.status AS child_status,
+      c.control_state AS child_control_state,
       c.parent_task_id AS child_parent_task_id,
       c.data_json AS child_data_json,
       c.created_at AS child_created_at,
@@ -328,16 +368,17 @@ export function updateTaskStatus(
   input: { taskId: string; status: TaskStatus; now?: string },
 ): void {
   const now = input.now ?? new Date().toISOString();
+  const controlState = taskSqlControlState(input.status);
   store.db.prepare(`
     UPDATE tasks
-    SET status = @status,
+    SET control_state = @controlState,
         updated_at = @now,
         terminal_at = CASE
-          WHEN @status IN ('done', 'failed', 'cancelled') THEN COALESCE(terminal_at, @now)
+          WHEN @controlState IN ('done', 'failed', 'cancelled') THEN COALESCE(terminal_at, @now)
           ELSE terminal_at
         END
     WHERE id = @taskId
-  `).run({ taskId: input.taskId, status: input.status, now });
+  `).run({ taskId: input.taskId, controlState, now });
 }
 
 export function updateAttemptStatus(
@@ -345,12 +386,13 @@ export function updateAttemptStatus(
   input: { attemptId?: string; taskId?: string; runId?: string; status: TaskAttemptStatus; now?: string },
 ): void {
   const now = input.now ?? new Date().toISOString();
+  const controlState = attemptSqlControlState(input.status);
   store.db.prepare(`
     UPDATE task_attempts
-    SET status = @status,
+    SET control_state = @controlState,
         updated_at = @now,
         terminal_at = CASE
-          WHEN @status IN ('done', 'failed', 'cancelled') THEN COALESCE(terminal_at, @now)
+          WHEN @controlState IN ('done', 'failed', 'cancelled') THEN COALESCE(terminal_at, @now)
           ELSE terminal_at
         END
     WHERE (@attemptId IS NOT NULL AND id = @attemptId)
@@ -359,7 +401,7 @@ export function updateAttemptStatus(
     attemptId: input.attemptId ?? null,
     taskId: input.taskId ?? null,
     runId: input.runId ?? null,
-    status: input.status,
+    controlState,
     now,
   });
 }
@@ -403,7 +445,7 @@ export function getDependencySummaryByParentRunId(
   }
 
   const children = store.db.prepare(`
-    SELECT c.workflow, c.item_id, c.run_id, c.status, d.metadata_json
+    SELECT c.workflow, c.item_id, c.run_id, c.control_state, d.metadata_json
     FROM task_dependencies d
     JOIN tasks c ON c.id = d.child_task_id
     WHERE d.parent_task_id = @parentTaskId
@@ -412,7 +454,7 @@ export function getDependencySummaryByParentRunId(
     workflow: string;
     item_id: string;
     run_id: string | null;
-    status: string;
+    control_state: string | null;
     metadata_json: string;
   }>;
 
@@ -423,7 +465,7 @@ export function getDependencySummaryByParentRunId(
       workflow: child.workflow,
       itemId: child.item_id,
       ...(child.run_id ? { runId: child.run_id } : {}),
-      status: child.status,
+      status: taskStatusFromSqlControlState(child.control_state),
       metadata: parseJsonObject(child.metadata_json),
     })),
   };
@@ -432,10 +474,11 @@ export function getDependencySummaryByParentRunId(
 function upsertTask(store: TaskStore, input: UpsertTaskInput, now: string): string {
   const existing = findTaskDbRow(store, input);
   const terminalAt = isTerminalTaskStatus(input.status) ? now : null;
+  const controlState = taskSqlControlState(input.status);
   if (existing) {
     store.db.prepare(`
       UPDATE tasks
-      SET status = @status,
+      SET control_state = @controlState,
           task_kind = @taskKind,
           parent_task_id = COALESCE(@parentTaskId, parent_task_id),
           data_json = @dataJson,
@@ -448,7 +491,7 @@ function upsertTask(store: TaskStore, input: UpsertTaskInput, now: string): stri
     `).run({
       id: existing.id,
       taskKind: input.taskKind,
-      status: input.status,
+      controlState,
       parentTaskId: input.parentTaskId ?? null,
       dataJson: JSON.stringify(input.data),
       terminalAt,
@@ -460,10 +503,10 @@ function upsertTask(store: TaskStore, input: UpsertTaskInput, now: string): stri
   const id = randomUUID();
   store.db.prepare(`
     INSERT INTO tasks (
-      id, workflow, item_id, run_id, task_kind, status, parent_task_id,
+      id, workflow, item_id, run_id, task_kind, control_state, parent_task_id,
       data_json, created_at, updated_at, terminal_at
     ) VALUES (
-      @id, @workflow, @itemId, @runId, @taskKind, @status, @parentTaskId,
+      @id, @workflow, @itemId, @runId, @taskKind, @controlState, @parentTaskId,
       @dataJson, @now, @now, @terminalAt
     )
   `).run({
@@ -472,7 +515,7 @@ function upsertTask(store: TaskStore, input: UpsertTaskInput, now: string): stri
     itemId: input.itemId,
     runId: input.runId ?? null,
     taskKind: input.taskKind,
-    status: input.status,
+    controlState,
     parentTaskId: input.parentTaskId ?? null,
     dataJson: JSON.stringify(input.data),
     terminalAt,
@@ -502,10 +545,11 @@ function upsertAttempt(
       AND run_id = @runId
   `).get(input) as { id: string } | undefined;
   const terminalAt = isTerminalAttemptStatus(input.status) ? input.now : null;
+  const controlState = attemptSqlControlState(input.status);
   if (existing) {
     store.db.prepare(`
       UPDATE task_attempts
-      SET status = @status,
+      SET control_state = @controlState,
           data_json = @dataJson,
           updated_at = @now,
           terminal_at = CASE
@@ -515,7 +559,7 @@ function upsertAttempt(
       WHERE id = @id
     `).run({
       id: existing.id,
-      status: input.status,
+      controlState,
       dataJson: JSON.stringify(input.data),
       terminalAt,
       now: input.now,
@@ -526,10 +570,10 @@ function upsertAttempt(
   const id = randomUUID();
   store.db.prepare(`
     INSERT INTO task_attempts (
-      id, task_id, attempt_no, run_id, status, tracker_workflow,
+      id, task_id, attempt_no, run_id, control_state, tracker_workflow,
       tracker_item_id, started_at, terminal_at, data_json, created_at, updated_at
     ) VALUES (
-      @id, @taskId, @attemptNo, @runId, @status, @trackerWorkflow,
+      @id, @taskId, @attemptNo, @runId, @controlState, @trackerWorkflow,
       @trackerItemId, @startedAt, @terminalAt, @dataJson, @now, @now
     )
   `).run({
@@ -537,7 +581,7 @@ function upsertAttempt(
     taskId: input.taskId,
     attemptNo: input.attemptNo,
     runId: input.runId,
-    status: input.status,
+    controlState,
     trackerWorkflow: input.trackerWorkflow,
     trackerItemId: input.trackerItemId,
     startedAt: input.status === "running" ? input.now : null,
@@ -635,7 +679,7 @@ function mapTaskRow(row: TaskDbRow): TaskRow {
     itemId: row.item_id,
     ...(row.run_id ? { runId: row.run_id } : {}),
     taskKind: row.task_kind,
-    status: row.status,
+    status: taskStatusFromSqlControlState(row.control_state),
     ...(row.parent_task_id ? { parentTaskId: row.parent_task_id } : {}),
     data: parseJsonObject(row.data_json),
     createdAt: row.created_at,
@@ -645,13 +689,14 @@ function mapTaskRow(row: TaskDbRow): TaskRow {
 }
 
 function prefixedTaskRow(row: Record<string, unknown>, prefix: "parent" | "child"): TaskDbRow {
+  const csRaw = row[`${prefix}_control_state`];
   return {
     id: String(row[`${prefix}_id`]),
     workflow: String(row[`${prefix}_workflow`]),
     item_id: String(row[`${prefix}_item_id`]),
     run_id: row[`${prefix}_run_id`] ? String(row[`${prefix}_run_id`]) : null,
     task_kind: row[`${prefix}_task_kind`] as TaskKind,
-    status: row[`${prefix}_status`] as TaskStatus,
+    control_state: csRaw != null ? String(csRaw) : null,
     parent_task_id: row[`${prefix}_parent_task_id`] ? String(row[`${prefix}_parent_task_id`]) : null,
     data_json: row[`${prefix}_data_json`] ? String(row[`${prefix}_data_json`]) : "{}",
     created_at: String(row[`${prefix}_created_at`]),

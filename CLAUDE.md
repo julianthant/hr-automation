@@ -325,7 +325,7 @@ Add a Commander subcommand in `src/cli.ts`, add npm scripts to `package.json`, f
 
 See `src/workflows/work-study/` for a clean one-system example, `src/workflows/emergency-contact/` for batch-mode with `preEmitPending`, `src/workflows/onboarding/` for multi-system sequential auth + pool-mode parallel, `src/workflows/old-kronos-reports/` for pool-mode with per-worker sessionDir injection, and `src/workflows/eid-lookup/` for `shared-context-pool` mode (N per-item tabs fanning out from a single Duo auth per system).
 
-All production workflows are kernel-based as of 2026-04-17. No `defineDashboardMetadata(...)` callers remain in `src/workflows/*`. New workflows should follow the kernel path exclusively; the legacy shape is institutional memory only.
+All production workflows are kernel-based as of 2026-04-17. New workflows must follow the kernel path exclusively.
 
 ## Kernel Essentials
 

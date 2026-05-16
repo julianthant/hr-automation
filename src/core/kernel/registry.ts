@@ -6,21 +6,6 @@ export function register(metadata: WorkflowMetadata): void {
   registry.set(metadata.name, metadata)
 }
 
-/**
- * Lightweight metadata registration for workflows that are NOT declared via
- * `defineWorkflow` (i.e. not kernel-based). Used by legacy workflows
- * (`old-kronos-reports`, `separations`, onboarding-legacy) that still need
- * to surface their label + steps + detailFields to the dashboard.
- *
- * Semantically identical to `register`, but carries intent: callers that use
- * this entry point have NOT opted into the Option-A declared-fields contract,
- * so the kernel's runtime warning for missing `updateData` populations will
- * never fire against them.
- */
-export function defineDashboardMetadata(metadata: WorkflowMetadata): void {
-  registry.set(metadata.name, metadata)
-}
-
 export function getAll(): WorkflowMetadata[] {
   return [...registry.values()]
 }
