@@ -1,14 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { defineWorkflow, runWorkflow } from "../../core/index.js";
-import { runCliEntry } from "../../core/cli-adapter.js";
+import { buildCliAdapter } from "../../core/cli-adapter.js";
 import type { Ctx } from "../../core/kernel/types.js";
 import { loginToUCPath } from "../../infra/auth/login.js";
 import { PATHS } from "../../config.js";
-import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
+import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { deriveActiveCheckOutcome } from "../../domain/active-check-outcome.js";
 import { searchByEid, searchByName } from "../../systems/ucpath/person-org-summary.js";
 import { allocateLowestBatchDisplayOrdinal } from "../../tracker/batch-display-ordinal.js";
-import { trackEvent } from "../../tracker/jsonl.js";
 import { log } from "../../utils/log.js";
 import {
   ActiveCheckItemSchema,
@@ -87,51 +86,33 @@ export async function runActiveCheck(input: ActiveCheckItem): Promise<void> {
   await runWorkflow(activeCheckWorkflow, input);
 }
 
-export async function runActiveCheckCli(
-  queries: string[],
-  options: { new?: boolean; parallel?: number } = {},
-): Promise<void> {
-  if (!runCliEntry(queries.length > 0, "runActiveCheckCli: provide at least one name or EID")) return;
-  const inputs = queries.map(buildActiveCheckCliInput);
-  const parsed = inputs.map((input) => ActiveCheckItemSchema.parse(input));
-  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
-  const now = new Date().toISOString();
-  const batchParentRunId = parsed.length > 1 ? randomUUID() : undefined;
-  const batchDisplayOrdinal =
-    batchParentRunId !== undefined
-      ? allocateLowestBatchDisplayOrdinal("active-check", PATHS.trackerDir)
-      : undefined;
-  await ensureDaemonsAndEnqueue(
-    activeCheckWorkflow,
-    parsed,
-    { new: options.new, parallel: options.parallel },
-    {
-      deriveItemId: deriveActiveCheckItemId,
-      ...(batchParentRunId ? { parentRunId: batchParentRunId } : {}),
-      onPreEmitPending: (item, runId, _parentRunId, itemId) => {
-        const subject = activeCheckWorkflow.config.operatorSubject?.(item);
-        const display = displayActiveCheckInput(item);
-        trackEvent({
-          workflow: "active-check",
-          timestamp: now,
-          id: itemId,
-          runId,
-          status: "pending",
-          data: {
-            searchName: display,
-            __name: display,
-            __id: itemId,
-            ...(batchDisplayOrdinal !== undefined
-              ? { batchDisplayOrdinal: String(batchDisplayOrdinal) }
-              : {}),
-            ...operatorSubjectData(subject),
-          },
-          ...(batchParentRunId ? { parentRunId: batchParentRunId } : {}),
-        });
-      },
-    },
-  );
-}
+const activeCheckBatchOrdinals = new Map<string, string>();
+
+export const runActiveCheckCli = buildCliAdapter<[string[]], ActiveCheckItem>({
+  workflow: activeCheckWorkflow,
+  emptyMessage: "runActiveCheckCli: provide at least one name or EID",
+  buildInputs: (queries) =>
+    queries.map(buildActiveCheckCliInput).map((input) => ActiveCheckItemSchema.parse(input)),
+  deriveItemId: deriveActiveCheckItemId,
+  parentRunId: (inputs) => (inputs.length > 1 ? randomUUID() : undefined),
+  buildPendingData: (input, itemId) => {
+    const display = displayActiveCheckInput(input);
+    return {
+      searchName: display,
+      __name: display,
+      __id: itemId,
+    };
+  },
+  pendingExtras: (_input, _itemId, _runId, parentRunId): Record<string, string> => {
+    if (!parentRunId) return {};
+    let batchDisplayOrdinal = activeCheckBatchOrdinals.get(parentRunId);
+    if (!batchDisplayOrdinal) {
+      batchDisplayOrdinal = String(allocateLowestBatchDisplayOrdinal("active-check", PATHS.trackerDir));
+      activeCheckBatchOrdinals.set(parentRunId, batchDisplayOrdinal);
+    }
+    return { batchDisplayOrdinal };
+  },
+});
 
 export type { ActiveCheckOutcome, ActiveCheckStatus } from "../../domain/active-check-outcome.js";
 export { deriveActiveCheckOutcome };
