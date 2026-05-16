@@ -20,6 +20,11 @@ if (files.length === 0) {
   process.exit(1);
 }
 
+const envBootstrap = join(process.cwd(), "tests/env-bootstrap.ts");
 const setupFile = join(process.cwd(), "tests/setup.ts");
-const result = spawnSync("tsx", ["--test", "--import", setupFile, "--test-force-exit", ...files], { stdio: "inherit" });
+const result = spawnSync(
+  "tsx",
+  ["--test", "--import", envBootstrap, "--import", setupFile, "--test-force-exit", ...files],
+  { stdio: "inherit" },
+);
 process.exit(result.status ?? 1);

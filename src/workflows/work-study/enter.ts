@@ -1,5 +1,6 @@
 import type { Page, FrameLocator } from "playwright";
 import { ActionPlan } from "../../systems/ucpath/action-plan.js";
+import { clickSaveAndSubmit } from "../../systems/ucpath/index.js";
 import { getContentFrame } from "../../systems/ucpath/navigate.js";
 import { payPathActions } from "../../systems/ucpath/selectors.js";
 import { log } from "../../utils/log.js";
@@ -218,11 +219,15 @@ export function buildWorkStudyPlan(
     () => fillInitiatorComments(getContentFrame(page), comments),
   );
 
-  // TODO: re-enable after testing
-  // plan.add(
-  //   "Save and Submit",
-  //   () => clickSaveAndSubmit(page, getContentFrame(page)),
-  // );
+  plan.add(
+    "Save and Submit",
+    async () => {
+      const result = await clickSaveAndSubmit(page, getContentFrame(page), input.emplId);
+      if (!result.success) {
+        throw new Error(result.error ?? "Save and Submit failed");
+      }
+    },
+  );
 
   return plan;
 }
