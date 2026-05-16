@@ -15,5 +15,10 @@ export type {
   TokenizedRosterRow,
   RosterMatchResult,
 } from "./match.js";
-export { findLatestRoster, listRosters, loadRoster } from "./roster-loader.js";
+export {
+  __resetRosterCacheForTests,
+  findLatestRoster,
+  listRosters,
+  loadRoster,
+} from "./roster-loader.js";
 export type { RosterFileRef } from "./roster-loader.js";

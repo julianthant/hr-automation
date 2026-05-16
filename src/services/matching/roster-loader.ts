@@ -53,6 +53,11 @@ export function listRosters(dir: string): RosterFileRef[] {
 // Rejects are evicted so transient failures (locked file, temp I/O) don't stick.
 const rosterCache = new Map<string, Promise<RosterRow[]>>();
 
+/** @internal Test isolation — clears the in-process roster cache. */
+export function __resetRosterCacheForTests(): void {
+  rosterCache.clear();
+}
+
 /**
  * Read an xlsx roster file into a list of RosterRow.
  *
