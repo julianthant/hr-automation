@@ -1,6 +1,41 @@
 import { useEffect, useState } from "react";
 import type { DaemonInfo } from "@/components/shared/types";
 
+let cache: DaemonInfo[] = [];
+const subscribers = new Set<(daemons: DaemonInfo[]) => void>();
+let interval: ReturnType<typeof setInterval> | null = null;
+let inflight = false;
+
+type HotImportMeta = ImportMeta & {
+  hot?: { dispose: (cb: () => void) => void };
+};
+
+const hot = (import.meta as HotImportMeta).hot;
+if (hot) {
+  hot.dispose(() => {
+    if (interval !== null) {
+      clearInterval(interval);
+      interval = null;
+    }
+    subscribers.clear();
+  });
+}
+
+async function fetchDaemons(): Promise<void> {
+  if (inflight) return;
+  inflight = true;
+  try {
+    const res = await fetch("/api/daemons");
+    if (!res.ok) return;
+    cache = (await res.json()) as DaemonInfo[];
+    for (const cb of subscribers) cb(cache);
+  } catch {
+    // best-effort — leave previous state on transient errors.
+  } finally {
+    inflight = false;
+  }
+}
+
 /**
  * Polls `/api/daemons` every 2s and returns the current daemon list. Used
  * by `WorkflowBox` to detect multi-daemon scenarios so the workflow-level
@@ -15,25 +50,20 @@ import type { DaemonInfo } from "@/components/shared/types";
  * needs eventual consistency.
  */
 export function useDaemons(): DaemonInfo[] {
-  const [daemons, setDaemons] = useState<DaemonInfo[]>([]);
+  const [daemons, setDaemons] = useState<DaemonInfo[]>(cache);
 
   useEffect(() => {
-    let cancelled = false;
-    const fetchDaemons = async () => {
-      try {
-        const res = await fetch("/api/daemons");
-        if (!res.ok) return;
-        const data = (await res.json()) as DaemonInfo[];
-        if (!cancelled) setDaemons(data);
-      } catch {
-        // best-effort — leave previous state on transient errors.
-      }
-    };
+    subscribers.add(setDaemons);
     void fetchDaemons();
-    const interval = setInterval(fetchDaemons, 2_000);
+    if (subscribers.size === 1) {
+      interval = setInterval(fetchDaemons, 2_000);
+    }
     return () => {
-      cancelled = true;
-      clearInterval(interval);
+      subscribers.delete(setDaemons);
+      if (subscribers.size === 0 && interval !== null) {
+        clearInterval(interval);
+        interval = null;
+      }
     };
   }, []);
 
