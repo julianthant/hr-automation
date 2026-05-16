@@ -23,7 +23,7 @@ import { displayPersonName, parseLastFirstName } from "../../domain/identity/per
 import { log } from "../../utils/log.js";
 import { collapseSidebar, getContentFrame, waitForPeopleSoftProcessing } from "./navigate.js";
 import { hrTasks, personOrgSummary } from "./selectors.js";
-import { safeClick, safeFill } from "../common/index.js";
+import { clickIfPresent, safeClick, safeFill } from "../common/index.js";
 
 /** Direct URL to Person Org Summary — opens in the HR Tasks iframe. */
 const PERSON_ORG_SUMMARY_URL =
@@ -422,12 +422,11 @@ async function extractResults(page: Page, frame: FrameLocator): Promise<EidResul
   // Click "View All" if present to load all rows
   try {
     const viewAll = personOrgSummary.viewAllLink(frame);
-    if (await viewAll.count() > 0) {
-      log.step("Clicking View All to load all results...");
-      await safeClick(viewAll, {
-        timeout: 10_000,
-        label: "ucpath person org view all link",
-      });
+    if (await clickIfPresent(viewAll, {
+      timeout: 10_000,
+      label: "ucpath person org view all link",
+    })) {
+      log.step("Clicked View All to load all results...");
       await page.waitForTimeout(3_000);
       await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
       await waitForPeopleSoftProcessing(frame);
@@ -576,12 +575,11 @@ async function returnToSearch(page: Page, frame: FrameLocator, needsViewAll: boo
   if (needsViewAll) {
     try {
       const viewAll = personOrgSummary.viewAllLink(frame);
-      if (await viewAll.count() > 0) {
-        log.step("Re-clicking View All after return...");
-        await safeClick(viewAll, {
-          timeout: 10_000,
-          label: "ucpath person org view all after return link",
-        });
+      if (await clickIfPresent(viewAll, {
+        timeout: 10_000,
+        label: "ucpath person org view all after return link",
+      })) {
+        log.step("Re-clicked View All after return...");
         await page.waitForTimeout(3_000);
         await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
         await waitForPeopleSoftProcessing(frame);
