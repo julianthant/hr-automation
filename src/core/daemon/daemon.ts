@@ -582,6 +582,15 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
             `[Daemon ${wf.config.name}/${instanceId}] browser disconnected (${systemId}); shutting down`,
           )
           state.shuttingDown = true
+          if (state.inFlight) {
+            // Set cancelTarget so the stepper reclassifies the in-flight step
+            // as cancelled rather than failed; the outer finally still writes
+            // the cancelled row.
+            state.cancelTarget = {
+              itemId: state.inFlight.itemId,
+              runId: state.inFlight.runId,
+            }
+          }
           state.shutdownResolve?.()
           state.wakeResolve?.()
         })

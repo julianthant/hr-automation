@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { EventEmitter } from 'node:events'
 import { z } from 'zod'
 import { defineWorkflow } from '../../../src/core/kernel/workflow.js'
 import { clear } from '../../../src/core/kernel/registry.js'
@@ -332,6 +333,65 @@ test('runWorkflowDaemon: records worker ownership, heartbeats, browser pids, and
     await runPromise
   } finally {
     workerStore.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('runWorkflowDaemon: browser disconnect cancels in-flight step errors', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-browser-disconnect-'))
+  const control = openControlDb({ trackerDir: dir })
+  const taskStore = createTaskStore(control)
+  try {
+    const started = deferred()
+    const releaseAfterDisconnect = deferred()
+    let browser: EventEmitter & { close: () => Promise<void> }
+    const wf = defineWorkflow({
+      name: 'dint-browser-disconnect',
+      schema: z.object({ id: z.string() }),
+      steps: ['work'],
+      systems: [{ id: 'ucpath', login: async () => {} }],
+      authSteps: false,
+      getId: (d) => (d as { id: string }).id,
+      handler: async (ctx) => {
+        await ctx.step('work', async () => {
+          started.resolve()
+          await releaseAfterDisconnect.promise
+          throw new Error('Target page, context or browser has been closed')
+        })
+      },
+    })
+
+    const launchFn = (async (systems: SystemConfig[]) => {
+      browser = Object.assign(new EventEmitter(), { close: async () => {} })
+      const fakePage = { close: async () => {}, isClosed: () => false } as unknown as import('playwright').Page
+      const fakeContext = { close: async () => {}, newPage: async () => fakePage } as unknown as import('playwright').BrowserContext
+      return Session.forTesting({
+        systems,
+        browsers: new Map([
+          ['ucpath', { page: fakePage, browser: browser as unknown as import('playwright').Browser, context: fakeContext, chromiumPid: 424244 }],
+        ]),
+        readyPromises: new Map([['ucpath', Promise.resolve()]]),
+      })
+    }) as unknown as typeof Session.launch
+
+    await enqueueItems<{ id: string }>('dint-browser-disconnect', [{ id: 'held' }], (d) => d.id, dir)
+    const runPromise = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: launchFn,
+      idleTimeoutMs: 10_000,
+    })
+    await waitForDaemon('dint-browser-disconnect', dir)
+    await started.promise
+
+    browser!.emit('disconnected')
+    releaseAfterDisconnect.resolve()
+    await runPromise
+
+    const [task] = taskStore.listTasksForWorkflow('dint-browser-disconnect')
+    assert.equal(task.state, 'cancelled')
+  } finally {
+    taskStore.close()
     rmSync(dir, { recursive: true, force: true })
   }
 })
