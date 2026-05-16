@@ -51,6 +51,14 @@ export function buildEntriesHash(raw: TrackerEntry[]): string {
   return hash;
 }
 
+export function resetEntriesMemoRefs(
+  prevHashRef: { current: string },
+  activeKeyRef: { current: string },
+): void {
+  prevHashRef.current = "";
+  activeKeyRef.current = "";
+}
+
 function entryRenderHash(entry: WithFirstLog): string {
   return stableKey([
     entry.id,
@@ -166,6 +174,8 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
       () => {
         setConnected(false);
         setLoading(false);
+        // Reset memo refs so the first post-reconnect tick is always applied.
+        resetEntriesMemoRefs(prevHashRef, activeKeyRef);
       },
     );
 
