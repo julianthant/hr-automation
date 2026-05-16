@@ -45,6 +45,7 @@ import {
   excelOnline,
   fileMenu,
 } from "../../systems/sharepoint/selectors.js";
+import { safeClick, safeFill } from "../../systems/common/index.js";
 
 export interface DownloadSharePointOptions {
   /** URL of the SharePoint file to open (e.g. a shared Excel Online link) */
@@ -63,8 +64,14 @@ async function handleMicrosoftEmailStep(page: Page): Promise<void> {
   if ((await emailField.count()) === 0) return;
 
   log.step("Microsoft login step — entering UCSD email...");
-  await emailField.first().fill(`${userId}@ucsd.edu`, { timeout: 5_000 });
-  await microsoft.nextButton(page).first().click({ timeout: 5_000 });
+  await safeFill(emailField.first(), `${userId}@ucsd.edu`, {
+    label: "sharepoint microsoft email input",
+    timeout: 5_000,
+  });
+  await safeClick(microsoft.nextButton(page).first(), {
+    label: "sharepoint microsoft next button",
+    timeout: 5_000,
+  });
   await page.waitForTimeout(3_000);
 }
 
@@ -72,7 +79,14 @@ async function dismissStaySignedIn(page: Page): Promise<void> {
   const noBtn = kmsi.noButton(page);
   if ((await noBtn.count()) > 0) {
     log.step('Dismissing "Stay signed in?" prompt (No)...');
-    await noBtn.first().click({ timeout: 3_000 }).catch(() => {});
+    try {
+      await safeClick(noBtn.first(), {
+        label: "sharepoint kmsi no button",
+        timeout: 3_000,
+      });
+    } catch {
+      /* kmsi prompt may have already dismissed — safe to ignore */
+    }
     await page.waitForTimeout(2_000);
   }
 }
@@ -96,12 +110,21 @@ async function handleAdfsLogin(page: Page): Promise<void> {
   const currentUser = await usernameField.inputValue().catch(() => "");
   if (!currentUser) {
     const { userId } = validateEnv();
-    await usernameField.fill(`${userId}@ucsd.edu`, { timeout: 5_000 });
+    await safeFill(usernameField, `${userId}@ucsd.edu`, {
+      label: "sharepoint adfs username",
+      timeout: 5_000,
+    });
   }
 
-  await adfs.passwordInput(page).first().fill(password, { timeout: 5_000 });
+  await safeFill(adfs.passwordInput(page).first(), password, {
+    label: "sharepoint adfs password",
+    timeout: 5_000,
+  });
   await page.waitForTimeout(300);
-  await adfs.submitButton(page).first().click({ timeout: 5_000 });
+  await safeClick(adfs.submitButton(page).first(), {
+    label: "sharepoint adfs submit",
+    timeout: 5_000,
+  });
   log.step("ADFS submit clicked");
 }
 
@@ -256,7 +279,10 @@ export async function clickExcelDownloadMenu(page: Page): Promise<boolean> {
     }
 
     log.step("Clicking File (Excel ribbon)...");
-    await fileBtn.first().click({ timeout: 5_000 });
+    await safeClick(fileBtn.first(), {
+      label: "sharepoint excel file button",
+      timeout: 5_000,
+    });
     await page.waitForTimeout(1_000);
 
     const createCopy = fileMenu.createACopy(frame);
@@ -276,7 +302,10 @@ export async function clickExcelDownloadMenu(page: Page): Promise<boolean> {
     }
 
     log.step("Clicking 'Download a Copy'...");
-    await downloadItem.first().click({ timeout: 5_000 });
+    await safeClick(downloadItem.first(), {
+      label: "sharepoint excel download a copy",
+      timeout: 5_000,
+    });
     return true;
   } catch (e) {
     log.step(

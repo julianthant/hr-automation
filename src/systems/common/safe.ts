@@ -38,28 +38,40 @@ export interface SafeActionOpts {
  *   - success > threshold  → `log.warn("selector fallback triggered: <label> (click took Nms — likely fallback-hit or page stall)")`
  *   - failure              → `log.error("selector fallback triggered: <label> (click failed after Nms — <error message>)")` then re-throw
  */
-export async function safeClick(
-  locator: Locator,
-  opts: SafeActionOpts,
-): Promise<void> {
-  const { label, timeout = 10_000, _slowThresholdMs = 3_000 } = opts;
+
+interface ActionOpts extends SafeActionOpts {
+  actionName: "click" | "fill";
+  fn: () => Promise<void>;
+}
+
+async function instrumentedAction(opts: ActionOpts): Promise<void> {
+  const { label, _slowThresholdMs = 3_000, actionName, fn } = opts;
   const start = Date.now();
   try {
-    await locator.click({ timeout });
+    await fn();
     const elapsed = Date.now() - start;
     if (elapsed > _slowThresholdMs) {
       log.warn(
-        `selector fallback triggered: ${label} (click took ${elapsed}ms — likely fallback-hit or page stall)`,
+        `selector fallback triggered: ${label} (${actionName} took ${elapsed}ms — likely fallback-hit or page stall)`,
       );
     } else {
-      log.debug(`${label}: clicked in ${elapsed}ms`);
+      log.debug(`${label}: ${actionName}ed in ${elapsed}ms`);
     }
   } catch (err) {
     log.error(
-      `selector fallback triggered: ${label} (click failed after ${Date.now() - start}ms — ${errorMessage(err)})`,
+      `selector fallback triggered: ${label} (${actionName} failed after ${Date.now() - start}ms — ${errorMessage(err)})`,
     );
     throw err;
   }
+}
+
+export async function safeClick(locator: Locator, opts: SafeActionOpts): Promise<void> {
+  const { timeout = 10_000 } = opts;
+  return instrumentedAction({
+    ...opts,
+    actionName: "click",
+    fn: () => locator.click({ timeout }),
+  });
 }
 
 /**
@@ -91,22 +103,10 @@ export async function safeFill(
   value: string,
   opts: SafeActionOpts,
 ): Promise<void> {
-  const { label, timeout = 10_000, _slowThresholdMs = 3_000 } = opts;
-  const start = Date.now();
-  try {
-    await locator.fill(value, { timeout });
-    const elapsed = Date.now() - start;
-    if (elapsed > _slowThresholdMs) {
-      log.warn(
-        `selector fallback triggered: ${label} (fill took ${elapsed}ms — likely fallback-hit or page stall)`,
-      );
-    } else {
-      log.debug(`${label}: filled in ${elapsed}ms`);
-    }
-  } catch (err) {
-    log.error(
-      `selector fallback triggered: ${label} (fill failed after ${Date.now() - start}ms — ${errorMessage(err)})`,
-    );
-    throw err;
-  }
+  const { timeout = 10_000 } = opts;
+  return instrumentedAction({
+    ...opts,
+    actionName: "fill",
+    fn: () => locator.fill(value, { timeout }),
+  });
 }
