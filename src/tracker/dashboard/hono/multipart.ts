@@ -12,6 +12,15 @@ export async function readMultipartRequest(
   request: Request,
   maxBytes: number,
 ): Promise<HonoMultipartResult> {
+  // Fast-path: reject before buffering when Content-Length is declared and
+  // already exceeds the limit. Note: Content-Length is client-supplied and
+  // may be absent or falsified; the per-field totalBytes check below handles
+  // the honest-but-unlabelled case. Full streaming protection (abort mid-read
+  // via AbortController + ReadableStream byte counter) is a v2 improvement.
+  const declaredLength = Number(request.headers.get("content-length") ?? "0");
+  if (declaredLength > maxBytes) {
+    return { ok: false, error: "Request body too large" };
+  }
   try {
     const form = await request.formData();
     const fields: Record<string, string> = {};

@@ -350,6 +350,7 @@ describe("buildSaveDataHandler", () => {
     const result = await buildSaveDataHandler(tmp)({
       workflow: "separations",
       id: "3930",
+      date: "2026-05-15",
       data: { transactionNumber: "" },
     });
 

@@ -7,6 +7,25 @@ import { ensurePdfPageCache, getCachedPage } from "../../../files/pdf-cache.js";
 import type { DashboardHonoDeps } from "../context.js";
 import { streamFileResponse, textResponse } from "../responses.js";
 
+/**
+ * Build a safe Content-Disposition header value for file downloads.
+ *
+ * Two-form per RFC 6266 / RFC 5987:
+ * - filename="..."  ASCII-safe fallback: strips control chars (\x00-\x1f),
+ *   double-quote, backslash, and non-ASCII to prevent CRLF header injection
+ *   and encoding issues in legacy clients.
+ * - filename*=UTF-8''... RFC 5987 percent-encoded form for the original name,
+ *   preserving Unicode for modern clients.
+ */
+function buildContentDisposition(originalName: string): string {
+  const base = basename(originalName);
+  const safeAscii = base
+    .replace(/[\x00-\x1f"\\]/g, "_") // strip control chars + quotes + backslash
+    .replace(/[^\x20-\x7e]/g, "_"); // strip non-ASCII
+  const utf8Encoded = encodeURIComponent(base);
+  return `attachment; filename="${safeAscii}"; filename*=UTF-8''${utf8Encoded}`;
+}
+
 function parsePdfPageParam(raw: string): number | null {
   if (!/^\d+$/.test(raw)) return null;
   const page = Number(raw);
@@ -21,7 +40,7 @@ export function registerFileRoutes(app: Hono, deps: DashboardHonoDeps): void {
     return await streamFileResponse(file.storagePath, {
       contentType: file.mimeType,
       cacheControl: "no-store",
-      disposition: `attachment; filename="${basename(file.originalName).replace(/"/g, "")}"`,
+      disposition: buildContentDisposition(file.originalName),
     });
   });
 

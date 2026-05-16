@@ -79,6 +79,13 @@ export async function readJsonRequest(
   request: Request,
   maxBytes = 64_536,
 ): Promise<JsonBodyResult> {
+  // Fast-path: reject before buffering when Content-Length is declared and
+  // already exceeds the limit. Content-Length is client-supplied; the
+  // Buffer.byteLength check below handles cases where it's absent.
+  const declaredLength = Number(request.headers.get("content-length") ?? "0");
+  if (declaredLength > maxBytes) {
+    return { ok: false, error: "Request body too large" };
+  }
   try {
     const raw = await request.text();
     if (Buffer.byteLength(raw) > maxBytes) {
