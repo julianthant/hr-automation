@@ -91,6 +91,13 @@ export const modalDismiss = {
     iframe.locator(
       "button.close-handler, button:has-text('Close'), .jqx-window-close-button",
     ),
+
+  /**
+   * "No matches were found" empty-result text shown after a failed EID search.
+   * Appears inside the same modal frame as okButton. verified 2026-05-16
+   * @tags no-matches, search, modal, text, ukg, old-kronos
+   */
+  noMatchesText: (iframe: Frame): Locator => iframe.locator("text=No matches were found"),
 };
 
 // ─── Date range dialog ────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import {
   verifyTxnNumberFilled,
   clickSave,
 } from "../../../systems/kuali/index.js";
+import { finalTransactions } from "../../../systems/kuali/selectors.js";
 import { buildDateChangeComments, getInitials } from "../schema.js";
 import type { KualiSeparationData } from "../../../systems/kuali/index.js";
 import type { Ctx } from "../../../core/kernel/types.js";
@@ -40,9 +41,7 @@ export async function runKualiFinalize(
   // path), ucpath-job-summary is skipped entirely and this fill is
   // the only Kuali term-eff-date write that happens.
   log.step(`[Kuali] Filling Termination Effective Date: ${finalTermEffDate}`);
-  await kualiPage
-    .getByRole("textbox", { name: "Termination Effective Date*" }) // allow-inline-selector
-    .fill(finalTermEffDate, { timeout: 5_000 });
+  await finalTransactions.terminationEffDate(kualiPage).fill(finalTermEffDate, { timeout: 5_000 });
 
   // Always fill checkbox + radio; fill txn number if we have it
   await fillTransactionResults(kualiPage, transactionNumber);

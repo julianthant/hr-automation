@@ -9,6 +9,7 @@ import {
   clickGoToTimecard as clickOldKronosGoToTimecard,
   getTimecardLastDate as getOldKronosTimecardLastDate,
 } from "../../../systems/old-kronos/index.js";
+import { modalDismiss } from "../../../systems/old-kronos/selectors.js";
 import {
   searchEmployee as searchNewKronos,
   selectEmployeeResult as selectNewKronosResult,
@@ -29,10 +30,10 @@ import type { Ctx } from "../../../core/kernel/types.js";
 async function checkOldKronosResult(page: Page): Promise<boolean> {
   let found = true;
   for (const f of page.frames()) {
-    const noMatch = await f.locator("text=No matches were found").count().catch(() => 0); // allow-inline-selector
+    const noMatch = await modalDismiss.noMatchesText(f).count().catch(() => 0);
     if (noMatch > 0) {
       found = false;
-      try { await f.locator("button:has-text('OK')").click({ timeout: 3_000 }); } catch { /* ok */ } // allow-inline-selector
+      try { await modalDismiss.okButton(f).click({ timeout: 3_000 }); } catch { /* ok */ }
       break;
     }
   }
