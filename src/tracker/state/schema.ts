@@ -7,7 +7,13 @@ export const LATEST_SCHEMA_VERSION = 6;
 
 export const MIGRATIONS: readonly Migration[] = [
   {
-    version: 1,
+    // v6 baseline: complete schema from scratch.
+    // Replaces migrations 1–6 which were collapsed after a full tracker wipe.
+    // No backfills, no ALTER TABLE, no DROP COLUMN.
+    // run_events.raw_json is NOT present (was dropped by old migration 6).
+    // session_events.tracker_date IS present (was added by old migration 4).
+    // tasks/task_attempts/task_dependencies include all v3 columns inline.
+    version: 6,
     sql: String.raw`
 CREATE TABLE IF NOT EXISTS schema_version (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -48,7 +54,6 @@ CREATE TABLE IF NOT EXISTS run_events (
   typed_data_json TEXT,
   input_json TEXT,
   error TEXT,
-  raw_json TEXT NOT NULL,
   applied_at TEXT NOT NULL,
   UNIQUE(source_path, source_offset)
 );
@@ -83,6 +88,7 @@ CREATE TABLE IF NOT EXISTS runs (
 
 CREATE INDEX IF NOT EXISTS idx_runs_workflow_date ON runs(workflow, tracker_date, first_work_ts, latest_tracker_ts);
 CREATE INDEX IF NOT EXISTS idx_runs_latest_status ON runs(workflow, tracker_date, latest_status);
+CREATE INDEX IF NOT EXISTS idx_runs_run_id ON runs(run_id);
 
 CREATE TABLE IF NOT EXISTS items (
   workflow TEXT NOT NULL,
@@ -132,6 +138,7 @@ CREATE TABLE IF NOT EXISTS session_events (
   run_id TEXT,
   timestamp TEXT NOT NULL,
   ts_ms INTEGER NOT NULL,
+  tracker_date TEXT NOT NULL DEFAULT '',
   raw_json TEXT NOT NULL,
   applied_at TEXT NOT NULL,
   UNIQUE(source_path, source_offset)
@@ -139,6 +146,7 @@ CREATE TABLE IF NOT EXISTS session_events (
 
 CREATE INDEX IF NOT EXISTS idx_session_events_run ON session_events(run_id, ts_ms);
 CREATE INDEX IF NOT EXISTS idx_session_events_instance ON session_events(workflow_instance, ts_ms);
+CREATE INDEX IF NOT EXISTS idx_session_events_date ON session_events(tracker_date, ts_ms);
 
 CREATE TABLE IF NOT EXISTS files (
   file_id TEXT PRIMARY KEY,
@@ -160,6 +168,8 @@ CREATE TABLE IF NOT EXISTS files (
 
 CREATE INDEX IF NOT EXISTS idx_files_owner ON files(workflow, item_id, run_id);
 CREATE INDEX IF NOT EXISTS idx_files_sha ON files(sha256);
+CREATE INDEX IF NOT EXISTS idx_files_run_id_screenshot
+  ON files(run_id) WHERE kind = 'screenshot';
 
 CREATE TABLE IF NOT EXISTS file_pages (
   file_id TEXT NOT NULL REFERENCES files(file_id) ON DELETE CASCADE,
@@ -176,11 +186,7 @@ CREATE TABLE IF NOT EXISTS file_pages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_file_pages_status ON file_pages(status, updated_at);
-    `,
-  },
-  {
-    version: 2,
-    sql: String.raw`
+
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
   workflow TEXT NOT NULL,
@@ -203,7 +209,35 @@ CREATE TABLE IF NOT EXISTS tasks (
   data_json TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  terminal_at TEXT
+  terminal_at TEXT,
+  input_json TEXT NOT NULL DEFAULT '{}',
+  control_state TEXT CHECK (
+    control_state IN (
+      'queued',
+      'waiting_dependencies',
+      'claimed',
+      'running',
+      'cancel_requested',
+      'cancelling',
+      'cancelled',
+      'done',
+      'failed',
+      'blocked'
+    )
+  ),
+  priority INTEGER NOT NULL DEFAULT 0,
+  available_at TEXT,
+  enqueued_at TEXT,
+  current_attempt_id TEXT REFERENCES task_attempts(id) ON DELETE SET NULL,
+  parent_run_id TEXT,
+  claimed_by_worker_id TEXT,
+  claimed_at TEXT,
+  claim_expires_at TEXT,
+  cancel_requested_at TEXT,
+  cancel_reason TEXT,
+  terminal_error TEXT,
+  source TEXT NOT NULL DEFAULT 'daemon',
+  metadata_json TEXT
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS tasks_workflow_item_run_idx
@@ -215,6 +249,15 @@ CREATE INDEX IF NOT EXISTS tasks_status_idx
 
 CREATE INDEX IF NOT EXISTS tasks_parent_idx
   ON tasks(parent_task_id);
+
+CREATE INDEX IF NOT EXISTS tasks_control_claimable_idx
+  ON tasks(workflow, control_state, priority DESC, enqueued_at ASC);
+
+CREATE INDEX IF NOT EXISTS tasks_control_owner_idx
+  ON tasks(claimed_by_worker_id, control_state);
+
+CREATE INDEX IF NOT EXISTS tasks_tracker_identity_idx
+  ON tasks(workflow, item_id);
 
 CREATE TABLE IF NOT EXISTS task_attempts (
   id TEXT PRIMARY KEY,
@@ -231,12 +274,33 @@ CREATE TABLE IF NOT EXISTS task_attempts (
   data_json TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  control_state TEXT CHECK (
+    control_state IN (
+      'pending',
+      'claimed',
+      'running',
+      'cancel_requested',
+      'cancelled',
+      'done',
+      'failed'
+    )
+  ),
+  worker_id TEXT,
+  claimed_at TEXT,
+  failed_at TEXT,
+  error TEXT,
   UNIQUE(task_id, attempt_no),
   UNIQUE(tracker_workflow, tracker_item_id, run_id)
 );
 
 CREATE INDEX IF NOT EXISTS task_attempts_task_idx
   ON task_attempts(task_id, attempt_no DESC);
+
+CREATE INDEX IF NOT EXISTS task_attempts_run_idx
+  ON task_attempts(run_id);
+
+CREATE INDEX IF NOT EXISTS task_attempts_worker_idx
+  ON task_attempts(worker_id, control_state);
 
 CREATE TABLE IF NOT EXISTS task_dependencies (
   id TEXT PRIMARY KEY,
@@ -254,6 +318,11 @@ CREATE TABLE IF NOT EXISTS task_dependencies (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   terminal_at TEXT,
+  on_child_failed TEXT NOT NULL DEFAULT 'block_parent' CHECK (
+    on_child_failed IN ('fail_parent', 'block_parent', 'allow_partial')
+  ),
+  cascade_cancel INTEGER NOT NULL DEFAULT 1,
+  resume_parent_after_child_retry INTEGER NOT NULL DEFAULT 1,
   UNIQUE(parent_task_id, child_task_id, kind)
 );
 
@@ -265,109 +334,6 @@ CREATE INDEX IF NOT EXISTS task_dependencies_child_idx
 
 CREATE INDEX IF NOT EXISTS task_dependencies_pending_idx
   ON task_dependencies(status, updated_at);
-    `,
-  },
-  {
-    version: 3,
-    sql: String.raw`
-ALTER TABLE tasks ADD COLUMN input_json TEXT NOT NULL DEFAULT '{}';
-ALTER TABLE tasks ADD COLUMN control_state TEXT CHECK (
-  control_state IN (
-    'queued',
-    'waiting_dependencies',
-    'claimed',
-    'running',
-    'cancel_requested',
-    'cancelling',
-    'cancelled',
-    'done',
-    'failed',
-    'blocked'
-  )
-);
-ALTER TABLE tasks ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE tasks ADD COLUMN available_at TEXT;
-ALTER TABLE tasks ADD COLUMN enqueued_at TEXT;
-ALTER TABLE tasks ADD COLUMN current_attempt_id TEXT REFERENCES task_attempts(id) ON DELETE SET NULL;
-ALTER TABLE tasks ADD COLUMN parent_run_id TEXT;
-ALTER TABLE tasks ADD COLUMN claimed_by_worker_id TEXT;
-ALTER TABLE tasks ADD COLUMN claimed_at TEXT;
-ALTER TABLE tasks ADD COLUMN claim_expires_at TEXT;
-ALTER TABLE tasks ADD COLUMN cancel_requested_at TEXT;
-ALTER TABLE tasks ADD COLUMN cancel_reason TEXT;
-ALTER TABLE tasks ADD COLUMN terminal_error TEXT;
-ALTER TABLE tasks ADD COLUMN source TEXT NOT NULL DEFAULT 'daemon';
-ALTER TABLE tasks ADD COLUMN metadata_json TEXT;
-
-UPDATE tasks
-SET control_state = CASE status
-  WHEN 'queued' THEN 'queued'
-  WHEN 'pending' THEN 'queued'
-  WHEN 'running' THEN 'running'
-  WHEN 'waiting_on_children' THEN 'waiting_dependencies'
-  WHEN 'awaiting_child_results' THEN 'waiting_dependencies'
-  WHEN 'done' THEN 'done'
-  WHEN 'failed' THEN 'failed'
-  WHEN 'cancelled' THEN 'cancelled'
-  ELSE 'queued'
-END,
-available_at = COALESCE(available_at, created_at),
-enqueued_at = COALESCE(enqueued_at, created_at),
-input_json = CASE
-  WHEN input_json = '{}' AND data_json IS NOT NULL THEN data_json
-  ELSE input_json
-END;
-
-CREATE INDEX IF NOT EXISTS tasks_control_claimable_idx
-  ON tasks(workflow, control_state, priority DESC, enqueued_at ASC);
-CREATE INDEX IF NOT EXISTS tasks_control_owner_idx
-  ON tasks(claimed_by_worker_id, control_state);
-CREATE INDEX IF NOT EXISTS tasks_tracker_identity_idx
-  ON tasks(workflow, item_id);
-
-ALTER TABLE task_attempts ADD COLUMN control_state TEXT CHECK (
-  control_state IN (
-    'pending',
-    'claimed',
-    'running',
-    'cancel_requested',
-    'cancelled',
-    'done',
-    'failed'
-  )
-);
-ALTER TABLE task_attempts ADD COLUMN worker_id TEXT;
-ALTER TABLE task_attempts ADD COLUMN claimed_at TEXT;
-ALTER TABLE task_attempts ADD COLUMN failed_at TEXT;
-ALTER TABLE task_attempts ADD COLUMN error TEXT;
-
-UPDATE task_attempts
-SET control_state = CASE status
-  WHEN 'queued' THEN 'pending'
-  WHEN 'running' THEN 'running'
-  WHEN 'done' THEN 'done'
-  WHEN 'failed' THEN 'failed'
-  WHEN 'cancelled' THEN 'cancelled'
-  ELSE 'pending'
-END;
-
-CREATE INDEX IF NOT EXISTS task_attempts_run_idx
-  ON task_attempts(run_id);
-CREATE INDEX IF NOT EXISTS task_attempts_worker_idx
-  ON task_attempts(worker_id, control_state);
-
-ALTER TABLE task_dependencies ADD COLUMN on_child_failed TEXT NOT NULL DEFAULT 'block_parent' CHECK (
-  on_child_failed IN ('fail_parent', 'block_parent', 'allow_partial')
-);
-ALTER TABLE task_dependencies ADD COLUMN cascade_cancel INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE task_dependencies ADD COLUMN resume_parent_after_child_retry INTEGER NOT NULL DEFAULT 1;
-
-UPDATE task_dependencies
-SET on_child_failed = CASE failure_policy
-  WHEN 'fail_parent' THEN 'fail_parent'
-  WHEN 'ignore' THEN 'allow_partial'
-  ELSE 'block_parent'
-END;
 
 CREATE TABLE IF NOT EXISTS workers (
   worker_id TEXT PRIMARY KEY,
@@ -392,6 +358,7 @@ CREATE TABLE IF NOT EXISTS workers (
 
 CREATE INDEX IF NOT EXISTS workers_workflow_status_idx
   ON workers(workflow, status, last_heartbeat_at);
+
 CREATE INDEX IF NOT EXISTS workers_pid_idx
   ON workers(pid);
 
@@ -438,8 +405,10 @@ CREATE TABLE IF NOT EXISTS browser_processes (
 
 CREATE INDEX IF NOT EXISTS browser_processes_pid_idx
   ON browser_processes(pid);
+
 CREATE INDEX IF NOT EXISTS browser_processes_owner_idx
   ON browser_processes(worker_id, status);
+
 CREATE INDEX IF NOT EXISTS browser_processes_attempt_idx
   ON browser_processes(attempt_id);
 
@@ -481,52 +450,9 @@ CREATE TABLE IF NOT EXISTS worker_commands (
 
 CREATE INDEX IF NOT EXISTS worker_commands_worker_state_idx
   ON worker_commands(target_worker_id, state, requested_at);
+
 CREATE INDEX IF NOT EXISTS worker_commands_task_state_idx
   ON worker_commands(target_task_id, state, requested_at);
-    `,
-  },
-  {
-    version: 4,
-    sql: String.raw`
-ALTER TABLE session_events ADD COLUMN tracker_date TEXT NOT NULL DEFAULT '';
-
-UPDATE session_events
-SET tracker_date = substr(timestamp, 1, 10)
-WHERE tracker_date = '';
-
-CREATE INDEX IF NOT EXISTS idx_session_events_date
-  ON session_events(tracker_date, ts_ms);
-    `,
-  },
-  {
-    // Migration 5: indexes for run_id-only lookups (used by applyScreenshotFiles).
-    // runs.run_id and files(kind='screenshot', run_id) were unindexed; the existing
-    // PK on runs and idx_files_owner on files are leftmost-prefix-only and don't
-    // help a run_id-only filter.
-    version: 5,
-    sql: String.raw`
-CREATE INDEX IF NOT EXISTS idx_runs_run_id ON runs(run_id);
-CREATE INDEX IF NOT EXISTS idx_files_run_id_screenshot
-  ON files(run_id) WHERE kind = 'screenshot';
-    `,
-  },
-  {
-    // Migration 6: drop run_events.raw_json (dead duplicate).
-    // raw_json stored the entire entry serialized as JSON in addition to the typed
-    // columns (data_json, typed_data_json, input_json, etc.). Every emit paid for
-    // the duplicate JSON.stringify; queries.ts reconstructs from typed columns and
-    // never reads raw_json. SQLite 3.35+ supports DROP COLUMN natively.
-    //
-    // OPERATOR NOTE — first-boot cost on existing prod DBs:
-    // SQLite 3.35+ implements DROP COLUMN as a full table rewrite (not metadata-only).
-    // On a prod state DB with millions of run_events rows, the first dashboard boot
-    // after pulling this change pauses for tens of seconds while the rewrite runs.
-    // Subsequent boots are unaffected. Fresh DBs run migrations 1→6 in sequence and
-    // pay the cost on a near-empty table — negligible. See tracker/CLAUDE.md
-    // 2026-05-08 lesson for the operator-side surface and workaround.
-    version: 6,
-    sql: String.raw`
-ALTER TABLE run_events DROP COLUMN raw_json;
     `,
   },
 ];
