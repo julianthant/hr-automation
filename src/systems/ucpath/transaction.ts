@@ -15,7 +15,7 @@ import {
 } from "./selectors.js";
 import { log } from "../../utils/log.js";
 import { dismissPeopleSoftModalMask } from "../common/modal.js";
-import { safeClick, safeFill } from "../common/index.js";
+import { clickIfPresent, safeClick, safeFill } from "../common/index.js";
 
 // ─── STEP 1: Navigate sidebar → Smart HR Templates → Smart HR Transactions ───
 
@@ -599,12 +599,11 @@ export async function clickSaveAndSubmit(
     await okButton.waitFor({ state: "visible", timeout: 15_000 }).catch(() => {});
     await page.waitForTimeout(2_000);
 
-    if ((await okButton.count()) > 0) {
-      log.step("Clicking OK on confirmation page...");
-      await safeClick(okButton, {
-        timeout: 5_000,
-        label: "ucpath save confirmation ok button",
-      });
+    if (await clickIfPresent(okButton, {
+      timeout: 5_000,
+      label: "ucpath save confirmation ok button",
+    })) {
+      log.step("Clicked OK on confirmation page...");
       await page.waitForTimeout(3_000);
 
       if (employeeId) {
@@ -669,23 +668,21 @@ export async function readLatestTransactionNumber(
 
   log.step(`Clicking transaction row for EID ${employeeId} (link='${linkText}')`);
   const link = txnFrame.getByRole("link", { name: linkText }); // allow-inline-selector -- dynamic matched-name link
-  if ((await link.count()) === 0) {
+  if (!(await clickIfPresent(link, {
+    timeout: 5_000,
+    label: "ucpath transaction row link",
+  }))) {
     log.warn(`[Txn Readback] Row matched but link '${linkText}' disappeared before click`);
     return "";
   }
-  await safeClick(link.first(), {
-    timeout: 5_000,
-    label: "ucpath transaction row link",
-  });
   await page.waitForTimeout(5_000);
 
   // Click Continue on transaction details page
   const continueBtn = smartHR.continueButton(txnFrame);
-  if ((await continueBtn.count()) === 0) return "";
-  await safeClick(continueBtn, {
+  if (!(await clickIfPresent(continueBtn, {
     timeout: 5_000,
     label: "ucpath transaction detail continue button",
-  });
+  }))) return "";
   await page.waitForTimeout(8_000);
 
   // Extract "Transaction ID: T002XXXXXX" from the re-opened form
@@ -753,22 +750,20 @@ export async function findExistingTerminationTransaction(
     log.step(`[Txn Lookup] Matching row found (link='${linkText}') — reading txn #`);
 
     const link = frame.getByRole("link", { name: linkText }); // allow-inline-selector -- dynamic matched-name link
-    if ((await link.count()) === 0) {
+    if (!(await clickIfPresent(link, {
+      timeout: 5_000,
+      label: "ucpath existing transaction row link",
+    }))) {
       log.warn(`[Txn Lookup] Row matched but link '${linkText}' disappeared before click — treating as no match`);
       return null;
     }
-    await safeClick(link.first(), {
-      timeout: 5_000,
-      label: "ucpath existing transaction row link",
-    });
     await page.waitForTimeout(4_000);
 
     const continueBtn = smartHR.continueButton(frame);
-    if ((await continueBtn.count()) > 0) {
-      await safeClick(continueBtn, {
-        timeout: 5_000,
-        label: "ucpath existing transaction continue button",
-      });
+    if (await clickIfPresent(continueBtn, {
+      timeout: 5_000,
+      label: "ucpath existing transaction continue button",
+    })) {
       await page.waitForTimeout(6_000);
     }
 
