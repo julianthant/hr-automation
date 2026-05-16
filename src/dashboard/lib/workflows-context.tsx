@@ -38,21 +38,47 @@ export interface WorkflowMetadata {
 
 const WorkflowsContext = createContext<WorkflowMetadata[] | null>(null)
 
+export function parseWorkflowDefinitionsResponse(data: unknown): WorkflowMetadata[] {
+  if (!Array.isArray(data)) {
+    throw new Error(`workflow-definitions: expected array, got ${typeof data}`)
+  }
+  return data as WorkflowMetadata[]
+}
+
 export function WorkflowsProvider({ children }: { children: ReactNode }) {
   const [workflows, setWorkflows] = useState<WorkflowMetadata[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [retryToken, setRetryToken] = useState(0)
 
   useEffect(() => {
     fetch("/api/workflow-definitions")
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json()
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`workflow-definitions: HTTP ${r.status}`)
+        const data: unknown = await r.json()
+        return parseWorkflowDefinitionsResponse(data)
       })
       .then(setWorkflows)
       .catch((e: Error) => setError(e.message))
-  }, [])
+  }, [retryToken])
 
-  if (error) return <div>Failed to load workflow config: {error}</div>
+  if (error) {
+    return (
+      <div className="p-6 text-sm">
+        <div className="mb-3">Failed to load workflow config: {error}</div>
+        <button
+          type="button"
+          onClick={() => {
+            setError(null)
+            setWorkflows(null)
+            setRetryToken((value) => value + 1)
+          }}
+          className="rounded-md border border-border bg-card px-3 py-1.5 text-xs"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
   if (!workflows) return <div>Loading…</div>
   return <WorkflowsContext.Provider value={workflows}>{children}</WorkflowsContext.Provider>
 }
