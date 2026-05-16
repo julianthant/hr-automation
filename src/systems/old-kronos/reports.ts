@@ -7,7 +7,7 @@ import { debugScreenshot } from "../../utils/screenshot.js";
 import { PATHS } from "../../config.js";
 import { tryRegisterDownloadedFile } from "../../tracker/files/register-download.js";
 import { reportsPage } from "./selectors.js";
-import { safeClick } from "../common/index.js";
+import { clickIfPresent, safeClick } from "../common/index.js";
 
 /**
  * Try multiple selectors across multiple frames. Returns true if one was clicked.
@@ -22,8 +22,7 @@ async function clickInFrames(
     for (const f of framesToSearch) {
       try {
         const loc = f.locator(sel);
-        if (await loc.count() > 0) {
-          await safeClick(loc.first(), { label: `old kronos report selector ${sel}` });
+        if (await clickIfPresent(loc, { label: `old kronos report selector ${sel}` })) {
           log.step(`Clicked '${sel}' in '${f.name()}'`);
           return true;
         }
@@ -377,8 +376,7 @@ export async function handleReportsPage(
   }
 
   const timecardLoc = reportsPage.timecardNavTreeEntry(listFrame);
-  if (await timecardLoc.count() > 0) {
-    await safeClick(timecardLoc.first(), { label: "old kronos reports timecard nav tree entry" });
+  if (await clickIfPresent(timecardLoc, { label: "old kronos reports timecard nav tree entry" })) {
     await page.waitForTimeout(3_000);
   } else {
     log.error("'Timecard' not found in nav tree");
