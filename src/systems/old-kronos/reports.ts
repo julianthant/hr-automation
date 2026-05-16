@@ -7,7 +7,7 @@ import { debugScreenshot } from "../../utils/screenshot.js";
 import { PATHS } from "../../config.js";
 import { tryRegisterDownloadedFile } from "../../tracker/files/register-download.js";
 import { reportsPage } from "./selectors.js";
-import { clickIfPresent, safeClick } from "../common/index.js";
+import { clickIfPresent } from "../common/index.js";
 
 /**
  * Try multiple selectors across multiple frames. Returns true if one was clicked.
