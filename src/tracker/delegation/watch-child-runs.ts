@@ -19,6 +19,7 @@ import {
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { TrackerEntry } from "../jsonl.js";
+import { makeTailState, tailIncremental, type TailState } from "../tail-incremental.js";
 import { createOperatorDiscardError } from "../ocr-prepare-abort.js";
 import { openControlDb } from "../../core/control-db.js";
 import { createTaskStore, type TaskRow } from "../../core/task-store/index.js";
@@ -80,8 +81,7 @@ interface AbortFileCache {
   size: number;
   mtimeMs: number;
   result: boolean;
-  readOffset: number;
-  utf8Pending: string;
+  tailState: TailState;
   lastStepForId: string | undefined;
 }
 
@@ -114,65 +114,31 @@ function readAbortRequestedCached(
     return prev.result;
   }
 
-  let readOffset = 0;
-  let utf8Pending = "";
-  let lastStepForId: string | undefined;
   const sameFile = prev?.path === abortFile;
-  if (sameFile && prev && st.size >= prev.readOffset) {
-    readOffset = prev.readOffset;
-    utf8Pending = prev.utf8Pending;
-    lastStepForId = prev.lastStepForId;
-  }
-  if (sameFile && prev && st.size < prev.readOffset) {
-    readOffset = 0;
-    utf8Pending = "";
+  const tailState = sameFile && prev ? prev.tailState : makeTailState();
+  let lastStepForId = sameFile && prev ? prev.lastStepForId : undefined;
+  if (sameFile && prev && st.size < prev.tailState.lastSize) {
     lastStepForId = undefined;
   }
 
-  if (st.size > readOffset) {
+  for (const line of tailIncremental(abortFile, tailState)) {
+    let entry: TrackerEntry;
     try {
-      const fd = openSync(abortFile, "r");
-      try {
-        const byteLen = st.size - readOffset;
-        const buf = Buffer.alloc(byteLen);
-        let total = 0;
-        while (total < byteLen) {
-          const n = readSync(fd, buf, total, byteLen - total, readOffset + total);
-          if (n === 0) break;
-          total += n;
-        }
-        const chunk = buf.subarray(0, total).toString("utf8");
-        const combined = utf8Pending + chunk;
-        const lines = combined.split("\n");
-        utf8Pending = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line) continue;
-          let entry: TrackerEntry;
-          try {
-            entry = JSON.parse(line);
-          } catch {
-            continue;
-          }
-          if (entry.id !== sentinel.id) continue;
-          lastStepForId = entry.step;
-        }
-      } finally {
-        closeSync(fd);
-      }
+      entry = JSON.parse(line);
     } catch {
-      return false;
+      continue;
     }
+    if (entry.id !== sentinel.id) continue;
+    lastStepForId = entry.step;
   }
 
-  readOffset = st.size;
   const result = lastStepForId === sentinel.step;
   cache.current = {
     path: abortFile,
     size: st.size,
     mtimeMs: st.mtimeMs,
     result,
-    readOffset,
-    utf8Pending,
+    tailState,
     lastStepForId,
   };
   return result;
