@@ -309,9 +309,8 @@ export async function runOcrOrchestrator(
     // Preview tab updates progressively as OCR / matching / disambig /
     // eid-lookup / verification each complete.
     // Running-status emits are deduplicated by a quick fingerprint
-    // (step + length + verifiedCount + last-record eid) so back-to-back
-    // phase-transition calls with unchanged content don't produce extra
-    // JSONL writes.
+    // (step + length + last-record eid + per-record match/verification state)
+    // so back-to-back calls with unchanged content skip work before writeTracker.
     let lastSnapshotKey = "";
     const emitSnapshot = (
       records: unknown[],
@@ -319,13 +318,20 @@ export async function runOcrOrchestrator(
       status: TrackerEntry["status"],
       extras: Record<string, unknown> = {},
     ): void => {
-      const verifiedCount = countVerified(records);
       if (status === "running") {
         const lastRec = (records as Record<string, unknown>[]).at(-1);
-        const key = `${step}|${records.length}|${verifiedCount}|${lastRec?.employeeId ?? lastRec?.eid ?? ""}`;
+        const stateFingerprint = (records as Record<string, unknown>[])
+          .map((r) => {
+            const matchState = String((r.matchState as string | undefined) ?? "");
+            const ver = (r.verification as { state?: string } | undefined)?.state ?? "";
+            return `${matchState}|${ver}`;
+          })
+          .join("|");
+        const key = `${step}|${records.length}|${lastRec?.employeeId ?? lastRec?.eid ?? ""}|${stateFingerprint}`;
         if (key === lastSnapshotKey) return;
         lastSnapshotKey = key;
       }
+      const verifiedCount = countVerified(records);
       writeTracker(status, {
         formType: input.formType,
         pdfOriginalName: input.pdfOriginalName,
@@ -532,29 +538,43 @@ export async function runOcrOrchestrator(
     if (suggestionTargets.length > 0) {
       log.step(`[ocr] asking LLM for lookup suggestions for ${suggestionTargets.length} record(s) with no fuzzy roster candidates`);
       const { suggestLookupCandidates } = await import("../../services/ocr/lookup-suggestions.js");
-      await raceOcrPrepWithDiscard(id, runId, Promise.all(suggestionTargets.map(async (target) => {
-        try {
-          const suggestions = opts._lookupSuggestionOverride
-            ? await opts._lookupSuggestionOverride({
-                formType: spec.formType,
-                record: target.rec,
-                recordIndex: target.index,
-              })
-            : await suggestLookupCandidates({
-                formType: spec.formType,
-                record: target.rec,
-              });
-          if (suggestions.length > 0) {
-            lookupSuggestionsByIndex.set(target.index, suggestions);
-            const rendered = suggestions.map((s) => s.emplId ? `eid=${s.emplId}` : `name="${s.name}"`).join(", ");
-            log.step(`[ocr] lookup suggestions for rec ${target.index + 1}: ${rendered}`);
-          } else {
-            log.step(`[ocr] lookup suggestions for rec ${target.index + 1}: none; falling back to extracted name`);
+      const suggestConcurrencyEnv = Number.parseInt(process.env.OCR_SUGGEST_CONCURRENCY ?? "", 10);
+      const suggestConcurrency = Number.isFinite(suggestConcurrencyEnv) && suggestConcurrencyEnv > 0
+        ? suggestConcurrencyEnv
+        : 4;
+      let suggestNextIdx = 0;
+      const suggestWorkers = Array.from(
+        { length: Math.min(suggestConcurrency, suggestionTargets.length) },
+        async () => {
+          while (true) {
+            const i = suggestNextIdx++;
+            if (i >= suggestionTargets.length) return;
+            const target = suggestionTargets[i];
+            try {
+              const suggestions = opts._lookupSuggestionOverride
+                ? await opts._lookupSuggestionOverride({
+                    formType: spec.formType,
+                    record: target.rec,
+                    recordIndex: target.index,
+                  })
+                : await suggestLookupCandidates({
+                    formType: spec.formType,
+                    record: target.rec,
+                  });
+              if (suggestions.length > 0) {
+                lookupSuggestionsByIndex.set(target.index, suggestions);
+                const rendered = suggestions.map((s) => s.emplId ? `eid=${s.emplId}` : `name="${s.name}"`).join(", ");
+                log.step(`[ocr] lookup suggestions for rec ${target.index + 1}: ${rendered}`);
+              } else {
+                log.step(`[ocr] lookup suggestions for rec ${target.index + 1}: none; falling back to extracted name`);
+              }
+            } catch (err) {
+              log.warn(`[ocr] lookup suggestions failed for record ${target.index + 1}: ${errorMessage(err)}`);
+            }
           }
-        } catch (err) {
-          log.warn(`[ocr] lookup suggestions failed for record ${target.index + 1}: ${errorMessage(err)}`);
-        }
-      })));
+        },
+      );
+      await raceOcrPrepWithDiscard(id, runId, Promise.all(suggestWorkers));
     }
 
     // 4. EID lookup fan-out — UCPath + CRM name resolution and active / HDH disposition.
@@ -774,11 +794,6 @@ export async function runOcrOrchestrator(
     // immediately; lookup outcomes will patch records into this row's
     // tracker entries as they arrive.
     log.success(`[ocr] preparation complete — awaiting operator approval (${records.length} record(s), ${verifiedCount} verified now)`);
-    emitSnapshot(records, "awaiting-approval", "running", {
-      failedPages,
-      emptyPages,
-      pageStatusSummary,
-    });
     emitSnapshot(records, "awaiting-approval", "done", {
       failedPages,
       emptyPages,

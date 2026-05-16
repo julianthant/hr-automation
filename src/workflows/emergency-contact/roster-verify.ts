@@ -1,8 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import ExcelJS from "exceljs";
 import { log } from "../../utils/log.js";
-import { normalizeEid } from "../../services/matching/index.js";
+import { loadRoster, normalizeEid } from "../../services/matching/index.js";
 import { normalizePersonNameForCompare } from "../../domain/identity/person-name.js";
 import type { EmergencyContactBatch } from "./schema.js";
 
@@ -37,7 +36,7 @@ function namesMatch(a: string, b: string): boolean {
   return false;
 }
 
-// ── Header column resolution (shared between xlsx + csv) ──
+// ── Header column resolution (CSV path; XLSX uses services/matching loadRoster) ──
 
 interface HeaderResolution {
   eidCol: number;
@@ -149,49 +148,6 @@ function loadCsvRoster(csvPath: string): {
   return { resolution, dataRows };
 }
 
-// ── XLSX parsing (original behavior) ────────────────────────
-
-async function loadXlsxRoster(xlsxPath: string): Promise<{
-  resolution: HeaderResolution;
-  dataRows: string[][];
-}> {
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.readFile(xlsxPath);
-  const sheet = wb.worksheets[0];
-  if (!sheet) throw new Error(`Roster has no worksheets: ${xlsxPath}`);
-
-  let headerIdx = -1;
-  let resolution: HeaderResolution | undefined;
-  for (let r = 1; r <= Math.min(10, sheet.rowCount); r++) {
-    const row = sheet.getRow(r);
-    const cells: string[] = [];
-    row.eachCell({ includeEmpty: true }, (cell, col) => {
-      cells[col - 1] = String(cell.value ?? "");
-    });
-    const res = resolveHeaderColumns(cells);
-    if (res.eidCol !== -1) {
-      headerIdx = r;
-      resolution = res;
-      break;
-    }
-  }
-  if (headerIdx === -1 || !resolution) {
-    throw new Error(`Could not find a header row with UCPath/Empl ID in ${xlsxPath}`);
-  }
-
-  const dataRows: string[][] = [];
-  sheet.eachRow({ includeEmpty: false }, (row, rowNum) => {
-    if (rowNum <= headerIdx) return;
-    const cells: string[] = [];
-    row.eachCell({ includeEmpty: true }, (cell, col) => {
-      cells[col - 1] = String(cell.value ?? "");
-    });
-    if (cells.some((c) => c.trim() !== "")) dataRows.push(cells);
-  });
-
-  return { resolution, dataRows };
-}
-
 // ── Public entry point ─────────────────────────────────────
 
 export async function verifyBatchAgainstRoster(
@@ -199,22 +155,32 @@ export async function verifyBatchAgainstRoster(
   rosterPath: string,
 ): Promise<RosterVerifyResult> {
   const ext = path.extname(rosterPath).toLowerCase();
-  const { resolution, dataRows } =
-    ext === ".csv"
-      ? loadCsvRoster(rosterPath)
-      : await loadXlsxRoster(rosterPath);
-
-  if (resolution.nameCol === -1 && (resolution.firstNameCol === -1 || resolution.lastNameCol === -1)) {
-    log.step("Roster has no Name column — matching on EID only (no name verification)");
-  }
 
   const byEid = new Map<string, string>();
   let rosterRows = 0;
-  for (const cells of dataRows) {
-    const eid = normalizeEid(cells[resolution.eidCol - 1]);
-    if (!eid) continue;
-    rosterRows++;
-    byEid.set(eid, readNameFromCells(cells, resolution));
+
+  if (ext === ".csv") {
+    const { resolution, dataRows } = loadCsvRoster(rosterPath);
+    if (resolution.nameCol === -1 && (resolution.firstNameCol === -1 || resolution.lastNameCol === -1)) {
+      log.step("Roster has no Name column — matching on EID only (no name verification)");
+    }
+    for (const cells of dataRows) {
+      const eid = normalizeEid(cells[resolution.eidCol - 1]);
+      if (!eid) continue;
+      rosterRows++;
+      byEid.set(eid, readNameFromCells(cells, resolution));
+    }
+  } else {
+    // XLSX: shared cached loader (multi-sheet, mtime-keyed cache, rich-text coercion).
+    // No name-column warning here — parseRosterFile skips sheets without name headers;
+    // it throws if no worksheet has a recognizable header.
+    const rows = await loadRoster(rosterPath);
+    for (const row of rows) {
+      const eid = normalizeEid(row.eid);
+      if (!eid) continue;
+      rosterRows++;
+      byEid.set(eid, row.name);
+    }
   }
 
   let matched = 0;
@@ -259,18 +225,20 @@ export interface RosterRowSummary {
 
 export async function loadRosterIndex(rosterPath: string): Promise<RosterRowSummary[]> {
   const ext = path.extname(rosterPath).toLowerCase();
-  const { resolution, dataRows } =
-    ext === ".csv"
-      ? loadCsvRoster(rosterPath)
-      : await loadXlsxRoster(rosterPath);
-
-  const out: RosterRowSummary[] = [];
-  for (const cells of dataRows) {
-    const emplId = normalizeEid(cells[resolution.eidCol - 1]);
-    if (!emplId) continue;
-    out.push({ emplId, name: readNameFromCells(cells, resolution) });
+  if (ext === ".csv") {
+    const { resolution, dataRows } = loadCsvRoster(rosterPath);
+    const out: RosterRowSummary[] = [];
+    for (const cells of dataRows) {
+      const emplId = normalizeEid(cells[resolution.eidCol - 1]);
+      if (!emplId) continue;
+      out.push({ emplId, name: readNameFromCells(cells, resolution) });
+    }
+    return out;
   }
-  return out;
+  const rows = await loadRoster(rosterPath);
+  return rows
+    .map((row) => ({ emplId: normalizeEid(row.eid), name: row.name }))
+    .filter((row) => row.emplId.length > 0);
 }
 
 export { namesMatch, normalizeName };
