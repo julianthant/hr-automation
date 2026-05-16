@@ -17,10 +17,7 @@ export function claimNextTask(
 ): ClaimedTask | null {
   const now = request.now ?? new Date().toISOString()
   const claimExpiresAt = new Date(Date.parse(now) + (request.leaseMs ?? 60_000)).toISOString()
-  const canReturn = control.supportsUpdateReturning()
-  return canReturn
-    ? claimNextTaskReturning(db, control, { ...request, now, claimExpiresAt })
-    : claimNextTaskFallback(db, control, { ...request, now, claimExpiresAt })
+  return claimNextTaskReturning(db, control, { ...request, now, claimExpiresAt })
 }
 
 function claimNextTaskReturning(
@@ -59,46 +56,6 @@ function claimNextTaskReturning(
     if (!row?.current_attempt_id) return null
     markAttemptClaimed(db, row.current_attempt_id, request.workerId, request.now)
     return claimedFromTaskRow(db, row, request.workerId)
-  })
-}
-
-function claimNextTaskFallback(
-  db: Database,
-  control: ControlDb,
-  request: { workflow: string; workerId: string; now: string; claimExpiresAt: string },
-): ClaimedTask | null {
-  return control.transaction(() => {
-    const next = db.prepare(`
-      SELECT *
-      FROM tasks
-      WHERE workflow = @workflow
-        AND task_kind = 'workflow_item'
-        AND source = 'daemon'
-        AND control_state = 'queued'
-        AND COALESCE(available_at, created_at) <= @now
-        AND NOT EXISTS (
-          SELECT 1
-          FROM task_dependencies d
-          WHERE d.parent_task_id = tasks.id
-            AND d.status NOT IN ('satisfied', 'cancelled')
-        )
-      ORDER BY priority DESC, COALESCE(enqueued_at, created_at) ASC, rowid ASC
-      LIMIT 1
-    `).get(request) as TaskDbRow | undefined
-    if (!next?.current_attempt_id) return null
-    const info = db.prepare(`
-      UPDATE tasks
-      SET control_state = 'claimed',
-          claimed_by_worker_id = @workerId,
-          claimed_at = @now,
-          claim_expires_at = @claimExpiresAt,
-          updated_at = @now
-      WHERE id = @taskId AND control_state = 'queued'
-    `).run({ ...request, taskId: next.id })
-    if (info.changes !== 1) return null
-    markAttemptClaimed(db, next.current_attempt_id, request.workerId, request.now)
-    const claimed = db.prepare('SELECT * FROM tasks WHERE id = ?').get(next.id) as TaskDbRow
-    return claimedFromTaskRow(db, claimed, request.workerId)
   })
 }
 

@@ -64,27 +64,6 @@ test('claimNextTask claims each queued task exactly once', () => {
   }
 })
 
-test('claimNextTask fallback path claims the oldest eligible task', () => {
-  const { dir, store } = openTempStore()
-  try {
-    store.control.supportsUpdateReturning = () => false
-    store.enqueueTasks({
-      workflow: 'wf',
-      inputs: [{ id: 'a' }, { id: 'b' }],
-      deriveItemId: (x) => x.id,
-      now: iso(1),
-    })
-
-    const first = store.claimNextTask({ workflow: 'wf', workerId: 'w1', now: iso(2) })
-
-    assert.equal(first?.itemId, 'a')
-    assert.equal(store.listTasksForWorkflow('wf')[0].claimedByWorkerId, 'w1')
-  } finally {
-    store.close()
-    rmSync(dir, { recursive: true, force: true })
-  }
-})
-
 test('recoverClaimsForDeadWorkers recovers expired claims even when worker is alive', () => {
   const { dir, store } = openTempStore()
   try {
