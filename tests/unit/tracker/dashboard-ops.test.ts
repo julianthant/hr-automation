@@ -361,6 +361,40 @@ describe("buildSaveDataHandler", () => {
     assert.equal(latest.data.transactionNumber, "");
     assert.equal(latest.data.eid, "10000001");
   });
+
+  it("saves edits to the selected tracker date instead of today", async () => {
+    trackEventForDate(
+      {
+        workflow: "separations",
+        timestamp: "2026-05-11T12:00:00.000Z",
+        id: "3930",
+        runId: "run-from-older-date",
+        status: "done",
+        data: { transactionNumber: "old" },
+      },
+      "2026-05-11",
+      tmp,
+    );
+
+    const result = await buildSaveDataHandler(tmp)({
+      workflow: "separations",
+      id: "3930",
+      date: "2026-05-11",
+      data: { transactionNumber: "new" },
+    });
+
+    assert.equal(result.ok, true);
+    const priorDateEntries = readFileSync(join(tmp, "separations-2026-05-11.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(priorDateEntries.at(-1).data.transactionNumber, "new");
+
+    const todayFile = readdirSync(tmp).find((file) => {
+      return /^separations-\d{4}-\d{2}-\d{2}\.jsonl$/.test(file) && file !== "separations-2026-05-11.jsonl";
+    });
+    assert.equal(todayFile, undefined);
+  });
 });
 
 describe("buildDeleteEntryHandler", () => {

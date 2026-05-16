@@ -111,6 +111,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       return {
         workflow: String(body.workflow ?? ""),
         id: String(body.id ?? ""),
+        date: body.date ? String(body.date) : undefined,
         data,
       };
     }, buildSaveDataHandler(deps.dir));

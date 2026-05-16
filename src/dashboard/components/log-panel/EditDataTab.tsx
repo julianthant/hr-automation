@@ -176,7 +176,12 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
       const res = await fetch("/api/save-data", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workflow, id: entry.id, data: values }),
+        body: JSON.stringify({
+          workflow,
+          id: entry.id,
+          data: values,
+          ...(date ? { date } : {}),
+        }),
       });
       const body = (await res.json()) as { ok: boolean; error?: string };
       if (body.ok) {
