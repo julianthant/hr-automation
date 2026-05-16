@@ -3,7 +3,8 @@
 // Dashboard metadata auto-registers via `defineWorkflow` in `workflow.ts` at
 // module load — no `defineDashboardMetadata` call needed.
 
-export { separationsWorkflow, runSeparation, runSeparationBatch, runSeparationCli } from "./workflow.js";
+export { separationsWorkflow } from "./workflow.js";
+export { runSeparation, runSeparationBatch, runSeparationCli } from "./cli.js";
 export type { SeparationData } from "./schema.js";
 export {
   computeTerminationEffDate,

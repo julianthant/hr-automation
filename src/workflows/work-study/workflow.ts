@@ -132,15 +132,7 @@ export async function runWorkStudy(input: WorkStudyInput): Promise<void> {
  * scripting can still run the work-study workflow directly without the
  * daemon.
  */
-export async function runWorkStudyCli(
-  emplId: string,
-  effectiveDate: string,
-  options: { new?: boolean; parallel?: number } = {},
-): Promise<void> {
-  await runWorkStudyDaemonCli(emplId, effectiveDate, options);
-}
-
-const runWorkStudyDaemonCli = buildCliAdapter<[string, string], WorkStudyInput>({
+export const runWorkStudyCli = buildCliAdapter<[string, string], WorkStudyInput>({
   workflow: workStudyWorkflow,
   emptyMessage: "runWorkStudyCli: emplId and effectiveDate are required",
   buildInputs: (emplId, effectiveDate) => (emplId && effectiveDate ? [{ emplId, effectiveDate }] : []),

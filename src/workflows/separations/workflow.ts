@@ -521,6 +521,3 @@ export const separationsWorkflow = defineWorkflow({
     log.success(`=== Separation complete for doc #${docId} ===`);
   },
 });
-
-// Re-export CLI runners so existing import sites (index.ts, src/cli.ts) continue working.
-export { runSeparation, runSeparationBatch, runSeparationCli } from "./cli.js";

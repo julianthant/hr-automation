@@ -443,14 +443,7 @@ export function eidLookupPreEmitPending(
  *     in-process path) instead of the daemon. The CLI wiring in
  *     `src/cli.ts` enforces this.
  */
-export async function runEidLookupCli(
-  names: string[],
-  options: { new?: boolean; parallel?: number } = {},
-): Promise<void> {
-  await runEidLookupDaemonCli(names, options);
-}
-
-const runEidLookupDaemonCli = buildCliAdapter<[string[]], EidLookupItem>({
+export const runEidLookupCli = buildCliAdapter<[string[]], EidLookupItem>({
   workflow: eidLookupCrmWorkflow,
   emptyMessage: "runEidLookupCli: no names provided",
   buildInputs: (names) => prepareNames(names).map((name) => ({ name })),

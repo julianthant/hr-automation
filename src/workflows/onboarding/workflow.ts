@@ -450,14 +450,7 @@ export async function runOnboarding(email: string): Promise<void> {
  * Pass emails explicitly on the CLI — `npm run onboarding a@uc b@uc c@uc`
  * fans across alive daemons via the shared SQLite tasks queue.
  */
-export async function runOnboardingCli(
-  emails: string[],
-  options: { new?: boolean; parallel?: number } = {},
-): Promise<void> {
-  await runOnboardingDaemonCli(emails, options);
-}
-
-const runOnboardingDaemonCli = buildCliAdapter<[string[]], { email: string }>({
+export const runOnboardingCli = buildCliAdapter<[string[]], { email: string }>({
   workflow: onboardingWorkflow,
   emptyMessage: "runOnboardingCli: no emails provided",
   buildInputs: (emails) => emails.map((email) => ({ email })),
