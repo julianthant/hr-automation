@@ -4,13 +4,58 @@ import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn, compact } from "@/lib/utils";
 import { IconActionButton } from "@/components/shared/IconActionButton";
+import type { TrackerEntry } from "@/components/shared/types";
 
 interface QueueItemControlsProps {
   workflow: string;
   id: string;
   runId?: string;
   subject?: string;
+  entry?: TrackerEntry;
   className?: string;
+}
+
+interface QueueCancelRequestArgs {
+  workflow: string;
+  id: string;
+  runId?: string;
+  entry?: TrackerEntry;
+}
+
+export function buildQueueCancelRequest({ workflow, id, runId, entry }: QueueCancelRequestArgs): {
+  path: string;
+  body: Record<string, string>;
+} {
+  const ocrPrep =
+    entry?.data?.mode === "prepare"
+      && typeof entry.data.ocrSessionId === "string"
+      && typeof entry.data.ocrRunId === "string"
+      ? {
+          ocrSessionId: entry.data.ocrSessionId,
+          ocrRunId: entry.data.ocrRunId,
+          formType: entry.data.formType,
+        }
+      : null;
+
+  if (!ocrPrep) {
+    return {
+      path: "/api/cancel-queued",
+      body: compact({ workflow, id, runId }),
+    };
+  }
+
+  return {
+    path: "/api/ocr/discard-prepare",
+    body: compact({
+      sessionId: ocrPrep.ocrSessionId,
+      runId: ocrPrep.ocrRunId,
+      reason: `Cancelled from ${workflow} queue`,
+      parentWorkflow: workflow,
+      parentRunId: runId,
+      parentItemId: id,
+      formType: ocrPrep.formType,
+    }),
+  };
 }
 
 /**
@@ -18,11 +63,11 @@ interface QueueItemControlsProps {
  * 409s from the backend are surfaced as warnings — the daemon claimed the
  * item between the user's click and the backend lock.
  */
-export function QueueItemControls({ workflow, id, runId, subject, className }: QueueItemControlsProps) {
+export function QueueItemControls({ workflow, id, runId, subject, entry, className }: QueueItemControlsProps) {
   const [pending, setPending] = useState<"cancel" | "bump" | null>(null);
   const label = subject?.trim() || id;
 
-  const post = async (path: string, action: "cancel" | "bump") => {
+  const post = async (path: string, body: Record<string, string>, action: "cancel" | "bump") => {
     setPending(action);
     const verbing = action === "cancel" ? "Cancelling" : "Bumping";
     const verbed = action === "cancel" ? "Cancelled" : "Bumped to top";
@@ -31,7 +76,7 @@ export function QueueItemControls({ workflow, id, runId, subject, className }: Q
       const res = await fetch(path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(compact({ workflow, id, runId })),
+        body: JSON.stringify(body),
       });
       const body = (await res.json()) as { ok: boolean; error?: string };
       if (body.ok) {
@@ -60,13 +105,14 @@ export function QueueItemControls({ workflow, id, runId, subject, className }: Q
   const onCancelClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (pending) return;
-    void post("/api/cancel-queued", "cancel");
+    const request = buildQueueCancelRequest({ workflow, id, runId, entry });
+    void post(request.path, request.body, "cancel");
   };
 
   const onBumpClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (pending) return;
-    void post("/api/queue/bump", "bump");
+    void post("/api/queue/bump", compact({ workflow, id, runId }), "bump");
   };
 
   return (
