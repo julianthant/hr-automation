@@ -5,6 +5,13 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runOcrRetryPage } from "../../../../src/workflows/ocr/retry-page.js";
 
+function ensurePdfCachePagePng(dir: string, pdfFileId: string, pageNum: number): void {
+  const cacheDir = join(dir, "pdf-cache", pdfFileId);
+  mkdirSync(cacheDir, { recursive: true });
+  const pngPath = join(cacheDir, `page-${String(pageNum).padStart(3, "0")}.png`);
+  writeFileSync(pngPath, "");
+}
+
 function setup(): { dir: string } {
   const dir = join(tmpdir(), `ocr-retry-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
@@ -25,6 +32,7 @@ test("runOcrRetryPage replaces records for the retried page and clears it from f
       formType: "oath",
       pdfPath: "/tmp/fake.pdf",
       pdfOriginalName: "fake.pdf",
+      pdfFileId: "pf-r1",
       sessionId: "session-r1",
       recordCount: 2,
       verifiedCount: 1,
@@ -42,6 +50,8 @@ test("runOcrRetryPage replaces records for the retried page and clears it from f
       pageStatusSummary: JSON.stringify({ total: 2, succeeded: 1, failed: 1 }),
     },
   }) + "\n", "utf-8");
+
+  ensurePdfCachePagePng(dir, "pf-r1", 2);
 
   const writtenEntries: object[] = [];
   await runOcrRetryPage(
@@ -97,6 +107,7 @@ test("runOcrRetryPage keeps page in failedPages with bumped attempts when retry 
       formType: "oath",
       pdfPath: "/tmp/fake.pdf",
       pdfOriginalName: "fake.pdf",
+      pdfFileId: "pf-r2",
       sessionId: "session-r2",
       recordCount: 0,
       verifiedCount: 0,
@@ -107,6 +118,8 @@ test("runOcrRetryPage keeps page in failedPages with bumped attempts when retry 
       pageStatusSummary: JSON.stringify({ total: 1, succeeded: 0, failed: 1 }),
     },
   }) + "\n", "utf-8");
+
+  ensurePdfCachePagePng(dir, "pf-r2", 1);
 
   const writtenEntries: object[] = [];
   await runOcrRetryPage(
@@ -153,6 +166,7 @@ test("runOcrRetryPage preserves rosterPath in the emitted row", async () => {
       formType: "oath",
       pdfPath: "/tmp/fake.pdf",
       pdfOriginalName: "fake.pdf",
+      pdfFileId: "pf-rp",
       sessionId: "session-rp",
       rosterPath: "/tmp/roster.xlsx",
       records: JSON.stringify([]),
@@ -162,6 +176,8 @@ test("runOcrRetryPage preserves rosterPath in the emitted row", async () => {
       pageStatusSummary: JSON.stringify({ total: 1, succeeded: 0, failed: 1 }),
     },
   }) + "\n", "utf-8");
+
+  ensurePdfCachePagePng(dir, "pf-rp", 1);
 
   const writtenEntries: Array<{ status: string; step?: string; data?: Record<string, string> }> = [];
   await runOcrRetryPage(
@@ -205,6 +221,7 @@ test("runOcrRetryPage keeps row selected when eid-lookup verification is non-hdh
       formType: "oath",
       pdfPath: "/tmp/fake.pdf",
       pdfOriginalName: "fake.pdf",
+      pdfFileId: "pf-nh",
       sessionId: "session-nh",
       recordCount: 0,
       verifiedCount: 0,
@@ -215,6 +232,8 @@ test("runOcrRetryPage keeps row selected when eid-lookup verification is non-hdh
       pageStatusSummary: JSON.stringify({ total: 1, succeeded: 0, failed: 1 }),
     },
   }) + "\n", "utf-8");
+
+  ensurePdfCachePagePng(dir, "pf-nh", 1);
 
   const writtenEntries: Array<{ status: string; step?: string; data?: Record<string, string> }> = [];
   await runOcrRetryPage(
@@ -278,6 +297,7 @@ test("runOcrRetryPage clamps succeeded to 0 when summary.total is 0 (old rows)",
       formType: "oath",
       pdfPath: "/tmp/fake.pdf",
       pdfOriginalName: "fake.pdf",
+      pdfFileId: "pf-clamp",
       sessionId: "session-clamp",
       records: JSON.stringify([]),
       failedPages: JSON.stringify([
@@ -287,6 +307,8 @@ test("runOcrRetryPage clamps succeeded to 0 when summary.total is 0 (old rows)",
       // No pageStatusSummary in the row — simulates an old row pre-dating the feature.
     },
   }) + "\n", "utf-8");
+
+  ensurePdfCachePagePng(dir, "pf-clamp", 1);
 
   const writtenEntries: Array<{ status: string; step?: string; data?: Record<string, string> }> = [];
   await runOcrRetryPage(

@@ -6,7 +6,6 @@ import { join } from "path";
 import { z } from "zod";
 import { defineWorkflow } from "../../core/index.js";
 import { log } from "../../utils/log.js";
-import { errorMessage } from "../../utils/errors.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { loginToUKG } from "../../infra/auth/login.js";
 import {
@@ -20,13 +19,11 @@ import {
 import { handleReportsPage } from "../../systems/old-kronos/reports.js";
 import { validateAndClean, verifyPdfMatch } from "./validate.js";
 import {
-  updateKronosTracker as defaultUpdateTracker,
   buildTrackerRow,
   TRACKER_PATH,
 } from "./tracker.js";
 import type { KronosTrackerRow } from "./tracker.js";
 import { EmployeeIdSchema } from "./schema.js";
-import { REPORTS_DIR, DEFAULT_START_DATE, DEFAULT_END_DATE } from "./config.js";
 
 /**
  * Module-scoped runtime state, initialized by `runParallelKronos` in `parallel.ts`
@@ -91,139 +88,8 @@ export type KronosItem = z.infer<typeof KronosItemSchema>;
 const kronosSteps = ["searching", "extracting", "downloading"] as const;
 
 /**
- * Run the kronos report download workflow for a single employee.
- *
- * Preserved as an exported helper (was the entire workflow body pre-migration).
- * The kernel handler below inlines the same control flow split across
- * `searching` / `extracting` / `downloading` ctx.step blocks, with `ctx.retry`
- * for the flaky Reports-iframe loads.
- *
- * Steps:
- * 1. Get the Genies iframe
- * 2. Search for employee by ID
- * 3. Click employee row, extract name
- * 4. Navigate to Reports via Go To
- * 5. Run Time Detail report and download PDF
- * 6. Validate PDF and update tracker
- * 7. Navigate back to dashboard
- */
-export async function runKronosForEmployee(
-  employeeId: string,
-  options: {
-    page: Page;
-    dateRangeSet?: boolean;
-    updateTrackerFn?: (filePath: string, data: KronosTrackerRow) => Promise<void>;
-    reportLock?: Mutex;
-    logPrefix?: string;
-    onStep?: (step: string) => void;
-    onData?: (data: Record<string, string>) => void;
-  },
-): Promise<void> {
-  const p = options.logPrefix;
-  const prefixed = (msg: string): string => (p ? `${p} ${msg}` : msg);
-  const writeTracker = options.updateTrackerFn ?? defaultUpdateTracker;
-  const page = options.page;
-  const reportsDir = REPORTS_DIR;
-
-  try {
-    const iframe = await getGeniesIframe(page);
-    await searchEmployee(page, iframe, employeeId);
-
-    const firstRow = iframe.locator("#row0genieGrid");
-    const rowExists = await firstRow.count() > 0;
-    const rowText = rowExists ? (await firstRow.innerText()).trim() : "";
-    if (!rowExists || !rowText || !rowText.includes(employeeId)) {
-      log.step(prefixed(`${employeeId} -> No matches were found on Kronos`));
-      await writeTracker(TRACKER_PATH, buildTrackerRow(
-        employeeId, "", "Done", "No matches were found on Kronos",
-      ));
-      return;
-    }
-
-    options.onStep?.("extracting");
-    const empName = await clickEmployeeRow(page, iframe, employeeId);
-    if (empName === false) {
-      log.step(prefixed(`${employeeId} -> Could not find row`));
-      await writeTracker(TRACKER_PATH, buildTrackerRow(
-        employeeId, "", "Done", "Could not find row",
-      ));
-      return;
-    }
-    const employeeName = empName ?? "";
-    options.onData?.({ name: employeeName });
-    log.step(prefixed(`Employee name: ${employeeName}`));
-
-    options.onStep?.("downloading");
-    const reportLock = options.reportLock;
-    let success = false;
-
-    const doReportFlow = async () => {
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        if (!await clickGoToReports(page, iframe)) {
-          log.step(prefixed(`${employeeId} -> Could not navigate to Reports`));
-          await writeTracker(TRACKER_PATH, buildTrackerRow(
-            employeeId, employeeName, "Failed", "Could not navigate to Reports",
-          ));
-          await goBackToMain(page);
-          return;
-        }
-
-        await page.waitForTimeout(5_000);
-        success = await handleReportsPage(page, employeeId, employeeName || null, reportsDir);
-
-        if (success) {
-          await goBackToMain(page);
-          return;
-        }
-
-        await goBackToMain(page);
-        if (attempt < 2) {
-          log.step(prefixed(`${employeeId} -> Retrying Reports navigation (attempt ${attempt + 1})...`));
-          await page.waitForTimeout(3_000);
-        }
-      }
-    };
-
-    if (reportLock) {
-      const release = await reportLock.acquire();
-      try { await doReportFlow(); } finally { release(); }
-    } else {
-      await doReportFlow();
-    }
-
-    if (success) {
-      await validateAndRecordTracker(employeeId, employeeName, reportsDir, p, writeTracker);
-    } else {
-      log.error(prefixed(`${employeeId} -> Report failed`));
-      await writeTracker(TRACKER_PATH, buildTrackerRow(
-        employeeId, employeeName, "Failed", "Report failed",
-      ));
-    }
-  } catch (error) {
-    const errMsg = errorMessage(error).slice(0, 100);
-    log.error(prefixed(`${employeeId} -> ERROR: ${errMsg}`));
-    try {
-      await writeTracker(TRACKER_PATH, buildTrackerRow(
-        employeeId, "", "Failed", errMsg,
-      ));
-    } catch { /* non-fatal */ }
-
-    try {
-      await goBackToMain(page);
-    } catch {
-      try {
-        const { UKG_URL } = await import("../../config.js");
-        await page.goto(UKG_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
-        await page.waitForTimeout(5_000);
-      } catch { /* give up recovery */ }
-    }
-  }
-}
-
-/**
- * Post-download validation + tracker row write. Extracted so both the legacy
- * `runKronosForEmployee` helper and the kernel handler share the same
- * "validate → write final tracker row" logic.
+ * Post-download validation + tracker row write. Used by the kernel handler's
+ * `downloading` step for the shared "validate → write final tracker row" logic.
  */
 async function validateAndRecordTracker(
   employeeId: string,
@@ -435,6 +301,3 @@ export const kronosReportsWorkflow = defineWorkflow({
     });
   },
 });
-
-// Re-exports kept for external callers (none production — legacy signature parity).
-export { DEFAULT_START_DATE, DEFAULT_END_DATE };

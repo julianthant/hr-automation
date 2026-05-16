@@ -127,22 +127,10 @@ export async function runOcrOrchestrator(
   const loadRosterFn = opts._loadRosterOverride ?? realLoadRoster;
   const watchChildren = opts._watchChildRunsOverride ?? realWatchChildRuns;
   const trackerBaseDir = trackerDir ?? ".tracker";
-  const legacyPageImagesDir = join(trackerBaseDir, "page-images", input.sessionId);
-  let pageImagesDir = legacyPageImagesDir;
-  let pageImagePad = 2;
-
-  if (input.pdfFileId) {
-    try {
-      const { isStateDbReady } = await import("../../tracker/state/db.js");
-      if (isStateDbReady(trackerBaseDir)) {
-        pageImagesDir = join(trackerBaseDir, "pdf-cache", input.pdfFileId);
-        pageImagePad = 3;
-      }
-    } catch {
-      pageImagesDir = legacyPageImagesDir;
-      pageImagePad = 2;
-    }
+  if (!input.pdfFileId) {
+    throw new Error("OCR: pdfFileId is required (legacy page-images path removed)");
   }
+  const pageImagesDir = join(trackerBaseDir, "pdf-cache", input.pdfFileId);
 
   const runOcr = opts._ocrPipelineOverride ?? (async ({ pdfPath, spec: s, preRenderedPages }: { pdfPath: string; formType: string; spec: AnyOcrFormSpec; sessionId: string; preRenderedPages?: string[] }) => {
     const result = await runOcrPipeline({
@@ -296,44 +284,23 @@ export async function runOcrOrchestrator(
     // 1b. Pre-render PDF pages so we know page count + can show the page
     // image in the Preview tab before OCR finishes.
     log.step(`[ocr] pre-rendering PDF pages so the Preview tab populates immediately`);
-    const { renderPdfPagesToPngs } = await import("../../services/ocr/render-pages.js");
-    let preRenderedPages: string[];
-    if (input.pdfFileId && pageImagePad === 3) {
-      const pdfFileId = input.pdfFileId;
-      try {
-        preRenderedPages = await raceOcrPrepWithDiscard(
-          id,
-          runId,
-          (async () => {
-            const { openStateDb } = await import("../../tracker/state/db.js");
-            const { ensurePdfPageCache } = await import("../../tracker/files/pdf-cache.js");
-            const cachedPages = await ensurePdfPageCache(openStateDb(trackerBaseDir), {
-              trackerDir: trackerBaseDir,
-              fileId: pdfFileId,
-              pdfPath: input.pdfPath,
-            });
-            return cachedPages
-              .filter((page) => page.status === "ready" && page.imagePath)
-              .map((page) => basename(page.imagePath!));
-          })(),
-        );
-      } catch (err) {
-        log.warn(`[ocr] PDF file cache unavailable, falling back to legacy page images: ${errorMessage(err)}`);
-        pageImagesDir = legacyPageImagesDir;
-        pageImagePad = 2;
-        preRenderedPages = await raceOcrPrepWithDiscard(
-          id,
-          runId,
-          renderPdfPagesToPngs(input.pdfPath, pageImagesDir),
-        );
-      }
-    } else {
-      preRenderedPages = await raceOcrPrepWithDiscard(
-        id,
-        runId,
-        renderPdfPagesToPngs(input.pdfPath, pageImagesDir),
-      );
-    }
+    const pdfFileId = input.pdfFileId;
+    const preRenderedPages = await raceOcrPrepWithDiscard(
+      id,
+      runId,
+      (async () => {
+        const { openStateDb } = await import("../../tracker/state/db.js");
+        const { ensurePdfPageCache } = await import("../../tracker/files/pdf-cache.js");
+        const cachedPages = await ensurePdfPageCache(openStateDb(trackerBaseDir), {
+          trackerDir: trackerBaseDir,
+          fileId: pdfFileId,
+          pdfPath: input.pdfPath,
+        });
+        return cachedPages
+          .filter((page) => page.status === "ready" && page.imagePath)
+          .map((page) => basename(page.imagePath!));
+      })(),
+    );
     const knownPageCount = preRenderedPages.length;
     log.success(`[ocr] rendered ${knownPageCount} page(s) — Preview tab now shows blank inputs ready to fill in`);
 
@@ -429,7 +396,7 @@ export async function runOcrOrchestrator(
         page: p.page,
         error: p.error ?? "unknown error",
         attemptedKeys: p.attemptedKeys,
-        pageImagePath: join(pageImagesDir, `page-${String(p.page).padStart(pageImagePad, "0")}.png`),
+        pageImagePath: join(pageImagesDir, `page-${String(p.page).padStart(3, "0")}.png`),
         attempts: 1,
       }));
     const pageStatusSummary = {

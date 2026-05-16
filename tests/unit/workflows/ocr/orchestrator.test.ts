@@ -4,26 +4,43 @@ import { mkdirSync, rmSync, readFileSync, existsSync, writeFileSync, readdirSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { WatchChildRunsOpts } from "../../../../src/tracker/delegation/watch-child-runs.js";
+import { openStateDb } from "../../../../src/tracker/state/db.js";
+import { registerLocalFile } from "../../../../src/tracker/files/files.js";
 import { runOcrOrchestrator } from "../../../../src/workflows/ocr/orchestrator.js";
 
-function setup(): { dir: string; uploadsDir: string; rosterPath: string } {
+function setup(): { dir: string; uploadsDir: string; rosterPath: string; pdfPath: string; pdfFileId: string } {
   const dir = join(tmpdir(), `ocr-orch-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
   const uploadsDir = join(dir, "uploads");
   mkdirSync(uploadsDir, { recursive: true });
   const rosterPath = join(dir, "roster.xlsx");
   writeFileSync(rosterPath, ""); // stubbed
-  return { dir, uploadsDir, rosterPath };
+  const pdfPath = join(uploadsDir, "test.pdf");
+  // Minimal valid PDF on disk so registerLocalFile can hash it (FK for pdf-cache rows).
+  writeFileSync(
+    pdfPath,
+    "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[]/Count 0>>endobj xref\n0 3\ntrailer<</Size 3/Root 1 0 R>>\nstartxref\n9\n%%EOF\n",
+  );
+  const db = openStateDb(dir);
+  const { fileId: pdfFileId } = registerLocalFile(db, {
+    kind: "pdf",
+    mimeType: "application/pdf",
+    path: pdfPath,
+    originalName: "test.pdf",
+    source: "ocr-orchestrator-test",
+  });
+  return { dir, uploadsDir, rosterPath, pdfPath, pdfFileId };
 }
 
 test("orchestrator emits pending → loading-roster → ocr → matching → done(awaiting-approval)", async () => {
-  const { dir, rosterPath } = setup();
+  const { dir, rosterPath, pdfPath, pdfFileId } = setup();
   const writtenEntries: object[] = [];
 
   await runOcrOrchestrator(
     {
-      pdfPath: "/tmp/fake.pdf",
+      pdfPath,
       pdfOriginalName: "fake.pdf",
+      pdfFileId,
       formType: "oath",
       sessionId: "session-1",
       rosterPath,
@@ -80,7 +97,7 @@ test("orchestrator emits pending → loading-roster → ocr → matching → don
 });
 
 test("orchestrator with previousRunId carries forward v1 EIDs", async () => {
-  const { dir, rosterPath } = setup();
+  const { dir, rosterPath, pdfPath, pdfFileId } = setup();
   // Pre-populate v1 history in JSONL
   const ocrFile = join(dir, "ocr-2026-05-01.jsonl");
   writeFileSync(ocrFile, JSON.stringify({
@@ -104,8 +121,9 @@ test("orchestrator with previousRunId carries forward v1 EIDs", async () => {
   let watchCalled = false;
   await runOcrOrchestrator(
     {
-      pdfPath: "/tmp/fake.pdf",
+      pdfPath,
       pdfOriginalName: "fake-v2.pdf",
+      pdfFileId,
       formType: "oath",
       sessionId: "session-1",
       rosterPath,
@@ -138,14 +156,15 @@ test("orchestrator with previousRunId carries forward v1 EIDs", async () => {
 });
 
 test("orchestrator uses SQLite dependencies for initial eid-lookup fan-out", async () => {
-  const { dir, rosterPath } = setup();
+  const { dir, rosterPath, pdfPath, pdfFileId } = setup();
   let watcherCalled = false;
   let dependencyBatchCreated = false;
 
   await runOcrOrchestrator(
     {
-      pdfPath: "/tmp/fake.pdf",
+      pdfPath,
       pdfOriginalName: "fake.pdf",
+      pdfFileId,
       formType: "oath",
       sessionId: "session-deps",
       rosterPath,
@@ -197,14 +216,15 @@ test("orchestrator uses SQLite dependencies for initial eid-lookup fan-out", asy
 });
 
 test("orchestrator waits for eid-lookup results before completing awaiting-approval", async () => {
-  const { dir, rosterPath } = setup();
+  const { dir, rosterPath, pdfPath, pdfFileId } = setup();
   const writtenEntries: object[] = [];
   let watcherCalled = false;
 
   await runOcrOrchestrator(
     {
-      pdfPath: "/tmp/fake.pdf",
+      pdfPath,
       pdfOriginalName: "fake.pdf",
+      pdfFileId,
       formType: "oath",
       sessionId: "session-wait-eid",
       rosterPath,
@@ -264,7 +284,7 @@ test("orchestrator waits for eid-lookup results before completing awaiting-appro
 });
 
 test("orchestrator patches child outcomes once when progress and final outcomes both include a failure", async () => {
-  const { dir, rosterPath } = setup();
+  const { dir, rosterPath, pdfPath, pdfFileId } = setup();
   const writtenEntries: object[] = [];
   const outcome = {
     workflow: "eid-lookup",
@@ -277,8 +297,9 @@ test("orchestrator patches child outcomes once when progress and final outcomes 
 
   await runOcrOrchestrator(
     {
-      pdfPath: "/tmp/fake.pdf",
+      pdfPath,
       pdfOriginalName: "fake.pdf",
+      pdfFileId,
       formType: "oath",
       sessionId: "session-single-patch",
       rosterPath,
@@ -324,13 +345,14 @@ test("orchestrator patches child outcomes once when progress and final outcomes 
 });
 
 test("orchestrator pre-emits delegated eid-lookup pending rows before daemon auth", async () => {
-  const { dir, rosterPath } = setup();
+  const { dir, rosterPath, pdfPath, pdfFileId } = setup();
   const writtenEntries: object[] = [];
 
   await runOcrOrchestrator(
     {
-      pdfPath: "/tmp/fake.pdf",
+      pdfPath,
       pdfOriginalName: "fake.pdf",
+      pdfFileId,
       formType: "oath",
       sessionId: "session-preemit-eid",
       rosterPath,
@@ -382,14 +404,15 @@ test("orchestrator pre-emits delegated eid-lookup pending rows before daemon aut
 });
 
 test("orchestrator dispatches eid-lookup by EID when roster supplies a UCPath employee id", async () => {
-  const { dir, rosterPath } = setup();
+  const { dir, rosterPath, pdfPath, pdfFileId } = setup();
   const writtenEntries: object[] = [];
   let eidLookupItems: Array<{ name?: string; emplId?: string; itemId: string }> = [];
 
   await runOcrOrchestrator(
     {
-      pdfPath: "/tmp/fake.pdf",
+      pdfPath,
       pdfOriginalName: "fake.pdf",
+      pdfFileId,
       formType: "oath",
       sessionId: "session-active",
       rosterPath,
@@ -447,13 +470,14 @@ test("orchestrator dispatches eid-lookup by EID when roster supplies a UCPath em
 });
 
 test("orchestrator treats non-UCPath employee ids as missing and falls back to name lookup", async () => {
-  const { dir, rosterPath } = setup();
+  const { dir, rosterPath, pdfPath, pdfFileId } = setup();
   let eidLookupItems: Array<{ name?: string; emplId?: string; itemId: string }> = [];
 
   await runOcrOrchestrator(
     {
-      pdfPath: "/tmp/fake.pdf",
+      pdfPath,
       pdfOriginalName: "fake.pdf",
+      pdfFileId,
       formType: "oath",
       sessionId: "session-invalid-eid",
       rosterPath,
@@ -496,15 +520,16 @@ test("orchestrator treats non-UCPath employee ids as missing and falls back to n
 });
 
 test("orchestrator records SQLite dependencies for eid-lookup fan-out (verify-by-EID)", async () => {
-  const { dir, rosterPath } = setup();
+  const { dir, rosterPath, pdfPath, pdfFileId } = setup();
   const runId = "00000000-0000-4000-8000-0000000000ab";
   let watcherCalled = false;
   let dependencyBatchCreated = false;
 
   await runOcrOrchestrator(
     {
-      pdfPath: "/tmp/fake.pdf",
+      pdfPath,
       pdfOriginalName: "fake.pdf",
+      pdfFileId,
       formType: "oath",
       sessionId: "session-active-deps",
       rosterPath,
@@ -557,13 +582,14 @@ test("orchestrator records SQLite dependencies for eid-lookup fan-out (verify-by
 });
 
 test("orchestrator uses LLM suggestion EIDs but enqueues only OCR name when fuzzy roster matching has no candidates", async () => {
-  const { dir, rosterPath } = setup();
+  const { dir, rosterPath, pdfPath, pdfFileId } = setup();
   let eidLookupItems: Array<{ name?: string; emplId?: string; itemId: string }> = [];
 
   await runOcrOrchestrator(
     {
-      pdfPath: "/tmp/fake.pdf",
+      pdfPath,
       pdfOriginalName: "fake.pdf",
+      pdfFileId,
       formType: "oath",
       sessionId: "session-suggestions",
       rosterPath,
@@ -608,13 +634,14 @@ test("orchestrator uses LLM suggestion EIDs but enqueues only OCR name when fuzz
 });
 
 test("orchestrator collapses lookup name variants to the candidate with the most words", async () => {
-  const { dir, rosterPath } = setup();
+  const { dir, rosterPath, pdfPath, pdfFileId } = setup();
   let eidLookupItems: Array<{ name?: string; emplId?: string; itemId: string }> = [];
 
   await runOcrOrchestrator(
     {
-      pdfPath: "/tmp/fake.pdf",
+      pdfPath,
       pdfOriginalName: "fake.pdf",
+      pdfFileId,
       formType: "oath",
       sessionId: "session-name-variants",
       rosterPath,
@@ -659,13 +686,14 @@ test("orchestrator collapses lookup name variants to the candidate with the most
 });
 
 test("orchestrator falls back to watchChildRuns when dependency creation fails", async () => {
-  const { dir, rosterPath } = setup();
+  const { dir, rosterPath, pdfPath, pdfFileId } = setup();
   let watcherCalled = false;
 
   await runOcrOrchestrator(
     {
-      pdfPath: "/tmp/fake.pdf",
+      pdfPath,
       pdfOriginalName: "fake.pdf",
+      pdfFileId,
       formType: "oath",
       sessionId: "session-fallback",
       rosterPath,
@@ -708,7 +736,7 @@ test("orchestrator falls back to watchChildRuns when dependency creation fails",
 });
 
 test("orchestrator uses watcher fallback when OCR_SQLITE_DEPENDENCIES is disabled", async () => {
-  const { dir, rosterPath } = setup();
+  const { dir, rosterPath, pdfPath, pdfFileId } = setup();
   const previous = process.env.OCR_SQLITE_DEPENDENCIES;
   process.env.OCR_SQLITE_DEPENDENCIES = "0";
   let watcherCalled = false;
@@ -717,8 +745,9 @@ test("orchestrator uses watcher fallback when OCR_SQLITE_DEPENDENCIES is disable
   try {
     await runOcrOrchestrator(
       {
-        pdfPath: "/tmp/fake.pdf",
+        pdfPath,
         pdfOriginalName: "fake.pdf",
+        pdfFileId,
         formType: "oath",
         sessionId: "session-env-fallback",
         rosterPath,
@@ -769,13 +798,14 @@ test("orchestrator uses watcher fallback when OCR_SQLITE_DEPENDENCIES is disable
 });
 
 test("rosterMode=download delegates to sharepoint-download via watchChildRuns", async () => {
-  const { dir, uploadsDir } = setup();
+  const { dir, uploadsDir, pdfPath, pdfFileId } = setup();
   let watchWorkflow = "";
 
   await runOcrOrchestrator(
     {
-      pdfPath: "/tmp/fake.pdf",
+      pdfPath,
       pdfOriginalName: "fake.pdf",
+      pdfFileId,
       formType: "oath",
       sessionId: "session-sp",
       rosterMode: "download",
@@ -813,13 +843,14 @@ test("rosterMode=download delegates to sharepoint-download via watchChildRuns", 
 });
 
 test("orchestrator surfaces failedPages and pageStatusSummary on awaiting-approval", async () => {
-  const { dir, rosterPath } = setup();
+  const { dir, rosterPath, pdfPath, pdfFileId } = setup();
   const writtenEntries: object[] = [];
 
   await runOcrOrchestrator(
     {
-      pdfPath: "/tmp/fake.pdf",
+      pdfPath,
       pdfOriginalName: "fake.pdf",
+      pdfFileId,
       formType: "oath",
       sessionId: "session-fp-1",
       rosterPath,

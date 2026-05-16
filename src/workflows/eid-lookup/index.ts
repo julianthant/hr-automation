@@ -9,11 +9,7 @@ export {
   type LookupResult,
 } from "./workflow.js";
 export {
-  EidLookupInputSchema,
-  EidLookupCrmInputSchema,
   EidLookupItemSchema,
   normalizeName,
-  type EidLookupInput,
-  type EidLookupCrmInput,
   type EidLookupItem,
 } from "./schema.js";
