@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from "fs";
-import { mkdir, rmdir } from "fs/promises";
+import { mkdir, rmdir, stat } from "fs/promises";
 import { setTimeout as delay } from "timers/promises";
 import { cancelInProcessRun } from "../../../core/daemon/in-process-runs.js";
 import { queueFilePath, queueLockDirPath } from "../../../core/daemon/queue.js";
@@ -14,6 +14,7 @@ import {
   emitDashboardCancelRequestedLog,
   currentAttemptWorker,
 } from "./shared.js";
+import { log } from "../../../utils/log.js";
 
 export interface CancelQueuedRequest {
   workflow: string;
@@ -56,6 +57,7 @@ async function withQueueLock<T>(
   body: () => Promise<T>,
 ): Promise<T> {
   const lockDir = queueLockDirPath(workflow, dir);
+  const STALE_AFTER_MS = 30_000;
   const start = Date.now();
   // Match the timing characteristics of claimNextItem (10 attempts × 100ms = 1s).
   for (let i = 0; i < 30; i++) {
@@ -69,6 +71,17 @@ async function withQueueLock<T>(
     } catch (err: unknown) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "EEXIST") {
+        try {
+          const st = await stat(lockDir);
+          const ageMs = Date.now() - st.mtimeMs;
+          if (ageMs > STALE_AFTER_MS) {
+            log.warn(`cancel.withQueueLock: reclaiming stale lockDir ${lockDir} (age=${Math.round(ageMs)}ms)`);
+            await rmdir(lockDir).catch(() => {});
+            continue;
+          }
+        } catch {
+          /* fall through to the normal acquisition backoff */
+        }
         if (Date.now() - start > 5_000) {
           throw new Error("queue lock acquisition timed out", { cause: err });
         }
