@@ -84,7 +84,10 @@ export class SseHub {
     };
     es.onerror = () => {
       for (const sub of this.subs.values()) sub.onError?.();
-      // Browser EventSource auto-reconnects; we do not manually rebuild on error.
+      if (es.readyState === EventSource.CLOSED) {
+        // The browser gave up entirely; rebuild through the normal batched path.
+        this.scheduleRebuild();
+      }
     };
     this.es = es;
   }

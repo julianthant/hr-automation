@@ -11,6 +11,7 @@ interface MockEventSourceInstance {
   url: string;
   onmessage: ((ev: { data: string }) => void) | null;
   onerror: (() => void) | null;
+  readyState: number;
   closed: boolean;
   close(): void;
 }
@@ -20,9 +21,11 @@ let lastInstance: MockEventSourceInstance | null = null;
 const allInstances: MockEventSourceInstance[] = [];
 
 class MockEventSource implements MockEventSourceInstance {
+  static CLOSED = 2;
   url: string;
   onmessage: ((ev: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
+  readyState = 0;
   closed = false;
 
   constructor(url: string) {
@@ -211,6 +214,21 @@ test("9. onError callback fires when EventSource onerror triggers; fires once pe
 
   unsub1();
   unsub2();
+});
+
+test("9b. CLOSED EventSource errors rebuild the hub connection", async () => {
+  hub.subscribe("entries", {}, () => {});
+  await flushMicrotasks();
+  assert.equal(constructorCallCount, 1);
+  const firstInstance = lastInstance!;
+
+  firstInstance.readyState = MockEventSource.CLOSED;
+  firstInstance.onerror!();
+  await flushMicrotasks();
+
+  assert.equal(constructorCallCount, 2);
+  assert.equal(firstInstance.closed, true);
+  assert.notEqual(lastInstance, firstInstance);
 });
 
 test("10. unsubscribing the last sub closes the EventSource and sets es to null", async () => {
