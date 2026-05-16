@@ -2,9 +2,9 @@
 
 Searches UCPath Person Organizational Summary for employees by name, filters for SDCMP business unit + HDH-accepted departments (Housing / Dining / Hospitality keyword match), with CRM cross-verification.
 
-**Kernel-based (daemon mode only).** One active `defineWorkflow` definition: `eidLookupCrmWorkflow` (UCPath + CRM, 2 steps — `searching` → `cross-verification`). This is the only variant wired to the CLI and daemon registry. The three other variants (`eidLookupWorkflow`, `eidLookupI9Workflow`, `eidLookupCrmI9Workflow`) were removed 2026-04-28.
+**Kernel-based (daemon mode only).** One active `defineWorkflow`: `eidLookupCrmWorkflow` (UCPath + CRM). Handler steps: `searching` → `cross-verification` (skipped for `{ emplId }` inputs) → **`active-status`** (Person Org disposition / HDH rules — same outcome derivation as standalone Active Check). This variant is wired to the CLI, daemon registry, and `WORKFLOW_LOADERS`.
 
-`eidLookupCrmWorkflow` is still imported by `src/workflows/oath-signature/prepare.ts` and `src/workflows/emergency-contact/prepare.ts` for cross-workflow EID enqueue — that import is preserved.
+Downstream prep flows (OCR orchestrator, etc.) enqueue `{ emplId }` items into this workflow for verify-only lookups — they import `eidLookupCrmWorkflow` / `runEidLookupCli` from this package, not deleted `prepare.ts` shims.
 
 Each CLI invocation enqueues N names as N kernel items to an alive daemon (session is reused so no re-Duo between items). Each name produces its own `pending → running → done/failed` tracker row with per-step timing.
 
@@ -22,11 +22,12 @@ This workflow touches two systems: **ucpath** and **crm**.
 
 ## Files
 
-- `schema.ts` — Zod schemas + `normalizeName` (title-case "Last, First Middle" normalizer). `EidLookupItemSchema` = per-kernel-item shape (`{ name }`).
-- `search.ts` — Multi-strategy name search (`searchByName`, `parseNameInput`): "Last, First Middle" → tries full → first → middle, drills into SDCMP candidates, then applies `isAcceptedDept` (HDH keyword whitelist: housing / dining / hospitality) to narrow to the accepted subset. Kernel-agnostic.
-- `crm-search.ts` — CRM cross-verification helpers (`searchCrmByName`, `datesWithinDays`): last/first name search, extracts PPS ID + UCPath EID + hire date + dept, ±7 day date matching. Kernel-agnostic.
-- `workflow.ts` — Kernel definition (`eidLookupCrmWorkflow`) + step helpers (`searchingStep`, `crossVerificationStep`) + CLI adapter `runEidLookupCli` (daemon-mode default). Also `dedupeNames` + `prepareNames` (normalize + dedupe).
+- `schema.ts` — Zod per-item schemas (`EidLookupNameInputSchema` / `EidLookupEidInputSchema`) + `EidLookupItemSchema` union; `normalizeName` helper.
+- `crm-search.ts` — CRM cross-verification helpers (`searchCrmByName`, `datesWithinDays`).
+- `workflow.ts` — Kernel definition (`eidLookupCrmWorkflow`), `searchingStep`, `crossVerificationStep`, `activeStatusStep`, `runEidLookupCli`, `prepareNames` / `dedupeNames` exports.
 - `index.ts` — Barrel exports.
+
+Person Org search + HDH acceptance logic lives in **`src/systems/ucpath/person-org-summary.ts`** (`searchByName`, `searchByEid`, filters) — not a `search.ts` file in this folder.
 
 No `tracker.ts` — dashboard JSONL only. The xlsx tracker was removed on 2026-04-21 (see Lessons Learned).
 
@@ -35,15 +36,17 @@ No `tracker.ts` — dashboard JSONL only. The xlsx tracker was removed on 2026-0
 | Field | Value |
 |-------|-------|
 | `systems` | `[ucpath, crm]` |
-| `steps` | `["searching", "cross-verification"]` |
-| `schema` | `EidLookupItemSchema` (`{ name }`) |
+| `steps` | `["searching", "cross-verification", "active-status"]` |
+| `schema` | `EidLookupItemSchema` — `{ name, ... }` **or** `{ emplId, ... }` |
 | `authSteps` | `true` — kernel prepends `auth:ucpath`, `auth:crm` |
 | `authChain` | `"sequential"` |
 | `tiling` | `"auto"` |
 | `batch` | `{ mode: "shared-context-pool", poolSize: 4, preEmitPending: true }` |
-| `detailFields` | `searchName, emplId, department, crmMatch` |
+| `detailFields` | `searchName`, `emplId`, `department`, `hrStatus`, `effdt`, `terminationDate` (declared keys — see `workflow.ts`) |
 | `getName` / `getId` | `d.searchName` |
-| `initialData` | `{ searchName: input.name }` |
+| `initialData` | Name path: `{ searchName: normalizeName(name) }`; EID path: `{ searchName: emplId, emplId }` |
+
+**`crmMatch`**, **`crmMatchedEmplId`**, and the **active-check overlay fields** (`activeStatus`, `isActive`, `isHdhAccepted`, `candidateEids`, `expectedJobEndDate`, …) are written via `ctx.updateData` in the step helpers — useful in JSONL / dashboards — but are **not** listed in `detailFields` (avoids “declared but optional” grid noise).
 
 ## Data Flow
 
@@ -77,10 +80,10 @@ CLI: npm run eid-lookup "Last, First Middle" [...] [--new] [--parallel N]
 ## Dashboard integration
 
 - Workflow name: `eid-lookup`
-- Steps (per-item): `auth:ucpath` → `auth:crm` → `searching` → `cross-verification`.
+- Steps (per-item): `auth:ucpath` → `auth:crm` → `searching` → `cross-verification` (skipped when input is `{ emplId }`) → **`active-status`**.
   - `authSteps: true` → the kernel prepends per-system `auth:<systemId>` step labels to the visible pipeline. Actual auth timing is **captured once per batch** by a `SessionObserver` wired via `withBatchLifecycle`, then injected into each item's tracker rows as synthetic pre-handler `running` entries with the real `onAuthStart` timestamp. The pool runs auth ONCE but every per-item row tiles exactly to elapsed with accurate per-system durations.
 - **Batch instance:** Every item in a batch shares a single workflow instance (e.g. `EID Lookup 1`). `runWorkflowSharedContextPool` emits exactly one `workflow_start` + one `workflow_end(done|failed)` per CLI invocation. The dashboard session drawer therefore shows ONE row per batch, not N.
-- Detail fields: `searchName, emplId, department, crmMatch`.
+- Detail fields: see `detailFields` in `workflow.ts` — excludes `crmMatch` / active-status extras (those are tracker `updateData` fields for orchestration and OCR panes).
 - Item ID on the dashboard = the searched name (deduped). `__name` / `__id` seeded on the initial pending row via `onPreEmitPending` so the row reads correctly before `searching` runs.
 
 ## Name Search Strategy
@@ -115,8 +118,8 @@ After each successful strategy the SDCMP candidate list is drilled into to fill 
 - **2026-04-22: Daemon mode + HDH dept filter + name normalization.** Three bugs surfaced after the first live `zaw, hein thant` lookup: (1) the CLI didn't run in daemon mode — every invocation re-Duo'd UCPath + CRM; (2) the dashboard showed "zaw, hein thant" verbatim; (3) UCPath surfaced an old QUALCOMM INSTITUTE appointment (EID 10417041, ended 08/12/2020) as if it were the active match even though CRM had the correct current-HDH EID (10848110). Root causes + fixes:
   - **Daemon mode**: added `runEidLookupCli` adapter and registered `"eid-lookup": eidLookupCrmWorkflow` in `src/cli-daemon.ts::WORKFLOWS`. The daemon hard-wires the CRM-on variant because `Session` systems are fixed at spawn. The `--no-crm` and `--i9` variant flags and the legacy `runEidLookup` adapter were removed 2026-04-28 — only daemon mode remains.
   - **Name normalization**: `normalizeName(raw)` in `schema.ts` title-cases "Last, First Middle" and canonicalizes the separator to `", "`. Applied via `prepareNames` (= `map(normalizeName) → dedupeNames`). UCPath/CRM forms are case-insensitive so title-casing doesn't affect matching; the win is on display (`searchName`), the `deriveItemId` key, and dedupe (case-insensitive duplicates now collapse).
-  - **HDH dept filter**: the old filter was `r.businessUnit === "SDCMP"` which is BU-level, not dept-level — QUALCOMM INSTITUTE is SDCMP so it passed. Added `isAcceptedDept(dept)` in `search.ts` (keyword whitelist: `housing | dining | hospitality`, substring, case-insensitive). `searchByName` now drills into every SDCMP candidate to populate dept, then filters by `isAcceptedDept`. Rejected rows are logged (`"Filtered out 2 non-HDH SDCMP result(s): EID … (QUALCOMM INSTITUTE), …"`). This ALSO fixes the "CRM match = none" display: when `sdcmp.length === 0` after the HDH filter, `crossVerificationStep`'s CRM-only branch fires, stamps the CRM-sourced EID, and sets `crmMatch: "crm-only"` instead of `"none"`.
+  - **HDH dept filter**: the old filter was `r.businessUnit === "SDCMP"` which is BU-level, not dept-level — QUALCOMM INSTITUTE is SDCMP so it passed. Keyword acceptance now lives in the Person Org search path (`searchByName` / related helpers in `src/systems/ucpath/person-org-summary.ts`). Rejected rows are logged (`"Filtered out 2 non-HDH SDCMP result(s): EID … (QUALCOMM INSTITUTE), …"`). This ALSO fixes the "CRM match = none" display: when `sdcmp.length === 0` after the HDH filter, `crossVerificationStep`'s CRM-only branch fires, stamps the CRM-sourced EID, and sets `crmMatch: "crm-only"` instead of `"none"`.
 - **2026-04-22: `--i9` Section 2 signer lookup** (removed 2026-04-28). Added two kernel variants (`eidLookupI9Workflow`, `eidLookupCrmI9Workflow`) and `i9SignerStep` delegating to `src/systems/i9/signer.ts::lookupSection2Signer`. These variants and the `--i9` CLI flag were removed along with the rest of the variant flags. If I-9 signer lookup is needed again, add a separate daemon workflow shape.
 - **2026-04-21: Batch-level instance + injected authTimings.** Shared-context-pool now runs inside `withBatchLifecycle` (`src/core/batch-lifecycle.ts`). One `workflow_start` / `workflow_end` per batch instead of N. A single `SessionObserver` captures `authTimings` during `Session.launch`; those timings are passed to every `runOneItem` call and become synthetic pre-handler `running` entries (`auth:ucpath`, `auth:crm`) with real start timestamps. Sum of step durations now tiles exactly to the per-item elapsed. SIGINT mid-batch fans out `failed` tracker rows for every un-terminated item and emits one `workflow_end(failed)`. `authSteps` was always `true` in code — earlier doc listed `false`, which was wrong.
 - **2026-04-21: Shared-context-pool + xlsx removal.** Replaced the handler-side `runWorkerPool` with the kernel's new `batch.mode: "shared-context-pool"`. TData is now `{ name: string }` — one kernel item per name, one dashboard row per name, same "1 Duo per system, N tabs" browser topology. CRM cross-verification moved inside the per-item handler (was a post-pool pass). Excel tracker (`tracker.ts` + `eid-lookup-tracker.xlsx`) fully removed — JSONL + dashboard are the only observability. `async-mutex` use dropped with the xlsx writes. Kernel addition: `Session.forWorker(parent)` + lazy `page(id)` branch + `closeWorkerPages()`. **Live run pending user verification** — UCPath + CRM Duo can't be approved this session; dry-run + unit tests validate this migration.
-- **2026-04-17: Migrated to kernel (historical).** First kernel cut used `runWorkerPool` inside `ctx.step("searching", ...)` as a helper. One workflow run per CLI invocation; per-name JSONL rows were the "Acceptable regression" closed by the 2026-04-21 change. Left here to explain why `search.ts` / `crm-search.ts` are kernel-agnostic helpers (they were authored before the kernel existed and survive the 2026-04-21 rewrite untouched).
+- **2026-04-17: Migrated to kernel (historical).** First kernel cut used `runWorkerPool` inside a single step. One workflow run per CLI invocation; per-name JSONL rows were the "Acceptable regression" closed by the 2026-04-21 shared-context-pool rewrite. Helpers in `crm-search.ts` and `person-org-summary.ts` remain shared utilities.

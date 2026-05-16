@@ -6,7 +6,7 @@ Downloads Time Detail PDF reports from Old Kronos (UKG) for multiple employees i
 
 ## What this workflow does
 
-Given a `batch.yaml` with employee IDs, the kernel launches N worker Sessions (default 4, overridable via `--workers N` → `RunOpts.poolSize`); each worker authenticates to UKG with its own Duo MFA, then the pool fans out employee IDs across workers, running queue-based Time Detail downloads with mutex-serialized Reports navigation and `ctx.retry`-wrapped flaky iframe loads. Each PDF is validated (size, no-data check, name/ID match) and a row is appended to the Excel tracker.
+Given a `batch.yaml` with employee IDs, the kernel launches N worker Sessions (default 4, overridable via **`npm run kronos -- --workers N`** → `RunOpts.poolSize`, or `DEFAULT_WORKERS` in `config.ts`); each worker authenticates to UKG with its own Duo MFA, then the pool fans out employee IDs across workers, running queue-based Time Detail downloads with mutex-serialized Reports navigation and `ctx.retry`-wrapped flaky iframe loads. Each PDF is validated (size, no-data check, name/ID match) and a row is appended to the Excel tracker.
 
 ## Selector intelligence
 
@@ -38,7 +38,7 @@ This workflow touches one system: **old-kronos** (UKG, Genies iframe).
 | `schema` | `KronosItemSchema = z.object({ employeeId })` — each queue entry |
 | `tiling` | `"single"` — each worker Session has one browser |
 | `authChain` | `"sequential"` — one system per worker, sequential by definition |
-| `batch` | `{ mode: "pool", poolSize: 4, preEmitPending: true }` — runtime `poolSize` override from `--workers N` wins |
+| `batch` | `{ mode: "pool", poolSize: 4, preEmitPending: true }` — CLI `--workers N` sets `RunOpts.poolSize` at runtime |
 | `detailFields` | `[{ key: "name", label: "Employee" }, { key: "id", label: "ID" }]` |
 | `getName` | `(d) => d.name ?? ""` |
 | `getId` | `(d) => d.id ?? ""` |
@@ -83,7 +83,7 @@ CLI: npm run kronos [-- --start-date ... --end-date ...]
 
 ## Worker count
 
-Default pool size: `4` (from `wf.config.batch.poolSize`). `RunOpts.poolSize` can override it if `runWorkflowBatch` is called programmatically. The `--workers N` CLI flag was removed 2026-04-28; to change the default, edit `DEFAULT_WORKERS` in `config.ts`.
+Default pool size: `4` (from `wf.config.batch.poolSize`). **`npm run kronos -- --workers N`** passes `N` into `runParallelKronos` → `RunOpts.poolSize` (overrides default for that invocation). Programmatic callers can pass `poolSize` on `runWorkflowBatch` the same way. To change the default when no flag is passed, edit `DEFAULT_WORKERS` in `config.ts`.
 
 ## Gotchas
 
@@ -106,4 +106,4 @@ UKG selectors live in `src/systems/old-kronos/selectors.ts`. This workflow uses 
 
 - **2026-05-16: Deleted `runKronosForEmployee` + removed `DEFAULT_START_DATE`/`DEFAULT_END_DATE` re-exports from `workflow.ts`.** `runKronosForEmployee` was a pre-migration helper preserved for "external callers" — grep confirmed zero callers outside the module. `validateAndRecordTracker` (the shared post-download validation helper) was NOT deleted — it is still used by the kernel handler's `downloading` step. The date constant re-exports through `workflow.ts` were dead; `parallel.ts` imports both names directly from `./config.ts`.
 - **2026-04-17: Migrated to kernel (pool mode).** `runParallelKronos` is now a CLI adapter over `runWorkflowBatch(kronosReportsWorkflow, items, { poolSize, launchFn, onPreEmitPending })`. Per-worker sessionDir is handled via `opts.launchFn` injection — the kernel's public surface is unchanged. Module-scoped `kronosRuntime` carries the mutexes + date range + reports dir because Zod can't validate `Mutex` instances. Dashboard metadata auto-registers from `defineWorkflow` (the obsolete standalone registration call was removed from `index.ts`). `ctx.retry` replaces the old inline 2-attempt Reports-nav retry. Workflow name stays `"kronos-reports"` (the directory is `old-kronos-reports` but the workflow name matches existing JSONL filenames). **Live-run pending user verification** — 4 parallel Duo approvals can't be exercised this session; only dry-runs + tests validate the migration. Don't reintroduce raw `launchBrowser` / `withTrackedWorkflow` / `withLogContext` in the workflow or CLI adapter — those live in the kernel now.
-- **2026-04-17: `RunOpts.poolSize` runtime override** — added a kernel-level `poolSize?: number` on `RunOpts` so `npm run kronos -- --workers N` can override the workflow's `batch.poolSize` default without redefining the workflow. `runWorkflowPool` reads `opts.poolSize ?? wf.config.batch?.poolSize ?? 4`. Covered by two tests in `tests/unit/core/pool.test.ts` + two workflow-level tests in `tests/unit/workflows/old-kronos-reports/workflow.test.ts`.
+- **2026-04-17 / 2026-05-16: Worker count configuration.** `RunOpts.poolSize` lets callers override the workflow's `batch.poolSize` default. **`npm run kronos -- --workers N`** maps to that override via `src/cli.ts`. `runWorkflowPool` reads `opts.poolSize ?? wf.config.batch?.poolSize ?? 4`. Covered by tests in `tests/unit/core/pool.test.ts` + `tests/unit/workflows/old-kronos-reports/workflow.test.ts`.

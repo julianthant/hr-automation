@@ -8,13 +8,12 @@ A from-scratch walkthrough of how the codebase is wired. Assumes zero prior cont
 2. [The three-layer split](#2-the-three-layer-split)
 3. [What is `Ctx`?](#3-what-is-ctx)
 4. [The kernel internals](#4-the-kernel-internals)
-5. [Run modes: single, sequential batch, pool](#5-run-modes-single-sequential-batch-pool)
+5. [Run modes: single, sequential batch, pool, daemon](#5-run-modes-single-sequential-batch-pool-daemon)
 6. [Auth chains (sequential vs interleaved)](#6-auth-chains-sequential-vs-interleaved)
 7. [Tracker + Dashboard (observability)](#7-tracker--dashboard-observability)
-8. [Reliability primitives: idempotency & step-cache](#8-reliability-primitives-idempotency--step-cache)
-9. [Systems + Selector Intelligence](#9-systems--selector-intelligence)
-10. [End-to-end: one onboarding, step by step](#10-end-to-end-one-onboarding-step-by-step)
-11. [Glossary](#11-glossary)
+8. [Systems + Selector Intelligence](#8-systems--selector-intelligence)
+9. [End-to-end: one onboarding, step by step](#9-end-to-end-one-onboarding-step-by-step)
+10. [Glossary](#10-glossary)
 
 ---
 
@@ -62,16 +61,25 @@ src/
 │   ├── old-kronos/    ←   UKG Kronos Time Detail PDFs
 │   └── common/    ←   safeClick, safeFill, dismissPeopleSoftModalMask
 ├── workflows/     ← COMPOSED WORKFLOWS: each is defineWorkflow(...) + CLI adapter
-│   ├── onboarding/
-│   ├── separations/
-│   ├── eid-lookup/
-│   ├── old-kronos-reports/
-│   ├── work-study/
-│   └── emergency-contact/
-├── auth/          ← Per-system login flows + Duo polling + SSO fields
-├── browser/       ← launchBrowser, CDP-based tiling math (kernel-internal)
+│   ├── onboarding/          ← CRM + UCPath + I9
+│   ├── separations/         ← Kuali + Old/New Kronos + UCPath
+│   ├── eid-lookup/          ← UCPath + optional CRM
+│   ├── old-kronos-reports/  ← UKG Time Detail PDFs
+│   ├── work-study/          ← UCPath PayPath
+│   ├── emergency-contact/   ← UCPath
+│   ├── oath-signature/      ← UCPath
+│   ├── oath-upload/         ← ServiceNow + OCR + delegation
+│   ├── active-check/        ← UCPath
+│   ├── crm-doc-download/    ← CRM iDocs PDFs
+│   ├── sharepoint-download/ ← SharePoint roster files
+│   └── ocr/                 ← OCR engine (dashboard HTTP only)
+├── infra/         ← Runtime infrastructure
+│   ├── infra/auth/     ← Per-system login flows + Duo polling + SSO fields
+│   └── infra/browser/  ← launchBrowser, CDP-based tiling math (kernel-internal)
+├── services/      ← Reusable IO/stateful primitives (capture, matching, ocr)
+├── domain/        ← Business concepts: identity, operator-subject, log-events, hdh
 ├── tracker/       ← JSONL append + SSE dashboard server + Excel export
-├── dashboard/     ← React SPA (Vite + HeroUI) — reads SSE, renders queue + logs
+├── dashboard/     ← React SPA (Vite + shadcn/ui) — reads SSE, renders queue + logs
 ├── utils/         ← env, errors, log (AsyncLocalStorage), pii, screenshot, worker-pool
 ├── scripts/       ← selector catalog generator, fuzzy search, clean-tracker, setup
 ├── cli.ts         ← Commander entry point
@@ -126,10 +134,14 @@ export interface Ctx<TSteps extends readonly string[], TData> {
   page(id: string): Promise<Page>          // get a Playwright Page (auth-ready-aware)
   step<R>(name, fn: () => Promise<R>): Promise<R>  // wrap work in a named step
   markStep(name): void                      // announce-only step transition
+  skipStep(name): void                      // mark step skipped (distinct from markStep — shows "skipped" treatment in dashboard pipeline)
   parallel(tasks): PromiseSettledResult<…>  // allSettled fan-out
   parallelAll(tasks): Awaited<…>            // Promise.all fan-out
   retry<R>(fn, opts?): Promise<R>           // linear-backoff retry
   updateData(patch): void                   // push fields into the dashboard row
+  data: Partial<TData>                      // current merged data (prefilled + updateData patches)
+  screenshot(label: string): Promise<void>  // take a debug screenshot, saved to .screenshots/
+  captureAndStampScreenshot(page, label): Promise<string | null>  // screenshot + stamp with label overlay
   session: SessionHandle                    // escape hatch to raw Session
   log: typeof log                           // colored console + JSONL
   isBatch: boolean                          // are we inside a batch run?
@@ -448,7 +460,7 @@ The **type parameters** are important: `TSteps extends readonly string[]` is a t
 
 ---
 
-## 5. Run modes: single, sequential batch, pool
+## 5. Run modes: single, sequential batch, pool, daemon
 
 Three entry points. Same handler shape. Different orchestration.
 
@@ -522,6 +534,35 @@ Used by: `separations` (4 systems, 1 Duo per system up front, then sequential do
 Used by: `onboarding` (parallel mode), `old-kronos-reports`.
 
 **Important property:** pool-mode gives you N sessions = N×M Duo prompts (M systems per workflow). Onboarding with `poolSize: 4` = 4 workers × 2 Duos (CRM + UCPath, I9 has no Duo) = 8 Duo approvals at startup.
+
+### Mode 4: Daemon mode — persistent long-lived worker processes
+
+Production default for all CLI-exposed workflows since 2026-04-22.
+
+```
+Operator runs: npm run onboarding alice@ucsd.edu
+  → No alive daemon? Spawn one detached (tsx src/cli-daemon.ts onboarding)
+  → Daemon authenticates once (CRM Duo + UCPath Duo)
+  → Item enqueued to SQLite tasks table (.tracker/state.db)
+  → Daemon claims item via UPDATE … RETURNING (atomic claim)
+  → Daemon processes item using runOneItem (same kernel primitive as runWorkflow)
+  → Daemon stays alive, polling for next item
+
+Operator runs: npm run onboarding bob@ucsd.edu (daemon already alive)
+  → Item enqueued to SQLite tasks table
+  → POST /wake to all alive daemons
+  → Daemon claims and processes — no re-Duo
+```
+
+**Key properties:**
+- Auth-once per session: Duo is paid at daemon start, then amortized across all subsequent items.
+- Load balancing: multiple alive daemons race to claim the next SQLite task row — no coordinator needed.
+- Keepalive: every 15 min idle, each daemon runs `session.healthCheck(system)` per system to prevent SAML expiry.
+- Graceful drain: `:stop` scripts set a stop signal; daemons finish in-flight work and exit.
+
+Workflows registered for daemon mode (as of 2026-05-16): `separations`, `work-study`, `eid-lookup`, `onboarding`, `oath-signature`, `emergency-contact`, `oath-upload`, `active-check`, `crm-doc-download`.
+
+Implementation: `src/core/daemon/` (daemon loop, queue, registry, HTTP keepalive) + `src/core/task-store/` (SQLite control plane).
 
 ### Deriving `itemId`
 
@@ -642,7 +683,10 @@ Every kernel workflow emits two append-only JSONL streams:
 ├── onboarding-2026-04-18.jsonl          ← entries: pending/running/done/failed
 ├── onboarding-2026-04-18-logs.jsonl     ← logs: step/success/warn/error/waiting
 ├── separations-2026-04-18.jsonl
-└── sessions.jsonl                        ← session-level events (browser launch, duo queue)
+├── sessions.jsonl                        ← session-level events (browser launch, duo queue)
+├── state.db                             ← SQLite control plane (tasks, worker heartbeats, worker_commands, browser_processes). Queue authority since 2026-05-04.
+└── daemons/
+    └── <workflow>.queue.jsonl            ← append-only audit trail for daemon queue items (not authoritative — read state.db)
 ```
 
 ### Write path
@@ -702,92 +746,7 @@ The dashboard used to let you launch workflows from the browser. **Removed 2026-
 
 ---
 
-## 8. Reliability primitives: idempotency & step-cache
-
-Two kernel-level helpers solve complementary "don't redo work" problems.
-
-### `idempotency.ts` — "don't double-submit transactional work"
-
-Problem: a workflow submits a Smart HR transaction to UCPath, then crashes before the tracker can write `done`. Re-running creates a **duplicate transaction**.
-
-Solution: before submitting, hash a stable key and check if the same key succeeded recently.
-
-```ts
-const key = hashKey({ workflow: "onboarding", emplId, ssn, effectiveDate });
-if (await hasRecentlySucceeded(key, { withinDays: 14 })) {
-  log.warn("Idempotency hit — skipping duplicate submit");
-  return { status: "Skipped (Duplicate)" };
-}
-// ... submit transaction ...
-await recordSuccess(key, transactionId, "onboarding");
-```
-
-Storage: `.tracker/idempotency.jsonl`, one success record per line. Sorted-keys JSON so field order doesn't affect the hash.
-
-Used by: `onboarding` (transaction step), `work-study`.
-
-### `step-cache.ts` — "don't re-do expensive read-only work" (NEW 2026-04-18)
-
-Problem: onboarding's `extraction` step scrapes the CRM record (~1–2 min). If the later `transaction` step fails, re-running pointlessly re-scrapes — the CRM data hasn't changed.
-
-Solution: cache step outputs, keyed by (workflow, itemId, stepName), with a short TTL.
-
-```ts
-// At step start:
-const cached = stepCacheGet<EmployeeData>("onboarding", email, "extraction", {
-  withinHours: 2,
-});
-if (cached) {
-  data = cached;
-  ctx.updateData(data);
-  return; // skip the expensive scrape
-}
-
-// Scrape normally:
-data = await extractRawFields(page);
-
-// At step end:
-try {
-  stepCacheSet("onboarding", email, "extraction", data);
-} catch {} // write failures mustn't fail the step
-```
-
-```
-.tracker/step-cache/
-└── onboarding-jane@ucsd.edu/
-    ├── extraction.json      ← { workflow, itemId, stepName, ts, value: EmployeeData }
-    └── pdf-download.json
-```
-
-- **Default TTL on read: 2h** (opt in via `withinHours`; `0` = no TTL check).
-- **Default prune: 7 days** (`pruneOldStepCache(168)`).
-- **Atomic write** via rename dance — partial writes never get read.
-- **Path safety**: all three segments (workflow, itemId, stepName) sanitized — `/`, `\`, `..`, NUL, ASCII ctrl chars rejected on write/clear.
-
-**Deliberately scoped:** this is a _primitive_, not a full kernel-level "resume from last successful step." A full resume would require handlers to thread state through ctx instead of local closures (onboarding mutates `let data: EmployeeData | null` inside steps). The primitive delivers the actual user-visible savings (~2–3 min on retry) without the handler rewrite.
-
-### How they compose
-
-```mermaid
-flowchart TB
-    START[handler starts]
-    START --> EXT{extraction<br/>step-cache hit?}
-    EXT -->|yes| SKIP[skip scrape,<br/>populate from cache]
-    EXT -->|no| DO[scrape CRM]
-    DO --> SAVE[stepCacheSet]
-    SKIP --> TX[transaction step]
-    SAVE --> TX
-    TX --> IDEM{idempotency<br/>key recently succeeded?}
-    IDEM -->|yes| SKIP2[skip submit<br/>status=Skipped Duplicate]
-    IDEM -->|no| SUBMIT[submit to UCPath]
-    SUBMIT --> RECORD[recordSuccess]
-    RECORD --> DONE[status=Done]
-    SKIP2 --> DONE
-```
-
----
-
-## 9. Systems + Selector Intelligence
+## 8. Systems + Selector Intelligence
 
 Each folder under `src/systems/` is a Playwright driver for one external system. They all share a conventional layout.
 
@@ -874,7 +833,7 @@ The fuzzy search is a pure in-repo scorer (no Fuse.js, no embeddings, no new dep
 
 ---
 
-## 10. End-to-end: one onboarding, step by step
+## 9. End-to-end: one onboarding, step by step
 
 Let's trace `npm run onboarding jane@ucsd.edu` from CLI to completed transaction.
 
@@ -909,13 +868,11 @@ sequenceDiagram
     STP-->>T: running "crm-auth"
     H->>H: ctx.step("extraction", ...)
     STP-->>T: running "extraction"
-    H->>H: stepCacheGet — miss
     H->>SES: ctx.page("crm")
     H->>H: extractRawFields(crmPage)
     H->>H: ctx.updateData({name, emplId, wage})
     STP-->>T: running + data
     T-->>D: row updates with name/emplId
-    H->>H: stepCacheSet
 
     Note over H: Phase 2: pdf-download (non-fatal)
     H->>H: ctx.step("pdf-download", ...)
@@ -937,9 +894,7 @@ sequenceDiagram
 
     Note over H: Phase 5: transaction
     H->>H: ctx.step("transaction", ...)
-    H->>H: idempotency hashKey + hasRecentlySucceeded — no
     H->>H: plan.execute() — fill 4 tabs + Save
-    H->>H: recordSuccess(key, transactionId)
     H->>H: updateData({status:"Done"})
 
     H-->>K: return
@@ -950,13 +905,9 @@ sequenceDiagram
 
 **Total Duos:** 2 (CRM + UCPath). I9 uses UCSD SSO without 2FA.
 
-**What's special about step 1's `stepCacheGet`:** if this onboarding was run within the last 2h and the `extraction` succeeded, the whole CRM scrape phase is replaced with a single `readFileSync` — ~2 min saved on retry-after-failure.
-
-**What's special about step 5's idempotency check:** if the workflow crashed mid-submit last run, but the transaction actually went through on UCPath's side, the hash key catches it — we skip re-submitting and return `status: "Skipped (Duplicate)"`.
-
 ---
 
-## 11. Glossary
+## 10. Glossary
 
 | Term                          | Meaning                                                                                                 |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -974,11 +925,7 @@ sequenceDiagram
 | **SSE**                       | Server-Sent Events. How the dashboard streams live tracker updates to React.                            |
 | **`runId`**                   | Unique UUID per workflow run. Appears on every tracker entry + log line.                                |
 | **`itemId`**                  | Stable per-subject id (emplId/docId/email/UUID). Groups retries of the same subject across runs.        |
-| **`WF_CONFIG`**               | **Obsolete.** Pre-kernel frontend workflow metadata. Now registry-driven.                               |
-| **`defineDashboardMetadata`** | Legacy registry affordance for non-kernel workflows. **No current callers.**                            |
 | **`withTrackedWorkflow`**     | Tracker lifecycle wrapper. Kernel-internal — handlers never call it directly.                           |
-| **Idempotency key**           | SHA-256 hash of transactional fields. Prevents duplicate submits on crash-retry.                        |
-| **Step-cache**                | Per-step output cache under `.tracker/step-cache/`. Prevents re-doing expensive read-only work.         |
 | **Selector intelligence**     | `SELECTORS.md` + `LESSONS.md` + `common-intents.txt` + `selector:search` per system.                    |
 | **`safeClick`/`safeFill`**    | Wrappers that log `selector fallback triggered` when `.or(...)` fallbacks match.                        |
 | **`playwright-cli`**          | Standalone tool for mapping selectors. `open --headed` + `snapshot` dumps accessibility tree with refs. |
@@ -987,10 +934,9 @@ sequenceDiagram
 
 ## Further reading (in this repo)
 
-- [`CLAUDE.md`](../CLAUDE.md) — root. Architecture overview + kernel primer + writing-a-new-workflow + gotchas.
-- [`src/core/CLAUDE.md`](../src/core/CLAUDE.md) — kernel internals.
-- [`src/tracker/CLAUDE.md`](../src/tracker/CLAUDE.md) — tracker + dashboard backend.
-- [`src/dashboard/CLAUDE.md`](../src/dashboard/CLAUDE.md) — frontend conventions.
-- [`src/workflows/*/CLAUDE.md`](../src/workflows/) — per-workflow shape + lessons.
-- [`src/systems/*/{LESSONS,SELECTORS}.md`](../src/systems/) — per-system failure notes + catalog.
-- [`docs/handoff-2026-04-18.md`](./handoff-2026-04-18.md) — pending-task punch list.
+- [`CLAUDE.md`](../../CLAUDE.md) — root. Architecture overview + kernel primer + writing-a-new-workflow + gotchas.
+- [`src/core/CLAUDE.md`](../../src/core/CLAUDE.md) — kernel internals.
+- [`src/tracker/CLAUDE.md`](../../src/tracker/CLAUDE.md) — tracker + dashboard backend.
+- [`src/dashboard/CLAUDE.md`](../../src/dashboard/CLAUDE.md) — frontend conventions.
+- [`src/workflows/*/CLAUDE.md`](../../src/workflows/) — per-workflow shape + lessons.
+- [`src/systems/*/{LESSONS,SELECTORS}.md`](../../src/systems/) — per-system failure notes + catalog.

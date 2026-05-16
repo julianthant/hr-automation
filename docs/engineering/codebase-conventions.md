@@ -1,8 +1,8 @@
 # HR Automation Codebase Conventions
 
 This document is the source of truth for naming, ownership, and review rules.
-`CLAUDE.md` and `AGENTS.md` files should point here and repeat only the
-module-specific parts.
+Root and module `CLAUDE.md` files should point here and repeat only the
+module-specific parts. For what counts as maintained docs versus ephemeral agent output, see `docs/README.md`.
 
 ## Module Ownership
 

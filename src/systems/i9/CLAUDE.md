@@ -7,7 +7,7 @@ Automates I9 Complete (Tracker I-9 by Mitratech) for employment verification: lo
 - `login.ts` — `loginToI9(page)`: email/password auth (no Duo MFA), auto-appends `@ucsd.edu` if needed, dismisses training notification popup after login
 - `create.ts` — `createI9Employee(page, input)`: fills profile form, saves, selects "Remote - Section 1 Only", fills start date, creates I-9 record. Returns `I9Result` with `profileId` extracted from URL
 - `search.ts` — `searchI9Employee(page, criteria)`: flexible search by lastName/firstName/ssn/profileId/employeeId, parses grid results (9 columns)
-- `signer.ts` — `lookupSection2Signer(page, criteria)`: search → navigate to `/form-I9/summary/{profileId}/{i9Id}` → read "Signed Section 2" row from the Electronic I-9 Audit Trail. Returns `Section2SignerResult` with `status: signed | unsigned | historical | not-found | error` and `signerName`. Used by the `eid-lookup` workflow's `--i9` mode.
+- `signer.ts` — `lookupSection2Signer(page, criteria)`: search → navigate to `/form-I9/summary/{profileId}/{i9Id}` → read "Signed Section 2" row from the Electronic I-9 Audit Trail. Returns `Section2SignerResult` with `status: signed | unsigned | historical | not-found | error` and `signerName`. Exported from `index.ts` but **not imported by any workflow today** (the former `eid-lookup --i9` path was removed 2026-04-28 — see `src/workflows/eid-lookup/CLAUDE.md`). Keep for reuse if a dedicated signer workflow returns.
 - `selectors.ts` — **Selector registry** (Subsystem A). Grouped: `login`, `dashboard`, `profile`, `remoteI9`, `search`, `summary`.
 - `types.ts` — `I9EmployeeInput`, `I9Result`, `I9SearchCriteria`, `I9SearchResult`
 - `index.ts` — Barrel exports (includes `i9Selectors` registry barrel)
@@ -24,6 +24,8 @@ Automates I9 Complete (Tracker I-9 by Mitratech) for employment verification: lo
    d. Verify the inline-selector test still passes: `tsx --test tests/unit/systems/inline-selectors.test.ts`.
 
 See [`SELECTORS.md`](./SELECTORS.md) for the auto-generated catalog of every selector this module exports.
+
+Example intents for `npm run selector:search`: [`common-intents.txt`](./common-intents.txt).
 
 ## SSN Format Inconsistency
 

@@ -27,7 +27,7 @@ This workflow touches one system: **ucpath**.
 | `steps` | `["ucpath-auth", "transaction"] as const` |
 | `authChain` | `"sequential"` |
 | `tiling` | `"single"` |
-| `detailFields` | `["emplId", "effectiveDate"]` |
+| `detailFields` | `name` (Employee), `emplId` (Empl ID), `effectiveDate` (Effective Date) — see `workflow.ts` |
 
 ## Data Flow
 
@@ -48,7 +48,6 @@ In-process path (tests/scripts — call runWorkStudy directly):
 
 ## Gotchas
 
-- **Save & Submit is commented out** (line ~237-240 in enter.ts) — pending test completion
 - Position Pool hardcoded to `"F"`, Position Change Reason to `"JRL"`
 - Comments template: `"Updated pool id to F per work study award {effectiveDate}"`
 - Employee name extracted from PeopleSoft header (multiple selector variants)

@@ -14,6 +14,8 @@ UCPath HR automation for UCSD. Playwright-driven onboarding, separations, EID lo
   → `src/dashboard/CLAUDE.md` or `src/tracker/CLAUDE.md`
 - **Shared primitives or architecture?**  
   → `docs/engineering/codebase-conventions.md`
+- **Which markdown is canonical vs ephemeral (reviews, drift checks)?**  
+  → `docs/README.md`
 
 **General lessons that apply everywhere:**  
 → `LESSONS.md` (project root) — read before every non-trivial task. Selector workflow, shared code boundaries, kernel patterns, common mistakes, architecture guards, daemon mode.
@@ -28,14 +30,13 @@ Before non-trivial tasks:
 # Onboarding (daemon mode by default — see "Daemon mode" below)
 npm run onboarding <email> [<email> ...]     # Enqueue each email as a separate queue item; daemon processes one at a time. Use `-p N` to spawn N daemons for parallel fan-out.
 npm run onboarding:stop                      # Soft-stop all daemons
-npm run extract <email>                      # Extract employee data from CRM only
 
 # Separations (daemon mode by default — see "Daemon mode" below)
 npm run separation <docId> [docId ...] # Enqueue to an alive daemon or spawn one
 npm run separation:stop                # Soft-stop all daemons (drain in-flight)
 
 # Kronos Reports
-npm run kronos                         # Download Time Detail PDFs (4 workers, kernel pool mode)
+npm run kronos                         # Download Time Detail PDFs (kernel pool mode, default 4 workers — edit DEFAULT_WORKERS in config.ts to change)
 
 # Work Study (daemon mode by default — see "Daemon mode" below)
 npm run work-study <emplId> <date>     # Enqueue to an alive daemon or spawn one
@@ -133,6 +134,7 @@ src/
   services/            # Reusable IO/stateful primitives used by workflows + dashboard backend.
     capture/           # Mobile photo capture + QR/session/PDF bundling.
     matching/          # Roster loading, name/address/EID matching, optional LLM disambiguation.
+    timecard/          # Shared UKG/timecard helpers (Old/New Kronos workflows).
     ocr/               # OCR engine, provider rotation, page rendering, form specs.
   tracker/             # JSONL append + SSE dashboard server + Excel export.
   dashboard/           # React SPA (Vite + shadcn/ui). Reads SSE, renders queue + logs.
@@ -182,6 +184,7 @@ Observability for every workflow: `.tracker/{workflow}-{YYYY-MM-DD}.jsonl` + `*-
 | Daemon mode (queues, health checks, etc.) | Root CLAUDE.md → **Daemon Mode** | Default for most CLI commands; use `-n` / `-p N` flags |
 | System-specific gotchas | `src/systems/<system>/CLAUDE.md` | PeopleSoft quirks, frame navigation, auth edge cases |
 | Shared primitives & anti-patterns | `src/domain/`, `src/services/`, `src/infra/` + `docs/engineering/codebase-conventions.md` | Names, operators, logs, matching, OCR, capture, auth/browser — use before adding workflow-local |
+| Canonical vs ephemeral docs (review / drift-check scope) | `docs/README.md` | Maintained codebase narrative vs `superpowers/` handoffs & plans vs historical snapshots |
 | Architecture guards & what they enforce | `npm run test:architecture` + test files in `tests/unit/` | No inline selectors, no default exports, lesson format, catalog sync |
 | General cross-codebase lessons | `LESSONS.md` (project root) | Read before every non-trivial task |
 
@@ -357,7 +360,7 @@ Flags (on `separation`, `work-study`, `eid-lookup`, `active-check`, `onboarding`
 
 `onboarding` daemon runs the standard `onboardingWorkflow` (CRM + UCPath + I9, 2 Duos per session since I9 is SSO no-2FA). For throughput, start N daemons with `-p N`. Pass multiple emails positionally to fan them across alive daemons via the shared queue.
 
-Lifecycle commands (converted workflows: `separations`, `work-study`, `eid-lookup`, `active-check`, `onboarding`, `oath-signature`, `oath-upload`, `emergency-contact`):
+Lifecycle commands (converted workflows: `separations`, `work-study`, `eid-lookup`, `active-check`, `onboarding`, `oath-signature`, `oath-upload`, `emergency-contact`, `crm-doc-download`):
 - `npm run <workflow>:stop` — soft-stop (drain in-flight, re-queue). Use `-- --force` to mark in-flight as failed and exit immediately.
 
 Converting a new workflow to daemon mode is mechanical — see `src/workflows/CLAUDE.md#daemon-mode-conversion-template`. Implementation: `src/core/daemon/{types,registry,queue,client,daemon}.ts` (main loop) + `src/cli-daemon.ts` (entry). Full design doc: `docs/superpowers/specs/2026-04-22-workflow-daemon-mode-design.md`.
@@ -367,6 +370,7 @@ Converting a new workflow to daemon mode is mechanical — see `src/workflows/CL
 Copy `.env.example` → `.env` and set:
 - `UCPATH_USER_ID` — UCSD SSO username
 - `UCPATH_PASSWORD` — UCSD SSO password
+- `TIMEKEEPER_NAME` — operator timekeeper name for Kuali separation timekeeper fills (required; `src/config.ts` throws at startup if unset)
 
 Duo MFA is manual — the automation pauses and polls until you approve on your phone.
 
@@ -398,6 +402,8 @@ src/systems/i9/selectors.ts
 src/systems/old-kronos/selectors.ts
 src/systems/kuali/selectors.ts
 src/systems/new-kronos/selectors.ts
+src/systems/servicenow/selectors.ts
+src/systems/sharepoint/selectors.ts
 ```
 
 Selectors are functions returning `Locator` / `FrameLocator`, each carrying a `// verified YYYY-MM-DD` comment. Fallback chains (`.or()`) up to 6-deep are used where PeopleSoft grid IDs mutate or similar brittle anchors need hardening. Wrap invocations with `safeClick` / `safeFill` from `src/systems/common/` to log `log.warn("selector fallback triggered: <label>")` when the primary + fallbacks all miss.
@@ -439,9 +445,15 @@ Workflows emit JSONL to `.tracker/{workflow}-{YYYY-MM-DD}.jsonl`; SSE server str
 
 **Details:** See `src/dashboard/CLAUDE.md` (frontend), `src/tracker/CLAUDE.md` (backend).
 
-## Deferred & Archived
+## Deferred & archived docs
 
-Historical design decisions and obsolete patterns are documented in spec/plan files in `docs/superpowers/`. Refer to these for context on architectural decisions but don't need them for current work.
+**Canonical maintained docs** (conventions, architecture, module `CLAUDE.md`, lessons, selector catalogs) are listed under **Canonical** in `docs/README.md`.
+
+**Ephemeral / tool-generated** material under `docs/superpowers/` (including **`handoffs/`** for session pickup), plus `.superpowers/`, is scratch and continuity output — useful for *why* something was decided or what to do next in a fresh session, not guaranteed to match shipped code. **Do not** treat it as the documentation surface area for routine doc review.
+
+**Frozen dated snapshots** (old backlog lists, etc.) live under `docs/historical/` — see that folder’s README.
+
+Individual specs under `docs/superpowers/specs/` may exist only in your working tree if never committed; those paths remain valid *historical* references when linked from lesson sections in `CLAUDE.md` files.
 
 ## Continuous improvement
 

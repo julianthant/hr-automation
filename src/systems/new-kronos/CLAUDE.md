@@ -21,13 +21,15 @@ Employee search automation for New Kronos (Workforce Dayforce). Much simpler tha
 
 See [`SELECTORS.md`](./SELECTORS.md) for the auto-generated catalog of every selector this module exports.
 
+Example intents for `npm run selector:search`: [`common-intents.txt`](./common-intents.txt).
+
 ## Gotchas
 
 - Uses modern `getByRole()` API (more maintainable than CSS selectors)
 - Dynamic iframe name: `iframe[name^="portal-frame-"]` (suffix changes per session)
 - Checks for "There are no items to display." message to detect no results
 - Less defensive than Old Kronos — fewer fallback strategies, lets errors propagate
-- No screenshot/debug logging
+- `navigate.ts` calls `debugScreenshot` during timecard checks (`new-kronos-timecard-01-current` / `02-previous`) — not a blanket debug logger across the whole module
 
 ## Verified Selectors
 

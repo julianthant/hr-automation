@@ -1,0 +1,9 @@
+log in to Microsoft SharePoint with UCSD account
+enter ADFS password on federation login page
+dismiss "keep me signed in" interstitial after Duo
+navigate to Excel Online file viewer
+open file menu backstage in Excel Online
+download a copy of the Excel file as xlsx
+export Excel file to PDF via file menu
+wait for Excel Online frame to load
+find the Excel iframe within SharePoint page

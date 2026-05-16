@@ -1,6 +1,6 @@
 # SharePoint / Excel Online Module
 
-Headed browser automation for downloading files from UCSD's SharePoint / OneDrive (Microsoft 365) — specifically the Excel Online viewer at `ucsdcloud-my.sharepoint.com/.../doc2.aspx`. Current consumer is the "Download onboarding spreadsheet" button in the dashboard queue header, which pulls a roster xlsx into `src/data/`.
+Headed browser automation for downloading files from UCSD's SharePoint / OneDrive (Microsoft 365) — specifically the Excel Online viewer at `ucsdcloud-my.sharepoint.com/.../doc2.aspx`. Primary consumers: the dashboard **SharePoint download dropdown** in the queue header (`GET /api/sharepoint-download/list` → `POST /api/sharepoint-download/run` with `{ id }` from the backend `SHAREPOINT_DOWNLOADS` registry) and the workflow-agnostic control in **Run modal** (`SharePointDownloadButton`), both pulling configured roster xlsx files into `src/data/` via `src/workflows/sharepoint-download/`.
 
 ## Files
 
@@ -41,9 +41,16 @@ The hover-first pattern is critical: clicking `Create a Copy` (instead of hoveri
 
 ## Before mapping a new selector
 
-1. Run `npm run selector:search "<your intent>"` and review top matches across all systems.
+1. Run `npm run selector:search "<your intent>"` and review the top matches across all systems.
 2. If a selector matches your intent, USE IT — do not map a new one.
-3. Otherwise, add the selector function with JSDoc (one-line summary, `@tags`, `verified YYYY-MM-DD`), then run `npm run selectors:catalog` to regenerate [`SELECTORS.md`](./SELECTORS.md).
+3. If [`LESSONS.md`](./LESSONS.md) has a relevant entry, read it first to avoid repeating a known failure.
+4. Otherwise, map a new selector following the conventions in [`selectors.ts`](./selectors.ts):
+   a. Add the selector function with JSDoc (one-line summary, `@tags`, `verified YYYY-MM-DD`).
+   b. Run `npm run selectors:catalog` to regenerate [`SELECTORS.md`](./SELECTORS.md).
+   c. If you discovered a non-obvious failure mode along the way, append a lesson to [`LESSONS.md`](./LESSONS.md) following its template.
+   d. Verify the inline-selector test still passes: `tsx --test tests/unit/systems/inline-selectors.test.ts`.
+
+Example intents for `npm run selector:search`: [`common-intents.txt`](./common-intents.txt).
 
 ## Gotchas
 
@@ -51,7 +58,7 @@ The hover-first pattern is critical: clicking `Create a Copy` (instead of hoveri
 - `excelOnline.coEditingBanner` can be used as a readiness probe but only fires when someone else has the workbook open. Don't depend on it for general page-ready detection; prefer `page.waitForLoadState("networkidle")` plus a small fixed wait.
 - The File button's accessible name is `"File"` (exact). There's also a `Files` ribbon tab in some Office hosts — not in Excel Online, but keep `exact: true` defensively.
 - Download triggers via a `page.on("download", ...)` event; the file streams into the Playwright CLI workspace's `.playwright-cli/` folder during CLI probing, but the real `downloadSharePointFile` helper uses `download.saveAs()` to land the bytes in `src/data/`.
-- The dashboard button's endpoint (`POST /api/sharepoint-download/run`, handled by `buildSharePointRosterDownloadHandler` in `src/workflows/sharepoint-download/handler.ts`) holds a module-level in-flight lock — concurrent clicks get HTTP 409. Don't try to call the helper twice in parallel.
+- The dashboard download endpoint (`POST /api/sharepoint-download/run`, handled by `buildSharePointRosterDownloadHandler` in `src/workflows/sharepoint-download/handler.ts`) holds a module-level in-flight lock — concurrent runs get HTTP 409. Don't invoke the helper twice in parallel.
 
 ## Lessons Learned
 

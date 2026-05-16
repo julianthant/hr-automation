@@ -24,6 +24,8 @@ ACT CRM (Salesforce) automation: employee search, navigation, and field extracti
 
 See [`SELECTORS.md`](./SELECTORS.md) for the auto-generated catalog of every selector this module exports.
 
+Example intents for `npm run selector:search`: [`common-intents.txt`](./common-intents.txt).
+
 ## Gotchas
 
 - Hardcoded column indices in search results: "Offer Sent On" is column index 1

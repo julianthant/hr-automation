@@ -11,7 +11,6 @@
   },
   "scripts": {
     "test-login": "tsx --env-file=.env src/cli.ts test-login",
-    "test-login:fresh": "tsx --env-file=.env src/cli.ts test-login --fresh",
     "extract": "tsx --env-file=.env src/cli.ts extract",
     "onboarding": "tsx --env-file=.env src/cli.ts onboarding",
     "onboarding:stop": "tsx --env-file=.env src/cli.ts daemon-stop onboarding",
