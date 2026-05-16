@@ -1,6 +1,7 @@
-import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_DIR, dateLocal } from "./jsonl.js";
+import { makeTailState, tailIncremental } from "./tail-incremental.js";
 import { getLogRunId } from "../utils/log.js";
 import { appendJsonlWithSource } from "./state/jsonl-source.js";
 import { applySessionEventLive } from "./state/runtime.js";
@@ -231,31 +232,19 @@ function recentStepLogExists(
   // covers the last ~10–20 lines, which is far more than the 50ms window
   // can produce. Avoids the multi-MB readFileSync the previous impl did.
   const path = join(dir, `${workflow}-${dateLocal()}-logs.jsonl`);
-  let stat;
-  try { stat = statSync(path); } catch { return false; }
-  const tailBytes = Math.min(stat.size, STEP_LOG_TAIL_BYTES);
+  let size: number;
+  try { size = statSync(path).size; } catch { return false; }
+  const tailBytes = Math.min(size, STEP_LOG_TAIL_BYTES);
   if (tailBytes === 0) return false;
-  let tail: string;
-  try {
-    const fd = openSync(path, "r");
-    try {
-      const buf = Buffer.alloc(tailBytes);
-      readSync(fd, buf, 0, tailBytes, stat.size - tailBytes);
-      tail = buf.toString("utf-8");
-    } finally {
-      closeSync(fd);
-    }
-  } catch {
-    return false;
-  }
-  // Drop the first (possibly partial) line if we didn't seek to a newline
-  // boundary (i.e. the file is bigger than our tail window).
-  const firstNl = tail.indexOf("\n");
-  const lines = firstNl >= 0 && stat.size > tailBytes
-    ? tail.slice(firstNl + 1).split("\n")
-    : tail.split("\n");
+
+  const state = makeTailState();
+  const startsMidFile = size > tailBytes;
+  if (startsMidFile) state.lastSize = size - tailBytes;
+  const lines = tailIncremental(path, state);
+  // Drop the first (possibly partial) line if we didn't seek to the beginning.
+  if (startsMidFile) lines.shift();
+
   for (const line of lines) {
-    if (!line) continue;
     try {
       const log = JSON.parse(line);
       if (
