@@ -1,5 +1,7 @@
 # HR Automation — Improvements & Next Steps
 
+> **Status as of 2026-05-15:** historical record. The `new:workflow` path was removed; new workflows are now scaffolded by hand per `src/workflows/CLAUDE.md`.
+
 **Date:** 2026-04-17
 **State at writing:**
 - Kernel shipped + 4 workflows migrated (work-study, emergency-contact, eid-lookup, onboarding single-mode).
