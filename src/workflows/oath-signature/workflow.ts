@@ -2,7 +2,7 @@ import {
   defineWorkflow,
   runWorkflow,
 } from "../../core/index.js";
-import { runCliEntry } from "../../core/cli-adapter.js";
+import { buildCliAdapter } from "../../core/cli-adapter.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { trackEvent } from "../../tracker/jsonl.js";
@@ -144,6 +144,18 @@ export async function runOathSignature(input: OathSignatureInput): Promise<void>
   }
 }
 
+function buildOathSignaturePendingData(item: OathSignatureInput): Record<string, string> {
+  const parentSubject = item.parentSubject;
+  const queueFields = parentSubject ? rootQueueTitleData(parentSubject) : {};
+  return {
+    emplId: item.emplId,
+    ...(item.date ? { date: item.date } : {}),
+    ...(item.dryRun ? { dryRun: "true" } : {}),
+    ...(parentSubject ? { __name: parentSubject } : {}),
+    ...queueFields,
+  };
+}
+
 /**
  * Pre-emit pending tracker row for an oath-signature queue item. Exported for
  * tests + reuse via the OCR orchestrator. When `parentSubject` is present,
@@ -160,8 +172,6 @@ export function oathSignaturePreEmitPending(
   trackerDir?: string,
 ): void {
   const subject = oathSignatureWorkflow.config.operatorSubject?.(item);
-  const parentSubject = item.parentSubject;
-  const queueFields = parentSubject ? rootQueueTitleData(parentSubject) : {};
   trackEvent({
     workflow: WORKFLOW,
     timestamp: new Date().toISOString(),
@@ -170,11 +180,7 @@ export function oathSignaturePreEmitPending(
     ...(parentRunId ? { parentRunId } : {}),
     status: "pending",
     data: {
-      emplId: item.emplId,
-      ...(item.date ? { date: item.date } : {}),
-      ...(item.dryRun ? { dryRun: "true" } : {}),
-      ...(parentSubject ? { __name: parentSubject } : {}),
-      ...queueFields,
+      ...buildOathSignaturePendingData(item),
       ...operatorSubjectData(subject),
     },
   }, trackerDir);
@@ -193,19 +199,10 @@ export function oathSignaturePreEmitPending(
  *     populates before any Duo clears.
  *   - `new` / `parallel` flags are forwarded to the spawn-plan math.
  */
-export async function runOathSignatureCli(
-  inputs: OathSignatureInput[],
-  options: { new?: boolean; parallel?: number } = {},
-): Promise<void> {
-  if (!runCliEntry(inputs.length > 0, "runOathSignatureCli: no EIDs provided")) return;
-  const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
-  await ensureDaemonsAndEnqueue(
-    oathSignatureWorkflow,
-    inputs,
-    { new: options.new, parallel: options.parallel },
-    {
-      onPreEmitPending: (item, runId, parentRunId, itemId) =>
-        oathSignaturePreEmitPending(item, runId, parentRunId, itemId),
-    },
-  );
-}
+export const runOathSignatureCli = buildCliAdapter<[OathSignatureInput[]], OathSignatureInput>({
+  workflow: oathSignatureWorkflow,
+  emptyMessage: "runOathSignatureCli: no EIDs provided",
+  buildInputs: (inputs) => inputs,
+  deriveItemId: (input) => input.emplId,
+  buildPendingData: (input) => buildOathSignaturePendingData(input),
+});
