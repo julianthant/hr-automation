@@ -22,13 +22,9 @@ type SampleT = z.infer<typeof Sample>;
 function happyResult(data: unknown): OcrResult<never> {
   return {
     data: data as never,
-    rawText: JSON.stringify(data),
-    pageCount: 1,
     provider: "gemini",
-    keyIndex: 1,
     attempts: 1,
     cached: false,
-    durationMs: 50,
   };
 }
 

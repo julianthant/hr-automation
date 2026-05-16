@@ -50,7 +50,6 @@ const result = await ocrDocument({
 result.data; // validated T (here: { name; age }[])
 result.cached; // true if served from cache
 result.attempts; // how many provider calls were made
-result.keyIndex; // which Gemini key succeeded (1..6)
 ```
 
 ## Cache
