@@ -8,7 +8,7 @@
  */
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, utimesSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { readLogEntries, trackEvent, trackEventForDate } from "../../../src/tracker/jsonl.js";
@@ -34,7 +34,7 @@ import {
   readQueueDepth,
 } from "../../../src/tracker/dashboard/ops/index.js";
 import { resolveRetryRosterPath } from "../../../src/tracker/dashboard/ops/retry.js";
-import { queueFilePath } from "../../../src/core/daemon/queue.js";
+import { queueFilePath, queueLockDirPath } from "../../../src/core/daemon/queue.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
 import type { QueueEvent } from "../../../src/core/daemon/types.js";
 
@@ -991,6 +991,32 @@ describe("buildCancelQueuedHandler", () => {
     assert.equal(logs.length, 1);
     assert.equal(logs[0].runId, "u-1");
     assert.match(logs[0].message, /cancelled by user from dashboard/);
+  });
+
+  it("reclaims a stale legacy queue lock directory", async () => {
+    const path = queueFilePath("separations", tmp);
+    mkdirSync(join(tmp, "daemons"), { recursive: true });
+    const enqueueEv: QueueEvent = {
+      type: "enqueue",
+      id: "3930",
+      workflow: "separations",
+      input: { docId: "3930" },
+      enqueuedAt: "2026-04-24T12:00:00.000Z",
+      enqueuedBy: "test",
+      runId: "u-1",
+    };
+    writeFileSync(path, JSON.stringify(enqueueEv) + "\n");
+    const lockDir = queueLockDirPath("separations", tmp);
+    mkdirSync(lockDir);
+    const stale = new Date(Date.now() - 60_000);
+    utimesSync(lockDir, stale, stale);
+
+    const result = await buildCancelQueuedHandler(tmp)({ workflow: "separations", id: "3930" });
+
+    assert.equal(result.ok, true);
+    assert.equal(existsSync(lockDir), false);
+    const after = readFileSync(path, "utf8");
+    assert.ok(after.includes('"type":"failed"'));
   });
 
   it("returns 409 when the item is already claimed", async () => {
