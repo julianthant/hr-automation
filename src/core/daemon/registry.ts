@@ -62,6 +62,7 @@ export function writeLockfile(lock: DaemonLockfile, path: string): void {
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`
   writeFileSync(tmp, JSON.stringify(lock))
   renameSync(tmp, path)
+  invalidateAliveDaemonsCache(lock.workflow)
 }
 
 /**

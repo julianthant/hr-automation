@@ -119,6 +119,27 @@ test('invalidateAliveDaemonsCache clears cached liveness probes', async () => {
   }
 })
 
+test('writeLockfile invalidates cached empty liveness probes', async () => {
+  const dir = TMP()
+  try {
+    const first = findAliveDaemons('wftest', dir)
+    assert.deepEqual(await first, [])
+    const path = lockfilePath('wftest', 'alive', dir)
+    writeLockfile(
+      { workflow: 'wftest', instanceId: 'alive', pid: process.pid, port: 1, startedAt: 'x', hostname: 'h', version: 1 },
+      path,
+    )
+    const second = findAliveDaemons('wftest', dir)
+    assert.notEqual(second, first)
+    const alive = await second
+    assert.equal(alive.length, 1)
+    assert.equal(alive[0].instanceId, 'alive')
+  } finally {
+    invalidateAliveDaemonsCache()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('findAliveDaemons unlinks lockfile for dead PID', async () => {
   const dir = TMP()
   try {
