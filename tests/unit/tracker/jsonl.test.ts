@@ -7,6 +7,7 @@ import {
   trackEvent,
   readEntries,
   readLogEntries,
+  readLogEntriesForDate,
   appendLogEntry,
   readRunsForId,
   findLatestEntryForRunOnDate,
@@ -240,6 +241,26 @@ describe("appendLogEntry PII pass-through (redaction disabled)", () => {
     assert.equal(got.length, 1);
     assert.equal(got[0].level, "debug");
     assert.equal(got[0].message, "selector probe detail");
+  });
+
+  it("writes log entries to the file matching the entry timestamp date", () => {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const entryDate = dateLocal(yesterday);
+    appendLogEntry(
+      {
+        workflow: "delayed",
+        itemId: "item-1",
+        level: "step",
+        message: "delayed log",
+        ts: yesterday.toISOString(),
+      },
+      TEST_DIR,
+    );
+
+    assert.equal(existsSync(join(TEST_DIR, `delayed-${entryDate}-logs.jsonl`)), true);
+    assert.equal(readLogEntriesForDate("delayed", "item-1", entryDate, TEST_DIR).length, 1);
+    assert.equal(readLogEntries("delayed", "item-1", TEST_DIR).length, entryDate === dateLocal() ? 1 : 0);
   });
 });
 

@@ -51,17 +51,22 @@ export interface LogEntry extends Omit<Partial<StructuredLogEvent>, "level" | "m
   ts: string;
 }
 
+export function getLogsJsonlPathForDate(workflow: string, dir: string, date: string): string {
+  return join(dir, `${workflow}-${date}-logs.jsonl`);
+}
+
 function getLogsJsonlPath(workflow: string, dir: string): string {
-  return join(dir, `${workflow}-${dateLocal()}-logs.jsonl`);
+  return getLogsJsonlPathForDate(workflow, dir, dateLocal());
 }
 
 export function appendLogEntry(entry: LogEntry, dir: string = DEFAULT_DIR): void {
-  const logPath = getLogsJsonlPath(entry.workflow, dir);
   const scrubbed: LogEntry = { ...entry, message: String(entry.message ?? "") };
+  const entryDate = dateLocal(new Date(scrubbed.ts));
+  const logPath = getLogsJsonlPathForDate(scrubbed.workflow, dir, entryDate);
   const source = appendJsonlWithSource(logPath, scrubbed, {
     sourceKind: "log",
     workflow: scrubbed.workflow,
-    trackerDate: dateLocal(new Date(scrubbed.ts)),
+    trackerDate: entryDate,
   });
   applyLogEntryLive(scrubbed, source, dir);
 }
@@ -406,6 +411,7 @@ export async function withTrackedWorkflow<T>(
   const data = { ...initialData };
   const typedData: Record<string, TypedValue> = {};
   const ts = () => new Date().toISOString();
+  let lastEmittedTrackerDate: string | undefined;
 
   let runId: string;
   if (preAssignedRunId) {
@@ -425,9 +431,10 @@ export async function withTrackedWorkflow<T>(
     if (opts.idFn) {
       try { data.__id = opts.idFn(data); } catch { /* non-fatal */ }
     }
-    trackEvent({
+    const timestamp = ts();
+    const entry: TrackerEntry = {
       workflow,
-      timestamp: ts(),
+      timestamp,
       id,
       runId,
       ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
@@ -437,7 +444,9 @@ export async function withTrackedWorkflow<T>(
       // `input` rides ONLY on the initial pending row (see TrackerEntry doc).
       ...(status === "pending" && opts.input ? { input: opts.input } : {}),
       ...extra,
-    }, dir);
+    };
+    trackEvent(entry, dir);
+    lastEmittedTrackerDate = trackerDateForTimestamp(timestamp);
   };
 
   if (!preAssignedRunId) emit("pending");
@@ -493,7 +502,7 @@ export async function withTrackedWorkflow<T>(
     if (!opts.preAssignedInstance) emitWorkflowEnd(instanceName, "failed", dir);
     const error = `Process terminated (${signal})`;
     const now = ts();
-    const date = trackerDateForTimestamp(now);
+    const date = lastEmittedTrackerDate ?? findLatestTrackerDateForRun(workflow, id, runId, dir) ?? trackerDateForTimestamp(now);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const logEntry: LogEntry = { workflow, itemId: id, runId, level: "error", message: error, ts: now };
     const trackEntry: TrackerEntry = {
@@ -506,7 +515,7 @@ export async function withTrackedWorkflow<T>(
       error,
       ...(lastStep ? { step: lastStep } : {}),
     };
-    appendFileSync(join(dir, `${workflow}-${date}-logs.jsonl`), JSON.stringify(logEntry) + "\n");
+    appendFileSync(getLogsJsonlPathForDate(workflow, dir, date), JSON.stringify(logEntry) + "\n");
     appendFileSync(join(dir, `${workflow}-${date}.jsonl`), JSON.stringify(trackEntry) + "\n");
   };
   const onSigint = (): void => { onSignal("SIGINT"); process.exit(130); };
@@ -651,6 +660,22 @@ export function findLatestEntryForRunOnDate(
   return rows[rows.length - 1];
 }
 
+function findLatestTrackerDateForRun(
+  workflow: string,
+  itemId: string,
+  runId: string,
+  dir: string = DEFAULT_DIR,
+): string | undefined {
+  let latest: { timestamp: string; date: string } | undefined;
+  for (const date of listDatesForWorkflow(workflow, dir)) {
+    for (const entry of readEntriesForDate(workflow, date, dir)) {
+      if (entry.id !== itemId || entry.runId !== runId) continue;
+      if (!latest || latest.timestamp < entry.timestamp) latest = { timestamp: entry.timestamp, date };
+    }
+  }
+  return latest?.date;
+}
+
 /** Read log entries for a specific date (not just today). */
 export function readLogEntriesForDate(
   workflow: string,
@@ -658,7 +683,7 @@ export function readLogEntriesForDate(
   date: string,
   dir: string = DEFAULT_DIR,
 ): LogEntry[] {
-  const all = readJsonlCached<LogEntry>(join(dir, `${workflow}-${date}-logs.jsonl`));
+  const all = readJsonlCached<LogEntry>(getLogsJsonlPathForDate(workflow, dir, date));
   if (itemId) return all.filter((e) => e.itemId === itemId);
   return all;
 }
