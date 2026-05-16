@@ -1,5 +1,5 @@
 import { randomUUID, type UUID } from 'node:crypto'
-import { findAliveDaemons, killOrphanedChromiumProcesses, spawnDaemon } from './registry.js'
+import { findAliveDaemons, invalidateAliveDaemonsCache, killOrphanedChromiumProcesses, spawnDaemon } from './registry.js'
 import { enqueueItems } from './queue.js'
 import { deriveItemId } from '../kernel/workflow.js'
 import { log } from '../../utils/log.js'
@@ -274,6 +274,7 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
     for (let i = 0; i < spawnCount; i++) {
       const d = await spawnDaemon(wf.config.name, trackerDir)
       spawned.push(d)
+      invalidateAliveDaemonsCache(wf.config.name, trackerDir)
     }
 
     const daemons = [...alive, ...spawned]
@@ -364,5 +365,6 @@ export async function stopDaemons(
       }
     }),
   )
+  invalidateAliveDaemonsCache(workflow, trackerDir)
   return alive.length
 }
