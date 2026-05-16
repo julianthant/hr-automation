@@ -121,18 +121,35 @@ export function mapLogRowToWire(row: LogEntryRow): LogEntry {
 
 export function selectRunEventsForRun(
   db: Database,
-  params: { workflow: string; trackerDate: string; itemId: string; runId: string; limit?: number },
+  params: { workflow: string; trackerDate: string; itemId?: string; runId: string; limit?: number },
 ): RunEventRow[] {
+  const itemFilter = params.itemId ? "AND item_id = @itemId" : "";
   return db.prepare(`
     SELECT *
     FROM run_events
     WHERE workflow = @workflow
       AND tracker_date = @trackerDate
-      AND item_id = @itemId
+      ${itemFilter}
       AND run_id = @runId
     ORDER BY event_ms ASC, id ASC
     LIMIT @limit
   `).all({ ...params, limit: params.limit ?? 5_000 }) as RunEventRow[];
+}
+
+export function mapRunEventRowToWire(row: RunEventRow): TrackerEntry {
+  return {
+    workflow: row.workflow,
+    timestamp: row.event_ts,
+    id: row.item_id,
+    runId: row.run_id,
+    ...(row.parent_run_id ? { parentRunId: row.parent_run_id } : {}),
+    status: row.status as TrackerEntry["status"],
+    ...(row.step ? { step: row.step } : {}),
+    data: parseJsonObject(row.data_json, {}),
+    ...(row.typed_data_json ? { typedData: parseJsonObject(row.typed_data_json, {}) } : {}),
+    ...(row.input_json ? { input: parseJsonObject(row.input_json, {}) } : {}),
+    ...(row.error ? { error: row.error } : {}),
+  };
 }
 
 export function queryEntriesPayload(

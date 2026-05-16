@@ -7,7 +7,14 @@ import {
   readEntriesForDate,
   type TrackerEntry,
 } from "../../../tracker/jsonl.js";
-import { mapLogRowToWire, queryEntriesPayload, querySessionEventsForRun, selectLogsForRun } from "../../../tracker/state/queries.js";
+import {
+  mapLogRowToWire,
+  mapRunEventRowToWire,
+  queryEntriesPayload,
+  querySessionEventsForRun,
+  selectLogsForRun,
+  selectRunEventsForRun,
+} from "../../../tracker/state/queries.js";
 import { buildJsonlEventsPayload } from "./routes/entries-payload.js";
 import {
   filterLiveSessionState,
@@ -257,20 +264,41 @@ function readTrackerEntriesForRunEvents(
  */
 export const runEventsTopic: TopicEmitter<{
   workflow?: string;
+  id?: string;
+  itemId?: string;
   runId?: string;
   date?: string;
 }> = (params, send, deps) => {
   const workflow = resolveWorkflow(params, deps);
+  const itemId = params.id ?? params.itemId ?? "";
   const requestedRunId = params.runId ?? "";
   const date = params.date ?? "";
   const today = dateLocal();
 
   return makeDeltaTopic(async () => {
     let trackerEntries: TrackerEntry[] = [];
-    try {
-      trackerEntries = readTrackerEntriesForRunEvents(workflow, date, today, deps.dir);
-    } catch {
-      // Tracker read failure only disables workflowInstance fallback for this tick.
+    let usedTrackerSqlite = deps.projectionReady && deps.stateDb !== undefined;
+    if (deps.projectionReady && deps.stateDb) {
+      try {
+        trackerEntries = selectRunEventsForRun(deps.stateDb, {
+          workflow,
+          trackerDate: date || today,
+          ...(itemId ? { itemId } : {}),
+          runId: requestedRunId,
+        }).map(mapRunEventRowToWire);
+      } catch (err) {
+        usedTrackerSqlite = false;
+        log.warn(
+          `run-events tracker SQLite query failed (workflow=${workflow}, runId=${requestedRunId}): ${err instanceof Error ? err.message : String(err)} — falling back to JSONL`,
+        );
+      }
+    }
+    if (!usedTrackerSqlite) {
+      try {
+        trackerEntries = readTrackerEntriesForRunEvents(workflow, date, today, deps.dir);
+      } catch {
+        // Tracker read failure only disables workflowInstance fallback for this tick.
+      }
     }
     let allEvents: Awaited<ReturnType<typeof readSessionEventsTolerant>> = [];
     let usedSqlite = deps.projectionReady && deps.stateDb !== undefined;
