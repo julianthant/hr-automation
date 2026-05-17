@@ -1,6 +1,7 @@
 import type { TrackerEntry } from "./types";
 import type { MergedEntryGroup } from "../../../tracker/queue-row-count.js";
 import { readQueueTitle } from "../../../domain/queue-title.js";
+import { resolveRowArchetype } from "../../../domain/row-archetype.js";
 export {
   groupMergedTrackerEntries as groupMergedEntries,
   type MergedEntryGroup,
@@ -106,7 +107,13 @@ export function deduplicateByResolvedId(entries: TrackerEntry[]): TrackerEntry[]
  */
 export function resolveEntryId(entry: TrackerEntry): string {
   const d = entry.data ?? {};
-  return d.__id || entry.id;
+  // Dispatch rows ("Oath Signature Request") use the group context label
+  // (e.g. "Oath · #6444") as the secondary footer ID rather than the
+  // technical request item ID.
+  if (resolveRowArchetype(entry) === "dispatch") {
+    return d.__queueRootTitle || d.parentSubject || d.__id || entry.id;
+  }
+  return d.__id || d.__name || entry.id;
 }
 
 export function getRunNumber(entry: TrackerEntry): number {
@@ -163,9 +170,9 @@ export function buildDisplayNameMap(
     if (parentSubject) return { base: parentSubject, ordinal: false, explicitWorkflowName: true };
     const ocrBase = ocrQueueDisplayBase(e);
     if (ocrBase) return { base: ocrBase, ordinal: true, explicitWorkflowName: true };
-    // Non-OCR prepare rows are batch anchors — their __name already encodes a
-    // unique batch id (e.g. "Oath Signature · #7596"). No ordinal suffix needed.
-    if (d.mode === "prepare") {
+    // Batch-parent rows already have a unique batch id in __name (e.g. "Oath Signature · #7596").
+    // No ordinal suffix needed. OCR batch-parent rows are handled above by ocrQueueDisplayBase.
+    if (resolveRowArchetype(e) === "batch-parent") {
       const workflowName = firstNonBlank(d.__name);
       return { base: workflowName || workflowLabel, ordinal: false, explicitWorkflowName: Boolean(workflowName) };
     }
@@ -242,7 +249,18 @@ export function buildDisplayNameMap(
   for (const e of sorted) {
     if (!e.parentRunId) continue;
     const parentLabel = resolveRootLabel(e.parentRunId);
-    if (parentLabel) result.set(e.id, parentLabel);
+    if (!parentLabel) continue;
+    // Dispatch rows are named notification rows (e.g. "Oath Signature Request") —
+    // keep their own __name rather than inheriting the parent batch label.
+    const d = e.data as Record<string, string> | undefined;
+    if (resolveRowArchetype(e) === "dispatch") {
+      const ownName = firstNonBlank(d.__name);
+      if (ownName) {
+        result.set(e.id, ownName);
+        continue;
+      }
+    }
+    result.set(e.id, parentLabel);
   }
   return result;
 }
