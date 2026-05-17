@@ -61,7 +61,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     r.matchState = "lookup-pending";
     r.matchSource = null;
     r.matchConfidence = null;
-    r.verification = undefined;
+    r.verification = null;
     r.forceResearch = true;
     const itemId = `ocr-force-${input.runId}-r${idx}`;
     itemIds.push(itemId);
@@ -118,6 +118,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     patchOcrRecordFromEidLookupOutcome(records, idx, outcome, "name");
   }
 
+  const baseData = { ...(latest.data ?? {}), records: JSON.stringify(records) };
   trackEvent(
     {
       workflow: WORKFLOW,
@@ -126,7 +127,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
       runId: input.runId,
       status: "running",
       step: "awaiting-approval",
-      data: { records: JSON.stringify(records) },
+      data: baseData,
     },
     trackerDir,
   );
@@ -138,7 +139,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
       runId: input.runId,
       status: "done",
       step: "awaiting-approval",
-      data: { records: JSON.stringify(records) },
+      data: baseData,
     },
     trackerDir,
   );
