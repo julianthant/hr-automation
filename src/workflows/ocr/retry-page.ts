@@ -293,11 +293,11 @@ function readLatestRowFromSqlite(
     const row = db.prepare(`
       SELECT workflow, item_id, run_id, parent_run_id, latest_tracker_ts, latest_status, latest_step, latest_data_json, latest_error
       FROM runs
-      WHERE workflow = @workflow AND tracker_date = @date AND item_id = @itemId AND run_id = @runId
+      WHERE workflow = @workflow AND item_id = @itemId AND run_id = @runId
+      ORDER BY tracker_date DESC
       LIMIT 1
     `).get({
       workflow: WORKFLOW,
-      date,
       itemId: sessionId,
       runId,
     }) as {
@@ -394,8 +394,14 @@ function readLatestRow(
   trackerDir: string | undefined,
   date: string,
 ): TrackerEntry | null {
-  return readLatestRowFromSqlite(sessionId, runId, trackerDir, date)
-    ?? readLatestRowFromJsonl(sessionId, runId, trackerDir, date);
+  const sqliteResult = readLatestRowFromSqlite(sessionId, runId, trackerDir, date);
+  if (sqliteResult) return sqliteResult;
+  const today = readLatestRowFromJsonl(sessionId, runId, trackerDir, date);
+  if (today) return today;
+  const yesterday = new Date(date);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().slice(0, 10);
+  return readLatestRowFromJsonl(sessionId, runId, trackerDir, yesterdayStr);
 }
 
 function parseRecords(data: Record<string, string> | undefined): unknown[] {

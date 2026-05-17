@@ -139,18 +139,20 @@ export const emergencyContactWorkflow = defineWorkflow({
     {
       const c = record.emergencyContact;
       const phoneSummary = c.cellPhone || c.homePhone || c.workPhone || "";
-      const addrSummary = c.address
-        ? [c.address.street, c.address.city, c.address.state, c.address.zip]
-            .filter((s): s is string => Boolean(s))
-            .join(", ")
-        : "(same as employee)";
+      const contactAddress = c.sameAddressAsEmployee
+        ? "(same as employee)"
+        : c.address
+          ? [c.address.street, c.address.city, c.address.state, c.address.zip]
+              .filter((s): s is string => Boolean(s))
+              .join(", ")
+          : "(none)";
       ctx.updateData({
         emplId: record.employee.employeeId,
         employeeName: record.employee.name,
         contactName: c.name,
         relationship: c.relationship,
         contactPhone: phoneSummary,
-        contactAddress: addrSummary,
+        contactAddress,
         ...(record.dryRun ? { dryRun: true } : {}),
       });
     }
@@ -201,7 +203,11 @@ export const emergencyContactWorkflow = defineWorkflow({
       return false;
     });
 
-    if (skipped) return;
+    if (skipped) {
+      ctx.skipStep("fill-form");
+      ctx.skipStep("save");
+      return;
+    }
 
     await ctx.step("fill-form", async () => {
       const planCtx: EmergencyContactContext = { employeeName: record.employee.name };
