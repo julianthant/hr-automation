@@ -15,6 +15,7 @@ import {
 } from "../../systems/servicenow/navigate.js";
 import { waitForOcrApproval, SEVEN_DAYS_MS } from "./wait-ocr-approval.js";
 import type { OathUploadInput } from "./schema.js";
+import { OcrInputSchema } from "../ocr/schema.js";
 
 export const oathUploadStepList = [
   "delegate-ocr",
@@ -92,10 +93,10 @@ export async function oathUploadHandler(
         await opts._runOcrOverride(input, ocrSessionId, ctx.runId);
         return;
       }
-      // Fire-and-forget — OCR runs as a child workflow in the same process,
-      // but we don't await it here. The next step (wait-ocr-approval) blocks
-      // until the operator approves on the dashboard.
-      void runWorkflow(ocrWorkflow, {
+      // Validate the OCR child input synchronously so schema failures
+      // surface immediately as a delegate-ocr step failure rather than
+      // being swallowed by the fire-and-forget catch.
+      const ocrInputRaw = {
         pdfPath: input.pdfPath,
         pdfOriginalName: input.pdfOriginalName,
         pdfFileId: input.pdfFileId,
@@ -105,7 +106,15 @@ export async function oathUploadHandler(
         rosterPath: input.rosterPath,
         dryRun: input.dryRun,
         parentRunId: ctx.runId,
-      } as never, { trackerDir: ctx.trackerDir ?? trackerDir }).catch((err) =>
+      };
+      const ocrParsed = OcrInputSchema.safeParse(ocrInputRaw);
+      if (!ocrParsed.success) {
+        throw new Error(`oath-upload: OCR child input invalid — ${ocrParsed.error.message}`);
+      }
+      // Fire-and-forget — OCR runs as a child workflow in the same process,
+      // but we don't await it here. The next step (wait-ocr-approval) blocks
+      // until the operator approves on the dashboard.
+      void runWorkflow(ocrWorkflow, ocrParsed.data as never, { trackerDir: ctx.trackerDir ?? trackerDir }).catch((err) =>
         log.warn(`[oath-upload] OCR child crashed: ${errorMessage(err)}`),
       );
     });
