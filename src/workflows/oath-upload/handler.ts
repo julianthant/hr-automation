@@ -60,9 +60,8 @@ export async function oathUploadHandler(
     ...(input.pdfFileId ? { pdfFileId: input.pdfFileId } : {}),
     sessionId: input.sessionId,
     pdfHash: input.pdfHash,
-    mode: input.mode,
+    uploadMode: input.mode,
     status: "running",
-    taskRole: input.mode === "upload-only" ? "root" : "delegator",
     taskGroupId: ctx.runId,
     ...(input.dryRun ? { dryRun: true } : {}),
   });

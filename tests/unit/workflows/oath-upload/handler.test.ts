@@ -296,7 +296,7 @@ test("oathUploadHandler: upload-only mode skips OCR and signature delegation the
     assert.ok(stepCalls.includes("fill-form"));
     assert.ok(stepCalls.includes("submit"));
     assert.equal(updates.find((u) => u.ticketNumber)?.ticketNumber, "HRC0099999");
-    assert.equal(updates.find((u) => u.mode)?.mode, "upload-only");
+    assert.equal(updates.find((u) => u.uploadMode)?.uploadMode, "upload-only");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
