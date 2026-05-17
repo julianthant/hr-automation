@@ -194,6 +194,7 @@ export async function runOcrOrchestrator(
     });
     flat.__id = input.sessionId ?? "";
     flat.__name = cachedParentSubject ?? "OCR";
+    flat.archetype = "batch-parent";
     if (cachedParentSubject) flat.parentSubject = cachedParentSubject;
     emit({
       workflow: WORKFLOW,
