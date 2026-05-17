@@ -92,6 +92,36 @@ describe("buildQueueSurfaces", () => {
     assert.equal(surfaces.flatEntries[0]?.parentRunId, "ocr-run-single");
   });
 
+  it("surfaces a single OCR-fan-out eid-lookup child as a passive-delegation card", () => {
+    const eid = row({
+      workflow: "eid-lookup",
+      id: "ocr-oath-run-1-r0",
+      runId: "eid-run-single",
+      parentRunId: "ocr-run-1",
+      status: "done",
+      data: {
+        searchName: "Barahona Martell, Carlos D",
+        taskRole: "child",
+        originWorkflow: "ocr",
+        parentSubject: "Oath Signature · #1234",
+      },
+    });
+
+    const surfaces = buildQueueSurfaces({
+      entries: [],
+      delegationSourceEntries: [eid],
+      workflow: "oath-signature",
+      workflowLabel: "Oath Signature",
+    });
+
+    assert.equal(surfaces.groupRows.length, 1);
+    assert.equal(surfaces.groupRows[0]?.kind, "passive-delegation");
+    assert.equal(surfaces.groupRows[0]?.parentRunId, "ocr-run-1");
+    assert.equal(surfaces.groupRows[0]?.titleOverride, "Oath Signature · #1234");
+    assert.deepEqual(surfaces.groupRows[0]?.members.map((entry) => entry.id), ["ocr-oath-run-1-r0"]);
+    assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), []);
+  });
+
   it("classifies non-approval parentRunId groups as batch rows", () => {
     const a = row({
       workflow: "eid-lookup",
@@ -122,7 +152,7 @@ describe("buildQueueSurfaces", () => {
     assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), []);
   });
 
-  it("surfaces one passive utility child as a selectable child row", () => {
+  it("surfaces one passive utility child as a single passive-delegation group card", () => {
     const parent = row({
       workflow: "onboarding",
       id: "jane@example.edu",
@@ -152,14 +182,39 @@ describe("buildQueueSurfaces", () => {
       workflowLabel: "Onboarding",
     });
 
-    assert.equal(surfaces.groupRows.length, 0);
+    assert.equal(surfaces.groupRows.length, 1);
+    assert.equal(surfaces.groupRows[0]?.kind, "passive-delegation");
+    assert.deepEqual(surfaces.groupRows[0]?.members.map((entry) => entry.id), ["jane@example.edu"]);
     assert.deepEqual(
       new Set(surfaces.flatEntries.map((entry) => entry.runId)),
-      new Set(["parent-run-1", "child-run-1"]),
+      new Set(["parent-run-1"]),
     );
   });
 
-  it("leaves awaiting approval OCR rows flat until they are approved", () => {
+  it("keeps an approved OCR row flat when no delegation members are visible in this queue", () => {
+    // Downstream entries (oath-signature) live in a different workflow's entries
+    // list and are absent from delegationSourceEntries for the OCR queue view.
+    const ocr = row({
+      workflow: "ocr",
+      id: "ocr-session-nochildren",
+      runId: "ocr-run-nochildren",
+      status: "done",
+      step: "approved",
+      data: { mode: "prepare", formType: "oath", pdfOriginalName: "single.pdf" },
+    });
+
+    const surfaces = buildQueueSurfaces({
+      entries: [ocr],
+      delegationSourceEntries: [ocr], // no downstream members
+      workflow: "ocr",
+      workflowLabel: "OCR",
+    });
+
+    assert.equal(surfaces.groupRows.length, 0, "no group card should be created");
+    assert.deepEqual(surfaces.flatEntries.map((e) => e.id), ["ocr-session-nochildren"]);
+  });
+
+  it("renders awaiting-approval OCR row as a group card (batch-parent archetype)", () => {
     const ocr = row({
       workflow: "ocr",
       id: "ocr-session-2",
@@ -176,8 +231,10 @@ describe("buildQueueSurfaces", () => {
       workflowLabel: "OCR",
     });
 
-    assert.equal(surfaces.groupRows.length, 0);
-    assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), ["ocr-session-2"]);
+    assert.equal(surfaces.groupRows.length, 1);
+    assert.equal(surfaces.groupRows[0]?.kind, "approval-delegation");
+    assert.equal(surfaces.groupRows[0]?.approvalState, "awaiting-approval");
+    assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), []);
   });
 
   it("removes discarded approval rows from all surfaces", () => {

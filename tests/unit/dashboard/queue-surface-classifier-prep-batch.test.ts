@@ -96,7 +96,7 @@ test("discarded prep parent is excluded from all surfaces", () => {
   assert.equal(surfaces.flatEntries.length, 0);
 });
 
-test("ocr-workflow awaiting-approval row stays flat (not a prep batch anchor)", () => {
+test("ocr-workflow awaiting-approval row renders as a group card (batch-parent archetype)", () => {
   const ocrRow: TrackerEntry = {
     workflow: "ocr",
     timestamp: "2026-05-14T06:00:00Z",
@@ -112,7 +112,8 @@ test("ocr-workflow awaiting-approval row stays flat (not a prep batch anchor)", 
     workflow: "ocr",
     workflowLabel: "OCR",
   });
-  assert.equal(surfaces.groupRows.length, 0);
-  assert.equal(surfaces.flatEntries.length, 1);
-  assert.equal(surfaces.flatEntries[0]!.id, "ocr-session-x");
+  assert.equal(surfaces.groupRows.length, 1);
+  assert.equal(surfaces.groupRows[0]?.kind, "approval-delegation");
+  assert.equal(surfaces.groupRows[0]?.approvalState, "awaiting-approval");
+  assert.equal(surfaces.flatEntries.length, 0);
 });
