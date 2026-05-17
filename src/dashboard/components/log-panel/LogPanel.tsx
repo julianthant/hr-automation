@@ -16,6 +16,7 @@ import { formatTrackerValue, isMonospaceKey } from "@/components/shared/types";
 import { deriveTrackerFallbackLog } from "./log-fallback";
 import { useWorkflow } from "@/lib/workflows-context";
 import { queueStatusDisplayLabel } from "../../../domain/tracker-terminal-display.js";
+import { resolveRowArchetype } from "../../../domain/row-archetype.js";
 
 type LazySlot = ReactNode | (() => ReactNode);
 
@@ -46,6 +47,46 @@ interface LogPanelProps {
   onPreviewVisibleChange?: (visible: boolean) => void;
   /** Called when the operator triggers a hard-delete from the RunSelector toolbar. */
   onDeleteEntry?: () => void;
+}
+
+function deriveQueueRowTypeLabel(
+  entry: TrackerEntry,
+  childEntries: TrackerEntry[],
+  allEntries: TrackerEntry[],
+  previewAvailable: boolean,
+): string {
+  const archetype = resolveRowArchetype(entry);
+
+  switch (archetype) {
+    case "batch-parent": {
+      // recordCount (set by OCR orchestrator) takes precedence; childEntries covers non-OCR anchors
+      const recordCount = Number(entry.data?.recordCount ?? 0);
+      const count = recordCount > 0 ? recordCount : childEntries.length;
+      const base = count > 1 ? "Batch delegation" : "Single delegation";
+      return previewAvailable ? `${base} · Preview` : base;
+    }
+    case "dispatch":
+      return "Single delegation";
+    case "passive-child":
+      return "Passive delegation";
+    case "delegate-child": {
+      const siblingCount = entry.parentRunId
+        ? allEntries.filter((e) => e.parentRunId === entry.parentRunId).length
+        : 1;
+      return siblingCount > 1 ? "Batch delegation" : "Single delegation";
+    }
+    case "batch-member":
+      return "Delegation member";
+    case "single":
+    default: {
+      // Legacy: delegating-workflow top-level rows (e.g. oath-upload) have taskRole "delegator"
+      // until they receive an explicit archetype stamp on their tracker rows.
+      if (entry.data?.taskRole === "delegator") return "Single delegation";
+      if (childEntries.length > 0) return "Batch row";
+      if (entry.parentRunId) return "Delegation member";
+      return "Normal row";
+    }
+  }
 }
 
 export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultTab, previewSlot, previewHeaderSlot, previewAvailable, onPreviewVisibleChange, onDeleteEntry }: LogPanelProps) {
@@ -185,7 +226,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
 
   // Show skeleton while logs are loading and we have no data yet
   const showSkeleton = logsLoading && displayedLogs.length === 0;
-  const hideDetailGrid = logSourceWorkflow === "ocr";
+  const hideDetailGrid = logSourceWorkflow === "ocr" || detailEntry?.data?.requestRole === "delegation-dispatch";
 
   return (
     <div className="flex-1 flex flex-col bg-card min-w-0 min-h-0 overflow-hidden">
@@ -227,7 +268,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
       )}
 
       {/* Step pipeline */}
-      {showSkeleton ? (
+      {(showSkeleton ? (
         <div className="flex items-center gap-3 px-6 py-4 border-b border-border">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="flex items-center">
@@ -245,7 +286,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
           stepDurations={runStepDurations}
           entry={entry ?? undefined}
         />
-      )}
+      ))}
 
       </>)}
 
@@ -289,6 +330,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
         logs={displayedLogs}
         events={events}
         loading={logsLoading}
+        rowTypeLabel={deriveQueueRowTypeLabel(entry, childEntries, allEntries ?? [], previewAvailable ?? false)}
         screenshotsSlot={
           <ScreenshotsPanel
             workflow={logSourceWorkflow}
