@@ -12,6 +12,7 @@ const WORKFLOW = "oath-upload";
 export const oathUploadWorkflow = defineWorkflow({
   name: WORKFLOW,
   label: "Oath Upload",
+  archetype: "delegating",
   category: "Onboarding",
   iconName: "UploadCloud",
   systems: [

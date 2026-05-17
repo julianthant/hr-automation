@@ -414,7 +414,7 @@ export async function withTrackedWorkflow<T>(
   const initialData = opts.initialData ?? {};
   const preAssignedRunId = opts.preAssignedRunId;
   const dir = opts.dir ?? DEFAULT_DIR;
-  const data: Record<string, unknown> = { ...initialData };
+  const data: Record<string, string> = { ...initialData };
   if (opts.archetype) data.archetype = opts.archetype;
   const typedData: Record<string, TypedValue> = {};
   const ts = () => new Date().toISOString();

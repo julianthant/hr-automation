@@ -34,6 +34,7 @@ const oathSignatureSteps = ["ocr", "ucpath-auth", "transaction"] as const;
 export const oathSignatureWorkflow = defineWorkflow({
   name: WORKFLOW,
   label: "Oath Signature",
+  archetype: "single",
   category: "Onboarding",
   iconName: "ClipboardSignature",
   systems: [
