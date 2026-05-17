@@ -366,6 +366,12 @@ export interface WithTrackedWorkflowOpts {
    * the OCR orchestrator) so the dashboard can render parent→child pills.
    */
   parentRunId?: string;
+  /**
+   * Canonical row archetype. Stamped into `data.archetype` on every emit so
+   * queue-surface, log-panel, and display-name classifiers can dispatch on a
+   * single field instead of the legacy seven-discriminator sprawl.
+   */
+  archetype?: import("../domain/row-archetype.js").RowArchetype;
 }
 
 export async function withTrackedWorkflow<T>(
@@ -408,7 +414,8 @@ export async function withTrackedWorkflow<T>(
   const initialData = opts.initialData ?? {};
   const preAssignedRunId = opts.preAssignedRunId;
   const dir = opts.dir ?? DEFAULT_DIR;
-  const data = { ...initialData };
+  const data: Record<string, unknown> = { ...initialData };
+  if (opts.archetype) data.archetype = opts.archetype;
   const typedData: Record<string, TypedValue> = {};
   const ts = () => new Date().toISOString();
   let lastEmittedTrackerDate: string | undefined;
