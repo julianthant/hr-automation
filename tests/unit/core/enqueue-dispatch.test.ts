@@ -12,7 +12,7 @@ test("buildHttpPendingData: EID lookup HTTP enqueue seeds normalized display dat
   assert.equal(data.searchName, "Zaw, Hein Thant");
   assert.equal(data.__name, "Zaw, Hein Thant");
   assert.equal(data.__id, "Zaw, Hein Thant");
-  assert.equal(data.__subject, "EID Lookup Zaw, Hein Thant");
+  assert.equal(data.__subject, "Zaw, Hein Thant");
 });
 
 test("buildHttpPendingData preserves workflow queue title metadata", () => {

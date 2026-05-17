@@ -54,10 +54,12 @@ export const ANNUAL_DATES = {
 
 // ─── Separations ─────────────────────────────────────────────
 // TIMEKEEPER_NAME must be set in .env — used by fillTimekeeperTasks (Kuali).
-// Prior setting used shell's NAME collision-prone env binding; renamed here.
-const _timekeeperName = process.env.TIMEKEEPER_NAME ?? "";
-if (!_timekeeperName) throw new EnvValidationError(["TIMEKEEPER_NAME"]);
-export const TIMEKEEPER_NAME: string = _timekeeperName;
+// Validated lazily so dashboard/other commands don't require it at startup.
+export function getTimekeeperName(): string {
+  const name = process.env.TIMEKEEPER_NAME ?? "";
+  if (!name) throw new EnvValidationError(["TIMEKEEPER_NAME"]);
+  return name;
+}
 
 // ─── URLs not yet centralized ───────────────────────────────
 
