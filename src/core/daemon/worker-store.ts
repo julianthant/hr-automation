@@ -718,12 +718,18 @@ function mapBrowserProcessRow(row: BrowserProcessDbRow): BrowserProcessRow {
 
 function parseJsonObject(raw: string | null): Record<string, unknown> {
   if (!raw) return {}
+  let parsed: unknown
   try {
-    const parsed = JSON.parse(raw) as unknown
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {}
-  } catch {
-    return {}
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    throw new Error(
+      `worker-store: malformed JSON — ${err instanceof Error ? err.message : String(err)}\n  raw: ${raw.slice(0, 120)}`,
+    )
   }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(
+      `worker-store: expected JSON object, got ${Array.isArray(parsed) ? 'array' : typeof parsed}\n  raw: ${raw.slice(0, 120)}`,
+    )
+  }
+  return parsed as Record<string, unknown>
 }
