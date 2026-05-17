@@ -3,7 +3,7 @@ import { Toaster, toast } from "sonner";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { TopBar } from "./components/navigation/TopBar";
 import { QueuePanel } from "./components/queue-panel/QueuePanel";
-import { collapseEntriesForStatStrip } from "./components/queue-panel/stat-strip-collapse";
+import { countQueuePanelTopLevelRows } from "./components/queue-panel/queue-surface-classifier";
 import { resolveDaemonBatchQueueTitle } from "./components/queue-panel/batch-queue-view";
 import { LogPanel } from "./components/log-panel/LogPanel";
 import { BatchScreenshotsPanel } from "./components/log-panel/BatchScreenshotsPanel";
@@ -40,7 +40,7 @@ import { StopAllButton } from "./components/queue-panel/StopAllButton";
 import { DeleteAllButton } from "./components/queue-panel/DeleteAllButton";
 import { TopBarRunButton } from "./components/navigation/TopBarRunButton";
 import { TopBarCaptureButton } from "./components/navigation/TopBarCaptureButton";
-import { parsePrepareRowData, isResolvedPrepRow } from "./components/ocr/types";
+import { parsePrepareRowData, isResolvedPrepRow, isDiscardedPrepRow } from "./components/ocr/types";
 import { RunModal } from "./components/run-modal/RunModal";
 import { dateLocal } from "./lib/utils";
 import type { TrackerEntry as TrackerEntryJsonl } from "../tracker/jsonl.js";
@@ -196,11 +196,6 @@ export function App() {
     [dedupedEntries],
   );
 
-  const collapsedStatPanelEntries = useMemo(
-    () => collapseEntriesForStatStrip(statPanelEntries),
-    [statPanelEntries],
-  );
-
   /** Tracker item ids delegated under the active batch-queue parent (if any). */
   const batchMemberIds = useMemo(() => {
     if (!batchQueueParentRunId) return null;
@@ -270,6 +265,18 @@ export function App() {
 
   const meta = useWorkflow(workflow);
   const wfLabel = meta?.label ?? autoLabel(workflow);
+
+  /** Matches QueuePanel group cards + flat rows (not strip-collapse primaries). */
+  const queuePanelTopLevelCount = useMemo(
+    () =>
+      countQueuePanelTopLevelRows({
+        entries: dedupedEntries.filter((e) => !isDiscardedPrepRow(e)),
+        delegationSourceEntries: entries.filter((e) => !isDiscardedPrepRow(e)),
+        workflow,
+        workflowLabel: wfLabel,
+      }),
+    [dedupedEntries, entries, workflow, wfLabel],
+  );
 
   // Per-entry "<base> <ordinal>" labels for the queue / log header / toasts.
   // Recomputed whenever entries or the workflow's label change so a row's
@@ -454,9 +461,9 @@ export function App() {
   const entryCounts = useMemo(
     () => ({
       ...wfCounts,
-      ...(entriesMatchWorkflow ? { [workflow]: collapsedStatPanelEntries.length } : {}),
+      ...(entriesMatchWorkflow ? { [workflow]: queuePanelTopLevelCount } : {}),
     }),
-    [wfCounts, workflow, collapsedStatPanelEntries, entriesMatchWorkflow],
+    [wfCounts, workflow, queuePanelTopLevelCount, entriesMatchWorkflow],
   );
 
   const batchPreviewMembers = useMemo(
@@ -570,6 +577,7 @@ export function App() {
           entries={dedupedEntries}
           delegationSourceEntries={entries}
           statPanelEntries={statPanelEntries}
+          topLevelQueueCount={queuePanelTopLevelCount}
           workflow={workflow}
           workflowLabel={wfLabel}
           displayNames={displayNames}

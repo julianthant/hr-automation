@@ -4,6 +4,8 @@ import { countEntriesByQueueStatus } from "./queue-status";
 
 interface StatPillsProps {
   entries: TrackerEntry[];
+  /** When set, "All" uses this instead of `entries.length` (top-level queue rows). */
+  allCountOverride?: number;
   activeFilter: string | null;
   onFilter: (status: string | null) => void;
 }
@@ -28,13 +30,13 @@ const STATS = [
   { key: "pending", label: "Queue",  color: "text-warning",         tint: "bg-warning/12",       ring: "ring-warning/40" },
 ] as const;
 
-export function StatPills({ entries, activeFilter, onFilter }: StatPillsProps) {
+export function StatPills({ entries, allCountOverride, activeFilter, onFilter }: StatPillsProps) {
   const counts = countEntriesByQueueStatus(entries);
 
   return (
     <div role="group" aria-label="Filter queue by status" className="w-full grid grid-cols-5 gap-1.5 h-full items-center">
       {STATS.map((s) => {
-        const count = s.key === null ? entries.length : counts[s.key] || 0;
+        const count = s.key === null ? (allCountOverride ?? entries.length) : counts[s.key] || 0;
         const isActive = activeFilter === s.key;
         const dim = !isActive && count === 0;
         const countClass = count === 0 && !isActive ? "text-muted-foreground" : s.color;

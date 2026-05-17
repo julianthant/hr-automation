@@ -14,7 +14,6 @@ import {
 } from "../../../core/daemon/registry.js";
 import { transaction } from "../../../infra/sqlite/index.js";
 import { openControlDb } from "../../../core/control-db.js";
-import { createTaskStore } from "../../../core/task-store/index.js";
 import { openControlStores, resolveControlTask } from "./shared.js";
 import { isStateDbReady, openStateDb } from "../../state/db.js";
 import { queryPriorEntriesByKey } from "../../state/queries.js";
@@ -317,9 +316,15 @@ export async function resolveDaemonLogPath(
   return null;
 }
 
-/** Per-workflow queue depth — count of `state === "queued"` items. */
+/** Per-workflow queue depth — count of daemon `workflow_item` tasks in `state === "queued"`. */
 export function readQueueDepth(workflow: string, dir: string): number {
-  const store = createTaskStore(openControlDb({ trackerDir: dir }));
-  const tasks = store.listTasksForWorkflow(workflow);
-  return tasks.filter((task) => task.state === "queued").length;
+  const { db } = openControlDb({ trackerDir: dir });
+  const row = db.prepare(`
+    SELECT COUNT(*) AS n FROM tasks
+    WHERE workflow = ?
+      AND control_state = 'queued'
+      AND task_kind = 'workflow_item'
+      AND source = 'daemon'
+  `).get(workflow) as { n: number };
+  return row?.n ?? 0;
 }
