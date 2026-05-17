@@ -248,6 +248,7 @@ function writeOriginParentPending(args: {
   const baseData: Record<string, string> = {
     __name: queueTitle,
     __id: args.parentItemId,
+    archetype: "batch-parent",
     mode: "prepare",
     ...queueTitleData({ kind: "batch", title: queueTitle }),
     __queueRootTitle: queueTitle,
@@ -328,6 +329,7 @@ function writeOriginParentPending(args: {
   const requestData: Record<string, string> = {
     __name: requestName,
     __id: requestItemId,
+    archetype: "dispatch",
     ...rootQueueTitleData(queueTitle),
     pdfOriginalName: args.pdfOriginalName,
     ocrSessionId: args.ocrSessionId,
@@ -382,6 +384,7 @@ function writeOriginParentPrepFailed(args: OriginPrepContext & {
   const baseData: Record<string, string> = {
     __name: queueTitle,
     __id: args.parentItemId,
+    archetype: "batch-parent",
     mode: "prepare",
     ...queueTitleData({ kind: "batch", title: queueTitle }),
     __queueRootTitle: queueTitle,
