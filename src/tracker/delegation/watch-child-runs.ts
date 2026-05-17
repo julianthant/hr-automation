@@ -61,6 +61,8 @@ export interface WatchChildRunsOpts {
     workflow: string;
     id: string;
     step: string;
+    /** Also abort when the matching entry carries this status value. */
+    status?: string;
   };
   /**
    * Dashboard-process OCR prepare: rejects when `/api/ocr/discard-prepare`
@@ -82,6 +84,7 @@ interface AbortFileCache {
   result: boolean;
   tailState: TailState;
   lastStepForId: string | undefined;
+  lastStatusForId: string | undefined;
 }
 
 function readAbortRequestedCached(
@@ -116,8 +119,10 @@ function readAbortRequestedCached(
   const sameFile = prev?.path === abortFile;
   const tailState = sameFile && prev ? prev.tailState : makeTailState();
   let lastStepForId = sameFile && prev ? prev.lastStepForId : undefined;
+  let lastStatusForId = sameFile && prev ? prev.lastStatusForId : undefined;
   if (sameFile && prev && st.size < prev.tailState.lastSize) {
     lastStepForId = undefined;
+    lastStatusForId = undefined;
   }
 
   for (const line of tailIncremental(abortFile, tailState)) {
@@ -129,9 +134,12 @@ function readAbortRequestedCached(
     }
     if (entry.id !== sentinel.id) continue;
     lastStepForId = entry.step;
+    lastStatusForId = entry.status;
   }
 
-  const result = lastStepForId === sentinel.step;
+  const result =
+    lastStepForId === sentinel.step ||
+    (sentinel.status !== undefined && lastStatusForId === sentinel.status);
   cache.current = {
     path: abortFile,
     size: st.size,
@@ -139,6 +147,7 @@ function readAbortRequestedCached(
     result,
     tailState,
     lastStepForId,
+    lastStatusForId,
   };
   return result;
 }

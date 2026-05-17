@@ -7,7 +7,7 @@ export interface WaitForOcrApprovalOpts {
   /** Default 7 days. */
   timeoutMs?: number;
   /** Optional: if set, watcher aborts when this sentinel appears on the parent row. */
-  abortIfRowState?: { workflow: string; id: string; step: string };
+  abortIfRowState?: { workflow: string; id: string; step: string; status?: string };
 }
 
 export interface OcrApprovalOutcome {

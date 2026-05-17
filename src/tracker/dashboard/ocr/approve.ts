@@ -6,7 +6,8 @@ import { openControlDb } from "../../../core/control-db.js";
 import { createTaskStore } from "../../../core/task-store/index.js";
 import { buildHttpPendingData } from "../../../core/daemon/enqueue-dispatch.js";
 import { readQueueTitle, rootQueueTitleData } from "../../../domain/queue-title.js";
-import { readFormType, readParentRunId, readDryRun } from "./shared.js";
+import { findLatestEntryForPredicate } from "../../find-latest-entry.js";
+import { readFormType, readParentRunId, readDryRun, readOriginWorkflow } from "./shared.js";
 
 const WORKFLOW = "ocr";
 
@@ -60,12 +61,13 @@ export function buildOcrApproveHandler(
     }
 
     const parentRunId = readParentRunId(input.sessionId, trackerDir);
+    const originWorkflow = readOriginWorkflow(input.sessionId, trackerDir);
     const dryRun = readDryRun(input.sessionId, trackerDir);
     const latestReviewData = readLatestOcrReviewData(input.sessionId, input.runId, trackerDir);
     const parentSubject = parentRunId
       ? readParentSubjectFromParentRow(
-          spec.approveTo.workflow,
-          `ocr-prep-${input.sessionId}`,
+          originWorkflow ?? spec.approveTo.workflow,
+          originWorkflow ? undefined : `ocr-prep-${input.sessionId}`,
           parentRunId,
           trackerDir,
         )
@@ -101,47 +103,10 @@ export function buildOcrApproveHandler(
       };
     }
 
-    // Mark the OCR row + parent row "approved" SYNCHRONOUSLY before kicking
-    // off the daemon dispatch. The dispatch can take minutes (cold-start
-    // daemon spawn = up to 5min for Duo + browser launch); blocking the
-    // approve POST on it caused the dashboard's loading toast to spin
-    // forever. Now the operator sees instant confirmation that the records
-    // were accepted, and the daemon spawn / enqueue runs in the background.
-    // Failures during dispatch surface as `failed step=approve-failed` on
-    // the OCR row + a fresh log line on the parent.
-    trackEvent(
-      {
-        workflow: WORKFLOW,
-        timestamp: new Date().toISOString(),
-        id: input.sessionId,
-        runId: input.runId,
-        ...(parentRunId ? { parentRunId } : {}),
-        status: "done",
-        step: "approved",
-        data: {
-          ...latestReviewData,
-          mode: "prepare",
-          formType,
-          sessionId: input.sessionId,
-          records: JSON.stringify(input.records),
-          recordCount: String(input.records.length),
-          fannedOutCount: String(fannedOut.length),
-          fannedOutItemIds: JSON.stringify(itemIds),
-          ...(dryRun ? { dryRun: "true" } : {}),
-        },
-      },
-      trackerDir,
-    );
-    if (parentRunId) {
-      writeOriginParentApproved({
-        originWorkflow: spec.approveTo.workflow,
-        parentItemId: `ocr-prep-${input.sessionId}`,
-        parentRunId,
-        fannedOutCount: fannedOut.length,
-        trackerDir,
-      });
-    }
-
+    // Dispatch runs in the background. The "approved" JSONL row is written
+    // AFTER the enqueue succeeds so that the restart-recovery path in
+    // oath-upload only trusts fannedOutItemIds that are actually in task_store.
+    // Failures during dispatch surface as `failed step=approve-failed`.
     void (async () => {
       try {
         let dispatchResult: void | { enqueued?: Array<{ id: string; taskId?: string; runId?: string }> };
@@ -228,6 +193,47 @@ export function buildOcrApproveHandler(
             },
           );
         }
+        // Capture the actually-enqueued item ids from the dispatch result.
+        const enqueuedIds: string[] =
+          dispatchResult && "enqueued" in dispatchResult && Array.isArray(dispatchResult.enqueued)
+            ? (dispatchResult.enqueued as Array<{ id: string }>).map((e) => e.id)
+            : itemIds;
+
+        // Write approved row AFTER successful enqueue so restart recovery
+        // can trust that fannedOutItemIds are all present in task_store.
+        trackEvent(
+          {
+            workflow: WORKFLOW,
+            timestamp: new Date().toISOString(),
+            id: input.sessionId,
+            runId: input.runId,
+            ...(parentRunId ? { parentRunId } : {}),
+            status: "done",
+            step: "approved",
+            data: {
+              ...latestReviewData,
+              mode: "prepare",
+              formType,
+              sessionId: input.sessionId,
+              records: JSON.stringify(input.records),
+              recordCount: String(input.records.length),
+              fannedOutCount: String(enqueuedIds.length),
+              fannedOutItemIds: JSON.stringify(enqueuedIds),
+              ...(dryRun ? { dryRun: "true" } : {}),
+            },
+          },
+          trackerDir,
+        );
+        if (parentRunId) {
+          writeOriginParentApproved({
+            originWorkflow: originWorkflow ?? spec.approveTo.workflow,
+            parentItemId: originWorkflow ? undefined : `ocr-prep-${input.sessionId}`,
+            parentRunId,
+            fannedOutCount: enqueuedIds.length,
+            trackerDir,
+          });
+        }
+
         if (parentRunId && dispatchResult?.enqueued) {
           createApprovalDependencyRows({
             trackerDir,
@@ -332,24 +338,43 @@ function readParentSubjectFromInput(input: unknown): string | undefined {
  */
 function writeOriginParentApproved(args: {
   originWorkflow: string;
-  parentItemId: string;
+  /** When set, used directly. When absent, look up the item id via parentRunId. */
+  parentItemId: string | undefined;
   parentRunId: string;
   fannedOutCount: number;
   trackerDir?: string;
 }): void {
   const ts = new Date().toISOString();
-  const latestParentData = readLatestEntryData(args.originWorkflow, args.parentItemId, args.parentRunId, args.trackerDir);
+  // Resolve the parent's item id. When `originWorkflow` is a kernel-managed
+  // daemon workflow (e.g. "oath-upload"), the item id is on the tracker row
+  // not predictable from the OCR session id — look it up by runId.
+  let parentItemId = args.parentItemId;
+  if (!parentItemId) {
+    const originEntry = findLatestEntryForPredicate({
+      workflow: args.originWorkflow,
+      trackerDir: args.trackerDir,
+      lookbackDays: 7,
+      predicate: (e) => e.runId === args.parentRunId,
+    });
+    parentItemId = originEntry?.id ?? args.parentRunId;
+  }
+  const latestParentData = readLatestEntryData(args.originWorkflow, parentItemId, args.parentRunId, args.trackerDir);
+  // For prep-anchor rows (ocr-prep-* in spec.approveTo.workflow) mark done/approved.
+  // For kernel-daemon origin rows (e.g. oath-upload) emit a running status update so
+  // the daemon's in-progress row shows OCR approval progress without prematurely
+  // flipping to "done".
+  const isKernelDaemonParent = args.parentItemId === undefined;
   trackEvent(
     {
       workflow: args.originWorkflow,
       timestamp: ts,
-      id: args.parentItemId,
+      id: parentItemId,
       runId: args.parentRunId,
-      status: "done",
-      step: "approved",
+      status: isKernelDaemonParent ? "running" : "done",
+      step: isKernelDaemonParent ? "wait-ocr-approval" : "approved",
       data: {
         ...latestParentData,
-        mode: "prepare",
+        ...(isKernelDaemonParent ? { approvedOcr: "true" } : { mode: "prepare" }),
         fannedOutCount: String(args.fannedOutCount),
       },
     },
@@ -358,10 +383,10 @@ function writeOriginParentApproved(args: {
   appendLogEntry(
     {
       workflow: args.originWorkflow,
-      itemId: args.parentItemId,
+      itemId: parentItemId,
       runId: args.parentRunId,
       level: "success",
-      message: `Approved · ${args.fannedOutCount} record${args.fannedOutCount === 1 ? "" : "s"} fanned out to the daemon.`,
+      message: `OCR approved · ${args.fannedOutCount} record${args.fannedOutCount === 1 ? "" : "s"} fanned out to the daemon.`,
       ts,
     },
     args.trackerDir,
@@ -385,11 +410,22 @@ function readLatestEntryData(
 
 function readParentSubjectFromParentRow(
   workflow: string,
-  parentItemId: string,
+  parentItemId: string | undefined,
   parentRunId: string,
   trackerDir?: string,
 ): string | undefined {
-  const data = readLatestEntryData(workflow, parentItemId, parentRunId, trackerDir);
+  let data: Record<string, string>;
+  if (parentItemId) {
+    data = readLatestEntryData(workflow, parentItemId, parentRunId, trackerDir);
+  } else {
+    const entry = findLatestEntryForPredicate({
+      workflow,
+      trackerDir,
+      lookbackDays: 7,
+      predicate: (e) => e.runId === parentRunId,
+    });
+    data = entry?.data ? { ...entry.data } : {};
+  }
   const name = readQueueTitle(data) ?? data.__name;
   return typeof name === "string" && name.length > 0 ? name : undefined;
 }
