@@ -22,6 +22,7 @@ import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChil
 import { trackEvent, dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
 import { patchOcrRecordFromEidLookupOutcome } from "./eid-lookup-results.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
+import { normalizeUcpathEmployeeId } from "../../domain/identity/eid.js";
 import type { AnyOcrFormSpec, RosterRow as OcrRosterRow } from "./types.js";
 
 const WORKFLOW = "ocr";
@@ -535,9 +536,9 @@ function extractName(record: unknown, spec: AnyOcrFormSpec): string {
 
 function extractEid(record: unknown): string {
   const r = record as Record<string, unknown>;
-  if (typeof r.employeeId === "string") return r.employeeId;
+  if (typeof r.employeeId === "string") return normalizeUcpathEmployeeId(r.employeeId) ?? "";
   const employee = r.employee as Record<string, unknown> | undefined;
-  if (employee && typeof employee.employeeId === "string") return employee.employeeId;
+  if (employee && typeof employee.employeeId === "string") return normalizeUcpathEmployeeId(employee.employeeId) ?? "";
   return "";
 }
 
