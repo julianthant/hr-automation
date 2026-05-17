@@ -187,9 +187,11 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
   const authPrefix =
     config.authSteps === false ? [] : config.systems.map((s) => `auth:${s.id}`)
   const effectiveSteps: readonly string[] = [...authPrefix, ...config.steps]
+  const archetype = config.archetype ?? (config.batch ? 'batch' : 'single')
   const metadata: WorkflowMetadata = {
     name: config.name,
     label: config.label ?? autoLabel(config.name),
+    archetype,
     steps: effectiveSteps,
     systems: config.systems.map((s) => s.id),
     detailFields: (config.detailFields ?? []).map(normalizeDetailField),
@@ -199,7 +201,7 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
     hasOperatorSubject: Boolean(config.operatorSubject),
   }
   register(metadata)
-  return { config, metadata }
+  return { config, metadata, archetype }
 }
 
 /**

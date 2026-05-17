@@ -2,6 +2,7 @@ import type { Page } from 'playwright'
 import type { ZodType } from 'zod'
 import type { OperatorSubject } from '../../domain/operator-subject.js'
 import type { log } from '../../utils/log.js'
+import type { WorkflowArchetype } from '../../domain/row-archetype.js'
 
 export interface SystemConfig {
   id: string
@@ -105,6 +106,8 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   version?: string
   /** Human-readable workflow label for the dashboard (e.g. "Onboarding"). */
   label?: string
+  /** Declarative row shape. Defaults to "batch" if `batch` is set, else "single". */
+  archetype?: WorkflowArchetype
   /**
    * Display category for the dashboard's `WorkflowRail` grouping
    * (e.g. "Onboarding", "Separations", "Utils"). Workflows with the same
@@ -288,6 +291,7 @@ export interface WorkflowMetadata {
   name: string
   /** Human-readable workflow label for the dashboard (auto-derived from `name` when absent). */
   label: string
+  archetype: WorkflowArchetype
   /** Dashboard-rail grouping (e.g. "Onboarding"). Absent → workflow lands in the rail's "Other" group. */
   category?: string
   /** Lucide-react icon name for `WorkflowBox`. Absent → frontend falls back to the generic `Workflow` icon. */
@@ -312,6 +316,7 @@ export interface WorkflowMetadata {
 export interface RegisteredWorkflow<TData, TSteps extends readonly string[]> {
   config: WorkflowConfig<TData, TSteps>
   metadata: WorkflowMetadata
+  archetype: WorkflowArchetype
 }
 
 export interface BatchResult {
