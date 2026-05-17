@@ -35,6 +35,22 @@ export function readParentRunId(sessionId: string, trackerDir: string | undefine
   return undefined;
 }
 
+export function readOriginWorkflow(sessionId: string, trackerDir: string | undefined): string | undefined {
+  const date = dateLocal();
+  const file = join(trackerDir ?? ".tracker", `ocr-${date}.jsonl`);
+  if (!existsSync(file)) return undefined;
+  const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      const e = JSON.parse(lines[i]) as TrackerEntry;
+      if (e.id !== sessionId) continue;
+      const v = e.data?.originWorkflow as unknown;
+      if (typeof v === "string" && v.length > 0) return v;
+    } catch { /* tolerate malformed lines */ }
+  }
+  return undefined;
+}
+
 export function readDryRun(sessionId: string, trackerDir: string | undefined): boolean {
   const date = dateLocal();
   const file = join(trackerDir ?? ".tracker", `ocr-${date}.jsonl`);

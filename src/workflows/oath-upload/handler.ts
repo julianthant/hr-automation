@@ -5,6 +5,8 @@ import { watchChildRuns } from "../../tracker/delegation/watch-child-runs.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
+import { openControlDb } from "../../core/control-db.js";
+import { createTaskStore } from "../../core/task-store/index.js";
 import {
   fillHrInquiryForm,
   submitAndCaptureTicketNumber,
@@ -71,7 +73,12 @@ export async function oathUploadHandler(
   }
 
   let fannedOutItemIds: string[] = [];
-  const priorApproval = input.mode === "upload-only" ? null : readPriorOcrApproval(ocrSessionId, trackerDir);
+  const rawPriorApproval = input.mode === "upload-only" ? null : readPriorOcrApproval(ocrSessionId, trackerDir);
+  // Verify prior approval's fanned-out ids are actually in task_store. If any are
+  // missing (enqueue failed before the approved row was written), treat as no recovery.
+  const priorApproval = rawPriorApproval
+    ? (verifyEnqueuedSignerIds(rawPriorApproval.fannedOutItemIds, trackerDir) !== null ? rawPriorApproval : null)
+    : null;
   if (input.mode === "upload-only") {
     log.step("[oath-upload] upload-only mode: skipping OCR and oath-signature delegation");
     ctx.skipStep("delegate-ocr");
@@ -106,6 +113,7 @@ export async function oathUploadHandler(
         rosterPath: input.rosterPath,
         dryRun: input.dryRun,
         parentRunId: ctx.runId,
+        originWorkflow: "oath-upload",
       };
       const ocrParsed = OcrInputSchema.safeParse(ocrInputRaw);
       if (!ocrParsed.success) {
@@ -114,9 +122,10 @@ export async function oathUploadHandler(
       // Fire-and-forget — OCR runs as a child workflow in the same process,
       // but we don't await it here. The next step (wait-ocr-approval) blocks
       // until the operator approves on the dashboard.
-      void runWorkflow(ocrWorkflow, ocrParsed.data as never, { trackerDir: ctx.trackerDir ?? trackerDir }).catch((err) =>
-        log.warn(`[oath-upload] OCR child crashed: ${errorMessage(err)}`),
-      );
+      void runWorkflow(ocrWorkflow, ocrParsed.data as never, { trackerDir: ctx.trackerDir ?? trackerDir }).catch((err) => {
+        log.error(`[oath-upload] OCR child crashed before emitting a tracker row: ${errorMessage(err)}`);
+        throw err;
+      });
     });
 
     await ctx.step("wait-ocr-approval", async () => {
@@ -129,6 +138,7 @@ export async function oathUploadHandler(
           workflow: "oath-upload",
           id: input.sessionId,
           step: "cancel-requested",
+          status: "cancelled",
         },
       });
       fannedOutItemIds = r.fannedOutItemIds;
@@ -152,6 +162,7 @@ export async function oathUploadHandler(
           workflow: "oath-upload",
           id: input.sessionId,
           step: "cancel-requested",
+          status: "cancelled",
         },
       });
     });
@@ -214,6 +225,28 @@ export function findPriorTicketForRunId(runId: string, trackerDir?: string): str
   if (!match) return null;
   const t = match.data?.ticketNumber;
   return typeof t === "string" ? t : null;
+}
+
+function verifyEnqueuedSignerIds(ids: string[], trackerDir: string | undefined): string[] | null {
+  if (ids.length === 0) return ids;
+  try {
+    const db = openControlDb({ trackerDir });
+    const taskStore = createTaskStore(db);
+    const allTasks = taskStore.listTasksForWorkflow("oath-signature");
+    db.close();
+    // If no oath-signature tasks exist at all, this is a pre-SQLite run — trust the JSONL.
+    if (allTasks.length === 0) return ids;
+    const taskItemIds = new Set(allTasks.map((t) => t.itemId));
+    const missing = ids.filter((id) => !taskItemIds.has(id));
+    if (missing.length === 0) return ids;
+    log.warn(
+      `[oath-upload] recovery: ${missing.length}/${ids.length} fanned-out signer ids missing from task_store — re-running dispatch`,
+    );
+    return null;
+  } catch {
+    // task_store unavailable — trust the prior approval (backward compat)
+    return ids;
+  }
 }
 
 function readPriorOcrApproval(
