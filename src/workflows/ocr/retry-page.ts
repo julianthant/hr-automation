@@ -400,12 +400,19 @@ function readLatestRow(
   if (sqliteResult) return sqliteResult;
   // JSONL fallback: walk back RETRY_PAGE_LOOKBACK_DAYS daily files so a retry
   // request for a (sessionId, runId) created days ago still finds its row.
-  const base = new Date(date);
+  // Parse `date` as local-calendar YYYY-MM-DD to match tracker filename dates
+  // (see `dateLocal`); `new Date("YYYY-MM-DD")` would parse as UTC midnight and
+  // shift the start day in non-UTC timezones.
+  const [yStr, mStr, dStr] = date.split("-");
+  const base = new Date(Number(yStr), Number(mStr) - 1, Number(dStr));
+  if (Number.isNaN(base.getTime())) {
+    return readLatestRowFromJsonl(sessionId, runId, trackerDir, date);
+  }
   for (let i = 0; i < RETRY_PAGE_LOOKBACK_DAYS; i++) {
     const d = new Date(base);
     d.setDate(base.getDate() - i);
-    const dStr = dateLocal(d);
-    const hit = readLatestRowFromJsonl(sessionId, runId, trackerDir, dStr);
+    const fileDate = dateLocal(d);
+    const hit = readLatestRowFromJsonl(sessionId, runId, trackerDir, fileDate);
     if (hit) return hit;
   }
   return null;
