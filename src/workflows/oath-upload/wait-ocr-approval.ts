@@ -1,13 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { watchChildRuns } from "../../tracker/delegation/watch-child-runs.js";
-import { dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
 import { SEVEN_DAYS_MS } from "../../utils/durations.js";
+import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 
 export interface WaitForOcrApprovalOpts {
   sessionId: string;
   trackerDir?: string;
-  date?: string;
   /** Default 7 days. */
   timeoutMs?: number;
   /** Optional: if set, watcher aborts when this sentinel appears on the parent row. */
@@ -32,35 +29,23 @@ export async function waitForOcrApproval(
   opts: WaitForOcrApprovalOpts,
 ): Promise<OcrApprovalOutcome> {
   const dir = opts.trackerDir ?? ".tracker";
-  const date = opts.date ?? dateLocal();
 
   await watchChildRuns({
     workflow: "ocr",
     expectedItemIds: [opts.sessionId],
     trackerDir: dir,
-    date,
     timeoutMs: opts.timeoutMs ?? SEVEN_DAYS_MS,
     isTerminal: (e) => e.step === "approved" || e.step === "discarded",
     ...(opts.abortIfRowState ? { abortIfRowState: opts.abortIfRowState } : {}),
   });
 
-  const file = join(dir, `ocr-${date}.jsonl`);
-  if (!existsSync(file)) {
-    throw new Error(`waitForOcrApproval: ${file} disappeared after watch resolved`);
-  }
-  const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
-  let latest: TrackerEntry | null = null;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    try {
-      const e = JSON.parse(lines[i]) as TrackerEntry;
-      if (e.id === opts.sessionId && (e.step === "approved" || e.step === "discarded")) {
-        latest = e;
-        break;
-      }
-    } catch {
-      /* tolerate malformed lines */
-    }
-  }
+  const latest = findLatestEntryForPredicate({
+    workflow: "ocr",
+    trackerDir: dir,
+    lookbackDays: 7,
+    predicate: (e) =>
+      e.id === opts.sessionId && (e.step === "approved" || e.step === "discarded"),
+  });
   if (!latest) {
     throw new Error(
       `waitForOcrApproval: no terminal entry found for ${opts.sessionId} after watch resolved`,
