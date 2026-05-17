@@ -20,6 +20,7 @@ import { streamFileResponse, textResponse } from "../responses.js";
 function buildContentDisposition(originalName: string): string {
   const base = basename(originalName);
   const safeAscii = base
+    // eslint-disable-next-line no-control-regex
     .replace(/[\x00-\x1f"\\]/g, "_") // strip control chars + quotes + backslash
     .replace(/[^\x20-\x7e]/g, "_"); // strip non-ASCII
   const utf8Encoded = encodeURIComponent(base);

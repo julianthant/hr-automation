@@ -254,7 +254,7 @@ export function buildDisplayNameMap(
     // keep their own __name rather than inheriting the parent batch label.
     const d = e.data as Record<string, string> | undefined;
     if (resolveRowArchetype(e) === "dispatch") {
-      const ownName = firstNonBlank(d.__name);
+      const ownName = firstNonBlank(d?.__name);
       if (ownName) {
         result.set(e.id, ownName);
         continue;

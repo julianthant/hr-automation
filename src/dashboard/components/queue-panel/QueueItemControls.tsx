@@ -78,18 +78,18 @@ export function QueueItemControls({ workflow, id, runId, subject, entry, classNa
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const body = (await res.json()) as { ok: boolean; error?: string };
-      if (body.ok) {
+      const resBody = (await res.json()) as { ok: boolean; error?: string };
+      if (resBody.ok) {
         toast.success(verbed, { id: t, description: label });
       } else if (res.status === 409) {
         toast.warning(`Already in progress`, {
           id: t,
-          description: body.error ?? "This item was picked up before the action could complete.",
+          description: resBody.error ?? "This item was picked up before the action could complete.",
         });
       } else {
         toast.error(`${action === "cancel" ? "Cancel" : "Bump"} failed`, {
           id: t,
-          description: body.error ?? `HTTP ${res.status}`,
+          description: resBody.error ?? `HTTP ${res.status}`,
         });
       }
     } catch (err) {

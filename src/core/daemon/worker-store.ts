@@ -724,6 +724,7 @@ function parseJsonObject(raw: string | null): Record<string, unknown> {
   } catch (err) {
     throw new Error(
       `worker-store: malformed JSON — ${err instanceof Error ? err.message : String(err)}\n  raw: ${raw.slice(0, 120)}`,
+      { cause: err },
     )
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {

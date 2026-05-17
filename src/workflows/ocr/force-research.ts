@@ -2,7 +2,7 @@
  * Drops resolved fields on selected records, re-fans-out eid-lookup, watches
  * for completions, patches the OCR row's records progressively.
  */
-import { trackEvent, dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
+import { trackEvent, dateLocal } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { watchChildRuns, type ChildOutcome } from "../../tracker/delegation/watch-child-runs.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";

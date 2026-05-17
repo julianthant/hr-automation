@@ -77,6 +77,7 @@ test("Hono /api/workflow-definitions returns registered workflow metadata", asyn
       label: "Legacy Hono",
       systems: ["crm"],
       steps: ["one"],
+      archetype: "single",
       detailFields: [],
     });
     const db = openStateDb(dir);
