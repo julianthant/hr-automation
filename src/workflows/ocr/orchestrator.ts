@@ -34,6 +34,7 @@ import { normalizeUcpathEmployeeId } from "../../domain/identity/eid.js";
 import { toLastFirstSearchName } from "../../domain/identity/person-name.js";
 import { buildHttpPendingData } from "../../core/daemon/enqueue-dispatch.js";
 import {
+  clearOcrPrepareAbort,
   createOperatorDiscardError,
   isOcrPrepareAbortRequested,
   isOperatorDiscardAbortError,
@@ -804,8 +805,18 @@ export async function runOcrOrchestrator(
       log.step(`[ocr] preparation stopped (${input.sessionId}) — operator discarded while prep was running`);
       return;
     }
-    writeTracker("failed", { formType: input.formType, sessionId: input.sessionId }, undefined, errorMessage(err));
+    try {
+      writeTracker("failed", { formType: input.formType, sessionId: input.sessionId }, undefined, errorMessage(err));
+    } catch (innerE) {
+      if (isOperatorDiscardAbortError(innerE)) {
+        // Discard fired while recording failure — both unwind to finally below.
+        return;
+      }
+      throw innerE;
+    }
     throw err;
+  } finally {
+    clearOcrPrepareAbort(id, runId);
   }
 }
 
