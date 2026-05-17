@@ -471,6 +471,10 @@ function emitRow(args: {
   pdfFileId?: string;
 }): void {
   const verifiedCount = countVerified(args.records);
+  // Inherit display fields from the prior row so dashboard preview-tab
+  // affordance and batch label are preserved after a page retry.
+  const priorName = (args.row.data?.__name as string | undefined) ?? "OCR";
+  const priorParentSubject = args.row.data?.parentSubject as string | undefined;
   const data = flattenForData({
     formType: args.formType,
     pdfOriginalName: args.pdfOriginalName,
@@ -483,6 +487,12 @@ function emitRow(args: {
     records: args.records,
     failedPages: args.failedPages,
     pageStatusSummary: args.summary,
+    // Mirror the orchestrator's awaiting-approval stamp so dashboard
+    // surfaces the preview-tab affordance and batch label on retried rows.
+    mode: "prepare",
+    __id: args.sessionId,
+    __name: priorName,
+    ...(priorParentSubject ? { parentSubject: priorParentSubject } : {}),
   });
   args.emit({
     workflow: WORKFLOW,
