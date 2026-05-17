@@ -17,7 +17,7 @@ import {
   newKronosNavigateAndFill,
   newKronosSubmitAndWaitForDuo,
 } from "../../infra/auth/login.js";
-import { TIMEKEEPER_NAME } from "../../config.js";
+import { getTimekeeperName } from "../../config.js";
 
 // Kuali module
 import {
@@ -111,6 +111,7 @@ export function resolveJobSummaryResult(
 export const separationsWorkflow = defineWorkflow({
   name: "separations",
   label: "Separations",
+  archetype: "batch",
   category: "Separations",
   iconName: "UserMinus",
   systems: [
@@ -297,7 +298,7 @@ export const separationsWorkflow = defineWorkflow({
     const termEffDate = computeTerminationEffDate(kualiData.separationDate);
     const ucpathReason = mapReasonCode(kualiData.terminationType);
     const template = isVol ? UC_VOL_TERM_TEMPLATE : UC_INVOL_TERM_TEMPLATE;
-    const timekeeperName = TIMEKEEPER_NAME;
+    const timekeeperName = getTimekeeperName();
 
     log.step(`Kuali extraction: Employee="${kualiData.employeeName}", EID="${kualiData.eid}", SepDate="${kualiData.separationDate}", Type="${kualiData.terminationType}"`);
     log.step(`Template: "${template}" — ${isVol ? "voluntary termination" : "involuntary termination"}`);

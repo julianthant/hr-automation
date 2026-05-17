@@ -21,6 +21,7 @@ const WORKFLOW = "crm-doc-download";
 export const crmDocDownloadWorkflow = defineWorkflow({
   name: WORKFLOW,
   label: "CRM Doc Download",
+  archetype: "utility",
   category: "Utils",
   iconName: "Download",
   systems: [
