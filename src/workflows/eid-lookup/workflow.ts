@@ -320,6 +320,7 @@ async function activeStatusStep<TSteps extends readonly string[]>(
 export const eidLookupCrmWorkflow = defineWorkflow({
   name: "eid-lookup",
   label: "EID Lookup",
+  archetype: "batch",
   category: "Utils",
   iconName: "Search",
   systems: [
@@ -356,8 +357,8 @@ export const eidLookupCrmWorkflow = defineWorkflow({
   getId: (d) => d.searchName ?? "",
   operatorSubject: (input) =>
     isEidInput(input)
-      ? buildOperatorSubject({ kind: "eid", value: input.emplId, prefix: "EID Lookup" })
-      : buildOperatorSubject({ kind: "person", value: input.name, prefix: "EID Lookup" }),
+      ? buildOperatorSubject({ kind: "eid", value: input.emplId })
+      : buildOperatorSubject({ kind: "person", value: input.name }),
   initialData: (input) =>
     isEidInput(input)
       ? { searchName: input.emplId, emplId: input.emplId }

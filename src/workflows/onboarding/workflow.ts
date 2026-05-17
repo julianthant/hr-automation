@@ -49,6 +49,7 @@ const onboardingSteps = [
 export const onboardingWorkflow = defineWorkflow({
   name: "onboarding",
   label: "Onboarding",
+  archetype: "batch",
   category: "Onboarding",
   iconName: "Users",
   systems: [

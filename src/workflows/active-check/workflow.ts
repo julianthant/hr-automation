@@ -23,6 +23,7 @@ const steps = ["checking"] as const;
 export const activeCheckWorkflow = defineWorkflow({
   name: "active-check",
   label: "Active Check",
+  archetype: "single",
   category: "Utils",
   iconName: "Search",
   systems: [

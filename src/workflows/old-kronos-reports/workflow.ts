@@ -158,6 +158,7 @@ async function validateAndRecordTracker(
 export const kronosReportsWorkflow = defineWorkflow({
   name: "kronos-reports",
   label: "Kronos Reports",
+  archetype: "batch",
   category: "Timekeeping",
   iconName: "FileText",
   systems: [
