@@ -148,6 +148,16 @@ export async function oathUploadHandler(
     });
   }
 
+  const priorTicket = findPriorTicketForRunId(ctx.runId, trackerDir);
+  if (priorTicket) {
+    log.warn(`[oath-upload] runId=${ctx.runId} already filed ticket ${priorTicket}; skipping HR form on restart`);
+    ctx.updateData({ ticketNumber: priorTicket });
+    ctx.skipStep("open-hr-form");
+    ctx.skipStep("fill-form");
+    ctx.skipStep("submit");
+    return;
+  }
+
   const page = await ctx.page("servicenow");
 
   await ctx.step("open-hr-form", async () => {
@@ -184,6 +194,18 @@ export async function oathUploadHandler(
 }
 
 const LOOKBACK_DAYS = 7;
+
+export function findPriorTicketForRunId(runId: string, trackerDir?: string): string | null {
+  const match = findLatestEntryForPredicate({
+    workflow: "oath-upload",
+    trackerDir,
+    lookbackDays: LOOKBACK_DAYS,
+    predicate: (e) => e.runId === runId && typeof e.data?.ticketNumber === "string" && (e.data.ticketNumber as string).length > 0,
+  });
+  if (!match) return null;
+  const t = match.data?.ticketNumber;
+  return typeof t === "string" ? t : null;
+}
 
 function readPriorOcrApproval(
   ocrSessionId: string,
