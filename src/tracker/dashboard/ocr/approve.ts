@@ -7,6 +7,7 @@ import { createTaskStore } from "../../../core/task-store/index.js";
 import { buildHttpPendingData } from "../../../core/daemon/enqueue-dispatch.js";
 import { readQueueTitle, rootQueueTitleData } from "../../../domain/queue-title.js";
 import { findLatestEntryForPredicate } from "../../find-latest-entry.js";
+import { deriveRowArchetype } from "../../../domain/row-archetype.js";
 import { readFormType, readParentRunId, readDryRun, readOriginWorkflow } from "./shared.js";
 
 const WORKFLOW = "ocr";
@@ -130,6 +131,7 @@ export function buildOcrApproveHandler(
               data: {
                 ...buildFallbackPendingData(item),
                 ...rootQueueTitleData(readParentSubjectFromInput(item)),
+                archetype: "delegate-child",
               },
               ...(passedParentRunId ? { parentRunId: passedParentRunId } : {}),
               ...(childInput ? { input: childInput } : {}),
@@ -183,6 +185,7 @@ export function buildOcrApproveHandler(
                     data: {
                       ...buildHttpPendingData(childWf, item),
                       ...rootQueueTitleData(readParentSubjectFromInput(item)),
+                      archetype: deriveRowArchetype(childWf.archetype, passedParentRunId ?? parentRunId),
                     },
                     ...(passedParentRunId ? { parentRunId: passedParentRunId } : {}),
                     ...(childInput ? { input: childInput } : {}),
@@ -212,6 +215,7 @@ export function buildOcrApproveHandler(
             step: "approved",
             data: {
               ...latestReviewData,
+              archetype: "batch-parent",
               mode: "prepare",
               formType,
               sessionId: input.sessionId,

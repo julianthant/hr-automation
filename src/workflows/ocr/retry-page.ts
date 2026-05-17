@@ -510,6 +510,7 @@ function emitRow(args: {
     pageStatusSummary: args.summary,
     // Mirror the orchestrator's awaiting-approval stamp so dashboard
     // surfaces the preview-tab affordance and batch label on retried rows.
+    archetype: "batch-parent",
     mode: "prepare",
     __id: args.sessionId,
     __name: priorName,
