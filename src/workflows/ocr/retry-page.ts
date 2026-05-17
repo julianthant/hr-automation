@@ -78,7 +78,12 @@ export async function runOcrRetryPage(
   // 1. Load the latest row state.
   const row = readLatestRow(input.sessionId, input.runId, trackerDir, date);
   if (!row) throw new RetryPageError("row-not-found", `No OCR row for sessionId=${input.sessionId} runId=${input.runId}`);
-  if (row.status === "failed") throw new RetryPageError("row-not-mutable", "Row is in failed state");
+  if (row.status === "failed" && row.step === "discarded") {
+    throw new RetryPageError("row-not-mutable", `cannot retry discarded row ${input.sessionId}`);
+  }
+  if (row.status === "done" && row.step === "approved") {
+    throw new RetryPageError("row-not-mutable", `cannot retry approved row ${input.sessionId}`);
+  }
   const formType = row.data?.formType as unknown as string | undefined;
   if (!formType) throw new RetryPageError("spec-missing", "Row missing formType");
   const spec = getFormSpec(formType);
