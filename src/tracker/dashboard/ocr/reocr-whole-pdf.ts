@@ -5,10 +5,12 @@ import { errorMessage } from "../../../utils/errors.js";
 import { trackEvent, dateLocal } from "../../jsonl.js";
 import type { TrackerEntry } from "../../jsonl.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
-import { isAcceptedHdhDepartment } from "../../../domain/hdh/departments.js";
+import { normalizeUcpathEmployeeId } from "../../../domain/identity/eid.js";
 import type { ChildOutcome, WatchChildRunsOpts } from "../../delegation/watch-child-runs.js";
 import type { OcrRequest, OcrResult } from "../../../services/ocr/index.js";
 import { rowKey, hasRowLock, acquireRowLock, releaseRowLock } from "./lock.js";
+import type { OcrLookupKind } from "../../../workflows/ocr/eid-lookup-results.js";
+import { patchOcrRecordFromEidLookupOutcome } from "../../../workflows/ocr/eid-lookup-results.js";
 
 const WORKFLOW = "ocr";
 
@@ -89,13 +91,13 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
       );
 
       // Eid-lookup fan-out (mirror the orchestrator's lookup phase)
-      const lookupTargets: Array<{ rec: unknown; index: number; kind: "name" | "verify" }> = [];
+      const lookupTargets: Array<{ rec: unknown; index: number; kind: OcrLookupKind }> = [];
       records.forEach((rec, index) => {
         const kind = spec.needsLookup(rec);
-        if (kind === "name" || kind === "verify") lookupTargets.push({ rec, index, kind });
+        if (kind) lookupTargets.push({ rec, index, kind });
       });
 
-      let enqueueItems: Array<{ record: unknown; index: number; kind: "name" | "verify"; itemId: string }> = [];
+      let enqueueItems: Array<{ record: unknown; index: number; kind: OcrLookupKind; itemId: string }> = [];
       if (lookupTargets.length > 0) {
         enqueueItems = lookupTargets.map((t) => ({
           record: t.rec,
@@ -108,7 +110,7 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
             enqueueItems.map((e) => ({
               ...(e.kind === "name"
                 ? { name: spec.carryForwardKey(e.record as never) }
-                : { emplId: extractEidLocal(e.record) }),
+                : { emplId: extractRecordEid(e.record) }),
               itemId: e.itemId,
             })),
           );
@@ -118,7 +120,7 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
           const inputs = enqueueItems.map((e) =>
             e.kind === "name"
               ? { name: spec.carryForwardKey(e.record as never) }
-              : { emplId: extractEidLocal(e.record), keepNonHdh: true },
+              : { emplId: extractRecordEid(e.record), keepNonHdh: true },
           );
           await ensureDaemonsAndEnqueue(eidLookupCrmWorkflow, inputs as never, {}, {
             trackerDir,
@@ -127,7 +129,7 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
                 if ("name" in inp && inp.name)
                   return spec.carryForwardKey(e.record as never) === inp.name;
                 if ("emplId" in inp && inp.emplId)
-                  return extractEidLocal(e.record) === inp.emplId;
+                  return extractRecordEid(e.record) === inp.emplId;
                 return false;
               });
               return matched?.itemId ?? `ocr-whole-fallback-${input.runId}`;
@@ -168,29 +170,7 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
                 if (rec.matchState === "lookup-pending" || rec.matchState === "lookup-running") rec.matchState = "unresolved";
                 continue;
               }
-              if (enq.kind === "name") {
-                const eid = (outcome.data?.emplId ?? "").trim();
-                if (outcome.status === "done" && /^\d{5,}$/.test(eid)) {
-                  if ("employee" in rec) (rec.employee as Record<string, unknown>).employeeId = eid;
-                  else rec.employeeId = eid;
-                  rec.matchState = "resolved";
-                  rec.matchSource = "eid-lookup";
-                } else {
-                  rec.matchState = "unresolved";
-                }
-              }
-              const v = computeVerificationLocal({
-                hrStatus: outcome.data?.hrStatus,
-                department: outcome.data?.department,
-                personOrgScreenshot: outcome.data?.personOrgScreenshot,
-              });
-              rec.verification = v;
-              // Match `isApprovable` in OcrReviewPane: only auto-deselect on a
-              // hard "don't process" verification. Soft `lookup-failed` keeps
-              // selection — operator decides from the warning banner.
-              if (v.state === "inactive" || v.state === "non-hdh") {
-                rec.selected = false;
-              }
+              patchOcrRecordFromEidLookupOutcome(records, idx, outcome, enq.kind);
             }
           }
 
@@ -210,16 +190,6 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
             failedPages: JSON.stringify([]),
             pageStatusSummary: JSON.stringify({ total: 0, succeeded: 0, failed: 0 }),
           };
-          emit({
-            workflow: WORKFLOW,
-            timestamp: new Date().toISOString(),
-            id: input.sessionId,
-            runId: input.runId,
-            ...(parentRunId ? { parentRunId } : {}),
-            status: "running",
-            step: "awaiting-approval",
-            data,
-          });
           emit({
             workflow: WORKFLOW,
             timestamp: new Date().toISOString(),
@@ -250,28 +220,10 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
   };
 }
 
-function extractEidLocal(record: unknown): string {
+function extractRecordEid(record: unknown): string {
   const r = record as Record<string, unknown>;
-  if (typeof r.employeeId === "string") return r.employeeId;
+  if (typeof r.employeeId === "string") return normalizeUcpathEmployeeId(r.employeeId);
   const employee = r.employee as Record<string, unknown> | undefined;
-  if (employee && typeof employee.employeeId === "string") return employee.employeeId;
+  if (employee && typeof employee.employeeId === "string") return normalizeUcpathEmployeeId(employee.employeeId);
   return "";
-}
-
-function computeVerificationLocal(d: { hrStatus?: string; department?: string; personOrgScreenshot?: string }): {
-  state: "verified" | "inactive" | "non-hdh" | "lookup-failed";
-  hrStatus?: string;
-  department?: string;
-  screenshotFilename: string;
-  checkedAt: string;
-  error?: string;
-} {
-  const checkedAt = new Date().toISOString();
-  const screenshotFilename = d.personOrgScreenshot ?? "";
-  if (!d.hrStatus) return { state: "lookup-failed", error: "no result", checkedAt, screenshotFilename };
-  const active = d.hrStatus === "Active";
-  const hdh = isAcceptedHdhDepartment(d.department ?? null);
-  if (!active) return { state: "inactive", hrStatus: d.hrStatus, department: d.department, screenshotFilename, checkedAt };
-  if (!hdh) return { state: "non-hdh", hrStatus: d.hrStatus, department: d.department ?? "", screenshotFilename, checkedAt };
-  return { state: "verified", hrStatus: d.hrStatus, department: d.department ?? "", screenshotFilename, checkedAt };
 }

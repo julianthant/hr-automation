@@ -112,7 +112,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
   // Keyed on (id, runId) tuples — NOT on status/step — so status updates
   // at 1 Hz do not trigger /api/runs refetches (new runs start by runId
   // changing, not status changing).
-  const { runs, activeRunId, setActiveRunId } = useRunsForMergedEntry({
+  const { runs, setRuns, activeRunId, setActiveRunId } = useRunsForMergedEntry({
     entry,
     siblings,
     workflow,
