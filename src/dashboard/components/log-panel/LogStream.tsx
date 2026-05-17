@@ -41,6 +41,8 @@ interface LogStreamProps {
   onPreviewVisibleChange?: (visible: boolean) => void;
   /** Compact controls for run history and row actions, rendered in the footer. */
   runControlsSlot?: ReactNode;
+  /** Queue row type label shown as a chip in the footer (e.g. "Normal row", "Batch delegation · Preview"). */
+  rowTypeLabel?: string;
   /** Default-active when first mounted — used to deep-link into Preview from another row. */
   initialTab?: string;
   /**
@@ -139,6 +141,7 @@ export function LogStream({
   previewAvailable,
   onPreviewVisibleChange,
   runControlsSlot,
+  rowTypeLabel,
   initialTab,
   maximized,
   onToggleMaximize,
@@ -322,10 +325,9 @@ export function LogStream({
           >
             {virtualItems.map((virtualRow) => {
               const item = displayed[virtualRow.index]!;
-              const key = buildLogStreamItemKey(item);
               return (
                 <div
-                  key={key}
+                  key={virtualRow.key}
                   data-index={virtualRow.index}
                   ref={virtualizer.measureElement}
                   style={{
@@ -386,6 +388,11 @@ export function LogStream({
               </>
             )}
           </div>
+        )}
+        {rowTypeLabel && (
+          <span className="px-2 py-0.5 rounded-md bg-secondary text-[11px] font-mono text-muted-foreground border border-border/60 whitespace-nowrap flex-shrink-0">
+            {rowTypeLabel}
+          </span>
         )}
         <div className="ml-auto flex items-center gap-1">
           {runControlsSlot}
