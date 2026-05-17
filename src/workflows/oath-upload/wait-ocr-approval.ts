@@ -1,6 +1,5 @@
 import { watchChildRuns } from "../../tracker/delegation/watch-child-runs.js";
 import { SEVEN_DAYS_MS } from "../../utils/durations.js";
-import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 
 export interface WaitForOcrApprovalOpts {
   sessionId: string;
@@ -30,7 +29,7 @@ export async function waitForOcrApproval(
 ): Promise<OcrApprovalOutcome> {
   const dir = opts.trackerDir ?? ".tracker";
 
-  await watchChildRuns({
+  const outcomes = await watchChildRuns({
     workflow: "ocr",
     expectedItemIds: [opts.sessionId],
     trackerDir: dir,
@@ -39,13 +38,7 @@ export async function waitForOcrApproval(
     ...(opts.abortIfRowState ? { abortIfRowState: opts.abortIfRowState } : {}),
   });
 
-  const latest = findLatestEntryForPredicate({
-    workflow: "ocr",
-    trackerDir: dir,
-    lookbackDays: 7,
-    predicate: (e) =>
-      e.id === opts.sessionId && (e.step === "approved" || e.step === "discarded"),
-  });
+  const latest = outcomes[0]?.terminalEntry;
   if (!latest) {
     throw new Error(
       `waitForOcrApproval: no terminal entry found for ${opts.sessionId} after watch resolved`,

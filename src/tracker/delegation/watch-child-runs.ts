@@ -30,6 +30,8 @@ export interface ChildOutcome {
   status: "done" | "failed";
   data?: Record<string, string>;
   error?: string;
+  /** The full TrackerEntry that triggered terminal classification. Always set by watchChildRuns; optional for test mocks. */
+  terminalEntry?: TrackerEntry;
 }
 
 export interface WatchChildRunsOpts {
@@ -220,6 +222,7 @@ async function maybeWatchSqliteChildRuns(
           status,
           data: synthetic.data,
           error: synthetic.error,
+          terminalEntry: synthetic,
         };
         outcomes.push(outcome);
         seen.add(fresh.itemId);
@@ -354,6 +357,7 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
           status: entry.status as "done" | "failed",
           data: entry.data,
           error: entry.error,
+          terminalEntry: entry,
         };
         outcomes.push(outcome);
         expected.delete(entry.id);

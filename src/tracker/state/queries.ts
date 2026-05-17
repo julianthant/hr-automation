@@ -5,7 +5,8 @@ import { computeStepDurations } from "../dashboard/run-timelines.js";
 import type { LogEntryRow, ProjectionEntriesPayload, ProjectionHealth, RunEventRow } from "./types.js";
 import { stateDbPath } from "./db.js";
 import type { SessionEvent } from "../session-events.js";
-import { collapseMergedPrimariesForQueueStrip, groupMergedTrackerEntries } from "../queue-row-count.js";
+import { groupMergedTrackerEntries } from "../queue-row-count.js";
+import { countTopLevelQueueSurfaceRows } from "../queue-surfaces.js";
 import type { LogEntry, TrackerEntry } from "../jsonl.js";
 
 function parseJsonObject<T>(raw: string | null | undefined, fallback: T): T {
@@ -189,23 +190,11 @@ export function queryEntriesPayload(
     latest_tracker_ts: string;
   }>;
 
-  const historyRows = db.prepare(`
-    SELECT item_id, run_id, event_ts AS timestamp, status, step
-    FROM run_events
-    WHERE workflow = @workflow AND tracker_date = @date
-    ORDER BY event_ms ASC, id ASC
-  `).all({ workflow: opts.workflow, date: opts.date }) as Array<{
-    item_id: string;
-    run_id: string;
-    timestamp: string;
-    status: "pending" | "running" | "done" | "failed" | "skipped";
-    step?: string | null;
-  }>;
   const historyByRun = new Map<string, Array<{ timestamp: string; status: "pending" | "running" | "done" | "failed" | "skipped"; step?: string }>>();
-  for (const row of historyRows) {
+  for (const row of eventRows) {
     const key = `${row.item_id}::${row.run_id}`;
     const arr = historyByRun.get(key) ?? [];
-    arr.push({ timestamp: row.timestamp, status: row.status, ...(row.step ? { step: row.step } : {}) });
+    arr.push({ timestamp: row.event_ts, status: row.status, ...(row.step ? { step: row.step } : {}) });
     historyByRun.set(key, arr);
   }
 
@@ -291,7 +280,10 @@ export function queryEntriesPayload(
       ...(row.error ? { error: row.error } : {}),
     }));
     const primaries = groupMergedTrackerEntries(asTracker).map((g) => g.primary);
-    wfCounts[wf] = collapseMergedPrimariesForQueueStrip(primaries).length;
+    wfCounts[wf] = countTopLevelQueueSurfaceRows({
+      entries: primaries,
+      delegationSourceEntries: asTracker,
+    });
   }
 
   const failureCounts: Record<string, number> = {};

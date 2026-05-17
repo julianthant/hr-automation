@@ -2,9 +2,8 @@
  * Drops resolved fields on selected records, re-fans-out eid-lookup, watches
  * for completions, patches the OCR row's records progressively.
  */
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { trackEvent, dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
+import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { watchChildRuns, type ChildOutcome } from "../../tracker/delegation/watch-child-runs.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
 import { patchOcrRecordFromEidLookupOutcome } from "./eid-lookup-results.js";
@@ -32,17 +31,12 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
   const trackerDir = opts.trackerDir;
 
   const date = dateLocal();
-  const file = join(trackerDir ?? ".tracker", `ocr-${date}.jsonl`);
-  if (!existsSync(file)) throw new Error("OCR row not found");
-  const raw = readFileSync(file, "utf-8");
-  const lines = raw.split("\n").filter(Boolean);
-  let latest: TrackerEntry | undefined;
-  for (const line of lines) {
-    try {
-      const e: TrackerEntry = JSON.parse(line);
-      if (e.id === input.sessionId && e.runId === input.runId) latest = e;
-    } catch { /* tolerate */ }
-  }
+  const latest = findLatestEntryForPredicate({
+    workflow: WORKFLOW,
+    trackerDir,
+    lookbackDays: 2,
+    predicate: (e) => e.id === input.sessionId && e.runId === input.runId,
+  });
   if (!latest) throw new Error("OCR row not found in JSONL");
   const formType = latest.data?.formType as unknown as string | undefined;
   if (!formType) throw new Error("formType missing on OCR row");
