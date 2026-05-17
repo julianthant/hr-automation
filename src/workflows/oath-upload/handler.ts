@@ -221,13 +221,19 @@ function readPriorOcrApproval(
       typeof e.data?.fannedOutItemIds === "string",
   });
   if (!entry || typeof entry.data?.fannedOutItemIds !== "string") return null;
+  let ids: unknown;
   try {
-    const ids = JSON.parse(entry.data.fannedOutItemIds);
-    if (Array.isArray(ids) && ids.every((s) => typeof s === "string")) {
-      return { fannedOutItemIds: ids as string[] };
-    }
-  } catch {
-    /* tolerate malformed payload */
+    ids = JSON.parse(entry.data.fannedOutItemIds);
+  } catch (e) {
+    throw new Error(
+      `oath-upload: malformed fannedOutItemIds JSON in prior OCR approval (ocrSessionId=${ocrSessionId}): ${e instanceof Error ? e.message : String(e)}`,
+      { cause: e },
+    );
   }
-  return null;
+  if (!Array.isArray(ids) || !ids.every((s) => typeof s === "string")) {
+    throw new Error(
+      `oath-upload: prior OCR approval has non-array fannedOutItemIds for ocrSessionId=${ocrSessionId} (got ${Array.isArray(ids) ? "non-string-array" : typeof ids})`,
+    );
+  }
+  return { fannedOutItemIds: ids as string[] };
 }
