@@ -87,6 +87,7 @@ export function buildEmergencyContactPendingData(
 export const emergencyContactWorkflow = defineWorkflow({
   name: WORKFLOW,
   label: "Emergency Contact",
+  archetype: "batch",
   category: "Onboarding",
   iconName: "Phone",
   systems: [
