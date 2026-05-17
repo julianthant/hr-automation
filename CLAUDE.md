@@ -293,6 +293,7 @@ const steps = ["ucpath-auth", "transaction"] as const;
 export const myWorkflow = defineWorkflow({
   name: "my-workflow",
   label: "My Workflow",
+  archetype: "single",
   systems: [{
     id: "ucpath",
     login: async (page) => {
@@ -336,6 +337,7 @@ All production workflows are kernel-based as of 2026-04-17. New workflows must f
 
 **Quick reference:**
 - `defineWorkflow({ name, systems, steps, schema, operatorSubject, handler, ... })` — declare workflow with type-narrowed steps + auto-registered in dashboard
+- `archetype: "single" | "batch" | "delegating" | "delegating-batch" | "utility"` — required; kernel stamps `data.archetype` on every tracker row so queue surface, log panel footer chip, and display-name resolver all dispatch on one field. Defaults to `"batch"` if `batch` is set, else `"single"` — but declare explicitly so `tests/unit/architecture/archetype-coverage.test.ts` passes.
 - `ctx.page(id)` — Playwright Page for a system; blocks until auth is ready
 - `ctx.step(name, fn)` — wraps your code, catches errors, screenshots on failure, emits to tracker
 - `ctx.updateData(patch)` — merge into tracker entry's data field (use for operator-facing fields like emplId, name, etc.)
@@ -486,6 +488,7 @@ After mapping, add to `src/systems/<system>/selectors.ts` with `// verified YYYY
 ## Lessons Learned
 
 - **2026-05-16: Oath-upload restart-recovery now covers the HR-form submit step.** `findPriorTicketForRunId` is consulted before re-firing `open-hr-form`/`fill-form`/`submit` — a daemon crash between submit-success and tracker-done no longer files a duplicate ServiceNow ticket. Recovery probes now cover both the OCR portion (existing `readPriorOcrApproval`) and the post-signature ServiceNow portion. Helper lives in `src/workflows/oath-upload/handler.ts`.
+- **2026-05-17: `data.archetype` is the canonical row-type discriminator.** Replaces the previous seven-discriminator sprawl (workflow-name match, id-prefix match, `data.mode`, `data.taskRole`, `data.requestRole`, `data.originWorkflow`, ad-hoc member-count heuristics). New rows get an `archetype` stamp via `withTrackedWorkflow` opts or explicit assignment for `batch-parent`/`dispatch` rows. Legacy discriminators remain as read-fallbacks in `resolveRowArchetype` for pre-migration JSONL. Architecture guard: `tests/unit/architecture/archetype-coverage.test.ts` requires every workflow to declare it explicitly.
 - **2026-05-16: Operator-discard mid-OCR must clear the abort flag in finally.** Without a `finally` block calling `clearOcrPrepareAbort(id, runId)`, re-entry on the same `(sessionId, runId)` throws at the first tracker emit because the module-level Set still has the flag. The `writeTracker("failed", …)` in the existing catch block can also re-throw the same abort — wrap it in its own inner try/catch so both paths land in the finally. See `src/workflows/ocr/orchestrator.ts`.
 - **2026-05-16: Force-research must consume eid-lookup outcomes.** Previous behavior `void`'d the `Promise.all`/`watchChildRuns` result, emitting `awaiting-approval` with unpatched records — operators saw blank lookups. Fixed by iterating outcomes and applying `patchOcrRecordFromEidLookupOutcome` per outcome before the final emit. Also: use explicit `null` (not `undefined`) when clearing `matchSource`/`matchConfidence` so `JSON.stringify` preserves the keys. See `src/workflows/ocr/force-research.ts`.
 - **2026-05-16: `queryEntriesPayload` builds `historyByRun` from already-fetched event rows.** The function was issuing two full-table SELECTs against `run_events` per `/events` tick — the second to build step-duration history. Since `eventRows` (the first query's JOIN result) already contains `item_id`, `run_id`, `event_ts`, `status`, and `step`, `historyByRun` is now built by iterating `eventRows` in a Map loop. Drops each tick from 2 to 1 SELECT against `run_events`.
