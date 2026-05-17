@@ -40,6 +40,11 @@ describe("task display", () => {
       "main",
     );
   });
+
+  it("dispatch role lands on the main queue", () => {
+    const out = buildTaskDisplay({ workflow: "ocr", subject: "PDF.pdf", role: "dispatch" });
+    assert.equal(out.queuePlacement, "main");
+  });
 });
 
 describe("task control vocabulary", () => {
