@@ -7,6 +7,7 @@ import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js"
 import { watchChildRuns, type ChildOutcome } from "../../tracker/delegation/watch-child-runs.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
 import { patchOcrRecordFromEidLookupOutcome } from "./eid-lookup-results.js";
+import { resolveParentSubject } from "./orchestrator.js";
 
 const WORKFLOW = "ocr";
 
@@ -118,13 +119,32 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     patchOcrRecordFromEidLookupOutcome(records, idx, outcome, "name");
   }
 
-  const baseData = { ...(latest.data ?? {}), records: JSON.stringify(records) };
+  // Mirror the orchestrator's emit shape so the dashboard can resolve the row
+  // by archetype/__id/__name/parentSubject — re-stamp on every emit rather
+  // than relying on whatever the latest row happened to carry.
+  const parentRunId = (latest.data?.parentRunId as unknown as string | undefined) ?? latest.parentRunId;
+  const originWorkflow = (latest.data?.originWorkflow as unknown as string | undefined);
+  const parentSubject = resolveParentSubject({
+    parentRunId,
+    originWorkflow,
+    trackerDir,
+  });
+  const baseData: Record<string, string> = {
+    ...(latest.data ?? {}),
+    records: JSON.stringify(records),
+    mode: "prepare",
+    archetype: "batch-parent",
+    __id: input.sessionId,
+    __name: parentSubject ?? "OCR",
+    ...(parentSubject ? { parentSubject } : {}),
+  };
   trackEvent(
     {
       workflow: WORKFLOW,
       timestamp: new Date().toISOString(),
       id: input.sessionId,
       runId: input.runId,
+      ...(parentRunId ? { parentRunId } : {}),
       status: "running",
       step: "awaiting-approval",
       data: baseData,
@@ -137,6 +157,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
       timestamp: new Date().toISOString(),
       id: input.sessionId,
       runId: input.runId,
+      ...(parentRunId ? { parentRunId } : {}),
       status: "done",
       step: "awaiting-approval",
       data: baseData,
