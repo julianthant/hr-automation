@@ -38,8 +38,8 @@ node_modules/
 # Playwright MCP (snapshots, console logs)
 .playwright-mcp/
 
-# Ad hoc LLM output paths (keep Superpowers trees visible — see docs/README.md)
-docs/gemini/
+#Docs
+docs/
 
 # Tracker data (local runtime)
 .tracker/
@@ -77,3 +77,4 @@ Thumbs.db
 /notes.md
 .ocr-cache/
 .worktrees/
+

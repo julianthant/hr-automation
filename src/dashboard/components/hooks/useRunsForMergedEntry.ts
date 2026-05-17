@@ -10,6 +10,7 @@ interface UseRunsForMergedEntryInput {
 
 interface UseRunsForMergedEntryResult {
   runs: RunInfo[];
+  setRuns: Dispatch<SetStateAction<RunInfo[]>>;
   activeRunId: string | null;
   setActiveRunId: Dispatch<SetStateAction<string | null>>;
 }
@@ -137,5 +138,5 @@ export function useRunsForMergedEntry({
   // the per-member id/runId tuples; if workflow identity itself changed we'd
   // see a different requestKey anyway.
 
-  return { runs, activeRunId, setActiveRunId };
+  return { runs, setRuns, activeRunId, setActiveRunId };
 }
