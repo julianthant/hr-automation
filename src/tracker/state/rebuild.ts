@@ -191,7 +191,7 @@ export function rebuildProjectionForDate(db: Database, opts: RebuildProjectionOp
       sessionLineCount += 1;
       applySessionEvent(db, row.value, source(datedSessionPath, "session", row.line, row.offset, eventDate));
     }
-    let sessionLinesAppliedTotal = sessionLineCount;
+    const sessionLinesAppliedTotal = sessionLineCount;
     recordSource(db, {
       path: datedSessionPath,
       sourceKind: "session",

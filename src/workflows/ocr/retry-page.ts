@@ -284,7 +284,7 @@ function readLatestRowFromSqlite(
   sessionId: string,
   runId: string,
   trackerDir: string | undefined,
-  date: string,
+  _date: string,
 ): TrackerEntry | null {
   const dir = trackerDir ?? ".tracker";
   if (!existsSync(stateDbPath(dir))) return null;

@@ -1,4 +1,4 @@
-import type { RegisteredWorkflow, WorkflowConfig } from './types.js'
+import type { RegisteredWorkflow } from './types.js'
 import { CancelledError } from './types.js'
 import type { WorkflowArchetype, RowArchetype } from '../../domain/row-archetype.js'
 import { Session } from './session.js'

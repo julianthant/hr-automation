@@ -15,7 +15,7 @@ describe("archetype stamping on WorkflowConfig", () => {
       detailFields: [],
       getName: () => "",
       getId: (d) => d.id,
-      operatorSubject: () => ({ value: "test", kind: "eid" as const }),
+      operatorSubject: () => ({ value: "test", kind: "eid" as const, label: "Test" }),
       handler: async () => {},
     });
     assert.equal(wf.archetype, "single");
@@ -31,7 +31,7 @@ describe("archetype stamping on WorkflowConfig", () => {
       detailFields: [],
       getName: () => "",
       getId: (d) => d.id,
-      operatorSubject: () => ({ value: "test", kind: "eid" as const }),
+      operatorSubject: () => ({ value: "test", kind: "eid" as const, label: "Test" }),
       handler: async () => {},
     });
     assert.equal(wf.archetype, "single");
@@ -48,7 +48,7 @@ describe("archetype stamping on WorkflowConfig", () => {
       detailFields: [],
       getName: () => "",
       getId: (d) => d.id,
-      operatorSubject: () => ({ value: "test", kind: "eid" as const }),
+      operatorSubject: () => ({ value: "test", kind: "eid" as const, label: "Test" }),
       handler: async () => {},
     });
     assert.equal(wf.archetype, "batch");

@@ -72,8 +72,8 @@ test("buildCliAdapter merges pendingExtras after standard pending data", async (
       parentRunId: parentRunId ?? "",
     }),
     enqueue: async (_workflow, inputs, _flags, opts) => {
-      assert.equal(opts.parentRunId, "parent-A");
-      opts.onPreEmitPending?.(inputs[0], "run-A", opts.parentRunId, inputs[0].id);
+      assert.equal(opts?.parentRunId, "parent-A");
+      opts?.onPreEmitPending?.(inputs[0], "run-A", opts.parentRunId, inputs[0].id);
     },
     track: (entry) => seen.push(entry),
   });
@@ -109,7 +109,7 @@ test("buildCliAdapter forwards onPreEmitFailed through injected enqueue", async 
       seen.push({ item, runId, error, itemId });
     },
     enqueue: async (_workflow, inputs, _flags, opts) => {
-      opts.onPreEmitFailed?.(inputs[0], "run-A", "spawn failed", inputs[0].id);
+      opts?.onPreEmitFailed?.(inputs[0], "run-A", "spawn failed", inputs[0].id);
     },
   });
 
