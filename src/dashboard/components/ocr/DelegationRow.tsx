@@ -2,6 +2,7 @@ import type { TrackerEntry } from "@/components/shared/types";
 import { GroupRowBase } from "@/components/queue-panel/group-row-base";
 import { RetryButton } from "@/components/shared/RetryButton";
 import { DeleteButton } from "@/components/shared/DeleteButton";
+import { readQueueTitle } from "../../../domain/queue-title.js";
 
 /**
  * Summary card for an approval delegation: an approved prep row and its
@@ -37,7 +38,7 @@ export function DelegationRow({
   batchDrillInEnabled = true,
 }: DelegationRowProps) {
   const runId = parent.runId ?? parent.id;
-  const title = parent.data?.pdfOriginalName || "Prep batch";
+  const title = readQueueTitle(parent.data) ?? parent.data?.pdfOriginalName ?? "Prep batch";
   const footerActions = (
     <>
       <RetryButton
@@ -66,7 +67,7 @@ export function DelegationRow({
       members={delegatedEntries}
       countTone="warning"
       footerRunOrdinal={parent.runOrdinal}
-      footerSecondaryId={parent.id}
+      footerSecondaryId={parent.data?.__name || parent.id}
       firstTimestamp={parent.timestamp}
       isFocused={isBatchQueueFocused}
       drillInEnabled={batchDrillInEnabled}
