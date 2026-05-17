@@ -1,5 +1,6 @@
 import type { TrackerEntry } from "./jsonl.js";
 import { isDelegatedOcrAwaitingApprovalEntry } from "./dashboard/prep-rows.js";
+import { countTopLevelQueueSurfaceRows } from "./queue-surfaces.js";
 
 /** SSE payloads may enrich rows; JSONL replay may omit this — both are valid. */
 function activityTimestamp(e: TrackerEntry): string {
@@ -9,9 +10,9 @@ function activityTimestamp(e: TrackerEntry): string {
 
 /**
  * Dashboard queue collapses multiple tracker items that resolve to the same
- * employee id (`data.emplId`) into one row. Sidebar `wfCounts` must use the
- * same grouping — counting raw item_ids would over-count (e.g. name + EID
- * checks for one person).
+ * employee id (`data.emplId`) into one row. Sidebar `wfCounts` combine that
+ * merge with the queue **surface** model ({@link countTopLevelQueueSurfaceRows})
+ * so delegated children inside one card are not counted separately from the card.
  */
 export interface MergedEntryGroup {
   primary: TrackerEntry;
@@ -138,9 +139,10 @@ function rollupBatchMembersToQueueStripSynth(
 }
 
 /**
- * Canonical “queue strip” row list: one visible row per surface card in the
- * left panel / stat pills / sidebar badges. Call on **merge primaries** (one
- * entry per person after {@link groupMergedTrackerEntries}).
+ * Legacy “queue strip” row list used for StatPills **per-status** counts on
+ * collapsed primaries. **Sidebar badges and SSE `wfCounts`** use
+ * {@link countTopLevelQueueSurfaceRows} instead — it matches delegation/batch
+ * cards and avoids double-counting children that render inside a group row.
  *
  * - Discarded prep rows are dropped.
  * - Entries with a shared `parentRunId` collapse to one synthetic row.
@@ -185,5 +187,8 @@ export function countSidebarRowsFromTrackerHistory(
   const deduped = dedupeLatestByIdWithCarriedEmplId(raw);
   const visible = deduped.filter((e) => !isExcluded(e));
   const primaries = groupMergedTrackerEntries(visible).map((g) => g.primary);
-  return collapseMergedPrimariesForQueueStrip(primaries).length;
+  return countTopLevelQueueSurfaceRows({
+    entries: primaries,
+    delegationSourceEntries: visible,
+  });
 }

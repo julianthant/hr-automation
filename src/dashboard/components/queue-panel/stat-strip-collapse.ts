@@ -2,9 +2,10 @@ import type { TrackerEntry } from "@/components/shared/types";
 import { collapseMergedPrimariesForQueueStrip } from "../../../tracker/queue-row-count.js";
 
 /**
- * Reduces merge primaries into one unit per StatPills / sidebar-visible row.
- * Delegates to the tracker canonical implementation so SSE `wfCounts`, SQLite
- * projection counts, and the React queue strip never drift.
+ * Reduces merge primaries for StatPills **per-status** bucketing on collapsed
+ * tracker rows. The "All" pill count + WorkflowRail badges use
+ * {@link countQueuePanelTopLevelRows} / SSE `wfCounts` (queue-surface model)
+ * instead so delegation cards are not double-counted.
  */
 export function collapseEntriesForStatStrip(entries: readonly TrackerEntry[]): TrackerEntry[] {
   return collapseMergedPrimariesForQueueStrip(entries);

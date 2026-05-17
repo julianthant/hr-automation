@@ -48,6 +48,8 @@ interface QueuePanelProps {
    * Parent-run batches count as **one** row in the pills; omit to use discarded-prep-filtered entries.
    */
   statPanelEntries?: TrackerEntry[];
+  /** When set, "All" StatPill + rail use this top-level row count (group cards + flat). */
+  topLevelQueueCount?: number;
   workflow: string;
   /** Registry label for batch summary cards / synthetic batch toolbar titles. */
   workflowLabel: string;
@@ -178,6 +180,7 @@ export function QueuePanel({
   entries,
   delegationSourceEntries,
   statPanelEntries,
+  topLevelQueueCount,
   workflow,
   workflowLabel,
   displayNames,
@@ -504,6 +507,7 @@ export function QueuePanel({
           <div className="h-[69.5px] flex items-center px-3 min-[1440px]:px-4 py-2">
             <StatPills
               entries={collapsedStatPillEntries}
+              allCountOverride={topLevelQueueCount}
               activeFilter={statusFilter}
               onFilter={setStatusFilter}
             />
