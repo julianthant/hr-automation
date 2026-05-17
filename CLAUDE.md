@@ -482,3 +482,9 @@ playwright-cli -s=session close
 ```
 
 After mapping, add to `src/systems/<system>/selectors.ts` with `// verified YYYY-MM-DD` comment. Run `npm run selectors:catalog` to sync.
+
+## Lessons Learned
+
+- **2026-05-16: Oath-upload restart-recovery now covers the HR-form submit step.** `findPriorTicketForRunId` is consulted before re-firing `open-hr-form`/`fill-form`/`submit` — a daemon crash between submit-success and tracker-done no longer files a duplicate ServiceNow ticket. Recovery probes now cover both the OCR portion (existing `readPriorOcrApproval`) and the post-signature ServiceNow portion. Helper lives in `src/workflows/oath-upload/handler.ts`.
+- **2026-05-16: Operator-discard mid-OCR must clear the abort flag in finally.** Without a `finally` block calling `clearOcrPrepareAbort(id, runId)`, re-entry on the same `(sessionId, runId)` throws at the first tracker emit because the module-level Set still has the flag. The `writeTracker("failed", …)` in the existing catch block can also re-throw the same abort — wrap it in its own inner try/catch so both paths land in the finally. See `src/workflows/ocr/orchestrator.ts`.
+- **2026-05-16: Force-research must consume eid-lookup outcomes.** Previous behavior `void`'d the `Promise.all`/`watchChildRuns` result, emitting `awaiting-approval` with unpatched records — operators saw blank lookups. Fixed by iterating outcomes and applying `patchOcrRecordFromEidLookupOutcome` per outcome before the final emit. Also: use explicit `null` (not `undefined`) when clearing `matchSource`/`matchConfidence` so `JSON.stringify` preserves the keys. See `src/workflows/ocr/force-research.ts`.
