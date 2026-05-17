@@ -388,6 +388,8 @@ function readLatestRowFromJsonl(
   return latest;
 }
 
+const RETRY_PAGE_LOOKBACK_DAYS = 7;
+
 function readLatestRow(
   sessionId: string,
   runId: string,
@@ -396,12 +398,17 @@ function readLatestRow(
 ): TrackerEntry | null {
   const sqliteResult = readLatestRowFromSqlite(sessionId, runId, trackerDir, date);
   if (sqliteResult) return sqliteResult;
-  const today = readLatestRowFromJsonl(sessionId, runId, trackerDir, date);
-  if (today) return today;
-  const yesterday = new Date(date);
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayStr = yesterday.toISOString().slice(0, 10);
-  return readLatestRowFromJsonl(sessionId, runId, trackerDir, yesterdayStr);
+  // JSONL fallback: walk back RETRY_PAGE_LOOKBACK_DAYS daily files so a retry
+  // request for a (sessionId, runId) created days ago still finds its row.
+  const base = new Date(date);
+  for (let i = 0; i < RETRY_PAGE_LOOKBACK_DAYS; i++) {
+    const d = new Date(base);
+    d.setDate(base.getDate() - i);
+    const dStr = dateLocal(d);
+    const hit = readLatestRowFromJsonl(sessionId, runId, trackerDir, dStr);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 function parseRecords(data: Record<string, string> | undefined): unknown[] {
