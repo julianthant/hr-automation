@@ -1,4 +1,4 @@
-export type TaskRole = "root" | "delegator" | "child" | "utility" | "approval";
+export type TaskRole = "root" | "delegator" | "child" | "utility" | "approval" | "dispatch";
 export type QueuePlacement = "main" | "subqueue";
 
 export interface TaskDisplayInput {
