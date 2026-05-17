@@ -60,3 +60,20 @@ function isRowArchetype(v: string): v is RowArchetype {
   return v === "single" || v === "batch-parent" || v === "batch-member"
     || v === "dispatch" || v === "delegate-child" || v === "passive-child";
 }
+
+/**
+ * Derive the RowArchetype for a single tracker row given the workflow's
+ * declared WorkflowArchetype and whether the row has a parent run.
+ * Used by pre-emit write sites that don't go through withTrackedWorkflow.
+ */
+export function deriveRowArchetype(
+  workflowArchetype: WorkflowArchetype,
+  parentRunId?: string,
+): RowArchetype {
+  if (parentRunId) {
+    return workflowArchetype === "utility" ? "passive-child" : "delegate-child";
+  }
+  if (workflowArchetype === "delegating-batch") return "batch-parent";
+  if (workflowArchetype === "batch") return "batch-member";
+  return "single";
+}

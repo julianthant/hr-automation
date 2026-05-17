@@ -16,6 +16,7 @@ import type { ScreenshotFn } from './types.js'
 import { registerInProcessRun, unregisterInProcessRun } from '../daemon/in-process-runs.js'
 import { operatorSubjectData } from '../../domain/operator-subject.js'
 import { queueTitleData } from '../../domain/queue-title.js'
+import { deriveRowArchetype } from '../../domain/row-archetype.js'
 import { openControlDb } from '../control-db.js'
 import { createTaskStore } from '../task-store/index.js'
 import { createWorkerStore } from '../daemon/worker-store.js'
@@ -514,6 +515,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
         initialData: Object.keys(seedData).length > 0 ? seedData : undefined,
         ...(inputForRow ? { input: inputForRow } : {}),
         ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
+        archetype: deriveRowArchetype(wf.archetype, opts.parentRunId),
       },
     )
   }, opts.trackerDir)

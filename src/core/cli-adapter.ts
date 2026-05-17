@@ -4,6 +4,7 @@ import type { ensureDaemonsAndEnqueue as ensureDaemonsAndEnqueueFn } from "./dae
 import { ensureDaemonsAndEnqueue } from "./daemon/client.js";
 import { trackEvent, type TrackerEntry } from "../tracker/jsonl.js";
 import { operatorSubjectData } from "../domain/operator-subject.js";
+import { deriveRowArchetype } from "../domain/row-archetype.js";
 import { log } from "../utils/log.js";
 
 type EnqueueFn<TInput> = (
@@ -77,6 +78,7 @@ export function buildCliAdapter<TArgs extends readonly unknown[], TInput>(
               ...opts.buildPendingData(item, itemId),
               ...operatorSubjectData(subject),
               ...opts.pendingExtras?.(item, itemId, runId, parentRunId),
+              archetype: deriveRowArchetype(opts.workflow.archetype, parentRunId),
             },
           });
         },

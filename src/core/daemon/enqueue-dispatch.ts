@@ -19,6 +19,7 @@ import type { RegisteredWorkflow } from "../kernel/types.js";
 import { buildInitialTrackerData, splitPrefilled } from "../kernel/workflow.js";
 import { allocateLowestBatchDisplayOrdinal } from "../../tracker/batch-display-ordinal.js";
 import { DEFAULT_DIR, trackEvent } from "../../tracker/jsonl.js";
+import { deriveRowArchetype } from "../../domain/row-archetype.js";
 import { log } from "../../utils/log.js";
 
 export interface EnqueueHttpResult {
@@ -225,6 +226,7 @@ export async function enqueueFromHttp(
           const id = itemId;
           /** Pending + spawn-failure rows share stamp; `??` tolerates enqueue-client vs HTTP-option drift. */
           const stampedParentRunId = passedParentRunId ?? effectiveParentRunId;
+          data.archetype = deriveRowArchetype(wf.archetype, stampedParentRunId);
           // Persist the original input verbatim on the pending row so the
           // dashboard's retry / edit-and-resume features can reconstruct
           // the call without per-workflow input-shaping logic. See the
@@ -259,6 +261,7 @@ export async function enqueueFromHttp(
           if (batchDisplayOrdinal !== undefined) {
             data.batchDisplayOrdinal = String(batchDisplayOrdinal);
           }
+          data.archetype = deriveRowArchetype(wf.archetype, effectiveParentRunId);
           const id = itemId;
           trackEvent(
             {
