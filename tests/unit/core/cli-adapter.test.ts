@@ -87,6 +87,7 @@ test("buildCliAdapter merges pendingExtras after standard pending data", async (
     __subjectKind: "document",
     runIdEcho: "run-A",
     parentRunId: "parent-A",
+    archetype: "delegate-child",
   });
 });
 

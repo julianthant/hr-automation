@@ -1,6 +1,6 @@
 import type { RegisteredWorkflow } from './types.js'
 import { CancelledError } from './types.js'
-import type { WorkflowArchetype, RowArchetype } from '../../domain/row-archetype.js'
+import { deriveRowArchetype } from '../../domain/row-archetype.js'
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
 import { trackEvent, withTrackedWorkflow, emitScreenshotEvent } from '../../tracker/jsonl.js'
@@ -70,17 +70,6 @@ export type RunOneItemResult =
   | { ok: true }
   | { ok: false; error: string; kind?: 'cancelled' }
 
-function deriveRowArchetype(
-  workflowArchetype: WorkflowArchetype,
-  parentRunId?: string,
-): RowArchetype {
-  if (parentRunId) {
-    return workflowArchetype === 'utility' ? 'passive-child' : 'delegate-child'
-  }
-  if (workflowArchetype === 'delegating-batch') return 'batch-parent'
-  if (workflowArchetype === 'batch') return 'batch-member'
-  return 'single'
-}
 
 /**
  * Run one item through the kernel envelope: emit pending (unless caller
