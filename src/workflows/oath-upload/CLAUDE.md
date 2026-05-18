@@ -64,10 +64,11 @@ Before mapping a new selector, run `npm run selector:search "<intent>"`.
 | `authSteps`   | `false` (we declare `servicenow-auth` ourselves)                               |
 | `steps`       | `["servicenow-auth", "delegate-ocr", "wait-ocr-approval", "delegate-signatures", "wait-signatures", "open-hr-form", "fill-form", "submit"]` |
 | `schema`      | `{ pdfPath, pdfOriginalName, sessionId, pdfHash }`                             |
+| `archetype`   | `"delegating-batch"` — stamps `data.archetype: "batch-parent"` on the root row |
 | `batch`       | `{ mode: "sequential", preEmitPending: true, betweenItems: ["reset"] }` |
 | `tiling`      | `"single"`                                                                     |
 | `authChain`   | `"sequential"`                                                                 |
-| `detailFields`| PDF / OCR session / Signers / HR ticket # / Filed / Status                     |
+| `detailFields`| PDF / OCR session / Signers / HR ticket # / Filed / Status. `data.uploadMode` carries the run mode (`"full"` / `"upload-only"`) — distinct from the legacy `data.mode` field which was renamed in the archetype migration (2026-05-17). |
 
 ## Dupe-protection
 
@@ -102,4 +103,5 @@ the abort, the kernel's failure path emits `failed` step
 ## Lessons Learned
 
 - **2026-05-01: oath-upload Run modal must show the roster picker.** The original 2026-05-01 ship hardcoded `rosterMode: "download"` in `handler.ts:93` because oath-upload's modal didn't surface a picker. The flaw: the delegated OCR (`formType: "oath"`) needs a roster to match OCR'd names → EIDs before fanning out oath-signature. Hardcoding "download" forces a SharePoint round-trip on every run even when a fresh roster is already on disk — wasteful, slow, and breaks for operators whose `ONBOARDING_ROSTER_URL` env var is unset. Fix: oath-upload's `RUN_MODAL_REGISTRY` entry now sets `sections: { roster: true, duplicateCheck: true }`. The schema accepts `rosterMode` + `rosterPath`, the dashboard route (`/api/oath-upload/start`) resolves `rosterPath` from `.tracker/rosters/` or `src/data/` when `rosterMode === "existing"` (mirroring the capture flow at `dashboard.ts:686-693`), and `handler.ts` forwards both fields into the OCR `runWorkflow(...)` call. **General rule for any workflow that delegates to OCR:** if it depends on the OCR roster-match step, its Run modal MUST expose the same roster picker the OCR modal does — never hardcode the mode at the delegation site.
+- **2026-05-17: `data.mode` renamed to `data.uploadMode`; archetype changed to `"delegating-batch"`.** `handler.ts` previously stamped `data.mode: input.mode` (values `"full"` / `"upload-only"`) and `data.taskRole: "delegator"/"root"`. Both were retired in the archetype migration: `data.mode` → `data.uploadMode` (avoids collision with the `data.mode === "prepare"` prep-row discriminator), and `data.taskRole` is removed because `archetype: "delegating-batch"` on `defineWorkflow` stamps `data.archetype: "batch-parent"` on every root row. Dashboard read sites now dispatch on `resolveRowArchetype` instead of these legacy fields.
 - **2026-05-15: Prior OCR approval lookup moved to tracker helper.** Restart recovery now uses `findLatestEntryForPredicate` from `src/tracker/` instead of a workflow-local `existsSync/readFileSync` loop. Keep any future "look back through tracker JSONL for latest row matching X" logic in that shared helper so malformed-line tolerance and newest-first scanning stay consistent.
