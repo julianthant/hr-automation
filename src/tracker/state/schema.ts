@@ -3,7 +3,7 @@ export interface Migration {
   sql: string;
 }
 
-export const LATEST_SCHEMA_VERSION = 7;
+export const LATEST_SCHEMA_VERSION = 8;
 
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -477,5 +477,9 @@ DROP INDEX IF EXISTS tasks_status_idx;
 ALTER TABLE tasks DROP COLUMN status;
 ALTER TABLE task_attempts DROP COLUMN status;
     `,
+  },
+  {
+    version: 8,
+    sql: String.raw`ALTER TABLE items ADD COLUMN latest_empl_id TEXT;`,
   },
 ];

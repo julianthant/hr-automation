@@ -20,11 +20,14 @@ function parseJsonObject<T>(raw: string | null | undefined, fallback: T): T {
 
 const WF_ITEM_KEY_SEP = "\u0000";
 const RESOLVED_EMPL_CACHE_TTL_MS = 1_000;
+const RESOLVED_EMPL_CACHE_MAX = 10_000;
 const resolvedEmplCache = new WeakMap<Database, { trackerDate: string; computedAt: number; value: Map<string, string> }>();
 
 /**
- * Chronological snapshots that carry non-empty data.emplId — last match per
- * `(workflow,item_id)` mirrors `useEntries` carry-forward across the JSONL replay.
+ * Reads `items.latest_empl_id` (projected at write time) for all items on
+ * `trackerDate`. One indexed SELECT replaces the previous `json_extract` scan
+ * over run_events. Result is cached with a 1s TTL and evicted on date change.
+ * Skips caching when the result exceeds RESOLVED_EMPL_CACHE_MAX entries.
  */
 function resolvedEmplIdMapFromRunEvents(db: Database, trackerDate: string): Map<string, string> {
   const cached = resolvedEmplCache.get(db);
@@ -38,26 +41,18 @@ function resolvedEmplIdMapFromRunEvents(db: Database, trackerDate: string): Map<
   }
   const out = new Map<string, string>();
   const rows = db.prepare(`
-    SELECT workflow, item_id, data_json
-    FROM run_events
+    SELECT workflow, item_id, latest_empl_id
+    FROM items
     WHERE tracker_date = @date
-      AND data_json IS NOT NULL
-      AND TRIM(IFNULL(json_extract(data_json, '$.emplId'), '')) != ''
-    ORDER BY workflow ASC, item_id ASC, event_ms ASC, id ASC
-  `).all({ date: trackerDate }) as Array<{ workflow: string; item_id: string; data_json: string }>;
+      AND latest_empl_id IS NOT NULL
+      AND TRIM(latest_empl_id) != ''
+  `).all({ date: trackerDate }) as Array<{ workflow: string; item_id: string; latest_empl_id: string }>;
   for (const row of rows) {
-    const data = parseJsonObject(row.data_json, {} as Record<string, unknown>);
-    const raw = data.emplId;
-    const emplId =
-      typeof raw === "string" && raw.trim().length > 0
-        ? raw.trim()
-        : typeof raw === "number" && Number.isFinite(raw)
-          ? String(Math.trunc(raw))
-          : null;
-    if (!emplId?.length) continue;
-    out.set(`${row.workflow}${WF_ITEM_KEY_SEP}${row.item_id}`, emplId);
+    out.set(`${row.workflow}${WF_ITEM_KEY_SEP}${row.item_id}`, row.latest_empl_id);
   }
-  resolvedEmplCache.set(db, { trackerDate, computedAt: now, value: out });
+  if (out.size <= RESOLVED_EMPL_CACHE_MAX) {
+    resolvedEmplCache.set(db, { trackerDate, computedAt: now, value: out });
+  }
   return out;
 }
 
