@@ -297,6 +297,8 @@ async function reEnqueueInProcessEntry(
   dir: string,
   date?: string,
 ): Promise<ReEnqueueResult> {
+  // Workflow-name dispatch here is intentional: these are routing decisions to
+  // different HTTP re-entry implementations, not archetype discrimination.
   if (workflow === "ocr") return reEnqueueOcrEntry(id, runId, dir, date);
   if (workflow === "sharepoint-download") return reEnqueueSharePointEntry(id, runId, dir, date);
   return { ok: false, error: `in-process retry not implemented for "${workflow}"` };

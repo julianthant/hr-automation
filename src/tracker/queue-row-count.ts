@@ -1,6 +1,7 @@
 import type { TrackerEntry } from "./jsonl.js";
 import { isDelegatedOcrAwaitingApprovalEntry } from "./dashboard/prep-rows.js";
 import { countTopLevelQueueSurfaceRows } from "./queue-surfaces.js";
+import { resolveRowArchetype } from "../domain/row-archetype.js";
 
 /** SSE payloads may enrich rows; JSONL replay may omit this — both are valid. */
 function activityTimestamp(e: TrackerEntry): string {
@@ -74,7 +75,7 @@ export function dedupeLatestByIdWithCarriedEmplId(raw: TrackerEntry[]): TrackerE
 }
 
 function isPrepareMode(e: TrackerEntry): boolean {
-  return e.workflow === "ocr" || e.data?.mode === "prepare" || e.id.startsWith("ocr-prep-");
+  return resolveRowArchetype(e) === "batch-parent";
 }
 
 function isDiscardedPrepForQueueStrip(e: TrackerEntry): boolean {
@@ -154,6 +155,8 @@ export function collapseMergedPrimariesForQueueStrip(entries: readonly TrackerEn
 
   const batchMembersByParent = new Map<string, TrackerEntry[]>();
   for (const e of visible) {
+    // OCR entries are direct-delegation children of oath-upload, not fan-out
+    // batch members — keep them out of the batch rollup even after archetype migration.
     if (e.workflow === "ocr") continue;
     if (!e.parentRunId) continue;
     const list = batchMembersByParent.get(e.parentRunId) ?? [];

@@ -1,10 +1,8 @@
 import type { TrackerEntry } from "../jsonl.js";
+import { resolveRowArchetype } from "../../domain/row-archetype.js";
 
 export function isPrepEntry(e: TrackerEntry): boolean {
-  if (e.data?.mode === "prepare") return true;
-  if (e.workflow === "ocr") return true;
-  if (isOcrPrepParentId(e.id)) return true;
-  return false;
+  return resolveRowArchetype(e) === "batch-parent";
 }
 
 /**
@@ -59,8 +57,4 @@ export function countRecords(e: TrackerEntry): number | undefined {
   } catch {
     return undefined;
   }
-}
-
-function isOcrPrepParentId(id: string): boolean {
-  return id.startsWith("ocr-prep-");
 }

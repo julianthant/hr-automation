@@ -79,9 +79,6 @@ function deriveQueueRowTypeLabel(
       return "Delegation member";
     case "single":
     default: {
-      // Legacy: delegating-workflow top-level rows (e.g. oath-upload) have taskRole "delegator"
-      // until they receive an explicit archetype stamp on their tracker rows.
-      if (entry.data?.taskRole === "delegator") return "Single delegation";
       if (childEntries.length > 0) return "Batch row";
       if (entry.parentRunId) return "Delegation member";
       return "Normal row";
@@ -173,16 +170,14 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
     ? (entry?.step || activeRun?.step || null)
     : (activeRun?.step || null);
   const runStepDurations = activeRun?.stepDurations ?? entry?.stepDurations;
-  const steps = useMemo(
-    () =>
-      effectiveWorkflow === "ocr"
-        ? registeredSteps.filter((step) => {
-            if (step === "awaiting-approval") return Boolean(entry?.parentRunId);
-            return true;
-          })
-        : registeredSteps,
-    [effectiveWorkflow, entry?.parentRunId, registeredSteps],
-  );
+  const steps = useMemo(() => {
+    const archetype = entry ? resolveRowArchetype(entry) : null;
+    // batch-parent OCR rows (no parentRunId, launched directly) don't surface
+    // awaiting-approval in the step timeline — they render the review pane instead.
+    return archetype === "batch-parent"
+      ? registeredSteps.filter((step) => step !== "awaiting-approval")
+      : registeredSteps;
+  }, [entry, registeredSteps]);
 
   const allDetailFields = useMemo(
     () => detailFields.filter((f) => f.displayInGrid !== false),
@@ -226,7 +221,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
 
   // Show skeleton while logs are loading and we have no data yet
   const showSkeleton = logsLoading && displayedLogs.length === 0;
-  const hideDetailGrid = logSourceWorkflow === "ocr" || detailEntry?.data?.requestRole === "delegation-dispatch";
+  const hideDetailGrid = Boolean(previewAvailable) || resolveRowArchetype(entry) === "dispatch";
 
   return (
     <div className="flex-1 flex flex-col bg-card min-w-0 min-h-0 overflow-hidden">
