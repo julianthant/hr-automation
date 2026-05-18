@@ -193,6 +193,7 @@ async function maybeWatchSqliteChildRuns(
   const seen = new Set<string>();
   const abortCache: { current: AbortFileCache | null } = { current: null };
   const dateForAbort = opts.date ?? dateLocal();
+  const isTerminalFn = opts.isTerminal ?? ((e: TrackerEntry) => e.status === "done" || e.status === "failed");
 
   try {
     for (;;) {
@@ -202,32 +203,43 @@ async function maybeWatchSqliteChildRuns(
           `watchChildRuns aborted by parent row state (${opts.abortIfRowState!.workflow}/${opts.abortIfRowState!.id} step="${opts.abortIfRowState!.step}")`,
         );
       }
-      for (const task of tasks) {
-        if (seen.has(task.itemId)) continue;
-        const fresh = taskStore.getTask(task.taskId);
-        if (!fresh) continue;
-        const status = sqliteTaskStatus(fresh);
-        if (!status) continue;
-        const projected = readLatestRunFromProjection(taskStore, {
-          workflow: fresh.workflow,
-          itemId: fresh.itemId,
-          runId: fresh.currentRunId ?? fresh.runId ?? undefined,
-        });
+
+      // --- 3 IN-list queries per tick (was 3N) ---
+
+      // Query 1: batch-fetch fresh task states for all unseen tasks.
+      const pendingTasks = tasks.filter((t) => !seen.has(t.itemId));
+      const freshMap = batchGetTaskStates(taskStore.db, pendingTasks.map((t) => t.taskId));
+
+      // Collect newly terminal items.
+      const newlyTerminal: Array<{ itemId: string; workflow: string; runId: string | null; state: string; error: string | null }> = [];
+      for (const task of pendingTasks) {
+        const fresh = freshMap.get(task.taskId);
+        if (!fresh || !sqliteTaskStatus(fresh)) continue;
+        newlyTerminal.push(fresh);
+      }
+
+      // Query 2: batch-fetch projection data for terminal items.
+      const projectionMap = newlyTerminal.length > 0
+        ? batchGetItemProjections(taskStore.db, opts.workflow, newlyTerminal.map((f) => f.itemId))
+        : new Map<string, { data: Record<string, string>; error?: string }>();
+
+      for (const fresh of newlyTerminal) {
+        const status = sqliteTaskStatus(fresh)!;
+        const projected = projectionMap.get(fresh.itemId) ?? null;
         const synthetic: TrackerEntry = {
           workflow: fresh.workflow,
           id: fresh.itemId,
-          runId: fresh.currentRunId ?? fresh.runId,
+          runId: fresh.runId ?? undefined,
           timestamp: new Date().toISOString(),
           status,
           data: projected?.data ?? {},
-          error: projected?.error ?? fresh.error,
+          error: projected?.error ?? (fresh.error ?? undefined),
         };
-        const isTerminal = opts.isTerminal ?? ((e: TrackerEntry) => e.status === "done" || e.status === "failed");
-        if (!isTerminal(synthetic)) continue;
+        if (!isTerminalFn(synthetic)) continue;
         const outcome: ChildOutcome = {
           workflow: fresh.workflow,
           itemId: fresh.itemId,
-          runId: fresh.currentRunId ?? fresh.runId ?? "",
+          runId: fresh.runId ?? "",
           status,
           data: synthetic.data,
           error: synthetic.error,
@@ -237,11 +249,16 @@ async function maybeWatchSqliteChildRuns(
         seen.add(fresh.itemId);
         opts.onProgress?.(outcome, tasks.length - outcomes.length);
       }
+
       if (seen.size === tasks.length) return outcomes;
-      const blockedParent = findBlockedParent(taskStore, tasks);
-      if (blockedParent) {
-        throw new Error(`watchChildRuns blocked by parent task ${blockedParent.taskId}`);
+
+      // Query 3: batch-check whether any pending task has a blocked/failed parent.
+      const remainingTaskIds = tasks.filter((t) => !seen.has(t.itemId)).map((t) => t.taskId);
+      const blockedParentId = findBlockedParentBatch(taskStore.db, remainingTaskIds);
+      if (blockedParentId) {
+        throw new Error(`watchChildRuns blocked by parent task ${blockedParentId}`);
       }
+
       if (Date.now() - started > timeoutMs) {
         const waiting = tasks.filter((task) => !seen.has(task.itemId)).map((task) => task.itemId).join(", ");
         throw new Error(`watchChildRuns timeout (${timeoutMs}ms) — still waiting for: ${waiting}`);
@@ -253,28 +270,84 @@ async function maybeWatchSqliteChildRuns(
   }
 }
 
-function readLatestRunFromProjection(
-  taskStore: ReturnType<typeof createTaskStore>,
-  args: { workflow: string; itemId: string; runId?: string },
-): { data: Record<string, string>; error?: string } | null {
-  const row = taskStore.db.prepare(`
-    SELECT latest_data_json, latest_error
-    FROM runs
-    WHERE workflow = @workflow
-      AND item_id = @itemId
-      AND (@runId IS NULL OR run_id = @runId)
-    ORDER BY latest_tracker_ts DESC
+interface FreshTaskState {
+  taskId: string;
+  itemId: string;
+  workflow: string;
+  runId: string | null;
+  state: string;
+  error: string | null;
+}
+
+function batchGetTaskStates(
+  db: ReturnType<typeof createTaskStore>["db"],
+  taskIds: string[],
+): Map<string, FreshTaskState> {
+  if (taskIds.length === 0) return new Map();
+  const placeholders = taskIds.map(() => "?").join(", ");
+  const rows = db.prepare(
+    `SELECT id, item_id, workflow, run_id, control_state, terminal_error FROM tasks WHERE id IN (${placeholders})`,
+  ).all(...taskIds) as Array<{
+    id: string;
+    item_id: string;
+    workflow: string;
+    run_id: string | null;
+    control_state: string | null;
+    terminal_error: string | null;
+  }>;
+  const out = new Map<string, FreshTaskState>();
+  for (const row of rows) {
+    out.set(row.id, {
+      taskId: row.id,
+      itemId: row.item_id,
+      workflow: row.workflow,
+      runId: row.run_id,
+      state: row.control_state ?? "queued",
+      error: row.terminal_error,
+    });
+  }
+  return out;
+}
+
+function batchGetItemProjections(
+  db: ReturnType<typeof createTaskStore>["db"],
+  workflow: string,
+  itemIds: string[],
+): Map<string, { data: Record<string, string>; error?: string }> {
+  if (itemIds.length === 0) return new Map();
+  const placeholders = itemIds.map(() => "?").join(", ");
+  const rows = db.prepare(
+    `SELECT item_id, latest_data_json, latest_error FROM items WHERE workflow = ? AND item_id IN (${placeholders})`,
+  ).all(workflow, ...itemIds) as Array<{
+    item_id: string;
+    latest_data_json: string | null;
+    latest_error: string | null;
+  }>;
+  const out = new Map<string, { data: Record<string, string>; error?: string }>();
+  for (const row of rows) {
+    out.set(row.item_id, {
+      data: parseStringRecord(row.latest_data_json),
+      ...(row.latest_error ? { error: row.latest_error } : {}),
+    });
+  }
+  return out;
+}
+
+function findBlockedParentBatch(
+  db: ReturnType<typeof createTaskStore>["db"],
+  taskIds: string[],
+): string | null {
+  if (taskIds.length === 0) return null;
+  const placeholders = taskIds.map(() => "?").join(", ");
+  const row = db.prepare(`
+    SELECT t.id AS task_id
+    FROM task_dependencies td
+    JOIN tasks t ON t.id = td.parent_task_id
+    WHERE td.child_task_id IN (${placeholders})
+      AND t.control_state IN ('blocked', 'failed', 'cancelled')
     LIMIT 1
-  `).get({
-    workflow: args.workflow,
-    itemId: args.itemId,
-    runId: args.runId ?? null,
-  }) as { latest_data_json: string | null; latest_error: string | null } | undefined;
-  if (!row) return null;
-  return {
-    data: parseStringRecord(row.latest_data_json),
-    ...(row.latest_error ? { error: row.latest_error } : {}),
-  };
+  `).get(...taskIds) as { task_id: string } | undefined;
+  return row ? row.task_id : null;
 }
 
 function parseStringRecord(raw: string | null): Record<string, string> {
@@ -293,24 +366,9 @@ function parseStringRecord(raw: string | null): Record<string, string> {
   }
 }
 
-function sqliteTaskStatus(task: TaskRow): "done" | "failed" | null {
+function sqliteTaskStatus(task: { state: string }): "done" | "failed" | null {
   if (task.state === "done") return "done";
   if (task.state === "failed" || task.state === "cancelled" || task.state === "blocked") return "failed";
-  return null;
-}
-
-function findBlockedParent(taskStore: ReturnType<typeof createTaskStore>, tasks: TaskRow[]): TaskRow | null {
-  for (const task of tasks) {
-    const rows = taskStore.db.prepare(`
-      SELECT parent_task_id
-      FROM task_dependencies
-      WHERE child_task_id = ?
-    `).all(task.taskId) as Array<{ parent_task_id: string }>;
-    for (const row of rows) {
-      const parent = taskStore.getTask(row.parent_task_id);
-      if (parent?.state === "blocked" || parent?.state === "failed" || parent?.state === "cancelled") return parent;
-    }
-  }
   return null;
 }
 
