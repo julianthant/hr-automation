@@ -196,12 +196,17 @@ export function LogStream({
     }
   }, [displayed.length, virtualizer]);
 
-  // Auto-scroll on new entries
+  // Auto-scroll on new entries — coalesced via rAF to avoid mid-paint thrash
   useEffect(() => {
-    if (autoScroll && displayed.length > prevLenRef.current) {
-      virtualizer.scrollToIndex(displayed.length - 1, { align: "end" });
+    if (!autoScroll || displayed.length <= prevLenRef.current) {
+      prevLenRef.current = displayed.length;
+      return;
     }
     prevLenRef.current = displayed.length;
+    const rafId = requestAnimationFrame(() => {
+      virtualizer.scrollToIndex(displayed.length - 1, { align: "end" });
+    });
+    return () => cancelAnimationFrame(rafId);
   }, [displayed.length, autoScroll, virtualizer]);
 
   const handleCopy = useCallback((text: string) => {
