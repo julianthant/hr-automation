@@ -10,6 +10,17 @@ reuploads → on approve, fans out to the form-type's downstream daemon
 dashboard's Node process via fire-and-forget `runWorkflow` from
 `/api/ocr/prepare`. Same shape as `sharepoint-download`.
 
+**Archetype:** `delegating-batch` — the prep parent is a `batch-parent`, every fan-out child run is rendered under it.
+
+### Row archetypes emitted
+
+| Row                                | Archetype         | Dashboard surface              |
+|------------------------------------|-------------------|--------------------------------|
+| OCR prep parent (awaiting-approval) | `batch-parent`    | OCR group card (top-level)     |
+| `eid-lookup` fan-out children      | `passive-child`   | Collapsed sub-rows in card     |
+| Downstream daemon dispatch row     | `dispatch`        | Terminal-at-enqueue dispatch row |
+| Approved downstream children       | `delegate-child`  | Nested under parent card       |
+
 ## Files
 
 - `workflow.ts` — `defineWorkflow(...)` + thin handler that calls the

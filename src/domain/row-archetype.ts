@@ -1,16 +1,40 @@
+/**
+ * Row-level archetype. Stamped on every tracker row as `data.archetype`.
+ * Canonical discriminator for queue surface, log panel footer chip, and
+ * display-name resolution. Read via `resolveRowArchetype(entry)`; write via
+ * `deriveRowArchetype(workflowArchetype, parentRunId?)` at pre-emit sites,
+ * or let `withTrackedWorkflow` stamp it via the `archetype` opt.
+ */
 export type RowArchetype =
-  | "single"           // one item one row, detail grid + timeline
-  | "batch-parent"     // anchor over N peers (OCR prep, daemon batch)
-  | "batch-member"     // peer item under a batch-parent
-  | "dispatch"         // records "I delegated to N children"; terminal at enqueue
-  | "delegate-child"   // run spawned by parent in a different workflow
-  | "passive-child";   // collapsed utility child; no operator action
-
-export type WorkflowArchetype =
+  /** One item, one row. Flat in the queue. Workflows: work-study, oath-signature (direct CLI run), active-check. */
   | "single"
+  /** Anchor row over N peers. Legacy fallback: `data.mode === "prepare"`. Emitted by OCR prep, oath-upload root. */
+  | "batch-parent"
+  /** Peer item under a batch-parent. Emitted by emergency-contact records, oath-signature batch members. */
+  | "batch-member"
+  /** Terminal-at-enqueue row recording "I delegated to N children in another workflow." Legacy fallback: `data.requestRole === "delegation-dispatch"`. */
+  | "dispatch"
+  /** Child run spawned from a parent in a different workflow; holds operator attention. Legacy fallback: `data.taskRole === "child" && originWorkflow`. */
+  | "delegate-child"
+  /** Collapsed delegate-child rendered as a sub-row inside its parent's card; never holds operator attention. Legacy fallback: `data.taskRole === "utility" && originWorkflow`. */
+  | "passive-child";
+
+/**
+ * Workflow-level archetype. Declared on every `defineWorkflow({...})` call.
+ * The kernel uses this plus `parentRunId` to pick the appropriate
+ * `RowArchetype` for each emitted row. Architecture guard
+ * `tests/unit/architecture/archetype-coverage.test.ts` enforces declaration.
+ */
+export type WorkflowArchetype =
+  /** Emits `single` rows only. Examples: work-study, active-check. */
+  | "single"
+  /** Emits a batch-parent over N batch-member rows. Examples: emergency-contact, oath-signature. */
   | "batch"
+  /** Emits `single` + `dispatch` + N delegate-children. Examples: ocr (parent), separations (when delegating). */
   | "delegating"
+  /** Emits batch-parent that delegates each member to another workflow. Examples: oath-upload. */
   | "delegating-batch"
+  /** Child-only workflow that holds no operator attention; always rendered as `passive-child`. Examples: eid-lookup (as passive child). */
   | "utility";
 
 const LABELS: Record<RowArchetype, string> = {
@@ -37,6 +61,14 @@ interface LegacyEntry {
  * Read `data.archetype` when present; otherwise infer from legacy fields so
  * pre-archetype JSONL rows still classify correctly. Once all readers are
  * migrated and on-disk rows have aged out, the legacy branches can be removed.
+ *
+ * Fallback ordering (only used when `data.archetype` is missing):
+ *  1. `data.requestRole === "delegation-dispatch"` → `dispatch`
+ *  2. `data.mode === "prepare"` OR `entry.workflow === "ocr"` → `batch-parent`
+ *  3. `data.taskRole === "utility" && originWorkflow` → `passive-child`
+ *  4. `data.taskRole === "child" && originWorkflow` → `delegate-child`
+ *  5. `entry.parentRunId` present → `batch-member`
+ *  6. Otherwise → `single`
  */
 export function resolveRowArchetype(entry: LegacyEntry): RowArchetype {
   const stamped = entry.data?.archetype;
