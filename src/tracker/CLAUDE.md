@@ -100,7 +100,6 @@ await withTrackedWorkflow("separations", docId, {}, async (setStep, updateData) 
 - `GET /screenshots/<filename>` — stream a PNG with path-traversal guard (`resolveScreenshotPath`)
 - `GET /api/search?q=Q[&days=N]` — cross-workflow tracker entry search (`buildSearchHandler`)
 - `GET /api/selector-warnings?days=N` — aggregated selector-fallback warns across N days (default 7)
-- `GET /api/preview-inbox` — `PreviewInboxRow[]` for cross-workflow preview rows ready for review (`buildPreviewInboxHandler`). Predicate: `data.mode === "prepare" && status === "done" && step !== "approved" && step !== "discarded"`, deduped to latest run per `(workflow, id)`, sorted newest first.
 - `GET /api/failures` — `FailureRow[]` for failed entries on a given date across all workflows (`buildFailuresHandler`). Same latest-run-per-`(workflow,id)` dedup pattern; takes optional `?date=YYYY-MM-DD` (default today).
 - `GET /api/preflight` — startup checks + cleanedFiles count
 - `GET /api/rosters` — list xlsx rosters in `.tracker/rosters/` + `src/data/`, newest first (consumer: `RunModal`)
