@@ -192,7 +192,7 @@ Representative CLI workflows (flags and full command list: `src/cli.ts`).
 | emergency-contact | `npm run emergency-contact` | UCPath | Yes (batch, `preEmitPending`) | Single browser, one record at a time; daemon via `runEmergencyContactCli` |
 | oath-signature | `npm run oath-signature <emplId...>` | UCPath | Yes (daemon default; sequential batch + `preEmitPending`) | Single browser; N daemons via `-p N` |
 | oath-upload | `npm run oath-upload` | ServiceNow + delegated OCR / oath-signature | Yes | Sequential steps + child-run waits; daemon default |
-| sharepoint-download | _Dashboard button_ (fire-and-forget) / `tsx src/workflows/emergency-contact/scripts/download-roster.ts` (non-kernel CLI) | SharePoint | Yes (single-item, module-level URL injection) | Single (headed browser, gated by Duo) |
+| sharepoint-download | _Dashboard button_ (fire-and-forget) — canonical entry is `src/workflows/sharepoint-download/`; legacy wrapper `src/workflows/emergency-contact/scripts/download-roster.ts` still exists for direct CLI invocation | SharePoint | Yes (single-item, module-level URL injection) | Single (headed browser, gated by Duo) |
 | ocr | _Dashboard Run button_ (HTTP only — no CLI, no daemon) | _none_ | Yes (`systems: []`, `authSteps: false`) | In-process (single fire-and-forget via `/api/ocr/prepare`) |
 
 ### `ocr` — notable shape

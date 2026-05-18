@@ -66,9 +66,12 @@ The HTTP server is created in `src/tracker/dashboard/server.ts` (`createDashboar
 | `/api/search?q=Q[&days=N]` | GET | `SearchResultRow[]` — cross-workflow tracker entry hits | `SearchBar` / `SearchResults` |
 | `/api/preflight` | GET | `{checks: [{name, passed, detail}], cleanedFiles?: number}` | `usePreflight` → sonner toast |
 | `/api/rosters` | GET | `RosterListing[]` — xlsx files in `.tracker/rosters/` + `src/data/`, newest first | `RunModal` (emergency-contact prep) |
-| `/api/emergency-contact/prepare` | POST (multipart) | `{ok, parentRunId, pdfPath}` — fires `runPrepare` in the dashboard process | `RunModal` |
-| `/api/emergency-contact/approve-batch` | POST | Body: `{parentRunId, records[]}`. Expands to N kernel queue items via `enqueueFromHttp`. Marks prep row `done` step `approved`. | `PreviewRow` Approve button |
-| `/api/emergency-contact/discard-prepare` | POST | Body: `{parentRunId, reason?}`. Emits `failed` step `discarded`; best-effort unlinks the PDF. | `PreviewRow` Discard button |
+| `/api/ocr/prepare` | POST (multipart) | `{ok, sessionId, pdfPath}` — fires `runWorkflow(ocrWorkflow)` in the dashboard process | `RunModal` (OCR prep upload) |
+| `/api/ocr/approve-batch` | POST | Body: `{sessionId, records[]}`. Expands to N kernel queue items via `enqueueFromHttp` for the downstream form-type daemon. Marks the OCR parent row `done` step `approved`. | `OcrReviewPane` Approve button |
+| `/api/ocr/discard` | POST | Body: `{sessionId, reason?}`. Emits `failed` step `discarded`; best-effort unlinks the PDF. | `OcrReviewPane` Discard button |
+| `/api/ocr/reocr-whole-pdf` | POST | Body: `{sessionId}`. Re-runs OCR for every page (clears prior failed pages). | `OcrReviewPane` Re-OCR whole PDF dialog |
+| `/api/ocr/retry-page` | POST | Body: `{sessionId, pageNumber}`. Retries one OCR page in isolation. | `FailedPageCard` Retry button |
+| `/api/ocr/force-research` | POST | Body: `{sessionId, records[]}`. Re-dispatches eid-lookup for a subset of records flagged for forced research. | `OcrReviewPane` Force Research action |
 | `/api/sharepoint-download/list` | GET | `SharePointDownloadListItem[]` — one row per registered spreadsheet (`{id, label, description?, envVar, configured}`) | `QueuePanel` Download dropdown — populates menu on mount |
 | `/api/sharepoint-download/run` | POST | Body: `{ id }`. Response: `{ok, id, label, path, filename}` or `{ok:false, error}` — launches headed SharePoint download via `buildSharePointRosterDownloadHandler` (in `src/workflows/sharepoint-download/`), saves to `src/data/` | `QueuePanel` Download dropdown — fired when a menu item is picked |
 | `/api/retry` | POST | Body: `{workflow, id, runId?}`. Re-enqueues using the entry's persisted `input` field. | `RetryButton` (EntryItem failed rows + LogPanel header) |
@@ -167,14 +170,20 @@ All dashboard UI metadata lives on the server-side `WorkflowMetadata` registry (
 
 Current consumption:
 
-| Workflow | Primary ID | Name Source | Steps | Detail Fields |
-|----------|-----------|-------------|-------|---------------|
-| `onboarding` | email | `data.firstName + data.lastName` | crm-auth → extraction → pdf-download → ucpath-auth → person-search → i9-creation → transaction | Employee, Email, Dept #, Position #, Wage, Eff Date, I9 Profile |
-| `separations` | doc ID | `data.name \|\| data.employeeName` | launching → authenticating → kuali-extraction → kronos-search → ucpath-job-summary → ucpath-transaction → kuali-finalization | Employee, EID, Doc ID |
-| `eid-lookup` | search name | `data.name` | ucpath-auth → searching (→ crm-auth → cross-verification) | (no declared detailFields — see workflow CLAUDE.md) |
-| `kronos-reports` | employee ID | `data.name` | searching → extracting → downloading | Employee, ID |
-| `work-study` | empl ID | `data.name` | ucpath-auth → transaction | Empl ID, Effective Date |
-| `emergency-contact` | `p{NN}-{emplId}` | `data.employeeName` | navigation → fill-form → save | Employee, Empl ID, Contact, Relationship |
+| Workflow | Archetype | Primary ID | Name Source | Steps | Detail Fields |
+|----------|-----------|-----------|-------------|-------|---------------|
+| `onboarding` | `single` | email | `data.firstName + data.lastName` | crm-auth → extraction → pdf-download → ucpath-auth → person-search → i9-creation → transaction | Employee, Email, Dept #, Position #, Wage, Eff Date, I9 Profile |
+| `separations` | `delegating` | doc ID | `data.name \|\| data.employeeName` | launching → authenticating → kuali-extraction → kronos-search → ucpath-job-summary → ucpath-transaction → kuali-finalization | Employee, EID, Doc ID |
+| `eid-lookup` | `utility` | search name | `data.name` | ucpath-auth → searching (→ crm-auth → cross-verification) | (no declared detailFields — see workflow CLAUDE.md) |
+| `active-check` | `single` | name or EID | `data.name` | ucpath-auth → check | Name, EID, Status |
+| `old-kronos-reports` | `single` | employee ID | `data.name` | searching → extracting → downloading | Employee, ID |
+| `work-study` | `single` | empl ID | `data.name` | ucpath-auth → transaction | Empl ID, Effective Date |
+| `emergency-contact` | `batch` | `p{NN}-{emplId}` | `data.employeeName` | navigation → fill-form → save | Employee, Empl ID, Contact, Relationship |
+| `oath-signature` | `single` | empl ID | `data.name` | ocr → ucpath-auth → transaction | Employee, Empl ID, Signature Date |
+| `oath-upload` | `delegating-batch` | session ID | (PDF filename / hash) | servicenow-auth → delegate-ocr → wait-ocr-approval → delegate-signatures → wait-signatures → open-hr-form → fill-form → submit | PDF, OCR session, Signers, HR ticket #, Filed, Status |
+| `ocr` | `delegating-batch` | session ID | (PDF filename) | upload → ocr → matching → disambiguating → awaiting-approval → approved/discarded | PDF, Form type, Pages, Records |
+| `crm-doc-download` | `delegating` | email or doc ID | `data.name` | crm-auth → download | Employee, Email, Doc URL |
+| `sharepoint-download` | `single` | URL or label | (file label) | login → download | Label, Output path |
 
 ## Hook → Component Mapping
 
