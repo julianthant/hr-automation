@@ -1,6 +1,6 @@
 "use client";
 
-import { Calendar as HeroCalendar } from "@heroui/react";
+import { Calendar as HeroCalendar } from "@heroui/calendar";
 import { parseDate, type CalendarDate } from "@internationalized/date";
 
 interface CalendarProps {
