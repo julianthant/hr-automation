@@ -24,7 +24,21 @@ Declare `label`, `getName`, `getId`, and labeled `detailFields` inside `defineWo
 
 All workflows are kernel-based as of 2026-04-17. New workflows must follow the kernel path exclusively.
 
-Add the workflow's step list to the "Step Tracking Per Workflow" table in root `CLAUDE.md` for documentation. Frontend requires no edits — the dashboard reads everything from the server-side registry via `/api/workflow-definitions`.
+Frontend requires no edits — the dashboard reads everything from the server-side registry via `/api/workflow-definitions`.
+
+### Required: archetype
+
+Every `defineWorkflow({...})` must declare `archetype`. The
+architecture guard at `tests/unit/architecture/archetype-coverage.test.ts`
+fails CI if a workflow omits it. Valid `WorkflowArchetype` values:
+
+- `single` — one item, one row (e.g. work-study, active-check).
+- `batch` — N peer items under a batch-parent (e.g. emergency-contact, oath-signature).
+- `delegating` — emits a `dispatch` row and N `delegate-child` runs in other workflows.
+- `delegating-batch` — batch-parent that delegates each member to another workflow (e.g. oath-upload).
+- `utility` — child-only workflow that holds no operator attention (e.g. eid-lookup as a passive child).
+
+See the canonical glossary in root `CLAUDE.md` → "Row & Workflow Archetypes".
 
 ## Naming and ownership conventions
 

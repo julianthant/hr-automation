@@ -5,7 +5,7 @@ more employees.
 
 **Kernel-based + daemon-mode.** Declared via `defineWorkflow` in `workflow.ts` and enqueued via `runOathSignatureCli` (`buildCliAdapter` → `ensureDaemonsAndEnqueue`). Supports N EIDs per invocation — each becomes its own queue item. `npm run oath-signature` exposes `-n`, `-p`, optional `--date`, and `--dry-run` (see `src/cli.ts`).
 
-**OCR / prep:** Paper-roster flows run through the **`ocr`** workflow (dashboard TopBar → form type **`oath`**) — see `src/workflows/ocr/CLAUDE.md` and `src/workflows/oath-signature/ocr-form.ts` for schemas + hybrid match. Approved OCR runs pre-emit child rows and enqueue this workflow per `{ emplId, date? }`.
+**OCR / prep:** Paper-roster flows run through the **`ocr`** workflow (dashboard TopBar → form type **`oath`**) — see `src/workflows/ocr/CLAUDE.md` and `src/services/ocr/forms/oath.ts` for schemas + hybrid match. Approved OCR runs pre-emit child rows and enqueue this workflow per `{ emplId, date? }`.
 
 **Synthetic `ocr` step:** `workflow.ts` declares **`"ocr"`** as the first step; the handler calls `ctx.markStep("ocr")` (no browser work — a timeline marker so rows show upload → OCR → UCPath).
 
@@ -44,7 +44,6 @@ Person Profile mounts inside `#ptifrmtgtframe` (name `TargetContent`), **not**
 ## Files
 
 - `schema.ts` — `OathSignatureInputSchema` (EID required; optional `date`, `dryRun`, delegation fields)
-- `ocr-form.ts` — OCR schemas + match logic when dashboard OCR uses **`formType: "oath"`**
 - `enter.ts` — `buildOathSignaturePlan` ActionPlan + `OathSignatureContext`
 - `workflow.ts` — `defineWorkflow`, `runOathSignature`, `runOathSignatureCli`
 - `config.ts` — `UCPATH_PERSON_PROFILES_URL` deep link
@@ -63,6 +62,15 @@ Person Profile mounts inside `#ptifrmtgtframe` (name `TargetContent`), **not**
 | `tiling`      | `"single"`                                                                     | One browser window.                                                                   |
 | `authChain`   | `"sequential"`                                                                 | Single system, no chain to interleave.                                                |
 | `detailFields`| Employee / Empl ID / Signature Date                                            | Dashboard detail panel populates via `ctx.updateData` in the handler.                 |
+| `archetype`   | `"single"` — each EID is independent. When dispatched as a child run from oath-upload, the kernel stamps `delegate-child`. |
+
+### Row archetypes emitted
+
+| Row                                  | Archetype         | Dashboard surface                |
+|--------------------------------------|-------------------|----------------------------------|
+| Direct CLI run per-EID               | `single`          | Flat queue row                   |
+| Child run dispatched from oath-upload | `delegate-child`  | Nested under oath-upload's card  |
+| Child run dispatched from OCR-approve | `delegate-child`  | Nested under OCR parent card     |
 
 ## Data Flow
 
@@ -123,7 +131,7 @@ OCR handlers import **`src/services/matching/`** for roster load + name match �
 
 ## Lessons Learned
 
-- **2026-04-28: Paper-roster OCR prep migrated to the shared `ocr` workflow.** Oath form type (`formType: "oath"`) is handled by dashboard routes under `/api/ocr/*` (`src/tracker/dashboard/hono/routes/ocr.ts`); per-form schemas + match live in `ocr-form.ts`. Deleted workflow-local `prepare.ts` / `preview-schema.ts`. Parent rows still use `data.mode === "prepare"` where applicable; eid-lookup queue items use `oath-prep-` prefixes. Kernel input remains `{ emplId, date? }` per `OathSignatureInputSchema`.
+- **2026-04-28: Paper-roster OCR prep migrated to the shared `ocr` workflow.** Oath form type (`formType: "oath"`) is handled by dashboard routes under `/api/ocr/*` (`src/tracker/dashboard/hono/routes/ocr.ts`); per-form schemas + match live in `src/services/ocr/forms/oath.ts`. Deleted workflow-local `prepare.ts` / `preview-schema.ts`. Parent rows still use `data.mode === "prepare"` where applicable; eid-lookup queue items use `oath-prep-` prefixes. Kernel input remains `{ emplId, date? }` per `OathSignatureInputSchema`.
 - **2026-04-23: Removed tracker-side idempotency guard; only the live-page
   probe remains.** `src/core/idempotency.ts` was deleted repo-wide. The
   earlier two-guard design (live-page sentinel + `hashKey({workflow,
@@ -138,4 +146,4 @@ OCR handlers import **`src/services/matching/`** for roster load + name match �
   `separations`; multi-EID dispatch works out of the box because
   `ensureDaemonsAndEnqueue` accepts an input array.
 - **2026-05-14: Batch-row redesign + label inheritance.** Oath-signature uploads now always render as a batch group (`Oath Signature · #<runIdSuffix>`) on the dashboard, regardless of OCR approval state. A new child row `Oath Signature Request` is emitted immediately after the OCR delegation is dispatched and reaches `done` as soon as the OCR session is queued. Cross-workflow delegated rows (OCR + EID-lookup children + post-approval oath-signature children) inherit the batch label via a new `data.parentSubject` channel — the receiving workflow's `onPreEmitPending` reads `parentSubject` and writes it into `data.__name`. Plan: `docs/superpowers/plans/2026-05-13-oath-signature-batch-row-naming.md`.
-- **2026-05-03: Hybrid match (roster → LLM disambig) + form-EID short-circuit.** `matchRecord` is now async and runs in three branches: (1) form-EID (the LLM extracted an `employeeId` from a UPAY585/586) → roster-exact match auto-accepts as `matchSource: "form-eid"`, no roster match dispatches eid-lookup-by-EID via the new `LookupKind: "verify-only"`. (2) Name-only with top score >= 0.95 + no close second → auto-accept as `matchSource: "roster"`. (3) Top score in [0.40, 0.95) or close second → leaves `matchState: "lookup-pending"` with candidates populated; the orchestrator's `disambiguating` phase runs `disambiguateMatch` and `applyDisambiguation` patches the record (high-confidence ≥ 0.6 → `matchSource: "llm"` accepted; low confidence → `matchSource: "llm"` lookup-pending; null → `matchSource: "manual"`). Top < 0.40 / no candidates → `matchSource: "manual"` directly with eid-lookup-by-name as the backstop. The 0.95/0.10/0.40/0.6 constants live at the top of `ocr-form.ts`. Spec: `docs/superpowers/specs/2026-05-03-ocr-hybrid-match-and-manual-fill-design.md`.
+- **2026-05-03: Hybrid match (roster → LLM disambig) + form-EID short-circuit.** `matchRecord` is now async and runs in three branches: (1) form-EID (the LLM extracted an `employeeId` from a UPAY585/586) → roster-exact match auto-accepts as `matchSource: "form-eid"`, no roster match dispatches eid-lookup-by-EID via the new `LookupKind: "verify-only"`. (2) Name-only with top score >= 0.95 + no close second → auto-accept as `matchSource: "roster"`. (3) Top score in [0.40, 0.95) or close second → leaves `matchState: "lookup-pending"` with candidates populated; the orchestrator's `disambiguating` phase runs `disambiguateMatch` and `applyDisambiguation` patches the record (high-confidence ≥ 0.6 → `matchSource: "llm"` accepted; low confidence → `matchSource: "llm"` lookup-pending; null → `matchSource: "manual"`). Top < 0.40 / no candidates → `matchSource: "manual"` directly with eid-lookup-by-name as the backstop. The 0.95/0.10/0.40/0.6 constants live at the top of `src/services/ocr/forms/oath.ts`. Spec: `docs/superpowers/specs/2026-05-03-ocr-hybrid-match-and-manual-fill-design.md`.

@@ -41,6 +41,15 @@ No `tracker.ts` — dashboard JSONL only (see `src/workflows/CLAUDE.md`).
 | `tiling` | `"single"` |
 | `batch` | `{ mode: "sequential", preEmitPending: true, betweenItems: ["reset"] }` |
 | `detailFields` | Six labeled fields — `employeeName`, `emplId`, `contactName`, `relationship`, `contactPhone`, `contactAddress` (all `editable: true` in `workflow.ts`) |
+| `archetype` | `"batch"` — one parent over N record items. The OCR prep parent (when emergency-contact is the OCR target) is stamped `batch-parent` separately. |
+
+### Row archetypes emitted
+
+| Row                                 | Archetype       | Dashboard surface                |
+|-------------------------------------|-----------------|----------------------------------|
+| Per-record item (single CLI run)    | `batch-member`  | Member chip in batch card        |
+| OCR-prep parent (in OCR workflow)   | `batch-parent`  | Group card (top-level)           |
+| Child run dispatched from OCR-approve | `delegate-child` | Nested under OCR parent card  |
 
 ## Data Flow
 

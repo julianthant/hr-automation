@@ -71,7 +71,7 @@ npm run dashboard:prod       # Serve pre-built dashboard from SSE only
 
 # Export / Utilities
 tsx --env-file=.env src/cli.ts export <workflow>   # Dump JSONL tracker to xlsx
-npm run clean:tracker                              # Prune .tracker/*.jsonl older than 30 days (default)
+npm run clean:tracker                              # Prune .tracker/*.jsonl older than 7 days (default)
 npm run clean:tracker -- --days 30 --dir .tracker  # Custom age + dir
 npm run test-login                                 # Smoke test UCPath + CRM auth
 npm run setup                                      # First-use environment validation wizard
@@ -330,6 +330,34 @@ Add a Commander subcommand in `src/cli.ts`, add npm scripts to `package.json`, f
 See `src/workflows/work-study/` for a clean one-system example, `src/workflows/emergency-contact/` for batch-mode with `preEmitPending`, `src/workflows/onboarding/` for multi-system sequential auth + pool-mode parallel, `src/workflows/old-kronos-reports/` for pool-mode with per-worker sessionDir injection, and `src/workflows/eid-lookup/` for `shared-context-pool` mode (N per-item tabs fanning out from a single Duo auth per system).
 
 All production workflows are kernel-based as of 2026-04-17. New workflows must follow the kernel path exclusively.
+
+## Row & Workflow Archetypes
+
+Every tracker row carries `data.archetype`. Every workflow declares an archetype.
+The vocabulary is canonical — use these nouns in code, comments, log strings,
+and CLAUDE.md files.
+
+| WorkflowArchetype (declared) | RowArchetype (emitted)                |
+|------------------------------|----------------------------------------|
+| `single`                     | `single`                               |
+| `batch`                      | `batch-parent` + `batch-member` (×N)   |
+| `delegating`                 | `single` + `dispatch` + `delegate-child` (×N) |
+| `delegating-batch`           | `batch-parent` + `delegate-child` / `passive-child` |
+| `utility`                    | `passive-child` only                   |
+
+### Row vocabulary
+
+- **single** — one item, one row, flat in the queue.
+- **batch-parent** — anchor row over N peers; legacy fallback: `data.mode === "prepare"`.
+- **batch-member** — peer item under a batch-parent.
+- **dispatch** — terminal-at-enqueue row recording "I delegated to N children in another workflow."
+- **delegate-child** — child run spawned from a parent in a different workflow; holds operator attention.
+- **passive-child** — collapsed delegate-child rendered as a sub-row inside its parent's card; never holds operator attention.
+
+The kernel auto-stamps the appropriate `RowArchetype` based on the workflow's
+`WorkflowArchetype` declaration and the row's `parentRunId`. See
+`src/domain/row-archetype.ts` (the `resolveRowArchetype` resolver and
+`deriveRowArchetype` derivation function).
 
 ## Kernel Essentials
 

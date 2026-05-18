@@ -70,6 +70,15 @@ Before mapping a new selector, run `npm run selector:search "<intent>"`.
 | `authChain`   | `"sequential"`                                                                 |
 | `detailFields`| PDF / OCR session / Signers / HR ticket # / Filed / Status. `data.uploadMode` carries the run mode (`"full"` / `"upload-only"`) — distinct from the legacy `data.mode` field which was renamed in the archetype migration (2026-05-17). |
 
+### Row archetypes emitted
+
+| Row                            | Archetype         | Dashboard surface          |
+|--------------------------------|-------------------|----------------------------|
+| Oath-upload daemon item (root) | `batch-parent`    | Queue card (top-level)     |
+| OCR delegated child            | `delegate-child`  | Nested under parent's card |
+| Per-signer oath-signature      | `delegate-child`  | Nested under parent's card |
+| ServiceNow ticket              | (same root row, terminal status — no new row) |
+
 ## Dupe-protection
 
 The dashboard's Run modal calls `/api/oath-upload/check-duplicate?hash=<sha256>`
