@@ -22,8 +22,8 @@ import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChil
 import { trackEvent, dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
 import { patchOcrRecordFromEidLookupOutcome } from "./eid-lookup-results.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
-import { normalizeUcpathEmployeeId } from "../../domain/identity/eid.js";
 import type { AnyOcrFormSpec, RosterRow as OcrRosterRow } from "./types.js";
+import { extractOcrRecordEid, extractOcrRecordName } from "./record-helpers.js";
 
 const WORKFLOW = "ocr";
 
@@ -165,8 +165,8 @@ export async function runOcrRetryPage(
       await opts._enqueueEidLookupOverride(
         enqueueItems.map((e) => ({
           ...(e.kind === "name"
-            ? { name: extractName(e.record, spec) }
-            : { emplId: extractEid(e.record) }),
+            ? { name: extractOcrRecordName(e.record, spec) }
+            : { emplId: extractOcrRecordEid(e.record) }),
           itemId: e.itemId,
         })),
       );
@@ -175,18 +175,18 @@ export async function runOcrRetryPage(
       const { eidLookupCrmWorkflow } = await import("../eid-lookup/index.js");
       const inputs = enqueueItems.map((e) =>
         e.kind === "name"
-          ? { name: extractName(e.record, spec) }
-          : { emplId: extractEid(e.record), keepNonHdh: true },
+          ? { name: extractOcrRecordName(e.record, spec) }
+          : { emplId: extractOcrRecordEid(e.record), keepNonHdh: true },
       );
       const nameKeyToItemId = new Map<string, string>();
       const eidKeyToItemId = new Map<string, string>();
       const fallbackItemId = `ocr-retry-fallback-${input.runId}-p${input.pageNum}`;
       for (const e of enqueueItems) {
         if (e.kind === "name") {
-          const nk = extractName(e.record, spec);
+          const nk = extractOcrRecordName(e.record, spec);
           if (nk) nameKeyToItemId.set(nk, e.itemId);
         } else {
-          const ek = extractEid(e.record);
+          const ek = extractOcrRecordEid(e.record);
           if (ek) eidKeyToItemId.set(ek, e.itemId);
         }
       }
@@ -549,18 +549,6 @@ function flattenForData(d: Record<string, unknown>): Record<string, string> {
     }
   }
   return out;
-}
-
-function extractName(record: unknown, spec: AnyOcrFormSpec): string {
-  return spec.carryForwardKey(record as never);
-}
-
-function extractEid(record: unknown): string {
-  const r = record as Record<string, unknown>;
-  if (typeof r.employeeId === "string") return normalizeUcpathEmployeeId(r.employeeId) ?? "";
-  const employee = r.employee as Record<string, unknown> | undefined;
-  if (employee && typeof employee.employeeId === "string") return normalizeUcpathEmployeeId(employee.employeeId) ?? "";
-  return "";
 }
 
 function patchUnresolved(records: unknown[], idx: number): void {

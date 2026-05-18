@@ -27,6 +27,7 @@ import {
   type OcrLookupKind,
 } from "./eid-lookup-results.js";
 import type { AnyOcrFormSpec, RosterRow as OcrRosterRow } from "./types.js";
+import { extractOcrRecordEid, extractOcrRecordName } from "./record-helpers.js";
 import type { OcrInput } from "./schema.js";
 import { runOcrPipeline } from "../../services/ocr/pipeline.js";
 import type { LookupSuggestion } from "../../services/ocr/lookup-suggestions.js";
@@ -532,7 +533,7 @@ export async function runOcrOrchestrator(
       if (kind !== "name") return;
       const r = rec as { rosterCandidates?: unknown[] };
       if (Array.isArray(r.rosterCandidates) && r.rosterCandidates.length > 0) return;
-      if (!extractName(rec, spec).trim()) return;
+      if (!extractOcrRecordName(rec, spec).trim()) return;
       suggestionTargets.push({ index, rec });
     });
 
@@ -593,8 +594,8 @@ export async function runOcrOrchestrator(
     records.forEach((rec, index) => {
       const kind = spec.needsLookup(rec);
       if (kind === "name" || kind === "verify" || kind === "verify-only") {
-        if (kind === "name" && !extractName(rec, spec).trim()) return;
-        if ((kind === "verify" || kind === "verify-only") && !extractEid(rec).trim()) return;
+        if (kind === "name" && !extractOcrRecordName(rec, spec).trim()) return;
+        if ((kind === "verify" || kind === "verify-only") && !extractOcrRecordEid(rec).trim()) return;
         if (kind === "name") {
           const suggestions = lookupSuggestionsByIndex.get(index) ?? [];
           for (const suggestion of suggestions) {
@@ -603,7 +604,7 @@ export async function runOcrOrchestrator(
               lookupTargets.push({ rec, index, kind: "verify-only", eid: suggestionEid });
             }
           }
-          const primaryName = selectLookupName(extractName(rec, spec), suggestions).trim();
+          const primaryName = selectLookupName(extractOcrRecordName(rec, spec), suggestions).trim();
           if (primaryName) {
             lookupTargets.push({ rec, index, kind, name: primaryName });
           }
@@ -617,7 +618,7 @@ export async function runOcrOrchestrator(
       log.step(`[ocr] enqueuing ${lookupTargets.length} eid-lookup(s) for unmatched/verify-needed records (skipped ${records.length - countTargetRecords(lookupTargets)} record(s) — already resolved, no name/EID, or manual)`);
       lookupTargets.forEach((t) => {
         const inputDesc =
-          t.kind === "name" ? `name="${targetName(t, spec)}"` : `eid=${t.eid ?? extractEid(t.rec)}`;
+          t.kind === "name" ? `name="${targetName(t, spec)}"` : `eid=${t.eid ?? extractOcrRecordEid(t.rec)}`;
         log.step(`[ocr] lookup target rec ${t.index + 1}: kind=${t.kind} ${inputDesc}`);
       });
       // Snapshot WITH records so the Preview keeps showing the matched
@@ -1050,11 +1051,11 @@ function readPreviousRecords(
 }
 
 function lookupEnqueueEmplId(target: { record: unknown; eid?: string }): string {
-  return target.eid ?? extractEid(target.record);
+  return target.eid ?? extractOcrRecordEid(target.record);
 }
 
 function targetName(target: { record?: unknown; rec?: unknown; name?: string }, spec: AnyOcrFormSpec): string {
-  return target.name ?? extractName(target.record ?? target.rec, spec);
+  return target.name ?? extractOcrRecordName(target.record ?? target.rec, spec);
 }
 
 function formatLookupName(raw: string): string {
@@ -1120,24 +1121,12 @@ function countTargetRecords(targets: Array<{ index: number }>): number {
   return new Set(targets.map((target) => target.index)).size;
 }
 
-function extractName(record: unknown, spec: AnyOcrFormSpec): string {
-  return spec.carryForwardKey(record as never);
-}
-
 /** Name string fed to LLM roster disambiguation (oath: printedName; EC: employee.name). */
 function disambigQueryFromRecord(record: unknown): string {
   const r = record as Record<string, unknown>;
   if (typeof r.printedName === "string" && r.printedName.trim()) return r.printedName.trim();
   const employee = r.employee as Record<string, unknown> | undefined;
   if (employee && typeof employee.name === "string") return employee.name.trim();
-  return "";
-}
-
-function extractEid(record: unknown): string {
-  const r = record as Record<string, unknown>;
-  if (typeof r.employeeId === "string") return normalizeUcpathEmployeeId(r.employeeId);
-  const employee = r.employee as Record<string, unknown> | undefined;
-  if (employee && typeof employee.employeeId === "string") return normalizeUcpathEmployeeId(employee.employeeId);
   return "";
 }
 
