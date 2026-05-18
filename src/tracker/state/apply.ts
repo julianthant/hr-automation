@@ -79,10 +79,12 @@ function stmts(db: Database): CachedStatements {
     upsertItem: db.prepare(`
       INSERT INTO items (
         workflow, tracker_date, item_id, latest_run_id, latest_status,
-        latest_step, latest_ts, latest_data_json, latest_error, resolved_prep, updated_at
+        latest_step, latest_ts, latest_data_json, latest_error, resolved_prep,
+        latest_empl_id, updated_at
       ) VALUES (
         @workflow, @trackerDate, @itemId, @runId, @status,
-        @step, @eventTs, @dataJson, @error, @resolvedPrep, @updatedAt
+        @step, @eventTs, @dataJson, @error, @resolvedPrep,
+        @emplId, @updatedAt
       )
       ON CONFLICT(workflow, tracker_date, item_id) DO UPDATE SET
         latest_run_id = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_run_id ELSE items.latest_run_id END,
@@ -92,6 +94,10 @@ function stmts(db: Database): CachedStatements {
         latest_data_json = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_data_json ELSE items.latest_data_json END,
         latest_error = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_error ELSE items.latest_error END,
         resolved_prep = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.resolved_prep ELSE items.resolved_prep END,
+        latest_empl_id = CASE
+          WHEN excluded.latest_empl_id IS NOT NULL THEN excluded.latest_empl_id
+          ELSE items.latest_empl_id
+        END,
         updated_at = excluded.updated_at
     `),
     insertLog: db.prepare(`
@@ -182,6 +188,13 @@ function runIdFor(entry: Pick<TrackerEntry, "id" | "runId">): string {
   return entry.runId || `${entry.id}#1`;
 }
 
+function extractEmplId(data: Record<string, string> | undefined): string | null {
+  if (!data) return null;
+  const raw = data.emplId;
+  if (typeof raw === "string" && raw.trim().length > 0) return raw.trim();
+  return null;
+}
+
 function isResolvedPrepData(status: string, step: string | undefined, data: Record<string, string> | undefined): number {
   const isPrep = data?.mode === "prepare";
   if (!isPrep) return 0;
@@ -261,6 +274,7 @@ export function applyTrackerEntry(
       dataJson,
       error: entry.error ?? null,
       resolvedPrep: isResolvedPrepData(entry.status, entry.step, entry.data),
+      emplId: extractEmplId(entry.data),
       updatedAt: now,
     });
 
