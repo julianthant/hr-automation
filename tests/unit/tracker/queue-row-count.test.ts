@@ -119,7 +119,7 @@ test("countSidebarRowsFromTrackerHistory: legacy approved OCR parent plus child 
       runId: "parent-run-1",
       status: "done",
       step: "approved",
-      data: { fannedOutCount: "1" },
+      data: { mode: "prepare", fannedOutCount: "1" },
     },
     {
       workflow: "oath-signature",
