@@ -215,15 +215,22 @@ export async function oathUploadHandler(
 const LOOKBACK_DAYS = 7;
 
 export function findPriorTicketForRunId(runId: string, trackerDir?: string): string | null {
-  const match = findLatestEntryForPredicate({
-    workflow: "oath-upload",
-    trackerDir,
-    lookbackDays: LOOKBACK_DAYS,
-    predicate: (e) => e.runId === runId && typeof e.data?.ticketNumber === "string" && (e.data.ticketNumber as string).length > 0,
-  });
-  if (!match) return null;
-  const t = match.data?.ticketNumber;
-  return typeof t === "string" ? t : null;
+  let controlDb: ReturnType<typeof openControlDb> | undefined;
+  try { controlDb = openControlDb({ trackerDir }); } catch { /* fall through to JSONL */ }
+  try {
+    const match = findLatestEntryForPredicate({
+      workflow: "oath-upload",
+      trackerDir,
+      lookbackDays: LOOKBACK_DAYS,
+      ...(controlDb ? { db: controlDb.db, runId } : {}),
+      predicate: (e) => e.runId === runId && typeof e.data?.ticketNumber === "string" && (e.data.ticketNumber as string).length > 0,
+    });
+    if (!match) return null;
+    const t = match.data?.ticketNumber;
+    return typeof t === "string" ? t : null;
+  } finally {
+    controlDb?.close();
+  }
 }
 
 function verifyEnqueuedSignerIds(ids: string[], trackerDir: string | undefined): string[] | null {
@@ -252,15 +259,23 @@ function readPriorOcrApproval(
   ocrSessionId: string,
   trackerDir: string | undefined,
 ): { fannedOutItemIds: string[] } | null {
-  const entry = findLatestEntryForPredicate({
-    workflow: "ocr",
-    trackerDir,
-    lookbackDays: LOOKBACK_DAYS,
-    predicate: (e) =>
-      e.id === ocrSessionId &&
-      e.step === "approved" &&
-      typeof e.data?.fannedOutItemIds === "string",
-  });
+  let controlDb: ReturnType<typeof openControlDb> | undefined;
+  try { controlDb = openControlDb({ trackerDir }); } catch { /* fall through to JSONL */ }
+  let entry: ReturnType<typeof findLatestEntryForPredicate>;
+  try {
+    entry = findLatestEntryForPredicate({
+      workflow: "ocr",
+      trackerDir,
+      lookbackDays: LOOKBACK_DAYS,
+      ...(controlDb ? { db: controlDb.db, itemId: ocrSessionId } : {}),
+      predicate: (e) =>
+        e.id === ocrSessionId &&
+        e.step === "approved" &&
+        typeof e.data?.fannedOutItemIds === "string",
+    });
+  } finally {
+    controlDb?.close();
+  }
   if (!entry || typeof entry.data?.fannedOutItemIds !== "string") return null;
   let ids: unknown;
   try {
