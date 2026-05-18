@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { promises as fsp } from "node:fs";
 import { createHash } from "node:crypto";
+import { openControlDb } from "../../core/control-db.js";
 import { readEntriesForDate, type TrackerEntry } from "../../tracker/jsonl.js";
 
 export interface PriorRunSummary {
@@ -20,15 +21,78 @@ export interface FindPriorRunsOpts {
   lookbackDays?: number;
 }
 
+function parseDataJson(raw: string | null | undefined): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === "string") out[k] = v;
+      else if (v !== null && v !== undefined) out[k] = String(v);
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 /**
- * Walk the last N days of `oath-upload-*.jsonl` files, find every
- * (sessionId, runId) pair whose latest tracker entry has
- * `data.pdfHash === hash`, dedup to one row per sessionId (keeping
- * the latest run by timestamp), and return newest-first.
+ * SQLite-first: query the items projection for oath-upload rows whose
+ * latest_data_json contains pdfHash === hash. Falls back to 30-day JSONL
+ * walk when SQLite is unavailable.
  */
 export function findPriorRunsForHash(opts: FindPriorRunsOpts): PriorRunSummary[] {
   const dir = opts.trackerDir ?? ".tracker";
   const lookbackDays = opts.lookbackDays ?? 30;
+
+  // SQLite fast path.
+  try {
+    const controlDb = openControlDb({ trackerDir: dir });
+    try {
+      const cutoffDate = new Date(Date.now() - lookbackDays * 24 * 60 * 60_000)
+        .toISOString()
+        .slice(0, 10);
+      const rows = controlDb.db.prepare(`
+        SELECT item_id, latest_run_id, latest_ts, latest_status, latest_step,
+               latest_data_json, latest_error
+        FROM items
+        WHERE workflow = 'oath-upload'
+          AND latest_ts >= @cutoffDate
+          AND json_extract(latest_data_json, '$.pdfHash') = @hash
+        ORDER BY latest_ts DESC
+      `).all({ cutoffDate, hash: opts.hash }) as {
+        item_id: string;
+        latest_run_id: string;
+        latest_ts: string;
+        latest_status: string;
+        latest_step: string | null;
+        latest_data_json: string | null;
+        latest_error: string | null;
+      }[];
+
+      if (rows.length > 0) {
+        return rows.map((row) => {
+          const data = parseDataJson(row.latest_data_json);
+          return {
+            sessionId: row.item_id,
+            runId: row.latest_run_id,
+            startedAt: row.latest_ts,
+            terminalStep: row.latest_step ?? "",
+            status: row.latest_status,
+            ticketNumber: typeof data.ticketNumber === "string" ? data.ticketNumber : undefined,
+            pdfOriginalName: typeof data.pdfOriginalName === "string" ? data.pdfOriginalName : "",
+          };
+        });
+      }
+    } finally {
+      controlDb.close();
+    }
+  } catch {
+    // SQLite unavailable or schema mismatch — fall through to JSONL.
+  }
+
+  // JSONL fallback.
   if (!existsSync(dir)) return [];
 
   const files = readdirSync(dir)
