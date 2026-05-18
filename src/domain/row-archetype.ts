@@ -65,6 +65,13 @@ function isRowArchetype(v: string): v is RowArchetype {
  * Derive the RowArchetype for a single tracker row given the workflow's
  * declared WorkflowArchetype and whether the row has a parent run.
  * Used by pre-emit write sites that don't go through withTrackedWorkflow.
+ *
+ * Mapping:
+ *   parentRunId present + utility  → "passive-child"  (EID lookup, active-check children)
+ *   parentRunId present + other    → "delegate-child" (OCR under oath-upload, oath-sig fan-out)
+ *   no parentRunId + delegating-batch → "batch-parent" (oath-upload root row)
+ *   no parentRunId + batch         → "batch-member"   (emergency-contact / oath-signature items)
+ *   no parentRunId + everything else → "single"
  */
 export function deriveRowArchetype(
   workflowArchetype: WorkflowArchetype,
