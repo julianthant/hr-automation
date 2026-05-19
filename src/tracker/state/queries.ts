@@ -8,6 +8,7 @@ import type { SessionEvent } from "../session-events.js";
 import { groupMergedTrackerEntries } from "../queue-row-count.js";
 import { countTopLevelQueueSurfaceRows } from "../queue-surfaces.js";
 import type { LogEntry, TrackerEntry, TypedValue } from "../jsonl.js";
+import { LOG_ENTRY_LEVELS } from "../jsonl.js";
 import { log } from "../../utils/log.js";
 
 function parseJsonObject<T>(raw: string | null | undefined, fallback: T): T {
@@ -162,7 +163,13 @@ export function selectLogsForRun(
   `).all({ ...params, limit: params.limit ?? 5_000 }) as LogEntryRow[];
 }
 
-export function mapLogRowToWire(row: LogEntryRow): LogEntry {
+export function mapLogRowToWire(row: LogEntryRow): LogEntry | null {
+  if (!LOG_ENTRY_LEVELS.has(row.level as LogEntry["level"])) {
+    log.warn(
+      `[queries] mapLogRowToWire: dropping log row with unknown level workflow=${row.workflow} itemId=${row.item_id} runId=${row.run_id} level=${row.level}`,
+    );
+    return null;
+  }
   const parsed = parseJsonObject<Partial<LogEntry>>(row.raw_json, {});
   return {
     ...parsed,
@@ -192,7 +199,13 @@ export function selectRunEventsForRun(
   `).all({ ...params, limit: params.limit ?? 5_000 }) as RunEventRow[];
 }
 
-export function mapRunEventRowToWire(row: RunEventRow): TrackerEntry {
+export function mapRunEventRowToWire(row: RunEventRow): TrackerEntry | null {
+  if (!isTrackerStatus(row.status)) {
+    log.warn(
+      `[queries] mapRunEventRowToWire: dropping run-event row with unknown status workflow=${row.workflow} itemId=${row.item_id} runId=${row.run_id} status=${row.status}`,
+    );
+    return null;
+  }
   const typedData = parseTypedDataJson(row.typed_data_json, {
     mapper: "mapRunEventRowToWire",
     rowId: row.id,
@@ -205,7 +218,7 @@ export function mapRunEventRowToWire(row: RunEventRow): TrackerEntry {
     id: row.item_id,
     runId: row.run_id,
     ...(row.parent_run_id ? { parentRunId: row.parent_run_id } : {}),
-    status: row.status as TrackerEntry["status"],
+    status: row.status,
     ...(row.step ? { step: row.step } : {}),
     data: parseJsonObject(row.data_json, {}),
     ...(typedData ? { typedData } : {}),
@@ -483,7 +496,7 @@ export function queryRunsForItem(
   runOrdinal: number;
   data?: Record<string, unknown>;
 }> {
-  const rows = db.prepare(`
+  const rawRows = db.prepare(`
     SELECT * FROM runs
     WHERE workflow = @workflow AND tracker_date = @date AND item_id = @itemId
     ORDER BY run_ordinal ASC
@@ -499,6 +512,13 @@ export function queryRunsForItem(
     last_log_ts: string | null;
     run_ordinal: number;
   }>;
+  const rows = rawRows.filter((row) => {
+    if (isTrackerStatus(row.latest_status)) return true;
+    log.warn(
+      `[queries] queryRunsForItem: dropping run row with unknown status workflow=${opts.workflow} itemId=${opts.itemId} runId=${row.run_id} status=${row.latest_status}`,
+    );
+    return false;
+  });
   const history = db.prepare(`
     SELECT run_id, event_ts AS timestamp, status, step
     FROM run_events
@@ -649,6 +669,12 @@ export function queryPriorEntriesByKey(
   const latestById = new Map<string, typeof rows[0]>();
   for (const row of rows) {
     if (opts.excludeId && row.item_id === opts.excludeId) continue;
+    if (!isTrackerStatus(row.latest_status)) {
+      log.warn(
+        `[queries] queryPriorEntriesByKey: dropping item row with unknown status workflow=${opts.workflow} itemId=${row.item_id} status=${row.latest_status}`,
+      );
+      continue;
+    }
     if (!latestById.has(row.item_id)) {
       // rows are already ordered latest_ts DESC so the first occurrence is the winner.
       latestById.set(row.item_id, row);

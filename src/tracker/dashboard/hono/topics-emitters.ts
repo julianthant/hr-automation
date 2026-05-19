@@ -219,7 +219,7 @@ export const logsTopic: TopicEmitter<{
           trackerDate: date || today,
           itemId,
           runId,
-        }).map(mapLogRowToWire);
+        }).flatMap((row) => { const e = mapLogRowToWire(row); return e ? [e] : []; });
       } catch (err) {
         log.warn(
           `logs SQLite query failed (workflow=${workflow}, itemId=${itemId}, runId=${runId}): ${err instanceof Error ? err.message : String(err)} — falling back to JSONL`,
@@ -285,7 +285,7 @@ export const runEventsTopic: TopicEmitter<{
           trackerDate: date || today,
           ...(itemId ? { itemId } : {}),
           runId: requestedRunId,
-        }).map(mapRunEventRowToWire);
+        }).flatMap((row) => { const e = mapRunEventRowToWire(row); return e ? [e] : []; });
       } catch (err) {
         usedTrackerSqlite = false;
         log.warn(
