@@ -371,6 +371,7 @@ function heartbeatWorker(db: Database, control: ControlDb, request: HeartbeatWor
 }
 
 function listStaleWorkers(db: Database, now: string): WorkerRow[] {
+  // NOTE: bare cast — listStaleWorkers is best-effort GC; consider adding row-shape validation if a column rename causes silent drift.
   const rows = db.prepare(`
     SELECT *
     FROM workers

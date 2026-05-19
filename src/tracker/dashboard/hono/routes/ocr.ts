@@ -17,6 +17,7 @@ import { ensurePdfPageCache } from "../../../files/pdf-cache.js";
 import type { DashboardHonoDeps } from "../context.js";
 import { readMultipartRequest } from "../multipart.js";
 import { jsonResponse, readJsonRequest } from "../responses.js";
+import { log } from "../../../../utils/log.js";
 
 export function registerOcrRoutes(app: Hono, deps: DashboardHonoDeps): void {
   const handlers = {
@@ -40,7 +41,15 @@ export function registerOcrRoutes(app: Hono, deps: DashboardHonoDeps): void {
     const result = await handlers.approve({
       sessionId: String(parsed.body.sessionId ?? ""),
       runId: String(parsed.body.runId ?? ""),
-      records: Array.isArray(parsed.body.records) ? parsed.body.records : [],
+      records: (() => {
+        const raw = Array.isArray(parsed.body.records) ? parsed.body.records : [];
+        const filtered = raw.filter(
+          (r): r is Record<string, unknown> => r !== null && typeof r === "object" && !Array.isArray(r),
+        );
+        const dropped = raw.length - filtered.length;
+        if (dropped > 0) log.warn(`[ocr-http] approve-batch: dropped ${dropped} non-object element(s) from records`);
+        return filtered;
+      })(),
     });
     return jsonResponse(result.body, result.status);
   });
