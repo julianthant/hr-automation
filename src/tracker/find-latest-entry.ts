@@ -46,6 +46,30 @@ function rowStatusOrUndefined(
   return undefined;
 }
 
+function coerceJsonlTrackerEntry(value: unknown, workflow: string): TrackerEntry | null {
+  if (isTrackerEntry(value)) return value;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const timestamp = typeof row.timestamp === "string"
+    ? row.timestamp
+    : typeof row.ts === "string" ? row.ts : undefined;
+  if (
+    typeof row.id !== "string" ||
+    row.id.length === 0 ||
+    !timestamp ||
+    !isTrackerEntryStatus(row.status)
+  ) {
+    return null;
+  }
+  return {
+    ...(row as Partial<TrackerEntry>),
+    workflow: typeof row.workflow === "string" && row.workflow.length > 0 ? row.workflow : workflow,
+    id: row.id,
+    timestamp,
+    status: row.status,
+  };
+}
+
 /**
  * Search recent workflow JSONL files newest-first and return the first entry
  * accepted by `predicate`. Tolerates malformed lines the same way dashboard
@@ -152,11 +176,11 @@ export function findLatestEntryForPredicate(
     for (let j = lines.length - 1; j >= 0; j--) {
       try {
         const parsed = JSON.parse(lines[j]) as unknown;
-        if (!isTrackerEntry(parsed)) {
+        const entry = coerceJsonlTrackerEntry(parsed, opts.workflow);
+        if (!entry) {
           log.warn(`[find-latest-entry] skipping invalid tracker JSONL line ${j + 1} in ${file}`);
           continue;
         }
-        const entry = parsed;
         if (opts.predicate(entry)) return entry;
       } catch (err) {
         log.warn(`[find-latest-entry] skipping malformed JSONL line ${j + 1} in ${file}: ${(err as Error).message}`);
