@@ -98,6 +98,10 @@ export function resolveOcrConfigForEntry(entry: {
     return hasOcrDownstream(entry.workflow) ? getOcrDownstream(entry.workflow) : null;
   }
   const formType = entry.data?.formType;
+  if (formType !== "oath" && formType !== "emergency-contact") {
+    console.warn(`resolveOcrConfigForEntry: unknown formType "${String(formType)}" — returning null`);
+    return null;
+  }
   const key = formType === "oath" ? "oath-signature" : "emergency-contact";
   if (!hasOcrDownstream(key)) return null;
   const base = getOcrDownstream(key);
