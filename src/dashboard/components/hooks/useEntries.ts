@@ -128,6 +128,9 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
   const [loading, setLoading] = useState(true);
   const prevHashRef = useRef("");
   const activeKeyRef = useRef("");
+  const prevWorkflowsRef = useRef<string>("");
+  const prevWfCountsRef = useRef<string>("");
+  const prevFailureCountsRef = useRef<string>("");
   // Cache: maps entry id → the last-emitted { entry, _hash } object.
   // Reusing the same object reference for unchanged rows lets EntryItem's
   // memo bailout on referential equality before the comparator body runs.
@@ -142,6 +145,9 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
     // empty. Without the key guard, switching to an empty date leaves the
     // previous date's rows on screen because both hashes are "".
     prevHashRef.current = "";
+    prevWorkflowsRef.current = "";
+    prevWfCountsRef.current = "";
+    prevFailureCountsRef.current = "";
     // Clear ref cache on workflow/date switch so stale objects from the
     // previous subscription don't contaminate the next one.
     entryRefCacheRef.current = new Map();
@@ -176,9 +182,23 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
         // day, or switching to a date where the current workflow has 0
         // entries but others have activity). Gating them behind the entry
         // hash was the bug that made date switches show "0 / 0 / 0".
-        setWorkflows(wfs || []);
-        if (counts) setWfCounts(counts);
-        setFailureCounts(fcounts ?? {});
+        const wfsKey = JSON.stringify(wfs || []);
+        if (wfsKey !== prevWorkflowsRef.current) {
+          prevWorkflowsRef.current = wfsKey;
+          setWorkflows(wfs || []);
+        }
+        if (counts) {
+          const countsKey = JSON.stringify(counts);
+          if (countsKey !== prevWfCountsRef.current) {
+            prevWfCountsRef.current = countsKey;
+            setWfCounts(counts);
+          }
+        }
+        const fcountsKey = JSON.stringify(fcounts ?? {});
+        if (fcountsKey !== prevFailureCountsRef.current) {
+          prevFailureCountsRef.current = fcountsKey;
+          setFailureCounts(fcounts ?? {});
+        }
 
         // Skip if data hasn't changed (prevent unnecessary re-renders).
         // Compact fingerprint: id + status + step + timestamp + run anchors.

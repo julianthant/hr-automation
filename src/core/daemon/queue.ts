@@ -38,19 +38,45 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
+/** Terminal `control_state` values excluded from the hot `readQueueState` path. */
+const TERMINAL_CONTROL_STATES = ['done', 'failed', 'cancelled', 'blocked'] as const
+
 export async function readQueueState(workflow: string, trackerDir?: string): Promise<QueueState> {
+  return readQueueStateInternal(workflow, trackerDir, { activeOnly: true })
+}
+
+/** Full fold including terminal rows — for tests and diagnostics only. */
+export async function readQueueStateIncludingTerminals(
+  workflow: string,
+  trackerDir?: string,
+): Promise<QueueState> {
+  return readQueueStateInternal(workflow, trackerDir, { activeOnly: false })
+}
+
+async function readQueueStateInternal(
+  workflow: string,
+  trackerDir: string | undefined,
+  opts: { activeOnly: boolean },
+): Promise<QueueState> {
   const store = openQueueTaskStore(trackerDir)
   const state: QueueState = { queued: [], claimed: [], done: [], failed: [] }
   // One query for full task rows. Previous shape (SELECT id then per-id
   // store.getTask) was N+1 prepared-statement executions per call.
+  // Hot path skips terminal rows — the tasks table is not pruned by clean:tracker.
+  const terminalFilter = opts.activeOnly
+    ? `AND control_state NOT IN (${TERMINAL_CONTROL_STATES.map(() => '?').join(', ')})`
+    : ''
   const rows = store.db.prepare(`
     SELECT *
     FROM tasks
     WHERE workflow = ?
       AND task_kind = 'workflow_item'
       AND source = 'daemon'
+      ${terminalFilter}
     ORDER BY COALESCE(enqueued_at, created_at) ASC, rowid ASC
-  `).all(workflow) as Array<TaskDbRow>
+  `).all(
+    ...(opts.activeOnly ? [workflow, ...TERMINAL_CONTROL_STATES] : [workflow]),
+  ) as Array<TaskDbRow>
   for (const row of rows) {
     const task = mapTaskRow(row)
     const item = taskToQueueItem(task)

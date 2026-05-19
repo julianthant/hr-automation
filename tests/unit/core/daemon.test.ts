@@ -9,7 +9,7 @@ import { defineWorkflow } from '../../../src/core/kernel/workflow.js'
 import { clear } from '../../../src/core/kernel/registry.js'
 import { runWorkflowDaemon } from '../../../src/core/daemon/daemon.js'
 import { Session } from '../../../src/core/kernel/session.js'
-import { enqueueItems, readQueueState } from '../../../src/core/daemon/queue.js'
+import { enqueueItems, readQueueStateIncludingTerminals } from '../../../src/core/daemon/queue.js'
 import { findAliveDaemons } from '../../../src/core/daemon/registry.js'
 import { openControlDb } from '../../../src/core/control-db.js'
 import { createTaskStore } from '../../../src/core/task-store/index.js'
@@ -183,7 +183,7 @@ test('runWorkflowDaemon: /stop during launch/auth aborts session launch and fail
       new Promise((_, reject) => setTimeout(() => reject(new Error('daemon did not stop during auth')), 1_500)),
     ])
     assert.equal(abortObserved, true)
-    const state = await readQueueState('dint-stop-auth', dir)
+    const state = await readQueueStateIncludingTerminals('dint-stop-auth', dir)
     assert.equal(state.failed.length, 1)
     assert.equal(state.failed[0].id, 'held')
   } finally {
@@ -309,7 +309,7 @@ test('runWorkflowDaemon: processes queued items via claim loop', async () => {
     const { port } = await waitForDaemon('dint-b', dir)
 
     await waitFor(async () => {
-      const st = await readQueueState('dint-b', dir)
+      const st = await readQueueStateIncludingTerminals('dint-b', dir)
       return st.done.length === 2
     }, 10_000)
 
@@ -600,7 +600,7 @@ test('runWorkflowDaemon: /wake after idle resumes and processes new enqueue', as
     await fetch(`http://127.0.0.1:${port}/wake`, { method: 'POST' })
 
     await waitFor(async () => {
-      const st = await readQueueState('dint-c', dir)
+      const st = await readQueueStateIncludingTerminals('dint-c', dir)
       return st.done.length === 1
     }, 5_000)
 
@@ -872,7 +872,7 @@ test('runWorkflowDaemon: forwards QueueItem.parentRunId into runOneItem so track
     const { port } = await waitForDaemon('dint-parent', dir)
 
     await waitFor(async () => {
-      const st = await readQueueState('dint-parent', dir)
+      const st = await readQueueStateIncludingTerminals('dint-parent', dir)
       return st.done.length === 1
     }, 10_000)
 
