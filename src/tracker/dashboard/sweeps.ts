@@ -61,21 +61,11 @@ export async function scanFailurePatterns(): Promise<void> {
 
 /**
  * Grace period before treating a queued-with-no-alive-daemons item as truly
- * orphaned. As of 2026-04-28 (Cluster A spec), the grace is **0 ms**.
- *
- * Rationale: `ensureDaemonsAndEnqueue` was reordered so SQLite task rows are
- * only inserted AFTER `spawnDaemon` returns (lockfile registered). Therefore
- * every queued task has a registered daemon by construction;
- * "queued task + 0 alive daemons" can only happen if that daemon
- * died after writing. Failing the items immediately matches the user's
- * "if the daemon dies, fail all queued ones" rule.
- *
- * Pre-2026-04-28 the grace was 5 minutes to cover the spawn-to-lockfile
- * window; with the new ordering that window is closed. Legacy queue items
- * left over from earlier runs (where a daemon died without exit cleanup)
- * are correctly treated as orphaned and failed on first poll.
+ * orphaned. Dashboard-initiated delegation can enqueue before a just-spawned
+ * daemon has finished browser launch, Duo, and lockfile registration; failing
+ * immediately blocks the parent workflow even though the daemon is healthy.
  */
-const ORPHAN_QUEUE_GRACE_MS = 0;
+const ORPHAN_QUEUE_GRACE_MS = 5 * 60 * 1000;
 
 /**
  * Safety net: detect queued items whose workflow has zero alive daemons,
@@ -88,12 +78,10 @@ const ORPHAN_QUEUE_GRACE_MS = 0;
  * queue. Idempotent - once an item is marked failed, the next pass sees
  * `state.queued.length === 0` for that id.
  *
- * **Grace = 0 (2026-04-28)**: with the spawn-then-enqueue reorder in
- * `ensureDaemonsAndEnqueue`, task rows are only inserted after a daemon
- * lockfile is registered. Any queued task + 0 alive daemons is a
- * genuine orphan, not a spawn-in-flight race. Failing immediately matches
- * the "daemon dies -> fail queued" rule. The legacy 5-minute grace was
- * removed because the spawn-to-lockfile window is now closed by ordering.
+ * **Grace = 5 minutes**: a new daemon may spend several minutes in
+ * browser/auth/Duo startup before it is visible to `findAliveDaemons`.
+ * Within that window, "queued task + 0 alive daemons" can be a legitimate
+ * spawn-in-flight state, not an orphan.
  *
  * Does NOT touch claimed items: those are owned by a daemon (alive or
  * recently dead). The daemon's own `recoverOrphanedClaims` keepalive sweep
