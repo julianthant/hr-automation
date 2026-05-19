@@ -71,6 +71,7 @@ export interface TrackerApprovalDelegationSurface {
   parent: TrackerEntry;
   members: TrackerEntry[];
   approvalState: "awaiting-approval" | "approved" | "discarded";
+  titleOverride?: string;
 }
 
 export interface TrackerPassiveDelegationSurface {

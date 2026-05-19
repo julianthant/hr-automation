@@ -6,57 +6,23 @@ import {
 } from "../../../tracker/queue-surfaces.js";
 import type { TrackerEntry as TrackerEntryJsonl } from "../../../tracker/jsonl.js";
 
+/**
+ * Identity cast. `TrackerEntry` (dashboard) is a structural superset of
+ * `TrackerEntryJsonl`; passing the original ref through preserves SSE
+ * enrichments (_hash, firstLogTs, lastLogTs, lastLogMessage, stepDurations,
+ * etc.) so EntryItem's memo and queue sort keep working.
+ */
 function toJsonlEntry(entry: TrackerEntry): TrackerEntryJsonl {
-  return {
-    workflow: entry.workflow,
-    timestamp: entry.timestamp,
-    id: entry.id,
-    runId: entry.runId,
-    parentRunId: entry.parentRunId,
-    status: entry.status,
-    step: entry.step,
-    data: entry.data,
-    typedData: entry.typedData,
-    error: entry.error,
-  };
+  return entry as unknown as TrackerEntryJsonl;
 }
 
-/** Preserves dashboard-only SSE enrichments when present on tracker rows. */
+/**
+ * Identity cast in reverse. Entries that flow through buildTrackerQueueSurfaces
+ * originated from useEntries — they still carry dashboard enrichments at
+ * runtime even though the JSONL type doesn't surface them.
+ */
 function toDashboardEntry(entry: TrackerEntryJsonl): TrackerEntry {
-  const enriched = entry as TrackerEntryJsonl &
-    Partial<
-      Pick<
-        TrackerEntry,
-        | "startTimestamp"
-        | "firstLogTs"
-        | "lastLogTs"
-        | "lastLogMessage"
-        | "_hash"
-        | "runOrdinal"
-        | "stepDurations"
-        | "screenshotCount"
-      >
-    >;
-  return {
-    workflow: entry.workflow,
-    timestamp: entry.timestamp,
-    id: entry.id,
-    runId: entry.runId,
-    parentRunId: entry.parentRunId,
-    status: entry.status,
-    step: entry.step,
-    data: entry.data,
-    typedData: entry.typedData,
-    error: entry.error,
-    startTimestamp: enriched.startTimestamp ?? undefined,
-    firstLogTs: enriched.firstLogTs ?? undefined,
-    lastLogTs: enriched.lastLogTs ?? undefined,
-    lastLogMessage: enriched.lastLogMessage ?? undefined,
-    _hash: enriched._hash ?? undefined,
-    runOrdinal: enriched.runOrdinal ?? undefined,
-    stepDurations: enriched.stepDurations ?? undefined,
-    screenshotCount: enriched.screenshotCount ?? undefined,
-  };
+  return entry as unknown as TrackerEntry;
 }
 
 function mapGroupSurface(surface: TrackerQueueGroupSurface): QueueGroupSurface {

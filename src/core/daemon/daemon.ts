@@ -16,7 +16,6 @@ import {
   markItemCancelled,
   markItemDone,
   markItemFailed,
-  readQueueState,
 } from './queue.js'
 import type { DaemonLockfile } from './types.js'
 import {
@@ -477,7 +476,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                     runId,
                     status: 'failed',
                     step: 'cancelled',
-                    data: buildShutdownTrackerData(wf, trackerDir, item.input, item.parentRunId),
+                    data: buildShutdownTrackerData(wf, item.input, item.parentRunId),
                     ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
                     error: cancelError,
                   },

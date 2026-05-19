@@ -206,6 +206,7 @@ export function sweepStuckOathUploadRows(trackerDir: string): void {
           step: "swept",
           error:
             "Dashboard restarted while oath-upload was in progress — please re-upload",
+          ...(e.data ? { data: { ...e.data } } : {}),
         },
         trackerDir,
       );

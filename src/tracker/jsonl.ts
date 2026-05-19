@@ -347,8 +347,14 @@ export function byTimestampAsc<T extends { timestamp: string }>(a: T, b: T): num
 
 export function parseTrackerFilename(name: string): { workflow: string; date: string } | null {
   if (name.endsWith("-logs.jsonl")) return null;
+  // `sessions-YYYY-MM-DD.jsonl` matches the generic shape below but holds
+  // SessionEvent rows, not TrackerEntry rows. Without this guard,
+  // listWorkflows() yields "sessions" as a workflow and every dashboard tick
+  // re-validates each session-event line against isTrackerEntry, spamming
+  // `[jsonl] skipping invalid line N in .tracker/sessions-*.jsonl` to stderr.
   const m = name.match(/^(.+)-(\d{4}-\d{2}-\d{2})\.jsonl$/);
   if (!m) return null;
+  if (m[1] === "sessions") return null;
   return { workflow: m[1], date: m[2] };
 }
 

@@ -25,7 +25,6 @@ import type { DaemonPhase, DaemonState } from './daemon-types.js'
 
 export function buildShutdownTrackerData<TData, TSteps extends readonly string[]>(
   wf: RegisteredWorkflow<TData, TSteps>,
-  trackerDir: string | undefined,
   input: unknown,
   parentRunId?: string,
 ): Record<string, string> {
@@ -266,7 +265,7 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
               runId: inFlightSnapshot.runId,
               status: 'failed',
               step: 'cancelled',
-              data: buildShutdownTrackerData(wf, trackerDir, existingTask?.input, parentRunId),
+              data: buildShutdownTrackerData(wf, existingTask?.input, parentRunId),
               ...(parentRunId ? { parentRunId } : {}),
               error: cancelReason,
             },
@@ -342,7 +341,7 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
             // would override the pending row's hoisted fields with
             // `docId` + an opaque `prefilledData` JSON blob, hiding the
             // user's edits in the dashboard detail grid.
-            const data = buildShutdownTrackerData(wf, trackerDir, item.input, item.parentRunId)
+            const data = buildShutdownTrackerData(wf, item.input, item.parentRunId)
             trackEvent(
               {
                 workflow: wf.config.name,

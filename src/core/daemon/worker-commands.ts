@@ -158,7 +158,13 @@ export function createHandleWorkerCommand<TData, TSteps extends readonly string[
           await state.activeSession.healthCheck(sys.id)
         }
         workerStore.completeCommand(command.commandId)
+        return
       }
+      // Unknown command type — terminalize so it doesn't sit in `queued`
+      // forever and block orphan recovery (claim.ts NOT EXISTS filter
+      // includes legacy `force_stop_task` rows; without this fallback
+      // they pin tasks in claimed-but-unrecoverable state).
+      workerStore.failCommand(command.commandId, `unsupported command type: ${command.commandType}`)
     } catch (err) {
       workerStore.failCommand(command.commandId, err instanceof Error ? err.message : String(err))
     }

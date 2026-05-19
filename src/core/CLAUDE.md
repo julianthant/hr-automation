@@ -8,7 +8,10 @@ See root `CLAUDE.md` for a user-facing kernel primer + minimal example. This doc
 
 **`kernel/`** — workflow execution primitives:
 - `types.ts` — `WorkflowConfig`, `Ctx`, `SystemConfig`, `RunOpts`, `WorkflowMetadata`, `DetailField`, `RetryOpts`. Single source of truth for the kernel surface.
-- `workflow.ts` — `defineWorkflow`, `runWorkflow`, `runWorkflowBatch` (sequential mode, wrapped in `withBatchLifecycle`), `buildTrackerOpts`, `deriveItemId`. `runWorkflowBatch` delegates to `runWorkflowPool` when `batch?.mode === "pool"` and to `runWorkflowSharedContextPool` when `"shared-context-pool"`.
+- `workflow.ts` — `defineWorkflow`, `runWorkflowBatch` (sequential mode, wrapped in `withBatchLifecycle`), `buildTrackerOpts`, `deriveItemId`. `runWorkflowBatch` delegates to `runWorkflowPool` when `batch?.mode === "pool"` and to `runWorkflowSharedContextPool` when `"shared-context-pool"`. Public `runWorkflow` is re-exported from `run-workflow.ts`.
+- `run-workflow.ts` — `runWorkflow` (single-item entry point). Implements the kernel envelope around `runOneItem` for non-batch callers.
+- `session-observer.ts` — `createSessionObserver` factory used by `runWorkflow` and batch lifecycle for auth-timing observation.
+- `workflow-tracker-data.ts` — `buildInitialTrackerData`, `splitPrefilled`, `toRecord`, `deriveItemId` shared helpers (extracted from `workflow.ts`).
 - `pool.ts` — `runWorkflowPool`: N workers, each with its own Session. One Duo per worker. Queue-based distribution. Wraps body in `withBatchLifecycle` — per-worker `SessionObserver` captures per-worker `authTimings[]`.
 - `shared-context-pool.ts` — `runWorkflowSharedContextPool`: one parent Session, N worker views via `Session.forWorker`, lazy per-worker pages. Wraps body in `withBatchLifecycle` with a single observer + shared `authTimings[]`.
 - `batch-lifecycle.ts` — `withBatchLifecycle(...)` — shared lifecycle shell for every batch runner. Owns instance allocation, one `workflow_start`/`workflow_end` per batch, SIGINT fanout, and auth-failure fanout. Also exports `createBatchObserver`. **`ownSigint: false`** is the daemon-mode opt-out.
@@ -22,15 +25,20 @@ See root `CLAUDE.md` for a user-facing kernel primer + minimal example. This doc
 
 **`daemon/`** — daemon mode (persistent processes, SQLite queue):
 - `types.ts` — `DaemonLockfile`, `Daemon`, `QueueEvent`, `QueueItem`, `QueueState`, `DaemonFlags`, `EnqueueResult`.
+- `daemon-types.ts` — `DaemonPhase`, `DaemonState`, `DaemonInFlight` runtime state types shared across the split daemon modules.
 - `registry.ts` — lockfile read/write, PID + `/whoami` liveness, `findAliveDaemons`, `spawnDaemon`.
 - `queue.ts` — `enqueueItems`, `claimNextItem`, `markItemDone`/`Failed`/`Cancelled`, `unclaimItem`, `recoverOrphanedClaims`, `readQueueState`.
 - `client.ts` — `ensureDaemonsAndEnqueue(wf, inputs, flags, opts)` — the ONE function every daemon-mode CLI adapter calls.
-- `daemon.ts` — `runWorkflowDaemon(wf, opts)`: long-running daemon main loop. HTTP surface: `GET /whoami`, `POST /wake`, `POST /stop`.
+- `daemon.ts` — `runWorkflowDaemon(wf, opts)`: long-running daemon main loop. HTTP surface: `GET /whoami`, `POST /wake`, `POST /stop`. Delegates shutdown/cleanup, worker-command handling, and auth-timing rotation to sibling modules.
+- `shutdown.ts` — `runDaemonShutdownCleanup`, `buildShutdownTrackerData`, `createAbortLaunchAndKillSession`. Terminalizes queued + in-flight items, preserves display metadata on cancellation rows.
+- `worker-commands.ts` — `createHandleWorkerCommand`, `createPollWorkerCommands`, `startWorkerTickInterval`. Routes `cancel_task` / `drain_worker` / `stop_worker` / `kill_browser` / `health_check`; defaults unknown command types to `failCommand` so orphan recovery isn't blocked.
+- `in-process-control.ts` — in-process control-DB hooks for HTTP / dashboard-initiated enqueues to live daemons.
+- `in-process-runs.ts` — module-level registry of fire-and-forget `runWorkflow` calls inside the dashboard process; `/api/cancel-running` falls back here when no daemon claim exists (e.g. sharepoint-download). Hard-kills Chromium via `session.killChromeHard()` for Duo-stuck launches.
 - `auth-timing.ts` — daemon-only auth timing rotation: `snapshotStartupAuthTimings`, `buildClaimAnchoredAuthTimings`, `createDaemonItemAuthTimingResolver`. Startup session launch + observer wiring stays inline in `daemon.ts`.
 - `http.ts` — daemon HTTP server (express-like minimal server for control surface).
 - `worker-store.ts` — daemon/dashboard worker rows, heartbeat, `worker_commands`, `browser_processes`.
 - `keepalive.ts` — idle healthcheck + stale-worker recovery tick.
-- `enqueue-dispatch.ts` — dispatch/wake helpers.
+- `enqueue-dispatch.ts` — dispatch/wake helpers; HTTP enqueue pending-data shaping via `buildHttpPendingData` + `buildTrackerDataForInput`.
 
 **`task-store/`** — SQLite control plane:
 - `index.ts`, `enqueue.ts`, `claim.ts`, `retry.ts`, `terminal.ts`, `queries.ts`, `types.ts`, `child-state.ts`.
@@ -49,7 +57,7 @@ See root `CLAUDE.md` for a user-facing kernel primer + minimal example. This doc
 - **Every mode constructs Ctx via `makeCtx`.** This is why `runWorkflow`, `runWorkflowBatch`, and `runWorkflowPool` behave identically. Adding a new run mode? Use `makeCtx` — never hand-roll a `Ctx` literal.
 - **`buildTrackerOpts(wf)` is shared across all modes.** Guarantees `declaredDetailFields`, `nameFn`, `idFn` land in lockstep on every mode's `withTrackedWorkflow` call. Subsystem D's runtime warning relies on this.
 - **`operatorSubject` is required for new workflows.** The kernel stamps it into initial tracker data as `data.__subject` / `data.__subjectKind`; dashboard toasts, Telegram, task display, and later SQLite projections rely on it.
-- **`data.archetype` is the canonical row-type discriminator.** Set by the kernel on every per-item tracker row via `withTrackedWorkflow` opts; set explicitly by orchestrator/prep code for `batch-parent`/`dispatch` rows that don't go through the per-item path. Dashboard queue surface, log panel footer chip, and display-name resolver dispatch on this single field; legacy discriminators (`mode === "prepare"`, `requestRole`, `taskRole === "utility"`) are read-fallbacks only (`resolveRowArchetype` in `src/domain/row-archetype.ts`). Declare `archetype` on every `defineWorkflow` call — the architecture guard in `tests/unit/architecture/archetype-coverage.test.ts` enforces this.
+- **`data.archetype` is the canonical row-type discriminator.** Set by the kernel on every per-item tracker row via `withTrackedWorkflow` opts; set explicitly by orchestrator/prep code for `batch-parent`/`dispatch` rows that don't go through the per-item path. Dashboard queue surface, log panel footer chip, and display-name resolver dispatch on this single field. Legacy read-fallbacks (`data.mode === "prepare"`, `data.taskRole`, `data.requestRole`, `data.workflow === "ocr"`) were removed from `resolveRowArchetype` on 2026-05-19; missing/invalid stamps now default to `single` (or `delegate-child` when `parentRunId` is set). `data.mode` is still stamped for prep-row dashboard logic but is not consulted by the archetype resolver. Declare `archetype` on every `defineWorkflow` call — the architecture guard in `tests/unit/architecture/archetype-coverage.test.ts` enforces this.
 - **Convention owner for execution behavior.** New cross-workflow execution semantics, cancellation checks, task/control contracts, and `Ctx` capabilities belong in `src/core/`. Do not patch those into individual workflow handlers.
 - **SQLite is live queue/control truth.** Daemon queue authority, worker ownership, command rows, retry attempts, and browser process targeting live in SQLite. JSONL queue/control writes are audit/history output during the transition. If you change queue/control behavior, update SQLite state and JSONL audit together, and never add a dashboard control that only mutates process-local state.
 - **Daemon queue readers only see daemon tasks.** The shared SQLite `tasks` table also stores non-daemon dependency parents such as OCR rows (`task_kind = "ocr"`). `claimNextTask`, `readQueueState`, orphan sweeps, and position counts must filter to `task_kind = "workflow_item"` plus `source = "daemon"`; otherwise in-process parents can be mistaken for abandoned queue work and overwritten by daemon cleanup.

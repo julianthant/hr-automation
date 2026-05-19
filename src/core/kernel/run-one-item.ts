@@ -193,6 +193,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       workflow: wf,
       input: handlerInput,
       useInitialTrackerSeed: true,
+      precomputedSeed: stringifiedSeed,
       nameIdStamp: 'always-on-seed',
       parentRunId: args.parentRunId,
     })
