@@ -7,6 +7,15 @@ import {
   resolveRowArchetype,
 } from "../../../src/domain/row-archetype.js";
 
+const CANONICAL: RowArchetype[] = [
+  "single",
+  "batch-parent",
+  "batch-member",
+  "dispatch",
+  "delegate-child",
+  "passive-child",
+];
+
 describe("row-archetype", () => {
   it("archetypeRowTypeLabel returns the canonical label per archetype", () => {
     assert.equal(archetypeRowTypeLabel("single"), "Single");
@@ -17,29 +26,27 @@ describe("row-archetype", () => {
     assert.equal(archetypeRowTypeLabel("passive-child"), "Passive");
   });
 
-  it("resolveRowArchetype prefers data.archetype when present", () => {
-    const entry = { workflow: "oath-signature", data: { archetype: "delegate-child" as RowArchetype } };
-    assert.equal(resolveRowArchetype(entry), "delegate-child");
+  it("resolveRowArchetype returns every canonical data.archetype value", () => {
+    for (const archetype of CANONICAL) {
+      assert.equal(resolveRowArchetype({ data: { archetype } }), archetype);
+    }
   });
 
-  it("resolveRowArchetype derives batch-parent from legacy data.mode === 'prepare'", () => {
-    const entry = { workflow: "emergency-contact", data: { mode: "prepare" } };
-    assert.equal(resolveRowArchetype(entry), "batch-parent");
+  it("resolveRowArchetype defaults to single when data.archetype is missing", () => {
+    assert.equal(resolveRowArchetype({ data: {} }), "single");
+    assert.equal(resolveRowArchetype({}), "single");
   });
 
-  it("resolveRowArchetype derives dispatch from legacy requestRole", () => {
-    const entry = { workflow: "ocr", data: { requestRole: "delegation-dispatch" } };
-    assert.equal(resolveRowArchetype(entry), "dispatch");
+  it("resolveRowArchetype defaults to delegate-child when parentRunId is set", () => {
+    assert.equal(resolveRowArchetype({ parentRunId: "parent-run-1", data: {} }), "delegate-child");
   });
 
-  it("resolveRowArchetype derives passive-child from legacy taskRole === 'utility' + originWorkflow", () => {
-    const entry = { workflow: "sharepoint-download", data: { taskRole: "utility", originWorkflow: "ocr" } };
-    assert.equal(resolveRowArchetype(entry), "passive-child");
-  });
-
-  it("resolveRowArchetype falls back to single", () => {
-    const entry = { workflow: "work-study", data: {} };
-    assert.equal(resolveRowArchetype(entry), "single");
+  it("resolveRowArchetype treats invalid data.archetype as missing", () => {
+    assert.equal(resolveRowArchetype({ data: { archetype: "not-a-real-archetype" } }), "single");
+    assert.equal(
+      resolveRowArchetype({ parentRunId: "parent-run-1", data: { archetype: 42 } }),
+      "delegate-child",
+    );
   });
 
   it("deriveRowArchetype: batch without parentRunId → batch-parent", () => {
@@ -49,20 +56,6 @@ describe("row-archetype", () => {
 
   it("deriveRowArchetype: batch with parentRunId → delegate-child", () => {
     assert.equal(deriveRowArchetype("batch", "parent-run-1"), "delegate-child");
-  });
-
-  it("resolveRowArchetype derives batch-parent from legacy ocr workflow without parentRunId", () => {
-    const entry = { workflow: "ocr", data: {} };
-    assert.equal(resolveRowArchetype(entry), "batch-parent");
-  });
-
-  it("resolveRowArchetype does not classify OCR child rows as batch-parent", () => {
-    const entry = {
-      workflow: "ocr",
-      parentRunId: "parent-run-1",
-      data: { taskRole: "child", originWorkflow: "ocr" },
-    };
-    assert.equal(resolveRowArchetype(entry), "delegate-child");
   });
 
   it("deriveRowArchetype: utility with parentRunId → passive-child", () => {
