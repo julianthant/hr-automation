@@ -10,7 +10,7 @@
  * watchChildRuns, eid-lookup daemon dispatch). Test escape hatches
  * mirror those on `runOcrOrchestrator`.
  */
-import { existsSync, readFileSync, openSync, closeSync, statSync, readSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join, basename, dirname } from "node:path";
 import { openStateDb, stateDbPath } from "../../tracker/state/db.js";
 import type { ZodType } from "zod/v4";
@@ -20,6 +20,7 @@ import { loadRoster as realLoadRoster } from "../../services/matching/index.js";
 import type { RosterRow as MatchRosterRow } from "../../services/matching/match.js";
 import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
 import { trackEvent, dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
+import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { patchOcrRecordFromEidLookupOutcome } from "./eid-lookup-results.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
 import type { AnyOcrFormSpec, RosterRow as OcrRosterRow } from "./types.js";
@@ -206,7 +207,7 @@ export async function runOcrRetryPage(
       trackerDir,
       date,
       timeoutMs: opts.eidLookupTimeoutMs ?? 60 * 60_000,
-    }).catch(() => [] as ChildOutcome[]);
+    });
 
     const outcomesByItemId = new Map(outcomes.map((o) => [o.itemId, o]));
     for (const enq of enqueueItems) {
@@ -330,64 +331,6 @@ function readLatestRowFromSqlite(
   }
 }
 
-const OCR_JSONL_TAIL_BYTES = 512 * 1024;
-
-function readLatestRowFromJsonl(
-  sessionId: string,
-  runId: string,
-  trackerDir: string | undefined,
-  date: string,
-): TrackerEntry | null {
-  const file = join(trackerDir ?? ".tracker", `ocr-${date}.jsonl`);
-  if (!existsSync(file)) return null;
-  let st;
-  try {
-    st = statSync(file);
-  } catch {
-    return null;
-  }
-  let latest: TrackerEntry | null = null;
-  const considerLine = (line: string): void => {
-    if (!line) return;
-    try {
-      const e: TrackerEntry = JSON.parse(line);
-      if (e.id === sessionId && e.runId === runId) latest = e;
-    } catch { /* tolerate */ }
-  };
-
-  if (st.size <= OCR_JSONL_TAIL_BYTES) {
-    const raw = readFileSync(file, "utf-8");
-    for (const line of raw.split("\n")) considerLine(line);
-    return latest;
-  }
-
-  const fd = openSync(file, "r");
-  try {
-    const start = st.size - OCR_JSONL_TAIL_BYTES;
-    const byteLen = st.size - start;
-    const buf = Buffer.alloc(byteLen);
-    let total = 0;
-    while (total < byteLen) {
-      const n = readSync(fd, buf, total, byteLen - total, start + total);
-      if (n === 0) break;
-      total += n;
-    }
-    const chunk = buf.subarray(0, total).toString("utf8");
-    const firstNl = chunk.indexOf("\n");
-    const text = firstNl === -1 ? chunk : chunk.slice(firstNl + 1);
-    for (const line of text.split("\n")) considerLine(line);
-  } finally {
-    closeSync(fd);
-  }
-
-  if (latest) return latest;
-
-  const raw = readFileSync(file, "utf-8");
-  latest = null;
-  for (const line of raw.split("\n")) considerLine(line);
-  return latest;
-}
-
 const RETRY_PAGE_LOOKBACK_DAYS = 7;
 
 function readLatestRow(
@@ -398,24 +341,15 @@ function readLatestRow(
 ): TrackerEntry | null {
   const sqliteResult = readLatestRowFromSqlite(sessionId, runId, trackerDir, date);
   if (sqliteResult) return sqliteResult;
-  // JSONL fallback: walk back RETRY_PAGE_LOOKBACK_DAYS daily files so a retry
-  // request for a (sessionId, runId) created days ago still finds its row.
-  // Parse `date` as local-calendar YYYY-MM-DD to match tracker filename dates
-  // (see `dateLocal`); `new Date("YYYY-MM-DD")` would parse as UTC midnight and
-  // shift the start day in non-UTC timezones.
   const [yStr, mStr, dStr] = date.split("-");
-  const base = new Date(Number(yStr), Number(mStr) - 1, Number(dStr));
-  if (Number.isNaN(base.getTime())) {
-    return readLatestRowFromJsonl(sessionId, runId, trackerDir, date);
-  }
-  for (let i = 0; i < RETRY_PAGE_LOOKBACK_DAYS; i++) {
-    const d = new Date(base);
-    d.setDate(base.getDate() - i);
-    const fileDate = dateLocal(d);
-    const hit = readLatestRowFromJsonl(sessionId, runId, trackerDir, fileDate);
-    if (hit) return hit;
-  }
-  return null;
+  const anchor = new Date(Number(yStr), Number(mStr) - 1, Number(dStr));
+  return findLatestEntryForPredicate({
+    workflow: WORKFLOW,
+    trackerDir,
+    lookbackDays: RETRY_PAGE_LOOKBACK_DAYS,
+    ...(Number.isNaN(anchor.getTime()) ? {} : { now: anchor }),
+    predicate: (e) => e.id === sessionId && e.runId === runId,
+  });
 }
 
 function parseRecords(data: Record<string, string> | undefined): unknown[] {

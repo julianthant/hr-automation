@@ -110,7 +110,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     trackerDir,
     date,
     timeoutMs: 30 * 60_000,
-  }).catch(() => [] as ChildOutcome[]);
+  });
 
   // Patch records from lookup outcomes before emitting the final state.
   for (const outcome of outcomes) {
