@@ -3,7 +3,8 @@ import { join } from "node:path";
 
 import { transaction, type Database } from "../../infra/sqlite/index.js";
 
-import { dateLocal, type TrackerEntry, type LogEntry } from "../jsonl.js";
+import { dateLocal, isLogEntry, isTrackerEntry, type TrackerEntry, type LogEntry } from "../jsonl.js";
+import { log } from "../../utils/log.js";
 import type { SessionEvent, ScreenshotSessionEvent } from "../session-events.js";
 import { applyTrackerEntry, applyLogEntry, applySessionEvent } from "./apply.js";
 import type { ProjectionSourceKind, ProjectionSourceRef } from "./types.js";
@@ -162,6 +163,12 @@ export function rebuildProjectionForDate(db: Database, opts: RebuildProjectionOp
       const startAt = existingOffsets.get(path) ?? 0;
       const parsed = parseJsonlFrom<TrackerEntry>(path, startAt);
       for (const row of parsed) {
+        if (!isTrackerEntry(row.value)) {
+          log.warn(
+            `[rebuild] skipping invalid tracker line ${row.line} in ${path}`,
+          );
+          continue;
+        }
         applyTrackerEntry(db, row.value, source(path, "tracker", row.line, row.offset, date, workflow));
       }
       recordSource(db, { path, sourceKind: "tracker", workflow, trackerDate: date, lineCount: parsed.length });
@@ -174,6 +181,10 @@ export function rebuildProjectionForDate(db: Database, opts: RebuildProjectionOp
       const startAt = existingOffsets.get(path) ?? 0;
       const parsed = parseJsonlFrom<LogEntry>(path, startAt);
       for (const row of parsed) {
+        if (!isLogEntry(row.value)) {
+          log.warn(`[rebuild] skipping invalid log line ${row.line} in ${path}`);
+          continue;
+        }
         applyLogEntry(db, row.value, source(path, "log", row.line, row.offset, date, workflow));
       }
       recordSource(db, { path, sourceKind: "log", workflow, trackerDate: date, lineCount: parsed.length });

@@ -54,12 +54,20 @@ export function sweepStaleRunScreenshots(
   const cutoffIso = new Date(cutoffMs).toISOString();
 
   // Pass 1: terminal runs older than cutoff.
+  // Join on (workflow, item_id, run_id): run_id alone is not unique across workflows
+  // (legacy `{itemId}#N` rows can collide). Files without owner columns fall through
+  // to the orphan backstop pass instead of matching the wrong run.
   const staleFiles = db
     .prepare(
       `SELECT f.file_id AS fileId, f.storage_path AS storagePath, f.run_id AS runId
        FROM files f
-       JOIN runs r ON r.run_id = f.run_id
+       JOIN runs r
+         ON r.run_id = f.run_id
+        AND r.workflow = f.workflow
+        AND r.item_id = f.item_id
        WHERE f.kind = 'screenshot'
+         AND f.workflow IS NOT NULL
+         AND f.item_id IS NOT NULL
          AND r.terminal_at IS NOT NULL
          AND r.terminal_at < @cutoffIso`,
     )

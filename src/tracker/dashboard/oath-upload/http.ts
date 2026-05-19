@@ -8,11 +8,11 @@
  *  - cancel:          writes the cancel-request sentinel that the watcher polls
  *  - sweepStuckOathUploadRows: restart-time orphan cleanup
  */
-import { existsSync, readFileSync } from "node:fs";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { trackEvent, dateLocal, type TrackerEntry } from "../../jsonl.js";
+import { trackEvent, readLatestTrackerEntriesByRunKey } from "../../jsonl.js";
+import { findLatestEntryForPredicate } from "../../find-latest-entry.js";
 import { errorMessage } from "../../../utils/errors.js";
 import { log } from "../../../utils/log.js";
 import {
@@ -180,37 +180,19 @@ function findLatestRunIdForSession(
   sessionId: string,
   trackerDir: string | undefined,
 ): string | null {
-  const file = join(trackerDir ?? ".tracker", `oath-upload-${dateLocal()}.jsonl`);
-  if (!existsSync(file)) return null;
-  const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    try {
-      const e = JSON.parse(lines[i]) as TrackerEntry;
-      if (e.id === sessionId && e.runId) return e.runId;
-    } catch {
-      /* tolerate */
-    }
-  }
-  return null;
+  const entry = findLatestEntryForPredicate({
+    workflow: WORKFLOW,
+    trackerDir: trackerDir ?? ".tracker",
+    lookbackDays: 7,
+    predicate: (e) => e.id === sessionId && Boolean(e.runId),
+  });
+  return entry?.runId ?? null;
 }
 
 // ─── Restart sweep ───────────────────────────────────────────
 
 export function sweepStuckOathUploadRows(trackerDir: string): void {
-  const date = dateLocal();
-  const file = join(trackerDir, `oath-upload-${date}.jsonl`);
-  if (!existsSync(file)) return;
-  const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
-  const latestById = new Map<string, TrackerEntry>();
-  for (const line of lines) {
-    try {
-      const e: TrackerEntry = JSON.parse(line);
-      const key = `${e.id}#${e.runId}`;
-      latestById.set(key, e);
-    } catch {
-      /* tolerate */
-    }
-  }
+  const latestById = readLatestTrackerEntriesByRunKey(WORKFLOW, trackerDir);
   for (const e of latestById.values()) {
     if (e.status === "pending" || e.status === "running") {
       trackEvent(

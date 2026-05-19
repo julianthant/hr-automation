@@ -3,7 +3,8 @@ import { basename } from "node:path";
 import { transaction, type Database, type Statement } from "../../infra/sqlite/index.js";
 
 import type { TrackerEntry, LogEntry } from "../jsonl.js";
-import { dateLocal } from "../jsonl.js";
+import { dateLocal, isTrackerEntry } from "../jsonl.js";
+import { log } from "../../utils/log.js";
 import type { SessionEvent, ScreenshotSessionEvent } from "../session-events.js";
 import { registerLocalFile } from "../files/files.js";
 import type { ProjectionSourceRef } from "./types.js";
@@ -17,6 +18,7 @@ interface CachedStatements {
   updateRunLogTs: Statement;
   insertSessionEvent: Statement;
   selectRunForScreenshot: Statement;
+  countRunsForScreenshot: Statement;
   updateRunScreenshotCount: Statement;
   recomputeRunOrdinalsForItem: Statement;
 }
@@ -147,8 +149,15 @@ function stmts(db: Database): CachedStatements {
         @runId, @timestamp, @tsMs, @rawJson, @appliedAt
       )
     `),
-    selectRunForScreenshot: db.prepare(
-      "SELECT workflow, item_id FROM runs WHERE run_id = ? LIMIT 1",
+    selectRunForScreenshot: db.prepare(`
+      SELECT workflow, item_id
+      FROM runs
+      WHERE run_id = ?
+      ORDER BY latest_tracker_ts DESC
+      LIMIT 1
+    `),
+    countRunsForScreenshot: db.prepare(
+      "SELECT COUNT(*) AS n FROM runs WHERE run_id = ?",
     ),
     updateRunScreenshotCount: db.prepare(`
       UPDATE runs
@@ -214,6 +223,14 @@ export function applyTrackerEntry(
   entry: TrackerEntry,
   source: ProjectionSourceRef,
 ): void {
+  if (!isTrackerEntry(entry)) {
+    log.warn(
+      `[apply] skipping invalid tracker entry workflow=${String((entry as TrackerEntry).workflow)} ` +
+        `item=${String((entry as TrackerEntry).id)} status=${String((entry as TrackerEntry).status)} ` +
+        `source=${source.path}:${source.line ?? "?"}`,
+    );
+    return;
+  }
   const trackerDate = source.trackerDate ?? trackerDateFromTimestamp(entry.timestamp);
   const runId = runIdFor(entry);
   const eventMs = toMs(entry.timestamp);
@@ -401,7 +418,14 @@ function applyScreenshotFiles(db: Database, event: ScreenshotSessionEvent): void
   let workflow: string | undefined;
   let itemId: string | undefined;
   if (event.runId) {
-    const run = stmts(db).selectRunForScreenshot.get(event.runId) as { workflow: string; item_id: string } | undefined;
+    const s = stmts(db);
+    const matchCount = s.countRunsForScreenshot.get(event.runId) as { n: number } | undefined;
+    if (matchCount && matchCount.n > 1) {
+      log.warn(
+        `applyScreenshotFiles: run_id ${event.runId} matches ${matchCount.n} runs — using latest tracker row`,
+      );
+    }
+    const run = s.selectRunForScreenshot.get(event.runId) as { workflow: string; item_id: string } | undefined;
     if (run) {
       workflow = run.workflow;
       itemId = run.item_id;

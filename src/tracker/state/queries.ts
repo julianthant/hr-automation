@@ -519,7 +519,7 @@ export function queryRunsForItem(
     );
     return false;
   });
-  const history = db.prepare(`
+  const rawHistory = db.prepare(`
     SELECT run_id, event_ts AS timestamp, status, step
     FROM run_events
     WHERE workflow = @workflow AND tracker_date = @date AND item_id = @itemId
@@ -527,11 +527,17 @@ export function queryRunsForItem(
   `).all({ workflow: opts.workflow, date: opts.date, itemId: opts.itemId }) as Array<{
     run_id: string;
     timestamp: string;
-    status: "pending" | "running" | "done" | "failed" | "skipped";
+    status: unknown;
     step: string | null;
   }>;
-  const byRun = new Map<string, Array<{ timestamp: string; status: "pending" | "running" | "done" | "failed" | "skipped"; step?: string }>>();
-  for (const row of history) {
+  const byRun = new Map<string, Array<{ timestamp: string; status: TrackerEntry["status"]; step?: string }>>();
+  for (const row of rawHistory) {
+    if (!isTrackerStatus(row.status)) {
+      log.warn(
+        `[queries] queryRunsForItem: dropping history row with unknown status workflow=${opts.workflow} itemId=${opts.itemId} runId=${row.run_id} status=${String(row.status)}`,
+      );
+      continue;
+    }
     const arr = byRun.get(row.run_id) ?? [];
     arr.push({ timestamp: row.timestamp, status: row.status, ...(row.step ? { step: row.step } : {}) });
     byRun.set(row.run_id, arr);

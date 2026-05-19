@@ -133,13 +133,17 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     intervalMs: 1000,
     onError: (err) => log.warn(`[tasks] dependency scheduler tick failed: ${errorMessage(err)}`),
   });
-  localServer.on("close", () => clearInterval(sweepInterval));
-  localServer.on("close", () => clearInterval(screenshotSweepInterval));
-  localServer.on("close", () => dependencyScheduler.stop());
+  const stopBackgroundWork = (): void => {
+    clearInterval(sweepInterval);
+    clearInterval(screenshotSweepInterval);
+    dependencyScheduler.stop();
+  };
+  localServer.on("close", () => stopBackgroundWork());
 
   localServer.on("error", (err: NodeJS.ErrnoException) => {
     if (err.code === "EADDRINUSE") {
       log.step(`Dashboard port ${port} in use — skipping (another instance may be running)`);
+      stopBackgroundWork();
       if (server === localServer) server = null;
     }
   });
