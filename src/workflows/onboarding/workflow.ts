@@ -99,8 +99,13 @@ export const onboardingWorkflow = defineWorkflow({
     { key: "effectiveDate", label: "Eff Date" },
     { key: "i9ProfileId", label: "I9 Profile" },
   ],
-  getName: (d) => [d.firstName, d.lastName].filter(Boolean).join(" "),
+  getName: (d) => {
+    const name = [d.firstName, d.lastName].filter(Boolean).join(" ");
+    if (name) return name;
+    return d.email ?? "(extracting)";
+  },
   getId: (d) => d.email ?? "",
+  initialData: (input) => ({ email: input.email }),
   operatorSubject: (input) =>
     buildOperatorSubject({ kind: "email", value: input.email, prefix: "Onboarding" }),
   handler: async (ctx, input) => {
