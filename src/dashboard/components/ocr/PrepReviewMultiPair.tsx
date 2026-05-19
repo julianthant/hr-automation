@@ -1,6 +1,7 @@
 import { Plus } from "lucide-react";
 import type { ReactNode } from "react";
 import { PdfPagePreview } from "@/components/shared/PdfPagePreview";
+import { PrepReviewPageLayout } from "./PrepReviewPageLayout";
 
 export interface PrepReviewMultiPairProps {
   /** Workflow name passed through to the PdfPagePreview backend route. */
@@ -36,39 +37,37 @@ export function PrepReviewMultiPair({
   onAddRow,
   onPreviewStatusChange,
 }: PrepReviewMultiPairProps) {
+  const cards: ReactNode[] = [
+    ...formCards,
+    ...(onAddRow
+      ? [
+          <button
+            key="add-row"
+            type="button"
+            onClick={() => onAddRow(page)}
+            className="inline-flex h-7 w-fit items-center gap-1.5 self-start rounded-md border border-dashed border-border px-3 text-xs text-muted-foreground hover:bg-muted"
+          >
+            <Plus className="h-3 w-3" />
+            Add row to this page
+          </button>,
+        ]
+      : []),
+  ];
+
   return (
-    <div className="p-4">
-      {titleBar ? (
-        <div className="mb-3 rounded-lg border border-border bg-card px-4 py-3">
-          {titleBar}
-        </div>
-      ) : null}
-      <div className="grid grid-cols-[minmax(420px,1.15fr)_minmax(360px,0.85fr)] gap-4">
-        <div className="sticky top-4 self-start">
-          <PdfPagePreview
-            workflow={workflow}
-            parentRunId={parentRunId}
-            page={page}
-            fileId={fileId}
-            onStatusChange={onPreviewStatusChange}
-          />
-        </div>
-        <div className="flex flex-col gap-3">
-          {formCards.map((card, i) => (
-            <div key={i}>{card}</div>
-          ))}
-          {onAddRow && (
-            <button
-              type="button"
-              onClick={() => onAddRow(page)}
-              className="inline-flex h-7 w-fit items-center gap-1.5 self-start rounded-md border border-dashed border-border px-3 text-xs text-muted-foreground hover:bg-muted"
-            >
-              <Plus className="h-3 w-3" />
-              Add row to this page
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
+    <PrepReviewPageLayout
+      sticky
+      title={titleBar}
+      pdfPreview={
+        <PdfPagePreview
+          workflow={workflow}
+          parentRunId={parentRunId}
+          page={page}
+          fileId={fileId}
+          onStatusChange={onPreviewStatusChange}
+        />
+      }
+      formCards={cards}
+    />
   );
 }
