@@ -94,7 +94,24 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
   // idempotent without the dashboard remembering it had to re-attach the
   // channel.
   const { cleaned: cleanedItem, prefilled } = splitPrefilled(item)
-  const handlerInput = cleanedItem as TData
+
+  // Validate the cleaned item against the workflow schema BEFORE handing it to
+  // the handler. Catches stale task_store rows whose shape predates a schema
+  // change, externally-mutated rows, and wrong-shape rows from older code
+  // versions. Use the PARSED return value so any .transform() / .default() /
+  // .coerce() declared in the schema is applied. The kernel classifies errors
+  // via /validation/i (see workflow.ts), so keep the literal "validation error"
+  // prefix lowercase.
+  let handlerInput: TData
+  try {
+    handlerInput = wf.config.schema.parse(cleanedItem) as TData
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    throw new Error(
+      `validation error in runOneItem (workflow=${wf.config.name}, itemId=${itemId}, runId=${runId}): ${msg}`,
+      { cause: err },
+    )
+  }
 
   const runInner = async (emitters: {
     setStep: (step: string) => void

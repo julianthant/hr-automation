@@ -678,6 +678,9 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
               const r = await runOneItem({
                 wf,
                 session,
+                // No cast: runOneItem validates `item` via wf.config.schema.parse
+                // before invoking the handler, so the claim loop hands the raw
+                // input straight through.
                 item: item.input as TData,
                 itemId: item.id,
                 runId,
