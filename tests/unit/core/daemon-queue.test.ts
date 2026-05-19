@@ -12,6 +12,7 @@ import {
   unclaimItem,
   recoverOrphanedClaims,
   readQueueState,
+  readQueueStateIncludingTerminals,
   queueFilePath,
   queueLockDirPath,
 } from '../../../src/core/daemon/queue.js'
@@ -174,7 +175,7 @@ test('markItemDone transitions claimed → done in state fold', async () => {
     await enqueueItems('wf', [{}], () => 'x', dir)
     const claimed = await claimNextItem('wf', 'w1', dir)
     await markItemDone('wf', 'x', claimed!.runId!, dir)
-    const state = await readQueueState('wf', dir)
+    const state = await readQueueStateIncludingTerminals('wf', dir)
     assert.equal(state.queued.length, 0)
     assert.equal(state.claimed.length, 0)
     assert.equal(state.done.length, 1)
@@ -191,7 +192,7 @@ test('markItemFailed transitions claimed → failed with error message', async (
     await enqueueItems('wf', [{}], () => 'x', dir)
     const c = await claimNextItem('wf', 'w1', dir)
     await markItemFailed('wf', 'x', 'boom', c!.runId!, dir)
-    const state = await readQueueState('wf', dir)
+    const state = await readQueueStateIncludingTerminals('wf', dir)
     assert.equal(state.failed.length, 1)
     assert.equal(state.failed[0].error, 'boom')
   } finally {
@@ -331,9 +332,12 @@ test('full cycle: enqueue → claim → done (latest-event-per-id fold)', async 
     const b = await claimNextItem('wf', 'w1', dir)
     await markItemDone('wf', 'a', a!.runId!, dir)
     await markItemFailed('wf', 'b', 'nope', b!.runId!, dir)
-    const state = await readQueueState('wf', dir)
-    assert.equal(state.queued.length, 0)
-    assert.equal(state.claimed.length, 0)
+    const active = await readQueueState('wf', dir)
+    assert.equal(active.queued.length, 0)
+    assert.equal(active.claimed.length, 0)
+    assert.equal(active.done.length, 0)
+    assert.equal(active.failed.length, 0)
+    const state = await readQueueStateIncludingTerminals('wf', dir)
     assert.equal(state.done.length, 1)
     assert.equal(state.failed.length, 1)
     assert.equal(state.done[0].id, 'a')
@@ -443,7 +447,7 @@ test('SQLite enqueue adopts OCR dependency-precreated EID child task rows', asyn
       childRunId,
       dir,
     )
-    state = await readQueueState('eid-lookup', dir)
+    state = await readQueueStateIncludingTerminals('eid-lookup', dir)
     assert.equal(state.queued.length, 0)
     assert.equal(state.failed.length, 1)
     assert.equal(state.failed[0].id, 'ocr-oath-ocr-run-1-r0')

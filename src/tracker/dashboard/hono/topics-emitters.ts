@@ -99,6 +99,29 @@ export function __resetSessionStateCacheForTests(): void {
   getCachedSessionState.reset();
 }
 
+// ── entries payload cache ─────────────────────────────────────────────────────
+
+const ENTRIES_PAYLOAD_TTL_MS = 1_000;
+/**
+ * 1s TTL cache around `queryEntriesPayload`. Without caching, every 1 Hz SSE
+ * tick × N connected clients would each run the full date-wide projection query.
+ */
+const getCachedEntriesPayload = ttlMemoize(
+  ENTRIES_PAYLOAD_TTL_MS,
+  (
+    _stateDb: Parameters<typeof queryEntriesPayload>[0],
+    dir: string,
+    workflow: string,
+    date: string,
+  ) => `${dir}|${workflow}|${date}`,
+  (stateDb, _dir, workflow, date) =>
+    queryEntriesPayload(stateDb, { workflow, date }),
+);
+
+export function __resetEntriesPayloadCacheForTests(): void {
+  getCachedEntriesPayload.reset();
+}
+
 // ── telegram topic ────────────────────────────────────────────────────────────
 
 /**
@@ -147,7 +170,7 @@ export const entriesTopic: TopicEmitter<{ workflow?: string; date?: string }> = 
   const tick = () => {
     if (deps.projectionReady && deps.stateDb) {
       try {
-        send(queryEntriesPayload(deps.stateDb, { workflow, date: date || today }));
+        send(getCachedEntriesPayload(deps.stateDb, deps.dir, workflow, date || today));
         return;
       } catch (err) {
         log.warn(
