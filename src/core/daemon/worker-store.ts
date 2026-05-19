@@ -542,7 +542,12 @@ function upsertBrowserProcess(
     SELECT *
     FROM browser_processes
     WHERE worker_id = @workerId AND system_id = @systemId AND pid = @pid
-  `).get(request) as BrowserProcessDbRow
+  `).get(request) as BrowserProcessDbRow | undefined
+  if (!row) {
+    throw new Error(
+      `upsertBrowserProcess: post-upsert row not found for workerId=${request.workerId} systemId=${request.systemId} pid=${request.pid}`,
+    )
+  }
   return mapBrowserProcessRow(row)
 }
 
