@@ -339,12 +339,17 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
   // gates kick in. The full `data` (with channel) rides on the pending row
   // for retry.
   const { cleaned: cleanedData, prefilled } = splitPrefilled(data)
-  const handlerInput = cleanedData as TData
   const inputForRow = toRecord(data)
 
-  // 1. Validate data. Wrap to ensure error message matches /validation/i.
+  // 1. Validate data AND use the parsed value so Zod .transform/.default/
+  // .coerce semantics actually take effect downstream. Previously this called
+  // schema.parse() and discarded the return value, silently dropping any
+  // transforms or defaults declared in workflow schemas. The cast to TData is
+  // required because Zod's parse signature returns the schema's output type,
+  // which TypeScript can't statically prove matches the declared TData.
+  let handlerInput: TData
   try {
-    wf.config.schema.parse(handlerInput)
+    handlerInput = wf.config.schema.parse(cleanedData) as TData
   } catch (err) {
     throw new Error(`validation error: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
   }
