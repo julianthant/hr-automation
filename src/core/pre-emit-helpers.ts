@@ -28,7 +28,21 @@ export function buildBatchPreEmitPending<TData>(opts: {
 }): (item: unknown, runId: string) => void {
   const now = new Date().toISOString();
   return (item: unknown, runId: string) => {
-    const typed = item as TData;
+    // Validate the item against the workflow schema BEFORE reading typed
+    // properties. Pre-emit runs before runOneItem, so a malformed row would
+    // otherwise crash inside operatorSubject/buildPendingData with no tracker
+    // breadcrumb. Throws with "validation error" prefix so the kernel's
+    // /validation/i classifier picks it up.
+    let typed: TData;
+    try {
+      typed = opts.workflow.config.schema.parse(item) as TData;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `validation error in buildBatchPreEmitPending (workflow=${opts.workflow.config.name}, runId=${runId}): ${msg}`,
+        { cause: err },
+      );
+    }
     const subject = opts.workflow.config.operatorSubject?.(typed);
     const id = opts.deriveId?.(typed, runId) ?? runId;
     trackEvent(
