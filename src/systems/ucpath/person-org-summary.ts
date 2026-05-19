@@ -329,18 +329,24 @@ async function extractSingleResultDetail(
   const hasDetail = await personIdLocator.count().catch(() => 0);
   if (hasDetail === 0) return null;
 
-  // Extract the EID from the page — look for 8-digit number near "Person ID" or "Person Organizational Summary"
-  const emplId = await personOrgSummary.body(frame).evaluate((body) => {
-    // Look for a standalone 8-digit number in a span/div (the Person ID value)
-    const allElements = body.querySelectorAll("span, div");
-    for (const el of Array.from(allElements)) {
-      const text = el.textContent?.trim() ?? "";
-      if (/^10\d{6}$/.test(text) && el.children.length === 0) {
-        return text;
-      }
-    }
-    return null;
-  }).catch(() => null);
+  // Prefer the registry personIdValue locator; fall back to body scan for legacy renderings.
+  let emplId = (await personIdLocator.first().textContent())?.trim() ?? "";
+  if (!/^10\d{6}$/.test(emplId)) {
+    emplId =
+      (await personOrgSummary
+        .body(frame)
+        .evaluate((body) => {
+          const allElements = body.querySelectorAll("span, div");
+          for (const el of Array.from(allElements)) {
+            const text = el.textContent?.trim() ?? "";
+            if (/^10\d{6}$/.test(text) && el.children.length === 0) {
+              return text;
+            }
+          }
+          return null;
+        })
+        .catch(() => null)) ?? "";
+  }
 
   if (!emplId) return null;
 

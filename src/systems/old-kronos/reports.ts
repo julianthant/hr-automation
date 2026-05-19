@@ -89,6 +89,29 @@ async function clickRunReport(page: Page): Promise<boolean> {
 }
 
 /**
+ * Collect TR ids for all report-status rows visible in any frame.
+ */
+async function collectReportRowIds(page: Page): Promise<Set<string>> {
+  const ids = new Set<string>();
+  for (const f of page.frames()) {
+    try {
+      const rowIds = await f.evaluate(() => {
+        const result: string[] = [];
+        for (const span of document.querySelectorAll('span[id^="statusValue"]')) {
+          const tr = span.closest("tr");
+          if (tr?.id) result.push(tr.id);
+        }
+        return result;
+      });
+      for (const id of rowIds) ids.add(id);
+    } catch {
+      // Frame detached
+    }
+  }
+  return ids;
+}
+
+/**
  * After Run Report: switch to Check Report Status tab,
  * poll for a NEW row (not in existingRowIds), wait for completion, then download.
  */
@@ -97,6 +120,7 @@ export async function waitForReportAndDownload(
   employeeId: string,
   employeeName: string | null,
   reportsDir: string,
+  existingRowIds: Set<string>,
 ): Promise<boolean> {
   log.step(`[${employeeId}] Waiting for report to complete...`);
 
@@ -108,9 +132,10 @@ export async function waitForReportAndDownload(
   // Wait 12 seconds for the report to generate
   await page.waitForTimeout(12_000);
 
-  // Refresh and find the first Complete row
+  // Poll for a NEW row (not in the pre-run snapshot), then wait until it is Complete.
   let myRowId: string | null = null;
   let statusFrame: Frame | null = null;
+  let candidateRowId: string | null = null;
 
   for (let attempt = 0; attempt < 10; attempt++) {
     if (!(await clickInFrames(page, [...reportsPage.refreshStatusSelectors]))) {
@@ -120,18 +145,56 @@ export async function waitForReportAndDownload(
 
     for (const f of page.frames()) {
       try {
-        const result = await f.evaluate(() => {
-          const spans = document.querySelectorAll('span[id^="statusValue"]');
-          if (spans.length === 0) return null;
-          const span = spans[0];
-          const text = span.textContent?.trim() ?? "";
-          const tr = span.closest("tr");
-          const trId = tr ? tr.id : null;
-          return { status: text, trId };
-        });
+        const pollArgs: { existing: string[]; candidate: string | null } = {
+          existing: [...existingRowIds],
+          candidate: candidateRowId,
+        };
+        const result: { status: string; trId: string } | null = await f.evaluate(
+          ({
+            existing,
+            candidate,
+          }: {
+            existing: string[];
+            candidate: string | null;
+          }): { status: string; trId: string } | null => {
+            const spans = document.querySelectorAll('span[id^="statusValue"]');
 
-        if (result) {
-          const status = (result.status ?? "").toLowerCase();
+            if (candidate) {
+              for (const span of spans) {
+                const tr = span.closest("tr");
+                if (tr?.id === candidate) {
+                  return {
+                    status: span.textContent?.trim() ?? "",
+                    trId: tr.id,
+                  };
+                }
+              }
+              return null;
+            }
+
+            for (const span of spans) {
+              const tr = span.closest("tr");
+              const trId = tr?.id ?? null;
+              if (!trId || existing.includes(trId)) continue;
+              return {
+                status: span.textContent?.trim() ?? "",
+                trId,
+              };
+            }
+            return null;
+          },
+          pollArgs,
+        );
+
+        if (result?.trId) {
+          if (!candidateRowId) {
+            candidateRowId = result.trId;
+            log.step(
+              `[${employeeId}] New report row detected: ${candidateRowId} status='${result.status}'`,
+            );
+          }
+
+          const status = result.status.toLowerCase();
           log.step(
             `[${employeeId}] Attempt ${attempt + 1}: status='${result.status}' tr_id=${result.trId}`,
           );
@@ -143,7 +206,6 @@ export async function waitForReportAndDownload(
             log.step(`[${employeeId}] Row ${myRowId} COMPLETE!`);
             break;
           }
-          // Still running/waiting — keep polling
           break;
         }
       } catch {
@@ -437,6 +499,16 @@ export async function handleReportsPage(
 
   await page.waitForTimeout(2_000);
 
+  // Snapshot existing report rows before Run Report so polling ignores stale Complete rows.
+  if (!(await clickInFrames(page, [...reportsPage.checkStatusSelectors]))) {
+    await jsClickText(page, "CHECK REPORT STATUS");
+  }
+  await page.waitForTimeout(2_000);
+  const existingRowIds = await collectReportRowIds(page);
+  log.step(
+    `[${employeeId}] Snapshot ${existingRowIds.size} existing report row(s) before Run Report`,
+  );
+
   // Step 5: Click Run Report
   log.step(`[${employeeId}] Clicking Run Report...`);
   if (!await clickRunReport(page)) {
@@ -446,5 +518,11 @@ export async function handleReportsPage(
   await page.waitForTimeout(3_000);
 
   // Step 6: Wait for report and download
-  return await waitForReportAndDownload(page, employeeId, employeeName, reportsDir);
+  return await waitForReportAndDownload(
+    page,
+    employeeId,
+    employeeName,
+    reportsDir,
+    existingRowIds,
+  );
 }
