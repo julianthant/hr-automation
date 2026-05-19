@@ -17,6 +17,8 @@ export interface BuildPendingTrackerDataOpts<TInput> {
   baseData?: Record<string, string>;
   /** Merge `initialData` + `operatorSubject` + `queueTitle` via `buildInitialTrackerData`. */
   useInitialTrackerSeed?: boolean;
+  /** Bypass the internal `buildInitialTrackerData` call when the caller has already computed the seed. Only consulted when `useInitialTrackerSeed === true`. */
+  precomputedSeed?: Record<string, string>;
   nameIdStamp?: NameIdStamp;
   /** When false, omit `data.archetype` (callers that stamp it elsewhere). Default true. */
   includeArchetype?: boolean;
@@ -56,7 +58,7 @@ export function buildPendingTrackerData<TInput>(
   }
 
   if (opts.useInitialTrackerSeed) {
-    Object.assign(data, buildInitialTrackerData(wf, opts.input));
+    Object.assign(data, opts.precomputedSeed ?? buildInitialTrackerData(wf, opts.input));
   }
 
   if (opts.extraData) {

@@ -11,10 +11,13 @@ Two execution paths share the same `OcrResult<T[]>` contract:
    PNGs and every page is dispatched in parallel across all available
    keys (Gemini + Mistral + Groq + Sambanova). Default path for the
    prep workflows (emergency-contact + oath-signature).
-2. **Whole-PDF cached** (`index.ts` → `ocrDocument`) — single Gemini
-   call with the full PDF as inline `application/pdf`. Cache-keyed
-   on PDF bytes + schema. Used as the fallback when per-page success
-   < 50% or no pool keys are configured.
+2. **Whole-PDF** (`index.ts` → `ocrDocument`) — single Gemini call
+   with the full PDF as inline `application/pdf`. **Results are not
+   cached** (operators repeatedly needed re-extraction after prompt or
+   model changes; cache hits silently bypassed both). Reached today only
+   via the operator-initiated `/api/ocr/reocr-whole-pdf` endpoint —
+   `pipeline.ts` no longer falls back to whole-PDF on partial per-page
+   failure (see Lessons 2026-05-01).
 
 ## Files
 
@@ -27,11 +30,11 @@ Two execution paths share the same `OcrResult<T[]>` contract:
   Gemini / Mistral / Groq / Sambanova. Pool composition is dynamic.
 - `render-pages.ts` — `renderPdfPagesToPngs()` — `pdf-to-img` wrapper.
   Returns `[]` on render failure (caller falls back).
-- `index.ts` — public `ocrDocument<T>()` whole-PDF orchestrator.
+- `index.ts` — public `ocrDocument<T>()` whole-PDF orchestrator (uncached; `result.cached` is always `false`).
 - `types.ts` — `OcrRequest`, `OcrResult`, `OcrProvider`, error classes.
-- `cache.ts` — file cache at `.ocr-cache/{sha256}.json`.
 - `rotation.ts` — per-key state machine + persisted state (used by
   the whole-PDF path; per-page path has its own simpler retry loop).
+- `eid-lookup-results.ts` / `parent-subject.ts` / `records-stats.ts` / `tracker-data.ts` — shared OCR helpers (records patching, parent-subject resolution, verified-count, tracker `data` flattening) consumed by workflow code (`orchestrator`, `retry-page`, `force-research`, `oath-upload`, `eid-lookup`). See `index.ts` for the public barrel.
 - `prompts.ts` — schema → Gemini prompt template.
 - `providers/gemini.ts` — Gemini 2.5 Flash multi-modal call.
 
@@ -48,15 +51,18 @@ const result = await ocrDocument({
   schemaName: "Person", // used for cache key + prompt label
 });
 result.data; // validated T (here: { name; age }[])
-result.cached; // true if served from cache
+result.cached; // always false (whole-PDF results are uncached)
 result.attempts; // how many provider calls were made
 ```
 
-## Cache
+## Cache directory
 
-Key = `sha256(pdfBytes + schemaName + schemaJsonHash + promptVersion)`.
-File: `.ocr-cache/{key}.json`. TTL: indefinite. To bust: pass
-`bustCache: true`, or `rm .ocr-cache/*.json`.
+`.ocr-cache/` is retained for `KeyRotation` per-key state files
+(`rotation-state-{provider}.json`) — those persist across runs so
+throttle/quota state doesn't reset on every process boot. **OCR
+results are never cached.** The `bustCache` option exists on the
+request type for backwards compatibility but no longer has an effect
+on whole-PDF orchestration.
 
 ## Rotation
 

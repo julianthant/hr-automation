@@ -36,6 +36,10 @@ export interface PerPageOcrResult<T> {
     error?: string;
     /** Pool entry id that succeeded (or the last one tried on failure). */
     poolKeyId?: string;
+    /** All pool entry ids attempted for this page (failures + the final success). */
+    attemptedKeys?: string[];
+    /** How many provider calls were issued for this page. */
+    attempts?: number;
   }>;
   /** Compact pool summary (e.g. `"gemini=6 mistral=2 groq=7"`) for logging. */
   poolSummary: string;
@@ -99,7 +103,14 @@ export async function runOcrPerPage<T>(
     process.env.OCR_PER_PAGE_MAX_RETRIES ?? "",
     10,
   );
-  const maxRetries = Number.isFinite(maxRetriesEnv) && maxRetriesEnv >= 0 ? maxRetriesEnv : 2;
+  // Default to "walk every key in the pool before giving up". The previous
+  // default of 2 meant a Gemini 503 surge (entire model overloaded — every
+  // key returns the same error) only tried 3 keys even when 8 were configured.
+  // Users explicitly want "retry with a different api key" until exhausted.
+  const maxRetries =
+    Number.isFinite(maxRetriesEnv) && maxRetriesEnv >= 0
+      ? maxRetriesEnv
+      : Math.max(pool.length - 1, 2);
   const geminiRotation = buildGeminiRotation(pool, req.cacheDir ?? DEFAULT_CACHE_DIR);
 
   const tasks = req.pagesAsImages.map((filename, idx) => ({
@@ -112,6 +123,8 @@ export async function runOcrPerPage<T>(
     success: boolean;
     error?: string;
     poolKeyId?: string;
+    attemptedKeys?: string[];
+    attempts?: number;
     rawRecords?: unknown[];
   };
   const results: PageOutcome[] = new Array(tasks.length);
@@ -156,6 +169,8 @@ export async function runOcrPerPage<T>(
               page: t.pageNum,
               success: true,
               poolKeyId,
+              attemptedKeys: [...attemptedPoolKeyIds],
+              attempts: attemptsMade,
               rawRecords: arr,
             };
             return;
@@ -185,6 +200,8 @@ export async function runOcrPerPage<T>(
           success: false,
           error: errMsg,
           poolKeyId: lastPoolKeyId,
+          attemptedKeys: [...attemptedPoolKeyIds],
+          attempts: attemptsMade,
         };
       }),
     ),
@@ -261,6 +278,8 @@ export async function runOcrPerPage<T>(
       success: r.success,
       error: r.error,
       poolKeyId: r.poolKeyId,
+      attemptedKeys: r.attemptedKeys,
+      attempts: r.attempts,
     })),
     poolSummary,
   };

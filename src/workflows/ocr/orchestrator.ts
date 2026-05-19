@@ -60,6 +60,7 @@ interface OcrPipelineResult {
     error?: string;
     attemptedKeys: string[];
     poolKeyId?: string;
+    attempts?: number;
   }>;
 }
 
@@ -315,9 +316,10 @@ export async function runOcrOrchestrator(
     // current `records` array. Called at every phase transition so the
     // Preview tab updates progressively as OCR / matching / disambig /
     // eid-lookup / verification each complete.
-    // Running-status emits are deduplicated by a quick fingerprint
-    // (step + length + last-record eid + per-record match/verification state)
-    // so back-to-back calls with unchanged content skip work before writeTracker.
+    // Running-status emits are deduplicated by a fingerprint over every
+    // record's (matchState, verification.state, resolved eid, selected)
+    // so any per-record progression triggers a new emit while truly
+    // unchanged back-to-back calls skip work before writeTracker.
     let lastSnapshotKey = "";
     const emitSnapshot = (
       records: unknown[],
@@ -326,10 +328,17 @@ export async function runOcrOrchestrator(
       extras: Record<string, unknown> = {},
     ): void => {
       if (status === "running") {
-        const lastRec = (records as Record<string, unknown>[]).at(-1);
-        const matchState = String((lastRec?.matchState as string | undefined) ?? "");
-        const ver = (lastRec?.verification as { state?: string } | undefined)?.state ?? "";
-        const key = `${step}|${records.length}|${lastRec?.employeeId ?? lastRec?.eid ?? ""}|${matchState}|${ver}`;
+        const recList = records as Record<string, unknown>[];
+        const stateVec = recList
+          .map((r) => {
+            const ms = String((r?.matchState as string | undefined) ?? "");
+            const ver = (r?.verification as { state?: string } | undefined)?.state ?? "";
+            const eid = String(((r?.employeeId ?? r?.eid) as string | undefined) ?? "");
+            const sel = r?.selected === true ? "1" : "0";
+            return `${ms}:${ver}:${eid}:${sel}`;
+          })
+          .join("|");
+        const key = `${step}|${recList.length}|${stateVec}`;
         if (key === lastSnapshotKey) return;
         lastSnapshotKey = key;
       }
@@ -406,7 +415,7 @@ export async function runOcrOrchestrator(
         error: p.error ?? "unknown error",
         attemptedKeys: p.attemptedKeys,
         pageImagePath: join(pageImagesDir, `page-${String(p.page).padStart(3, "0")}.png`),
-        attempts: 1,
+        attempts: p.attempts ?? p.attemptedKeys?.length ?? 1,
       }));
     const pageStatusSummary = {
       total: pages.length,

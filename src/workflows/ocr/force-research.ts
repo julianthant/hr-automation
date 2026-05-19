@@ -6,7 +6,10 @@ import { trackEvent, dateLocal } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { watchChildRuns, type ChildOutcome } from "../../tracker/delegation/watch-child-runs.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
-import { patchOcrRecordFromEidLookupOutcome } from "../../services/ocr/eid-lookup-results.js";
+import {
+  patchOcrRecordFromEidLookupOutcome,
+  patchOcrRecordUnresolved,
+} from "../../services/ocr/eid-lookup-results.js";
 import { resolveParentSubject } from "../../services/ocr/parent-subject.js";
 
 const WORKFLOW = "ocr";
@@ -35,7 +38,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
   const latest = findLatestEntryForPredicate({
     workflow: WORKFLOW,
     trackerDir,
-    lookbackDays: 2,
+    lookbackDays: 7,
     predicate: (e) => e.id === input.sessionId && e.runId === input.runId,
   });
   if (!latest) throw new Error("OCR row not found in JSONL");
@@ -117,6 +120,21 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     const idx = itemIdToRecordIdx.get(outcome.itemId);
     if (idx === undefined) continue;
     patchOcrRecordFromEidLookupOutcome(records, idx, outcome, "name");
+  }
+
+  // Any expected itemId that did not produce an outcome (timeout or skipped)
+  // must be marked unresolved so the dashboard does not leave the record
+  // stuck in `lookup-pending`. Mirrors the orchestrator's safety net.
+  const receivedItemIds = new Set(outcomes.map((o) => o.itemId));
+  for (const itemId of itemIds) {
+    if (receivedItemIds.has(itemId)) continue;
+    const idx = itemIdToRecordIdx.get(itemId);
+    if (idx === undefined) continue;
+    patchOcrRecordUnresolved(
+      records,
+      idx,
+      "eid-lookup timed out without a result",
+    );
   }
 
   // Mirror the orchestrator's emit shape so the dashboard can resolve the row

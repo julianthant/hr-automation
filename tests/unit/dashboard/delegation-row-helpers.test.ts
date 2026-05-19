@@ -99,7 +99,7 @@ describe("pickPreviewChildren", () => {
     assert.equal(pickPreviewChildren(kids, 10).length, 2);
   });
 
-  it("prefers data.__subject and person names over bare EID for preview labels", () => {
+  it("prefers person names and EIDs over technical subject labels for preview labels", () => {
     const out = pickPreviewChildren(
       [
         child({
@@ -115,9 +115,27 @@ describe("pickPreviewChildren", () => {
       ],
       3,
     );
-    assert.equal(out[0]?.name, "Oath · 10794813");
+    assert.equal(out[0]?.name, "Akitsugu Uchida");
     assert.equal(out[1]?.name, "Carlos Barahona");
     assert.equal(out[2]?.name, "10800001");
+  });
+
+  it("uses EID before technical OCR retry ids for cancelled lookup children", () => {
+    const out = pickPreviewChildren(
+      [
+        child({
+          id: "ocr-oath-1ade2f20-p3-r0",
+          status: "failed",
+          step: "cancelled",
+          data: {
+            __name: "ocr-oath-1ade2f20-p3-r0",
+            emplId: "10424984",
+          },
+        }),
+      ],
+      1,
+    );
+    assert.equal(out[0]?.name, "10424984");
   });
 
   it("resolves emplId from data.emplId or data.eid", () => {

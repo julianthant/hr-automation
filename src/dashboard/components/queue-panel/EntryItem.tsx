@@ -120,11 +120,6 @@ function resolveStatusConfig(entry: TrackerEntry): StatusConfig {
   return STATUS_CONFIG[entry.status] ?? STATUS_CONFIG.pending;
 }
 
-function pickRowTitle(entry: TrackerEntry, resolvedName: string, isCancelled: boolean): string {
-  if (isCancelled && entry.id && entry.id !== resolvedName) return entry.id;
-  return resolvedName;
-}
-
 function deriveActiveCheckTag(entry: TrackerEntry, isDone: boolean): null | {
   text: string;
   title: string;
@@ -184,7 +179,7 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
   const isOcrDelegatedNeedsReview = isDelegatedOcrAwaitingApprovalEntry(entry);
   const isDaemonRunning = entry.status === "running";
   const isCancelled = entry.status === "failed" && entry.step === "cancelled";
-  const name = pickRowTitle(entry, resolvedName, isCancelled);
+  const name = resolvedName;
   const isFailed = entry.status === "failed" && !isCancelled;
   const isDone = entry.status === "done" && !isOcrDelegatedNeedsReview;
   const isPending = entry.status === "pending";

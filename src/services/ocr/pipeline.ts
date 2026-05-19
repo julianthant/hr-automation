@@ -38,6 +38,7 @@ export interface OcrPipelineResult<T> {
     error?: string;
     attemptedKeys: string[];
     poolKeyId?: string;
+    attempts?: number;
   }>;
 }
 
@@ -80,8 +81,9 @@ export async function runOcrPipeline<T>(
       page: p.page,
       success: p.success,
       error: p.error,
-      attemptedKeys: p.poolKeyId ? [p.poolKeyId] : [],
+      attemptedKeys: p.attemptedKeys ?? (p.poolKeyId ? [p.poolKeyId] : []),
       poolKeyId: p.poolKeyId,
+      attempts: p.attempts,
     })),
   };
 }

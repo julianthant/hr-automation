@@ -26,10 +26,10 @@ export function isDelegatedOcrAwaitingApprovalEntry(e: TrackerEntry): boolean {
 }
 
 export function isResolvedPrepEntry(e: TrackerEntry): boolean {
-  if (!isPrepEntry(e)) return false;
   if (e.workflow === "ocr") {
     return e.status === "failed" && e.step === "discarded";
   }
+  if (!isPrepEntry(e)) return false;
   if (e.status === "done" && e.step === "approved") return true;
   if (e.status === "failed" && e.step === "discarded") return true;
   return false;

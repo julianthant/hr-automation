@@ -64,6 +64,10 @@ export function resolveRowArchetype(entry: ResolveEntry): RowArchetype {
   const stamped = entry.data?.archetype;
   if (typeof stamped === "string" && isRowArchetype(stamped)) return stamped;
 
+  if (entry.data?.mode === "prepare") return "batch-parent";
+  if (entry.data?.taskRole === "utility") return "passive-child";
+  if (entry.data?.requestRole === "delegation-dispatch") return "dispatch";
+
   return entry.parentRunId ? "delegate-child" : "single";
 }
 

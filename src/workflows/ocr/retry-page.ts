@@ -404,7 +404,7 @@ async function runSinglePageThroughPool(args: {
       records: [],
       stillFailed: true,
       error: status?.error ?? "unknown failure",
-      attemptedKeys: status?.poolKeyId ? [status.poolKeyId] : [],
+      attemptedKeys: status?.attemptedKeys ?? (status?.poolKeyId ? [status.poolKeyId] : []),
     };
   }
   const newRecords = result.records

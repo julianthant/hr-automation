@@ -17,6 +17,7 @@ export function sweepStuckOcrRows(trackerDir: string): void {
           ...(e.parentRunId ? { parentRunId: e.parentRunId } : {}),
           status: "failed",
           error: "Dashboard restarted while OCR was in progress — please re-upload",
+          ...(e.data ? { data: { ...e.data } } : {}),
         },
         trackerDir,
       );

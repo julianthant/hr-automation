@@ -464,7 +464,6 @@ export function QueuePanel({
             parentRunId={surface.parentRunId}
             members={surface.members}
             countTone="neutral"
-            footerSecondaryId={surface.parentRunId}
             firstTimestamp={surface.members[0]?.timestamp}
             isFocused={batchQueueParentRunId === surface.parentRunId}
             drillInEnabled={!batchQueueParentRunId}
