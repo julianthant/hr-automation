@@ -61,6 +61,7 @@ describe("sweepStaleRunScreenshots", () => {
       data: {},
     };
     applyTrackerEntry(db, entry, {
+      sourceKind: "tracker",
       path: "fake.jsonl",
       line: 1,
       offset: 1,
