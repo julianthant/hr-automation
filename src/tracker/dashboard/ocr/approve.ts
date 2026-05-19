@@ -1,4 +1,4 @@
-import { trackEvent, appendLogEntry, readEntries } from "../../jsonl.js";
+import { trackEvent, appendLogEntry, readEntries, readEntriesForDate, dateLocal } from "../../jsonl.js";
 import { log } from "../../../utils/log.js";
 import { errorMessage } from "../../../utils/errors.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
@@ -11,6 +11,7 @@ import { deriveRowArchetype } from "../../../domain/row-archetype.js";
 import { readFormType, readParentRunId, readDryRun, readOriginWorkflow } from "./shared.js";
 
 const WORKFLOW = "ocr";
+const SESSION_LOOKBACK_DAYS = 7;
 
 // ─── POST /api/ocr/approve-batch ─────────────────────────────
 
@@ -297,18 +298,38 @@ export function buildOcrApproveHandler(
   };
 }
 
+function readLatestEntryDataWithLookback(
+  workflow: string,
+  matchId: string,
+  matchRunId: string,
+  trackerDir?: string,
+): Record<string, string> {
+  // Walk today + past N days, newest-first, returning the first match.
+  // Cross-day case: session started yesterday, approved today — yesterday's
+  // JSONL holds the actual data. Today-only `readEntries(...)` returned {}.
+  const today = new Date();
+  for (let dayOffset = 0; dayOffset < SESSION_LOOKBACK_DAYS; dayOffset++) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - dayOffset);
+    const dateStr = dateLocal(d);
+    const rows = dayOffset === 0
+      ? readEntries(workflow, trackerDir)
+      : readEntriesForDate(workflow, dateStr, trackerDir);
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const row = rows[i];
+      if (row.id !== matchId || row.runId !== matchRunId || !row.data) continue;
+      return { ...row.data };
+    }
+  }
+  return {};
+}
+
 function readLatestOcrReviewData(
   sessionId: string,
   runId: string,
   trackerDir?: string,
 ): Record<string, string> {
-  const rows = readEntries(WORKFLOW, trackerDir);
-  for (let i = rows.length - 1; i >= 0; i--) {
-    const row = rows[i];
-    if (row.id !== sessionId || row.runId !== runId || !row.data) continue;
-    return { ...row.data };
-  }
-  return {};
+  return readLatestEntryDataWithLookback(WORKFLOW, sessionId, runId, trackerDir);
 }
 
 function buildFallbackPendingData(input: unknown): Record<string, string> {
@@ -403,13 +424,7 @@ function readLatestEntryData(
   runId: string,
   trackerDir?: string,
 ): Record<string, string> {
-  const rows = readEntries(workflow, trackerDir);
-  for (let i = rows.length - 1; i >= 0; i--) {
-    const row = rows[i];
-    if (row.id !== id || row.runId !== runId || !row.data) continue;
-    return { ...row.data };
-  }
-  return {};
+  return readLatestEntryDataWithLookback(workflow, id, runId, trackerDir);
 }
 
 function readParentSubjectFromParentRow(
