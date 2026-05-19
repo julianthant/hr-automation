@@ -356,16 +356,20 @@ export const oathOcrFormSpec: OcrFormSpec<
     // uses `as never` casts that erase the discriminant, AND v1 records
     // come from a JSON.parse of a previous run's JSONL (`readPreviousRecords`
     // in orchestrator.ts) which bypasses Zod's `.default("oath")` — so a
-    // legacy row may have `formKind: undefined`. Tolerate that, but reject
-    // any record that affirmatively carries the wrong tag (genuine cross-
-    // form mixing). Theme 1, 2026-05-18 type-soundness review.
-    if (
-      (v1.formKind !== undefined && v1.formKind !== "oath") ||
-      (v2.formKind !== undefined && v2.formKind !== "oath")
-    ) {
+    // legacy row may have `formKind: undefined`. Skip merging from legacy
+    // rows to avoid cross-form contamination. Reject affirmative wrong tags.
+    if (v1.formKind !== undefined && v1.formKind !== "oath") {
       throw new Error(
         `oath.applyCarryForward: cross-form-type carry-forward not supported (v1=${v1.formKind}, v2=${v2.formKind})`,
       );
+    }
+    if (v2.formKind !== undefined && v2.formKind !== "oath") {
+      throw new Error(
+        `oath.applyCarryForward: cross-form-type carry-forward not supported (v1=${v1.formKind}, v2=${v2.formKind})`,
+      );
+    }
+    if (v1.formKind === undefined) {
+      log.warn("oath.applyCarryForward: legacy v1 row has no formKind — merging as oath (pre-formKind JSONL)");
     }
     return {
       ...v2,

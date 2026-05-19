@@ -1217,7 +1217,8 @@ function isPendingChildStatus(status: string): boolean {
 
 function renderSignatureBadge(r: AnyPreviewRecord, hasSignature: boolean): ReactNode {
   if (!hasSignature) return undefined;
-  const oath = r as OathPreviewRecord;
+  if (r.formKind !== "oath") return null;
+  const oath = r;
   if (oath.employeeSigned === false) {
     return (
       <span className="rounded-md border border-warning/40 bg-warning/10 px-1.5 py-px font-mono text-[10px] uppercase text-warning">
@@ -1240,7 +1241,8 @@ function renderOathSignatureBanner(
   hasSignature: boolean,
 ): ReactNode {
   if (!hasSignature) return undefined;
-  const oath = r as OathPreviewRecord;
+  if (r.formKind !== "oath") return null;
+  const oath = r;
   if (oath.employeeSigned === false) {
     return <span>Signature missing — employee did not sign.</span>;
   }
