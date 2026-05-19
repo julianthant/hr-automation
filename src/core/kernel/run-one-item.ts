@@ -1,5 +1,6 @@
 import type { RegisteredWorkflow } from './types.js'
 import { CancelledError } from './types.js'
+import { buildPendingTrackerData } from '../pending-data.js'
 import { deriveRowArchetype } from '../../domain/row-archetype.js'
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
@@ -188,15 +189,13 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
   // pending row so retry / edit-and-resume can reconstruct the call.
   const inputForRow = toRecord(item)
   if (!callerPreEmits) {
-    // Also compute __name / __id so the queue shows the friendly name from t=0.
-    const nameFn = wf.config.getName
-    const idFn = wf.config.getId
-    const enriched = {
-      ...stringifiedSeed,
-      __name: nameFn ? nameFn(stringifiedSeed) : '',
-      __id: idFn ? idFn(stringifiedSeed) : '',
-      archetype: deriveRowArchetype(wf.archetype, args.parentRunId),
-    }
+    const enriched = buildPendingTrackerData({
+      workflow: wf,
+      input: handlerInput,
+      useInitialTrackerSeed: true,
+      nameIdStamp: 'always-on-seed',
+      parentRunId: args.parentRunId,
+    })
     trackEvent(
       {
         workflow: wf.config.name,
