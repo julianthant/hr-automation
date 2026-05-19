@@ -191,6 +191,88 @@ test('runWorkflowDaemon: /stop during launch/auth aborts session launch and fail
   }
 })
 
+test('runWorkflowDaemon: queued shutdown-cancel rows preserve title and row archetype', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-stop-queued-display-'))
+  try {
+    const parentRunId = 'ocr-parent-run-123'
+    const wf = defineWorkflow({
+      name: 'dint-stop-queued-display',
+      schema: z.object({
+        emplId: z.string(),
+        parentSubject: z.string().optional(),
+        originWorkflow: z.string().optional(),
+      }),
+      steps: ['run'],
+      systems: [{ id: 'ucpath', login: async () => {} }],
+      authSteps: false,
+      archetype: 'utility',
+      getId: (d) => (d as { emplId: string }).emplId,
+      getName: (d) => (d as { emplId?: string; searchName?: string }).searchName ?? (d as { emplId: string }).emplId,
+      initialData: (d) => ({ searchName: d.emplId, emplId: d.emplId }),
+      queueTitle: { kind: 'single' },
+      handler: async () => {},
+    })
+    await enqueueItems(
+      'dint-stop-queued-display',
+      [{ emplId: '10424984', parentSubject: 'Oath · 4248', originWorkflow: 'ocr' }],
+      (d) => d.emplId,
+      dir,
+      undefined,
+      [parentRunId],
+    )
+
+    const launchFn = (async (_systems: SystemConfig[], opts?: Parameters<typeof Session.launch>[1]) => {
+      const fakePage = { close: async () => {}, isClosed: () => false } as unknown as import('playwright').Page
+      const fakeContext = { close: async () => {} } as unknown as import('playwright').BrowserContext
+      const session = Session.forTesting({
+        systems: [{ id: 'ucpath', login: async () => {} }],
+        browsers: new Map([
+          ['ucpath', { page: fakePage, browser: null as never, context: fakeContext, chromiumPid: 424245 }],
+        ]),
+        readyPromises: new Map([['ucpath', new Promise(() => {})]]),
+      })
+      opts?.onReady?.(session)
+      await new Promise<void>((_resolve, reject) => {
+        opts?.abortSignal?.addEventListener('abort', () => {
+          reject(new Error('launch aborted by daemon stop'))
+        }, { once: true })
+        setTimeout(() => reject(new Error('test cleanup timeout: launch was not aborted')), 1_000)
+      })
+      return session
+    }) as unknown as typeof Session.launch
+
+    const runPromise = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: launchFn,
+      idleTimeoutMs: 10_000,
+    })
+    const { port } = await waitForDaemon('dint-stop-queued-display', dir)
+
+    await fetch(`http://127.0.0.1:${port}/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ force: true }),
+    })
+    await runPromise
+
+    const date = dateLocal()
+    const jsonlPath = join(dir, `dint-stop-queued-display-${date}.jsonl`)
+    const rows = readFileSync(jsonlPath, 'utf-8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { id?: string; status?: string; parentRunId?: string; data?: Record<string, unknown> })
+    const cancelled = rows.find((row) => row.id === '10424984' && row.status === 'failed')
+    assert.ok(cancelled, 'expected cancelled tracker row')
+    assert.equal(cancelled.parentRunId, parentRunId)
+    assert.equal(cancelled.data?.__name, '10424984')
+    assert.equal(cancelled.data?.__queueTitle, '10424984')
+    assert.equal(cancelled.data?.archetype, 'passive-child')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('runWorkflowDaemon: processes queued items via claim loop', async () => {
   clear()
   const dir = mkdtempSync(join(tmpdir(), 'daemon-int-claim-'))
@@ -390,6 +472,94 @@ test('runWorkflowDaemon: browser disconnect cancels in-flight step errors', asyn
 
     const [task] = taskStore.listTasksForWorkflow('dint-browser-disconnect')
     assert.equal(task.state, 'cancelled')
+  } finally {
+    taskStore.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('runWorkflowDaemon: in-flight shutdown-cancel rows preserve title and row archetype', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-stop-running-display-'))
+  const control = openControlDb({ trackerDir: dir })
+  const taskStore = createTaskStore(control)
+  try {
+    const parentRunId = 'ocr-parent-run-running'
+    const started = deferred()
+    const releaseAfterDisconnect = deferred()
+    let browser: EventEmitter & { close: () => Promise<void> }
+    const wf = defineWorkflow({
+      name: 'dint-stop-running-display',
+      schema: z.object({
+        emplId: z.string(),
+        parentSubject: z.string().optional(),
+        originWorkflow: z.string().optional(),
+      }),
+      steps: ['work'],
+      systems: [{ id: 'ucpath', login: async () => {} }],
+      authSteps: false,
+      archetype: 'utility',
+      getId: (d) => (d as { emplId: string }).emplId,
+      getName: (d) => (d as { emplId?: string; searchName?: string }).searchName ?? (d as { emplId: string }).emplId,
+      initialData: (d) => ({ searchName: d.emplId, emplId: d.emplId }),
+      queueTitle: { kind: 'single' },
+      handler: async (ctx) => {
+        await ctx.step('work', async () => {
+          started.resolve()
+          await releaseAfterDisconnect.promise
+          throw new Error('Target page, context or browser has been closed')
+        })
+      },
+    })
+
+    const launchFn = (async (systems: SystemConfig[]) => {
+      browser = Object.assign(new EventEmitter(), { close: async () => {} })
+      const fakePage = { close: async () => {}, isClosed: () => false } as unknown as import('playwright').Page
+      const fakeContext = { close: async () => {}, newPage: async () => fakePage } as unknown as import('playwright').BrowserContext
+      return Session.forTesting({
+        systems,
+        browsers: new Map([
+          ['ucpath', { page: fakePage, browser: browser as unknown as import('playwright').Browser, context: fakeContext, chromiumPid: 424246 }],
+        ]),
+        readyPromises: new Map([['ucpath', Promise.resolve()]]),
+      })
+    }) as unknown as typeof Session.launch
+
+    await enqueueItems(
+      'dint-stop-running-display',
+      [{ emplId: '10424984', parentSubject: 'Oath · 4248', originWorkflow: 'ocr' }],
+      (d) => d.emplId,
+      dir,
+      undefined,
+      [parentRunId],
+    )
+    const runPromise = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: launchFn,
+      idleTimeoutMs: 10_000,
+    })
+    await waitForDaemon('dint-stop-running-display', dir)
+    await started.promise
+
+    browser!.emit('disconnected')
+    releaseAfterDisconnect.resolve()
+    await runPromise
+
+    const [task] = taskStore.listTasksForWorkflow('dint-stop-running-display')
+    assert.equal(task.state, 'cancelled')
+
+    const date = dateLocal()
+    const jsonlPath = join(dir, `dint-stop-running-display-${date}.jsonl`)
+    const rows = readFileSync(jsonlPath, 'utf-8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { id?: string; status?: string; step?: string; parentRunId?: string; data?: Record<string, unknown> })
+    const cancelled = rows.find((row) => row.id === '10424984' && row.status === 'failed' && row.step === 'cancelled')
+    assert.ok(cancelled, 'expected cancelled tracker row')
+    assert.equal(cancelled.parentRunId, parentRunId)
+    assert.equal(cancelled.data?.__name, '10424984')
+    assert.equal(cancelled.data?.__queueTitle, '10424984')
+    assert.equal(cancelled.data?.archetype, 'passive-child')
   } finally {
     taskStore.close()
     rmSync(dir, { recursive: true, force: true })
