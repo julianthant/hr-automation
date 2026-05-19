@@ -25,6 +25,8 @@ export function useSseHistoryStream<T>(
   const [entries, setEntries] = useState<T[]>([]);
   const [loading, setLoading] = useState(true);
   const prevItemIdRef = useRef<string | null>(null);
+  const prevRunIdRef = useRef<string | null>(null);
+  const streamGeneration = useRef(0);
 
   // Keep latest callback refs so the effect closure always calls the current
   // version without needing them in the dep array. Callbacks are intentionally
@@ -42,14 +44,21 @@ export function useSseHistoryStream<T>(
       setEntries([]);
       setLoading(false);
       prevItemIdRef.current = null;
+      prevRunIdRef.current = null;
       return;
     }
 
-    if (params.itemId !== prevItemIdRef.current) {
+    if (
+      params.itemId !== prevItemIdRef.current ||
+      params.runId !== prevRunIdRef.current
+    ) {
       setEntries([]);
+      streamGeneration.current += 1;
       prevItemIdRef.current = params.itemId;
+      prevRunIdRef.current = params.runId;
     }
     setLoading(true);
+    const myGen = streamGeneration.current;
 
     const currentBuildParams = buildParamsRef.current;
     const hubParams = currentBuildParams
@@ -66,6 +75,7 @@ export function useSseHistoryStream<T>(
       topic,
       hubParams,
       (newEntries) => {
+        if (myGen !== streamGeneration.current) return;
         if (!Array.isArray(newEntries)) return;
         const currentReplaceFn = replaceFnRef.current;
         const currentAppendFn = appendFnRef.current;

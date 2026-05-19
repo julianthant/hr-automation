@@ -1,4 +1,4 @@
-import { useState, useEffect, type Dispatch, type SetStateAction } from "react";
+import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import type { TrackerEntry, RunInfo } from "@/components/shared/types";
 
 interface UseRunsForMergedEntryInput {
@@ -32,6 +32,7 @@ export function useRunsForMergedEntry({
 }: UseRunsForMergedEntryInput): UseRunsForMergedEntryResult {
   const [runs, setRuns] = useState<RunInfo[]>([]);
   const [activeRunId, setActiveRunId] = useState<string | null>(entry?.runId || null);
+  const fetchGeneration = useRef(0);
 
   // Stable request key: encodes the (id, runId) pair for each member, sorted
   // oldest-first by firstSeen. Excludes status and step — those change every
@@ -79,6 +80,8 @@ export function useRunsForMergedEntry({
       firstSeen: m.firstSeen,
     }));
 
+    const myGen = ++fetchGeneration.current;
+
     Promise.all(
       fetchItems.map((m) =>
         fetch(
@@ -89,6 +92,8 @@ export function useRunsForMergedEntry({
           .catch(() => [] as RunInfo[]),
       ),
     ).then((perMember) => {
+      if (myGen !== fetchGeneration.current) return;
+
       const pooled = perMember.flat();
       const renumbered = pooled.map((run, i) => ({ ...run, runOrdinal: i + 1 }));
 
