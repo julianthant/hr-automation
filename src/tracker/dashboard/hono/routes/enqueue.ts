@@ -15,9 +15,7 @@ export function registerEnqueueRoute(app: Hono, deps: DashboardHonoDeps): void {
     try {
       const parsed = await readJsonRequest(c.req.raw, 65_536);
       if (!parsed.ok) {
-        return parsed.error === "Invalid JSON body"
-          ? jsonResponse({ ok: false, error: "Invalid JSON body" }, 400)
-          : jsonResponse({ ok: false, error: parsed.error }, 500);
+        return jsonResponse({ ok: false, error: parsed.error }, 400);
       }
 
       const input = parsed.body as { workflow?: string; inputs?: unknown[]; parentRunId?: unknown };

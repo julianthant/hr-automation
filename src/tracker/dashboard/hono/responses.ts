@@ -93,7 +93,11 @@ export async function readJsonRequest(
     }
     const trimmed = raw.trim();
     if (!trimmed) return { ok: true, body: {} };
-    return { ok: true, body: JSON.parse(trimmed) as Record<string, unknown> };
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { ok: false, error: "Request body must be a JSON object" };
+    }
+    return { ok: true, body: parsed as Record<string, unknown> };
   } catch {
     return { ok: false, error: "Invalid JSON body" };
   }

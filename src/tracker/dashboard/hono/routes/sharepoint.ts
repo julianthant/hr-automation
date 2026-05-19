@@ -22,9 +22,7 @@ export function registerSharePointRoutes(app: Hono): void {
     try {
       const parsed = await readJsonRequest(c.req.raw, 4096);
       if (!parsed.ok) {
-        return parsed.error === "Invalid JSON body"
-          ? jsonResponse({ ok: false, error: "Invalid JSON body" }, 400)
-          : jsonResponse({ ok: false, error: parsed.error }, 500);
+        return jsonResponse({ ok: false, error: parsed.error }, 400);
       }
       const { status, body } = await handler(parsed.body as { id?: string });
       return jsonResponse(body, status);
