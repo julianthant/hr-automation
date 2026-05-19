@@ -25,6 +25,8 @@ export interface ParsedOcrPrepareRow {
  * untouched.
  */
 export interface OcrDownstreamConfig {
+  /** Which OCR form variant this config produces records for. Drives addBlankRow's variant branch. */
+  formKind: "oath" | "emergency-contact";
   /** Parser for the prep row's serialized records / PDF metadata. */
   parseRow: (data: Record<string, string> | undefined) => ParsedOcrPrepareRow | null;
   /** POST endpoint that fans out N kernel queue items on Approve. */
@@ -138,6 +140,7 @@ const OCR_APPROVE_URL = "/api/ocr/approve-batch";
 const OCR_DISCARD_URL = "/api/ocr/discard-prepare";
 
 registerOcrDownstream("ocr", {
+  formKind: "emergency-contact",
   parseRow: parsePrepareRowData,
   approveUrl: OCR_APPROVE_URL,
   discardUrl: OCR_DISCARD_URL,
@@ -145,11 +148,12 @@ registerOcrDownstream("ocr", {
   cursorKey: ({ runId }) => `ec-prep-cursor:${runId}`,
   hasSignature: false,
   supportsForceResearch: true,
-  recordName: (r) => (r as PreviewRecord).employee?.name || "(no name)",
+  recordName: (r) => (r.formKind === "emergency-contact" ? r.employee?.name : "") || "(no name)",
   renderEditor: noopRenderer,
 });
 
 registerOcrDownstream("emergency-contact", {
+  formKind: "emergency-contact",
   parseRow: parsePrepareRowData,
   approveUrl: OCR_APPROVE_URL,
   discardUrl: OCR_DISCARD_URL,
@@ -157,11 +161,12 @@ registerOcrDownstream("emergency-contact", {
   cursorKey: ({ runId }) => `ec-prep-cursor:${runId}`,
   hasSignature: false,
   supportsForceResearch: false,
-  recordName: (r) => (r as PreviewRecord).employee?.name || "(no name)",
+  recordName: (r) => (r.formKind === "emergency-contact" ? r.employee?.name : "") || "(no name)",
   renderEditor: noopRenderer,
 });
 
 registerOcrDownstream("oath-signature", {
+  formKind: "oath",
   parseRow: parseOathPrepareRowData,
   approveUrl: OCR_APPROVE_URL,
   discardUrl: OCR_DISCARD_URL,
@@ -169,6 +174,6 @@ registerOcrDownstream("oath-signature", {
   cursorKey: ({ runId }) => `oath-prep-cursor:${runId}`,
   hasSignature: true,
   supportsForceResearch: false,
-  recordName: (r) => (r as OathPreviewRecord).printedName || "(no name)",
+  recordName: (r) => (r.formKind === "oath" ? r.printedName : "") || "(no name)",
   renderEditor: noopRenderer,
 });

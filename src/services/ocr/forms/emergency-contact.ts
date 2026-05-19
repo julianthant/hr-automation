@@ -233,8 +233,19 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
   },
 
   applyCarryForward({ v2, v1 }): PreviewRecord {
+    // See oath.applyCarryForward for the rationale on the per-form-type
+    // assertion + why we tolerate `undefined` from legacy JSONL rows.
+    if (
+      (v1.formKind !== undefined && v1.formKind !== "emergency-contact") ||
+      (v2.formKind !== undefined && v2.formKind !== "emergency-contact")
+    ) {
+      throw new Error(
+        `emergency-contact.applyCarryForward: cross-form-type carry-forward not supported (v1=${v1.formKind}, v2=${v2.formKind})`,
+      );
+    }
     return {
       ...v2,
+      formKind: "emergency-contact",
       employee: {
         ...v2.employee,
         employeeId: v1.employee.employeeId || v2.employee.employeeId,

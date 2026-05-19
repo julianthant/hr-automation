@@ -351,8 +351,25 @@ export const oathOcrFormSpec: OcrFormSpec<
   },
 
   applyCarryForward({ v2, v1 }): OathPreviewRecord {
+    // Defensive: TS already enforces both inputs are OathPreviewRecord via
+    // the OcrFormSpec generic, but `applyCarryForward` in carry-forward.ts
+    // uses `as never` casts that erase the discriminant, AND v1 records
+    // come from a JSON.parse of a previous run's JSONL (`readPreviousRecords`
+    // in orchestrator.ts) which bypasses Zod's `.default("oath")` — so a
+    // legacy row may have `formKind: undefined`. Tolerate that, but reject
+    // any record that affirmatively carries the wrong tag (genuine cross-
+    // form mixing). Theme 1, 2026-05-18 type-soundness review.
+    if (
+      (v1.formKind !== undefined && v1.formKind !== "oath") ||
+      (v2.formKind !== undefined && v2.formKind !== "oath")
+    ) {
+      throw new Error(
+        `oath.applyCarryForward: cross-form-type carry-forward not supported (v1=${v1.formKind}, v2=${v2.formKind})`,
+      );
+    }
     return {
       ...v2,
+      formKind: "oath",
       employeeId: v1.employeeId || v2.employeeId,
       matchState: v1.matchState !== "lookup-pending" && v1.matchState !== "lookup-running"
         ? v1.matchState
