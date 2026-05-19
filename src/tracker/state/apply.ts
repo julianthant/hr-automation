@@ -43,11 +43,12 @@ function stmts(db: Database): CachedStatements {
         workflow, tracker_date, item_id, run_id, parent_run_id,
         first_any_ts, first_work_ts, latest_tracker_ts, latest_status, latest_step,
         latest_data_json, latest_typed_data_json, latest_input_json, latest_error,
-        updated_at
+        terminal_at, updated_at
       ) VALUES (
         @workflow, @trackerDate, @itemId, @runId, @parentRunId,
         @eventTs, @firstWorkTs, @eventTs, @status, @step,
-        @dataJson, @typedDataJson, @inputJson, @error, @updatedAt
+        @dataJson, @typedDataJson, @inputJson, @error,
+        @terminalAt, @updatedAt
       )
       ON CONFLICT(workflow, tracker_date, item_id, run_id) DO UPDATE SET
         parent_run_id = COALESCE(excluded.parent_run_id, runs.parent_run_id),
@@ -65,6 +66,11 @@ function stmts(db: Database): CachedStatements {
         latest_typed_data_json = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_typed_data_json ELSE runs.latest_typed_data_json END,
         latest_input_json = COALESCE(runs.latest_input_json, excluded.latest_input_json),
         latest_error = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_error ELSE runs.latest_error END,
+        terminal_at = CASE
+          WHEN runs.terminal_at IS NOT NULL THEN runs.terminal_at
+          WHEN excluded.terminal_at IS NOT NULL THEN excluded.terminal_at
+          ELSE NULL
+        END,
         updated_at = excluded.updated_at
     `),
     selectRunExists: db.prepare(`
@@ -216,6 +222,10 @@ export function applyTrackerEntry(
   const inputJson = entry.input ? JSON.stringify(entry.input) : null;
   const now = new Date().toISOString();
   const isWork = entry.status !== "pending";
+  const isTerminal =
+    entry.status === "done" ||
+    entry.status === "failed" ||
+    entry.status === "skipped";
 
   const s = stmts(db);
   transaction(db, () => {
@@ -260,6 +270,7 @@ export function applyTrackerEntry(
       typedDataJson,
       inputJson,
       error: entry.error ?? null,
+      terminalAt: isTerminal ? entry.timestamp : null,
       updatedAt: now,
     });
 

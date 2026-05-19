@@ -3,7 +3,7 @@ export interface Migration {
   sql: string;
 }
 
-export const LATEST_SCHEMA_VERSION = 8;
+export const LATEST_SCHEMA_VERSION = 9;
 
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -481,5 +481,17 @@ ALTER TABLE task_attempts DROP COLUMN status;
   {
     version: 8,
     sql: String.raw`ALTER TABLE items ADD COLUMN latest_empl_id TEXT;`,
+  },
+  {
+    // Migration 9: lifecycle-tied screenshot cleanup.
+    // Stamps the timestamp at which a run reached its first terminal status
+    // (done/failed/skipped/cancelled). NULL while still running. The sweep
+    // joins (runs.terminal_at < now - 30d) with files (kind='screenshot') to
+    // delete stale evidence — see src/tracker/state/screenshot-sweep.ts.
+    version: 9,
+    sql: String.raw`
+ALTER TABLE runs ADD COLUMN terminal_at TEXT;
+CREATE INDEX IF NOT EXISTS idx_runs_terminal_at ON runs(terminal_at);
+    `,
   },
 ];
