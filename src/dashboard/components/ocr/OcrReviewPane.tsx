@@ -115,13 +115,32 @@ function overlayServerOwnedPrepFields(
   local: AnyPreviewRecord,
 ): AnyPreviewRecord {
   if (!baseRecord) return local;
-  return {
-    ...local,
-    verification: baseRecord.verification,
-    matchState: baseRecord.matchState,
-    matchSource: baseRecord.matchSource,
-    warnings: baseRecord.warnings,
-  };
+  if (baseRecord.formKind !== local.formKind) {
+    console.warn(
+      "[OcrReviewPane] overlayServerOwnedPrepFields: variant mismatch",
+      { baseKind: baseRecord.formKind, localKind: local.formKind },
+    );
+    return local;
+  }
+  if (local.formKind === "oath" && baseRecord.formKind === "oath") {
+    return {
+      ...local,
+      verification: baseRecord.verification,
+      matchState: baseRecord.matchState,
+      matchSource: baseRecord.matchSource,
+      warnings: baseRecord.warnings,
+    };
+  }
+  if (local.formKind === "emergency-contact" && baseRecord.formKind === "emergency-contact") {
+    return {
+      ...local,
+      verification: baseRecord.verification,
+      matchState: baseRecord.matchState,
+      matchSource: baseRecord.matchSource,
+      warnings: baseRecord.warnings,
+    };
+  }
+  return local;
 }
 
 function loadPrepStorage(rawKey: string): { edits: Record<number, AnyPreviewRecord>; removed: Set<number> } {
