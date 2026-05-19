@@ -15,8 +15,7 @@ export function getFormSpec(formType: string): AnyOcrFormSpec | null;
 export function getFormSpec(
   formType: string,
 ): typeof oathOcrFormSpec | typeof emergencyContactOcrFormSpec | AnyOcrFormSpec | null {
-  const map = FORM_SPECS as unknown as Record<string, AnyOcrFormSpec>;
-  return map[formType] ?? null;
+  return FORM_SPECS[formType as keyof typeof FORM_SPECS] ?? null;
 }
 
 export interface FormTypeListing {
