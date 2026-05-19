@@ -123,6 +123,12 @@ OCR handlers import **`src/services/matching/`** for roster load + name match â€
 - **Return-to-Search retains the EID.** The search form re-renders with the
   prior Empl ID populated between iterations; `searchByEmplId` clears the
   field before filling it to avoid EID concatenation.
+- **Direct Person Profile URL can reopen on the prior profile.** PeopleSoft
+  sometimes preserves the last loaded detail page even after navigating to the
+  Person Profiles component URL. `navigateToPersonProfiles` must verify the
+  Empl ID search textbox is visible and click **Return to Search** when the
+  detail page is still rendered; `returnToSearch` must also wait for the
+  search textbox before the next daemon item starts.
 - **Two "Add New Oath Signature Date" anchors** exist (icon + text link)
   with the same accessible name. The selector anchors on the PeopleSoft id
   `DERIVED_JPM_JP_JPM_JP_ADD_CAT_ITM$41$$0` first, falling back to
@@ -131,6 +137,7 @@ OCR handlers import **`src/services/matching/`** for roster load + name match â€
 
 ## Lessons Learned
 
+- **2026-05-19: Person Profiles direct URL can preserve stale detail state.** A two-item daemon batch skipped the first employee because an oath already existed, clicked Return to Search, then the second item navigated to the Person Profiles URL but UCPath was still rendering the first employee's profile. The second item timed out waiting for the search-form Empl ID textbox. `ensurePersonProfilesSearchForm` now verifies the search form after direct navigation and after Return-to-Search, and recovers by clicking Return to Search when a prior detail page is still visible.
 - **2026-04-28: Paper-roster OCR prep migrated to the shared `ocr` workflow.** Oath form type (`formType: "oath"`) is handled by dashboard routes under `/api/ocr/*` (`src/tracker/dashboard/hono/routes/ocr.ts`); per-form schemas + match live in `src/services/ocr/forms/oath.ts`. Deleted workflow-local `prepare.ts` / `preview-schema.ts`. Parent rows still use `data.mode === "prepare"` where applicable; eid-lookup queue items use `oath-prep-` prefixes. Kernel input remains `{ emplId, date? }` per `OathSignatureInputSchema`.
 - **2026-04-23: Removed tracker-side idempotency guard; only the live-page
   probe remains.** `src/core/idempotency.ts` was deleted repo-wide. The

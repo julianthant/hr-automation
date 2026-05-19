@@ -180,6 +180,22 @@ test("approveTo.deriveInput: matched record → OathSignatureInput shape", async
   assert.equal(input.date, "05/01/2026");
 });
 
+test("approveTo.deriveInput: OCR uppercase names are normalized for queue display", async () => {
+  const comma = oathOcrFormSpec.approveTo.deriveInput({
+    employeeId: "10000001",
+    printedName: "ABUTIN, JASON, L",
+    dateSigned: "05/01/2026",
+  } as any);
+  const natural = oathOcrFormSpec.approveTo.deriveInput({
+    employeeId: "10000002",
+    printedName: "CORREA DINORA",
+    dateSigned: "05/15/2003",
+  } as any);
+
+  assert.equal(comma.name, "Abutin, Jason, L");
+  assert.equal(natural.name, "Correa Dinora");
+});
+
 test("approveTo.deriveItemId: deterministic shape", async () => {
   const r = {} as any;
   const id = oathOcrFormSpec.approveTo.deriveItemId(r, "parent-run-xyz", 3);

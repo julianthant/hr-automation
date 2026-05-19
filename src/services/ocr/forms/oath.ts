@@ -9,7 +9,10 @@ import { z } from "zod/v4";
 import { matchAgainstRoster } from "../../matching/index.js";
 import { log } from "../../../utils/log.js";
 import { normalizeUcpathEmployeeId } from "../../../domain/identity/eid.js";
-import { normalizePersonNameForCompare } from "../../../domain/identity/person-name.js";
+import {
+  displayPersonName,
+  normalizePersonNameForCompare,
+} from "../../../domain/identity/person-name.js";
 import type { OcrFormSpec, LookupKind } from "../../../workflows/ocr/types.js";
 import type { OathSignatureInput } from "../../../workflows/oath-signature/schema.js";
 import { LLM_HIGH_CONFIDENCE, MatchStateSchema, VerificationSchema } from "./shared.js";
@@ -393,9 +396,10 @@ export const oathOcrFormSpec: OcrFormSpec<
     workflow: "oath-signature",
     deriveInput(record): OathSignatureInput {
       const normalizedDate = normalizeOathDate(record.dateSigned ?? null);
+      const displayName = displayPersonName(record.printedName);
       return {
         emplId: record.employeeId,
-        ...(record.printedName ? { name: record.printedName } : {}),
+        ...(displayName ? { name: displayName } : {}),
         ...(normalizedDate ? { date: normalizedDate } : {}),
       };
     },
