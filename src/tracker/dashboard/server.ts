@@ -12,6 +12,8 @@ import { openStateDb } from "../state/db.js";
 import { rebuildProjectionForDate } from "../state/rebuild.js";
 import { startDependencyScheduler } from "../tasks/scheduler.js";
 import { sweepOrphanUploadDirs } from "../../scripts/ops/clean-tracker.js";
+import { sweepStaleRunScreenshots } from "../state/screenshot-sweep.js";
+import { PATHS } from "../../config.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { createDashboardHonoApp } from "./hono/app.js";
@@ -77,11 +79,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     } catch (err) {
       log.step(`Tracker startup prune skipped: ${err instanceof Error ? err.message : String(err)}`);
     }
-    // TODO(2026-05-11): Screenshot cleanup was removed from startup and preflight
-    // per the run-lifecycle lesson (screenshots should not be pruned on dashboard
-    // cadence). If retention becomes a disk concern, implement lifecycle-tied cleanup
-    // in applyTrackerEntry when a run reaches a terminal state (e.g., delete after
-    // 7 days post-completion). Manual pruning: `npm run clean:tracker`.
+    runScreenshotSweep(dir, opts.screenshotsDir);
     try {
       sweepStuckOcrRows(dir);
     } catch (err) {
@@ -126,12 +124,17 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     void scanFailurePatterns();
     void scanOrphanedQueueItems(dir);
   }, 15_000);
+  const screenshotSweepInterval = setInterval(() => {
+    runScreenshotSweep(dir, opts.screenshotsDir);
+  }, 6 * 60 * 60 * 1000);
+  screenshotSweepInterval.unref();
   const dependencyScheduler = startDependencyScheduler({
     trackerDir: dir,
     intervalMs: 1000,
     onError: (err) => log.warn(`[tasks] dependency scheduler tick failed: ${errorMessage(err)}`),
   });
   localServer.on("close", () => clearInterval(sweepInterval));
+  localServer.on("close", () => clearInterval(screenshotSweepInterval));
   localServer.on("close", () => dependencyScheduler.stop());
 
   localServer.on("error", (err: NodeJS.ErrnoException) => {
@@ -173,6 +176,21 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
   }
 
   return localServer;
+}
+
+function runScreenshotSweep(dir: string, screenshotsDir: string | undefined): void {
+  try {
+    const result = sweepStaleRunScreenshots(dir, screenshotsDir ?? PATHS.screenshotDir);
+    const total =
+      result.terminalRunFilesDeleted + result.orphanFilesDeleted;
+    if (total > 0) {
+      log.step(
+        `Screenshot sweep: pruned ${result.terminalRunFilesDeleted} terminal-run + ${result.orphanFilesDeleted} orphan PNG${total === 1 ? "" : "s"}`,
+      );
+    }
+  } catch (err) {
+    log.warn(`Screenshot sweep skipped: ${errorMessage(err)}`);
+  }
 }
 
 export function stopDashboard(): void {
