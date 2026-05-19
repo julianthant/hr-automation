@@ -64,7 +64,7 @@ interface LegacyEntry {
  *
  * Fallback ordering (only used when `data.archetype` is missing):
  *  1. `data.requestRole === "delegation-dispatch"` → `dispatch`
- *  2. `data.mode === "prepare"` OR `entry.workflow === "ocr"` → `batch-parent`
+ *  2. `data.mode === "prepare"` OR (`entry.workflow === "ocr"` && !parentRunId) → `batch-parent`
  *  3. `data.taskRole === "utility" && originWorkflow` → `passive-child`
  *  4. `data.taskRole === "child" && originWorkflow` → `delegate-child`
  *  5. `entry.parentRunId` present → `batch-member`
@@ -81,7 +81,7 @@ export function resolveRowArchetype(entry: LegacyEntry): RowArchetype {
   const mode = typeof data.mode === "string" ? data.mode : undefined;
 
   if (requestRole === "delegation-dispatch") return "dispatch";
-  if (mode === "prepare" || entry.workflow === "ocr") return "batch-parent";
+  if (mode === "prepare" || (entry.workflow === "ocr" && !entry.parentRunId)) return "batch-parent";
   if (taskRole === "utility" && originWorkflow) return "passive-child";
   if (taskRole === "child" && originWorkflow) return "delegate-child";
   if (entry.parentRunId) return "batch-member";

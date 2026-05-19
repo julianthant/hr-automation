@@ -195,6 +195,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       ...stringifiedSeed,
       __name: nameFn ? nameFn(stringifiedSeed) : '',
       __id: idFn ? idFn(stringifiedSeed) : '',
+      archetype: deriveRowArchetype(wf.archetype, args.parentRunId),
     }
     trackEvent(
       {

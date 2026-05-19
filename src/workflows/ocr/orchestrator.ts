@@ -663,7 +663,6 @@ export async function runOcrOrchestrator(
                     ? { name: targetName(e, spec) }
                     : { emplId: lookupEnqueueEmplId(e) }),
                   itemId: e.itemId,
-                  taskRole: "child",
                   originWorkflow: "ocr",
                   taskGroupId: input.sessionId,
                   ...(cachedParentSubject ? { parentSubject: cachedParentSubject } : {}),
@@ -677,7 +676,6 @@ export async function runOcrOrchestrator(
             const item = e.kind === "name"
               ? {
                   name: targetName(e, spec),
-                  taskRole: "child",
                   originWorkflow: "ocr",
                   taskGroupId: input.sessionId,
                   ...(cachedParentSubject ? { parentSubject: cachedParentSubject } : {}),
@@ -685,7 +683,6 @@ export async function runOcrOrchestrator(
               : {
                   emplId: lookupEnqueueEmplId(e),
                   keepNonHdh: true,
-                  taskRole: "child",
                   originWorkflow: "ocr",
                   taskGroupId: input.sessionId,
                   ...(cachedParentSubject ? { parentSubject: cachedParentSubject } : {}),
@@ -709,7 +706,6 @@ export async function runOcrOrchestrator(
             e.kind === "name"
               ? {
                   name: targetName(e, spec),
-                  taskRole: "child",
                   originWorkflow: "ocr",
                   taskGroupId: input.sessionId,
                   ...(cachedParentSubject ? { parentSubject: cachedParentSubject } : {}),
@@ -717,7 +713,6 @@ export async function runOcrOrchestrator(
               : {
                   emplId: lookupEnqueueEmplId(e),
                   keepNonHdh: true,
-                  taskRole: "child",
                   originWorkflow: "ocr",
                   taskGroupId: input.sessionId,
                   ...(cachedParentSubject ? { parentSubject: cachedParentSubject } : {}),

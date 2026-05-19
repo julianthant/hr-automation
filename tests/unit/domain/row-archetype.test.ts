@@ -51,7 +51,25 @@ describe("row-archetype", () => {
     assert.equal(deriveRowArchetype("batch", "parent-run-1"), "delegate-child");
   });
 
+  it("resolveRowArchetype derives batch-parent from legacy ocr workflow without parentRunId", () => {
+    const entry = { workflow: "ocr", data: {} };
+    assert.equal(resolveRowArchetype(entry), "batch-parent");
+  });
+
+  it("resolveRowArchetype does not classify OCR child rows as batch-parent", () => {
+    const entry = {
+      workflow: "ocr",
+      parentRunId: "parent-run-1",
+      data: { taskRole: "child", originWorkflow: "ocr" },
+    };
+    assert.equal(resolveRowArchetype(entry), "delegate-child");
+  });
+
   it("deriveRowArchetype: utility with parentRunId → passive-child", () => {
     assert.equal(deriveRowArchetype("utility", "parent-run-1"), "passive-child");
+  });
+
+  it("deriveRowArchetype: utility without parentRunId → single", () => {
+    assert.equal(deriveRowArchetype("utility"), "single");
   });
 });
