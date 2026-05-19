@@ -162,8 +162,7 @@ export function readLogEntries(
   itemId?: string,
   dir: string = DEFAULT_DIR,
 ): LogEntry[] {
-  // TODO(jsonl-guard): add a LogEntry validator once tracker-entry readers are fully guarded.
-  const all = readJsonlCached<LogEntry>(getLogsJsonlPath(workflow, dir));
+  const all = readJsonlCached<LogEntry>(getLogsJsonlPath(workflow, dir), { validate: isLogEntry });
   if (itemId) return all.filter((e) => e.itemId === itemId);
   return all;
 }
@@ -233,6 +232,24 @@ export interface TrackerEntry {
 }
 
 const TRACKER_ENTRY_STATUSES = new Set<TrackerEntry["status"]>(["pending", "running", "done", "failed", "skipped"]);
+
+const LOG_ENTRY_LEVELS = new Set<LogEntry["level"]>(["step", "success", "error", "waiting", "warn", "debug"]);
+
+export function isLogEntry(value: unknown): value is LogEntry {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const entry = value as Record<string, unknown>;
+  return (
+    typeof entry.workflow === "string" &&
+    entry.workflow.length > 0 &&
+    typeof entry.itemId === "string" &&
+    entry.itemId.length > 0 &&
+    typeof entry.level === "string" &&
+    LOG_ENTRY_LEVELS.has(entry.level as LogEntry["level"]) &&
+    typeof entry.message === "string" &&
+    typeof entry.ts === "string" &&
+    entry.ts.length > 0
+  );
+}
 
 export function isTrackerEntryStatus(value: unknown): value is TrackerEntry["status"] {
   return typeof value === "string" && TRACKER_ENTRY_STATUSES.has(value as TrackerEntry["status"]);
@@ -737,8 +754,7 @@ export function readLogEntriesForDate(
   date: string,
   dir: string = DEFAULT_DIR,
 ): LogEntry[] {
-  // TODO(jsonl-guard): add a LogEntry validator once tracker-entry readers are fully guarded.
-  const all = readJsonlCached<LogEntry>(getLogsJsonlPathForDate(workflow, dir, date));
+  const all = readJsonlCached<LogEntry>(getLogsJsonlPathForDate(workflow, dir, date), { validate: isLogEntry });
   if (itemId) return all.filter((e) => e.itemId === itemId);
   return all;
 }
