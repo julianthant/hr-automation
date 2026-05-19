@@ -62,19 +62,30 @@ export async function searchEmployee(
     timeout: 5_000,
     label: "new kronos search submit button",
   });
-  await page.waitForTimeout(3_000);
 
-  // Check for "There are no items to display" — means not found
+  const checkbox = searchSelectors.firstResultCheckbox(frame);
   const noResults = searchSelectors.noResultsText(frame);
-  const notFound = (await noResults.count()) > 0;
+  const searchResultTimeout = 15_000;
 
-  if (notFound) {
-    log.step(`[New Kronos] Employee ${employeeId} NOT found`);
-  } else {
-    log.success(`[New Kronos] Employee ${employeeId} found`);
+  let found: boolean;
+  try {
+    found = await Promise.race([
+      checkbox.first().waitFor({ state: "visible", timeout: searchResultTimeout }).then(() => true),
+      noResults.waitFor({ state: "visible", timeout: searchResultTimeout }).then(() => false),
+    ]);
+  } catch {
+    throw new Error(
+      `[New Kronos] Timed out waiting for search results for ${employeeId}`,
+    );
   }
 
-  return !notFound;
+  if (found) {
+    log.success(`[New Kronos] Employee ${employeeId} found`);
+  } else {
+    log.step(`[New Kronos] Employee ${employeeId} NOT found`);
+  }
+
+  return found;
 }
 
 /**
