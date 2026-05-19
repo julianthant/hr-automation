@@ -233,7 +233,7 @@ export interface TrackerEntry {
 
 const TRACKER_ENTRY_STATUSES = new Set<TrackerEntry["status"]>(["pending", "running", "done", "failed", "skipped"]);
 
-const LOG_ENTRY_LEVELS = new Set<LogEntry["level"]>(["step", "success", "error", "waiting", "warn", "debug"]);
+export const LOG_ENTRY_LEVELS = new Set<LogEntry["level"]>(["step", "success", "error", "waiting", "warn", "debug"]);
 
 export function isLogEntry(value: unknown): value is LogEntry {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
