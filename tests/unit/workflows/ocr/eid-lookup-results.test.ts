@@ -5,7 +5,7 @@ import {
   patchOcrRecordFromActiveCheckOutcome,
   patchOcrRecordFromEidLookupOutcome,
   patchOcrRecordUnresolved,
-} from "../../../../src/workflows/ocr/eid-lookup-results.js";
+} from "../../../../src/services/ocr/eid-lookup-results.js";
 
 test("patchOcrRecordFromEidLookupOutcome resolves a name lookup with EID and verification", () => {
   const records: unknown[] = [{

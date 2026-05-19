@@ -7,7 +7,7 @@ import {
   patchOcrRecordFromEidLookupOutcome,
   patchOcrRecordUnresolved,
   type OcrLookupKind,
-} from "../../workflows/ocr/eid-lookup-results.js";
+} from "../../services/ocr/eid-lookup-results.js";
 
 interface OcrEidLookupDependencyMetadata {
   recordIndex: number;

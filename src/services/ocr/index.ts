@@ -167,3 +167,14 @@ function nextUtcMidnight(): number {
   );
   return tomorrow.getTime();
 }
+
+export { flattenForData } from "./tracker-data.js";
+export { countVerified } from "./records-stats.js";
+export {
+  computeOcrVerification,
+  patchOcrRecordFromActiveCheckOutcome,
+  patchOcrRecordFromEidLookupOutcome,
+  patchOcrRecordUnresolved,
+  type OcrLookupKind,
+} from "./eid-lookup-results.js";
+export { resolveParentSubject } from "./parent-subject.js";

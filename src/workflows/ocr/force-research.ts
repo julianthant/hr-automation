@@ -6,8 +6,8 @@ import { trackEvent, dateLocal } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { watchChildRuns, type ChildOutcome } from "../../tracker/delegation/watch-child-runs.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
-import { patchOcrRecordFromEidLookupOutcome } from "./eid-lookup-results.js";
-import { resolveParentSubject } from "./orchestrator.js";
+import { patchOcrRecordFromEidLookupOutcome } from "../../services/ocr/eid-lookup-results.js";
+import { resolveParentSubject } from "../../services/ocr/parent-subject.js";
 
 const WORKFLOW = "ocr";
 

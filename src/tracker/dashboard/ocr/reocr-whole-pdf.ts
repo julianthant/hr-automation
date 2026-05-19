@@ -9,8 +9,8 @@ import { normalizeUcpathEmployeeId } from "../../../domain/identity/eid.js";
 import type { ChildOutcome, WatchChildRunsOpts } from "../../delegation/watch-child-runs.js";
 import type { OcrRequest, OcrResult } from "../../../services/ocr/index.js";
 import { rowKey, hasRowLock, acquireRowLock, releaseRowLock } from "./lock.js";
-import type { OcrLookupKind } from "../../../workflows/ocr/eid-lookup-results.js";
-import { patchOcrRecordFromEidLookupOutcome } from "../../../workflows/ocr/eid-lookup-results.js";
+import type { OcrLookupKind } from "../../../services/ocr/eid-lookup-results.js";
+import { patchOcrRecordFromEidLookupOutcome } from "../../../services/ocr/eid-lookup-results.js";
 
 const WORKFLOW = "ocr";
 
