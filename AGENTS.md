@@ -1,109 +1,76 @@
 <claude-mem-context>
 # Memory Context
 
-# [hr-automation] recent context, 2026-05-16 11:35am PDT
+# [hr-automation] recent context, 2026-05-18 4:39pm PDT
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (19,103t read) | 529,341t work | 96% savings
+Stats: 50 obs (18,931t read) | 697,288t work | 97% savings
 
-### May 15, 2026
-S209 Execute Plan 1: Kernel/Daemon Correctness Fixes (7 tasks) — pre-execution setup and working tree cleanup (May 15 at 4:37 PM)
-S210 Comprehensive parallel codebase review of hr-automation project with subagents — decompose findings into 13 targeted plan files + 13 handoff files covering all identified issues (May 15 at 5:09 PM)
-S211 Full codebase review with parallel subagents to detect and catalog legacy code for migration/removal, given tracker data wipe means no backward compatibility needed (May 15 at 5:10 PM)
-### May 16, 2026
-S212 Full codebase review with subagents for different parts, detect and plan migration/removal of all legacy code (tracker data wiped, fresh start, no backward compatibility needed) (May 16 at 9:17 AM)
-S213 Execute Plan 04 — Collapse SQLite migrations 1–6 into v6 baseline in src/tracker/state/schema.ts (May 16 at 9:42 AM)
-S214 Plan 08: Inline Selector Migration — migrate all allow-inline-selector suppressions to typed registry functions across four workflow files (May 16 at 10:04 AM)
-S215 Plan 09 CLI Adapter Consolidation — execution blocked at Task 1 zero-caller verification (May 16 at 10:43 AM)
-S216 Execute Plan 09 — CLI Adapter Consolidation for hr-automation: extract shared helper, delete dead code, commit and push (May 16 at 10:45 AM)
-1961 10:47a 🔵 Both `*PreEmitPending` Functions Are Intentional OCR Orchestrator APIs — Not Dead Code
-1962 " 🔵 Import Dependency Cleanup Scope for Potential Task 1 Deletion
-1963 " 🔄 Task 1a Started: Removing Unused Imports from `oath-signature/workflow.ts` as Part of `oathSignaturePreEmitPending` Deletion
-1964 " 🔄 Task 1 Deletions Applied: `oathSignaturePreEmitPending` Removed, `eidLookupPreEmitPending` Import Cleanup Started
-1965 10:48a 🔄 Task 1 Complete: Both `*PreEmitPending` Functions and Test Files Deleted, Typecheck Green
-1966 " 🟣 Task 2: Created `src/core/pre-emit-helpers.ts` with `buildBatchPreEmitPending` Helper
-1967 " 🔴 TypeScript Error in `buildBatchPreEmitPending`: `data` Field Type Mismatch
-1968 10:49a 🔴 Fixed `buildBatchPreEmitPending` Type Error: `buildPendingData` Return Tightened to `Record<string, string>`
-1969 " 🔄 Task 2 Migration 1/3: `onboarding/positional.ts` Migrated to `buildBatchPreEmitPending`
-1970 " 🔄 Task 2 Migration 2/3: `separations/cli.ts` `runSeparationBatch` Migrated to `buildBatchPreEmitPending`
-1971 10:50a 🔄 Task 2 Migration 3/3: `emergency-contact/workflow.ts` `runEmergencyContact` Migrated to `buildBatchPreEmitPending`
-1972 " 🔄 Task 3 Option A: `onboarding/positional.ts` Deleted — Zero Production Callers Confirmed
-1973 10:51a 🔄 Task 3 Cleanup: Barrel Export and Doc Comments Updated After `positional.ts` Deletion
-1974 " 🔄 Plan 09 Final Verification: All Gates Pass — 1541 Tests, 0 Failures, Architecture Clean
-S217 Plan 11 — System Driver Simplifications: Three independent refactor tasks executed and committed to hr-automation master (May 16 at 10:52 AM)
-1975 10:56a ⚖️ Plan 11 — System Driver Simplifications Handoff
-1976 " 🔵 Existing Timecard and SafeClick Code State Confirmed Pre-Refactor
-1977 10:57a 🟣 Created src/services/timecard/index.ts — Shared Timecard Module
-1978 " 🔄 old-kronos/navigate.ts — getTimecardLastDate Refactored to Use Shared formatTimecardDate
-1979 10:58a 🔄 old-kronos checkTimecardDates Delegated to Shared runTimecardCheck
-1980 " 🔄 new-kronos/navigate.ts — Shared Timecard Imports Added
-1981 " 🔄 new-kronos getTimecardLastDate Refactored to Use Shared formatTimecardDate
-1982 " 🔄 new-kronos checkTimecardDates Delegated to Shared runTimecardCheck
-1983 10:59a ✅ Created src/services/timecard/CLAUDE.md Module Documentation
-1984 " 🔄 safe.ts Collapsed safeClick/safeFill into Shared instrumentedAction Helper
-1985 " 🔄 instrumentedAction Signature Cleaned Up — Locator Param Removed
-1986 " 🔄 download.ts — safeClick/safeFill Import Added for Task 3
-1987 11:00a 🔄 download.ts — handleMicrosoftEmailStep and dismissStaySignedIn Wrapped with safeClick/safeFill
-1988 " 🔄 download.ts — handleAdfsLogin and clickExcelDownloadMenu File Button Wrapped with safeClick/safeFill
-1989 11:01a 🔄 Task 3 Complete — All SharePoint Raw Clicks/Fills Wrapped; All Three Tasks Verified
-1990 " ✅ TypeScript Typecheck Passes After All Three Refactor Tasks
-1991 " ✅ Full Test Suite Passes — 1540/1541 After Plan 11 Refactors
-1992 11:02a ✅ Architecture Guard Tests Pass — All Plan 11 Verification Complete
-1993 11:14a 🔵 Git index.lock conflict blocked handoff file moves in Plan 13 execution
-1994 11:15a 🔵 git mv requires escalated sandbox permissions in hr-automation to write .git/index.lock
-1995 11:16a ✅ Plan 13 Task 1 & 2: Root CLAUDE.md doc drift fixes and handoff archive created
-1996 " 🔵 architecture-deep-dive.md confirmed: §8 idempotency/step-cache still present, stale handoff link in Further Reading
-1997 11:17a ✅ Plan 13 Task 3: architecture-deep-dive.md major doc drift cleanup — §8 deleted, daemon mode added, directory tree expanded
-1998 " 🔵 Dashboard component tree is folder-organized; src/dashboard/CLAUDE.md Frontend Files section is stale flat list
-1999 " 🔵 ocr-http.ts lives at src/tracker/ocr-http.ts; src/tracker/CLAUDE.md already documents it correctly
-2000 " 🔵 src/workflows/CLAUDE.md still lists onboarding/work-study/eid-lookup/kronos-reports as having tracker.ts; only work-study + old-kronos-reports remain
-2001 11:18a 🔵 work-study Save & Submit is NOT commented out — CLAUDE.md stale note at line 51 needs removal
-2002 " 🔵 old-kronos-reports CLAUDE.md: --workers N contradiction is line 9 description vs line ~86 Worker count section
-2003 " 🔵 SharePoint selectors.ts has 5 distinct selector groups for common-intents.txt generation
-2004 " 🔵 Onboarding CLAUDE.md lesson line 142 references dead --direct and --batch flags still used in daemon-mode description
-2005 " ✅ Plan 13 Task 4: Per-module CLAUDE.md fixes and SharePoint common-intents.txt created
-2006 11:19a 🔵 Plan 13 verification sweep: authoritative docs are clean; stale terms only remain in historical plan/spec files
-2007 " ✅ Plan 13 all verification checks passed — doc drift cleanup complete
-2008 " ✅ Plan 13 doc drift cleanup fully verified and complete — all checks passed
-2009 " 🔵 AGENTS.md unexpectedly deleted during Plan 13 — not part of plan scope
-2010 11:20a 🔵 Pre-existing lint errors in 3 source files — unrelated to Plan 13 doc changes
-S218 Plan 13 doc drift cleanup — git staging, commit preparation, and final verification for hr-automation (May 16 at 11:20 AM)
-**Investigated**: - Full test suite result: 1541 tests, 1540 pass, 0 fail, 1 todo — Plan 13 doc changes do not break any tests
-    - Dead-terms verification sweep: grep for 'npm run extract|--direct.*--batch|api/stats|api/diff|ocr-http\.ts\b' across authoritative *.md files (excluding node_modules and historical) returned empty — all targeted stale terms removed
-    - git diff --check: CLAUDE.md still has trailing whitespace on line 17 (the docs/README.md pointer bullet with two trailing spaces as markdown forced line break)
-    - git diff -- CLAUDE.md: confirmed exact content of all 6 hunks including which are staged vs unstaged
-    - git diff --cached --name-status: confirmed what is already staged — CLAUDE.md (partially), plus 9 renames (R100): docs/architecture-deep-dive.md→docs/engineering/architecture-deep-dive.md, handoff files to docs/handoff/, historical file to docs/historical/
-    - git diff --name-status (unstaged): reveals AGENTS.md deleted, CLAUDE.md modified, README.md modified, docs/engineering/ files modified, multiple src/*/CLAUDE.md files modified
-    - git status --short: actual docs structure is: docs/README.md, docs/handoff/, docs/historical/ with READMEs; handoffs moved to docs/handoff/ (NOT docs/historical/ as prior summary wrongly stated); docs/engineering/architecture-deep-dive.md (not docs/architecture-deep-dive.md)
-    - README.md: confirmed it also contained dead 'npm run extract' command line (out of Plan 13 original scope but correct to fix)
+### May 17, 2026
+S233 Full code review of oath-upload, oath-signature, emergency-contact, and OCR workflows — tracing frontend/backend logic, consistency, delegation patterns, row archetypes, logs/timeline, and codebase-wide simplification/unification (May 17 at 11:40 AM)
+S234 Full cross-workflow code review of oath-upload, oath-signature, emergency-contact, OCR + codebase-wide sweep → produced 4 implementation plans + 4 handoff documents covering ~80 findings (May 17 at 11:48 AM)
+S235 Plan 1 of 4 (2026-05-17 correctness bug fixes) — Task 5 verification sweep: resolve typecheck:all and lint errors, then commit (May 17 at 12:00 PM)
+S236 Review and fix Plan 1 (2026-05-17 correctness bug fixes) — fan out subagent to verify execution and apply fixes (May 17 at 12:26 PM)
+S237 Archetype Migration Completion — Plan 2 of 4 session start (May 17 at 1:00 PM)
+S238 Memory observer: monitor hr-automation primary session completing archetype migration plan (tasks 3–5) (May 17 at 1:06 PM)
+S239 Observer role for Plan 2 (Archetype Migration Completion) execution in hr-automation — record durable technical observations about what was built, fixed, and documented (May 17 at 10:17 PM)
+S240 Execute hot-path performance plan (Plan 3 of 4) — all four tasks completed inline (May 17 at 10:30 PM)
+S241 Plan 4 Cross-Workflow Unification — observer session recording primary session execution of Tasks 2 and 4 (May 17 at 10:49 PM)
+### May 18, 2026
+2468 9:32a 🔴 EID Lookup Fan-Out Rows No Longer Grouped as Batch Cards — Surface as Flat Delegation Members
+2469 " 🔴 Batch View Member Rows Now Show Person Name as Title Instead of Batch Label
+2470 " 🔴 EID Lookup Pending Rows Now Use Person Name as __name Instead of parentSubject Batch Label
+2471 " 🟣 Oath Signature Input Schema and Fan-Out Now Pass Person's Printed Name from OCR Records
+2472 9:33a 🔴 Oath Signature Pending Data — __name Now Uses Person Name, Not parentSubject Batch Label
+2473 " 🔴 Dispatch Row "Oath Signature Request" — __queueSubtitle Removed from Row Data
+2474 " ✅ Tests Updated — EID Lookup Fan-Out Now Expected as Flat Delegation Members, Not Batch Cards
+2475 9:34a ✅ Tests Updated — __queueSubtitle Removed from Dispatch Row Assertions, New Person-Name Test Added
+2476 9:54a 🟣 RunModal Multi-File Upload for Oath Signature
+2477 " ⚖️ Multi-File Oath Upload is Grouped Singles, Not a New Workflow
+2478 10:07a 🔵 Oath OCR form spec — EID extraction and matching logic
+2479 " 🔵 Latest oath signature OCR run successfully extracted 8-digit EID starting with "10"
+2480 10:08a 🔵 RunModal already supports multiple PDF uploads — gated by allowMultipleFiles config flag
+2481 " 🔵 Run-modal registry — current multi-file and workflow config state
+2482 10:09a 🔵 OCR runs today processed 612 and 1115 records — no per-record EID detail captured
+2483 " 🔵 All 1115 OCR records in latest run have EIDs starting with "10" — no missing or wrong-prefix EIDs found
+2484 " 🔵 OCR tracker stores records as JSON-encoded string, not a parsed array — sample record confirms EID extraction working
+2485 10:36a 🔵 OCR Missing 8-Digit EID Numbers in Oath Signature PDFs
+2486 " 🔵 OCR Oath Signature Run: One Record Missing EID (CORREA DINORA)
+2487 " 🔵 EID Normalization and Validation Logic in src/domain/identity/eid.ts
+2488 " 🔵 CORREA DINORA OCR Record: EID Blank, UCPath Lookup Returned "Not Found"
+2489 " 🔵 Root Cause: Gemini OCR Extracts 6-Digit EIDs; Validation Requires 8-Digit ^10\d{6}$ Format
+2490 10:37a 🔵 Roster Matching Fails for All Records Due to 6-Digit EIDs Not Matching Roster
+2491 " 🔵 oath.ts EID Matching: 6-Digit EIDs Silently Dropped by normalizeUcpathEmployeeId at Line 164
+2492 10:38a 🔵 PrepareInput Accepts Single pdfPath — Multi-PDF Upload Not Yet Supported
+2493 10:39a 🔴 OCR Prompt Fixed: Gemini Now Instructed to Extract Full 8-Digit UCPath EIDs
+2494 10:40a 🔴 Added Diagnostic Log Warning When Gemini Extracts Invalid (Non-UCPath) EID Format
+2495 " 🟣 Multi-PDF Upload Enabled for Emergency Contact Run Modal
+2496 " 🟣 Multi-PDF Upload Enabled for OCR Run Modal
+2497 " 🟣 Multi-PDF Upload Enabled for oath-upload Run Modal — All Four Modals Now Support Multi-File
+2498 " 🔴 RunModal Multi-File Batch Subject Generalized — No Longer Hardcoded to oath-signature
+2499 " 🟣 buildBatchSubject Helper Added to RunModal for Workflow-Aware Batch Labels
+2500 10:41a ✅ TypeCheck Passes Clean After All OCR EID and Multi-PDF Upload Changes
+S242 Fix OCR missing 8-digit EID extraction from oath signature PDFs + add multi-PDF upload to all run modals (May 18 at 10:42 AM)
+2501 10:46a 🔵 RunModal multi-PDF upload: logic exists but gated by allowMultipleFiles flag
+2502 10:47a 🟣 RunModal: added handleFilesAdd for appending PDFs to existing selection
+2503 " 🟣 FileRows: added "Add PDFs" button for incrementally appending files after initial selection
+2504 10:53a ✅ RunModal "Add PDFs" label upgraded to labeled button style
+2505 " 🟣 RunModal multi-file mode shows Dropzone and FileRows simultaneously
+2506 10:57a 🔄 FileRows component rewritten to render one row per file
+2507 " 🟣 Dropzone gains compact mode that collapses to a single row when files are already attached
+2508 11:01a 🔵 OCR Oath Form — EID Extraction Already Prompted but Failing in Practice
+2509 11:02a 🟣 TDD Red Phase: Failing Test Added to Drive Oath OCR Prompt Improvement for Top-Margin EIDs
+2510 " 🔴 Oath OCR EID extraction improved to scan full page including top margin
+2511 2:43p 🔵 Daemon Cancellation Bug: Pending EID Lookup Rows Lose Their Title
+2512 2:44p 🔵 EID Lookup Row Title Bug: Daemon Stop May Trigger Sweeps That Overwrite Pending Row Names
+2513 " 🔵 Large WIP Changeset: OCR Delegation Row Naming, Queue Surfaces, Sweeps, and Multi-File Oath Upload
+2514 2:45p 🔴 Daemon shutdown-cancel rows now preserve title and row archetype
+2515 3:03p ✅ src/core/CLAUDE.md lesson: daemon shutdown rows must preserve display metadata
+2516 3:17p 🔴 Full test suite and lint pass after daemon shutdown-cancel fix
+2517 " 🔴 Full 1595-test suite passes after daemon shutdown-cancel row fix
 
-**Learned**: - The git index (staging area) already has 9 renames staged from prior interactive work — architecture-deep-dive.md→engineering/, handoffs, historical
-    - CLAUDE.md is MM (partially staged): hunks 3, 4, 5 were staged in prior session; hunks 1 (docs/README.md pointer with trailing whitespace), 2 (extract removal + kronos update), 6 (Deferred section rewrite) were NOT staged yet
-    - The second git add -p CLAUDE.md session (current) staged hunks 2, 3, 5, 6 (y for hunks 2/4/5/6, n for 1 and 3); this means now hunk 1 (trailing whitespace) is still not staged but hunk 6 (Deferred section rewrite) IS staged
-    - AGENTS.md was deleted in working tree but NOT staged — needs git checkout -- AGENTS.md to restore
-    - docs/handoff/README.md (untracked ??) and docs/README.md (untracked ??) still need to be staged
-    - src/systems/sharepoint/common-intents.txt (untracked ??) needs staging
-    - git add README.md docs/architecture-deep-dive.md ... failed again with pathspec error for docs/architecture-deep-dive.md — the correct path is docs/engineering/architecture-deep-dive.md (already staged as rename from index)
-
-**Completed**: - Test suite: 1541 tests, 1540 pass, 0 fail, 1 todo — verified
-    - Dead-terms sweep: empty output — all plan 13 target terms removed from authoritative docs
-    - README.md: dead 'npm run extract' line removed
-    - CLAUDE.md: now staging second pass via git add -p; hunks staged: extract removal + kronos update (hunk 2), canonical docs table row (hunk 3), servicenow + sharepoint selectors registry (hunk 5), Deferred section rewrite (hunk 6) — SKIPPED: hunk 1 (trailing whitespace on docs/README.md pointer line)
-    - Renames already staged: docs/architecture-deep-dive.md→docs/engineering/architecture-deep-dive.md, all handoff files to docs/handoff/, improvements to docs/historical/
-    - All 4 Plan 13 target docs modified: src/dashboard/CLAUDE.md, src/tracker/CLAUDE.md, src/workflows/onboarding/CLAUDE.md, plus the broader CLAUDE.md updates and module CLAUDE.md files
-
-**Next Steps**: 1. Fix AGENTS.md: git checkout -- AGENTS.md (restore deleted file)
-    2. Stage remaining files with CORRECT paths:
-       git add README.md docs/README.md docs/handoff/README.md docs/historical/README.md docs/engineering/codebase-conventions.md src/dashboard/CLAUDE.md src/tracker/CLAUDE.md src/workflows/CLAUDE.md src/workflows/old-kronos-reports/CLAUDE.md src/workflows/onboarding/CLAUDE.md src/workflows/work-study/CLAUDE.md src/systems/sharepoint/common-intents.txt
-       (Note: docs/engineering/architecture-deep-dive.md is already staged as a rename from the index)
-    3. Handle CLAUDE.md hunk 1 trailing whitespace: either strip the trailing spaces from line 17 and re-stage, or leave unstaged (minor — docs/README.md pointer bullet, two trailing spaces for markdown line break)
-    4. Verify final staged state with git diff --cached --stat
-    5. Make commit with Plan 13 verbatim message
-    6. Consider whether to push to master
-
-
-Access 529k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 697k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>
