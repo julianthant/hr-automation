@@ -2,7 +2,6 @@ import type { Ctx } from "../../core/kernel/types.js";
 import { runWorkflow } from "../../core/index.js";
 import { ocrWorkflow } from "../ocr/index.js";
 import { watchChildRuns } from "../../tracker/delegation/watch-child-runs.js";
-import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { openControlDb } from "../../core/control-db.js";
@@ -125,13 +124,7 @@ export async function oathUploadHandler(
       if (!ocrParsed.success) {
         throw new Error(`oath-upload: OCR child input invalid — ${ocrParsed.error.message}`);
       }
-      // Fire-and-forget — OCR runs as a child workflow in the same process,
-      // but we don't await it here. The next step (wait-ocr-approval) blocks
-      // until the operator approves on the dashboard.
-      void runWorkflow(ocrWorkflow, ocrParsed.data, { trackerDir: ctx.trackerDir ?? trackerDir }).catch((err) => {
-        log.error(`[oath-upload] OCR child crashed before emitting a tracker row: ${errorMessage(err)}`);
-        throw err;
-      });
+      await runWorkflow(ocrWorkflow, ocrParsed.data, { trackerDir: ctx.trackerDir ?? trackerDir });
     });
 
     await ctx.step("wait-ocr-approval", async () => {
@@ -221,6 +214,12 @@ export async function oathUploadHandler(
 
 const LOOKBACK_DAYS = 7;
 
+function isFiledTicketNumber(ticketNumber: string): boolean {
+  if (ticketNumber.length === 0) return false;
+  if (ticketNumber.toUpperCase().includes("DRY RUN")) return false;
+  return /^HRC\d/i.test(ticketNumber);
+}
+
 export function findPriorTicketForRunId(runId: string, trackerDir?: string): string | null {
   let controlDb: ReturnType<typeof openControlDb> | undefined;
   try { controlDb = openControlDb({ trackerDir }); } catch { /* fall through to JSONL */ }
@@ -230,7 +229,10 @@ export function findPriorTicketForRunId(runId: string, trackerDir?: string): str
       trackerDir,
       lookbackDays: LOOKBACK_DAYS,
       ...(controlDb ? { db: controlDb.db, runId } : {}),
-      predicate: (e) => e.runId === runId && typeof e.data?.ticketNumber === "string" && (e.data.ticketNumber as string).length > 0,
+      predicate: (e) =>
+        e.runId === runId &&
+        typeof e.data?.ticketNumber === "string" &&
+        isFiledTicketNumber(e.data.ticketNumber as string),
     });
     if (!match) return null;
     const t = match.data?.ticketNumber;

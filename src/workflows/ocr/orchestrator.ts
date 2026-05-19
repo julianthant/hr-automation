@@ -14,7 +14,8 @@ import type { ZodType } from "zod/v4";
 import { loadRoster as realLoadRoster, precomputeRoster } from "../../services/matching/index.js";
 import type { RosterRow as MatchRosterRow } from "../../services/matching/match.js";
 import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
-import { trackEvent, dateLocal, readEntries, readEntriesForDate, type TrackerEntry } from "../../tracker/jsonl.js";
+import { trackEvent, dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
+import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
 import { createOcrEidLookupDependencyBatch } from "../../tracker/tasks/store.js";
@@ -323,14 +324,9 @@ export async function runOcrOrchestrator(
     ): void => {
       if (status === "running") {
         const lastRec = (records as Record<string, unknown>[]).at(-1);
-        const stateFingerprint = (records as Record<string, unknown>[])
-          .map((r) => {
-            const matchState = String((r.matchState as string | undefined) ?? "");
-            const ver = (r.verification as { state?: string } | undefined)?.state ?? "";
-            return `${matchState}|${ver}`;
-          })
-          .join("|");
-        const key = `${step}|${records.length}|${lastRec?.employeeId ?? lastRec?.eid ?? ""}|${stateFingerprint}`;
+        const matchState = String((lastRec?.matchState as string | undefined) ?? "");
+        const ver = (lastRec?.verification as { state?: string } | undefined)?.state ?? "";
+        const key = `${step}|${records.length}|${lastRec?.employeeId ?? lastRec?.eid ?? ""}|${matchState}|${ver}`;
         if (key === lastSnapshotKey) return;
         lastSnapshotKey = key;
       }
@@ -1030,14 +1026,23 @@ function flattenForData(d: Record<string, unknown>): Record<string, string> {
   return out;
 }
 
+const OCR_READER_LOOKBACK_DAYS = 7;
+
 function readPreviousRecords(
   sessionId: string,
   previousRunId: string,
   trackerDir: string | undefined,
   date: string,
 ): unknown[] {
-  const entries = readEntriesForDate("ocr", date, trackerDir ?? ".tracker");
-  const latest = entries.findLast((e) => e.id === sessionId && e.runId === previousRunId);
+  const [yStr, mStr, dStr] = date.split("-");
+  const anchor = new Date(Number(yStr), Number(mStr) - 1, Number(dStr));
+  const latest = findLatestEntryForPredicate({
+    workflow: WORKFLOW,
+    trackerDir,
+    lookbackDays: OCR_READER_LOOKBACK_DAYS,
+    ...(Number.isNaN(anchor.getTime()) ? {} : { now: anchor }),
+    predicate: (e) => e.id === sessionId && e.runId === previousRunId,
+  });
   if (!latest?.data?.records) return [];
   try {
     const parsed = JSON.parse(latest.data.records as unknown as string);
@@ -1141,12 +1146,14 @@ export function resolveParentSubject(args: {
   trackerDir?: string;
 }): string | undefined {
   if (!args.parentRunId || !args.originWorkflow) return undefined;
-  const rows = readEntries(args.originWorkflow, args.trackerDir ?? ".tracker");
-  for (let i = rows.length - 1; i >= 0; i--) {
-    const row = rows[i];
-    if (row.runId !== args.parentRunId) continue;
-    const name = row.data?.__name;
-    if (typeof name === "string" && name.length > 0) return name;
-  }
-  return undefined;
+  const match = findLatestEntryForPredicate({
+    workflow: args.originWorkflow,
+    trackerDir: args.trackerDir,
+    lookbackDays: OCR_READER_LOOKBACK_DAYS,
+    predicate: (e) =>
+      e.runId === args.parentRunId &&
+      typeof e.data?.__name === "string" &&
+      e.data.__name.length > 0,
+  });
+  return match?.data?.__name;
 }

@@ -28,12 +28,30 @@ describe("oath-upload restart idempotency", () => {
       ts: new Date().toISOString(),
       status: "done",
       step: "submit",
-      data: { ticketNumber: "INC0123456" },
+      data: { ticketNumber: "HRC0123456" },
     });
     writeFileSync(join(dir, `oath-upload-${date}.jsonl`), line + "\n");
 
     const result = findPriorTicketForRunId("test-run-1", dir);
-    assert.equal(result, "INC0123456");
+    assert.equal(result, "HRC0123456");
+  });
+
+  it("findPriorTicketForRunId ignores dry-run sentinel ticketNumber", () => {
+    const dir = mkdtempSync(join(tmpdir(), "oath-idem-"));
+    const date = dateLocal();
+    const line = JSON.stringify({
+      workflow: "oath-upload",
+      id: "pdf-1",
+      runId: "test-run-dry",
+      ts: new Date().toISOString(),
+      status: "done",
+      step: "submit",
+      data: { ticketNumber: "DRY RUN - not submitted" },
+    });
+    writeFileSync(join(dir, `oath-upload-${date}.jsonl`), line + "\n");
+
+    const result = findPriorTicketForRunId("test-run-dry", dir);
+    assert.equal(result, null);
   });
 
   it("findPriorTicketForRunId ignores rows with empty ticketNumber", () => {
