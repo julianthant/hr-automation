@@ -8,7 +8,6 @@ import { watchChildRuns, type ChildOutcome } from "../../tracker/delegation/watc
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
 import { patchOcrRecordFromEidLookupOutcome } from "./eid-lookup-results.js";
 import { resolveParentSubject } from "./orchestrator.js";
-import type { EidLookupItem } from "../eid-lookup/schema.js";
 
 const WORKFLOW = "ocr";
 
@@ -47,7 +46,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
 
   const records: unknown[] = JSON.parse((latest.data?.records as unknown as string) ?? "[]");
   const itemIds: string[] = [];
-  const enqueueInputs: unknown[] = [];
+  const enqueueInputs: Array<{ name: string }> = [];
   // Map itemId → index into records[] for outcome patching.
   const itemIdToRecordIdx = new Map<string, number>();
 
@@ -95,7 +94,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     );
     await ensureDaemonsAndEnqueue(
       eidLookupCrmWorkflow,
-      enqueueInputs as EidLookupItem[],
+      enqueueInputs,
       {},
       {
         trackerDir,
