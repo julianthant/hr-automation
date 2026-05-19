@@ -38,7 +38,7 @@ node_modules/
 # Playwright MCP (snapshots, console logs)
 .playwright-mcp/
 
-#Docs
+# Docs
 docs/
 
 # Tracker data (local runtime)
