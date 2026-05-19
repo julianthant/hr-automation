@@ -218,7 +218,7 @@ export function queryEntriesPayload(
   db: Database,
   opts: { workflow: string; date: string },
 ): ProjectionEntriesPayload {
-  const eventRows = db.prepare(`
+  const rawEventRows = db.prepare(`
     SELECT re.*, r.first_log_ts, r.last_log_ts, r.last_log_message, r.run_ordinal, r.screenshot_count,
            r.first_any_ts, r.first_work_ts, r.latest_tracker_ts
     FROM run_events re
@@ -236,7 +236,7 @@ export function queryEntriesPayload(
     item_id: string;
     run_id: string;
     parent_run_id: string | null;
-    status: "pending" | "running" | "done" | "failed" | "skipped";
+    status: unknown;
     step: string | null;
     data_json: string | null;
     typed_data_json: string | null;
@@ -251,8 +251,39 @@ export function queryEntriesPayload(
     first_work_ts: string | null;
     latest_tracker_ts: string;
   }>;
+  const eventRows: Array<{
+    id: number;
+    workflow: string;
+    event_ts: string;
+    item_id: string;
+    run_id: string;
+    parent_run_id: string | null;
+    status: TrackerEntry["status"];
+    step: string | null;
+    data_json: string | null;
+    typed_data_json: string | null;
+    input_json: string | null;
+    error: string | null;
+    first_log_ts: string | null;
+    last_log_ts: string | null;
+    last_log_message: string | null;
+    run_ordinal: number;
+    screenshot_count: number;
+    first_any_ts: string;
+    first_work_ts: string | null;
+    latest_tracker_ts: string;
+  }> = [];
+  for (const row of rawEventRows) {
+    if (isTrackerStatus(row.status)) {
+      eventRows.push({ ...row, status: row.status });
+    } else {
+      log.warn(
+        `[queries] queryEntriesPayload: dropping event row with unknown status workflow=${row.workflow} itemId=${row.item_id} runId=${row.run_id} status=${String(row.status)}`,
+      );
+    }
+  }
 
-  const historyByRun = new Map<string, Array<{ timestamp: string; status: "pending" | "running" | "done" | "failed" | "skipped"; step?: string }>>();
+  const historyByRun = new Map<string, Array<{ timestamp: string; status: TrackerEntry["status"]; step?: string }>>();
   for (const row of eventRows) {
     const key = `${row.item_id}::${row.run_id}`;
     const arr = historyByRun.get(key) ?? [];
@@ -376,7 +407,7 @@ export function queryEntriesPayload(
   // One query for ALL workflows on this date, partition in JS.
   // Replaces the prior per-workflow N+1 (one prepared statement per
   // workflow per tick per connected SSE client).
-  const allLatestRows = db.prepare(`
+  const rawAllLatestRows = db.prepare(`
     SELECT workflow, latest_ts AS timestamp, item_id AS id, latest_run_id AS runId,
            latest_status AS status, latest_step AS step, latest_data_json AS data_json,
            latest_error AS error
@@ -387,11 +418,30 @@ export function queryEntriesPayload(
     timestamp: string;
     id: string;
     runId: string;
-    status: "pending" | "running" | "done" | "failed" | "skipped";
+    status: unknown;
     step?: string | null;
     data_json?: string | null;
     error?: string | null;
   }>;
+  const allLatestRows: Array<{
+    workflow: string;
+    timestamp: string;
+    id: string;
+    runId: string;
+    status: TrackerEntry["status"];
+    step?: string | null;
+    data_json?: string | null;
+    error?: string | null;
+  }> = [];
+  for (const row of rawAllLatestRows) {
+    if (isTrackerStatus(row.status)) {
+      allLatestRows.push({ ...row, status: row.status });
+    } else {
+      log.warn(
+        `[queries] queryEntriesPayload: dropping allLatest row with unknown status workflow=${row.workflow} id=${row.id} runId=${row.runId} status=${String(row.status)}`,
+      );
+    }
+  }
 
   const rowsByWorkflow = new Map<string, typeof allLatestRows>();
   for (const row of allLatestRows) {
