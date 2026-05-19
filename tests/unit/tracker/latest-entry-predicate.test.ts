@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { trackEvent } from "../../../src/tracker/jsonl.js";
+import { dateLocal, trackEvent } from "../../../src/tracker/jsonl.js";
+import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
 import { findLatestEntryForPredicate } from "../../../src/tracker/find-latest-entry.js";
 
 test("findLatestEntryForPredicate scans recent tracker files newest line first", () => {
@@ -37,6 +38,69 @@ test("findLatestEntryForPredicate scans recent tracker files newest line first",
 
     assert.equal(latest?.runId, "run-new");
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("findLatestEntryForPredicate skips invalid JSONL tracker rows", () => {
+  const dir = mkdtempSync(join(tmpdir(), "latest-entry-"));
+  try {
+    const date = dateLocal();
+    const file = join(dir, `ocr-${date}.jsonl`);
+    trackEvent({
+      workflow: "ocr",
+      timestamp: `${date}T10:00:00.000Z`,
+      id: "session-1",
+      runId: "run-ok",
+      status: "done",
+      step: "approved",
+      data: {},
+    }, dir);
+    appendFileSync(file, "{\"not\":\"a tracker entry\"}\n");
+    appendFileSync(file, "{not json}\n");
+
+    const latest = findLatestEntryForPredicate({
+      workflow: "ocr",
+      trackerDir: dir,
+      lookbackDays: 1,
+      predicate: (entry) => entry.id === "session-1" && entry.step === "approved",
+    });
+
+    assert.equal(latest?.runId, "run-ok");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("findLatestEntryForPredicate falls back to JSONL when SQLite latest_status is invalid", () => {
+  const dir = mkdtempSync(join(tmpdir(), "latest-entry-"));
+  try {
+    openStateDb(dir);
+    const date = dateLocal();
+    trackEvent({
+      workflow: "ocr",
+      timestamp: `${date}T10:00:00.000Z`,
+      id: "session-1",
+      runId: "run-ok",
+      status: "done",
+      step: "approved",
+      data: {},
+    }, dir);
+    const db = openStateDb(dir);
+    db.prepare("UPDATE runs SET latest_status = 'paused' WHERE workflow = 'ocr'").run();
+
+    const latest = findLatestEntryForPredicate({
+      workflow: "ocr",
+      trackerDir: dir,
+      lookbackDays: 1,
+      db,
+      runId: "run-ok",
+      predicate: (entry) => entry.id === "session-1" && entry.step === "approved",
+    });
+
+    assert.equal(latest?.runId, "run-ok");
+  } finally {
+    closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });
   }
 });
