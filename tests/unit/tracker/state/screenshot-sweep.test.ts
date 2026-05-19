@@ -50,10 +50,11 @@ describe("sweepStaleRunScreenshots", () => {
 
   function seedRun(
     db: ReturnType<typeof openStateDb>,
-    opts: { runId: string; itemId: string; status: TrackerEntry["status"]; ts: string },
+    opts: { workflow?: string; runId: string; itemId: string; status: TrackerEntry["status"]; ts: string },
   ): void {
+    const workflow = opts.workflow ?? "x";
     const entry: TrackerEntry = {
-      workflow: "x",
+      workflow,
       id: opts.itemId,
       runId: opts.runId,
       timestamp: opts.ts,
@@ -68,6 +69,30 @@ describe("sweepStaleRunScreenshots", () => {
       trackerDate: opts.ts.slice(0, 10),
     });
   }
+
+  it("does not delete screenshots when another workflow shares the same run_id", () => {
+    const db = openStateDb(trackerDir);
+    const ts = isoDaysAgo(45);
+    const sharedRunId = "10873698#1";
+    seedRun(db, { workflow: "eid-lookup", runId: sharedRunId, itemId: "10873698", status: "done", ts });
+    seedRun(db, { workflow: "work-study", runId: sharedRunId, itemId: "10873698", status: "running", ts });
+    const activePng = writePng(screenshotsDir, "work-study-10873698-step-sys-9000.png");
+    registerLocalFile(db, {
+      kind: "screenshot",
+      mimeType: "image/png",
+      path: activePng,
+      originalName: "work-study-10873698-step-sys-9000.png",
+      source: "test",
+      workflow: "work-study",
+      itemId: "10873698",
+      runId: sharedRunId,
+    });
+
+    const result = sweepStaleRunScreenshots(trackerDir, screenshotsDir, 30);
+
+    assert.equal(result.terminalRunFilesDeleted, 0);
+    assert.equal(existsSync(activePng), true);
+  });
 
   it("deletes screenshots for runs terminal_at > 30 days ago", () => {
     const db = openStateDb(trackerDir);

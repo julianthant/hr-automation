@@ -709,6 +709,37 @@ export function readEntriesForDate(
   return readJsonlCached<TrackerEntry>(join(dir, `${workflow}-${date}.jsonl`), { validate: isTrackerEntry });
 }
 
+/**
+ * Walk `lookbackDays` of `{workflow}-YYYY-MM-DD.jsonl` oldest→newest and return
+ * the latest line per `(id, runId)` key. Used by dashboard restart sweeps.
+ */
+export function readLatestTrackerEntriesByRunKey(
+  workflow: string,
+  dir: string = DEFAULT_DIR,
+  lookbackDays = 7,
+  now: Date = new Date(),
+): Map<string, TrackerEntry> {
+  const latestByKey = new Map<string, TrackerEntry>();
+  for (let age = lookbackDays - 1; age >= 0; age--) {
+    const d = new Date(now);
+    d.setDate(now.getDate() - age);
+    const file = join(dir, `${workflow}-${dateLocal(d)}.jsonl`);
+    if (!existsSync(file)) continue;
+    const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
+    for (const line of lines) {
+      try {
+        const parsed = JSON.parse(line) as unknown;
+        if (!isTrackerEntry(parsed)) continue;
+        const key = `${parsed.id}#${parsed.runId ?? ""}`;
+        latestByKey.set(key, parsed);
+      } catch {
+        /* tolerate malformed lines */
+      }
+    }
+  }
+  return latestByKey;
+}
+
 /** Whether this tracker row is terminal for UX/dedupe purposes (not pending/running). */
 export function isTerminalTrackerEntryStatus(e: TrackerEntry): boolean {
   return e.status === "done" || e.status === "failed" || e.status === "skipped";
