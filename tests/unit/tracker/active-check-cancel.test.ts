@@ -366,10 +366,10 @@ describe("buildCancelRunningHandler for active-check tasks", () => {
 // ── Supplemental: force-stop for active-check ─────────────────────────────
 //
 // Verifies the /api/task/force-stop path marks the active-check task as
-// cancelled, writes a force_stop_task command, and emits a tracker row.
+// cancelled, writes a cooperative cancel_task command, and emits a tracker row.
 
 describe("buildForceStopTaskHandler for active-check tasks", () => {
-  it("marks active-check task cancelled, writes force_stop_task command, and emits tracker row", async () => {
+  it("marks active-check task cancelled, writes cancel_task command, and emits tracker row", async () => {
     const control = openControlDb({ trackerDir: tmp });
     const taskStore = createTaskStore(control);
     const workerStore = createWorkerStore(control);

@@ -1,6 +1,6 @@
 import type { RegisteredWorkflow, BatchResult, RunOpts } from './types.js'
 import { Session } from './session.js'
-import { runOneItem } from './workflow.js'
+import { runOneItem } from './run-one-item.js'
 import { withBatchLifecycle } from './batch-lifecycle.js'
 import { validateAndPrepareItems, callerPreEmitsPending, awaitAllSystemsReady } from './batch-helpers.js'
 import type { PerItem } from './batch-helpers.js'
