@@ -162,7 +162,10 @@ export function recoverClaimsForDeadWorkers(
 
 function claimedFromTaskRow(db: Database, row: TaskDbRow, workerId: string): ClaimedTask {
   if (!row.current_attempt_id) throw new Error(`Task ${row.id} has no current attempt`)
-  const attempt = db.prepare('SELECT * FROM task_attempts WHERE id = ?').get(row.current_attempt_id) as { id: string; run_id: string }
+  const attempt = db.prepare('SELECT * FROM task_attempts WHERE id = ?').get(row.current_attempt_id) as { id: string; run_id: string } | undefined
+  if (!attempt) {
+    throw new Error(`claimedFromTaskRow: attempt ${row.current_attempt_id} not found for task ${row.id} (race?)`)
+  }
   const result: ClaimedTask = {
     taskId: row.id,
     attemptId: attempt.id,
