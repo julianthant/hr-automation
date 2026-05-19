@@ -1,68 +1,61 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { dateLocal } from "../../jsonl.js";
+import { readEntries, readEntriesForDate, dateLocal } from "../../jsonl.js";
 import type { TrackerEntry } from "../../jsonl.js";
 
-export function readFormType(sessionId: string, trackerDir: string | undefined): string | null {
-  const date = dateLocal();
-  const file = join(trackerDir ?? ".tracker", `ocr-${date}.jsonl`);
-  if (!existsSync(file)) return null;
-  const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    try {
-      const e: TrackerEntry = JSON.parse(lines[i]);
-      if (e.id === sessionId && typeof e.data?.formType === "string") {
-        return e.data.formType;
-      }
-    } catch { /* tolerate */ }
+const WORKFLOW = "ocr";
+const SESSION_LOOKBACK_DAYS = 7;
+
+/**
+ * Walk OCR JSONL entries for a given session newest-first across up to
+ * SESSION_LOOKBACK_DAYS days. Handles cross-midnight sessions where the
+ * session was created just before midnight and approved after.
+ */
+function walkOcrJsonl(
+  sessionId: string,
+  trackerDir: string | undefined,
+  predicate: (e: TrackerEntry) => boolean,
+): TrackerEntry | undefined {
+  const dir = trackerDir ?? ".tracker";
+  const today = new Date();
+  for (let dayOffset = 0; dayOffset < SESSION_LOOKBACK_DAYS; dayOffset++) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - dayOffset);
+    const rows = dayOffset === 0
+      ? readEntries(WORKFLOW, dir)
+      : readEntriesForDate(WORKFLOW, dateLocal(d), dir);
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const e = rows[i];
+      if (e.id === sessionId && predicate(e)) return e;
+    }
   }
-  return null;
+  return undefined;
+}
+
+export function readFormType(sessionId: string, trackerDir: string | undefined): string | null {
+  const e = walkOcrJsonl(sessionId, trackerDir, (row) => typeof row.data?.formType === "string");
+  return e ? (e.data!.formType as string) : null;
 }
 
 export function readParentRunId(sessionId: string, trackerDir: string | undefined): string | undefined {
-  const date = dateLocal();
-  const file = join(trackerDir ?? ".tracker", `ocr-${date}.jsonl`);
-  if (!existsSync(file)) return undefined;
-  const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    try {
-      const e = JSON.parse(lines[i]) as TrackerEntry;
-      if (e.id === sessionId && typeof e.parentRunId === "string" && e.parentRunId.length > 0) {
-        return e.parentRunId;
-      }
-    } catch { /* tolerate malformed lines */ }
-  }
-  return undefined;
+  const e = walkOcrJsonl(
+    sessionId,
+    trackerDir,
+    (row) => typeof row.parentRunId === "string" && row.parentRunId.length > 0,
+  );
+  return e?.parentRunId;
 }
 
 export function readOriginWorkflow(sessionId: string, trackerDir: string | undefined): string | undefined {
-  const date = dateLocal();
-  const file = join(trackerDir ?? ".tracker", `ocr-${date}.jsonl`);
-  if (!existsSync(file)) return undefined;
-  const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    try {
-      const e = JSON.parse(lines[i]) as TrackerEntry;
-      if (e.id !== sessionId) continue;
-      const v = e.data?.originWorkflow as unknown;
-      if (typeof v === "string" && v.length > 0) return v;
-    } catch { /* tolerate malformed lines */ }
-  }
-  return undefined;
+  const e = walkOcrJsonl(sessionId, trackerDir, (row) => {
+    const v = row.data?.originWorkflow as unknown;
+    return typeof v === "string" && v.length > 0;
+  });
+  return e ? (e.data!.originWorkflow as string) : undefined;
 }
 
 export function readDryRun(sessionId: string, trackerDir: string | undefined): boolean {
-  const date = dateLocal();
-  const file = join(trackerDir ?? ".tracker", `ocr-${date}.jsonl`);
-  if (!existsSync(file)) return false;
-  const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    try {
-      const e = JSON.parse(lines[i]) as TrackerEntry;
-      if (e.id !== sessionId) continue;
-      const value = e.data?.dryRun;
-      if (value === "true" || value === "1") return true;
-    } catch { /* tolerate malformed lines */ }
-  }
-  return false;
+  const e = walkOcrJsonl(sessionId, trackerDir, (row) => {
+    const v = row.data?.dryRun;
+    return v === "true" || v === "1";
+  });
+  return e !== undefined;
 }
