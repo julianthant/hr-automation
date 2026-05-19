@@ -50,6 +50,7 @@ import {
   startWorkerTickInterval,
   type WorkerCommandContext,
 } from './worker-commands.js'
+import { createDaemonItemAuthTimingResolver } from './auth-timing.js'
 
 export interface DaemonOpts {
   trackerDir?: string
@@ -269,6 +270,13 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
       },
       async ({ instance, markTerminated, makeObserver }) => {
         state.workflowInstanceForCleanup = instance
+        // --- auth-timing region (startup) ----------------------------------------
+        // Session launch + observer wiring + per-system auth completion live here.
+        // auth-start/success/failed session events emit via createBatchObserver
+        // (makeObserver); per-item synthetic auth rows are resolved in the claim
+        // loop via createDaemonItemAuthTimingResolver (auth-timing.ts). Left
+        // inline because launch error handling, phase transitions, and
+        // activeSession/onReady hooks share this closure's state.
         const { observer, getAuthTimings } = makeObserver('1')
         setPhase('authenticating')
         let session: Session
@@ -318,18 +326,12 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           throw e
         }
 
-        // Snapshot the real auth timings now that every system has finished
-        // authenticating. We inject these into the FIRST queued item only so
-        // its step pipeline shows the actual per-system Duo durations. Every
-        // subsequent item gets synthesized zero-duration timings anchored at
-        // its own claim time — auth really was free for those items (the
-        // daemon reuses the session), so "Authenticating (4) — 0s" is the
-        // truthful display. Passing the real startup timings to item #N would
-        // re-stamp synthetic auth rows at daemon-start time and drag the
-        // entry's firstLogTs minutes/hours into the past, inflating its
-        // elapsed timer by the full queue-wait gap.
-        const startupAuthTimings = wf.config.authSteps !== false ? getAuthTimings() : undefined
-        let firstItemClaimed = false
+        const itemAuthTimingResolver = createDaemonItemAuthTimingResolver(
+          getAuthTimings,
+          wf.config.authSteps !== false,
+          wf.config.systems,
+        )
+        // --- end auth-timing region (startup) ------------------------------------
 
         // Closing any window (user intent) or a browser crash should terminate
         // the daemon — a daemon whose browsers are gone can't serve queued
@@ -410,21 +412,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
               registerBrowserProcesses()
               emitWorkerHeartbeat()
               state.lastActivity = Date.now()
-              // First item gets the real startup auth timings; subsequent
-              // items get zero-duration synthetic timings anchored at claim
-              // time so the step pipeline tiles "Authenticating (4) — 0s"
-              // instead of "—" without dragging the entry's anchor back to
-              // daemon-start.
-              let itemAuthTimings = startupAuthTimings
-              if (firstItemClaimed && wf.config.authSteps !== false) {
-                const claimTs = Date.now()
-                itemAuthTimings = wf.config.systems.map((sys) => ({
-                  systemId: sys.id,
-                  startTs: claimTs,
-                  endTs: claimTs,
-                }))
-              }
-              firstItemClaimed = true
+              const itemAuthTimings = itemAuthTimingResolver.resolveForNextItem()
               emitItemStart(instance, item.id, trackerDir, runId)
               const r = await runOneItem({
                 wf,

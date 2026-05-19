@@ -26,6 +26,7 @@ See root `CLAUDE.md` for a user-facing kernel primer + minimal example. This doc
 - `queue.ts` — `enqueueItems`, `claimNextItem`, `markItemDone`/`Failed`/`Cancelled`, `unclaimItem`, `recoverOrphanedClaims`, `readQueueState`.
 - `client.ts` — `ensureDaemonsAndEnqueue(wf, inputs, flags, opts)` — the ONE function every daemon-mode CLI adapter calls.
 - `daemon.ts` — `runWorkflowDaemon(wf, opts)`: long-running daemon main loop. HTTP surface: `GET /whoami`, `POST /wake`, `POST /stop`.
+- `auth-timing.ts` — daemon-only auth timing rotation: `snapshotStartupAuthTimings`, `buildClaimAnchoredAuthTimings`, `createDaemonItemAuthTimingResolver`. Startup session launch + observer wiring stays inline in `daemon.ts`.
 - `http.ts` — daemon HTTP server (express-like minimal server for control surface).
 - `worker-store.ts` — daemon/dashboard worker rows, heartbeat, `worker_commands`, `browser_processes`.
 - `keepalive.ts` — idle healthcheck + stale-worker recovery tick.
