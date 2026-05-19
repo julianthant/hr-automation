@@ -9,8 +9,8 @@ import { cn } from "@/lib/utils";
  * (`Active Check 1`, `EID Lookup 2`, …). Uses `data.batchDisplayOrdinal` from
  * members when present; otherwise a short parent id suffix for pre-ordinal rows.
  *
- * When `titleOverride` is provided and non-empty (e.g. the prep parent's
- * `data.__name` like `"Oath Signature · #1234"`), it takes precedence over all
+ * When `titleOverride` is provided and non-empty (for example an inherited
+ * delegated-batch label like `"Oath · 1234"`), it takes precedence over all
  * computed fallbacks.
  */
 export function resolveDaemonBatchQueueTitle(

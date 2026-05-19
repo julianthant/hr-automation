@@ -6,6 +6,7 @@ import {
   buildDisplayNameEntries,
   collectEntriesForMergedScope,
   mergedGroupPeersForLogPanel,
+  resolveEntryId,
   resolveEntryName,
 } from "../../../src/dashboard/components/shared/entry-display.js";
 import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
@@ -88,7 +89,7 @@ test("buildDisplayNameMap ordinals OCR prep rows using OATH / EMPL prefixes from
   assert.equal(resolveEntryName(second, displayNames), "EMPL 1");
 });
 
-test("OCR rows with parentSubject use the batch label instead of OATH/EMPL", () => {
+test("OCR parent rows use parentSubject while lookup children keep person titles", () => {
   const ocrRow = entry(
     "ocr-session-1",
     {
@@ -116,7 +117,72 @@ test("OCR rows with parentSubject use the batch label instead of OATH/EMPL", () 
   const displayNames = buildDisplayNameMap([child, ocrRow], "OCR");
 
   assert.equal(resolveEntryName(ocrRow, displayNames), "Oath Signature · #1234");
-  assert.equal(resolveEntryName(child, displayNames), "Oath Signature · #1234");
+  assert.equal(resolveEntryName(child, displayNames), "Barahona Martell, Carlos D");
+});
+
+test("delegated OCR prep rows use PDF name as title and inherited Oath title as footer id", () => {
+  const entry = {
+    workflow: "ocr",
+    id: "ocr-session-1",
+    runId: "ocr-run-1",
+    parentRunId: "oath-parent-run",
+    timestamp: "2026-05-18T12:00:00.000Z",
+    status: "running",
+    data: {
+      archetype: "batch-parent",
+      mode: "prepare",
+      pdfOriginalName: "packet.pdf",
+      __queueTitle: "Oath · 1234",
+      __queueTitleKind: "batch",
+      __queueRootTitle: "Oath · 1234",
+      __name: "Oath · 1234",
+      __id: "ocr-session-1",
+    },
+  } as const;
+
+  const names = buildDisplayNameMap([entry], "OCR");
+  assert.equal(resolveEntryName(entry as never, names), "packet.pdf");
+  assert.equal(resolveEntryId(entry as never), "Oath · 1234");
+});
+
+test("dispatch rows can show an explicit queue subtitle", () => {
+  const entry = {
+    workflow: "oath-signature",
+    id: "ocr-prep-1-request",
+    runId: "req-run",
+    parentRunId: "parent-run",
+    timestamp: "2026-05-18T12:00:00.000Z",
+    status: "done",
+    data: {
+      archetype: "dispatch",
+      __name: "Delegation Request",
+      __queueSubtitle: "Oath request sent",
+      __queueRootTitle: "Oath · 1234",
+      parentSubject: "Oath · 1234",
+    },
+  } as const;
+
+  assert.equal(resolveEntryId(entry as never), "Oath request sent");
+});
+
+test("delegated person rows keep the person name instead of inheriting the parent title", () => {
+  const row = entry("10874100", {
+    archetype: "delegate-child",
+    name: "Barahona Martell, Carlos D",
+    emplId: "10874100",
+    __name: "Barahona Martell, Carlos D",
+    __id: "10874100",
+    __queueTitle: "Oath · 1234",
+    __queueTitleKind: "delegation",
+    __queueRootTitle: "Oath · 1234",
+    parentSubject: "Oath · 1234",
+  });
+  row.workflow = "oath-signature";
+  row.parentRunId = "ocr-run-1";
+
+  const displayNames = buildDisplayNameMap([row], "Oath Signature");
+
+  assert.equal(resolveEntryName(row, displayNames), "Barahona Martell, Carlos D");
 });
 
 test("batch rows display the global queue title", () => {
@@ -133,7 +199,7 @@ test("batch rows display the global queue title", () => {
   assert.equal(resolveEntryName(row, displayNames), "Oath · #90ab");
 });
 
-test("delegated rows inherit root queue title even with employee name", () => {
+test("delegated person rows prefer employee name over root queue title", () => {
   const parent = entry("ocr-session-1", {
     __queueTitle: "Emergency Contact · #3456",
     __queueTitleKind: "batch",
@@ -154,10 +220,10 @@ test("delegated rows inherit root queue title even with employee name", () => {
   const displayNames = buildDisplayNameMap([child, parent], "OCR");
 
   assert.equal(resolveEntryName(parent, displayNames), "Emergency Contact · #3456");
-  assert.equal(resolveEntryName(child, displayNames), "Emergency Contact · #3456");
+  assert.equal(resolveEntryName(child, displayNames), "Doe, Jane");
 });
 
-test("delegated rows inherit the parent display name", () => {
+test("delegated utility person rows keep their own person display name", () => {
   const firstParent = entry("ocr-session-1", { __id: "ocr-session-1", formType: "oath" }, "2026-05-05T12:00:00.000Z");
   firstParent.workflow = "ocr";
   firstParent.runId = "ocr-run-1";
@@ -175,10 +241,10 @@ test("delegated rows inherit the parent display name", () => {
 
   assert.equal(resolveEntryName(firstParent, displayNames), "OATH 1");
   assert.equal(resolveEntryName(secondParent, displayNames), "EMPL 1");
-  assert.equal(resolveEntryName(child, displayNames), "OATH 1");
+  assert.equal(resolveEntryName(child, displayNames), "Barahona Martell, Carlos D");
 });
 
-test("delegated rows inherit a single visible parent label even when the child has its own employee name", () => {
+test("delegated final oath-signature rows keep their own person display name", () => {
   const parent = entry(
     "ocr-session-single",
     { __id: "ocr-session-single", formType: "oath" },
@@ -201,14 +267,14 @@ test("delegated rows inherit a single visible parent label even when the child h
   const displayNames = buildDisplayNameMap([child, parent], "OCR");
 
   assert.equal(resolveEntryName(parent, displayNames), "OATH 1");
-  assert.equal(resolveEntryName(child, displayNames), "OATH 1");
+  assert.equal(resolveEntryName(child, displayNames), "Barahona Martell, Carlos D");
 });
 
-test("nested delegated rows inherit the root parent display name (prepare-mode parent gets no ordinal suffix)", () => {
+test("nested delegated rows inherit the root parent PDF display name", () => {
   const parent = entry(
     "ocr-prep-session-nested",
     {
-      __name: "Oath Signature · #sted",
+      __name: "Oath · sted",
       __id: "ocr-prep-session-nested",
       mode: "prepare",
       pdfOriginalName: "oath-packet.pdf",
@@ -241,9 +307,9 @@ test("nested delegated rows inherit the root parent display name (prepare-mode p
 
   const displayNames = buildDisplayNameMap([eidGrandchild, ocrChild, parent], "Oath Signature");
 
-  assert.equal(resolveEntryName(parent, displayNames), "Oath Signature · #sted");
-  assert.equal(resolveEntryName(ocrChild, displayNames), "Oath Signature · #sted");
-  assert.equal(resolveEntryName(eidGrandchild, displayNames), "Oath Signature · #sted");
+  assert.equal(resolveEntryName(parent, displayNames), "oath-packet.pdf");
+  assert.equal(resolveEntryName(ocrChild, displayNames), "oath-packet.pdf");
+  assert.equal(resolveEntryName(eidGrandchild, displayNames), "Barahona Martell, Carlos D");
 });
 
 test("buildDisplayNameEntries includes delegated parents for visible single child rows", () => {
@@ -282,7 +348,7 @@ test("buildDisplayNameEntries includes delegated parents for visible single chil
     new Set(entriesForNames.map((row) => row.runId)),
     new Set(["ocr-run-single", "10000001#1"]),
   );
-  assert.equal(resolveEntryName(child, displayNames), "OATH 1");
+  assert.equal(resolveEntryName(child, displayNames), "Barahona Martell, Carlos D");
 });
 
 test("collectEntriesForMergedScope includes hidden merged siblings for bulk controls", () => {

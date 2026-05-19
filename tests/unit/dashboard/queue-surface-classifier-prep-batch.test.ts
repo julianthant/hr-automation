@@ -21,23 +21,10 @@ function prepParent(overrides: Partial<TrackerEntry> = {}): TrackerEntry {
   } as TrackerEntry;
 }
 
-function requestChild(): TrackerEntry {
-  return {
-    workflow: "oath-signature",
-    timestamp: "2026-05-14T06:00:00Z",
-    id: "ocr-prep-abc-request",
-    runId: "parent-1234-req",
-    parentRunId: "parent-1234",
-    status: "done",
-    step: "delegated",
-    data: { __name: "Oath Signature Request", __id: "ocr-prep-abc-request" },
-  } as TrackerEntry;
-}
-
-test("pre-approval prep parent + 1 request child renders as batch surface", () => {
+test("pre-approval prep parent renders as batch surface without request child rows", () => {
   const surfaces = buildQueueSurfaces({
-    entries: [prepParent(), requestChild()],
-    delegationSourceEntries: [requestChild()],
+    entries: [prepParent()],
+    delegationSourceEntries: [],
     workflow: "oath-signature",
     workflowLabel: "Oath Signature",
   });
@@ -46,7 +33,7 @@ test("pre-approval prep parent + 1 request child renders as batch surface", () =
   assert.equal(surfaces.flatEntries.length, 0);
 });
 
-test("post-approval prep parent + request + N kernel children stays grouped", () => {
+test("post-approval prep parent + multiple kernel children stays grouped", () => {
   const approved = prepParent({ status: "done", step: "approved" });
   const child1: TrackerEntry = {
     workflow: "oath-signature",
@@ -62,14 +49,28 @@ test("post-approval prep parent + request + N kernel children stays grouped", ()
       parentSubject: "Oath Signature · #1234",
     },
   } as TrackerEntry;
+  const child2: TrackerEntry = {
+    workflow: "oath-signature",
+    timestamp: "2026-05-14T06:00:00Z",
+    id: "10874101",
+    runId: "kernel-2",
+    parentRunId: "parent-1234",
+    status: "running",
+    data: {
+      __name: "Oath Signature · #1234",
+      __id: "10874101",
+      emplId: "10874101",
+      parentSubject: "Oath Signature · #1234",
+    },
+  } as TrackerEntry;
   const surfaces = buildQueueSurfaces({
-    entries: [approved, requestChild(), child1],
-    delegationSourceEntries: [requestChild(), child1],
+    entries: [approved, child1, child2],
+    delegationSourceEntries: [child1, child2],
     workflow: "oath-signature",
     workflowLabel: "Oath Signature",
   });
   assert.equal(surfaces.groupRows.length, 1);
-  assert.ok(surfaces.groupRows[0]!.members.length >= 2);
+  assert.equal(surfaces.groupRows[0]!.members.length, 2);
 });
 
 test("prep parent with 0 members still renders as group surface (not flat)", () => {

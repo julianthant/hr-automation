@@ -124,6 +124,8 @@ async function handlePrepare(
   const sessionId = requestedSessionId ?? (isReupload ? undefined : randomUUID());
   const previousRunId = fields.previousRunId?.trim() || undefined;
   const originWorkflow = fields.originWorkflow?.trim() || undefined;
+  const originBatchRunId = fields.originBatchRunId?.trim() || undefined;
+  const originBatchSubject = fields.originBatchSubject?.trim() || undefined;
   const dryRun = fields.dryRun === "true" || fields.dryRun === "1";
   const pdfOriginalName = file.filename ?? pdfFilename;
   let pdfFileId: string | undefined;
@@ -156,6 +158,8 @@ async function handlePrepare(
     previousRunId,
     isReupload,
     originWorkflow,
+    originBatchRunId,
+    originBatchSubject,
     dryRun,
   });
   return jsonResponse(result.body, result.status);

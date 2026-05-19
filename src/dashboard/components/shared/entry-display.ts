@@ -55,6 +55,11 @@ export function resolveEntryName(
   const fromMap = displayNames?.get(entry.id);
   if (fromMap) return fromMap;
   const d = entry.data ?? {};
+  if (d.mode === "prepare" && d.pdfOriginalName) return d.pdfOriginalName;
+  if (entry.parentRunId) {
+    const personName = resolveEmployeeLabel(d);
+    if (personName) return personName;
+  }
   const queueTitle = readQueueTitle(d);
   if (queueTitle) return queueTitle;
   return resolveEmployeeLabel(d) || d.__name || d.__subject || "";
@@ -107,11 +112,14 @@ export function deduplicateByResolvedId(entries: TrackerEntry[]): TrackerEntry[]
  */
 export function resolveEntryId(entry: TrackerEntry): string {
   const d = entry.data ?? {};
-  // Dispatch rows ("Oath Signature Request") use the group context label
-  // (e.g. "Oath · #6444") as the secondary footer ID rather than the
-  // technical request item ID.
+  // Dispatch rows use the group context label as the secondary footer ID
+  // rather than the technical request item ID.
   if (resolveRowArchetype(entry) === "dispatch") {
+    if (d.__queueSubtitle) return d.__queueSubtitle;
     return d.__queueRootTitle || d.parentSubject || d.__id || entry.id;
+  }
+  if (d.mode === "prepare" && d.pdfOriginalName) {
+    return readQueueTitle(d) || d.parentSubject || d.__name || d.__id || entry.id;
   }
   return d.__id || d.__name || entry.id;
 }
@@ -156,6 +164,13 @@ export function buildDisplayNameMap(
 ): Map<string, string> {
   const displayFor = (e: TrackerEntry): { base: string; ordinal: boolean; explicitWorkflowName: boolean } => {
     const d = e.data ?? {};
+    if (d.mode === "prepare" && d.pdfOriginalName) {
+      return { base: d.pdfOriginalName, ordinal: false, explicitWorkflowName: false };
+    }
+    const personName = resolveEmployeeLabel(d);
+    if (e.parentRunId && personName) {
+      return { base: personName, ordinal: false, explicitWorkflowName: false };
+    }
     const queueTitle = readQueueTitle(d);
     if (queueTitle) {
       return {
@@ -164,13 +179,12 @@ export function buildDisplayNameMap(
         explicitWorkflowName: d.__queueTitleKind === "batch" || d.__queueTitleKind === "delegation",
       };
     }
-    const personName = resolveEmployeeLabel(d);
     if (personName) return { base: personName, ordinal: false, explicitWorkflowName: false };
     const parentSubject = firstNonBlank(d.parentSubject);
     if (parentSubject) return { base: parentSubject, ordinal: false, explicitWorkflowName: true };
     const ocrBase = ocrQueueDisplayBase(e);
     if (ocrBase) return { base: ocrBase, ordinal: true, explicitWorkflowName: true };
-    // Batch-parent rows already have a unique batch id in __name (e.g. "Oath Signature · #7596").
+    // Batch-parent rows already have a unique batch id in __name (e.g. "Oath · 7596").
     // No ordinal suffix needed. OCR batch-parent rows are handled above by ocrQueueDisplayBase.
     if (resolveRowArchetype(e) === "batch-parent") {
       const workflowName = firstNonBlank(d.__name);
@@ -248,11 +262,20 @@ export function buildDisplayNameMap(
   };
   for (const e of sorted) {
     if (!e.parentRunId) continue;
+    const d = e.data as Record<string, string> | undefined;
+    if (d?.mode === "prepare" && d.pdfOriginalName) {
+      result.set(e.id, d.pdfOriginalName);
+      continue;
+    }
+    const ownPersonName = d ? resolveEmployeeLabel(d) : "";
+    if (ownPersonName) {
+      result.set(e.id, ownPersonName);
+      continue;
+    }
     const parentLabel = resolveRootLabel(e.parentRunId);
     if (!parentLabel) continue;
-    // Dispatch rows are named notification rows (e.g. "Oath Signature Request") —
-    // keep their own __name rather than inheriting the parent batch label.
-    const d = e.data as Record<string, string> | undefined;
+    // Dispatch rows are named notification rows; keep their own __name rather
+    // than inheriting the parent batch label.
     if (resolveRowArchetype(e) === "dispatch") {
       const ownName = firstNonBlank(d?.__name);
       if (ownName) {

@@ -1,17 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { trackEvent, appendLogEntry } from "../../jsonl.js";
-import { batchQueueTitle, queueTitleData, rootQueueTitleData } from "../../../domain/queue-title.js";
+import { batchQueueTitle, queueTitleData } from "../../../domain/queue-title.js";
 import { log, withLogContext, setLogRunId } from "../../../utils/log.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
 import { runOcrOrchestrator, type OcrOrchestratorOpts } from "../../../workflows/ocr/orchestrator.js";
 import { errorMessage } from "../../../utils/errors.js";
 import { hasSessionLock, acquireSessionLock, releaseSessionLock } from "./lock.js";
 import { clearOcrPrepareAbort, isOperatorDiscardAbortError } from "../../ocr-prepare-abort.js";
-import { getByName, autoLabel } from "../../../core/index.js";
-
-function workflowDisplayLabel(workflowName: string): string {
-  return getByName(workflowName)?.label ?? autoLabel(workflowName);
-}
 
 function batchTypeLabelForForm(formType: string | undefined): string {
   if (formType === "oath") return "Oath";
@@ -20,6 +15,7 @@ function batchTypeLabelForForm(formType: string | undefined): string {
 }
 
 function prepBatchQueueTitle(formType: string | undefined, runId: string): string {
+  if (formType === "oath") return `${batchTypeLabelForForm(formType)} · ${runId.slice(-4)}`;
   return batchQueueTitle(batchTypeLabelForForm(formType), runId);
 }
 
@@ -51,6 +47,13 @@ export interface PrepareInput {
    * just to inspect the result, no downstream side effects.
    */
   originWorkflow?: string;
+  /**
+   * Optional dashboard-only grouping id. Multi-file upload uses this to group
+   * N single-file prepare rows under one batch card without changing OCR or
+   * downstream workflow behavior.
+   */
+  originBatchRunId?: string;
+  originBatchSubject?: string;
 }
 
 export interface PrepareResponse {
@@ -70,6 +73,8 @@ interface OriginPrepContext {
   originWorkflow: string;
   parentItemId: string;
   parentRunId: string;
+  originBatchRunId?: string;
+  originBatchSubject?: string;
   pdfOriginalName: string;
   formType: string;
 }
@@ -130,6 +135,8 @@ export function buildOcrPrepareHandler(
         originWorkflow: origin,
         parentItemId: `ocr-prep-${sessionId}`,
         parentRunId: randomUUID(),
+        ...(input.originBatchRunId ? { originBatchRunId: input.originBatchRunId } : {}),
+        ...(input.originBatchSubject ? { originBatchSubject: input.originBatchSubject } : {}),
         pdfOriginalName: input.pdfOriginalName,
         formType: input.formType,
       };
@@ -137,6 +144,8 @@ export function buildOcrPrepareHandler(
         originWorkflow: originPrep.originWorkflow,
         parentItemId: originPrep.parentItemId,
         parentRunId: originPrep.parentRunId,
+        ...(originPrep.originBatchRunId ? { originBatchRunId: originPrep.originBatchRunId } : {}),
+        ...(originPrep.originBatchSubject ? { originBatchSubject: originPrep.originBatchSubject } : {}),
         pdfOriginalName: input.pdfOriginalName,
         formType: input.formType,
         ocrSessionId: sessionId,
@@ -230,6 +239,8 @@ function writeOriginParentPending(args: {
   originWorkflow: string;
   parentItemId: string;
   parentRunId: string;
+  originBatchRunId?: string;
+  originBatchSubject?: string;
   pdfOriginalName: string;
   formType?: string;
   ocrSessionId: string;
@@ -239,7 +250,7 @@ function writeOriginParentPending(args: {
   dryRun?: boolean;
 }): void {
   const ts = new Date().toISOString();
-  const queueTitle = prepBatchQueueTitle(args.formType, args.parentRunId);
+  const queueTitle = args.originBatchSubject ?? prepBatchQueueTitle(args.formType, args.parentRunId);
   // mode: "prepare" hooks the parent into the existing prep-row machinery
   // so post-approval the row is auto-extracted from the regular queue and
   // folded into a DelegationRow with its kernel children (which inherit
@@ -265,6 +276,7 @@ function writeOriginParentPending(args: {
       timestamp: ts,
       id: args.parentItemId,
       runId: args.parentRunId,
+      ...(args.originBatchRunId ? { parentRunId: args.originBatchRunId } : {}),
       status: "pending",
       data: baseData,
     },
@@ -276,6 +288,7 @@ function writeOriginParentPending(args: {
       timestamp: ts,
       id: args.parentItemId,
       runId: args.parentRunId,
+      ...(args.originBatchRunId ? { parentRunId: args.originBatchRunId } : {}),
       status: "running",
       // Step name aligns with `oath-signature` workflow's first declared
       // step ("ocr") so the StepPipeline highlights it as the live step on
@@ -319,59 +332,6 @@ function writeOriginParentPending(args: {
     },
     args.trackerDir,
   );
-
-  // Emit a child "Request" row that marks the delegation dispatch as done.
-  // This row nests under the parent (parentRunId) and inherits parentSubject
-  // so future siblings (fan-out items) can display the anchor name in their data.
-  const requestItemId = `${args.parentItemId}-request`;
-  const requestRunId = `${args.parentRunId}-req`;
-  const requestName = `${workflowDisplayLabel(args.originWorkflow)} Request`;
-  const requestData: Record<string, string> = {
-    __name: requestName,
-    __id: requestItemId,
-    archetype: "dispatch",
-    ...rootQueueTitleData(queueTitle),
-    pdfOriginalName: args.pdfOriginalName,
-    ocrSessionId: args.ocrSessionId,
-    ocrRunId: args.ocrRunId,
-    requestRole: "delegation-dispatch",
-  };
-  trackEvent(
-    {
-      workflow: args.originWorkflow,
-      timestamp: ts,
-      id: requestItemId,
-      runId: requestRunId,
-      parentRunId: args.parentRunId,
-      status: "pending",
-      data: requestData,
-    },
-    args.trackerDir,
-  );
-  trackEvent(
-    {
-      workflow: args.originWorkflow,
-      timestamp: ts,
-      id: requestItemId,
-      runId: requestRunId,
-      parentRunId: args.parentRunId,
-      status: "done",
-      step: "delegated",
-      data: requestData,
-    },
-    args.trackerDir,
-  );
-  appendLogEntry(
-    {
-      workflow: args.originWorkflow,
-      itemId: requestItemId,
-      runId: requestRunId,
-      level: "success",
-      message: `Dispatched OCR delegation (session=${args.ocrSessionId.slice(0, 8)}…).`,
-      ts,
-    },
-    args.trackerDir,
-  );
 }
 
 function writeOriginParentPrepFailed(args: OriginPrepContext & {
@@ -380,7 +340,7 @@ function writeOriginParentPrepFailed(args: OriginPrepContext & {
   detail: string;
 }): void {
   const ts = new Date().toISOString();
-  const queueTitle = prepBatchQueueTitle(args.formType, args.parentRunId);
+  const queueTitle = args.originBatchSubject ?? prepBatchQueueTitle(args.formType, args.parentRunId);
   const baseData: Record<string, string> = {
     __name: queueTitle,
     __id: args.parentItemId,
@@ -398,6 +358,7 @@ function writeOriginParentPrepFailed(args: OriginPrepContext & {
       timestamp: ts,
       id: args.parentItemId,
       runId: args.parentRunId,
+      ...(args.originBatchRunId ? { parentRunId: args.originBatchRunId } : {}),
       status: "failed",
       error: `OCR prep failed — ${args.detail}`,
       data: baseData,

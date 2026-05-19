@@ -63,6 +63,8 @@ export interface RunModalConfig {
   sections: RunModalSections;
   /** Sonner toast emitted on a successful submit. */
   buildSuccessToast: (resp: RunModalSubmitResponse, file: File) => RunModalToast;
+  /** Allow selecting and submitting multiple PDFs as grouped single-file runs. */
+  allowMultipleFiles?: boolean;
   /**
    * If set, the workflow's run modal locks the OCR `formType` to this value
    * — picker is hidden, the field is force-injected on submit. Used so
@@ -82,6 +84,7 @@ export const RUN_MODAL_REGISTRY: Record<string, RunModalConfig> = {
       reuploadFor ? "/api/ocr/reupload" : "/api/ocr/prepare",
     sections: { roster: true, dryRun: true },
     lockedFormType: "emergency-contact",
+    allowMultipleFiles: true,
     buildSuccessToast: (_resp, file) => ({
       title: "Preparation started",
       description: file.name,
@@ -95,6 +98,7 @@ export const RUN_MODAL_REGISTRY: Record<string, RunModalConfig> = {
       reuploadFor ? "/api/ocr/reupload" : "/api/ocr/prepare",
     sections: { roster: true, dryRun: true },
     lockedFormType: "oath",
+    allowMultipleFiles: true,
     buildSuccessToast: (_resp, file) => ({
       title: "Preparation started",
       description: file.name,
@@ -113,6 +117,7 @@ export const RUN_MODAL_REGISTRY: Record<string, RunModalConfig> = {
     // so dry-run is meaningless here. Delegations from oath-signature /
     // emergency-contact / oath-upload keep their own dry-run toggles.
     sections: { roster: true, formType: true },
+    allowMultipleFiles: true,
     buildSuccessToast: (_resp, file) => ({
       title: "Preparation started",
       description: file.name,
@@ -128,6 +133,7 @@ export const RUN_MODAL_REGISTRY: Record<string, RunModalConfig> = {
     // Roster picker is required because oath-upload delegates to OCR, which needs
     // a roster to match the OCR'd names → EIDs before fanning out oath-signature.
     sections: { roster: true, duplicateCheck: true, dryRun: true, oathUploadMode: true },
+    allowMultipleFiles: true,
     buildSuccessToast: (resp, file) => ({
       title: resp.sessionId
         ? `Oath upload queued — session ${resp.sessionId.slice(0, 8)}`

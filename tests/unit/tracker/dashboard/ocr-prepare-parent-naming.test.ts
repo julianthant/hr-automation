@@ -34,10 +34,10 @@ test("writeOriginParentPending writes Oath batch queue title fields", () => {
     const rows = readJsonl(join(dir, `oath-signature-${todayLocal()}.jsonl`));
     assert.ok(rows.length >= 1);
     const pending = rows[0] as { data: Record<string, string> };
-    assert.equal(pending.data.__name, "Oath · #90ab");
-    assert.equal(pending.data.__queueTitle, "Oath · #90ab");
+    assert.equal(pending.data.__name, "Oath · 90ab");
+    assert.equal(pending.data.__queueTitle, "Oath · 90ab");
     assert.equal(pending.data.__queueTitleKind, "batch");
-    assert.equal(pending.data.__queueRootTitle, "Oath · #90ab");
+    assert.equal(pending.data.__queueRootTitle, "Oath · 90ab");
     assert.equal(pending.data.pdfOriginalName, "Xerox Scan.pdf");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -68,7 +68,7 @@ test("emergency-contact prep uses the registry label too", () => {
   }
 });
 
-test("writeOriginParentPending emits a 'Oath Signature Request' child row marked done", () => {
+test("writeOriginParentPending does not emit a synthetic request child row", () => {
   const dir = mkdtempSync(join(tmpdir(), "ocr-prep-req-"));
   try {
     writeOriginParentPending({
@@ -82,19 +82,47 @@ test("writeOriginParentPending emits a 'Oath Signature Request' child row marked
       trackerDir: dir,
     });
     const rows = readJsonl(join(dir, `oath-signature-${todayLocal()}.jsonl`));
-    // Find the request child rows by parentRunId
     const childRows = rows.filter(
       (r) => (r as { parentRunId?: string }).parentRunId === "parent-run-9999",
     );
-    assert.ok(childRows.length >= 2, "expected at least pending+done child rows");
-    const doneChild = childRows.find(
-      (r) => (r as { status?: string }).status === "done",
-    ) as { status: string; parentRunId: string; data: Record<string, string> } | undefined;
-    assert.ok(doneChild, "expected a done child row");
-    assert.equal(doneChild!.data.__name, "Oath Signature Request");
-    assert.equal(doneChild!.data.parentSubject, "Oath · #9999");
-    assert.equal(doneChild!.data.__queueRootTitle, "Oath · #9999");
-    assert.equal(doneChild!.data.__queueTitleKind, "delegation");
+    assert.equal(childRows.length, 0, "origin prep parent should be the only queue-panel row");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("writeOriginParentPending groups multi-file oath uploads without reusing file run ids", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ocr-prep-group-"));
+  try {
+    writeOriginParentPending({
+      originWorkflow: "oath-signature",
+      parentItemId: "ocr-prep-file-1",
+      parentRunId: "file-run-1111",
+      originBatchRunId: "batch-run-9999",
+      originBatchSubject: "Oath · 9999",
+      pdfOriginalName: "first.pdf",
+      formType: "oath",
+      ocrSessionId: "sess-1",
+      ocrRunId: "ocr-run-1",
+      trackerDir: dir,
+    });
+
+    const rows = readJsonl(join(dir, `oath-signature-${todayLocal()}.jsonl`));
+    const parent = rows.find(
+      (r) => (r as { id?: string; status?: string }).id === "ocr-prep-file-1" && (r as { status?: string }).status === "running",
+    ) as { runId: string; parentRunId?: string; data: Record<string, string> } | undefined;
+    const requestRows = rows.filter(
+      (r) => String((r as { id?: string }).id ?? "").endsWith("-request"),
+    );
+
+    assert.ok(parent, "expected grouped file parent row");
+    assert.equal(parent.runId, "file-run-1111");
+    assert.equal(parent.parentRunId, "batch-run-9999");
+    assert.equal(parent.data.__name, "Oath · 9999");
+    assert.equal(parent.data.__queueRootTitle, "Oath · 9999");
+    assert.equal(parent.data.pdfOriginalName, "first.pdf");
+
+    assert.deepEqual(requestRows, [], "multi-file prep should not emit request child rows");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

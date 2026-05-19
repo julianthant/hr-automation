@@ -92,7 +92,7 @@ describe("buildQueueSurfaces", () => {
     assert.equal(surfaces.flatEntries[0]?.parentRunId, "ocr-run-single");
   });
 
-  it("surfaces a single OCR-fan-out eid-lookup child as a passive-delegation card", () => {
+  it("surfaces a single OCR-fan-out eid-lookup child as a flat delegation member", () => {
     const eid = row({
       workflow: "eid-lookup",
       id: "ocr-oath-run-1-r0",
@@ -103,7 +103,7 @@ describe("buildQueueSurfaces", () => {
         searchName: "Barahona Martell, Carlos D",
         taskRole: "child",
         originWorkflow: "ocr",
-        parentSubject: "Oath Signature · #1234",
+        parentSubject: "Oath · 1234",
       },
     });
 
@@ -114,12 +114,8 @@ describe("buildQueueSurfaces", () => {
       workflowLabel: "Oath Signature",
     });
 
-    assert.equal(surfaces.groupRows.length, 1);
-    assert.equal(surfaces.groupRows[0]?.kind, "passive-delegation");
-    assert.equal(surfaces.groupRows[0]?.parentRunId, "ocr-run-1");
-    assert.equal(surfaces.groupRows[0]?.titleOverride, "Oath Signature · #1234");
-    assert.deepEqual(surfaces.groupRows[0]?.members.map((entry) => entry.id), ["ocr-oath-run-1-r0"]);
-    assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), []);
+    assert.equal(surfaces.groupRows.length, 0);
+    assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), ["ocr-oath-run-1-r0"]);
   });
 
   it("classifies non-approval parentRunId groups as batch rows", () => {
@@ -256,6 +252,65 @@ describe("buildQueueSurfaces", () => {
 
     assert.equal(surfaces.groupRows.length, 0);
     assert.equal(surfaces.flatEntries.length, 0);
+  });
+
+  it("surfaces a single delegated OCR prepare row as a flat entry", () => {
+    const ocr = row({
+      workflow: "ocr",
+      id: "ocr-session-single",
+      runId: "ocr-run-single",
+      parentRunId: "oath-upload-run-single",
+      status: "running",
+      step: "awaiting-approval",
+      data: { mode: "prepare", formType: "oath", pdfOriginalName: "single-oath.pdf" },
+    });
+
+    const surfaces = buildQueueSurfaces({
+      entries: [ocr],
+      delegationSourceEntries: [ocr],
+      workflow: "ocr",
+      workflowLabel: "OCR",
+    });
+
+    assert.equal(surfaces.groupRows.length, 0);
+    assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), ["ocr-session-single"]);
+  });
+
+  it("folds multiple delegated OCR prepare rows into one upstream batch row", () => {
+    const first = row({
+      workflow: "ocr",
+      id: "ocr-session-first",
+      runId: "ocr-run-first",
+      parentRunId: "oath-upload-run-batch",
+      status: "running",
+      step: "awaiting-approval",
+      data: { mode: "prepare", formType: "oath", pdfOriginalName: "first.pdf" },
+    });
+    const second = row({
+      workflow: "ocr",
+      id: "ocr-session-second",
+      runId: "ocr-run-second",
+      parentRunId: "oath-upload-run-batch",
+      status: "running",
+      step: "awaiting-approval",
+      data: { mode: "prepare", formType: "oath", pdfOriginalName: "second.pdf" },
+    });
+
+    const surfaces = buildQueueSurfaces({
+      entries: [first, second],
+      delegationSourceEntries: [first, second],
+      workflow: "ocr",
+      workflowLabel: "OCR",
+    });
+
+    assert.equal(surfaces.groupRows.length, 1);
+    assert.equal(surfaces.groupRows[0]?.kind, "batch");
+    assert.equal(surfaces.groupRows[0]?.parentRunId, "oath-upload-run-batch");
+    assert.deepEqual(surfaces.groupRows[0]?.members.map((entry) => entry.id), [
+      "ocr-session-first",
+      "ocr-session-second",
+    ]);
+    assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), []);
   });
 
   for (const origin of ["oath-upload", "oath-signature", "emergency-contact"] as const) {

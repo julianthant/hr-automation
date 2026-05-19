@@ -201,11 +201,88 @@ describe("buildTrackerQueueSurfaces", () => {
       delegationSourceEntries: [oauthUpload, ocrPrepRow],
     });
 
-    // OCR row becomes its own group card; oath-upload appears flat
+    // A single delegated OCR row stays flat; the important guard is that a
+    // batch-parent is never folded into its own approval members.
     const groupParentRunIds = result.groupRows.map((g) => g.parentRunId);
-    assert.ok(groupParentRunIds.includes("ocr-child-run"), "OCR prep row should be a group card");
+    assert.ok(!groupParentRunIds.includes("ocr-child-run"), "OCR prep row should not self-group");
     const flatIds = result.flatEntries.map((e) => e.id);
-    assert.ok(!flatIds.includes("ocr-child"), "OCR prep row should not appear flat");
+    assert.ok(flatIds.includes("ocr-child"), "single delegated OCR prep row should appear flat");
+  });
+
+  it("surfaces one delegated OCR batch-parent as a flat single delegation row", () => {
+    const ocrPrepRow = entry({
+      workflow: "ocr",
+      id: "ocr-single",
+      runId: "ocr-single-run",
+      parentRunId: "oath-upload-run",
+      status: "running",
+      step: "awaiting-approval",
+      data: { archetype: "batch-parent", mode: "prepare", formType: "oath" },
+    });
+
+    const result = buildTrackerQueueSurfaces({
+      entries: [ocrPrepRow],
+      delegationSourceEntries: [ocrPrepRow],
+    });
+
+    assert.equal(result.groupRows.length, 0);
+    assert.deepEqual(result.flatEntries.map((e) => e.id), ["ocr-single"]);
+  });
+
+  it("folds multiple delegated OCR batch-parents into the upstream batch row with inherited title", () => {
+    const first = entry({
+      workflow: "ocr",
+      id: "ocr-first",
+      runId: "ocr-first-run",
+      parentRunId: "oath-upload-run",
+      status: "running",
+      step: "awaiting-approval",
+      data: { archetype: "batch-parent", mode: "prepare", formType: "oath", parentSubject: "Oath · 7777" },
+    });
+    const second = entry({
+      workflow: "ocr",
+      id: "ocr-second",
+      runId: "ocr-second-run",
+      parentRunId: "oath-upload-run",
+      status: "running",
+      step: "awaiting-approval",
+      data: { archetype: "batch-parent", mode: "prepare", formType: "oath", parentSubject: "Oath · 7777" },
+    });
+
+    const result = buildTrackerQueueSurfaces({
+      entries: [first, second],
+      delegationSourceEntries: [first, second],
+    });
+
+    assert.equal(result.groupRows.length, 1);
+    assert.equal(result.groupRows[0]?.kind, "batch");
+    assert.equal(result.groupRows[0]?.parentRunId, "oath-upload-run");
+    assert.equal(result.groupRows[0]?.titleOverride, "Oath · 7777");
+    assert.deepEqual(result.groupRows[0]?.members.map((e) => e.id), ["ocr-first", "ocr-second"]);
+    assert.deepEqual(result.flatEntries.map((e) => e.id), []);
+  });
+
+  it("surfaces OCR eid lookup fan-out as flat delegation member rows", () => {
+    const child = entry({
+      workflow: "eid-lookup",
+      id: "lookup-1",
+      runId: "lookup-run-1",
+      parentRunId: "ocr-run-1",
+      status: "pending",
+      data: {
+        archetype: "delegate-child",
+        originWorkflow: "ocr",
+        parentSubject: "Oath · 1234",
+      },
+    });
+
+    const result = buildTrackerQueueSurfaces({
+      entries: [],
+      delegationSourceEntries: [child],
+    });
+
+    assert.equal(result.groupRows.length, 0);
+    assert.deepEqual(result.flatEntries.map((e) => e.id), ["lookup-1"]);
   });
 
   it("surfaces passive-child archetype members as passive-delegation cards", () => {

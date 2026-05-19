@@ -15,6 +15,8 @@ export interface DaemonBatchRowProps {
   batchParentRunId: string;
   /** Workflow label for display (kernel registry). */
   workflowLabel: string;
+  /** Optional inherited display title for delegated batches. */
+  titleOverride?: string;
   memberEntries: TrackerEntry[];
   isBatchQueueFocused: boolean;
   onEnterBatchQueue: (batchParentRunId: string) => void;
@@ -36,6 +38,7 @@ export function DaemonBatchRow({
   date,
   batchParentRunId,
   workflowLabel,
+  titleOverride,
   memberEntries,
   isBatchQueueFocused,
   onEnterBatchQueue,
@@ -60,8 +63,8 @@ export function DaemonBatchRow({
     [memberEntries],
   );
   const title = useMemo(
-    () => resolveDaemonBatchQueueTitle(workflowLabel, memberEntries, batchParentRunId),
-    [workflowLabel, memberEntries, batchParentRunId],
+    () => resolveDaemonBatchQueueTitle(workflowLabel, memberEntries, batchParentRunId, titleOverride),
+    [workflowLabel, memberEntries, batchParentRunId, titleOverride],
   );
 
   async function deleteEntireBatch(e: MouseEvent<HTMLButtonElement>) {
@@ -207,7 +210,7 @@ export function DaemonBatchRow({
       parentRunId={batchParentRunId}
       members={memberEntries}
       countTone="neutral"
-      footerSecondaryId={batchParentRunId}
+      footerSecondaryId={titleOverride ? undefined : batchParentRunId}
       firstTimestamp={firstTimestamp}
       isFocused={isBatchQueueFocused}
       drillInEnabled={batchDrillInEnabled}

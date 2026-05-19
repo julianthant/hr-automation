@@ -66,10 +66,11 @@ export const oathSignatureWorkflow = defineWorkflow({
   operatorSubject: (input) =>
     buildOperatorSubject({ kind: "eid", value: input.emplId, prefix: "Oath Signature" }),
   handler: async (ctx, input) => {
-    const oathCtx: OathSignatureContext = { employeeName: "", alreadyHasOath: false };
+    const oathCtx: OathSignatureContext = { employeeName: input.name ?? "", alreadyHasOath: false };
 
     ctx.updateData({
       emplId: input.emplId,
+      ...(input.name ? { name: input.name } : {}),
       ...(input.date ? { date: input.date } : {}),
       ...(input.dryRun ? { dryRun: true } : {}),
     });
@@ -149,9 +150,11 @@ function buildOathSignaturePendingData(item: OathSignatureInput): Record<string,
   const queueFields = parentSubject ? rootQueueTitleData(parentSubject) : {};
   return {
     emplId: item.emplId,
+    ...(item.name ? { name: item.name } : {}),
     ...(item.date ? { date: item.date } : {}),
     ...(item.dryRun ? { dryRun: "true" } : {}),
-    ...(parentSubject ? { __name: parentSubject } : {}),
+    __name: item.name ?? item.emplId,
+    __id: item.emplId,
     ...queueFields,
   };
 }
