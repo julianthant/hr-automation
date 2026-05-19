@@ -8,15 +8,15 @@
 export type RowArchetype =
   /** One item, one row. Flat in the queue. Workflows: work-study, oath-signature (direct CLI run), active-check. */
   | "single"
-  /** Anchor row over N peers. Legacy fallback: `data.mode === "prepare"`. Emitted by OCR prep, oath-upload root. */
+  /** Anchor row over N peers. Emitted by OCR prep, oath-upload root. */
   | "batch-parent"
   /** Peer item under a batch-parent. Emitted by emergency-contact records, oath-signature batch members. */
   | "batch-member"
-  /** Terminal-at-enqueue row recording "I delegated to N children in another workflow." Legacy fallback: `data.requestRole === "delegation-dispatch"`. */
+  /** Terminal-at-enqueue row recording "I delegated to N children in another workflow." */
   | "dispatch"
-  /** Child run spawned from a parent in a different workflow; holds operator attention. Legacy fallback: `data.taskRole === "child" && originWorkflow`. */
+  /** Child run spawned from a parent in a different workflow; holds operator attention. */
   | "delegate-child"
-  /** Collapsed delegate-child rendered as a sub-row inside its parent's card; never holds operator attention. Legacy fallback: `data.taskRole === "utility" && originWorkflow`. */
+  /** Collapsed delegate-child rendered as a sub-row inside its parent's card; never holds operator attention. */
   | "passive-child";
 
 /**
@@ -50,42 +50,21 @@ export function archetypeRowTypeLabel(archetype: RowArchetype): string {
   return LABELS[archetype];
 }
 
-interface LegacyEntry {
-  workflow?: string;
-  id?: string;
+interface ResolveEntry {
   parentRunId?: string;
   data?: Record<string, unknown> | null;
 }
 
 /**
- * Read `data.archetype` when present; otherwise infer from legacy fields so
- * pre-archetype JSONL rows still classify correctly. Once all readers are
- * migrated and on-disk rows have aged out, the legacy branches can be removed.
- *
- * Fallback ordering (only used when `data.archetype` is missing):
- *  1. `data.requestRole === "delegation-dispatch"` → `dispatch`
- *  2. `data.mode === "prepare"` OR (`entry.workflow === "ocr"` && !parentRunId) → `batch-parent`
- *  3. `data.taskRole === "utility" && originWorkflow` → `passive-child`
- *  4. `data.taskRole === "child" && originWorkflow` → `delegate-child`
- *  5. `entry.parentRunId` present → `batch-member`
- *  6. Otherwise → `single`
+ * Read `data.archetype` when present and valid; otherwise default to
+ * `delegate-child` when `parentRunId` is set, or `single` — matching
+ * `deriveRowArchetype("single", parentRunId)` in the absence of workflow info.
  */
-export function resolveRowArchetype(entry: LegacyEntry): RowArchetype {
+export function resolveRowArchetype(entry: ResolveEntry): RowArchetype {
   const stamped = entry.data?.archetype;
   if (typeof stamped === "string" && isRowArchetype(stamped)) return stamped;
 
-  const data = entry.data ?? {};
-  const taskRole = typeof data.taskRole === "string" ? data.taskRole : undefined;
-  const requestRole = typeof data.requestRole === "string" ? data.requestRole : undefined;
-  const originWorkflow = typeof data.originWorkflow === "string" ? data.originWorkflow : undefined;
-  const mode = typeof data.mode === "string" ? data.mode : undefined;
-
-  if (requestRole === "delegation-dispatch") return "dispatch";
-  if (mode === "prepare" || (entry.workflow === "ocr" && !entry.parentRunId)) return "batch-parent";
-  if (taskRole === "utility" && originWorkflow) return "passive-child";
-  if (taskRole === "child" && originWorkflow) return "delegate-child";
-  if (entry.parentRunId) return "batch-member";
-  return "single";
+  return entry.parentRunId ? "delegate-child" : "single";
 }
 
 function isRowArchetype(v: string): v is RowArchetype {
