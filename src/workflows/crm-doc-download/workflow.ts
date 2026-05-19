@@ -63,7 +63,6 @@ export const crmDocDownloadWorkflow = defineWorkflow({
       ...(input.parentSubject ? { parentSubject: input.parentSubject } : {}),
       ...(input.parentRunId ? { parentRunId: input.parentRunId } : {}),
       ...(input.taskGroupId ? { taskGroupId: input.taskGroupId } : {}),
-      taskRole: input.originWorkflow ? "utility" : "root",
     });
 
     const page = await ctx.page("crm");
@@ -127,7 +126,6 @@ function buildCrmDocDownloadPendingData(input: CrmDocDownloadInput): Record<stri
   return {
     ...(input.email ? { email: input.email } : {}),
     ...(input.emplId ? { emplId: input.emplId } : {}),
-    taskRole: "root",
   };
 }
 

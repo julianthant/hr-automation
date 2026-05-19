@@ -320,7 +320,7 @@ async function activeStatusStep<TSteps extends readonly string[]>(
 export const eidLookupCrmWorkflow = defineWorkflow({
   name: "eid-lookup",
   label: "EID Lookup",
-  archetype: "batch",
+  archetype: "utility",
   category: "Utils",
   iconName: "Search",
   systems: [
