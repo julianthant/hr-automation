@@ -8,10 +8,12 @@ import { openStateDb, closeStateDbForTests } from "../../../src/tracker/state/db
 import { trackEvent, appendLogEntry } from "../../../src/tracker/jsonl.js";
 import {
   queryEntriesPayload,
+  queryProjectionHealth,
   queryPriorEntriesByKey,
   queryRunsForItem,
   selectLogsForRun,
   selectRunEventsForRun,
+  mapRunEventRowToWire,
 } from "../../../src/tracker/state/queries.js";
 
 function tmpTracker(): string {
@@ -140,6 +142,75 @@ test("queryEntriesPayload wfCounts carries emplId from earlier events when lates
       1,
       "SQLite rail count respects cross-event emplId carry + merge-by-emplId",
     );
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("mapRunEventRowToWire drops invalid typedData entries from projected rows", () => {
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    trackEvent({
+      workflow: "typed-check",
+      timestamp: "2026-05-11T10:00:00.000Z",
+      id: "typed-1",
+      runId: "run-1",
+      status: "running",
+      data: { good: "42", bad: "legacy" },
+    }, dir);
+    const db = openStateDb(dir);
+    db.prepare("UPDATE run_events SET typed_data_json = ?").run(JSON.stringify({
+      good: { type: "number", value: "42" },
+      bad: "legacy",
+      wrongValue: { type: "boolean", value: true },
+    }));
+    const row = selectRunEventsForRun(db, {
+      workflow: "typed-check",
+      trackerDate: "2026-05-11",
+      itemId: "typed-1",
+      runId: "run-1",
+    })[0];
+    const entry = mapRunEventRowToWire(row);
+    assert.deepEqual(entry.typedData, { good: { type: "number", value: "42" } });
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("queryProjectionHealth reports schemaVersion 0 when schema_version row is missing", () => {
+  const dir = tmpTracker();
+  try {
+    const db = openStateDb(dir);
+    db.prepare("DELETE FROM schema_version").run();
+    const health = queryProjectionHealth(db, dir);
+    assert.equal(health.schemaVersion, 0);
+    assert.equal(health.ok, true);
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("queryEntriesPayload skips wfCount rows with unknown status", () => {
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    const day = "2026-05-12";
+    trackEvent({
+      workflow: "status-check",
+      timestamp: `${day}T10:00:00.000Z`,
+      id: "status-1",
+      runId: "run-1",
+      status: "pending",
+      data: {},
+    }, dir);
+    const db = openStateDb(dir);
+    db.prepare("UPDATE items SET latest_status = 'paused' WHERE workflow = 'status-check'").run();
+    const payload = queryEntriesPayload(db, { workflow: "status-check", date: day });
+    assert.equal(payload.wfCounts["status-check"], 0);
   } finally {
     closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });

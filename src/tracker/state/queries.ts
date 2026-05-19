@@ -7,7 +7,8 @@ import { stateDbPath } from "./db.js";
 import type { SessionEvent } from "../session-events.js";
 import { groupMergedTrackerEntries } from "../queue-row-count.js";
 import { countTopLevelQueueSurfaceRows } from "../queue-surfaces.js";
-import type { LogEntry, TrackerEntry } from "../jsonl.js";
+import type { LogEntry, TrackerEntry, TypedValue } from "../jsonl.js";
+import { log } from "../../utils/log.js";
 
 function parseJsonObject<T>(raw: string | null | undefined, fallback: T): T {
   if (!raw) return fallback;
@@ -15,6 +16,65 @@ function parseJsonObject<T>(raw: string | null | undefined, fallback: T): T {
     return JSON.parse(raw) as T;
   } catch {
     return fallback;
+  }
+}
+
+const TRACKER_STATUSES = new Set<TrackerEntry["status"]>(["pending", "running", "done", "failed", "skipped"]);
+const TYPED_VALUE_TYPES = new Set<TypedValue["type"]>(["string", "number", "boolean", "date", "null"]);
+
+function isTrackerStatus(value: unknown): value is TrackerEntry["status"] {
+  return typeof value === "string" && TRACKER_STATUSES.has(value as TrackerEntry["status"]);
+}
+
+function isTypedValue(value: unknown): value is TypedValue {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const typed = value as { type?: unknown; value?: unknown };
+  if (typeof typed.type !== "string" || !TYPED_VALUE_TYPES.has(typed.type as TypedValue["type"])) {
+    return false;
+  }
+  if (typed.type === "null") return typed.value === "";
+  return typeof typed.value === "string";
+}
+
+function validateTypedDataMap(
+  raw: unknown,
+  ctx: { mapper: string; rowId: string | number; sourcePath?: string | null; sourceLine?: number | null },
+): Record<string, TypedValue> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    log.warn(
+      `[queries] ${ctx.mapper}: dropping non-object typed_data_json for row=${ctx.rowId}` +
+        `${ctx.sourcePath ? ` source=${ctx.sourcePath}:${ctx.sourceLine ?? "?"}` : ""} payload=${JSON.stringify(raw)}`,
+    );
+    return undefined;
+  }
+
+  const out: Record<string, TypedValue> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (isTypedValue(value)) {
+      out[key] = value;
+    } else {
+      log.warn(
+        `[queries] ${ctx.mapper}: dropping non-TypedValue entry for row=${ctx.rowId} key=${key}` +
+          `${ctx.sourcePath ? ` source=${ctx.sourcePath}:${ctx.sourceLine ?? "?"}` : ""} payload=${JSON.stringify(value)}`,
+      );
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function parseTypedDataJson(
+  raw: string | null | undefined,
+  ctx: { mapper: string; rowId: string | number; sourcePath?: string | null; sourceLine?: number | null },
+): Record<string, TypedValue> | undefined {
+  if (!raw) return undefined;
+  try {
+    return validateTypedDataMap(JSON.parse(raw) as unknown, ctx);
+  } catch (err) {
+    log.warn(
+      `[queries] ${ctx.mapper}: failed to parse typed_data_json for row=${ctx.rowId}` +
+        `${ctx.sourcePath ? ` source=${ctx.sourcePath}:${ctx.sourceLine ?? "?"}` : ""}: ${(err as Error).message}`,
+    );
+    return undefined;
   }
 }
 
@@ -70,7 +130,7 @@ function patchItemDataWithCarriedEmpl(
 }
 
 export function queryProjectionHealth(db: Database, dir: string): ProjectionHealth {
-  const version = db.prepare("SELECT version FROM schema_version WHERE id = 1").get() as { version: number };
+  const version = db.prepare("SELECT version FROM schema_version WHERE id = 1").get() as { version: number } | undefined;
   const sourceCount = db.prepare("SELECT COUNT(*) AS n FROM projection_sources").get() as { n: number };
   const runEventCount = db.prepare("SELECT COUNT(*) AS n FROM run_events").get() as { n: number };
   const logCount = db.prepare("SELECT COUNT(*) AS n FROM logs").get() as { n: number };
@@ -78,7 +138,7 @@ export function queryProjectionHealth(db: Database, dir: string): ProjectionHeal
   return {
     ok: true,
     dbPath: stateDbPath(dir),
-    schemaVersion: version.version,
+    schemaVersion: version?.version ?? 0,
     sourceCount: sourceCount.n,
     runEventCount: runEventCount.n,
     logCount: logCount.n,
@@ -133,6 +193,12 @@ export function selectRunEventsForRun(
 }
 
 export function mapRunEventRowToWire(row: RunEventRow): TrackerEntry {
+  const typedData = parseTypedDataJson(row.typed_data_json, {
+    mapper: "mapRunEventRowToWire",
+    rowId: row.id,
+    sourcePath: row.source_path,
+    sourceLine: row.source_line,
+  });
   return {
     workflow: row.workflow,
     timestamp: row.event_ts,
@@ -142,7 +208,7 @@ export function mapRunEventRowToWire(row: RunEventRow): TrackerEntry {
     status: row.status as TrackerEntry["status"],
     ...(row.step ? { step: row.step } : {}),
     data: parseJsonObject(row.data_json, {}),
-    ...(row.typed_data_json ? { typedData: parseJsonObject(row.typed_data_json, {}) } : {}),
+    ...(typedData ? { typedData } : {}),
     ...(row.input_json ? { input: parseJsonObject(row.input_json, {}) } : {}),
     ...(row.error ? { error: row.error } : {}),
   };
@@ -164,6 +230,7 @@ export function queryEntriesPayload(
     WHERE re.workflow = @workflow AND re.tracker_date = @date
     ORDER BY re.event_ms ASC, re.id ASC
   `).all({ workflow: opts.workflow, date: opts.date }) as Array<{
+    id: number;
     workflow: string;
     event_ts: string;
     item_id: string;
@@ -197,6 +264,10 @@ export function queryEntriesPayload(
     const key = `${row.item_id}::${row.run_id}`;
     const firstLogTs = pickEarlier(row.first_log_ts ?? undefined, row.first_work_ts ?? row.first_any_ts);
     const lastLogTs = pickLater(row.last_log_ts ?? undefined, row.latest_tracker_ts);
+    const typedData = parseTypedDataJson(row.typed_data_json, {
+      mapper: "queryEntriesPayload",
+      rowId: row.id,
+    });
     return {
       workflow: row.workflow,
       timestamp: row.event_ts,
@@ -206,7 +277,7 @@ export function queryEntriesPayload(
       status: row.status,
       ...(row.step ? { step: row.step } : {}),
       data: parseJsonObject(row.data_json, {}),
-      ...(row.typed_data_json ? { typedData: parseJsonObject(row.typed_data_json, {}) } : {}),
+      ...(typedData ? { typedData } : {}),
       ...(row.input_json ? { input: parseJsonObject(row.input_json, {}) } : {}),
       ...(row.error ? { error: row.error } : {}),
       firstLogTs,
@@ -225,7 +296,7 @@ export function queryEntriesPayload(
   const resolvedEmplFromDay = resolvedEmplIdMapFromRunEvents(db, opts.date);
 
   const wfCounts: Record<string, number> = {};
-  const wfCountRows = db.prepare(`
+  const rawWfCountRows = db.prepare(`
     SELECT i.workflow, i.item_id AS id, i.latest_run_id AS runId,
            r.parent_run_id AS parent_run_id,
            i.latest_status AS status, i.latest_step AS step, i.latest_ts AS timestamp,
@@ -242,12 +313,32 @@ export function queryEntriesPayload(
     id: string;
     runId: string;
     parent_run_id: string | null;
-    status: "pending" | "running" | "done" | "failed" | "skipped";
+    status: unknown;
     step: string | null;
     timestamp: string;
     data_json: string | null;
     error: string | null;
   }>;
+  const wfCountRows: Array<{
+    workflow: string;
+    id: string;
+    runId: string;
+    parent_run_id: string | null;
+    status: TrackerEntry["status"];
+    step: string | null;
+    timestamp: string;
+    data_json: string | null;
+    error: string | null;
+  }> = [];
+  for (const row of rawWfCountRows) {
+    if (isTrackerStatus(row.status)) {
+      wfCountRows.push({ ...row, status: row.status });
+    } else {
+      log.warn(
+        `[queries] queryEntriesPayload: dropping wfCount row with unknown status workflow=${row.workflow} row=${row.id} runId=${row.runId} status=${String(row.status)}`,
+      );
+    }
+  }
 
   const rowsByWorkflowForCount = new Map<string, typeof wfCountRows>();
   for (const row of wfCountRows) {
