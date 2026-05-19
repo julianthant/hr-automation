@@ -190,36 +190,67 @@ function mergePrepRecordRows(
 // Wire the per-record editor renderers into the registry once at module
 // load. Done here (not in the registry file) so the registry stays a plain
 // `.ts` and avoids a circular dep on `components/ocr/`.
-setOcrDownstreamRenderer("ocr", ({ record, onChange, onForceResearch, isResearching }) => (
-  <EcRecordView
-    record={record as PreviewRecord}
-    onChange={(next) => onChange(next)}
-    onForceResearch={
-      onForceResearch ? (rec) => onForceResearch(rec as AnyOcrPreviewRecord) : undefined
-    }
-    isResearching={isResearching}
-  />
-));
-setOcrDownstreamRenderer("emergency-contact", ({ record, onChange, onForceResearch, isResearching }) => (
-  <EcRecordView
-    record={record as PreviewRecord}
-    onChange={(next) => onChange(next)}
-    onForceResearch={
-      onForceResearch ? (rec) => onForceResearch(rec as AnyOcrPreviewRecord) : undefined
-    }
-    isResearching={isResearching}
-  />
-));
-setOcrDownstreamRenderer("oath-signature", ({ record, onChange, onForceResearch, isResearching }) => (
-  <OathRecordView
-    record={record as OathPreviewRecord}
-    onChange={(next) => onChange(next)}
-    onForceResearch={
-      onForceResearch ? (rec) => onForceResearch(rec as AnyOcrPreviewRecord) : undefined
-    }
-    isResearching={isResearching}
-  />
-));
+// Narrow on record.formKind so the unknown-formType fallthrough in
+// resolveOcrConfigForEntry (which defaults to the EC config when
+// data.formType is missing or unrecognized) doesn't route an oath-shaped
+// record into EcRecordView and crash on record.employee.name. The
+// "ocr" registration is the fallback used by direct OCR-workflow rows;
+// the per-variant registrations are picked when the OCR row has a known
+// downstream workflow.
+setOcrDownstreamRenderer("ocr", ({ record, onChange, onForceResearch, isResearching }) => {
+  if (record.formKind === "oath") {
+    return (
+      <OathRecordView
+        record={record}
+        onChange={(next) => onChange(next)}
+        onForceResearch={onForceResearch ? (rec) => onForceResearch(rec) : undefined}
+        isResearching={isResearching}
+      />
+    );
+  }
+  return (
+    <EcRecordView
+      record={record}
+      onChange={(next) => onChange(next)}
+      onForceResearch={onForceResearch ? (rec) => onForceResearch(rec) : undefined}
+      isResearching={isResearching}
+    />
+  );
+});
+setOcrDownstreamRenderer("emergency-contact", ({ record, onChange, onForceResearch, isResearching }) => {
+  if (record.formKind !== "emergency-contact") {
+    console.error(
+      "[OcrReviewPane] emergency-contact renderer received non-EC record",
+      { formKind: record.formKind },
+    );
+    return null;
+  }
+  return (
+    <EcRecordView
+      record={record}
+      onChange={(next) => onChange(next)}
+      onForceResearch={onForceResearch ? (rec) => onForceResearch(rec) : undefined}
+      isResearching={isResearching}
+    />
+  );
+});
+setOcrDownstreamRenderer("oath-signature", ({ record, onChange, onForceResearch, isResearching }) => {
+  if (record.formKind !== "oath") {
+    console.error(
+      "[OcrReviewPane] oath-signature renderer received non-oath record",
+      { formKind: record.formKind },
+    );
+    return null;
+  }
+  return (
+    <OathRecordView
+      record={record}
+      onChange={(next) => onChange(next)}
+      onForceResearch={onForceResearch ? (rec) => onForceResearch(rec) : undefined}
+      isResearching={isResearching}
+    />
+  );
+});
 
 /**
  * Legacy stacked layout (toolbar + body). Prefer {@link OcrReviewPrepProvider} +
@@ -481,7 +512,7 @@ function useOcrReviewPrepApi(
   function addBlankRow(page: number): void {
     if (!cfg) return;
     const onPageCount = recordRows.filter(
-      (e) => (e.record as { sourcePage: number }).sourcePage === page,
+      (e) => e.record.sourcePage === page,
     ).length;
     const indexSet = new Set<number>();
     baseRecords.forEach((_, i) => indexSet.add(i));
@@ -490,22 +521,55 @@ function useOcrReviewPrepApi(
       if (Number.isFinite(i)) indexSet.add(i);
     }
     const nextIndex = Math.max(-1, ...indexSet) + 1;
-    const blank = {
-      sourcePage: page,
-      rowIndex: onPageCount,
-      printedName: "",
-      employeeId: "",
-      matchState: "lookup-pending",
-      matchSource: "manual",
-      selected: false,
-      employeeSigned: true,
-      officerSigned: null,
-      dateSigned: null,
-      notes: [],
-      documentType: "expected",
-      originallyMissing: [],
-      warnings: [],
-    } as unknown as AnyPreviewRecord;
+    // Per-variant blank: oath rows expect printedName / employeeSigned / etc.;
+    // EC rows expect employee / emergencyContact subtrees. Mixing them
+    // (the pre-2026-05-18 single-shape blank) injected oath-shaped rows into
+    // EC sessions and the server then rejected the approve. `satisfies` here
+    // forces TS to verify each branch against its variant's full required
+    // field set — do NOT downgrade to `as` if a future field is added.
+    let blank: AnyPreviewRecord;
+    if (cfg.formKind === "oath") {
+      blank = {
+        formKind: "oath",
+        sourcePage: page,
+        rowIndex: onPageCount,
+        printedName: "",
+        employeeId: "",
+        matchState: "lookup-pending",
+        matchSource: "manual",
+        selected: false,
+        employeeSigned: true,
+        officerSigned: null,
+        dateSigned: null,
+        notes: [],
+        documentType: "expected",
+        originallyMissing: [],
+        warnings: [],
+      } satisfies OathPreviewRecord;
+    } else {
+      // EC's PreviewRecord.matchSource union excludes "manual" / "form-eid"
+      // (backend Zod is `z.enum(["form", "roster", "eid-lookup", "llm"])`),
+      // so leave matchSource undefined on operator-added blanks — the
+      // operator fills the EID/name and the next eid-lookup or approve
+      // path sets the real matchSource.
+      blank = {
+        formKind: "emergency-contact",
+        sourcePage: page,
+        employee: { name: "", employeeId: "" },
+        emergencyContact: {
+          name: "",
+          relationship: "",
+          primary: true,
+          sameAddressAsEmployee: true,
+        },
+        notes: [],
+        matchState: "lookup-pending",
+        selected: false,
+        warnings: [],
+        documentType: "expected",
+        originallyMissing: [],
+      } satisfies PreviewRecord;
+    }
     setLocalEdits((prev) => ({ ...prev, [nextIndex]: blank }));
   }
 
