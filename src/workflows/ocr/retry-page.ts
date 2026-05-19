@@ -21,7 +21,9 @@ import type { RosterRow as MatchRosterRow } from "../../services/matching/match.
 import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
 import { trackEvent, dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
-import { patchOcrRecordFromEidLookupOutcome } from "./eid-lookup-results.js";
+import { patchOcrRecordFromEidLookupOutcome } from "../../services/ocr/eid-lookup-results.js";
+import { flattenForData } from "../../services/ocr/tracker-data.js";
+import { countVerified } from "../../services/ocr/records-stats.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
 import type { AnyOcrFormSpec, RosterRow as OcrRosterRow } from "./types.js";
 import { extractOcrRecordEid, extractOcrRecordName } from "./record-helpers.js";
@@ -472,19 +474,6 @@ function emitRow(args: {
   });
 }
 
-function flattenForData(d: Record<string, unknown>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(d)) {
-    if (v === undefined || v === null) continue;
-    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
-      out[k] = String(v);
-    } else {
-      try { out[k] = JSON.stringify(v); } catch { out[k] = String(v); }
-    }
-  }
-  return out;
-}
-
 function patchUnresolved(records: unknown[], idx: number): void {
   const rec = records[idx] as Record<string, unknown>;
   if (rec.matchState === "lookup-pending" || rec.matchState === "lookup-running") {
@@ -495,11 +484,3 @@ function patchUnresolved(records: unknown[], idx: number): void {
   }
 }
 
-function countVerified(records: unknown[]): number {
-  let n = 0;
-  for (const r of records) {
-    const v = (r as Record<string, unknown>).verification as { state?: string } | undefined;
-    if (v?.state === "verified") n++;
-  }
-  return n;
-}

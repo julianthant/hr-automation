@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { resolveParentSubject } from "../../../../src/workflows/ocr/orchestrator.js";
+import { resolveParentSubject } from "../../../../src/services/ocr/parent-subject.js";
 
 function todayLocal(): string {
   const d = new Date();

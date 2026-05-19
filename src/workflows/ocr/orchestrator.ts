@@ -26,7 +26,10 @@ import {
   patchOcrRecordFromEidLookupOutcome,
   patchOcrRecordUnresolved,
   type OcrLookupKind,
-} from "./eid-lookup-results.js";
+} from "../../services/ocr/eid-lookup-results.js";
+import { flattenForData } from "../../services/ocr/tracker-data.js";
+import { countVerified } from "../../services/ocr/records-stats.js";
+import { resolveParentSubject } from "../../services/ocr/parent-subject.js";
 import type { AnyOcrFormSpec, RosterRow as OcrRosterRow } from "./types.js";
 import { extractOcrRecordEid, extractOcrRecordName } from "./record-helpers.js";
 import type { OcrInput } from "./schema.js";
@@ -1013,19 +1016,6 @@ async function runFanOutPhase(fanOpts: FanOutOpts): Promise<void> {
   await waitForChildRuns();
 }
 
-function flattenForData(d: Record<string, unknown>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(d)) {
-    if (v === undefined || v === null) continue;
-    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
-      out[k] = String(v);
-    } else {
-      try { out[k] = JSON.stringify(v); } catch { out[k] = String(v); }
-    }
-  }
-  return out;
-}
-
 const OCR_READER_LOOKBACK_DAYS = 7;
 
 function readPreviousRecords(
@@ -1131,29 +1121,3 @@ function disambigQueryFromRecord(record: unknown): string {
   return "";
 }
 
-function countVerified(records: unknown[]): number {
-  let n = 0;
-  for (const r of records) {
-    const v = (r as Record<string, unknown>).verification as { state?: string } | undefined;
-    if (v?.state === "verified") n++;
-  }
-  return n;
-}
-
-export function resolveParentSubject(args: {
-  parentRunId: string | undefined;
-  originWorkflow: string | undefined;
-  trackerDir?: string;
-}): string | undefined {
-  if (!args.parentRunId || !args.originWorkflow) return undefined;
-  const match = findLatestEntryForPredicate({
-    workflow: args.originWorkflow,
-    trackerDir: args.trackerDir,
-    lookbackDays: OCR_READER_LOOKBACK_DAYS,
-    predicate: (e) =>
-      e.runId === args.parentRunId &&
-      typeof e.data?.__name === "string" &&
-      e.data.__name.length > 0,
-  });
-  return match?.data?.__name;
-}
