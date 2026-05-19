@@ -1,6 +1,5 @@
-import { Pencil } from "lucide-react";
-import type { ReactNode } from "react";
 import type { OathPreviewRecord } from "./types";
+import { RecordField } from "./shared/RecordField";
 
 export interface OathRecordViewProps {
   record: OathPreviewRecord;
@@ -11,35 +10,6 @@ export interface OathRecordViewProps {
 
 function isMissing(record: OathPreviewRecord, fieldKey: string): boolean {
   return record.originallyMissing?.includes(fieldKey) ?? false;
-}
-
-function MissingFlag({ visible }: { visible: boolean }) {
-  if (!visible) return null;
-  return (
-    <span title="Was blank on paper — please add to physical form" className="inline-flex">
-      <Pencil className="h-3 w-3 text-warning" aria-hidden />
-    </span>
-  );
-}
-
-function Field({
-  label,
-  missing,
-  children,
-}: {
-  label: string;
-  missing?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="inline-flex items-center gap-1.5 font-mono text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-        <MissingFlag visible={missing ?? false} />
-      </span>
-      {children}
-    </label>
-  );
 }
 
 /**
@@ -54,24 +24,24 @@ export function OathRecordView({ record, onChange }: OathRecordViewProps) {
 
   return (
     <div className="flex flex-col gap-3">
-      <Field label="Empl ID" missing={isMissing(record, "employeeId")}>
+      <RecordField label="Empl ID" missing={isMissing(record, "employeeId")}>
         <input
           type="text"
           value={record.employeeId}
           onChange={(e) => onChange({ ...record, employeeId: e.target.value })}
           className="form-input font-mono"
         />
-      </Field>
-      <Field label="Printed Name" missing={isMissing(record, "printedName")}>
+      </RecordField>
+      <RecordField label="Printed Name" missing={isMissing(record, "printedName")}>
         <input
           type="text"
           value={record.printedName}
           onChange={(e) => onChange({ ...record, printedName: e.target.value })}
           className="form-input"
         />
-      </Field>
+      </RecordField>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Date Signed" missing={isMissing(record, "dateSigned")}>
+        <RecordField label="Date Signed" missing={isMissing(record, "dateSigned")}>
           <input
             type="text"
             value={formatOathDateForDisplay(record.dateSigned)}
@@ -81,8 +51,8 @@ export function OathRecordView({ record, onChange }: OathRecordViewProps) {
             placeholder="MM/DD/YYYY"
             className="form-input font-mono"
           />
-        </Field>
-        <Field label="Employee Signed?">
+        </RecordField>
+        <RecordField label="Employee Signed?">
           <select
             value={record.employeeSigned ? "yes" : "no"}
             onChange={(e) =>
@@ -93,10 +63,10 @@ export function OathRecordView({ record, onChange }: OathRecordViewProps) {
             <option value="yes">Yes</option>
             <option value="no">No</option>
           </select>
-        </Field>
+        </RecordField>
       </div>
       {officerApplicable && (
-        <Field label="Officer Signed?">
+        <RecordField label="Officer Signed?">
           <select
             value={record.officerSigned ? "yes" : "no"}
             onChange={(e) =>
@@ -107,7 +77,7 @@ export function OathRecordView({ record, onChange }: OathRecordViewProps) {
             <option value="yes">Yes</option>
             <option value="no">No</option>
           </select>
-        </Field>
+        </RecordField>
       )}
     </div>
   );

@@ -1,7 +1,6 @@
-import { Pencil } from "lucide-react";
-import type { ReactNode } from "react";
 import type { PreviewRecord } from "./types";
 import { RELATIONSHIP_OPTIONS } from "./types";
+import { RecordField } from "./shared/RecordField";
 
 export interface EcRecordViewProps {
   record: PreviewRecord;
@@ -25,37 +24,8 @@ const FIELD_LABELS = {
   workPhone: "Work Phone",
 } as const;
 
-function MissingFlag({ visible }: { visible: boolean }) {
-  if (!visible) return null;
-  return (
-    <span title="Was blank on paper — please add to physical form" className="inline-flex">
-      <Pencil className="h-3 w-3 text-warning" aria-hidden />
-    </span>
-  );
-}
-
 function isMissing(record: PreviewRecord, fieldKey: string): boolean {
   return record.originallyMissing?.includes(fieldKey) ?? false;
-}
-
-function Field({
-  label,
-  missing,
-  children,
-}: {
-  label: string;
-  missing?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="inline-flex items-center gap-1.5 font-mono text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-        <MissingFlag visible={missing ?? false} />
-      </span>
-      {children}
-    </label>
-  );
 }
 
 /**
@@ -86,7 +56,7 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
 
   return (
     <div className="flex flex-col gap-3">
-      <Field
+      <RecordField
         label={FIELD_LABELS.employeeName}
         missing={isMissing(record, "employee.name")}
       >
@@ -96,8 +66,8 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
           onChange={(e) => setEmployee({ name: e.target.value })}
           className="form-input"
         />
-      </Field>
-      <Field
+      </RecordField>
+      <RecordField
         label={FIELD_LABELS.emplId}
         missing={isMissing(record, "employee.employeeId")}
       >
@@ -107,8 +77,8 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
           onChange={(e) => setEmployee({ employeeId: e.target.value })}
           className="form-input font-mono"
         />
-      </Field>
-      <Field
+      </RecordField>
+      <RecordField
         label={FIELD_LABELS.contactName}
         missing={isMissing(record, "emergencyContact.name")}
       >
@@ -118,8 +88,8 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
           onChange={(e) => setContact({ name: e.target.value })}
           className="form-input"
         />
-      </Field>
-      <Field
+      </RecordField>
+      <RecordField
         label={FIELD_LABELS.relationship}
         missing={isMissing(record, "emergencyContact.relationship")}
       >
@@ -139,8 +109,8 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
             </option>
           ))}
         </select>
-      </Field>
-      <Field label={FIELD_LABELS.sameAddress}>
+      </RecordField>
+      <RecordField label={FIELD_LABELS.sameAddress}>
         <label className="flex items-center gap-2">
           <input
             type="checkbox"
@@ -152,10 +122,10 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
             Use the employee's home address
           </span>
         </label>
-      </Field>
+      </RecordField>
       {!sameAddress && (
         <div className="grid grid-cols-2 gap-3">
-          <Field
+          <RecordField
             label={FIELD_LABELS.street}
             missing={isMissing(record, "emergencyContact.address.street")}
           >
@@ -165,35 +135,35 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
               onChange={(e) => setAddress({ street: e.target.value })}
               className="form-input"
             />
-          </Field>
-          <Field label={FIELD_LABELS.city}>
+          </RecordField>
+          <RecordField label={FIELD_LABELS.city}>
             <input
               type="text"
               value={address?.city ?? ""}
               onChange={(e) => setAddress({ city: e.target.value })}
               className="form-input"
             />
-          </Field>
-          <Field label={FIELD_LABELS.state}>
+          </RecordField>
+          <RecordField label={FIELD_LABELS.state}>
             <input
               type="text"
               value={address?.state ?? ""}
               onChange={(e) => setAddress({ state: e.target.value })}
               className="form-input"
             />
-          </Field>
-          <Field label={FIELD_LABELS.zip}>
+          </RecordField>
+          <RecordField label={FIELD_LABELS.zip}>
             <input
               type="text"
               value={address?.zip ?? ""}
               onChange={(e) => setAddress({ zip: e.target.value })}
               className="form-input font-mono"
             />
-          </Field>
+          </RecordField>
         </div>
       )}
       <div className="grid grid-cols-3 gap-3">
-        <Field
+        <RecordField
           label={FIELD_LABELS.cellPhone}
           missing={isMissing(record, "emergencyContact.cellPhone")}
         >
@@ -203,23 +173,23 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
             onChange={(e) => setContact({ cellPhone: e.target.value })}
             className="form-input font-mono"
           />
-        </Field>
-        <Field label={FIELD_LABELS.homePhone}>
+        </RecordField>
+        <RecordField label={FIELD_LABELS.homePhone}>
           <input
             type="text"
             value={record.emergencyContact.homePhone ?? ""}
             onChange={(e) => setContact({ homePhone: e.target.value })}
             className="form-input font-mono"
           />
-        </Field>
-        <Field label={FIELD_LABELS.workPhone}>
+        </RecordField>
+        <RecordField label={FIELD_LABELS.workPhone}>
           <input
             type="text"
             value={record.emergencyContact.workPhone ?? ""}
             onChange={(e) => setContact({ workPhone: e.target.value })}
             className="form-input font-mono"
           />
-        </Field>
+        </RecordField>
       </div>
     </div>
   );
