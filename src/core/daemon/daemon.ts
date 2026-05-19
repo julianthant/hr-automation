@@ -36,7 +36,8 @@ import {
   findLatestEntryForRunOnDate,
   isTerminalTrackerEntryStatus,
 } from '../../tracker/jsonl.js'
-import { buildTrackerDataForInput } from './enqueue-dispatch.js'
+import { buildHttpPendingData, buildTrackerDataForInput } from './enqueue-dispatch.js'
+import { deriveRowArchetype } from '../../domain/row-archetype.js'
 import { openControlDb } from '../control-db.js'
 import { createTaskStore } from '../task-store/index.js'
 import { isStateDbReady, openStateDb } from '../../tracker/state/db.js'
@@ -313,6 +314,18 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     }
   }
   emitWorkerHeartbeat()
+
+  const buildShutdownTrackerData = (input: unknown, parentRunId?: string): Record<string, string> => {
+    try {
+      const data = buildHttpPendingData(wf, input)
+      data.archetype = deriveRowArchetype(wf.archetype, parentRunId)
+      return data
+    } catch {
+      const data = buildTrackerDataForInput(input)
+      data.archetype = deriveRowArchetype(wf.archetype, parentRunId)
+      return data
+    }
+  }
 
   const sigHandler = (sig: string): void => {
     log.warn(`[Daemon ${wf.config.name}/${instanceId}] received ${sig}; shutting down`)
@@ -722,6 +735,8 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                     runId,
                     status: 'failed',
                     step: 'cancelled',
+                    data: buildShutdownTrackerData(item.input, item.parentRunId),
+                    ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
                     error: cancelError,
                   },
                   trackerDir,
@@ -918,6 +933,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
             /* best-effort — queue event append; tracker row below is the user-visible signal */
           }
           try {
+            const parentRunId = existingTask?.parentRunId
             trackEvent(
               {
                 workflow: wf.config.name,
@@ -926,6 +942,8 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 runId: inFlightSnapshot.runId,
                 status: 'failed',
                 step: 'cancelled',
+                data: buildShutdownTrackerData(existingTask?.input, parentRunId),
+                ...(parentRunId ? { parentRunId } : {}),
                 error: cancelReason,
               },
               trackerDir,
@@ -1000,7 +1018,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
               // would override the pending row's hoisted fields with
               // `docId` + an opaque `prefilledData` JSON blob, hiding the
               // user's edits in the dashboard detail grid.
-              const data = buildTrackerDataForInput(item.input)
+              const data = buildShutdownTrackerData(item.input, item.parentRunId)
               trackEvent(
                 {
                   workflow: wf.config.name,
@@ -1010,6 +1028,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                   status: 'failed',
                   step: 'cancelled',
                   data,
+                  ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
                   error: cancelReason,
                 },
                 trackerDir,
