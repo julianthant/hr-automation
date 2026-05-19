@@ -173,6 +173,7 @@ test("mapRunEventRowToWire drops invalid typedData entries from projected rows",
       runId: "run-1",
     })[0];
     const entry = mapRunEventRowToWire(row);
+    assert.ok(entry !== null, "expected entry to be non-null for valid status row");
     assert.deepEqual(entry.typedData, { good: { type: "number", value: "42" } });
   } finally {
     closeStateDbForTests(dir);
