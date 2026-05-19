@@ -21,9 +21,7 @@ export function registerDaemonStopRoute(app: Hono, deps: DashboardHonoDeps): voi
     try {
       const parsed = await readJsonRequest(c.req.raw, 4096);
       if (!parsed.ok) {
-        return parsed.error === "Invalid JSON body"
-          ? jsonResponse({ ok: false, error: "Invalid JSON body" }, 400)
-          : jsonResponse({ ok: false, error: parsed.error }, 500);
+        return jsonResponse({ ok: false, error: parsed.error }, 400);
       }
       const input = parsed.body as { workflow?: string; force?: boolean };
       const workflow = input.workflow?.trim();

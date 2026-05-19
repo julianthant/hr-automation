@@ -18,6 +18,13 @@ test("readJsonRequest returns Invalid JSON body for malformed JSON", async () =>
   assert.deepEqual(parsed, { ok: false, error: "Invalid JSON body" });
 });
 
+test("readJsonRequest rejects non-object JSON bodies", async () => {
+  for (const body of ["[]", "null", "\"hi\"", "42"]) {
+    const parsed = await readJsonRequest(new Request("http://localhost", { method: "POST", body }));
+    assert.deepEqual(parsed, { ok: false, error: "Request body must be a JSON object" });
+  }
+});
+
 test("readJsonRequest enforces maxBytes", async () => {
   const parsed = await readJsonRequest(
     new Request("http://localhost", { method: "POST", body: JSON.stringify({ value: "abcdef" }) }),
