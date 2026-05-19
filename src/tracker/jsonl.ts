@@ -75,10 +75,28 @@ export function appendLogEntry(entry: LogEntry, dir: string = DEFAULT_DIR): void
 // iteration plus delete-on-hit + re-set gives a 6-line LRU without a dep.
 // Cap chosen for ~10 workflows × ~7 active dates.
 const PARSE_CACHE_MAX = 64;
-type ParseCacheEntry = { mtimeMs: number; size: number; entries: unknown[] };
+type JsonlCachedLine = { lineNum: number; value: unknown };
+type ParseCacheEntry = { mtimeMs: number; size: number; entries: JsonlCachedLine[] };
 const parseCache = new Map<string, ParseCacheEntry>();
 
-function readJsonlCached<T>(path: string): T[] {
+export interface ReadJsonlOpts<T> {
+  /** If provided, parsed lines that fail this guard are skipped with a warning. */
+  validate?: (raw: unknown, ctx: { file: string; lineNum: number }) => raw is T;
+}
+
+function materializeJsonlEntries<T>(path: string, entries: JsonlCachedLine[], opts?: ReadJsonlOpts<T>): T[] {
+  const out: T[] = [];
+  for (const entry of entries) {
+    if (opts?.validate && !opts.validate(entry.value, { file: path, lineNum: entry.lineNum })) {
+      log.warn(`[jsonl] skipping invalid line ${entry.lineNum} in ${path}`);
+      continue;
+    }
+    out.push(entry.value as T);
+  }
+  return out;
+}
+
+function readJsonlCached<T>(path: string, opts?: ReadJsonlOpts<T>): T[] {
   if (!existsSync(path)) return [];
   const stat = statSync(path);
   const cached = parseCache.get(path);
@@ -86,12 +104,20 @@ function readJsonlCached<T>(path: string): T[] {
     // Bump to most-recent.
     parseCache.delete(path);
     parseCache.set(path, cached);
-    return cached.entries as T[];
+    return materializeJsonlEntries(path, cached.entries, opts);
   }
-  const entries = readFileSync(path, "utf-8")
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
+  const entries: JsonlCachedLine[] = [];
+  const lines = readFileSync(path, "utf-8").split("\n");
+  for (const [idx, line] of lines.entries()) {
+    if (!line) continue;
+    const lineNum = idx + 1;
+    try {
+      entries.push({ lineNum, value: JSON.parse(line) as unknown });
+    } catch (err) {
+      if (!opts?.validate) throw err;
+      log.warn(`[jsonl] skipping malformed JSON line ${lineNum} in ${path}: ${(err as Error).message}`);
+    }
+  }
   // Delete-then-set so a re-parse of an already-cached path bumps its
   // insertion-order position. Map.set on an existing key keeps the original
   // position, which would freeze hot files at first-read time and evict them
@@ -102,7 +128,7 @@ function readJsonlCached<T>(path: string): T[] {
     const oldestKey = parseCache.keys().next().value;
     if (oldestKey !== undefined) parseCache.delete(oldestKey);
   }
-  return entries as T[];
+  return materializeJsonlEntries(path, entries, opts);
 }
 
 export async function* readJsonlStream<T>(path: string): AsyncIterable<T> {
@@ -136,6 +162,7 @@ export function readLogEntries(
   itemId?: string,
   dir: string = DEFAULT_DIR,
 ): LogEntry[] {
+  // TODO(jsonl-guard): add a LogEntry validator once tracker-entry readers are fully guarded.
   const all = readJsonlCached<LogEntry>(getLogsJsonlPath(workflow, dir));
   if (itemId) return all.filter((e) => e.itemId === itemId);
   return all;
@@ -203,6 +230,26 @@ export interface TrackerEntry {
    */
   input?: Record<string, unknown>;
   error?: string;
+}
+
+const TRACKER_ENTRY_STATUSES = new Set<TrackerEntry["status"]>(["pending", "running", "done", "failed", "skipped"]);
+
+export function isTrackerEntryStatus(value: unknown): value is TrackerEntry["status"] {
+  return typeof value === "string" && TRACKER_ENTRY_STATUSES.has(value as TrackerEntry["status"]);
+}
+
+export function isTrackerEntry(value: unknown): value is TrackerEntry {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const entry = value as Record<string, unknown>;
+  return (
+    typeof entry.workflow === "string" &&
+    entry.workflow.length > 0 &&
+    typeof entry.id === "string" &&
+    entry.id.length > 0 &&
+    typeof entry.timestamp === "string" &&
+    entry.timestamp.length > 0 &&
+    isTrackerEntryStatus(entry.status)
+  );
 }
 
 function getTrackerJsonlPath(workflow: string, dir: string): string {
@@ -604,7 +651,7 @@ export async function withTrackedWorkflow<T>(
 }
 
 export function readEntries(workflow: string, dir: string = DEFAULT_DIR): TrackerEntry[] {
-  return readJsonlCached<TrackerEntry>(getTrackerJsonlPath(workflow, dir));
+  return readJsonlCached<TrackerEntry>(getTrackerJsonlPath(workflow, dir), { validate: isTrackerEntry });
 }
 
 /**
@@ -642,7 +689,7 @@ export function readEntriesForDate(
   date: string,
   dir: string = DEFAULT_DIR,
 ): TrackerEntry[] {
-  return readJsonlCached<TrackerEntry>(join(dir, `${workflow}-${date}.jsonl`));
+  return readJsonlCached<TrackerEntry>(join(dir, `${workflow}-${date}.jsonl`), { validate: isTrackerEntry });
 }
 
 /** Whether this tracker row is terminal for UX/dedupe purposes (not pending/running). */
@@ -690,6 +737,7 @@ export function readLogEntriesForDate(
   date: string,
   dir: string = DEFAULT_DIR,
 ): LogEntry[] {
+  // TODO(jsonl-guard): add a LogEntry validator once tracker-entry readers are fully guarded.
   const all = readJsonlCached<LogEntry>(getLogsJsonlPathForDate(workflow, dir, date));
   if (itemId) return all.filter((e) => e.itemId === itemId);
   return all;

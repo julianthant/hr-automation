@@ -1,6 +1,6 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, rmSync, mkdtempSync, writeFileSync, utimesSync } from "fs";
+import { appendFileSync, existsSync, rmSync, mkdtempSync, writeFileSync, utimesSync } from "fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -91,6 +91,19 @@ describe("JSONL tracker", () => {
       active: { type: "boolean", value: "true" },
       start: { type: "date", value: "2026-04-17T00:00:00.000Z" },
     });
+  });
+
+  it("skips malformed and wrong-shape tracker lines when reading entries", () => {
+    const date = dateLocal();
+    trackEvent({ workflow: "ac", timestamp: `${date}T10:00:00.000Z`, id: "id-1", runId: "run-1", status: "pending", data: {} }, TEST_DIR);
+    const file = join(TEST_DIR, `ac-${date}.jsonl`);
+    appendFileSync(file, "{\"not\":\"a tracker entry\"}\n");
+    appendFileSync(file, "{not json}\n");
+    trackEvent({ workflow: "ac", timestamp: `${date}T10:00:01.000Z`, id: "id-2", runId: "run-2", status: "done", data: {} }, TEST_DIR);
+
+    const entries = readEntries("ac", TEST_DIR);
+
+    assert.deepEqual(entries.map((entry) => entry.id), ["id-1", "id-2"]);
   });
 });
 

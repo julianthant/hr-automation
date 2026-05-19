@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Database } from "../infra/sqlite/index.js";
-import { dateLocal, type TrackerEntry } from "./jsonl.js";
+import { log } from "../utils/log.js";
+import { dateLocal, isTrackerEntry, isTrackerEntryStatus, type TrackerEntry } from "./jsonl.js";
 
 export interface FindLatestEntryForPredicateOpts {
   workflow: string;
@@ -31,6 +32,18 @@ function parseDataJson(raw: string | null | undefined): Record<string, string> {
   } catch {
     return {};
   }
+}
+
+function rowStatusOrUndefined(
+  value: unknown,
+  ctx: { source: string; workflow: string; itemId: string; runId?: string | null },
+): TrackerEntry["status"] | undefined {
+  if (isTrackerEntryStatus(value)) return value;
+  log.warn(
+    `[find-latest-entry] skipping SQLite ${ctx.source} row with invalid latest_status workflow=${ctx.workflow} item=${ctx.itemId}` +
+      `${ctx.runId ? ` runId=${ctx.runId}` : ""} status=${String(value)}`,
+  );
+  return undefined;
 }
 
 /**
@@ -64,17 +77,25 @@ export function findLatestEntryForPredicate(
           latest_error: string | null;
         } | undefined;
         if (row) {
-          const entry: TrackerEntry = {
+          const status = rowStatusOrUndefined(row.latest_status, {
+            source: "runs",
             workflow: opts.workflow,
-            id: row.item_id,
+            itemId: row.item_id,
             runId: row.run_id,
-            timestamp: row.latest_tracker_ts,
-            status: row.latest_status as TrackerEntry["status"],
-            ...(row.latest_step ? { step: row.latest_step } : {}),
-            data: parseDataJson(row.latest_data_json),
-            ...(row.latest_error ? { error: row.latest_error } : {}),
-          };
-          if (opts.predicate(entry)) return entry;
+          });
+          if (status) {
+            const entry: TrackerEntry = {
+              workflow: opts.workflow,
+              id: row.item_id,
+              runId: row.run_id,
+              timestamp: row.latest_tracker_ts,
+              status,
+              ...(row.latest_step ? { step: row.latest_step } : {}),
+              data: parseDataJson(row.latest_data_json),
+              ...(row.latest_error ? { error: row.latest_error } : {}),
+            };
+            if (opts.predicate(entry)) return entry;
+          }
         }
       } else if (opts.itemId) {
         const row = opts.db.prepare(`
@@ -93,17 +114,25 @@ export function findLatestEntryForPredicate(
           latest_error: string | null;
         } | undefined;
         if (row) {
-          const entry: TrackerEntry = {
+          const status = rowStatusOrUndefined(row.latest_status, {
+            source: "items",
             workflow: opts.workflow,
-            id: row.item_id,
+            itemId: row.item_id,
             runId: row.latest_run_id,
-            timestamp: row.latest_ts,
-            status: row.latest_status as TrackerEntry["status"],
-            ...(row.latest_step ? { step: row.latest_step } : {}),
-            data: parseDataJson(row.latest_data_json),
-            ...(row.latest_error ? { error: row.latest_error } : {}),
-          };
-          if (opts.predicate(entry)) return entry;
+          });
+          if (status) {
+            const entry: TrackerEntry = {
+              workflow: opts.workflow,
+              id: row.item_id,
+              runId: row.latest_run_id,
+              timestamp: row.latest_ts,
+              status,
+              ...(row.latest_step ? { step: row.latest_step } : {}),
+              data: parseDataJson(row.latest_data_json),
+              ...(row.latest_error ? { error: row.latest_error } : {}),
+            };
+            if (opts.predicate(entry)) return entry;
+          }
         }
       }
     } catch {
@@ -122,10 +151,15 @@ export function findLatestEntryForPredicate(
     const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
     for (let j = lines.length - 1; j >= 0; j--) {
       try {
-        const entry = JSON.parse(lines[j]) as TrackerEntry;
+        const parsed = JSON.parse(lines[j]) as unknown;
+        if (!isTrackerEntry(parsed)) {
+          log.warn(`[find-latest-entry] skipping invalid tracker JSONL line ${j + 1} in ${file}`);
+          continue;
+        }
+        const entry = parsed;
         if (opts.predicate(entry)) return entry;
-      } catch {
-        /* tolerate malformed JSONL */
+      } catch (err) {
+        log.warn(`[find-latest-entry] skipping malformed JSONL line ${j + 1} in ${file}: ${(err as Error).message}`);
       }
     }
   }
