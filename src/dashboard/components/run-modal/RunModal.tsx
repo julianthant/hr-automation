@@ -48,6 +48,14 @@ interface RunModalProps {
   lockedFormType?: string;
 }
 
+function buildBatchSubject(workflowName: string, batchRunId: string): string {
+  const suffix = batchRunId.slice(-4);
+  if (workflowName === "oath-signature" || workflowName === "ocr") return `Oath · ${suffix}`;
+  if (workflowName === "emergency-contact") return `Emergency Contact · ${suffix}`;
+  if (workflowName === "oath-upload") return `Oath Upload · ${suffix}`;
+  return `Batch · ${suffix}`;
+}
+
 export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedFormType: lockedFormTypeProp }: RunModalProps) {
   const config = getRunModalConfig(workflow);
   // Per-workflow registry can lock the form type so the modal hides the
@@ -63,8 +71,9 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
   const showDuplicateCheck = config?.sections.duplicateCheck ?? false;
   const showDryRun = config?.sections.dryRun ?? false;
   const showOathUploadMode = config?.sections.oathUploadMode ?? false;
+  const allowMultipleFiles = Boolean(config?.allowMultipleFiles && !reuploadFor);
 
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [rosterMode, setRosterMode] = useState<"download" | "existing">("existing");
   const rosters = useRosters();
@@ -79,6 +88,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
   const [oathUploadMode, setOathUploadMode] = useState<"full" | "upload-only">("full");
   const effectiveShowRoster = showRoster && oathUploadMode === "full";
   const ctx = { reuploadFor, lockedFormType: effectiveLockedFormType, oathUploadMode };
+  const file = files[0] ?? null;
 
   useEffect(() => {
     if (open && effectiveLockedFormType) setFormType(effectiveLockedFormType);
@@ -90,7 +100,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
   // so the chunk is split out of the main bundle. Spec §4.3: falls back
   // to bytes-only when unknown.
   useEffect(() => {
-    if (!file) {
+    if (!file || files.length !== 1) {
       setPageCount(null);
       return;
     }
@@ -108,7 +118,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
     return () => {
       cancelled = true;
     };
-  }, [file]);
+  }, [file, files.length]);
 
   // Refresh rosters cache each time the modal opens so a SharePoint download
   // that finished while the modal was closed is reflected. The cache hook
@@ -128,7 +138,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
   // we've seen it before. Best-effort: failures surface as an inline error
   // but don't block submit (the operator may genuinely want to re-run).
   useEffect(() => {
-    if (!showDuplicateCheck || !file) {
+    if (!showDuplicateCheck || !file || files.length !== 1) {
       setPriorRuns([]);
       return;
     }
@@ -155,7 +165,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
     return () => {
       cancelled = true;
     };
-  }, [file, showDuplicateCheck]);
+  }, [file, files.length, showDuplicateCheck]);
 
   // Refresh form-types cache each time the modal opens so a backend update
   // (rare) is reflected. The hook (`useFormTypes`) already serves any
@@ -177,7 +187,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
   // useRosters) so we don't reset it here — it's reused across opens.
   useEffect(() => {
     if (open) return;
-    setFile(null);
+    setFiles([]);
     setPageCount(null);
     setSubmitting(false);
     setProgress(null);
@@ -192,57 +202,70 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
     return null;
   }
 
-  function handleFileSelect(picked: File | null): void {
-    setError(null);
-    if (!picked) return setFile(null);
+  function validatePdf(picked: File): string | null {
     if (!picked.name.toLowerCase().endsWith(".pdf") && picked.type !== "application/pdf") {
-      setError("PDF rejected: file is not a valid application/pdf.");
-      return;
+      return `PDF rejected: ${picked.name} is not a valid application/pdf.`;
     }
     if (picked.size > 50 * 1024 * 1024) {
-      setError("File too large (max 50 MB).");
+      return `File too large: ${picked.name} exceeds 50 MB.`;
+    }
+    return null;
+  }
+
+  function handleFilesSelect(picked: FileList | File[] | null): void {
+    setError(null);
+    const next = Array.from(picked ?? []);
+    if (next.length === 0) return setFiles([]);
+    if (!allowMultipleFiles && next.length > 1) {
+      setError("Select one PDF for this workflow.");
       return;
     }
-    setFile(picked);
+    for (const candidate of next) {
+      const validationError = validatePdf(candidate);
+      if (validationError) {
+        setError(validationError);
+        return;
+      }
+    }
+    setFiles(next);
+  }
+
+  function handleFilesAdd(picked: FileList | null): void {
+    setError(null);
+    const additions = Array.from(picked ?? []);
+    if (additions.length === 0) return;
+    if (!allowMultipleFiles) {
+      handleFilesSelect(additions);
+      return;
+    }
+    const next = [...files, ...additions];
+    for (const candidate of next) {
+      const validationError = validatePdf(candidate);
+      if (validationError) {
+        setError(validationError);
+        return;
+      }
+    }
+    setFiles(next);
   }
 
   function handleDrop(e: React.DragEvent<HTMLLabelElement>): void {
     e.preventDefault();
     e.stopPropagation();
     dropRef.current?.classList.remove("bg-primary/5", "border-primary");
-    const dropped = e.dataTransfer.files?.[0];
-    if (dropped) handleFileSelect(dropped);
+    if (allowMultipleFiles) {
+      handleFilesAdd(e.dataTransfer.files ?? null);
+    } else {
+      handleFilesSelect(e.dataTransfer.files ?? null);
+    }
   }
 
   async function handleSubmit(): Promise<void> {
-    if (!config || !file || submitting) return;
+    if (!config || files.length === 0 || submitting) return;
     if (showFormType && !formType) return;
     setSubmitting(true);
     setProgress(0);
     setError(null);
-
-    const fd = new FormData();
-    fd.append("pdf", file, file.name);
-    if (showOathUploadMode) fd.append("mode", oathUploadMode);
-    if (effectiveShowRoster) {
-      fd.append("rosterMode", rosterMode);
-      if (rosterMode === "existing" && latestRoster) {
-        fd.append("rosterPath", latestRoster.path);
-      }
-    }
-    if (showFormType && formType) fd.append("formType", formType);
-    if (showDryRun && dryRun) fd.append("dryRun", "true");
-    if (reuploadFor) {
-      fd.append("sessionId", reuploadFor.sessionId);
-      fd.append("previousRunId", reuploadFor.previousRunId);
-    }
-    // Tell the backend which workflow originated this upload. When the
-    // operator opens the run modal from the OCR queue → originWorkflow="ocr"
-    // and the row is standalone (no parent in any other workflow). When the
-    // operator opens it from oath-signature/emergency-contact → the OCR
-    // backend synthesizes a parent row in that workflow + threads parentRunId
-    // into the OCR row so post-approval fan-out items nest under the parent.
-    if (workflow !== "ocr") fd.append("originWorkflow", workflow);
 
     const submitUrl = config.submitUrl(ctx);
 
@@ -261,14 +284,46 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
 
     // Use XHR so we get progress events. Fetch's upload progress is still
     // not widely supported across browsers as of 2026.
-    try {
-      const result = await new Promise<RunModalSubmitResponse>(
+    const batchRunId = files.length > 1 ? crypto.randomUUID() : null;
+    const batchSubject = batchRunId ? buildBatchSubject(workflow, batchRunId) : null;
+    const totalBytes = files.reduce((sum, nextFile) => sum + nextFile.size, 0);
+    const uploadedByIndex = new Map<number, number>();
+
+    const uploadOne = (nextFile: File, index: number) =>
+      new Promise<RunModalSubmitResponse>(
         (resolve, reject) => {
+          const fd = new FormData();
+          fd.append("pdf", nextFile, nextFile.name);
+          if (showOathUploadMode) fd.append("mode", oathUploadMode);
+          if (effectiveShowRoster) {
+            fd.append("rosterMode", rosterMode);
+            if (rosterMode === "existing" && latestRoster) {
+              fd.append("rosterPath", latestRoster.path);
+            }
+          }
+          if (showFormType && formType) fd.append("formType", formType);
+          if (showDryRun && dryRun) fd.append("dryRun", "true");
+          if (reuploadFor) {
+            fd.append("sessionId", reuploadFor.sessionId);
+            fd.append("previousRunId", reuploadFor.previousRunId);
+          }
+          // Tell the backend which workflow originated this upload. When the
+          // operator opens the run modal from the OCR queue → originWorkflow="ocr"
+          // and the row is standalone. Other workflows synthesize their own
+          // parent row; multi-file oath uploads share a dashboard-only parent id.
+          if (workflow !== "ocr") fd.append("originWorkflow", workflow);
+          if (batchRunId && batchSubject) {
+            fd.append("originBatchRunId", batchRunId);
+            fd.append("originBatchSubject", batchSubject);
+          }
           const xhr = new XMLHttpRequest();
           xhr.open("POST", fullSubmitUrl);
           xhr.upload.addEventListener("progress", (ev) => {
             if (ev.lengthComputable) {
-              setProgress(Math.round((ev.loaded / ev.total) * 100));
+              uploadedByIndex.set(index, ev.loaded);
+              const uploaded = Array.from(uploadedByIndex.values()).reduce((sum, n) => sum + n, 0);
+              const denominator = totalBytes > 0 ? totalBytes : ev.total;
+              setProgress(Math.min(100, Math.round((uploaded / denominator) * 100)));
             }
           });
           xhr.addEventListener("load", () => {
@@ -285,13 +340,25 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
         },
       );
 
-      if (!result.ok) {
-        setError(result.error ?? "Server error — try again or check the dashboard logs.");
-        setSubmitting(false);
-        return;
+    try {
+      const results: RunModalSubmitResponse[] = [];
+      for (let i = 0; i < files.length; i += 1) {
+        const result = await uploadOne(files[i]!, i);
+        if (!result.ok) {
+          setError(result.error ?? "Server error — try again or check the dashboard logs.");
+          setSubmitting(false);
+          return;
+        }
+        uploadedByIndex.set(i, files[i]!.size);
+        results.push(result);
       }
-      const t = config.buildSuccessToast(result, file);
-      toast.success(t.title, t.description ? { description: t.description } : undefined);
+      const t = config.buildSuccessToast(results[0]!, files[0]!);
+      toast.success(
+        files.length > 1 ? `${files.length} preparations started` : t.title,
+        files.length > 1
+          ? { description: batchSubject ?? files.map((nextFile) => nextFile.name).join(", ") }
+          : t.description ? { description: t.description } : undefined,
+      );
       onOpenChange(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -400,17 +467,44 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
             <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground/70">
               PDF
             </div>
-            {!file ? (
+            {progress !== null && submitting ? (
+              <UploadProgress
+                fileName={files.length === 1 ? file.name : `${files.length} PDFs`}
+                fileSize={files.reduce((sum, nextFile) => sum + nextFile.size, 0)}
+                progress={progress}
+              />
+            ) : allowMultipleFiles ? (
+              <div className="grid gap-2.5">
+                <Dropzone
+                  fileInputRef={fileInputRef}
+                  dropRef={dropRef}
+                  onDrop={handleDrop}
+                  onPick={handleFilesAdd}
+                  multiple
+                  compact={files.length > 0}
+                />
+                {files.length > 0 ? (
+                  <FileRows
+                    files={files}
+                    pageCount={pageCount}
+                    onRemoveAt={(index) => setFiles((current) => current.filter((_, i) => i !== index))}
+                  />
+                ) : null}
+              </div>
+            ) : !file ? (
               <Dropzone
                 fileInputRef={fileInputRef}
                 dropRef={dropRef}
                 onDrop={handleDrop}
-                onPick={(p) => handleFileSelect(p)}
+                onPick={handleFilesSelect}
+                multiple={false}
               />
-            ) : progress !== null && submitting ? (
-              <UploadProgress fileName={file.name} fileSize={file.size} progress={progress} />
             ) : (
-              <FileRow file={file} pageCount={pageCount} onRemove={() => setFile(null)} />
+              <FileRows
+                files={files}
+                pageCount={pageCount}
+                onRemoveAt={() => setFiles([])}
+              />
             )}
           </section>
 
@@ -496,7 +590,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={!file || submitting}
+            disabled={files.length === 0 || submitting}
             className={cn(
               "col-span-3 inline-flex items-center justify-center gap-1.5 rounded-[7px] px-3.5 py-2.5",
               "text-[12.5px] font-medium",
@@ -507,20 +601,20 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
               "cursor-pointer",
             )}
             style={{
-              borderColor: !file || submitting
+              borderColor: files.length === 0 || submitting
                 ? "var(--capture-border-subtle)"
                 : "var(--capture-border-cta)",
-              color: !file || submitting
+              color: files.length === 0 || submitting
                 ? "var(--capture-fg-faint)"
                 : "var(--capture-fg-primary)",
             }}
             onMouseOver={(e) => {
-              if (!(!file || submitting)) {
+              if (!(files.length === 0 || submitting)) {
                 e.currentTarget.style.borderColor = "var(--capture-border-cta-strong)";
               }
             }}
             onMouseOut={(e) => {
-              if (!(!file || submitting)) {
+              if (!(files.length === 0 || submitting)) {
                 e.currentTarget.style.borderColor = "var(--capture-border-cta)";
               }
             }}
@@ -615,11 +709,15 @@ function Dropzone({
   dropRef,
   onDrop,
   onPick,
+  multiple,
+  compact = false,
 }: {
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   dropRef: React.RefObject<HTMLLabelElement | null>;
   onDrop: (e: React.DragEvent<HTMLLabelElement>) => void;
-  onPick: (file: File | null) => void;
+  onPick: (files: FileList | null) => void;
+  multiple: boolean;
+  compact?: boolean;
 }) {
   void fileInputRef; // hidden input is selected by id; ref kept for parity with prior api
   return (
@@ -635,9 +733,12 @@ function Dropzone({
       }}
       onDrop={onDrop}
       className={cn(
-        "flex flex-col items-center justify-center gap-2.5",
+        compact
+          ? "flex items-center gap-3.5"
+          : "flex flex-col items-center justify-center gap-2.5",
         "rounded-[10px] border border-dashed border-border/80 bg-transparent",
-        "px-6 py-9 cursor-pointer transition-colors",
+        compact ? "px-4 py-3.5" : "px-6 py-9",
+        "cursor-pointer transition-colors",
         "hover:bg-muted/30 hover:border-border",
         "focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1 ring-offset-card",
       )}
@@ -646,78 +747,93 @@ function Dropzone({
         id="ec-pdf-input"
         type="file"
         accept="application/pdf,.pdf"
+        multiple={multiple}
         className="sr-only"
-        onChange={(e) => onPick(e.target.files?.[0] ?? null)}
+        onChange={(e) => onPick(e.target.files ?? null)}
       />
       <span
-        className="inline-flex items-center justify-center rounded-full"
+        className={cn(
+          "inline-flex items-center justify-center shrink-0",
+          compact ? "rounded-md" : "rounded-full",
+        )}
         style={{
-          width: 38,
-          height: 38,
+          width: compact ? 32 : 38,
+          height: compact ? 32 : 38,
           border: "1px solid var(--border)",
           color: "var(--muted-foreground)",
         }}
       >
         <UploadCloud aria-hidden className="h-4 w-4" />
       </span>
-      <div className="text-[13px] text-foreground/90">Drag PDF here, or click to browse</div>
-      <div className="text-[10.5px] text-muted-foreground/70 font-mono tracking-wide">
-        PDF only · max 50 MB
+      <div className={cn(compact ? "grid gap-0.5 min-w-0" : "contents")}>
+        <div className="text-[13px] text-foreground/90">
+          {multiple ? "Drag PDFs here, or click to browse" : "Drag PDF here, or click to browse"}
+        </div>
+        <div className="text-[10.5px] text-muted-foreground/70 font-mono tracking-wide">
+          PDF only · max 50 MB
+        </div>
       </div>
     </label>
   );
 }
 
-function FileRow({
-  file,
+function FileRows({
+  files,
   pageCount,
-  onRemove,
+  onRemoveAt,
 }: {
-  file: File;
+  files: File[];
   pageCount: number | null;
-  onRemove: () => void;
+  onRemoveAt: (index: number) => void;
 }) {
-  const meta =
-    pageCount != null
-      ? `${formatBytes(file.size)} · ${pageCount} page${pageCount === 1 ? "" : "s"}`
-      : formatBytes(file.size);
   return (
-    <div
-      className="flex items-center gap-3.5 rounded-[10px] px-4 py-3.5"
-      style={{ border: "1px solid var(--border)", backgroundColor: "var(--muted)" }}
-    >
-      <span
-        className="inline-flex items-center justify-center rounded-md shrink-0"
-        style={{
-          width: 32,
-          height: 32,
-          backgroundColor: "var(--background)",
-          border: "1px solid var(--border)",
-          color: "var(--foreground)",
-        }}
-      >
-        <FileText aria-hidden className="h-4 w-4" />
-      </span>
-      <div className="flex-1 min-w-0 grid gap-0.5">
-        <div className="text-[13px] truncate text-foreground">{file.name}</div>
-        <div className="text-[10.5px] text-muted-foreground/70 font-mono">
-          {meta}
-        </div>
-      </div>
-      <button
-        type="button"
-        onClick={onRemove}
-        aria-label="Remove file"
-        title="Remove file"
-        className={cn(
-          "h-7 w-7 inline-flex items-center justify-center rounded-md",
-          "text-muted-foreground hover:bg-muted hover:text-foreground",
-          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border",
-          "cursor-pointer",
-        )}
-      >
-        <X aria-hidden className="h-3.5 w-3.5" />
-      </button>
+    <div className="grid gap-2">
+      {files.map((file, index) => {
+        const meta =
+          files.length === 1 && pageCount != null
+            ? `${formatBytes(file.size)} · ${pageCount} page${pageCount === 1 ? "" : "s"}`
+            : formatBytes(file.size);
+        return (
+          <div
+            key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
+            className="flex items-center gap-3.5 rounded-[10px] px-4 py-3.5"
+            style={{ border: "1px solid var(--border)", backgroundColor: "var(--muted)" }}
+          >
+            <span
+              className="inline-flex items-center justify-center rounded-md shrink-0"
+              style={{
+                width: 32,
+                height: 32,
+                backgroundColor: "var(--background)",
+                border: "1px solid var(--border)",
+                color: "var(--foreground)",
+              }}
+            >
+              <FileText aria-hidden className="h-4 w-4" />
+            </span>
+            <div className="flex-1 min-w-0 grid gap-0.5">
+              <div className="text-[13px] truncate text-foreground">{file.name}</div>
+              <div className="text-[10.5px] text-muted-foreground/70 font-mono">
+                {meta}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onRemoveAt(index)}
+              aria-label={`Remove ${file.name}`}
+              title="Remove file"
+              className={cn(
+                "h-7 w-7 inline-flex items-center justify-center rounded-md",
+                "text-muted-foreground hover:bg-muted hover:text-foreground",
+                "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border",
+                "cursor-pointer",
+              )}
+            >
+              <X aria-hidden className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }

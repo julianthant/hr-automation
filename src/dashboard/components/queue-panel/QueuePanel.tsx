@@ -447,6 +447,7 @@ export function QueuePanel({
             date={date}
             batchParentRunId={surface.parentRunId}
             workflowLabel={workflowLabel}
+            titleOverride={surface.titleOverride}
             memberEntries={surface.members}
             isBatchQueueFocused={batchQueueParentRunId === surface.parentRunId}
             onEnterBatchQueue={(runId) => onEnterBatchQueue?.(runId)}
@@ -486,7 +487,11 @@ export function QueuePanel({
       {batchQueueParentRunId && resolvedBatchToolbarEntry ? (
         <BatchQueueToolbar
           batchAnchor={resolvedBatchToolbarEntry}
-          titleOverride={resolvedBatchToolbarEntry.data?.__name as string | undefined}
+          titleOverride={
+            batchAnchorIsPrep
+              ? undefined
+              : resolvedBatchToolbarEntry.data?.__name as string | undefined
+          }
           anchorKind={batchAnchorIsPrep ? "prep" : "daemon"}
           memberCount={batchQueueMembers.length}
           batchPreviewActive={selectedId === null}

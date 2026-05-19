@@ -38,7 +38,7 @@ export function DelegationRow({
   batchDrillInEnabled = true,
 }: DelegationRowProps) {
   const runId = parent.runId ?? parent.id;
-  const title = readQueueTitle(parent.data) ?? parent.data?.pdfOriginalName ?? "Prep batch";
+  const title = parent.data?.pdfOriginalName ?? readQueueTitle(parent.data) ?? "Prep batch";
   const footerActions = (
     <>
       <RetryButton

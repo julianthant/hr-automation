@@ -408,10 +408,9 @@ export const runEidLookupCli = buildCliAdapter<[string[]], EidLookupItem>({
     const n = "name" in item ? normalizeName(item.name) : item.emplId;
     const subject = eidLookupCrmWorkflow.config.operatorSubject?.(item);
     const parentSubject = "parentSubject" in item ? item.parentSubject : undefined;
-    const displayName = parentSubject ?? n ?? "";
     return {
       searchName: n,
-      __name: displayName,
+      __name: n ?? "",
       __id: n ?? itemId,
       ...(parentSubject ? rootQueueTitleData(parentSubject) : {}),
       ...operatorSubjectData(subject),

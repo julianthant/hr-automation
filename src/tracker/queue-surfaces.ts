@@ -23,7 +23,7 @@ function isPassiveDelegationMember(entry: TrackerEntry): boolean {
   return resolveRowArchetype(entry) === "passive-child";
 }
 
-/** OCR prep fans out daemon utility rows with `taskRole: "child"` — same group card as passive utility. */
+/** OCR prep fans out daemon utility rows with `taskRole: "child"` — these stay as delegation member rows. */
 function isOcrDaemonPrepFanoutChild(entry: TrackerEntry): boolean {
   return (
     resolveRowArchetype(entry) === "delegate-child" &&
@@ -32,15 +32,24 @@ function isOcrDaemonPrepFanoutChild(entry: TrackerEntry): boolean {
   );
 }
 
-function isPassiveDelegationSurfaceMember(entry: TrackerEntry): boolean {
-  return isPassiveDelegationMember(entry) || isOcrDaemonPrepFanoutChild(entry);
-}
-
 function buildMembersByParentRunId(entries: TrackerEntry[]): Map<string, TrackerEntry[]> {
   const map = new Map<string, TrackerEntry[]>();
   for (const entry of entries) {
     if (!entry.parentRunId) continue;
     if (isBatchParent(entry)) continue; // batch-parent rows are anchors, not members
+    const list = map.get(entry.parentRunId) ?? [];
+    list.push(entry);
+    map.set(entry.parentRunId, list);
+  }
+  return map;
+}
+
+function groupPendingDelegatedBatchParents(entries: TrackerEntry[]): Map<string, TrackerEntry[]> {
+  const map = new Map<string, TrackerEntry[]>();
+  for (const entry of entries) {
+    if (!entry.parentRunId) continue;
+    if (!isBatchParentAnchor(entry)) continue;
+    if (isApprovedPrepRow(entry)) continue;
     const list = map.get(entry.parentRunId) ?? [];
     list.push(entry);
     map.set(entry.parentRunId, list);
@@ -109,12 +118,32 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
   const batchParentAnchors = visibleEntries.filter(isBatchParentAnchor);
   const batchParentAnchorRunIds = new Set(batchParentAnchors.map((entry) => entry.runId ?? entry.id));
   const approvalParentRunIds = new Set([...batchParentAnchorRunIds]);
+  const pendingDelegatedBatchParentsByParentRunId =
+    groupPendingDelegatedBatchParents(batchParentAnchors);
+  const pendingDelegatedBatchParentRunIds = new Set<string>();
   const singleDelegationEntries: TrackerEntry[] = [];
 
   const groupRows: TrackerQueueGroupSurface[] = [];
 
+  for (const [parentRunId, members] of pendingDelegatedBatchParentsByParentRunId) {
+    for (const member of members) {
+      pendingDelegatedBatchParentRunIds.add(member.runId ?? member.id);
+    }
+    if (members.length === 1) {
+      singleDelegationEntries.push(members[0]!);
+      continue;
+    }
+    groupRows.push({
+      kind: "batch",
+      parentRunId,
+      members,
+      titleOverride: members[0]?.data?.parentSubject,
+    });
+  }
+
   for (const parent of batchParentAnchors) {
     const parentRunId = parent.runId ?? parent.id;
+    if (pendingDelegatedBatchParentRunIds.has(parentRunId)) continue;
     const members = membersByParentRunId.get(parentRunId) ?? [];
     const approved = isApprovedPrepRow(parent);
 
@@ -144,7 +173,9 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
     if (approvalParentRunIds.has(parentRunId)) continue;
     if (members.length === 1) {
       const only = members[0]!;
-      if (isPassiveDelegationSurfaceMember(only)) {
+      if (isOcrDaemonPrepFanoutChild(only)) {
+        singleDelegationEntries.push(only);
+      } else if (isPassiveDelegationMember(only)) {
         groupRows.push({
           kind: "passive-delegation",
           parentRunId,
@@ -154,6 +185,10 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
       } else {
         singleDelegationEntries.push(only);
       }
+      continue;
+    }
+    if (members.every(isOcrDaemonPrepFanoutChild)) {
+      singleDelegationEntries.push(...members);
       continue;
     }
     const passive = members.every(isPassiveDelegationMember);
