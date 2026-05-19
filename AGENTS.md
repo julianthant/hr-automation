@@ -1,34 +1,22 @@
 <claude-mem-context>
 # Memory Context
 
-# [hr-automation] recent context, 2026-05-19 11:13am PDT
+# [hr-automation] recent context, 2026-05-19 11:36am PDT
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (19,097t read) | 646,261t work | 97% savings
+Stats: 50 obs (18,571t read) | 694,786t work | 97% savings
 
 ### May 18, 2026
-S249 Plan 2 — Remove all `as never` casts from OCR orchestrator and force-research (7 total sites) (May 18 at 9:06 PM)
 S250 Plan 4 — add isTrackerStatus runtime validation to eventRows and allLatestRows SELECTs in queries.ts (May 18 at 9:26 PM)
 S251 Plan 3 — Residual formKind guards: three type-soundness tightenings in OCR form handling code (May 18 at 9:31 PM)
 S252 Plan 6 — LogEntry boundary validator for hr-automation: add isLogEntry type guard and wire into both log-entry JSONL read functions (May 18 at 10:29 PM)
 S253 Plan 7 — Lifecycle-tied screenshot cleanup: architecture reviewed and implementation queued (May 18 at 10:33 PM)
 S255 Plan 7 — Lifecycle-tied screenshot cleanup for hr-automation: close TODO(2026-05-11) in server.ts with 30-day terminal_at-based sweep (May 18 at 10:34 PM)
-2663 10:37p 🔴 OCR Shared Readers — Multi-Day JSONL Walkback for Cross-Midnight Sessions
-2664 " 🔄 OCR Orchestrator — Removed 7 as-never Casts; AnyOcrFormSpec Accepts unknown
-2662 " 🟣 TODO(2026-05-11) replaced with runScreenshotSweep call in createDashboardServer
-2668 " 🟣 Screenshot sweep periodic interval wired into createDashboardServer with proper cleanup
-2669 " 🟣 runScreenshotSweep helper defined in server.ts — sweep wiring complete
-2671 " 🔵 AnyOcrFormSpec Confirmed as OcrFormSpec&lt;unknown, unknown, unknown&gt; — as-never Casts Remaining
-2672 " 🔵 JSONL Parse Cache — LRU with mtime+size Invalidation, 64-Entry Cap
-2673 " 🔴 Tracker Queries — Raw/Typed Row Split Pattern for Status Boundary Validation
-2670 10:38p 🔴 TypeScript error: TrackerEntry.status has no 'cancelled' variant — removed from isTerminal check
-2675 " 🟣 DB Schema v9 — terminal_at Column for Lifecycle-Tied Screenshot Cleanup
+2675 10:38p 🟣 DB Schema v9 — terminal_at Column for Lifecycle-Tied Screenshot Cleanup
 2676 " 🟣 Screenshot Sweep — Lifecycle-Tied Cleanup for Stale Run Evidence
-2677 " 🔴 applySessionEvent — Discriminated on ScreenshotSessionEvent via isScreenshotSessionEvent Guard
-2678 " 🔴 OCR Registry — getFormSpec Replaced Double-Cast with keyof Narrowing
 2674 " 🟣 Test suite created for sweepStaleRunScreenshots with 7 scenarios
 2680 10:39p 🔵 Code Review Verification — Plans 1–4, 6 CLOSED; Plan 7 Uncommitted and Needs Test
 2679 " 🔵 Test failure: seedRun with different trackerDates creates two runs rows, not an upsert
@@ -48,13 +36,13 @@ S256 Fan out parallel subagents to complete all type-soundness plans and push to
 2692 " 🔵 LOG_ENTRY_LEVELS Not Exported from jsonl.ts — sqlite-mappers Fix Must Export or Duplicate
 2693 10:45p 🟣 Parallel subagent fan-out requested for type-soundness completion
 S257 Fix "skipping invalid line" errors in .tracker/sessions-2026-05-18.jsonl (lines 685–724) (May 18 at 10:58 PM)
+S258 Fix two bugs: (1) JSONL warning flood from sessions file being treated as a workflow, (2) OCR auto-retry with different API key on provider errors like Gemini 503 (May 18 at 10:59 PM)
 ### May 19, 2026
 2694 2:34a 🔵 Source of "skipping invalid line" warnings in sessions JSONL
 2695 2:35a 🔵 parseTrackerFilename matches sessions file, leaking "sessions" as a fake workflow
 2696 " 🔵 OCR error classification and per-page retry logic architecture
 2697 2:36a 🔵 runSinglePageThroughPool only reports last-tried key, not full attempted-keys list
 2698 " 🔴 OCR per-page retry: exhausts full pool by default and tracks all attempted keys
-S258 Fix two bugs: (1) JSONL warning flood from sessions file being treated as a workflow, (2) OCR auto-retry with different API key on provider errors like Gemini 503 (May 19 at 2:38 AM)
 2699 2:39a 🔵 EID Lookup Page — Footer and Label Bugs Identified
 2700 " 🔵 GroupRowBase Footer Architecture — footerSecondaryId Controls Run ID Display
 2701 " 🔵 Root Cause Found — DaemonBatchRow Passes batchParentRunId as footerSecondaryId
@@ -71,6 +59,26 @@ S258 Fix two bugs: (1) JSONL warning flood from sessions file being treated as a
 2712 2:44a 🔴 All 61 Tests Pass — resolveRowArchetype Legacy Heuristics Fix Confirmed
 2713 " ✅ src/tracker/CLAUDE.md Updated — Legacy Archetype Fallbacks Documented
 2714 3:00a ✅ Delegation workflow documentation requested
+2715 11:13a 🔴 Test failure: countSidebarRowsFromTrackerHistory discarded OCR review rows not hidden
+2716 11:14a 🔵 countSidebarRowsFromTrackerHistory discarded-row filtering investigation
+2717 " 🔵 Root cause: discarded OCR rows without data.mode="prepare" bypass isResolvedPrepEntry filter
+2718 " 🔴 Fixed isResolvedPrepEntry to filter discarded OCR rows without requiring batch-parent archetype
+2719 " ✅ CLAUDE.md lesson added: legacy OCR discard rows can lack data.mode
+2720 11:15a 🔴 Full test suite passes clean after isResolvedPrepEntry fix — 1628/1629 passing
+2721 11:16a 🔴 resolveRowArchetype legacy fallbacks restored for mode/taskRole/requestRole
+2722 " 🔴 Cancelled delegated lookup rows keep person/EID titles instead of technical OCR retry ids
+2723 " ✅ Daemon batch cards and batch rows no longer show raw parentRunId in footer
+2724 " 🔄 queue-surface-classifier.ts toJsonlEntry/toDashboardEntry simplified to identity casts
+2725 11:27a 🔵 hr-automation repo has 31 unstaged files and is 13 commits ahead of origin/master
+S259 Push all local commits and staged changes to git origin/master (May 19 at 11:27 AM)
+**Investigated**: Git status showed 31 unstaged modified files and 13 unpushed commits on local master ahead of origin/master.
 
-Access 646k tokens of past work via get_observations([IDs]) or mem-search skill.
+**Learned**: The 31 unstaged files were a type-soundness sweep and documentation updates across core, OCR, and tracker modules — companion edits to the 13 refactor commits already committed locally.
+
+**Completed**: All 31 unstaged files were staged and committed as a single rollup commit ("chore: type-soundness sweep and doc updates across core/ocr/tracker"), then the full batch of 14 commits (13 prior refactors + the new chore commit) was pushed to origin/master. Remote is now at b0734cff.
+
+**Next Steps**: No active work in progress — push was the complete request and it succeeded.
+
+
+Access 695k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

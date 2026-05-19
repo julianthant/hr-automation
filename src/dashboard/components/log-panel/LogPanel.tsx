@@ -49,7 +49,18 @@ interface LogPanelProps {
   onDeleteEntry?: () => void;
 }
 
-function deriveQueueRowTypeLabel(
+function ocrPrepFileCount(entry: TrackerEntry, allEntries: TrackerEntry[]): number {
+  if (entry.workflow !== "ocr") return 0;
+  if (!entry.parentRunId) return 1;
+  const count = allEntries.filter((candidate) =>
+    candidate.workflow === "ocr" &&
+    candidate.parentRunId === entry.parentRunId &&
+    resolveRowArchetype(candidate) === "batch-parent"
+  ).length;
+  return Math.max(1, count);
+}
+
+export function deriveQueueRowTypeLabel(
   entry: TrackerEntry,
   childEntries: TrackerEntry[],
   allEntries: TrackerEntry[],
@@ -59,6 +70,11 @@ function deriveQueueRowTypeLabel(
 
   switch (archetype) {
     case "batch-parent": {
+      if (entry.workflow === "ocr") {
+        const fileCount = ocrPrepFileCount(entry, allEntries);
+        const base = fileCount > 1 ? "Batch delegation" : "Single delegation";
+        return previewAvailable ? `${base} · Preview` : base;
+      }
       // recordCount (set by OCR orchestrator) takes precedence; childEntries covers non-OCR anchors
       const recordCount = Number(entry.data?.recordCount ?? 0);
       const count = recordCount > 0 ? recordCount : childEntries.length;

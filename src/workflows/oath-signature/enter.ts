@@ -30,6 +30,41 @@ async function waitForPageReady(page: Page): Promise<void> {
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 }
 
+async function isPersonProfilesSearchFormVisible(frame: FrameLocator): Promise<boolean> {
+  return oathSignature
+    .emplIdInput(frame)
+    .isVisible({ timeout: 2_000 })
+    .catch(() => false);
+}
+
+async function waitForPersonProfilesSearchForm(frame: FrameLocator): Promise<void> {
+  await oathSignature.emplIdInput(frame).waitFor({ state: "visible", timeout: 10_000 });
+}
+
+/**
+ * PeopleSoft can preserve the last Person Profile detail page across direct
+ * component URL loads. Make the search-form state explicit before filling the
+ * next EID; otherwise daemon item N+1 can time out looking for the search box
+ * while item N's profile is still rendered.
+ */
+export async function ensurePersonProfilesSearchForm(
+  page: Page,
+  frame: FrameLocator,
+): Promise<void> {
+  if (await isPersonProfilesSearchFormVisible(frame)) return;
+
+  const returnButton = oathSignature.returnToSearchButton(frame);
+  const canReturn = await returnButton.isVisible({ timeout: 2_000 }).catch(() => false);
+  if (!canReturn) {
+    throw new Error("Person Profiles search form is not visible and Return to Search is unavailable");
+  }
+
+  log.step("Person Profiles opened on a prior profile — returning to search...");
+  await returnButton.click({ timeout: 10_000 });
+  await waitForPageReady(page);
+  await waitForPersonProfilesSearchForm(frame);
+}
+
 // --- Navigation ---
 
 /**
@@ -44,6 +79,7 @@ export async function navigateToPersonProfiles(page: Page): Promise<void> {
     timeout: 30_000,
   });
   await waitForPageReady(page);
+  await ensurePersonProfilesSearchForm(page, oathSignature.getPersonProfileFrame(page));
   log.success("Person Profiles search form loaded");
 }
 
@@ -155,6 +191,7 @@ export async function returnToSearch(page: Page, frame: FrameLocator): Promise<v
   log.step("Returning to search...");
   await btn.click({ timeout: 10_000 });
   await waitForPageReady(page);
+  await waitForPersonProfilesSearchForm(frame);
 }
 
 // --- ActionPlan builder ---
