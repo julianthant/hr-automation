@@ -90,7 +90,7 @@ Do NOT wrap records in a page object. Do NOT nest under "records" or "data" keys
 For each record extract these fields:
 - rowIndex: 0-indexed position on the page, starting from 0 for the first record
 - printedName: the printed/handwritten name on the form. ALWAYS attempt a best-guess transcription — speak the name out loud as you read it. Only set null if the field is genuinely BLANK (no writing at all). Faint or hard-to-read writing should still be transcribed.
-- employeeId: digits in the "Employee ID" field. Null if blank.
+- employeeId: the full Employee ID number. UCPath IDs are exactly 8 digits starting with "10" (e.g. "10874100"). Scan the ENTIRE page for this number before returning null, including the top page margin, the white space above the form header, and handwritten notes outside the printed Employee ID box. Standalone handwritten 8-digit numbers above the form header are usually the correct employeeId, especially on UPAY585 scans where the printed Employee ID box is faint, clipped, or partially filled. Copy ALL digits exactly as printed — do NOT drop the leading "10". Return null ONLY when the whole page has no readable Employee ID anywhere. If you can read any digits, return them all.
 - dateSigned: the date signed (typical formats: MM/DD/YYYY, M/D/YY, M-D-YY). Null if blank.
 - employeeSigned: true if the employee signature line has any writing/scribble. False for an empty box. For sign-in sheets with one signature column, set true if the row's signature box is filled.
 - officerSigned: true if the authorized-officer / witness signature is filled. Null for sign-in sheets with one signature column. False for UPAY585/UPAY586 when empty.
@@ -162,6 +162,9 @@ export const oathOcrFormSpec: OcrFormSpec<
     // over the handwritten name. Roster-exact match → auto-accept; no roster
     // match → flag for eid-lookup-by-EID (verify-only branch).
     const formEid = normalizeUcpathEmployeeId(formEidRaw);
+    if (formEidRaw.length > 0 && formEid.length === 0) {
+      log.step(`[oath/match] page ${record.sourcePage} row ${record.rowIndex ?? "?"}: extracted EID "${formEidRaw}" is not a valid UCPath EID (expected 8 digits starting with "10") — falling back to name-based lookup`);
+    }
     if (formEid.length > 0) {
       const rosterHit = roster.find((row) => row.eid === formEid);
       if (rosterHit) {
@@ -370,6 +373,7 @@ export const oathOcrFormSpec: OcrFormSpec<
       const normalizedDate = normalizeOathDate(record.dateSigned ?? null);
       return {
         emplId: record.employeeId,
+        ...(record.printedName ? { name: record.printedName } : {}),
         ...(normalizedDate ? { date: normalizedDate } : {}),
       };
     },
