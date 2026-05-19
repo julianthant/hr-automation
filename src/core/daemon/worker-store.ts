@@ -11,7 +11,6 @@ export type WorkerCommandType =
   | 'retry_task'
   | 'drain_worker'
   | 'stop_worker'
-  | 'force_stop_task'
   | 'kill_browser'
   | 'force_kill_worker'
   | 'health_check'
