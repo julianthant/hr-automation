@@ -29,6 +29,13 @@ export const oathUploadStepList = [
   "submit",
 ] as const;
 
+export const oathUploadSteps = [
+  "servicenow-auth",
+  ...oathUploadStepList,
+] as const;
+
+export type OathUploadSteps = typeof oathUploadSteps;
+
 const HR_FORM_VALUES = {
   subject: "HDH New Hire Oaths",
   description: "Please see attached oaths for employees hired under HDH.",
@@ -49,7 +56,7 @@ export interface OathUploadHandlerOpts {
 }
 
 export async function oathUploadHandler(
-  ctx: Ctx<readonly string[], OathUploadInput>,
+  ctx: Ctx<OathUploadSteps, OathUploadInput>,
   input: OathUploadInput,
   opts: OathUploadHandlerOpts = {},
 ): Promise<void> {
@@ -121,7 +128,7 @@ export async function oathUploadHandler(
       // Fire-and-forget — OCR runs as a child workflow in the same process,
       // but we don't await it here. The next step (wait-ocr-approval) blocks
       // until the operator approves on the dashboard.
-      void runWorkflow(ocrWorkflow, ocrParsed.data as never, { trackerDir: ctx.trackerDir ?? trackerDir }).catch((err) => {
+      void runWorkflow(ocrWorkflow, ocrParsed.data, { trackerDir: ctx.trackerDir ?? trackerDir }).catch((err) => {
         log.error(`[oath-upload] OCR child crashed before emitting a tracker row: ${errorMessage(err)}`);
         throw err;
       });

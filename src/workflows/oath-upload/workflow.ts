@@ -5,9 +5,11 @@ import { errorMessage } from "../../utils/errors.js";
 import { loginToServiceNow } from "../../infra/auth/login.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { OathUploadInputSchema, type OathUploadInput } from "./schema.js";
-import { oathUploadHandler, oathUploadStepList } from "./handler.js";
+import { oathUploadHandler, oathUploadSteps } from "./handler.js";
 
 const WORKFLOW = "oath-upload";
+
+export { oathUploadSteps, type OathUploadSteps } from "./handler.js";
 
 export const oathUploadWorkflow = defineWorkflow({
   name: WORKFLOW,
@@ -25,10 +27,7 @@ export const oathUploadWorkflow = defineWorkflow({
     },
   ],
   authSteps: false,
-  steps: [
-    "servicenow-auth",
-    ...oathUploadStepList,
-  ] as const,
+  steps: oathUploadSteps,
   schema: OathUploadInputSchema,
   authChain: "sequential",
   batch: {
@@ -55,7 +54,7 @@ export const oathUploadWorkflow = defineWorkflow({
   handler: async (ctx, input) => {
     ctx.markStep("servicenow-auth");
     await ctx.page("servicenow");
-    await oathUploadHandler(ctx as never, input);
+    await oathUploadHandler(ctx, input);
   },
 });
 
