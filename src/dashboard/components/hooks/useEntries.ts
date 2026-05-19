@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { toast } from "sonner";
 import type { TrackerEntry } from "@/components/shared/types";
 import { dateLocal, stableKey } from "../../lib/utils";
 import { sseHub } from "@/lib/sse-hub";
@@ -23,6 +24,18 @@ interface UseEntriesResult {
 }
 
 type WithFirstLog = TrackerEntry & { firstLogTs?: string; lastLogTs?: string };
+type EntriesEnvelope = {
+  entries: TrackerEntry[];
+  workflows: string[];
+  wfCounts?: Record<string, number>;
+  failureCounts?: Record<string, number>;
+};
+
+export function isEntriesEnvelope(value: unknown): value is EntriesEnvelope {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const envelope = value as Record<string, unknown>;
+  return Array.isArray(envelope.entries) && Array.isArray(envelope.workflows);
+}
 
 export function shouldApplyEntriesUpdate(args: {
   previousHash: string;
@@ -143,12 +156,15 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
       "entries",
       params,
       (data) => {
-        const { entries: raw, workflows: wfs, wfCounts: counts, failureCounts: fcounts } = data as {
-          entries: TrackerEntry[];
-          workflows: string[];
-          wfCounts?: Record<string, number>;
-          failureCounts?: Record<string, number>;
-        };
+        if (!isEntriesEnvelope(data)) {
+          console.error("[useEntries] malformed SSE envelope; ignoring", data);
+          toast.error("Dashboard received a malformed update", {
+            id: "entries-malformed-sse-envelope",
+            description: "Refresh to recover if the queue stops updating.",
+          });
+          return;
+        }
+        const { entries: raw, workflows: wfs, wfCounts: counts, failureCounts: fcounts } = data;
 
         setConnected(true);
         setLoading(false);

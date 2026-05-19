@@ -183,6 +183,29 @@ test("7. malformed envelope → no throw, no listener called", async () => {
   unsub();
 });
 
+test("7b. wrong-shape JSON envelope warns and does not call listener", async () => {
+  let listenerCalled = false;
+  const warnings: unknown[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => warnings.push(args.join(" "));
+  const unsub = hub.subscribe("entries", {}, () => {
+    listenerCalled = true;
+  });
+  await flushMicrotasks();
+
+  try {
+    assert.doesNotThrow(() => {
+      lastInstance!.onmessage!({ data: JSON.stringify({ data: { entries: [] } }) });
+    });
+    assert.equal(listenerCalled, false);
+    assert.equal(warnings.length, 1);
+    assert.match(String(warnings[0]), /malformed envelope shape/);
+  } finally {
+    console.warn = originalWarn;
+    unsub();
+  }
+});
+
 test("8. envelope for an unknown sub id → no throw, no listener called", async () => {
   let listenerCalled = false;
   const unsub = hub.subscribe("entries", {}, () => {

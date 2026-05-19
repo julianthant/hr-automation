@@ -17,6 +17,26 @@ interface Sub {
   onError?: ErrorHandler;
 }
 
+function payloadPreview(value: unknown): string {
+  try {
+    const json = JSON.stringify(value);
+    if (!json) return String(value);
+    return json.length > 500 ? `${json.slice(0, 500)}...` : json;
+  } catch {
+    return String(value);
+  }
+}
+
+function isHubEnvelope(value: unknown): value is { sub: string; data: unknown; event?: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const envelope = value as Record<string, unknown>;
+  return (
+    typeof envelope.sub === "string" &&
+    "data" in envelope &&
+    (envelope.event === undefined || typeof envelope.event === "string")
+  );
+}
+
 function buildHubUrl(subsArray: Array<{ id: string; topic: string; params: unknown }>): string {
   const path = `/events/hub?subs=${encodeURIComponent(JSON.stringify(subsArray))}`;
   if (typeof window !== "undefined" && window.location.port === "5173") {
@@ -65,14 +85,19 @@ export class SseHub {
     const url = buildHubUrl(subsArray);
     const es = new EventSource(url);
     es.onmessage = (ev) => {
-      let env: { sub: string; data: unknown; event?: string };
+      let parsed: unknown;
       try {
-        env = JSON.parse(ev.data) as { sub: string; data: unknown; event?: string };
+        parsed = JSON.parse(ev.data) as unknown;
       } catch {
         // malformed envelope — ignore
         console.warn("SseHub: malformed envelope (could not parse JSON), ignoring.");
         return;
       }
+      if (!isHubEnvelope(parsed)) {
+        console.warn(`SseHub: malformed envelope shape, ignoring payload=${payloadPreview(parsed)}`);
+        return;
+      }
+      const env = parsed;
       const sub = this.subs.get(env.sub);
       if (!sub) return;
       try {

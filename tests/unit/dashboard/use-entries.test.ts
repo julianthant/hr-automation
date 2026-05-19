@@ -7,6 +7,7 @@ import { dirname, resolve } from "node:path";
 import {
   buildEntriesHash,
   entryRenderHash,
+  isEntriesEnvelope,
   resetEntriesMemoRefs,
   shouldApplyEntriesUpdate,
 } from "../../../src/dashboard/components/hooks/useEntries.js";
@@ -45,6 +46,13 @@ test("useEntries updates aggregate SSE state only once per delivery", () => {
   assert.equal(source.match(/\bsetWorkflows\(/g)?.length ?? 0, 1);
   assert.equal(source.match(/\bsetWfCounts\(/g)?.length ?? 0, 1);
   assert.equal(source.match(/\bsetFailureCounts\(/g)?.length ?? 0, 1);
+});
+
+test("isEntriesEnvelope accepts only shallow entries payloads", () => {
+  assert.equal(isEntriesEnvelope({ entries: [], workflows: [], wfCounts: {}, failureCounts: {} }), true);
+  assert.equal(isEntriesEnvelope({ entries: {}, workflows: [] }), false);
+  assert.equal(isEntriesEnvelope({ entries: [], workflows: {} }), false);
+  assert.equal(isEntriesEnvelope(null), false);
 });
 
 test("buildEntriesHash fingerprints entries in one stable pass", () => {
