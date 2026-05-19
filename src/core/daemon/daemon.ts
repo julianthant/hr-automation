@@ -317,9 +317,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
 
   const buildShutdownTrackerData = (input: unknown, parentRunId?: string): Record<string, string> => {
     try {
-      const data = buildHttpPendingData(wf, input)
-      data.archetype = deriveRowArchetype(wf.archetype, parentRunId)
-      return data
+      return buildHttpPendingData(wf, input, parentRunId)
     } catch {
       const data = buildTrackerDataForInput(input)
       data.archetype = deriveRowArchetype(wf.archetype, parentRunId)

@@ -2,9 +2,8 @@ import type { RegisteredWorkflow } from "./kernel/types.js";
 import type { DaemonFlags } from "./daemon/types.js";
 import type { ensureDaemonsAndEnqueue as ensureDaemonsAndEnqueueFn } from "./daemon/client.js";
 import { ensureDaemonsAndEnqueue } from "./daemon/client.js";
+import { buildPendingTrackerData } from "./pending-data.js";
 import { trackEvent, type TrackerEntry } from "../tracker/jsonl.js";
-import { operatorSubjectData } from "../domain/operator-subject.js";
-import { deriveRowArchetype } from "../domain/row-archetype.js";
 import { log } from "../utils/log.js";
 
 type EnqueueFn<TInput> = (
@@ -65,8 +64,8 @@ export function buildCliAdapter<TArgs extends readonly unknown[], TInput>(
         ...(opts.deriveItemId ? { deriveItemId: opts.deriveItemId } : {}),
         ...(parentRunId ? { parentRunId } : {}),
         onPreEmitPending: (item, runId, parentRunId, itemId) => {
-          const subject = opts.workflow.config.operatorSubject?.(item);
           const id = opts.getPendingId?.(item, itemId) ?? itemId;
+          const extras = opts.pendingExtras?.(item, itemId, runId, parentRunId);
           track({
             workflow: opts.workflow.config.name,
             timestamp: now,
@@ -74,12 +73,16 @@ export function buildCliAdapter<TArgs extends readonly unknown[], TInput>(
             runId,
             ...(parentRunId ? { parentRunId } : {}),
             status: "pending",
-            data: {
-              ...opts.buildPendingData(item, itemId),
-              ...operatorSubjectData(subject),
-              ...opts.pendingExtras?.(item, itemId, runId, parentRunId),
-              archetype: deriveRowArchetype(opts.workflow.archetype, parentRunId),
-            },
+            data: buildPendingTrackerData({
+              workflow: opts.workflow,
+              input: item,
+              parentRunId,
+              extraData: {
+                ...opts.buildPendingData(item, itemId),
+                ...(extras ?? {}),
+              },
+              nameIdStamp: "omit",
+            }),
           });
         },
         ...(opts.onPreEmitFailed

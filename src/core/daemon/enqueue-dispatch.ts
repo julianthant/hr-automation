@@ -16,10 +16,10 @@
 import { randomUUID } from "node:crypto";
 import { loadWorkflow } from "../workflow-loaders.js";
 import type { RegisteredWorkflow } from "../kernel/types.js";
-import { buildInitialTrackerData, splitPrefilled } from "../kernel/workflow.js";
+import { splitPrefilled } from "../kernel/workflow.js";
+import { buildPendingTrackerData } from "../pending-data.js";
 import { allocateLowestBatchDisplayOrdinal } from "../../tracker/batch-display-ordinal.js";
 import { DEFAULT_DIR, trackEvent } from "../../tracker/jsonl.js";
-import { deriveRowArchetype } from "../../domain/row-archetype.js";
 import { log } from "../../utils/log.js";
 
 export interface EnqueueHttpResult {
@@ -128,19 +128,19 @@ export function buildTrackerDataForInput(input: unknown): Record<string, string>
 export function buildHttpPendingData<TData, TSteps extends readonly string[]>(
   wf: RegisteredWorkflow<TData, TSteps>,
   input: unknown,
+  parentRunId?: string,
 ): Record<string, string> {
   const baseData = buildTrackerDataForInput(input);
   const { cleaned } = splitPrefilled(input);
-  const handlerInput = wf.config.schema.parse(cleaned);
-  const data = {
-    ...baseData,
-    ...buildInitialTrackerData(wf, handlerInput),
-  };
-  const name = wf.config.getName?.(data);
-  if (name) data.__name = name;
-  const id = wf.config.getId?.(data);
-  if (id) data.__id = id;
-  return data;
+  const handlerInput = wf.config.schema.parse(cleaned) as TData;
+  return buildPendingTrackerData({
+    workflow: wf,
+    input: handlerInput,
+    baseData,
+    useInitialTrackerSeed: true,
+    nameIdStamp: "if-truthy-on-merged",
+    parentRunId,
+  });
 }
 
 /**
@@ -219,14 +219,13 @@ export async function enqueueFromHttp(
         ...(effectiveParentRunId ? { parentRunId: effectiveParentRunId } : {}),
         ...(deriveItemId ? { deriveItemId } : {}),
         onPreEmitPending: (item, runId, passedParentRunId, itemId) => {
-          const data = buildHttpPendingData(wf, item);
+          /** Pending + spawn-failure rows share stamp; `??` tolerates enqueue-client vs HTTP-option drift. */
+          const stampedParentRunId = passedParentRunId ?? effectiveParentRunId;
+          const data = buildHttpPendingData(wf, item, stampedParentRunId);
           if (batchDisplayOrdinal !== undefined) {
             data.batchDisplayOrdinal = String(batchDisplayOrdinal);
           }
           const id = itemId;
-          /** Pending + spawn-failure rows share stamp; `??` tolerates enqueue-client vs HTTP-option drift. */
-          const stampedParentRunId = passedParentRunId ?? effectiveParentRunId;
-          data.archetype = deriveRowArchetype(wf.archetype, stampedParentRunId);
           // Persist the original input verbatim on the pending row so the
           // dashboard's retry / edit-and-resume features can reconstruct
           // the call without per-workflow input-shaping logic. See the
@@ -257,11 +256,10 @@ export async function enqueueFromHttp(
           // becoming a ghost. Use the same data-shape helper as the
           // pending emit so prefilledData (edit-and-resume) values stay
           // visible on the failed row.
-          const data = buildHttpPendingData(wf, item);
+          const data = buildHttpPendingData(wf, item, effectiveParentRunId);
           if (batchDisplayOrdinal !== undefined) {
             data.batchDisplayOrdinal = String(batchDisplayOrdinal);
           }
-          data.archetype = deriveRowArchetype(wf.archetype, effectiveParentRunId);
           const id = itemId;
           trackEvent(
             {
