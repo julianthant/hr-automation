@@ -519,7 +519,7 @@ export async function runOcrOrchestrator(
 
       disambigTargets.forEach((t, i) => {
         records[t.index] = spec.applyDisambiguation({
-          record: records[t.index] as never,
+          record: records[t.index],
           result: results[i],
         });
       });
@@ -530,7 +530,7 @@ export async function runOcrOrchestrator(
 
     const suggestionTargets: Array<{ index: number; rec: unknown }> = [];
     records.forEach((rec, index) => {
-      const kind = spec.needsLookup(rec as never);
+      const kind = spec.needsLookup(rec);
       if (kind !== "name") return;
       const r = rec as { rosterCandidates?: unknown[] };
       if (Array.isArray(r.rosterCandidates) && r.rosterCandidates.length > 0) return;
@@ -641,9 +641,9 @@ export async function runOcrOrchestrator(
         createDependencyBatch: async (children) => {
           const parent = { workflow: "ocr" as const, itemId: id, runId, formType: spec.formType };
           if (opts._createDependencyBatchOverride) {
-            await opts._createDependencyBatchOverride({ parent, children: children as never });
+            await opts._createDependencyBatchOverride({ parent, children });
           } else {
-            createOcrEidLookupDependencyBatch({ trackerDir, parent, children: children as never });
+            createOcrEidLookupDependencyBatch({ trackerDir, parent, children });
           }
         },
         buildChild: (itemId, childRunId, item) => ({
@@ -733,7 +733,7 @@ export async function runOcrOrchestrator(
           };
           await ensureDaemonsAndEnqueue(
             eidLookupCrmWorkflow,
-            inputs as never,
+            inputs,
             {},
             {
               trackerDir,

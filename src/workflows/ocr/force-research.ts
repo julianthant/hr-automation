@@ -8,6 +8,7 @@ import { watchChildRuns, type ChildOutcome } from "../../tracker/delegation/watc
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
 import { patchOcrRecordFromEidLookupOutcome } from "./eid-lookup-results.js";
 import { resolveParentSubject } from "./orchestrator.js";
+import type { EidLookupItem } from "../eid-lookup/schema.js";
 
 const WORKFLOW = "ocr";
 
@@ -67,7 +68,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     const itemId = `ocr-force-${input.runId}-r${idx}`;
     itemIds.push(itemId);
     itemIdToRecordIdx.set(itemId, idx);
-    const name = spec.carryForwardKey(r as never);
+    const name = spec.carryForwardKey(r);
     enqueueInputs.push({ name });
   }
 
@@ -94,7 +95,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     );
     await ensureDaemonsAndEnqueue(
       eidLookupCrmWorkflow,
-      enqueueInputs as never,
+      enqueueInputs as EidLookupItem[],
       {},
       {
         trackerDir,
