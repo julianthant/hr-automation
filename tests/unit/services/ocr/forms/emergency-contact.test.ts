@@ -5,6 +5,7 @@ import type { RosterRow } from "../../../../../src/services/matching/match.js";
 
 function makeRecord(name: string) {
   return {
+    formKind: "emergency-contact" as const,
     sourcePage: 1,
     employee: { name, employeeId: "" },
     emergencyContact: {

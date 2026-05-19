@@ -74,6 +74,7 @@ export interface PreviewEmergencyContact {
 }
 
 export interface PreviewRecord {
+  formKind: "emergency-contact";
   sourcePage: number;
   employee: PreviewEmployee;
   emergencyContact: PreviewEmergencyContact;
@@ -308,6 +309,7 @@ export type OathMatchState =
 export type OathMatchSource = "roster" | "eid-lookup" | "llm" | "form-eid" | "manual";
 
 export interface OathPreviewRecord {
+  formKind: "oath";
   sourcePage: number;
   rowIndex: number;
   printedName: string;

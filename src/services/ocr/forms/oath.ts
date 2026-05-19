@@ -17,6 +17,7 @@ import { LLM_HIGH_CONFIDENCE, MatchStateSchema, VerificationSchema } from "./sha
 // ─── OCR-pass record (one row of a paper roster) ──────────
 
 export const OathRosterOcrRecordSchema = z.object({
+  formKind: z.literal("oath").default("oath"),
   sourcePage: z.number().int().positive(),
   rowIndex: z.number().int().nonnegative().optional(),
   printedName: z.string().optional(),
