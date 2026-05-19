@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   type RowArchetype,
   archetypeRowTypeLabel,
+  deriveRowArchetype,
   resolveRowArchetype,
 } from "../../../src/domain/row-archetype.js";
 
@@ -39,5 +40,18 @@ describe("row-archetype", () => {
   it("resolveRowArchetype falls back to single", () => {
     const entry = { workflow: "work-study", data: {} };
     assert.equal(resolveRowArchetype(entry), "single");
+  });
+
+  it("deriveRowArchetype: batch without parentRunId → batch-parent", () => {
+    assert.equal(deriveRowArchetype("batch"), "batch-parent");
+    assert.equal(deriveRowArchetype("batch", undefined), "batch-parent");
+  });
+
+  it("deriveRowArchetype: batch with parentRunId → delegate-child", () => {
+    assert.equal(deriveRowArchetype("batch", "parent-run-1"), "delegate-child");
+  });
+
+  it("deriveRowArchetype: utility with parentRunId → passive-child", () => {
+    assert.equal(deriveRowArchetype("utility", "parent-run-1"), "passive-child");
   });
 });

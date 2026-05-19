@@ -102,7 +102,7 @@ function isRowArchetype(v: string): v is RowArchetype {
  *   parentRunId present + utility  → "passive-child"  (EID lookup, active-check children)
  *   parentRunId present + other    → "delegate-child" (OCR under oath-upload, oath-sig fan-out)
  *   no parentRunId + delegating-batch → "batch-parent" (oath-upload root row)
- *   no parentRunId + batch         → "batch-member"   (emergency-contact / oath-signature items)
+ *   no parentRunId + batch         → "batch-parent"   (anchor row — members carry parentRunId)
  *   no parentRunId + everything else → "single"
  */
 export function deriveRowArchetype(
@@ -112,7 +112,8 @@ export function deriveRowArchetype(
   if (parentRunId) {
     return workflowArchetype === "utility" ? "passive-child" : "delegate-child";
   }
-  if (workflowArchetype === "delegating-batch") return "batch-parent";
-  if (workflowArchetype === "batch") return "batch-member";
+  if (workflowArchetype === "delegating-batch" || workflowArchetype === "batch") {
+    return "batch-parent";
+  }
   return "single";
 }
