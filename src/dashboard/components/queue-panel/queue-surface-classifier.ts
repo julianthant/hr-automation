@@ -50,6 +50,10 @@ export interface QueueSurfaces {
 }
 
 export function buildQueueSurfaces(input: BuildQueueSurfacesInput): QueueSurfaces {
+  // SAFETY: TrackerEntry (dashboard) and TrackerEntryJsonl (tracker) are structurally
+  // aligned today — same fields the queue surface builder reads. If they diverge,
+  // add a toTrackerEntry() mapper instead of widening this cast.
+  // TODO(types): replace dual cast with an explicit mapper when either type gains fields.
   const core = buildTrackerQueueSurfaces({
     entries: input.entries as TrackerEntryJsonl[],
     delegationSourceEntries: input.delegationSourceEntries as TrackerEntryJsonl[],

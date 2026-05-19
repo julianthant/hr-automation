@@ -11,8 +11,8 @@ export function readFormType(sessionId: string, trackerDir: string | undefined):
   for (let i = lines.length - 1; i >= 0; i--) {
     try {
       const e: TrackerEntry = JSON.parse(lines[i]);
-      if (e.id === sessionId && e.data?.formType) {
-        return e.data.formType as unknown as string;
+      if (e.id === sessionId && typeof e.data?.formType === "string") {
+        return e.data.formType;
       }
     } catch { /* tolerate */ }
   }
@@ -60,8 +60,8 @@ export function readDryRun(sessionId: string, trackerDir: string | undefined): b
     try {
       const e = JSON.parse(lines[i]) as TrackerEntry;
       if (e.id !== sessionId) continue;
-      const value = e.data?.dryRun as unknown;
-      if (value === true || value === "true" || value === "1") return true;
+      const value = e.data?.dryRun;
+      if (value === "true" || value === "1") return true;
     } catch { /* tolerate malformed lines */ }
   }
   return false;
