@@ -141,7 +141,18 @@ export async function setDateRange(
 
   // Fill start and end dates by typing digits (MMDDYYYY format, zero-padded)
   const toDigits = (dateStr: string): string => {
-    const [m, d, y] = dateStr.split("/");
+    const parts = dateStr.split("/");
+    if (parts.length !== 3) {
+      throw new Error(
+        `toDigits: expected MM/DD/YYYY, got ${JSON.stringify(dateStr)}`,
+      );
+    }
+    const [m, d, y] = parts;
+    if (!m || !d || !y) {
+      throw new Error(
+        `toDigits: expected non-empty MM/DD/YYYY parts, got ${JSON.stringify(dateStr)}`,
+      );
+    }
     return m.padStart(2, "0") + d.padStart(2, "0") + y;
   };
   const dates = [
