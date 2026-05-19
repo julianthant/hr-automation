@@ -330,30 +330,57 @@ export function applyLogEntry(
   });
 }
 
+function isScreenshotSessionEvent(
+  event: SessionEvent | ScreenshotSessionEvent,
+): event is ScreenshotSessionEvent {
+  return event.type === "screenshot" && "files" in event;
+}
+
 export function applySessionEvent(
   db: Database,
   event: SessionEvent | ScreenshotSessionEvent,
   source: ProjectionSourceRef,
 ): void {
-  const timestamp = "timestamp" in event && event.timestamp ? event.timestamp : new Date((event as ScreenshotSessionEvent).ts).toISOString();
-  const tsMs = "ts" in event && typeof event.ts === "number" ? event.ts : toMs(timestamp);
+  if (isScreenshotSessionEvent(event)) {
+    const screenshotEvent = event;
+    const timestamp = screenshotEvent.timestamp;
+    const tsMs = screenshotEvent.ts;
+    const trackerDate = source.trackerDate ?? trackerDateFromTimestamp(timestamp);
+    const inserted = stmts(db).insertSessionEvent.run({
+      sourcePath: source.path,
+      sourceLine: source.line ?? 0,
+      sourceOffset: source.offset,
+      trackerDate,
+      eventType: screenshotEvent.type,
+      workflowInstance: null,
+      runId: screenshotEvent.runId,
+      timestamp,
+      tsMs,
+      rawJson: JSON.stringify(screenshotEvent),
+      appliedAt: new Date().toISOString(),
+    });
+    if (inserted.changes > 0) {
+      applyScreenshotFiles(db, screenshotEvent);
+    }
+    return;
+  }
+
+  const timestamp = event.timestamp;
+  const tsMs = toMs(timestamp);
   const trackerDate = source.trackerDate ?? trackerDateFromTimestamp(timestamp);
-  const inserted = stmts(db).insertSessionEvent.run({
+  stmts(db).insertSessionEvent.run({
     sourcePath: source.path,
     sourceLine: source.line ?? 0,
     sourceOffset: source.offset,
     trackerDate,
     eventType: event.type,
-    workflowInstance: "workflowInstance" in event ? event.workflowInstance ?? null : null,
-    runId: "runId" in event ? event.runId ?? null : null,
+    workflowInstance: event.workflowInstance ?? null,
+    runId: event.runId ?? null,
     timestamp,
     tsMs,
     rawJson: JSON.stringify(event),
     appliedAt: new Date().toISOString(),
   });
-  if (event.type === "screenshot" && inserted.changes > 0) {
-    applyScreenshotFiles(db, event as ScreenshotSessionEvent);
-  }
 }
 
 function applyScreenshotFiles(db: Database, event: ScreenshotSessionEvent): void {
