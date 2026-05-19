@@ -11,9 +11,9 @@ describe("parseWorkflowDefinitionsResponse", () => {
     );
   });
 
-  it("returns array payloads unchanged", () => {
+  it("returns validated workflow definitions", () => {
     const payload = [{ name: "ocr", label: "OCR", steps: [], systems: [], detailFields: [] }];
 
-    assert.equal(parseWorkflowDefinitionsResponse(payload), payload);
+    assert.deepEqual(parseWorkflowDefinitionsResponse(payload), payload);
   });
 });

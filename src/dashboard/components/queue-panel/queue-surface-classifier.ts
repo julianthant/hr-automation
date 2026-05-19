@@ -2,8 +2,90 @@ import type { TrackerEntry } from "@/components/shared/types";
 import {
   buildTrackerQueueSurfaces,
   countTopLevelQueueSurfaceRows,
+  type TrackerQueueGroupSurface,
 } from "../../../tracker/queue-surfaces.js";
 import type { TrackerEntry as TrackerEntryJsonl } from "../../../tracker/jsonl.js";
+
+function toJsonlEntry(entry: TrackerEntry): TrackerEntryJsonl {
+  return {
+    workflow: entry.workflow,
+    timestamp: entry.timestamp,
+    id: entry.id,
+    runId: entry.runId,
+    parentRunId: entry.parentRunId,
+    status: entry.status,
+    step: entry.step,
+    data: entry.data,
+    typedData: entry.typedData,
+    error: entry.error,
+  };
+}
+
+/** Preserves dashboard-only SSE enrichments when present on tracker rows. */
+function toDashboardEntry(entry: TrackerEntryJsonl): TrackerEntry {
+  const enriched = entry as TrackerEntryJsonl &
+    Partial<
+      Pick<
+        TrackerEntry,
+        | "startTimestamp"
+        | "firstLogTs"
+        | "lastLogTs"
+        | "lastLogMessage"
+        | "_hash"
+        | "runOrdinal"
+        | "stepDurations"
+        | "screenshotCount"
+      >
+    >;
+  return {
+    workflow: entry.workflow,
+    timestamp: entry.timestamp,
+    id: entry.id,
+    runId: entry.runId,
+    parentRunId: entry.parentRunId,
+    status: entry.status,
+    step: entry.step,
+    data: entry.data,
+    typedData: entry.typedData,
+    error: entry.error,
+    startTimestamp: enriched.startTimestamp ?? undefined,
+    firstLogTs: enriched.firstLogTs ?? undefined,
+    lastLogTs: enriched.lastLogTs ?? undefined,
+    lastLogMessage: enriched.lastLogMessage ?? undefined,
+    _hash: enriched._hash ?? undefined,
+    runOrdinal: enriched.runOrdinal ?? undefined,
+    stepDurations: enriched.stepDurations ?? undefined,
+    screenshotCount: enriched.screenshotCount ?? undefined,
+  };
+}
+
+function mapGroupSurface(surface: TrackerQueueGroupSurface): QueueGroupSurface {
+  switch (surface.kind) {
+    case "approval-delegation":
+      return {
+        kind: "approval-delegation",
+        parentRunId: surface.parentRunId,
+        parent: toDashboardEntry(surface.parent),
+        members: surface.members.map(toDashboardEntry),
+        approvalState: surface.approvalState,
+        titleOverride: surface.titleOverride,
+      };
+    case "passive-delegation":
+      return {
+        kind: "passive-delegation",
+        parentRunId: surface.parentRunId,
+        members: surface.members.map(toDashboardEntry),
+        titleOverride: surface.titleOverride,
+      };
+    case "batch":
+      return {
+        kind: "batch",
+        parentRunId: surface.parentRunId,
+        members: surface.members.map(toDashboardEntry),
+        titleOverride: surface.titleOverride,
+      };
+  }
+}
 
 export type QueueGroupSurfaceKind = "approval-delegation" | "passive-delegation" | "batch";
 
@@ -50,18 +132,19 @@ export interface QueueSurfaces {
 }
 
 export function buildQueueSurfaces(input: BuildQueueSurfacesInput): QueueSurfaces {
-  // SAFETY: TrackerEntry (dashboard) and TrackerEntryJsonl (tracker) are structurally
-  // aligned today — same fields the queue surface builder reads. If they diverge,
-  // add a toTrackerEntry() mapper instead of widening this cast.
-  // TODO(types): replace dual cast with an explicit mapper when either type gains fields.
   const core = buildTrackerQueueSurfaces({
-    entries: input.entries as TrackerEntryJsonl[],
-    delegationSourceEntries: input.delegationSourceEntries as TrackerEntryJsonl[],
+    entries: input.entries.map(toJsonlEntry),
+    delegationSourceEntries: input.delegationSourceEntries.map(toJsonlEntry),
   });
   return {
-    groupRows: core.groupRows as QueueGroupSurface[],
-    flatEntries: core.flatEntries as TrackerEntry[],
-    membersByParentRunId: core.membersByParentRunId as Map<string, TrackerEntry[]>,
+    groupRows: core.groupRows.map(mapGroupSurface),
+    flatEntries: core.flatEntries.map(toDashboardEntry),
+    membersByParentRunId: new Map(
+      [...core.membersByParentRunId.entries()].map(([parentRunId, members]) => [
+        parentRunId,
+        members.map(toDashboardEntry),
+      ]),
+    ),
     approvalParentRunIds: core.approvalParentRunIds,
   };
 }
@@ -72,7 +155,7 @@ export function buildQueueSurfaces(input: BuildQueueSurfacesInput): QueueSurface
  */
 export function countQueuePanelTopLevelRows(input: BuildQueueSurfacesInput): number {
   return countTopLevelQueueSurfaceRows({
-    entries: input.entries as TrackerEntryJsonl[],
-    delegationSourceEntries: input.delegationSourceEntries as TrackerEntryJsonl[],
+    entries: input.entries.map(toJsonlEntry),
+    delegationSourceEntries: input.delegationSourceEntries.map(toJsonlEntry),
   });
 }

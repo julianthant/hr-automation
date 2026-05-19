@@ -38,11 +38,38 @@ export interface WorkflowMetadata {
 
 const WorkflowsContext = createContext<WorkflowMetadata[] | null>(null)
 
+function isWorkflowMetadata(item: unknown): item is WorkflowMetadata {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return false
+  const o = item as Record<string, unknown>
+  if (typeof o.name !== "string") return false
+  if (typeof o.label !== "string") return false
+  if (!Array.isArray(o.steps) || !o.steps.every((s) => typeof s === "string")) return false
+  if (!Array.isArray(o.systems) || !o.systems.every((s) => typeof s === "string")) return false
+  if (!Array.isArray(o.detailFields)) return false
+  for (const field of o.detailFields) {
+    if (!field || typeof field !== "object" || Array.isArray(field)) return false
+    const f = field as Record<string, unknown>
+    if (typeof f.key !== "string" || typeof f.label !== "string") return false
+  }
+  if (o.category !== undefined && typeof o.category !== "string") return false
+  if (o.iconName !== undefined && typeof o.iconName !== "string") return false
+  if (o.matchKey !== undefined && typeof o.matchKey !== "string") return false
+  return true
+}
+
 export function parseWorkflowDefinitionsResponse(data: unknown): WorkflowMetadata[] {
   if (!Array.isArray(data)) {
     throw new Error(`workflow-definitions: expected array, got ${typeof data}`)
   }
-  return data as WorkflowMetadata[]
+  const validated: WorkflowMetadata[] = []
+  for (const item of data) {
+    if (isWorkflowMetadata(item)) {
+      validated.push(item)
+    } else {
+      console.warn("workflow-definitions: skipping malformed entry", item)
+    }
+  }
+  return validated
 }
 
 export function WorkflowsProvider({ children }: { children: ReactNode }) {
