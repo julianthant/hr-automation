@@ -42,6 +42,7 @@ const PermissiveEmployeeSchema = z.object({
 });
 
 export const PermissiveRecordSchema = z.object({
+  formKind: z.literal("emergency-contact").default("emergency-contact"),
   sourcePage: z.number().int().positive(),
   employee: PermissiveEmployeeSchema,
   emergencyContact: EmergencyContactSchema,

@@ -17,6 +17,7 @@ test("oath OCR prompt requires scanning top margin for standalone handwritten EI
 
 test("matchRecord: signed row with high-confidence roster name → matched", async () => {
   const ocr = {
+    formKind: "oath" as const,
     sourcePage: 1, rowIndex: 0,
     printedName: "Liam Kustenbauder",
     employeeSigned: true, officerSigned: true,
@@ -32,6 +33,7 @@ test("matchRecord: signed row with high-confidence roster name → matched", asy
 
 test("matchRecord: signed row with one fuzzy roster candidate → matched before active-check", async () => {
   const ocr = {
+    formKind: "oath" as const,
     sourcePage: 1, rowIndex: 0,
     printedName: "Sarah Chenn",
     employeeSigned: true, officerSigned: true,
@@ -47,6 +49,7 @@ test("matchRecord: signed row with one fuzzy roster candidate → matched before
 
 test("matchRecord: unsigned row → extracted, deselected, no employeeId", async () => {
   const ocr = {
+    formKind: "oath" as const,
     sourcePage: 1, rowIndex: 1,
     printedName: "Some Person",
     employeeSigned: false, officerSigned: null,
@@ -61,6 +64,7 @@ test("matchRecord: unsigned row → extracted, deselected, no employeeId", async
 
 test("matchRecord: signed row with no roster match → lookup-pending", async () => {
   const ocr = {
+    formKind: "oath" as const,
     sourcePage: 1, rowIndex: 2,
     printedName: "Unknown Person Notroster",
     employeeSigned: true, officerSigned: true,
@@ -74,6 +78,7 @@ test("matchRecord: signed row with no roster match → lookup-pending", async ()
 
 test("matchRecord: high OCR name confidence skips roster LLM disambiguation", async () => {
   const ocr = {
+    formKind: "oath" as const,
     sourcePage: 1, rowIndex: 0,
     printedName: "Carlos D Barahona Martell",
     confidence: 0.94,
@@ -96,6 +101,7 @@ test("matchRecord: high OCR name confidence skips roster LLM disambiguation", as
 
 test("matchRecord: low OCR name confidence keeps roster LLM disambiguation path", async () => {
   const ocr = {
+    formKind: "oath" as const,
     sourcePage: 1, rowIndex: 0,
     printedName: "Carlos D Barahona Martell",
     confidence: 0.42,

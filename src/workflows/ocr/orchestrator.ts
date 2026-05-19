@@ -352,6 +352,7 @@ export async function runOcrOrchestrator(
     // sees the page image + empty inputs immediately. As OCR finishes,
     // these are replaced with real extracted records.
     const placeholderRecords: unknown[] = Array.from({ length: knownPageCount }, (_, i) => ({
+      formKind: input.formType,
       sourcePage: i + 1,
       rowIndex: 0,
       printedName: "",

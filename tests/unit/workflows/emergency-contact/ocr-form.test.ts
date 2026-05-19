@@ -10,6 +10,7 @@ const roster: RosterRow[] = [
 
 test("matchRecord: form-EID present → matched (form-eid first)", async () => {
   const ocr = {
+    formKind: "emergency-contact" as const,
     sourcePage: 1,
     employee: { name: "Maria Garcia", employeeId: "10001234" },
     emergencyContact: { name: "Sara Garcia", relationship: "Sister", primary: true, sameAddressAsEmployee: true, cellPhone: "(555) 123-4567" },
@@ -24,6 +25,7 @@ test("matchRecord: form-EID present → matched (form-eid first)", async () => {
 
 test("matchRecord: no form-EID, high roster name match → matched (roster)", async () => {
   const ocr = {
+    formKind: "emergency-contact" as const,
     sourcePage: 2,
     employee: { name: "Maria Garcia", employeeId: "" },
     emergencyContact: { name: "Sara Garcia", relationship: "Sister", primary: true, sameAddressAsEmployee: true, cellPhone: "(555) 123-4567" },
@@ -38,6 +40,7 @@ test("matchRecord: no form-EID, high roster name match → matched (roster)", as
 test("matchRecord: no form-EID, one fuzzy roster candidate below ROSTER_AUTO_ACCEPT → lookup-pending", async () => {
   // "James Womg" vs "James Wong" → Levenshtein-1 → score 0.7 < 0.85 threshold
   const ocr = {
+    formKind: "emergency-contact" as const,
     sourcePage: 2,
     employee: { name: "James Womg", employeeId: "" },
     emergencyContact: { name: "Sara Wong", relationship: "Sister", primary: true, sameAddressAsEmployee: true, cellPhone: "(555) 123-4567" },
@@ -52,6 +55,7 @@ test("matchRecord: no form-EID, multiple fuzzy roster candidates → LLM disambi
   // Two-token search name required for token-set matching. Single-token names
   // ("Maria") no longer qualify after the duplicate-token-collapse fix.
   const ocr = {
+    formKind: "emergency-contact" as const,
     sourcePage: 2,
     employee: { name: "Maria Garcia", employeeId: "" },
     emergencyContact: { name: "Sara Garcia", relationship: "Sister", primary: true, sameAddressAsEmployee: true, cellPhone: "(555) 123-4567" },
@@ -79,6 +83,7 @@ test("matchRecord: no form-EID, multiple fuzzy roster candidates → LLM disambi
 
 test("matchRecord: no form-EID, no roster match → lookup-pending", async () => {
   const ocr = {
+    formKind: "emergency-contact" as const,
     sourcePage: 3,
     employee: { name: "Unknown Person", employeeId: "" },
     emergencyContact: { name: "Other Person", relationship: "Friend", primary: true, sameAddressAsEmployee: true, cellPhone: "(555) 999-0000" },
