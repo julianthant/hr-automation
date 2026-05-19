@@ -9,6 +9,12 @@ const roster: RosterRow[] = [
   { eid: "10000003", name: "Sarah Chen" },
 ];
 
+test("oath OCR prompt requires scanning top margin for standalone handwritten EIDs", () => {
+  assert.match(oathOcrFormSpec.prompt, /top (?:page )?margin/i);
+  assert.match(oathOcrFormSpec.prompt, /standalone handwritten/i);
+  assert.match(oathOcrFormSpec.prompt, /above the form header/i);
+});
+
 test("matchRecord: signed row with high-confidence roster name → matched", async () => {
   const ocr = {
     sourcePage: 1, rowIndex: 0,
@@ -159,10 +165,12 @@ test("applyCarryForward inherits resolved EID + verification + selection", async
 test("approveTo.deriveInput: matched record → OathSignatureInput shape", async () => {
   const r = {
     employeeId: "10000001",
+    printedName: "Doe, Jane",
     dateSigned: "05/01/2026",
   } as any;
   const input = oathOcrFormSpec.approveTo.deriveInput(r);
   assert.equal(input.emplId, "10000001");
+  assert.equal(input.name, "Doe, Jane");
   assert.equal(input.date, "05/01/2026");
 });
 
