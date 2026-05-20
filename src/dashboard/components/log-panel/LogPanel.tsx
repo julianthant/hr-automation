@@ -163,6 +163,14 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
     [detailFields],
   );
 
+  const rowTypeLabel = useMemo(
+    () =>
+      entry
+        ? deriveQueueRowTypeLabel(entry, childEntries, allEntries ?? [], previewAvailable ?? false, runtimePolicies)
+        : "",
+    [entry, childEntries, allEntries, previewAvailable, runtimePolicies],
+  );
+
   if (!entry) {
     return (
       <div className="flex-1 flex flex-col bg-card">
@@ -304,7 +312,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
         logs={displayedLogs}
         events={events}
         loading={logsLoading}
-        rowTypeLabel={deriveQueueRowTypeLabel(entry, childEntries, allEntries ?? [], previewAvailable ?? false, runtimePolicies)}
+        rowTypeLabel={rowTypeLabel}
         screenshotsSlot={
           <ScreenshotsPanel
             workflow={logSourceWorkflow}
