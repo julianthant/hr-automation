@@ -7,10 +7,15 @@ import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath } from "../../infra/auth/login.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
+import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
+import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { buildWorkStudyPlan, type WorkStudyContext } from "./enter.js";
 import { WorkStudyInputSchema, type WorkStudyInput } from "./schema.js";
 
 const workStudySteps = ["ucpath-auth", "transaction"] as const;
+
+export const WORK_STUDY_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy =
+  DEFAULT_WORKFLOW_RUNTIME_POLICY;
 
 /**
  * Kernel definition for the work-study PayPath workflow.
@@ -36,6 +41,7 @@ export const workStudyWorkflow = defineWorkflow({
   authSteps: false,
   steps: workStudySteps,
   schema: WorkStudyInputSchema,
+  runtimePolicy: WORK_STUDY_WORKFLOW_RUNTIME_POLICY,
   authChain: "sequential",
   // Matches pre-subsystem-D WF_CONFIG["work-study"].detailFields:
   // Employee/EmplId are rendered by the dashboard from name + id; Started/Elapsed

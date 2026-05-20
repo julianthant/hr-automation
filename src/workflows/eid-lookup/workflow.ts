@@ -9,6 +9,8 @@
 
 import { defineWorkflow } from "../../core/index.js";
 import { buildCliAdapter } from "../../core/cli-adapter.js";
+import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
+import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import type { Ctx } from "../../core/kernel/types.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
@@ -41,6 +43,14 @@ export interface LookupResult {
 }
 
 const stepsCrm = ["searching", "cross-verification", "active-status"] as const;
+
+/** Direct CLI runs use normal utility defaults; OCR fan-out children title by person/EID. */
+export const EID_LOOKUP_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
+  ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
+  memberRow: {
+    titleSource: "person",
+  },
+};
 
 /**
  * Perform the UCPath search for one item and stamp the result fields
@@ -342,6 +352,7 @@ export const eidLookupCrmWorkflow = defineWorkflow({
   authSteps: true,
   steps: stepsCrm,
   schema: EidLookupItemSchema,
+  runtimePolicy: EID_LOOKUP_WORKFLOW_RUNTIME_POLICY,
   queueTitle: { kind: "single" },
   authChain: "sequential",
   batch: { mode: "shared-context-pool", poolSize: 4, preEmitPending: true },

@@ -7,8 +7,14 @@ import {
 } from "../../../src/dashboard/components/queue-panel/queue-surface-classifier.js";
 import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
 import { OCR_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/ocr/workflow.js";
+import { EID_LOOKUP_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/eid-lookup/workflow.js";
+import { ACTIVE_CHECK_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/active-check/workflow.js";
 
-const phase4Policies = new Map([["ocr", OCR_WORKFLOW_RUNTIME_POLICY]]);
+const runtimePolicies = new Map([
+  ["ocr", OCR_WORKFLOW_RUNTIME_POLICY],
+  ["eid-lookup", EID_LOOKUP_WORKFLOW_RUNTIME_POLICY],
+  ["active-check", ACTIVE_CHECK_WORKFLOW_RUNTIME_POLICY],
+]);
 
 function row(
   overrides: Partial<TrackerEntry> & Pick<TrackerEntry, "workflow" | "id" | "status">,
@@ -150,11 +156,43 @@ describe("buildQueueSurfaces", () => {
       delegationSourceEntries: [eid],
       workflow: "oath-signature",
       workflowLabel: "Oath Signature",
-      runtimePolicies: phase4Policies,
+      runtimePolicies,
     });
 
     assert.equal(surfaces.groupRows.length, 0);
     assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), ["ocr-oath-run-1-r0"]);
+  });
+
+  it("builds phase-5 projections with default group actions for separations batches", () => {
+    const a = row({
+      workflow: "separations",
+      id: "3927",
+      runId: "run-a",
+      parentRunId: "batch-1",
+      status: "pending",
+      data: { docId: "3927", __queueTitle: "Employee A" },
+    });
+    const b = row({
+      workflow: "separations",
+      id: "3924",
+      runId: "run-b",
+      parentRunId: "batch-1",
+      status: "done",
+      data: { docId: "3924", __queueTitle: "Employee B" },
+    });
+
+    const projections = buildQueueProjections({
+      entries: [a, b],
+      delegationSourceEntries: [a, b],
+      workflow: "separations",
+      workflowLabel: "Separations",
+      runtimePolicies,
+    });
+
+    assert.equal(projections.length, 1);
+    assert.equal(projections[0]?.surfaceType, "batch-delegation");
+    assert.equal(projections[0]?.rowTypeLabel, "Batch delegation");
+    assert.notEqual(projections[0]?.subtitle, "batch-1");
   });
 
   it("classifies non-approval parentRunId groups as batch rows", () => {
