@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { defineWorkflow, runWorkflow } from "../../core/index.js";
 import { buildCliAdapter } from "../../core/cli-adapter.js";
+import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
+import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import type { Ctx } from "../../core/kernel/types.js";
 import { loginToUCPath } from "../../infra/auth/login.js";
 import { PATHS } from "../../config.js";
@@ -20,6 +22,14 @@ import {
 
 const steps = ["checking"] as const;
 
+/** Direct CLI runs use normal defaults; OCR fan-out children title by person/EID. */
+export const ACTIVE_CHECK_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
+  ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
+  memberRow: {
+    titleSource: "person",
+  },
+};
+
 export const activeCheckWorkflow = defineWorkflow({
   name: "active-check",
   label: "Active Check",
@@ -37,6 +47,7 @@ export const activeCheckWorkflow = defineWorkflow({
   ],
   steps,
   schema: ActiveCheckItemSchema,
+  runtimePolicy: ACTIVE_CHECK_WORKFLOW_RUNTIME_POLICY,
   queueTitle: { kind: "single" },
   authChain: "sequential",
   batch: { mode: "shared-context-pool", poolSize: 4, preEmitPending: true },

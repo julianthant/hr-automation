@@ -11,12 +11,37 @@ import { OCR_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/ocr/workflow
 import { OATH_SIGNATURE_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/oath-signature/workflow.js";
 import { OATH_UPLOAD_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/oath-upload/workflow.js";
 import { EMERGENCY_CONTACT_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/emergency-contact/workflow.js";
+import { EID_LOOKUP_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/eid-lookup/workflow.js";
+import { ACTIVE_CHECK_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/active-check/workflow.js";
+import { CRM_DOC_DOWNLOAD_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/crm-doc-download/workflow.js";
+import { SHAREPOINT_DOWNLOAD_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/sharepoint-download/workflow.js";
+import { SEPARATIONS_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/separations/workflow.js";
+import { ONBOARDING_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/onboarding/workflow.js";
+import { WORK_STUDY_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/work-study/workflow.js";
+import { KRONOS_REPORTS_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/old-kronos-reports/workflow.js";
+import {
+  DEFAULT_GROUP_DELETE_ACTION,
+  DEFAULT_GROUP_RETRY_ACTION,
+  DEFAULT_ROW_CANCEL_ACTION,
+} from "../../../src/domain/workflow-runtime/default-policy.js";
 
 const phase4Policies = new Map([
   ["ocr", OCR_WORKFLOW_RUNTIME_POLICY],
   ["oath-signature", OATH_SIGNATURE_WORKFLOW_RUNTIME_POLICY],
   ["oath-upload", OATH_UPLOAD_WORKFLOW_RUNTIME_POLICY],
   ["emergency-contact", EMERGENCY_CONTACT_WORKFLOW_RUNTIME_POLICY],
+]);
+
+const phase5Policies = new Map([
+  ...phase4Policies,
+  ["eid-lookup", EID_LOOKUP_WORKFLOW_RUNTIME_POLICY],
+  ["active-check", ACTIVE_CHECK_WORKFLOW_RUNTIME_POLICY],
+  ["crm-doc-download", CRM_DOC_DOWNLOAD_WORKFLOW_RUNTIME_POLICY],
+  ["sharepoint-download", SHAREPOINT_DOWNLOAD_WORKFLOW_RUNTIME_POLICY],
+  ["separations", SEPARATIONS_WORKFLOW_RUNTIME_POLICY],
+  ["onboarding", ONBOARDING_WORKFLOW_RUNTIME_POLICY],
+  ["work-study", WORK_STUDY_WORKFLOW_RUNTIME_POLICY],
+  ["kronos-reports", KRONOS_REPORTS_WORKFLOW_RUNTIME_POLICY],
 ]);
 
 function entry(
@@ -399,5 +424,158 @@ describe("workflow runtime projection adapters", () => {
       "ocr-run-1",
       "signature-run-1",
     ]);
+  });
+});
+
+describe("workflow runtime projection — phase 5 standard workflows", () => {
+  it("projects direct utility and single workflows with default row actions", () => {
+    for (const [workflowId, label] of [
+      ["work-study", "Doe, Jane"],
+      ["separations", "3927"],
+      ["crm-doc-download", "jane@ucsd.edu"],
+      ["kronos-reports", "10873698"],
+    ] as const) {
+      const row = entry({
+        workflow: workflowId,
+        id: label,
+        runId: `${workflowId}-run-1`,
+        status: "pending",
+        data: { __queueTitle: label, __queueTitleKind: "single" },
+      });
+      const projection = buildWorkflowRunProjection(row, {
+        runtimePolicies: phase5Policies,
+      });
+      assert.equal(projection.surfaceType, "normal");
+      assert.equal(projection.rowTypeLabel, "Normal row");
+      assert.deepEqual(projection.actions, [
+        { ...DEFAULT_ROW_CANCEL_ACTION, targetRunIds: [projection.runId] },
+      ]);
+    }
+  });
+
+  it("projects a direct eid-lookup row as a normal utility surface", () => {
+    const row = entry({
+      workflow: "eid-lookup",
+      id: "Doe, Jane",
+      runId: "lookup-direct-run",
+      status: "pending",
+      data: { searchName: "Doe, Jane", __queueTitle: "Doe, Jane", __queueTitleKind: "single" },
+    });
+    const projection = buildWorkflowRunProjection(row, {
+      runtimePolicies: phase5Policies,
+    });
+    assert.equal(projection.surfaceType, "normal");
+    assert.equal(projection.title, "Doe, Jane");
+  });
+
+  it("titles OCR eid-lookup children by resolved person name instead of technical ids", () => {
+    const child = entry({
+      workflow: "eid-lookup",
+      id: "ocr-oath-technical-r0",
+      runId: "lookup-run-1",
+      parentRunId: "ocr-run-1",
+      status: "done",
+      data: {
+        archetype: "delegate-child",
+        originWorkflow: "ocr",
+        searchName: "Jane Doe",
+        emplId: "10000001",
+      },
+    });
+    const projection = buildWorkflowRunProjection(child, {
+      runtimePolicies: phase5Policies,
+    });
+    assert.equal(projection.surfaceType, "delegation-member");
+    assert.equal(projection.title, "Jane Doe");
+  });
+
+  it("projects OCR active-check utility children as flat delegation members", () => {
+    const child = entry({
+      workflow: "active-check",
+      id: "ocr-active-1",
+      runId: "active-run-1",
+      parentRunId: "ocr-run-1",
+      status: "pending",
+      data: {
+        archetype: "delegate-child",
+        originWorkflow: "ocr",
+        searchName: "Jane Doe",
+        emplId: "10000001",
+      },
+    });
+    const surfaces = buildTrackerQueueSurfaces({
+      entries: [],
+      delegationSourceEntries: [child],
+      runtimePolicies: phase5Policies,
+    });
+    assert.equal(surfaces.groupRows.length, 0);
+    assert.deepEqual(surfaces.flatEntries.map((row) => row.id), ["ocr-active-1"]);
+    const projection = buildWorkflowRunProjection(surfaces.flatEntries[0]!, {
+      runtimePolicies: phase5Policies,
+    });
+    assert.equal(projection.surfaceType, "delegation-member");
+    assert.equal(projection.title, "Jane Doe");
+  });
+
+  it("projects separations daemon batch groups without a raw parent run id subtitle", () => {
+    const first = entry({
+      workflow: "separations",
+      id: "3927",
+      runId: "sep-run-1",
+      parentRunId: "sep-batch-parent-run-12345678",
+      status: "pending",
+      data: { __queueTitle: "Avery Admin", docId: "3927" },
+    });
+    const second = entry({
+      workflow: "separations",
+      id: "3924",
+      runId: "sep-run-2",
+      parentRunId: "sep-batch-parent-run-12345678",
+      status: "running",
+      data: { __queueTitle: "Bailey Benefits", docId: "3924" },
+    });
+    const surfaces = buildTrackerQueueSurfaces({
+      entries: [],
+      delegationSourceEntries: [first, second],
+      runtimePolicies: phase5Policies,
+    });
+    const projection = buildProjectionFromQueueSurface(surfaces.groupRows[0]!, {
+      workflowLabels: new Map([["separations", "Separations"]]),
+      runtimePolicies: phase5Policies,
+    });
+    assert.equal(projection.surfaceType, "batch-delegation");
+    assert.notEqual(projection.subtitle, "sep-batch-parent-run-12345678");
+    assert.deepEqual(projection.actions, [
+      { ...DEFAULT_GROUP_RETRY_ACTION, targetRunIds: ["sep-run-1", "sep-run-2"] },
+      { ...DEFAULT_GROUP_DELETE_ACTION, targetRunIds: ["sep-run-1", "sep-run-2"] },
+    ]);
+  });
+
+  it("folds SharePoint roster downloads under OCR as passive delegation", () => {
+    const roster = entry({
+      workflow: "sharepoint-download",
+      id: "onboarding-roster",
+      runId: "sp-run-1",
+      parentRunId: "ocr-run-1",
+      status: "running",
+      data: {
+        archetype: "passive-child",
+        originWorkflow: "ocr",
+        label: "Onboarding Roster",
+        parentSubject: "Emergency Contact · 5678",
+      },
+    });
+    const surfaces = buildTrackerQueueSurfaces({
+      entries: [],
+      delegationSourceEntries: [roster],
+      runtimePolicies: phase5Policies,
+    });
+    assert.equal(surfaces.groupRows.length, 1);
+    assert.equal(surfaces.groupRows[0]?.kind, "passive-delegation");
+    const projection = buildProjectionFromQueueSurface(surfaces.groupRows[0]!, {
+      runtimePolicies: phase5Policies,
+    });
+    assert.equal(projection.surfaceType, "passive-delegation");
+    assert.equal(projection.title, "Emergency Contact · 5678");
   });
 });

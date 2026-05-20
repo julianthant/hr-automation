@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { defineWorkflow, runWorkflow } from "../../core/index.js";
 import { buildCliAdapter } from "../../core/cli-adapter.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
+import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
+import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { loginToACTCrm } from "../../infra/auth/login.js";
 import {
   buildCrmDocumentDownloadPath,
@@ -17,6 +19,9 @@ import { CrmDocDownloadInputSchema, type CrmDocDownloadInput } from "./schema.js
 
 const crmDocDownloadSteps = ["search-record", "download"] as const;
 const WORKFLOW = "crm-doc-download";
+
+export const CRM_DOC_DOWNLOAD_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy =
+  DEFAULT_WORKFLOW_RUNTIME_POLICY;
 
 export const crmDocDownloadWorkflow = defineWorkflow({
   name: WORKFLOW,
@@ -36,6 +41,7 @@ export const crmDocDownloadWorkflow = defineWorkflow({
   authSteps: true,
   steps: crmDocDownloadSteps,
   schema: CrmDocDownloadInputSchema,
+  runtimePolicy: CRM_DOC_DOWNLOAD_WORKFLOW_RUNTIME_POLICY,
   authChain: "sequential",
   batch: { mode: "pool", poolSize: 4, preEmitPending: true },
   detailFields: [

@@ -7,6 +7,8 @@ import { z } from "zod";
 import { defineWorkflow } from "../../core/index.js";
 import { log } from "../../utils/log.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
+import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
+import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { loginToUKG } from "../../infra/auth/login.js";
 import {
   getGeniesIframe,
@@ -86,6 +88,9 @@ export const KronosItemSchema = z.object({ employeeId: EmployeeIdSchema });
 export type KronosItem = z.infer<typeof KronosItemSchema>;
 
 const kronosSteps = ["searching", "extracting", "downloading"] as const;
+
+export const KRONOS_REPORTS_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy =
+  DEFAULT_WORKFLOW_RUNTIME_POLICY;
 
 /**
  * Post-download validation + tracker row write. Used by the kernel handler's
@@ -176,6 +181,7 @@ export const kronosReportsWorkflow = defineWorkflow({
   authSteps: false,
   steps: kronosSteps,
   schema: KronosItemSchema,
+  runtimePolicy: KRONOS_REPORTS_WORKFLOW_RUNTIME_POLICY,
   authChain: "sequential",
   batch: {
     mode: "pool",

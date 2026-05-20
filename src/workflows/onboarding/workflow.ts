@@ -6,6 +6,8 @@ import {
 } from "../../core/index.js";
 import { buildCliAdapter } from "../../core/cli-adapter.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
+import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
+import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { loginToUCPath, loginToACTCrm } from "../../infra/auth/login.js";
 import {
   searchByEmail,
@@ -38,6 +40,9 @@ const onboardingSteps = [
   "i9-creation",
   "transaction",
 ] as const;
+
+export const ONBOARDING_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy =
+  DEFAULT_WORKFLOW_RUNTIME_POLICY;
 
 /**
  * Kernel definition for single-mode onboarding.
@@ -80,6 +85,7 @@ export const onboardingWorkflow = defineWorkflow({
   authSteps: false,
   steps: onboardingSteps,
   schema: OnboardingInputSchema,
+  runtimePolicy: ONBOARDING_WORKFLOW_RUNTIME_POLICY,
   authChain: "sequential",
   // Pool mode: each worker gets its own Session with 3 browsers (CRM + UCPath +
   // I9), 2 Duos per worker (I9 SSO has no 2FA). Pool size 4 matches the legacy

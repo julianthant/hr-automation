@@ -32,6 +32,8 @@ import {
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
+import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
+import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import {
   loginToSharePoint,
   captureExcelDownload,
@@ -42,6 +44,9 @@ import {
 } from "./schema.js";
 
 const sharepointDownloadSteps = ["navigate", "download"] as const;
+
+export const SHAREPOINT_DOWNLOAD_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy =
+  DEFAULT_WORKFLOW_RUNTIME_POLICY;
 
 /**
  * Module-level landing URL for the current run. Set by the HTTP handler
@@ -126,6 +131,7 @@ export const sharepointDownloadWorkflow: RegisteredWorkflow<
   authSteps: true,
   steps: sharepointDownloadSteps,
   schema: SharePointDownloadInputSchema,
+  runtimePolicy: SHAREPOINT_DOWNLOAD_WORKFLOW_RUNTIME_POLICY,
   authChain: "sequential",
   detailFields: [
     { key: "label", label: "Spreadsheet" },

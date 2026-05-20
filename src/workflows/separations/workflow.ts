@@ -3,6 +3,8 @@ import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { defineWorkflow } from "../../core/index.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
+import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
+import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 
 // Auth wrappers — split into prepare (nav + fill) + submit (click + Duo)
 // phases so Session.launch can pre-fill every SSO form in parallel before
@@ -74,6 +76,9 @@ const separationsSteps = [
   "ucpath-transaction",
   "kuali-finalization",
 ] as const;
+
+export const SEPARATIONS_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy =
+  DEFAULT_WORKFLOW_RUNTIME_POLICY;
 
 /**
  * Kernel definition for the separations workflow.
@@ -171,6 +176,7 @@ export const separationsWorkflow = defineWorkflow({
   ],
   steps: separationsSteps,
   schema: SeparationInputSchema,
+  runtimePolicy: SEPARATIONS_WORKFLOW_RUNTIME_POLICY,
   authChain: "parallel-staggered",
   batch: {
     mode: "sequential",
