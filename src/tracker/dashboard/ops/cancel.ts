@@ -210,6 +210,9 @@ export function buildCancelRunningHandler(dir: string) {
  * Cancel many in-flight queue rows: **running** first (cooperative daemon cancel),
  * then **pending** (queued SQLite). Matches per-row `/api/cancel-running`
  * and `/api/cancel-queued` behavior.
+ *
+ * HTTP routes no longer call this directly — `/api/cancel-active-bulk` wraps
+ * `performWorkflowAction`. Exported for unit tests and as a low-level helper.
  */
 export function buildCancelActiveBulkHandler(dir: string) {
   const cancelQueued = buildCancelQueuedHandler(dir);

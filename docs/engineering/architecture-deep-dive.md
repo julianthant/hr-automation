@@ -11,9 +11,10 @@ A from-scratch walkthrough of how the codebase is wired. Assumes zero prior cont
 5. [Run modes: single, sequential batch, pool, daemon](#5-run-modes-single-sequential-batch-pool-daemon)
 6. [Auth chains (sequential vs interleaved)](#6-auth-chains-sequential-vs-interleaved)
 7. [Tracker + Dashboard (observability)](#7-tracker--dashboard-observability)
-8. [Systems + Selector Intelligence](#8-systems--selector-intelligence)
-9. [End-to-end: one onboarding, step by step](#9-end-to-end-one-onboarding-step-by-step)
-10. [Glossary](#10-glossary)
+8. [Workflow runtime (projections + actions)](#8-workflow-runtime-projections--actions)
+9. [Systems + Selector Intelligence](#9-systems--selector-intelligence)
+10. [End-to-end: one onboarding, step by step](#10-end-to-end-one-onboarding-step-by-step)
+11. [Glossary](#11-glossary)
 
 ---
 
@@ -746,7 +747,35 @@ The dashboard used to let you launch workflows from the browser. **Removed 2026-
 
 ---
 
-## 8. Systems + Selector Intelligence
+## 8. Workflow runtime (projections + actions)
+
+After the 2026-05 workflow runtime migration, dashboard queue behavior is **declarative per workflow**, not hardcoded in React.
+
+```mermaid
+flowchart LR
+  JSONL[Tracker entries] --> SURF[queue-surfaces.ts]
+  SURF --> PROJ[workflow-runtime/projection.ts]
+  POL[workflow.ts runtimePolicy] --> PROJ
+  PROJ --> UI[QueuePanel / EntryItem / LogPanel chip]
+  UI -->|POST /api/*| ACT[performWorkflowAction]
+  ACT --> OPS[ops/cancel retry delete queue]
+```
+
+| Piece | Location | Role |
+| ----- | -------- | ---- |
+| `WorkflowRuntimePolicy` | `src/domain/workflow-runtime/types.ts` | Declares row/group/batch-view action descriptors + delegation/preview/member/prep rules |
+| Policy registry | `src/domain/workflow-runtime/registry.ts` | Populated at workflow load via `defineWorkflow({ runtimePolicy })` |
+| Projections | `src/domain/workflow-runtime/projection.ts` | Turns tracker rows + queue surfaces into `WorkflowRunProjection` (title, subtitle, `rowTypeLabel`, `actions`, `batchMembers`) |
+| Action engine | `src/tracker/dashboard/actions/perform-workflow-action.ts` | Single dispatcher for cancel / retry / delete / bump; HTTP routes are thin wrappers |
+| React consumers | `QueuePanel`, `EntryItem`, `BatchFooterActions`, `QueueItemControls` | Read projection `actions` for enablement + scope; POST to legacy-compatible `/api/*` paths |
+
+**Scope discipline:** `row` / `group` / `visible-view` use caller-provided targets verbatim — queue-panel buttons cannot reach batch-view-only rows. Only explicit `tree` scope walks descendant runs. Batch footer retry/delete uses projection `targetRunIds` so bulk actions stay inside the opened batch.
+
+**Adding a workflow:** spread `DEFAULT_WORKFLOW_RUNTIME_POLICY` in `workflow.ts`, override delegation/preview rules when needed, and ensure `tests/unit/architecture/runtime-policy-coverage.test.ts` passes. See `delegation.md` → "How To Add A New Workflow".
+
+---
+
+## 9. Systems + Selector Intelligence
 
 Each folder under `src/systems/` is a Playwright driver for one external system. They all share a conventional layout.
 
@@ -833,7 +862,7 @@ The fuzzy search is a pure in-repo scorer (no Fuse.js, no embeddings, no new dep
 
 ---
 
-## 9. End-to-end: one onboarding, step by step
+## 10. End-to-end: one onboarding, step by step
 
 Let's trace `npm run onboarding jane@ucsd.edu` from CLI to completed transaction.
 
@@ -907,7 +936,7 @@ sequenceDiagram
 
 ---
 
-## 10. Glossary
+## 11. Glossary
 
 | Term                          | Meaning                                                                                                 |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------- |

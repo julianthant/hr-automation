@@ -91,6 +91,10 @@ export function buildDeleteEntryHandler(dir: string, opts: DeleteEntryOptions = 
   };
 }
 
+/**
+ * Bulk delete helper. HTTP `/api/delete-bulk` routes through
+ * `performWorkflowAction`; this factory remains for unit tests.
+ */
 export function buildDeleteBulkHandler(dir: string, opts: DeleteEntryOptions = {}) {
   const screenshotsDir = opts.screenshotsDir ?? PATHS.screenshotDir;
   return (req: DeleteBulkRequest): DeleteBulkResult => {

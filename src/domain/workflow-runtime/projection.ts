@@ -3,6 +3,7 @@ import {
   resolveRowArchetype,
 } from "../row-archetype.js";
 import type { TrackerEntry } from "../../tracker/jsonl.js";
+import { buildTrackerQueueSurfaces } from "../../tracker/queue-surfaces.js";
 import type { TrackerQueueGroupSurface } from "../../tracker/queue-surfaces.js";
 import {
   getWorkflowRuntimePolicy,
@@ -208,6 +209,38 @@ export function buildWorkflowRunProjection(
     actions: overrides.actions ?? withTargets(policy.rowActions, [runId]),
     batchMembers: overrides.batchMembers ?? [],
   };
+}
+
+/**
+ * Log-panel row-type chip label for one tracker entry. Reuses queue-surface
+ * classification + runtime projection instead of duplicating surface rules in
+ * the dashboard.
+ */
+export function deriveRowTypeLabelForEntry(
+  entry: TrackerEntry,
+  childEntries: TrackerEntry[],
+  allEntries: TrackerEntry[],
+  previewAvailable: boolean,
+  runtimePolicies?: WorkflowRuntimePolicyLookup,
+): string {
+  const runId = entry.runId ?? entry.id;
+  const sourceEntries = allEntries.length > 0 ? allEntries : [entry, ...childEntries];
+  const surfaces = buildTrackerQueueSurfaces({
+    entries: sourceEntries,
+    delegationSourceEntries: sourceEntries,
+    runtimePolicies,
+  });
+  const surface = surfaces.groupRows.find((candidate) => {
+    if (candidate.parentRunId === runId) return true;
+    if (candidate.kind === "approval-delegation" && (candidate.parent.runId ?? candidate.parent.id) === runId) {
+      return true;
+    }
+    return candidate.members.some((member) => (member.runId ?? member.id) === runId);
+  });
+  const label = surface
+    ? buildProjectionFromQueueSurface(surface, { runtimePolicies }).rowTypeLabel
+    : buildWorkflowRunProjection(entry, { runtimePolicies }).rowTypeLabel;
+  return previewAvailable && !label.endsWith("· Preview") ? `${label} · Preview` : label;
 }
 
 export function buildProjectionFromQueueSurface(

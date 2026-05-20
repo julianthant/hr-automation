@@ -446,6 +446,7 @@ export function buildRunWithDataHandler(dir: string) {
   return buildEntryReEnqueueHandler(dir, { withData: true });
 }
 
+/** Bulk retry helper. HTTP `/api/retry-bulk` routes through `performWorkflowAction`. */
 export function buildRetryBulkHandler(dir: string) {
   const retry = buildRetryHandler(dir);
   return async (

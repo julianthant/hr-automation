@@ -6,6 +6,10 @@ import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "@/components/shared/types";
 import { IconActionButton } from "@/components/shared/IconActionButton";
 import type { WorkflowActionDescriptor } from "../../../domain/workflow-runtime/types.js";
+import {
+  actionScopeBody,
+  hasEnabledAction,
+} from "@/lib/workflow-action-utils";
 
 interface CancelRunningButtonProps {
   workflow: string;
@@ -25,21 +29,13 @@ interface CancelRunningButtonProps {
  * the force-stop endpoint directly so a single click actually stops the
  * browser-backed run instead of waiting on a cooperative step boundary.
  */
-function hasEnabledCancel(actions: WorkflowActionDescriptor[] | undefined): boolean {
-  if (!actions) return true;
-  return actions.some((action) => action.kind === "cancel" && action.enabled);
-}
-
-function cancelActionScope(actions: WorkflowActionDescriptor[] | undefined): string | undefined {
-  const action = actions?.find((candidate) => candidate.kind === "cancel" && candidate.enabled);
-  return action && action.scope !== "row" ? action.scope : undefined;
-}
-
 export function CancelRunningButton({ workflow, id, runId, subject, entry, actions, className }: CancelRunningButtonProps) {
   const [pending, setPending] = useState(false);
   const label = subject?.trim() || id;
-  const cancelEnabled = hasEnabledCancel(actions);
-  const scope = cancelActionScope(actions);
+  const cancelEnabled = hasEnabledAction(actions, "cancel");
+  const scope = actionScopeBody(
+    actions?.find((candidate) => candidate.kind === "cancel" && candidate.enabled),
+  ).scope;
 
   // OCR-prep parent rows live in the downstream workflow's queue but aren't
   // daemon-claimed — they're tracker-only proxies for the OCR session. The
