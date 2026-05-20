@@ -22,6 +22,7 @@ import {
   buildWorkflowRunProjection,
 } from "../../../domain/workflow-runtime/projection.js";
 import { buildTrackerQueueSurfaces } from "../../../tracker/queue-surfaces.js";
+import type { WorkflowRuntimePolicyLookup } from "../../../domain/workflow-runtime/registry.js";
 
 type LazySlot = ReactNode | (() => ReactNode);
 
@@ -52,6 +53,8 @@ interface LogPanelProps {
   onPreviewVisibleChange?: (visible: boolean) => void;
   /** Called when the operator triggers a hard-delete from the RunSelector toolbar. */
   onDeleteEntry?: () => void;
+  /** Per-workflow runtime policies from workflow metadata. */
+  runtimePolicies?: WorkflowRuntimePolicyLookup;
 }
 
 export function deriveQueueRowTypeLabel(
@@ -59,12 +62,14 @@ export function deriveQueueRowTypeLabel(
   childEntries: TrackerEntry[],
   allEntries: TrackerEntry[],
   previewAvailable: boolean,
+  runtimePolicies?: WorkflowRuntimePolicyLookup,
 ): string {
   const runId = entry.runId ?? entry.id;
   const sourceEntries = allEntries.length > 0 ? allEntries : [entry, ...childEntries];
   const surfaces = buildTrackerQueueSurfaces({
     entries: sourceEntries,
     delegationSourceEntries: sourceEntries,
+    runtimePolicies,
   });
   const surface = surfaces.groupRows.find((candidate) => {
     if (candidate.parentRunId === runId) return true;
@@ -74,12 +79,12 @@ export function deriveQueueRowTypeLabel(
     return candidate.members.some((member) => (member.runId ?? member.id) === runId);
   });
   const label = surface
-    ? buildProjectionFromQueueSurface(surface, {}).rowTypeLabel
-    : buildWorkflowRunProjection(entry, {}).rowTypeLabel;
-  return previewAvailable ? `${label} · Preview` : label;
+    ? buildProjectionFromQueueSurface(surface, { runtimePolicies }).rowTypeLabel
+    : buildWorkflowRunProjection(entry, { runtimePolicies }).rowTypeLabel;
+  return previewAvailable && !label.endsWith("· Preview") ? `${label} · Preview` : label;
 }
 
-export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultTab, previewSlot, previewHeaderSlot, previewAvailable, onPreviewVisibleChange, onDeleteEntry }: LogPanelProps) {
+export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultTab, previewSlot, previewHeaderSlot, previewAvailable, onPreviewVisibleChange, onDeleteEntry, runtimePolicies }: LogPanelProps) {
   const effectiveWorkflow = entry?.workflow ?? workflow;
   const registered = useWorkflow(effectiveWorkflow);
   const [maximized, setMaximized] = useState(false);
@@ -318,7 +323,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
         logs={displayedLogs}
         events={events}
         loading={logsLoading}
-        rowTypeLabel={deriveQueueRowTypeLabel(entry, childEntries, allEntries ?? [], previewAvailable ?? false)}
+        rowTypeLabel={deriveQueueRowTypeLabel(entry, childEntries, allEntries ?? [], previewAvailable ?? false, runtimePolicies)}
         screenshotsSlot={
           <ScreenshotsPanel
             workflow={logSourceWorkflow}

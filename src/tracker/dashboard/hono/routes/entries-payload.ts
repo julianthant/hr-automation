@@ -35,6 +35,7 @@ import { SCREENSHOTS_DIR } from "../../screenshots.js";
 import { countSidebarRowsFromTrackerHistory } from "../../../queue-row-count.js";
 import { ttlMemoize } from "../memo.js";
 import { isStateDbReady, openStateDb } from "../../../state/db.js";
+import { getWorkflowRuntimePolicy } from "../../../../domain/workflow-runtime/registry.js";
 
 // ── Cross-workflow counts cache ───────────────────────────────────────────────
 
@@ -92,6 +93,45 @@ function readTrackerEntriesForStream(
     : readEntries(workflow, dir);
 }
 
+function trackerEntryKey(entry: TrackerEntry): string {
+  return `${entry.workflow}\0${entry.id}\0${getRunIdOr(entry)}`;
+}
+
+function withRuntimeContextEntries(
+  workflow: string,
+  date: string,
+  today: string,
+  dir: string,
+  entries: TrackerEntry[],
+): TrackerEntry[] {
+  const policy = getWorkflowRuntimePolicy(workflow);
+  if (!policy.delegation?.rootRowPersistsThroughChildren) return entries;
+
+  const out = [...entries];
+  const seen = new Set(out.map(trackerEntryKey));
+  const contextRunIds = new Set(out.map(getRunIdOr));
+  const workflows = listWorkflows(dir).filter((candidate) => candidate !== workflow).sort();
+
+  let added = true;
+  while (added) {
+    added = false;
+    for (const childWorkflow of workflows) {
+      const candidates = readTrackerEntriesForStream(childWorkflow, date, today, dir);
+      for (const candidate of candidates) {
+        if (!candidate.parentRunId || !contextRunIds.has(candidate.parentRunId)) continue;
+        const key = trackerEntryKey(candidate);
+        if (seen.has(key)) continue;
+        out.push(candidate);
+        seen.add(key);
+        contextRunIds.add(getRunIdOr(candidate));
+        added = true;
+      }
+    }
+  }
+
+  return out;
+}
+
 function countScreenshotsForItems(
   workflow: string,
   itemIds: Set<string>,
@@ -147,7 +187,13 @@ export function buildJsonlEventsPayload(
   wfCounts: Record<string, number>;
   failureCounts: Record<string, number>;
 } {
-  const entries = readTrackerEntriesForStream(workflow, date, today, dir);
+  const entries = withRuntimeContextEntries(
+    workflow,
+    date,
+    today,
+    dir,
+    readTrackerEntriesForStream(workflow, date, today, dir),
+  );
   const logs = date && date !== today
     ? readLogEntriesForDate(workflow, undefined, date, dir)
     : readLogEntries(workflow, undefined, dir);

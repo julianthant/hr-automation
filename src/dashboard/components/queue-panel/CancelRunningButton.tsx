@@ -30,10 +30,16 @@ function hasEnabledCancel(actions: WorkflowActionDescriptor[] | undefined): bool
   return actions.some((action) => action.kind === "cancel" && action.enabled);
 }
 
+function cancelActionScope(actions: WorkflowActionDescriptor[] | undefined): string | undefined {
+  const action = actions?.find((candidate) => candidate.kind === "cancel" && candidate.enabled);
+  return action && action.scope !== "row" ? action.scope : undefined;
+}
+
 export function CancelRunningButton({ workflow, id, runId, subject, entry, actions, className }: CancelRunningButtonProps) {
   const [pending, setPending] = useState(false);
   const label = subject?.trim() || id;
   const cancelEnabled = hasEnabledCancel(actions);
+  const scope = cancelActionScope(actions);
 
   // OCR-prep parent rows live in the downstream workflow's queue but aren't
   // daemon-claimed — they're tracker-only proxies for the OCR session. The
@@ -102,7 +108,7 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, actio
       const res = await fetch("/api/task/force-stop", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workflow, id, runId }),
+        body: JSON.stringify({ workflow, id, runId, ...(scope ? { scope } : {}) }),
       });
       const body = (await res.json()) as { ok?: boolean; error?: string };
       if (res.ok && body.ok) {

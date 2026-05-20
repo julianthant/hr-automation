@@ -21,6 +21,33 @@ function prepEntry(): TrackerEntry {
 }
 
 describe("buildQueueCancelRequest", () => {
+  it("carries policy-declared cancel scope for ordinary queued rows", () => {
+    assert.deepEqual(
+      buildQueueCancelRequest({
+        workflow: "oath-upload",
+        id: "oath-parent",
+        runId: "parent-run",
+        actions: [{
+          kind: "cancel",
+          scope: "tree",
+          source: "queue-panel",
+          label: "Cancel workflow tree",
+          targetRunIds: ["parent-run"],
+          enabled: true,
+        }],
+      }),
+      {
+        path: "/api/cancel-queued",
+        body: {
+          workflow: "oath-upload",
+          id: "oath-parent",
+          runId: "parent-run",
+          scope: "tree",
+        },
+      },
+    );
+  });
+
   it("routes OCR prep proxy rows to discard-prepare with the OCR session body", () => {
     assert.deepEqual(
       buildQueueCancelRequest({

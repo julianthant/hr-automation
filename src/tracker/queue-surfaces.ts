@@ -1,4 +1,8 @@
 import { resolveRowArchetype } from "../domain/row-archetype.js";
+import {
+  getWorkflowRuntimePolicy,
+  type WorkflowRuntimePolicyLookup,
+} from "../domain/workflow-runtime/registry.js";
 import type { TrackerEntry } from "./jsonl.js";
 
 function isBatchParent(e: TrackerEntry): boolean {
@@ -23,20 +27,47 @@ function isPassiveDelegationMember(entry: TrackerEntry): boolean {
   return resolveRowArchetype(entry) === "passive-child";
 }
 
-/** OCR prep fans out daemon utility rows with `taskRole: "child"` — these stay as delegation member rows. */
-function isOcrDaemonPrepFanoutChild(entry: TrackerEntry): boolean {
-  return (
-    resolveRowArchetype(entry) === "delegate-child" &&
-    entry.data?.originWorkflow === "ocr" &&
-    (entry.workflow === "eid-lookup" || entry.workflow === "active-check")
-  );
+/** Policy-declared utility fan-out children stay as flat delegation member rows. */
+function isPolicyUtilityDelegationMember(
+  entry: TrackerEntry,
+  runtimePolicies?: WorkflowRuntimePolicyLookup,
+): boolean {
+  if (resolveRowArchetype(entry) !== "delegate-child") return false;
+  const originWorkflow = entry.data?.originWorkflow;
+  if (typeof originWorkflow !== "string" || !originWorkflow) return false;
+  const policy = getWorkflowRuntimePolicy(originWorkflow, runtimePolicies);
+  if (policy.delegation?.utilityChildSurface !== "delegation-member") return false;
+  const workflows = policy.delegation.utilityChildWorkflows ?? [];
+  return workflows.includes(entry.workflow);
 }
 
-function buildMembersByParentRunId(entries: TrackerEntry[]): Map<string, TrackerEntry[]> {
+function runIdFor(entry: Pick<TrackerEntry, "id" | "runId">): string {
+  return entry.runId ?? entry.id;
+}
+
+function rootPersistingParentRunIds(
+  entries: TrackerEntry[],
+  runtimePolicies?: WorkflowRuntimePolicyLookup,
+): Set<string> {
+  const runIds = new Set<string>();
+  for (const entry of entries) {
+    if (!isBatchParentAnchor(entry)) continue;
+    const policy = getWorkflowRuntimePolicy(entry.workflow, runtimePolicies);
+    if (policy.delegation?.rootRowPersistsThroughChildren) {
+      runIds.add(runIdFor(entry));
+    }
+  }
+  return runIds;
+}
+
+function buildMembersByParentRunId(
+  entries: TrackerEntry[],
+  rootPersistingRunIds: Set<string>,
+): Map<string, TrackerEntry[]> {
   const map = new Map<string, TrackerEntry[]>();
   for (const entry of entries) {
     if (!entry.parentRunId) continue;
-    if (isBatchParent(entry)) continue; // batch-parent rows are anchors, not members
+    if (isBatchParent(entry) && !rootPersistingRunIds.has(entry.parentRunId)) continue; // batch-parent rows are anchors, not members
     const list = map.get(entry.parentRunId) ?? [];
     list.push(entry);
     map.set(entry.parentRunId, list);
@@ -44,10 +75,14 @@ function buildMembersByParentRunId(entries: TrackerEntry[]): Map<string, Tracker
   return map;
 }
 
-function groupPendingDelegatedBatchParents(entries: TrackerEntry[]): Map<string, TrackerEntry[]> {
+function groupPendingDelegatedBatchParents(
+  entries: TrackerEntry[],
+  rootPersistingRunIds: Set<string>,
+): Map<string, TrackerEntry[]> {
   const map = new Map<string, TrackerEntry[]>();
   for (const entry of entries) {
     if (!entry.parentRunId) continue;
+    if (rootPersistingRunIds.has(entry.parentRunId)) continue;
     if (!isBatchParentAnchor(entry)) continue;
     if (isApprovedPrepRow(entry)) continue;
     const list = map.get(entry.parentRunId) ?? [];
@@ -103,6 +138,7 @@ export interface TrackerQueueSurfaces {
 export interface BuildTrackerQueueSurfacesInput {
   entries: TrackerEntry[];
   delegationSourceEntries: TrackerEntry[];
+  runtimePolicies?: WorkflowRuntimePolicyLookup;
 }
 
 /**
@@ -115,12 +151,13 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
   const visibleSources = input.delegationSourceEntries.filter(
     (entry) => !isDiscardedPrepRow(entry),
   );
-  const membersByParentRunId = buildMembersByParentRunId(visibleSources);
+  const rootPersistingRunIds = rootPersistingParentRunIds(visibleSources, input.runtimePolicies);
+  const membersByParentRunId = buildMembersByParentRunId(visibleSources, rootPersistingRunIds);
   const batchParentAnchors = visibleEntries.filter(isBatchParentAnchor);
   const batchParentAnchorRunIds = new Set(batchParentAnchors.map((entry) => entry.runId ?? entry.id));
   const approvalParentRunIds = new Set([...batchParentAnchorRunIds]);
   const pendingDelegatedBatchParentsByParentRunId =
-    groupPendingDelegatedBatchParents(batchParentAnchors);
+    groupPendingDelegatedBatchParents(batchParentAnchors, rootPersistingRunIds);
   const pendingDelegatedBatchParentRunIds = new Set<string>();
   const singleDelegationEntries: TrackerEntry[] = [];
 
@@ -174,7 +211,7 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
     if (approvalParentRunIds.has(parentRunId)) continue;
     if (members.length === 1) {
       const only = members[0]!;
-      if (isOcrDaemonPrepFanoutChild(only)) {
+      if (isPolicyUtilityDelegationMember(only, input.runtimePolicies)) {
         singleDelegationEntries.push(only);
       } else if (isPassiveDelegationMember(only)) {
         groupRows.push({
@@ -188,7 +225,7 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
       }
       continue;
     }
-    if (members.every(isOcrDaemonPrepFanoutChild)) {
+    if (members.every((member) => isPolicyUtilityDelegationMember(member, input.runtimePolicies))) {
       singleDelegationEntries.push(...members);
       continue;
     }

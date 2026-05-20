@@ -6,6 +6,8 @@ import { buildCliAdapter } from "../../core/cli-adapter.js";
 import { buildBatchPreEmitPending } from "../../core/pre-emit-helpers.js";
 import { loginToUCPath } from "../../infra/auth/login.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
+import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
+import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { TransactionError } from "../../systems/ucpath/types.js";
 import {
   navigateToEmergencyContact,
@@ -39,6 +41,26 @@ export interface EmergencyContactOptions {
 const WORKFLOW = "emergency-contact";
 
 const emergencyContactSteps = ["navigation", "fill-form", "save"] as const;
+
+/**
+ * Emergency Contact runtime policy.
+ *
+ * Emergency Contact PDF uploads mirror OCR prep behavior before approval:
+ * file rows title by PDF filename, and approved contact/person rows fan
+ * out as child-only delegation members titled by employee/contact data.
+ */
+export const EMERGENCY_CONTACT_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
+  ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
+  delegation: {
+    cancelScope: "row",
+  },
+  memberRow: {
+    titleSource: "person",
+  },
+  prepRow: {
+    titleSource: "pdf-original-name",
+  },
+};
 
 export function shouldDemoteExistingContactForRun(
   match: ContactMatch | null,
@@ -102,6 +124,7 @@ export const emergencyContactWorkflow = defineWorkflow({
   authSteps: false,
   steps: emergencyContactSteps,
   schema: RecordSchema,
+  runtimePolicy: EMERGENCY_CONTACT_WORKFLOW_RUNTIME_POLICY,
   queueTitle: { kind: "single" },
   authChain: "sequential",
   batch: {

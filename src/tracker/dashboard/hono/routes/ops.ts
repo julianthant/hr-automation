@@ -17,7 +17,7 @@ import {
   readQueueDepth,
 } from "../../ops/index.js";
 import { performWorkflowAction } from "../../actions/perform-workflow-action.js";
-import type { WorkflowActionResult } from "../../actions/types.js";
+import type { WorkflowActionResult, WorkflowActionScope } from "../../actions/types.js";
 import { errorMessage } from "../../../../utils/errors.js";
 import { log } from "../../../../utils/log.js";
 import type { DashboardHonoDeps } from "../context.js";
@@ -41,6 +41,10 @@ function parseParentRunIdFromBody(body: Record<string, unknown>):
     return { ok: false, error: PARENT_RUN_ID_VALIDATION_HINT };
   }
   return parentRunId ? { ok: true, parentRunId } : { ok: true };
+}
+
+function parseRowCancelScope(value: unknown): WorkflowActionScope {
+  return value === "tree" ? "tree" : "row";
 }
 
 function parseItemsFromBody<T>(
@@ -233,10 +237,11 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       workflow: String(body.workflow ?? ""),
       id: String(body.id ?? ""),
       runId: body.runId ? String(body.runId) : undefined,
-    }), async (req: { workflow: string; id: string; runId?: string }) => {
+      scope: parseRowCancelScope(body.scope),
+    }), async (req: { workflow: string; id: string; runId?: string; scope: WorkflowActionScope }) => {
       const result = await performWorkflowAction({
         action: "cancel",
-        scope: "row",
+        scope: req.scope,
         source: "queue-panel",
         workflowId: req.workflow,
         cancelMode: "cooperative",
@@ -299,10 +304,11 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       workflow: String(body.workflow ?? ""),
       id: String(body.id ?? ""),
       runId: body.runId ? String(body.runId) : undefined,
-    }), async (req: { workflow: string; id: string; runId?: string }) => {
+      scope: parseRowCancelScope(body.scope),
+    }), async (req: { workflow: string; id: string; runId?: string; scope: WorkflowActionScope }) => {
       const result = await performWorkflowAction({
         action: "cancel",
-        scope: "row",
+        scope: req.scope,
         source: "queue-panel",
         workflowId: req.workflow,
         cancelMode: "force",

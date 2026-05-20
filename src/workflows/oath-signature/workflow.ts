@@ -8,8 +8,36 @@ import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath } from "../../infra/auth/login.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { rootQueueTitleData } from "../../domain/queue-title.js";
+import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
+import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { buildOathSignaturePlan, type OathSignatureContext } from "./enter.js";
 import { OathSignatureInputSchema, type OathSignatureInput } from "./schema.js";
+
+/**
+ * Oath Signature runtime policy.
+ *
+ * - Prep row (created by OCR upstream) titles by PDF filename and shows
+ *   `Oath · <last4 run id>` as the default subtitle.
+ * - Final per-person signature rows are delegation members, titled by
+ *   the person's name (the projection's person-name fallback) and
+ *   carrying the normal kernel daemon footer.
+ * - Cancel on a final person row is child-only; cancel on the file prep
+ *   row should walk the file's OCR-prep chain (handled by the OCR
+ *   policy's `fileScopeCancelKind`).
+ */
+export const OATH_SIGNATURE_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
+  ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
+  delegation: {
+    cancelScope: "row",
+  },
+  memberRow: {
+    titleSource: "person",
+  },
+  prepRow: {
+    titleSource: "pdf-original-name",
+    subtitleTemplate: "Oath · <last4 run id>",
+  },
+};
 
 const WORKFLOW = "oath-signature";
 // "ocr" leads the pipeline because every oath-signature item comes from an
@@ -49,6 +77,7 @@ export const oathSignatureWorkflow = defineWorkflow({
   authSteps: false,
   steps: oathSignatureSteps,
   schema: OathSignatureInputSchema,
+  runtimePolicy: OATH_SIGNATURE_WORKFLOW_RUNTIME_POLICY,
   queueTitle: { kind: "single" },
   authChain: "sequential",
   batch: {

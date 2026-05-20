@@ -22,12 +22,27 @@ interface QueueCancelRequestArgs {
   id: string;
   runId?: string;
   entry?: TrackerEntry;
+  actions?: WorkflowActionDescriptor[];
 }
 
-export function buildQueueCancelRequest({ workflow, id, runId, entry }: QueueCancelRequestArgs): {
+function findEnabledAction(
+  actions: WorkflowActionDescriptor[] | undefined,
+  kind: WorkflowActionDescriptor["kind"],
+): WorkflowActionDescriptor | undefined {
+  return actions?.find((action) => action.kind === kind && action.enabled);
+}
+
+function actionScopeBody(
+  action: WorkflowActionDescriptor | undefined,
+): { scope?: string } {
+  return action && action.scope !== "row" ? { scope: action.scope } : {};
+}
+
+export function buildQueueCancelRequest({ workflow, id, runId, entry, actions }: QueueCancelRequestArgs): {
   path: string;
   body: Record<string, string>;
 } {
+  const cancelAction = findEnabledAction(actions, "cancel");
   const ocrPrep =
     entry?.data?.mode === "prepare"
       && typeof entry.data.ocrSessionId === "string"
@@ -42,7 +57,7 @@ export function buildQueueCancelRequest({ workflow, id, runId, entry }: QueueCan
   if (!ocrPrep) {
     return {
       path: "/api/cancel-queued",
-      body: compact({ workflow, id, runId }),
+      body: compact({ workflow, id, runId, ...actionScopeBody(cancelAction) }),
     };
   }
 
@@ -70,7 +85,7 @@ function hasEnabledAction(
   kind: WorkflowActionDescriptor["kind"],
 ): boolean {
   if (!actions) return true;
-  return actions.some((action) => action.kind === kind && action.enabled);
+  return Boolean(findEnabledAction(actions, kind));
 }
 
 export function QueueItemControls({ workflow, id, runId, subject, entry, actions, className }: QueueItemControlsProps) {
@@ -116,7 +131,7 @@ export function QueueItemControls({ workflow, id, runId, subject, entry, actions
   const onCancelClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (pending || !cancelEnabled) return;
-    const request = buildQueueCancelRequest({ workflow, id, runId, entry });
+    const request = buildQueueCancelRequest({ workflow, id, runId, entry, actions });
     void post(request.path, request.body, "cancel");
   };
 

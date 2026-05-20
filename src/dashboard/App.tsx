@@ -265,6 +265,14 @@ export function App() {
 
   const meta = useWorkflow(workflow);
   const wfLabel = meta?.label ?? autoLabel(workflow);
+  const runtimePolicies = useMemo(
+    () => new Map(
+      registered
+        .filter((item) => item.runtimePolicy)
+        .map((item) => [item.name, item.runtimePolicy!]),
+    ),
+    [registered],
+  );
 
   /** Matches QueuePanel group cards + flat rows (not strip-collapse primaries). */
   const queuePanelTopLevelCount = useMemo(
@@ -274,8 +282,9 @@ export function App() {
         delegationSourceEntries: entries.filter((e) => !isDiscardedPrepRow(e)),
         workflow,
         workflowLabel: wfLabel,
+        runtimePolicies,
       }),
-    [dedupedEntries, entries, workflow, wfLabel],
+    [dedupedEntries, entries, workflow, wfLabel, runtimePolicies],
   );
 
   // Per-entry "<base> <ordinal>" labels for the queue / log header / toasts.
@@ -580,6 +589,7 @@ export function App() {
           topLevelQueueCount={queuePanelTopLevelCount}
           workflow={workflow}
           workflowLabel={wfLabel}
+          runtimePolicies={runtimePolicies}
           displayNames={displayNames}
           selectedId={selectedId}
           onSelect={handleSelectEntry}
@@ -668,6 +678,7 @@ export function App() {
               previewSlot={isPrepEntry ? renderOcrPrepBody : undefined}
               onPreviewVisibleChange={setOcrPreviewVisible}
               defaultTab={wantsPreview && reviewingPrepId ? "preview" : undefined}
+              runtimePolicies={runtimePolicies}
             />
           );
         })()}

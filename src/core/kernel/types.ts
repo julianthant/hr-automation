@@ -3,6 +3,7 @@ import type { ZodType } from 'zod'
 import type { OperatorSubject } from '../../domain/operator-subject.js'
 import type { log } from '../../utils/log.js'
 import type { WorkflowArchetype } from '../../domain/row-archetype.js'
+import type { WorkflowRuntimePolicy } from '../../domain/workflow-runtime/types.js'
 
 export interface SystemConfig {
   id: string
@@ -186,6 +187,12 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
    */
   queueTitle?: WorkflowQueueTitleConfig<TData>
   /**
+   * Serializable dashboard/runtime policy for row projection and action
+   * blast-radius rules. Workflow files own their overrides; the dashboard
+   * receives this through workflow metadata.
+   */
+  runtimePolicy?: WorkflowRuntimePolicy
+  /**
    * Derive a stable tracker/queue item id from raw workflow input. The kernel
    * has a generic top-level id/docId/email fallback, but dashboard HTTP
    * launches and daemon queue rows need workflow-specific ids for inputs like
@@ -311,6 +318,8 @@ export interface WorkflowMetadata {
   matchKey?: string
   /** True when the workflow declares an operatorSubject hook. */
   hasOperatorSubject?: boolean
+  /** Serializable row/action policy consumed by workflow runtime projections. */
+  runtimePolicy?: WorkflowRuntimePolicy
 }
 
 export interface RegisteredWorkflow<TData, TSteps extends readonly string[]> {

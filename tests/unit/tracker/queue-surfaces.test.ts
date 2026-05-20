@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 
 import { buildTrackerQueueSurfaces } from "../../../src/tracker/queue-surfaces.js";
 import type { TrackerEntry } from "../../../src/tracker/jsonl.js";
+import { OCR_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/ocr/workflow.js";
+
+const phase4Policies = new Map([["ocr", OCR_WORKFLOW_RUNTIME_POLICY]]);
 
 function entry(
   overrides: Partial<TrackerEntry> & Pick<TrackerEntry, "workflow" | "id" | "status">,
@@ -279,6 +282,7 @@ describe("buildTrackerQueueSurfaces", () => {
     const result = buildTrackerQueueSurfaces({
       entries: [],
       delegationSourceEntries: [child],
+      runtimePolicies: phase4Policies,
     });
 
     assert.equal(result.groupRows.length, 0);

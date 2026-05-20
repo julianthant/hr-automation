@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
+import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js"
 
 export interface WorkflowMetadata {
   name: string
@@ -34,6 +35,8 @@ export interface WorkflowMetadata {
    * forward instead of re-typing it.
    */
   matchKey?: string
+  /** Serializable workflow runtime policy for queue projections/actions. */
+  runtimePolicy?: WorkflowRuntimePolicy
 }
 
 const WorkflowsContext = createContext<WorkflowMetadata[] | null>(null)
@@ -54,6 +57,10 @@ function isWorkflowMetadata(item: unknown): item is WorkflowMetadata {
   if (o.category !== undefined && typeof o.category !== "string") return false
   if (o.iconName !== undefined && typeof o.iconName !== "string") return false
   if (o.matchKey !== undefined && typeof o.matchKey !== "string") return false
+  if (
+    o.runtimePolicy !== undefined &&
+    (!o.runtimePolicy || typeof o.runtimePolicy !== "object" || Array.isArray(o.runtimePolicy))
+  ) return false
   return true
 }
 

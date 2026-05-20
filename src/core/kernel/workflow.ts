@@ -1,5 +1,6 @@
 import type { WorkflowConfig, RegisteredWorkflow, WorkflowMetadata, RunOpts, BatchResult } from './types.js'
 import { register, autoLabel, normalizeDetailField } from './registry.js'
+import { setWorkflowRuntimePolicy } from '../../domain/workflow-runtime/registry.js'
 import { Session } from './session.js'
 import { log } from '../../utils/log.js'
 import { runWorkflowPool } from './pool.js'
@@ -39,6 +40,10 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
     ...(config.iconName ? { iconName: config.iconName } : {}),
     ...(config.matchKey ? { matchKey: config.matchKey } : {}),
     hasOperatorSubject: Boolean(config.operatorSubject),
+    ...(config.runtimePolicy ? { runtimePolicy: config.runtimePolicy } : {}),
+  }
+  if (config.runtimePolicy) {
+    setWorkflowRuntimePolicy(config.name, config.runtimePolicy)
   }
   register(metadata)
   return { config, metadata, archetype }

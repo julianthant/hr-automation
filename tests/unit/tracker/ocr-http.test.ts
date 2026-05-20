@@ -185,6 +185,53 @@ test("POST /api/ocr/discard-prepare deletes delegated EID lookup child rows", as
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("POST /api/ocr/discard-prepare deletes children for that OCR run only", async () => {
+  const dir = setup();
+  const date = todayLocal();
+  trackEventForDate(
+    {
+      workflow: "eid-lookup",
+      timestamp: new Date().toISOString(),
+      id: "child-for-discarded-run",
+      runId: "eid-child-run-1",
+      parentRunId: "ocr-run-discarded",
+      status: "done",
+    },
+    date,
+    dir,
+  );
+  trackEventForDate(
+    {
+      workflow: "eid-lookup",
+      timestamp: new Date().toISOString(),
+      id: "child-for-other-run",
+      runId: "eid-child-run-2",
+      parentRunId: "ocr-run-kept",
+      status: "done",
+    },
+    date,
+    dir,
+  );
+
+  const handler = buildOcrDiscardHandler({ trackerDir: dir });
+  const resp = await handler({
+    sessionId: "ocr-session-discarded",
+    runId: "ocr-run-discarded",
+    reason: "operator discarded OCR row",
+  });
+
+  assert.equal(resp.status, 200);
+  const eidFile = join(dir, `eid-lookup-${date}.jsonl`);
+  const remaining = existsSync(eidFile)
+    ? readFileSync(eidFile, "utf-8").split("\n").filter(Boolean).map((line) => JSON.parse(line))
+    : [];
+  assert.deepEqual(
+    remaining.map((row) => row.id),
+    ["child-for-other-run"],
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("POST /api/ocr/discard-prepare mirrors explicit parent row without OCR history", async () => {
   const dir = setup();
   const handler = buildOcrDiscardHandler({ trackerDir: dir });

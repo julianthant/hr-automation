@@ -34,6 +34,7 @@ import {
 import { QueueSortDropdown } from "./QueueSortDropdown";
 import { collapseEntriesForStatStrip } from "./stat-strip-collapse";
 import { isEditableFocus } from "@/lib/utils";
+import type { WorkflowRuntimePolicyLookup } from "../../../domain/workflow-runtime/registry.js";
 
 interface QueuePanelProps {
   /**
@@ -57,6 +58,8 @@ interface QueuePanelProps {
   workflowLabel: string;
   /** Per-entry "<base> <ordinal>" labels from `buildDisplayNameMap`. */
   displayNames?: Map<string, string>;
+  /** Per-workflow runtime policies from workflow metadata. */
+  runtimePolicies?: WorkflowRuntimePolicyLookup;
   selectedId: string | null;
   onSelect: (id: string) => void;
   /** The tracker date — forwarded to EntryItem delete buttons. */
@@ -186,6 +189,7 @@ export function QueuePanel({
   workflow,
   workflowLabel,
   displayNames,
+  runtimePolicies,
   selectedId,
   onSelect,
   date,
@@ -227,8 +231,9 @@ export function QueuePanel({
         workflow,
         workflowLabel,
         displayNames,
+        runtimePolicies,
       }),
-    [visibleEntries, visibleDelegationSources, workflow, workflowLabel, displayNames],
+    [visibleEntries, visibleDelegationSources, workflow, workflowLabel, displayNames, runtimePolicies],
   );
   const queueSurfaces = queueProjectionRows.surfaces;
 

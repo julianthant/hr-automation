@@ -12,6 +12,7 @@ import {
   type TrackerQueueGroupSurface,
 } from "../../../tracker/queue-surfaces.js";
 import type { TrackerEntry as TrackerEntryJsonl } from "../../../tracker/jsonl.js";
+import type { WorkflowRuntimePolicyLookup } from "../../../domain/workflow-runtime/registry.js";
 
 /**
  * Identity cast. `TrackerEntry` (dashboard) is a structural superset of
@@ -96,6 +97,7 @@ export interface BuildQueueSurfacesInput {
   workflow: string;
   workflowLabel: string;
   displayNames?: Map<string, string>;
+  runtimePolicies?: WorkflowRuntimePolicyLookup;
 }
 
 export interface QueueSurfaces {
@@ -128,6 +130,7 @@ function projectionContext(input: BuildQueueSurfacesInput): WorkflowProjectionCo
     resolveEntryTitle: input.displayNames
       ? (entry) => resolveEntryName(toDashboardEntry(entry), input.displayNames)
       : undefined,
+    runtimePolicies: input.runtimePolicies,
   };
 }
 
@@ -135,6 +138,7 @@ export function buildQueueSurfaces(input: BuildQueueSurfacesInput): QueueSurface
   const core = buildTrackerQueueSurfaces({
     entries: input.entries.map(toJsonlEntry),
     delegationSourceEntries: input.delegationSourceEntries.map(toJsonlEntry),
+    runtimePolicies: input.runtimePolicies,
   });
   return {
     groupRows: core.groupRows.map(mapGroupSurface),
@@ -186,5 +190,6 @@ export function countQueuePanelTopLevelRows(input: BuildQueueSurfacesInput): num
   return countTopLevelQueueSurfaceRows({
     entries: input.entries.map(toJsonlEntry),
     delegationSourceEntries: input.delegationSourceEntries.map(toJsonlEntry),
+    runtimePolicies: input.runtimePolicies,
   });
 }
