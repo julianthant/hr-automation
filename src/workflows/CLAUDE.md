@@ -26,11 +26,18 @@ All workflows are kernel-based as of 2026-04-17. New workflows must follow the k
 
 Frontend requires no edits — the dashboard reads everything from the server-side registry via `/api/workflow-definitions`.
 
-### Required: archetype
+### Required: archetype and runtimePolicy
 
 Every `defineWorkflow({...})` must declare `archetype`. The
 architecture guard at `tests/unit/architecture/archetype-coverage.test.ts`
-fails CI if a workflow omits it. Valid `WorkflowArchetype` values:
+fails CI if a workflow omits it.
+
+Every kernel workflow must also declare `runtimePolicy` (spread
+`DEFAULT_WORKFLOW_RUNTIME_POLICY` from `src/domain/workflow-runtime/default-policy.ts`
+unless the workflow needs delegation/preview/member/prep overrides).
+Guard: `tests/unit/architecture/runtime-policy-coverage.test.ts`.
+
+Valid `WorkflowArchetype` values:
 
 - `single` — one item, one row (e.g. work-study, active-check).
 - `batch` — N peer items under a batch-parent (e.g. emergency-contact, oath-signature).

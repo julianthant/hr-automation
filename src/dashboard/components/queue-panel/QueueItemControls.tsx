@@ -6,6 +6,11 @@ import { cn, compact } from "@/lib/utils";
 import { IconActionButton } from "@/components/shared/IconActionButton";
 import type { TrackerEntry } from "@/components/shared/types";
 import type { WorkflowActionDescriptor } from "../../../domain/workflow-runtime/types.js";
+import {
+  actionScopeBody,
+  findEnabledAction,
+  hasEnabledAction,
+} from "@/lib/workflow-action-utils";
 
 interface QueueItemControlsProps {
   workflow: string;
@@ -23,19 +28,6 @@ interface QueueCancelRequestArgs {
   runId?: string;
   entry?: TrackerEntry;
   actions?: WorkflowActionDescriptor[];
-}
-
-function findEnabledAction(
-  actions: WorkflowActionDescriptor[] | undefined,
-  kind: WorkflowActionDescriptor["kind"],
-): WorkflowActionDescriptor | undefined {
-  return actions?.find((action) => action.kind === kind && action.enabled);
-}
-
-function actionScopeBody(
-  action: WorkflowActionDescriptor | undefined,
-): { scope?: string } {
-  return action && action.scope !== "row" ? { scope: action.scope } : {};
 }
 
 export function buildQueueCancelRequest({ workflow, id, runId, entry, actions }: QueueCancelRequestArgs): {
@@ -80,14 +72,6 @@ export function buildQueueCancelRequest({ workflow, id, runId, entry, actions }:
  * 409s from the backend are surfaced as warnings — the daemon claimed the
  * item between the user's click and the backend lock.
  */
-function hasEnabledAction(
-  actions: WorkflowActionDescriptor[] | undefined,
-  kind: WorkflowActionDescriptor["kind"],
-): boolean {
-  if (!actions) return true;
-  return Boolean(findEnabledAction(actions, kind));
-}
-
 export function QueueItemControls({ workflow, id, runId, subject, entry, actions, className }: QueueItemControlsProps) {
   const [pending, setPending] = useState<"cancel" | "bump" | null>(null);
   const label = subject?.trim() || id;

@@ -18,10 +18,8 @@ import { useWorkflow } from "@/lib/workflows-context";
 import { queueStatusDisplayLabel } from "../../../domain/tracker-terminal-display.js";
 import { resolveRowArchetype } from "../../../domain/row-archetype.js";
 import {
-  buildProjectionFromQueueSurface,
-  buildWorkflowRunProjection,
+  deriveRowTypeLabelForEntry,
 } from "../../../domain/workflow-runtime/projection.js";
-import { buildTrackerQueueSurfaces } from "../../../tracker/queue-surfaces.js";
 import type { WorkflowRuntimePolicyLookup } from "../../../domain/workflow-runtime/registry.js";
 
 type LazySlot = ReactNode | (() => ReactNode);
@@ -64,24 +62,7 @@ export function deriveQueueRowTypeLabel(
   previewAvailable: boolean,
   runtimePolicies?: WorkflowRuntimePolicyLookup,
 ): string {
-  const runId = entry.runId ?? entry.id;
-  const sourceEntries = allEntries.length > 0 ? allEntries : [entry, ...childEntries];
-  const surfaces = buildTrackerQueueSurfaces({
-    entries: sourceEntries,
-    delegationSourceEntries: sourceEntries,
-    runtimePolicies,
-  });
-  const surface = surfaces.groupRows.find((candidate) => {
-    if (candidate.parentRunId === runId) return true;
-    if (candidate.kind === "approval-delegation" && (candidate.parent.runId ?? candidate.parent.id) === runId) {
-      return true;
-    }
-    return candidate.members.some((member) => (member.runId ?? member.id) === runId);
-  });
-  const label = surface
-    ? buildProjectionFromQueueSurface(surface, { runtimePolicies }).rowTypeLabel
-    : buildWorkflowRunProjection(entry, { runtimePolicies }).rowTypeLabel;
-  return previewAvailable && !label.endsWith("· Preview") ? `${label} · Preview` : label;
+  return deriveRowTypeLabelForEntry(entry, childEntries, allEntries, previewAvailable, runtimePolicies);
 }
 
 export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultTab, previewSlot, previewHeaderSlot, previewAvailable, onPreviewVisibleChange, onDeleteEntry, runtimePolicies }: LogPanelProps) {

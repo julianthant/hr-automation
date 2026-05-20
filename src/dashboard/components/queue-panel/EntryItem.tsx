@@ -338,9 +338,16 @@ function EntryItemImpl({
                 id={entry.id}
                 runId={entry.runId}
                 date={date}
+                actions={projectedActions}
               />
               {onDelete && date && (
-                <DeleteButton workflow={entry.workflow} id={entry.id} date={date} onDeleted={onDelete} />
+                <DeleteButton
+                  workflow={entry.workflow}
+                  id={entry.id}
+                  date={date}
+                  actions={projectedActions}
+                  onDeleted={onDelete}
+                />
               )}
             </div>
           )}
@@ -349,6 +356,7 @@ function EntryItemImpl({
               workflow={entry.workflow}
               id={entry.id}
               date={date}
+              actions={projectedActions}
               onDeleted={onDelete}
               className="flex-shrink-0"
             />

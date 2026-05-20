@@ -5,6 +5,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn, compact } from "@/lib/utils";
 import { useOptionalBatchQueueParentRunId } from "@/components/hooks/useBatchQueueContext";
 import { IconActionButton } from "@/components/shared/IconActionButton";
+import type { WorkflowActionDescriptor } from "../../../domain/workflow-runtime/types.js";
+import { hasEnabledAction } from "@/lib/workflow-action-utils";
 
 interface RetryButtonProps {
   workflow: string;
@@ -13,6 +15,8 @@ interface RetryButtonProps {
   runId?: string;
   /** Tracker date selected in the dashboard. */
   date?: string;
+  /** Projection action descriptors — when set, retry renders only when enabled. */
+  actions?: WorkflowActionDescriptor[];
   size?: "sm" | "md";
   className?: string;
 }
@@ -28,11 +32,15 @@ export function RetryButton({
   id,
   runId,
   date,
+  actions,
   size = "sm",
   className,
 }: RetryButtonProps) {
   const [pending, setPending] = useState(false);
   const batchParentRunId = useOptionalBatchQueueParentRunId();
+  const retryEnabled = hasEnabledAction(actions, "retry");
+
+  if (!retryEnabled) return null;
 
   const onClick = async (e: React.MouseEvent) => {
     e.stopPropagation();

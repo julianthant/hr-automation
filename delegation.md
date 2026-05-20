@@ -1,8 +1,10 @@
 # Workflow, Delegation, And Queue Behavior Map
 
-Last checked: 2026-05-20
+Last checked: 2026-05-20 · **Post–workflow-runtime migration (Phases 1–6)**
 
-This file maps what the dashboard code currently does for workflow rows, delegated work, batch views, cancel buttons, retry buttons, delete buttons, OCR approval, and daemon controls. It is written as an implementation reference: each row says what appears in the queue, what appears in batch view, which workflow owns the work, and what cancel/retry means for that scope.
+This file maps what the dashboard does **after** the workflow runtime migration: queue rows render from `WorkflowRunProjection` + per-workflow `runtimePolicy`, operator actions funnel through `performWorkflowAction`, and this doc describes the resulting behavior (not pre-migration inline special cases).
+
+Implementation reference: each row says what appears in the queue, what appears in batch view, which workflow owns the work, and what cancel/retry means for that scope.
 
 ## Source Map
 
@@ -305,3 +307,11 @@ Stages: `ucpath-auth`, `transaction`.
 - Daemon stop is operational control. It stops workers; it is not the same as a clean cancellation decision for every related row.
 - Some workflows exist in metadata but are not exposed through the dashboard run modal or quick-run registry.
 - Parent dependency behavior depends on policy. Oath Upload signature children use `block_parent` on failure and cascade-capable dependencies, but dashboard buttons still need the correct endpoint to apply tree-wide cancellation.
+
+## How To Add A New Workflow
+
+1. **Kernel workflow** — `defineWorkflow({ archetype, runtimePolicy, operatorSubject, detailFields, ... })`. Spread `DEFAULT_WORKFLOW_RUNTIME_POLICY` unless the workflow needs delegation/preview/member/prep overrides (see `src/workflows/ocr/workflow.ts` and `src/workflows/oath-upload/workflow.ts`).
+2. **Runtime policy** — declare cancel/retry/delete scopes in `runtimePolicy.rowActions` / `groupActions`. OCR-style file-scope cancel uses `delegation.fileScopeCancelKind: "ocr-discard"`. Utility fan-out uses `delegation.utilityChildSurface: "delegation-member"`.
+3. **Architecture guards** — `tests/unit/architecture/archetype-coverage.test.ts` requires `archetype:`; `tests/unit/architecture/runtime-policy-coverage.test.ts` requires `runtimePolicy:` and validates action descriptors.
+4. **Dashboard** — no frontend registry edits. Queue rows pick up titles/actions from projections automatically once the workflow registers and emits tracker rows with the right `data.archetype` stamps.
+5. **Document behavior here** — add a row to **Workflow Inventory** and, if the workflow delegates or batches, a short flow section with cancel/retry scope notes.

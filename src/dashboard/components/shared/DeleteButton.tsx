@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { IconActionButton } from "@/components/shared/IconActionButton";
+import type { WorkflowActionDescriptor } from "../../../domain/workflow-runtime/types.js";
+import { hasEnabledAction } from "@/lib/workflow-action-utils";
 
 interface DeleteButtonProps {
   workflow: string;
@@ -11,6 +13,8 @@ interface DeleteButtonProps {
   date: string;
   /** Optional run scope. Omit to delete every run for the queue item. */
   runId?: string;
+  /** Projection action descriptors — when set, delete renders only when enabled. */
+  actions?: WorkflowActionDescriptor[];
   /** Called after the delete succeeds so the parent can remove the entry from state. */
   onDeleted: (id: string) => void;
   /** "sm" = 24×24 for inline queue rows. "md" = 32×32 for the LogPanel header. */
@@ -23,9 +27,12 @@ interface DeleteButtonProps {
  * tracker files and the SQLite projection via POST /api/delete-entry.
  * Non-reversible — the tooltip and destructive styling make the intent clear.
  */
-export function DeleteButton({ workflow, id, date, runId, onDeleted, size = "sm", className }: DeleteButtonProps) {
+export function DeleteButton({ workflow, id, date, runId, actions, onDeleted, size = "sm", className }: DeleteButtonProps) {
   const [pending, setPending] = useState(false);
   const label = runId ? "Delete this run permanently" : "Delete this entry permanently";
+  const deleteEnabled = hasEnabledAction(actions, "delete");
+
+  if (!deleteEnabled) return null;
 
   const onClick = async (e: React.MouseEvent) => {
     e.stopPropagation();
