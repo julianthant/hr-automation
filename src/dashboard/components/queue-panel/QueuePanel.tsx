@@ -17,6 +17,7 @@ import {
 import { DaemonBatchRow } from "./DaemonBatchRow";
 import { DelegationRow } from "@/components/ocr/DelegationRow";
 import { GroupRowBase } from "./group-row-base";
+import { BatchFooterActions } from "./BatchFooterActions";
 import type { TrackerEntry } from "@/components/shared/types";
 import { isDiscardedPrepRow } from "@/components/ocr/types";
 import {
@@ -468,6 +469,15 @@ export function QueuePanel({
             isFocused={batchQueueParentRunId === surface.parentRunId}
             drillInEnabled={!batchQueueParentRunId}
             onEnter={(runId) => onEnterBatchQueue?.(runId)}
+            footerActions={
+              <BatchFooterActions
+                workflow={workflow}
+                date={date}
+                batchParentRunId={surface.parentRunId}
+                memberEntries={surface.members}
+                onDeletedIds={onBulkDeleted}
+              />
+            }
           />
         );
       default:

@@ -1,522 +1,307 @@
-# Delegation Behavior Map
+# Workflow, Delegation, And Queue Behavior Map
 
-Last checked: 2026-05-18
+Last checked: 2026-05-20
 
-This is a current-state map of delegation rows, batch views, dashboard stages, and cancellation behavior. It is meant to be edited with the desired row copy/behavior before changing code.
+This file maps what the dashboard code currently does for workflow rows, delegated work, batch views, cancel buttons, retry buttons, delete buttons, OCR approval, and daemon controls. It is written as an implementation reference: each row says what appears in the queue, what appears in batch view, which workflow owns the work, and what cancel/retry means for that scope.
 
 ## Source Map
 
-- Queue surface classifier: `src/tracker/queue-surfaces.ts`
-- Dashboard wrapper around classifier: `src/dashboard/components/queue-panel/queue-surface-classifier.ts`
-- Queue renderer and batch-mode switch: `src/dashboard/components/queue-panel/QueuePanel.tsx`
-- Group card base UI: `src/dashboard/components/queue-panel/group-row-base.tsx`
-- Approval delegation card: `src/dashboard/components/ocr/DelegationRow.tsx`
-- Daemon/batch card: `src/dashboard/components/queue-panel/DaemonBatchRow.tsx`
-- Batch mode toolbar/member list: `src/dashboard/components/queue-panel/batch-queue-view.tsx`
-- Flat queue row and per-row controls: `src/dashboard/components/queue-panel/EntryItem.tsx`
-- Queued cancel/bump control: `src/dashboard/components/queue-panel/QueueItemControls.tsx`
-- Running stop control: `src/dashboard/components/queue-panel/CancelRunningButton.tsx`
-- Cancel backend: `src/tracker/dashboard/ops/cancel.ts`
-- Daemon cancel handling: `src/core/daemon/daemon.ts`
-- Parent/child dependency behavior: `src/core/task-store/child-state.ts`, `src/core/task-store/terminal.ts`
-- Row archetype rules: `src/domain/row-archetype.ts`
-- OCR approval fan-out: `src/tracker/dashboard/ocr/approve.ts`
-- OCR discard/cancel: `src/tracker/dashboard/ocr/discard.ts`
-- Oath Upload orchestration: `src/workflows/oath-upload/handler.ts`
+- Workflow registry and loader: `src/workflows/*/workflow.ts`, `src/core/workflow-loaders.ts`
+- Run modal registry: `src/dashboard/lib/run-modal-registry.ts`
+- Quick run registry: `src/dashboard/lib/quick-run-registry.ts`
+- Queue surface builder: `src/tracker/queue-surfaces.ts`
+- Queue renderer: `src/dashboard/components/queue-panel/QueuePanel.tsx`
+- Flat queue row: `src/dashboard/components/queue-panel/EntryItem.tsx`
+- Group row base UI: `src/dashboard/components/queue-panel/group-row-base.tsx`
+- Approval delegation row: `src/dashboard/components/ocr/DelegationRow.tsx`
+- Daemon/batch group row: `src/dashboard/components/queue-panel/DaemonBatchRow.tsx`
+- Batch view: `src/dashboard/components/queue-panel/batch-queue-view.tsx`
+- Pending controls: `src/dashboard/components/queue-panel/QueueItemControls.tsx`
+- Running cancel control: `src/dashboard/components/queue-panel/CancelRunningButton.tsx`
+- Retry/delete group controls: `src/dashboard/components/queue-panel/BatchFooterActions.tsx`
+- Cancel endpoints: `src/tracker/dashboard/ops/cancel.ts`
+- Retry endpoints: `src/tracker/dashboard/ops/retry.ts`
+- Delete endpoints: `src/tracker/dashboard/ops/delete.ts`
+- OCR prepare/approve/discard: `src/tracker/dashboard/ocr/*`
+- Parent/child dependencies: `src/core/task-store/child-state.ts`, `src/core/task-store/terminal.ts`
 
-## Vocabulary
+## Row Units
 
-`parentRunId` is the dashboard relationship key. If row B has `parentRunId = rowA.runId`, the dashboard can show B under A or in A's batch mode.
+| Unit | Meaning | Renderer | Opens batch view? | Common title | Common footer/subtitle |
+|---|---|---|---|---|---|
+| Normal row | One tracker entry or one SQLite task projection. | `EntryItem` | No. | `resolveEntryName()` from data/name/EID/file/person. | Time, `#run`, optional secondary id, duration. |
+| Approval delegation row | OCR prep parent that is awaiting or has completed approval. | `DelegationRow` over `GroupRowBase` | Yes. | Prep/PDF title. | Prep footer; Oath prep uses `Oath · <last4 run id>` as the useful secondary id. |
+| Batch delegation row | Multiple rows share one `parentRunId`, or multiple delegated prep rows are grouped under one upstream batch id. | `DaemonBatchRow` over `GroupRowBase` | Yes. | Batch/workflow title or inherited parent subject. | Usual footer, but no raw `parentRunId` beside the run number. |
+| Passive delegation row | Utility children grouped under a parent, not intended as the main operator task. | `GroupRowBase` | Yes. | Parent subject or delegated utility work. | Usual footer; no direct retry/delete actions unless wired by caller. |
+| Batch view member | A row shown inside an opened group. | `EntryItem` | No nested batch view. | The member's own title. | The member's own footer/subtitle. |
+| Log panel row label | Small bottom label in the right log panel. | Log panel surface classifier | N/A | Row type text such as `Normal row`, `Single delegation`, or `Batch delegation · Preview`. | Informational only. |
 
-`data.archetype` is the current row discriminator:
+Dashboard grouping is display-only unless an endpoint explicitly cancels/deletes descendants. Sharing a `parentRunId` makes rows appear together; it does not automatically make every button operate on the full tree.
 
-| Archetype | Current meaning |
-|---|---|
-| `single` | One normal flat queue row. |
-| `batch-parent` | Anchor row for a prep/delegating parent. OCR prep and Oath Upload root rows use this. |
-| `batch-member` | Peer item under a batch parent. |
-| `dispatch` | Terminal-at-enqueue row saying "I delegated to children." Currently mostly historical/diagnostic. |
-| `delegate-child` | Cross-workflow child that still needs operator attention. |
-| `passive-child` | Cross-workflow utility child collapsed into its parent card; not meant to hold operator attention. |
+## Global Queue Surface Algorithm
 
-The dashboard should read `resolveRowArchetype(entry)`, not old fields such as `taskRole`, `requestRole`, or `data.mode` except for legacy fallback.
-
-## Queue Surface Types
-
-The queue does not render every tracker row as a separate top-level row. `buildTrackerQueueSurfaces()` produces grouped cards plus flat rows.
-
-| Surface | Trigger now | Top-level row now | Batch view now |
-|---|---|---|---|
-| Approval delegation | A `batch-parent` row that is not discarded. Usually OCR prep. | `DelegationRow`, a card over the prep parent and its members. | Clicking opens one-level batch mode with normal `EntryItem` rows for members. Toolbar can show "Open prep review" for prep anchors. |
-| Passive delegation | Members under a parent are `passive-child`. | `GroupRowBase` with title `parentSubject` or "Delegated utility work". | Clicking opens member list. |
-| Batch | Multiple children share a `parentRunId`, or multiple delegated `batch-parent` rows share an upstream parent. | `DaemonBatchRow`, a card with count, status totals, preview children, retry-all and delete-all. | Clicking opens member list. |
-| Flat row | Anything not grouped, including a single delegated child in many cases. | `EntryItem`. | No batch mode unless it is itself part of an opened parent group. |
-
-Important current rule: Oath Signature multi-file upload is a dashboard grouping over single-file prep runs. The modal posts each PDF as its own `/api/ocr/prepare` request, with a shared `originBatchRunId` used only as the file rows' `parentRunId`. One delegated OCR file becomes a flat single row. Multiple delegated OCR files become one daemon batch row over those file rows. OCR-to-EID fan-out stays as delegation member rows, not a batch delegated row.
-
-## What The Group Cards Show Now
-
-All group cards use `GroupRowBase`.
-
-Current card content:
-
-- Header title.
-- `done / total` count.
-- Status totals: done, running, queued, failed.
-- Progress bar segmented by status.
-- Up to 3 preview child rows, sorted running > queued > done > failed.
-- Footer: time, run number, secondary id, elapsed/duration, optional actions.
-
-Current actions:
-
-- `DelegationRow`: retry prep parent, delete prep parent.
-- `DaemonBatchRow`: retry all members, delete all members.
-- Passive delegation: no explicit footer actions.
-
-## Desired Queue Row Copy
-
-Fill these in before changing UI behavior.
-
-| Delegation scenario | Current top-level row | What I want in the row |
-|---|---|---|
-| Direct OCR prep for Oath Signature | Approval delegation / prep row; title is PDF name when available. | Title is the PDF name. Footer/subtitle uses the default title: `Oath · <last 4 of run id>`. |
-| Direct OCR prep for Emergency Contact | Approval delegation / prep row; title from queue title or PDF name. | TODO |
-| Oath Upload root while OCR is running | Oath Upload root is `batch-parent`; OCR child is delegated with `parentRunId`. | TODO |
-| Oath Upload after OCR approved, waiting on oath-signature children | Parent row updates `wait-ocr-approval`; child oath-signature rows have parent dependency rows. | Keep using the same existing row that started the run. Do not create a new row after approval; the batch view/member content changes underneath it. |
-| OCR utility lookup children (`eid-lookup`, `active-check`) | Passive delegation or grouped utility card. | TODO |
-| SharePoint download delegated from OCR roster download | Passive utility child under OCR prep. | TODO |
-| Multiple delegated OCR prep rows under one upstream parent | Daemon batch row over delegated prep rows, titled by the inherited default title when present. | Title is default title; footer/subtitle is empty. Batch view member rows use PDF name + default title. |
-| Single delegated OCR prep row under one upstream parent | Flat row, not batch card. | Single uploaded file should behave as one file delegation: canceling the file cancels the whole file's chain. |
-| Normal daemon batch of multiple records | Daemon batch row. | TODO |
-
-## Desired Batch View Copy
-
-Batch mode is one level deep. `QueuePanel` prevents nested batch navigation while already inside a batch.
-
-Current batch view:
-
-- Toolbar shows back button, title, batch screenshot preview button, and sometimes "Open prep review".
-- Sort toolbar remains visible.
-- Member list renders normal `EntryItem` rows.
-- Selecting a member opens that row in the right-side log/detail panel.
-- If no member is selected but batch preview is active, the right pane shows a batch preview over the batch members.
-
-Fill desired behavior:
-
-| Batch view scenario | Current behavior | What I want |
-|---|---|---|
-| Prep batch toolbar title | Uses prep row `data.__name` override or PDF name. | For Oath Signature, use the PDF name. |
-| Daemon batch toolbar title | Uses `batchDisplayOrdinal` (`Workflow 1`) or `Workflow · #abcd`. | TODO |
-| Batch screenshot preview | Available from toolbar image button. | TODO |
-| Member row title | Normal `EntryItem` title resolution. | TODO |
-| Member row controls | Pending rows show bump/cancel; running rows show stop; done/failed rows show delete/retry where applicable. | TODO |
-
-## Workflow: Oath Upload Delegation
-
-Workflow: `oath-upload`
-
-Workflow archetype: `delegating-batch`, so the root row is stamped as `batch-parent`.
-
-Current stages:
-
-1. `servicenow-auth`
-2. `delegate-ocr`
-3. `wait-ocr-approval`
-4. `delegate-signatures`
-5. `wait-signatures`
-6. `open-hr-form`
-7. `fill-form`
-8. `submit`
-
-Current behavior:
-
-- The root row stores PDF/session/hash/upload status data.
-- In full mode, it starts an OCR child with `parentRunId = oath-upload runId`.
-- It does not await OCR execution directly. It waits up to 7 days for OCR approval.
-- OCR approval fans out selected signer records to `oath-signature`.
-- Oath Upload then waits until all expected oath-signature item ids have terminal `done` rows.
-- After signatures are done, Oath Upload opens/fills/submits the ServiceNow HR inquiry.
-- In upload-only mode, OCR/signature delegation is skipped.
-
-Current dependency behavior:
-
-- After OCR approval, `createApprovalDependencyRows()` links the Oath Upload parent task to each downstream oath-signature child task.
-- Dependency policy is `onChildFailed: "block_parent"`, `cascadeCancel: true`, `resumeParentAfterChildRetry: true`.
-- A child failure blocks the parent rather than letting the parent continue.
-- A child cancellation marks that dependency `cancelled`; if no unsatisfied or failed dependencies remain, the parent can be released.
-
-Desired Oath Upload behavior:
-
-- Queue row: TODO
-- Batch view: TODO
-- If one signature child is cancelled: TODO
-- If all signature children are cancelled: TODO
-- If the Oath Upload parent is cancelled: TODO
-- If daemon is stopped while parent waits: TODO
-
-## Workflow: OCR Prep Delegation
-
-Workflow: `ocr`
-
-Workflow archetype: `delegating-batch`, but the orchestrator writes tracker rows manually and stamps `archetype: "batch-parent"` on prep rows.
-
-Current stages:
-
-1. `loading-roster`
-2. `ocr`
-3. `matching`
-4. `disambiguating`
-5. `eid-lookup`
-6. `verification`
-7. `awaiting-approval`
-
-Current behavior:
-
-- OCR prep emits a pending/running row with `data.mode = "prepare"` and `data.archetype = "batch-parent"`.
-- If OCR came from an upstream workflow, the prep row carries `parentRunId`.
-- If roster mode is download, OCR delegates one `sharepoint-download` child and waits for it.
-- During matching/verification, OCR can fan out `eid-lookup` and `active-check` utility children.
-- OCR-to-EID utility children stay as delegation member rows. They are not promoted into a batch delegated row just because they share an OCR parent.
-- The Preview tab updates progressively as OCR, matching, disambiguation, lookup, and verification complete.
-- Approval is operator-driven through `/api/ocr/approve-batch`.
-- Discard/cancel is operator-driven through `/api/ocr/discard-prepare`.
-
-Approval current behavior:
-
-- Only selected records are fanned out.
-- The target workflow comes from the OCR form spec, e.g. oath forms fan out to `oath-signature`, emergency contact forms fan out to `emergency-contact`.
-- Child pending rows are pre-emitted before daemon auth, so operators can see them immediately.
-- The OCR parent row is written `done` with `step: "approved"` after enqueue succeeds.
-- If OCR had an upstream parent, that upstream parent row is updated too.
-
-Discard current behavior:
-
-- `/api/ocr/discard-prepare` requests in-process OCR abort.
-- It deletes delegated children for the OCR run from tracker/state.
-- It writes the OCR row as `failed` with `step: "discarded"`.
-- If a parent workflow/run is known, it mirrors `failed` + `step: "discarded"` onto that parent row.
-- Discarded prep rows are filtered out of the queue surfaces.
-
-Desired OCR behavior:
-
-- Queue row before approval: TODO
-- Queue row after approval: TODO
-- Batch view before approval: TODO
-- Batch view after approval: TODO
-- If OCR prep is discarded from preview pane: TODO
-- If OCR prep is cancelled from queue row: TODO
-- If one utility lookup child is cancelled: TODO
-- If OCR is delegated from Oath Upload: TODO
-
-## Workflow: Oath Signature
-
-Workflow: `oath-signature`
-
-Workflow archetype: `single`.
-
-Current stages:
-
-1. Synthetic `ocr` marker.
-2. `ucpath-auth`
-3. `transaction`
-
-Current behavior:
-
-- A direct daemon item is a normal single row.
-- When created by OCR approval, it receives `parentRunId` and becomes a delegated child row under the upstream parent.
-- The handler stamps EID/date/dry-run data immediately.
-- The synthetic `ocr` marker exists so the timeline reads upload/OCR then UCPath transaction.
-- If the employee already has an oath, the row is marked with skipped/existing-oath status data instead of saving a new oath.
-
-Desired Oath Signature delegated row:
-
-- Title: PDF name.
-- Default title / secondary/footer data: `Oath · <last 4 of run id>`.
-- Status tags: this means the visible queue row badge/label, not a separate feature. It should say what happened: Queued, Running, Needs review, Done, Skipped / Existing Oath, Cancelled, or Failed.
-- Cancel behavior when queued: cancel the scope represented by the row. If it is the only uploaded file, cancel the whole Oath Signature chain. If multiple PDFs were uploaded, cancel only this file's chain.
-- Cancel behavior when running: same scope as queued cancel. Stop this file's OCR/signature chain; do not cancel unrelated uploaded files in the same multi-file upload.
-- Whether canceling one signer should affect the parent: canceling one signer/person from inside the final oath-signature child stage cancels that person and shows that person as Cancelled in the parent batch view. It should not cancel sibling signers unless the canceled row represents the whole file.
-
-### Oath Signature Flow Spec
-
-The desired mental model is file-first:
-
-```
-Uploaded PDF file
-  -> OCR prep for that PDF
-    -> EID lookup / active-check utility work for people in that PDF
-    -> OCR approval for selected rows
-      -> oath-signature daemon child rows for approved people
+```mermaid
+flowchart TD
+  A["Tracker entries + task projections"] --> B["Discard hidden rows"]
+  B --> C{"Has batch-parent / OCR prep anchor?"}
+  C -->|yes| D["Approval delegation row<br/>{ renderer: DelegationRow,<br/>opens: batch view,<br/>members: prep members/children }"]
+  C -->|no| E{"Multiple visible entries share parentRunId?"}
+  E -->|yes| F{"OCR utility fan-out from prep?"}
+  F -->|yes| G["Flat delegation member rows<br/>{ reason: EID/active-check from OCR stay person-level }"]
+  F -->|no| H["Batch delegation row<br/>{ renderer: DaemonBatchRow,<br/>members: same parentRunId }"]
+  E -->|no| I{"One delegated child?"}
+  I -->|yes| J["Flat delegated child row<br/>{ renderer: EntryItem }"]
+  I -->|no| K["Normal flat row<br/>{ renderer: EntryItem }"]
 ```
 
-The queue should make the file the operator-visible unit. Person rows are members inside that file's batch/delegation view.
+Special Oath rule now: multi-PDF Oath Signature upload is simplified into multiple single-file OCR prep runs. The dashboard may group those single-file rows by a shared batch id for display, but the backend work is still one OCR prep per PDF.
 
-### Scenario: Upload One Oath PDF
+## Global Action Map
 
-Expected top-level queue:
-
-| Stage | Row type | Title | Footer/subtitle | What appears in row |
+| Action | Where it appears | Endpoint | Scope now | Effect |
 |---|---|---|---|---|
-| File just submitted / OCR starting | Oath file batch row. Current code may classify as `approval-delegation` or `batch` depending on source. | PDF name. | `Oath · <last 4 of run id>`. | Badge says Queued/Running. Progress reflects OCR prep work. |
-| OCR needs operator review | Same row that started the run. | PDF name. | `Oath · <last 4 of run id>`. | Badge should say Needs review / awaiting approval. Batch/prep view opens the OCR review. |
-| OCR approved and signer rows enqueued | Same row that started the run; no new top-level row. | PDF name. | `Oath · <last 4 of run id>`. | Counts show done/running/queued/failed/cancelled across signer rows. |
-| UCPath oath-signature daemon running people | Same row that started the run, with member rows in batch view. | PDF name. | `Oath · <last 4 of run id>`. | Batch view lists people/signers. Each person shows Queued/Running/Done/Skipped/Cancelled/Failed. |
-| Finished | Same row until filtered/archived by normal queue behavior. | PDF name. | `Oath · <last 4 of run id>`. | Done count equals total, unless some people were skipped/cancelled/failed. |
+| Start from run modal | Oath Signature, Emergency Contact, OCR, Oath Upload. | `/api/ocr/prepare`, `/api/ocr/reupload`, or `/api/oath-upload/start` | The uploaded PDF list and selected form options. | Creates prep/root rows. Oath Signature and Emergency Contact go through OCR prepare first. |
+| Start from quick run | Separations, EID Lookup, Active Check, Oath Signature, CRM Doc Download. | Workflow enqueue endpoint or modal handoff. | Input names/EIDs/doc ids. | Creates normal daemon rows, except empty Oath Signature opens OCR modal. |
+| Cancel queued row | Pending row footer. | `/api/cancel-queued` | One queued task only. | Refuses claimed/running tasks. Marks task attempt cancelled, updates dependency child state as cancelled, writes cancelled/failed tracker audit. |
+| Cancel queued OCR prep row | Pending OCR prep/proxy row footer. | `/api/ocr/discard-prepare` | The OCR prep run and children for that prep run. | Requests OCR abort, deletes delegated children for that OCR run, writes OCR discarded, mirrors discarded to parent when known. |
+| Stop running row | Running row footer. | `/api/task/force-stop` | One running task. | Marks task cancelled immediately, records dependency cancelled, sends daemon `force-current`. Does not kill Chrome. |
+| Stop running OCR prep row | Running OCR prep/proxy row footer. | `/api/ocr/discard-prepare` | The OCR prep run and children for that prep run. | Same as OCR discard. |
+| Stop all visible active rows | Queue toolbar stop button. | `/api/cancel-active-bulk` | Visible pending/running rows in current filter. | Cancels pending through `/api/cancel-queued`; requests running cancellation through running cancel path. |
+| Stop daemon | Daemon controls/API. | `/api/daemon/stop` or `/api/daemons/stop` | Daemon process/session, not automatically a workflow tree. | Stops the worker/daemon. Items not processed may later appear cancelled/failed depending on tracker/task state. |
+| Kill browser | Session/worker controls. | `/api/browser/kill` | Recorded browser process only. | Sends kill command/SIGTERM for browser process. Does not by itself mark an entire delegation tree cancelled. |
+| Retry one row | Failed/cancelled row footer. | `/api/retry` | One row/task, preserving parent batch context when known. | Re-enqueues from SQLite task when possible. Falls back to latest JSONL input. OCR and SharePoint have special retry handlers. |
+| Retry group | Batch/delegation group footer. | `/api/retry-bulk` | Members passed by the group. | Retries each eligible member. Group retry is member retry, not a special parent transaction. |
+| Delete one row | Terminal row footer. | Delete endpoint in `ops/delete.ts` | One row plus task subtree/projected entry when resolvable. | Rewrites tracker/log JSONL, removes screenshots, deletes task subtree data. |
+| Delete group | Batch/delegation group footer or queue toolbar. | `/api/delete-bulk` | Members passed by caller or visible entries. | Bulk version of delete. OCR discard also calls delegated-child cleanup for that prep run. |
+| Bump queued row | Pending row footer. | `/api/queue/bump` | One queued task. | Moves pending task earlier/later according to queue bump logic. |
+| OCR approve | OCR preview/approval UI. | `/api/ocr/approve-batch` | Selected OCR records. | Enqueues target workflow children, pre-emits child pending rows, writes OCR approved/done, records dependencies when there is an upstream parent. |
+| OCR discard | OCR preview/queue cancel. | `/api/ocr/discard-prepare` | One OCR prep file/run. | Cancels that file's OCR chain and removes delegated children for that run. |
+| OCR retry page | OCR preview page action. | `/api/ocr/retry-page` | One OCR page. | Re-runs OCR for that page/session. |
+| OCR re-OCR whole PDF | OCR preview action. | `/api/ocr/reocr-whole-pdf` | One OCR session/PDF. | Re-runs OCR for the PDF/session. |
+| OCR force research | OCR preview action. | `/api/ocr/force-research` | One OCR record/session path. | Forces lookup/research path for unresolved OCR data. |
+| OCR reupload | Run modal when existing prep file is replaced. | `/api/ocr/reupload` | One OCR prep/session. | Replaces source PDF and reruns prep path. |
+| Edit and resume | Editable workflow detail fields. | `/api/run-with-data` | One failed/cancelled row with edited data. | Re-enqueues with `prefilledData`; used mostly by workflows with editable detail fields such as Separations. |
 
-Expected batch view for the single file:
+## Cancellation And Dependency Rules
 
-| Batch view element | Desired value |
+| Situation | Current behavior |
 |---|---|
-| Toolbar title | PDF name. |
-| Toolbar subtitle/footer | `Oath · <last 4 of run id>`. |
-| Members before OCR approval | OCR prep/utility rows if useful, but the file row remains the main unit. |
-| Members after OCR approval | Use the same existing member row pattern that was used to run the work. Do not create a new synthetic row just because OCR approved. |
-| Person row title | Person name when known; fallback to EID. |
-| Person row footer | EID, run number, and status/timing. |
-
-Cancel rules for one uploaded PDF:
+| Cancel one queued child | Only that child task is cancelled. Parent dependency state becomes `cancelled`; if every dependency is either satisfied or cancelled, the parent can release. Sibling children continue. |
+| Cancel one running child | Force-stop marks that child cancelled and notifies daemon. Siblings continue unless a parent/tree cancel endpoint is used. |
+| Child fails | Dependency policy decides parent effect. Oath Upload approval dependencies use `block_parent`, so failed signature children block the parent until retried/resolved. |
+| Child is cancelled | Dependency is marked `cancelled`, not `failed`. Parent may release if no unsatisfied or failed dependencies remain. |
+| Parent/root cancel through normal row cancel | Normal row controls operate on the row/task. They do not automatically walk the full dependency tree unless the endpoint is a tree-aware path. |
+| Parent/tree cancel through task-store helper | `requestCancelParentAndChildren()` can mark the parent cancelling/cancelled and cancel pending dependency children with cascade cancel enabled. This is task-store behavior, not every dashboard button. |
+| OCR prep discard | This is the strongest file-scope cancel path. It aborts OCR, deletes delegated children for that prep run, writes the prep as discarded, and mirrors discarded to the upstream parent when known. |
+| Daemon stop | Stops processing. It is not the same as "cancel this workflow tree". Rows can remain cancelled/failed/queued based on where the daemon stopped and which tracker events were written. |
+| Retry child | Re-enqueues that child and preserves parent/batch context. For dependency children, retry can let a blocked/waiting parent resume after the child reaches a good terminal state. |
+| Delete child | Removes dashboard/tracker visibility for that child and task subtree. It is cleanup, not business approval. |
+
+## Workflow Inventory
+
+| Workflow | Archetype | Start paths | Queue row when direct | Delegates to | Batch view members | Notes |
+|---|---|---|---|---|---|---|
+| Oath Signature | `single` | Quick run, OCR approval, Oath Signature modal through OCR. | Normal row for direct person run; OCR prep row before approval. | OCR prep first when using PDF; final work is `oath-signature` per approved person. | PDF prep members, EID lookup members, final person signature rows. | Final signature rows should title by person name and show as delegation members. |
+| Oath Upload | `delegating-batch` | Run modal. | Root batch-parent row using the same row through the whole ServiceNow flow. | OCR, then Oath Signature, then ServiceNow submit. | OCR/signature children under same parent context. | Full mode waits on OCR approval and signature children; upload-only skips them. |
+| OCR | `delegating-batch` | OCR modal, Oath/Emergency modal, retry/reupload. | Approval delegation prep row. | SharePoint roster download, EID Lookup, Active Check, then target workflow after approval. | OCR records/utility children/approved target children depending stage. | Single file should label as single delegation; multiple files group as batch delegation. |
+| Emergency Contact | `batch` | Emergency Contact modal through OCR approval. | OCR prep row first; final rows are emergency-contact daemon rows. | OCR prep, EID/verification utilities, final emergency-contact rows. | Contact/person rows after approval. | Final rows use editable contact detail fields. |
+| EID Lookup | `utility` | Quick run, OCR utility child. | Normal utility row if direct. | None. | If OCR-created, appears as delegation member; OCR fan-out is not promoted to batch group. | Canceling one lookup cancels only that lookup/person. |
+| Active Check | `single` | Quick run, OCR utility child. | Normal row if direct. | None. | If OCR-created, appears as delegation member. | Used for UCPath active status verification. |
+| CRM Doc Download | `utility` | Quick run, daemon loader. | Normal utility row. | None. | Usually none. | Retry uses normal retry path. |
+| SharePoint Download | `utility` | SharePoint UI/API, OCR roster-download child. | Normal/in-process row if direct. | None. | If OCR-created, passive utility member under OCR prep. | Retry is special-cased by sharepoint download spec id. |
+| Separations | `batch` | Quick run, daemon loader. | Normal rows per separation/doc/person; multiple inputs can group as daemon batch. | None. | Separation rows. | Has editable detail fields and edit-and-resume. |
+| Onboarding | `batch` | Daemon loader/API. | Normal rows per onboarding record; multiple inputs can group as daemon batch. | None. | Onboarding rows. | Multi-system workflow: CRM, UCPath, I-9. |
+| Work Study | `single` | Daemon loader/API. | Normal row. | None. | None unless launched in a batch. | Direct UCPath transaction workflow. |
+| Kronos Reports | `batch` | Workflow exists; not in generic dashboard loader. | Normal/batch rows when run by its own path. | None. | Kronos report rows. | Not currently exposed by run modal or quick run registry. |
+
+## Oath Signature Detailed Flow
+
+Desired mental model:
+
+```mermaid
+flowchart TD
+  A["Oath Signature request<br/>{ source: quick-run empty input or modal,<br/>unit: PDF file }"]
+  A --> B["OCR prep<br/>{ workflow: ocr,<br/>row: approval delegation,<br/>title: pdf name,<br/>footer: Oath · last4(runId) }"]
+  B --> C["OCR utilities<br/>{ workflows: eid-lookup / active-check,<br/>row: delegation member,<br/>not: batch delegated row }"]
+  C --> D["OCR approval<br/>{ action: approve selected people,<br/>endpoint: /api/ocr/approve-batch }"]
+  D --> E["Final Oath Signature work<br/>{ workflow: oath-signature,<br/>row: delegation member,<br/>title: person's name,<br/>footer: normal run footer }"]
+```
+
+### Single Oath PDF Upload
+
+| Stage | Queue row | Title | Footer/subtitle | Batch view | Cancel effect |
+|---|---|---|---|---|---|
+| 1. Oath Signature started | Approval delegation row over one OCR prep file. | PDF name. | Default title: `Oath · <last4 run id>`. | Batch view contains the Oath Signature request/prep row. The request row subtitle is the default title. | Cancel/discard this file. Since it is the only file, the whole Oath Signature request is cancelled. |
+| 2. OCR running | Same OCR prep row. Log panel should show `Single delegation · Preview`. | PDF name. | `Oath · <last4 run id>`. | OCR preview/records appear for that file. | Cancel from queue or preview discards this OCR prep and its children. |
+| 3. EID lookup/active checks | Delegation member rows, not a batch delegated row. | Person/EID when known. | Normal footer for that child. | Members appear inside the file's batch/delegation view. | Cancel one utility lookup cancels that person/lookup only. |
+| 4. OCR approval | OCR prep row becomes approved/done. | PDF name. | `Oath · <last4 run id>`. | Approved selected people become downstream members. | Discard before approval cancels file. After approval, cancel final person rows individually. |
+| 5. Final Oath Signature work | Delegation member rows. | Person's name, not PDF name. | Normal footer/subtitle. | Every approved person from the PDF gets a row in the batch view. | Cancel one person cancels only that person and shows that member as Cancelled. |
+
+### Multiple Oath PDF Upload
+
+The current simplification is "multiple singles": each PDF becomes its own OCR prep run. The shared batch id is for dashboard grouping.
+
+| Stage | Queue row | Title | Footer/subtitle | Batch view | Cancel effect |
+|---|---|---|---|---|---|
+| 1. Oath Signature started | Batch delegation row over multiple single-file OCR prep rows. | `Oath · <last4 batch/run id>` when the group title is inherited; no PDF title at top because there are multiple files. | Empty/normal group footer; do not show raw parent run id beside `#run`. | Batch view contains normal preview rows, one per PDF. Each member title is PDF name and subtitle/default title is `Oath · <last4 file run id>`. | Canceling the main/group row should cancel all file rows if wired through a tree/group cancel. Current group actions are retry/delete, not a dedicated cancel-all. |
+| 2. Per-file OCR | Each PDF row is a single OCR prep row inside the group. | PDF name. | `Oath · <last4 file run id>`. | Open file row to see OCR preview/logs. | Canceling one file cancels only that file's OCR/signature chain. Other uploaded PDFs continue. |
+| 3. Per-file EID lookup | Delegation member rows under that file/prep. | Person/EID when known. | Normal child footer. | They appear as file members, not as an EID batch delegated row. | Cancel one lookup cancels that one lookup/person only. |
+| 4. Per-file final signature | Delegation member rows. | Person's name. | Normal child footer. | Every person from each PDF gets a row under that PDF's context. | Cancel one person cancels only that person and marks the parent batch view member Cancelled. |
+
+## OCR Workflow
+
+```mermaid
+flowchart LR
+  A["loading-roster"] --> B["ocr"]
+  B --> C["matching"]
+  C --> D["disambiguating"]
+  D --> E["eid-lookup<br/>{ may spawn eid-lookup / active-check children }"]
+  E --> F["verification"]
+  F --> G["awaiting-approval<br/>{ operator approves/discards }"]
+  G --> H["target workflow fan-out<br/>{ oath-signature or emergency-contact }"]
+```
+
+| Scenario | Row type | Title | Footer/subtitle | Batch view | Actions |
+|---|---|---|---|---|---|
+| One PDF OCR prep | Approval delegation row; log label should be `Single delegation · Preview`. | PDF name. | Form-specific default title when present, otherwise normal footer id. | OCR preview/records for that file. | Cancel/discard, retry prep, delete prep, retry page, re-OCR whole PDF, force research, approve selected records. |
+| Multiple PDFs OCR prep | Batch delegation row over multiple single-file prep rows. | Batch/default title. | No raw parent run id in group footer. | Normal preview rows, one per PDF. | Retry/delete group members; cancel per file through member row. |
+| Roster download needed | Passive SharePoint Download utility child under OCR. | Roster/download label. | Normal child footer. | Utility member row. | Cancel/retry utility child only. |
+| EID/active verification needed | Flat delegation member rows for EID Lookup/Active Check. | Person/EID. | Normal child footer. | Member rows in file/prep context. | Cancel/retry one lookup/check only. |
+| OCR approved | Prep row becomes done/approved; selected records fan out. | PDF name. | Same prep footer. | Target workflow children appear as members. | Retry target children individually; retry prep only if the prep row is retried. |
+| OCR discarded | Prep row is hidden from normal queue surfaces after discarded filtering. | PDF name in logs/history. | Same prep footer. | Delegated children for that OCR run are deleted. | Discard is file-scope cancellation. |
+
+## Oath Upload Workflow
+
+```mermaid
+flowchart TD
+  A["oath-upload root<br/>{ row: batch-parent,<br/>same row remains through workflow }"]
+  A --> B["servicenow-auth"]
+  B --> C["delegate-ocr<br/>{ child workflow: ocr }"]
+  C --> D["wait-ocr-approval"]
+  D --> E["delegate-signatures<br/>{ child workflow: oath-signature }"]
+  E --> F["wait-signatures"]
+  F --> G["open-hr-form"]
+  G --> H["fill-form"]
+  H --> I["submit"]
+```
+
+| Stage | Queue row | Title | Footer/subtitle | Batch view | Cancel effect |
+|---|---|---|---|---|---|
+| Root starts | Existing Oath Upload root row (`batch-parent`). | Oath Upload/request title from upload data. | Normal root footer. | Children appear under this root as they are created. | Cancel root row cancels root task. Tree-wide child cancellation depends on tree-aware cancellation path, not every row button. |
+| Delegate OCR | Same root row; OCR child appears. | Root title. | Normal root footer. | OCR file/prep child appears as member. | Cancel OCR child discards that file's OCR chain. |
+| Wait OCR approval | Same root row waits. | Root title. | Normal root footer. | OCR approval view controls selected signer records. | Discard OCR blocks/cancels that prep path and mirrors discarded to parent when parent known. |
+| Delegate signatures | Same root row; signature children are enqueued. | Root title. | Normal root footer. | One Oath Signature member per selected signer/person. | Cancel one signature child cancels that person only; failed child blocks parent because dependency policy is `block_parent`. |
+| Submit ServiceNow | Same root row continues after signatures resolve. | Root title. | Normal root footer. | Signature children remain visible as member history. | Stop daemon stops processing, not a clean tree cancel. |
 
-| Where cancel happens | Desired effect | Desired display |
-|---|---|---|
-| Main/top-level file row | Cancel the whole file chain: OCR prep, utility children, and any oath-signature signer rows for that file. | File row shows Cancelled. Batch view members show Cancelled where rows exist. |
-| OCR stage / OCR prep row | Same as canceling the file. | File row shows Cancelled/Discarded consistently; child rows for that file do not keep running. |
-| EID lookup / active-check utility child | Cancel only that person/lookup. | Parent file batch view shows that person/lookup as Cancelled. The rest of the file continues unless the missing lookup makes approval impossible. |
-| Final oath-signature person row | Cancel only that signer/person. | Parent file batch view shows that person as Cancelled. Sibling signers continue. |
-| Daemon stop for `oath-signature` | Cancels running/queued oath-signature children in that workflow only. | File row updates through child dependency state; unrelated OCR/prep rows should not be silently hidden. |
+Upload-only mode skips OCR/signature delegation and goes straight to the ServiceNow upload path.
 
-### Scenario: Upload Multiple Oath PDFs
+## Emergency Contact Workflow
 
-Expected top-level queue:
-
-| Stage | Row type | Title | Footer/subtitle | What appears |
-|---|---|---|---|---|
-| Multi-file upload submitted | Parent batch row over files. | Default title for the batch: `Oath · <last 4 of run id>`. | Empty. | Batch view contains normal rows for each request/file. |
-| Delegates to OCR | Same parent batch row; each PDF is a normal single-file OCR prepare run grouped under it. | Default title: `Oath · <last 4 of batch id>`. | Empty. | Batch view contains normal preview rows, one per PDF. Each preview row title is PDF name and subtitle is the shared default title: `Oath · <last 4 of batch id>`. |
-| Viewing file inside batch | Normal preview/file row inside the grouped batch. | PDF name. | `Oath · <last 4 of batch id>`. | Shows OCR/review/signature progress for that file only. |
-| OCR approved for one file | Same existing file row; no replacement row. | PDF name. | `Oath · <last 4 of batch id>`. | Other files stay in their own OCR/review/signature state. |
-| All files complete | Batch row aggregates all files. | Batch title. | Batch run id / ordinal. | Counts reflect all file members and person rows according to final design. |
-
-Expected nested/delegated workflow chain:
-
-| Level | Row meaning | Desired title | Desired footer/subtitle |
-|---|---|---|---|
-| Batch level | Multi-file upload batch. | `Oath · <last 4 of run id>`. | Empty. |
-| File level | One uploaded PDF, implemented as its own single-file OCR prepare run. | PDF name. | `Oath · <last 4 of batch id>`. |
-| OCR level | No separate true multi OCR workflow. The batch row is only a dashboard grouping over file-level OCR prep rows. | `Oath · <last 4 of batch id>`. | Empty; inside its batch view, each normal preview row is titled by PDF name and subtitled with the shared default title. |
-| Utility level | EID lookup / active-check for one person. | Person name or EID. | Parent PDF/file context. |
-| Final workflow level | `oath-signature` UCPath transaction for one person. | Person name when known; fallback to EID. | Parent PDF/file context; EID visible. Shows as a delegation member row in batch view. |
-
-Cancel rules for multiple uploaded PDFs:
-
-| Where cancel happens | Desired effect | Desired display |
-|---|---|---|
-| Main batch row | Cancel every file in the upload and all descendant OCR/utility/oath-signature work. | Batch row Cancelled; every file/member shows Cancelled or removed according to resolved-row rules. |
-| One file row | Cancel only that PDF file's chain. | That file shows Cancelled. Other uploaded files continue. |
-| OCR stage for one file | Same as canceling that file. | That file shows Cancelled/Discarded; other files continue. |
-| EID lookup / active-check for one person | Cancel only that person/lookup. | That person shows Cancelled inside the file batch view. |
-| Final oath-signature person row | Cancel only that signer/person. | That person shows Cancelled inside the file batch view. |
-
-### Oath Signature Pages / Panels
-
-| Page/panel | What should show for one PDF | What should show for multiple PDFs |
-|---|---|---|
-| Main queue | One file row titled by PDF name. | One batch row, drill-in to file rows; each file row titled by PDF name. |
-| Batch view | Person/member rows for that file as they appear; toolbar title is PDF name. | First drill-in shows file rows. Selecting a file row shows that file's OCR/review/signature detail; the underlying workflow chain remains the same as a single upload. |
-| OCR review / Preview tab | OCR records for the selected PDF. | OCR records for selected PDF only. |
-| Log/detail panel | Selected row's timeline. File row should show OCR -> approval -> signature delegation story. Person row should show OCR marker -> UCPath auth -> transaction. | Same, scoped to selected batch/file/person row. |
-| Terminal drawer / daemon cards | Workflow-scoped daemon status, not delegation-scoped. | Same; stopping a daemon is still workflow-scoped unless a new delegation-scoped stop is added. |
-
-## Workflow: Emergency Contact
-
-Workflow: `emergency-contact`
-
-Workflow archetype: `batch`.
-
-Current stages:
-
-1. `navigation`
-2. `fill-form`
-3. `save`
-
-Current behavior:
-
-- Direct CLI/daemon batch rows are batch members.
-- OCR approval fans out selected emergency-contact records into daemon queue items.
-- Pending rows include employee, EID, contact, relationship, and dry-run fields.
-- Each record is processed as its own queue item, while the daemon reuses/reset UCPath between records.
-
-Desired Emergency Contact delegated row:
-
-- Title: TODO
-- Secondary/footer data: TODO
-- Batch grouping: TODO
-- Cancel behavior when queued: TODO
-- Cancel behavior when running: TODO
-- Whether canceling one record should affect the parent: TODO
-
-## Workflow: Utility Delegations
-
-Utility workflows include `sharepoint-download`, `eid-lookup` in utility contexts, and OCR fan-out rows for `eid-lookup` / `active-check`.
-
-Current behavior:
-
-- Utility workflows are not supposed to hold the main operator attention.
-- Rows are grouped as passive delegation when `resolveRowArchetype()` returns `passive-child`.
-- OCR utility fan-out to `eid-lookup` / `active-check` stays as delegation member rows.
-- Passive group rows show aggregate counts and preview children.
-- Utility child failure can block the parent depending on the dependency policy used by the caller/watcher.
-
-Desired utility behavior:
-
-- SharePoint download row: TODO
-- EID lookup row: TODO
-- Active check row: TODO
-- Whether utility failures should block parent: TODO
-- Whether utility cancellations should release/block parent: TODO
-
-## Cancellation Behavior Now
-
-There are several different cancel paths.
-
-### Pending row cancel from queue
-
-Frontend:
-
-- `EntryItem` shows `QueueItemControls` when `entry.status === "pending"`.
-- Normal pending rows call `/api/cancel-queued`.
-- OCR prep proxy rows with `data.mode === "prepare"` plus OCR session data call `/api/ocr/discard-prepare` instead.
-
-Backend `/api/cancel-queued`:
-
-- Finds the SQLite control task.
-- Refuses if already claimed/running; the UI should use running stop instead.
-- Refuses if already terminal.
-- Writes a completed `cancel_task` worker command as audit/control state.
-- Marks the task and current attempt cancelled.
-- Calls `markDependencyFromChildTerminal(childState: "cancelled")`.
-- Writes queue failed audit and a tracker row with `status: "failed"` and `step: "cancelled"`.
-
-Effect on the rest of a delegation:
-
-- Canceling one queued child marks that child dependency `cancelled`.
-- In current dependency release logic, `cancelled` dependencies do not count as pending/failed.
-- If all remaining dependencies are `satisfied` or `cancelled`, a waiting parent can be released back to `queued`.
-- This means canceling a child is not currently treated the same as a child failure.
-
-### Running row stop from queue
-
-Frontend:
-
-- `EntryItem` shows `CancelRunningButton` when `entry.status === "running"` and `runId` exists.
-- Normal running rows call `/api/task/force-stop`.
-- OCR prep proxy rows call `/api/ocr/discard-prepare`.
-
-Backend `/api/task/force-stop`:
-
-- Enqueues a `cancel_task` command.
-- Marks the task cancelled immediately.
-- Marks dependency from child terminal as `cancelled`.
-- Writes queue audit and tracker cancelled row.
-- Attempts to hit daemon `/force-current`.
-- It does not intentionally kill Chrome. The daemon should preserve the browser/session where possible.
-
-Daemon behavior:
-
-- `cancel_task` sets `state.cancelTarget` for the in-flight item.
-- `runOneItem()` receives `isCancelRequested()`.
-- Cancel wins over success/failure races.
-- The daemon writes a cancelled tracker row (`status: "failed"`, `step: "cancelled"`).
-- After a cancelled item, the daemon best-effort resets every system page before claiming the next item.
-
-Effect on the rest of a delegation:
-
-- Same dependency effect as queued cancel: the child dependency becomes `cancelled`.
-- Sibling child rows are not automatically cancelled by canceling one child.
-- Parent release depends on whether any dependency is still pending or failed.
-
-### Stop all from queue
-
-Frontend:
-
-- `StopAllButton` posts `/api/cancel-active-bulk` with visible pending/running items.
-
-Backend:
-
-- Running items are cancelled first via `/api/cancel-running`.
-- Pending items are cancelled second via `/api/cancel-queued`.
-- This is per visible item; it does not inherently understand "cancel the whole parent delegation" unless every relevant child is included in the submitted item list.
-
-### Stop daemon from terminal drawer
-
-Frontend:
-
-- Terminal drawer stop posts `/api/daemon/stop` with `force: true`.
-- If multiple daemons for the workflow are alive, the confirmation warns that the endpoint is workflow-scoped.
-
-Backend:
-
-- Stops daemon/session/process/browser surfaces for the workflow.
-- With force enabled, it reads that workflow's queued items and calls the queued cancel handler on each.
-- Running in-flight cleanup happens in the daemon `finally`: in-flight items are marked cancelled on shutdown unless already terminal.
-- If this is the last daemon and there are unclaimed queued items, those queued items are marked cancelled with reason `Daemon stopped before this item could be processed (browser closed).`
-
-Effect on delegations:
-
-- It only operates on one workflow at a time.
-- Stopping the `oath-signature` daemon cancels oath-signature queued/running children, not the `oath-upload` or `ocr` parent rows directly.
-- Dependency propagation then updates parent dependency state when child task ids are known.
-- It does not automatically stop sibling workflows unless their daemon is separately stopped.
-
-### Parent cancellation cascade in task store
-
-There is a lower-level `requestCancelParentAndChildren()` helper:
-
-- Marks the parent `cancelling`.
-- Finds pending dependency children with `cascade_cancel = 1`.
-- Cancels queued/waiting/blocked children immediately.
-- Requests cancel for running children.
-- Marks dependency rows cancelled.
-- Marks the parent cancelled.
-
-Important current caveat:
-
-- The common dashboard row controls usually cancel the clicked row/task, not "the whole delegation tree".
-- Parent-to-child cascade exists in the task store, but the queue row buttons documented above do not obviously route a parent card click into `requestCancelParentAndChildren()`.
-
-## Desired Cancellation Rules
-
-Fill this table before implementing fixes.
-
-| Action | Current behavior | What I want |
-|---|---|---|
-| Cancel one queued child from batch view | Cancels that child; sibling rows remain; dependency becomes cancelled. | For Oath Signature: if the child is a person/signer, cancel only that person and show Cancelled in the parent file batch view. If the row represents the whole uploaded file, cancel that file's whole chain. |
-| Stop one running child from batch view | Force-cancels that child; sibling rows remain; dependency becomes cancelled. | Same as queued cancel: person row cancels one person; file row cancels the whole file chain. |
-| Cancel one OCR utility child | Child becomes cancelled; parent may release if no pending/failed deps remain. | For Oath Signature: cancel only that person/lookup; parent file batch view should show that person/lookup as Cancelled. |
-| Discard OCR prep before approval | OCR row and mirrored parent row become discarded; delegated children for OCR run are deleted. | TODO |
-| Cancel delegated OCR prep from queue row | Routes to OCR discard. | For Oath Signature: treat this as canceling the uploaded file. If one file was uploaded, everything is cancelled. If multiple files were uploaded, only that file's chain is cancelled. |
-| Stop Oath Upload parent while waiting on children | Depends on whether clicked row maps to parent task; child cascade is not obviously wired through group card controls. | If the main parent row is cancelled, cancel everything underneath it. If a file row under the parent is cancelled, cancel only that file's descendants. |
-| Stop daemon for a child workflow | Cancels queued/running items for that workflow only; parent/sibling workflows are affected only through dependency updates. | TODO |
-| Stop all visible in queue | Cancels submitted visible pending/running rows; not necessarily the whole delegation tree. | TODO |
-
-## Current Ambiguities / Fix Targets
-
-- Group cards have retry/delete actions but no explicit "cancel whole delegation" action.
-- Child cancellation is treated as dependency `cancelled`, not failure. A parent can be released when all unresolved children are cancelled/satisfied.
-- Dashboard daemon stop is workflow-scoped, not delegation-scoped.
-- OCR discard deletes delegated children for the OCR run, which is different from normal cancel behavior that leaves cancelled tracker rows.
-- Batch mode is display-only grouping plus normal member rows; it is not a transaction boundary.
-- Single delegated OCR prep rows intentionally render flat while multiple delegated OCR prep rows render as a batch over single-file rows. Multi-file Oath Signature should stay this grouped-singles model rather than adding a second true multi workflow path.
-
-## Implementation Notes For Future Fix
-
-Likely places to edit after desired behavior is filled in:
-
-- Row grouping: `src/tracker/queue-surfaces.ts`
-- Top-level queue rendering: `src/dashboard/components/queue-panel/QueuePanel.tsx`
-- Group card content/actions: `src/dashboard/components/queue-panel/group-row-base.tsx`, `DelegationRow.tsx`, `DaemonBatchRow.tsx`
-- Batch toolbar/member behavior: `src/dashboard/components/queue-panel/batch-queue-view.tsx`
-- Per-row cancel routing: `QueueItemControls.tsx`, `CancelRunningButton.tsx`
-- Whole-delegation cancel endpoint, if needed: `src/tracker/dashboard/ops/cancel.ts` plus Hono route wiring
-- Parent/child propagation semantics: `src/core/task-store/child-state.ts`, `src/core/task-store/terminal.ts`
-- OCR discard semantics: `src/tracker/dashboard/ocr/discard.ts`
-- Oath Upload parent wait behavior: `src/workflows/oath-upload/handler.ts`
+```mermaid
+flowchart TD
+  A["Emergency Contact request<br/>{ source: modal,<br/>input: one or more PDFs }"]
+  A --> B["OCR prep<br/>{ workflow: ocr,<br/>formType: emergency-contact }"]
+  B --> C["OCR utilities<br/>{ eid lookup / active check when needed }"]
+  C --> D["OCR approval"]
+  D --> E["emergency-contact daemon rows<br/>{ row: batch/member per approved contact }"]
+  E --> F["navigation -> fill-form -> save"]
+```
+
+| Scenario | Queue row | Title | Footer/subtitle | Batch view | Actions |
+|---|---|---|---|---|---|
+| One PDF before approval | OCR approval delegation row. | PDF name when available. | Emergency/default prep footer. | OCR preview/records for that PDF. | OCR cancel/discard/retry/approve actions. |
+| Multiple PDFs before approval | Batch delegation row over single-file OCR prep rows. | Batch/default emergency contact title. | No raw parent run id in group footer. | One PDF prep member per uploaded file. | Retry/delete group members; cancel each PDF through member row. |
+| After approval | Final emergency-contact rows. | Employee/contact subject. | Normal footer. | Approved records become member rows. | Cancel/retry/delete one contact row; edit details where field editing is wired. |
+
+## EID Lookup Workflow
+
+Stages: `searching`, `cross-verification`, `active-status`.
+
+| Source | Queue row | Title | Footer/subtitle | Batch view | Cancel/retry |
+|---|---|---|---|---|---|
+| Direct quick run | Normal utility row. | Search input, person, or EID. | Normal footer. | None unless launched as a multi-input daemon batch. | Cancel/retry affects only that lookup. |
+| OCR utility child | Delegation member row, not a batch delegated row. | Person/EID, preferring resolved person/EID over technical OCR retry ids. | Normal child footer. | Appears inside OCR/Oath/Emergency prep context. | Cancel/retry affects only that lookup/person. |
+| Grouped utility children outside OCR special case | Passive or batch group depending shared parent and count. | Parent subject or utility title. | Group footer with no raw parent id. | Member rows for each lookup. | Group retry/delete acts on members. |
+
+## Active Check Workflow
+
+Stages: active-status verification in UCPath.
+
+| Source | Queue row | Title | Footer/subtitle | Batch view | Cancel/retry |
+|---|---|---|---|---|---|
+| Direct quick run | Normal row. | Name/EID/search input. | Normal footer. | None unless multi-input batch. | Cancel/retry affects only that check. |
+| OCR utility child | Delegation member row. | Person/EID. | Normal child footer. | Appears inside OCR context. | Cancel/retry affects only that check/person. |
+
+## CRM Doc Download Workflow
+
+| Source | Queue row | Title | Footer/subtitle | Stages | Cancel/retry |
+|---|---|---|---|---|---|
+| Quick run or daemon loader | Normal utility row; multiple inputs can group as daemon batch. | Email, EID, or person name. | Normal footer. | CRM document download steps from workflow metadata. | Cancel/retry affects one download row; group retry/delete acts on visible members. |
+
+## SharePoint Download Workflow
+
+| Source | Queue row | Title | Footer/subtitle | Batch view | Cancel/retry |
+|---|---|---|---|---|---|
+| Direct SharePoint download UI/API | Normal utility/in-process row. | Download label/filename/path. | Normal footer. | None unless grouped by caller. | Retry uses SharePoint special handler/spec id. |
+| OCR roster download | Passive utility child under OCR prep. | Roster/download label. | Normal child footer. | Appears as utility member under OCR prep. | Cancel/retry affects only the roster download child. |
+
+## Separations Workflow
+
+```mermaid
+flowchart LR
+  A["launching"] --> B["authenticating"]
+  B --> C["kuali-extraction"]
+  C --> D["kronos-search"]
+  D --> E["ucpath-job-summary"]
+  E --> F["ucpath-transaction"]
+  F --> G["kuali-finalization"]
+```
+
+| Source | Queue row | Title | Footer/subtitle | Batch view | Actions |
+|---|---|---|---|---|---|
+| Quick run / daemon loader | Normal row per separation record; multiple records can show as daemon batch. | Person/name/doc/EID subject. | Normal footer. | Member rows for each separation record. | Cancel/retry/delete per row, group retry/delete, edit-and-resume via `/api/run-with-data` for editable fields. |
+
+## Onboarding Workflow
+
+Stages: `crm-auth`, `extraction`, `pdf-download`, `ucpath-auth`, `person-search`, `i9-creation`, `transaction`.
+
+| Source | Queue row | Title | Footer/subtitle | Batch view | Actions |
+|---|---|---|---|---|---|
+| Daemon loader/API | Normal row per onboarding record; multiple records can show as daemon batch. | Email/person/input subject. | Normal footer. | Member rows for each onboarding record. | Cancel/retry/delete per row; group retry/delete for grouped members. |
+
+## Work Study Workflow
+
+Stages: `ucpath-auth`, `transaction`.
+
+| Source | Queue row | Title | Footer/subtitle | Batch view | Actions |
+|---|---|---|---|---|---|
+| Daemon loader/API | Normal single row. | Person/name/EID subject. | Normal footer. | None unless launched in a parent batch. | Cancel/retry/delete per row. |
+
+## Kronos Reports Workflow
+
+| Source | Queue row | Title | Footer/subtitle | Batch view | Actions |
+|---|---|---|---|---|---|
+| Workflow-specific runner; not currently in quick-run or run-modal registries. | Normal/batch rows when launched by its own path. | Name/id subject. | Normal footer. | Member rows for each report target when batched. | Cancel/retry/delete per row if surfaced through normal task/tracker paths. |
+
+## UI Copy Rules To Preserve
+
+| Place | Current/desired rule |
+|---|---|
+| Oath default title | `Oath · <last4 of run id>`. This is the default title/secondary id for file prep context, not the final person row title. |
+| Oath final signature row title | Person's name. If unavailable, fall back to EID/search input, not raw OCR retry task id. |
+| Oath single file prep row title | PDF filename. |
+| Oath multiple file group title | Shared Oath default title; member rows are PDF filenames. |
+| Batch group footer | Usual time/run/footer controls without raw parent run id beside the run number. |
+| OCR workflow footer | OCR prep/member rows may show the Oath default title beside the run number when the prep is for Oath. |
+| EID lookup title | Resolved person/EID should win over technical `ocr-retry-*` ids. |
+| Status badges | Badges should describe what happened: Queued, Running, Needs review, Done, Skipped/Existing, Cancelled, Failed, Not found. They are not separate arbitrary tags. |
+
+## Known Sharp Edges
+
+- A group row is often just a display group. Do not assume group cancel exists because group retry/delete exists.
+- `/api/ocr/discard-prepare` is the file-scope cancel path for OCR prep; it is stronger than generic queued/running cancel.
+- OCR utility EID/active-check rows intentionally stay as delegation member rows instead of becoming their own batch delegated row.
+- Multi-PDF Oath Signature now behaves as multiple single-file OCR prep runs grouped for display.
+- Daemon stop is operational control. It stops workers; it is not the same as a clean cancellation decision for every related row.
+- Some workflows exist in metadata but are not exposed through the dashboard run modal or quick-run registry.
+- Parent dependency behavior depends on policy. Oath Upload signature children use `block_parent` on failure and cascade-capable dependencies, but dashboard buttons still need the correct endpoint to apply tree-wide cancellation.

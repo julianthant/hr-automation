@@ -47,6 +47,7 @@ Optional field added 2026-05-01. When set, the entry is a child run delegated by
 - JSONL remains audit/history output and dashboard visibility during transition. Do not remove `watchChildRuns`; it remains the fallback for legacy rows with no SQLite task/dependency records.
 - Queue authority is SQLite. The `.queue.jsonl` file in `.tracker/daemons/` is an append-only audit trail only — readers must not consume it as state.
 - New dependency kinds should not be added until a second real workflow needs them.
+- **2026-05-20 retry rule:** retrying an OCR dependency child by failed `runId` must reopen the matching `task_dependencies` row (`status='pending'`, clear `terminal_at` / `result_json`) because the child task id is reused with a new attempt/run id. Without that reset, the scheduler will not patch the OCR preview after the retry and the operator could approve stale data.
 
 ## Failure-Pattern Alerts
 

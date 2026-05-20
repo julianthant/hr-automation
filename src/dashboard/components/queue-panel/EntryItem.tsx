@@ -190,7 +190,9 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
   const lastTs = entry.lastLogTs || entry.timestamp;
   const elapsed = useElapsed(isDaemonRunning ? firstTs : null);
   const duration =
-    (isDone || isFailed) && firstTs !== lastTs ? formatDuration(firstTs, lastTs) : null;
+    (isDone || isFailed || isOcrDelegatedNeedsReview) && firstTs !== lastTs
+      ? formatDuration(firstTs, lastTs)
+      : null;
 
   const runNumber = getRunNumber(entry);
   const time = entry.firstLogTs || entry.timestamp
@@ -304,12 +306,17 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
           {isDaemonRunning && elapsed && (
             <span className="text-primary tabular-nums flex-shrink-0">{elapsed}</span>
           )}
-          {(isDone || isFailed) && duration && (
+          {(isDone || isFailed || isOcrDelegatedNeedsReview) && duration && (
             <span className="tabular-nums flex-shrink-0">{duration}</span>
           )}
-          {(isFailed || isCancelled) && (
+          {(isFailed || isCancelled || isOcrDelegatedNeedsReview) && (
             <div className="flex items-center gap-1 flex-shrink-0">
-              <RetryButton workflow={entry.workflow} id={entry.id} runId={entry.runId} />
+              <RetryButton
+                workflow={entry.workflow}
+                id={entry.id}
+                runId={entry.runId}
+                date={date}
+              />
               {onDelete && date && (
                 <DeleteButton workflow={entry.workflow} id={entry.id} date={date} onDeleted={onDelete} />
               )}

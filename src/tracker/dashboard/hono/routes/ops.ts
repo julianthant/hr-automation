@@ -76,9 +76,21 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       const parent = parseParentRunIdFromBody(body);
       if (!parent.ok) return parent;
       const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
+      const items = Array.isArray(body.items)
+        ? body.items
+            .filter((item): item is Record<string, unknown> =>
+              Boolean(item) && typeof item === "object" && !Array.isArray(item),
+            )
+            .map((item) => ({
+              id: String(item.id ?? ""),
+              ...(item.runId ? { runId: String(item.runId) } : {}),
+            }))
+            .filter((item) => item.id)
+        : undefined;
       return {
         workflow: String(body.workflow ?? ""),
         ids,
+        ...(items ? { items } : {}),
         date: body.date ? String(body.date) : undefined,
         ...(parent.parentRunId ? { parentRunId: parent.parentRunId } : {}),
       };
