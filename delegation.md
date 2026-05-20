@@ -310,7 +310,7 @@ Stages: `ucpath-auth`, `transaction`.
 
 ## How To Add A New Workflow
 
-1. **Kernel workflow** — `defineWorkflow({ archetype, runtimePolicy, operatorSubject, detailFields, ... })`. Spread `DEFAULT_WORKFLOW_RUNTIME_POLICY` unless the workflow needs delegation/preview/member/prep overrides (see `src/workflows/ocr/workflow.ts` and `src/workflows/oath-upload/workflow.ts`).
+1. **Kernel workflow** — `defineWorkflow({ archetype, runtimePolicy, operatorSubject, detailFields, ... })`. Spread `DEFAULT_WORKFLOW_RUNTIME_POLICY` unless the workflow needs delegation/preview/memberRow/prepRow overrides (see `src/workflows/ocr/workflow.ts` and `src/workflows/oath-upload/workflow.ts`).
 2. **Runtime policy** — declare cancel/retry/delete scopes in `runtimePolicy.rowActions` / `groupActions`. OCR-style file-scope cancel uses `delegation.fileScopeCancelKind: "ocr-discard"`. Utility fan-out uses `delegation.utilityChildSurface: "delegation-member"`.
 3. **Architecture guards** — `tests/unit/architecture/archetype-coverage.test.ts` requires `archetype:`; `tests/unit/architecture/runtime-policy-coverage.test.ts` requires `runtimePolicy:` and validates action descriptors.
 4. **Dashboard** — no frontend registry edits. Queue rows pick up titles/actions from projections automatically once the workflow registers and emits tracker rows with the right `data.archetype` stamps.
