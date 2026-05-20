@@ -34,7 +34,8 @@ export interface RunWithDataRequest {
 
 export interface RetryBulkRequest {
   workflow: string;
-  ids: string[];
+  ids?: string[];
+  items?: Array<{ id: string; runId?: string }>;
   date?: string;
   parentRunId?: string;
 }
@@ -231,6 +232,7 @@ async function reEnqueueEntry(
         task.parentRunId ??
         extractLatestParentRunId(readEntriesForRetryItem(wf, id, runId, dir, date).scoped);
       const retried = stores.taskStore.retryTaskFromAttempt({ runId });
+      resetRetriedOcrDependencies(stores.taskStore.db, retried.taskId);
       if (resolvedParent) {
         stores.taskStore.db
           .prepare(`UPDATE tasks SET parent_run_id = @p WHERE id = @tid`)
@@ -286,6 +288,33 @@ async function reEnqueueEntry(
   });
   if (!result.ok) return { ok: false, error: result.error ?? "enqueue failed" };
   return { ok: true };
+}
+
+function resetRetriedOcrDependencies(db: { prepare: (sql: string) => { run: (params: Record<string, unknown>) => unknown } }, taskId: string): void {
+  const now = new Date().toISOString();
+  db.prepare(`
+    UPDATE task_dependencies
+    SET status = 'pending',
+        result_json = '{}',
+        updated_at = @now,
+        terminal_at = NULL
+    WHERE child_task_id = @taskId
+      AND kind IN ('ocr-eid-lookup', 'ocr-active-check')
+      AND status IN ('failed', 'cancelled')
+  `).run({ taskId, now });
+  db.prepare(`
+    UPDATE tasks
+    SET control_state = 'waiting_dependencies',
+        terminal_at = NULL,
+        terminal_error = NULL,
+        updated_at = @now
+    WHERE id IN (
+      SELECT parent_task_id
+      FROM task_dependencies
+      WHERE child_task_id = @taskId
+        AND kind IN ('ocr-eid-lookup', 'ocr-active-check')
+    )
+  `).run({ taskId, now });
 }
 
 /** Retry for in-process workflows — dispatches to the same launcher their
@@ -416,10 +445,19 @@ export function buildRetryBulkHandler(dir: string) {
   ): Promise<{ ok: true; count: number; errors: Array<{ id: string; error: string }> }> => {
     const errors: Array<{ id: string; error: string }> = [];
     let count = 0;
-    for (const id of req.ids ?? []) {
-      const r = await retry({ workflow: req.workflow, id, date: req.date, parentRunId: req.parentRunId });
+    const items: Array<{ id: string; runId?: string }> = req.items && req.items.length > 0
+      ? req.items
+      : (req.ids ?? []).map((id) => ({ id }));
+    for (const item of items) {
+      const r = await retry({
+        workflow: req.workflow,
+        id: item.id,
+        runId: item.runId,
+        date: req.date,
+        parentRunId: req.parentRunId,
+      });
       if (r.ok) count++;
-      else errors.push({ id, error: r.error });
+      else errors.push({ id: item.id, error: r.error });
     }
     return { ok: true, count, errors };
   };

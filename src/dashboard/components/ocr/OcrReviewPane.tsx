@@ -309,7 +309,7 @@ function useOcrReviewPrepApi(
   const [submitting, setSubmitting] = useState(false);
   const [researchingIndices, setResearchingIndices] = useState<Set<number>>(new Set());
   const [markedBlankPages, setMarkedBlankPages] = useState<Set<number>>(new Set());
-  const { children: dependencyChildren } = useTaskDependencies(
+  const { summary: dependencySummary, children: dependencyChildren } = useTaskDependencies(
     prepActive && entry ? (entry.runId ?? entry.id) : undefined,
   );
 
@@ -473,6 +473,7 @@ function useOcrReviewPrepApi(
       unselectedApprovableCount: approvableRecords.length - selected,
     };
   }, [approvableRecords]);
+  const hasPendingDependencies = (dependencySummary?.pending ?? 0) > 0;
 
   function selectAllApprovable(): void {
     setLocalEdits((prev) => {
@@ -575,6 +576,10 @@ function useOcrReviewPrepApi(
 
   async function handleApprove() {
     if (submitting || !cfg) return;
+    if (hasPendingDependencies) {
+      toast.error("OCR lookup retry is still running. Wait for the preview data to update before approving.");
+      return;
+    }
     if (selectedCount <= 0) {
       toast.error("Select at least one reviewed record before approving.");
       return;
@@ -692,8 +697,14 @@ function useOcrReviewPrepApi(
               <button
                 type="button"
                 onClick={handleApprove}
-                disabled={submitting || selectedCount <= 0}
-                title={selectedCount <= 0 ? "Select at least one approvable record (checkbox)." : undefined}
+                disabled={submitting || selectedCount <= 0 || hasPendingDependencies}
+                title={
+                  hasPendingDependencies
+                    ? "Wait for OCR lookup retries to finish before approving."
+                    : selectedCount <= 0
+                      ? "Select at least one approvable record (checkbox)."
+                      : undefined
+                }
                 className={cn(
                   "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-primary bg-primary px-2.5 text-xs font-medium text-primary-foreground",
                   "leading-none hover:bg-primary/90",

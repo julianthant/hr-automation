@@ -30,12 +30,19 @@ import {
   buildSaveDataHandler,
   buildStopWorkerHandler,
   buildDaemonsListHandler,
+  buildRetryBulkHandler,
   buildRetryHandler,
   readQueueDepth,
 } from "../../../src/tracker/dashboard/ops/index.js";
 import { resolveRetryRosterPath } from "../../../src/tracker/dashboard/ops/retry.js";
 import { queueFilePath } from "../../../src/core/daemon/queue.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
+import {
+  createTaskDependencyBatch,
+  getDependencySummary,
+  markDependencyTerminal,
+  openTaskStore,
+} from "../../../src/tracker/tasks/store.js";
 import type { QueueEvent } from "../../../src/core/daemon/types.js";
 
 let tmp: string;
@@ -1428,6 +1435,100 @@ describe("buildRetryHandler SQLite lineage", () => {
 
     assert.equal(result.ok, true);
     assert.equal(taskStore.getTask(enqueued.taskId)?.parentRunId, undefined);
+    workerStore.close();
+  });
+
+  it("reopens failed OCR lookup dependencies when retrying the failed child run", async () => {
+    const control = openControlDb({ trackerDir: tmp });
+    const taskStore = createTaskStore(control);
+    const workerStore = createWorkerStore(control);
+    const [enqueued] = taskStore.enqueueTasks({
+      workflow: "eid-lookup",
+      inputs: [{ eid: "10424984" }],
+      deriveItemId: () => "ocr-oath-run-r0",
+      runIds: ["eid-run-failed"],
+      parentRunId: "ocr-run-1",
+    });
+    taskStore.claimNextTask({ workflow: "eid-lookup", workerId: "eid-worker" });
+    taskStore.markTaskFailed({
+      taskId: enqueued.taskId,
+      attemptId: enqueued.attemptId,
+      error: "lookup failed",
+    });
+
+    const trackerStore = openTaskStore(tmp);
+    const batch = createTaskDependencyBatch(trackerStore, {
+      parent: {
+        workflow: "ocr",
+        itemId: "ocr-session-1",
+        runId: "ocr-run-1",
+        taskKind: "ocr",
+        status: "waiting_on_children",
+        data: { formType: "oath" },
+      },
+      children: [{
+        workflow: "eid-lookup",
+        itemId: "ocr-oath-run-r0",
+        runId: "eid-run-failed",
+        taskKind: "workflow_item",
+        status: "queued",
+        dependencyKind: "ocr-eid-lookup",
+        failurePolicy: "record_unresolved",
+        metadata: { recordIndex: 0, lookupKind: "verify-only", formType: "oath" },
+      }],
+      now: "2026-05-20T12:00:00.000Z",
+    });
+    markDependencyTerminal(trackerStore, {
+      dependencyId: batch.dependencies[0]!.id,
+      status: "failed",
+      result: { status: "failed", error: "lookup failed" },
+      now: "2026-05-20T12:01:00.000Z",
+    });
+    assert.equal(getDependencySummary(trackerStore, batch.parentTaskId).failed, 1);
+
+    const result = await buildRetryHandler(tmp)({
+      workflow: "eid-lookup",
+      id: "ocr-oath-run-r0",
+      runId: "eid-run-failed",
+    });
+
+    assert.equal(result.ok, true);
+    const summary = getDependencySummary(trackerStore, batch.parentTaskId);
+    assert.equal(summary.pending, 1);
+    assert.equal(summary.failed, 0);
+    assert.equal(taskStore.getTask(enqueued.taskId)?.state, "queued");
+    workerStore.close();
+  });
+
+  it("bulk retry uses scoped run ids so OCR dependency children are retried in place", async () => {
+    const control = openControlDb({ trackerDir: tmp });
+    const taskStore = createTaskStore(control);
+    const workerStore = createWorkerStore(control);
+    const [enqueued] = taskStore.enqueueTasks({
+      workflow: "eid-lookup",
+      inputs: [{ eid: "10424984" }],
+      deriveItemId: () => "ocr-oath-run-r0",
+      runIds: ["eid-run-failed"],
+      parentRunId: "ocr-run-1",
+    });
+    taskStore.claimNextTask({ workflow: "eid-lookup", workerId: "eid-worker" });
+    taskStore.markTaskFailed({
+      taskId: enqueued.taskId,
+      attemptId: enqueued.attemptId,
+      error: "lookup failed",
+    });
+
+    const result = await buildRetryBulkHandler(tmp)({
+      workflow: "eid-lookup",
+      items: [{ id: "ocr-oath-run-r0", runId: "eid-run-failed" }],
+      parentRunId: "ocr-run-1",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.count, 1);
+    assert.equal(result.errors.length, 0);
+    assert.equal(taskStore.getTask(enqueued.taskId)?.state, "queued");
+    assert.equal(taskStore.listAttemptsForTask(enqueued.taskId).length, 2);
     workerStore.close();
   });
 });
