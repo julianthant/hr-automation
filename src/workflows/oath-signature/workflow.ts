@@ -22,14 +22,10 @@ import { OathSignatureInputSchema, type OathSignatureInput } from "./schema.js";
  *   the person's name (the projection's person-name fallback) and
  *   carrying the normal kernel daemon footer.
  * - Cancel on a final person row is child-only; cancel on the file prep
- *   row should walk the file's OCR-prep chain (handled by the OCR
- *   policy's `fileScopeCancelKind`).
+ *   row is handled by the OCR workflow's cancel policy.
  */
 export const OATH_SIGNATURE_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
   ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
-  delegation: {
-    cancelScope: "row",
-  },
   memberRow: {
     titleSource: "person",
   },

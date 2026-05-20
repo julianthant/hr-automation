@@ -29,7 +29,6 @@ export const OATH_UPLOAD_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
   delegation: {
     rootRowPersistsThroughChildren: true,
     failedChildBlocksParent: true,
-    cancelScope: "tree",
   },
 };
 

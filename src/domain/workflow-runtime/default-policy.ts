@@ -61,6 +61,4 @@ export const DEFAULT_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
   groupActions: [DEFAULT_GROUP_RETRY_ACTION, DEFAULT_GROUP_DELETE_ACTION],
   batchViewToolbarActions: DEFAULT_BATCH_VIEW_TOOLBAR_ACTIONS,
   daemonActions: [DEFAULT_DAEMON_STOP_ACTION],
-  daemonStopIsWorkflowCancel: false,
-  unknownTitleFallback: "entry-title-resolution",
 };
