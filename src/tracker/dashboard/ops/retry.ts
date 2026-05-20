@@ -1,3 +1,11 @@
+/**
+ * Low-level retry / re-enqueue operations.
+ *
+ * The primitive behind the central action engine — operator retries arrive
+ * through `actions/perform-workflow-action.ts`, which decides scope and
+ * routes here. `buildEntryReEnqueueHandler` stays exported so the
+ * `/api/run-with-data` edit-and-resume route can reuse it directly.
+ */
 import { existsSync } from "fs";
 import { listRosters, resolveRosterDirs } from "../../../services/matching/roster-loader.js";
 import { byTimestampAsc, readEntries, readEntriesForDate, trackEvent, type TrackerEntry } from "../../jsonl.js";
