@@ -117,6 +117,7 @@ describe("workflow runtime projection adapters", () => {
     const projection = buildWorkflowRunProjection(surfaces.flatEntries[0]!, {});
 
     assert.equal(projection.surfaceType, "delegation-member");
+    assert.equal(projection.rowTypeLabel, "Delegation member");
   });
 
   it("does not expose a raw parent run id as the batch group subtitle", () => {

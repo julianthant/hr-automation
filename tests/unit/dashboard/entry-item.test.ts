@@ -4,9 +4,13 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { EntryItem } from "../../../src/dashboard/components/queue-panel/EntryItem.js";
-import { BatchFooterActions } from "../../../src/dashboard/components/queue-panel/BatchFooterActions.js";
+import {
+  BatchFooterActions,
+  selectEntriesForWorkflowAction,
+} from "../../../src/dashboard/components/queue-panel/BatchFooterActions.js";
 import { TooltipProvider } from "../../../src/dashboard/components/ui/tooltip.js";
 import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
+import type { WorkflowActionDescriptor } from "../../../src/domain/workflow-runtime/types.js";
 
 (globalThis as typeof globalThis & { React: typeof React }).React = React;
 
@@ -72,4 +76,53 @@ test("batch footer actions render retry and delete icon controls for grouped row
 
   assert.match(html, /aria-label="Retry all 1 item in this batch"/);
   assert.match(html, /aria-label="Delete all entries in this batch"/);
+});
+
+test("batch footer actions select retry/delete targets from projection descriptors", () => {
+  const entries = [
+    {
+      workflow: "eid-lookup",
+      id: "hidden-outside-opened-projection",
+      runId: "hidden-run",
+      parentRunId: "batch-run",
+      status: "failed",
+      timestamp: "2026-05-19T12:54:08.000Z",
+    },
+    {
+      workflow: "eid-lookup",
+      id: "visible-member",
+      runId: "visible-run",
+      parentRunId: "batch-run",
+      status: "failed",
+      timestamp: "2026-05-19T12:54:08.000Z",
+    },
+  ] as TrackerEntry[];
+
+  const actions: WorkflowActionDescriptor[] = [
+    {
+      kind: "retry",
+      scope: "visible-view",
+      source: "batch-view",
+      label: "Retry visible rows",
+      targetRunIds: ["visible-run"],
+      enabled: true,
+    },
+    {
+      kind: "delete",
+      scope: "visible-view",
+      source: "batch-view",
+      label: "Delete visible rows",
+      targetRunIds: ["visible-run"],
+      enabled: true,
+    },
+  ];
+
+  assert.deepEqual(
+    selectEntriesForWorkflowAction(entries, actions, "retry").map((entry) => entry.id),
+    ["visible-member"],
+  );
+  assert.deepEqual(
+    selectEntriesForWorkflowAction(entries, actions, "delete").map((entry) => entry.id),
+    ["visible-member"],
+  );
 });

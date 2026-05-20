@@ -4,13 +4,33 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "@/components/shared/types";
 import { IconActionButton } from "@/components/shared/IconActionButton";
+import type {
+  WorkflowActionDescriptor,
+  WorkflowRunProjection,
+} from "../../../domain/workflow-runtime/types.js";
 
 export interface BatchFooterActionsProps {
   workflow: string;
   date?: string;
   batchParentRunId: string;
   memberEntries: TrackerEntry[];
+  projection?: WorkflowRunProjection;
+  actions?: WorkflowActionDescriptor[];
   onDeletedIds?: (ids: string[]) => void;
+}
+
+export function selectEntriesForWorkflowAction(
+  memberEntries: TrackerEntry[],
+  actions: WorkflowActionDescriptor[] | undefined,
+  kind: WorkflowActionDescriptor["kind"],
+): TrackerEntry[] {
+  const descriptor = actions?.find((action) => action.kind === kind && action.enabled);
+  if (!descriptor) return actions ? [] : memberEntries;
+  if (descriptor.targetRunIds.length === 0) return memberEntries;
+  const entriesByRunId = new Map(memberEntries.map((entry) => [entry.runId ?? entry.id, entry]));
+  return descriptor.targetRunIds
+    .map((runId) => entriesByRunId.get(runId))
+    .filter((entry): entry is TrackerEntry => entry !== undefined);
 }
 
 export function BatchFooterActions({
@@ -18,25 +38,44 @@ export function BatchFooterActions({
   date,
   batchParentRunId,
   memberEntries,
+  projection,
+  actions,
   onDeletedIds,
 }: BatchFooterActionsProps) {
   const [deleting, setDeleting] = useState(false);
   const [retrying, setRetrying] = useState(false);
 
-  const memberItems = useMemo(
+  const actionDescriptors = projection?.actions ?? actions;
+  const retryEntries = useMemo(
+    () => selectEntriesForWorkflowAction(memberEntries, actionDescriptors, "retry"),
+    [actionDescriptors, memberEntries],
+  );
+  const deleteEntries = useMemo(
+    () => selectEntriesForWorkflowAction(memberEntries, actionDescriptors, "delete"),
+    [actionDescriptors, memberEntries],
+  );
+  const retryItems = useMemo(
     () =>
-      memberEntries.map((entry) => ({
+      retryEntries.map((entry) => ({
         id: entry.id,
         ...(entry.runId ? { runId: entry.runId } : {}),
       })),
-    [memberEntries],
+    [retryEntries],
   );
-  const memberIds = useMemo(() => memberItems.map((entry) => entry.id), [memberItems]);
+  const deleteItems = useMemo(
+    () =>
+      deleteEntries.map((entry) => ({
+        id: entry.id,
+        ...(entry.runId ? { runId: entry.runId } : {}),
+      })),
+    [deleteEntries],
+  );
+  const deleteIds = useMemo(() => deleteItems.map((entry) => entry.id), [deleteItems]);
 
   async function deleteEntireBatch(e: MouseEvent<HTMLButtonElement>) {
     e.stopPropagation();
-    if (deleting || memberIds.length === 0 || !date) return;
-    const n = memberIds.length;
+    if (deleting || deleteIds.length === 0 || !date) return;
+    const n = deleteIds.length;
     if (
       !window.confirm(
         `Permanently delete all ${n} entr${n === 1 ? "y" : "ies"} in this batch? This cannot be undone.`,
@@ -50,7 +89,7 @@ export function BatchFooterActions({
       const res = await fetch("/api/delete-bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workflow, date, items: memberItems }),
+        body: JSON.stringify({ workflow, date, items: deleteItems }),
       });
       const body = (await res.json()) as {
         ok?: boolean;
@@ -73,14 +112,14 @@ export function BatchFooterActions({
         toast.success(`Deleted ${body.count} ${body.count === 1 ? "entry" : "entries"}`, {
           id: t,
         });
-        onDeletedIds?.(memberIds);
+        onDeletedIds?.(deleteIds);
       } else {
         toast.warning("Some deletes failed", {
           id: t,
           description: `${body.count} removed · ${errors.length} failed (${errors[0]!.error})`,
         });
         const failed = new Set(errors.map((x) => x.id));
-        onDeletedIds?.(memberIds.filter((id) => !failed.has(id)));
+        onDeletedIds?.(deleteIds.filter((id) => !failed.has(id)));
       }
     } catch (err) {
       toast.error("Couldn't delete batch", {
@@ -94,16 +133,16 @@ export function BatchFooterActions({
 
   async function retryAllInBatch(ev: MouseEvent<HTMLButtonElement>) {
     ev.stopPropagation();
-    if (retrying || memberItems.length === 0) return;
+    if (retrying || retryItems.length === 0) return;
     setRetrying(true);
-    const t = toast.loading(`Retrying ${memberItems.length} items...`);
+    const t = toast.loading(`Retrying ${retryItems.length} items...`);
     try {
       const res = await fetch("/api/retry-bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           workflow,
-          items: memberItems,
+          items: retryItems,
           date,
           parentRunId: batchParentRunId,
         }),
@@ -116,7 +155,7 @@ export function BatchFooterActions({
       if (body.errors.length === 0) {
         toast.success("Retry scheduled", {
           id: t,
-          description: `${body.count} of ${memberItems.length} items re-added to queue`,
+          description: `${body.count} of ${retryItems.length} items re-added to queue`,
         });
       } else {
         toast.warning("Some retries failed", {
@@ -136,10 +175,10 @@ export function BatchFooterActions({
 
   return (
     <>
-      {memberItems.length > 0 && (
+      {retryItems.length > 0 && (
         <IconActionButton
           tone="muted"
-          label={`Retry all ${memberItems.length} ${memberItems.length === 1 ? "item" : "items"} in this batch`}
+          label={`Retry all ${retryItems.length} ${retryItems.length === 1 ? "item" : "items"} in this batch`}
           title="Re-queue every row in this batch (any status)"
           pending={retrying}
           onClick={retryAllInBatch}
@@ -152,7 +191,7 @@ export function BatchFooterActions({
           spinnerClassName="text-primary"
         />
       )}
-      {memberItems.length > 0 && date ? (
+      {deleteItems.length > 0 && date ? (
         <IconActionButton
           tone="destructive"
           label="Delete all entries in this batch"

@@ -65,3 +65,25 @@ test("OCR prep row type becomes batch only when multiple OCR file prep rows shar
     "Batch delegation · Preview",
   );
 });
+
+test("OCR EID lookup child remains a delegation member projection", () => {
+  const child = {
+    workflow: "eid-lookup",
+    timestamp: "2026-05-19T18:01:00.000Z",
+    id: "ocr-oath-run-r0",
+    runId: "eid-run-1",
+    parentRunId: "ocr-run-1",
+    status: "done",
+    data: {
+      archetype: "delegate-child",
+      originWorkflow: "ocr",
+      searchName: "Doe, Jane",
+      emplId: "10000001",
+    },
+  } as TrackerEntry;
+
+  assert.equal(
+    deriveQueueRowTypeLabel(child, [], [child], false),
+    "Delegation member",
+  );
+});

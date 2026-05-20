@@ -9,14 +9,16 @@ interface RetryAllButtonProps {
   workflow: string;
   /** Entries in the current queue scope (any status). Resolved prep rows are omitted upstream. */
   ids: string[];
+  items?: Array<{ id: string; runId?: string }>;
   /** Tracker date selected in the dashboard. */
   date?: string;
   /** When set (batch queue mode), retries are stamped with this batch parent id. */
   parentRunId?: string;
 }
 
-export function RetryAllButton({ workflow, ids, date, parentRunId }: RetryAllButtonProps) {
-  const n = ids.length;
+export function RetryAllButton({ workflow, ids, items, date, parentRunId }: RetryAllButtonProps) {
+  const retryItems = items ?? ids.map((id) => ({ id }));
+  const n = retryItems.length;
   const retryToasts = useMemo(() => ({
     loading: `Retrying ${n} items...`,
     success: (body: { count: number }) => ({
@@ -41,13 +43,13 @@ export function RetryAllButton({ workflow, ids, date, parentRunId }: RetryAllBut
 
   async function retryAll() {
     if (retrying) return;
-    if (ids.length === 0) {
+    if (retryItems.length === 0) {
       toast.message("Nothing to retry", { description: "No entries in the current view." });
       return;
     }
     await postRetryAll({
       workflow,
-      ids,
+      items: retryItems,
       ...(date ? { date } : {}),
       ...(parentRunId ? { parentRunId } : {}),
     });

@@ -27,6 +27,10 @@ import {
 } from "../../../tracker/dashboard/prep-rows.js";
 import { QueueItemControls } from "./QueueItemControls";
 import { CancelRunningButton } from "./CancelRunningButton";
+import type {
+  WorkflowActionDescriptor,
+  WorkflowRunProjection,
+} from "../../../domain/workflow-runtime/types.js";
 
 // Bento-card row. Each entry is a tonal `bg-card` panel with rounded
 // corners, an internal divider splitting the header zone (name + status
@@ -152,6 +156,11 @@ function deriveActiveCheckTag(entry: TrackerEntry, isDone: boolean): null | {
 
 interface EntryItemProps {
   entry: TrackerEntry;
+  projection?: WorkflowRunProjection;
+  title?: string;
+  subtitle?: string;
+  statusLabel?: string;
+  actions?: WorkflowActionDescriptor[];
   /** Per-entry "<base> <ordinal>" labels from `buildDisplayNameMap`. */
   displayNames?: Map<string, string>;
   selected: boolean;
@@ -168,7 +177,19 @@ interface EntryItemProps {
   onDelete?: (id: string) => void;
 }
 
-function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete }: EntryItemProps) {
+function EntryItemImpl({
+  entry,
+  projection,
+  title,
+  subtitle,
+  statusLabel,
+  actions,
+  displayNames,
+  selected,
+  onSelect,
+  date,
+  onDelete,
+}: EntryItemProps) {
   const resolvedName = resolveEntryName(entry, displayNames);
   // `step === "cancelled"` overrides the generic `failed` status so the row
   // renders amber/Ban instead of red/AlertTriangle. The data model is still
@@ -179,7 +200,8 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
   const isOcrDelegatedNeedsReview = isDelegatedOcrAwaitingApprovalEntry(entry);
   const isDaemonRunning = entry.status === "running";
   const isCancelled = entry.status === "failed" && entry.step === "cancelled";
-  const name = resolvedName;
+  const projectedActions = projection?.actions ?? actions;
+  const name = projection?.title ?? title ?? resolvedName;
   const isFailed = entry.status === "failed" && !isCancelled;
   const isDone = entry.status === "done" && !isOcrDelegatedNeedsReview;
   const isPending = entry.status === "pending";
@@ -200,7 +222,7 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
     : "";
 
   const subject = typeof entry.data?.__subject === "string" ? entry.data.__subject : undefined;
-  const footerSecondaryId = resolveEntryId(entry);
+  const footerSecondaryId = projection?.subtitle ?? subtitle ?? resolveEntryId(entry);
   const showLiveRow =
     (isFailed && Boolean(entry.error)) ||
     Boolean(
@@ -219,7 +241,7 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
         aria-label={
           activeCheckTag
             ? `${name || entry.id} — ${activeCheckTag.title.toLowerCase()}, ${cfg.label.toLowerCase()}`
-            : `${name || entry.id} — ${cfg.label.toLowerCase()}`
+            : `${name || entry.id} — ${(statusLabel ?? cfg.label).toLowerCase()}`
         }
         data-queue-entry-id={entry.id}
         onKeyDown={(e) => {
@@ -267,7 +289,7 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
                   cfg.badge,
                 )}
               >
-                {cfg.label}
+                {statusLabel ?? cfg.label}
               </span>
             </div>
           </div>
@@ -332,15 +354,16 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
             />
           )}
           {isDaemonRunning && entry.runId && (
-            <CancelRunningButton
-              workflow={entry.workflow}
-              id={entry.id}
-              runId={entry.runId}
-              subject={subject}
-              entry={entry}
-              className="flex-shrink-0 ml-1"
-            />
-          )}
+              <CancelRunningButton
+                workflow={entry.workflow}
+                id={entry.id}
+                runId={entry.runId}
+                subject={subject}
+                entry={entry}
+                actions={projectedActions}
+                className="flex-shrink-0 ml-1"
+              />
+            )}
           {isPending && (
             <QueueItemControls
               workflow={entry.workflow}
@@ -348,6 +371,7 @@ function EntryItemImpl({ entry, displayNames, selected, onSelect, date, onDelete
               runId={entry.runId}
               subject={subject}
               entry={entry}
+              actions={projectedActions}
               className="flex-shrink-0 ml-1"
             />
           )}
@@ -377,5 +401,10 @@ export const EntryItem = memo(EntryItemImpl, (prev, next) => {
   if (prev.onDelete !== next.onDelete) return false;
   if (prev.date !== next.date) return false;
   if (prev.displayNames !== next.displayNames) return false;
+  if (prev.projection !== next.projection) return false;
+  if (prev.title !== next.title) return false;
+  if (prev.subtitle !== next.subtitle) return false;
+  if (prev.statusLabel !== next.statusLabel) return false;
+  if (prev.actions !== next.actions) return false;
   return prev.entry._hash === next.entry._hash;
 });

@@ -5,6 +5,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "@/components/shared/types";
 import { IconActionButton } from "@/components/shared/IconActionButton";
+import type { WorkflowActionDescriptor } from "../../../domain/workflow-runtime/types.js";
 
 interface CancelRunningButtonProps {
   workflow: string;
@@ -15,6 +16,7 @@ interface CancelRunningButtonProps {
    *  routing instead of the kernel cancel-running path. Optional for legacy
    *  callers that don't have the entry handy (kernel daemon items only). */
   entry?: TrackerEntry;
+  actions?: WorkflowActionDescriptor[];
   className?: string;
 }
 
@@ -23,9 +25,15 @@ interface CancelRunningButtonProps {
  * the force-stop endpoint directly so a single click actually stops the
  * browser-backed run instead of waiting on a cooperative step boundary.
  */
-export function CancelRunningButton({ workflow, id, runId, subject, entry, className }: CancelRunningButtonProps) {
+function hasEnabledCancel(actions: WorkflowActionDescriptor[] | undefined): boolean {
+  if (!actions) return true;
+  return actions.some((action) => action.kind === "cancel" && action.enabled);
+}
+
+export function CancelRunningButton({ workflow, id, runId, subject, entry, actions, className }: CancelRunningButtonProps) {
   const [pending, setPending] = useState(false);
   const label = subject?.trim() || id;
+  const cancelEnabled = hasEnabledCancel(actions);
 
   // OCR-prep parent rows live in the downstream workflow's queue but aren't
   // daemon-claimed — they're tracker-only proxies for the OCR session. The
@@ -120,7 +128,7 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, class
 
   const onClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (pending) return;
+    if (pending || !cancelEnabled) return;
     void fire();
   };
 
@@ -132,6 +140,7 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, class
             tone="destructive"
             label={ocrPrep ? "Discard OCR prep" : "Stop running item"}
             pending={pending}
+            disabled={!cancelEnabled}
             onClick={onClick}
             icon={<Square className="h-3.5 w-3.5" />}
             className="text-muted-foreground bg-transparent hover:text-destructive hover:bg-muted focus-visible:ring-destructive/40"

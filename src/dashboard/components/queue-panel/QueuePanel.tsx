@@ -21,7 +21,8 @@ import { BatchFooterActions } from "./BatchFooterActions";
 import type { TrackerEntry } from "@/components/shared/types";
 import { isDiscardedPrepRow } from "@/components/ocr/types";
 import {
-  buildQueueSurfaces,
+  buildQueueProjectionRows,
+  type QueueGroupProjectionRow,
   type QueueGroupSurface,
 } from "./queue-surface-classifier";
 import { entryMatchesStatusFilter, queueGroupMatchesStatusFilter } from "./queue-status";
@@ -97,13 +98,13 @@ interface QueuePanelProps {
   onQueueSortModeChange: (mode: QueueSortMode) => void;
 }
 
-function pickSurfaces<K extends QueueGroupSurface["kind"]>(
-  surfaces: QueueGroupSurface[],
+function pickProjectionRows<K extends QueueGroupSurface["kind"]>(
+  rows: QueueGroupProjectionRow[],
   kind: K,
-): Extract<QueueGroupSurface, { kind: K }>[] {
-  return surfaces.filter(
-    (surface): surface is Extract<QueueGroupSurface, { kind: K }> =>
-      surface.kind === kind,
+): Array<QueueGroupProjectionRow & { surface: Extract<QueueGroupSurface, { kind: K }> }> {
+  return rows.filter(
+    (row): row is QueueGroupProjectionRow & { surface: Extract<QueueGroupSurface, { kind: K }> } =>
+      row.surface.kind === kind,
   );
 }
 
@@ -218,16 +219,18 @@ export function QueuePanel({
     [delegationSourceEntries],
   );
 
-  const queueSurfaces = useMemo(
+  const queueProjectionRows = useMemo(
     () =>
-      buildQueueSurfaces({
+      buildQueueProjectionRows({
         entries: visibleEntries,
         delegationSourceEntries: visibleDelegationSources,
         workflow,
         workflowLabel,
+        displayNames,
       }),
-    [visibleEntries, visibleDelegationSources, workflow, workflowLabel],
+    [visibleEntries, visibleDelegationSources, workflow, workflowLabel, displayNames],
   );
+  const queueSurfaces = queueProjectionRows.surfaces;
 
   const batchMembersByParentRunId = queueSurfaces.membersByParentRunId;
 
@@ -258,6 +261,16 @@ export function QueuePanel({
     workflow,
   ]);
 
+  const focusedBatchProjection = useMemo(
+    () =>
+      batchQueueParentRunId
+        ? queueProjectionRows.groupRows.find(
+            (row) => row.projection.runId === batchQueueParentRunId,
+          )?.projection
+        : undefined,
+    [batchQueueParentRunId, queueProjectionRows.groupRows],
+  );
+
   const batchAnchorIsPrep = useMemo(
     () =>
       Boolean(
@@ -281,47 +294,47 @@ export function QueuePanel({
 
   const approvalDelegationSurfaces = useMemo(
     () =>
-      pickSurfaces(queueSurfaces.groupRows, "approval-delegation")
-        .filter((surface): surface is Extract<QueueGroupSurface, { kind: "approval-delegation" }> & { parent: TrackerEntry } =>
-          Boolean(surface.parent),
+      pickProjectionRows(queueProjectionRows.groupRows, "approval-delegation")
+        .filter((row): row is QueueGroupProjectionRow & { surface: Extract<QueueGroupSurface, { kind: "approval-delegation" }> & { parent: TrackerEntry } } =>
+          Boolean(row.surface.parent),
         ),
-    [queueSurfaces],
+    [queueProjectionRows.groupRows],
   );
 
   const sortedApprovalDelegationSurfaces = useMemo(() => {
     const sortedParents = sortQueueEntriesForDisplay(
-      approvalDelegationSurfaces.map((surface) => surface.parent),
+      approvalDelegationSurfaces.map((row) => row.surface.parent),
       queueSortMode,
       displayNames,
     );
     return reorderByIds(
       approvalDelegationSurfaces,
-      (surface) => surface.parentRunId,
+      (row) => row.surface.parentRunId,
       sortedParents.map((parent) => parent.runId ?? parent.id),
     );
   }, [approvalDelegationSurfaces, queueSortMode, displayNames]);
 
   const batchSurfaces = useMemo(
-    () => pickSurfaces(queueSurfaces.groupRows, "batch"),
-    [queueSurfaces],
+    () => pickProjectionRows(queueProjectionRows.groupRows, "batch"),
+    [queueProjectionRows.groupRows],
   );
 
   const sortedBatchSurfaces = useMemo(() => {
     const ids = sortDaemonBatchParentIds(
-      batchSurfaces.map((surface) => surface.parentRunId),
+      batchSurfaces.map((row) => row.surface.parentRunId),
       batchMembersByParentRunId,
       queueSortMode,
       workflowLabel,
       displayNames,
     );
-    return reorderByIds(batchSurfaces, (surface) => surface.parentRunId, ids);
+    return reorderByIds(batchSurfaces, (row) => row.surface.parentRunId, ids);
   }, [batchSurfaces, batchMembersByParentRunId, queueSortMode, workflowLabel, displayNames]);
 
   /** Delegation cards respect StatPills — show when parent or any child matches. */
   const visibleApprovalDelegationSurfaces = useMemo(
     () =>
       sortedApprovalDelegationSurfaces.filter((surface) => {
-        return queueGroupMatchesStatusFilter(statusFilter, surface.members, surface.parent);
+        return queueGroupMatchesStatusFilter(statusFilter, surface.surface.members, surface.surface.parent);
       }),
     [sortedApprovalDelegationSurfaces, statusFilter],
   );
@@ -330,28 +343,35 @@ export function QueuePanel({
   const visibleBatchSurfaces = useMemo(
     () =>
       sortedBatchSurfaces.filter((surface) =>
-        queueGroupMatchesStatusFilter(statusFilter, surface.members),
+        queueGroupMatchesStatusFilter(statusFilter, surface.surface.members),
       ),
     [sortedBatchSurfaces, statusFilter],
   );
 
   const visiblePassiveDelegationSurfaces = useMemo(
     () =>
-      pickSurfaces(queueSurfaces.groupRows, "passive-delegation")
-        .filter((surface) => queueGroupMatchesStatusFilter(statusFilter, surface.members)),
-    [queueSurfaces, statusFilter],
+      pickProjectionRows(queueProjectionRows.groupRows, "passive-delegation")
+        .filter((row) => queueGroupMatchesStatusFilter(statusFilter, row.surface.members)),
+    [queueProjectionRows.groupRows, statusFilter],
   );
 
   const filtered = useMemo(() => {
-    let result = queueSurfaces.flatEntries;
+    let result = queueProjectionRows.flatEntries;
     if (statusFilter) {
-      result = result.filter((e) => entryMatchesStatusFilter(e, statusFilter));
+      result = result.filter((row) => entryMatchesStatusFilter(row.entry, statusFilter));
     }
     return result;
-  }, [queueSurfaces, statusFilter]);
+  }, [queueProjectionRows.flatEntries, statusFilter]);
 
   const sortedFiltered = useMemo(
-    () => sortQueueEntriesForDisplay(filtered, queueSortMode, displayNames),
+    () => {
+      const entries = sortQueueEntriesForDisplay(
+        filtered.map((row) => row.entry),
+        queueSortMode,
+        displayNames,
+      );
+      return reorderByIds(filtered, (row) => row.entry.id, entries.map((entry) => entry.id));
+    },
     [filtered, queueSortMode, displayNames],
   );
 
@@ -379,7 +399,7 @@ export function QueuePanel({
   const navigableIds = useMemo(() => {
     if (loading) return [];
     if (batchQueueParentRunId) return sortedBatchMembers.map((e) => e.id);
-    return sortedFiltered.map((e) => e.id);
+    return sortedFiltered.map((row) => row.entry.id);
   }, [loading, batchQueueParentRunId, sortedBatchMembers, sortedFiltered]);
 
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -425,7 +445,8 @@ export function QueuePanel({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  const renderQueueGroupSurface = (surface: QueueGroupSurface): ReactNode => {
+  const renderQueueGroupSurface = (row: QueueGroupProjectionRow): ReactNode => {
+    const { surface, projection } = row;
     switch (surface.kind) {
       case "approval-delegation":
         return (
@@ -433,6 +454,7 @@ export function QueuePanel({
             key={`delegation-${surface.parentRunId}`}
             parent={surface.parent}
             delegatedEntries={surface.members}
+            projection={projection}
             isBatchQueueFocused={batchQueueParentRunId === surface.parentRunId}
             onEnterBatchQueue={(runId) => onEnterBatchQueue?.(runId)}
             date={date}
@@ -449,6 +471,7 @@ export function QueuePanel({
             batchParentRunId={surface.parentRunId}
             workflowLabel={workflowLabel}
             titleOverride={surface.titleOverride}
+            projection={projection}
             memberEntries={surface.members}
             isBatchQueueFocused={batchQueueParentRunId === surface.parentRunId}
             onEnterBatchQueue={(runId) => onEnterBatchQueue?.(runId)}
@@ -461,10 +484,11 @@ export function QueuePanel({
           <GroupRowBase
             key={`passive-delegation-${surface.parentRunId}`}
             variant="passive-delegation"
-            title={surface.titleOverride ?? "Delegated utility work"}
+            title={projection.title}
             parentRunId={surface.parentRunId}
             members={surface.members}
             countTone="neutral"
+            footerSecondaryId={projection.subtitle}
             firstTimestamp={surface.members[0]?.timestamp}
             isFocused={batchQueueParentRunId === surface.parentRunId}
             drillInEnabled={!batchQueueParentRunId}
@@ -475,6 +499,7 @@ export function QueuePanel({
                 date={date}
                 batchParentRunId={surface.parentRunId}
                 memberEntries={surface.members}
+                projection={projection}
                 onDeletedIds={onBulkDeleted}
               />
             }
@@ -485,7 +510,7 @@ export function QueuePanel({
     }
   };
 
-  const visibleGroupSurfaces: QueueGroupSurface[] = [
+  const visibleGroupSurfaces: QueueGroupProjectionRow[] = [
     ...visibleApprovalDelegationSurfaces,
     ...visibleBatchSurfaces,
     ...visiblePassiveDelegationSurfaces,
@@ -501,6 +526,7 @@ export function QueuePanel({
               ? undefined
               : resolvedBatchToolbarEntry.data?.__name as string | undefined
           }
+          projection={focusedBatchProjection}
           anchorKind={batchAnchorIsPrep ? "prep" : "daemon"}
           memberCount={batchQueueMembers.length}
           batchPreviewActive={selectedId === null}
@@ -552,6 +578,7 @@ export function QueuePanel({
         {batchQueueParentRunId ? (
           <BatchQueueMemberList
             members={sortedBatchMembers}
+            projections={focusedBatchProjection?.batchMembers}
             selectedId={selectedId}
             onSelect={onSelect}
             displayNames={displayNames}
@@ -579,10 +606,11 @@ export function QueuePanel({
                 description="Data will appear here as workflows run"
               />
             ) : (
-              sortedFiltered.map((entry) => (
+              sortedFiltered.map(({ entry, projection }) => (
                 <EntryItem
                   key={entry.id}
                   entry={entry}
+                  projection={projection}
                   displayNames={displayNames}
                   selected={selectedId === entry.id}
                   onSelect={onSelect}
