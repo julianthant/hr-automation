@@ -2,25 +2,22 @@ import type { Hono } from "hono";
 
 import { listWorkflows } from "../../../jsonl.js";
 import {
-  buildCancelActiveBulkHandler,
-  buildCancelQueuedHandler,
   buildCancelRunningHandler,
   buildDaemonsListHandler,
   buildDaemonsSpawnHandler,
   buildDaemonsStopHandler,
-  buildDeleteBulkHandler,
   buildDeleteEntryHandler,
   buildDrainWorkerHandler,
   buildEntryReEnqueueHandler,
   buildFindPriorByKeyHandler,
-  buildForceStopTaskHandler,
   buildKillBrowserHandler,
   buildQueueBumpHandler,
-  buildRetryBulkHandler,
   buildSaveDataHandler,
   buildStopWorkerHandler,
   readQueueDepth,
 } from "../../ops/index.js";
+import { performWorkflowAction } from "../../actions/perform-workflow-action.js";
+import type { WorkflowActionResult } from "../../actions/types.js";
 import { errorMessage } from "../../../../utils/errors.js";
 import { log } from "../../../../utils/log.js";
 import type { DashboardHonoDeps } from "../context.js";
@@ -56,6 +53,51 @@ function parseItemsFromBody<T>(
     .filter((item): item is T => item !== null);
 }
 
+/**
+ * Map a {@link WorkflowActionResult} back to a per-row route's legacy
+ * `{ ok }` / `{ ok, error, status }` shape. Used by routes that act on a
+ * single target (`/api/cancel-queued`, `/api/retry`).
+ */
+function toSingleActionResult(
+  result: WorkflowActionResult,
+): { ok: boolean; error?: string; status?: number } {
+  if (result.error && result.results.length === 0) {
+    return { ok: false, error: result.error, status: 400 };
+  }
+  const first = result.results[0];
+  if (!first) return { ok: false, error: "no action target", status: 400 };
+  if (first.ok) return { ok: true };
+  return {
+    ok: false,
+    error: first.error ?? "action failed",
+    ...(first.status ? { status: first.status } : {}),
+  };
+}
+
+/** Single-target variant that preserves force-stop's `commandId` payload. */
+function toForceStopActionResult(
+  result: WorkflowActionResult,
+): { ok: boolean; commandId?: string; error?: string; status?: number } {
+  if (result.error && result.results.length === 0) {
+    return { ok: false, error: result.error, status: 400 };
+  }
+  const first = result.results[0];
+  if (!first) return { ok: false, error: "no action target", status: 400 };
+  if (first.ok) return { ok: true, commandId: String(first.detail?.commandId ?? "") };
+  return {
+    ok: false,
+    error: first.error ?? "force stop failed",
+    ...(first.status ? { status: first.status } : {}),
+  };
+}
+
+/** Map a {@link WorkflowActionResult} to a bulk route's `{ ok, count, errors }` shape. */
+function toBulkActionResult(
+  result: WorkflowActionResult,
+): { ok: true; count: number; errors: Array<{ id: string; error: string }> } {
+  return { ok: true, count: result.count, errors: result.errors };
+}
+
 export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
   app.post("/api/retry", async (c) => {
     return postJson(c, (body) => {
@@ -68,7 +110,28 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         date: body.date ? String(body.date) : undefined,
         ...(parent.parentRunId ? { parentRunId: parent.parentRunId } : {}),
       };
-    }, buildEntryReEnqueueHandler(deps.dir), 202);
+    }, async (req: {
+      workflow: string;
+      id: string;
+      runId?: string;
+      date?: string;
+      parentRunId?: string;
+    }) => {
+      const result = await performWorkflowAction({
+        action: "retry",
+        scope: "row",
+        source: "queue-panel",
+        workflowId: req.workflow,
+        targets: [{
+          id: req.id,
+          ...(req.runId ? { runId: req.runId } : {}),
+          ...(req.date ? { date: req.date } : {}),
+        }],
+        ...(req.date ? { date: req.date } : {}),
+        ...(req.parentRunId ? { parentRunId: req.parentRunId } : {}),
+      }, { dir: deps.dir });
+      return toSingleActionResult(result);
+    }, 202);
   });
 
   app.post("/api/retry-bulk", async (c) => {
@@ -94,7 +157,31 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         date: body.date ? String(body.date) : undefined,
         ...(parent.parentRunId ? { parentRunId: parent.parentRunId } : {}),
       };
-    }, buildRetryBulkHandler(deps.dir), 202);
+    }, async (req: {
+      workflow: string;
+      ids: string[];
+      items?: Array<{ id: string; runId?: string }>;
+      date?: string;
+      parentRunId?: string;
+    }) => {
+      const items: Array<{ id: string; runId?: string }> = req.items && req.items.length > 0
+        ? req.items
+        : req.ids.map((id) => ({ id }));
+      const result = await performWorkflowAction({
+        action: "retry",
+        scope: "group",
+        source: "queue-panel",
+        workflowId: req.workflow,
+        targets: items.map((it) => ({
+          id: it.id,
+          ...(it.runId ? { runId: it.runId } : {}),
+          ...(req.date ? { date: req.date } : {}),
+        })),
+        ...(req.date ? { date: req.date } : {}),
+        ...(req.parentRunId ? { parentRunId: req.parentRunId } : {}),
+      }, { dir: deps.dir });
+      return toBulkActionResult(result);
+    }, 202);
   });
 
   app.post("/api/run-with-data", async (c) => {
@@ -146,7 +233,21 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       workflow: String(body.workflow ?? ""),
       id: String(body.id ?? ""),
       runId: body.runId ? String(body.runId) : undefined,
-    }), buildCancelQueuedHandler(deps.dir));
+    }), async (req: { workflow: string; id: string; runId?: string }) => {
+      const result = await performWorkflowAction({
+        action: "cancel",
+        scope: "row",
+        source: "queue-panel",
+        workflowId: req.workflow,
+        cancelMode: "cooperative",
+        targets: [{
+          id: req.id,
+          status: "pending",
+          ...(req.runId ? { runId: req.runId } : {}),
+        }],
+      }, { dir: deps.dir });
+      return toSingleActionResult(result);
+    });
   });
 
   app.post("/api/cancel-running", async (c) => {
@@ -176,7 +277,21 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         return { ok: false, error: "items must be a non-empty array of { id, status }" };
       }
       return { workflow, items };
-    }, buildCancelActiveBulkHandler(deps.dir), (result) => bulkMutationHttpStatus(result.count, result.errors.length));
+    }, async (req: { workflow: string; items: CancelActiveBulkItem[] }) => {
+      const result = await performWorkflowAction({
+        action: "cancel",
+        scope: "visible-view",
+        source: "queue-panel",
+        workflowId: req.workflow,
+        cancelMode: "cooperative",
+        targets: req.items.map((it) => ({
+          id: it.id,
+          status: it.status,
+          ...(it.runId ? { runId: it.runId } : {}),
+        })),
+      }, { dir: deps.dir });
+      return toBulkActionResult(result);
+    }, (result) => bulkMutationHttpStatus(result.count, result.errors.length));
   });
 
   app.post("/api/task/force-stop", async (c) => {
@@ -184,7 +299,20 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       workflow: String(body.workflow ?? ""),
       id: String(body.id ?? ""),
       runId: body.runId ? String(body.runId) : undefined,
-    }), buildForceStopTaskHandler(deps.dir), 202);
+    }), async (req: { workflow: string; id: string; runId?: string }) => {
+      const result = await performWorkflowAction({
+        action: "cancel",
+        scope: "row",
+        source: "queue-panel",
+        workflowId: req.workflow,
+        cancelMode: "force",
+        targets: [{
+          id: req.id,
+          ...(req.runId ? { runId: req.runId } : {}),
+        }],
+      }, { dir: deps.dir });
+      return toForceStopActionResult(result);
+    }, 202);
   });
 
   app.post("/api/browser/kill", async (c) => {
@@ -275,17 +403,28 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         return { ok: false, error: "ids or items must be non-empty — provide at least one entry to delete" };
       }
       return { workflow, date, ids, items };
-    }, (body) => {
-      const result = buildDeleteBulkHandler(deps.dir, { screenshotsDir: deps.screenshotsDir })(body as {
-        workflow: string;
-        date: string;
-        ids: string[];
-        items: Array<{ id: string; runId?: string }>;
-      });
-      if (!result.ok) {
-        return { ok: false, error: result.errors[0]?.error ?? "invalid request", count: 0, errors: result.errors };
-      }
-      return result;
-    }, (result) => result.ok ? bulkMutationHttpStatus(result.count, result.errors.length) : 400);
+    }, async (req: {
+      workflow: string;
+      date: string;
+      ids: string[];
+      items: Array<{ id: string; runId?: string }>;
+    }) => {
+      const items: Array<{ id: string; runId?: string }> = req.items.length > 0
+        ? req.items
+        : req.ids.map((id) => ({ id }));
+      const result = await performWorkflowAction({
+        action: "delete",
+        scope: "group",
+        source: "queue-panel",
+        workflowId: req.workflow,
+        date: req.date,
+        targets: items.map((it) => ({
+          id: it.id,
+          date: req.date,
+          ...(it.runId ? { runId: it.runId } : {}),
+        })),
+      }, { dir: deps.dir, screenshotsDir: deps.screenshotsDir });
+      return toBulkActionResult(result);
+    }, (result) => bulkMutationHttpStatus(result.count, result.errors.length));
   });
 }

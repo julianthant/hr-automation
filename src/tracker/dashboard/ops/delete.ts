@@ -1,3 +1,11 @@
+/**
+ * Low-level delete operations (single entry / bulk / delegated-children).
+ *
+ * The primitive behind the central action engine — operator deletes arrive
+ * through `actions/perform-workflow-action.ts`, which decides scope and
+ * routes here. `deleteDelegatedChildrenForRun` stays exported for the OCR
+ * discard path.
+ */
 import { existsSync, readdirSync, readFileSync, unlinkSync } from "fs";
 import { basename, join, resolve, sep } from "path";
 import { PATHS } from "../../../config.js";

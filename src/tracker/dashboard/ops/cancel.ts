@@ -1,3 +1,11 @@
+/**
+ * Low-level cancel operations (queued / running / force-stop / bulk).
+ *
+ * These are the primitives behind the central action engine — operator
+ * cancels arrive through `actions/perform-workflow-action.ts`, which decides
+ * scope and routes here. The handlers stay independently exported so daemon
+ * code and tests can call a single primitive directly.
+ */
 import { cancelInProcessRun } from "../../../core/daemon/in-process-runs.js";
 import type { BrowserProcessRow, ControlWorkerStore } from "../../../core/daemon/worker-store.js";
 import {
