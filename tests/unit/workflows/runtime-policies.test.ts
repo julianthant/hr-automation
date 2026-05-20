@@ -65,16 +65,16 @@ describe("workflow runtime policies", () => {
     assert.equal(policy?.memberRow?.titleSource, "person");
   });
 
-  it("standard workflows inherit default row cancel action", () => {
+  it("standard workflows do not override rowActions", () => {
     for (const [name, workflow] of ALL_WORKFLOWS) {
       if (name === "ocr" || name === "oath-upload" || name === "oath-signature" || name === "emergency-contact") {
         continue;
       }
       const policy = workflow.metadata.runtimePolicy!;
-      assert.equal(
-        policy.rowActions.find((action) => action.kind === "cancel")?.scope,
-        DEFAULT_WORKFLOW_RUNTIME_POLICY.rowActions[0]?.scope,
-        `${name} cancel scope drift`,
+      assert.deepEqual(
+        policy.rowActions,
+        DEFAULT_WORKFLOW_RUNTIME_POLICY.rowActions,
+        `${name} should inherit the default rowActions, not declare a custom set`,
       );
     }
   });
