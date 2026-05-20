@@ -20,7 +20,7 @@ import type { WorkflowActionRequest } from "../../../src/tracker/dashboard/actio
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
 import { readEntries } from "../../../src/tracker/jsonl.js";
-import { closeStateDbForTests } from "../../../src/tracker/state/db.js";
+import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
 
 let dir: string;
 
@@ -233,5 +233,124 @@ describe("resolveActionTargets", () => {
     };
     const resolved = resolveActionTargets(req, dir);
     assert.equal(resolved.ok, false);
+  });
+});
+
+// ── Helper: seed runs rows directly into the SQLite projection ────────────────
+
+function seedRunRow(opts: {
+  workflow: string;
+  date: string;
+  itemId: string;
+  runId: string;
+  parentRunId?: string;
+  latestStatus: string;
+}): void {
+  const db = openStateDb(dir);
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT OR REPLACE INTO runs
+      (workflow, tracker_date, item_id, run_id, parent_run_id,
+       first_any_ts, latest_tracker_ts, latest_status,
+       run_ordinal, screenshot_count, updated_at)
+    VALUES
+      (@workflow, @date, @itemId, @runId, @parentRunId,
+       @now, @now, @latestStatus,
+       1, 0, @now)
+  `).run({
+    workflow: opts.workflow,
+    date: opts.date,
+    itemId: opts.itemId,
+    runId: opts.runId,
+    parentRunId: opts.parentRunId ?? null,
+    latestStatus: opts.latestStatus,
+    now,
+  });
+}
+
+describe("resolveActionTargets — tree scope descendant resolution", () => {
+  const DATE = "2026-05-20";
+
+  it("includes pending and running descendants with correct status field", () => {
+    // Root: oath-upload row
+    seedRunRow({ workflow: "oath-upload", date: DATE, itemId: "sess-1", runId: "root-run", latestStatus: "running" });
+    // Pending child (OCR)
+    seedRunRow({ workflow: "ocr", date: DATE, itemId: "ocr-1", runId: "child-run-1", parentRunId: "root-run", latestStatus: "pending" });
+    // Running child (oath-signature)
+    seedRunRow({ workflow: "oath-signature", date: DATE, itemId: "sig-1", runId: "child-run-2", parentRunId: "root-run", latestStatus: "running" });
+
+    const req: WorkflowActionRequest = {
+      action: "cancel",
+      scope: "tree",
+      source: "queue-panel",
+      workflowId: "oath-upload",
+      targets: [{ id: "sess-1", runId: "root-run", status: "running" }],
+    };
+    const resolved = resolveActionTargets(req, dir);
+    assert.ok(resolved.ok);
+
+    const targets = resolved.targets;
+    // Root + 2 non-terminal children
+    assert.equal(targets.length, 3);
+
+    const pending = targets.find((t) => t.runId === "child-run-1");
+    assert.ok(pending, "pending child must be included");
+    assert.equal(pending?.status, "pending");
+
+    const running = targets.find((t) => t.runId === "child-run-2");
+    assert.ok(running, "running child must be included");
+    assert.equal(running?.status, "running");
+  });
+
+  it("excludes terminal (done/failed/skipped) descendants from the cancel set", () => {
+    seedRunRow({ workflow: "oath-upload", date: DATE, itemId: "sess-2", runId: "root-run-2", latestStatus: "running" });
+    // Done child — must be excluded
+    seedRunRow({ workflow: "ocr", date: DATE, itemId: "ocr-2", runId: "done-child", parentRunId: "root-run-2", latestStatus: "done" });
+    // Failed child — must be excluded
+    seedRunRow({ workflow: "oath-signature", date: DATE, itemId: "sig-2", runId: "failed-child", parentRunId: "root-run-2", latestStatus: "failed" });
+    // Pending child — must be included
+    seedRunRow({ workflow: "eid-lookup", date: DATE, itemId: "eid-1", runId: "pending-child", parentRunId: "root-run-2", latestStatus: "pending" });
+
+    const req: WorkflowActionRequest = {
+      action: "cancel",
+      scope: "tree",
+      source: "queue-panel",
+      workflowId: "oath-upload",
+      targets: [{ id: "sess-2", runId: "root-run-2", status: "running" }],
+    };
+    const resolved = resolveActionTargets(req, dir);
+    assert.ok(resolved.ok);
+
+    const runIds = resolved.targets.map((t) => t.runId);
+    // Root and pending child only — terminal rows excluded
+    assert.ok(runIds.includes("root-run-2"), "root must be included");
+    assert.ok(runIds.includes("pending-child"), "pending child must be included");
+    assert.ok(!runIds.includes("done-child"), "done child must be excluded");
+    assert.ok(!runIds.includes("failed-child"), "failed child must be excluded");
+    assert.equal(resolved.targets.length, 2);
+  });
+
+  it("still descends through terminal nodes to find non-terminal grandchildren", () => {
+    seedRunRow({ workflow: "oath-upload", date: DATE, itemId: "sess-3", runId: "root-run-3", latestStatus: "running" });
+    // Done intermediate — excluded from cancel set but BFS must continue through it
+    seedRunRow({ workflow: "ocr", date: DATE, itemId: "ocr-3", runId: "done-mid", parentRunId: "root-run-3", latestStatus: "done" });
+    // Running grandchild under the done intermediate — must be included
+    seedRunRow({ workflow: "oath-signature", date: DATE, itemId: "sig-3", runId: "running-grand", parentRunId: "done-mid", latestStatus: "running" });
+
+    const req: WorkflowActionRequest = {
+      action: "cancel",
+      scope: "tree",
+      source: "queue-panel",
+      workflowId: "oath-upload",
+      targets: [{ id: "sess-3", runId: "root-run-3", status: "running" }],
+    };
+    const resolved = resolveActionTargets(req, dir);
+    assert.ok(resolved.ok);
+
+    const runIds = resolved.targets.map((t) => t.runId);
+    assert.ok(runIds.includes("root-run-3"), "root must be included");
+    assert.ok(!runIds.includes("done-mid"), "terminal intermediate must be excluded from cancel set");
+    assert.ok(runIds.includes("running-grand"), "non-terminal grandchild must still be reached via BFS");
+    assert.equal(resolved.targets.length, 2);
   });
 });

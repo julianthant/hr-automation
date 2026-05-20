@@ -57,7 +57,7 @@ function collectDescendants(dir: string, rootRunIds: string[]): ResolvedActionTa
     if (!parentRunId || seen.has(parentRunId)) continue;
     seen.add(parentRunId);
     const children = db.prepare(`
-      SELECT workflow, tracker_date, item_id, run_id
+      SELECT workflow, tracker_date, item_id, run_id, latest_status
       FROM runs
       WHERE parent_run_id = @parentRunId
       ORDER BY tracker_date ASC, workflow ASC, item_id ASC, run_id ASC
@@ -66,17 +66,26 @@ function collectDescendants(dir: string, rootRunIds: string[]): ResolvedActionTa
       tracker_date: string;
       item_id: string;
       run_id: string;
+      latest_status: string;
     }>;
     for (const child of children) {
+      // Always enqueue for BFS — a terminal descendant can still have
+      // non-terminal grandchildren that need to be cancelled.
+      queue.push(child.run_id);
+      // Skip terminal descendants: cancelling a finished row produces a
+      // spurious 410 error and would make the whole tree-cancel report failure.
+      if (child.latest_status === "done" || child.latest_status === "failed" || child.latest_status === "skipped") {
+        continue;
+      }
       const resolved: ResolvedActionTarget = {
         workflow: child.workflow,
         id: child.item_id,
         runId: child.run_id,
         date: child.tracker_date,
+        status: child.latest_status === "running" ? "running" : "pending",
       };
       const key = targetKey(resolved);
       if (!out.has(key)) out.set(key, resolved);
-      queue.push(child.run_id);
     }
   }
   return [...out.values()];
