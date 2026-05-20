@@ -145,7 +145,6 @@ function rowSurfaceType(entry: TrackerEntry): WorkflowSurfaceType {
 function rowTypeLabelFor(
   surfaceType: WorkflowSurfaceType,
   policy: WorkflowRuntimePolicy,
-  _entry?: TrackerEntry,
 ): string {
   const withPreview = (label: string): string => {
     const suffix = policy.preview?.rowTypeLabelSuffix;
@@ -205,7 +204,7 @@ export function buildWorkflowRunProjection(
     status: context.resolveEntryStatus?.(entry) ?? entry.status,
     step: entry.step,
     surfaceType,
-    rowTypeLabel: overrides.rowTypeLabel ?? rowTypeLabelFor(surfaceType, policy, entry),
+    rowTypeLabel: overrides.rowTypeLabel ?? rowTypeLabelFor(surfaceType, policy),
     actions: overrides.actions ?? withTargets(policy.rowActions, [runId]),
     batchMembers: overrides.batchMembers ?? [],
   };
@@ -294,7 +293,7 @@ export function buildProjectionFromQueueSurface(
     status,
     step: surface.kind === "approval-delegation" ? surface.parent.step : undefined,
     surfaceType,
-    rowTypeLabel: rowTypeLabelFor(surfaceType, policy, anchor),
+    rowTypeLabel: rowTypeLabelFor(surfaceType, policy),
     actions,
     batchMembers: members,
   };

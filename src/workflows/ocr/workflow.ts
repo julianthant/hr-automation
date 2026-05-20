@@ -25,8 +25,6 @@ export const OCR_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
   delegation: {
     utilityChildSurface: "delegation-member",
     utilityChildWorkflows: ["eid-lookup", "active-check"],
-    cancelScope: "tree",
-    fileScopeCancelKind: "ocr-discard",
   },
   preview: {
     rowTypeLabelSuffix: "Preview",

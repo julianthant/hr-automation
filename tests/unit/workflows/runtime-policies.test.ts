@@ -40,7 +40,6 @@ describe("workflow runtime policies", () => {
   it("registers OCR file-scope prep and utility child rules", () => {
     const policy = ocrWorkflow.metadata.runtimePolicy;
     assert.equal(policy?.preview?.rowTypeLabelSuffix, "Preview");
-    assert.equal(policy?.delegation?.fileScopeCancelKind, "ocr-discard");
     assert.equal(policy?.delegation?.utilityChildSurface, "delegation-member");
     assert.deepEqual(policy?.delegation?.utilityChildWorkflows, ["eid-lookup", "active-check"]);
   });
@@ -64,7 +63,6 @@ describe("workflow runtime policies", () => {
     const policy = emergencyContactWorkflow.metadata.runtimePolicy;
     assert.equal(policy?.prepRow?.titleSource, "pdf-original-name");
     assert.equal(policy?.memberRow?.titleSource, "person");
-    assert.equal(policy?.delegation?.cancelScope, "row");
   });
 
   it("standard workflows inherit default row cancel action", () => {

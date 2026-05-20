@@ -80,21 +80,6 @@ export interface WorkflowDelegationPolicy {
    */
   failedChildBlocksParent?: boolean;
   /**
-   * Default scope for `cancel` issued against the parent row.
-   * - "row": cancel the row only (queue/running task), no descendants.
-   * - "group": cancel the visible group members.
-   * - "tree": cancel the row plus every descendant run.
-   * Used by the central action engine when callers don't supply an
-   * explicit scope; it documents the intended blast-radius for tests.
-   */
-  cancelScope?: "row" | "group" | "tree";
-  /**
-   * File-scope cancellation routes through a workflow-specific endpoint
-   * instead of the generic cancel ops. OCR uses `ocr-discard` so cancel
-   * also deletes delegated children for that prep run.
-   */
-  fileScopeCancelKind?: "ocr-discard";
-  /**
    * Same row id persists through the entire workflow even as the run
    * delegates to sub-workflows (Oath Upload root row stays one row across
    * OCR + signature + ServiceNow stages).
@@ -148,8 +133,6 @@ export interface WorkflowRuntimePolicy {
   groupActions: WorkflowActionDescriptor[];
   batchViewToolbarActions: WorkflowActionDescriptor[];
   daemonActions: WorkflowActionDescriptor[];
-  daemonStopIsWorkflowCancel: boolean;
-  unknownTitleFallback: "entry-title-resolution";
   /** Delegation/cancel-scope behavior for this workflow. */
   delegation?: WorkflowDelegationPolicy;
   /** Approval-preview surface affordances. */

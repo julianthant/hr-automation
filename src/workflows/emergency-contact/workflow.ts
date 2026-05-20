@@ -51,9 +51,6 @@ const emergencyContactSteps = ["navigation", "fill-form", "save"] as const;
  */
 export const EMERGENCY_CONTACT_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
   ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
-  delegation: {
-    cancelScope: "row",
-  },
   memberRow: {
     titleSource: "person",
   },
