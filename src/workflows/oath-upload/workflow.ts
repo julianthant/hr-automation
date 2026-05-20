@@ -4,8 +4,34 @@ import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { loginToServiceNow } from "../../infra/auth/login.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
+import {
+  DEFAULT_WORKFLOW_RUNTIME_POLICY,
+  workflowAction,
+} from "../../domain/workflow-runtime/default-policy.js";
+import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { OathUploadInputSchema, type OathUploadInput } from "./schema.js";
 import { oathUploadHandler, oathUploadSteps } from "./handler.js";
+
+/**
+ * Oath Upload runtime policy.
+ *
+ * The root Oath Upload row is the same tracker row through every child
+ * delegation (OCR prep → signatures → ServiceNow submit). Approval
+ * dependencies use `block_parent`, so a failed signature child blocks
+ * the parent until retried or cancelled. Tree-wide cancel must be
+ * explicit — group/row cancel never reaches descendant signature rows.
+ */
+export const OATH_UPLOAD_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
+  ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
+  rowActions: [
+    workflowAction("cancel", "tree", "queue-panel", "Cancel workflow tree"),
+  ],
+  delegation: {
+    rootRowPersistsThroughChildren: true,
+    failedChildBlocksParent: true,
+    cancelScope: "tree",
+  },
+};
 
 const WORKFLOW = "oath-upload";
 
@@ -29,6 +55,7 @@ export const oathUploadWorkflow = defineWorkflow({
   authSteps: false,
   steps: oathUploadSteps,
   schema: OathUploadInputSchema,
+  runtimePolicy: OATH_UPLOAD_WORKFLOW_RUNTIME_POLICY,
   authChain: "sequential",
   batch: {
     mode: "sequential",

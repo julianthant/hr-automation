@@ -6,6 +6,9 @@ import {
   buildQueueSurfaces,
 } from "../../../src/dashboard/components/queue-panel/queue-surface-classifier.js";
 import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
+import { OCR_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/ocr/workflow.js";
+
+const phase4Policies = new Map([["ocr", OCR_WORKFLOW_RUNTIME_POLICY]]);
 
 function row(
   overrides: Partial<TrackerEntry> & Pick<TrackerEntry, "workflow" | "id" | "status">,
@@ -147,6 +150,7 @@ describe("buildQueueSurfaces", () => {
       delegationSourceEntries: [eid],
       workflow: "oath-signature",
       workflowLabel: "Oath Signature",
+      runtimePolicies: phase4Policies,
     });
 
     assert.equal(surfaces.groupRows.length, 0);

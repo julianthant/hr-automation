@@ -10,6 +10,7 @@ import { createTaskStore } from "../../../src/core/task-store/index.js";
 import { createWorkerStore } from "../../../src/core/daemon/worker-store.js";
 import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
+import { trackEventForDate } from "../../../src/tracker/jsonl.js";
 
 let dir: string;
 
@@ -55,6 +56,57 @@ test("Hono /api/cancel-queued cancels a queued task", async () => {
     assert.deepEqual(await res.json(), { ok: true });
     assert.equal(taskStore.getTask(task.taskId)?.state, "cancelled");
     assert.equal(taskStore.getAttempt(task.attemptId)?.state, "cancelled");
+  } finally {
+    taskStore.close();
+  }
+});
+
+test("Hono /api/cancel-queued honors explicit tree scope for descendants", async () => {
+  openStateDb(dir);
+  const taskStore = createTaskStore(openControlDb({ trackerDir: dir }));
+  try {
+    const date = "2026-05-20";
+    const [parent] = taskStore.enqueueTasks({
+      workflow: "oath-upload",
+      inputs: [{ sessionId: "oath-parent" }],
+      deriveItemId: (input) => input.sessionId,
+      runIds: ["oath-parent-run"],
+    });
+    const [child] = taskStore.enqueueTasks({
+      workflow: "oath-signature",
+      inputs: [{ emplId: "10000001" }],
+      deriveItemId: (input) => input.emplId,
+      runIds: ["signature-child-run"],
+      parentRunId: "oath-parent-run",
+    });
+    trackEventForDate({
+      workflow: "oath-upload",
+      timestamp: "2026-05-20T10:00:00.000Z",
+      id: "oath-parent",
+      runId: "oath-parent-run",
+      status: "pending",
+      data: { archetype: "batch-parent" },
+    }, date, dir);
+    trackEventForDate({
+      workflow: "oath-signature",
+      timestamp: "2026-05-20T10:01:00.000Z",
+      id: "10000001",
+      runId: "signature-child-run",
+      parentRunId: "oath-parent-run",
+      status: "pending",
+    }, date, dir);
+
+    const res = await app().request("/api/cancel-queued", jsonRequest({
+      workflow: "oath-upload",
+      id: "oath-parent",
+      runId: "oath-parent-run",
+      scope: "tree",
+    }));
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ok: true });
+    assert.equal(taskStore.getTask(parent.taskId)?.state, "cancelled");
+    assert.equal(taskStore.getTask(child.taskId)?.state, "cancelled");
   } finally {
     taskStore.close();
   }

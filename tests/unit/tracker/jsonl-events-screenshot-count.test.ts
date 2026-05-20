@@ -4,8 +4,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openStateDb, closeStateDbForTests } from "../../../src/tracker/state/db.js";
-import { trackEvent } from "../../../src/tracker/jsonl.js";
+import { trackEvent, trackEventForDate } from "../../../src/tracker/jsonl.js";
 import { buildJsonlEventsPayload } from "../../../src/tracker/dashboard/hono/routes/entries-payload.js";
+import "../../../src/workflows/oath-upload/workflow.js";
 
 test("buildJsonlEventsPayload uses SQLite screenshot_count when projection DB is ready", () => {
   const dir = mkdtempSync(join(tmpdir(), "jsonl-events-shots-"));
@@ -24,6 +25,58 @@ test("buildJsonlEventsPayload uses SQLite screenshot_count when projection DB is
 
     const payload = buildJsonlEventsPayload("work-study", "2026-05-15", "2026-05-15", dir);
     assert.equal(payload.entries[0]?.screenshotCount, 3);
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("buildJsonlEventsPayload includes Oath Upload delegated child context", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jsonl-events-oath-context-"));
+  try {
+    openStateDb(dir);
+    const date = "2026-05-20";
+    trackEventForDate({
+      workflow: "oath-upload",
+      timestamp: "2026-05-20T10:00:00.000Z",
+      id: "upload-session",
+      runId: "oath-upload-run",
+      status: "running",
+      step: "wait-signatures",
+      data: { archetype: "batch-parent", pdfOriginalName: "oath.pdf" },
+    }, date, dir);
+    trackEventForDate({
+      workflow: "ocr",
+      timestamp: "2026-05-20T10:01:00.000Z",
+      id: "ocr-session",
+      runId: "ocr-run",
+      parentRunId: "oath-upload-run",
+      status: "done",
+      step: "approved",
+      data: { archetype: "batch-parent", mode: "prepare", formType: "oath" },
+    }, date, dir);
+    trackEventForDate({
+      workflow: "oath-signature",
+      timestamp: "2026-05-20T10:02:00.000Z",
+      id: "10000001",
+      runId: "signature-run",
+      parentRunId: "oath-upload-run",
+      status: "pending",
+      data: { archetype: "delegate-child", name: "Jane Doe", emplId: "10000001" },
+    }, date, dir);
+
+    const payload = buildJsonlEventsPayload("oath-upload", date, date, dir);
+
+    assert.deepEqual(
+      payload.entries
+        .map((entry) => [entry.workflow, entry.id, entry.parentRunId ?? "root"])
+        .sort((a, b) => `${a[0]}:${a[1]}`.localeCompare(`${b[0]}:${b[1]}`)),
+      [
+        ["oath-signature", "10000001", "oath-upload-run"],
+        ["oath-upload", "upload-session", "root"],
+        ["ocr", "ocr-session", "oath-upload-run"],
+      ].sort((a, b) => `${a[0]}:${a[1]}`.localeCompare(`${b[0]}:${b[1]}`)),
+    );
   } finally {
     closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });

@@ -4,7 +4,10 @@ import {
 } from "../row-archetype.js";
 import type { TrackerEntry } from "../../tracker/jsonl.js";
 import type { TrackerQueueGroupSurface } from "../../tracker/queue-surfaces.js";
-import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "./default-policy.js";
+import {
+  getWorkflowRuntimePolicy,
+  type WorkflowRuntimePolicyLookup,
+} from "./registry.js";
 import type {
   WorkflowActionDescriptor,
   WorkflowRunProjection,
@@ -15,6 +18,7 @@ import type {
 export interface WorkflowProjectionContext {
   workflowLabels?: ReadonlyMap<string, string> | Record<string, string>;
   policy?: WorkflowRuntimePolicy;
+  runtimePolicies?: WorkflowRuntimePolicyLookup;
   resolveEntryTitle?: (entry: TrackerEntry) => string | undefined;
   resolveEntrySubtitle?: (entry: TrackerEntry) => string | undefined;
   resolveEntryStatus?: (entry: TrackerEntry) => string | undefined;
@@ -79,8 +83,30 @@ function resolveEmployeeLabel(data: Record<string, string>): string {
   return "";
 }
 
-function fallbackEntryTitle(entry: TrackerEntry): string {
+function isPrepRow(entry: TrackerEntry): boolean {
   const data = entry.data ?? {};
+  return resolveRowArchetype(entry) === "batch-parent" && (
+    data.mode === "prepare" || Boolean(data.pdfOriginalName)
+  );
+}
+
+function interpolateTemplate(template: string, entry: TrackerEntry): string {
+  return template.replaceAll("<last4 run id>", runIdFor(entry).slice(-4));
+}
+
+function fallbackEntryTitle(entry: TrackerEntry, policy: WorkflowRuntimePolicy): string {
+  const data = entry.data ?? {};
+  if (
+    policy.prepRow?.titleSource === "pdf-original-name" &&
+    isPrepRow(entry) &&
+    data.pdfOriginalName
+  ) {
+    return data.pdfOriginalName;
+  }
+  if (policy.memberRow?.titleSource === "person" && entry.parentRunId) {
+    const personName = resolveEmployeeLabel(data);
+    if (personName) return personName;
+  }
   if (data.mode === "prepare" && data.pdfOriginalName) return data.pdfOriginalName;
   if (entry.parentRunId) {
     const personName = resolveEmployeeLabel(data);
@@ -91,8 +117,14 @@ function fallbackEntryTitle(entry: TrackerEntry): string {
   return resolveEmployeeLabel(data) || data.__name || data.__subject || entry.id;
 }
 
-function fallbackEntrySubtitle(entry: TrackerEntry): string | undefined {
+function fallbackEntrySubtitle(entry: TrackerEntry, policy: WorkflowRuntimePolicy): string | undefined {
   const data = entry.data ?? {};
+  if (policy.prepRow?.subtitleTemplate && isPrepRow(entry)) {
+    return interpolateTemplate(policy.prepRow.subtitleTemplate, entry);
+  }
+  if (entry.parentRunId && policy.memberRow?.subtitle) {
+    return policy.memberRow.subtitle;
+  }
   const archetype = resolveRowArchetype(entry);
   if (archetype === "dispatch") {
     return firstNonBlank(data.__queueSubtitle, data.__queueRootTitle, data.parentSubject, data.__id, entry.id)
@@ -109,14 +141,22 @@ function rowSurfaceType(entry: TrackerEntry): WorkflowSurfaceType {
   return entry.parentRunId ? "delegation-member" : "normal";
 }
 
-function rowTypeLabelFor(surfaceType: WorkflowSurfaceType, _entry?: TrackerEntry): string {
+function rowTypeLabelFor(
+  surfaceType: WorkflowSurfaceType,
+  policy: WorkflowRuntimePolicy,
+  _entry?: TrackerEntry,
+): string {
+  const withPreview = (label: string): string => {
+    const suffix = policy.preview?.rowTypeLabelSuffix;
+    return policy.preview?.alwaysAvailable && suffix ? `${label} · ${suffix}` : label;
+  };
   switch (surfaceType) {
     case "normal":
       return "Normal row";
     case "approval-delegation":
-      return "Single delegation";
+      return withPreview("Single delegation");
     case "batch-delegation":
-      return "Batch delegation";
+      return withPreview("Batch delegation");
     case "passive-delegation":
       return "Passive delegation";
     case "delegation-member":
@@ -127,12 +167,13 @@ function rowTypeLabelFor(surfaceType: WorkflowSurfaceType, _entry?: TrackerEntry
 function batchGroupTitle(
   surface: TrackerQueueGroupSurface,
   context: WorkflowProjectionContext,
+  policy: WorkflowRuntimePolicy,
 ): string {
   const overridden = firstNonBlank(context.resolveGroupTitle?.(surface), surface.titleOverride);
   if (overridden) return overridden;
 
   if (surface.kind === "approval-delegation") {
-    return context.resolveEntryTitle?.(surface.parent) ?? fallbackEntryTitle(surface.parent);
+    return context.resolveEntryTitle?.(surface.parent) ?? fallbackEntryTitle(surface.parent, policy);
   }
 
   const first = surface.members[0];
@@ -150,7 +191,7 @@ export function buildWorkflowRunProjection(
   context: WorkflowProjectionContext,
   overrides: ProjectionOverrides = {},
 ): WorkflowRunProjection {
-  const policy = context.policy ?? DEFAULT_WORKFLOW_RUNTIME_POLICY;
+  const policy = context.policy ?? getWorkflowRuntimePolicy(entry.workflow, context.runtimePolicies);
   const surfaceType = overrides.surfaceType ?? rowSurfaceType(entry);
   const runId = runIdFor(entry);
   return {
@@ -158,12 +199,12 @@ export function buildWorkflowRunProjection(
     workflowId: entry.workflow,
     itemId: entry.id,
     parentRunId: entry.parentRunId,
-    title: overrides.title ?? context.resolveEntryTitle?.(entry) ?? fallbackEntryTitle(entry),
-    subtitle: overrides.subtitle ?? context.resolveEntrySubtitle?.(entry) ?? fallbackEntrySubtitle(entry),
+    title: overrides.title ?? context.resolveEntryTitle?.(entry) ?? fallbackEntryTitle(entry, policy),
+    subtitle: overrides.subtitle ?? context.resolveEntrySubtitle?.(entry) ?? fallbackEntrySubtitle(entry, policy),
     status: context.resolveEntryStatus?.(entry) ?? entry.status,
     step: entry.step,
     surfaceType,
-    rowTypeLabel: overrides.rowTypeLabel ?? rowTypeLabelFor(surfaceType, entry),
+    rowTypeLabel: overrides.rowTypeLabel ?? rowTypeLabelFor(surfaceType, policy, entry),
     actions: overrides.actions ?? withTargets(policy.rowActions, [runId]),
     batchMembers: overrides.batchMembers ?? [],
   };
@@ -173,7 +214,6 @@ export function buildProjectionFromQueueSurface(
   surface: TrackerQueueGroupSurface,
   context: WorkflowProjectionContext,
 ): WorkflowRunProjection {
-  const policy = context.policy ?? DEFAULT_WORKFLOW_RUNTIME_POLICY;
   const surfaceType: WorkflowSurfaceType =
     surface.kind === "approval-delegation"
       ? "approval-delegation"
@@ -185,6 +225,7 @@ export function buildProjectionFromQueueSurface(
   );
   const anchor = surface.kind === "approval-delegation" ? surface.parent : surface.members[0];
   const fallbackWorkflow = anchor?.workflow ?? "workflow";
+  const policy = context.policy ?? getWorkflowRuntimePolicy(fallbackWorkflow, context.runtimePolicies);
   const status = surface.kind === "approval-delegation"
     ? surface.parent.status
     : surface.members.some((member) => member.status === "running")
@@ -199,18 +240,29 @@ export function buildProjectionFromQueueSurface(
     : surface.kind === "approval-delegation"
       ? [surface.parent]
       : [];
+  const rowTargetEntries = surface.kind === "approval-delegation" ? [surface.parent] : [];
+  const groupActions = withTargets(policy.groupActions, targetRunIds(targetEntries));
+  const actions = surface.kind === "approval-delegation"
+    ? [
+        ...withTargets(policy.rowActions, targetRunIds(rowTargetEntries)),
+        ...groupActions,
+      ]
+    : groupActions;
+  const anchorProjection = anchor
+    ? buildWorkflowRunProjection(anchor, context, { surfaceType })
+    : undefined;
 
   return {
     runId: surface.parentRunId,
     workflowId: fallbackWorkflow,
-    itemId: surface.parentRunId,
-    title: batchGroupTitle(surface, context),
-    subtitle: undefined,
+    itemId: surface.kind === "approval-delegation" ? surface.parent.id : surface.parentRunId,
+    title: batchGroupTitle(surface, context, policy),
+    subtitle: surface.kind === "approval-delegation" ? anchorProjection?.subtitle : undefined,
     status,
     step: surface.kind === "approval-delegation" ? surface.parent.step : undefined,
     surfaceType,
-    rowTypeLabel: rowTypeLabelFor(surfaceType, anchor),
-    actions: withTargets(policy.groupActions, targetRunIds(targetEntries)),
+    rowTypeLabel: rowTypeLabelFor(surfaceType, policy, anchor),
+    actions,
     batchMembers: members,
   };
 }
