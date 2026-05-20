@@ -16,11 +16,14 @@ workflow children render under the prep/root context.
 
 ### Row archetypes emitted
 
-| Row                                | Archetype         | Dashboard surface              |
+| Row                                | RowArchetype      | Dashboard surface              |
 |------------------------------------|-------------------|--------------------------------|
 | OCR prep parent (awaiting-approval) | `batch-parent`    | OCR group card (top-level)     |
-| `eid-lookup` / active-check utility children | `delegate-child` | Flat delegation member rows    |
+| `eid-lookup` utility children (archetype `utility`) | `passive-child` | Flat `delegation-member` surface rows |
+| `active-check` utility children (archetype `single`) | `delegate-child` | Flat `delegation-member` surface rows |
 | Approved downstream children       | `delegate-child`  | Nested under parent card       |
+
+Note: `eid-lookup` and `active-check` both render flat as the `delegation-member` **surface type** (controlled by the OCR runtime policy's `delegation.utilityChildSurface`). However their RowArchetype differs: `eid-lookup` declares `archetype: "utility"` so `deriveRowArchetype` stamps `passive-child`; `active-check` declares `archetype: "single"` so children with a `parentRunId` resolve to `delegate-child`.
 
 ## Files
 
