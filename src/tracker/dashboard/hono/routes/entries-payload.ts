@@ -112,11 +112,18 @@ function withRuntimeContextEntries(
   const contextRunIds = new Set(out.map(getRunIdOr));
   const workflows = listWorkflows(dir).filter((candidate) => candidate !== workflow).sort();
 
+  // Read each child workflow's entries exactly once — the JSONL files do not
+  // change mid-call, so re-reading them on every fixpoint pass is wasteful.
+  const candidatesByWorkflow = new Map<string, TrackerEntry[]>();
+  for (const childWorkflow of workflows) {
+    candidatesByWorkflow.set(childWorkflow, readTrackerEntriesForStream(childWorkflow, date, today, dir));
+  }
+
   let added = true;
   while (added) {
     added = false;
     for (const childWorkflow of workflows) {
-      const candidates = readTrackerEntriesForStream(childWorkflow, date, today, dir);
+      const candidates = candidatesByWorkflow.get(childWorkflow)!;
       for (const candidate of candidates) {
         if (!candidate.parentRunId || !contextRunIds.has(candidate.parentRunId)) continue;
         const key = trackerEntryKey(candidate);
