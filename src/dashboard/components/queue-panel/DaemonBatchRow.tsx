@@ -3,6 +3,7 @@ import type { TrackerEntry } from "@/components/shared/types";
 import { resolveDaemonBatchQueueTitle } from "./batch-queue-view";
 import { GroupRowBase } from "./group-row-base";
 import { BatchFooterActions } from "./BatchFooterActions";
+import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/types.js";
 
 export interface DaemonBatchRowProps {
   workflow: string;
@@ -14,6 +15,7 @@ export interface DaemonBatchRowProps {
   workflowLabel: string;
   /** Optional inherited display title for delegated batches. */
   titleOverride?: string;
+  projection?: WorkflowRunProjection;
   memberEntries: TrackerEntry[];
   isBatchQueueFocused: boolean;
   onEnterBatchQueue: (batchParentRunId: string) => void;
@@ -36,6 +38,7 @@ export function DaemonBatchRow({
   batchParentRunId,
   workflowLabel,
   titleOverride,
+  projection,
   memberEntries,
   isBatchQueueFocused,
   onEnterBatchQueue,
@@ -58,6 +61,7 @@ export function DaemonBatchRow({
       date={date}
       batchParentRunId={batchParentRunId}
       memberEntries={memberEntries}
+      projection={projection}
       onDeletedIds={onDeletedIds}
     />
   );
@@ -65,10 +69,11 @@ export function DaemonBatchRow({
   return (
     <GroupRowBase
       variant="batch"
-      title={title}
+      title={projection?.title ?? title}
       parentRunId={batchParentRunId}
       members={memberEntries}
       countTone="neutral"
+      footerSecondaryId={projection?.subtitle}
       firstTimestamp={firstTimestamp}
       isFocused={isBatchQueueFocused}
       drillInEnabled={batchDrillInEnabled}

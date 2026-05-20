@@ -489,8 +489,8 @@ export function App() {
 
   const primariesForBulkActions = useMemo(() => {
     if (!batchQueueParentRunId) return dedupedEntries;
-    return dedupedEntries.filter((e) => e.parentRunId === batchQueueParentRunId);
-  }, [batchQueueParentRunId, dedupedEntries]);
+    return entries.filter((e) => e.parentRunId === batchQueueParentRunId);
+  }, [batchQueueParentRunId, dedupedEntries, entries]);
 
   const bulkActionEntries = useMemo(
     () => collectEntriesForMergedScope(mergeGroups, primariesForBulkActions),
@@ -603,6 +603,12 @@ export function App() {
               <RetryAllButton
                 workflow={workflow}
                 ids={retryAllIds}
+                items={bulkActionEntries
+                  .filter((e) => !isResolvedPrepRow(e))
+                  .map((e) => ({
+                    id: e.id,
+                    ...(e.runId ? { runId: e.runId } : {}),
+                  }))}
                 date={date}
                 parentRunId={batchQueueParentRunId ?? undefined}
               />

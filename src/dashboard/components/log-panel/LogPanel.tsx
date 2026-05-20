@@ -17,6 +17,11 @@ import { deriveTrackerFallbackLog } from "./log-fallback";
 import { useWorkflow } from "@/lib/workflows-context";
 import { queueStatusDisplayLabel } from "../../../domain/tracker-terminal-display.js";
 import { resolveRowArchetype } from "../../../domain/row-archetype.js";
+import {
+  buildProjectionFromQueueSurface,
+  buildWorkflowRunProjection,
+} from "../../../domain/workflow-runtime/projection.js";
+import { buildTrackerQueueSurfaces } from "../../../tracker/queue-surfaces.js";
 
 type LazySlot = ReactNode | (() => ReactNode);
 
@@ -49,57 +54,29 @@ interface LogPanelProps {
   onDeleteEntry?: () => void;
 }
 
-function ocrPrepFileCount(entry: TrackerEntry, allEntries: TrackerEntry[]): number {
-  if (entry.workflow !== "ocr") return 0;
-  if (!entry.parentRunId) return 1;
-  const count = allEntries.filter((candidate) =>
-    candidate.workflow === "ocr" &&
-    candidate.parentRunId === entry.parentRunId &&
-    resolveRowArchetype(candidate) === "batch-parent"
-  ).length;
-  return Math.max(1, count);
-}
-
 export function deriveQueueRowTypeLabel(
   entry: TrackerEntry,
   childEntries: TrackerEntry[],
   allEntries: TrackerEntry[],
   previewAvailable: boolean,
 ): string {
-  const archetype = resolveRowArchetype(entry);
-
-  switch (archetype) {
-    case "batch-parent": {
-      if (entry.workflow === "ocr") {
-        const fileCount = ocrPrepFileCount(entry, allEntries);
-        const base = fileCount > 1 ? "Batch delegation" : "Single delegation";
-        return previewAvailable ? `${base} · Preview` : base;
-      }
-      // recordCount (set by OCR orchestrator) takes precedence; childEntries covers non-OCR anchors
-      const recordCount = Number(entry.data?.recordCount ?? 0);
-      const count = recordCount > 0 ? recordCount : childEntries.length;
-      const base = count > 1 ? "Batch delegation" : "Single delegation";
-      return previewAvailable ? `${base} · Preview` : base;
+  const runId = entry.runId ?? entry.id;
+  const sourceEntries = allEntries.length > 0 ? allEntries : [entry, ...childEntries];
+  const surfaces = buildTrackerQueueSurfaces({
+    entries: sourceEntries,
+    delegationSourceEntries: sourceEntries,
+  });
+  const surface = surfaces.groupRows.find((candidate) => {
+    if (candidate.parentRunId === runId) return true;
+    if (candidate.kind === "approval-delegation" && (candidate.parent.runId ?? candidate.parent.id) === runId) {
+      return true;
     }
-    case "dispatch":
-      return "Single delegation";
-    case "passive-child":
-      return "Passive delegation";
-    case "delegate-child": {
-      const siblingCount = entry.parentRunId
-        ? allEntries.filter((e) => e.parentRunId === entry.parentRunId).length
-        : 1;
-      return siblingCount > 1 ? "Batch delegation" : "Single delegation";
-    }
-    case "batch-member":
-      return "Delegation member";
-    case "single":
-    default: {
-      if (childEntries.length > 0) return "Batch row";
-      if (entry.parentRunId) return "Delegation member";
-      return "Normal row";
-    }
-  }
+    return candidate.members.some((member) => (member.runId ?? member.id) === runId);
+  });
+  const label = surface
+    ? buildProjectionFromQueueSurface(surface, {}).rowTypeLabel
+    : buildWorkflowRunProjection(entry, {}).rowTypeLabel;
+  return previewAvailable ? `${label} · Preview` : label;
 }
 
 export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultTab, previewSlot, previewHeaderSlot, previewAvailable, onPreviewVisibleChange, onDeleteEntry }: LogPanelProps) {

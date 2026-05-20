@@ -1,4 +1,11 @@
 import type { TrackerEntry } from "@/components/shared/types";
+import { resolveEntryName } from "@/components/shared/entry-display";
+import {
+  buildProjectionFromQueueSurface,
+  buildWorkflowRunProjection,
+  type WorkflowProjectionContext,
+} from "../../../domain/workflow-runtime/projection.js";
+import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/types.js";
 import {
   buildTrackerQueueSurfaces,
   countTopLevelQueueSurfaceRows,
@@ -88,6 +95,7 @@ export interface BuildQueueSurfacesInput {
   delegationSourceEntries: TrackerEntry[];
   workflow: string;
   workflowLabel: string;
+  displayNames?: Map<string, string>;
 }
 
 export interface QueueSurfaces {
@@ -95,6 +103,32 @@ export interface QueueSurfaces {
   flatEntries: TrackerEntry[];
   membersByParentRunId: Map<string, TrackerEntry[]>;
   approvalParentRunIds: Set<string>;
+}
+
+export interface QueueGroupProjectionRow {
+  surface: QueueGroupSurface;
+  projection: WorkflowRunProjection;
+}
+
+export interface QueueEntryProjectionRow {
+  entry: TrackerEntry;
+  projection: WorkflowRunProjection;
+}
+
+export interface QueueProjectionRows {
+  surfaces: QueueSurfaces;
+  groupRows: QueueGroupProjectionRow[];
+  flatEntries: QueueEntryProjectionRow[];
+  projections: WorkflowRunProjection[];
+}
+
+function projectionContext(input: BuildQueueSurfacesInput): WorkflowProjectionContext {
+  return {
+    workflowLabels: new Map([[input.workflow, input.workflowLabel]]),
+    resolveEntryTitle: input.displayNames
+      ? (entry) => resolveEntryName(toDashboardEntry(entry), input.displayNames)
+      : undefined,
+  };
 }
 
 export function buildQueueSurfaces(input: BuildQueueSurfacesInput): QueueSurfaces {
@@ -113,6 +147,35 @@ export function buildQueueSurfaces(input: BuildQueueSurfacesInput): QueueSurface
     ),
     approvalParentRunIds: core.approvalParentRunIds,
   };
+}
+
+export function buildQueueProjectionRows(input: BuildQueueSurfacesInput): QueueProjectionRows {
+  const surfaces = buildQueueSurfaces(input);
+  const context = projectionContext(input);
+  const groupRows = surfaces.groupRows.map((surface) => ({
+    surface,
+    projection: buildProjectionFromQueueSurface(
+      surface as unknown as TrackerQueueGroupSurface,
+      context,
+    ),
+  }));
+  const flatEntries = surfaces.flatEntries.map((entry) => ({
+    entry,
+    projection: buildWorkflowRunProjection(toJsonlEntry(entry), context),
+  }));
+  return {
+    surfaces,
+    groupRows,
+    flatEntries,
+    projections: [
+      ...groupRows.map((row) => row.projection),
+      ...flatEntries.map((row) => row.projection),
+    ],
+  };
+}
+
+export function buildQueueProjections(input: BuildQueueSurfacesInput): WorkflowRunProjection[] {
+  return buildQueueProjectionRows(input).projections;
 }
 
 /**

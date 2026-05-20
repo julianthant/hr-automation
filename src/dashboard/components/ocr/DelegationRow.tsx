@@ -1,8 +1,8 @@
 import type { TrackerEntry } from "@/components/shared/types";
 import { GroupRowBase } from "@/components/queue-panel/group-row-base";
-import { RetryButton } from "@/components/shared/RetryButton";
-import { DeleteButton } from "@/components/shared/DeleteButton";
+import { BatchFooterActions } from "@/components/queue-panel/BatchFooterActions";
 import { readQueueTitle } from "../../../domain/queue-title.js";
+import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/types.js";
 
 /**
  * Summary card for an approval delegation: an approved prep row and its
@@ -14,6 +14,7 @@ export interface DelegationRowProps {
   parent: TrackerEntry;
   /** Downstream entries with `parentRunId === parent.runId`. */
   delegatedEntries: TrackerEntry[];
+  projection?: WorkflowRunProjection;
   /** Whether the batch queue view is showing this parent's members. */
   isBatchQueueFocused: boolean;
   onEnterBatchQueue: (parentRunId: string) => void;
@@ -31,6 +32,7 @@ export interface DelegationRowProps {
 export function DelegationRow({
   parent,
   delegatedEntries,
+  projection,
   isBatchQueueFocused,
   onEnterBatchQueue,
   date,
@@ -39,40 +41,33 @@ export function DelegationRow({
 }: DelegationRowProps) {
   const runId = parent.runId ?? parent.id;
   const title = parent.data?.pdfOriginalName ?? readQueueTitle(parent.data) ?? "Prep batch";
-  const footerActions = (
-    <>
-      <RetryButton
-        workflow={parent.workflow}
-        id={parent.id}
-        runId={parent.runId}
-        date={date}
-      />
-      {date && onDelete ? (
-        <DeleteButton
-          workflow={parent.workflow}
-          id={parent.id}
-          runId={parent.runId}
-          date={date}
-          onDeleted={onDelete}
-        />
-      ) : null}
-    </>
-  );
+  const footerActionEntries = delegatedEntries.length > 0 ? delegatedEntries : [parent];
 
   return (
     <GroupRowBase
       variant="approval-delegation"
-      title={title}
+      title={projection?.title ?? title}
       parentRunId={runId}
       members={delegatedEntries}
       countTone="warning"
       footerRunOrdinal={parent.runOrdinal}
-      footerSecondaryId={parent.data?.__name || parent.id}
+      footerSecondaryId={projection?.subtitle ?? parent.data?.__name || parent.id}
       firstTimestamp={parent.timestamp}
       isFocused={isBatchQueueFocused}
       drillInEnabled={batchDrillInEnabled}
       onEnter={onEnterBatchQueue}
-      footerActions={footerActions}
+      footerActions={
+        <BatchFooterActions
+          workflow={parent.workflow}
+          date={date}
+          batchParentRunId={runId}
+          memberEntries={footerActionEntries}
+          projection={projection}
+          onDeletedIds={(ids) => {
+            if (ids.includes(parent.id)) onDelete?.(parent.id);
+          }}
+        />
+      }
     />
   );
 }

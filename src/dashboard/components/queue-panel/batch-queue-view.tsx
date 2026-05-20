@@ -3,6 +3,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import type { TrackerEntry } from "@/components/shared/types";
 import { EntryItem } from "./EntryItem";
 import { cn } from "@/lib/utils";
+import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/types.js";
 
 /**
  * Display title for daemon / dashboard batch cards and batch-queue toolbar
@@ -35,6 +36,7 @@ export function resolveDaemonBatchQueueTitle(
  */
 export function BatchQueueToolbar({
   batchAnchor,
+  projection,
   titleOverride,
   anchorKind = "prep",
   memberCount,
@@ -44,6 +46,7 @@ export function BatchQueueToolbar({
   onOpenBatchPreview,
 }: {
   batchAnchor: TrackerEntry;
+  projection?: WorkflowRunProjection;
   /** When set, replaces the default title from tracker data (for non-OCR batches). */
   titleOverride?: string;
   /** Prep batches use an "Approved …" subtitle; daemon/dashboard batches use "Started …". */
@@ -59,6 +62,7 @@ export function BatchQueueToolbar({
   onOpenBatchPreview?: () => void;
 }) {
   const title =
+    projection?.title ??
     titleOverride ??
     batchAnchor.data?.pdfOriginalName ??
     "Batch";
@@ -175,6 +179,7 @@ function formatBatchToolbarTime(ts: string): string {
  */
 export function BatchQueueMemberList({
   members,
+  projections,
   selectedId,
   onSelect,
   displayNames,
@@ -183,6 +188,7 @@ export function BatchQueueMemberList({
   emptyDescription = "Members will appear here as the workflow processes them",
 }: {
   members: TrackerEntry[];
+  projections?: WorkflowRunProjection[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   displayNames?: Map<string, string>;
@@ -202,17 +208,23 @@ export function BatchQueueMemberList({
   }
   return (
     <>
-      {members.map((entry) => (
+      {members.map((entry) => {
+        const projection = projections?.find(
+          (candidate) => candidate.runId === (entry.runId ?? entry.id),
+        );
+        return (
         <EntryItem
           key={entry.id}
           entry={entry}
+          projection={projection}
           displayNames={displayNames}
           selected={selectedId === entry.id}
           onSelect={onSelect}
           date={date}
           onDelete={onDelete}
         />
-      ))}
+        );
+      })}
     </>
   );
 }

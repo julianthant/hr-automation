@@ -5,6 +5,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn, compact } from "@/lib/utils";
 import { IconActionButton } from "@/components/shared/IconActionButton";
 import type { TrackerEntry } from "@/components/shared/types";
+import type { WorkflowActionDescriptor } from "../../../domain/workflow-runtime/types.js";
 
 interface QueueItemControlsProps {
   workflow: string;
@@ -12,6 +13,7 @@ interface QueueItemControlsProps {
   runId?: string;
   subject?: string;
   entry?: TrackerEntry;
+  actions?: WorkflowActionDescriptor[];
   className?: string;
 }
 
@@ -63,9 +65,18 @@ export function buildQueueCancelRequest({ workflow, id, runId, entry }: QueueCan
  * 409s from the backend are surfaced as warnings — the daemon claimed the
  * item between the user's click and the backend lock.
  */
-export function QueueItemControls({ workflow, id, runId, subject, entry, className }: QueueItemControlsProps) {
+function hasEnabledAction(
+  actions: WorkflowActionDescriptor[] | undefined,
+  kind: WorkflowActionDescriptor["kind"],
+): boolean {
+  if (!actions) return true;
+  return actions.some((action) => action.kind === kind && action.enabled);
+}
+
+export function QueueItemControls({ workflow, id, runId, subject, entry, actions, className }: QueueItemControlsProps) {
   const [pending, setPending] = useState<"cancel" | "bump" | null>(null);
   const label = subject?.trim() || id;
+  const cancelEnabled = hasEnabledAction(actions, "cancel");
 
   const post = async (path: string, body: Record<string, string>, action: "cancel" | "bump") => {
     setPending(action);
@@ -104,7 +115,7 @@ export function QueueItemControls({ workflow, id, runId, subject, entry, classNa
 
   const onCancelClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (pending) return;
+    if (pending || !cancelEnabled) return;
     const request = buildQueueCancelRequest({ workflow, id, runId, entry });
     void post(request.path, request.body, "cancel");
   };
@@ -144,7 +155,7 @@ export function QueueItemControls({ workflow, id, runId, subject, entry, classNa
             tone="destructive"
             label="Cancel queued item"
             pending={pending === "cancel"}
-            disabled={pending !== null}
+            disabled={pending !== null || !cancelEnabled}
             onClick={onCancelClick}
             icon={<X className="h-3.5 w-3.5" />}
             className={cn(

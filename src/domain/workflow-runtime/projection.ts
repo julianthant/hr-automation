@@ -1,6 +1,5 @@
 import { readQueueTitle } from "../queue-title.js";
 import {
-  archetypeRowTypeLabel,
   resolveRowArchetype,
 } from "../row-archetype.js";
 import type { TrackerEntry } from "../../tracker/jsonl.js";
@@ -110,7 +109,7 @@ function rowSurfaceType(entry: TrackerEntry): WorkflowSurfaceType {
   return entry.parentRunId ? "delegation-member" : "normal";
 }
 
-function rowTypeLabelFor(surfaceType: WorkflowSurfaceType, entry?: TrackerEntry): string {
+function rowTypeLabelFor(surfaceType: WorkflowSurfaceType, _entry?: TrackerEntry): string {
   switch (surfaceType) {
     case "normal":
       return "Normal row";
@@ -121,7 +120,7 @@ function rowTypeLabelFor(surfaceType: WorkflowSurfaceType, entry?: TrackerEntry)
     case "passive-delegation":
       return "Passive delegation";
     case "delegation-member":
-      return entry ? archetypeRowTypeLabel(resolveRowArchetype(entry)) : "Delegated";
+      return "Delegation member";
   }
 }
 

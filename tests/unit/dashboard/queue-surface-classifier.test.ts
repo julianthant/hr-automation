@@ -1,7 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { buildQueueSurfaces } from "../../../src/dashboard/components/queue-panel/queue-surface-classifier.js";
+import {
+  buildQueueProjections,
+  buildQueueSurfaces,
+} from "../../../src/dashboard/components/queue-panel/queue-surface-classifier.js";
 import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
 
 function row(
@@ -15,6 +18,38 @@ function row(
 }
 
 describe("buildQueueSurfaces", () => {
+  it("builds projection rows from the same queue surfaces", () => {
+    const a = row({
+      workflow: "eid-lookup",
+      id: "a",
+      runId: "run-a",
+      parentRunId: "batch-1",
+      status: "pending",
+    });
+    const b = row({
+      workflow: "eid-lookup",
+      id: "b",
+      runId: "run-b",
+      parentRunId: "batch-1",
+      status: "done",
+    });
+
+    const projections = buildQueueProjections({
+      entries: [a, b],
+      delegationSourceEntries: [a, b],
+      workflow: "eid-lookup",
+      workflowLabel: "EID Lookup",
+    });
+
+    assert.equal(projections.length, 1);
+    assert.equal(projections[0]?.surfaceType, "batch-delegation");
+    assert.equal(projections[0]?.rowTypeLabel, "Batch delegation");
+    assert.deepEqual(projections[0]?.actions.map((action) => action.targetRunIds), [
+      ["run-a", "run-b"],
+      ["run-a", "run-b"],
+    ]);
+  });
+
   it("keeps approved OCR approval delegation visible and folds passive children underneath", () => {
     const ocr = row({
       workflow: "ocr",
