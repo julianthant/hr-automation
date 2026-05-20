@@ -8,6 +8,7 @@ import { IconActionButton } from "@/components/shared/IconActionButton";
 import type { WorkflowActionDescriptor } from "../../../domain/workflow-runtime/types.js";
 import {
   actionScopeBody,
+  findEnabledAction,
   hasEnabledAction,
 } from "@/lib/workflow-action-utils";
 
@@ -33,9 +34,7 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, actio
   const [pending, setPending] = useState(false);
   const label = subject?.trim() || id;
   const cancelEnabled = hasEnabledAction(actions, "cancel");
-  const scope = actionScopeBody(
-    actions?.find((candidate) => candidate.kind === "cancel" && candidate.enabled),
-  ).scope;
+  const scope = actionScopeBody(findEnabledAction(actions, "cancel")).scope;
 
   // OCR-prep parent rows live in the downstream workflow's queue but aren't
   // daemon-claimed — they're tracker-only proxies for the OCR session. The
