@@ -104,4 +104,34 @@ describe("buildWorkflowActionRequest", () => {
       },
     );
   });
+
+  it("carries OCR discard context on central cancel requests", () => {
+    assert.deepEqual(
+      buildWorkflowActionRequest({
+        transport: "force-stop",
+        kind: "cancel",
+        fallbackTarget: { workflowId: "oath-upload", id: "oath-parent", runId: "ocr-run" },
+        parentRunId: "parent-run",
+        ocrSessionId: "ocr-session",
+        parentWorkflow: "oath-upload",
+        parentItemId: "oath-parent",
+        formType: "oath-signature",
+        reason: "Cancelled from oath-upload queue",
+      }),
+      {
+        path: "/api/task/force-stop",
+        body: {
+          workflow: "oath-upload",
+          id: "oath-parent",
+          runId: "ocr-run",
+          ocrSessionId: "ocr-session",
+          parentWorkflow: "oath-upload",
+          parentRunId: "parent-run",
+          parentItemId: "oath-parent",
+          formType: "oath-signature",
+          reason: "Cancelled from oath-upload queue",
+        },
+      },
+    );
+  });
 });

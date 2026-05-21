@@ -48,7 +48,7 @@ describe("buildQueueCancelRequest", () => {
     );
   });
 
-  it("routes OCR prep proxy rows to discard-prepare with the OCR session body", () => {
+  it("routes OCR prep proxy rows through central cancel with the OCR session context", () => {
     assert.deepEqual(
       buildQueueCancelRequest({
         workflow: "oath-upload",
@@ -57,10 +57,12 @@ describe("buildQueueCancelRequest", () => {
         entry: prepEntry(),
       }),
       {
-        path: "/api/ocr/discard-prepare",
+        path: "/api/cancel-queued",
         body: {
-          sessionId: "ocr-session",
           runId: "ocr-run",
+          workflow: "oath-upload",
+          id: "oath-parent",
+          ocrSessionId: "ocr-session",
           reason: "Cancelled from oath-upload queue",
           parentWorkflow: "oath-upload",
           parentRunId: "parent-run",

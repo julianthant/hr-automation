@@ -5,6 +5,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn, compact } from "@/lib/utils";
 import {
   buildWorkflowActionRequest,
+  type BuildWorkflowActionRequestArgs,
   useWorkflowActionDispatcher,
 } from "@/components/hooks/useWorkflowActionDispatcher";
 import { IconActionButton } from "@/components/shared/IconActionButton";
@@ -34,6 +35,16 @@ export function buildQueueCancelRequest({ workflow, id, runId, entry, actions }:
   path: string;
   body: Record<string, unknown>;
 } {
+  return buildWorkflowActionRequest(buildQueueCancelDispatchArgs({ workflow, id, runId, entry, actions }));
+}
+
+function buildQueueCancelDispatchArgs({
+  workflow,
+  id,
+  runId,
+  entry,
+  actions,
+}: QueueCancelRequestArgs): BuildWorkflowActionRequestArgs {
   const cancelAction = findEnabledAction(actions, "cancel");
   const ocrPrep =
     entry?.data?.mode === "prepare"
@@ -47,25 +58,25 @@ export function buildQueueCancelRequest({ workflow, id, runId, entry, actions }:
       : null;
 
   if (!ocrPrep) {
-    return buildWorkflowActionRequest({
+    return {
       transport: "cancel-queued",
       kind: "cancel",
       action: cancelAction,
       fallbackTarget: { workflowId: workflow, id, runId },
-    });
+    };
   }
 
   return {
-    path: "/api/ocr/discard-prepare",
-    body: compact({
-      sessionId: ocrPrep.ocrSessionId,
-      runId: ocrPrep.ocrRunId,
-      reason: `Cancelled from ${workflow} queue`,
-      parentWorkflow: workflow,
-      parentRunId: runId,
-      parentItemId: id,
-      formType: ocrPrep.formType,
-    }),
+    transport: "cancel-queued",
+    kind: "cancel",
+    action: cancelAction,
+    fallbackTarget: { workflowId: workflow, id, runId: ocrPrep.ocrRunId },
+    ocrSessionId: ocrPrep.ocrSessionId,
+    reason: `Cancelled from ${workflow} queue`,
+    parentWorkflow: workflow,
+    parentRunId: runId,
+    parentItemId: id,
+    formType: typeof ocrPrep.formType === "string" ? ocrPrep.formType : undefined,
   };
 }
 
@@ -119,20 +130,13 @@ export function QueueItemControls({ workflow, id, runId, subject, entry, actions
   const onCancelClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (pending || !cancelEnabled) return;
-    const request = buildQueueCancelRequest({ workflow, id, runId, entry, actions });
-    if (request.path === "/api/ocr/discard-prepare") {
-      void post(request.path, request.body, "cancel");
-      return;
-    }
+    const request = buildQueueCancelDispatchArgs({ workflow, id, runId, entry, actions });
     void (async () => {
       setPending("cancel");
       const t = toast.loading(`Cancelling ${label}…`);
       try {
         const result = await dispatchWorkflowAction<{ ok?: boolean; error?: string }>({
-          transport: "cancel-queued",
-          kind: "cancel",
-          action: cancelAction,
-          fallbackTarget: { workflowId: workflow, id, runId },
+          ...request,
         });
         if (result.ok) {
           toast.success("Cancelled", { id: t, description: label });

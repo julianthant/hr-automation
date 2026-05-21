@@ -17,7 +17,7 @@ import {
   readQueueDepth,
 } from "../../ops/index.js";
 import { performWorkflowAction } from "../../actions/perform-workflow-action.js";
-import type { WorkflowActionResult, WorkflowActionScope } from "../../actions/types.js";
+import type { WorkflowActionRequest, WorkflowActionResult, WorkflowActionScope } from "../../actions/types.js";
 import { errorMessage } from "../../../../utils/errors.js";
 import { log } from "../../../../utils/log.js";
 import type { DashboardHonoDeps } from "../context.js";
@@ -45,6 +45,23 @@ function parseParentRunIdFromBody(body: Record<string, unknown>):
 
 function parseRowCancelScope(value: unknown): WorkflowActionScope {
   return value === "tree" ? "tree" : "row";
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function parseOcrCancelContext(
+  body: Record<string, unknown>,
+): Pick<WorkflowActionRequest, "ocrSessionId" | "parentWorkflow" | "parentRunId" | "parentItemId" | "formType" | "reason"> {
+  return {
+    ...(optionalString(body.ocrSessionId) ? { ocrSessionId: optionalString(body.ocrSessionId) } : {}),
+    ...(optionalString(body.parentWorkflow) ? { parentWorkflow: optionalString(body.parentWorkflow) } : {}),
+    ...(optionalString(body.parentRunId) ? { parentRunId: optionalString(body.parentRunId) } : {}),
+    ...(optionalString(body.parentItemId) ? { parentItemId: optionalString(body.parentItemId) } : {}),
+    ...(optionalString(body.formType) ? { formType: optionalString(body.formType) } : {}),
+    ...(optionalString(body.reason) ? { reason: optionalString(body.reason) } : {}),
+  };
 }
 
 function parseItemsFromBody<T>(
@@ -241,13 +258,31 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       id: String(body.id ?? ""),
       runId: body.runId ? String(body.runId) : undefined,
       scope: parseRowCancelScope(body.scope),
-    }), async (req: { workflow: string; id: string; runId?: string; scope: WorkflowActionScope }) => {
+      ...parseOcrCancelContext(body),
+    }), async (req: {
+      workflow: string;
+      id: string;
+      runId?: string;
+      scope: WorkflowActionScope;
+      ocrSessionId?: string;
+      parentWorkflow?: string;
+      parentRunId?: string;
+      parentItemId?: string;
+      formType?: string;
+      reason?: string;
+    }) => {
       const result = await performWorkflowAction({
         action: "cancel",
         scope: req.scope,
         source: "queue-panel",
         workflowId: req.workflow,
         cancelMode: "cooperative",
+        ...(req.ocrSessionId ? { ocrSessionId: req.ocrSessionId } : {}),
+        ...(req.parentWorkflow ? { parentWorkflow: req.parentWorkflow } : {}),
+        ...(req.parentRunId ? { parentRunId: req.parentRunId } : {}),
+        ...(req.parentItemId ? { parentItemId: req.parentItemId } : {}),
+        ...(req.formType ? { formType: req.formType } : {}),
+        ...(req.reason ? { reason: req.reason } : {}),
         targets: [{
           workflowId: req.workflow,
           id: req.id,
@@ -310,13 +345,31 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       id: String(body.id ?? ""),
       runId: body.runId ? String(body.runId) : undefined,
       scope: parseRowCancelScope(body.scope),
-    }), async (req: { workflow: string; id: string; runId?: string; scope: WorkflowActionScope }) => {
+      ...parseOcrCancelContext(body),
+    }), async (req: {
+      workflow: string;
+      id: string;
+      runId?: string;
+      scope: WorkflowActionScope;
+      ocrSessionId?: string;
+      parentWorkflow?: string;
+      parentRunId?: string;
+      parentItemId?: string;
+      formType?: string;
+      reason?: string;
+    }) => {
       const result = await performWorkflowAction({
         action: "cancel",
         scope: req.scope,
         source: "queue-panel",
         workflowId: req.workflow,
         cancelMode: "force",
+        ...(req.ocrSessionId ? { ocrSessionId: req.ocrSessionId } : {}),
+        ...(req.parentWorkflow ? { parentWorkflow: req.parentWorkflow } : {}),
+        ...(req.parentRunId ? { parentRunId: req.parentRunId } : {}),
+        ...(req.parentItemId ? { parentItemId: req.parentItemId } : {}),
+        ...(req.formType ? { formType: req.formType } : {}),
+        ...(req.reason ? { reason: req.reason } : {}),
         targets: [{
           workflowId: req.workflow,
           id: req.id,

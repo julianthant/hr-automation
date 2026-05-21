@@ -123,7 +123,11 @@ async function discardOcrPrep(
   const r = await buildOcrDiscardHandler({ trackerDir: deps.dir })({
     sessionId,
     runId,
+    ...(req.reason ? { reason: req.reason } : {}),
+    ...(req.parentWorkflow ? { parentWorkflow: req.parentWorkflow } : {}),
     ...(req.parentRunId ? { parentRunId: req.parentRunId } : {}),
+    ...(req.parentItemId ? { parentItemId: req.parentItemId } : {}),
+    ...(req.formType ? { formType: req.formType } : {}),
   });
   return r.body.ok
     ? okTarget(t)
@@ -151,18 +155,19 @@ export async function performWorkflowAction(
   const rejection = rejectionReason(req);
   if (rejection) return empty(rejection);
 
-  const resolved = resolveActionTargets(req, deps.dir);
-  if (!resolved.ok) return empty(resolved.error);
-
   const results: WorkflowActionTargetResult[] = [];
 
   if (req.action === "cancel" && req.ocrSessionId) {
     results.push(await discardOcrPrep(req, deps));
   } else if (req.action === "cancel") {
+    const resolved = resolveActionTargets(req, deps.dir);
+    if (!resolved.ok) return empty(resolved.error);
     for (const t of resolved.targets) {
       results.push(await cancelTarget(req, t, deps));
     }
   } else if (req.action === "retry") {
+    const resolved = resolveActionTargets(req, deps.dir);
+    if (!resolved.ok) return empty(resolved.error);
     const retry = buildEntryReEnqueueHandler(deps.dir);
     for (const t of resolved.targets) {
       const r = await retry({
@@ -175,6 +180,8 @@ export async function performWorkflowAction(
       results.push(r.ok ? okTarget(t) : failTarget(t, r.error));
     }
   } else if (req.action === "delete") {
+    const resolved = resolveActionTargets(req, deps.dir);
+    if (!resolved.ok) return empty(resolved.error);
     const del = buildDeleteEntryHandler(
       deps.dir,
       deps.screenshotsDir ? { screenshotsDir: deps.screenshotsDir } : {},
@@ -193,6 +200,8 @@ export async function performWorkflowAction(
       results.push(r.ok ? okTarget(t) : failTarget(t, r.error, r.status));
     }
   } else if (req.action === "bump") {
+    const resolved = resolveActionTargets(req, deps.dir);
+    if (!resolved.ok) return empty(resolved.error);
     const bump = buildQueueBumpHandler(deps.dir);
     for (const t of resolved.targets) {
       const r = await bump({

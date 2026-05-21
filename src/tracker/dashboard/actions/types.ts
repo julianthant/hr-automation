@@ -60,6 +60,11 @@ export interface WorkflowActionRequest {
   parentRunId?: string;
   /** When set on a `cancel`, routes to OCR file-scope discard. */
   ocrSessionId?: string;
+  /** OCR discard only — explicit parent row context for mirrored discard rows. */
+  parentWorkflow?: string;
+  parentItemId?: string;
+  formType?: string;
+  reason?: string;
   /** Cancel only — cooperative (default) vs force interrupt. */
   cancelMode?: CancelMode;
 }

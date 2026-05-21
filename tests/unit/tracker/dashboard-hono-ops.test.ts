@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -10,7 +10,7 @@ import { createTaskStore } from "../../../src/core/task-store/index.js";
 import { createWorkerStore } from "../../../src/core/daemon/worker-store.js";
 import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
-import { trackEventForDate } from "../../../src/tracker/jsonl.js";
+import { dateLocal, trackEventForDate } from "../../../src/tracker/jsonl.js";
 
 let dir: string;
 
@@ -110,6 +110,60 @@ test("Hono /api/cancel-queued honors explicit tree scope for descendants", async
   } finally {
     taskStore.close();
   }
+});
+
+test("Hono /api/cancel-queued routes OCR discard context through workflow actions", async () => {
+  const res = await app().request("/api/cancel-queued", jsonRequest({
+    workflow: "oath-upload",
+    id: "oath-parent",
+    runId: "ocr-run",
+    ocrSessionId: "ocr-session",
+    reason: "Cancelled from oath-upload queue",
+    parentWorkflow: "oath-upload",
+    parentRunId: "parent-run",
+    parentItemId: "oath-parent",
+    formType: "oath-signature",
+  }));
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true });
+
+  const parentFile = join(dir, `oath-upload-${dateLocal()}.jsonl`);
+  assert.ok(existsSync(parentFile));
+  const parentLines = readFileSync(parentFile, "utf-8").split("\n").filter(Boolean);
+  const parent = JSON.parse(parentLines[parentLines.length - 1]);
+  assert.equal(parent.id, "oath-parent");
+  assert.equal(parent.runId, "parent-run");
+  assert.equal(parent.status, "failed");
+  assert.equal(parent.step, "discarded");
+  assert.equal(parent.error, "Cancelled from oath-upload queue");
+});
+
+test("Hono /api/task/force-stop routes OCR discard context through workflow actions", async () => {
+  const res = await app().request("/api/task/force-stop", jsonRequest({
+    workflow: "oath-upload",
+    id: "oath-parent-running",
+    runId: "ocr-run-running",
+    ocrSessionId: "ocr-session-running",
+    reason: "Cancelled from oath-upload queue",
+    parentWorkflow: "oath-upload",
+    parentRunId: "parent-run-running",
+    parentItemId: "oath-parent-running",
+    formType: "oath-signature",
+  }));
+
+  assert.equal(res.status, 202);
+  assert.deepEqual(await res.json(), { ok: true, commandId: "" });
+
+  const parentFile = join(dir, `oath-upload-${dateLocal()}.jsonl`);
+  assert.ok(existsSync(parentFile));
+  const parentLines = readFileSync(parentFile, "utf-8").split("\n").filter(Boolean);
+  const parent = JSON.parse(parentLines[parentLines.length - 1]);
+  assert.equal(parent.id, "oath-parent-running");
+  assert.equal(parent.runId, "parent-run-running");
+  assert.equal(parent.status, "failed");
+  assert.equal(parent.step, "discarded");
+  assert.equal(parent.error, "Cancelled from oath-upload queue");
 });
 
 test("Hono /api/cancel-queued returns not-found shape for missing queue item", async () => {

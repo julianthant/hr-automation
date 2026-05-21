@@ -35,10 +35,9 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, actio
   const cancelEnabled = actions ? Boolean(cancelAction) : true;
 
   // OCR-prep parent rows live in the downstream workflow's queue but aren't
-  // daemon-claimed — they're tracker-only proxies for the OCR session. The
-  // /api/cancel-running endpoint would 4xx with "not claimed by any daemon".
-  // Route to /api/ocr/discard-prepare with the OCR session info from data;
-  // the discard handler mirrors `failed step=discarded` back onto this row.
+  // daemon-claimed — they're tracker-only proxies for the OCR session. Send
+  // them through central cancel with OCR context so the action engine routes
+  // to discard and mirrors `failed step=discarded` back onto this row.
   const ocrPrep =
     entry?.data?.mode === "prepare"
       && typeof entry.data.ocrSessionId === "string"
@@ -62,26 +61,24 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, actio
       description: "Cancelling the OCR session and removing this row from the queue.",
     });
     try {
-      const res = await fetch("/api/ocr/discard-prepare", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: ocrPrep.ocrSessionId,
-          runId: ocrPrep.ocrRunId,
-          reason: `Cancelled from ${workflow} queue`,
-          parentWorkflow: workflow,
-          parentRunId: runId,
-          parentItemId: id,
-          formType: ocrPrep.formType,
-        }),
+      const result = await dispatchWorkflowAction<{ ok?: boolean; error?: string }>({
+        transport: "force-stop",
+        kind: "cancel",
+        action: cancelAction,
+        fallbackTarget: { workflowId: workflow, id, runId: ocrPrep.ocrRunId },
+        ocrSessionId: ocrPrep.ocrSessionId,
+        reason: `Cancelled from ${workflow} queue`,
+        parentWorkflow: workflow,
+        parentRunId: runId,
+        parentItemId: id,
+        formType: typeof ocrPrep.formType === "string" ? ocrPrep.formType : undefined,
       });
-      const body = (await res.json()) as { ok?: boolean; error?: string };
-      if (res.ok && body.ok) {
+      if (result.ok) {
         toast.success("OCR prep discarded", { id: t });
       } else {
         toast.error("Couldn't discard OCR prep", {
           id: t,
-          description: body.error ?? `HTTP ${res.status}`,
+          description: result.error ?? `HTTP ${result.status}`,
         });
       }
     } catch (err) {
