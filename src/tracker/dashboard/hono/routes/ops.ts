@@ -17,7 +17,12 @@ import {
   readQueueDepth,
 } from "../../ops/index.js";
 import { performWorkflowAction } from "../../actions/perform-workflow-action.js";
-import type { WorkflowActionRequest, WorkflowActionResult, WorkflowActionScope } from "../../actions/types.js";
+import type {
+  WorkflowActionRequest,
+  WorkflowActionResult,
+  WorkflowActionScope,
+  WorkflowActionSource,
+} from "../../actions/types.js";
 import { errorMessage } from "../../../../utils/errors.js";
 import { log } from "../../../../utils/log.js";
 import type { DashboardHonoDeps } from "../context.js";
@@ -45,6 +50,14 @@ function parseParentRunIdFromBody(body: Record<string, unknown>):
 
 function parseRowCancelScope(value: unknown): WorkflowActionScope {
   return value === "tree" ? "tree" : "row";
+}
+
+function parseBulkActionSource(value: unknown): Extract<WorkflowActionSource, "queue-panel" | "batch-view"> {
+  return value === "batch-view" ? "batch-view" : "queue-panel";
+}
+
+function parseBulkActionScope(value: unknown): Extract<WorkflowActionScope, "group" | "visible-view"> {
+  return value === "visible-view" ? "visible-view" : "group";
 }
 
 function optionalString(value: unknown): string | undefined {
@@ -170,6 +183,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
               workflowId: item.workflowId ? String(item.workflowId) : undefined,
               id: String(item.id ?? ""),
               ...(item.runId ? { runId: String(item.runId) } : {}),
+              ...(item.date ? { date: String(item.date) } : {}),
             }))
             .filter((item) => item.id)
         : undefined;
@@ -179,27 +193,32 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         ...(items ? { items } : {}),
         date: body.date ? String(body.date) : undefined,
         ...(parent.parentRunId ? { parentRunId: parent.parentRunId } : {}),
+        source: parseBulkActionSource(body.source),
+        scope: parseBulkActionScope(body.scope),
       };
     }, async (req: {
       workflow: string;
       ids: string[];
-      items?: Array<{ workflowId?: string; id: string; runId?: string }>;
+      items?: Array<{ workflowId?: string; id: string; runId?: string; date?: string }>;
       date?: string;
       parentRunId?: string;
+      source: Extract<WorkflowActionSource, "queue-panel" | "batch-view">;
+      scope: Extract<WorkflowActionScope, "group" | "visible-view">;
     }) => {
-      const items: Array<{ workflowId?: string; id: string; runId?: string }> = req.items && req.items.length > 0
+      const items: Array<{ workflowId?: string; id: string; runId?: string; date?: string }> = req.items && req.items.length > 0
         ? req.items
         : req.ids.map((id) => ({ id }));
       const result = await performWorkflowAction({
         action: "retry",
-        scope: "group",
-        source: "queue-panel",
+        scope: req.scope,
+        source: req.source,
         workflowId: req.workflow,
         targets: items.map((it) => ({
           workflowId: it.workflowId ?? req.workflow,
           id: it.id,
           ...(it.runId ? { runId: it.runId } : {}),
           ...(req.date ? { date: req.date } : {}),
+          ...(it.date ? { date: it.date } : {}),
         })),
         ...(req.date ? { date: req.date } : {}),
         ...(req.parentRunId ? { parentRunId: req.parentRunId } : {}),
@@ -455,15 +474,17 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       const workflow = String(body.workflow ?? "").trim();
       const date = String(body.date ?? "").trim();
       const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
-      const items = parseItemsFromBody<{ workflowId?: string; id: string; runId?: string }>(body.items, (o) => {
+      const items = parseItemsFromBody<{ workflowId?: string; id: string; runId?: string; date?: string }>(body.items, (o) => {
         const id = typeof o.id === "string" ? o.id : "";
         if (!id) return null;
         const runId = typeof o.runId === "string" && o.runId.length > 0 ? o.runId : undefined;
         const workflowId = typeof o.workflowId === "string" && o.workflowId.length > 0 ? o.workflowId : undefined;
+        const itemDate = typeof o.date === "string" && o.date.length > 0 ? o.date : undefined;
         return {
           ...(workflowId ? { workflowId } : {}),
           id,
           ...(runId ? { runId } : {}),
+          ...(itemDate ? { date: itemDate } : {}),
         };
       });
       if (!workflow || !date) {
@@ -472,26 +493,35 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       if (items.length === 0 && ids.length === 0) {
         return { ok: false, error: "ids or items must be non-empty — provide at least one entry to delete" };
       }
-      return { workflow, date, ids, items };
+      return {
+        workflow,
+        date,
+        ids,
+        items,
+        source: parseBulkActionSource(body.source),
+        scope: parseBulkActionScope(body.scope),
+      };
     }, async (req: {
       workflow: string;
       date: string;
       ids: string[];
-      items: Array<{ workflowId?: string; id: string; runId?: string }>;
+      items: Array<{ workflowId?: string; id: string; runId?: string; date?: string }>;
+      source: Extract<WorkflowActionSource, "queue-panel" | "batch-view">;
+      scope: Extract<WorkflowActionScope, "group" | "visible-view">;
     }) => {
-      const items: Array<{ workflowId?: string; id: string; runId?: string }> = req.items.length > 0
+      const items: Array<{ workflowId?: string; id: string; runId?: string; date?: string }> = req.items.length > 0
         ? req.items
         : req.ids.map((id) => ({ id }));
       const result = await performWorkflowAction({
         action: "delete",
-        scope: "group",
-        source: "queue-panel",
+        scope: req.scope,
+        source: req.source,
         workflowId: req.workflow,
         date: req.date,
         targets: items.map((it) => ({
           workflowId: it.workflowId ?? req.workflow,
           id: it.id,
-          date: req.date,
+          date: it.date ?? req.date,
           ...(it.runId ? { runId: it.runId } : {}),
         })),
       }, { dir: deps.dir, screenshotsDir: deps.screenshotsDir });

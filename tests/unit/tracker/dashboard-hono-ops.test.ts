@@ -221,6 +221,51 @@ test("Hono /api/queue/bump moves a queued SQLite task ahead and validates input"
   }
 });
 
+test("Hono bulk routes ignore unsupported source and scope values", async () => {
+  const taskStore = createTaskStore(openControlDb({ trackerDir: dir }));
+  try {
+    const [task] = taskStore.enqueueTasks({
+      workflow: "separations",
+      inputs: [{ docId: "visible" }],
+      deriveItemId: (input) => input.docId,
+      runIds: ["visible-run"],
+    });
+
+    const retry = await app().request("/api/retry-bulk", jsonRequest({
+      workflow: "separations",
+      source: "daemon",
+      scope: "daemon",
+      items: [{ workflowId: "separations", id: "visible", runId: "visible-run" }],
+    }));
+
+    assert.equal(retry.status, 202);
+    assert.deepEqual(await retry.json(), { ok: true, count: 1, errors: [] });
+    assert.equal(taskStore.listAttemptsForTask(task.taskId).length, 2);
+
+    const deletionDate = "2026-05-21";
+    trackEventForDate({
+      workflow: "separations",
+      timestamp: "2026-05-21T10:00:00.000Z",
+      id: "visible",
+      runId: "visible-run",
+      status: "failed",
+    }, deletionDate, dir);
+
+    const deleted = await app().request("/api/delete-bulk", jsonRequest({
+      workflow: "separations",
+      date: deletionDate,
+      source: "daemon",
+      scope: "daemon",
+      items: [{ workflowId: "separations", id: "visible", runId: "visible-run" }],
+    }));
+
+    assert.equal(deleted.status, 200);
+    assert.deepEqual(await deleted.json(), { ok: true, count: 1, errors: [] });
+  } finally {
+    taskStore.close();
+  }
+});
+
 test("Hono worker drain and stop routes enqueue worker commands", async () => {
   const workerStore = createWorkerStore(openControlDb({ trackerDir: dir }));
   try {
