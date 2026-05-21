@@ -65,7 +65,7 @@ test("buildJsonlEventsPayload includes Oath Upload delegated child context", () 
       data: { archetype: "delegate-child", name: "Jane Doe", emplId: "10000001" },
     }, date, dir);
 
-    const payload = buildJsonlEventsPayload("oath-upload", date, date, dir);
+    const payload = buildJsonlEventsPayload("oath-upload", date, "2026-05-21", dir);
 
     assert.deepEqual(
       payload.entries
