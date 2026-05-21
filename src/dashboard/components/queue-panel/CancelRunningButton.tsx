@@ -4,13 +4,10 @@ import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "@/components/shared/types";
+import { useWorkflowActionDispatcher } from "@/components/hooks/useWorkflowActionDispatcher";
 import { IconActionButton } from "@/components/shared/IconActionButton";
 import type { WorkflowActionDescriptor } from "../../../domain/workflow-runtime/types.js";
-import {
-  actionScopeBody,
-  findEnabledAction,
-  hasEnabledAction,
-} from "@/lib/workflow-action-utils";
+import { findEnabledAction } from "@/lib/workflow-action-utils";
 
 interface CancelRunningButtonProps {
   workflow: string;
@@ -32,9 +29,10 @@ interface CancelRunningButtonProps {
  */
 export function CancelRunningButton({ workflow, id, runId, subject, entry, actions, className }: CancelRunningButtonProps) {
   const [pending, setPending] = useState(false);
+  const { dispatchWorkflowAction } = useWorkflowActionDispatcher();
   const label = subject?.trim() || id;
-  const cancelEnabled = hasEnabledAction(actions, "cancel");
-  const scope = actionScopeBody(findEnabledAction(actions, "cancel")).scope;
+  const cancelAction = findEnabledAction(actions, "cancel");
+  const cancelEnabled = actions ? Boolean(cancelAction) : true;
 
   // OCR-prep parent rows live in the downstream workflow's queue but aren't
   // daemon-claimed — they're tracker-only proxies for the OCR session. The
@@ -100,13 +98,13 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, actio
     setPending(true);
     const t = toast.loading(`Stopping ${label}…`);
     try {
-      const res = await fetch("/api/task/force-stop", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workflow, id, runId, ...(scope ? { scope } : {}) }),
+      const result = await dispatchWorkflowAction<{ ok?: boolean; error?: string }>({
+        transport: "force-stop",
+        kind: "cancel",
+        action: cancelAction,
+        fallbackTarget: { workflowId: workflow, id, runId },
       });
-      const body = (await res.json()) as { ok?: boolean; error?: string };
-      if (res.ok && body.ok) {
+      if (result.ok) {
         toast.success(`Stopped ${label}`, {
           id: t,
           description: "Task marked cancelled; session and browser stop requested.",
@@ -114,7 +112,7 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, actio
       } else {
         toast.error("Stop failed", {
           id: t,
-          description: body.error ?? `HTTP ${res.status}`,
+          description: result.error ?? `HTTP ${result.status}`,
         });
       }
     } catch (err) {

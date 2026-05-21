@@ -2,11 +2,12 @@ import { useState } from "react";
 import { RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { cn, compact } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { useOptionalBatchQueueParentRunId } from "@/components/hooks/useBatchQueueContext";
+import { useWorkflowActionDispatcher } from "@/components/hooks/useWorkflowActionDispatcher";
 import { IconActionButton } from "@/components/shared/IconActionButton";
 import type { WorkflowActionDescriptor } from "../../../domain/workflow-runtime/types.js";
-import { hasEnabledAction } from "@/lib/workflow-action-utils";
+import { findEnabledAction } from "@/lib/workflow-action-utils";
 
 interface RetryButtonProps {
   workflow: string;
@@ -38,7 +39,9 @@ export function RetryButton({
 }: RetryButtonProps) {
   const [pending, setPending] = useState(false);
   const batchParentRunId = useOptionalBatchQueueParentRunId();
-  const retryEnabled = hasEnabledAction(actions, "retry");
+  const { dispatchWorkflowAction } = useWorkflowActionDispatcher();
+  const retryAction = findEnabledAction(actions, "retry");
+  const retryEnabled = actions ? Boolean(retryAction) : true;
 
   if (!retryEnabled) return null;
 
@@ -48,19 +51,14 @@ export function RetryButton({
     setPending(true);
     const t = toast.loading(`Retrying ${id}…`);
     try {
-      const res = await fetch("/api/retry", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(compact({
-          workflow,
-          id,
-          runId,
-          date,
-          parentRunId: batchParentRunId,
-        })),
+      const result = await dispatchWorkflowAction<{ ok?: boolean; error?: string }>({
+        transport: "retry",
+        kind: "retry",
+        action: retryAction,
+        fallbackTarget: { workflowId: workflow, id, runId, date },
+        parentRunId: batchParentRunId,
       });
-      const body = (await res.json()) as { ok: boolean; error?: string };
-      if (body.ok) {
+      if (result.ok) {
         toast.success(`Retry scheduled`, {
           id: t,
           description: id,
@@ -68,7 +66,7 @@ export function RetryButton({
       } else {
         toast.error(`Couldn't retry`, {
           id: t,
-          description: body.error ?? `HTTP ${res.status}`,
+          description: result.error ?? `HTTP ${result.status}`,
         });
       }
     } catch (err) {

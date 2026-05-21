@@ -3,9 +3,10 @@ import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useWorkflowActionDispatcher } from "@/components/hooks/useWorkflowActionDispatcher";
 import { IconActionButton } from "@/components/shared/IconActionButton";
 import type { WorkflowActionDescriptor } from "../../../domain/workflow-runtime/types.js";
-import { hasEnabledAction } from "@/lib/workflow-action-utils";
+import { findEnabledAction } from "@/lib/workflow-action-utils";
 
 interface DeleteButtonProps {
   workflow: string;
@@ -29,8 +30,10 @@ interface DeleteButtonProps {
  */
 export function DeleteButton({ workflow, id, date, runId, actions, onDeleted, size = "sm", className }: DeleteButtonProps) {
   const [pending, setPending] = useState(false);
+  const { dispatchWorkflowAction } = useWorkflowActionDispatcher();
   const label = runId ? "Delete this run permanently" : "Delete this entry permanently";
-  const deleteEnabled = hasEnabledAction(actions, "delete");
+  const deleteAction = findEnabledAction(actions, "delete");
+  const deleteEnabled = actions ? Boolean(deleteAction) : true;
 
   if (!deleteEnabled) return null;
 
@@ -39,16 +42,16 @@ export function DeleteButton({ workflow, id, date, runId, actions, onDeleted, si
     if (pending) return;
     setPending(true);
     try {
-      const res = await fetch("/api/delete-entry", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workflow, id, date, ...(runId ? { runId } : {}) }),
+      const result = await dispatchWorkflowAction<{ ok?: boolean; error?: string }>({
+        transport: "delete-entry",
+        kind: "delete",
+        action: deleteAction,
+        fallbackTarget: { workflowId: workflow, id, runId, date },
       });
-      const body = (await res.json()) as { ok: boolean; error?: string };
-      if (body.ok) {
+      if (result.ok) {
         onDeleted(id);
       } else {
-        toast.error("Couldn't delete entry", { description: body.error ?? `HTTP ${res.status}` });
+        toast.error("Couldn't delete entry", { description: result.error ?? `HTTP ${result.status}` });
       }
     } catch (err) {
       toast.error("Couldn't delete entry", {

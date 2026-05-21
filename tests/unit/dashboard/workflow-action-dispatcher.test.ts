@@ -1,0 +1,107 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+
+import { buildWorkflowActionRequest } from "../../../src/dashboard/components/hooks/useWorkflowActionDispatcher.js";
+import type { WorkflowActionDescriptor } from "../../../src/domain/workflow-runtime/types.js";
+
+const treeCancelAction: WorkflowActionDescriptor = {
+  kind: "cancel",
+  scope: "tree",
+  source: "queue-panel",
+  label: "Cancel workflow tree",
+  targets: [{ workflowId: "oath-upload", id: "oath-parent", runId: "parent-run" }],
+  enabled: true,
+};
+
+describe("buildWorkflowActionRequest", () => {
+  it("builds retry row requests from resolved targets and parent batch context", () => {
+    assert.deepEqual(
+      buildWorkflowActionRequest({
+        transport: "retry",
+        kind: "retry",
+        action: {
+          kind: "retry",
+          scope: "row",
+          source: "queue-panel",
+          label: "Retry",
+          targets: [{ workflowId: "eid-lookup", id: "employee-id", runId: "run-2", date: "2026-05-21" }],
+          enabled: true,
+        },
+        fallbackTarget: { workflowId: "ignored", id: "ignored", runId: "ignored", date: "ignored" },
+        parentRunId: "batch-parent",
+      }),
+      {
+        path: "/api/retry",
+        body: {
+          workflow: "eid-lookup",
+          id: "employee-id",
+          runId: "run-2",
+          date: "2026-05-21",
+          parentRunId: "batch-parent",
+        },
+      },
+    );
+  });
+
+  it("builds delete-entry requests from fallback target data when descriptors are absent", () => {
+    assert.deepEqual(
+      buildWorkflowActionRequest({
+        transport: "delete-entry",
+        kind: "delete",
+        fallbackTarget: {
+          workflowId: "onboarding",
+          id: "person@example.edu",
+          runId: "run-1",
+          date: "2026-05-20",
+        },
+      }),
+      {
+        path: "/api/delete-entry",
+        body: {
+          workflow: "onboarding",
+          id: "person@example.edu",
+          runId: "run-1",
+          date: "2026-05-20",
+        },
+      },
+    );
+  });
+
+  it("carries descriptor cancel scope for queued and force-stop row requests", () => {
+    assert.deepEqual(
+      buildWorkflowActionRequest({
+        transport: "cancel-queued",
+        kind: "cancel",
+        action: treeCancelAction,
+        fallbackTarget: { workflowId: "oath-upload", id: "oath-parent", runId: "parent-run" },
+      }),
+      {
+        path: "/api/cancel-queued",
+        body: {
+          workflow: "oath-upload",
+          id: "oath-parent",
+          runId: "parent-run",
+          scope: "tree",
+        },
+      },
+    );
+
+    assert.deepEqual(
+      buildWorkflowActionRequest({
+        transport: "force-stop",
+        kind: "cancel",
+        action: treeCancelAction,
+        fallbackTarget: { workflowId: "oath-upload", id: "oath-parent", runId: "parent-run" },
+      }),
+      {
+        path: "/api/task/force-stop",
+        body: {
+          workflow: "oath-upload",
+          id: "oath-parent",
+          runId: "parent-run",
+          scope: "tree",
+        },
+      },
+    );
+  });
+});
