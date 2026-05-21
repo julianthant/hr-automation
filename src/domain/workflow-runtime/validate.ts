@@ -1,6 +1,6 @@
 import type {
-  WorkflowActionDescriptor,
   WorkflowActionKind,
+  WorkflowActionPolicy,
   WorkflowActionScope,
   WorkflowActionSource,
   WorkflowRunProjection,
@@ -46,8 +46,8 @@ export function isValidWorkflowActionSource(source: string): source is WorkflowA
   return SOURCE_SET.has(source);
 }
 
-export function validateWorkflowActionDescriptor(
-  action: WorkflowActionDescriptor,
+export function validateWorkflowActionPolicy(
+  action: WorkflowActionPolicy,
   label: string,
 ): string[] {
   const errors: string[] = [];
@@ -60,9 +60,6 @@ export function validateWorkflowActionDescriptor(
   if (!isValidWorkflowActionSource(action.source)) {
     errors.push(`${label}: invalid source "${action.source}"`);
   }
-  if (!Array.isArray(action.targetRunIds)) {
-    errors.push(`${label}: targetRunIds must be an array`);
-  }
   if (typeof action.enabled !== "boolean") {
     errors.push(`${label}: enabled must be boolean`);
   }
@@ -74,7 +71,7 @@ export function validateWorkflowRuntimePolicy(
   workflowId: string,
 ): string[] {
   const errors: string[] = [];
-  const buckets: Array<[string, WorkflowActionDescriptor[]]> = [
+  const buckets: Array<[string, WorkflowActionPolicy[]]> = [
     ["rowActions", policy.rowActions],
     ["groupActions", policy.groupActions],
     ["batchViewToolbarActions", policy.batchViewToolbarActions],
@@ -83,7 +80,7 @@ export function validateWorkflowRuntimePolicy(
   for (const [bucket, actions] of buckets) {
     for (const [index, action] of actions.entries()) {
       errors.push(
-        ...validateWorkflowActionDescriptor(action, `${workflowId}.${bucket}[${index}]`),
+        ...validateWorkflowActionPolicy(action, `${workflowId}.${bucket}[${index}]`),
       );
     }
   }
@@ -99,7 +96,8 @@ export function batchViewActionsWithinMembers(
   const errors: string[] = [];
   for (const action of projection.actions) {
     if (action.source !== "batch-view") continue;
-    for (const runId of action.targetRunIds) {
+    for (const target of action.targets) {
+      const runId = target.runId ?? target.id;
       if (!allowed.has(runId)) {
         errors.push(
           `action ${action.kind} targets runId "${runId}" outside batch members [${[...allowed].join(", ")}]`,

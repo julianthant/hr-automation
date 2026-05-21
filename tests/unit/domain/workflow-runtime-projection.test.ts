@@ -448,7 +448,15 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       assert.equal(projection.surfaceType, "normal");
       assert.equal(projection.rowTypeLabel, "Normal row");
       assert.deepEqual(projection.actions, [
-        { ...DEFAULT_ROW_CANCEL_ACTION, targetRunIds: [projection.runId] },
+        {
+          ...DEFAULT_ROW_CANCEL_ACTION,
+          targets: [{
+            workflowId,
+            id: label,
+            runId: projection.runId,
+            status: "pending",
+          }],
+        },
       ]);
     }
   });
@@ -546,8 +554,20 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
     assert.equal(projection.surfaceType, "batch-delegation");
     assert.notEqual(projection.subtitle, "sep-batch-parent-run-12345678");
     assert.deepEqual(projection.actions, [
-      { ...DEFAULT_GROUP_RETRY_ACTION, targetRunIds: ["sep-run-1", "sep-run-2"] },
-      { ...DEFAULT_GROUP_DELETE_ACTION, targetRunIds: ["sep-run-1", "sep-run-2"] },
+      {
+        ...DEFAULT_GROUP_RETRY_ACTION,
+        targets: [
+          { workflowId: "separations", id: "3927", runId: "sep-run-1", status: "pending" },
+          { workflowId: "separations", id: "3924", runId: "sep-run-2", status: "running" },
+        ],
+      },
+      {
+        ...DEFAULT_GROUP_DELETE_ACTION,
+        targets: [
+          { workflowId: "separations", id: "3927", runId: "sep-run-1", status: "pending" },
+          { workflowId: "separations", id: "3924", runId: "sep-run-2", status: "running" },
+        ],
+      },
     ]);
   });
 

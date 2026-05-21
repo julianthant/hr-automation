@@ -1,21 +1,20 @@
 import type {
-  WorkflowActionDescriptor,
+  WorkflowActionPolicy,
   WorkflowRuntimePolicy,
 } from "./types.js";
 
 export function workflowAction(
-  kind: WorkflowActionDescriptor["kind"],
-  scope: WorkflowActionDescriptor["scope"],
-  source: WorkflowActionDescriptor["source"],
+  kind: WorkflowActionPolicy["kind"],
+  scope: WorkflowActionPolicy["scope"],
+  source: WorkflowActionPolicy["source"],
   label: string,
-  extra: Partial<WorkflowActionDescriptor> = {},
-): WorkflowActionDescriptor {
+  extra: Partial<WorkflowActionPolicy> = {},
+): WorkflowActionPolicy {
   return {
     kind,
     scope,
     source,
     label,
-    targetRunIds: [],
     enabled: true,
     ...extra,
   };
@@ -42,7 +41,7 @@ export const DEFAULT_GROUP_DELETE_ACTION = workflowAction(
   "Delete group",
 );
 
-export const DEFAULT_BATCH_VIEW_TOOLBAR_ACTIONS: WorkflowActionDescriptor[] = [
+export const DEFAULT_BATCH_VIEW_TOOLBAR_ACTIONS: WorkflowActionPolicy[] = [
   workflowAction("retry", "visible-view", "batch-view", "Retry visible rows"),
   workflowAction("delete", "visible-view", "batch-view", "Delete visible rows"),
   workflowAction("cancel", "visible-view", "batch-view", "Cancel visible rows"),

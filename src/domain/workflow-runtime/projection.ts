@@ -11,6 +11,8 @@ import {
 } from "./registry.js";
 import type {
   WorkflowActionDescriptor,
+  WorkflowActionPolicy,
+  WorkflowActionTargetDescriptor,
   WorkflowRunProjection,
   WorkflowRuntimePolicy,
   WorkflowSurfaceType,
@@ -58,17 +60,22 @@ function runIdFor(entry: Pick<TrackerEntry, "id" | "runId">): string {
   return entry.runId ?? entry.id;
 }
 
-function targetRunIds(entries: readonly TrackerEntry[]): string[] {
-  return entries.map(runIdFor);
+function actionTargets(entries: readonly TrackerEntry[]): WorkflowActionTargetDescriptor[] {
+  return entries.map((entry) => ({
+    workflowId: entry.workflow,
+    id: entry.id,
+    runId: runIdFor(entry),
+    status: entry.status,
+  }));
 }
 
 function withTargets(
-  actions: readonly WorkflowActionDescriptor[],
-  runIds: readonly string[],
+  actions: readonly WorkflowActionPolicy[],
+  targets: readonly WorkflowActionTargetDescriptor[],
 ): WorkflowActionDescriptor[] {
   return actions.map((action) => ({
     ...action,
-    targetRunIds: [...runIds],
+    targets: targets.map((target) => ({ ...target })),
   }));
 }
 
@@ -194,6 +201,7 @@ export function buildWorkflowRunProjection(
   const policy = context.policy ?? getWorkflowRuntimePolicy(entry.workflow, context.runtimePolicies);
   const surfaceType = overrides.surfaceType ?? rowSurfaceType(entry);
   const runId = runIdFor(entry);
+  const targets = actionTargets([entry]);
   return {
     runId,
     workflowId: entry.workflow,
@@ -205,7 +213,7 @@ export function buildWorkflowRunProjection(
     step: entry.step,
     surfaceType,
     rowTypeLabel: overrides.rowTypeLabel ?? rowTypeLabelFor(surfaceType, policy),
-    actions: overrides.actions ?? withTargets(policy.rowActions, [runId]),
+    actions: overrides.actions ?? withTargets(policy.rowActions, targets),
     batchMembers: overrides.batchMembers ?? [],
   };
 }
@@ -273,10 +281,10 @@ export function buildProjectionFromQueueSurface(
       ? [surface.parent]
       : [];
   const rowTargetEntries = surface.kind === "approval-delegation" ? [surface.parent] : [];
-  const groupActions = withTargets(policy.groupActions, targetRunIds(targetEntries));
+  const groupActions = withTargets(policy.groupActions, actionTargets(targetEntries));
   const actions = surface.kind === "approval-delegation"
     ? [
-        ...withTargets(policy.rowActions, targetRunIds(rowTargetEntries)),
+        ...withTargets(policy.rowActions, actionTargets(rowTargetEntries)),
         ...groupActions,
       ]
     : groupActions;

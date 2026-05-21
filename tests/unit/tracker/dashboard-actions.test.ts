@@ -56,7 +56,7 @@ describe("performWorkflowAction — cancel scope", () => {
         source: "queue-panel",
         workflowId: "separations",
         cancelMode: "cooperative",
-        targets: [{ id: "3930", runId: "run-a", status: "pending" }],
+        targets: [{ workflowId: "separations", id: "3930", runId: "run-a", status: "pending" }],
       }, { dir });
 
       assert.equal(result.ok, true);
@@ -82,8 +82,8 @@ describe("performWorkflowAction — cancel scope", () => {
         workflowId: "separations",
         cancelMode: "cooperative",
         targets: [
-          { id: "a", runId: "run-a", status: "pending" },
-          { id: "b", runId: "run-b", status: "pending" },
+          { workflowId: "separations", id: "a", runId: "run-a", status: "pending" },
+          { workflowId: "separations", id: "b", runId: "run-b", status: "pending" },
         ],
       }, { dir });
 
@@ -105,7 +105,7 @@ describe("performWorkflowAction — cancel scope", () => {
       source: "queue-panel",
       workflowId: "ocr",
       ocrSessionId: "ocr-sess-1",
-      targets: [{ id: "ocr-sess-1", runId: "ocr-run-1" }],
+      targets: [{ workflowId: "ocr", id: "ocr-sess-1", runId: "ocr-run-1" }],
     }, { dir });
 
     assert.equal(result.ok, true);
@@ -131,8 +131,8 @@ describe("performWorkflowAction — retry scope", () => {
         source: "queue-panel",
         workflowId: "separations",
         targets: [
-          { id: "a", runId: "run-a" },
-          { id: "b", runId: "run-b" },
+          { workflowId: "separations", id: "a", runId: "run-a" },
+          { workflowId: "separations", id: "b", runId: "run-b" },
         ],
       }, { dir });
 
@@ -159,7 +159,7 @@ describe("performWorkflowAction — rejected combinations", () => {
         scope: "tree",
         source: "daemon",
         workflowId: "separations",
-        targets: [{ id: "3930", runId: "run-a" }],
+        targets: [{ workflowId: "separations", id: "3930", runId: "run-a" }],
       }, { dir });
 
       assert.equal(result.ok, false);
@@ -179,7 +179,7 @@ describe("performWorkflowAction — rejected combinations", () => {
       scope: "row",
       source: "queue-panel",
       workflowId: "separations",
-      targets: [{ id: "3930", runId: "run-a" }],
+      targets: [{ workflowId: "separations", id: "3930", runId: "run-a" }],
     }, { dir });
 
     assert.equal(result.ok, false);
@@ -193,7 +193,7 @@ describe("performWorkflowAction — rejected combinations", () => {
       scope: "group",
       source: "queue-panel",
       workflowId: "separations",
-      targets: [{ id: "3930", runId: "run-a" }],
+      targets: [{ workflowId: "separations", id: "3930", runId: "run-a" }],
     }, { dir });
 
     assert.equal(result.ok, false);
@@ -210,8 +210,8 @@ describe("resolveActionTargets", () => {
       source: "queue-panel",
       workflowId: "separations",
       targets: [
-        { id: "a", runId: "run-a" },
-        { id: "b", runId: "run-b" },
+        { workflowId: "separations", id: "a", runId: "run-a" },
+        { workflowId: "separations", id: "b", runId: "run-b" },
       ],
     };
     const resolved = resolveActionTargets(req, dir);
@@ -284,7 +284,7 @@ describe("resolveActionTargets — tree scope descendant resolution", () => {
       scope: "tree",
       source: "queue-panel",
       workflowId: "oath-upload",
-      targets: [{ id: "sess-1", runId: "root-run", status: "running" }],
+      targets: [{ workflowId: "oath-upload", id: "sess-1", runId: "root-run", status: "running" }],
     };
     const resolved = resolveActionTargets(req, dir);
     assert.ok(resolved.ok);
@@ -316,7 +316,7 @@ describe("resolveActionTargets — tree scope descendant resolution", () => {
       scope: "tree",
       source: "queue-panel",
       workflowId: "oath-upload",
-      targets: [{ id: "sess-2", runId: "root-run-2", status: "running" }],
+      targets: [{ workflowId: "oath-upload", id: "sess-2", runId: "root-run-2", status: "running" }],
     };
     const resolved = resolveActionTargets(req, dir);
     assert.ok(resolved.ok);
@@ -342,7 +342,7 @@ describe("resolveActionTargets — tree scope descendant resolution", () => {
       scope: "tree",
       source: "queue-panel",
       workflowId: "oath-upload",
-      targets: [{ id: "sess-3", runId: "root-run-3", status: "running" }],
+      targets: [{ workflowId: "oath-upload", id: "sess-3", runId: "root-run-3", status: "running" }],
     };
     const resolved = resolveActionTargets(req, dir);
     assert.ok(resolved.ok);

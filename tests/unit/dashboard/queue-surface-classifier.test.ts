@@ -53,7 +53,7 @@ describe("buildQueueSurfaces", () => {
     assert.equal(projections.length, 1);
     assert.equal(projections[0]?.surfaceType, "batch-delegation");
     assert.equal(projections[0]?.rowTypeLabel, "Batch delegation");
-    assert.deepEqual(projections[0]?.actions.map((action) => action.targetRunIds), [
+    assert.deepEqual(projections[0]?.actions.map((action) => action.targets.map((target) => target.runId)), [
       ["run-a", "run-b"],
       ["run-a", "run-b"],
     ]);

@@ -104,7 +104,7 @@ test("batch footer actions select retry/delete targets from projection descripto
       scope: "visible-view",
       source: "batch-view",
       label: "Retry visible rows",
-      targetRunIds: ["visible-run"],
+      targets: [{ workflowId: "eid-lookup", id: "visible-member", runId: "visible-run" }],
       enabled: true,
     },
     {
@@ -112,7 +112,7 @@ test("batch footer actions select retry/delete targets from projection descripto
       scope: "visible-view",
       source: "batch-view",
       label: "Delete visible rows",
-      targetRunIds: ["visible-run"],
+      targets: [{ workflowId: "eid-lookup", id: "visible-member", runId: "visible-run" }],
       enabled: true,
     },
   ];

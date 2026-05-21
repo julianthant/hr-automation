@@ -26,10 +26,12 @@ export function selectEntriesForWorkflowAction(
 ): TrackerEntry[] {
   const descriptor = actions?.find((action) => action.kind === kind && action.enabled);
   if (!descriptor) return actions ? [] : memberEntries;
-  if (descriptor.targetRunIds.length === 0) return memberEntries;
-  const entriesByRunId = new Map(memberEntries.map((entry) => [entry.runId ?? entry.id, entry]));
-  return descriptor.targetRunIds
-    .map((runId) => entriesByRunId.get(runId))
+  if (descriptor.targets.length === 0) return memberEntries;
+  const entriesByTarget = new Map(
+    memberEntries.map((entry) => [`${entry.workflow}\0${entry.runId ?? entry.id}`, entry]),
+  );
+  return descriptor.targets
+    .map((target) => entriesByTarget.get(`${target.workflowId}\0${target.runId ?? target.id}`))
     .filter((entry): entry is TrackerEntry => entry !== undefined);
 }
 
@@ -57,6 +59,7 @@ export function BatchFooterActions({
   const retryItems = useMemo(
     () =>
       retryEntries.map((entry) => ({
+        workflowId: entry.workflow,
         id: entry.id,
         ...(entry.runId ? { runId: entry.runId } : {}),
       })),
@@ -65,6 +68,7 @@ export function BatchFooterActions({
   const deleteItems = useMemo(
     () =>
       deleteEntries.map((entry) => ({
+        workflowId: entry.workflow,
         id: entry.id,
         ...(entry.runId ? { runId: entry.runId } : {}),
       })),

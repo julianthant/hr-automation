@@ -106,7 +106,12 @@ test("batch-view visible actions stay scoped to opened batch member run ids", ()
     ...projection,
     actions: projection.actions.map((action) =>
       action.kind === "retry" || action.kind === "delete"
-        ? { ...action, source: "batch-view" as const, scope: "visible-view" as const, targetRunIds: ["run-a"] }
+        ? {
+            ...action,
+            source: "batch-view" as const,
+            scope: "visible-view" as const,
+            targets: [{ workflowId: "eid-lookup", id: "member-a", runId: "run-a" }],
+          }
         : action,
     ),
   };
@@ -117,7 +122,13 @@ test("batch-view visible actions stay scoped to opened batch member run ids", ()
     ...scoped,
     actions: scoped.actions.map((action) =>
       action.kind === "retry"
-        ? { ...action, targetRunIds: ["run-a", "outside-run"] }
+        ? {
+            ...action,
+            targets: [
+              { workflowId: "eid-lookup", id: "member-a", runId: "run-a" },
+              { workflowId: "eid-lookup", id: "outside", runId: "outside-run" },
+            ],
+          }
         : action,
     ),
   };

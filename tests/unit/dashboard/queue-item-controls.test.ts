@@ -32,7 +32,7 @@ describe("buildQueueCancelRequest", () => {
           scope: "tree",
           source: "queue-panel",
           label: "Cancel workflow tree",
-          targetRunIds: ["parent-run"],
+          targets: [{ workflowId: "oath-upload", id: "oath-parent", runId: "parent-run" }],
           enabled: true,
         }],
       }),

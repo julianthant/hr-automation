@@ -25,15 +25,26 @@ export type WorkflowActionSource =
   | "log-panel"
   | "daemon";
 
-export interface WorkflowActionDescriptor {
+export interface WorkflowActionPolicy {
   kind: WorkflowActionKind;
   scope: WorkflowActionScope;
   source: WorkflowActionSource;
   label: string;
-  targetRunIds: string[];
   enabled: boolean;
   operational?: boolean;
   reason?: string;
+}
+
+export interface WorkflowActionTargetDescriptor {
+  workflowId: string;
+  id: string;
+  runId?: string;
+  date?: string;
+  status?: string;
+}
+
+export interface WorkflowActionDescriptor extends WorkflowActionPolicy {
+  targets: WorkflowActionTargetDescriptor[];
 }
 
 export interface WorkflowRunProjection {
@@ -129,10 +140,10 @@ export interface WorkflowPrepRowPolicy {
 }
 
 export interface WorkflowRuntimePolicy {
-  rowActions: WorkflowActionDescriptor[];
-  groupActions: WorkflowActionDescriptor[];
-  batchViewToolbarActions: WorkflowActionDescriptor[];
-  daemonActions: WorkflowActionDescriptor[];
+  rowActions: WorkflowActionPolicy[];
+  groupActions: WorkflowActionPolicy[];
+  batchViewToolbarActions: WorkflowActionPolicy[];
+  daemonActions: WorkflowActionPolicy[];
   /** Delegation/cancel-scope behavior for this workflow. */
   delegation?: WorkflowDelegationPolicy;
   /** Approval-preview surface affordances. */
