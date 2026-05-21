@@ -3,14 +3,14 @@ import { ArrowUp, X } from "lucide-react";
 import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn, compact } from "@/lib/utils";
+import {
+  buildWorkflowActionRequest,
+  useWorkflowActionDispatcher,
+} from "@/components/hooks/useWorkflowActionDispatcher";
 import { IconActionButton } from "@/components/shared/IconActionButton";
 import type { TrackerEntry } from "@/components/shared/types";
 import type { WorkflowActionDescriptor } from "../../../domain/workflow-runtime/types.js";
-import {
-  actionScopeBody,
-  findEnabledAction,
-  hasEnabledAction,
-} from "@/lib/workflow-action-utils";
+import { findEnabledAction } from "@/lib/workflow-action-utils";
 
 interface QueueItemControlsProps {
   workflow: string;
@@ -32,7 +32,7 @@ interface QueueCancelRequestArgs {
 
 export function buildQueueCancelRequest({ workflow, id, runId, entry, actions }: QueueCancelRequestArgs): {
   path: string;
-  body: Record<string, string>;
+  body: Record<string, unknown>;
 } {
   const cancelAction = findEnabledAction(actions, "cancel");
   const ocrPrep =
@@ -47,10 +47,12 @@ export function buildQueueCancelRequest({ workflow, id, runId, entry, actions }:
       : null;
 
   if (!ocrPrep) {
-    return {
-      path: "/api/cancel-queued",
-      body: compact({ workflow, id, runId, ...actionScopeBody(cancelAction) }),
-    };
+    return buildWorkflowActionRequest({
+      transport: "cancel-queued",
+      kind: "cancel",
+      action: cancelAction,
+      fallbackTarget: { workflowId: workflow, id, runId },
+    });
   }
 
   return {
@@ -74,10 +76,12 @@ export function buildQueueCancelRequest({ workflow, id, runId, entry, actions }:
  */
 export function QueueItemControls({ workflow, id, runId, subject, entry, actions, className }: QueueItemControlsProps) {
   const [pending, setPending] = useState<"cancel" | "bump" | null>(null);
+  const { dispatchWorkflowAction } = useWorkflowActionDispatcher();
   const label = subject?.trim() || id;
-  const cancelEnabled = hasEnabledAction(actions, "cancel");
+  const cancelAction = findEnabledAction(actions, "cancel");
+  const cancelEnabled = actions ? Boolean(cancelAction) : true;
 
-  const post = async (path: string, body: Record<string, string>, action: "cancel" | "bump") => {
+  const post = async (path: string, body: Record<string, unknown>, action: "cancel" | "bump") => {
     setPending(action);
     const verbing = action === "cancel" ? "Cancelling" : "Bumping";
     const verbed = action === "cancel" ? "Cancelled" : "Bumped to top";
@@ -116,7 +120,37 @@ export function QueueItemControls({ workflow, id, runId, subject, entry, actions
     e.stopPropagation();
     if (pending || !cancelEnabled) return;
     const request = buildQueueCancelRequest({ workflow, id, runId, entry, actions });
-    void post(request.path, request.body, "cancel");
+    if (request.path === "/api/ocr/discard-prepare") {
+      void post(request.path, request.body, "cancel");
+      return;
+    }
+    void (async () => {
+      setPending("cancel");
+      const t = toast.loading(`Cancelling ${label}…`);
+      try {
+        const result = await dispatchWorkflowAction<{ ok?: boolean; error?: string }>({
+          transport: "cancel-queued",
+          kind: "cancel",
+          action: cancelAction,
+          fallbackTarget: { workflowId: workflow, id, runId },
+        });
+        if (result.ok) {
+          toast.success("Cancelled", { id: t, description: label });
+        } else if (result.status === 409) {
+          toast.warning("Already in progress", {
+            id: t,
+            description: result.error ?? "This item was picked up before the action could complete.",
+          });
+        } else {
+          toast.error("Cancel failed", {
+            id: t,
+            description: result.error ?? `HTTP ${result.status}`,
+          });
+        }
+      } finally {
+        setPending(null);
+      }
+    })();
   };
 
   const onBumpClick = (e: React.MouseEvent) => {
