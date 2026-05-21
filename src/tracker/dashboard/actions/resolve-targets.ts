@@ -37,7 +37,7 @@ function toResolved(
 ): ResolvedActionTarget {
   const date = target.date ?? req.date;
   return {
-    workflow: req.workflowId,
+    workflow: target.workflowId || req.workflowId,
     id: target.id,
     ...(target.runId ? { runId: target.runId } : {}),
     ...(date ? { date } : {}),

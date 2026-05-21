@@ -127,6 +127,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         source: "queue-panel",
         workflowId: req.workflow,
         targets: [{
+          workflowId: req.workflow,
           id: req.id,
           ...(req.runId ? { runId: req.runId } : {}),
           ...(req.date ? { date: req.date } : {}),
@@ -149,6 +150,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
               Boolean(item) && typeof item === "object" && !Array.isArray(item),
             )
             .map((item) => ({
+              workflowId: item.workflowId ? String(item.workflowId) : undefined,
               id: String(item.id ?? ""),
               ...(item.runId ? { runId: String(item.runId) } : {}),
             }))
@@ -164,11 +166,11 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
     }, async (req: {
       workflow: string;
       ids: string[];
-      items?: Array<{ id: string; runId?: string }>;
+      items?: Array<{ workflowId?: string; id: string; runId?: string }>;
       date?: string;
       parentRunId?: string;
     }) => {
-      const items: Array<{ id: string; runId?: string }> = req.items && req.items.length > 0
+      const items: Array<{ workflowId?: string; id: string; runId?: string }> = req.items && req.items.length > 0
         ? req.items
         : req.ids.map((id) => ({ id }));
       const result = await performWorkflowAction({
@@ -177,6 +179,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         source: "queue-panel",
         workflowId: req.workflow,
         targets: items.map((it) => ({
+          workflowId: it.workflowId ?? req.workflow,
           id: it.id,
           ...(it.runId ? { runId: it.runId } : {}),
           ...(req.date ? { date: req.date } : {}),
@@ -246,6 +249,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         workflowId: req.workflow,
         cancelMode: "cooperative",
         targets: [{
+          workflowId: req.workflow,
           id: req.id,
           status: "pending",
           ...(req.runId ? { runId: req.runId } : {}),
@@ -290,6 +294,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         workflowId: req.workflow,
         cancelMode: "cooperative",
         targets: req.items.map((it) => ({
+          workflowId: req.workflow,
           id: it.id,
           status: it.status,
           ...(it.runId ? { runId: it.runId } : {}),
@@ -313,6 +318,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         workflowId: req.workflow,
         cancelMode: "force",
         targets: [{
+          workflowId: req.workflow,
           id: req.id,
           ...(req.runId ? { runId: req.runId } : {}),
         }],
@@ -396,11 +402,16 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       const workflow = String(body.workflow ?? "").trim();
       const date = String(body.date ?? "").trim();
       const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
-      const items = parseItemsFromBody<{ id: string; runId?: string }>(body.items, (o) => {
+      const items = parseItemsFromBody<{ workflowId?: string; id: string; runId?: string }>(body.items, (o) => {
         const id = typeof o.id === "string" ? o.id : "";
         if (!id) return null;
         const runId = typeof o.runId === "string" && o.runId.length > 0 ? o.runId : undefined;
-        return runId ? { id, runId } : { id };
+        const workflowId = typeof o.workflowId === "string" && o.workflowId.length > 0 ? o.workflowId : undefined;
+        return {
+          ...(workflowId ? { workflowId } : {}),
+          id,
+          ...(runId ? { runId } : {}),
+        };
       });
       if (!workflow || !date) {
         return { ok: false, error: "workflow and date are required" };
@@ -413,9 +424,9 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       workflow: string;
       date: string;
       ids: string[];
-      items: Array<{ id: string; runId?: string }>;
+      items: Array<{ workflowId?: string; id: string; runId?: string }>;
     }) => {
-      const items: Array<{ id: string; runId?: string }> = req.items.length > 0
+      const items: Array<{ workflowId?: string; id: string; runId?: string }> = req.items.length > 0
         ? req.items
         : req.ids.map((id) => ({ id }));
       const result = await performWorkflowAction({
@@ -425,6 +436,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         workflowId: req.workflow,
         date: req.date,
         targets: items.map((it) => ({
+          workflowId: it.workflowId ?? req.workflow,
           id: it.id,
           date: req.date,
           ...(it.runId ? { runId: it.runId } : {}),

@@ -34,9 +34,12 @@ export type CancelMode = "cooperative" | "force";
  * required: every low-level ops handler keys on it, and resolving `id` from
  * `runId` alone would require the SQLite `runs` projection — which is not
  * populated for freshly-queued tasks (nor in hermetic tests). Callers always
- * have the item id at hand, so the request carries both.
+ * have the item id at hand, so the request carries both. Each target also
+ * carries `workflowId` because resolved dashboard actions can cross workflow
+ * boundaries even when the request has a source/default workflow.
  */
 export interface WorkflowActionTarget {
+  workflowId: string;
   id: string;
   runId?: string;
   /** Tracker date (YYYY-MM-DD). Required for delete; optional elsewhere. */
