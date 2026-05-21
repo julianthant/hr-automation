@@ -27,6 +27,11 @@ export interface BuildWorkflowActionRequestArgs {
   actions?: WorkflowActionDescriptor[];
   fallbackTarget: WorkflowActionFallbackTarget;
   parentRunId?: string;
+  ocrSessionId?: string;
+  parentWorkflow?: string;
+  parentItemId?: string;
+  formType?: string;
+  reason?: string;
 }
 
 export interface WorkflowActionHttpRequest {
@@ -72,6 +77,11 @@ export function buildWorkflowActionRequest({
   actions,
   fallbackTarget,
   parentRunId,
+  ocrSessionId,
+  parentWorkflow,
+  parentItemId,
+  formType,
+  reason,
 }: BuildWorkflowActionRequestArgs): WorkflowActionHttpRequest {
   const resolvedAction = resolveAction(kind, action, actions);
   const target = resolveTarget(resolvedAction, fallbackTarget);
@@ -97,13 +107,35 @@ export function buildWorkflowActionRequest({
   if (transport === "cancel-queued") {
     return {
       path: "/api/cancel-queued",
-      body: compact({ workflow, id, runId, ...actionScopeBody(resolvedAction) }),
+      body: compact({
+        workflow,
+        id,
+        runId,
+        ...actionScopeBody(resolvedAction),
+        ocrSessionId,
+        parentWorkflow,
+        parentRunId,
+        parentItemId,
+        formType,
+        reason,
+      }),
     };
   }
 
   return {
     path: "/api/task/force-stop",
-    body: compact({ workflow, id, runId, ...actionScopeBody(resolvedAction) }),
+    body: compact({
+      workflow,
+      id,
+      runId,
+      ...actionScopeBody(resolvedAction),
+      ocrSessionId,
+      parentWorkflow,
+      parentRunId,
+      parentItemId,
+      formType,
+      reason,
+    }),
   };
 }
 
