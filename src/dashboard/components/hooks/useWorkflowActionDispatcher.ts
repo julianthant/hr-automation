@@ -2,6 +2,8 @@ import { useCallback } from "react";
 import type {
   WorkflowActionDescriptor,
   WorkflowActionKind,
+  WorkflowActionScope,
+  WorkflowActionSource,
 } from "../../../domain/workflow-runtime/types.js";
 import { compact } from "@/lib/utils";
 import { actionScopeBody, findEnabledAction } from "@/lib/workflow-action-utils";
@@ -11,6 +13,10 @@ export type WorkflowActionTransport =
   | "delete-entry"
   | "cancel-queued"
   | "force-stop";
+
+export type BulkWorkflowActionTransport =
+  | "retry-bulk"
+  | "delete-bulk";
 
 export interface WorkflowActionFallbackTarget {
   workflowId: string;
@@ -32,6 +38,26 @@ export interface BuildWorkflowActionRequestArgs {
   parentItemId?: string;
   formType?: string;
   reason?: string;
+}
+
+export interface WorkflowActionBulkItem {
+  workflowId: string;
+  id: string;
+  runId?: string;
+  date?: string;
+}
+
+export interface BuildBulkWorkflowActionRequestArgs {
+  transport: BulkWorkflowActionTransport;
+  kind: Extract<WorkflowActionKind, "retry" | "delete">;
+  workflow: string;
+  items: WorkflowActionBulkItem[];
+  action?: WorkflowActionDescriptor;
+  actions?: WorkflowActionDescriptor[];
+  date?: string;
+  parentRunId?: string;
+  source?: WorkflowActionSource;
+  scope?: WorkflowActionScope;
 }
 
 export interface WorkflowActionHttpRequest {
@@ -139,6 +165,43 @@ export function buildWorkflowActionRequest({
   };
 }
 
+export function buildBulkWorkflowActionRequest({
+  transport,
+  kind,
+  workflow,
+  items,
+  action,
+  actions,
+  date,
+  parentRunId,
+  source,
+  scope,
+}: BuildBulkWorkflowActionRequestArgs): WorkflowActionHttpRequest {
+  const resolvedAction = resolveAction(kind, action, actions);
+  const resolvedSource = source ?? resolvedAction?.source;
+  const resolvedScope = scope ?? resolvedAction?.scope;
+  const normalizedItems = items.map((item) =>
+    compact({
+      workflowId: item.workflowId,
+      id: item.id,
+      runId: item.runId,
+      date: item.date,
+    }),
+  );
+
+  return {
+    path: transport === "retry-bulk" ? "/api/retry-bulk" : "/api/delete-bulk",
+    body: compact({
+      workflow,
+      items: normalizedItems,
+      date,
+      ...(transport === "retry-bulk" ? { parentRunId } : {}),
+      source: resolvedSource,
+      scope: resolvedScope,
+    }),
+  };
+}
+
 export async function postWorkflowActionRequest<TBody = Record<string, unknown>>(
   request: WorkflowActionHttpRequest,
 ): Promise<WorkflowActionDispatchResult<TBody>> {
@@ -178,6 +241,12 @@ export function useWorkflowActionDispatcher() {
     },
     [],
   );
+  const dispatchBulkWorkflowAction = useCallback(
+    <TBody = Record<string, unknown>>(args: BuildBulkWorkflowActionRequestArgs) => {
+      return postWorkflowActionRequest<TBody>(buildBulkWorkflowActionRequest(args));
+    },
+    [],
+  );
 
-  return { dispatchWorkflowAction };
+  return { dispatchWorkflowAction, dispatchBulkWorkflowAction };
 }

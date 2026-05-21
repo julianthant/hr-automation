@@ -8,6 +8,7 @@ import type {
   WorkflowActionDescriptor,
   WorkflowRunProjection,
 } from "../../../domain/workflow-runtime/types.js";
+import { useWorkflowActionDispatcher } from "@/components/hooks/useWorkflowActionDispatcher";
 
 export interface BatchFooterActionsProps {
   workflow: string;
@@ -46,6 +47,7 @@ export function BatchFooterActions({
 }: BatchFooterActionsProps) {
   const [deleting, setDeleting] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const { dispatchBulkWorkflowAction } = useWorkflowActionDispatcher();
 
   const actionDescriptors = projection?.actions ?? actions;
   const retryEntries = useMemo(
@@ -90,25 +92,37 @@ export function BatchFooterActions({
     setDeleting(true);
     const t = toast.loading(`Deleting ${n} ${n === 1 ? "entry" : "entries"}...`);
     try {
-      const res = await fetch("/api/delete-bulk", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workflow, date, items: deleteItems }),
-      });
-      const body = (await res.json()) as {
+      const result = await dispatchBulkWorkflowAction<{
         ok?: boolean;
         count?: number;
         errors?: Array<{ id: string; error: string }>;
         error?: string;
-      };
+      }>({
+        transport: "delete-bulk",
+        kind: "delete",
+        workflow,
+        items: deleteItems,
+        date,
+        actions: actionDescriptors,
+        source: "batch-view",
+        scope: "visible-view",
+      });
+      const body = result.body;
       const errors = body.errors ?? [];
-      if (!res.ok) {
-        toast.error(res.status === 422 ? "Couldn't delete any entries" : "Couldn't delete entries", {
+      if (!result.ok) {
+        if (result.status === 0) {
+          toast.error("Couldn't delete batch", {
+            id: t,
+            description: result.error,
+          });
+          return;
+        }
+        toast.error(result.status === 422 ? "Couldn't delete any entries" : "Couldn't delete entries", {
           id: t,
           description:
             errors.length > 0
               ? `${errors[0]!.error}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ""}`
-              : body.error ?? `HTTP ${res.status}`,
+              : body.error ?? result.error ?? `HTTP ${result.status}`,
         });
         return;
       }
@@ -141,21 +155,30 @@ export function BatchFooterActions({
     setRetrying(true);
     const t = toast.loading(`Retrying ${retryItems.length} items...`);
     try {
-      const res = await fetch("/api/retry-bulk", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          workflow,
-          items: retryItems,
-          date,
-          parentRunId: batchParentRunId,
-        }),
-      });
-      const body = (await res.json()) as {
+      const result = await dispatchBulkWorkflowAction<{
         ok: boolean;
         count: number;
         errors: Array<{ id: string; error: string }>;
-      };
+        error?: string;
+      }>({
+        transport: "retry-bulk",
+        kind: "retry",
+        workflow,
+        items: retryItems,
+        date,
+        parentRunId: batchParentRunId,
+        actions: actionDescriptors,
+        source: "batch-view",
+        scope: "visible-view",
+      });
+      const body = result.body;
+      if (!result.ok) {
+        toast.error("Couldn't retry", {
+          id: t,
+          description: body.error ?? result.error,
+        });
+        return;
+      }
       if (body.errors.length === 0) {
         toast.success("Retry scheduled", {
           id: t,

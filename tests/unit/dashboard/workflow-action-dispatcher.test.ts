@@ -1,7 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { buildWorkflowActionRequest } from "../../../src/dashboard/components/hooks/useWorkflowActionDispatcher.js";
+import {
+  buildBulkWorkflowActionRequest,
+  buildWorkflowActionRequest,
+} from "../../../src/dashboard/components/hooks/useWorkflowActionDispatcher.js";
 import type { WorkflowActionDescriptor } from "../../../src/domain/workflow-runtime/types.js";
 
 const treeCancelAction: WorkflowActionDescriptor = {
@@ -130,6 +133,76 @@ describe("buildWorkflowActionRequest", () => {
           parentItemId: "oath-parent",
           formType: "oath-signature",
           reason: "Cancelled from oath-upload queue",
+        },
+      },
+    );
+  });
+});
+
+describe("buildBulkWorkflowActionRequest", () => {
+  it("builds batch-view visible-view retry requests with per-target workflow ids", () => {
+    assert.deepEqual(
+      buildBulkWorkflowActionRequest({
+        transport: "retry-bulk",
+        kind: "retry",
+        workflow: "oath-upload",
+        date: "2026-05-21",
+        parentRunId: "batch-parent",
+        action: {
+          kind: "retry",
+          scope: "group",
+          source: "queue-panel",
+          label: "Retry",
+          targets: [],
+          enabled: true,
+        },
+        source: "batch-view",
+        scope: "visible-view",
+        items: [
+          { workflowId: "eid-lookup", id: "employee-id", runId: "eid-run" },
+          { workflowId: "active-check", id: "employee-id", runId: "active-run" },
+        ],
+      }),
+      {
+        path: "/api/retry-bulk",
+        body: {
+          workflow: "oath-upload",
+          date: "2026-05-21",
+          parentRunId: "batch-parent",
+          source: "batch-view",
+          scope: "visible-view",
+          items: [
+            { workflowId: "eid-lookup", id: "employee-id", runId: "eid-run" },
+            { workflowId: "active-check", id: "employee-id", runId: "active-run" },
+          ],
+        },
+      },
+    );
+  });
+
+  it("builds batch-view visible-view delete requests with per-target workflow ids", () => {
+    assert.deepEqual(
+      buildBulkWorkflowActionRequest({
+        transport: "delete-bulk",
+        kind: "delete",
+        workflow: "oath-upload",
+        date: "2026-05-21",
+        source: "batch-view",
+        scope: "visible-view",
+        items: [
+          { workflowId: "oath-signature", id: "10000001", runId: "signature-run" },
+        ],
+      }),
+      {
+        path: "/api/delete-bulk",
+        body: {
+          workflow: "oath-upload",
+          date: "2026-05-21",
+          source: "batch-view",
+          scope: "visible-view",
+          items: [
+            { workflowId: "oath-signature", id: "10000001", runId: "signature-run" },
+          ],
         },
       },
     );
