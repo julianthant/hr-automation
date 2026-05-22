@@ -121,9 +121,10 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
 
   const localServer: Server = createServer(requestListener);
   const sweepInterval = setInterval(() => {
-    void scanFailurePatterns();
+    void scanFailurePatterns(stateDb, projectionReady, dir);
     void scanOrphanedQueueItems(dir);
   }, 15_000);
+  sweepInterval.unref();
   const screenshotSweepInterval = setInterval(() => {
     runScreenshotSweep(dir, opts.screenshotsDir);
   }, 6 * 60 * 60 * 1000);
