@@ -2,8 +2,8 @@ import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import { transaction, type Database, type Statement } from "../../infra/sqlite/index.js";
 
-import type { TrackerEntry, LogEntry } from "../jsonl.js";
-import { dateLocal, isTrackerEntry } from "../jsonl.js";
+import type { TrackerEntry, LogEntry } from "../jsonl-io.js";
+import { dateLocal, isTrackerEntry } from "../jsonl-io.js";
 import { log } from "../../utils/log.js";
 import type { SessionEvent, ScreenshotSessionEvent } from "../session-events.js";
 import { registerLocalFile } from "../files/files.js";

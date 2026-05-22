@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { openDatabase, transaction, type Database } from "../../infra/sqlite/index.js";
 
-import { DEFAULT_DIR } from "../jsonl.js";
+import { DEFAULT_DIR } from "../jsonl-io.js";
 import { LATEST_SCHEMA_VERSION, MIGRATIONS } from "./schema.js";
 
 const openDbs = new Map<string, Database>();
