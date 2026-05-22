@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { FileScan, Loader2, RotateCw, UploadCloud } from "lucide-react";
+import { Check, FileScan, Loader2, RotateCw, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -307,6 +307,7 @@ function useOcrReviewPrepApi(
   }, [storageKey]);
 
   const [submitting, setSubmitting] = useState(false);
+  useEffect(() => { setSubmitting(false); }, [sessionId, runId]);
   const [researchingIndices, setResearchingIndices] = useState<Set<number>>(new Set());
   const [markedBlankPages, setMarkedBlankPages] = useState<Set<number>>(new Set());
   const { summary: dependencySummary, children: dependencyChildren } = useTaskDependencies(
@@ -677,47 +678,64 @@ function useOcrReviewPrepApi(
                 }
                 disabled={submitting}
                 title="Re-upload corrected PDF — carries forward resolved EIDs from this run"
-                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-medium leading-none text-muted-foreground hover:bg-muted disabled:opacity-50"
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium leading-none text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
               >
-                <UploadCloud className="h-3 w-3" aria-hidden /> Reupload
+                <UploadCloud className="h-3.5 w-3.5 shrink-0" aria-hidden /> Reupload
               </button>
             )}
-            {isDelegation && unselectedApprovableCount > 0 && (
-              <button
-                type="button"
-                onClick={selectAllApprovable}
-                disabled={submitting}
-                title="Select every approvable record (matched/resolved with a valid EID, not inactive/non-HDH)"
-                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-medium leading-none text-muted-foreground hover:bg-muted disabled:opacity-50"
-              >
-                Select all ({unselectedApprovableCount})
-              </button>
-            )}
-            {isDelegation && (
-              <button
-                type="button"
-                onClick={handleApprove}
-                disabled={submitting || selectedCount <= 0 || hasPendingDependencies}
-                title={
-                  hasPendingDependencies
-                    ? "Wait for OCR lookup retries to finish before approving."
-                    : selectedCount <= 0
-                      ? "Select at least one approvable record (checkbox)."
-                      : undefined
-                }
-                className={cn(
-                  "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-primary bg-primary px-2.5 text-xs font-medium text-primary-foreground",
-                  "leading-none hover:bg-primary/90",
-                  "disabled:cursor-not-allowed disabled:opacity-50",
-                )}
-              >
-                {submitting && <Loader2 className="h-3 w-3 animate-spin" aria-hidden />}
-                Approve {selectedCount}
-              </button>
-            )}
-            <span className="inline-flex h-8 shrink-0 items-center rounded-md border border-border bg-secondary/40 px-2.5 font-mono text-[11px] font-medium leading-none tabular-nums text-muted-foreground">
-              {recordRows.length} records
-            </span>
+            {/* Split button: [N records (→ select all)] + [Approve N] as one capsule */}
+            <div className={cn("flex h-8 shrink-0 items-stretch overflow-hidden rounded-md border", isDelegation ? "border-primary/40" : "border-border")}>
+              {isDelegation ? (
+                <button
+                  type="button"
+                  onClick={unselectedApprovableCount > 0 ? selectAllApprovable : undefined}
+                  disabled={submitting}
+                  title={
+                    unselectedApprovableCount > 0
+                      ? `Select all ${unselectedApprovableCount} approvable record${unselectedApprovableCount === 1 ? "" : "s"}`
+                      : "All approvable records selected"
+                  }
+                  className={cn(
+                    "inline-flex items-center gap-1.5 border-r border-primary/30 bg-primary/10 px-2.5 font-mono text-[11px] tabular-nums leading-none transition-colors",
+                    unselectedApprovableCount > 0
+                      ? "cursor-pointer text-primary/80 hover:bg-primary/20 hover:text-primary"
+                      : "cursor-default text-primary/50",
+                    "disabled:opacity-50",
+                  )}
+                >
+                  {recordRows.length} <span className="font-sans not-italic opacity-70">records</span>
+                </button>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 bg-secondary/40 px-2.5 font-mono text-[11px] tabular-nums leading-none text-muted-foreground">
+                  {recordRows.length} <span className="font-sans not-italic opacity-70">records</span>
+                </span>
+              )}
+              {isDelegation && (
+                <button
+                  type="button"
+                  onClick={handleApprove}
+                  disabled={submitting || selectedCount <= 0 || hasPendingDependencies}
+                  title={
+                    hasPendingDependencies
+                      ? "Wait for OCR lookup retries to finish before approving."
+                      : selectedCount <= 0
+                        ? "Select at least one approvable record (checkbox)."
+                        : undefined
+                  }
+                  className={cn(
+                    "inline-flex items-center gap-1.5 bg-primary px-3 text-xs font-semibold leading-none text-primary-foreground transition-colors",
+                    "hover:bg-primary/90",
+                    "disabled:cursor-not-allowed disabled:opacity-50",
+                  )}
+                >
+                  {submitting
+                    ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                    : <Check className="h-3 w-3" aria-hidden />
+                  }
+                  Approve {selectedCount}
+                </button>
+              )}
+            </div>
           </div>
         </div>
   );
