@@ -4,6 +4,7 @@ import { transaction, type Database, type Statement } from "../../infra/sqlite/i
 
 import type { TrackerEntry, LogEntry } from "../jsonl-io.js";
 import { dateLocal, getRunIdOr, isTrackerEntry } from "../jsonl-io.js";
+import { isResolvedPrepEntry } from "../dashboard/prep-rows.js";
 import { log } from "../../utils/log.js";
 import type { SessionEvent, ScreenshotSessionEvent } from "../session-events.js";
 import { registerLocalFile } from "../files/files.js";
@@ -206,12 +207,23 @@ function extractEmplId(data: Record<string, string> | undefined): string | null 
   return null;
 }
 
-function isResolvedPrepData(status: string, step: string | undefined, data: Record<string, string> | undefined): number {
-  const isPrep = data?.mode === "prepare";
-  if (!isPrep) return 0;
-  if (status === "done" && step === "approved") return 1;
-  if (status === "failed" && step === "discarded") return 1;
-  return 0;
+/** Mirrors {@link isResolvedPrepEntry} for SQLite `items.resolved_prep` (sidebar wfCounts). */
+function isResolvedPrepData(
+  workflow: string,
+  status: TrackerEntry["status"],
+  step: string | undefined,
+  data: Record<string, string> | undefined,
+): number {
+  const entry: TrackerEntry = {
+    workflow,
+    timestamp: "",
+    id: "",
+    runId: "",
+    status,
+    ...(step ? { step } : {}),
+    ...(data ? { data } : {}),
+  };
+  return isResolvedPrepEntry(entry) ? 1 : 0;
 }
 
 export function applyTrackerEntry(
@@ -297,7 +309,7 @@ export function applyTrackerEntry(
       eventTs: entry.timestamp,
       dataJson,
       error: entry.error ?? null,
-      resolvedPrep: isResolvedPrepData(entry.status, entry.step, entry.data),
+      resolvedPrep: isResolvedPrepData(entry.workflow, entry.status, entry.step, entry.data),
       emplId: extractEmplId(entry.data),
       updatedAt: now,
     });

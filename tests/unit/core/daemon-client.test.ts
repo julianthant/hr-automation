@@ -6,7 +6,12 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { defineWorkflow } from '../../../src/core/kernel/workflow.js'
 import { clear } from '../../../src/core/kernel/registry.js'
-import { computeSpawnPlan, ensureDaemonsAndEnqueue } from '../../../src/core/daemon/client.js'
+import {
+  computeSpawnPlan,
+  ensureDaemonsAndEnqueue,
+  __setSpawnDaemonImplForTests,
+  __resetDaemonSpawnLocksForTests,
+} from '../../../src/core/daemon/client.js'
 import { readQueueState } from '../../../src/core/daemon/queue.js'
 import { openControlDb } from '../../../src/core/control-db.js'
 
@@ -281,6 +286,86 @@ test('ensureDaemonsAndEnqueue: omits parentRunId when not in opts (back-compat)'
     assert.equal(state.queued[0].parentRunId, undefined)
     await new Promise<void>((r) => server.close(() => r()))
   } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('ensureDaemonsAndEnqueue: concurrent same-workflow enqueues spawn only ONE daemon', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-client-race-'))
+  const servers: Array<() => Promise<void>> = []
+  let spawnCalls = 0
+  try {
+    const { createServer } = await import('node:http')
+    const { writeLockfile, lockfilePath, ensureDaemonsDir } = await import(
+      '../../../src/core/daemon/registry.js'
+    )
+    ensureDaemonsDir(dir)
+
+    // Fake spawn: stand up a stub /whoami+/wake server and write a matching
+    // lockfile so the "spawned" daemon is discoverable by findAliveDaemons —
+    // mimics a real spawn without the subprocess. Counts invocations.
+    __setSpawnDaemonImplForTests(async (workflow, trackerDir) => {
+      spawnCalls++
+      const instanceId = `race-0${spawnCalls}`
+      const server = createServer((req, res) => {
+        if (req.url === '/whoami' && req.method === 'GET') {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ workflow, instanceId, pid: process.pid, version: 1 }))
+          return
+        }
+        if (req.url === '/wake' && req.method === 'POST') {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end('{"ok":true}')
+          return
+        }
+        res.writeHead(404)
+        res.end()
+      })
+      await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
+      servers.push(() => new Promise<void>((r) => server.close(() => r())))
+      const addr = server.address()
+      const port = typeof addr === 'object' && addr ? addr.port : 0
+      const startedAt = new Date().toISOString()
+      const lp = lockfilePath(workflow, instanceId, trackerDir)
+      writeLockfile(
+        { workflow, instanceId, pid: process.pid, port, startedAt, hostname: 'host', version: 1 },
+        lp,
+      )
+      return { workflow, instanceId, pid: process.pid, port, startedAt, lockfilePath: lp }
+    })
+
+    const wf = defineWorkflow({
+      name: 'race-wf',
+      schema: z.object({ id: z.string() }),
+      steps: ['a'],
+      systems: [],
+      authSteps: false,
+      handler: async () => {},
+    })
+
+    // Two enqueues fired concurrently with no daemon alive. Pre-fix, both
+    // observe 0 alive in the discover→spawn race and each spawn → spawnCalls===2.
+    const [r1, r2] = await Promise.all([
+      ensureDaemonsAndEnqueue(wf, [{ id: 'x' }], {}, { trackerDir: dir, quiet: true }),
+      ensureDaemonsAndEnqueue(wf, [{ id: 'y' }], {}, { trackerDir: dir, quiet: true }),
+    ])
+
+    assert.equal(spawnCalls, 1, 'exactly one daemon spawned despite two concurrent enqueues')
+    assert.equal(r1.daemons.length, 1)
+    assert.equal(r2.daemons.length, 1)
+    assert.equal(
+      r1.daemons[0].instanceId,
+      r2.daemons[0].instanceId,
+      'both enqueues resolve to the same daemon',
+    )
+
+    const state = await readQueueState('race-wf', dir)
+    assert.equal(state.queued.length, 2, 'both items enqueued onto the shared queue')
+  } finally {
+    __setSpawnDaemonImplForTests(null)
+    __resetDaemonSpawnLocksForTests()
+    for (const close of servers) await close()
     rmSync(dir, { recursive: true, force: true })
   }
 })

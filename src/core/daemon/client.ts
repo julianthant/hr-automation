@@ -68,6 +68,74 @@ export function computeSpawnPlan(aliveCount: number, flags: DaemonFlags): number
 }
 
 /**
+ * Per-workflow in-process serialization of the daemon discover→spawn
+ * critical section.
+ *
+ * Without it, two near-simultaneous enqueues for the same workflow — e.g.
+ * approving two OCR documents in quick succession, each delegating to
+ * oath-signature, or two rapid dashboard Run clicks — both run
+ * `findAliveDaemons` before either's `spawnDaemon` has registered a
+ * lockfile, both observe 0 alive, and both spawn a daemon. That is the
+ * duplicate "<Workflow> 1 / <Workflow> 2" bug.
+ *
+ * Callers for the same `(trackerDir, workflow)` key queue: the second
+ * caller's `fn` runs only after the first's settles, so when it
+ * re-discovers it sees the daemon the first caller just spawned and reuses
+ * it instead of spawning a duplicate.
+ *
+ * The stored chain tail never rejects, so one failed spawn doesn't wedge
+ * the queue for the workflow. The map entry self-deletes once its chain
+ * drains, keeping the map bounded.
+ */
+const daemonSpawnChains = new Map<string, Promise<unknown>>()
+
+function daemonSpawnLockKey(workflow: string, trackerDir?: string): string {
+  // NUL separator (matches registry's aliveDaemonsCacheKey) -- can't appear
+  // in a path or workflow name, so distinct inputs never collide.
+  return `${trackerDir ?? ''}\u0000${workflow}`
+}
+
+function withDaemonSpawnLock<T>(
+  workflow: string,
+  trackerDir: string | undefined,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const key = daemonSpawnLockKey(workflow, trackerDir)
+  const prev = daemonSpawnChains.get(key) ?? Promise.resolve()
+  // Run fn once prev settles — onFulfilled AND onRejected both run fn, so a
+  // failed predecessor spawn still releases the next caller.
+  const result = prev.then(fn, fn)
+  // Tail swallows both outcomes so the next caller's `prev` never rejects.
+  const tail = result.then(
+    () => {},
+    () => {},
+  )
+  daemonSpawnChains.set(key, tail)
+  void tail.then(() => {
+    if (daemonSpawnChains.get(key) === tail) daemonSpawnChains.delete(key)
+  })
+  return result
+}
+
+/**
+ * Active daemon spawn implementation. Indirected through a module-level
+ * binding so unit tests can exercise the spawn-dedup path without launching
+ * a real subprocess — see `__setSpawnDaemonImplForTests`.
+ */
+type SpawnDaemonFn = (workflow: string, trackerDir?: string) => Promise<Daemon>
+let spawnDaemonImpl: SpawnDaemonFn = spawnDaemon
+
+/** Test-only: override the daemon spawn implementation. Pass `null` to restore. */
+export function __setSpawnDaemonImplForTests(fn: SpawnDaemonFn | null): void {
+  spawnDaemonImpl = fn ?? spawnDaemon
+}
+
+/** Test-only: clear the per-workflow spawn-lock chains between cases. */
+export function __resetDaemonSpawnLocksForTests(): void {
+  daemonSpawnChains.clear()
+}
+
+/**
  * The ONE function every daemon-mode CLI adapter calls.
  *
  * Discovers alive daemons, validates inputs, spawns additional daemons as
@@ -85,9 +153,12 @@ export function computeSpawnPlan(aliveCount: number, flags: DaemonFlags): number
  *   - No flags + ≥1 alive → enqueue only, no new daemon.
  *   - No flags + 0 alive → spawn 1, then enqueue.
  *
- * Spawns are serialized: Duo cannot be approved in parallel, so back-to-back
- * spawns match the existing `--parallel` pool mode behaviour where each
- * worker's auth chain runs sequentially.
+ * Discover + spawn is serialized per workflow via `withDaemonSpawnLock` so
+ * two near-simultaneous enqueues for the same workflow can't both observe
+ * "0 alive" and each spawn a daemon (the duplicate "<Workflow> 1 / 2" bug).
+ * The second caller waits for the first's spawn to register, re-discovers,
+ * and reuses it — spawnCount drops to 0. Spawns within a single call are
+ * likewise serial: Duo cannot be approved in parallel.
  */
 export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly string[]>(
   wf: RegisteredWorkflow<TData, TSteps>,
@@ -153,9 +224,6 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
     }
   }
 
-  const alive = await findAliveDaemons(wf.config.name, trackerDir)
-  const spawnCount = computeSpawnPlan(alive.length, flags)
-
   const idFn = (input: TData, idx: number): string => {
     if (opts.deriveItemId) return opts.deriveItemId(input)
     if (wf.config.deriveItemId) return wf.config.deriveItemId(input)
@@ -164,19 +232,22 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
   }
 
   // ---------------------------------------------------------------------
-  // Order (2026-04-28 reorder per Cluster A spec):
+  // Order (2026-04-28 reorder per Cluster A spec; discover+spawn moved
+  // under withDaemonSpawnLock 2026-05-22):
   //   1. Pre-assign runIds for every input
   //   2. FIRE onPreEmitPending (dashboard sees pending rows in <100ms)
-  //   3. Cleanup orphan chromium processes if we're about to spawn (so
-  //      a fresh daemon doesn't pile chrome on top of leaked tabs from
-  //      a SIGKILLed predecessor)
-  //   4. Spawn new daemons (await lockfile registration, ~5-10s)
+  //   3-4. withDaemonSpawnLock — serialized per workflow:
+  //      a. Discover alive daemons (cache-bypassed inside the lock)
+  //      b. Cleanup orphan chromium processes if we're about to spawn (so
+  //         a fresh daemon doesn't pile chrome on top of leaked tabs from
+  //         a SIGKILLed predecessor)
+  //      c. Spawn new daemons (await lockfile registration, ~5-10s)
   //   5. Wake every alive daemon (now includes spawned ones)
   //   6. Write SQLite task rows + JSONL enqueue audit — ONLY after a daemon is registered,
   //      so the orphan sweep can be aggressive (5s/0-grace) without
   //      false-positives during a spawn-in-flight window.
   //
-  // Failure handling: if step 4 throws, we fire onPreEmitFailed for
+  // Failure handling: if the spawn step throws, we fire onPreEmitFailed for
   // every pre-emitted runId so the caller can mark the stranded
   // `pending` tracker rows as `failed`. No task row or queue audit event is
   // written on this path → the orphan sweep doesn't see anything to fail.
@@ -233,51 +304,75 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
   }
 
   try {
-    // Step 3: kill orphan chromium before spawning. Cheap no-op when
-    // spawnCount === 0 (no orphans expected to interfere) — but always
-    // worth doing once per session to clean up stale state.
-    if (spawnCount > 0) {
-      try {
-        const killed = await killOrphanedChromiumProcesses()
-        if (killed > 0 && !quiet) {
-          log.step(`[Daemon] Killed ${killed} orphaned Chromium process(es) before spawn.`)
+    // Steps 3-4: discover + spawn, serialized per workflow.
+    //
+    // The discover→spawn window is a TOCTOU race: two near-simultaneous
+    // enqueues for the same workflow would both run findAliveDaemons before
+    // either's spawnDaemon registered a lockfile, both see 0 alive, and both
+    // spawn — the duplicate "<Workflow> 1 / <Workflow> 2" daemon bug.
+    // withDaemonSpawnLock serializes the section so the second caller
+    // re-discovers AFTER the first's spawn registers, finds that daemon, and
+    // computeSpawnPlan returns 0 for it — it reuses the existing daemon.
+    const daemons = await withDaemonSpawnLock(wf.config.name, trackerDir, async () => {
+      // Discover fresh INSIDE the lock — invalidate the alive-daemons TTL
+      // cache first so a predecessor lock-holder's just-spawned daemon is
+      // always visible (a stale `[]` cache entry would defeat the dedup).
+      invalidateAliveDaemonsCache(wf.config.name, trackerDir)
+      const alive = await findAliveDaemons(wf.config.name, trackerDir)
+      const spawnCount = computeSpawnPlan(alive.length, flags)
+
+      // Step 3: kill orphan chromium before spawning. Skipped when
+      // spawnCount === 0 (nothing is about to spawn).
+      if (spawnCount > 0) {
+        try {
+          const killed = await killOrphanedChromiumProcesses()
+          if (killed > 0 && !quiet) {
+            log.step(`[Daemon] Killed ${killed} orphaned Chromium process(es) before spawn.`)
+          }
+        } catch (err) {
+          // Non-fatal: orphan cleanup is best-effort. A failure here would
+          // typically be a missing pgrep/ps binary; the daemon spawn is
+          // still attempted so the user isn't blocked.
+          log.warn(
+            `[Daemon] Orphan-chromium cleanup failed (continuing): ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          )
         }
-      } catch (err) {
-        // Non-fatal: orphan cleanup is best-effort. A failure here would
-        // typically be a missing pgrep/ps binary; the daemon spawn is
-        // still attempted so the user isn't blocked.
-        log.warn(
-          `[Daemon] Orphan-chromium cleanup failed (continuing): ${
-            err instanceof Error ? err.message : String(err)
-          }`,
+      }
+
+      // Step 4: spawn additional daemons if needed (serial — Duo can't be
+      // approved in parallel). After this step every requested daemon is
+      // lockfile-registered (spawnDaemon blocks until /whoami responds).
+      if (!quiet && spawnCount > 0) {
+        const why =
+          flags.parallel !== undefined
+            ? flags.new
+              ? `--parallel ${flags.parallel} --new (${alive.length} alive)`
+              : `--parallel ${flags.parallel} (${alive.length} alive)`
+            : flags.new
+              ? `--new (${alive.length} alive)`
+              : `no alive daemons`
+        log.step(`[Daemon] Spawning ${spawnCount} new ${wf.config.name} daemon(s) (${why}).`)
+        log.step('[Daemon] Approve Duo(s) in the new browser window(s); this takes 30s–2min.')
+      } else if (!quiet && alive.length > 0) {
+        // The reuse path the spawn lock guarantees — surface it so a rapid
+        // double-action visibly reuses one daemon instead of spawning two.
+        log.step(
+          `[Daemon] Reusing ${alive.length} alive ${wf.config.name} daemon(s); no spawn needed.`,
         )
       }
-    }
 
-    // Step 4: spawn additional daemons if needed (serial — Duo can't be
-    // approved in parallel). After this step every requested daemon is
-    // lockfile-registered (spawnDaemon blocks until /whoami responds).
-    if (!quiet && spawnCount > 0) {
-      const why =
-        flags.parallel !== undefined
-          ? flags.new
-            ? `--parallel ${flags.parallel} --new (${alive.length} alive)`
-            : `--parallel ${flags.parallel} (${alive.length} alive)`
-          : flags.new
-            ? `--new (${alive.length} alive)`
-            : `no alive daemons`
-      log.step(`[Daemon] Spawning ${spawnCount} new ${wf.config.name} daemon(s) (${why}).`)
-      log.step('[Daemon] Approve Duo(s) in the new browser window(s); this takes 30s–2min.')
-    }
+      const spawned: Daemon[] = []
+      for (let i = 0; i < spawnCount; i++) {
+        const d = await spawnDaemonImpl(wf.config.name, trackerDir)
+        spawned.push(d)
+        invalidateAliveDaemonsCache(wf.config.name, trackerDir)
+      }
 
-    const spawned: Daemon[] = []
-    for (let i = 0; i < spawnCount; i++) {
-      const d = await spawnDaemon(wf.config.name, trackerDir)
-      spawned.push(d)
-      invalidateAliveDaemonsCache(wf.config.name, trackerDir)
-    }
+      return [...alive, ...spawned]
+    })
 
-    const daemons = [...alive, ...spawned]
     if (daemons.length === 0) {
       throw new Error('ensureDaemonsAndEnqueue: expected at least one daemon after spawn phase')
     }

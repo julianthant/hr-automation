@@ -3,7 +3,7 @@ export interface Migration {
   sql: string;
 }
 
-export const LATEST_SCHEMA_VERSION = 9;
+export const LATEST_SCHEMA_VERSION = 10;
 
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -492,6 +492,20 @@ ALTER TABLE task_attempts DROP COLUMN status;
     sql: String.raw`
 ALTER TABLE runs ADD COLUMN terminal_at TEXT;
 CREATE INDEX IF NOT EXISTS idx_runs_terminal_at ON runs(terminal_at);
+    `,
+  },
+  {
+    // Migration 10: OCR approved prep rows must stay in sidebar wfCounts.
+    // `isResolvedPrepData` previously treated any `mode=prepare` approved row as
+    // resolved, but OCR keeps approved prep visible until discarded — same rule as
+    // `isResolvedPrepEntry` / the active-workflow queue count override.
+    version: 10,
+    sql: String.raw`
+UPDATE items
+SET resolved_prep = 0
+WHERE workflow = 'ocr'
+  AND resolved_prep = 1
+  AND NOT (latest_status = 'failed' AND latest_step = 'discarded');
     `,
   },
 ];
