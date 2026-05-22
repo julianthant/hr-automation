@@ -3,7 +3,8 @@
  * folder. Not part of the public surface — not re-exported from index.ts.
  */
 import { appendFileSync, mkdirSync } from "fs";
-import { appendLogEntry, dateLocal, readEntries, readEntriesForDate, trackEvent } from "../../jsonl.js";
+import { appendLogEntry, trackEvent } from "../../jsonl.js";
+import { findLatestEntryForPredicate } from "../../find-latest-entry.js";
 import { emitItemCancelled } from "../../session-events.js";
 import {
   daemonsDir,
@@ -98,18 +99,15 @@ export function appendQueueEnqueueAudit(
  * alongside is the authoritative user-visible signal).
  */
 function resolveInstanceForRunId(workflow: string, runId: string, dir: string): string | null {
-  for (const e of readEntries(workflow, dir)) {
-    if (e.runId === runId && typeof e.data?.instance === "string") {
-      return e.data.instance;
-    }
-  }
-  const ydate = dateLocal(new Date(Date.now() - 24 * 60 * 60 * 1000));
-  for (const e of readEntriesForDate(workflow, ydate, dir)) {
-    if (e.runId === runId && typeof e.data?.instance === "string") {
-      return e.data.instance;
-    }
-  }
-  return null;
+  const entry = findLatestEntryForPredicate({
+    workflow,
+    trackerDir: dir,
+    // Today + yesterday — matches the original near-midnight fallback window.
+    lookbackDays: 2,
+    predicate: (e) => e.runId === runId && typeof e.data?.instance === "string",
+  });
+  const instance = entry?.data?.instance;
+  return typeof instance === "string" ? instance : null;
 }
 
 export function emitDashboardCancelTrackerRow(

@@ -1,4 +1,4 @@
-import { trackEvent, appendLogEntry, readEntries, readEntriesForDate, dateLocal } from "../../jsonl.js";
+import { trackEvent, appendLogEntry } from "../../jsonl.js";
 import { log } from "../../../utils/log.js";
 import { errorMessage } from "../../../utils/errors.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
@@ -307,21 +307,13 @@ function readLatestEntryDataWithLookback(
   // Walk today + past N days, newest-first, returning the first match.
   // Cross-day case: session started yesterday, approved today — yesterday's
   // JSONL holds the actual data. Today-only `readEntries(...)` returned {}.
-  const today = new Date();
-  for (let dayOffset = 0; dayOffset < SESSION_LOOKBACK_DAYS; dayOffset++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - dayOffset);
-    const dateStr = dateLocal(d);
-    const rows = dayOffset === 0
-      ? readEntries(workflow, trackerDir)
-      : readEntriesForDate(workflow, dateStr, trackerDir);
-    for (let i = rows.length - 1; i >= 0; i--) {
-      const row = rows[i];
-      if (row.id !== matchId || row.runId !== matchRunId || !row.data) continue;
-      return { ...row.data };
-    }
-  }
-  return {};
+  const entry = findLatestEntryForPredicate({
+    workflow,
+    ...(trackerDir !== undefined ? { trackerDir } : {}),
+    lookbackDays: SESSION_LOOKBACK_DAYS,
+    predicate: (row) => row.id === matchId && row.runId === matchRunId && Boolean(row.data),
+  });
+  return entry?.data ? { ...entry.data } : {};
 }
 
 function readLatestOcrReviewData(
