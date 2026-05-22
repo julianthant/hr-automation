@@ -79,11 +79,16 @@ const SESSIONS_DATE_RE = /^sessions-\d{4}-\d{2}-\d{2}\.jsonl$/;
 // ── readSessionEvents cache ────────────────────────────────
 // Session files are append-only. Cache parsed events per file by
 // (mtimeMs, size). If both match the cached entry, skip re-parsing.
+// Cap at 64 entries with LRU eviction (delete-on-hit + re-set) so long-lived
+// dashboard sessions walking historical dated files don't leak unboundedly.
+// `cleanOldSessionFiles` removes the files but not cache entries, so without
+// a cap the parsed arrays for old dates accumulate for the process lifetime.
 interface SessionFileCache {
   mtimeMs: number;
   size: number;
   events: SessionEvent[];
 }
+const SESSION_EVENTS_CACHE_MAX = 64;
 const sessionEventsCache = new Map<string, SessionFileCache>();
 
 /** Test-only: clear the module-level session-events file cache. */
@@ -151,7 +156,9 @@ export function readSessionEvents(dir: string = DEFAULT_DIR): SessionEvent[] {
     }
     const cached = sessionEventsCache.get(filePath);
     if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
-      // File unchanged — reuse parsed events directly.
+      // File unchanged — bump to most-recent (LRU hit) and reuse.
+      sessionEventsCache.delete(filePath);
+      sessionEventsCache.set(filePath, cached);
       for (const ev of cached.events) out.push(ev);
       continue;
     }
@@ -171,7 +178,13 @@ export function readSessionEvents(dir: string = DEFAULT_DIR): SessionEvent[] {
         // Skip malformed lines.
       }
     }
+    // Delete-then-set bumps insertion-order position for the LRU eviction.
+    sessionEventsCache.delete(filePath);
     sessionEventsCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, events });
+    if (sessionEventsCache.size > SESSION_EVENTS_CACHE_MAX) {
+      const oldestKey = sessionEventsCache.keys().next().value;
+      if (oldestKey !== undefined) sessionEventsCache.delete(oldestKey);
+    }
     for (const ev of events) out.push(ev);
   }
   return out;

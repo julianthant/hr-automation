@@ -79,6 +79,164 @@ function parseTypedDataJson(
   }
 }
 
+// ── Per-Database prepared-statement cache ─────────────────────────────────────
+//
+// `node:sqlite`'s `prepare()` re-parses + re-plans SQL on every call.  The
+// read path runs multiple queries per SSE tick × N connected clients; caching
+// prepared statements once per `Database` handle (same pattern as `apply.ts`'s
+// write-path `stmtCache`) eliminates that repeated cost.
+
+interface CachedReadStatements {
+  selectSchemaVersion: ReturnType<Database["prepare"]>;
+  countProjectionSources: ReturnType<Database["prepare"]>;
+  countRunEvents: ReturnType<Database["prepare"]>;
+  countLogs: ReturnType<Database["prepare"]>;
+  countSessionEvents: ReturnType<Database["prepare"]>;
+  selectLogsForRun: ReturnType<Database["prepare"]>;
+  selectRunEventsForRunWithItem: ReturnType<Database["prepare"]>;
+  selectRunEventsForRunNoItem: ReturnType<Database["prepare"]>;
+  selectRunEventsWithRunsForDate: ReturnType<Database["prepare"]>;
+  selectDistinctWorkflowsForDate: ReturnType<Database["prepare"]>;
+  selectWfCountRowsForDate: ReturnType<Database["prepare"]>;
+  selectAllLatestRowsForDate: ReturnType<Database["prepare"]>;
+  selectRunsForItem: ReturnType<Database["prepare"]>;
+  selectRunHistoryForItem: ReturnType<Database["prepare"]>;
+  selectSessionEventsByRunId: ReturnType<Database["prepare"]>;
+  selectSessionEventsByRunIdAndInstance: ReturnType<Database["prepare"]>;
+  selectPriorEntriesByKey: ReturnType<Database["prepare"]>;
+  selectResolvedEmplIds: ReturnType<Database["prepare"]>;
+}
+
+const readStmtCache = new WeakMap<Database, CachedReadStatements>();
+
+function readStmts(db: Database): CachedReadStatements {
+  const hit = readStmtCache.get(db);
+  if (hit) return hit;
+  const s: CachedReadStatements = {
+    selectSchemaVersion: db.prepare(
+      "SELECT version FROM schema_version WHERE id = 1",
+    ),
+    countProjectionSources: db.prepare(
+      "SELECT COUNT(*) AS n FROM projection_sources",
+    ),
+    countRunEvents: db.prepare(
+      "SELECT COUNT(*) AS n FROM run_events",
+    ),
+    countLogs: db.prepare(
+      "SELECT COUNT(*) AS n FROM logs",
+    ),
+    countSessionEvents: db.prepare(
+      "SELECT COUNT(*) AS n FROM session_events",
+    ),
+    selectLogsForRun: db.prepare(`
+      SELECT *
+      FROM logs
+      WHERE workflow = @workflow
+        AND tracker_date = @trackerDate
+        AND item_id = @itemId
+        AND run_id = @runId
+      ORDER BY ts_ms ASC, id ASC
+      LIMIT @limit
+    `),
+    selectRunEventsForRunWithItem: db.prepare(`
+      SELECT *
+      FROM run_events
+      WHERE workflow = @workflow
+        AND tracker_date = @trackerDate
+        AND item_id = @itemId
+        AND run_id = @runId
+      ORDER BY event_ms ASC, id ASC
+      LIMIT @limit
+    `),
+    selectRunEventsForRunNoItem: db.prepare(`
+      SELECT *
+      FROM run_events
+      WHERE workflow = @workflow
+        AND tracker_date = @trackerDate
+        AND run_id = @runId
+      ORDER BY event_ms ASC, id ASC
+      LIMIT @limit
+    `),
+    selectRunEventsWithRunsForDate: db.prepare(`
+      SELECT re.*, r.first_log_ts, r.last_log_ts, r.last_log_message, r.run_ordinal, r.screenshot_count,
+             r.first_any_ts, r.first_work_ts, r.latest_tracker_ts
+      FROM run_events re
+      JOIN runs r
+        ON r.workflow = re.workflow
+       AND r.tracker_date = re.tracker_date
+       AND r.item_id = re.item_id
+       AND r.run_id = re.run_id
+      WHERE re.workflow = @workflow AND re.tracker_date = @date
+      ORDER BY re.event_ms ASC, re.id ASC
+    `),
+    selectDistinctWorkflowsForDate: db.prepare(
+      "SELECT DISTINCT workflow FROM items WHERE tracker_date = @date ORDER BY workflow",
+    ),
+    selectWfCountRowsForDate: db.prepare(`
+      SELECT i.workflow, i.item_id AS id, i.latest_run_id AS runId,
+             r.parent_run_id AS parent_run_id,
+             i.latest_status AS status, i.latest_step AS step, i.latest_ts AS timestamp,
+             i.latest_data_json AS data_json, i.latest_error AS error
+      FROM items i
+      LEFT JOIN runs r
+        ON r.workflow = i.workflow
+       AND r.tracker_date = i.tracker_date
+       AND r.item_id = i.item_id
+       AND r.run_id = i.latest_run_id
+      WHERE i.tracker_date = @date AND i.resolved_prep = 0
+    `),
+    selectAllLatestRowsForDate: db.prepare(`
+      SELECT workflow, latest_ts AS timestamp, item_id AS id, latest_run_id AS runId,
+             latest_status AS status, latest_step AS step, latest_data_json AS data_json,
+             latest_error AS error
+      FROM items
+      WHERE tracker_date = @date
+    `),
+    selectRunsForItem: db.prepare(`
+      SELECT * FROM runs
+      WHERE workflow = @workflow AND tracker_date = @date AND item_id = @itemId
+      ORDER BY run_ordinal ASC
+    `),
+    selectRunHistoryForItem: db.prepare(`
+      SELECT run_id, event_ts AS timestamp, status, step
+      FROM run_events
+      WHERE workflow = @workflow AND tracker_date = @date AND item_id = @itemId
+      ORDER BY event_ms ASC, id ASC
+    `),
+    selectSessionEventsByRunId: db.prepare(`
+      SELECT raw_json FROM session_events
+      WHERE run_id = @runId
+      ORDER BY ts_ms ASC, id ASC
+    `),
+    selectSessionEventsByRunIdAndInstance: db.prepare(`
+      SELECT raw_json FROM session_events
+      WHERE run_id = @runId OR (run_id IS NULL AND workflow_instance = @instance)
+      ORDER BY ts_ms ASC, id ASC
+    `),
+    selectPriorEntriesByKey: db.prepare(`
+      SELECT item_id, latest_run_id, latest_status, latest_step, latest_ts, tracker_date, latest_data_json
+      FROM items
+      WHERE workflow = @workflow
+        AND tracker_date >= @cutoff
+        AND latest_data_json IS NOT NULL
+        AND TRIM(json_extract(latest_data_json, '$.' || @key)) = @value
+        AND NOT (latest_status = 'failed' AND (latest_step = 'cancelled' OR latest_step = 'discarded'))
+      ORDER BY latest_ts DESC
+    `),
+    selectResolvedEmplIds: db.prepare(`
+      SELECT workflow, item_id, latest_empl_id
+      FROM items
+      WHERE tracker_date = @date
+        AND latest_empl_id IS NOT NULL
+        AND TRIM(latest_empl_id) != ''
+    `),
+  };
+  readStmtCache.set(db, s);
+  return s;
+}
+
+// ── resolvedEmplIdMapFromRunEvents ────────────────────────────────────────────
+
 const WF_ITEM_KEY_SEP = "\u0000";
 const RESOLVED_EMPL_CACHE_TTL_MS = 1_000;
 const RESOLVED_EMPL_CACHE_MAX = 10_000;
@@ -101,13 +259,7 @@ function resolvedEmplIdMapFromRunEvents(db: Database, trackerDate: string): Map<
     return cached.value;
   }
   const out = new Map<string, string>();
-  const rows = db.prepare(`
-    SELECT workflow, item_id, latest_empl_id
-    FROM items
-    WHERE tracker_date = @date
-      AND latest_empl_id IS NOT NULL
-      AND TRIM(latest_empl_id) != ''
-  `).all({ date: trackerDate }) as Array<{ workflow: string; item_id: string; latest_empl_id: string }>;
+  const rows = readStmts(db).selectResolvedEmplIds.all({ date: trackerDate }) as Array<{ workflow: string; item_id: string; latest_empl_id: string }>;
   for (const row of rows) {
     out.set(`${row.workflow}${WF_ITEM_KEY_SEP}${row.item_id}`, row.latest_empl_id);
   }
@@ -131,11 +283,12 @@ function patchItemDataWithCarriedEmpl(
 }
 
 export function queryProjectionHealth(db: Database, dir: string): ProjectionHealth {
-  const version = db.prepare("SELECT version FROM schema_version WHERE id = 1").get() as { version: number } | undefined;
-  const sourceCount = db.prepare("SELECT COUNT(*) AS n FROM projection_sources").get() as { n: number };
-  const runEventCount = db.prepare("SELECT COUNT(*) AS n FROM run_events").get() as { n: number };
-  const logCount = db.prepare("SELECT COUNT(*) AS n FROM logs").get() as { n: number };
-  const sessionEventCount = db.prepare("SELECT COUNT(*) AS n FROM session_events").get() as { n: number };
+  const s = readStmts(db);
+  const version = s.selectSchemaVersion.get() as { version: number } | undefined;
+  const sourceCount = s.countProjectionSources.get() as { n: number };
+  const runEventCount = s.countRunEvents.get() as { n: number };
+  const logCount = s.countLogs.get() as { n: number };
+  const sessionEventCount = s.countSessionEvents.get() as { n: number };
   return {
     ok: true,
     dbPath: stateDbPath(dir),
@@ -151,16 +304,7 @@ export function selectLogsForRun(
   db: Database,
   params: { workflow: string; trackerDate: string; itemId: string; runId: string; limit?: number },
 ): LogEntryRow[] {
-  return db.prepare(`
-    SELECT *
-    FROM logs
-    WHERE workflow = @workflow
-      AND tracker_date = @trackerDate
-      AND item_id = @itemId
-      AND run_id = @runId
-    ORDER BY ts_ms ASC, id ASC
-    LIMIT @limit
-  `).all({ ...params, limit: params.limit ?? 5_000 }) as LogEntryRow[];
+  return readStmts(db).selectLogsForRun.all({ ...params, limit: params.limit ?? 5_000 }) as LogEntryRow[];
 }
 
 export function mapLogRowToWire(row: LogEntryRow): LogEntry | null {
@@ -186,17 +330,11 @@ export function selectRunEventsForRun(
   db: Database,
   params: { workflow: string; trackerDate: string; itemId?: string; runId: string; limit?: number },
 ): RunEventRow[] {
-  const itemFilter = params.itemId ? "AND item_id = @itemId" : "";
-  return db.prepare(`
-    SELECT *
-    FROM run_events
-    WHERE workflow = @workflow
-      AND tracker_date = @trackerDate
-      ${itemFilter}
-      AND run_id = @runId
-    ORDER BY event_ms ASC, id ASC
-    LIMIT @limit
-  `).all({ ...params, limit: params.limit ?? 5_000 }) as RunEventRow[];
+  const s = readStmts(db);
+  const stmt = params.itemId
+    ? s.selectRunEventsForRunWithItem
+    : s.selectRunEventsForRunNoItem;
+  return stmt.all({ ...params, limit: params.limit ?? 5_000 }) as RunEventRow[];
 }
 
 export function mapRunEventRowToWire(row: RunEventRow): TrackerEntry | null {
@@ -231,18 +369,7 @@ export function queryEntriesPayload(
   db: Database,
   opts: { workflow: string; date: string },
 ): ProjectionEntriesPayload {
-  const rawEventRows = db.prepare(`
-    SELECT re.*, r.first_log_ts, r.last_log_ts, r.last_log_message, r.run_ordinal, r.screenshot_count,
-           r.first_any_ts, r.first_work_ts, r.latest_tracker_ts
-    FROM run_events re
-    JOIN runs r
-      ON r.workflow = re.workflow
-     AND r.tracker_date = re.tracker_date
-     AND r.item_id = re.item_id
-     AND r.run_id = re.run_id
-    WHERE re.workflow = @workflow AND re.tracker_date = @date
-    ORDER BY re.event_ms ASC, re.id ASC
-  `).all({ workflow: opts.workflow, date: opts.date }) as Array<{
+  const rawEventRows = readStmts(db).selectRunEventsWithRunsForDate.all({ workflow: opts.workflow, date: opts.date }) as Array<{
     id: number;
     workflow: string;
     event_ts: string;
@@ -333,26 +460,12 @@ export function queryEntriesPayload(
     };
   });
 
-  const workflows = (db.prepare(`
-    SELECT DISTINCT workflow FROM items WHERE tracker_date = @date ORDER BY workflow
-  `).all({ date: opts.date }) as Array<{ workflow: string }>).map((r) => r.workflow);
+  const workflows = (readStmts(db).selectDistinctWorkflowsForDate.all({ date: opts.date }) as Array<{ workflow: string }>).map((r) => r.workflow);
 
   const resolvedEmplFromDay = resolvedEmplIdMapFromRunEvents(db, opts.date);
 
   const wfCounts: Record<string, number> = {};
-  const rawWfCountRows = db.prepare(`
-    SELECT i.workflow, i.item_id AS id, i.latest_run_id AS runId,
-           r.parent_run_id AS parent_run_id,
-           i.latest_status AS status, i.latest_step AS step, i.latest_ts AS timestamp,
-           i.latest_data_json AS data_json, i.latest_error AS error
-    FROM items i
-    LEFT JOIN runs r
-      ON r.workflow = i.workflow
-     AND r.tracker_date = i.tracker_date
-     AND r.item_id = i.item_id
-     AND r.run_id = i.latest_run_id
-    WHERE i.tracker_date = @date AND i.resolved_prep = 0
-  `).all({ date: opts.date }) as Array<{
+  const rawWfCountRows = readStmts(db).selectWfCountRowsForDate.all({ date: opts.date }) as Array<{
     workflow: string;
     id: string;
     runId: string;
@@ -420,13 +533,7 @@ export function queryEntriesPayload(
   // One query for ALL workflows on this date, partition in JS.
   // Replaces the prior per-workflow N+1 (one prepared statement per
   // workflow per tick per connected SSE client).
-  const rawAllLatestRows = db.prepare(`
-    SELECT workflow, latest_ts AS timestamp, item_id AS id, latest_run_id AS runId,
-           latest_status AS status, latest_step AS step, latest_data_json AS data_json,
-           latest_error AS error
-    FROM items
-    WHERE tracker_date = @date
-  `).all({ date: opts.date }) as Array<{
+  const rawAllLatestRows = readStmts(db).selectAllLatestRowsForDate.all({ date: opts.date }) as Array<{
     workflow: string;
     timestamp: string;
     id: string;
@@ -496,11 +603,7 @@ export function queryRunsForItem(
   runOrdinal: number;
   data?: Record<string, unknown>;
 }> {
-  const rawRows = db.prepare(`
-    SELECT * FROM runs
-    WHERE workflow = @workflow AND tracker_date = @date AND item_id = @itemId
-    ORDER BY run_ordinal ASC
-  `).all({ workflow: opts.workflow, date: opts.date, itemId: opts.itemId }) as Array<{
+  const rawRows = readStmts(db).selectRunsForItem.all({ workflow: opts.workflow, date: opts.date, itemId: opts.itemId }) as Array<{
     run_id: string;
     latest_status: string;
     latest_step: string | null;
@@ -519,12 +622,7 @@ export function queryRunsForItem(
     );
     return false;
   });
-  const rawHistory = db.prepare(`
-    SELECT run_id, event_ts AS timestamp, status, step
-    FROM run_events
-    WHERE workflow = @workflow AND tracker_date = @date AND item_id = @itemId
-    ORDER BY event_ms ASC, id ASC
-  `).all({ workflow: opts.workflow, date: opts.date, itemId: opts.itemId }) as Array<{
+  const rawHistory = readStmts(db).selectRunHistoryForItem.all({ workflow: opts.workflow, date: opts.date, itemId: opts.itemId }) as Array<{
     run_id: string;
     timestamp: string;
     status: unknown;
@@ -576,17 +674,10 @@ export function querySessionEventsForRun(
   db: Database,
   opts: { runId: string; workflowInstance?: string },
 ): SessionEvent[] {
-  const params: Record<string, unknown> = { runId: opts.runId };
-  let where = "run_id = @runId";
-  if (opts.workflowInstance) {
-    where += " OR (run_id IS NULL AND workflow_instance = @instance)";
-    params.instance = opts.workflowInstance;
-  }
-  const rows = db.prepare(`
-    SELECT raw_json FROM session_events
-    WHERE ${where}
-    ORDER BY ts_ms ASC, id ASC
-  `).all(params) as Array<{ raw_json: string }>;
+  const s = readStmts(db);
+  const rows = opts.workflowInstance
+    ? (s.selectSessionEventsByRunIdAndInstance.all({ runId: opts.runId, instance: opts.workflowInstance }) as Array<{ raw_json: string }>)
+    : (s.selectSessionEventsByRunId.all({ runId: opts.runId }) as Array<{ raw_json: string }>);
   const out: SessionEvent[] = [];
   for (const r of rows) {
     try {
@@ -647,16 +738,7 @@ export function queryPriorEntriesByKey(
   // then dedupe to the single latest across all dates in JS. SQLite's window
   // functions would allow a one-pass solution but the bounded result set (90 days
   // × matching items) is small enough that a JS Map dedup is negligible.
-  const rows = db.prepare(`
-    SELECT item_id, latest_run_id, latest_status, latest_step, latest_ts, tracker_date, latest_data_json
-    FROM items
-    WHERE workflow = @workflow
-      AND tracker_date >= @cutoff
-      AND latest_data_json IS NOT NULL
-      AND TRIM(json_extract(latest_data_json, '$.' || @key)) = @value
-      AND NOT (latest_status = 'failed' AND (latest_step = 'cancelled' OR latest_step = 'discarded'))
-    ORDER BY latest_ts DESC
-  `).all({
+  const rows = readStmts(db).selectPriorEntriesByKey.all({
     workflow: opts.workflow,
     cutoff: opts.cutoffDate,
     key: opts.keyField,

@@ -2,8 +2,10 @@ import {
   listWorkflows,
   readEntries,
   trackEvent,
+  dateLocal,
   DEFAULT_DIR,
 } from "../jsonl.js";
+import type { TrackerEntry } from "../jsonl.js";
 import { log } from "../../utils/log.js";
 import { detectFailurePattern } from "../alerts/failure-detector.js";
 import { notify } from "../alerts/notify.js";
@@ -12,6 +14,7 @@ import { readQueueState, markItemFailed } from "../../core/daemon/queue.js";
 import { buildTrackerDataForInput } from "../../core/daemon/enqueue-dispatch.js";
 import { openControlDb } from "../../core/control-db.js";
 import { createTaskStore } from "../../core/task-store/index.js";
+import type { Database } from "../../infra/sqlite/index.js";
 
 /**
  * Cooldown map for failure-pattern alerts. Module-level so it survives the
@@ -30,19 +33,80 @@ export function __resetFailureAlertCooldown(): void {
 }
 
 /**
+ * Read today's failed entries for failure-pattern detection.
+ *
+ * SQLite path (when projection is ready): one indexed SELECT on
+ * `run_events WHERE status = 'failed' AND error IS NOT NULL` for all workflows
+ * on today's date. Uses `idx_run_events_workflow_date` so the scan is bounded
+ * to today's rows only — avoids the full-table read the JSONL path incurs.
+ *
+ * JSONL fallback: per-workflow `readEntries` (unchanged behavior).
+ */
+function readFailedEntriesForScan(
+  stateDb: Database | null,
+  projectionReady: boolean,
+  dir: string,
+): TrackerEntry[] {
+  if (projectionReady && stateDb) {
+    try {
+      const today = dateLocal();
+      const rows = stateDb.prepare(`
+        SELECT workflow, item_id AS id, run_id AS runId, event_ts AS timestamp, error
+        FROM run_events
+        WHERE tracker_date = @date
+          AND status = 'failed'
+          AND error IS NOT NULL
+          AND error != ''
+      `).all({ date: today }) as Array<{
+        workflow: string;
+        id: string;
+        runId: string;
+        timestamp: string;
+        error: string;
+      }>;
+      return rows.map((r) => ({
+        workflow: r.workflow,
+        id: r.id,
+        runId: r.runId,
+        timestamp: r.timestamp,
+        status: "failed" as const,
+        error: r.error,
+        data: {},
+      }));
+    } catch (err) {
+      log.warn(
+        `[sweeps] SQLite failed-entries read error, falling back to JSONL: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  // JSONL fallback — same as before.
+  const workflows = listWorkflows(dir);
+  return workflows.flatMap((w) => readEntries(w, dir));
+}
+
+/**
  * Scan the current day's tracker entries across all known workflows for
  * repeated-failure patterns. Fires macOS notifications + log.warn for any
  * pattern that crosses the threshold and isn't in cooldown. Best-effort -
  * a notification failure never stalls the SSE poll cycle.
  *
  * Pulled out of the `/events` handler so it can be smoke-tested in isolation.
+ *
+ * @param stateDb  - Live SQLite handle from `createDashboardServer` (or null
+ *   when called from tests / paths without a projection). When non-null and
+ *   `projectionReady` is true the SQLite fast-path is used; otherwise falls
+ *   back to the JSONL `readEntries` scan.
+ * @param projectionReady - Mirror of `deps.projectionReady` from the server
+ *   startup. Keeps the same dual-path gate used everywhere else in the module.
+ * @param dir - Tracker dir (default `.tracker`).
  */
-export async function scanFailurePatterns(): Promise<void> {
+export async function scanFailurePatterns(
+  stateDb: Database | null = null,
+  projectionReady = false,
+  dir = DEFAULT_DIR,
+): Promise<void> {
   try {
-    const workflows = listWorkflows();
-    // Read today's entries for every workflow - concat and scan in one go.
-    // The detector groups by (workflow, error) so cross-workflow mixing is fine.
-    const all = workflows.flatMap((w) => readEntries(w));
+    const all = readFailedEntriesForScan(stateDb, projectionReady, dir);
     const patterns = detectFailurePattern(all, {
       cooldownState: failureAlertCooldown,
     });
