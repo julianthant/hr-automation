@@ -15,6 +15,10 @@ export interface BatchFooterActionsProps {
   date?: string;
   batchParentRunId: string;
   memberEntries: TrackerEntry[];
+  /** Override retry target rows; defaults to {@link memberEntries}. */
+  retryMemberEntries?: TrackerEntry[];
+  /** Override delete target rows; defaults to {@link memberEntries}. */
+  deleteMemberEntries?: TrackerEntry[];
   projection?: WorkflowRunProjection;
   actions?: WorkflowActionDescriptor[];
   onDeletedIds?: (ids: string[]) => void;
@@ -41,6 +45,8 @@ export function BatchFooterActions({
   date,
   batchParentRunId,
   memberEntries,
+  retryMemberEntries,
+  deleteMemberEntries,
   projection,
   actions,
   onDeletedIds,
@@ -50,13 +56,15 @@ export function BatchFooterActions({
   const { dispatchBulkWorkflowAction } = useWorkflowActionDispatcher();
 
   const actionDescriptors = projection?.actions ?? actions;
+  const retrySourceEntries = retryMemberEntries ?? memberEntries;
+  const deleteSourceEntries = deleteMemberEntries ?? memberEntries;
   const retryEntries = useMemo(
-    () => selectEntriesForWorkflowAction(memberEntries, actionDescriptors, "retry"),
-    [actionDescriptors, memberEntries],
+    () => selectEntriesForWorkflowAction(retrySourceEntries, actionDescriptors, "retry"),
+    [actionDescriptors, retrySourceEntries],
   );
   const deleteEntries = useMemo(
-    () => selectEntriesForWorkflowAction(memberEntries, actionDescriptors, "delete"),
-    [actionDescriptors, memberEntries],
+    () => selectEntriesForWorkflowAction(deleteSourceEntries, actionDescriptors, "delete"),
+    [actionDescriptors, deleteSourceEntries],
   );
   const retryItems = useMemo(
     () =>

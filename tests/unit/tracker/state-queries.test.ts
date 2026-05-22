@@ -148,6 +148,38 @@ test("queryEntriesPayload wfCounts carries emplId from earlier events when lates
   }
 });
 
+test("queryEntriesPayload wfCounts includes OCR rows approved after prep (not resolved_prep)", () => {
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    const day = "2026-05-22";
+    for (const id of ["prep-a", "prep-b", "prep-c"]) {
+      trackEvent(
+        {
+          workflow: "ocr",
+          timestamp: `${day}T12:00:00.000Z`,
+          id,
+          runId: `${id}#1`,
+          status: "done",
+          step: "approved",
+          data: { mode: "prepare", pdfOriginalName: `${id}.pdf` },
+        },
+        dir,
+      );
+    }
+    const db = openStateDb(dir);
+    const payload = queryEntriesPayload(db, { workflow: "ocr", date: day });
+    assert.equal(
+      payload.wfCounts.ocr,
+      3,
+      "approved OCR prep stays in sidebar wfCounts until discarded",
+    );
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("mapRunEventRowToWire drops invalid typedData entries from projected rows", () => {
   const dir = tmpTracker();
   try {

@@ -6,7 +6,6 @@ import {
 import { __resetPreflightThrottleForTests } from "./dashboard/hono/routes/base.js";
 import { __resetCrossWorkflowCountsCacheForTests } from "./dashboard/hono/routes/entries-payload.js";
 import { __resetSessionEventsCacheForTests } from "./session-events.js";
-import { __resetQueueSurfaceDebugForTests } from "./queue-surfaces-debug.js";
 
 export function __resetAllDashboardCachesForTests(): void {
   __resetParseCacheForTests();
@@ -15,5 +14,4 @@ export function __resetAllDashboardCachesForTests(): void {
   __resetPreflightThrottleForTests();
   __resetCrossWorkflowCountsCacheForTests();
   __resetSessionEventsCacheForTests();
-  __resetQueueSurfaceDebugForTests();
 }

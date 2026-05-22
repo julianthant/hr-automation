@@ -41,6 +41,8 @@ export interface GroupRowBaseProps {
   footerRunOrdinal?: number;
   footerSecondaryId?: string;
   firstTimestamp?: string;
+  /** Rows used for footer elapsed time; defaults to {@link members}. */
+  elapsedEntries?: TrackerEntry[];
   isFocused: boolean;
   drillInEnabled?: boolean;
   onEnter: (parentRunId: string) => void;
@@ -56,6 +58,7 @@ export function GroupRowBase({
   footerRunOrdinal,
   footerSecondaryId,
   firstTimestamp,
+  elapsedEntries,
   isFocused,
   drillInEnabled = true,
   onEnter,
@@ -64,7 +67,7 @@ export function GroupRowBase({
   const counts = aggregateBatchCounts(members);
   const accent = resolveBatchAccent(counts);
   const previewKids = pickPreviewChildren(members, PREVIEW_KIDS);
-  const elapsed = computeBatchElapsed(members);
+  const elapsed = computeBatchElapsed(elapsedEntries ?? members);
 
   const elapsedLabel = useBatchElapsedLabel(elapsed);
 

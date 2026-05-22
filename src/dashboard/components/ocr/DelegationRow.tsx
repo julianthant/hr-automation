@@ -1,6 +1,6 @@
 import type { TrackerEntry } from "@/components/shared/types";
 import { GroupRowBase } from "@/components/queue-panel/group-row-base";
-import { BatchFooterActions } from "@/components/queue-panel/BatchFooterActions";
+import { ApprovalDelegationFooterActions } from "@/components/queue-panel/ApprovalDelegationFooterActions";
 import { readQueueTitle } from "../../../domain/queue-title.js";
 import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/types.js";
 
@@ -41,7 +41,6 @@ export function DelegationRow({
 }: DelegationRowProps) {
   const runId = parent.runId ?? parent.id;
   const title = parent.data?.pdfOriginalName ?? readQueueTitle(parent.data) ?? "Prep batch";
-  const footerActionEntries = delegatedEntries.length > 0 ? delegatedEntries : [parent];
 
   return (
     <GroupRowBase
@@ -53,19 +52,18 @@ export function DelegationRow({
       footerRunOrdinal={parent.runOrdinal}
       footerSecondaryId={projection?.subtitle ?? (parent.data?.__name || parent.id)}
       firstTimestamp={parent.timestamp}
+      elapsedEntries={[parent, ...delegatedEntries]}
       isFocused={isBatchQueueFocused}
       drillInEnabled={batchDrillInEnabled}
       onEnter={onEnterBatchQueue}
       footerActions={
-        <BatchFooterActions
-          workflow={parent.workflow}
-          date={date}
-          batchParentRunId={runId}
-          memberEntries={footerActionEntries}
+        <ApprovalDelegationFooterActions
+          parent={parent}
+          delegatedEntries={delegatedEntries}
           projection={projection}
-          onDeletedIds={(ids) => {
-            if (ids.includes(parent.id)) onDelete?.(parent.id);
-          }}
+          batchParentRunId={runId}
+          date={date}
+          onDelete={onDelete}
         />
       }
     />
