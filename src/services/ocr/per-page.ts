@@ -53,7 +53,7 @@ type CallSinglePageFn = (args: {
 }) => Promise<{ json: unknown; poolKeyId: string }>;
 
 let _callSinglePageForTests: CallSinglePageFn | undefined;
-const DEFAULT_CACHE_DIR = ".ocr-cache";
+const DEFAULT_CACHE_DIR = ".tracker";
 
 export function __setPerPageCallForTests(fn: CallSinglePageFn | undefined): void {
   _callSinglePageForTests = fn;
