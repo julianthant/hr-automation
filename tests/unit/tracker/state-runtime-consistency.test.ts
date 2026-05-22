@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
@@ -56,18 +56,31 @@ function poisonedSource(): ProjectionSourceRef {
   };
 }
 
-// C2: consecutive apply failures trigger a deferred async rebuild.
+// C2: consecutive apply failures trigger a deferred async rebuild that
+// recovers the projection from the JSONL audit log.
 test("applyTrackerEntryLive triggers a deferred rebuild after consecutive failures", async () => {
   const dir = tmpTracker();
   __resetProjectionFailureStateForTests();
   try {
     openStateDb(dir);
     const date = "2026-05-21";
-    // Write the JSONL line so the rebuild has something to replay. (This live
-    // apply itself succeeds — it uses a valid source.)
-    trackEvent(trackerEntry(date), dir);
-    // Drop the projection row so the test can prove the rebuild re-creates it.
-    openStateDb(dir).exec("DELETE FROM runs");
+
+    // Model real drift: the JSONL audit line exists on disk but was never
+    // applied to the projection. Workflows append JSONL *before* the
+    // projection apply, so a failing live apply leaves the row in JSONL only.
+    // We write the line directly so it carries no `projection_sources` offset
+    // and no `(source_path, source_offset)` dedup record — exactly the state a
+    // failed live apply leaves behind. (`rebuildProjectionForDate` is an
+    // incremental, dedup-guarded replay: it recovers never-applied lines, but
+    // would correctly no-op on a row that was applied and then deleted.)
+    const jsonlPath = join(dir, `onboarding-${date}.jsonl`);
+    appendFileSync(jsonlPath, `${JSON.stringify(trackerEntry(date))}\n`);
+
+    // Sanity: the projection has no row for this item yet.
+    const before = openStateDb(dir)
+      .prepare("SELECT COUNT(*) AS n FROM runs WHERE item_id = 'jane@ucsd.edu'")
+      .get() as { n: number };
+    assert.equal(before.n, 0, "projection should not have the row before rebuild");
 
     // Three consecutive failures (poisoned source) must elevate to log.error
     // and, on the 3rd, schedule a deferred rebuild. The synchronous calls
@@ -80,13 +93,13 @@ test("applyTrackerEntryLive triggers a deferred rebuild after consecutive failur
     // The deferred rebuild runs on the next setImmediate tick.
     await delay(50);
 
-    // After the rebuild, the projection should reflect the JSONL row again.
+    // After the rebuild, the projection reflects the JSONL row.
     const verifyDb = openDatabase(stateDbPath(dir));
     try {
       const row = verifyDb
         .prepare("SELECT latest_status FROM runs WHERE item_id = 'jane@ucsd.edu'")
         .get() as { latest_status: string } | undefined;
-      assert.ok(row, "rebuild should have re-applied the tracker row to the projection");
+      assert.ok(row, "rebuild should have applied the JSONL row to the projection");
       assert.equal(row.latest_status, "running");
     } finally {
       verifyDb.close();
