@@ -52,6 +52,7 @@ const DASHBOARD_HONO_ROUTE_MANIFEST: readonly DashboardHonoRouteManifestEntry[] 
   { method: "POST", path: "/api/daemons/stop" },
   { method: "GET", path: "/api/queue-depth" },
   { method: "GET", path: "/api/ocr/forms" },
+  { method: "GET", path: "/api/ocr/key-status" },
   { method: "POST", path: "/api/ocr/prepare" },
   { method: "POST", path: "/api/ocr/reupload" },
   { method: "POST", path: "/api/ocr/approve-batch" },
