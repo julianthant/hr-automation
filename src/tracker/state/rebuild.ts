@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { transaction, type Database } from "../../infra/sqlite/index.js";
 
-import { dateLocal, isLogEntry, isTrackerEntry, type TrackerEntry, type LogEntry } from "../jsonl.js";
+import { dateLocal, isLogEntry, isTrackerEntry, type TrackerEntry, type LogEntry } from "../jsonl-io.js";
 import { log } from "../../utils/log.js";
 import type { SessionEvent, ScreenshotSessionEvent } from "../session-events.js";
 import { applyTrackerEntry, applyLogEntry, applySessionEvent } from "./apply.js";

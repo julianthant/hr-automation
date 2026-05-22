@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Database } from "../infra/sqlite/index.js";
 import { log } from "../utils/log.js";
-import { dateLocal, isTrackerEntry, isTrackerEntryStatus, type TrackerEntry } from "./jsonl.js";
+import { dateLocal, isTrackerEntry, isTrackerEntryStatus, type TrackerEntry } from "./jsonl-io.js";
 
 export interface FindLatestEntryForPredicateOpts {
   workflow: string;

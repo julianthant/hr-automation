@@ -1,4 +1,4 @@
-import type { TrackerEntry, LogEntry } from "../jsonl.js";
+import type { TrackerEntry, LogEntry } from "../jsonl-io.js";
 import type { SessionEvent, ScreenshotSessionEvent } from "../session-events.js";
 import { log } from "../../utils/log.js";
 import { isStateDbReady, openStateDb } from "./db.js";

@@ -6,7 +6,10 @@ Two-tier tracking: JSONL for live dashboard streaming, Excel for persistent hist
 
 ## Files
 
-- `jsonl.ts` — JSONL append-only tracker + `withTrackedWorkflow` lifecycle wrapper, `cleanOldTrackerFiles`/`cleanOldScreenshots`, PII-aware `serializeValue` + `toTypedValue`
+- `jsonl.ts` — compatibility barrel for the tracker JSONL surface; keep public imports stable here
+- `jsonl-io.ts` — JSONL append/read helpers (`trackEvent`, `appendLogEntry`, `readEntries*`, `readLogEntries*`), parse cache, type guards, PII-aware `serializeValue` + `toTypedValue`
+- `tracked-workflow.ts` — `withTrackedWorkflow` lifecycle wrapper, `SessionContext`, `WithTrackedWorkflowOpts`, kernel-owned SIGINT/SIGTERM handling
+- `jsonl-cleanup.ts` — `cleanOldTrackerFiles`, `cleanOldSessionFiles`, `cleanOldScreenshots`
 - `dashboard/server.ts` — creates the HTTP server (port 3838): JSONL-only startup prune (unless `noClean`), projection rebuild, periodic sweeps. Serves `/api/*`, multiplexed `GET /events/hub`, and static prod assets when configured — routing lives under `dashboard/hono/`
 - `dashboard.ts` — barrel re-export of `startDashboard` / `createDashboardServer` / `stopDashboard` plus session-state helpers (`filterEventsForRun`, `rebuildSessionState`, …) for tests and imports
 - `session-events.ts` — `emitWorkflowStart` / `emitWorkflowEnd` / `emitSessionCreate` / `emitBrowserLaunch` / `emitAuthStart` / `emitAuthComplete` / `emitItemStart` / etc. Append `SessionEvent` lines to rotated `sessions-*.jsonl` (and legacy `sessions.jsonl`). `rebuildSessionState` in `src/tracker/dashboard/session-state.ts` reduces them into a live `SessionState` (re-exported from `dashboard.ts` for tests)
@@ -16,6 +19,7 @@ Two-tier tracking: JSONL for live dashboard streaming, Excel for persistent hist
 - `files/pdf-cache.ts` — renders and registers per-page PNG cache records for uploaded PDFs.
 - `files/multipart-helper.ts` — small multipart/form-data parser shared by dashboard upload routes.
 - `state/screenshot-sweep.ts` — `sweepStaleRunScreenshots(dir, screenshotsDir, maxAgeDays = 30)` — lifecycle-tied screenshot cleanup driven by `runs.terminal_at`. Wired into `createDashboardServer` (startup + 6h interval). See "Cleaning Old Tracker Files".
+- `state/queries.ts` — compatibility barrel for SQLite projection reads. Query-family modules live under `state/queries/`; the shared per-`Database` prepared-statement `WeakMap` lives in `state/queries/statements.ts`.
 - `exports/export-excel.ts` — On-demand Excel export from JSONL data
 - `exports/spreadsheet.ts` — `appendRow(filePath, columns, data)` and `parseDepartmentNumber(deptText)`
 - `alerts/failure-detector.ts` — `detectFailurePattern(entries, opts)` — pure function that groups failed tracker entries by (workflow, error), returns patterns that cross `thresholdN` inside `windowMs`. Caller-owned `cooldownState: Map<string, number>` suppresses re-alerts for `cooldownMs`. Defaults: 3 / 10min / 1h.
@@ -153,6 +157,7 @@ If you ever add a **non-kernel** one-off workflow, it would need an explicit `re
 
 ## Lessons Learned
 
+- **2026-05-22: Tracker JSONL and SQLite query files split by concern.** `jsonl.ts` is now a thin public barrel; append/read/cache/type-guard helpers live in `jsonl-io.ts`, the kernel lifecycle wrapper lives in `tracked-workflow.ts`, and cleanup helpers live in `jsonl-cleanup.ts`. `state/queries.ts` is likewise a compatibility barrel over query-family modules in `state/queries/`, with the Task-2 prepared-statement `WeakMap` centralized in `state/queries/statements.ts`. Low-level state code imports `jsonl-io.ts` directly to avoid evaluating the full JSONL barrel from projection rebuild paths.
 - **2026-05-22: Recent JSONL latest-row walkers should use `findLatestEntryForPredicate`.** The helper is now the canonical newest-first, malformed-line-tolerant scan for recent workflow tracker JSONL. `findLatestTrackerDateForRun`, restart-sweep latest-by-run maps, OCR session metadata readers, OCR approval data lookup, and dashboard cancel instance lookup all route through it with explicit lookback windows where needed. Data-field predicates stay JSONL-only because no SQLite index covers them; callers preserve their public no-match values (`undefined`, `null`, or `{}`) at their own boundary.
 - **2026-05-22: SSE hot-path caches and sweep cost fixed (5 performance defects).** Five defects caused measurable event-loop stalls and per-client cache thrashing:
   - **Fix 1 — `ttlMemoize` single-slot thrash.** `ttlMemoize` stored exactly one `{ key, computedAt, value }` entry, so two SSE clients viewing different workflows/dates alternated keys and never hit the cache — `queryEntriesPayload` ran per-tick-per-client. Fix: replaced the single slot with a keyed LRU `Map` (cap 16, delete-on-hit + re-set insertion-order LRU). Same fix applied to `getCrossWorkflowCounts` in `entries-payload.ts` (also single-slot, key `dir::date`). Public signature of `ttlMemoize` unchanged; both `reset()` hooks preserved. Tests: `tests/unit/tracker/perf-hot-path-caches.test.ts`.
