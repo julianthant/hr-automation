@@ -15,22 +15,22 @@ import {
   buildSaveDataHandler,
   buildStopWorkerHandler,
   readQueueDepth,
-} from "../../ops/index.js";
-import { performWorkflowAction } from "../../actions/perform-workflow-action.js";
+} from "../../../../control/ops/index.js";
+import { performWorkflowAction } from "../../../../control/actions/perform-workflow-action.js";
 import type {
   CancelMode,
   WorkflowActionRequest,
   WorkflowActionResult,
   WorkflowActionScope,
   WorkflowActionSource,
-} from "../../actions/types.js";
+} from "../../../../control/actions/types.js";
 import { errorMessage } from "../../../../utils/errors.js";
 import { log } from "../../../../utils/log.js";
 import type { DashboardHonoDeps } from "../context.js";
 import { PARENT_RUN_ID_VALIDATION_HINT, parseOptionalParentRunId } from "../parent-run-id.js";
 import { postJson } from "../post-helper.js";
 import { jsonResponse } from "../responses.js";
-import type { CancelActiveBulkItem } from "../../ops/cancel.js";
+import type { CancelActiveBulkItem } from "../../../../control/ops/cancel.js";
 
 type Compact<T extends Record<string, unknown>> = {
   [K in keyof T]?: Exclude<T[K], undefined>;

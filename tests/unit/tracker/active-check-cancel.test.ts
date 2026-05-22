@@ -31,7 +31,7 @@ import {
   buildCancelQueuedHandler,
   buildCancelRunningHandler,
   buildForceStopTaskHandler,
-} from "../../../src/tracker/dashboard/ops/index.js";
+} from "../../../src/control/ops/index.js";
 import { queueFilePath } from "../../../src/core/daemon/queue.js";
 import {
   workflowNameFromInstance,

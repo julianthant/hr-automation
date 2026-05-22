@@ -8,15 +8,15 @@ import {
   trackEvent,
   trackEventForDate,
   type TrackerEntry,
-} from "../../jsonl.js";
+} from "../../tracker/jsonl.js";
 import {
   daemonsDir,
-} from "../../../core/daemon/registry.js";
-import { transaction } from "../../../infra/sqlite/index.js";
-import { openControlDb } from "../../../core/control-db.js";
+} from "../../core/daemon/registry.js";
+import { transaction } from "../../infra/sqlite/index.js";
+import { openControlDb } from "../../core/control-db.js";
 import { openControlStores, resolveControlTask } from "./shared.js";
-import { isStateDbReady, openStateDb } from "../../state/db.js";
-import { queryPriorEntriesByKey } from "../../state/queries.js";
+import { isStateDbReady, openStateDb } from "../../tracker/state/db.js";
+import { queryPriorEntriesByKey } from "../../tracker/state/queries.js";
 
 export interface QueueBumpRequest {
   workflow: string;

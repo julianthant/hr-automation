@@ -1,10 +1,10 @@
-import { trackEvent, appendLogEntry } from "../../jsonl.js";
-import { getFormSpec } from "../../../services/ocr/forms/registry.js";
+import { trackEvent, appendLogEntry } from "../../tracker/jsonl.js";
+import { getFormSpec } from "../../services/ocr/forms/registry.js";
 import {
   requestOcrPrepareAbort,
-} from "../../ocr-prepare-abort.js";
+} from "../../tracker/ocr-prepare-abort.js";
 import { deleteDelegatedChildrenForRun } from "../ops/delete.js";
-import { readFormType, readParentRunId } from "./shared.js";
+import { readFormType, readParentRunId } from "../../tracker/dashboard/ocr/shared.js";
 
 const WORKFLOW = "ocr";
 

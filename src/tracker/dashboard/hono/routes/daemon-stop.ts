@@ -6,7 +6,7 @@ import { readQueueState } from "../../../../core/daemon/queue.js";
 import { findAliveDaemons } from "../../../../core/daemon/registry.js";
 import { errorMessage } from "../../../../utils/errors.js";
 import { log } from "../../../../utils/log.js";
-import { buildCancelQueuedHandler } from "../../ops/index.js";
+import { buildCancelQueuedHandler } from "../../../../control/ops/index.js";
 import {
   emitWorkflowEnd,
   readSessionEvents,

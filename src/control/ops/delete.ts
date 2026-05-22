@@ -8,11 +8,11 @@
  */
 import { existsSync, readdirSync, readFileSync, unlinkSync } from "fs";
 import { basename, join, resolve, sep } from "path";
-import { PATHS } from "../../../config.js";
-import { readSessionEvents } from "../../session-events.js";
-import { openStateDb } from "../../state/db.js";
-import { transaction } from "../../../infra/sqlite/index.js";
-import { rewriteJsonlFile } from "../../jsonl-rewrite.js";
+import { PATHS } from "../../config.js";
+import { readSessionEvents } from "../../tracker/session-events.js";
+import { openStateDb } from "../../tracker/state/db.js";
+import { transaction } from "../../infra/sqlite/index.js";
+import { rewriteJsonlFile } from "../../tracker/jsonl-rewrite.js";
 
 export interface DeleteEntryRequest {
   workflow: string;

@@ -33,8 +33,8 @@ import {
   buildRetryBulkHandler,
   buildRetryHandler,
   readQueueDepth,
-} from "../../../src/tracker/dashboard/ops/index.js";
-import { resolveRetryRosterPath } from "../../../src/tracker/dashboard/ops/retry.js";
+} from "../../../src/control/ops/index.js";
+import { resolveRetryRosterPath } from "../../../src/control/ops/retry.js";
 import { queueFilePath } from "../../../src/core/daemon/queue.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
 import {

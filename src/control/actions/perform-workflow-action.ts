@@ -21,7 +21,7 @@ import {
   buildForceStopTaskHandler,
   buildQueueBumpHandler,
 } from "../ops/index.js";
-import { buildOcrDiscardHandler } from "../ocr/index.js";
+import { buildOcrDiscardHandler } from "../ocr/discard.js";
 import { resolveActionTargets, type ResolvedActionTarget } from "./resolve-targets.js";
 import type {
   WorkflowActionRequest,

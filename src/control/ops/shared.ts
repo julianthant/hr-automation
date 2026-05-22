@@ -3,17 +3,17 @@
  * folder. Not part of the public surface — not re-exported from index.ts.
  */
 import { appendFileSync, mkdirSync } from "fs";
-import { appendLogEntry, trackEvent } from "../../jsonl.js";
-import { findLatestEntryForPredicate } from "../../find-latest-entry.js";
-import { emitItemCancelled } from "../../session-events.js";
+import { appendLogEntry, trackEvent } from "../../tracker/jsonl.js";
+import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
+import { emitItemCancelled } from "../../tracker/session-events.js";
 import {
   daemonsDir,
-} from "../../../core/daemon/registry.js";
-import { queueFilePath } from "../../../core/daemon/queue.js";
-import type { QueueEvent } from "../../../core/daemon/types.js";
-import { openControlDb } from "../../../core/control-db.js";
-import { createTaskStore, type ControlTaskStore, type TaskRow } from "../../../core/task-store/index.js";
-import { createWorkerStore, type ControlWorkerStore } from "../../../core/daemon/worker-store.js";
+} from "../../core/daemon/registry.js";
+import { queueFilePath } from "../../core/daemon/queue.js";
+import type { QueueEvent } from "../../core/daemon/types.js";
+import { openControlDb } from "../../core/control-db.js";
+import { createTaskStore, type ControlTaskStore, type TaskRow } from "../../core/task-store/index.js";
+import { createWorkerStore, type ControlWorkerStore } from "../../core/daemon/worker-store.js";
 
 export const DASHBOARD_CANCEL_ERROR = "cancelled by user from dashboard";
 
