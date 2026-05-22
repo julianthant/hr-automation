@@ -18,7 +18,7 @@ Dashboard controls mutate the SQLite control plane first (`tasks`, `task_attempt
 
 ## Component Tree
 
-Component placement rules live in `components/AGENTS.md`. Read that file before adding, moving, or promoting files under `src/dashboard/components/`.
+Component placement rules live in `components/CLAUDE.md`. Read that file before adding, moving, or promoting files under `src/dashboard/components/`.
 
 ```
 App.tsx

@@ -17,26 +17,3 @@ This folder is organized by dashboard area. Keep files near the UI surface that 
 | `shared/` | Cross-area components, shared display helpers, styles, and tracker/dashboard API types. | `EmptyState.tsx`, `RetryButton.tsx`, `PdfPagePreview.tsx`, `MediaLightbox.tsx`, `types.ts`, `entry-display.ts` |
 | `hooks/` | React hooks that own client-side state, polling, SSE subscriptions, cache warming, or toast effects. Hooks should not render JSX. | `useEntries.ts`, `useLogs.ts`, `useSessions.ts`, `useRosters.ts` |
 | `ui/` | Local shadcn/HeroUI-style primitives only. These should stay generic and workflow-agnostic. | `dialog.tsx`, `popover.tsx`, `tooltip.tsx`, `calendar.tsx` |
-
-## Placement Rules
-
-- Put navbar/top-bar/rail work in `navigation/`.
-- Put queue list, queue row, retry-all, cancel, bump, and queue status work in `queue-panel/`.
-- Put log/detail/screenshot/run-history work in `log-panel/`.
-- Put daemon/session/browser drawer work in `terminal-drawer/`.
-- Put workflow launch modal work in `run-modal/`; keep workflow-specific launch config in `dashboard/lib/`.
-- Put capture/photo work in `capture/`; modal-only subcomponents stay under `capture/modal/`.
-- Put hooks in `hooks/`, even when they serve one feature folder.
-- Put generic primitives in `ui/`; do not add workflow-specific fetch logic there.
-- Prefer named exports. Do not add default exports.
-
-## Promotion Rule
-
-When a feature-private component or helper gets used by a second dashboard area, promote it to `shared/` and update imports in the same change. Do not leave shared behavior hidden inside `navigation/`, `queue-panel/`, `log-panel/`, `ocr/`, `capture/`, or `run-modal/`.
-
-## Import Style
-
-- Use `@/components/...` for cross-folder component imports.
-- Use relative imports inside a folder for private sibling components.
-- Use `@/components/ui/...` and `@/lib/...` for dashboard-wide primitives and registries.
-- Keep folder names lowercase kebab-case so imports work consistently on case-sensitive filesystems.

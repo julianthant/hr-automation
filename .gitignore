@@ -78,3 +78,6 @@ Thumbs.db
 .ocr-cache/
 .worktrees/
 
+# claude-mem session artifacts (regenerated each session for Codex context injection)
+AGENTS.md
+

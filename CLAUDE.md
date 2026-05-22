@@ -493,13 +493,15 @@ After every error fix, selector re-map, or new pattern: update the relevant CLAU
 
 ## Memory Search (claude-mem)
 
-Before any non-trivial work (planning, debugging, implementing), query prior sessions with `mem-search` skill:
-- **mem-search:** Natural-language query wrapper (search → timeline → get_observations)
-- **knowledge-agent:** For repeated questions on the same topic in one session (build corpus, prime, query)
+**Auto-injected each session:** `MEMORY.md` (behavioral preferences) + recent session summaries. No querying needed for these.
 
-See `LESSONS.md` (project root) for when to query memory. Observations are historical — verify against current code before acting on recalled facts.
+**Active querying** (`mem-search` skill) adds value when you need to go further back than the session summaries, or find a specific past decision/bug not covered by them. Use before non-trivial planning, debugging, or implementing a system you haven't touched in several sessions.
 
-**Skills:** `mem-search`, `knowledge-agent`, `smart-explore` (code structure), `timeline-report`
+Skip querying when: the session summaries already cover it, the task is trivial, or the codebase is the authoritative source.
+
+**Memory hygiene:** Delete project-state memories when work is done. Only feedback/preference memories are permanent. See global CLAUDE.md for the full hygiene rules.
+
+**Skills:** `mem-search` (past bugs/decisions), `knowledge-agent` (repeated broad questions in one session), `smart-explore` (code structure without reading full files), `timeline-report`
 
 ## Selector Discovery (playwright-cli)
 
