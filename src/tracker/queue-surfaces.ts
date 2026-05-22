@@ -185,19 +185,18 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
     const members = membersByParentRunId.get(parentRunId) ?? [];
     const approved = isApprovedPrepRow(parent);
 
-    if (approved) {
-      if (members.length === 0) {
-        // Approved parent with no visible members stays flat — downstream
-        // entries live in a different workflow's queue. Row type must not
-        // change after approval.
-        continue;
-      }
-      if (members.length === 1) {
-        singleDelegationEntries.push(members[0]!);
-        continue;
-      }
+    if (approved && members.length === 0) {
+      // Approved parent with no visible members stays flat — downstream
+      // entries live in a different workflow's queue (e.g. the OCR tab
+      // showing a prep row whose signer children are oath-signature rows).
+      // Row type must not change after approval.
+      continue;
     }
 
+    // A prep/upload batch-parent represents one operator upload action, so
+    // it stays an approval-delegation card regardless of approval state and
+    // signer count. A single-signer PDF must not collapse into a flat row
+    // after OCR approval — that would change the row type mid-lifecycle.
     groupRows.push({
       kind: "approval-delegation",
       parentRunId,
