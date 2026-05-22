@@ -1,3 +1,5 @@
+import { activeCaptureSseSubscribers as activeCaptureSseSubscribersBinding } from "./topics-emitters.js";
+
 export type SseSend = (data: unknown, event?: string) => void;
 export type SseCleanup = () => void | Promise<void>;
 
@@ -5,6 +7,10 @@ let activeHonoSseStreams = 0;
 
 export function getActiveHonoSseStreamCountForTests(): number {
   return activeHonoSseStreams;
+}
+
+export function getActiveHonoCaptureSseSubscriberCountForTests(): number {
+  return activeCaptureSseSubscribersBinding;
 }
 
 export function sseResponse(

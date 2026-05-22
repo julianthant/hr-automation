@@ -6,7 +6,6 @@ import { registerBaseRoutes } from "./routes/base.js";
 import { registerCaptureRoutes } from "./routes/capture.js";
 import { registerDaemonStopRoute } from "./routes/daemon-stop.js";
 import { registerEnqueueRoute } from "./routes/enqueue.js";
-import { registerEventRoutes } from "./routes/events.js";
 import { registerHubRoute } from "./routes/hub.js";
 import { registerFileRoutes } from "./routes/files.js";
 import { registerOathUploadRoutes } from "./routes/oath-upload.js";
@@ -39,7 +38,6 @@ export function createDashboardHonoApp(deps: DashboardHonoDeps): Hono {
   registerOcrRoutes(app, deps);
   registerOathUploadRoutes(app, deps);
   registerCaptureRoutes(app, deps);
-  registerEventRoutes(app, deps);
   registerHubRoute(app, deps);
   registerStaticRoutes(app, deps);
 

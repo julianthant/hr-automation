@@ -126,7 +126,7 @@ export function registerBaseRoutes(app: Hono, deps: DashboardHonoDeps): void {
     const logFirst = new Map<string, string>();
     const logLast = new Map<string, string>();
     for (const entry of allLogs) {
-      const runId = entry.runId || `${entry.itemId}#1`;
+      const runId = getRunIdOr(entry);
       if (!logFirst.has(runId)) logFirst.set(runId, entry.ts);
       logLast.set(runId, entry.ts);
     }
