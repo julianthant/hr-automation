@@ -25,6 +25,7 @@ import {
   getSessionsFilePathForDate,
   type ScreenshotSessionEvent,
 } from "./session-events.js";
+import { findLatestEntryForPredicate } from "./find-latest-entry.js";
 
 export const DEFAULT_DIR = ".tracker";
 
@@ -738,23 +739,23 @@ export function readLatestTrackerEntriesByRunKey(
   lookbackDays = 7,
   now: Date = new Date(),
 ): Map<string, TrackerEntry> {
+  const newestFirst: TrackerEntry[] = [];
+  findLatestEntryForPredicate({
+    workflow,
+    trackerDir: dir,
+    lookbackDays,
+    now,
+    predicate: (entry) => {
+      newestFirst.push(entry);
+      return false;
+    },
+  });
+
   const latestByKey = new Map<string, TrackerEntry>();
-  for (let age = lookbackDays - 1; age >= 0; age--) {
-    const d = new Date(now);
-    d.setDate(now.getDate() - age);
-    const file = join(dir, `${workflow}-${dateLocal(d)}.jsonl`);
-    if (!existsSync(file)) continue;
-    const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
-    for (const line of lines) {
-      try {
-        const parsed = JSON.parse(line) as unknown;
-        if (!isTrackerEntry(parsed)) continue;
-        const key = `${parsed.id}#${parsed.runId ?? ""}`;
-        latestByKey.set(key, parsed);
-      } catch {
-        /* tolerate malformed lines */
-      }
-    }
+  for (let i = newestFirst.length - 1; i >= 0; i--) {
+    const entry = newestFirst[i];
+    const key = `${entry.id}#${entry.runId ?? ""}`;
+    latestByKey.set(key, entry);
   }
   return latestByKey;
 }
@@ -787,14 +788,16 @@ function findLatestTrackerDateForRun(
   runId: string,
   dir: string = DEFAULT_DIR,
 ): string | undefined {
-  let latest: { timestamp: string; date: string } | undefined;
-  for (const date of listDatesForWorkflow(workflow, dir)) {
-    for (const entry of readEntriesForDate(workflow, date, dir)) {
-      if (entry.id !== itemId || entry.runId !== runId) continue;
-      if (!latest || latest.timestamp < entry.timestamp) latest = { timestamp: entry.timestamp, date };
-    }
-  }
-  return latest?.date;
+  // Resolve the most-recent JSONL line for this (itemId, runId) via the
+  // canonical newest-first walker, then derive its calendar date. Only used
+  // as a SIGINT-path fallback when `lastEmittedTrackerDate` is unset, so the
+  // 7-day default lookback comfortably covers any in-flight run.
+  const ts = findLatestEntryForPredicate({
+    workflow,
+    trackerDir: dir,
+    predicate: (entry) => entry.id === itemId && entry.runId === runId,
+  })?.timestamp;
+  return ts ? trackerDateForTimestamp(ts) : undefined;
 }
 
 /** Read log entries for a specific date (not just today). */

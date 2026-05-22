@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { dateLocal, trackEvent } from "../../../src/tracker/jsonl.js";
+import { dateLocal, readLatestTrackerEntriesByRunKey, trackEvent } from "../../../src/tracker/jsonl.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
 import { findLatestEntryForPredicate } from "../../../src/tracker/find-latest-entry.js";
 
@@ -67,6 +67,87 @@ test("findLatestEntryForPredicate skips invalid JSONL tracker rows", () => {
     });
 
     assert.equal(latest?.runId, "run-ok");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("findLatestEntryForPredicate accepts legacy ts tracker rows", () => {
+  const dir = mkdtempSync(join(tmpdir(), "latest-entry-"));
+  try {
+    const date = dateLocal();
+    const timestamp = `${date}T10:00:00.000Z`;
+    appendFileSync(
+      join(dir, `ocr-${date}.jsonl`),
+      `${JSON.stringify({
+        workflow: "ocr",
+        ts: timestamp,
+        id: "legacy-session",
+        runId: "legacy-run",
+        status: "done",
+        step: "approved",
+      })}\n`,
+    );
+
+    const latest = findLatestEntryForPredicate({
+      workflow: "ocr",
+      trackerDir: dir,
+      lookbackDays: 1,
+      predicate: (entry) => entry.id === "legacy-session",
+    });
+
+    assert.equal(latest?.timestamp, timestamp);
+    assert.equal(latest?.runId, "legacy-run");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readLatestTrackerEntriesByRunKey uses tolerant newest-first JSONL scan", () => {
+  const dir = mkdtempSync(join(tmpdir(), "latest-entry-"));
+  try {
+    const now = new Date("2026-05-22T12:00:00.000Z");
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const todayDate = dateLocal(now);
+    const yesterdayDate = dateLocal(yesterday);
+    appendFileSync(
+      join(dir, `ocr-${yesterdayDate}.jsonl`),
+      `${JSON.stringify({
+        workflow: "ocr",
+        timestamp: `${yesterdayDate}T09:00:00.000Z`,
+        id: "session-1",
+        runId: "run-1",
+        status: "running",
+        data: { value: "old" },
+      })}\n`,
+    );
+    appendFileSync(
+      join(dir, `ocr-${todayDate}.jsonl`),
+      [
+        "{not json}",
+        JSON.stringify({
+          workflow: "ocr",
+          timestamp: `${todayDate}T09:00:00.000Z`,
+          id: "session-1",
+          runId: "run-1",
+          status: "done",
+          data: { value: "new" },
+        }),
+        JSON.stringify({
+          workflow: "ocr",
+          ts: `${todayDate}T10:00:00.000Z`,
+          id: "legacy-session",
+          status: "done",
+        }),
+        "",
+      ].join("\n"),
+    );
+
+    const latestByKey = readLatestTrackerEntriesByRunKey("ocr", dir, 2, now);
+
+    assert.equal(latestByKey.get("session-1#run-1")?.data?.value, "new");
+    assert.equal(latestByKey.get("legacy-session#")?.timestamp, `${todayDate}T10:00:00.000Z`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
