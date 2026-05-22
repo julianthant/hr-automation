@@ -8,7 +8,7 @@ import { classifyError } from "../utils/errors.js";
 import { PATHS } from "../config.js";
 import type { StructuredLogEvent } from "../domain/log-events.js";
 import { appendJsonlWithSource } from "./state/jsonl-source.js";
-import { applyLogEntryLive, applySessionEventLive, applyTrackerEntryLive } from "./state/runtime.js";
+import { applyLogEntryLive, applySessionEventLive, applyTrackerEntryLive, applySigintTerminalToProjection } from "./state/runtime.js";
 import {
   generateInstanceName,
   emitWorkflowStart,
@@ -592,8 +592,21 @@ export async function withTrackedWorkflow<T>(
       error,
       ...(lastStep ? { step: lastStep } : {}),
     };
-    appendFileSync(getLogsJsonlPathForDate(workflow, dir, date), JSON.stringify(logEntry) + "\n");
-    appendFileSync(join(dir, `${workflow}-${date}.jsonl`), JSON.stringify(trackEntry) + "\n");
+    const trackerPath = join(dir, `${workflow}-${date}.jsonl`);
+    const logPath = getLogsJsonlPathForDate(workflow, dir, date);
+    appendFileSync(logPath, JSON.stringify(logEntry) + "\n");
+    appendFileSync(trackerPath, JSON.stringify(trackEntry) + "\n");
+    // JSONL is written; now mirror the same terminal state into the SQLite
+    // projection so a live dashboard doesn't show the killed run stuck
+    // "running" forever. `node:sqlite` is synchronous, so this is safe inside
+    // the signal handler. JSONL-first, SQLite-second, SQLite failure swallowed
+    // locally — the startup rebuild is the backstop.
+    applySigintTerminalToProjection(
+      trackEntry,
+      logEntry,
+      { trackerPath, logPath, trackerDate: date },
+      dir,
+    );
   };
   const onSigint = (): void => { onSignal("SIGINT"); process.exit(130); };
   const onSigterm = (): void => { onSignal("SIGTERM"); process.exit(143); };

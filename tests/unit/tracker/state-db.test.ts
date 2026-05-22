@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import {
   closeStateDbForTests,
+  isStateDbReady,
   openStateDb,
   stateDbPath,
 } from "../../../src/tracker/state/db.js";
@@ -42,6 +43,40 @@ test("openStateDb is idempotent for an already migrated DB", () => {
     const second = openStateDb(dir);
     const secondVersion = second.prepare("SELECT version FROM schema_version WHERE id = 1").get() as { version: number };
     assert.equal(secondVersion.version, firstVersion.version);
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// C1: isStateDbReady must not trust a stale positive forever — if the DB file
+// is deleted after the first successful probe, readiness must flip to false.
+test("isStateDbReady invalidates the ready cache when the DB file is deleted", () => {
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    assert.equal(isStateDbReady(dir), true, "freshly opened DB should be ready");
+    // Drop the cached open handle, then delete the file out from under us.
+    closeStateDbForTests(dir);
+    unlinkSync(stateDbPath(dir));
+    assert.equal(isStateDbReady(dir), false, "deleted DB file must report not-ready");
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// C1: isStateDbReady must re-probe (and reject) when the DB file is replaced
+// with a different/corrupt file after the cache was warmed.
+test("isStateDbReady invalidates the ready cache when the DB file is corrupted", () => {
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    assert.equal(isStateDbReady(dir), true);
+    closeStateDbForTests(dir);
+    // Overwrite with garbage so the schema-version probe fails.
+    writeFileSync(stateDbPath(dir), "not a sqlite database");
+    assert.equal(isStateDbReady(dir), false, "corrupted DB file must report not-ready");
   } finally {
     closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });
