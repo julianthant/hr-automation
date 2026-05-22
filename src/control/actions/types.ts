@@ -16,13 +16,13 @@ import type {
   WorkflowActionKind,
   WorkflowActionScope,
   WorkflowActionSource,
-} from "../../../domain/workflow-runtime/types.js";
+} from "../../domain/workflow-runtime/types.js";
 
 export type {
   WorkflowActionKind,
   WorkflowActionScope,
   WorkflowActionSource,
-} from "../../../domain/workflow-runtime/types.js";
+} from "../../domain/workflow-runtime/types.js";
 
 /** Cooperative = step-boundary cancel; force = interrupt the in-flight run. */
 export type CancelMode = "cooperative" | "force";

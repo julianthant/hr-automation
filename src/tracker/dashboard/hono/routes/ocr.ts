@@ -5,13 +5,13 @@ import type { Hono } from "hono";
 
 import {
   buildOcrApproveHandler,
-  buildOcrDiscardHandler,
   buildOcrForceResearchHandler,
   buildOcrFormsHandler,
   buildOcrPrepareHandler,
   buildOcrReocrWholePdfHandler,
   buildOcrRetryPageHandler,
 } from "../../ocr/index.js";
+import { buildOcrDiscardHandler } from "../../../../control/ocr/discard.js";
 import { registerLocalFile } from "../../../files/files.js";
 import { ensurePdfPageCache } from "../../../files/pdf-cache.js";
 import type { DashboardHonoDeps } from "../context.js";

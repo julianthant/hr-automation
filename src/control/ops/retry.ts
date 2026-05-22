@@ -7,14 +7,14 @@
  * `/api/run-with-data` edit-and-resume route can reuse it directly.
  */
 import { existsSync } from "fs";
-import { listRosters, resolveRosterDirs } from "../../../services/matching/roster-loader.js";
-import { byTimestampAsc, readEntries, readEntriesForDate, trackEvent, type TrackerEntry } from "../../jsonl.js";
-import { enqueueFromHttp } from "../../../core/daemon/enqueue-dispatch.js";
+import { listRosters, resolveRosterDirs } from "../../services/matching/roster-loader.js";
+import { byTimestampAsc, readEntries, readEntriesForDate, trackEvent, type TrackerEntry } from "../../tracker/jsonl.js";
+import { enqueueFromHttp } from "../../core/daemon/enqueue-dispatch.js";
 import {
   findRetryInputFromTaskStore,
   readEntriesForRetryItem,
   selectRetryInputFromEntries,
-} from "../../../core/find-input.js";
+} from "../../core/find-input.js";
 import {
   openControlStores,
   resolveControlTask,
@@ -385,7 +385,7 @@ async function reEnqueueOcrEntry(
     return { ok: false, error: `OCR retry: PDF no longer exists at ${pdfPath}` };
   }
 
-  const { buildOcrPrepareHandler } = await import("../ocr/index.js");
+  const { buildOcrPrepareHandler } = await import("../../tracker/dashboard/ocr/prepare.js");
   const handler = buildOcrPrepareHandler({ trackerDir: dir });
   const result = await handler({
     pdfPath,
@@ -417,7 +417,7 @@ async function reEnqueueSharePointEntry(
   }
 
   const { buildSharePointRosterDownloadHandler } = await import(
-    "../../../workflows/sharepoint-download/handler.js"
+    "../../workflows/sharepoint-download/handler.js"
   );
   const handler = buildSharePointRosterDownloadHandler();
   const result = await handler({ id: specId });

@@ -12,7 +12,7 @@
  *   walk is skipped and `tree` degrades to the verbatim set (safe: never
  *   cancels/deletes more than the caller asked for).
  */
-import { isStateDbReady, openStateDb } from "../../state/db.js";
+import { isStateDbReady, openStateDb } from "../../tracker/state/db.js";
 import type { WorkflowActionRequest } from "./types.js";
 
 export interface ResolvedActionTarget {

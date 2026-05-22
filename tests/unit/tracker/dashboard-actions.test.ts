@@ -14,9 +14,9 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { performWorkflowAction } from "../../../src/tracker/dashboard/actions/perform-workflow-action.js";
-import { resolveActionTargets } from "../../../src/tracker/dashboard/actions/resolve-targets.js";
-import type { WorkflowActionRequest } from "../../../src/tracker/dashboard/actions/types.js";
+import { performWorkflowAction } from "../../../src/control/actions/perform-workflow-action.js";
+import { resolveActionTargets } from "../../../src/control/actions/resolve-targets.js";
+import type { WorkflowActionRequest } from "../../../src/control/actions/types.js";
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
 import { readEntries } from "../../../src/tracker/jsonl.js";

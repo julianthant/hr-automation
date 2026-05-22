@@ -89,7 +89,7 @@ All runtime scripts use `tsx --env-file=.env` (tsx is in `devDependencies` and p
 
 ## Architecture
 
-The repo is split into clear layers: business concepts (`src/domain/`), runtime infrastructure (`src/infra/`), reusable services (`src/services/`), per-system drivers (`src/systems/`), the workflow kernel (`src/core/`), and composed workflows (`src/workflows/`). Tracker, dashboard, scripts, and utils remain top-level support areas.
+The repo is split into clear layers: business concepts (`src/domain/`), runtime infrastructure (`src/infra/`), reusable services (`src/services/`), per-system drivers (`src/systems/`), the workflow kernel (`src/core/`), workflow control actions (`src/control/`), and composed workflows (`src/workflows/`). Tracker, dashboard, scripts, and utils remain top-level support areas.
 
 ```
 src/
@@ -106,6 +106,11 @@ src/
       index.ts, enqueue.ts, claim.ts, retry.ts, terminal.ts, queries.ts, types.ts, child-state.ts
     control-db.ts, control-schema.ts, workflow-loaders.ts, find-input.ts,
     task-control.ts, task-display.ts
+    index.ts           # Barrel re-export
+  control/             # Operator workflow control actions above core + tracker.
+    actions/           # performWorkflowAction, target resolution, request/result types
+    ops/               # cancel, retry, delete, queue, worker/daemon control handlers
+    ocr/               # OCR discard/cancel glue used by workflow action dispatch
     index.ts           # Barrel re-export
   systems/             # Playwright drivers, one per external system
     common/            # safeClick / safeFill / dismissPeopleSoftModalMask (cross-system)
@@ -184,6 +189,7 @@ Observability for every workflow: `.tracker/{workflow}-{YYYY-MM-DD}.jsonl` + `*-
 | New workflow guide + archetype glossary | `src/workflows/CLAUDE.md` | Writing a new workflow, archetypes, daemon conversion template |
 | Kernel API (defineWorkflow, Ctx, etc.) | `src/core/CLAUDE.md` | User-facing primer, Ctx methods, run modes, dupe-protection |
 | Daemon mode (queues, health checks, etc.) | `src/core/CLAUDE.md` | Queue mechanics, flags, daemon conversion guide |
+| Workflow control actions & ops handlers | `src/control/CLAUDE.md` | Operator cancel/retry/delete/bump dispatch, low-level handlers, OCR discard |
 | Dashboard internals & React components | `src/dashboard/CLAUDE.md` | SSE streams, queue rendering, detail panels |
 | Tracker & JSONL observability patterns | `src/tracker/CLAUDE.md` | Emit patterns, Excel export, child-run delegation |
 | System-specific gotchas | `src/systems/<system>/CLAUDE.md` | PeopleSoft quirks, frame navigation, auth edge cases |

@@ -7,13 +7,13 @@ import {
   buildOcrFormsHandler,
   buildOcrPrepareHandler,
   buildOcrApproveHandler,
-  buildOcrDiscardHandler,
   buildOcrForceResearchHandler,
   buildOcrReocrWholePdfHandler,
   sweepStuckOcrRows,
   _resetSessionLockForTests,
   type ApproveHandlerOpts,
 } from "../../../src/tracker/dashboard/ocr/index.js";
+import { buildOcrDiscardHandler } from "../../../src/control/ocr/discard.js";
 import { trackEventForDate } from "../../../src/tracker/jsonl.js";
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";

@@ -6,8 +6,8 @@
  * scope and routes here. The handlers stay independently exported so daemon
  * code and tests can call a single primitive directly.
  */
-import { cancelInProcessRun } from "../../../core/daemon/in-process-runs.js";
-import type { BrowserProcessRow, ControlWorkerStore } from "../../../core/daemon/worker-store.js";
+import { cancelInProcessRun } from "../../core/daemon/in-process-runs.js";
+import type { BrowserProcessRow, ControlWorkerStore } from "../../core/daemon/worker-store.js";
 import {
   DASHBOARD_CANCEL_ERROR,
   openControlStores,
@@ -61,7 +61,7 @@ function signalBrowserPid(pid: number): void {
 }
 
 async function requestDaemonForceCurrent(
-  worker: import("../../../core/daemon/worker-store.js").WorkerRow | null,
+  worker: import("../../core/daemon/worker-store.js").WorkerRow | null,
   itemId: string,
   runId: string | undefined,
 ): Promise<boolean> {
@@ -304,7 +304,7 @@ export function buildForceStopTaskHandler(dir: string) {
     emitDashboardCancelTrackerRow(req.workflow, req.id, runId, dir);
     const daemonAccepted = await requestDaemonForceCurrent(worker, req.id, runId);
     if (!daemonAccepted) {
-      const { log } = await import("../../../utils/log.js");
+      const { log } = await import("../../utils/log.js");
       log.warn(
         `[force-stop] task ${req.workflow}/${req.id} could not reach daemon /force-current — marked cancelled in control state; daemon will pick up the worker_command on next poll`,
       );

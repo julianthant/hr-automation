@@ -27,9 +27,9 @@ Two-tier tracking: JSONL for live dashboard streaming, Excel for persistent hist
 - `delegation/watch-child-runs.ts` — `watchChildRuns(opts)` — generic watcher: polls a workflow's JSONL until N expected `itemId`s reach terminal status. Used by non-migrated waits such as SharePoint delegation and OCR fallback/force-research paths. Supports custom `isTerminal` predicate, `onProgress` callback, and 200ms polling fallback for filesystems where `fs.watch` is unavailable.
 - `dashboard/oath-upload/http.ts` — HTTP handlers for `/api/oath-upload/*` endpoints and restart sweep; kept under `dashboard/` because its imports are dashboard route/server-only.
 - `locked.ts` — Generic mutex-locked write wrapper for parallel Excel access
-- `dashboard/hono/routes/ocr.ts` — HTTP handlers for `/api/ocr/*` endpoints: `buildOcrPrepareHandler`, `buildOcrApproveHandler`, `buildOcrDiscardHandler`, `buildOcrForceResearchHandler`, `buildOcrFormsHandler`, `sweepStuckOcrRows`. Per-sessionId in-memory lock (`_resetSessionLockForTests` for tests).
+- `dashboard/hono/routes/ocr.ts` — HTTP adapter for `/api/ocr/*` endpoints: OCR prepare/approve/force-research/forms/sweep handlers live under `dashboard/ocr/`; OCR discard/cancel glue lives in `src/control/ocr/discard.ts`. Per-sessionId in-memory lock (`_resetSessionLockForTests` for tests).
 - `dashboard/hono/routes/entries-payload.ts` — JSONL fallback builder for the `entries` hub topic. It returns the selected workflow's tracker rows plus policy-declared persistent-root descendants (currently Oath Upload OCR/signature child context), then enriches rows for queue rendering.
-- `dashboard/actions/` — central workflow action engine. `perform-workflow-action.ts` (`performWorkflowAction` dispatcher), `resolve-targets.ts` (scope → blast radius), `types.ts` (`WorkflowActionRequest` / `WorkflowActionResult`). Routes operator cancel/retry/delete/bump to the low-level `dashboard/ops/*` handlers.
+- `../control/actions/`, `../control/ops/`, and `../control/ocr/` — central workflow action engine, low-level operator handlers, and OCR discard/cancel glue. Hono route wrappers live in `dashboard/hono/routes/ops.ts` and `dashboard/hono/routes/ocr.ts`; implementation lives in `src/control/`.
 - `index.ts` — Barrel re-exports
 
 ## Observability conventions
