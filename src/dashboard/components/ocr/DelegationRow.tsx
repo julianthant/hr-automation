@@ -51,7 +51,7 @@ export function DelegationRow({
       members={delegatedEntries}
       countTone="warning"
       footerRunOrdinal={parent.runOrdinal}
-      footerSecondaryId={projection?.subtitle ?? parent.data?.__name || parent.id}
+      footerSecondaryId={projection?.subtitle ?? (parent.data?.__name || parent.id)}
       firstTimestamp={parent.timestamp}
       isFocused={isBatchQueueFocused}
       drillInEnabled={batchDrillInEnabled}
