@@ -1,18 +1,15 @@
 <claude-mem-context>
 # Memory Context
 
-# [hr-automation] recent context, 2026-05-19 11:22pm PDT
+# [hr-automation] recent context, 2026-05-21 1:00am PDT
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (19,075t read) | 964,177t work | 98% savings
+Stats: 50 obs (20,604t read) | 363,887t work | 94% savings
 
 ### May 18, 2026
-S252 Plan 6 — LogEntry boundary validator for hr-automation: add isLogEntry type guard and wire into both log-entry JSONL read functions (May 18 at 10:29 PM)
-S253 Plan 7 — Lifecycle-tied screenshot cleanup: architecture reviewed and implementation queued (May 18 at 10:33 PM)
-S255 Plan 7 — Lifecycle-tied screenshot cleanup for hr-automation: close TODO(2026-05-11) in server.ts with 30-day terminal_at-based sweep (May 18 at 10:34 PM)
 S254 Re-run /review-code with multiple subagents to verify all planned fixes were completed and check for new issues in hr-automation codebase (May 18 at 10:40 PM)
 S256 Fan out parallel subagents to complete all type-soundness plans and push to origin (May 18 at 10:41 PM)
 S257 Fix "skipping invalid line" errors in .tracker/sessions-2026-05-18.jsonl (lines 685–724) (May 18 at 10:58 PM)
@@ -20,57 +17,61 @@ S258 Fix two bugs: (1) JSONL warning flood from sessions file being treated as a
 ### May 19, 2026
 S259 Push all local commits and staged changes to git origin/master (May 19 at 2:38 AM)
 S260 Push all changes to git — committed and pushed oath-signature + log-panel updates to origin/master (May 19 at 11:27 AM)
-2729 11:37a 🔴 OCR single-file rows now correctly show "Single delegation" label
-2728 " 🔴 Oath signature: fixed failing ensurePersonProfilesSearchForm step and ALL-CAPS name display
-2730 " 🟣 Unit tests added for OCR single vs batch delegation label logic
-2731 " 🔵 Oath signature fixes not yet implemented — two test failures reveal root causes
-2732 " 🔴 ensurePersonProfilesSearchForm implemented and exported in enter.ts
-2733 " ✅ All 20 tests pass after OCR label fix; CLAUDE.md updated with file-count lesson
-2734 11:38a 🔴 OCR oath form deriveInput now title-cases printedName via displayPersonName
-2735 " 🔴 ensurePersonProfilesSearchForm test mock updated to include waitFor method
-2736 " 🔴 All oath-signature unit tests passing after both fixes applied
-2737 " ✅ Full test suite passes after OCR label fix: 1632/1633 tests pass
-2738 " 🔵 Oath-signature daemon batch failure: UCPath Person Profiles stale detail page scenario documented
-2739 11:39a 🔵 Typecheck and lint pass after oath-signature fixes; one pre-existing lint warning unrelated to changes
-2740 " ✅ Oath-signature fix complete: 6 files changed, ready to commit
-2741 7:17p 🔵 DaemonBatchRow footer lacks retry/delete/timer controls that normal EntryItem rows have
-2742 7:18p 🔵 DaemonBatchRow prop interface discovered via QueuePanel render site
-2743 " 🔵 DeleteButton and RetryButton API constraints for DaemonBatchRow footer integration
-2744 7:19p 🔵 SSR-confirmed: EntryItem "Needs review" footer renders no action buttons — only time and run number
-2745 7:27p 🟣 BatchFooterActions component added to queue panel
-2746 7:28p 🔄 DaemonBatchRow refactored to use BatchFooterActions
-2747 " 🟣 passive-delegation GroupRowBase rows now show BatchFooterActions
-2748 " 🟣 retry-bulk API now accepts items array with runId and resets OCR dependencies on retry
-2749 7:29p 🟣 retry-bulk Hono route now parses and forwards items array with runId
-2750 " 🟣 OcrReviewPane blocks approval while OCR dependency retries are pending
-2751 " 🟣 Unit tests added for OCR dependency reset on retry and bulk retry with runId
-2752 " 🟣 UI test added for BatchFooterActions rendering retry and delete controls
-2753 7:30p 🔵 All 50 tests pass after BatchFooterActions and OCR retry reset changes
-2754 " 🔴 TypeScript error in retry.ts: runId missing on ids-mapped items type
-2755 " 🔴 Fixed TypeScript error in retryBulk items array type annotation
-2756 7:31p ✅ CLAUDE.md updated with passive-delegation batch footer lesson
-2757 " ✅ OCR CLAUDE.md updated with EID lookup dependency retry semantics
-2758 " ✅ tracker CLAUDE.md documents retry rule for OCR dependency children
-2759 " 🔵 typecheck and dashboard build both pass after BatchFooterActions and retry fixes
-2760 7:32p 🔵 Full test suite passes: 1636/1637 tests, 0 failures after all BatchFooterActions changes
-2761 7:33p 🔵 Lint passes with 1 pre-existing warning; all changes ready to commit
-2762 9:48p 🟣 Comprehensive Workflow Documentation Requested
-2763 " 🔵 Complete Workflow Registry Inventory
-2764 " 🔵 Complete Dashboard API Action Surface Catalogued
-2765 9:49p 🔵 Run Entry Points: RunModal and QuickRun Registry Contents
-2766 " 🔵 All Workflow defineWorkflow Configs Fully Catalogued
-2767 " 🔵 Cancel/Retry/Delete Backend Implementation Details
-2768 " 🔵 delegation.md Existing Content Fully Read
-2769 9:51p 🟣 Comprehensive workflow/action map document planned for hr-automation
-2770 9:56p 🟣 delegation.md replaced with comprehensive workflow/action map
-2771 " ✅ delegation.md rewritten: 522-line partial spec → 307-line complete workflow/action map
-2772 11:14p ⚖️ Workflow Architecture — Migrate to Centralized Modular Structure
-2773 11:17p ✅ Delegation workflow documentation requested
-S261 Delegation.md documentation + architectural analysis of delegation workflow system (May 19 at 11:17 PM)
-2774 " 🔵 hr-automation active unstaged changes include delegation.md and queue panel components
-2775 11:18p 🔵 Cross-workflow unification plan (2026-05-17) status: written but not started
-2776 11:20p 🟣 Workflow runtime migration master plan created: 6-phase policy-driven architecture
-2777 11:21p 🔵 docs/ directory is excluded by .gitignore — workflow runtime plans are untracked
+S261 Delegation.md documentation + architectural analysis of delegation workflow system (May 19 at 12:51 PM)
+S262 Workflow Runtime Phase 2: Central Action Engine — implement performWorkflowAction dispatcher and wire 6 HTTP routes through it (May 19 at 11:17 PM)
+S263 Run /review-code with parallel Sonnet agents across hr-automation codebase, synthesize findings into sequential plans, and execute each plan with a Sonnet subagent — all 4 plans now complete (May 19 at 11:44 PM)
+### May 21, 2026
+S264 Action system architecture review — split static policy from resolved descriptors, add client-side dispatcher hook, centralize OCR discard, and clarify batch-view toolbar scope semantics (May 21 at 12:35 AM)
+2902 12:35a 🔵 hr-automation repo baseline before action system refactor — master ahead 13, two unstaged files
+2903 " 🔵 projection.ts is where static policy descriptors get targetRunIds injected — withTargets() is the fill function
+2904 12:36a ⚖️ Action system refactor implementation plan — 5 tasks defined
+2905 " 🔄 Split static action policy from resolved action descriptors in workflow-runtime
+2906 " 🔵 Pre-refactor state of WorkflowActionDescriptor and related types confirmed
+2907 12:37a 🔵 Pre-refactor test baseline confirmed: all workflow-runtime and dashboard-actions tests pass
+2912 12:38a 🔄 Split WorkflowActionPolicy from WorkflowActionDescriptor — targets now carry workflowId per target
+2908 12:44a ⚖️ Action System Architectural Refactor — Policy/Descriptor Split and Centralized Dispatch
+2909 12:45a 🔄 Split WorkflowActionPolicy from WorkflowActionDescriptor — Action Targets Now Carry workflowId
+2910 12:47a 🔄 Centralized Workflow Action Dispatcher Hook — Sequential Subagent Task 2
+2911 " 🔵 useWorkflowActionDispatcher Hook Not Yet Created — Test Fails with Module Not Found
+2913 12:48a 🟣 useWorkflowActionDispatcher Hook Implemented and Tests Pass
+2914 " 🔄 RetryButton Migrated to useWorkflowActionDispatcher
+2915 " 🔄 DeleteButton Migrated to useWorkflowActionDispatcher
+2916 " 🔄 CancelRunningButton Migrated to useWorkflowActionDispatcher
+2917 12:49a 🔄 QueueItemControls Migrated — OCR Path Preserved, Non-OCR Cancel Uses Dispatcher
+2918 " 🔵 Full Dashboard Action Migration Verified — 9/9 Tests Pass
+2919 " ✅ src/dashboard/CLAUDE.md Updated — Dispatcher Pattern Documented
+2920 12:50a 🔵 Migration Completeness Verified — No Stray Inline Fetch Calls Remain
+2921 " 🔵 TypeScript Typecheck Passes Clean After Migration
+2922 " 🔵 Full Dashboard Test Suite Passes With env-bootstrap + setup Imports
+2923 12:51a 🔵 Lint Passes Clean — Pre-existing Warning in Unrelated File
+2924 " 🔄 Commit 6faf6cff — Centralize Workflow Action Dispatch
+2925 " 🔵 Final Commit Is a5ded2bd — Two Commit Attempts Made
+2926 " ⚖️ Action Policy Architecture Refactor — Separation of Static Policy from Resolved Descriptors
+2927 12:52a 🟣 useWorkflowActionDispatcher Hook — Centralized Workflow Action Dispatch
+2928 " 🔵 OCR Prep Discard Routing — Component-Local Special Case Retained in CancelRunningButton
+2929 " 🔄 WorkflowActionDescriptor — Per-Target workflowId, Scope/Source on Descriptor
+2930 12:54a 🔄 OCR Discard Routed Through Central Workflow Cancel Dispatcher
+2931 " ⚖️ Single Dispatcher Pattern for All Workflow Row Actions Including OCR
+2932 12:55a 🔵 Test Failures Reveal Implementation Gaps for OCR Cancel Routing Refactor
+2933 " 🔄 useWorkflowActionDispatcher Extended to Forward OCR Discard Context Fields
+2934 " 🔄 CancelRunningButton OCR Special-Case Removed; Routes Through Central Dispatcher
+2935 12:56a 🔄 CancelRunningButton Direct OCR Fetch Replaced with dispatchWorkflowAction
+2936 " 🔄 WorkflowActionRequest Type Extended with OCR Discard Parent Context Fields
+2937 " 🔄 performWorkflowAction: resolveActionTargets Deferred Per-Branch; OCR Discard Gets Full Parent Context
+2938 12:57a 🔄 Hono Cancel Routes Extended to Parse and Forward OCR Discard Context
+2939 " 🟣 All 16 Tests Pass After OCR Discard Central Cancel Refactor
+2940 " 🔵 CLAUDE.md Lesson Needs Update — OCR Local Special Case No Longer Applies
+2941 " ✅ Dashboard CLAUDE.md Updated with OCR Central Cancel Routing Documentation
+2942 12:58a ✅ Tracker CLAUDE.md Updated with OCR Discard Central Cancel Variant Lesson
+2943 " 🔄 Complete Diff Verified: OCR Discard Central Cancel Refactor — All Files Changed
+2944 " 🟣 Typecheck and Full Test Suite Pass — OCR Central Cancel Refactor Complete
+2945 " 🔵 Lint Clean for Refactor — Pre-existing Warning in Unrelated File
+2946 12:59a 🔵 Pre-commit Verification: Dirty Files Confirmed; No Stale OCR Direct Fetch in Components
+2947 " 🟣 Integration Test Added for /api/task/force-stop OCR Discard Path
+2948 " 🟣 Final Verification: 50/50 Tests Pass, Typecheck Clean, Lint Clean
+2949 " 🔄 11 Refactor Files Staged for Commit; Pre-existing Dirty Files Preserved
+2951 1:00a ⚖️ Action system architecture redesign — policy/descriptor split + centralized dispatch
+2950 " 🔄 Commit 06991af2 Landed: OCR Discard Central Cancel Refactor on Master
 
-Access 964k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 364k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

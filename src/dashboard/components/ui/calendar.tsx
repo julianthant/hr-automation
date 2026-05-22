@@ -1,6 +1,7 @@
 "use client";
 
-import { Calendar as HeroCalendar } from "@heroui/calendar";
+import { useState, useEffect } from "react";
+import { Calendar as HeroCalendar } from "@heroui/react";
 import { parseDate, type CalendarDate } from "@internationalized/date";
 
 interface CalendarProps {
@@ -17,6 +18,14 @@ export function Calendar({ selected, onSelect }: CalendarProps) {
     }
   })();
 
+  const [focusedValue, setFocusedValue] = useState<CalendarDate | undefined>(value);
+
+  // Sync focused month to selected date whenever the selection changes (e.g. popover reopens on a different date)
+  useEffect(() => {
+    setFocusedValue(value);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
+
   const handleChange = (date: CalendarDate | null) => {
     if (date) onSelect(date.toString());
   };
@@ -25,12 +34,17 @@ export function Calendar({ selected, onSelect }: CalendarProps) {
     <HeroCalendar
       value={value}
       onChange={handleChange}
+      focusedValue={focusedValue}
+      onFocusChange={setFocusedValue}
       aria-label="Select date"
     >
       <HeroCalendar.Header>
-        <HeroCalendar.Heading />
-        <HeroCalendar.NavButton slot="previous" />
-        <HeroCalendar.NavButton slot="next" />
+        <HeroCalendar.NavButton className="text-foreground" slot="previous" />
+        <HeroCalendar.YearPickerTrigger className="w-full justify-center">
+          <HeroCalendar.YearPickerTriggerHeading className="text-foreground" />
+          <HeroCalendar.YearPickerTriggerIndicator className="text-foreground" />
+        </HeroCalendar.YearPickerTrigger>
+        <HeroCalendar.NavButton className="text-foreground" slot="next" />
       </HeroCalendar.Header>
       <HeroCalendar.Grid>
         <HeroCalendar.GridHeader>
@@ -40,6 +54,11 @@ export function Calendar({ selected, onSelect }: CalendarProps) {
           {(date) => <HeroCalendar.Cell date={date} />}
         </HeroCalendar.GridBody>
       </HeroCalendar.Grid>
+      <HeroCalendar.YearPickerGrid>
+        <HeroCalendar.YearPickerGridBody>
+          {({ year }) => <HeroCalendar.YearPickerCell year={year} />}
+        </HeroCalendar.YearPickerGridBody>
+      </HeroCalendar.YearPickerGrid>
     </HeroCalendar>
   );
 }
