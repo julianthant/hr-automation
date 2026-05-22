@@ -2,7 +2,40 @@
 
 Declarative workflow primitives. Every kernel workflow is a `defineWorkflow({...})` call; `runWorkflow` / `runWorkflowBatch` / `runWorkflowPool` execute it. This directory is the canonical place to introduce new cross-cutting behavior (new step semantics, new run modes, new Ctx capabilities) — do NOT inline those concerns into individual workflow handlers.
 
-See root `CLAUDE.md` for a user-facing kernel primer + minimal example. This doc covers the **internals**.
+This doc includes a user-facing primer below. The rest covers **internals**.
+
+## User-facing primer
+
+**Kernel API quick reference:**
+- `defineWorkflow({ name, systems, steps, schema, operatorSubject, handler, ... })` — declare workflow with type-narrowed steps + auto-registered in dashboard
+- `archetype: "single" | "batch" | "delegating" | "delegating-batch" | "utility"` — required; kernel stamps `data.archetype` on every tracker row so queue surface, log panel footer chip, and display-name resolver all dispatch on one field. Declare explicitly so `tests/unit/architecture/archetype-coverage.test.ts` passes.
+- `ctx.page(id)` — Playwright Page for a system; blocks until auth is ready
+- `ctx.step(name, fn)` — wraps your code, catches errors, screenshots on failure, emits to tracker
+- `ctx.updateData(patch)` — merge into tracker entry's data field (use for operator-facing fields like emplId, name, etc.)
+- `ctx.parallel({ task1, task2, ... })` — Promise.allSettled over multiple tasks
+- Live-page dupe-protection: check the page state before submitting (e.g., `findExistingTerminationTransaction`) — no tracker cache
+- `authChain: "sequential" | "interleaved"` — sequential: wait for each Duo before next; interleaved: auth#1 blocking, #2+ in background
+
+**Minimal workflow example + archetype glossary:** `src/workflows/CLAUDE.md` → "Writing a new workflow".
+
+## Daemon mode
+
+Kernel workflows exposed on the CLI (`npm run separation`, `npm run work-study`, `npm run eid-lookup`, etc.) default to **daemon mode**:
+
+- **First invocation with no alive daemon** → spawns one detached daemon (`tsx src/cli-daemon.ts <workflow>`), waits for auth (Duo once), enqueues the item. Daemon stays alive after processing.
+- **Subsequent invocations** → insert into the shared SQLite queue (`tasks` table in `.tracker/state.db`, audit-appended to `.tracker/daemons/{workflow}.queue.jsonl` for `tail -f` debugging) and `POST /wake` every alive daemon. No re-Duo.
+- **Multi-daemon dispatch**: all alive daemons for a workflow race to claim the next queued row via a single `UPDATE … RETURNING` against `tasks` indexed by `tasks_control_claimable_idx (workflow, control_state, priority DESC, enqueued_at ASC)`, run inside a `transaction(...)`. Dynamic load balancing without a coordinator.
+- **Keepalive**: every 15 min idle, each daemon runs `session.healthCheck(system)` per system so SAML/Duo sessions don't silently expire between items.
+
+Flags (on supported CLI commands):
+- `-n, --new` — spawn one **additional** daemon even if others are alive.
+- `-p, --parallel <N>` — ensure ≥N daemons are alive before enqueueing (spawns `max(0, N - alive)`).
+
+Lifecycle: `npm run <workflow>:stop` — soft-stop (drain in-flight, re-queue). `-- --force` marks in-flight as failed immediately.
+
+**Daemon-mode conversion guide:** `src/workflows/CLAUDE.md` → "Daemon-mode conversion template".  
+**Implementation:** `src/core/daemon/{types,registry,queue,client,daemon}.ts` + `src/cli-daemon.ts`.  
+**Design doc:** `docs/superpowers/specs/2026-04-22-workflow-daemon-mode-design.md`.
 
 ## Files
 
