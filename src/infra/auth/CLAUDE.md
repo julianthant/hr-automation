@@ -56,7 +56,7 @@ Submit button: always `button[name="_eventId_proceed"]` (avoids collision with "
 
 ## Verified Selectors
 
-*(Add selectors here after each playwright-cli mapping session — include date and system)*
+SSO field fallbacks are documented in the selector pattern above and live inline in `fillSsoCredentials`. If a login selector changes, update this file and the relevant system `LESSONS.md` after searching/merging related entries.
 
 ## Lessons Learned
 

@@ -40,7 +40,7 @@ npm run active-check:stop
 
 - Positional tokens: strings of digits (after normalize) that look like an 8-digit EID are treated as **EID**; otherwise **name** (see `buildActiveCheckCliInput`).
 - Multi-item CLI uses a shared parent run id + `batchDisplayOrdinal` for dashboard batch grouping (`allocateLowestBatchDisplayOrdinal`).
-- Daemons claim work via the shared SQLite queue like other daemon-mode workflows (see root `CLAUDE.md` → Daemon mode).
+- Daemons claim work via the shared SQLite queue like other daemon-mode workflows (see `src/core/CLAUDE.md`).
 
 ## Inputs and outputs
 
@@ -53,7 +53,7 @@ Same topology as **eid-lookup**: up to 4 workers share UCPath browser contexts; 
 
 ## Operator notes
 
-*(Empty — append lessons when something non-obvious surfaces.)*
+*(Empty — when something non-obvious surfaces, search this file and the UCPath system docs first. Add a new lesson only if no existing entry can be updated or merged.)*
 
 ## Lessons Learned
 

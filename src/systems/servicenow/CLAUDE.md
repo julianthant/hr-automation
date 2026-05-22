@@ -13,7 +13,7 @@ UCPath.
 - `navigate.ts` — `gotoHrInquiryForm`, `verifyOnInquiryForm`,
   `HR_INQUIRY_FORM_URL`
 - `SELECTORS.md` — auto-generated catalog (`npm run selectors:catalog`)
-- `LESSONS.md` — append-only selector lessons file (currently only a short placeholder line; substantive workflow notes may appear in § Lessons Learned below until migrated)
+- `LESSONS.md` — structured selector lessons file. Search/update existing related entries before adding a new one; substantive workflow notes may appear in § Lessons Learned below until migrated.
 
 ## Auth
 

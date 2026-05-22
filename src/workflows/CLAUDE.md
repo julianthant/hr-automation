@@ -100,7 +100,7 @@ Guard: `tests/unit/architecture/runtime-policy-coverage.test.ts`.
 Valid `WorkflowArchetype` values:
 
 - `single` — one item, one row (e.g. work-study, active-check).
-- `batch` — N peer items under a batch-parent (e.g. emergency-contact, oath-signature).
+- `batch` — N peer items under a batch-parent (e.g. emergency-contact).
 - `delegating` — emits a `dispatch` row and N `delegate-child` runs in other workflows.
 - `delegating-batch` — batch-parent that delegates each member to another workflow (e.g. oath-upload).
 - `utility` — child-only workflow that holds no operator attention (e.g. eid-lookup as a passive child).
@@ -151,7 +151,7 @@ Add a Commander subcommand to `src/cli.ts` invoking your workflow's CLI adapter.
 
 ## Daemon-mode conversion template
 
-As of 2026-04-22, CLI-driven workflows should default to **daemon mode** (see root `CLAUDE.md` → "Daemon mode"). This avoids re-Duo per invocation and enables shared-queue load balancing across multiple alive daemons.
+As of 2026-04-22, CLI-driven workflows should default to **daemon mode** (see `src/core/CLAUDE.md`). This avoids re-Duo per invocation and enables shared-queue load balancing across multiple alive daemons.
 
 As of 2026-05-16, use `buildCliAdapter` from `src/core/cli-adapter.ts` for CLI-driven daemon
 adapters. It centralizes the `ensureDaemonsAndEnqueue` call, pre-emits pending
