@@ -1,4 +1,4 @@
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 
 import { listWorkflows } from "../../../jsonl.js";
 import {
@@ -18,6 +18,7 @@ import {
 } from "../../ops/index.js";
 import { performWorkflowAction } from "../../actions/perform-workflow-action.js";
 import type {
+  CancelMode,
   WorkflowActionRequest,
   WorkflowActionResult,
   WorkflowActionScope,
@@ -30,6 +31,19 @@ import { PARENT_RUN_ID_VALIDATION_HINT, parseOptionalParentRunId } from "../pare
 import { postJson } from "../post-helper.js";
 import { jsonResponse } from "../responses.js";
 import type { CancelActiveBulkItem } from "../../ops/cancel.js";
+
+type Compact<T extends Record<string, unknown>> = {
+  [K in keyof T]?: Exclude<T[K], undefined>;
+};
+
+function compact<T extends Record<string, unknown>>(obj: T): Compact<T> {
+  const out: Partial<Record<keyof T, unknown>> = {};
+  for (const key of Object.keys(obj) as Array<keyof T>) {
+    const value = obj[key];
+    if (value !== undefined) out[key] = value;
+  }
+  return out as Compact<T>;
+}
 
 /** Full success vs partial (207) vs all rows failed (422). Caller validates non-empty workload before invoke. */
 function bulkMutationHttpStatus(succeededCount: number, errorCount: number): number {
@@ -67,14 +81,14 @@ function optionalString(value: unknown): string | undefined {
 function parseOcrCancelContext(
   body: Record<string, unknown>,
 ): Pick<WorkflowActionRequest, "ocrSessionId" | "parentWorkflow" | "parentRunId" | "parentItemId" | "formType" | "reason"> {
-  return {
-    ...(optionalString(body.ocrSessionId) ? { ocrSessionId: optionalString(body.ocrSessionId) } : {}),
-    ...(optionalString(body.parentWorkflow) ? { parentWorkflow: optionalString(body.parentWorkflow) } : {}),
-    ...(optionalString(body.parentRunId) ? { parentRunId: optionalString(body.parentRunId) } : {}),
-    ...(optionalString(body.parentItemId) ? { parentItemId: optionalString(body.parentItemId) } : {}),
-    ...(optionalString(body.formType) ? { formType: optionalString(body.formType) } : {}),
-    ...(optionalString(body.reason) ? { reason: optionalString(body.reason) } : {}),
-  };
+  return compact({
+    ocrSessionId: optionalString(body.ocrSessionId),
+    parentWorkflow: optionalString(body.parentWorkflow),
+    parentRunId: optionalString(body.parentRunId),
+    parentItemId: optionalString(body.parentItemId),
+    formType: optionalString(body.formType),
+    reason: optionalString(body.reason),
+  });
 }
 
 function parseItemsFromBody<T>(
@@ -104,7 +118,7 @@ function toSingleActionResult(
   return {
     ok: false,
     error: first.error ?? "action failed",
-    ...(first.status ? { status: first.status } : {}),
+    ...compact({ status: first.status || undefined }),
   };
 }
 
@@ -121,7 +135,7 @@ function toForceStopActionResult(
   return {
     ok: false,
     error: first.error ?? "force stop failed",
-    ...(first.status ? { status: first.status } : {}),
+    ...compact({ status: first.status || undefined }),
   };
 }
 
@@ -130,6 +144,54 @@ function toBulkActionResult(
   result: WorkflowActionResult,
 ): { ok: true; count: number; errors: Array<{ id: string; error: string }> } {
   return { ok: true, count: result.count, errors: result.errors };
+}
+
+type RowCancelRequest = {
+  workflow: string;
+  id: string;
+  runId?: string;
+  scope: WorkflowActionScope;
+} & Pick<WorkflowActionRequest, "ocrSessionId" | "parentWorkflow" | "parentRunId" | "parentItemId" | "formType" | "reason">;
+
+function parseRowCancelRequest(body: Record<string, unknown>): RowCancelRequest {
+  return {
+    workflow: String(body.workflow ?? ""),
+    id: String(body.id ?? ""),
+    ...compact({ runId: body.runId ? String(body.runId) : undefined }),
+    scope: parseRowCancelScope(body.scope),
+    ...parseOcrCancelContext(body),
+  };
+}
+
+function buildCancelRoute(cancelMode: CancelMode, deps: DashboardHonoDeps): (c: Context) => Promise<Response> {
+  return async (c) => postJson(c, parseRowCancelRequest, async (req) => {
+    const result = await performWorkflowAction({
+      action: "cancel",
+      scope: req.scope,
+      source: "queue-panel",
+      workflowId: req.workflow,
+      cancelMode,
+      ...compact({
+        ocrSessionId: req.ocrSessionId,
+        parentWorkflow: req.parentWorkflow,
+        parentRunId: req.parentRunId,
+        parentItemId: req.parentItemId,
+        formType: req.formType,
+        reason: req.reason,
+      }),
+      targets: [{
+        workflowId: req.workflow,
+        id: req.id,
+        ...compact({
+          runId: req.runId,
+          status: cancelMode === "cooperative" ? "pending" as const : undefined,
+        }),
+      }],
+    }, { dir: deps.dir });
+    return cancelMode === "force"
+      ? toForceStopActionResult(result)
+      : toSingleActionResult(result);
+  }, cancelMode === "force" ? 202 : 200);
 }
 
 export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
@@ -142,7 +204,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         id: String(body.id ?? ""),
         runId: body.runId ? String(body.runId) : undefined,
         date: body.date ? String(body.date) : undefined,
-        ...(parent.parentRunId ? { parentRunId: parent.parentRunId } : {}),
+        ...compact({ parentRunId: parent.parentRunId }),
       };
     }, async (req: {
       workflow: string;
@@ -159,11 +221,9 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         targets: [{
           workflowId: req.workflow,
           id: req.id,
-          ...(req.runId ? { runId: req.runId } : {}),
-          ...(req.date ? { date: req.date } : {}),
+          ...compact({ runId: req.runId, date: req.date }),
         }],
-        ...(req.date ? { date: req.date } : {}),
-        ...(req.parentRunId ? { parentRunId: req.parentRunId } : {}),
+        ...compact({ date: req.date, parentRunId: req.parentRunId }),
       }, { dir: deps.dir });
       return toSingleActionResult(result);
     }, 202);
@@ -180,19 +240,21 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
               Boolean(item) && typeof item === "object" && !Array.isArray(item),
             )
             .map((item) => ({
-              workflowId: item.workflowId ? String(item.workflowId) : undefined,
               id: String(item.id ?? ""),
-              ...(item.runId ? { runId: String(item.runId) } : {}),
-              ...(item.date ? { date: String(item.date) } : {}),
+              ...compact({
+                workflowId: item.workflowId ? String(item.workflowId) : undefined,
+                runId: item.runId ? String(item.runId) : undefined,
+                date: item.date ? String(item.date) : undefined,
+              }),
             }))
             .filter((item) => item.id)
         : undefined;
       return {
         workflow: String(body.workflow ?? ""),
         ids,
-        ...(items ? { items } : {}),
+        ...compact({ items }),
         date: body.date ? String(body.date) : undefined,
-        ...(parent.parentRunId ? { parentRunId: parent.parentRunId } : {}),
+        ...compact({ parentRunId: parent.parentRunId }),
         source: parseBulkActionSource(body.source),
         scope: parseBulkActionScope(body.scope),
       };
@@ -216,12 +278,9 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         targets: items.map((it) => ({
           workflowId: it.workflowId ?? req.workflow,
           id: it.id,
-          ...(it.runId ? { runId: it.runId } : {}),
-          ...(req.date ? { date: req.date } : {}),
-          ...(it.date ? { date: it.date } : {}),
+          ...compact({ runId: it.runId, date: it.date ?? req.date }),
         })),
-        ...(req.date ? { date: req.date } : {}),
-        ...(req.parentRunId ? { parentRunId: req.parentRunId } : {}),
+        ...compact({ date: req.date, parentRunId: req.parentRunId }),
       }, { dir: deps.dir });
       return toBulkActionResult(result);
     }, 202);
@@ -240,7 +299,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         runId: body.runId ? String(body.runId) : undefined,
         date: body.date ? String(body.date) : undefined,
         data,
-        ...(parent.parentRunId ? { parentRunId: parent.parentRunId } : {}),
+        ...compact({ parentRunId: parent.parentRunId }),
       };
     }, buildEntryReEnqueueHandler(deps.dir, { withData: true }), 202);
   });
@@ -271,47 +330,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
     return jsonResponse(result, result.ok ? 200 : 400);
   });
 
-  app.post("/api/cancel-queued", async (c) => {
-    return postJson(c, (body) => ({
-      workflow: String(body.workflow ?? ""),
-      id: String(body.id ?? ""),
-      runId: body.runId ? String(body.runId) : undefined,
-      scope: parseRowCancelScope(body.scope),
-      ...parseOcrCancelContext(body),
-    }), async (req: {
-      workflow: string;
-      id: string;
-      runId?: string;
-      scope: WorkflowActionScope;
-      ocrSessionId?: string;
-      parentWorkflow?: string;
-      parentRunId?: string;
-      parentItemId?: string;
-      formType?: string;
-      reason?: string;
-    }) => {
-      const result = await performWorkflowAction({
-        action: "cancel",
-        scope: req.scope,
-        source: "queue-panel",
-        workflowId: req.workflow,
-        cancelMode: "cooperative",
-        ...(req.ocrSessionId ? { ocrSessionId: req.ocrSessionId } : {}),
-        ...(req.parentWorkflow ? { parentWorkflow: req.parentWorkflow } : {}),
-        ...(req.parentRunId ? { parentRunId: req.parentRunId } : {}),
-        ...(req.parentItemId ? { parentItemId: req.parentItemId } : {}),
-        ...(req.formType ? { formType: req.formType } : {}),
-        ...(req.reason ? { reason: req.reason } : {}),
-        targets: [{
-          workflowId: req.workflow,
-          id: req.id,
-          status: "pending",
-          ...(req.runId ? { runId: req.runId } : {}),
-        }],
-      }, { dir: deps.dir });
-      return toSingleActionResult(result);
-    });
-  });
+  app.post("/api/cancel-queued", buildCancelRoute("cooperative", deps));
 
   app.post("/api/cancel-running", async (c) => {
     return postJson(c, (body) => {
@@ -334,7 +353,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         const status = o.status === "pending" || o.status === "running" ? o.status : null;
         if (!id || !status) return null;
         const runId = typeof o.runId === "string" && o.runId.length > 0 ? o.runId : undefined;
-        return runId ? { id, status, runId } : { id, status };
+        return { id, status, ...compact({ runId }) };
       });
       if (items.length === 0) {
         return { ok: false, error: "items must be a non-empty array of { id, status }" };
@@ -351,53 +370,14 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
           workflowId: req.workflow,
           id: it.id,
           status: it.status,
-          ...(it.runId ? { runId: it.runId } : {}),
+          ...compact({ runId: it.runId }),
         })),
       }, { dir: deps.dir });
       return toBulkActionResult(result);
     }, (result) => bulkMutationHttpStatus(result.count, result.errors.length));
   });
 
-  app.post("/api/task/force-stop", async (c) => {
-    return postJson(c, (body) => ({
-      workflow: String(body.workflow ?? ""),
-      id: String(body.id ?? ""),
-      runId: body.runId ? String(body.runId) : undefined,
-      scope: parseRowCancelScope(body.scope),
-      ...parseOcrCancelContext(body),
-    }), async (req: {
-      workflow: string;
-      id: string;
-      runId?: string;
-      scope: WorkflowActionScope;
-      ocrSessionId?: string;
-      parentWorkflow?: string;
-      parentRunId?: string;
-      parentItemId?: string;
-      formType?: string;
-      reason?: string;
-    }) => {
-      const result = await performWorkflowAction({
-        action: "cancel",
-        scope: req.scope,
-        source: "queue-panel",
-        workflowId: req.workflow,
-        cancelMode: "force",
-        ...(req.ocrSessionId ? { ocrSessionId: req.ocrSessionId } : {}),
-        ...(req.parentWorkflow ? { parentWorkflow: req.parentWorkflow } : {}),
-        ...(req.parentRunId ? { parentRunId: req.parentRunId } : {}),
-        ...(req.parentItemId ? { parentItemId: req.parentItemId } : {}),
-        ...(req.formType ? { formType: req.formType } : {}),
-        ...(req.reason ? { reason: req.reason } : {}),
-        targets: [{
-          workflowId: req.workflow,
-          id: req.id,
-          ...(req.runId ? { runId: req.runId } : {}),
-        }],
-      }, { dir: deps.dir });
-      return toForceStopActionResult(result);
-    }, 202);
-  });
+  app.post("/api/task/force-stop", buildCancelRoute("force", deps));
 
   app.post("/api/browser/kill", async (c) => {
     return postJson(c, (body) => ({
@@ -481,10 +461,8 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         const workflowId = typeof o.workflowId === "string" && o.workflowId.length > 0 ? o.workflowId : undefined;
         const itemDate = typeof o.date === "string" && o.date.length > 0 ? o.date : undefined;
         return {
-          ...(workflowId ? { workflowId } : {}),
           id,
-          ...(runId ? { runId } : {}),
-          ...(itemDate ? { date: itemDate } : {}),
+          ...compact({ workflowId, runId, date: itemDate }),
         };
       });
       if (!workflow || !date) {
@@ -522,7 +500,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
           workflowId: it.workflowId ?? req.workflow,
           id: it.id,
           date: it.date ?? req.date,
-          ...(it.runId ? { runId: it.runId } : {}),
+          ...compact({ runId: it.runId }),
         })),
       }, { dir: deps.dir, screenshotsDir: deps.screenshotsDir });
       return toBulkActionResult(result);

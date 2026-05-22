@@ -3,7 +3,7 @@ import { basename } from "node:path";
 import { transaction, type Database, type Statement } from "../../infra/sqlite/index.js";
 
 import type { TrackerEntry, LogEntry } from "../jsonl-io.js";
-import { dateLocal, isTrackerEntry } from "../jsonl-io.js";
+import { dateLocal, getRunIdOr, isTrackerEntry } from "../jsonl-io.js";
 import { log } from "../../utils/log.js";
 import type { SessionEvent, ScreenshotSessionEvent } from "../session-events.js";
 import { registerLocalFile } from "../files/files.js";
@@ -199,10 +199,6 @@ function trackerDateFromTimestamp(ts: string): string {
   return dateLocal(new Date(ts));
 }
 
-function runIdFor(entry: Pick<TrackerEntry, "id" | "runId">): string {
-  return entry.runId || `${entry.id}#1`;
-}
-
 function extractEmplId(data: Record<string, string> | undefined): string | null {
   if (!data) return null;
   const raw = data.emplId;
@@ -232,7 +228,7 @@ export function applyTrackerEntry(
     return;
   }
   const trackerDate = source.trackerDate ?? trackerDateFromTimestamp(entry.timestamp);
-  const runId = runIdFor(entry);
+  const runId = getRunIdOr(entry);
   const eventMs = toMs(entry.timestamp);
   const dataJson = entry.data ? JSON.stringify(entry.data) : null;
   const typedDataJson = entry.typedData ? JSON.stringify(entry.typedData) : null;

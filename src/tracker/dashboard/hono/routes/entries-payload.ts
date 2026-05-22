@@ -1,8 +1,8 @@
 /**
  * JSONL-fallback payload builder for the `/events` (entries) SSE topic.
  *
- * Extracted here so both `routes/events.ts` and `topics-emitters.ts` can
- * import it without creating a circular dependency.
+ * Extracted here so `topics-emitters.ts` can import it without carrying the
+ * JSONL fallback payload code inline.
  *
  * The cross-workflow counts cache (`getCrossWorkflowCounts`) and its reset
  * function (`__resetCrossWorkflowCountsCacheForTests`) live here so they stay

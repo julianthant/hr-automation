@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
-import { getActiveHonoCaptureSseSubscriberCountForTests } from "../../../src/tracker/dashboard/hono/routes/events.js";
+import { getActiveHonoCaptureSseSubscriberCountForTests } from "../../../src/tracker/dashboard/hono/sse.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
 import { dateLocal, type TrackerEntry } from "../../../src/tracker/jsonl.js";
 

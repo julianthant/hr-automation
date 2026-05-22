@@ -320,8 +320,11 @@ export function serializeValue(v: unknown, key?: string): string {
   }
 }
 
-export function getRunIdOr(e: Pick<TrackerEntry, "id" | "runId">): string {
-  return e.runId || `${e.id}#1`;
+type RunIdFallbackTarget = { runId?: string } & ({ id: string } | { itemId: string });
+
+export function getRunIdOr(e: RunIdFallbackTarget): string {
+  const itemId = "id" in e ? e.id : e.itemId;
+  return e.runId || `${itemId}#1`;
 }
 
 export function byTimestampAsc<T extends { timestamp: string }>(a: T, b: T): number {

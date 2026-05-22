@@ -84,10 +84,9 @@ function makeDeltaTopic<T>(
 
 const SESSION_STATE_TTL_MS = 1_000;
 /**
- * 1s TTL cache around `rebuildSessionState`.  Mirrors the pattern used by
- * the legacy `/events/sessions` handler in routes/events.ts (now delegated
- * here).  Without caching, every 1 Hz SSE tick × N connected clients would
- * re-aggregate all dated `sessions-YYYY-MM-DD.jsonl` files on every call.
+ * 1s TTL cache around `rebuildSessionState`. Without caching, every 1 Hz SSE
+ * tick × N connected clients would re-aggregate all dated
+ * `sessions-YYYY-MM-DD.jsonl` files on every call.
  */
 const getCachedSessionState = ttlMemoize(
   SESSION_STATE_TTL_MS,
