@@ -58,7 +58,7 @@ In-process path (tests/scripts — call runWorkStudy directly):
 
 ## Verified Selectors
 
-*(Add selectors here after each playwright-cli mapping session — include date and page)*
+No workflow-local selectors live here. Use the UCPath selector catalog listed above; add selector lessons to `src/systems/ucpath/LESSONS.md` after searching/updating existing entries.
 
 ## Lessons Learned
 

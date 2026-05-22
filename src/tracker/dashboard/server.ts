@@ -21,6 +21,7 @@ import {
   scanFailurePatterns,
   scanOrphanedQueueItems,
 } from "./sweeps.js";
+import { runQueueSurfaceDebugSweep } from "../queue-surfaces-debug.js";
 
 let server: Server | null = null;
 
@@ -129,6 +130,13 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     runScreenshotSweep(dir, opts.screenshotsDir);
   }, 6 * 60 * 60 * 1000);
   screenshotSweepInterval.unref();
+  // Debug-only: sample the queue-surface classifier and append surface
+  // transitions to .tracker/debug/queue-surfaces-<date>.jsonl. Off the
+  // hot path, never streamed — see src/tracker/queue-surfaces-debug.ts.
+  const queueSurfaceDebugInterval = setInterval(() => {
+    runQueueSurfaceDebugSweep(dir);
+  }, 60_000);
+  queueSurfaceDebugInterval.unref();
   const dependencyScheduler = startDependencyScheduler({
     trackerDir: dir,
     intervalMs: 1000,
@@ -137,6 +145,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
   const stopBackgroundWork = (): void => {
     clearInterval(sweepInterval);
     clearInterval(screenshotSweepInterval);
+    clearInterval(queueSurfaceDebugInterval);
     dependencyScheduler.stop();
   };
   localServer.on("close", () => stopBackgroundWork());
