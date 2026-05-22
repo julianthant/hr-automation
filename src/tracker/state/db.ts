@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { statSync } from "node:fs";
 import { join } from "node:path";
 
 import { openDatabase, transaction, type Database } from "../../infra/sqlite/index.js";
@@ -7,10 +7,48 @@ import { DEFAULT_DIR } from "../jsonl.js";
 import { LATEST_SCHEMA_VERSION, MIGRATIONS } from "./schema.js";
 
 const openDbs = new Map<string, Database>();
-let readyCache: { path: string; ready: true } | null = null;
+
+/**
+ * Readiness cache for `isStateDbReady`.
+ *
+ * `isStateDbReady` runs on the `trackEvent` hot path, so it must not issue a
+ * `SELECT version` on every call. But it also must not trust a stale positive
+ * forever — if `state.db` is deleted, corrupted, or version-regressed after the
+ * first successful open, a permanently-cached `ready=true` would feed every
+ * projection write into the (now elevated) error path.
+ *
+ * Compromise: cache the DB file's identity fingerprint (`inode + size + mtime`)
+ * captured when readiness was confirmed. Each `isStateDbReady` call does a cheap
+ * `statSync` and compares the fingerprint; if the file changed or vanished, the
+ * cache is invalidated and the next call re-runs the full schema-version probe.
+ * A `statSync` is far cheaper than opening a connection + querying.
+ */
+interface DbFingerprint {
+  ino: number;
+  size: number;
+  mtimeMs: number;
+}
+interface ReadyCacheEntry {
+  path: string;
+  fingerprint: DbFingerprint;
+}
+let readyCache: ReadyCacheEntry | null = null;
 
 export function stateDbPath(dir: string = DEFAULT_DIR): string {
   return join(dir, "state.db");
+}
+
+function fingerprintOf(path: string): DbFingerprint | null {
+  try {
+    const stat = statSync(path);
+    return { ino: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs };
+  } catch {
+    return null;
+  }
+}
+
+function fingerprintsMatch(a: DbFingerprint, b: DbFingerprint): boolean {
+  return a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs;
 }
 
 export function openStateDb(dir: string = DEFAULT_DIR): Database {
@@ -20,23 +58,42 @@ export function openStateDb(dir: string = DEFAULT_DIR): Database {
 
   const db = openDatabase(path);
   runMigrations(db);
-  readyCache = { path, ready: true };
+  const fingerprint = fingerprintOf(path);
+  readyCache = fingerprint ? { path, fingerprint } : null;
   openDbs.set(path, db);
   return db;
 }
 
 export function isStateDbReady(dir: string = DEFAULT_DIR): boolean {
   const path = stateDbPath(dir);
-  if (readyCache?.path === path) return true;
-  if (!existsSync(path)) return false;
+  const fingerprint = fingerprintOf(path);
+  // File deleted/vanished — drop a stale positive and report not-ready.
+  if (!fingerprint) {
+    if (readyCache?.path === path) readyCache = null;
+    return false;
+  }
+  // Cheap fast path: a previous probe confirmed readiness AND the file is
+  // byte-for-byte the same DB (inode/size/mtime). Trust it without a query.
+  if (readyCache?.path === path && fingerprintsMatch(readyCache.fingerprint, fingerprint)) {
+    return true;
+  }
+  // Cache miss or file changed since last confirmation — re-run the full probe.
   let db: Database | null = null;
   try {
     db = openDatabase(path, { readonly: true, fileMustExist: true, applyDefaultPragmas: false });
     const row = db.prepare("SELECT version FROM schema_version WHERE id = 1").get() as { version?: number } | undefined;
     const ready = row?.version === LATEST_SCHEMA_VERSION;
-    if (ready) readyCache = { path, ready: true };
+    if (ready) {
+      // Re-fingerprint after the probe — the read connection itself can touch
+      // sidecar files, and we want the latest identity of the DB file.
+      const confirmed = fingerprintOf(path);
+      readyCache = confirmed ? { path, fingerprint: confirmed } : null;
+    } else if (readyCache?.path === path) {
+      readyCache = null;
+    }
     return ready;
   } catch {
+    if (readyCache?.path === path) readyCache = null;
     return false;
   } finally {
     db?.close();
