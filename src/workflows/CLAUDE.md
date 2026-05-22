@@ -2,7 +2,67 @@
 
 Each subdirectory is one composed workflow. As of 2026-04-17, every workflow is kernel-based: it declares its shape via `defineWorkflow` in `workflow.ts` and is run by `runWorkflow` / `runWorkflowBatch` / `runWorkflowPool` in `src/core/`.
 
-See the root `CLAUDE.md` "Writing a new workflow" section for the minimal `defineWorkflow` example. This file lists what's specific to this directory.
+This file covers what's specific to the workflows layer. See below for writing new workflows, archetypes, and daemon conversion.
+
+## Writing a new workflow
+
+Declare it with `defineWorkflow`. The kernel handles browser launch, auth (Duo-aware, sequential or interleaved), tracker emissions, SIGINT cleanup, screenshotting on step failure, per-item `withTrackedWorkflow` wrapping in batch/pool modes, and the dashboard registry. Your handler just drives Playwright.
+
+Minimal example:
+
+```ts
+import { defineWorkflow, runWorkflow } from "../../core/index.js";
+import { loginToUCPath } from "../../infra/auth/login.js";
+import { buildOperatorSubject } from "../../domain/operator-subject.js";
+import { MyInputSchema, type MyInput } from "./schema.js";
+
+const steps = ["ucpath-auth", "transaction"] as const;
+
+export const myWorkflow = defineWorkflow({
+  name: "my-workflow",
+  label: "My Workflow",
+  archetype: "single",
+  systems: [{
+    id: "ucpath",
+    login: async (page) => {
+      const ok = await loginToUCPath(page);
+      if (!ok) throw new Error("UCPath authentication failed");
+    },
+  }],
+  steps,
+  schema: MyInputSchema,
+  tiling: "single",
+  authChain: "sequential",
+  detailFields: [{ key: "emplId", label: "Empl ID" }, { key: "name", label: "Employee" }],
+  getName: (d) => d.name ?? "",
+  getId: (d) => d.emplId ?? "",
+  operatorSubject: (d) => buildOperatorSubject({ kind: "eid", value: d.emplId, prefix: "My Workflow" }),
+  handler: async (ctx, input: MyInput) => {
+    ctx.updateData({ emplId: input.emplId });
+    ctx.markStep("ucpath-auth");
+    const page = await ctx.page("ucpath");
+    await ctx.step("transaction", async () => {
+      // ... Playwright work ...
+      ctx.updateData({ name: "Jane Doe" });
+    });
+  },
+});
+
+export async function runMyWorkflow(input: MyInput) {
+  await runWorkflow(myWorkflow, input);
+}
+```
+
+Add a Commander subcommand in `src/cli.ts`, add npm scripts to `package.json`, fill in the schema + handler — no dashboard registry edits needed.
+
+Reference workflows:
+- `src/workflows/work-study/` — clean one-system example
+- `src/workflows/emergency-contact/` — batch-mode with `preEmitPending`
+- `src/workflows/onboarding/` — multi-system sequential auth + pool-mode parallel
+- `src/workflows/old-kronos-reports/` — pool-mode with per-worker sessionDir injection
+- `src/workflows/eid-lookup/` — `shared-context-pool` mode (N per-item tabs, single Duo per system)
+
+All production workflows are kernel-based as of 2026-04-17. New workflows must follow the kernel path exclusively.
 
 ## Directory layout
 
@@ -45,7 +105,26 @@ Valid `WorkflowArchetype` values:
 - `delegating-batch` — batch-parent that delegates each member to another workflow (e.g. oath-upload).
 - `utility` — child-only workflow that holds no operator attention (e.g. eid-lookup as a passive child).
 
-See the canonical glossary in root `CLAUDE.md` → "Row & Workflow Archetypes".
+### Row vocabulary
+
+Every tracker row carries `data.archetype`. The vocabulary is canonical — use these nouns in code, comments, log strings, and CLAUDE.md files.
+
+| WorkflowArchetype (declared) | RowArchetype (emitted) |
+|------------------------------|------------------------|
+| `single` | `single` |
+| `batch` | `batch-parent` + `batch-member` (×N) |
+| `delegating` | `single` + `dispatch` + `delegate-child` (×N) |
+| `delegating-batch` | `batch-parent` + `delegate-child` / `passive-child` |
+| `utility` | `passive-child` only |
+
+- **single** — one item, one row, flat in the queue.
+- **batch-parent** — anchor row over N peers. Stamped via `data.archetype`; `resolveRowArchetype` has legacy fallbacks for older JSONL rows.
+- **batch-member** — peer item under a batch-parent.
+- **dispatch** — terminal-at-enqueue row recording "I delegated to N children in another workflow."
+- **delegate-child** — child run spawned from a parent in a different workflow; holds operator attention.
+- **passive-child** — collapsed delegate-child rendered as a sub-row inside its parent's card; never holds operator attention.
+
+The kernel auto-stamps the appropriate `RowArchetype` based on the workflow's `WorkflowArchetype` declaration and the row's `parentRunId`. See `src/domain/row-archetype.ts` (`resolveRowArchetype` and `deriveRowArchetype`).
 
 ## Naming and ownership conventions
 

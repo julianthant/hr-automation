@@ -180,10 +180,12 @@ Observability for every workflow: `.tracker/{workflow}-{YYYY-MM-DD}.jsonl` + `*-
 | Playwright selector for UI element | `src/systems/<system>/selectors.ts` | Use `npm run selector:search "intent"` first; never guess |
 | Lessons from past selector failures | `src/systems/<system>/LESSONS.md` | Append-only; read before mapping new selectors |
 | Workflow implementation example | `src/workflows/work-study/` or `src/workflows/onboarding/` | Reference minimal (work-study) or complex (onboarding) example |
-| Kernel API (defineWorkflow, Ctx, etc.) | Root CLAUDE.md → **Kernel Primer** | Read before authoring new workflows |
+| Selector registry, intelligence artifacts, playwright-cli guide | `src/systems/CLAUDE.md` | All systems' selectors.ts layout, SELECTORS.md, LESSONS.md, selector discovery workflow |
+| New workflow guide + archetype glossary | `src/workflows/CLAUDE.md` | Writing a new workflow, archetypes, daemon conversion template |
+| Kernel API (defineWorkflow, Ctx, etc.) | `src/core/CLAUDE.md` | User-facing primer, Ctx methods, run modes, dupe-protection |
+| Daemon mode (queues, health checks, etc.) | `src/core/CLAUDE.md` | Queue mechanics, flags, daemon conversion guide |
 | Dashboard internals & React components | `src/dashboard/CLAUDE.md` | SSE streams, queue rendering, detail panels |
 | Tracker & JSONL observability patterns | `src/tracker/CLAUDE.md` | Emit patterns, Excel export, child-run delegation |
-| Daemon mode (queues, health checks, etc.) | Root CLAUDE.md → **Daemon Mode** | Default for most CLI commands; use `-n` / `-p N` flags |
 | System-specific gotchas | `src/systems/<system>/CLAUDE.md` | PeopleSoft quirks, frame navigation, auth edge cases |
 | Shared primitives & anti-patterns | `src/domain/`, `src/services/`, `src/infra/` + `docs/engineering/codebase-conventions.md` | Names, operators, logs, matching, OCR, capture, auth/browser — use before adding workflow-local |
 | Canonical vs ephemeral docs (review / drift-check scope) | `docs/README.md` | Maintained codebase narrative vs `superpowers/` handoffs & plans vs historical snapshots |
@@ -192,210 +194,24 @@ Observability for every workflow: `.tracker/{workflow}-{YYYY-MM-DD}.jsonl` + `*-
 
 ## Codebase conventions
 
-Read `docs/engineering/codebase-conventions.md` before adding shared behavior, new workflows, dashboard controls, or system drivers.
-
-High-level rules:
-- Workflow folders own orchestration, not reusable domain/system helpers.
-- Shared behavior used by two workflows, or by one workflow plus tracker/dashboard/core/OCR, belongs outside `src/workflows/<workflow>/`.
-- New workflows must declare `operatorSubject`, `detailFields`, `getName`, `getId`, and pending-row display data.
-- Operator-facing text should use the shared subject (`data.__subject`) before raw ids/run ids/session ids.
-- Use action-oriented function names: `parse`, `normalize`, `display/format`, `derive`, `resolve`, `build`, `create`, `read/write/list/find`, `is/has/can/should`, `ensure`, `assert`, `run`.
-- Do not add default exports in `src/`.
-- Use `log.*`, structured log fields, and notification policy instead of ad hoc `console.*`, toasts, or Telegram messages.
-
-## Node 26 conventions
-
-Floor: Node 26.0.0 (pinned via `engines` + `.nvmrc`). Prefer the Node 26 primitives below over older equivalents in new code. Do **not** codemod existing working code for aesthetic reasons — adopt these as files are touched.
-
-| Use this | Instead of | When |
-|---|---|---|
-| `Promise.withResolvers()` | `let resolve, reject; const p = new Promise((r, j) => { resolve = r; reject = j; })` | Building deferred promises (event handlers, lazy gates) |
-| `Array.fromAsync(asyncIter)` | `const out = []; for await (const x of iter) out.push(x); return out;` | Materializing an async iterable |
-| Iterator helpers (`.map/.filter/.take/.drop/.flatMap`) | `[...iter].map(...)` / `Array.from(iter).filter(...)` | Streaming transforms where you don't need the full array materialized |
-| `AbortSignal.timeout(ms)` | `const c = new AbortController(); setTimeout(() => c.abort(), ms);` | Fetch / cancellation timeouts |
-| `AbortSignal.any([a, b])` | Manual `addEventListener("abort", ...)` chaining | Composing multiple signals |
-| `node:timers/promises` `setTimeout(ms, value, { signal })` | Hand-rolled abortable sleep | Sleep that should reject on abort |
-| `import.meta.dirname` | `fileURLToPath(import.meta.url)` + `dirname()` | `__dirname` equivalent in ESM |
-| `styleText("red", s)` from `node:util` | `chalk.red(s)` / `pc.red(s)` | Colored CLI output |
-| `node:sqlite` (via `src/infra/sqlite/` shim) | `better-sqlite3` | Any SQLite — project default |
-| `Object.groupBy(iter, fn)` | Reduce-into-accumulator | Bucketing items by key |
-| `node:util.parseArgs` | `commander` (for **new internal scripts only**) | Tiny scripts in `src/scripts/` that don't need commander's subcommand tree |
-
-**Type-stripping note:** The codebase uses `tsx` for runtime TS execution. Native `node --strip-types` is intentionally NOT used because the codebase imports relative paths with `.js` extensions and Node 26's strip-types mode does not rewrite `.js` → `.ts`. Migrating to native execution would require rewriting every relative import — rejected for a marginal cold-start win. If `tsx` ever drops support, revisit then.
-
-### Sandboxing (optional)
-
-Node 26's permission model can sandbox daemon processes so a Playwright bug or rogue selector cannot write outside expected paths. Disabled by default — the threat model for an internal HR tool running on operator machines doesn't justify the operational cost (every new write path becomes an allowlist edit).
-
-To enable for a specific deployment, launch daemons with:
-
-```bash
-node --permission \
-  --allow-fs-read=* \
-  --allow-fs-write=/Users/$USER/Documents/hr-automation/.tracker \
-  --allow-fs-write=/Users/$USER/Documents/hr-automation/.screenshots \
-  --allow-fs-write=/tmp \
-  --allow-child-process \
-  ./node_modules/.bin/tsx --env-file=.env src/cli-daemon.ts <workflow>
-```
-
-Required flags:
-- `--allow-fs-read=*` — Playwright reads from many paths (Chromium binaries, user-data-dir, system fonts).
-- `--allow-fs-write=<tracker dir>` — JSONL emissions, SQLite state DB, screenshot uploads.
-- `--allow-fs-write=<screenshots dir>` — debug screenshots written by `Stepper.step` on failure.
-- `--allow-fs-write=/tmp` — Playwright + Chromium temp files.
-- `--allow-child-process` — Playwright spawns Chromium.
-
-Network access does not need a flag (allowed by default in the permission model).
-
-## Shared workflow primitives
-
-Any helper used by two or more workflows, or by one workflow plus tracker/dashboard/core/OCR, belongs outside `src/workflows/<workflow>/`.
-
-Use these shared homes first:
-- `src/domain/identity/` for person names and EIDs.
-- `src/domain/operator-subject.ts` for queue/toast/Telegram/log labels.
-- `src/domain/log-events.ts` and `src/domain/notifications/` for structured logs and notification routing.
-- `src/core/task-display.ts` and `src/core/task-control.ts` for delegation display and control vocabulary.
-- `src/services/ocr/forms/` for OCR form specs and shared verification schemas.
-- `src/services/matching/` for roster loading plus name/address/EID matching.
-- `src/systems/ucpath/person-org-summary.ts` for UCPath Person Org Summary search.
-- `src/domain/hdh/departments.ts` for HDH department acceptance.
-
-Workflow folders own orchestration and workflow-specific business steps only. When fixing a bug, decide whether it belongs to the shared primitive or to the workflow-specific handler before adding a new helper.
+Full rules: `docs/engineering/codebase-conventions.md`. Key points:
+- No default exports in `src/`.
+- No `page.locator(...)` inline in system files (architecture guard enforces this).
+- Action-oriented function names: `parse`, `normalize`, `display/format`, `derive`, `resolve`, `build`, `create`, `read/write/list/find`, `is/has/can/should`, `ensure`, `assert`, `run`.
+- Shared helpers used by 2+ workflows (or 1 workflow + tracker/dashboard/core/OCR) → promote out of `src/workflows/<workflow>/`. Shared homes listed in `src/workflows/CLAUDE.md`.
+- Use `log.*` with structured fields; no ad hoc `console.*`, toasts, or Telegram messages.
 
 ## Best Practices
 
-**Selectors:** Always use `npm run selector:search "<intent>"` before mapping a new selector. If a match exists, USE IT — don't remap. If not found, map via `playwright-cli snapshot`, add JSDoc + `// verified <date>` in `selectors.ts`, run `npm run selectors:catalog`, then append a lesson to `LESSONS.md` if you hit something non-obvious.
+**Selectors:** `npm run selector:search "<intent>"` first — use any existing match. New: map via `playwright-cli`, add JSDoc + `// verified <date>` to `selectors.ts`, run `npm run selectors:catalog`. Full workflow: `src/systems/CLAUDE.md`.
 
-**Shared code:** If a function is used by 2+ workflows (or 1 workflow + tracker/dashboard/core/OCR), it belongs outside `src/workflows/`. Check the **Shared workflow primitives** section above before adding a new helper. Avoid duplication; prefer moving to `src/domain/` or `src/core/`.
+**Writing a new workflow:** See `src/workflows/CLAUDE.md` for `defineWorkflow` example, archetype vocabulary, and daemon-mode conversion template. Kernel API details: `src/core/CLAUDE.md`.
 
-**Architecture guards:** Run `npm run test:architecture` before commits. It enforces: no inline selectors in system files, no default exports in `src/`, lesson format correctness, and selector catalog sync. These gates catch drift early.
+**Architecture guards:** `npm run test:architecture` before commits.
 
-**Continuous improvement:** After every selector re-map, system change, or discovered pattern: update the relevant CLAUDE.md with a dated lesson-learned entry. These files are the only memory between sessions — keep them accurate.
+**Continuous improvement:** After every fix or new pattern, add a dated lesson entry to the relevant CLAUDE.md.
 
-**Daemon mode:** Most CLI commands default to daemon mode (persistent long-lived processes, Duo auth once per session). Use `-n, --new` to spawn an additional daemon; `-p, --parallel <N>` to ensure N are alive. Always drain gracefully with `:stop` before force-killing.
-
-**Testing:** Run `npm run test` + `npm run test:architecture` before PRs. Architecture guards are non-negotiable; they prevent anti-patterns from creeping in.
-
-## Writing a new workflow
-
-Declare it with `defineWorkflow`. The kernel handles browser launch, auth (Duo-aware, sequential or interleaved), tracker emissions, SIGINT cleanup, screenshotting on step failure, per-item `withTrackedWorkflow` wrapping in batch/pool modes, and the dashboard registry. Your handler just drives Playwright.
-
-Minimal example:
-
-```ts
-import { defineWorkflow, runWorkflow } from "../../core/index.js";
-import { loginToUCPath } from "../../infra/auth/login.js";
-import { buildOperatorSubject } from "../../domain/operator-subject.js";
-import { MyInputSchema, type MyInput } from "./schema.js";
-
-const steps = ["ucpath-auth", "transaction"] as const;
-
-export const myWorkflow = defineWorkflow({
-  name: "my-workflow",
-  label: "My Workflow",
-  archetype: "single",
-  systems: [{
-    id: "ucpath",
-    login: async (page) => {
-      const ok = await loginToUCPath(page);
-      if (!ok) throw new Error("UCPath authentication failed");
-    },
-  }],
-  steps,
-  schema: MyInputSchema,
-  tiling: "single",
-  authChain: "sequential",
-  detailFields: [{ key: "emplId", label: "Empl ID" }, { key: "name", label: "Employee" }],
-  getName: (d) => d.name ?? "",
-  getId: (d) => d.emplId ?? "",
-  operatorSubject: (d) => buildOperatorSubject({ kind: "eid", value: d.emplId, prefix: "My Workflow" }),
-  handler: async (ctx, input: MyInput) => {
-    ctx.updateData({ emplId: input.emplId });
-    ctx.markStep("ucpath-auth");
-    const page = await ctx.page("ucpath");
-    await ctx.step("transaction", async () => {
-      // ... Playwright work ...
-      ctx.updateData({ name: "Jane Doe" });
-    });
-  },
-});
-
-export async function runMyWorkflow(input: MyInput) {
-  await runWorkflow(myWorkflow, input);
-}
-```
-
-Add a Commander subcommand in `src/cli.ts`, add npm scripts to `package.json`, fill in the schema + handler, and that's the whole story — no dashboard registry edits needed. (The `npm run new:workflow` scaffolder was removed; scaffold manually from the minimal example above.)
-
-See `src/workflows/work-study/` for a clean one-system example, `src/workflows/emergency-contact/` for batch-mode with `preEmitPending`, `src/workflows/onboarding/` for multi-system sequential auth + pool-mode parallel, `src/workflows/old-kronos-reports/` for pool-mode with per-worker sessionDir injection, and `src/workflows/eid-lookup/` for `shared-context-pool` mode (N per-item tabs fanning out from a single Duo auth per system).
-
-All production workflows are kernel-based as of 2026-04-17. New workflows must follow the kernel path exclusively.
-
-## Row & Workflow Archetypes
-
-Every tracker row carries `data.archetype`. Every workflow declares an archetype.
-The vocabulary is canonical — use these nouns in code, comments, log strings,
-and CLAUDE.md files.
-
-| WorkflowArchetype (declared) | RowArchetype (emitted)                |
-|------------------------------|----------------------------------------|
-| `single`                     | `single`                               |
-| `batch`                      | `batch-parent` + `batch-member` (×N)   |
-| `delegating`                 | `single` + `dispatch` + `delegate-child` (×N) |
-| `delegating-batch`           | `batch-parent` + `delegate-child` / `passive-child` |
-| `utility`                    | `passive-child` only                   |
-
-### Row vocabulary
-
-- **single** — one item, one row, flat in the queue.
-- **batch-parent** — anchor row over N peers. Stamped via `data.archetype` when present; `resolveRowArchetype` falls back to `data.mode === "prepare"` for legacy JSONL rows that predate `data.archetype` stamping.
-- **batch-member** — peer item under a batch-parent.
-- **dispatch** — terminal-at-enqueue row recording "I delegated to N children in another workflow."
-- **delegate-child** — child run spawned from a parent in a different workflow; holds operator attention.
-- **passive-child** — collapsed delegate-child rendered as a sub-row inside its parent's card; never holds operator attention.
-
-The kernel auto-stamps the appropriate `RowArchetype` based on the workflow's
-`WorkflowArchetype` declaration and the row's `parentRunId`. See
-`src/domain/row-archetype.ts` (the `resolveRowArchetype` resolver and
-`deriveRowArchetype` derivation function).
-
-## Kernel Essentials
-
-**Full API reference:** See `src/core/CLAUDE.md` (defineWorkflow shape, Ctx methods, run modes, dupe-protection patterns).
-
-**Quick reference:**
-- `defineWorkflow({ name, systems, steps, schema, operatorSubject, handler, ... })` — declare workflow with type-narrowed steps + auto-registered in dashboard
-- `archetype: "single" | "batch" | "delegating" | "delegating-batch" | "utility"` — required; kernel stamps `data.archetype` on every tracker row so queue surface, log panel footer chip, and display-name resolver all dispatch on one field. Defaults to `"batch"` if `batch` is set, else `"single"` — but declare explicitly so `tests/unit/architecture/archetype-coverage.test.ts` passes.
-- `ctx.page(id)` — Playwright Page for a system; blocks until auth is ready
-- `ctx.step(name, fn)` — wraps your code, catches errors, screenshots on failure, emits to tracker
-- `ctx.updateData(patch)` — merge into tracker entry's data field (use for operator-facing fields like emplId, name, etc.)
-- `ctx.parallel({ task1, task2, ... })` — Promise.allSettled over multiple tasks
-- Live-page dupe-protection: check the page state before submitting (e.g., `findExistingTerminationTransaction`) — no tracker cache
-- `authChain: "sequential" | "interleaved"` — sequential: wait for each Duo before next; interleaved: auth#1 blocking, #2+ in background
-
-## Daemon mode (persistent workflow processes)
-
-Kernel workflows exposed on the CLI (`npm run separation <ids>`, `npm run work-study <emplId> <date>`, `npm run eid-lookup <names...>`, `npm run active-check <names-or-eids...>`, `npm run onboarding <emails...>`, `npm run oath-signature …`, `npm run oath-upload …`, `npm run emergency-contact …`) default to **daemon mode**:
-
-- **First invocation with no alive daemon** → spawns one detached daemon (`tsx src/cli-daemon.ts <workflow>`), waits for auth (Duo once), enqueues the item. Daemon stays alive after processing.
-- **Subsequent invocations** → insert into the shared SQLite queue (`tasks` table in `.tracker/state.db`, audit-appended to `.tracker/daemons/{workflow}.queue.jsonl` for `tail -f` debugging) and `POST /wake` every alive daemon. No re-Duo.
-- **Multi-daemon dispatch**: all alive daemons for a workflow race to claim the next queued row via a single `UPDATE … RETURNING` against `tasks` indexed by `tasks_control_claimable_idx (workflow, control_state, priority DESC, enqueued_at ASC)`, run inside a `transaction(...)`. Whichever daemon's `UPDATE` wins grabs the row — dynamic load balancing without a coordinator. (No filesystem mutex; the JSONL `.queue.jsonl` is audit-only.)
-- **Keepalive**: every 15 min idle, each daemon runs `session.healthCheck(system)` per system so SAML/Duo sessions don't silently expire between items.
-
-Flags (on `separation`, `work-study`, `eid-lookup`, `active-check`, `onboarding`, `oath-signature`, `oath-upload`, `emergency-contact`):
-- `-n, --new` — spawn one **additional** daemon even if others are alive.
-- `-p, --parallel <N>` — ensure ≥N daemons are alive before enqueueing (spawns `max(0, N - alive)`).
-
-`eid-lookup` daemon hard-wires the default CRM-on variant (`eidLookupCrmWorkflow`). If a different variant is ever needed, add a separate daemon shape.
-
-`onboarding` daemon runs the standard `onboardingWorkflow` (CRM + UCPath + I9, 2 Duos per session since I9 is SSO no-2FA). For throughput, start N daemons with `-p N`. Pass multiple emails positionally to fan them across alive daemons via the shared queue.
-
-Lifecycle commands (converted workflows: `separations`, `work-study`, `eid-lookup`, `active-check`, `onboarding`, `oath-signature`, `oath-upload`, `emergency-contact`, `crm-doc-download`):
-- `npm run <workflow>:stop` — soft-stop (drain in-flight, re-queue). Use `-- --force` to mark in-flight as failed and exit immediately.
-
-Converting a new workflow to daemon mode is mechanical — see `src/workflows/CLAUDE.md#daemon-mode-conversion-template`. Implementation: `src/core/daemon/{types,registry,queue,client,daemon}.ts` (main loop) + `src/cli-daemon.ts` (entry). Full design doc: `docs/superpowers/specs/2026-04-22-workflow-daemon-mode-design.md`.
+**Testing:** `npm run test` + `npm run test:architecture` before PRs.
 
 ## Environment
 
@@ -422,52 +238,6 @@ All system-level gotchas (PeopleSoft modal mask, frame navigation, dropdown beha
 - **ServiceNow** → `src/systems/servicenow/CLAUDE.md`
 
 Check the relevant system's CLAUDE.md before you get bitten. Lessons from past failures live in `src/systems/<system>/LESSONS.md`.
-
-## Selector registry
-
-Every Playwright selector used by automation lives in a per-system `selectors.ts`:
-
-```
-src/systems/ucpath/selectors.ts
-src/systems/crm/selectors.ts
-src/systems/i9/selectors.ts
-src/systems/old-kronos/selectors.ts
-src/systems/kuali/selectors.ts
-src/systems/new-kronos/selectors.ts
-src/systems/servicenow/selectors.ts
-src/systems/sharepoint/selectors.ts
-```
-
-Selectors are functions returning `Locator` / `FrameLocator`, each carrying a `// verified YYYY-MM-DD` comment. Fallback chains (`.or()`) up to 6-deep are used where PeopleSoft grid IDs mutate or similar brittle anchors need hardening. Wrap invocations with `safeClick` / `safeFill` from `src/systems/common/` to log `log.warn("selector fallback triggered: <label>")` when the primary + fallbacks all miss.
-
-Do **not** inline `page.locator("...")` in system `.ts` files — the [`tests/unit/systems/inline-selectors.test.ts`](./tests/unit/systems/inline-selectors.test.ts) guard rejects PRs that do. Compound paths rooted in registry locators (`row.locator("td").nth(1)`) are whitelisted via end-of-line `// allow-inline-selector` comments.
-
-When you verify a selector via `playwright-cli snapshot`, bump its `// verified` date in `selectors.ts`. Never guess selectors — map the live page first.
-
-## Selector Intelligence
-
-Three artifacts per system support adding new workflows without re-mapping selectors or repeating past mistakes:
-
-- **`src/systems/<sys>/SELECTORS.md`** — auto-generated catalog of every selector this system exports. Each entry has the FQN (e.g. `smartHR.tab.personalData`), one-line summary from JSDoc, `@tags`, and a clickable line ref into `selectors.ts`. Regenerate after any selectors.ts change with `npm run selectors:catalog`. Committed so future Claude sessions see the catalog without running anything. A unit test (`tests/unit/scripts/selectors-catalog.test.ts`) gates drift — PRs that change selectors without regenerating fail there.
-- **`src/systems/<sys>/LESSONS.md`** — append-only structured lessons. Required subsections per H2: `**Tried:**`, `**Failed because:**`, `**Fix:**`, `**Tags:**` (plus optional `**Selector:**` and `**References:**`). `tests/unit/scripts/lessons-format.test.ts` enforces the shape. When you discover a non-obvious selector failure, append a lesson here so the next session doesn't relearn it.
-- **`src/systems/<sys>/common-intents.txt`** — hand-curated 5-10 typical intents per system. Useful reference when authoring a new workflow's CLAUDE.md `selector:search` examples.
-
-The fuzzy search:
-
-```bash
-npm run selector:search "comp rate"
-# → top hit: ucpath/jobData.compRateCodeInput (selector)
-# → also: relevant lessons that touch the same intent
-```
-
-Workflow when adding or finding a selector:
-1. `npm run selector:search "<your intent>"` — does a matching selector exist?
-2. If yes, USE IT. Don't remap.
-3. If no, check the per-system `LESSONS.md` for related failure modes.
-4. Map a new selector via `playwright-cli`, add JSDoc + `@tags` + `// verified <date>` in `selectors.ts`, run `npm run selectors:catalog`.
-5. If you hit a non-obvious failure on the way, append a lesson to `LESSONS.md`.
-
-Each per-system `CLAUDE.md` links to its `LESSONS.md` + `SELECTORS.md` and embeds this loop verbatim.
 
 ## Dashboard
 
@@ -502,28 +272,3 @@ Skip querying when: the session summaries already cover it, the task is trivial,
 **Memory hygiene:** Delete project-state memories when work is done. Only feedback/preference memories are permanent. See global CLAUDE.md for the full hygiene rules.
 
 **Skills:** `mem-search` (past bugs/decisions), `knowledge-agent` (repeated broad questions in one session), `smart-explore` (code structure without reading full files), `timeline-report`
-
-## Selector Discovery (playwright-cli)
-
-Use `playwright-cli` (install: `npm install -g @playwright/cli@latest`) to map selectors before writing code:
-
-```bash
-playwright-cli -s=session open --headed <url>
-playwright-cli -s=session snapshot              # view element refs
-playwright-cli -s=session click e40             # click by ref ID
-playwright-cli -s=session screenshot
-playwright-cli -s=session close
-```
-
-After mapping, add to `src/systems/<system>/selectors.ts` with `// verified YYYY-MM-DD` comment. Run `npm run selectors:catalog` to sync.
-
-## Lessons Learned
-
-- **2026-05-19: `resolveRowArchetype` reads `data.archetype` first, with legacy fallbacks retained.** `data.archetype` is the primary discriminator. When it is absent or not a valid archetype, the resolver falls back to legacy signals — `data.mode === "prepare"` → `batch-parent`, `data.taskRole === "utility"` → `passive-child`, `data.requestRole === "delegation-dispatch"` → `dispatch` — and otherwise defaults to `delegate-child` when `parentRunId` is set, else `single`. The fallbacks are kept because dashboard JSONL history and older tests (notably OCR prep rows) still rely on them. Write sites use `deriveRowArchetype` from `src/domain/row-archetype.ts`.
-- **2026-05-16: Oath-upload restart-recovery now covers the HR-form submit step.** `findPriorTicketForRunId` is consulted before re-firing `open-hr-form`/`fill-form`/`submit` — a daemon crash between submit-success and tracker-done no longer files a duplicate ServiceNow ticket. Recovery probes now cover both the OCR portion (existing `readPriorOcrApproval`) and the post-signature ServiceNow portion. Helper lives in `src/workflows/oath-upload/handler.ts`.
-- **2026-05-17: `data.archetype` is the canonical row-type discriminator.** Replaces the previous seven-discriminator sprawl (workflow-name match, id-prefix match, `data.mode`, `data.taskRole`, `data.requestRole`, `data.originWorkflow`, ad-hoc member-count heuristics). New rows get an `archetype` stamp via `withTrackedWorkflow` opts or explicit assignment for `batch-parent`/`dispatch` rows. (Legacy read-fallbacks in `resolveRowArchetype` are still preserved — see the 2026-05-19 lesson above.) Architecture guard: `tests/unit/architecture/archetype-coverage.test.ts` requires every workflow to declare it explicitly. **Write sites:** use `deriveRowArchetype(workflowArchetype, parentRunId?)` from `src/domain/row-archetype.ts` in all pre-emit pending hooks. **Read sites:** use `resolveRowArchetype(entry)` — reads `data.archetype`; missing values default to `single` (or `delegate-child` when `parentRunId` is set). **oath-upload note:** `data.mode` was renamed `data.uploadMode` (avoids collision with the `data.mode === "prepare"` prep-row discriminator); `data.taskRole` was removed.
-- **2026-05-16: Operator-discard mid-OCR must clear the abort flag in finally.** Without a `finally` block calling `clearOcrPrepareAbort(id, runId)`, re-entry on the same `(sessionId, runId)` throws at the first tracker emit because the module-level Set still has the flag. The `writeTracker("failed", …)` in the existing catch block can also re-throw the same abort — wrap it in its own inner try/catch so both paths land in the finally. See `src/workflows/ocr/orchestrator.ts`.
-- **2026-05-16: Force-research must consume eid-lookup outcomes.** Previous behavior `void`'d the `Promise.all`/`watchChildRuns` result, emitting `awaiting-approval` with unpatched records — operators saw blank lookups. Fixed by iterating outcomes and applying `patchOcrRecordFromEidLookupOutcome` per outcome before the final emit. Also: use explicit `null` (not `undefined`) when clearing `matchSource`/`matchConfidence` so `JSON.stringify` preserves the keys. See `src/workflows/ocr/force-research.ts`.
-- **2026-05-16: `queryEntriesPayload` builds `historyByRun` from already-fetched event rows.** The function was issuing two full-table SELECTs against `run_events` per `/events` tick — the second to build step-duration history. Since `eventRows` (the first query's JOIN result) already contains `item_id`, `run_id`, `event_ts`, `status`, and `step`, `historyByRun` is now built by iterating `eventRows` in a Map loop. Drops each tick from 2 to 1 SELECT against `run_events`.
-- **2026-05-16: `watchChildRuns` returns the terminal `TrackerEntry` in each `ChildOutcome`.** The optional `terminalEntry` field is populated by both the SQLite branch (synthetic entry) and the JSONL branch (parsed entry) when an item reaches terminal status. Callers no longer need a follow-up `findLatestEntryForPredicate` scan — `outcomes[0]?.terminalEntry` has the data. `wait-ocr-approval.ts` was the first caller converted. Test mocks that construct bare `ChildOutcome` objects can omit `terminalEntry` since the field is optional.
-- **2026-05-16: `force-research.ts` uses `findLatestEntryForPredicate`.** The old code read the full today-only JSONL with `readFileSync`, walking every line to find the latest OCR entry by `(sessionId, runId)`. The canonical helper (`src/tracker/find-latest-entry.ts`) searches newest-first with malformed-line tolerance and a `lookbackDays` backstop — use it for any "find latest row matching predicate" pattern instead of inline `readFileSync` loops.
