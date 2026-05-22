@@ -8,7 +8,7 @@ type KeyStateKind = "available" | "throttled" | "quota-exhausted" | "dead";
 
 interface OcrKeyStatus {
   id: string;
-  providerId: "gemini" | "mistral" | "groq" | "sambanova";
+  providerId: ProviderId;
   state:
     | { kind: "available" }
     | { kind: "throttled"; untilMs: number }
@@ -19,6 +19,8 @@ interface OcrKeyStatus {
 
 // ── Config ─────────────────────────────────────────────────────────────────
 
+type ProviderId = "gemini" | "mistral" | "groq" | "sambanova";
+
 const PROVIDER_LABEL: Record<string, string> = {
   gemini: "Gemini",
   mistral: "Mistral",
@@ -26,7 +28,7 @@ const PROVIDER_LABEL: Record<string, string> = {
   sambanova: "Sambanova",
 };
 
-const PROVIDER_ORDER = ["gemini", "mistral", "groq", "sambanova"];
+const PROVIDER_ORDER: ProviderId[] = ["gemini", "mistral", "groq", "sambanova"];
 
 const STATE_LABEL: Record<KeyStateKind, string> = {
   "available": "available",
@@ -125,6 +127,7 @@ export function ApiLimitsIndicator() {
   const [open, setOpen] = useState(false);
   const [statuses, setStatuses] = useState<OcrKeyStatus[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedProvider, setSelectedProvider] = useState<ProviderId>("gemini");
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchStatuses = (signal?: AbortSignal) => {
@@ -153,9 +156,14 @@ export function ApiLimitsIndicator() {
   const geminiKeys = statuses.filter((s) => s.providerId === "gemini");
   const geminiAvail = geminiKeys.filter((s) => s.state.kind === "available").length;
 
-  const byProvider: Record<string, OcrKeyStatus[]> = {};
+  const byProvider: Record<ProviderId, OcrKeyStatus[]> = {
+    gemini: [],
+    mistral: [],
+    groq: [],
+    sambanova: [],
+  };
   for (const s of statuses) (byProvider[s.providerId] ??= []).push(s);
-  const sections = PROVIDER_ORDER.flatMap((p) => (byProvider[p]?.length ? [{ id: p, keys: byProvider[p] }] : []));
+  const selectedKeys = byProvider[selectedProvider] ?? [];
 
   const triggerLabel =
     geminiKeys.length > 0
@@ -163,8 +171,6 @@ export function ApiLimitsIndicator() {
       : statuses.length > 0
         ? `AI·${statuses.length}`
         : "AI";
-
-  const totalReqToday = statuses.reduce((s, k) => s + (k.dailyCount ?? 0), 0);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -198,35 +204,28 @@ export function ApiLimitsIndicator() {
 
       <PopoverContent align="end" className="p-0 w-[300px]">
         {/* Header */}
-        <div className="px-3.5 pt-3 pb-2.5 border-b border-border flex items-start justify-between gap-2">
-          <div>
+        <div className="px-3.5 pt-3 pb-2.5 border-b border-border flex items-center justify-between gap-3">
+          <div className="min-w-0">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-foreground">
               OCR Key Pool
             </div>
-            <div className="text-[10px] text-muted-foreground mt-0.5 font-mono">
-              {loading
-                ? "Loading…"
-                : statuses.length === 0
-                  ? "No keys configured"
-                  : `${statuses.length} key${statuses.length === 1 ? "" : "s"} · ${totalReqToday} req today · resets midnight UTC`}
-            </div>
           </div>
-          {/* Overall health pill */}
-          {!loading && statuses.length > 0 && (
-            <span
-              className={cn(
-                "text-[9px] font-mono font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded",
-                health === "good" &&
-                  "bg-emerald-400/10 text-emerald-400 border border-emerald-400/20",
-                health === "warn" &&
-                  "bg-amber-400/10 text-amber-400 border border-amber-400/20",
-                health === "critical" &&
-                  "bg-destructive/10 text-destructive border border-destructive/20",
-              )}
-            >
-              {health === "good" ? "healthy" : health === "warn" ? "degraded" : "critical"}
-            </span>
-          )}
+          <select
+            aria-label="Select OCR provider"
+            value={selectedProvider}
+            onChange={(event) => setSelectedProvider(event.target.value as ProviderId)}
+            className={cn(
+              "h-7 min-w-[112px] rounded border border-border bg-secondary px-2",
+              "font-mono text-[10px] font-semibold uppercase tracking-wider text-foreground",
+              "outline-none focus-visible:ring-2 focus-visible:ring-primary",
+            )}
+          >
+            {PROVIDER_ORDER.map((providerId) => (
+              <option key={providerId} value={providerId}>
+                {PROVIDER_LABEL[providerId]} ({byProvider[providerId].length})
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Key rows */}
@@ -238,25 +237,14 @@ export function ApiLimitsIndicator() {
           <div className="px-3.5 py-5 text-center text-[11px] text-muted-foreground font-mono">
             No OCR keys configured.
           </div>
+        ) : selectedKeys.length === 0 ? (
+          <div className="px-3.5 py-5 text-center text-[11px] text-muted-foreground font-mono">
+            No {PROVIDER_LABEL[selectedProvider]} keys configured.
+          </div>
         ) : (
           <div className="py-1.5">
-            {sections.map(({ id: providerId, keys }, sectionIdx) => (
-              <div key={providerId}>
-                {/* Provider label — only show if more than one provider present */}
-                {sections.length > 1 && (
-                  <div
-                    className={cn(
-                      "px-3.5 pb-1 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/50",
-                      sectionIdx > 0 ? "pt-2.5 border-t border-border/50 mt-1" : "pt-1.5",
-                    )}
-                  >
-                    {PROVIDER_LABEL[providerId] ?? providerId}
-                  </div>
-                )}
-                {keys.map((key) => (
-                  <KeyRow key={key.id} status={key} />
-                ))}
-              </div>
+            {selectedKeys.map((key) => (
+              <KeyRow key={key.id} status={key} />
             ))}
           </div>
         )}

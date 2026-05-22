@@ -73,6 +73,36 @@ test("post-approval prep parent + multiple kernel children stays grouped", () =>
   assert.equal(surfaces.groupRows[0]!.members.length, 2);
 });
 
+test("post-approval prep parent + single kernel child stays grouped", () => {
+  const approved = prepParent({ status: "done", step: "approved" });
+  const child1: TrackerEntry = {
+    workflow: "oath-signature",
+    timestamp: "2026-05-14T06:00:00Z",
+    id: "10874100",
+    runId: "kernel-1",
+    parentRunId: "parent-1234",
+    status: "running",
+    data: {
+      __name: "Oath Signature · #1234",
+      __id: "10874100",
+      emplId: "10874100",
+      parentSubject: "Oath Signature · #1234",
+    },
+  } as TrackerEntry;
+  const surfaces = buildQueueSurfaces({
+    entries: [approved, child1],
+    delegationSourceEntries: [child1],
+    workflow: "oath-signature",
+    workflowLabel: "Oath Signature",
+  });
+  // A single-signer PDF must remain a batch card after OCR approval — it
+  // must not collapse into a flat single row.
+  assert.equal(surfaces.groupRows.length, 1);
+  assert.equal(surfaces.groupRows[0]!.kind, "approval-delegation");
+  assert.equal(surfaces.groupRows[0]!.members.length, 1);
+  assert.equal(surfaces.flatEntries.length, 0);
+});
+
 test("prep parent with 0 members still renders as group surface (not flat)", () => {
   const surfaces = buildQueueSurfaces({
     entries: [prepParent()],

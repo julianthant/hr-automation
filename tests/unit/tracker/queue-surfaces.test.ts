@@ -135,7 +135,7 @@ describe("buildTrackerQueueSurfaces", () => {
     assert.deepEqual(result.flatEntries.map((e) => e.id), []);
   });
 
-  it("surfaces a single approved-batch-parent child as a selectable flat row", () => {
+  it("keeps an approved batch-parent with a single child as a group card", () => {
     const ocr = entry({
       workflow: "ocr",
       id: "ocr-session-single",
@@ -157,8 +157,13 @@ describe("buildTrackerQueueSurfaces", () => {
       delegationSourceEntries: [ocr, child],
     });
 
-    assert.equal(result.groupRows.length, 0);
-    assert.deepEqual(result.flatEntries.map((e) => e.id), ["10000001"]);
+    // A single-signer PDF stays a batch card after approval — the row type
+    // must not change just because OCR matched only one person.
+    assert.equal(result.groupRows.length, 1);
+    assert.equal(result.groupRows[0]?.kind, "approval-delegation");
+    assert.equal(result.groupRows[0]?.approvalState, "approved");
+    assert.deepEqual(result.groupRows[0]?.members.map((e) => e.id), ["10000001"]);
+    assert.deepEqual(result.flatEntries.map((e) => e.id), []);
   });
 
   it("excludes discarded batch-parent rows from all surfaces", () => {

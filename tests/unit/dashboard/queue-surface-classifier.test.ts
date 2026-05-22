@@ -104,7 +104,7 @@ describe("buildQueueSurfaces", () => {
     assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), []);
   });
 
-  it("surfaces a one-child approved OCR delegation as a selectable child row", () => {
+  it("keeps a one-child approved OCR delegation as a group card", () => {
     const ocr = row({
       workflow: "ocr",
       id: "ocr-session-single",
@@ -130,10 +130,11 @@ describe("buildQueueSurfaces", () => {
       workflowLabel: "OCR",
     });
 
-    assert.equal(surfaces.groupRows.length, 0);
-    assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), ["10000001"]);
-    assert.equal(surfaces.flatEntries[0]?.workflow, "oath-signature");
-    assert.equal(surfaces.flatEntries[0]?.parentRunId, "ocr-run-single");
+    // A single-signer prep row stays a batch card after approval.
+    assert.equal(surfaces.groupRows.length, 1);
+    assert.equal(surfaces.groupRows[0]?.kind, "approval-delegation");
+    assert.deepEqual(surfaces.groupRows[0]?.members.map((entry) => entry.id), ["10000001"]);
+    assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), []);
   });
 
   it("surfaces a single OCR-fan-out eid-lookup child as a flat delegation member", () => {
