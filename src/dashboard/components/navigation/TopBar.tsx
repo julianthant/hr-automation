@@ -6,6 +6,7 @@ import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { SearchBar } from "./SearchBar";
 import { FailureBell } from "./FailureBell";
+import { ApiLimitsIndicator } from "./ApiLimitsIndicator";
 import type { SearchResultRow, FailureRow } from "@/components/shared/types";
 
 interface TopBarProps {
@@ -108,6 +109,7 @@ export function TopBar({
 
       {/* ── Date navigator + rightSlot — right edge ────────────── */}
       <div className="flex items-center gap-1 justify-self-end">
+        <ApiLimitsIndicator />
         {onFailureSelect && failureCounts && (
           <FailureBell
             failureCounts={failureCounts}

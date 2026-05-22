@@ -17,7 +17,7 @@ export interface DisambiguateResult {
 
 type DisambiguateCallFn = (key: ProviderKey, prompt: string) => Promise<string>;
 
-const DEFAULT_CACHE_DIR = ".ocr-cache";
+const DEFAULT_CACHE_DIR = ".tracker";
 let _cacheDir: string | undefined;
 let _callForTests: DisambiguateCallFn | undefined;
 

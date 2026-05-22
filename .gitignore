@@ -75,7 +75,6 @@ Thumbs.db
 # Scratch files (chat references, not meant to be committed)
 /image.png
 /notes.md
-.ocr-cache/
 .worktrees/
 
 # claude-mem session artifacts (regenerated each session for Codex context injection)

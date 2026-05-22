@@ -50,6 +50,10 @@ function dayUtc(ms = Date.now()): number {
 }
 
 /** Tiny non-cryptographic hash — just to dedupe the value in the state file. */
+export function hashKeyValue(value: string): string {
+  return hashKey(value);
+}
+
 function hashKey(value: string): string {
   let h = 0;
   for (let i = 0; i < value.length; i++) h = ((h << 5) - h + value.charCodeAt(i)) | 0;
