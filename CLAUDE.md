@@ -129,7 +129,8 @@ Full rules: `docs/engineering/codebase-conventions.md`. Key points:
 - **Selectors:** `npm run selector:search "<intent>"` first. New selector: map via `playwright-cli` → add JSDoc + `// verified <date>` to `selectors.ts` → `npm run selectors:catalog`. Full workflow: `src/systems/CLAUDE.md`.
 - **New workflow:** `src/workflows/CLAUDE.md` (example, archetypes, daemon template). Kernel API: `src/core/CLAUDE.md`.
 - **Before commits:** `npm run test` + `npm run test:architecture` (architecture guards run here).
-- **After changes:** update the relevant `CLAUDE.md`/`LESSONS.md`; merge or replace stale entries, don't layer duplicates.
+- **After changes — CLAUDE.md:** update after every non-trivial fix, new pattern, or gotcha; merge/replace stale entries, don't layer duplicates.
+- **After changes — docs/engineering/:** update only when the reference material structurally changes — new endpoint added/removed, new module file, changed API signature, removed feature. Not needed for every implementation change.
 
 ## Environment
 
