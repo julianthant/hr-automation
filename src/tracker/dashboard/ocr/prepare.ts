@@ -47,13 +47,6 @@ export interface PrepareInput {
    * just to inspect the result, no downstream side effects.
    */
   originWorkflow?: string;
-  /**
-   * Optional dashboard-only grouping id. Multi-file upload uses this to group
-   * N single-file prepare rows under one batch card without changing OCR or
-   * downstream workflow behavior.
-   */
-  originBatchRunId?: string;
-  originBatchSubject?: string;
 }
 
 export interface PrepareResponse {
@@ -73,8 +66,6 @@ interface OriginPrepContext {
   originWorkflow: string;
   parentItemId: string;
   parentRunId: string;
-  originBatchRunId?: string;
-  originBatchSubject?: string;
   pdfOriginalName: string;
   formType: string;
 }
@@ -135,8 +126,6 @@ export function buildOcrPrepareHandler(
         originWorkflow: origin,
         parentItemId: `ocr-prep-${sessionId}`,
         parentRunId: randomUUID(),
-        ...(input.originBatchRunId ? { originBatchRunId: input.originBatchRunId } : {}),
-        ...(input.originBatchSubject ? { originBatchSubject: input.originBatchSubject } : {}),
         pdfOriginalName: input.pdfOriginalName,
         formType: input.formType,
       };
@@ -144,8 +133,6 @@ export function buildOcrPrepareHandler(
         originWorkflow: originPrep.originWorkflow,
         parentItemId: originPrep.parentItemId,
         parentRunId: originPrep.parentRunId,
-        ...(originPrep.originBatchRunId ? { originBatchRunId: originPrep.originBatchRunId } : {}),
-        ...(originPrep.originBatchSubject ? { originBatchSubject: originPrep.originBatchSubject } : {}),
         pdfOriginalName: input.pdfOriginalName,
         formType: input.formType,
         ocrSessionId: sessionId,
@@ -239,8 +226,6 @@ function writeOriginParentPending(args: {
   originWorkflow: string;
   parentItemId: string;
   parentRunId: string;
-  originBatchRunId?: string;
-  originBatchSubject?: string;
   pdfOriginalName: string;
   formType?: string;
   ocrSessionId: string;
@@ -250,7 +235,7 @@ function writeOriginParentPending(args: {
   dryRun?: boolean;
 }): void {
   const ts = new Date().toISOString();
-  const queueTitle = args.originBatchSubject ?? prepBatchQueueTitle(args.formType, args.parentRunId);
+  const queueTitle = prepBatchQueueTitle(args.formType, args.parentRunId);
   // mode: "prepare" hooks the parent into the existing prep-row machinery
   // so post-approval the row is auto-extracted from the regular queue and
   // folded into a DelegationRow with its kernel children (which inherit
@@ -276,7 +261,6 @@ function writeOriginParentPending(args: {
       timestamp: ts,
       id: args.parentItemId,
       runId: args.parentRunId,
-      ...(args.originBatchRunId ? { parentRunId: args.originBatchRunId } : {}),
       status: "pending",
       data: baseData,
     },
@@ -288,7 +272,6 @@ function writeOriginParentPending(args: {
       timestamp: ts,
       id: args.parentItemId,
       runId: args.parentRunId,
-      ...(args.originBatchRunId ? { parentRunId: args.originBatchRunId } : {}),
       status: "running",
       // Step name aligns with `oath-signature` workflow's first declared
       // step ("ocr") so the StepPipeline highlights it as the live step on
@@ -340,7 +323,7 @@ function writeOriginParentPrepFailed(args: OriginPrepContext & {
   detail: string;
 }): void {
   const ts = new Date().toISOString();
-  const queueTitle = args.originBatchSubject ?? prepBatchQueueTitle(args.formType, args.parentRunId);
+  const queueTitle = prepBatchQueueTitle(args.formType, args.parentRunId);
   const baseData: Record<string, string> = {
     __name: queueTitle,
     __id: args.parentItemId,
@@ -358,7 +341,6 @@ function writeOriginParentPrepFailed(args: OriginPrepContext & {
       timestamp: ts,
       id: args.parentItemId,
       runId: args.parentRunId,
-      ...(args.originBatchRunId ? { parentRunId: args.originBatchRunId } : {}),
       status: "failed",
       error: `OCR prep failed — ${args.detail}`,
       data: baseData,

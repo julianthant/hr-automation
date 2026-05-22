@@ -91,15 +91,13 @@ test("writeOriginParentPending does not emit a synthetic request child row", () 
   }
 });
 
-test("writeOriginParentPending groups multi-file oath uploads without reusing file run ids", () => {
-  const dir = mkdtempSync(join(tmpdir(), "ocr-prep-group-"));
+test("writeOriginParentPending emits each PDF as a standalone prep row with no batch parent", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ocr-prep-standalone-"));
   try {
     writeOriginParentPending({
       originWorkflow: "oath-signature",
       parentItemId: "ocr-prep-file-1",
       parentRunId: "file-run-1111",
-      originBatchRunId: "batch-run-9999",
-      originBatchSubject: "Oath · 9999",
       pdfOriginalName: "first.pdf",
       formType: "oath",
       ocrSessionId: "sess-1",
@@ -108,21 +106,16 @@ test("writeOriginParentPending groups multi-file oath uploads without reusing fi
     });
 
     const rows = readJsonl(join(dir, `oath-signature-${todayLocal()}.jsonl`));
-    const parent = rows.find(
-      (r) => (r as { id?: string; status?: string }).id === "ocr-prep-file-1" && (r as { status?: string }).status === "running",
+    const running = rows.find(
+      (r) =>
+        (r as { id?: string }).id === "ocr-prep-file-1" &&
+        (r as { status?: string }).status === "running",
     ) as { runId: string; parentRunId?: string; data: Record<string, string> } | undefined;
-    const requestRows = rows.filter(
-      (r) => String((r as { id?: string }).id ?? "").endsWith("-request"),
-    );
 
-    assert.ok(parent, "expected grouped file parent row");
-    assert.equal(parent.runId, "file-run-1111");
-    assert.equal(parent.parentRunId, "batch-run-9999");
-    assert.equal(parent.data.__name, "Oath · 9999");
-    assert.equal(parent.data.__queueRootTitle, "Oath · 9999");
-    assert.equal(parent.data.pdfOriginalName, "first.pdf");
-
-    assert.deepEqual(requestRows, [], "multi-file prep should not emit request child rows");
+    assert.ok(running, "expected standalone file prep row");
+    assert.equal(running.runId, "file-run-1111");
+    assert.equal(running.parentRunId, undefined, "prep row must not be nested under a batch parent");
+    assert.equal(running.data.pdfOriginalName, "first.pdf");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

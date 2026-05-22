@@ -48,14 +48,6 @@ interface RunModalProps {
   lockedFormType?: string;
 }
 
-function buildBatchSubject(workflowName: string, batchRunId: string): string {
-  const suffix = batchRunId.slice(-4);
-  if (workflowName === "oath-signature" || workflowName === "ocr") return `Oath · ${suffix}`;
-  if (workflowName === "emergency-contact") return `Emergency Contact · ${suffix}`;
-  if (workflowName === "oath-upload") return `Oath Upload · ${suffix}`;
-  return `Batch · ${suffix}`;
-}
-
 export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedFormType: lockedFormTypeProp }: RunModalProps) {
   const config = getRunModalConfig(workflow);
   // Per-workflow registry can lock the form type so the modal hides the
@@ -284,8 +276,6 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
 
     // Use XHR so we get progress events. Fetch's upload progress is still
     // not widely supported across browsers as of 2026.
-    const batchRunId = files.length > 1 ? crypto.randomUUID() : null;
-    const batchSubject = batchRunId ? buildBatchSubject(workflow, batchRunId) : null;
     const totalBytes = files.reduce((sum, nextFile) => sum + nextFile.size, 0);
     const uploadedByIndex = new Map<number, number>();
 
@@ -310,12 +300,9 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
           // Tell the backend which workflow originated this upload. When the
           // operator opens the run modal from the OCR queue → originWorkflow="ocr"
           // and the row is standalone. Other workflows synthesize their own
-          // parent row; multi-file oath uploads share a dashboard-only parent id.
+          // parent row. Each uploaded PDF is an independent single-file run —
+          // multi-file selection just fires N standalone prepare requests.
           if (workflow !== "ocr") fd.append("originWorkflow", workflow);
-          if (batchRunId && batchSubject) {
-            fd.append("originBatchRunId", batchRunId);
-            fd.append("originBatchSubject", batchSubject);
-          }
           const xhr = new XMLHttpRequest();
           xhr.open("POST", fullSubmitUrl);
           xhr.upload.addEventListener("progress", (ev) => {
@@ -356,7 +343,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
       toast.success(
         files.length > 1 ? `${files.length} preparations started` : t.title,
         files.length > 1
-          ? { description: batchSubject ?? files.map((nextFile) => nextFile.name).join(", ") }
+          ? { description: files.map((nextFile) => nextFile.name).join(", ") }
           : t.description ? { description: t.description } : undefined,
       );
       onOpenChange(false);
