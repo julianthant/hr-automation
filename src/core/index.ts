@@ -67,3 +67,14 @@ export type {
   EnqueueResult,
 } from './daemon/types.js'
 export { buildBatchPreEmitPending } from './pre-emit-helpers.js'
+export {
+  buildDelegateApi,
+  delegateToImpl,
+  delegateToAllImpl,
+} from './delegate.js'
+export type {
+  DelegateOpts,
+  DelegateAllOpts,
+  DelegateRenderAs,
+  ChildRunResult,
+} from './delegate.js'
