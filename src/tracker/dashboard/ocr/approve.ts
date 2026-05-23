@@ -1,4 +1,4 @@
-import { emitTrackerRow, appendLogEntry, type StampedData } from "../../jsonl.js";
+import { emitTrackerRow, appendLogEntry } from "../../jsonl.js";
 import { log } from "../../../utils/log.js";
 import { errorMessage } from "../../../utils/errors.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";

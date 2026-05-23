@@ -19,7 +19,7 @@ import { buildVisionPool } from "../../services/ocr/per-page-pool.js";
 import { loadRoster as realLoadRoster } from "../../services/matching/index.js";
 import type { RosterRow as MatchRosterRow } from "../../services/matching/match.js";
 import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
-import { emitTrackerRow, dateLocal, type StampedData, type TrackerEntry, type TrackerRowEmission } from "../../tracker/jsonl.js";
+import { emitTrackerRow, dateLocal, type TrackerEntry, type TrackerRowEmission } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { patchOcrRecordFromEidLookupOutcome } from "../../services/ocr/eid-lookup-results.js";
 import { flattenForData } from "../../services/ocr/tracker-data.js";
