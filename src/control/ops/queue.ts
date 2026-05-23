@@ -2,13 +2,15 @@ import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import {
   dateLocal,
+  emitTrackerRow,
+  emitTrackerRowForDate,
   listDatesForWorkflow,
   readEntries,
   readEntriesForDate,
-  trackEvent,
-  trackEventForDate,
+  type StampedData,
   type TrackerEntry,
 } from "../../tracker/jsonl.js";
+import { resolveRowArchetype } from "../../domain/row-archetype.js";
 import {
   daemonsDir,
 } from "../../core/daemon/registry.js";
@@ -115,22 +117,27 @@ export function buildSaveDataHandler(dir: string) {
       const next = typeof v === "string" ? v : v == null ? "" : String(v);
       merged[k] = next;
     }
-    const entry: TrackerEntry = {
+    // Inherit archetype from the prior row — save-data is a no-status-change
+    // overlay so the row type must not change.
+    const priorArchetype = resolveRowArchetype(latest);
+    const mergedStamped: StampedData = { ...merged, archetype: priorArchetype };
+    const emission = {
       workflow: req.workflow,
       timestamp: new Date().toISOString(),
       id: req.id,
-      runId: latest.runId,
+      ...(latest.runId ? { runId: latest.runId } : {}),
+      ...(latest.parentRunId ? { parentRunId: latest.parentRunId } : {}),
       status: latest.status,
-      step: latest.step,
-      data: merged,
+      ...(latest.step ? { step: latest.step } : {}),
+      data: mergedStamped,
       // Don't carry `input` — that field is reserved for `pending` rows by
       // the kernel; this synthetic row never originated from an enqueue.
-      error: latest.error,
+      ...(latest.error ? { error: latest.error } : {}),
     };
     if (req.date) {
-      trackEventForDate(entry, req.date, dir);
+      emitTrackerRowForDate(emission, req.date, dir);
     } else {
-      trackEvent(entry, dir);
+      emitTrackerRow(emission, dir);
     }
     return { ok: true };
   };

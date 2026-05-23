@@ -8,7 +8,8 @@
  */
 import { existsSync } from "fs";
 import { listRosters, resolveRosterDirs } from "../../services/matching/roster-loader.js";
-import { byTimestampAsc, readEntries, readEntriesForDate, trackEvent, type TrackerEntry } from "../../tracker/jsonl.js";
+import { byTimestampAsc, emitTrackerRow, readEntries, readEntriesForDate, type TrackerEntry } from "../../tracker/jsonl.js";
+import { resolveRowArchetype } from "../../domain/row-archetype.js";
 import { enqueueFromHttp } from "../../core/daemon/enqueue-dispatch.js";
 import {
   findRetryInputFromTaskStore,
@@ -255,7 +256,16 @@ async function reEnqueueEntry(
         payload: { fromRunId: runId, runId: retried.runId },
       });
       appendQueueEnqueueAudit(wf, retried.itemId, input, retried.runId, dir);
-      trackEvent(
+      // Inherit archetype from the failed run's latest row so the retry's
+      // pending row surfaces with the same row type (batch-member, single,
+      // delegate-child, etc.). Without the inheritance the new pending row
+      // would default to deriveRowArchetype("single", parentRunId) — wrong
+      // for any batch-member retry, which is one of the bugs this contract
+      // is designed to prevent.
+      const priorRunRows = readEntriesForRetryItem(wf, id, runId, dir, date).scoped;
+      const priorEntry = priorRunRows.length > 0 ? priorRunRows[priorRunRows.length - 1] : undefined;
+      const priorArchetype = priorEntry ? resolveRowArchetype(priorEntry) : "single";
+      emitTrackerRow(
         {
           workflow: wf,
           timestamp: new Date().toISOString(),
@@ -263,6 +273,7 @@ async function reEnqueueEntry(
           runId: retried.runId,
           status: "pending",
           input,
+          data: { archetype: priorArchetype },
           ...(resolvedParent ? { parentRunId: resolvedParent } : {}),
         },
         dir,

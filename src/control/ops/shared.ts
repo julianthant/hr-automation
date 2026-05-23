@@ -3,9 +3,10 @@
  * folder. Not part of the public surface — not re-exported from index.ts.
  */
 import { appendFileSync, mkdirSync } from "fs";
-import { appendLogEntry, trackEvent } from "../../tracker/jsonl.js";
+import { appendLogEntry, emitTrackerRow } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { emitItemCancelled } from "../../tracker/session-events.js";
+import { resolveRowArchetype } from "../../domain/row-archetype.js";
 import {
   daemonsDir,
 } from "../../core/daemon/registry.js";
@@ -117,14 +118,29 @@ export function emitDashboardCancelTrackerRow(
   dir: string,
 ): void {
   const ts = new Date().toISOString();
-  trackEvent(
+  // Look up the latest prior row for this (id, runId) so the cancel row
+  // inherits its archetype + parentRunId. Without the inheritance, the
+  // archetype would default to "single" / "delegate-child" via
+  // resolveRowArchetype's fallback path — and batch-member / batch-parent
+  // cancellations would surface as the wrong row type in the dashboard.
+  const priorEntry = findLatestEntryForPredicate({
+    workflow,
+    trackerDir: dir,
+    lookbackDays: 7,
+    predicate: (e) => e.id === id && (runId ? e.runId === runId : true),
+  });
+  const priorArchetype = priorEntry ? resolveRowArchetype(priorEntry) : "single";
+  const priorParentRunId = priorEntry?.parentRunId;
+  emitTrackerRow(
     {
       workflow,
       timestamp: ts,
       id,
-      runId,
+      ...(runId ? { runId } : {}),
+      ...(priorParentRunId ? { parentRunId: priorParentRunId } : {}),
       status: "failed",
       step: "cancelled",
+      data: { archetype: priorArchetype },
       error: DASHBOARD_CANCEL_ERROR,
     },
     dir,

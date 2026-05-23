@@ -1,10 +1,12 @@
-import { trackEvent, appendLogEntry } from "../../tracker/jsonl.js";
+import { emitTrackerRow, appendLogEntry } from "../../tracker/jsonl.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
 import {
   requestOcrPrepareAbort,
 } from "../../tracker/ocr-prepare-abort.js";
 import { deleteDelegatedChildrenForRun } from "../ops/delete.js";
 import { readFormType, readParentRunId } from "../../tracker/dashboard/ocr/shared.js";
+import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
+import { resolveRowArchetype } from "../../domain/row-archetype.js";
 
 const WORKFLOW = "ocr";
 
@@ -33,7 +35,18 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
     }
     requestOcrPrepareAbort(input.sessionId, input.runId);
     deleteDelegatedChildrenForRun(opts.trackerDir ?? ".tracker", input.runId);
-    trackEvent(
+    // OCR prep parent is always batch-parent. We still resolve from the
+    // prior row so this code never has to know about per-workflow archetype
+    // declarations beyond what the row itself already carries.
+    const trackerDir = opts.trackerDir;
+    const ocrPriorEntry = findLatestEntryForPredicate({
+      workflow: WORKFLOW,
+      trackerDir,
+      lookbackDays: 7,
+      predicate: (e) => e.id === input.sessionId && e.runId === input.runId,
+    });
+    const ocrArchetype = ocrPriorEntry ? resolveRowArchetype(ocrPriorEntry) : "batch-parent";
+    emitTrackerRow(
       {
         workflow: WORKFLOW,
         timestamp: new Date().toISOString(),
@@ -41,9 +54,10 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
         runId: input.runId,
         status: "failed",
         step: "discarded",
+        data: { archetype: ocrArchetype },
         ...(input.reason ? { error: input.reason } : {}),
       },
-      opts.trackerDir,
+      trackerDir,
     );
     // If this OCR session was started from a downstream workflow's run
     // modal, mirror the discard onto the parent row so it doesn't sit at
@@ -57,7 +71,16 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
       if (parentWorkflow) {
         const ts = new Date().toISOString();
         const parentItemId = input.parentItemId || `ocr-prep-${input.sessionId}`;
-        trackEvent(
+        const parentPriorEntry = findLatestEntryForPredicate({
+          workflow: parentWorkflow,
+          trackerDir,
+          lookbackDays: 7,
+          predicate: (e) => e.id === parentItemId && e.runId === parentRunId,
+        });
+        const parentArchetype = parentPriorEntry
+          ? resolveRowArchetype(parentPriorEntry)
+          : "batch-parent";
+        emitTrackerRow(
           {
             workflow: parentWorkflow,
             timestamp: ts,
@@ -65,9 +88,10 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
             runId: parentRunId,
             status: "failed",
             step: "discarded",
+            data: { archetype: parentArchetype },
             ...(input.reason ? { error: input.reason } : {}),
           },
-          opts.trackerDir,
+          trackerDir,
         );
         appendLogEntry(
           {
