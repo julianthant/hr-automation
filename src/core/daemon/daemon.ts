@@ -25,7 +25,7 @@ import {
   emitDaemonPhase,
   emitUcpathIdleSignal,
 } from '../../tracker/session-events.js'
-import { trackEvent } from '../../tracker/jsonl.js'
+import { emitTrackerRow, type StampedData } from '../../tracker/jsonl.js'
 import { openControlDb } from '../control-db.js'
 import { createTaskStore } from '../task-store/index.js'
 import { createWorkerStore } from './worker-store.js'
@@ -262,6 +262,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     await withBatchLifecycle(
       {
         workflow: wf.config.name,
+        archetype: wf.archetype,
         systems: wf.config.systems,
         perItem: [],
         trackerDir,
@@ -468,7 +469,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 // the handler returned r.ok=true (which would have written
                 // a status:done row). The latest tracker entry wins on
                 // dedup, so this row makes the badge show Cancelled.
-                trackEvent(
+                emitTrackerRow(
                   {
                     workflow: wf.config.name,
                     timestamp: new Date().toISOString(),
@@ -476,7 +477,10 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                     runId,
                     status: 'failed',
                     step: 'cancelled',
-                    data: buildShutdownTrackerData(wf, item.input, item.parentRunId),
+                    // buildShutdownTrackerData always stamps `data.archetype`
+                    // (via buildHttpPendingData or its fallback path) so the
+                    // returned record satisfies StampedData at runtime.
+                    data: buildShutdownTrackerData(wf, item.input, item.parentRunId) as StampedData,
                     ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
                     error: cancelError,
                   },

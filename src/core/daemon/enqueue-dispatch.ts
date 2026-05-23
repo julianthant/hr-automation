@@ -19,7 +19,8 @@ import type { RegisteredWorkflow } from "../kernel/types.js";
 import { splitPrefilled } from "../kernel/workflow.js";
 import { buildPendingTrackerData } from "../pending-data.js";
 import { allocateLowestBatchDisplayOrdinal } from "../../tracker/batch-display-ordinal.js";
-import { DEFAULT_DIR, trackEvent } from "../../tracker/jsonl.js";
+import { DEFAULT_DIR, emitTrackerRow } from "../../tracker/jsonl.js";
+import { deriveRowArchetype } from "../../domain/row-archetype.js";
 import { log } from "../../utils/log.js";
 
 export interface EnqueueHttpResult {
@@ -234,14 +235,14 @@ export async function enqueueFromHttp(
             item && typeof item === "object" && !Array.isArray(item)
               ? (item as Record<string, unknown>)
               : undefined;
-          trackEvent(
+          emitTrackerRow(
             {
               workflow: wf.config.name,
               timestamp: now,
               id,
               runId,
               status: "pending",
-              data,
+              data: { ...data, archetype: deriveRowArchetype(wf.archetype, stampedParentRunId) },
               ...(stampedParentRunId ? { parentRunId: stampedParentRunId } : {}),
               ...(input ? { input } : {}),
             },
@@ -261,14 +262,14 @@ export async function enqueueFromHttp(
             data.batchDisplayOrdinal = String(batchDisplayOrdinal);
           }
           const id = itemId;
-          trackEvent(
+          emitTrackerRow(
             {
               workflow: wf.config.name,
               timestamp: new Date().toISOString(),
               id,
               runId,
               status: "failed",
-              data,
+              data: { ...data, archetype: deriveRowArchetype(wf.archetype, effectiveParentRunId) },
               ...(effectiveParentRunId ? { parentRunId: effectiveParentRunId } : {}),
               error: `Spawn failed before enqueue: ${error}`,
             },

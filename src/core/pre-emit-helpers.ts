@@ -1,6 +1,7 @@
 import type { RegisteredWorkflow } from "./kernel/types.js";
 import { buildPendingTrackerData } from "./pending-data.js";
-import { trackEvent } from "../tracker/jsonl.js";
+import { emitTrackerRow } from "../tracker/jsonl.js";
+import { deriveRowArchetype } from "../domain/row-archetype.js";
 
 /**
  * Build an `onPreEmitPending` callback for use with `runWorkflowBatch`.
@@ -44,19 +45,20 @@ export function buildBatchPreEmitPending<TData>(opts: {
       );
     }
     const id = opts.deriveId?.(typed, runId) ?? runId;
-    trackEvent(
+    const data = buildPendingTrackerData({
+      workflow: opts.workflow,
+      input: typed,
+      extraData: opts.buildPendingData(typed, runId),
+      nameIdStamp: "omit",
+    });
+    emitTrackerRow(
       {
         workflow: opts.workflow.config.name,
         timestamp: now,
         id,
         runId,
         status: "pending",
-        data: buildPendingTrackerData({
-          workflow: opts.workflow,
-          input: typed,
-          extraData: opts.buildPendingData(typed, runId),
-          nameIdStamp: "omit",
-        }),
+        data: { ...data, archetype: deriveRowArchetype(opts.workflow.archetype, undefined) },
       },
       opts.trackerDir,
     );

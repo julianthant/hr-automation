@@ -23,15 +23,17 @@ import {
 import { findLatestEntryForPredicate } from "./find-latest-entry.js";
 import {
   DEFAULT_DIR,
+  emitTrackerRow,
   getLogsJsonlPathForDate,
   serializeValue,
   toTypedValue,
-  trackEvent,
   trackerDateForTimestamp,
   type LogEntry,
+  type StampedData,
   type TrackerEntry,
   type TypedValue,
 } from "./jsonl-io.js";
+import type { RowArchetype } from "../domain/row-archetype.js";
 
 /** Session context passed to workflow callbacks for registering sessions/browsers. */
 export interface SessionContext {
@@ -159,8 +161,12 @@ export async function withTrackedWorkflow<T>(
   const initialData = opts.initialData ?? {};
   const preAssignedRunId = opts.preAssignedRunId;
   const dir = opts.dir ?? DEFAULT_DIR;
-  const data: Record<string, string> = { ...initialData };
-  if (opts.archetype) data.archetype = opts.archetype;
+  // Default archetype to "single" so the StampedData contract is always
+  // satisfied. Real kernel call paths pass `opts.archetype` from
+  // `deriveRowArchetype(wf.archetype, parentRunId)`; tests that bypass the
+  // kernel get a "single" stamp which matches their workflow shape.
+  const stampedArchetype: RowArchetype = opts.archetype ?? "single";
+  const data: Record<string, string> = { ...initialData, archetype: stampedArchetype };
   const typedData: Record<string, TypedValue> = {};
   const ts = () => new Date().toISOString();
   let lastEmittedTrackerDate: string | undefined;
@@ -184,20 +190,26 @@ export async function withTrackedWorkflow<T>(
       try { data.__id = opts.idFn(data); } catch { /* non-fatal */ }
     }
     const timestamp = ts();
-    const entry: TrackerEntry = {
-      workflow,
-      timestamp,
-      id,
-      runId,
-      ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
-      status,
-      data,
-      ...(Object.keys(typedData).length > 0 ? { typedData } : {}),
-      // `input` rides ONLY on the initial pending row (see TrackerEntry doc).
-      ...(status === "pending" && opts.input ? { input: opts.input } : {}),
-      ...extra,
-    };
-    trackEvent(entry, dir);
+    // Re-stamp archetype on every emit so that even if a handler clears it
+    // via updateData (it shouldn't, but defensive), the StampedData
+    // invariant for emitTrackerRow holds.
+    const stampedData: StampedData = { ...data, archetype: stampedArchetype };
+    emitTrackerRow(
+      {
+        workflow,
+        timestamp,
+        id,
+        runId,
+        ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
+        status,
+        data: stampedData,
+        ...(Object.keys(typedData).length > 0 ? { typedData } : {}),
+        // `input` rides ONLY on the initial pending row (see TrackerEntry doc).
+        ...(status === "pending" && opts.input ? { input: opts.input } : {}),
+        ...extra,
+      },
+      dir,
+    );
     lastEmittedTrackerDate = trackerDateForTimestamp(timestamp);
   };
 
@@ -257,13 +269,17 @@ export async function withTrackedWorkflow<T>(
     const date = lastEmittedTrackerDate ?? findLatestTrackerDateForRun(workflow, id, runId, dir) ?? trackerDateForTimestamp(now);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const logEntry: LogEntry = { workflow, itemId: id, runId, level: "error", message: error, ts: now };
+    // SIGINT path runs synchronously and bypasses emitTrackerRow, but `data`
+    // always carries `archetype` (seeded at the top of withTrackedWorkflow)
+    // so the row written here still satisfies the stamping contract.
     const trackEntry: TrackerEntry = {
       workflow,
       timestamp: now,
       id,
       runId,
+      ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
       status: "failed",
-      data,
+      data: { ...data, archetype: stampedArchetype },
       error,
       ...(lastStep ? { step: lastStep } : {}),
     };

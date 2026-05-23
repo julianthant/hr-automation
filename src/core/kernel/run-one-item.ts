@@ -4,7 +4,7 @@ import { buildPendingTrackerData } from '../pending-data.js'
 import { deriveRowArchetype } from '../../domain/row-archetype.js'
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
-import { trackEvent, withTrackedWorkflow, emitScreenshotEvent } from '../../tracker/jsonl.js'
+import { emitTrackerRow, withTrackedWorkflow, emitScreenshotEvent } from '../../tracker/jsonl.js'
 import { withLogContext } from '../../utils/log.js'
 import { classifyError } from '../../utils/errors.js'
 import { splitPrefilled, buildInitialTrackerData, buildTrackerOpts, toRecord } from './workflow.js'
@@ -197,14 +197,14 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       nameIdStamp: 'always-on-seed',
       parentRunId: args.parentRunId,
     })
-    trackEvent(
+    emitTrackerRow(
       {
         workflow: wf.config.name,
         timestamp: new Date().toISOString(),
         id: itemId,
         runId,
         status: 'pending',
-        data: enriched,
+        data: { ...enriched, archetype: deriveRowArchetype(wf.archetype, args.parentRunId) },
         ...(inputForRow ? { input: inputForRow } : {}),
         ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
       },
@@ -221,7 +221,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
   // `runId` but don't trigger the wrapper's internal step-change dedupe.
   if (args.authTimings && args.authTimings.length > 0) {
     for (const { systemId, startTs } of args.authTimings) {
-      trackEvent(
+      emitTrackerRow(
         {
           workflow: wf.config.name,
           timestamp: new Date(startTs).toISOString(),
@@ -229,7 +229,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
           runId,
           status: 'running',
           step: `auth:${systemId}`,
-          data: stringifiedSeed,
+          data: { ...stringifiedSeed, archetype: deriveRowArchetype(wf.archetype, args.parentRunId) },
         },
         trackerDir,
       )

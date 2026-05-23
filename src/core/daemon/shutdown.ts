@@ -9,11 +9,12 @@ import {
   markItemCancelled,
 } from './queue.js'
 import {
-  trackEvent,
+  emitTrackerRow,
   dateLocal,
   DEFAULT_DIR,
   findLatestEntryForRunOnDate,
   isTerminalTrackerEntryStatus,
+  type StampedData,
 } from '../../tracker/jsonl.js'
 import { buildHttpPendingData, buildTrackerDataForInput } from './enqueue-dispatch.js'
 import { deriveRowArchetype } from '../../domain/row-archetype.js'
@@ -257,7 +258,7 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
         }
         try {
           const parentRunId = existingTask?.parentRunId
-          trackEvent(
+          emitTrackerRow(
             {
               workflow: wf.config.name,
               timestamp: nowIso,
@@ -265,7 +266,7 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
               runId: inFlightSnapshot.runId,
               status: 'failed',
               step: 'cancelled',
-              data: buildShutdownTrackerData(wf, existingTask?.input, parentRunId),
+              data: buildShutdownTrackerData(wf, existingTask?.input, parentRunId) as StampedData,
               ...(parentRunId ? { parentRunId } : {}),
               error: cancelReason,
             },
@@ -341,8 +342,8 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
             // would override the pending row's hoisted fields with
             // `docId` + an opaque `prefilledData` JSON blob, hiding the
             // user's edits in the dashboard detail grid.
-            const data = buildShutdownTrackerData(wf, item.input, item.parentRunId)
-            trackEvent(
+            const data = buildShutdownTrackerData(wf, item.input, item.parentRunId) as StampedData
+            emitTrackerRow(
               {
                 workflow: wf.config.name,
                 timestamp: nowIso,
