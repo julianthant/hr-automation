@@ -8,6 +8,35 @@ Two-tier tracking: JSONL for live dashboard streaming, Excel for persistent hist
 
 → Full reference: `docs/engineering/tracker-reference.md`
 
+## Tracker row emission — archetype stamping contract
+
+Every persisted tracker row carries `data.archetype` (a `RowArchetype`).
+The canonical write path is **`emitTrackerRow`** in `jsonl-io.ts`, which
+requires `data: StampedData` (`Record<string, string> & { archetype:
+RowArchetype }`) at the type level. New emit sites MUST go through this
+helper — the compiler refuses any row that drops `data.archetype`, and
+`tests/unit/architecture/tracker-row-emission.test.ts` blocks new direct
+uses of the legacy `trackEvent` / `trackEventForDate` aliases.
+
+For workflow-driven rows, compute the archetype via
+`stampArchetypeForRow(data, { workflowArchetype, parentRunId })` (uses
+`deriveRowArchetype` under the hood). For rows whose archetype is fixed
+by the surface that's emitting them (OCR prep parent → `batch-parent`,
+OCR approve fan-out child → `delegate-child`), pass `{ override:
+"batch-parent" }` instead.
+
+The kernel auto-stamps via `runOneItem`, `cli-adapter`, `pre-emit-helpers`,
+and the OCR orchestrator's `writeTracker` closure. Control-layer cancel /
+retry rows inherit archetype from the prior row via `resolveRowArchetype`
+on the latest matching JSONL entry; if you add a new control-layer write
+site, mirror that inheritance pattern so the cancel/retry row matches the
+row type it's replacing.
+
+`trackEvent` / `trackEventForDate` remain as `@deprecated` shims for the
+tracker module itself + the `tracked-workflow.ts` SIGINT handler (which
+must stay synchronous because `process.exit` follows immediately). Don't
+introduce new callers — the architecture guard fails the build.
+
 ## Observability conventions
 
 Tracker/log/session rows should preserve readable messages and carry structured fields when available. Operator-facing rows should prefer `data.__subject`; raw run ids/session ids are debug identifiers.
