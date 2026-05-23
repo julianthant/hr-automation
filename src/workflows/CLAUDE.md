@@ -55,6 +55,34 @@ export async function runMyWorkflow(input: MyInput) {
 
 Add a Commander subcommand in `src/cli.ts`, add npm scripts to `package.json`, fill in the schema + handler — no dashboard registry edits needed.
 
+### Delegating to a child workflow
+
+Workflows compose like functions via `ctx.delegateTo` and `ctx.delegateToAll` (Contract 3). The kernel owns parentRunId stamping, archetype derivation, the pre-emit pending row, and pristine input persistence. Direct calls to `runWorkflow(child, ..., { parentRunId })` or `ensureDaemonsAndEnqueue(child, ..., { parentRunId })` inside a handler are blocked by the architecture guard.
+
+```ts
+// Single sequential child — parent awaits its terminal status.
+const ocrResult = await ctx.delegateTo(ocrWorkflow, ocrInput, {
+  renderAs: "preview",  // approval-delegation surface card with preview tab
+  itemId: ocrSessionId, // pin a stable child id for restart recovery
+});
+if (ocrResult.status !== "done") throw new Error("OCR failed");
+
+// N children fanned out — daemon-capable children dispatch via ensureDaemonsAndEnqueue;
+// non-daemon children run in-process with optional concurrency.
+const results = await ctx.delegateToAll(
+  oathSignatureWorkflow,
+  perSignerInputs,
+  { renderAs: "batch" },  // batch-delegation group rows under parent card
+);
+```
+
+`renderAs` overrides the child's row archetype (and therefore its dashboard surface):
+- `"flat"` → stamps `passive-child`; renders as `delegation-member` flat row (OCR's utility children).
+- `"preview"` → stamps `delegate-child`; renders as `approval-delegation` preview card (OCR under oath-upload).
+- `"batch"` → stamps `delegate-child`; renders as `batch-delegation` group member (signature fan-out under a parent).
+
+Omit `renderAs` to use the child workflow's declared archetype.
+
 Reference workflows:
 - `src/workflows/work-study/` — clean one-system example
 - `src/workflows/emergency-contact/` — batch-mode with `preEmitPending`
