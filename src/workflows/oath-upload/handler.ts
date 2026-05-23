@@ -1,5 +1,4 @@
 import type { Ctx } from "../../core/kernel/types.js";
-import { runWorkflow } from "../../core/index.js";
 import { ocrWorkflow } from "../ocr/index.js";
 import { watchChildRuns } from "../../tracker/delegation/watch-child-runs.js";
 import { log } from "../../utils/log.js";
@@ -107,7 +106,7 @@ export async function oathUploadHandler(
       }
       // Validate the OCR child input synchronously so schema failures
       // surface immediately as a delegate-ocr step failure rather than
-      // being swallowed by the fire-and-forget catch.
+      // being swallowed by the kernel's later validation throw.
       const ocrInputRaw = {
         pdfPath: input.pdfPath,
         pdfOriginalName: input.pdfOriginalName,
@@ -117,6 +116,11 @@ export async function oathUploadHandler(
         rosterMode: input.rosterMode,
         rosterPath: input.rosterPath,
         dryRun: input.dryRun,
+        // `parentRunId` + `originWorkflow` ride on the OCR input schema for
+        // legacy reasons (OCR's orchestrator still reads them off the input
+        // for parentSubject resolution + tracker JSONL emits). ctx.delegateTo
+        // ALSO stamps parentRunId on the tracker row independently; keeping
+        // both keeps OCR's existing behaviour unchanged.
         parentRunId: ctx.runId,
         originWorkflow: "oath-upload",
       };
@@ -124,7 +128,21 @@ export async function oathUploadHandler(
       if (!ocrParsed.success) {
         throw new Error(`oath-upload: OCR child input invalid — ${ocrParsed.error.message}`);
       }
-      await runWorkflow(ocrWorkflow, ocrParsed.data, { trackerDir: ctx.trackerDir ?? trackerDir });
+      // OCR is `delegating-batch` and surfaces its preview pane via the
+      // approval-delegation surface. `renderAs: "preview"` keeps the
+      // existing row archetype stamping consistent with how OCR rows
+      // already appear in the dashboard.
+      const result = await ctx.delegateTo(ocrWorkflow, ocrParsed.data, {
+        renderAs: "preview",
+        // Pin the OCR child's itemId to ocrSessionId so the wait-ocr-approval
+        // watcher (and restart-recovery probe) keep finding the same row.
+        itemId: ocrSessionId,
+      });
+      if (result.status === "failed" || result.status === "cancelled") {
+        throw new Error(
+          `oath-upload: OCR delegation ${result.status}${result.error ? ` — ${result.error.message}` : ""}`,
+        );
+      }
     });
 
     await ctx.step("wait-ocr-approval", async () => {
