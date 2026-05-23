@@ -16,9 +16,10 @@ Given an `OathUploadInput` (`pdfPath`, `pdfOriginalName`, `sessionId`,
 `pdfHash`):
 
 1. Authenticate `servicenow` (UCSD SSO + Duo) once per daemon spawn.
-2. Delegate OCR (`runWorkflow(ocrWorkflow, …, parentRunId: ctx.runId)`).
-   `formType: "oath"` plus the operator-selected `rosterMode` / `rosterPath`. The OCR row carries
-   `parentRunId` so the dashboard nests it under this row.
+2. Delegate OCR (`ctx.delegateTo(ocrWorkflow, …, { renderAs: "preview", itemId: ocrSessionId })`).
+   `formType: "oath"` plus the operator-selected `rosterMode` / `rosterPath`. The kernel
+   stamps `parentRunId` from `ctx.runId` and pre-emits the OCR pending row with archetype
+   stamped per Contract 1; the dashboard nests the OCR row under this oath-upload row.
 3. Wait for the OCR row to reach `step="approved"` (operator clicks
    approve on the OCR row's existing UI). Custom `isTerminal` predicate
    on `watchChildRuns`. 7-day backstop. On `step="discarded"`, fail.
@@ -120,6 +121,7 @@ The dashboard duplicate-check banner already surfaces prior runs for the same ha
 ## Lessons Learned
 
 - **Lesson maintenance rule:** Search this section and `src/workflows/ocr/CLAUDE.md` before adding oath-upload delegation lessons. Merge old restart/OCR notes into the current shared helper and runtime-shape rules.
+- **2026-05-23: OCR delegation routes through `ctx.delegateTo`.** The handler used to call `runWorkflow(ocrWorkflow, …, { parentRunId: ctx.runId, trackerDir })` directly; Contract 3 moves that to `ctx.delegateTo(ocrWorkflow, …, { renderAs: "preview", itemId: ocrSessionId })`. The kernel owns parentRunId stamping, archetype derivation, and the OCR pending row pre-emit. `wait-ocr-approval` and `wait-signatures` keep using `watchChildRuns` — those are operator-attention polls, not delegations. The signature fan-out itself still happens in the OCR approve endpoint (HTTP), not here, so oath-upload does not need `ctx.delegateToAll` for signatures.
 - **OCR-delegating workflows need the roster picker.** Any Run modal for a workflow that depends on OCR roster matching must expose the same roster controls as the OCR modal. Never hardcode `rosterMode` at the delegation site; thread `rosterMode` and `rosterPath` into the delegated OCR run.
 - **Use `data.uploadMode`, not `data.mode`.** Oath-upload root rows are `archetype: "delegating-batch"`; `data.mode` was renamed to avoid colliding with prep-row `data.mode === "prepare"` compatibility. Dashboard read sites should dispatch on `resolveRowArchetype` / stamped `data.archetype`, not legacy task-role fields.
 - **Restart recovery uses tracker helpers.** Prior OCR approval lookup should use `findLatestEntryForPredicate` so newest-first scanning and malformed-line tolerance stay shared. Do not reintroduce workflow-local `existsSync` / `readFileSync` JSONL loops.
