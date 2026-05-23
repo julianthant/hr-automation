@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import type { ActiveOutcomePersonOrgResult } from "../../../../src/domain/active-check-outcome.js";
 import { deriveActiveCheckOutcome } from "../../../../src/workflows/active-check/workflow.js";

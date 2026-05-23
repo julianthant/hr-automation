@@ -1,14 +1,18 @@
-import { test } from "node:test";
+import { test, vi } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getByName, clear } from "../../../src/core/kernel/registry.js";
 
 test("sharepoint-download: registers as kernel workflow on import", async () => {
-  clear();
-  // Dynamic import so the module's side-effect register() runs AFTER clear().
-  await import(`../../../src/workflows/sharepoint-download/workflow.js?t=${Date.now()}`);
+  // vi.resetModules() gives the workflow file a fresh registry to register
+  // into. We must then re-import both the registry and the workflow module
+  // so getByName queries the same instance the workflow just registered
+  // into — the statically-imported registry.js would point at a different
+  // (cleared) module instance.
+  vi.resetModules();
+  const { getByName } = await import("../../../src/core/kernel/registry.js");
+  await import("../../../src/workflows/sharepoint-download/workflow.js");
   const meta = getByName("sharepoint-download");
   assert.ok(meta, "sharepoint-download should be registered");
   assert.equal(meta.label, "SharePoint Download");
@@ -26,7 +30,7 @@ test("sharepoint-download: registers as kernel workflow on import", async () => 
 
 test("buildSharePointRosterDownloadHandler: fires kernel runWorkflow and returns 202", async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), "sp-handler-"));
-  t.after(() => rmSync(tmp, { recursive: true, force: true }));
+  t.onTestFinished(() => rmSync(tmp, { recursive: true, force: true }));
 
   const { buildSharePointRosterDownloadHandler, _resetInFlightForTests } =
     await import("../../../src/workflows/sharepoint-download/handler.js");
@@ -100,7 +104,7 @@ test("buildSharePointRosterDownloadHandler: 404 on unknown id", async () => {
 
 test("buildSharePointRosterDownloadHandler: 409 when concurrent run in flight", async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), "sp-409-"));
-  t.after(() => rmSync(tmp, { recursive: true, force: true }));
+  t.onTestFinished(() => rmSync(tmp, { recursive: true, force: true }));
 
   const { buildSharePointRosterDownloadHandler, _resetInFlightForTests } =
     await import("../../../src/workflows/sharepoint-download/handler.js");

@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -65,7 +65,7 @@ test('runWorkflowPool: distributes items across N workers, each with own Session
 
 test('runWorkflowPool emits per-item tracker entries', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'pool-tracker-'))
-  t.after(() => cleanupDir(tmp))
+  t.onTestFinished(() => cleanupDir(tmp))
   const wfName = `pool-tracker-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
   const wf = defineWorkflow({
@@ -213,7 +213,7 @@ test('runWorkflowPool: falls back to wf.config.batch.poolSize when opts.poolSize
 
 test('runWorkflowPool: emits exactly one workflow_start + one workflow_end(done) per batch (across N workers)', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'pool-one-instance-'))
-  t.after(() => cleanupDir(tmp))
+  t.onTestFinished(() => cleanupDir(tmp))
   const wfName = `pool-oneinst-${Date.now()}`
   const wf = defineWorkflow({
     name: wfName,

@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { Session } from '../../../src/core/kernel/session.js'
 import type { SystemConfig } from '../../../src/core/kernel/types.js'

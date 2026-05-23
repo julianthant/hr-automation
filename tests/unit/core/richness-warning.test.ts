@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { existsSync, rmSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -37,7 +37,7 @@ function captureWarn<T>(fn: () => Promise<T>): Promise<{ warnings: string[]; res
 
 test('runtime warning: declared detailFields never populated emit one warn each', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'richness-warn-'))
-  t.after(() => cleanupDir(tmp))
+  t.onTestFinished(() => cleanupDir(tmp))
 
   const wf = defineWorkflow({
     name: `richness-warn-${Date.now()}`,
@@ -75,7 +75,7 @@ test('runtime warning: declared detailFields never populated emit one warn each'
 
 test('runtime warning: no warning when all declared fields populated', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'richness-ok-'))
-  t.after(() => cleanupDir(tmp))
+  t.onTestFinished(() => cleanupDir(tmp))
 
   const wf = defineWorkflow({
     name: `richness-ok-${Date.now()}`,

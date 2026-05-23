@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -24,6 +24,7 @@ function renderDelegationRow(
   });
   const row = rows.groupRows[0];
   assert.ok(row, "expected an approval-delegation group row");
+  if (row.surface.kind !== "approval-delegation") throw new Error("expected approval-delegation surface");
   return renderToStaticMarkup(
     React.createElement(
       TooltipProvider,

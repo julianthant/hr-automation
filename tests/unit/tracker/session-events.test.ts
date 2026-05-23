@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, test } from "node:test";
+import { describe, it, beforeEach, test } from "vitest";
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

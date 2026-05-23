@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 
 /**
  * Integration smoke test for the oath-upload workflow.

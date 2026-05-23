@@ -80,7 +80,8 @@ npm run selectors:catalog                          # Regenerate per-system SELEC
 npm run selector:search "<intent>"                 # Fuzzy search across SELECTORS.md + LESSONS.md
 npm run typecheck                                  # Type-check src/
 npm run typecheck:all                              # Type-check src/ + tests
-npm run test                                       # Unit tests
+npm run test                                       # Unit tests (vitest run — non-watch)
+npm run test:watch                                 # Vitest in watch mode for iterative dev
 npm run test:architecture                          # Static architecture/convention guards
 npm run build:dashboard                            # Single-file dashboard build
 ```

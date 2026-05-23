@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { createCueDuo } from "../../../../src/infra/auth/voice-cue.js";
 

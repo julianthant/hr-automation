@@ -5,7 +5,7 @@
  * - Every action descriptor in those policies uses valid kind/scope/source.
  * - Batch-view projections cannot target run ids outside opened batch members.
  */
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";

@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -119,7 +119,7 @@ test('runWorkflowBatch (preEmitPending): emits pending for all items with a pre-
 
 test('runWorkflowBatch sequential emits per-item tracker entries', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'batch-tracker-'))
-  t.after(() => cleanupDir(tmp))
+  t.onTestFinished(() => cleanupDir(tmp))
   const wfName = `batch-tracker-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
   const wf = defineWorkflow({
@@ -165,7 +165,7 @@ test('runWorkflowBatch sequential emits per-item tracker entries', async (t) => 
 
 test('runWorkflowBatch sequential: emits exactly one workflow_start + one workflow_end(done) per batch', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'batch-one-instance-'))
-  t.after(() => cleanupDir(tmp))
+  t.onTestFinished(() => cleanupDir(tmp))
   const wfName = `batch-oneinst-${Date.now()}`
 
   const wf = defineWorkflow({
@@ -209,7 +209,7 @@ test('runWorkflowBatch sequential: emits exactly one workflow_start + one workfl
 
 test('runWorkflowBatch sequential emits per-item failed tracker entry and continues', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'batch-tracker-fail-'))
-  t.after(() => cleanupDir(tmp))
+  t.onTestFinished(() => cleanupDir(tmp))
   const wfName = `batch-tracker-fail-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
   const wf = defineWorkflow({

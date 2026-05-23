@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { validateEmployeeData, EmployeeDataSchema } from "../../../../src/workflows/onboarding/schema.js";
 import { ExtractionError } from "../../../../src/systems/crm/types.js";

@@ -18,7 +18,7 @@
  *   C: cancel_task command is written for an active-check task
  *   D: cancellation of queued active-check task writes BOTH tracker row AND JSONL log line
  */
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from "fs";
 import { tmpdir } from "os";

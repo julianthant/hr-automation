@@ -1,4 +1,4 @@
-import { describe, it, after } from "node:test";
+import { describe, it, afterAll } from "vitest";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -12,7 +12,7 @@ const TMP_DIR = join(
   `export-schemas-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 );
 
-after(() => {
+afterAll(() => {
   if (existsSync(TMP_DIR)) rmSync(TMP_DIR, { recursive: true, force: true });
 });
 

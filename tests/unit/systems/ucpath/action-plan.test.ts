@@ -1,4 +1,4 @@
-import { describe, it, mock } from "node:test";
+import { describe, it, vi } from "vitest";
 import assert from "node:assert/strict";
 import { ActionPlan } from "../../../../src/systems/ucpath/action-plan.js";
 import { TransactionError } from "../../../../src/systems/ucpath/types.js";
@@ -12,7 +12,7 @@ describe("ActionPlan", () => {
         logs.push(args.join(" "));
       };
 
-      const executeFn = mock.fn(async () => {});
+      const executeFn = vi.fn(async () => {});
       const plan = new ActionPlan();
       plan.add("Navigate to Smart HR", executeFn);
       plan.add("Fill employee name", executeFn);
@@ -29,7 +29,7 @@ describe("ActionPlan", () => {
       assert.ok(logs.some((l) => l.includes("2.") && l.includes("Fill employee name")));
 
       // Execute functions NOT called
-      assert.equal(executeFn.mock.callCount(), 0);
+      assert.equal(executeFn.mock.calls.length, 0);
     });
 
     it("prints header and footer only for empty plan", () => {

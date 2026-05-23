@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 
 import { collapseEntriesForStatStrip } from "../../../src/dashboard/components/queue-panel/stat-strip-collapse.js";

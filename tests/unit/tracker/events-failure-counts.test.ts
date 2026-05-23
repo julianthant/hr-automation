@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { computeFailureCounts } from "../../../src/tracker/dashboard.js";
 import type { TrackerEntry } from "../../../src/tracker/jsonl.js";

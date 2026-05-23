@@ -51,3 +51,15 @@ Full file-by-file reference for `src/core/`. Orientation, design invariants, and
 - `index.ts` — public barrel.
 
 > **Note (2026-04-23):** `idempotency.ts` and `step-cache.ts` were deleted. No tracker-side idempotency cache or step-cache remains in the kernel. Workflows needing dupe-protection use live-page probes (see separations' `findExistingTerminationTransaction`, oath-signature's existing-oath sentinel).
+
+## Run isolation in daemon mode
+
+A daemon keeps one `workflowInstance` for its entire lifetime and processes many items (each with a distinct `runId`) under that single instance. Four rules keep events, step durations, and dashboard state from bleeding across items:
+
+1. **Every per-item tracker row carries `runId` + `workflowInstance`.** Hub topic `runEvents` and `filterEventsForRun` trust `runId` first. Events with a non-matching `runId` are never shown.
+
+2. **Orphan events (no `runId`) fall back to `workflowInstance` + time window.** `Session.launch` emits `auth_start`/`auth_complete`/`browser_launch` at batch scope with no `runId`. `filterEventsForRun` attributes these to a run only if they (a) share `workflowInstance` AND (b) fall within `[firstTrackerTs, lastTrackerTs]`. `runEndFallback` (default `Date.now()`) extends the window for in-progress runs.
+
+3. **`itemInFlight` is the authoritative live-state signal.** The daemon emits `item_start` on claim and `item_complete` on release. Use `WorkflowInstanceState.itemInFlight` for "Idle" vs "processing" UI — never infer from tracker rows.
+
+4. **`authTimings` rotation.** Startup Duo durations inject into item #1 only. Every subsequent item gets zero-duration synthetic `auth:<systemId>` rows anchored at claim time. Re-using startup timings for item #N inflates its elapsed timer by the full queue-wait gap.

@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
 import { buildTrackerQueueSurfaces } from "../../../src/tracker/queue-surfaces.js";

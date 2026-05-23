@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { pickLanIpFrom } from "../../../../src/services/capture/lan-ip.js";
 import type { NetworkInterfaceInfo } from "node:os";

@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { EmergencyContactSchema, RecordSchema } from "../../../../src/workflows/emergency-contact/schema.js";
 

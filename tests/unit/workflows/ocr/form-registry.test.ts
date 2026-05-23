@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert";
 import { FORM_SPECS, getFormSpec, listFormTypes } from "../../../../src/workflows/ocr/form-registry.js";
 

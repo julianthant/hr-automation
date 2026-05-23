@@ -56,7 +56,7 @@ export function RetryButton({
         kind: "retry",
         action: retryAction,
         fallbackTarget: { workflowId: workflow, id, runId, date },
-        parentRunId: batchParentRunId,
+        parentRunId: batchParentRunId ?? undefined,
       });
       if (result.ok) {
         toast.success(`Retry scheduled`, {

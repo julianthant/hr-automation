@@ -1,4 +1,4 @@
-import { test, mock } from "node:test";
+import { test, vi } from "vitest";
 import assert from "node:assert";
 import { mkdirSync, writeFileSync, appendFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -306,7 +306,7 @@ test("backs off fs.watch creation failures while polling continues", async () =>
   const date = "2026-05-01";
   const file = join(dir, `eid-lookup-${date}.jsonl`);
   writeFileSync(file, "");
-  const warn = mock.method(log, "warn", () => {});
+  const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
 
   try {
     await assert.rejects(
@@ -323,11 +323,11 @@ test("backs off fs.watch creation failures while polling continues", async () =>
       /timeout/i,
     );
 
-    assert.equal(warn.mock.callCount(), 1);
-    const [message] = warn.mock.calls[0]?.arguments ?? [];
+    assert.equal(warn.mock.calls.length, 1);
+    const [message] = warn.mock.calls[0] ?? [];
     assert.match(String(message), /fsWatch creation failed/);
   } finally {
-    warn.mock.restore();
+    warn.mockRestore();
     rmSync(dir, { recursive: true, force: true });
   }
 });

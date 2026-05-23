@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -106,7 +106,7 @@ test('runWorkflow: installs SIGINT handler during handler execution', async () =
 
 test('runWorkflow: does NOT install SIGINT when trackerStub is false (tracker owns it)', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'sigint-dedup-'))
-  t.after(() => {
+  t.onTestFinished(() => {
     try { rmSync(tmp, { recursive: true, force: true }) } catch { /* ignore */ }
   })
 
@@ -144,7 +144,7 @@ test('runWorkflow: does NOT install SIGINT when trackerStub is false (tracker ow
 
 test('runWorkflow: mirrors tracker-enabled in-process runs into SQLite control state', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'workflow-in-process-sqlite-'))
-  t.after(() => {
+  t.onTestFinished(() => {
     try { rmSync(tmp, { recursive: true, force: true }) } catch { /* ignore */ }
   })
 
