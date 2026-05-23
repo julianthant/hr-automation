@@ -19,7 +19,7 @@ import { buildVisionPool } from "../../services/ocr/per-page-pool.js";
 import { loadRoster as realLoadRoster } from "../../services/matching/index.js";
 import type { RosterRow as MatchRosterRow } from "../../services/matching/match.js";
 import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
-import { trackEvent, dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
+import { emitTrackerRow, dateLocal, type StampedData, type TrackerEntry, type TrackerRowEmission } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { patchOcrRecordFromEidLookupOutcome } from "../../services/ocr/eid-lookup-results.js";
 import { flattenForData } from "../../services/ocr/tracker-data.js";
@@ -75,7 +75,7 @@ export async function runOcrRetryPage(
 ): Promise<RetryPageResult> {
   const trackerDir = opts.trackerDir;
   const date = opts.date ?? dateLocal();
-  const emit = opts._emitOverride ?? ((e: TrackerEntry) => trackEvent(e, trackerDir));
+  const emit = opts._emitOverride ?? ((e: TrackerEntry) => emitTrackerRow(e as TrackerRowEmission, trackerDir));
   const loadRosterFn = opts._loadRosterOverride ?? realLoadRoster;
   const watchChildren = opts._watchChildRunsOverride ?? realWatchChildRuns;
 

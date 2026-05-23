@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { trackEvent, appendLogEntry } from "../../jsonl.js";
+import { emitTrackerRow, appendLogEntry, type StampedData } from "../../jsonl.js";
+import { findLatestEntryForPredicate } from "../../find-latest-entry.js";
+import { resolveRowArchetype } from "../../../domain/row-archetype.js";
 import { batchQueueTitle, queueTitleData } from "../../../domain/queue-title.js";
 import { log, withLogContext, setLogRunId } from "../../../utils/log.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
@@ -144,7 +146,17 @@ export function buildOcrPrepareHandler(
     }
 
     if (input.isReupload && input.previousRunId) {
-      trackEvent(
+      // The supersede marker rides on the previous run's row; inherit its
+      // archetype so the cancelled-by-reupload row keeps the OCR batch
+      // shape.
+      const supersededRow = findLatestEntryForPredicate({
+        workflow: WORKFLOW,
+        trackerDir,
+        lookbackDays: 7,
+        predicate: (e) => e.id === sessionId && e.runId === input.previousRunId,
+      });
+      const supersededArchetype = supersededRow ? resolveRowArchetype(supersededRow) : "batch-parent";
+      emitTrackerRow(
         {
           workflow: WORKFLOW,
           timestamp: new Date().toISOString(),
@@ -152,6 +164,7 @@ export function buildOcrPrepareHandler(
           runId: input.previousRunId,
           status: "failed",
           step: "superseded",
+          data: { archetype: supersededArchetype },
         },
         trackerDir,
       );
@@ -255,18 +268,21 @@ function writeOriginParentPending(args: {
     ocrSessionId: args.ocrSessionId,
     ocrRunId: args.ocrRunId,
   };
-  trackEvent(
+  // baseData already stamps `archetype: "batch-parent"` so it satisfies
+  // emitTrackerRow's StampedData contract.
+  const stampedBase = baseData as StampedData;
+  emitTrackerRow(
     {
       workflow: args.originWorkflow,
       timestamp: ts,
       id: args.parentItemId,
       runId: args.parentRunId,
       status: "pending",
-      data: baseData,
+      data: stampedBase,
     },
     args.trackerDir,
   );
-  trackEvent(
+  emitTrackerRow(
     {
       workflow: args.originWorkflow,
       timestamp: ts,
@@ -278,7 +294,7 @@ function writeOriginParentPending(args: {
       // the parent row. Kernel daemon items emit `markStep("ocr")` at the
       // top of their handler so they show OCR as completed.
       step: "ocr",
-      data: baseData,
+      data: stampedBase,
     },
     args.trackerDir,
   );
@@ -335,7 +351,7 @@ function writeOriginParentPrepFailed(args: OriginPrepContext & {
     pdfOriginalName: args.pdfOriginalName,
     ocrSessionId: args.ocrSessionId,
   };
-  trackEvent(
+  emitTrackerRow(
     {
       workflow: args.originWorkflow,
       timestamp: ts,
@@ -343,7 +359,8 @@ function writeOriginParentPrepFailed(args: OriginPrepContext & {
       runId: args.parentRunId,
       status: "failed",
       error: `OCR prep failed — ${args.detail}`,
-      data: baseData,
+      // baseData stamps `archetype: "batch-parent"`.
+      data: baseData as StampedData,
     },
     args.trackerDir,
   );

@@ -12,7 +12,8 @@ import {
   searchCrmOnboardingRecords,
   selectLatestResult,
 } from "../../systems/crm/index.js";
-import { trackEvent } from "../../tracker/jsonl.js";
+import { emitTrackerRow } from "../../tracker/jsonl.js";
+import { deriveRowArchetype } from "../../domain/row-archetype.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
 import { CrmDocDownloadInputSchema, type CrmDocDownloadInput } from "./schema.js";
@@ -142,13 +143,19 @@ export const runCrmDocDownloadCli = buildCliAdapter<[string[]], CrmDocDownloadIn
   deriveItemId: deriveCrmDocDownloadItemId,
   buildPendingData: (input) => buildCrmDocDownloadPendingData(input),
   onPreEmitFailed: (input, runId, error, itemId) => {
-    trackEvent({
+    emitTrackerRow({
       workflow: WORKFLOW,
       timestamp: new Date().toISOString(),
       id: itemId,
       runId,
       status: "failed",
-      data: buildCrmDocDownloadPendingData(input),
+      // crm-doc-download is "utility" — when invoked as a delegate it
+      // surfaces as passive-child, otherwise single (deriveRowArchetype
+      // does the right thing for both cases).
+      data: {
+        ...buildCrmDocDownloadPendingData(input),
+        archetype: deriveRowArchetype("utility", undefined),
+      },
       error: `Spawn failed before enqueue: ${errorMessage(error)}`,
     });
   },

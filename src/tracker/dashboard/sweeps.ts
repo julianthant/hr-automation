@@ -1,11 +1,13 @@
 import {
   listWorkflows,
   readEntries,
-  trackEvent,
+  emitTrackerRow,
   dateLocal,
   DEFAULT_DIR,
 } from "../jsonl.js";
-import type { TrackerEntry } from "../jsonl.js";
+import type { StampedData, TrackerEntry } from "../jsonl.js";
+import { loadWorkflow } from "../../core/workflow-loaders.js";
+import { deriveRowArchetype } from "../../domain/row-archetype.js";
 import { log } from "../../utils/log.js";
 import { detectFailurePattern } from "../alerts/failure-detector.js";
 import { notify } from "../alerts/notify.js";
@@ -176,6 +178,12 @@ export async function scanOrphanedQueueItems(dir = DEFAULT_DIR): Promise<void> {
       const failError =
         "No alive daemon available to process this item. Start a daemon and retry.";
       const controlDb = openControlDb({ trackerDir: dir });
+      // Load the workflow definition once per sweep loop so the synthetic
+      // `failed` rows can stamp the right archetype. loadWorkflow may
+      // return null for in-process workflows (ocr, sharepoint-download)
+      // that don't show up in the daemon queue anyway.
+      const loadedWf = await loadWorkflow(wf).catch(() => null);
+      const wfArchetype = loadedWf?.archetype;
       try {
         const taskStore = createTaskStore(controlDb);
         for (const item of stale) {
@@ -201,13 +209,17 @@ export async function scanOrphanedQueueItems(dir = DEFAULT_DIR): Promise<void> {
             // Otherwise the failed row's barer `data` overrides the pending
             // row in the dashboard's latest-per-id dedupe and the user's
             // edits disappear from the detail grid.
-            const data = buildTrackerDataForInput(item.input);
-            trackEvent(
+            const data: StampedData = {
+              ...buildTrackerDataForInput(item.input),
+              archetype: deriveRowArchetype(wfArchetype ?? "single", item.parentRunId),
+            };
+            emitTrackerRow(
               {
                 workflow: wf,
                 timestamp: nowIso,
                 id: item.id,
                 runId,
+                ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
                 status: "failed",
                 data,
                 error: failError,

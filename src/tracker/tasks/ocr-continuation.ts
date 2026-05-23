@@ -73,6 +73,10 @@ export async function applyOcrEidLookupContinuation(args: {
       recordCount: String(records.length),
       verifiedCount: String(verifiedCount),
       records: JSON.stringify(records),
+      // OCR prep parent rows are always batch-parent — defensive re-stamp
+      // so a parent row that somehow dropped the field doesn't propagate
+      // an unstamped row through the scheduler.
+      archetype: "batch-parent",
     },
   });
   return { ok: true };
@@ -214,6 +218,7 @@ function emitPatchedOcrTrackerRow(args: {
       recordCount: String(args.records.length),
       verifiedCount: String(verifiedCount),
       records: JSON.stringify(args.records),
+      archetype: "batch-parent",
     },
   });
 }
