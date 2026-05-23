@@ -48,7 +48,7 @@ The hover-first pattern is critical: clicking `Create a Copy` (instead of hoveri
    a. Add the selector function with JSDoc (one-line summary, `@tags`, `verified YYYY-MM-DD`).
    b. Run `npm run selectors:catalog` to regenerate [`SELECTORS.md`](./SELECTORS.md).
    c. If you discovered a non-obvious failure mode along the way, append a lesson to [`LESSONS.md`](./LESSONS.md) following its template.
-   d. Verify the inline-selector test still passes: `tsx --test tests/unit/systems/inline-selectors.test.ts`.
+   d. Verify the inline-selector test still passes: `npx vitest run tests/unit/systems/inline-selectors.test.ts`.
 
 Example intents for `npm run selector:search`: [`common-intents.txt`](./common-intents.txt).
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { resolveActiveStatusResultsForEidLookup } from "../../../../src/workflows/eid-lookup/workflow.js";
 import type { EidResult } from "../../../../src/systems/ucpath/person-org-summary.js";
 

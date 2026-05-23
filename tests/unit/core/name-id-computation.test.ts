@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { existsSync, rmSync, readFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -31,7 +31,7 @@ function cleanupDir(dir: string) {
 
 test('getName: stamped as data.__name on every emit', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'name-'))
-  t.after(() => cleanupDir(tmp))
+  t.onTestFinished(() => cleanupDir(tmp))
 
   const wfName = `get-name-${Date.now()}`
   const wf = defineWorkflow({
@@ -61,7 +61,7 @@ test('getName: stamped as data.__name on every emit', async (t) => {
 
 test('getId: stamped as data.__id on every emit', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'id-'))
-  t.after(() => cleanupDir(tmp))
+  t.onTestFinished(() => cleanupDir(tmp))
 
   const wfName = `get-id-${Date.now()}`
   const wf = defineWorkflow({
@@ -91,7 +91,7 @@ test('getId: stamped as data.__id on every emit', async (t) => {
 
 test('getName throws: does not crash the workflow', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'name-throw-'))
-  t.after(() => cleanupDir(tmp))
+  t.onTestFinished(() => cleanupDir(tmp))
 
   const wfName = `name-throws-${Date.now()}`
   const wf = defineWorkflow({

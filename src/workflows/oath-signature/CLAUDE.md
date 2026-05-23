@@ -51,6 +51,16 @@ Person Profile mounts inside `#ptifrmtgtframe` (name `TargetContent`), **not**
 
 (Removed 2026-05-01: `prepare.ts`, `preview-schema.ts` — prep is owned by the **`ocr`** workflow + `src/tracker/dashboard/hono/routes/ocr.ts`.)
 
+## Dashboard-contract scenario tests
+
+`tests/scenarios/oath-signature/` covers the row lifecycle the dashboard
+renders — `happy-path-single`, `cancel-during-transaction`, `fail-during-transaction`,
+`retry-after-failure`, `multi-eid-batch`. Each test runs the real kernel + tracker
+with a scripted handler (no browser, no UCPath calls) and locks the row
+snapshot via `expect(snap).toMatchInlineSnapshot()`. Read
+`tests/scenarios/CLAUDE.md` for the harness and `_beats.ts` for the beat
+builder before changing handler step structure — drift will fail snapshots.
+
 ## Kernel Config
 
 | Field         | Value                                                                          | Why                                                                                   |

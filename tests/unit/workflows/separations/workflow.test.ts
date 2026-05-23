@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -61,7 +61,7 @@ test("separations shape: 4-system interleaved authChain declares correctly", () 
 
 test("separations shape: ctx.parallel returns 4-keyed PromiseSettledResult (Phase-1 pattern)", async (t) => {
   const wfName = `separations-parallel-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  t.after(() => cleanupWorkflow(wfName));
+  t.onTestFinished(() => cleanupWorkflow(wfName));
 
   const wf = defineWorkflow({
     name: wfName,
@@ -104,7 +104,7 @@ test("separations shape: ctx.parallel returns 4-keyed PromiseSettledResult (Phas
 
 test("separations shape: runWorkflowBatch (sequential) + deriveItemId threads docId through onPreEmitPending", async (t) => {
   const wfName = `separations-batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  t.after(() => cleanupWorkflow(wfName));
+  t.onTestFinished(() => cleanupWorkflow(wfName));
 
   const pendings: Array<{ docId: string; runId: string }> = [];
 

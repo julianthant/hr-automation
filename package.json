@@ -47,8 +47,9 @@
     "typecheck:all": "tsc --noEmit -p tsconfig.test.json",
     "lint": "eslint src --ext .ts,.tsx",
     "lint:fix": "eslint src --ext .ts,.tsx --fix",
-    "test": "node scripts/run-tests.mjs tests",
-    "test:architecture": "node scripts/run-tests.mjs tests/unit/architecture"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:architecture": "vitest run tests/unit/architecture"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
@@ -100,6 +101,7 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.59.2",
     "vite": "^8.0.8",
-    "vite-plugin-singlefile": "^2.3.2"
+    "vite-plugin-singlefile": "^2.3.2",
+    "vitest": "^4.1.7"
   }
 }

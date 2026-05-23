@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { emergencyContactOcrFormSpec } from "../../../../../src/services/ocr/forms/emergency-contact.js";
 import type { RosterRow } from "../../../../../src/services/matching/match.js";

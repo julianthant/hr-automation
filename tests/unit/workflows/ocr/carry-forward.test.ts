@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert";
 import { applyCarryForward } from "../../../../src/workflows/ocr/carry-forward.js";
 import { oathOcrFormSpec } from "../../../../src/services/ocr/forms/oath.js";

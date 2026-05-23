@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { makeCtx } from '../../../src/core/kernel/ctx.js'
 import { Session } from '../../../src/core/kernel/session.js'

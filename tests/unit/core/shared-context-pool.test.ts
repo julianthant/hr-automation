@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { mkdtempSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -36,7 +36,7 @@ function cleanup(dir: string) { if (existsSync(dir)) rmSync(dir, { recursive: tr
 
 test('runWorkflowSharedContextPool emits one workflow_start + one workflow_end(done) regardless of item count', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'scp-one-instance-'))
-  t.after(() => cleanup(tmp))
+  t.onTestFinished(() => cleanup(tmp))
   const wfName = `scp-one-${Date.now()}`
 
   const wf = defineWorkflow({
@@ -67,7 +67,7 @@ test('runWorkflowSharedContextPool emits one workflow_start + one workflow_end(d
 
 test('runWorkflowSharedContextPool stamps pool instance on every item and injects per-system authTimings', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'scp-authtimings-'))
-  t.after(() => cleanup(tmp))
+  t.onTestFinished(() => cleanup(tmp))
   const wfName = `scp-auth-${Date.now()}`
 
   const wf = defineWorkflow({

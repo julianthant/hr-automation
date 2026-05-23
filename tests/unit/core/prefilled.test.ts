@@ -4,7 +4,7 @@
  *   - ctx.data — live getter on Ctx returning a fresh shallow copy
  *   - ctx.skipStep — emits a `skipped` row via Stepper's emitSkipped hook
  */
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { splitPrefilled } from '../../../src/core/kernel/workflow.js'
 import { Stepper } from '../../../src/core/kernel/stepper.js'

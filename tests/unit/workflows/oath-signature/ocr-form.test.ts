@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert";
 import { oathOcrFormSpec, normalizeOathDate } from "../../../../src/services/ocr/forms/oath.js";
 import type { RosterRow } from "../../../../src/workflows/ocr/types.js";

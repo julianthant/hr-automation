@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { buildQueueSurfaces } from "../../../src/dashboard/components/queue-panel/queue-surface-classifier.js";
 import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";

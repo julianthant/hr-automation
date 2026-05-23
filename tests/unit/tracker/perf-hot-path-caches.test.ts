@@ -10,7 +10,7 @@
  * it is verified by the server.ts source change alone.
  */
 
-import { describe, it, before, beforeEach, after } from "node:test";
+import { describe, it, beforeAll, beforeEach, afterAll } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, mkdirSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
@@ -132,7 +132,7 @@ function tmpTracker(): string {
 
 describe("queries.ts — prepared-statement cache", () => {
   let dir: string;
-  before(() => {
+  beforeAll(() => {
     dir = tmpTracker();
     openStateDb(dir);
     const day = "2026-05-22";
@@ -150,7 +150,7 @@ describe("queries.ts — prepared-statement cache", () => {
     );
   });
 
-  after(() => {
+  afterAll(() => {
     closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });
   });

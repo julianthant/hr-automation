@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach } from "vitest";
 import { strict as assert } from "node:assert";
 import { mkdtempSync, rmSync, existsSync } from "fs";
 import { tmpdir } from "os";

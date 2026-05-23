@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -35,7 +35,7 @@ function cleanupWorkflow(workflow: string) {
 
 test("runWorkflowBatch (pool): onPreEmitPending paired with runId per employeeId", async (t) => {
   const wfName = `kronos-pool-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  t.after(() => cleanupWorkflow(wfName));
+  t.onTestFinished(() => cleanupWorkflow(wfName));
 
   const pendingEmissions: Array<{ employeeId: string; runId: string }> = [];
 

@@ -4,7 +4,7 @@
  * from the batch config shape, but explicit declarations make the intent
  * visible and prevent misclassifying delegating / utility workflows.
  */
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";

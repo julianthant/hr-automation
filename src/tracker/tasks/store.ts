@@ -48,12 +48,6 @@ function attemptSqlControlState(status: TaskAttemptStatus): string {
   return status === "queued" ? "pending" : status;
 }
 
-function attemptStatusFromSqlControlState(controlState: string | null): TaskAttemptStatus {
-  if (!controlState || controlState === "pending") return "queued";
-  if (controlState === "claimed" || controlState === "cancel_requested") return "running";
-  return controlState as TaskAttemptStatus;
-}
-
 export interface TaskStore {
   db: Database;
 }

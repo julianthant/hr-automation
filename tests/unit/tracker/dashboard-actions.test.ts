@@ -8,7 +8,7 @@
  * members, an OCR prep cancel routes to file-scope discard, and daemon stop
  * is refused outright.
  */
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

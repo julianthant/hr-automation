@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { VerificationSchema } from "../../../../src/services/ocr/forms/shared.js";
 import { getFormSpec, listFormTypes } from "../../../../src/services/ocr/forms/registry.js";

@@ -13,7 +13,7 @@
  * exactly the child's log entries.
  */
 
-import { afterEach, beforeEach, test, describe } from "node:test";
+import { afterEach, beforeEach, test, describe } from "vitest";
 import assert from "node:assert/strict";
 import { appendFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";

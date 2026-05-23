@@ -1,4 +1,4 @@
-import test, { describe, it, beforeEach, afterEach } from 'node:test'
+import { test, describe, it, beforeEach, afterEach } from 'vitest'
 import assert from 'node:assert/strict'
 import { promises as fs } from 'node:fs'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'

@@ -1,4 +1,4 @@
-import { beforeEach } from "node:test";
+import { beforeEach } from "vitest";
 
 import { __resetAllDashboardCachesForTests } from "../src/tracker/test-caches.js";
 

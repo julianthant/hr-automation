@@ -670,46 +670,70 @@ function useOcrReviewPrepApi(
                 }}
               />
             )}
-            {onReupload && (
-              <button
-                type="button"
-                onClick={() =>
-                  onReupload({ sessionId: entry.id, previousRunId: entry.runId ?? entry.id })
-                }
-                disabled={submitting}
-                title="Re-upload corrected PDF — carries forward resolved EIDs from this run"
-                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium leading-none text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
-              >
-                <UploadCloud className="h-3.5 w-3.5 shrink-0" aria-hidden /> Reupload
-              </button>
-            )}
-            {/* Split button: [N records (→ select all)] + [Approve N] as one capsule */}
-            <div className={cn("flex h-8 shrink-0 items-stretch overflow-hidden rounded-md border", isDelegation ? "border-primary/40" : "border-border")}>
-              {isDelegation ? (
+            {/* Quiet typographic trio: muted text links · middle dot · single amber pill.
+                Only the Approve button reads as a "button"; Reupload and the record count
+                are inline links with subtle hover affordance (color lift + underline). */}
+            <div className="flex items-center gap-3">
+              {onReupload && (
                 <button
                   type="button"
-                  onClick={unselectedApprovableCount > 0 ? selectAllApprovable : undefined}
-                  disabled={submitting}
-                  title={
-                    unselectedApprovableCount > 0
-                      ? `Select all ${unselectedApprovableCount} approvable record${unselectedApprovableCount === 1 ? "" : "s"}`
-                      : "All approvable records selected"
+                  onClick={() =>
+                    onReupload({ sessionId: entry.id, previousRunId: entry.runId ?? entry.id })
                   }
+                  disabled={submitting}
+                  title="Re-upload corrected PDF — carries forward resolved EIDs from this run"
                   className={cn(
-                    "inline-flex items-center gap-1.5 border-r border-primary/30 bg-primary/10 px-2.5 font-mono text-[11px] tabular-nums leading-none transition-colors",
-                    unselectedApprovableCount > 0
-                      ? "cursor-pointer text-primary/80 hover:bg-primary/20 hover:text-primary"
-                      : "cursor-default text-primary/50",
-                    "disabled:opacity-50",
+                    "group inline-flex items-center gap-1.5 text-[13px] font-medium leading-none",
+                    "text-muted-foreground/85 transition-colors duration-150 ease-out",
+                    "cursor-pointer hover:text-foreground hover:underline underline-offset-[3px] decoration-1",
+                    "active:opacity-70",
+                    "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:no-underline disabled:hover:text-muted-foreground/85",
+                    "rounded-sm focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-foreground/40",
                   )}
                 >
-                  {recordRows.length} <span className="font-sans not-italic opacity-70">records</span>
+                  <UploadCloud
+                    className="h-3 w-3 shrink-0 opacity-70 transition-opacity duration-150 group-hover:opacity-100"
+                    aria-hidden
+                  />
+                  Reupload
                 </button>
-              ) : (
-                <span className="inline-flex items-center gap-1.5 bg-secondary/40 px-2.5 font-mono text-[11px] tabular-nums leading-none text-muted-foreground">
-                  {recordRows.length} <span className="font-sans not-italic opacity-70">records</span>
+              )}
+
+              {/* Middle-dot separator — only between Reupload and the record count */}
+              {onReupload && (
+                <span aria-hidden className="select-none text-muted-foreground/35 leading-none">
+                  ·
                 </span>
               )}
+
+              {isDelegation && unselectedApprovableCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={selectAllApprovable}
+                  disabled={submitting}
+                  title={`Click to select all ${unselectedApprovableCount} approvable record${unselectedApprovableCount === 1 ? "" : "s"}`}
+                  className={cn(
+                    "inline-flex items-baseline gap-1 text-[13px] font-medium leading-none",
+                    "text-muted-foreground/85 transition-colors duration-150 ease-out",
+                    "cursor-pointer hover:text-foreground hover:underline underline-offset-[3px] decoration-1",
+                    "active:opacity-70",
+                    "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:no-underline disabled:hover:text-muted-foreground/85",
+                    "rounded-sm focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-foreground/40",
+                  )}
+                >
+                  <span className="font-mono tabular-nums">{recordRows.length}</span>
+                  <span>records</span>
+                </button>
+              ) : (
+                <span
+                  className="inline-flex items-baseline gap-1 text-[13px] font-medium leading-none text-muted-foreground/70"
+                  title={isDelegation ? "All approvable records selected" : undefined}
+                >
+                  <span className="font-mono tabular-nums">{recordRows.length}</span>
+                  <span>records</span>
+                </span>
+              )}
+
               {isDelegation && (
                 <button
                   type="button"
@@ -723,16 +747,23 @@ function useOcrReviewPrepApi(
                         : undefined
                   }
                   className={cn(
-                    "inline-flex items-center gap-1.5 bg-primary px-3 text-xs font-semibold leading-none text-primary-foreground transition-colors",
-                    "hover:bg-primary/90",
-                    "disabled:cursor-not-allowed disabled:opacity-50",
+                    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3.5 text-xs font-semibold leading-none",
+                    "bg-primary text-primary-foreground",
+                    "transition-[background-color,transform] duration-150 ease-out",
+                    "hover:bg-primary/90 active:translate-y-[0.5px]",
+                    // Disabled (no selection / pending deps) → dim. Submitting keeps full
+                    // saturation so the spinner reads as "working" not "dead".
+                    "disabled:cursor-not-allowed",
+                    !submitting && "disabled:opacity-50 disabled:active:translate-y-0",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                   )}
                 >
-                  {submitting
-                    ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-                    : <Check className="h-3 w-3" aria-hidden />
-                  }
-                  Approve {selectedCount}
+                  {submitting ? (
+                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+                  ) : (
+                    <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  )}
+                  <span className="tabular-nums">Approve {selectedCount}</span>
                 </button>
               )}
             </div>

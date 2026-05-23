@@ -6,7 +6,7 @@
  * daemons; the underlying file readers (queueFilePath, daemonsDir) are
  * already covered by tests in tests/unit/core/daemon-*.test.ts.
  */
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "fs";
 import { tmpdir } from "os";

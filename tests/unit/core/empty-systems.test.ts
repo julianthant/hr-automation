@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert";
 import { z } from "zod/v4";
 import { defineWorkflow, runWorkflow } from "../../../src/core/index.js";

@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -32,7 +32,7 @@ function cleanupDir(dir: string) {
 test('updateData preserves Date ISO string in tracker entry', async (t) => {
   const wfName = `updatedata-date-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const tmp = mkdtempSync(join(tmpdir(), "updatedata-"))
-  t.after(() => cleanupDir(tmp))
+  t.onTestFinished(() => cleanupDir(tmp))
 
   const when = new Date('2026-04-17T12:34:56.000Z')
   const wf = defineWorkflow({
@@ -65,7 +65,7 @@ test('updateData preserves Date ISO string in tracker entry', async (t) => {
 test('updateData stringifies objects via JSON.stringify', async (t) => {
   const wfName = `updatedata-obj-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const tmp = mkdtempSync(join(tmpdir(), "updatedata-"))
-  t.after(() => cleanupDir(tmp))
+  t.onTestFinished(() => cleanupDir(tmp))
 
   const wf = defineWorkflow({
     name: wfName,
@@ -96,7 +96,7 @@ test('updateData stringifies objects via JSON.stringify', async (t) => {
 test('updateData preserves primitives (number/boolean) as strings', async (t) => {
   const wfName = `updatedata-prim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const tmp = mkdtempSync(join(tmpdir(), "updatedata-"))
-  t.after(() => cleanupDir(tmp))
+  t.onTestFinished(() => cleanupDir(tmp))
 
   const wf = defineWorkflow({
     name: wfName,
@@ -125,7 +125,7 @@ test('updateData preserves primitives (number/boolean) as strings', async (t) =>
 test('updateData co-emits typedData alongside string data', async (t) => {
   const wfName = `updatedata-typed-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const tmp = mkdtempSync(join(tmpdir(), "updatedata-"))
-  t.after(() => cleanupDir(tmp))
+  t.onTestFinished(() => cleanupDir(tmp))
 
   const when = new Date('2026-04-17T12:34:56.000Z')
   const wf = defineWorkflow({

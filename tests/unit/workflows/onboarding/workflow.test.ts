@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -36,7 +36,7 @@ function cleanupWorkflow(workflow: string) {
 
 test("runWorkflowBatch (pool): onboarding-shaped onPreEmitPending paired with runId per email", async (t) => {
   const wfName = `onboarding-pool-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  t.after(() => cleanupWorkflow(wfName));
+  t.onTestFinished(() => cleanupWorkflow(wfName));
 
   const pendingEmissions: Array<{ email: string; runId: string }> = [];
 

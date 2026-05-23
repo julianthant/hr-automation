@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { parsePersonOrgNameInput as parseNameInput } from "../../../../src/systems/ucpath/person-org-summary.js";
 import { isAcceptedHdhDepartment as isAcceptedDept } from "../../../../src/domain/hdh/departments.js";

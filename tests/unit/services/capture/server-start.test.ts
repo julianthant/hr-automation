@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { handleStart } from "../../../../src/services/capture/server.js";
 import { createSessionStore } from "../../../../src/services/capture/sessions.js";

@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { routeNotification } from "../../../src/domain/notifications/policy.js";
 import { renderTelegramNotification } from "../../../src/domain/notifications/render.js";

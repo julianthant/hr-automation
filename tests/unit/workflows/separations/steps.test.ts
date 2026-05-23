@@ -1,4 +1,4 @@
-import test from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { separationsWorkflow } from '../../../../src/workflows/separations/workflow.js'
 import { getByName } from '../../../../src/core/kernel/registry.js'
