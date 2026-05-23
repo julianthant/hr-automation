@@ -1,5 +1,6 @@
 import type { SessionObserver, SystemConfig } from './types.js'
-import { trackEvent } from '../../tracker/jsonl.js'
+import { emitTrackerRow } from '../../tracker/jsonl.js'
+import { deriveRowArchetype, type WorkflowArchetype } from '../../domain/row-archetype.js'
 import {
   generateInstanceName,
   emitWorkflowStart,
@@ -105,6 +106,13 @@ export function createBatchObserver(
 export interface BatchLifecycleOpts<_TData = unknown> {
   /** Workflow name — threaded into `generateInstanceName` and tracker rows. */
   workflow: string
+  /**
+   * Workflow-level archetype — stamped onto the per-item `failed` rows the
+   * SIGINT / auth-failure fanout emits. Required so the dashboard's
+   * row-archetype resolver gets a stamped value even on synthetic terminal
+   * rows. Defaults to `"single"` for back-compat with tests that omit it.
+   */
+  archetype?: WorkflowArchetype
   /** Systems the workflow will authenticate — used to attribute the auth-
    * failure fanout step (e.g. `auth:ucpath`) when the body throws before any
    * item finishes. Optional for tests that never trigger auth-failure. */
@@ -113,8 +121,10 @@ export interface BatchLifecycleOpts<_TData = unknown> {
    * `failed` tracker rows on SIGINT / auth failure. Terminal states are
    * signalled via `markTerminated(runId)`. Daemon mode passes an empty
    * array — items arrive dynamically, and in-flight state is tracked by
-   * the daemon loop itself. */
-  perItem: Array<{ item: unknown; itemId: string; runId: string }>
+   * the daemon loop itself. `parentRunId` (when set) flows onto the
+   * synthetic `failed` row so archetype derivation produces the right
+   * `delegate-child` / `passive-child` shape. */
+  perItem: Array<{ item: unknown; itemId: string; runId: string; parentRunId?: string }>
   /** Tracker directory override — defaults to `.tracker` via DEFAULT_DIR. */
   trackerDir?: string
   /**
@@ -190,19 +200,22 @@ export async function withBatchLifecycle<TData, R>(
     emitWorkflowEnd(instance, status, opts.trackerDir)
   }
 
+  const workflowArchetype: WorkflowArchetype = opts.archetype ?? 'single'
   const fanoutFailed = (errorMessage: string, step?: string): void => {
     const now = new Date().toISOString()
-    for (const { itemId, runId } of opts.perItem) {
+    for (const { itemId, runId, parentRunId } of opts.perItem) {
       if (terminated.has(runId)) continue
       terminated.add(runId)
-      trackEvent(
+      emitTrackerRow(
         {
           workflow: opts.workflow,
           timestamp: now,
           id: itemId,
           runId,
           status: 'failed',
+          ...(parentRunId ? { parentRunId } : {}),
           ...(step ? { step } : {}),
+          data: { archetype: deriveRowArchetype(workflowArchetype, parentRunId) },
           error: errorMessage,
         },
         opts.trackerDir,

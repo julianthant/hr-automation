@@ -3,7 +3,8 @@ import type { DaemonFlags } from "./daemon/types.js";
 import type { ensureDaemonsAndEnqueue as ensureDaemonsAndEnqueueFn } from "./daemon/client.js";
 import { ensureDaemonsAndEnqueue } from "./daemon/client.js";
 import { buildPendingTrackerData } from "./pending-data.js";
-import { trackEvent, type TrackerEntry } from "../tracker/jsonl.js";
+import { emitTrackerRow, type TrackerRowEmission } from "../tracker/jsonl.js";
+import { deriveRowArchetype } from "../domain/row-archetype.js";
 import { log } from "../utils/log.js";
 
 type EnqueueFn<TInput> = (
@@ -36,7 +37,8 @@ export interface BuildCliAdapterOpts<TArgs extends readonly unknown[], TInput> {
   getPendingId?: (input: TInput, itemId: string) => string;
   parentRunId?: (inputs: readonly TInput[]) => string | undefined;
   flags?: (options: { new?: boolean; parallel?: number }) => DaemonFlags;
-  track?: (entry: TrackerEntry) => void;
+  /** Test override — receives a fully-stamped {@link TrackerRowEmission}. */
+  track?: (emission: TrackerRowEmission) => void;
   enqueue?: EnqueueFn<TInput>;
 }
 
@@ -53,7 +55,7 @@ export function buildCliAdapter<TArgs extends readonly unknown[], TInput>(
     if (!runCliEntry(inputs.length > 0, opts.emptyMessage)) return;
 
     const enqueue = opts.enqueue ?? (ensureDaemonsAndEnqueue as unknown as EnqueueFn<TInput>);
-    const track = opts.track ?? trackEvent;
+    const track = opts.track ?? emitTrackerRow;
     const now = new Date().toISOString();
     const parentRunId = opts.parentRunId?.(inputs);
     await enqueue(
@@ -66,6 +68,21 @@ export function buildCliAdapter<TArgs extends readonly unknown[], TInput>(
         onPreEmitPending: (item, runId, parentRunId, itemId) => {
           const id = opts.getPendingId?.(item, itemId) ?? itemId;
           const extras = opts.pendingExtras?.(item, itemId, runId, parentRunId);
+          // buildPendingTrackerData stamps `data.archetype` based on the
+          // workflow's declared archetype + parentRunId. We re-stamp via the
+          // helper below as a defense-in-depth so the StampedData contract
+          // is satisfied even if a future buildPendingTrackerData change
+          // moves archetype computation elsewhere.
+          const data = buildPendingTrackerData({
+            workflow: opts.workflow,
+            input: item,
+            parentRunId,
+            extraData: {
+              ...opts.buildPendingData(item, itemId),
+              ...(extras ?? {}),
+            },
+            nameIdStamp: "omit",
+          });
           track({
             workflow: opts.workflow.config.name,
             timestamp: now,
@@ -73,16 +90,10 @@ export function buildCliAdapter<TArgs extends readonly unknown[], TInput>(
             runId,
             ...(parentRunId ? { parentRunId } : {}),
             status: "pending",
-            data: buildPendingTrackerData({
-              workflow: opts.workflow,
-              input: item,
-              parentRunId,
-              extraData: {
-                ...opts.buildPendingData(item, itemId),
-                ...(extras ?? {}),
-              },
-              nameIdStamp: "omit",
-            }),
+            data: {
+              ...data,
+              archetype: deriveRowArchetype(opts.workflow.archetype, parentRunId),
+            },
           });
         },
         ...(opts.onPreEmitFailed
