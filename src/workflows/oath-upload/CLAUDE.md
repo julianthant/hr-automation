@@ -109,6 +109,14 @@ can be in any of the two long waits and still cancel cleanly. After
 the abort, the kernel's failure path emits `failed` step
 `"cancelled"`.
 
+## Retry safety
+
+**Known idempotency gap (workflow bug — not a kernel concern).** Contract 2 makes retry a uniform kernel behavior: a retry assigns a NEW runId and replays the handler from step 0 with the pristine original input. The existing **Restart recovery** above keys ticket-skip on `data.ticketNumber` written by the prior run on the same runId — but a retry uses a new runId, so a `findPriorTicketForRunId(ctx.runId)` style probe would miss and the handler would file a SECOND HR ServiceNow ticket.
+
+The fix lives in this workflow, not the kernel: probe by `sessionId` (`pdfHash` / `ocrSessionId`) — which IS preserved across retry because it comes from the original input — instead of `runId`. Scan all tracker entries for the workflow whose `data.pdfHash` matches, look for any prior entry with `data.ticketNumber`, and skip ServiceNow submission if found.
+
+The dashboard duplicate-check banner already surfaces prior runs for the same hash on file select — operators retrying oath-upload are responsible for noting any prior `ticketNumber` in the banner before clicking Retry. The kernel does not gate this — no `supportsRetry` flag, no "not retryable" error; idempotency belongs in the workflow.
+
 ## Lessons Learned
 
 - **Lesson maintenance rule:** Search this section and `src/workflows/ocr/CLAUDE.md` before adding oath-upload delegation lessons. Merge old restart/OCR notes into the current shared helper and runtime-shape rules.
