@@ -25,6 +25,17 @@ Dashboard HTTP routes should stay thin: parse/validate request bodies, call this
 - Tracker Hono routes may import `src/control/` as HTTP adapters. Other tracker modules should keep observability concerns local unless there is a deliberate control-plane path.
 - OCR discard was moved with the action engine instead of leaving `control/actions` dependent on the dashboard OCR barrel. The handler still imports narrow tracker OCR helpers for abort flags and parent metadata reads.
 
+## Retry contract (Contract 2 — Uniform Retry)
+
+Retry is **uniform kernel behavior**, not a per-workflow capability:
+
+- Every retry assigns a new `runId`, re-runs the handler from step 0, and feeds the workflow the **pristine original input** the task was first enqueued with — never accumulated state from a prior run.
+- The pristine input lives in `tasks.original_input_json` (SQLite, migration 11). `enqueueTasks` writes it on INSERT and preserves it on adopt-existing via `COALESCE`. `retryTaskFromAttempt` deliberately resets `input_json ← original_input_json` so the daemon's claim path hands the handler the original payload.
+- `reEnqueueEntry` (`ops/retry.ts`) reads `findOriginalInputForRunId` from the task store. For rows that predate migration 11, it falls back to `findEntryInput` + `mergeAccumulatedTrackerStrings` (now `@deprecated`) and logs a one-time warn per process.
+- The new pending row carries `data.__retriedFrom = <prior runId>` for dashboard provenance.
+
+There is **no `supportsRetry` flag**, no `WorkflowDoesNotSupportRetryError`, no per-workflow gate. If a workflow's step has irreversible side effects, the workflow is responsible for probing live system state before re-executing (the standard pattern is `findExistingTerminationTransaction`-style; see `src/workflows/separations/`). Known idempotency gaps are documented per-workflow in `src/workflows/{onboarding,work-study,oath-upload,old-kronos-reports}/CLAUDE.md` → "Retry safety".
+
 ## Lessons Learned
 
 - **2026-05-22: Workflow control moved out of tracker.** `src/tracker/` owns JSONL/projection/SSE observability. Operator action dispatch and low-level cancel/retry/delete/queue handlers live in `src/control/` because they mutate SQLite control state, enqueue work, issue worker commands, and also need tracker audit/projection reads. Keep future workflow control behavior in this module and leave dashboard routes as adapters.
