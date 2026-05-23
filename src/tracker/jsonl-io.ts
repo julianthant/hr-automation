@@ -4,6 +4,7 @@ import { createInterface } from "node:readline";
 
 import { log } from "../utils/log.js";
 import type { StructuredLogEvent } from "../domain/log-events.js";
+import { deriveRowArchetype, type RowArchetype, type WorkflowArchetype } from "../domain/row-archetype.js";
 import { appendJsonlWithSource } from "./state/jsonl-source.js";
 import { applyLogEntryLive, applySessionEventLive, applyTrackerEntryLive } from "./state/runtime.js";
 import { getSessionsFilePathForDate, type ScreenshotSessionEvent } from "./session-events.js";
@@ -214,6 +215,60 @@ export interface TrackerEntry {
   error?: string;
 }
 
+/**
+ * Contract 1 — Archetype Stamping.
+ *
+ * Every persisted tracker row carries `data.archetype`. Emit sites construct a
+ * {@link StampedData} (a `Record<string, string>` *with* `archetype` required
+ * at the type level) and hand it to {@link emitTrackerRow}. The compiler
+ * refuses any row that drops the field, replacing the prior "convention plus
+ * legacy heuristic" approach that broke whenever a control-layer or
+ * orchestrator emit site forgot to stamp it.
+ *
+ * For row archetypes derived from a workflow's declared `WorkflowArchetype` +
+ * presence of a `parentRunId`, see {@link stampArchetypeForRow}. Callers that
+ * already know the row archetype directly (OCR prep `batch-parent`, OCR
+ * approve `delegate-child`, etc.) can stamp it inline. The
+ * `tests/unit/architecture/tracker-row-emission.test.ts` guard fails the
+ * build if any new caller bypasses the helper.
+ */
+export type StampedData = Record<string, string> & { archetype: RowArchetype };
+
+/** A tracker row emission with archetype-stamped `data` required at the type level. */
+export interface TrackerRowEmission {
+  workflow: string;
+  timestamp: string;
+  id: string;
+  runId?: string;
+  parentRunId?: string;
+  status: TrackerEntry["status"];
+  step?: string;
+  data: StampedData;
+  typedData?: Record<string, TypedValue>;
+  input?: Record<string, unknown>;
+  error?: string;
+}
+
+/**
+ * Convenience builder — stamp `archetype` onto an existing data record so it
+ * can be passed to {@link emitTrackerRow}. The resulting object satisfies
+ * the `StampedData` constraint.
+ *
+ * Pass the workflow's declared `WorkflowArchetype` plus the row's
+ * `parentRunId` (when present). For row archetypes that don't follow the
+ * derivation rule (e.g. OCR's `batch-parent` for the prep parent row), set
+ * `override` directly.
+ */
+export function stampArchetypeForRow(
+  data: Record<string, string>,
+  args: { workflowArchetype: WorkflowArchetype; parentRunId?: string } | { override: RowArchetype },
+): StampedData {
+  if ("override" in args) {
+    return { ...data, archetype: args.override };
+  }
+  return { ...data, archetype: deriveRowArchetype(args.workflowArchetype, args.parentRunId) };
+}
+
 const TRACKER_ENTRY_STATUSES = new Set<TrackerEntry["status"]>(["pending", "running", "done", "failed", "skipped"]);
 
 export const LOG_ENTRY_LEVELS = new Set<LogEntry["level"]>(["step", "success", "error", "waiting", "warn", "debug"]);
@@ -257,13 +312,31 @@ function getTrackerJsonlPath(workflow: string, dir: string): string {
 }
 
 /**
- * Append a tracker entry to a *specific* date file (instead of today's).
- * Used by the prep-row HTTP handlers (approve / discard) so resolution
- * lines land in the same file as the row's existing history — otherwise
- * the dashboard's per-date SSE never sees them when the operator resolves
- * a row created on a previous local day.
+ * Internal — write a tracker entry to disk without enforcing the
+ * archetype-stamping contract. Used by:
+ *   - {@link emitTrackerRow} and {@link emitTrackerRowForDate} after the
+ *     compile-time contract has been satisfied.
+ *   - The SIGINT/SIGTERM handler in `tracked-workflow.ts`, which already
+ *     stamps `data.archetype` via the wrapper's seeded `data` object.
+ *   - Test helpers that need to forge legacy-shaped rows for backwards-
+ *     compatibility assertions on the read path.
+ *
+ * New production emit sites must NOT call this directly — the architecture
+ * guard `tests/unit/architecture/tracker-row-emission.test.ts` fails the
+ * build for any caller outside the tracker module and the SIGINT handler.
  */
-export function trackEventForDate(
+export function writeTrackerEntryRaw(entry: TrackerEntry, dir: string = DEFAULT_DIR): void {
+  const logPath = getTrackerJsonlPath(entry.workflow, dir);
+  const source = appendJsonlWithSource(logPath, entry, {
+    sourceKind: "tracker",
+    workflow: entry.workflow,
+    trackerDate: dateLocal(new Date(entry.timestamp)),
+  });
+  applyTrackerEntryLive(entry, source, dir);
+}
+
+/** Internal — see {@link writeTrackerEntryRaw}. Targets a specific date file. */
+export function writeTrackerEntryRawForDate(
   entry: TrackerEntry,
   date: string,
   dir: string = DEFAULT_DIR,
@@ -277,14 +350,51 @@ export function trackEventForDate(
   applyTrackerEntryLive(entry, source, dir);
 }
 
+/**
+ * Canonical tracker row emission. Replaces the legacy `trackEvent` direct
+ * write. The `data: StampedData` parameter makes archetype stamping a
+ * compile-time requirement — see the {@link StampedData} comment above.
+ */
+export function emitTrackerRow(emission: TrackerRowEmission, dir: string = DEFAULT_DIR): void {
+  writeTrackerEntryRaw(emission as TrackerEntry, dir);
+}
+
+/**
+ * Append a tracker entry to a *specific* date file (instead of today's).
+ * Used by the prep-row HTTP handlers (approve / discard) so resolution
+ * lines land in the same file as the row's existing history — otherwise
+ * the dashboard's per-date SSE never sees them when the operator resolves
+ * a row created on a previous local day.
+ */
+export function emitTrackerRowForDate(
+  emission: TrackerRowEmission,
+  date: string,
+  dir: string = DEFAULT_DIR,
+): void {
+  writeTrackerEntryRawForDate(emission as TrackerEntry, date, dir);
+}
+
+// ── Legacy compatibility aliases ───────────────────────────────────────
+//
+// `trackEvent` and `trackEventForDate` remain as thin wrappers so existing
+// call sites continue to compile. They accept the loose `TrackerEntry`
+// shape (data optional, archetype not type-enforced). New code must use
+// `emitTrackerRow` / `emitTrackerRowForDate` instead — the architecture
+// guard `tests/unit/architecture/tracker-row-emission.test.ts` blocks new
+// uses of the legacy alias.
+
+/** @deprecated Use {@link emitTrackerRow}. */
 export function trackEvent(entry: TrackerEntry, dir: string = DEFAULT_DIR): void {
-  const logPath = getTrackerJsonlPath(entry.workflow, dir);
-  const source = appendJsonlWithSource(logPath, entry, {
-    sourceKind: "tracker",
-    workflow: entry.workflow,
-    trackerDate: dateLocal(new Date(entry.timestamp)),
-  });
-  applyTrackerEntryLive(entry, source, dir);
+  writeTrackerEntryRaw(entry, dir);
+}
+
+/** @deprecated Use {@link emitTrackerRowForDate}. */
+export function trackEventForDate(
+  entry: TrackerEntry,
+  date: string,
+  dir: string = DEFAULT_DIR,
+): void {
+  writeTrackerEntryRawForDate(entry, date, dir);
 }
 
 const SSN_KEYS: ReadonlySet<string> = new Set(["ssn"]);
