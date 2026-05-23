@@ -53,15 +53,20 @@ export function enqueueTasks<T>(db: Database, control: ControlDb, request: Enque
 
       const taskId = randomUUID()
       const attemptId = randomUUID()
+      // Contract 2: stamp the pristine original input on the task at first
+      // enqueue. `retryTaskFromAttempt` runs the same task with a new attempt
+      // and run id; the original_input_json column is the source of truth for
+      // what the retry handler will see, NOT input_json (which may be edited
+      // by edit-and-resume or future migrations).
       db.prepare(`
         INSERT INTO tasks (
           id, workflow, item_id, run_id, task_kind, parent_task_id,
-          data_json, input_json, control_state, priority, available_at,
+          data_json, input_json, original_input_json, control_state, priority, available_at,
           enqueued_at, current_attempt_id, parent_run_id, source, metadata_json,
           created_at, updated_at, terminal_at
         ) VALUES (
           @taskId, @workflow, @itemId, @runId, 'workflow_item', @parentTaskId,
-          '{}', @inputJson, 'queued', 0, @now,
+          '{}', @inputJson, @inputJson, 'queued', 0, @now,
           @now, NULL, @parentRunId, @source, @metadataJson,
           @now, @now, NULL
         )
@@ -121,9 +126,15 @@ function adoptExistingTaskForEnqueue(
   },
 ): EnqueuedTask {
   const attemptId = ensureQueuedAttemptForTask(db, request)
+  // Preserve the existing original_input_json when present (it's the pristine
+  // first-enqueue snapshot for Contract 2 retry replay); fill it from the
+  // current input only when the row never had one (legacy row touched for the
+  // first time after migration 11, or a fresh task that just hit the adopt
+  // path because of a race).
   db.prepare(`
     UPDATE tasks
     SET input_json = @inputJson,
+        original_input_json = COALESCE(original_input_json, @inputJson),
         control_state = 'queued',
         priority = 0,
         available_at = @now,

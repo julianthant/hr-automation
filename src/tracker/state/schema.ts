@@ -3,7 +3,7 @@ export interface Migration {
   sql: string;
 }
 
-export const LATEST_SCHEMA_VERSION = 10;
+export const LATEST_SCHEMA_VERSION = 11;
 
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -506,6 +506,24 @@ SET resolved_prep = 0
 WHERE workflow = 'ocr'
   AND resolved_prep = 1
   AND NOT (latest_status = 'failed' AND latest_step = 'discarded');
+    `,
+  },
+  {
+    // Migration 11: persist the pristine original input on every task.
+    //
+    // Contract 2 (Uniform Retry) — `retryTaskFromAttempt` re-runs the workflow
+    // with the input the task was FIRST enqueued with. The new column captures
+    // that snapshot at enqueue time; retry reads it directly and skips the
+    // legacy `findEntryInput` + `mergeAccumulatedTrackerStrings` reconstruction
+    // path (which folded mutated data from later rows into the "retry" input,
+    // making "retry" a replay with leaked state instead of a clean replay).
+    //
+    // Nullable on purpose: rows enqueued before this migration ran have no
+    // snapshot. The control layer falls back to the legacy reconstruction
+    // path for those (with a one-time deprecation warning per process).
+    version: 11,
+    sql: String.raw`
+ALTER TABLE tasks ADD COLUMN original_input_json TEXT;
     `,
   },
 ];
