@@ -708,7 +708,21 @@ export async function runOcrOrchestrator(
           }
         },
         realEnqueue: async (onPreparedItems) => {
-          const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
+          // Contract 3: route the eid-lookup fan-out through the kernel's
+          // delegateToAllImpl primitive so parentRunId stamping, archetype
+          // derivation, and pending-row pre-emit share one code path with
+          // every other delegation site. Behavioural equivalence vs the
+          // pre-Contract-3 ensureDaemonsAndEnqueue call:
+          //   - `renderAs: "flat"` stamps archetype "passive-child" so the
+          //     children render as `delegation-member` rows — matching the
+          //     OCR runtime policy's `utilityChildSurface: "delegation-member"`.
+          //   - `onPreparedItems` is forwarded verbatim so the SQLite task
+          //     dependency batch is still created in the same lifecycle slot.
+          //   - `fireAndForget: true` because the orchestrator's own
+          //     `watchChildRuns` call below (waitForChildRuns) handles the
+          //     await — wrapping a second wait inside delegateToAllImpl
+          //     would double-count and re-watch the same children.
+          const { delegateToAllImpl } = await import("../../core/delegate.js");
           const { eidLookupCrmWorkflow } = await import("../eid-lookup/index.js");
           const inputs = eidLookupEnqueueItems.map((e) =>
             e.kind === "name"
@@ -734,29 +748,39 @@ export async function runOcrOrchestrator(
             });
             return matched?.itemId ?? `ocr-fallback-${runId}-r0`;
           };
-          await ensureDaemonsAndEnqueue(
-            eidLookupCrmWorkflow,
+          type EidLookupChildInput = (typeof inputs)[number];
+          await delegateToAllImpl<EidLookupChildInput, readonly string[]>({
+            parentRunId: runId,
+            trackerDir,
+            // eidLookupCrmWorkflow's exact generic param doesn't line up
+            // with the union type of `inputs` (name-only vs emplId-only
+            // variants), so cast through unknown — the runtime schema
+            // validates both shapes.
+            child: eidLookupCrmWorkflow as unknown as Parameters<typeof delegateToAllImpl<EidLookupChildInput, readonly string[]>>[0]["child"],
             inputs,
-            {},
-            {
-              trackerDir,
-              deriveItemId: deriveChildItemId,
-              parentRunId: runId,
-              onPreparedItems,
-              onPreEmitPending: (item, childRunId, passedParentRunId, itemId) => {
-                emitTrackerRow({
-                  workflow: eidLookupCrmWorkflow.config.name,
-                  timestamp: new Date().toISOString(),
-                  id: itemId,
-                  runId: childRunId,
-                  status: "pending",
-                  data: buildHttpPendingData(eidLookupCrmWorkflow, item, passedParentRunId) as StampedData,
-                  ...(passedParentRunId ? { parentRunId: passedParentRunId } : {}),
-                  input: item as Record<string, unknown>,
-                }, trackerDir);
-              },
+            renderAs: "flat",
+            fireAndForget: true,
+            deriveItemId: deriveChildItemId,
+            // The OCR pending row carries pdfFileId / sessionId / parent
+            // subject context — re-emit those onto each child pending row
+            // so the dashboard's queue-surface dispatcher has everything it
+            // needs to title/group the rows.
+            buildPendingExtras: (childItem, _itemId) => {
+              const base = buildHttpPendingData(eidLookupCrmWorkflow, childItem, runId);
+              // buildPendingTrackerData stamps __name/__id + parentSubject
+              // again, so strip ours to avoid duplicate keys winning the
+              // wrong write order. The remaining buildHttpPendingData fields
+              // are the ones that aren't part of the pending-data seed.
+              const { __name: _n, __id: _i, archetype: _a, ...extras } = base as Record<string, unknown> & { __name?: string; __id?: string; archetype?: string };
+              return extras as Record<string, unknown>;
             },
-          );
+            ...(onPreparedItems
+              ? {
+                  onPreparedItems: async (prepared) =>
+                    onPreparedItems(prepared.map((p) => ({ itemId: p.itemId, runId: p.runId }))),
+                }
+              : {}),
+          });
         },
         patchRecord: (recs, index, outcome, kind) => patchOcrRecordFromEidLookupOutcome(recs, index, outcome, kind),
         scheduleDependencyTickOverride: opts._scheduleDependencyTickOverride,

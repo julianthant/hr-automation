@@ -301,6 +301,10 @@ async function runInProcessPool<TChildData, TChildSteps extends readonly string[
  * SQLite task rows + pre-emit pending tracker rows for every child, then
  * awaits all terminal statuses via `watchChildRuns` (unless
  * `fireAndForget: true`).
+ *
+ * `onPreparedItems` is forwarded verbatim to `ensureDaemonsAndEnqueue` —
+ * see its docstring. Used by OCR to attach SQLite task-dependency rows
+ * after itemIds/runIds are assigned but before the pending emit fires.
  */
 async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly string[]>(args: {
   parentRunId: string
@@ -309,6 +313,9 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
   inputs: readonly TChildData[]
   renderAs?: DelegateRenderAs
   fireAndForget: boolean
+  deriveItemId?: (input: TChildData) => string
+  buildPendingExtras?: (input: TChildData, itemId: string) => Record<string, unknown>
+  onPreparedItems?: (items: Array<{ itemId: string; runId: string; input: TChildData }>) => Promise<void> | void
 }): Promise<ChildRunResult<TChildData>[]> {
   if (args.inputs.length === 0) return []
 
@@ -322,15 +329,27 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
     {
       ...(args.trackerDir ? { trackerDir: args.trackerDir } : {}),
       parentRunId: args.parentRunId,
-      ...(args.child.config.deriveItemId ? { deriveItemId: args.child.config.deriveItemId } : {}),
+      ...(args.deriveItemId
+        ? { deriveItemId: args.deriveItemId }
+        : (args.child.config.deriveItemId ? { deriveItemId: args.child.config.deriveItemId } : {})),
+      ...(args.onPreparedItems
+        ? {
+            onPreparedItems: async (prepared) =>
+              args.onPreparedItems!(
+                prepared.map((p) => ({ itemId: p.itemId, runId: p.runId, input: p.input as TChildData })),
+              ),
+          }
+        : {}),
       onPreEmitPending: (item, childRunId, parentRunIdFwd, itemId) => {
         expectedItemIds.push(itemId)
+        const extras = args.buildPendingExtras?.(item as TChildData, itemId) ?? {}
         const data = buildPendingTrackerData({
           workflow: args.child,
           input: item,
           parentRunId: parentRunIdFwd,
           useInitialTrackerSeed: true,
           nameIdStamp: "always-on-seed",
+          extraData: extras,
           includeArchetype: false,
         })
         const stamped: StampedData = { ...data, archetype }
@@ -386,6 +405,13 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
 /**
  * Implementation backing `ctx.delegateToAll`. Routes to daemon enqueue
  * when the child is daemon-capable, in-process pool otherwise.
+ *
+ * Internal hooks (not exposed on the Ctx surface, but available to
+ * `delegateToAllImpl` callers that need them — used by OCR's orchestrator
+ * to wire SQLite task dependencies):
+ *   - `deriveItemId`        — per-input itemId override
+ *   - `buildPendingExtras`  — extra fields stamped onto the child pending row
+ *   - `onPreparedItems`     — runs after itemIds/runIds assigned, before pre-emit
  */
 export async function delegateToAllImpl<TChildData, TChildSteps extends readonly string[]>(args: {
   parentRunId: string
@@ -395,6 +421,9 @@ export async function delegateToAllImpl<TChildData, TChildSteps extends readonly
   renderAs?: DelegateRenderAs
   fireAndForget: boolean
   concurrency?: number
+  deriveItemId?: (input: TChildData) => string
+  buildPendingExtras?: (input: TChildData, itemId: string) => Record<string, unknown>
+  onPreparedItems?: (items: Array<{ itemId: string; runId: string; input: TChildData }>) => Promise<void> | void
 }): Promise<ChildRunResult<TChildData>[]> {
   if (args.inputs.length === 0) return []
   if (isDaemonCapable(args.child.config.name)) {

@@ -37,13 +37,10 @@ const SRC_DIR = join(ROOT, "src");
  */
 const ORCHESTRATOR_ALLOWLIST = new Set<string>([
   // OCR's force-research and retry-page paths reach into the same
-  // dispatch shape from non-handler contexts.
+  // dispatch shape from non-handler contexts. They remain on the legacy
+  // direct-runWorkflow path pending a dedicated migration plan.
   "src/workflows/ocr/force-research.ts",
   "src/workflows/ocr/retry-page.ts",
-  // OCR's main orchestrator: the eid-lookup fan-out still uses
-  // ensureDaemonsAndEnqueue directly. Step C of Contract 3 migrates this
-  // to ctx.delegateToAll, at which point this entry is removed.
-  "src/workflows/ocr/orchestrator.ts",
 ]);
 
 function listSourceFiles(dir: string): string[] {
