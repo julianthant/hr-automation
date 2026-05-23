@@ -56,6 +56,14 @@ In-process path (tests/scripts — call runWorkStudy directly):
 - PeopleSoft alerts (payroll-in-progress warnings) are auto-dismissed
 - Uses `getContentFrame()` for all iframe interactions — same pattern as onboarding
 
+## Retry safety
+
+**Known idempotency gap (workflow bug — not a kernel concern).** Contract 2 makes retry a uniform kernel behavior: the kernel re-runs the handler from step 0 with the pristine original input. The `transaction` step's PayPath submit has no live-page dupe probe (already called out in the 2026-04-23 lesson below), so a retry on a successfully-submitted PayPath transaction can re-submit it.
+
+The fix lives in this workflow, not the kernel: scan the Smart HR Transactions list for an existing pending/in-flight transaction for this `(emplId, effectiveDate)` before submitting. Pattern reference: separations' `findExistingTerminationTransaction` (in `src/workflows/separations/`).
+
+Until that probe lands, operators retrying work-study are responsible for confirming PayPath doesn't already have a pending transaction for the EID/date before clicking Retry. The kernel does not gate this — no `supportsRetry` flag, no "not retryable" error; idempotency belongs in the workflow.
+
 ## Verified Selectors
 
 No workflow-local selectors live here. Use the UCPath selector catalog listed above; add selector lessons to `src/systems/ucpath/LESSONS.md` after searching/updating existing entries.

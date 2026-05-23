@@ -98,6 +98,12 @@ Default pool size: `4` (from `wf.config.batch.poolSize`). **`npm run kronos -- -
 - **`mkdirSync(REPORTS_DIR, { recursive: true })`** — reports dir created if missing.
 - **Phase 1 report status polling**: first attempt may show stale "Complete" row from previous run — must skip it (handled in `src/systems/old-kronos/reports.ts`).
 
+## Retry safety
+
+**Dashboard retry is not currently supported for this workflow.** kronos-reports runs exclusively through `runParallelKronos` (it's intentionally NOT in `WORKFLOW_LOADERS` — see the table in `src/workflows/CLAUDE.md`), which sets module-scoped runtime (`setKronosRuntime` with `trackerMutex`, `reportMutex`, date range, reports dir, tracker writer) BEFORE the kernel handler executes. The dashboard retry path goes through `enqueueFromHttp` → daemon claim → kernel `runOneItem`, which has no opportunity to invoke `runParallelKronos` first and therefore no opportunity to call `setKronosRuntime`. A dashboard-issued retry would throw `Kronos runtime not initialized` from the handler's first action.
+
+Contract 2 (Uniform Retry) does not gate this — there's no per-workflow opt-out. The fix lives in this workflow: decouple the per-run state from a module-scoped singleton (e.g. carry the mutexes/dates/tracker through `ctx.runtime` or via a workflow-local registry keyed by `instance`) so the handler can be invoked outside the CLI adapter's setup. Until then, retry kronos-reports failures by re-running `npm run kronos` (which re-enters `runParallelKronos`), not from the dashboard.
+
 ## Verified Selectors
 
 UKG selectors live in `src/systems/old-kronos/selectors.ts`. This workflow uses them through `handleReportsPage`, `waitForReportAndDownload`, and the search helpers in that system module.

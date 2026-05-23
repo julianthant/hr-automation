@@ -73,6 +73,14 @@ runWorkflow(onboardingWorkflow, { email })
 - **Rehire short-circuit still works.** Daemon handler is the same `onboardingWorkflow` handler; rehire detection in the `person-search` step returns early with `status: "Rehire"` before I-9/transaction. The daemon stays alive for the next email.
 - **Tracker byte-parity.** Per-item JSONL emissions are identical between daemon mode and in-process single mode — the daemon calls `runOneItem` under `withBatchLifecycle({ ownSigint: false })`, so instance/run IDs, `authTimings`, and step entries all flow through the same code path.
 
+## Retry safety
+
+**Known idempotency gap (workflow bug — not a kernel concern).** Contract 2 makes retry a uniform kernel behavior: a retry re-runs the handler from step 0 with the pristine original input. That means the `transaction` step's UCPath Smart HR submit can fire twice if the first run succeeded server-side but failed before writing the terminal tracker row (e.g. network blip after submit).
+
+The fix lives in this workflow, not the kernel: probe the UCPath Smart HR transactions list for an existing in-flight / saved transaction for this `(emplId, effectiveDate, templateCode)` before re-submitting. Pattern reference: separations already does this via `findExistingTerminationTransaction` (search `src/workflows/separations/`); mirror it for Smart HR hire transactions.
+
+Until that probe lands, operators retrying onboarding are responsible for confirming UCPath doesn't already have a pending hire for the EID before clicking Retry. The kernel does not gate this — `supportsRetry` flags / structured "not retryable" errors are explicitly out of scope; idempotency belongs in the workflow.
+
 ## Gotchas
 
 - SSN/DOB are optional (international students) but wage requires `$` prefix
