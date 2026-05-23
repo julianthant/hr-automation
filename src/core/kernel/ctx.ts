@@ -6,6 +6,7 @@ import { log } from '../../utils/log.js'
 import { errorMessage } from '../../utils/errors.js'
 import { makeScreenshotFn } from './screenshot.js'
 import type { ScreenshotEvent } from './screenshot.js'
+import { buildDelegateApi } from '../delegate.js'
 
 export interface MakeCtxOpts {
   session: Session
@@ -75,6 +76,8 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     currentStep: () => stepper.getCurrentStep(),
   })
 
+  const delegateApi = buildDelegateApi({ runId, trackerDir })
+
   const ctx = {
     page: (id: string) => session.page(id),
     step: <R>(name: string, fn: () => Promise<R>) => stepper.step(name, fn),
@@ -92,6 +95,8 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     runId,
     screenshot,
     trackerDir,
+    delegateTo: delegateApi.delegateTo,
+    delegateToAll: delegateApi.delegateToAll,
   }
   Object.assign(ctx, {
     captureAndStampScreenshot: async (label: string, dataKey: string) => {

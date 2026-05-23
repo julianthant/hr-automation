@@ -239,6 +239,59 @@ export interface RetryOpts {
   onAttempt?: (attempt: number, err: unknown) => void
 }
 
+/** See `src/core/delegate.ts` for the delegation API + `renderAs` semantics. */
+export type DelegateRenderAs = "batch" | "preview" | "flat"
+
+export interface DelegateOpts {
+  /**
+   * Override the child's derived row archetype for this delegation. Maps
+   * to the surface types the dashboard renders:
+   *   - "flat"    → `delegation-member` flat row (passive-child stamp)
+   *   - "preview" → approval-delegation preview card (delegate-child stamp)
+   *   - "batch"   → batch-delegation group member (delegate-child stamp)
+   * Omitted → use the child workflow's declared archetype + `parentRunId`
+   * to derive the archetype (default kernel behavior).
+   */
+  renderAs?: DelegateRenderAs
+  /**
+   * Don't await the child. Returns immediately after the pending row is
+   * emitted and the child is enqueued / launched. The returned
+   * `ChildRunResult` carries `status: "pending"` and no terminal data.
+   * Default: false.
+   */
+  fireAndForget?: boolean
+  /** Pre-assign the child itemId (tests, deterministic ids). */
+  itemId?: string
+  /** Pre-assign the child runId (tests, deterministic ids). */
+  runId?: string
+}
+
+export interface DelegateAllOpts extends DelegateOpts {
+  /**
+   * Max concurrent child runs. Only honored when the child is NOT
+   * daemon-capable (in-process pool path). Default: all inputs run
+   * concurrently. Daemon-capable children always use the daemon's own
+   * scheduling.
+   */
+  concurrency?: number
+}
+
+// `_TChildData` is the input/output shape used by the parent for return-type
+// inference at call sites; the result fields themselves are workflow-agnostic
+// (string-stringified tracker data + error message), so the type parameter is
+// not consumed inside the interface body.
+export interface ChildRunResult<_TChildData> {
+  workflow: string
+  runId: string
+  itemId: string
+  /** `"pending"` only when `fireAndForget: true`. */
+  status: "done" | "failed" | "cancelled" | "pending"
+  /** Final accumulated tracker data when `status === "done"`. */
+  data?: Record<string, string>
+  /** Error details when `status === "failed"` / `"cancelled"`. */
+  error?: { message: string; step?: string }
+}
+
 export interface Ctx<TSteps extends readonly string[], TData> {
   page(id: string): Promise<Page>
   step<R>(name: TSteps[number], fn: () => Promise<R>): Promise<R>
@@ -288,6 +341,33 @@ export interface Ctx<TSteps extends readonly string[], TData> {
    * with `.tracker`.
    */
   trackerDir?: string
+  /**
+   * Delegate to a single child workflow. The kernel stamps `parentRunId`
+   * from `ctx.runId`, pre-emits the child's pending row through
+   * `emitTrackerRow` with archetype stamped (Contract 1), persists the
+   * pristine input on the pending row's `input` field (Contract 2 tier
+   * 2), runs the child in-process via `runWorkflow`, and returns a
+   * typed `ChildRunResult` with the child's terminal status. Use
+   * `delegateToAll` for daemon-dispatched fan-out across N inputs.
+   */
+  delegateTo<TChildData, TChildSteps extends readonly string[]>(
+    child: RegisteredWorkflow<TChildData, TChildSteps>,
+    input: TChildData,
+    opts?: DelegateOpts,
+  ): Promise<ChildRunResult<TChildData>>
+  /**
+   * Delegate to N child workflow runs. Dispatches via
+   * `ensureDaemonsAndEnqueue` when the child is daemon-capable
+   * (registered in `WORKFLOW_LOADERS`); otherwise iterates `runWorkflow`
+   * with the supplied `concurrency`. Awaits all child terminal statuses
+   * via `watchChildRuns` (daemon path) or per-run promises (in-process
+   * path) unless `fireAndForget: true`.
+   */
+  delegateToAll<TChildData, TChildSteps extends readonly string[]>(
+    child: RegisteredWorkflow<TChildData, TChildSteps>,
+    inputs: readonly TChildData[],
+    opts?: DelegateAllOpts,
+  ): Promise<ChildRunResult<TChildData>[]>
 }
 
 export interface SessionHandle {
