@@ -38,6 +38,7 @@ import {
   getTaskByRunId,
   findTaskByIdentity,
   findInputForRunId,
+  findOriginalInputForRunId,
   listTasksForWorkflow,
   listAttemptsForTask,
   countQueued,
@@ -83,6 +84,8 @@ export interface ControlTaskStore {
   getTaskByRunId(runId: string): TaskRow | null
   findTaskByIdentity(request: { workflow: string; itemId: string; runId?: string }): TaskRow | null
   findInputForRunId(runId: string): unknown | null
+  /** Contract 2 (Uniform Retry): pristine first-enqueue input; `null` for legacy rows. */
+  findOriginalInputForRunId(runId: string): unknown | null
   listTasksForWorkflow(workflow: string): TaskRow[]
   listAttemptsForTask(taskId: string): AttemptRow[]
   returnTaskToQueued(request: { taskId: string; now?: string }): void
@@ -121,6 +124,7 @@ export function createTaskStore(control: ControlDb): ControlTaskStore {
     getTaskByRunId: bindDb(getTaskByRunId),
     findTaskByIdentity: bindDb(findTaskByIdentity),
     findInputForRunId: bindDb(findInputForRunId),
+    findOriginalInputForRunId: bindDb(findOriginalInputForRunId),
     listTasksForWorkflow: bindDb(listTasksForWorkflow),
     listAttemptsForTask: bindDb(listAttemptsForTask),
     returnTaskToQueued: bindControl(returnTaskToQueued),

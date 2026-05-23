@@ -67,6 +67,28 @@ export function findInputForRunId(db: Database, runId: string): unknown | null {
   return row ? parseJson(row.input_json) : null
 }
 
+/**
+ * Contract 2 (Uniform Retry): return the pristine input the task was first
+ * enqueued with. Distinct from {@link findInputForRunId}, which returns the
+ * task's CURRENT `input_json` (potentially mutated by `adoptExistingTaskForEnqueue`
+ * or future edit-and-resume migrations).
+ *
+ * Returns `null` for legacy rows enqueued before migration 11 — the column is
+ * nullable on purpose. The control layer falls back to JSONL reconstruction
+ * for those rows.
+ */
+export function findOriginalInputForRunId(db: Database, runId: string): unknown | null {
+  const row = db.prepare(`
+    SELECT t.original_input_json
+    FROM task_attempts a
+    JOIN tasks t ON t.id = a.task_id
+    WHERE a.run_id = ?
+    LIMIT 1
+  `).get(runId) as { original_input_json: string | null } | undefined
+  if (!row || row.original_input_json === null) return null
+  return parseJson(row.original_input_json)
+}
+
 export function listTasksForWorkflow(db: Database, workflow: string): TaskRow[] {
   const rows = db.prepare(`
     SELECT *
