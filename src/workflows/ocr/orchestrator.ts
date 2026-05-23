@@ -14,7 +14,7 @@ import type { ZodType } from "zod/v4";
 import { loadRoster as realLoadRoster, precomputeRoster } from "../../services/matching/index.js";
 import type { RosterRow as MatchRosterRow } from "../../services/matching/match.js";
 import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
-import { trackEvent, dateLocal, type TrackerEntry } from "../../tracker/jsonl.js";
+import { emitTrackerRow, dateLocal, type StampedData, type TrackerEntry, type TrackerRowEmission } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
@@ -130,7 +130,7 @@ export async function runOcrOrchestrator(
   const runId = opts.runId;
   const emit =
     opts._emitOverride ??
-    ((entry: TrackerEntry) => trackEvent(entry, trackerDir));
+    ((entry: TrackerEntry) => emitTrackerRow(entry as TrackerRowEmission, trackerDir));
   const loadRosterFn = opts._loadRosterOverride ?? realLoadRoster;
   const watchChildren = opts._watchChildRunsOverride ?? realWatchChildRuns;
   const trackerBaseDir = trackerDir ?? ".tracker";
@@ -695,13 +695,13 @@ export async function runOcrOrchestrator(
                   taskGroupId: input.sessionId,
                   ...(cachedParentSubject ? { parentSubject: cachedParentSubject } : {}),
                 };
-            trackEvent({
+            emitTrackerRow({
               workflow: eidLookupCrmWorkflow.config.name,
               timestamp: new Date().toISOString(),
               id: e.itemId,
               runId: `override-${e.itemId}`,
               status: "pending",
-              data: buildHttpPendingData(eidLookupCrmWorkflow, item),
+              data: buildHttpPendingData(eidLookupCrmWorkflow, item, runId) as StampedData,
               parentRunId: runId,
               input: item,
             }, trackerDir);
@@ -744,13 +744,13 @@ export async function runOcrOrchestrator(
               parentRunId: runId,
               onPreparedItems,
               onPreEmitPending: (item, childRunId, passedParentRunId, itemId) => {
-                trackEvent({
+                emitTrackerRow({
                   workflow: eidLookupCrmWorkflow.config.name,
                   timestamp: new Date().toISOString(),
                   id: itemId,
                   runId: childRunId,
                   status: "pending",
-                  data: buildHttpPendingData(eidLookupCrmWorkflow, item),
+                  data: buildHttpPendingData(eidLookupCrmWorkflow, item, passedParentRunId) as StampedData,
                   ...(passedParentRunId ? { parentRunId: passedParentRunId } : {}),
                   input: item as Record<string, unknown>,
                 }, trackerDir);

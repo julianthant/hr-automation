@@ -1,4 +1,4 @@
-import { trackEvent, appendLogEntry } from "../../jsonl.js";
+import { emitTrackerRow, appendLogEntry, type StampedData } from "../../jsonl.js";
 import { log } from "../../../utils/log.js";
 import { errorMessage } from "../../../utils/errors.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
@@ -122,7 +122,7 @@ export function buildOcrApproveHandler(
             item && typeof item === "object" && !Array.isArray(item)
               ? (item as Record<string, unknown>)
               : undefined;
-          trackEvent(
+          emitTrackerRow(
             {
               workflow: spec.approveTo.workflow,
               timestamp: new Date().toISOString(),
@@ -176,7 +176,7 @@ export function buildOcrApproveHandler(
                   item && typeof item === "object" && !Array.isArray(item)
                     ? (item as Record<string, unknown>)
                     : undefined;
-                trackEvent(
+                emitTrackerRow(
                   {
                     workflow: childWf.config.name,
                     timestamp: new Date().toISOString(),
@@ -184,7 +184,7 @@ export function buildOcrApproveHandler(
                     runId: childRunId,
                     status: "pending",
                     data: {
-                      ...buildHttpPendingData(childWf, item),
+                      ...buildHttpPendingData(childWf, item, passedParentRunId ?? parentRunId),
                       ...rootQueueTitleData(readParentSubjectFromInput(item)),
                       archetype: deriveRowArchetype(childWf.archetype, passedParentRunId ?? parentRunId),
                     },
@@ -205,7 +205,7 @@ export function buildOcrApproveHandler(
 
         // Write approved row AFTER successful enqueue so restart recovery
         // can trust that fannedOutItemIds are all present in task_store.
-        trackEvent(
+        emitTrackerRow(
           {
             workflow: WORKFLOW,
             timestamp: new Date().toISOString(),
@@ -251,7 +251,7 @@ export function buildOcrApproveHandler(
         const msg = errorMessage(err);
         log.error(`[ocr-http] approve-batch dispatch failed: ${msg}`);
         // Surface the failure on both rows so the operator notices.
-        trackEvent(
+        emitTrackerRow(
           {
             workflow: WORKFLOW,
             timestamp: new Date().toISOString(),
@@ -260,6 +260,8 @@ export function buildOcrApproveHandler(
             ...(parentRunId ? { parentRunId } : {}),
             status: "failed",
             step: "approve-failed",
+            // OCR prep parent is always batch-parent.
+            data: { archetype: "batch-parent" },
             error: msg,
           },
           trackerDir,
@@ -267,7 +269,7 @@ export function buildOcrApproveHandler(
         if (parentRunId) {
           const ts = new Date().toISOString();
           const parentItemId = `ocr-prep-${input.sessionId}`;
-          trackEvent(
+          emitTrackerRow(
             {
               workflow: spec.approveTo.workflow,
               timestamp: ts,
@@ -275,6 +277,9 @@ export function buildOcrApproveHandler(
               runId: parentRunId,
               status: "failed",
               step: "approve-failed",
+              // Origin parent row is batch-parent (oath-upload root, or
+              // synthetic ocr-prep-* anchor row).
+              data: { archetype: "batch-parent" },
               error: msg,
             },
             trackerDir,
@@ -381,7 +386,10 @@ function writeOriginParentApproved(args: {
   // the daemon's in-progress row shows OCR approval progress without prematurely
   // flipping to "done".
   const isKernelDaemonParent = args.parentItemId === undefined;
-  trackEvent(
+  // Both branches are batch-parent rows: the synthetic ocr-prep-* anchor
+  // is the OCR batch row; the kernel-daemon origin (oath-upload) is also
+  // a batch-parent at the top level of its tree.
+  emitTrackerRow(
     {
       workflow: args.originWorkflow,
       timestamp: ts,
@@ -393,6 +401,7 @@ function writeOriginParentApproved(args: {
         ...latestParentData,
         ...(isKernelDaemonParent ? { approvedOcr: "true" } : { mode: "prepare" }),
         fannedOutCount: String(args.fannedOutCount),
+        archetype: "batch-parent",
       },
     },
     args.trackerDir,

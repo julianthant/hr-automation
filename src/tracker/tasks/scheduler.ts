@@ -1,6 +1,6 @@
 import { transaction } from "../../infra/sqlite/index.js";
 
-import { trackEvent, type TrackerEntry } from "../jsonl.js";
+import { emitTrackerRow, type TrackerEntry, type TrackerRowEmission } from "../jsonl.js";
 import type { TaskStore } from "./store.js";
 import {
   allDependenciesTerminal,
@@ -93,7 +93,7 @@ export async function runDependencySchedulerTick(
 ): Promise<DependencySchedulerTickResult> {
   const now = opts.now ?? new Date().toISOString();
   const projection = opts.projection ?? makePhase1ProjectionReader(opts.store);
-  const emitTracker = opts.emitTracker ?? ((entry: TrackerEntry) => trackEvent(entry, opts.trackerDir));
+  const emitTracker = opts.emitTracker ?? ((entry: TrackerEntry) => emitTrackerRow(entry as TrackerRowEmission, opts.trackerDir));
   const pending = listPendingDependencies(opts.store, { limit: opts.limit ?? 100 });
   const result: DependencySchedulerTickResult = {
     dependenciesScanned: pending.length,

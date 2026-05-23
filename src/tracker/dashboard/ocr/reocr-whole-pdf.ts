@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { log } from "../../../utils/log.js";
 import { errorMessage } from "../../../utils/errors.js";
-import { trackEvent, dateLocal } from "../../jsonl.js";
+import { emitTrackerRow, dateLocal, type TrackerRowEmission } from "../../jsonl.js";
 import type { TrackerEntry } from "../../jsonl.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
 import { normalizeUcpathEmployeeId } from "../../../domain/identity/eid.js";
@@ -143,7 +143,7 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
       // background and return 202 immediately. The frontend polls SSE for
       // OCR row state changes regardless of this HTTP response.
       const parentRunId = row.parentRunId;
-      const emit = opts._emitOverride ?? ((e: TrackerEntry) => trackEvent(e, trackerDir));
+      const emit = opts._emitOverride ?? ((e: TrackerEntry) => emitTrackerRow(e as TrackerRowEmission, trackerDir));
       const capturedRow = row;
       const capturedEnqueueItems = enqueueItems;
       backgroundStarted = true;
@@ -189,6 +189,9 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
             records: JSON.stringify(records),
             failedPages: JSON.stringify([]),
             pageStatusSummary: JSON.stringify({ total: 0, succeeded: 0, failed: 0 }),
+            // OCR prep parent rows are always batch-parent — required for
+            // emitTrackerRow's StampedData contract.
+            archetype: "batch-parent" as const,
           };
           emit({
             workflow: WORKFLOW,

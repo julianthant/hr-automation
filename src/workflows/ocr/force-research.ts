@@ -2,7 +2,7 @@
  * Drops resolved fields on selected records, re-fans-out eid-lookup, watches
  * for completions, patches the OCR row's records progressively.
  */
-import { trackEvent, dateLocal } from "../../tracker/jsonl.js";
+import { emitTrackerRow, dateLocal, type StampedData } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { watchChildRuns, type ChildOutcome } from "../../tracker/delegation/watch-child-runs.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
@@ -74,7 +74,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     enqueueInputs.push({ name });
   }
 
-  trackEvent(
+  emitTrackerRow(
     {
       workflow: WORKFLOW,
       timestamp: new Date().toISOString(),
@@ -82,7 +82,8 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
       runId: input.runId,
       status: "running",
       step: "eid-lookup",
-      data: { records: JSON.stringify(records) },
+      // OCR prep parent is always batch-parent.
+      data: { records: JSON.stringify(records), archetype: "batch-parent" },
     },
     trackerDir,
   );
@@ -156,7 +157,10 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     __name: parentSubject ?? "OCR",
     ...(parentSubject ? { parentSubject } : {}),
   };
-  trackEvent(
+  // baseData already carries `archetype: "batch-parent"` (line above) so
+  // emitTrackerRow's StampedData contract is satisfied at compile time.
+  const stampedBase = baseData as StampedData;
+  emitTrackerRow(
     {
       workflow: WORKFLOW,
       timestamp: new Date().toISOString(),
@@ -165,11 +169,11 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
       ...(parentRunId ? { parentRunId } : {}),
       status: "running",
       step: "awaiting-approval",
-      data: baseData,
+      data: stampedBase,
     },
     trackerDir,
   );
-  trackEvent(
+  emitTrackerRow(
     {
       workflow: WORKFLOW,
       timestamp: new Date().toISOString(),
@@ -178,7 +182,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
       ...(parentRunId ? { parentRunId } : {}),
       status: "done",
       step: "awaiting-approval",
-      data: baseData,
+      data: stampedBase,
     },
     trackerDir,
   );

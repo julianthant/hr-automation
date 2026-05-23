@@ -5,7 +5,8 @@ import { Mutex } from "async-mutex";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { runWorkflowBatch } from "../../core/index.js";
-import { trackEvent } from "../../tracker/jsonl.js";
+import { emitTrackerRow } from "../../tracker/jsonl.js";
+import { deriveRowArchetype } from "../../domain/row-archetype.js";
 import { operatorSubjectData } from "../../domain/operator-subject.js";
 import { launchBrowser } from "../../infra/browser/launch.js";
 import { SCREEN } from "../../config.js";
@@ -150,13 +151,20 @@ export async function runParallelKronos(
         onPreEmitPending: (item, runId) => {
           const { employeeId } = item as KronosItem;
           const subject = kronosReportsWorkflow.config.operatorSubject?.({ employeeId });
-          trackEvent({
+          emitTrackerRow({
             workflow: "kronos-reports",
             timestamp: now,
             id: employeeId,
             runId,
             status: "pending",
-            data: { id: employeeId, ...operatorSubjectData(subject) },
+            data: {
+              id: employeeId,
+              ...operatorSubjectData(subject),
+              // kronos-reports is "batch" — the batch-parent anchor row is
+              // implicit (it's an Excel-only workflow), but each item is a
+              // batch-member in the dashboard.
+              archetype: deriveRowArchetype(kronosReportsWorkflow.archetype, undefined),
+            },
           });
         },
       },

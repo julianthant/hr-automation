@@ -11,7 +11,8 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { trackEvent, readLatestTrackerEntriesByRunKey } from "../../jsonl.js";
+import { emitTrackerRow, readLatestTrackerEntriesByRunKey } from "../../jsonl.js";
+import { resolveRowArchetype } from "../../../domain/row-archetype.js";
 import { findLatestEntryForPredicate } from "../../find-latest-entry.js";
 import { errorMessage } from "../../../utils/errors.js";
 import { log } from "../../../utils/log.js";
@@ -160,7 +161,16 @@ export function buildOathUploadCancelHandler(opts: CancelHandlerOpts = {}) {
         body: { ok: false, error: "no active oath-upload row for sessionId" },
       };
     }
-    trackEvent(
+    // oath-upload is the top-level batch parent — inherit from the latest
+    // row so we don't accidentally flip its archetype.
+    const priorOathRow = findLatestEntryForPredicate({
+      workflow: WORKFLOW,
+      trackerDir: opts.trackerDir ?? ".tracker",
+      lookbackDays: 7,
+      predicate: (e) => e.id === input.sessionId && e.runId === runId,
+    });
+    const oathArchetype = priorOathRow ? resolveRowArchetype(priorOathRow) : "batch-parent";
+    emitTrackerRow(
       {
         workflow: WORKFLOW,
         timestamp: new Date().toISOString(),
@@ -168,7 +178,10 @@ export function buildOathUploadCancelHandler(opts: CancelHandlerOpts = {}) {
         runId,
         status: "running",
         step: "cancel-requested",
-        ...(input.reason ? { data: { reason: input.reason } } : {}),
+        data: {
+          archetype: oathArchetype,
+          ...(input.reason ? { reason: input.reason } : {}),
+        },
       },
       opts.trackerDir,
     );
@@ -195,18 +208,21 @@ export function sweepStuckOathUploadRows(trackerDir: string): void {
   const latestById = readLatestTrackerEntriesByRunKey(WORKFLOW, trackerDir);
   for (const e of latestById.values()) {
     if (e.status === "pending" || e.status === "running") {
-      trackEvent(
+      // Inherit archetype from the swept row so the sweep marker keeps
+      // the row type intact.
+      const sweptArchetype = resolveRowArchetype(e);
+      emitTrackerRow(
         {
           workflow: WORKFLOW,
           timestamp: new Date().toISOString(),
           id: e.id,
-          runId: e.runId,
+          ...(e.runId ? { runId: e.runId } : {}),
           ...(e.parentRunId ? { parentRunId: e.parentRunId } : {}),
           status: "failed",
           step: "swept",
           error:
             "Dashboard restarted while oath-upload was in progress — please re-upload",
-          ...(e.data ? { data: { ...e.data } } : {}),
+          data: { ...(e.data ?? {}), archetype: sweptArchetype },
         },
         trackerDir,
       );

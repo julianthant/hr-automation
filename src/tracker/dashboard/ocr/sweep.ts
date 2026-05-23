@@ -1,4 +1,5 @@
-import { trackEvent, readLatestTrackerEntriesByRunKey } from "../../jsonl.js";
+import { emitTrackerRow, readLatestTrackerEntriesByRunKey } from "../../jsonl.js";
+import { resolveRowArchetype } from "../../../domain/row-archetype.js";
 
 const WORKFLOW = "ocr";
 
@@ -8,16 +9,20 @@ export function sweepStuckOcrRows(trackerDir: string): void {
   const latestById = readLatestTrackerEntriesByRunKey(WORKFLOW, trackerDir);
   for (const e of latestById.values()) {
     if (e.status === "pending" || e.status === "running") {
-      trackEvent(
+      // Inherit archetype from the stuck row so the sweep marker matches
+      // the row type it's replacing (always "batch-parent" for OCR, but
+      // we route through resolveRowArchetype so this code stays generic).
+      const archetype = resolveRowArchetype(e);
+      emitTrackerRow(
         {
           workflow: WORKFLOW,
           timestamp: new Date().toISOString(),
           id: e.id,
-          runId: e.runId,
+          ...(e.runId ? { runId: e.runId } : {}),
           ...(e.parentRunId ? { parentRunId: e.parentRunId } : {}),
           status: "failed",
           error: "Dashboard restarted while OCR was in progress — please re-upload",
-          ...(e.data ? { data: { ...e.data } } : {}),
+          data: { ...(e.data ?? {}), archetype },
         },
         trackerDir,
       );
