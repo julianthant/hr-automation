@@ -13,7 +13,7 @@ export function retryTaskFromAttempt(
   const now = request.now ?? new Date().toISOString()
   return control.transaction(() => {
     const prior = db.prepare(`
-      SELECT a.*, t.workflow, t.item_id, t.input_json, t.parent_run_id
+      SELECT a.*, t.workflow, t.item_id, t.input_json, t.original_input_json, t.parent_run_id
       FROM task_attempts a
       JOIN tasks t ON t.id = a.task_id
       WHERE a.run_id = @runId
@@ -22,6 +22,7 @@ export function retryTaskFromAttempt(
       workflow: string
       item_id: string
       input_json: string
+      original_input_json: string | null
       parent_run_id: string | null
     }) | undefined
     if (!prior) throw new Error(`No task attempt found for runId ${request.runId}`)
@@ -49,10 +50,20 @@ export function retryTaskFromAttempt(
       itemId: prior.item_id,
       now,
     })
+    // Contract 2 (Uniform Retry): the new attempt runs against the PRISTINE
+    // original input the task was first enqueued with. Reset input_json to
+    // original_input_json when available so the daemon's claim path
+    // (parseJson(row.input_json)) hands the handler the same payload the
+    // first attempt saw — no accumulated state from intervening edits or
+    // adopt-existing overwrites. Legacy rows (pre-migration 11) have
+    // original_input_json = NULL; for those we leave input_json alone, and
+    // the control layer logs a one-time deprecation warning.
+    const resetInputJson = prior.original_input_json ?? prior.input_json
     db.prepare(`
       UPDATE tasks
       SET control_state = 'queued',
           run_id = @runId,
+          input_json = @resetInputJson,
           current_attempt_id = @attemptId,
           claimed_by_worker_id = NULL,
           claimed_at = NULL,
@@ -64,7 +75,7 @@ export function retryTaskFromAttempt(
           parent_run_id = parent_run_id,
           updated_at = @now
       WHERE id = @taskId
-    `).run({ taskId: prior.task_id, runId, attemptId, now })
+    `).run({ taskId: prior.task_id, runId, resetInputJson, attemptId, now })
     const position = (db.prepare(`
       SELECT COUNT(*) AS n
       FROM tasks
