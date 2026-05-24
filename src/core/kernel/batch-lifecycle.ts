@@ -111,9 +111,9 @@ export interface BatchLifecycleOpts<TData = unknown> {
    * Workflow-level archetype — stamped onto the per-item `failed` rows the
    * SIGINT / auth-failure fanout emits. Required so the dashboard's
    * row-archetype resolver gets a stamped value even on synthetic terminal
-   * rows. Defaults to `"single"` for back-compat with tests that omit it.
+   * rows.
    */
-  archetype?: WorkflowArchetype
+  archetype: WorkflowArchetype
   /**
    * Workflow definition — passed so the SIGINT / auth-failure fanout can
    * build rich `data` (operatorSubject, getName/getId, queue title) for
@@ -210,7 +210,7 @@ export async function withBatchLifecycle<TData, R>(
     emitWorkflowEnd(instance, status, opts.trackerDir)
   }
 
-  const workflowArchetype: WorkflowArchetype = opts.archetype ?? 'single'
+  const workflowArchetype: WorkflowArchetype = opts.archetype
   // Build a rich data record for each synthetic failed row so the dashboard
   // dedupe doesn't surface a nameless cancelled card. Use the same
   // buildPendingTrackerData seed the normal pending emit uses (with

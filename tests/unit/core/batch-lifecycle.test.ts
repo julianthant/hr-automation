@@ -25,6 +25,7 @@ test('withBatchLifecycle: happy path emits one workflow_start + one workflow_end
   await withBatchLifecycle(
     {
       workflow: 'lifetest',
+      archetype: 'single',
       perItem: [
         { item: {}, itemId: 'i1', runId: 'r1' },
         { item: {}, itemId: 'i2', runId: 'r2' },
@@ -53,6 +54,7 @@ test('withBatchLifecycle: body throws before any markTerminated → fans out fai
     await withBatchLifecycle(
       {
         workflow: 'authfail',
+        archetype: 'single',
         systems: [{ id: 'ucpath', login: async () => {} }],
         perItem: [
           { item: { n: 'a' }, itemId: 'a', runId: 'ra' },
@@ -89,6 +91,7 @@ test('withBatchLifecycle: body throws after partial markTerminated → only un-t
     await withBatchLifecycle(
       {
         workflow: 'partialfail',
+        archetype: 'single',
         systems: [{ id: 'ucpath', login: async () => {} }],
         perItem: [
           { item: {}, itemId: 'a', runId: 'ra' },
@@ -121,6 +124,7 @@ test('withBatchLifecycle: emits session_create for the allocated instance', asyn
   await withBatchLifecycle(
     {
       workflow: 'sessioncreate',
+      archetype: 'single',
       perItem: [{ item: {}, itemId: 'i', runId: 'r' }],
       trackerDir: dir,
     },
@@ -140,6 +144,7 @@ test('withBatchLifecycle: ownSigint=false skips installing the SIGINT handler', 
   await withBatchLifecycle(
     {
       workflow: 'sigtest',
+      archetype: 'single',
       perItem: [],
       trackerDir: dir,
       ownSigint: false,
@@ -158,6 +163,7 @@ test('withBatchLifecycle: ownSigint default (true) installs and removes the hand
   await withBatchLifecycle(
     {
       workflow: 'sigtest2',
+      archetype: 'single',
       perItem: [],
       trackerDir: dir,
     },

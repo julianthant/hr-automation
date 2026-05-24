@@ -121,12 +121,7 @@ function preEmitPendingForChild<TChildData, TChildSteps extends readonly string[
   runId: string
   archetype: RowArchetype
   trackerDir: string | undefined
-  isDaemonPath: boolean
 }): void {
-  // Daemon path handles its own pre-emit inside ensureDaemonsAndEnqueue
-  // via the `onPreEmitPending` callback below — emitting twice would
-  // produce duplicate rows.
-  if (args.isDaemonPath) return
   const data = buildPendingTrackerData({
     workflow: args.child,
     input: args.input,
@@ -234,7 +229,6 @@ export async function delegateToImpl<TChildData, TChildSteps extends readonly st
     runId: childRunId,
     archetype,
     trackerDir: args.trackerDir,
-    isDaemonPath: false,
   })
 
   if (args.fireAndForget) {
