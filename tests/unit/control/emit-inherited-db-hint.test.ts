@@ -82,7 +82,7 @@ describe("emitInheritedRow — SQLite db hint plumbing (Finding #13)", () => {
     // first invocation is the one we care about — it's the prior-row lookup
     // that bulk cancel would hit O(K*D*L) times.
     assert.ok(spy.mock.calls.length >= 1, "called at least once");
-    const inheritedLookup = spy.mock.calls.find((c) => c[0].runId === "run-abc" && c[0].id === undefined && c[0].lookbackDays === 30);
+    const inheritedLookup = spy.mock.calls.find((c) => c[0].runId === "run-abc" && c[0].itemId === undefined && c[0].lookbackDays === 30);
     // Find the prior-row lookup by its lookbackDays === 30 (emit-inherited.ts)
     // vs lookbackDays === 2 (resolveInstanceForRunId).
     const priorRowLookup = spy.mock.calls.find((c) => c[0].lookbackDays === 30);
