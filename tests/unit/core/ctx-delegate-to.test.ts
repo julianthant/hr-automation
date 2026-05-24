@@ -178,6 +178,10 @@ test("ctx.delegateTo with fireAndForget: true returns pending immediately; child
 
   let parentReturnedAt = 0;
   let childCompletedAt = 0;
+  let childResolve!: () => void;
+  const childCompleted = new Promise<void>((resolve) => {
+    childResolve = resolve;
+  });
   const child = defineWorkflow({
     name: "deleg-child-faf",
     archetype: "single",
@@ -194,7 +198,7 @@ test("ctx.delegateTo with fireAndForget: true returns pending immediately; child
         // Force a microtask boundary so the parent can return BEFORE
         // the child's terminal row lands.
         await new Promise((resolve) => setTimeout(resolve, 25));
-        childCompletedAt = Date.now();
+        childResolve();
       });
     },
   });
@@ -212,8 +216,8 @@ test("ctx.delegateTo with fireAndForget: true returns pending immediately; child
   parentReturnedAt = Date.now();
   const r = observed as { status: string };
   assert.equal(r.status, "pending", "fireAndForget returns pending immediately");
-  // Give the detached child a chance to finish.
-  await new Promise((resolve) => setTimeout(resolve, 80));
+  await childCompleted;
+  childCompletedAt = Date.now();
   assert.ok(childCompletedAt >= parentReturnedAt, "child completes after parent returns");
   const pending = readWorkflowLines(trackerDir, "deleg-child-faf")
     .find((l) => l.status === "pending");
