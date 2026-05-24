@@ -348,6 +348,11 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
 
   const archetype = resolveDelegateArchetype(args.child, args.parentRunId, args.renderAs)
   const expectedItemIds: string[] = []
+  // Parallel to expectedItemIds: index → assigned childRunId from the
+  // daemon enqueue path. Captured here so the fire-and-forget branch can
+  // return ChildRunResults with the real runIds (instead of empty strings)
+  // — the caller may want to query the child's status later.
+  const expectedRunIds: string[] = []
 
   await ensureDaemonsAndEnqueue(
     args.child,
@@ -369,6 +374,7 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
         : {}),
       onPreEmitPending: (item, childRunId, parentRunIdFwd, itemId) => {
         expectedItemIds.push(itemId)
+        expectedRunIds.push(childRunId)
         const extras = args.buildPendingExtras?.(item as TChildData, itemId) ?? {}
         const data = buildPendingTrackerData({
           workflow: args.child,
@@ -398,9 +404,9 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
   )
 
   if (args.fireAndForget) {
-    return expectedItemIds.map<ChildRunResult<TChildData>>((itemId) => ({
+    return expectedItemIds.map<ChildRunResult<TChildData>>((itemId, i) => ({
       workflow: args.child.config.name,
-      runId: "",
+      runId: expectedRunIds[i] ?? "",
       itemId,
       status: "pending",
     }))
