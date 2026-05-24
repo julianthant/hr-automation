@@ -186,10 +186,18 @@ async function runInProcessAndCollectResult<TChildData, TChildSteps extends read
 }
 
 /**
- * Implementation backing `ctx.delegateTo`. Always runs the child
- * in-process so the parent's await semantics are direct and the child's
- * terminal data is immediately available. Use `delegateToAll` for
- * daemon-dispatched fan-out.
+ * Implementation backing `ctx.delegateTo`. Routes daemon-capable children
+ * through `dispatchToDaemonAndWait` so SQLite `tasks.original_input_json`
+ * (Contract 2 tier 1) gets written — without that, a retry of a crashed
+ * single-child delegation falls into the "no SQLite task record found"
+ * branch in `ops/retry.ts`. Non-daemon-capable children (OCR,
+ * sharepoint-download, etc.) stay on the in-process `runWorkflow` path
+ * because they have no `WORKFLOW_LOADERS` entry to spawn a daemon for.
+ *
+ * Fire-and-forget always uses the in-process path. The daemon enqueue
+ * returns before the worker even claims the row, but the parent still
+ * holds a reference to the kernel run, so detaching is simpler when we
+ * stay in-process.
  */
 export async function delegateToImpl<TChildData, TChildSteps extends readonly string[]>(
   args: DelegateCoreArgs<TChildData, TChildSteps>,
@@ -200,6 +208,25 @@ export async function delegateToImpl<TChildData, TChildSteps extends readonly st
     ?? `delegate-${randomUUID().slice(0, 8)}`
   const childRunId = args.runId ?? randomUUID()
   const archetype = resolveDelegateArchetype(args.child, args.parentRunId, args.renderAs)
+
+  // Route daemon-capable, non-fire-and-forget children through the daemon
+  // path so SQLite `tasks.original_input_json` lands (Contract 2 tier 1).
+  // The daemon path itself derives its own itemId via the child config's
+  // `deriveItemId`; when the caller pins an explicit itemId, we have to
+  // pass a `deriveItemId` override that returns it unconditionally so the
+  // SQLite row keys on the pinned id.
+  if (!args.fireAndForget && isDaemonCapable(args.child.config.name)) {
+    const results = await dispatchToDaemonAndWait({
+      parentRunId: args.parentRunId,
+      trackerDir: args.trackerDir,
+      child: args.child,
+      inputs: [args.input],
+      ...(args.renderAs ? { renderAs: args.renderAs } : {}),
+      fireAndForget: false,
+      deriveItemId: args.itemId ? () => childItemId : undefined,
+    })
+    return results[0]
+  }
 
   preEmitPendingForChild({
     child: args.child,
