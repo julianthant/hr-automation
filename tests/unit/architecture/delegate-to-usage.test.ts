@@ -22,8 +22,9 @@
  */
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { listSourceFiles } from "../../_utils/source-scanner.js";
 
 const ROOT = process.cwd();
 const SRC_DIR = join(ROOT, "src");
@@ -42,20 +43,6 @@ const ORCHESTRATOR_ALLOWLIST = new Set<string>([
   "src/workflows/ocr/force-research.ts",
   "src/workflows/ocr/retry-page.ts",
 ]);
-
-function listSourceFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const name of readdirSync(dir)) {
-    const full = join(dir, name);
-    const st = statSync(full);
-    if (st.isDirectory()) {
-      out.push(...listSourceFiles(full));
-    } else if (name.endsWith(".ts") || name.endsWith(".tsx")) {
-      out.push(full);
-    }
-  }
-  return out;
-}
 
 const WORKFLOW_FILES = listSourceFiles(SRC_DIR).filter((file) => {
   const rel = relative(ROOT, file);
