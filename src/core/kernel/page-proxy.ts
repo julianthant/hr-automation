@@ -102,11 +102,6 @@ const FRAME_RETURNING_METHODS = new Set<string>([
   'mainFrame', 'frame', 'frameByUrl', 'parentFrame',
 ])
 
-interface ProxyTarget {
-  readonly target: object
-  readonly signal: AbortSignal
-}
-
 function isOptionsLike(value: unknown): value is Record<string, unknown> {
   // Playwright option objects are plain objects (not arrays / null / class
   // instances). Treating any plain-object last-arg as the options bag matches
@@ -208,7 +203,6 @@ function createProxy<T extends object>(target: T, signal: AbortSignal): T {
   }
   // The Proxy preserves T's structural type, which is what `ctx.page(id)`
   // promises (`Promise<Page>`) so workflow handlers see no API change.
-  void ({} as ProxyTarget) // explicit unused-type discard
   return new Proxy(target, handler) as T
 }
 

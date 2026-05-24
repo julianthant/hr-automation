@@ -30,7 +30,12 @@ export function buildShutdownTrackerData<TData, TSteps extends readonly string[]
 ): Record<string, string> {
   try {
     return buildHttpPendingData(wf, input, parentRunId)
-  } catch {
+  } catch (err) {
+    log.warn(
+      `[Daemon ${wf.config.name}] buildShutdownTrackerData fell back to minimal stamp: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    )
     const data = buildTrackerDataForInput(input)
     data.archetype = deriveRowArchetype(wf.archetype, parentRunId)
     return data
