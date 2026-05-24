@@ -175,4 +175,47 @@ describe("retry uses pristine original input (Contract 2)", () => {
     const originalAfterRetry = taskStore.findOriginalInputForRunId(newPending.runId!);
     assert.deepEqual(originalAfterRetry, { emplId: "1234", effectiveDate: "2026-05-01" });
   });
+
+  it("returns a structured error when both original and current task inputs are missing", async () => {
+    const control = openControlDb({ trackerDir: tmp });
+    const taskStore = createTaskStore(control);
+
+    const [enqueued] = taskStore.enqueueTasks({
+      workflow: "work-study",
+      inputs: [{ emplId: "5678", effectiveDate: "2026-05-02" }],
+      deriveItemId: (input) => input.emplId,
+      runIds: ["corrupt-run"],
+    });
+
+    taskStore.claimNextTask({ workflow: "work-study", workerId: "w1" });
+    taskStore.markTaskFailed({
+      taskId: enqueued.taskId,
+      attemptId: enqueued.attemptId,
+      error: "submit timeout",
+    });
+
+    // Simulate persisted corruption: the live schema prevents input_json
+    // NULL, so this test-local table rebuild removes only that constraint.
+    control.db.exec(`
+      PRAGMA foreign_keys = OFF;
+      CREATE TABLE tasks_corrupt AS SELECT * FROM tasks;
+      DROP TABLE tasks;
+      ALTER TABLE tasks_corrupt RENAME TO tasks;
+    `);
+    control.db.prepare(`
+      UPDATE tasks
+      SET original_input_json = NULL,
+          input_json = NULL
+      WHERE id = @taskId
+    `).run({ taskId: enqueued.taskId });
+
+    const result = await buildRetryHandler(tmp)({
+      workflow: "work-study",
+      id: "5678",
+      runId: "corrupt-run",
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.error, /no original_input_json AND no current input_json/);
+  });
 });
