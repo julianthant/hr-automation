@@ -19,8 +19,7 @@ import type { RegisteredWorkflow } from "../kernel/types.js";
 import { splitPrefilled } from "../kernel/workflow.js";
 import { buildPendingTrackerData } from "../pending-data.js";
 import { allocateLowestBatchDisplayOrdinal } from "../../tracker/batch-display-ordinal.js";
-import { DEFAULT_DIR, emitTrackerRow } from "../../tracker/jsonl.js";
-import { deriveRowArchetype } from "../../domain/row-archetype.js";
+import { DEFAULT_DIR, emitTrackerRow, type StampedData } from "../../tracker/jsonl.js";
 import { log } from "../../utils/log.js";
 
 export interface EnqueueHttpResult {
@@ -130,7 +129,7 @@ export function buildHttpPendingData<TData, TSteps extends readonly string[]>(
   wf: RegisteredWorkflow<TData, TSteps>,
   input: unknown,
   parentRunId?: string,
-): Record<string, string> {
+): StampedData {
   const baseData = buildTrackerDataForInput(input);
   const { cleaned } = splitPrefilled(input);
   const handlerInput = wf.config.schema.parse(cleaned) as TData;
@@ -242,7 +241,7 @@ export async function enqueueFromHttp(
               id,
               runId,
               status: "pending",
-              data: { ...data, archetype: deriveRowArchetype(wf.archetype, stampedParentRunId) },
+              data,
               ...(stampedParentRunId ? { parentRunId: stampedParentRunId } : {}),
               ...(input ? { input } : {}),
             },
@@ -269,7 +268,7 @@ export async function enqueueFromHttp(
               id,
               runId,
               status: "failed",
-              data: { ...data, archetype: deriveRowArchetype(wf.archetype, effectiveParentRunId) },
+              data,
               ...(effectiveParentRunId ? { parentRunId: effectiveParentRunId } : {}),
               error: `Spawn failed before enqueue: ${error}`,
             },

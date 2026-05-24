@@ -4,7 +4,6 @@ import type { ensureDaemonsAndEnqueue as ensureDaemonsAndEnqueueFn } from "./dae
 import { ensureDaemonsAndEnqueue } from "./daemon/client.js";
 import { buildPendingTrackerData } from "./pending-data.js";
 import { emitTrackerRow, type TrackerRowEmission } from "../tracker/jsonl.js";
-import { deriveRowArchetype } from "../domain/row-archetype.js";
 import { log } from "../utils/log.js";
 
 type EnqueueFn<TInput> = (
@@ -68,11 +67,6 @@ export function buildCliAdapter<TArgs extends readonly unknown[], TInput>(
         onPreEmitPending: (item, runId, parentRunId, itemId) => {
           const id = opts.getPendingId?.(item, itemId) ?? itemId;
           const extras = opts.pendingExtras?.(item, itemId, runId, parentRunId);
-          // buildPendingTrackerData stamps `data.archetype` based on the
-          // workflow's declared archetype + parentRunId. We re-stamp via the
-          // helper below as a defense-in-depth so the StampedData contract
-          // is satisfied even if a future buildPendingTrackerData change
-          // moves archetype computation elsewhere.
           const data = buildPendingTrackerData({
             workflow: opts.workflow,
             input: item,
@@ -90,10 +84,7 @@ export function buildCliAdapter<TArgs extends readonly unknown[], TInput>(
             runId,
             ...(parentRunId ? { parentRunId } : {}),
             status: "pending",
-            data: {
-              ...data,
-              archetype: deriveRowArchetype(opts.workflow.archetype, parentRunId),
-            },
+            data,
           });
         },
         ...(opts.onPreEmitFailed

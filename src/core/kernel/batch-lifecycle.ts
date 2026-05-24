@@ -215,9 +215,7 @@ export async function withBatchLifecycle<TData, R>(
   // dedupe doesn't surface a nameless cancelled card. Use the same
   // buildPendingTrackerData seed the normal pending emit uses (with
   // `nameIdStamp: 'always-on-seed'` to force __name/__id stamping even when
-  // the workflow's getName/getId can't extract them from the input alone),
-  // then override `archetype` so it matches the row archetype derived from
-  // the workflow archetype + parentRunId.
+  // the workflow's getName/getId can't extract them from the input alone).
   const buildRowData = (item: unknown, parentRunId: string | undefined): StampedData => {
     const archetype = deriveRowArchetype(workflowArchetype, parentRunId)
     if (!opts.wf) {
@@ -230,9 +228,8 @@ export async function withBatchLifecycle<TData, R>(
         useInitialTrackerSeed: true,
         nameIdStamp: 'always-on-seed',
         parentRunId,
-        includeArchetype: false,
       })
-      return { ...data, archetype }
+      return data
     } catch {
       // Bad shape (e.g. input failed schema for stamping helpers) — fall
       // back to the minimal stamp so the failed row still lands.

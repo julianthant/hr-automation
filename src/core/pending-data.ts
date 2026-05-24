@@ -3,6 +3,7 @@ import { buildInitialTrackerData } from "./kernel/workflow.js";
 import { deriveRowArchetype } from "../domain/row-archetype.js";
 import { operatorSubjectData } from "../domain/operator-subject.js";
 import { rootQueueTitleData } from "../domain/queue-title.js";
+import type { StampedData } from "../tracker/jsonl.js";
 
 export type NameIdStamp = "omit" | "if-truthy-on-merged" | "always-on-seed";
 
@@ -20,8 +21,6 @@ export interface BuildPendingTrackerDataOpts<TInput> {
   /** Bypass the internal `buildInitialTrackerData` call when the caller has already computed the seed. Only consulted when `useInitialTrackerSeed === true`. */
   precomputedSeed?: Record<string, string>;
   nameIdStamp?: NameIdStamp;
-  /** When false, omit `data.archetype` (callers that stamp it elsewhere). Default true. */
-  includeArchetype?: boolean;
 }
 
 function stringifyExtra(extra: Record<string, unknown>): Record<string, string> {
@@ -49,7 +48,7 @@ function stringifyExtra(extra: Record<string, unknown>): Record<string, string> 
  */
 export function buildPendingTrackerData<TInput>(
   opts: BuildPendingTrackerDataOpts<TInput>,
-): Record<string, string> {
+): StampedData {
   const wf = opts.workflow;
   const data: Record<string, string> = {};
 
@@ -86,9 +85,7 @@ export function buildPendingTrackerData<TInput>(
     Object.assign(data, rootQueueTitleData(opts.parentSubject));
   }
 
-  if (opts.includeArchetype !== false) {
-    data.archetype = deriveRowArchetype(wf.archetype, opts.parentRunId);
-  }
+  data.archetype = deriveRowArchetype(wf.archetype, opts.parentRunId);
 
-  return data;
+  return data as StampedData;
 }
