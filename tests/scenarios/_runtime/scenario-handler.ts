@@ -20,6 +20,15 @@ export type ScenarioBeat =
       name: string;
       /** When true, the step body awaits the runtime's `holdAt` hook before returning. */
       hold?: boolean;
+      /**
+       * Contract 5: simulate a long AbortSignal-aware Playwright wait
+       * (e.g. `page.waitForSelector("foo", { timeout: ms })`) inside the
+       * step body. The body awaits a setTimeout for `signalWaitMs` ms, but
+       * subscribes to `ctx.signal` so an operator cancel rejects the wait
+       * within a few ms instead of running the full timeout. Test asserts
+       * cancel completes fast (~100ms) regardless of `signalWaitMs`.
+       */
+      signalWaitMs?: number;
       /** Optional: throw this error from inside the step body (after hold). */
       throw?: Error;
       /** Optional: data merged into the row at the start of the step body. */
@@ -74,6 +83,25 @@ export function cloneWithScript<TData, TSteps extends readonly string[]>(
               hooks.onStepReached?.(beat.name);
               if (beat.updateData) ctx.updateData(beat.updateData);
               if (beat.hold) await hooks.holdAt?.(beat.name);
+              if (typeof beat.signalWaitMs === "number") {
+                // Simulate a long AbortSignal-aware Playwright wait. If the
+                // per-run controller aborts before the timeout fires, the
+                // wait rejects immediately — mirroring how a real
+                // page.waitForSelector with options.signal would behave
+                // when our Page proxy injects ctx.signal.
+                await new Promise<void>((resolve, reject) => {
+                  const timer = setTimeout(resolve, beat.signalWaitMs);
+                  if (ctx.signal.aborted) {
+                    clearTimeout(timer);
+                    reject(new Error("aborted"));
+                    return;
+                  }
+                  ctx.signal.addEventListener("abort", () => {
+                    clearTimeout(timer);
+                    reject(new Error("aborted"));
+                  }, { once: true });
+                });
+              }
               if (beat.throw) throw beat.throw;
             });
           } else {
