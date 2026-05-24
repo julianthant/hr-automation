@@ -266,3 +266,92 @@ test("delegateToImpl with explicit itemId/runId pins the child's row identifiers
   assert.equal(pending?.runId, "pinned-run");
   assert.equal(pending?.parentRunId, "parent-run-pinned");
 });
+
+// Bug #5 — fire-and-forget catch must emit a terminal `failed` JSONL row when
+// `runWorkflow` rejects synchronously (schema-parse error, before
+// `withTrackedWorkflow` is installed). Otherwise the pre-emitted pending row
+// gets stuck pending forever in the dashboard.
+test("delegateToImpl fire-and-forget emits terminal failed row when runWorkflow rejects synchronously", async (t) => {
+  const trackerDir = mkdtempSync(join(tmpdir(), "ctx-delegate-faf-reject-"));
+  t.onTestFinished(() => rmSync(trackerDir, { recursive: true, force: true }));
+
+  // Schema requires a string, but we'll force a number through with `as`,
+  // triggering Zod's parse error in runWorkflow BEFORE withTrackedWorkflow
+  // attaches a lifecycle — i.e. before any terminal row could be written
+  // by the kernel itself.
+  const child = defineWorkflow({
+    name: "deleg-child-faf-reject",
+    archetype: "single",
+    systems: [],
+    authSteps: false,
+    steps: ["work"] as const,
+    schema: z.object({ payload: z.string() }),
+    detailFields: [{ key: "payload", label: "Payload" }],
+    getName: (d) => d.payload ?? "",
+    getId: (d) => d.payload ?? "",
+    handler: async () => {
+      // Unreachable — schema rejection fires before the handler runs.
+    },
+  });
+
+  const result = await delegateToImpl({
+    parentRunId: "parent-run-faf-reject",
+    trackerDir,
+    child,
+    // Intentionally malformed for the schema:
+    input: { payload: 12345 } as unknown as { payload: string },
+    itemId: "faf-reject-item",
+    runId: "faf-reject-run",
+    fireAndForget: true,
+  });
+
+  // delegateToImpl itself returns pending immediately — the reject lands later.
+  assert.equal(result.status, "pending");
+  assert.equal(result.itemId, "faf-reject-item");
+  assert.equal(result.runId, "faf-reject-run");
+
+  // Yield several microtasks + a macrotask to let the void-Promise's catch run.
+  await new Promise((r) => setTimeout(r, 50));
+
+  const lines = readWorkflowLines(trackerDir, "deleg-child-faf-reject");
+  const pending = lines.find((l) => l.status === "pending");
+  assert.ok(pending, "fire-and-forget still pre-emits the pending row");
+  assert.equal(pending!.id, "faf-reject-item");
+  assert.equal(pending!.runId, "faf-reject-run");
+
+  const failed = lines.find((l) => l.status === "failed");
+  assert.ok(failed, "terminal failed row must be emitted on synchronous reject (Bug #5)");
+  assert.equal(failed!.id, "faf-reject-item", "failed row keys on same itemId as pending");
+  assert.equal(failed!.runId, "faf-reject-run", "failed row keys on same runId as pending");
+  assert.equal(failed!.parentRunId, "parent-run-faf-reject", "failed row inherits parentRunId");
+  assert.equal(
+    (failed!.data as { archetype?: string }).archetype,
+    "delegate-child",
+    "failed row stamps the same archetype as the pending row",
+  );
+});
+
+// Bug #4 — delegateToImpl in-process fire-and-forget result MUST carry the
+// runId we generated, not an empty string (retry-by-runId / dashboard
+// navigation / watchChildRuns correlation all key off runId). The
+// in-process branch returns `childRunId` directly; this test pins the
+// behavior so a future refactor can't silently drop it.
+test("delegateToImpl fire-and-forget in-process result carries the assigned runId", async (t) => {
+  const trackerDir = mkdtempSync(join(tmpdir(), "ctx-delegate-faf-runid-"));
+  t.onTestFinished(() => rmSync(trackerDir, { recursive: true, force: true }));
+
+  const child = makeChildWorkflow({ name: "deleg-child-faf-runid" });
+  const result = await delegateToImpl({
+    parentRunId: "parent-run-faf-runid",
+    trackerDir,
+    child,
+    input: { payload: "x" },
+    itemId: "faf-runid-item",
+    runId: "faf-runid-run",
+    fireAndForget: true,
+  });
+  assert.equal(result.runId, "faf-runid-run", "fire-and-forget result must carry the runId, never empty (Bug #4)");
+  assert.notEqual(result.runId, "");
+  // Drain the child so the tracker file is fully written before teardown.
+  await new Promise((r) => setTimeout(r, 50));
+});
