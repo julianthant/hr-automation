@@ -99,7 +99,9 @@ describe('in-process delegation propagates parent signal (Finding #7)', () => {
     t.onTestFinished(() => rmSync(trackerDir, { recursive: true, force: true }))
 
     // Capture the child's ctx so we can inspect its signal from the test.
-    let childCtxSignal: AbortSignal | null = null
+    // Wrap in a ref object so TS doesn't narrow the closure-captured value
+    // back to its initializer type (`null`) at later access points.
+    const childCtxRef: { signal: AbortSignal | null } = { signal: null }
     let childObservedAbortReason: unknown = null
     let childResolveStarted!: () => void
     const childStarted = new Promise<void>((r) => { childResolveStarted = r })
@@ -115,7 +117,7 @@ describe('in-process delegation propagates parent signal (Finding #7)', () => {
       getName: (d) => d.payload ?? '',
       getId: (d) => d.payload ?? '',
       handler: async (ctx) => {
-        childCtxSignal = ctx.signal
+        childCtxRef.signal = ctx.signal
         await ctx.step('wait', async () => {
           // Signal the test we're inside the handler, then await an
           // AbortSignal-aware promise that resolves only on abort.
@@ -146,11 +148,11 @@ describe('in-process delegation propagates parent signal (Finding #7)', () => {
 
     // Wait until the child is inside its handler, then abort the parent.
     await childStarted
-    assert.equal(childCtxSignal?.aborted, false, 'child signal starts unaborted')
+    assert.equal(childCtxRef.signal?.aborted, false, 'child signal starts unaborted')
     parentController.abort(new Error('parent cancelled'))
 
     const result = await childPromise
-    assert.equal(childCtxSignal!.aborted, true, 'child ctx.signal flips to aborted after parent abort')
+    assert.equal(childCtxRef.signal!.aborted, true, 'child ctx.signal flips to aborted after parent abort')
     assert.ok(childObservedAbortReason, 'child observed the abort via its signal listener')
     // The child threw inside ctx.step due to the abort — should be failed/cancelled.
     assert.ok(result.status === 'failed' || result.status === 'cancelled', `expected failed/cancelled, got ${result.status}`)
@@ -210,10 +212,16 @@ describe('ctx.page(id) proxy — signal injection', () => {
    * makeCtx so we exercise the full ctx.page() → wrapPageWithSignal() path.
    */
   function buildCtxWithFakePage(controller: AbortController) {
+    // Hold typed vi.fn() mocks separately so tests can read `.mock.calls`
+    // — the `as unknown as Page` cast below erases vitest's mock metadata
+    // from the Page surface, but the standalone refs keep it.
+    const clickMock = vi.fn().mockResolvedValue(undefined)
+    const evaluateMock = vi.fn().mockResolvedValue(42)
+    const gotoMock = vi.fn().mockResolvedValue(undefined)
     const fakePage = {
-      click: vi.fn().mockResolvedValue(undefined),
-      evaluate: vi.fn().mockResolvedValue(42),
-      goto: vi.fn().mockResolvedValue(undefined),
+      click: clickMock,
+      evaluate: evaluateMock,
+      goto: gotoMock,
     } as unknown as Page
 
     // Session.forTesting requires: systems[], browsers Map, readyPromises Map.
@@ -246,31 +254,31 @@ describe('ctx.page(id) proxy — signal injection', () => {
       signal: controller.signal,
     })
 
-    return { ctx, fakePage }
+    return { ctx, fakePage, clickMock, evaluateMock, gotoMock }
   }
 
   test('click() injects signal into options arg', async () => {
     const controller = new AbortController()
-    const { ctx, fakePage } = buildCtxWithFakePage(controller)
+    const { ctx, clickMock } = buildCtxWithFakePage(controller)
 
     const proxyPage = await ctx.page('ucpath')
     await proxyPage.click('button')
 
-    assert.equal(fakePage.click.mock.calls.length, 1, 'click was called once')
-    const [, opts] = fakePage.click.mock.calls[0] as [string, { signal?: AbortSignal }]
+    assert.equal(clickMock.mock.calls.length, 1, 'click was called once')
+    const [, opts] = clickMock.mock.calls[0] as [string, { signal?: AbortSignal }]
     assert.ok(opts && typeof opts === 'object', 'options object was appended')
     assert.equal(opts.signal, controller.signal, 'ctx.signal was injected into click options')
   })
 
   test('goto() injects signal into options arg', async () => {
     const controller = new AbortController()
-    const { ctx, fakePage } = buildCtxWithFakePage(controller)
+    const { ctx, gotoMock } = buildCtxWithFakePage(controller)
 
     const proxyPage = await ctx.page('ucpath')
     await proxyPage.goto('about:blank')
 
-    assert.equal(fakePage.goto.mock.calls.length, 1, 'goto was called once')
-    const [, opts] = fakePage.goto.mock.calls[0] as [string, { signal?: AbortSignal }]
+    assert.equal(gotoMock.mock.calls.length, 1, 'goto was called once')
+    const [, opts] = gotoMock.mock.calls[0] as [string, { signal?: AbortSignal }]
     assert.ok(opts && typeof opts === 'object', 'options object was appended')
     assert.equal(opts.signal, controller.signal, 'ctx.signal was injected into goto options')
   })
@@ -280,26 +288,26 @@ describe('ctx.page(id) proxy — signal injection', () => {
     // `{ signal }` as a phantom second arg. The page function would receive
     // { signal } as its `arg` parameter — misbehavior in every evaluate call.
     const controller = new AbortController()
-    const { ctx, fakePage } = buildCtxWithFakePage(controller)
+    const { ctx, evaluateMock } = buildCtxWithFakePage(controller)
 
     const proxyPage = await ctx.page('ucpath')
     await proxyPage.evaluate(() => 42)
 
-    assert.equal(fakePage.evaluate.mock.calls.length, 1)
-    const call = fakePage.evaluate.mock.calls[0] as unknown[]
+    assert.equal(evaluateMock.mock.calls.length, 1)
+    const call = evaluateMock.mock.calls[0] as unknown[]
     assert.equal(call.length, 1, 'evaluate must be called with exactly one arg — no phantom signal injection')
   })
 
   test('evaluate(fn, arg) with plain arg — underlying evaluate called with exactly (fn, arg), no signal', async () => {
     const controller = new AbortController()
-    const { ctx, fakePage } = buildCtxWithFakePage(controller)
+    const { ctx, evaluateMock } = buildCtxWithFakePage(controller)
 
     const proxyPage = await ctx.page('ucpath')
     const fn = (x: number) => x + 1
     await proxyPage.evaluate(fn, 10)
 
-    assert.equal(fakePage.evaluate.mock.calls.length, 1)
-    const call = fakePage.evaluate.mock.calls[0] as unknown[]
+    assert.equal(evaluateMock.mock.calls.length, 1)
+    const call = evaluateMock.mock.calls[0] as unknown[]
     assert.equal(call.length, 2, 'evaluate must be called with exactly (fn, arg) — no signal appended as third arg')
     assert.equal(call[1], 10, 'second arg must be the original arg value, not merged with signal')
     assert.ok(
@@ -312,13 +320,19 @@ describe('ctx.page(id) proxy — signal injection', () => {
     // The proxy must NOT override a caller-supplied signal — callers that
     // wire their own AbortController for finer-grain control must win.
     const controller = new AbortController()
-    const { ctx, fakePage } = buildCtxWithFakePage(controller)
+    const { ctx, clickMock } = buildCtxWithFakePage(controller)
 
     const callerController = new AbortController()
     const proxyPage = await ctx.page('ucpath')
-    await proxyPage.click('button', { signal: callerController.signal })
+    // The proxy's signal injection itself uses a known Page method type; cast
+    // here to allow the test to pass an explicit options.signal that Playwright's
+    // type surface doesn't formally publish (it does support it at runtime).
+    await (proxyPage.click as (sel: string, opts: { signal?: AbortSignal }) => Promise<void>)(
+      'button',
+      { signal: callerController.signal },
+    )
 
-    const [, opts] = fakePage.click.mock.calls[0] as [string, { signal?: AbortSignal }]
+    const [, opts] = clickMock.mock.calls[0] as [string, { signal?: AbortSignal }]
     assert.equal(
       opts.signal,
       callerController.signal,
