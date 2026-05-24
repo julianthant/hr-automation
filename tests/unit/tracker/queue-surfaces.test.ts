@@ -40,26 +40,6 @@ describe("buildTrackerQueueSurfaces", () => {
     assert.deepEqual(result.flatEntries.map((e) => e.id), []);
   });
 
-  it("classifies legacy OCR awaiting-approval (no stamped archetype) as group card via legacy resolver", () => {
-    const ocr = entry({
-      workflow: "ocr",
-      id: "ocr-legacy",
-      runId: "ocr-run-legacy",
-      status: "running",
-      step: "awaiting-approval",
-      data: { mode: "prepare", formType: "emergency-contact" },
-    });
-
-    const result = buildTrackerQueueSurfaces({
-      entries: [ocr],
-      delegationSourceEntries: [ocr],
-    });
-
-    assert.equal(result.groupRows.length, 1);
-    assert.equal(result.groupRows[0]?.kind, "approval-delegation");
-    assert.equal(result.groupRows[0]?.approvalState, "awaiting-approval");
-  });
-
   it("classifies any stamped batch-parent as a group card anchor, regardless of workflow name", () => {
     const row = entry({
       workflow: "some-future-workflow",

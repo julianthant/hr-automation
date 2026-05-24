@@ -119,10 +119,13 @@ export function emitDashboardCancelTrackerRow(
 ): void {
   const ts = new Date().toISOString();
   // Look up the latest prior row for this (id, runId) so the cancel row
-  // inherits its archetype + parentRunId. Without the inheritance, the
-  // archetype would default to "single" / "delegate-child" via
-  // resolveRowArchetype's fallback path — and batch-member / batch-parent
-  // cancellations would surface as the wrong row type in the dashboard.
+  // inherits its archetype + parentRunId. Post-Contract 1, archetype is
+  // required at the type level on `emitTrackerRow` — explicit inheritance
+  // keeps the cancel row in the same row type as the run it cancels
+  // (batch-member cancels stay batch-member, etc.). The `?? "single"` only
+  // fires when there is NO prior row at all (cancel of an item that was
+  // never enqueued), which is itself a no-op since the dashboard has
+  // nothing to display.
   const priorEntry = findLatestEntryForPredicate({
     workflow,
     trackerDir: dir,

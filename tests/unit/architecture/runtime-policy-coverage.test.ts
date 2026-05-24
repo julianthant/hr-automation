@@ -84,6 +84,7 @@ test("batch-view visible actions stay scoped to opened batch member run ids", ()
       parentRunId: "batch-run",
       status: "failed",
       timestamp: "2026-05-20T12:00:00.000Z",
+      data: { archetype: "batch-member" },
     },
     {
       workflow: "eid-lookup",
@@ -92,6 +93,7 @@ test("batch-view visible actions stay scoped to opened batch member run ids", ()
       parentRunId: "batch-run",
       status: "failed",
       timestamp: "2026-05-20T12:01:00.000Z",
+      data: { archetype: "batch-member" },
     },
   ] as TrackerEntry[];
 

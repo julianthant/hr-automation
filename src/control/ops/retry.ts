@@ -26,33 +26,15 @@ import { log } from "../../utils/log.js";
 /**
  * Contract 2 (Uniform Retry): the kernel retries every workflow the same
  * way — enqueue a new attempt with the SAME pristine input the prior run
- * saw, and re-run the steps from the beginning. There is no per-workflow
- * `supportsRetry` gate, no structured "retry not supported" error.
+ * saw (read from `tasks.original_input_json`, stamped at first enqueue),
+ * and re-run the steps from the beginning. There is no per-workflow
+ * `supportsRetry` gate, no structured "retry not supported" error, no
+ * legacy JSONL-reconstruction fallback — historic tracker data was
+ * deleted and the contract is mandatory for every row going forward.
+ *
  * Idempotency is the workflow's responsibility (steps with irreversible
  * side effects must probe live state before re-creating).
- *
- * Implementation:
- *   1. Read the persisted original input from the task record
- *      (`tasks.original_input_json`, stamped at first enqueue).
- *   2. If the task is missing that column (rows enqueued before migration
- *      11 landed), fall back to the legacy JSONL reconstruction path
- *      below. A one-time `log.warn` per process surfaces the fallback so
- *      it's visible in operator logs but doesn't spam them.
  */
-
-let loggedLegacyRetryFallback = false;
-function warnLegacyRetryFallbackOnce(workflow: string, id: string, runId: string | undefined): void {
-  if (loggedLegacyRetryFallback) return;
-  loggedLegacyRetryFallback = true;
-  log.warn(
-    `[retry] falling back to JSONL reconstruction for legacy row — originalInput not stamped (workflow=${workflow} id=${id}${runId ? ` runId=${runId}` : ""}). Future legacy fallbacks are silent this process.`,
-  );
-}
-
-/** Test-only: clear the legacy-fallback warning latch so each test gets a fresh warn. */
-export function __resetLegacyRetryFallbackWarningForTests(): void {
-  loggedLegacyRetryFallback = false;
-}
 
 export interface RetryRequest {
   workflow: string;
@@ -141,15 +123,16 @@ function extractLatestParentRunId(rows: TrackerEntry[]): string | undefined {
 
 /**
  * Lookup an entry's input by (workflow, id, runId?). SQLite tier-1 runs first
- * when `runId` is set; one JSONL pass supplies input fallback, latest parent run
- * id, and accumulated data for merge.
+ * when `runId` is set; one JSONL pass supplies input fallback, latest parent
+ * run id, and accumulated data for merge.
  *
- * @deprecated Contract 2 (Uniform Retry) reads the pristine original input
- * from `tasks.original_input_json` directly. This function is only used as
- * a legacy fallback for tracker rows enqueued before migration 11 landed,
- * and for edit-and-resume which needs `mergedEntryStrings` to seed
- * `prefilledData`. The folding of accumulated `data.*` fields leaks state
- * from prior runs into the retry's input — do NOT add new callers.
+ * **Edit-and-resume only.** Contract 2 retries read the pristine original
+ * input from `tasks.original_input_json` directly. This function's
+ * `mergedEntryStrings` exists so edit-and-resume can seed the `prefilledData`
+ * channel with previously-extracted non-editable fields (e.g. separations'
+ * `rawTerminationType` carried forward into the prefill). Do NOT call this
+ * from a pure retry path — folding accumulated `data.*` fields leaks state
+ * from prior runs into the input.
  */
 export function findEntryInput(
   workflow: string,
@@ -272,24 +255,21 @@ async function reEnqueueEntry(
     const task = resolveControlTask(stores.taskStore, wf, id, runId);
     if (task) {
       // Contract 2: read the pristine original input from the task record.
-      // Falls back to the current input_json only when migration 11 hasn't
-      // touched this row yet (legacy). The fallback emits a one-time warn so
-      // the operator can see they're on the legacy path — Contract 2 is the
-      // long-term plan; legacy rows drain naturally as workflows complete.
+      // Stamped at first enqueue (migration 11). Historic rows that predate
+      // the column were purged — a null here is a bug, not a legacy state.
       const originalInput = stores.taskStore.findOriginalInputForRunId(runId);
-      const usingLegacyFallback = originalInput === null;
-      if (usingLegacyFallback) {
-        warnLegacyRetryFallbackOnce(wf, id, runId);
-      }
-      const input = asRecordInput(originalInput ?? task.input);
+      const input = asRecordInput(originalInput);
       if (!input) {
-        return { ok: false, error: "stored task input is unavailable for retry" };
+        return {
+          ok: false,
+          error: `retry: tasks.original_input_json missing for runId=${runId} — every row must be stamped at enqueue (Contract 2). This is a bug, not a legacy state.`,
+        };
       }
       // Log the input fields being used so retries are debuggable from
       // operator logs (Contract 2, Step C). Just key names — values can
       // contain PII / huge prefilledData payloads.
       log.step(
-        `[retry] enqueueing ${wf}/${id} from runId=${runId} with ${usingLegacyFallback ? "legacy-reconstructed" : "pristine original"} input keys=[${Object.keys(input).sort().join(", ")}]`,
+        `[retry] enqueueing ${wf}/${id} from runId=${runId} with pristine original input keys=[${Object.keys(input).sort().join(", ")}]`,
       );
       const resolvedParent =
         requestedParent ??
@@ -344,27 +324,29 @@ async function reEnqueueEntry(
     return reEnqueueInProcessEntry(wf, id, runId, dir, date);
   }
 
-  // Fall-through: no SQLite task row (legacy data), OR edit-and-resume
-  // (prefilledData given — needs JSONL merge to seed the prefill channel).
-  // Pure retries hitting this branch are by definition legacy rows that
-  // weren't stamped with `original_input_json` — warn once so the regression
-  // is visible.
+  // Edit-and-resume only: prefilledData carries user edits that need to be
+  // merged with previously-extracted (non-editable) fields like separations'
+  // rawTerminationType. findEntryInput's mergedEntryStrings seeds that prefill
+  // channel — this is NOT a retry fallback, it's the legitimate edit-and-
+  // resume path. A pure retry should never reach here (the SQLite task lookup
+  // above handles all retries); if it does, the prior task row is missing,
+  // which is a bug.
   if (!prefilledData) {
-    warnLegacyRetryFallbackOnce(wf, id, runId);
+    return {
+      ok: false,
+      error: `retry: no SQLite task record found for workflow=${wf} id=${id}${runId ? ` runId=${runId}` : ""} — pure retries require the task store row (Contract 2).`,
+    };
   }
   const lookup = findEntryInput(wf, id, runId, dir, date);
   if ("error" in lookup) return { ok: false, error: lookup.error };
 
-  let input: Record<string, unknown> = lookup.input;
-  if (prefilledData) {
-    input = {
-      ...input,
-      prefilledData: {
-        ...lookup.mergedEntryStrings,
-        ...prefilledData,
-      },
-    };
-  }
+  const input: Record<string, unknown> = {
+    ...lookup.input,
+    prefilledData: {
+      ...lookup.mergedEntryStrings,
+      ...prefilledData,
+    },
+  };
 
   const resolvedParent = requestedParent ?? lookup.latestParentRunId;
   const result = await enqueueFromHttp(wf, [input], {
