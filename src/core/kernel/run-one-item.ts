@@ -156,7 +156,15 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
         if (v && !controller.signal.aborted) {
           controller.abort(new Error('cancel requested'))
         }
-        return v
+        // Once aborted, stay aborted. The daemon may clear `state.cancelTarget`
+        // back to null after the first cancel signal lands (per-run cancel
+        // commands flip cancelTarget transiently), so a subsequent probe on
+        // the underlying `args.isCancelRequested()` returns false even though
+        // the controller's signal is still aborted. Without this fall-back,
+        // the Stepper's between-step probe stops recognizing the cancel and
+        // the AbortError escapes mapEscapedHandlerError as `failed` instead
+        // of `cancelled`.
+        return v || controller.signal.aborted
       }
     : undefined
 
