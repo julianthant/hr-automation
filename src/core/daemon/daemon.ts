@@ -453,37 +453,38 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
               state.lastActivity = Date.now()
               const itemAuthTimings = itemAuthTimingResolver.resolveForNextItem()
               emitItemStart(instance, item.id, trackerDir, runId)
-              const r = await runOneItem({
-                wf,
-                session,
-                // No cast: runOneItem validates `item` via wf.config.schema.parse
-                // before invoking the handler, so the claim loop hands the raw
-                // input straight through.
-                item: item.input as TData,
-                itemId: item.id,
-                runId,
-                trackerDir,
-                callerPreEmits: false,
-                preAssignedInstance: instance,
-                authTimings: itemAuthTimings,
-                isCancelRequested: () =>
-                  state.cancelTarget?.itemId === item.id && state.cancelTarget?.runId === runId,
-                onCancelController: (controller) => {
-                  // Stash the per-run AbortController so cancel_task /
-                  // /cancel-current can abort in-flight Playwright work
-                  // immediately (Contract 5) instead of waiting on the
-                  // step-boundary probe. Cleared below after the item
-                  // finishes so a late command can't poison the next item.
-                  state.currentRunController = controller
-                },
-                ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
-              })
-              emitItemComplete(instance, item.id, trackerDir, runId)
-              if (wf.config.systems.some((s) => s.id === 'ucpath')) {
-                emitUcpathIdleSignal(instance, trackerDir, 'touch')
-              }
-              markTerminated(runId)
-              const taskStateAfterRun = item.taskId ? taskStore.getTask(item.taskId)?.state : null
+              try {
+                const r = await runOneItem({
+                  wf,
+                  session,
+                  // No cast: runOneItem validates `item` via wf.config.schema.parse
+                  // before invoking the handler, so the claim loop hands the raw
+                  // input straight through.
+                  item: item.input as TData,
+                  itemId: item.id,
+                  runId,
+                  trackerDir,
+                  callerPreEmits: false,
+                  preAssignedInstance: instance,
+                  authTimings: itemAuthTimings,
+                  isCancelRequested: () =>
+                    state.cancelTarget?.itemId === item.id && state.cancelTarget?.runId === runId,
+                  onCancelController: (controller) => {
+                    // Stash the per-run AbortController so cancel_task /
+                    // /cancel-current can abort in-flight Playwright work
+                    // immediately (Contract 5) instead of waiting on the
+                    // step-boundary probe. Cleared below after the item
+                    // finishes so a late command can't poison the next item.
+                    state.currentRunController = controller
+                  },
+                  ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
+                })
+                emitItemComplete(instance, item.id, trackerDir, runId)
+                if (wf.config.systems.some((s) => s.id === 'ucpath')) {
+                  emitUcpathIdleSignal(instance, trackerDir, 'touch')
+                }
+                markTerminated(runId)
+                const taskStateAfterRun = item.taskId ? taskStore.getTask(item.taskId)?.state : null
               // Cancellation precedence: if a cancel was requested at any
               // point during the run (via cancelTarget OR SQLite task state
               // transition), the item is cancelled — regardless of whether
@@ -493,88 +494,105 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
               // → marked Done → cancelled tracker row from the dashboard
               // gets overwritten. Cancel always wins over both done and
               // failure.
-              const cancelRequestedForThisItem =
-                (state.cancelTarget?.itemId === item.id && state.cancelTarget?.runId === runId) ||
-                taskStateAfterRun === 'cancelled' ||
-                taskStateAfterRun === 'cancel_requested' ||
-                taskStateAfterRun === 'cancelling'
-              const isCancelOutcome = cancelRequestedForThisItem || (!r.ok && r.kind === 'cancelled')
+                const cancelRequestedForThisItem =
+                  (state.cancelTarget?.itemId === item.id && state.cancelTarget?.runId === runId) ||
+                  taskStateAfterRun === 'cancelled' ||
+                  taskStateAfterRun === 'cancel_requested' ||
+                  taskStateAfterRun === 'cancelling'
+                const isCancelOutcome = cancelRequestedForThisItem || (!r.ok && r.kind === 'cancelled')
 
-              if (isCancelOutcome) {
-                const cancelError =
-                  !r.ok && r.kind === 'cancelled'
-                    ? r.error
-                    : 'cancelled by user from dashboard'
-                await markItemCancelled(wf.config.name, item.id, cancelError, runId, trackerDir)
-                if (item.taskId) {
-                  taskStore.markDependencyFromChildTerminal({
-                    childTaskId: item.taskId,
-                    childState: 'cancelled',
-                  })
-                }
-                // Always overwrite with a cancelled tracker row, even if
-                // the handler returned r.ok=true (which would have written
-                // a status:done row). The latest tracker entry wins on
-                // dedup, so this row makes the badge show Cancelled.
-                emitTrackerRow(
-                  {
-                    workflow: wf.config.name,
-                    timestamp: new Date().toISOString(),
-                    id: item.id,
-                    runId,
-                    status: 'failed',
-                    step: 'cancelled',
-                    // buildShutdownTrackerData always stamps `data.archetype`
-                    // (via buildHttpPendingData or its fallback path) so the
-                    // returned record satisfies StampedData at runtime.
-                    data: buildShutdownTrackerData(wf, item.input, item.parentRunId) as StampedData,
-                    ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
-                    error: cancelError,
-                  },
-                  trackerDir,
-                )
-                emitItemCancelled(instance, item.id, cancelError, trackerDir, runId)
-              } else if (r.ok) {
-                await markItemDone(wf.config.name, item.id, runId, trackerDir)
-                if (item.taskId) {
-                  taskStore.markDependencyFromChildTerminal({
-                    childTaskId: item.taskId,
-                    childState: 'done',
-                  })
-                }
-              } else {
-                await markItemFailed(wf.config.name, item.id, r.error, runId, trackerDir)
-                if (item.taskId) {
-                  taskStore.markDependencyFromChildTerminal({
-                    childTaskId: item.taskId,
-                    childState: 'failed',
-                  })
-                }
-              }
-              // Reset every system's page to its `resetUrl` after a
-              // cancelled item — leaves the daemon's auth intact but
-              // returns the workflow surface to a clean starting state
-              // for the next claim. Reset failures are best-effort: a
-              // failed reset won't block the next item from claiming.
-              // Fires for both cooperative + force-cancel paths (force
-              // navigates pages to about:blank, so reset is required to
-              // restore the resetUrl before the next claim).
-              if (isCancelOutcome) {
-                for (const sys of wf.config.systems) {
-                  try {
-                    await session.reset(sys.id)
-                  } catch (resetErr) {
-                    log.warn(
-                      `[Daemon ${instanceId}] post-cancel reset(${sys.id}) failed: ${
-                        resetErr instanceof Error ? resetErr.message : String(resetErr)
-                      }`,
-                    )
+                if (isCancelOutcome) {
+                  const cancelError =
+                    !r.ok && r.kind === 'cancelled'
+                      ? r.error
+                      : 'cancelled by user from dashboard'
+                  await markItemCancelled(wf.config.name, item.id, cancelError, runId, trackerDir)
+                  if (item.taskId) {
+                    taskStore.markDependencyFromChildTerminal({
+                      childTaskId: item.taskId,
+                      childState: 'cancelled',
+                    })
+                  }
+                  // Always overwrite with a cancelled tracker row, even if
+                  // the handler returned r.ok=true (which would have written
+                  // a status:done row). The latest tracker entry wins on
+                  // dedup, so this row makes the badge show Cancelled.
+                  emitTrackerRow(
+                    {
+                      workflow: wf.config.name,
+                      timestamp: new Date().toISOString(),
+                      id: item.id,
+                      runId,
+                      status: 'failed',
+                      step: 'cancelled',
+                      // buildShutdownTrackerData always stamps `data.archetype`
+                      // (via buildHttpPendingData or its fallback path) so the
+                      // returned record satisfies StampedData at runtime.
+                      data: buildShutdownTrackerData(wf, item.input, item.parentRunId) as StampedData,
+                      ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
+                      error: cancelError,
+                    },
+                    trackerDir,
+                  )
+                  emitItemCancelled(instance, item.id, cancelError, trackerDir, runId)
+                } else if (r.ok) {
+                  await markItemDone(wf.config.name, item.id, runId, trackerDir)
+                  if (item.taskId) {
+                    taskStore.markDependencyFromChildTerminal({
+                      childTaskId: item.taskId,
+                      childState: 'done',
+                    })
+                  }
+                } else {
+                  await markItemFailed(wf.config.name, item.id, r.error, runId, trackerDir)
+                  if (item.taskId) {
+                    taskStore.markDependencyFromChildTerminal({
+                      childTaskId: item.taskId,
+                      childState: 'failed',
+                    })
                   }
                 }
+                // Reset every system's page to its `resetUrl` after a
+                // cancelled item — leaves the daemon's auth intact but
+                // returns the workflow surface to a clean starting state
+                // for the next claim. Reset failures are best-effort: a
+                // failed reset won't block the next item from claiming.
+                // Fires for both cooperative + force-cancel paths (force
+                // navigates pages to about:blank, so reset is required to
+                // restore the resetUrl before the next claim).
+                if (isCancelOutcome) {
+                  for (const sys of wf.config.systems) {
+                    try {
+                      await session.reset(sys.id)
+                    } catch (resetErr) {
+                      log.warn(
+                        `[Daemon ${instanceId}] post-cancel reset(${sys.id}) failed: ${
+                          resetErr instanceof Error ? resetErr.message : String(resetErr)
+                        }`,
+                      )
+                    }
+                  }
+                }
+              } finally {
+                // Per-item cleanup MUST run on both happy and throw paths
+                // (Finding #9). If `runOneItem` throws — e.g. the schema
+                // validation error at run-one-item.ts that fires BEFORE the
+                // controller setup — these fields would otherwise stay
+                // populated, and a late `/cancel-current` would abort the
+                // dead controller from the previous item and stamp a stale
+                // `cancelTarget`. Only null the cancelTarget if it was for
+                // THIS just-finished item; a cancel that arrived for a
+                // future run (unlikely given single-claim semantics, but
+                // robust) is preserved.
+                if (
+                  state.cancelTarget?.itemId === item.id
+                  && state.cancelTarget?.runId === runId
+                ) {
+                  state.cancelTarget = null
+                }
+                state.currentRunController = null
+                state.inFlight = null
               }
-              state.cancelTarget = null
-              state.currentRunController = null
-              state.inFlight = null
               setPhase('idle')
               emitWorkerHeartbeat()
               continue
