@@ -24,8 +24,9 @@
  */
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { listSourceFiles } from "../../_utils/source-scanner.js";
 
 import * as trackerBarrel from "../../../src/tracker/jsonl.js";
 
@@ -71,20 +72,6 @@ const JSONL_WRITE_ALLOWLIST = new Set<string>([
   "src/control/ops/shared.ts",
   "src/core/daemon/queue.ts",
 ]);
-
-function listSourceFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const name of readdirSync(dir)) {
-    const full = join(dir, name);
-    const st = statSync(full);
-    if (st.isDirectory()) {
-      out.push(...listSourceFiles(full));
-    } else if (name.endsWith(".ts") || name.endsWith(".tsx")) {
-      out.push(full);
-    }
-  }
-  return out;
-}
 
 const SRC_FILES = listSourceFiles(SRC_DIR);
 
