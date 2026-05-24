@@ -100,6 +100,14 @@ export async function createScenarioRuntime<TData, TSteps extends readonly strin
   const holdRejecters = new Map<string, (err: Error) => void>();
   let cancelRequested = false;
 
+  // Per-run AbortControllers (Contract 5). The kernel's `runOneItem`
+  // constructs an AbortController per run; we capture it via
+  // `onCancelController` so `cancelRow(runId)` can `.abort()` it directly,
+  // unblocking any AbortSignal-aware await inside a scripted beat (used by
+  // `cancel-during-playwright-wait.test.ts` to simulate a long
+  // `waitForSelector` rejecting on cancel).
+  const runControllers = new Map<string, AbortController>();
+
   // Shared hooks used by every per-enqueue workflow clone. Each enqueue
   // clones the production workflow with its own scripted handler (so retry
   // scenarios can pass different beats per run); the hooks reference the
@@ -166,8 +174,12 @@ export async function createScenarioRuntime<TData, TSteps extends readonly strin
       trackerDir,
       callerPreEmits: false,
       isCancelRequested: () => cancelRequested,
+      onCancelController: (controller) => {
+        runControllers.set(runId, controller);
+      },
     }).then((res) => {
       terminalResolvers.get(runId)?.();
+      runControllers.delete(runId);
       return res;
     });
     return { runId, itemId: String(itemId), result };
@@ -193,8 +205,18 @@ export async function createScenarioRuntime<TData, TSteps extends readonly strin
   const waitForTerminal: ScenarioRuntime<TData>["waitForTerminal"] = (runId, timeoutMs = 5000) =>
     withTimeout(`waitForTerminal("${runId}")`, ensureTerminalPromise(runId), timeoutMs);
 
-  const cancelRow: ScenarioRuntime<TData>["cancelRow"] = async () => {
+  const cancelRow: ScenarioRuntime<TData>["cancelRow"] = async (runId) => {
     cancelRequested = true;
+    // Contract 5: abort the per-run AbortController so any
+    // AbortSignal-aware await inside a scripted beat (e.g. simulated
+    // `page.waitForSelector` via `AbortSignal.timeout`-style logic)
+    // rejects immediately. Existing tests that use `hold: true` still
+    // work via the hold-rejecter path below — the controller abort is
+    // additive.
+    const controller = runControllers.get(runId);
+    if (controller && !controller.signal.aborted) {
+      controller.abort(new Error("scenario cancel"));
+    }
     // Release every active hold by rejecting — the rejected promise propagates
     // out of `ctx.step`'s body, the kernel sees a thrown error PLUS an active
     // isCancelRequested, and `mapEscapedHandlerError` rewrites it to
