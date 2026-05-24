@@ -273,6 +273,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     await withBatchLifecycle(
       {
         workflow: wf.config.name,
+        wf,
         archetype: wf.archetype,
         systems: wf.config.systems,
         perItem: [],

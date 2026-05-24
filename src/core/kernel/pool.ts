@@ -44,6 +44,7 @@ export async function runWorkflowPool<TData, TSteps extends readonly string[]>(
   return withBatchLifecycle(
     {
       workflow: wf.config.name,
+      wf,
       archetype: wf.archetype,
       systems: wf.config.systems,
       perItem: perItem.map(({ item, itemId, runId }) => ({
