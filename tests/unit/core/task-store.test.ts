@@ -138,6 +138,28 @@ test('retryTaskFromAttempt creates a new attempt on the same task', () => {
   }
 })
 
+test('retryTaskFromAttempt throws when original_input_json is absent', () => {
+  const { dir, store } = openTempStore()
+  try {
+    const [queued] = store.enqueueTasks({ workflow: 'wf', inputs: [{ id: 'a' }], deriveItemId: (x) => x.id })
+    store.markTaskFailed({ taskId: queued.taskId, attemptId: queued.attemptId, error: 'boom', now: iso(1) })
+    store.db.prepare('UPDATE tasks SET original_input_json = NULL WHERE id = @taskId').run({
+      taskId: queued.taskId,
+    })
+
+    assert.throws(
+      () => store.retryTaskFromAttempt({ runId: queued.runId, now: iso(2) }),
+      new RegExp(
+        `retryTaskFromAttempt: task ${queued.taskId} has no original_input_json \\(legacy pre-migration-11 row\\)\\. Contract 2 requires every retryable row to have original_input_json\\. Either delete the row and re-enqueue, or repair the row manually\\.`,
+      ),
+    )
+    assert.equal(store.listAttemptsForTask(queued.taskId).length, 1)
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('retryTaskFromAttempt preserves parentRunId for delegated child tasks', () => {
   const { dir, store } = openTempStore()
   try {
