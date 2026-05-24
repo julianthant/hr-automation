@@ -11,6 +11,16 @@ export interface WorkerCommandContext<TData, TSteps extends readonly string[]> {
   trackerDir: string | undefined
   state: DaemonState
   abortLaunchAndKillSession: (reason: string) => void
+  /**
+   * Centralized cancel-request entry — sets `state.cancelTarget` AND aborts
+   * `state.currentRunController`. Daemon owner constructs this so all three
+   * cancel triggers (HTTP /cancel-current, worker `cancel_task` command,
+   * browser-disconnect) share one mutation path and cannot drift.
+   */
+  requestCancel: (
+    target: { itemId: string; runId: string } | null,
+    reason: 'http' | 'worker-command' | 'browser-disconnect',
+  ) => void
 }
 
 export function createEmitWorkerHeartbeat<TData, TSteps extends readonly string[]>(
@@ -89,7 +99,7 @@ export function createRecoverClaimsFromDeadOrStaleWorkers<TData, TSteps extends 
 export function createHandleWorkerCommand<TData, TSteps extends readonly string[]>(
   ctx: WorkerCommandContext<TData, TSteps>,
 ): (command: WorkerCommandRow) => Promise<void> {
-  const { wf, instanceId, state, abortLaunchAndKillSession } = ctx
+  const { wf, instanceId, state, abortLaunchAndKillSession, requestCancel } = ctx
   return async (command: WorkerCommandRow): Promise<void> => {
     const workerStore = state.workerStore
     if (!workerStore) return
@@ -104,17 +114,15 @@ export function createHandleWorkerCommand<TData, TSteps extends readonly string[
           return
         }
         workerStore.acknowledgeCommand(command.commandId, instanceId)
-        state.cancelTarget = { itemId: state.inFlight.itemId, runId: state.inFlight.runId }
-        // Contract 5: aborting the per-run AbortController propagates into
-        // any in-flight Playwright call (via the signal injected by
-        // ctx.page(id)'s proxy), so cancel completes in ms rather than at
-        // the next ctx.step boundary. The stepper still sees `cancelTarget`
-        // set and emits step="cancelled" via its mapEscapedHandlerError
-        // path; without controller.abort() the dashboard would wait up to
-        // ~30s for the active waitForSelector to time out.
-        if (!state.currentRunController?.signal.aborted) {
-          state.currentRunController?.abort(new Error('cancel requested'))
-        }
+        // Contract 5: route through `requestCancel` so all three cancel
+        // triggers (HTTP, worker command, browser disconnect) share one
+        // mutation path. Sets `state.cancelTarget` (stepper between-step
+        // probe) AND aborts the per-run AbortController (in-flight
+        // Playwright call rejects within ms instead of waiting timeout).
+        requestCancel(
+          { itemId: state.inFlight.itemId, runId: state.inFlight.runId },
+          'worker-command',
+        )
         workerStore.completeCommand(command.commandId)
         return
       }

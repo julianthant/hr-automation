@@ -144,12 +144,39 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   }
 
   const abortLaunchAndKillSession = createAbortLaunchAndKillSession(wf, instanceId, state)
+
+  /**
+   * Centralized cancel-request entry point — all three triggers
+   * (HTTP /cancel-current, worker `cancel_task` command, browser-disconnect)
+   * MUST flow through here so they cannot drift. Drops a `cancelTarget` on
+   * the state (the between-step probe reads it) AND aborts the per-run
+   * `AbortController` so any in-flight Playwright call rejects within ms
+   * instead of waiting on its declared timeout (Contract 5).
+   *
+   * Pre-Contract-5-cleanup the browser-disconnect handler only set
+   * `cancelTarget` and skipped the controller abort, causing disconnect
+   * during a `waitForSelector` to wait the full ~30s timeout. This helper
+   * collapses the three paths so that gap can't reappear.
+   *
+   * `target` of null clears the cancelTarget without touching the controller
+   * (used by the per-item finalize sweep so the next item starts clean).
+   */
+  const requestCancel = (
+    target: { itemId: string; runId: string } | null,
+    reason: 'http' | 'worker-command' | 'browser-disconnect',
+  ): void => {
+    state.cancelTarget = target
+    if (target && state.currentRunController && !state.currentRunController.signal.aborted) {
+      state.currentRunController.abort(new Error(`cancel requested (${reason})`))
+    }
+  }
   const workerCtx: WorkerCommandContext<TData, TSteps> = {
     wf,
     instanceId,
     trackerDir,
     state,
     abortLaunchAndKillSession,
+    requestCancel,
   }
   const { listenPromise } = startDaemonHttpServer({
     workflowName: wf.config.name,
@@ -161,13 +188,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     getActiveSession: () => state.activeSession,
     getWorkerStore: () => state.workerStore,
     setCancelTarget: (target) => {
-      state.cancelTarget = target
-      // Contract 5: aborting the per-run AbortController makes any
-      // in-flight Playwright call reject within ms. Skipped when target is
-      // null (between-item clearing) or the controller is already aborted.
-      if (target && state.currentRunController && !state.currentRunController.signal.aborted) {
-        state.currentRunController.abort(new Error('cancel requested'))
-      }
+      requestCancel(target, 'http')
     },
     setForceShutdown: (value) => { state.forceShutdown = value },
     setDrainOnlyShutdown: (value) => { state.drainOnlyShutdown = value },
@@ -363,11 +384,17 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           if (state.inFlight) {
             // Set cancelTarget so the stepper reclassifies the in-flight step
             // as cancelled rather than failed; the outer finally still writes
-            // the cancelled row.
-            state.cancelTarget = {
-              itemId: state.inFlight.itemId,
-              runId: state.inFlight.runId,
-            }
+            // the cancelled row. Route through `requestCancel` so the per-run
+            // AbortController is also aborted — without this, a disconnect
+            // during a `waitForSelector` waited the full timeout instead of
+            // failing fast.
+            requestCancel(
+              {
+                itemId: state.inFlight.itemId,
+                runId: state.inFlight.runId,
+              },
+              'browser-disconnect',
+            )
           }
           state.shutdownResolve?.()
           state.wakeResolve?.()
