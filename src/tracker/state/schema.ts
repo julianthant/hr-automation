@@ -513,14 +513,20 @@ WHERE workflow = 'ocr'
     //
     // Contract 2 (Uniform Retry) — `retryTaskFromAttempt` re-runs the workflow
     // with the input the task was FIRST enqueued with. The new column captures
-    // that snapshot at enqueue time; retry reads it directly and skips the
-    // legacy `findEntryInput` + `mergeAccumulatedTrackerStrings` reconstruction
-    // path (which folded mutated data from later rows into the "retry" input,
-    // making "retry" a replay with leaked state instead of a clean replay).
+    // that snapshot at enqueue time; retry reads it directly.
     //
-    // Nullable on purpose: rows enqueued before this migration ran have no
-    // snapshot. The control layer falls back to the legacy reconstruction
-    // path for those (with a one-time deprecation warning per process).
+    // Three-way retry split in `reEnqueueEntry` (ops/retry.ts):
+    //   - **SQLite-happy:** `original_input_json` is present → use it directly
+    //     (`retryTaskFromAttempt` resets `input_json ← original_input_json`).
+    //   - **SQLite-null-original:** row exists but `original_input_json` is
+    //     null → structured error returned to the operator (this is a bug, not
+    //     a legacy state, since migration 11 always stamps at enqueue).
+    //   - **SQLite-pruned:** task record was deleted by `npm run clean:tracker`;
+    //     JSONL audit is usually still present → JSONL + `enqueueFromHttp`
+    //     rescue path (`findEntryInput` + `mergeAccumulatedTrackerStrings`).
+    //
+    // Nullable on purpose: rows enqueued before this migration ran hit the
+    // null-original branch above, which returns a structured error.
     version: 11,
     sql: String.raw`
 ALTER TABLE tasks ADD COLUMN original_input_json TEXT;
