@@ -77,7 +77,7 @@ function rejectionReason(req: WorkflowActionRequest): string | null {
 }
 
 async function cancelTarget(
-  req: WorkflowActionRequest,
+  _req: WorkflowActionRequest,
   t: ResolvedActionTarget,
   deps: PerformWorkflowActionDeps,
 ): Promise<WorkflowActionTargetResult> {
@@ -89,7 +89,6 @@ async function cancelTarget(
   // so there's no in-flight controller to abort; running tasks dispatch
   // a `cancel_task` worker command which both flips cancelTarget and
   // aborts the controller.
-  void req;
   if (t.status === "running") {
     if (!t.runId) {
       return failTarget(t, "runId is required to cancel a running row", 400);

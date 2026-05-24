@@ -156,7 +156,7 @@ async function runInProcessAndCollectResult<TChildData, TChildSteps extends read
     await runWorkflow(args.child, args.input, {
       itemId: args.itemId,
       preAssignedRunId: args.runId,
-      ...(args.trackerDir ? { trackerDir: args.trackerDir } : {}),
+      trackerDir: args.trackerDir,
       parentRunId: args.parentRunId,
     })
     return {
@@ -214,7 +214,7 @@ export async function delegateToImpl<TChildData, TChildSteps extends readonly st
       trackerDir: args.trackerDir,
       child: args.child,
       inputs: [args.input],
-      ...(args.renderAs ? { renderAs: args.renderAs } : {}),
+      renderAs: args.renderAs,
       fireAndForget: false,
       deriveItemId: args.itemId ? () => childItemId : undefined,
     })
@@ -236,7 +236,7 @@ export async function delegateToImpl<TChildData, TChildSteps extends readonly st
     void runWorkflow(args.child, args.input, {
       itemId: childItemId,
       preAssignedRunId: childRunId,
-      ...(args.trackerDir ? { trackerDir: args.trackerDir } : {}),
+      trackerDir: args.trackerDir,
       parentRunId: args.parentRunId,
     }).catch((err) => {
       log.warn(`[delegateTo] fire-and-forget child '${args.child.config.name}/${childItemId}' crashed: ${errorMessage(err)}`)
@@ -306,7 +306,7 @@ async function runInProcessPool<TChildData, TChildSteps extends readonly string[
         trackerDir: args.trackerDir,
         child: args.child,
         input: args.inputs[i],
-        ...(args.renderAs ? { renderAs: args.renderAs } : {}),
+        renderAs: args.renderAs,
         fireAndForget: args.fireAndForget,
       })
     }
@@ -351,7 +351,7 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
     args.inputs as TChildData[],
     {},
     {
-      ...(args.trackerDir ? { trackerDir: args.trackerDir } : {}),
+      trackerDir: args.trackerDir,
       parentRunId: args.parentRunId,
       ...(args.deriveItemId
         ? { deriveItemId: args.deriveItemId }
@@ -383,7 +383,7 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
             timestamp: new Date().toISOString(),
             id: itemId,
             runId: childRunId,
-            ...(parentRunIdFwd ? { parentRunId: parentRunIdFwd } : {}),
+            parentRunId: parentRunIdFwd,
             status: "pending",
             data: stamped,
             input: item as Record<string, unknown>,
@@ -406,7 +406,7 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
   const outcomes = await watchChildRuns({
     workflow: args.child.config.name,
     expectedItemIds,
-    ...(args.trackerDir ? { trackerDir: args.trackerDir } : {}),
+    trackerDir: args.trackerDir,
   })
   // Preserve input order in the returned results — watchChildRuns may
   // resolve in completion order.
@@ -480,10 +480,10 @@ export function buildDelegateApi(parent: {
       trackerDir: parent.trackerDir,
       child,
       input,
-      ...(opts.renderAs ? { renderAs: opts.renderAs } : {}),
+      renderAs: opts.renderAs,
       fireAndForget: opts.fireAndForget ?? false,
-      ...(opts.itemId ? { itemId: opts.itemId } : {}),
-      ...(opts.runId ? { runId: opts.runId } : {}),
+      itemId: opts.itemId,
+      runId: opts.runId,
     })
 
   const delegateToAll = <TChildData, TChildSteps extends readonly string[]>(
@@ -496,9 +496,9 @@ export function buildDelegateApi(parent: {
       trackerDir: parent.trackerDir,
       child,
       inputs,
-      ...(opts.renderAs ? { renderAs: opts.renderAs } : {}),
+      renderAs: opts.renderAs,
       fireAndForget: opts.fireAndForget ?? false,
-      ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
+      concurrency: opts.concurrency,
     })
 
   return { delegateTo, delegateToAll } as unknown as Pick<

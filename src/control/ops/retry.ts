@@ -386,12 +386,12 @@ async function reEnqueueEntry(
 
   // SQLite task row is missing for this (workflow, id, runId). Two
   // distinct concerns sit under this branch:
-  //   1. **Legacy** — the row was never stamped with original_input_json
-  //      (predates migration 11). That's the fail-loud case handled in the
-  //      inner `if (!input)` branch above with the explicit "this is a bug,
-  //      not a legacy state" error.
-  //   2. **Pruned** — the row WAS stamped, but the task record was deleted
-  //      by `npm run clean:tracker` (which prunes JSONL plus, separately,
+  //   1. **Null original_input** — the row exists in SQLite but has no
+  //      original_input_json. This is a bug (not a legacy state since
+  //      migration 11 always stamps it at enqueue) — handled above in the
+  //      `if (!input)` branch with an explicit structured error.
+  //   2. **Pruned SQLite row** — the task record was deleted by
+  //      `npm run clean:tracker` (which prunes JSONL plus, separately,
   //      can prune SQLite rows). The JSONL audit/history is often still
   //      present. Fall back to JSONL reconstruction in this case so the
   //      operator's retry succeeds. Log a warn so the operator sees that
