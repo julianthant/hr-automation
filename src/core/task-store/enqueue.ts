@@ -126,15 +126,14 @@ function adoptExistingTaskForEnqueue(
   },
 ): EnqueuedTask {
   const attemptId = ensureQueuedAttemptForTask(db, request)
-  // Preserve the existing original_input_json when present (it's the pristine
-  // first-enqueue snapshot for Contract 2 retry replay); fill it from the
-  // current input only when the row never had one (legacy row touched for the
-  // first time after migration 11, or a fresh task that just hit the adopt
-  // path because of a race).
+  // Post-migration-11 every task row is written with original_input_json at
+  // INSERT time. `retryTaskFromAttempt` already hard-fails on any row that
+  // would reach this path without a stamped original — so the COALESCE
+  // fallback is dead. Use @inputJson directly.
   db.prepare(`
     UPDATE tasks
     SET input_json = @inputJson,
-        original_input_json = COALESCE(original_input_json, @inputJson),
+        original_input_json = @inputJson,
         control_state = 'queued',
         priority = 0,
         available_at = @now,
