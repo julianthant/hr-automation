@@ -129,7 +129,7 @@ export function emitDashboardCancelTrackerRow(
   const priorEntry = findLatestEntryForPredicate({
     workflow,
     trackerDir: dir,
-    lookbackDays: 7,
+    lookbackDays: 30,
     predicate: (e) => e.id === id && (runId ? e.runId === runId : true),
   });
   const priorArchetype = priorEntry ? resolveRowArchetype(priorEntry) : "single";
