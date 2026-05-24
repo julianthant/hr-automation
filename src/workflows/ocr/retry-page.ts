@@ -174,7 +174,18 @@ export async function runOcrRetryPage(
         })),
       );
     } else {
-      const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
+      // Contract 3 (Finding #23): route through delegateToAllImpl so
+      // parentRunId stamping, archetype derivation, and child pending pre-emit
+      // share one code path with the OCR orchestrator's eid-lookup fan-out.
+      //   - `renderAs: "flat"` → stamps archetype "passive-child" so children
+      //     render as `delegation-member` rows (OCR runtime policy's
+      //     `utilityChildSurface: "delegation-member"`).
+      //   - `fireAndForget: true` because the `watchChildren` call below
+      //     drives the wait — wrapping a second wait inside delegateToAllImpl
+      //     would double-count.
+      //   - `parentRunId: input.runId` so the OCR session row is the parent
+      //     of each eid-lookup child row.
+      const { delegateToAllImpl } = await import("../../core/delegate.js");
       const { eidLookupCrmWorkflow } = await import("../eid-lookup/index.js");
       const inputs = enqueueItems.map((e) =>
         e.kind === "name"
@@ -193,9 +204,19 @@ export async function runOcrRetryPage(
           if (ek) eidKeyToItemId.set(ek, e.itemId);
         }
       }
-      await ensureDaemonsAndEnqueue(eidLookupCrmWorkflow, inputs as never, {}, {
+      type EidLookupChildInput = { name?: string; emplId?: string; keepNonHdh?: boolean };
+      await delegateToAllImpl<EidLookupChildInput, readonly string[]>({
+        parentRunId: input.runId,
         trackerDir,
-        deriveItemId: (inp: { name?: string; emplId?: string }) => {
+        // eidLookupCrmWorkflow's exact generic param is a union of name-only /
+        // emplId-only variants; the local `EidLookupChildInput` widens both
+        // into one optional-fields shape, so cast through unknown — the
+        // runtime schema validates either variant.
+        child: eidLookupCrmWorkflow as unknown as Parameters<typeof delegateToAllImpl<EidLookupChildInput, readonly string[]>>[0]["child"],
+        inputs,
+        renderAs: "flat",
+        fireAndForget: true,
+        deriveItemId: (inp: EidLookupChildInput) => {
           if ("name" in inp && inp.name) return nameKeyToItemId.get(inp.name) ?? fallbackItemId;
           if ("emplId" in inp && inp.emplId) return eidKeyToItemId.get(inp.emplId) ?? fallbackItemId;
           return fallbackItemId;

@@ -14,11 +14,10 @@
  *
  * The guard is scoped to `src/workflows/<workflow>/handler.ts` and
  * `workflow.ts` files (the handler body lives in those two files for
- * every workflow). Orchestrator files (`src/workflows/ocr/orchestrator.ts`,
- * `src/workflows/ocr/force-research.ts`, `src/workflows/ocr/retry-page.ts`)
- * remain temporarily allow-listed during the OCR migration — see the
- * `ORCHESTRATOR_ALLOWLIST` constant. New entries require a deliberate
- * review.
+ * every workflow). No files are currently allow-listed: as of Finding #23
+ * the OCR `force-research` and `retry-page` paths route through
+ * `delegateToAllImpl` like the orchestrator, so the guard applies
+ * uniformly to all of `src/workflows/`.
  */
 import { test } from "vitest";
 import assert from "node:assert/strict";
@@ -29,26 +28,10 @@ import { listSourceFiles, stripCommentsPreserveLines } from "../../_utils/source
 const ROOT = process.cwd();
 const SRC_DIR = join(ROOT, "src");
 
-/**
- * Allow-listed files that may keep direct delegation calls. Use sparingly
- * and document why in `src/workflows/<workflow>/CLAUDE.md`. The OCR
- * orchestrator owns its own emit/retry/force-research machinery and
- * cannot trivially be migrated piecemeal — track its conversion in a
- * dedicated plan rather than padding this list.
- */
-const ORCHESTRATOR_ALLOWLIST = new Set<string>([
-  // OCR's force-research and retry-page paths reach into the same
-  // dispatch shape from non-handler contexts. They remain on the legacy
-  // direct-runWorkflow path pending a dedicated migration plan.
-  "src/workflows/ocr/force-research.ts",
-  "src/workflows/ocr/retry-page.ts",
-]);
-
 const WORKFLOW_FILES = listSourceFiles(SRC_DIR).filter((file) => {
   const rel = relative(ROOT, file);
   return rel.startsWith("src/workflows/")
-    && !rel.endsWith(".d.ts")
-    && !ORCHESTRATOR_ALLOWLIST.has(rel);
+    && !rel.endsWith(".d.ts");
 });
 
 test("no direct runWorkflow(..., { parentRunId }) calls inside workflow handlers — use ctx.delegateTo", () => {
