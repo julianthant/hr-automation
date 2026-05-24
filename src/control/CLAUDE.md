@@ -8,8 +8,8 @@ Dashboard HTTP routes should stay thin: parse/validate request bodies, call this
 
 - `actions/perform-workflow-action.ts` — `performWorkflowAction` dispatcher for operator cancel / retry / delete / bump.
 - `actions/resolve-targets.ts` — resolves action scope into concrete targets. `tree` may walk tracker projection parent/child runs; `row`, `group`, and `visible-view` use caller-provided targets.
-- `actions/types.ts` — `WorkflowActionRequest`, `WorkflowActionResult`, `CancelMode`, and related contracts.
-- `ops/cancel.ts` — low-level queued/running/force-stop/bulk cancel handlers.
+- `actions/types.ts` — `WorkflowActionRequest`, `WorkflowActionResult`, and related contracts.
+- `ops/cancel.ts` — low-level queued/running/bulk cancel handlers.
 - `ops/retry.ts` — low-level retry/re-enqueue and edit-and-resume handlers.
 - `ops/delete.ts` — low-level tracker row, screenshot, and delegated-child deletion.
 - `ops/queue.ts` — queue bump, save-data, queue-depth, and prior-entry lookup handlers.
@@ -24,6 +24,18 @@ Dashboard HTTP routes should stay thin: parse/validate request bodies, call this
 - `src/core/` must not import `src/control/`.
 - Tracker Hono routes may import `src/control/` as HTTP adapters. Other tracker modules should keep observability concerns local unless there is a deliberate control-plane path.
 - OCR discard was moved with the action engine instead of leaving `control/actions` dependent on the dashboard OCR barrel. The handler still imports narrow tracker OCR helpers for abort flags and parent metadata reads.
+
+## Cancel contract (Contract 5 — Unified Cancel)
+
+There is one cancel mechanism:
+
+- The kernel's `runOneItem` constructs a per-run `AbortController`. The signal is exposed as `ctx.signal` AND auto-injected into every `signal?: AbortSignal` option of Playwright methods via the Proxy returned by `ctx.page(id)` (see `src/core/kernel/page-proxy.ts`).
+- A `cancel_task` worker command (issued by `buildCancelRunningHandler` for running rows, or by `buildCancelQueuedHandler` for queued rows that get claimed mid-cancel) AND the HTTP `/cancel-current` route both abort the daemon's `state.currentRunController` in lockstep with setting `state.cancelTarget`. Any in-flight `waitForSelector` / `click` / `goto` / `fill` rejects with an AbortError within ms; the stepper's catch block sees `isCancelRequested()` is true and remaps the error to `CancelledError('cancelled')` → `step: "cancelled"` on the terminal row.
+- The stepper's between-step `isCancelRequested` probe remains as the synchronous-checkpoint when no Playwright call is in flight. Both paths produce the same terminal-row shape: `status: "failed"`, `step: "cancelled"`, `error: "Cancelled by user before step 'cancelled'"`.
+- **Gone (2026-05-23):** `buildForceStopTaskHandler`, the `ForceStopTaskRequest` type, the `CancelMode = "cooperative" | "force"` type, the `/api/task/force-stop` route, the daemon's `/force-current` route, `createInterruptInFlightWork`, and the dashboard's Force Stop button transport. The Page proxy makes them all redundant — cancel propagates fast enough through the signal that the about:blank navigation trick is unnecessary.
+- The browser stays alive (no chrome teardown, no re-Duo on the next item). The daemon's existing post-cancel `session.reset(sysId)` loop restores each system's resetUrl before claiming the next item.
+
+`performWorkflowAction({ action: "cancel", ... })` in `actions/perform-workflow-action.ts` dispatches by target status only: `t.status === "running"` → `buildCancelRunningHandler`; otherwise → `buildCancelQueuedHandler`. No mode switch.
 
 ## Retry contract (Contract 2 — Uniform Retry)
 
