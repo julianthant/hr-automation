@@ -42,7 +42,7 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
     const ocrPriorEntry = findLatestEntryForPredicate({
       workflow: WORKFLOW,
       trackerDir,
-      lookbackDays: 7,
+      lookbackDays: 30,
       predicate: (e) => e.id === input.sessionId && e.runId === input.runId,
     });
     const ocrArchetype = ocrPriorEntry ? resolveRowArchetype(ocrPriorEntry) : "batch-parent";
@@ -74,7 +74,7 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
         const parentPriorEntry = findLatestEntryForPredicate({
           workflow: parentWorkflow,
           trackerDir,
-          lookbackDays: 7,
+          lookbackDays: 30,
           predicate: (e) => e.id === parentItemId && e.runId === parentRunId,
         });
         const parentArchetype = parentPriorEntry
