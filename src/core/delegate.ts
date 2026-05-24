@@ -436,12 +436,17 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
  * Implementation backing `ctx.delegateToAll`. Routes to daemon enqueue
  * when the child is daemon-capable, in-process pool otherwise.
  *
- * Internal hooks (not exposed on the Ctx surface, but available to
- * `delegateToAllImpl` callers that need them — used by OCR's orchestrator
- * to wire SQLite task dependencies):
- *   - `deriveItemId`        — per-input itemId override
- *   - `buildPendingExtras`  — extra fields stamped onto the child pending row
- *   - `onPreparedItems`     — runs after itemIds/runIds assigned, before pre-emit
+ * **Orchestrator escape hatch.** The `deriveItemId`, `buildPendingExtras`,
+ * and `onPreparedItems` hooks exist for OCR orchestrator's specialized
+ * eid-lookup fan-out (deriving stable per-record item IDs, attaching
+ * formType/pageNum metadata, and chaining SQLite task dependencies for
+ * downstream waits). They are NOT part of the public `ctx.delegateToAll`
+ * API and should not be added to it.
+ *
+ * If a second consumer plausibly needs these hooks, that's the signal to
+ * promote them to `ctx.delegateToAll`'s options object — and add explicit
+ * tests covering each one. Until then, the only caller is
+ * `src/workflows/ocr/orchestrator.ts`.
  */
 export async function delegateToAllImpl<TChildData, TChildSteps extends readonly string[]>(args: {
   parentRunId: string
