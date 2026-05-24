@@ -1,3 +1,4 @@
+import type { Page } from 'playwright'
 import type { Ctx, RetryOpts } from './types.js'
 import { setTimeout as sleep } from 'node:timers/promises'
 import type { Session } from './session.js'
@@ -6,6 +7,7 @@ import { log } from '../../utils/log.js'
 import { errorMessage } from '../../utils/errors.js'
 import { makeScreenshotFn } from './screenshot.js'
 import type { ScreenshotEvent } from './screenshot.js'
+import { wrapPageWithSignal } from './page-proxy.js'
 import { buildDelegateApi } from '../delegate.js'
 
 export interface MakeCtxOpts {
@@ -17,6 +19,13 @@ export interface MakeCtxOpts {
   itemId: string
   emitScreenshotEvent: (event: ScreenshotEvent) => void
   trackerDir?: string
+  /**
+   * Per-run AbortSignal. Sourced from the kernel's per-item
+   * `AbortController` (see `run-one-item.ts`). Wired into `ctx.signal` for
+   * handler-level use and into the `ctx.page(id)` proxy so every Playwright
+   * call that accepts a `signal` option auto-injects this one.
+   */
+  signal: AbortSignal
 }
 
 /**
@@ -63,7 +72,7 @@ export async function tryScreenshot(
 export function makeCtx<TSteps extends readonly string[], TData>(
   opts: MakeCtxOpts,
 ): Ctx<TSteps, TData> {
-  const { session, stepper, isBatch, runId, workflow, itemId, emitScreenshotEvent, trackerDir } = opts
+  const { session, stepper, isBatch, runId, workflow, itemId, emitScreenshotEvent, trackerDir, signal } = opts
 
   session.setUcpathIdleGuard(() => stepper.isInsideStep())
 
@@ -78,8 +87,20 @@ export function makeCtx<TSteps extends readonly string[], TData>(
 
   const delegateApi = buildDelegateApi({ runId, trackerDir })
 
+  // `ctx.page(id)` returns a Playwright Page wrapped in the kernel's
+  // signal-injecting Proxy (see `page-proxy.ts`). The wrapper merges
+  // `ctx.signal` into the options object of every Playwright method that
+  // accepts a `signal?: AbortSignal`, and returns proxied Locators / sub-
+  // objects (`keyboard`, `mouse`, `frame`, `mainFrame`) so chained calls
+  // stay signal-aware too. Sync getters (`url`, `title`, `context`, etc.)
+  // pass through verbatim.
+  const page = async (id: string): Promise<Page> => {
+    const raw = await session.page(id)
+    return wrapPageWithSignal(raw, signal)
+  }
+
   const ctx = {
-    page: (id: string) => session.page(id),
+    page,
     step: <R>(name: string, fn: () => Promise<R>) => stepper.step(name, fn),
     markStep: (name: string) => stepper.markStep(name),
     skipStep: (name: string) => stepper.skipStep(name),
@@ -88,11 +109,12 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     retry,
     updateData: (patch: Record<string, unknown>) => stepper.updateData(patch),
     session: {
-      page: (id: string) => session.page(id),
+      page,
     },
     log,
     isBatch,
     runId,
+    signal,
     screenshot,
     trackerDir,
     delegateTo: delegateApi.delegateTo,

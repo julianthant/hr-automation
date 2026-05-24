@@ -325,6 +325,23 @@ export interface Ctx<TSteps extends readonly string[], TData> {
   isBatch: boolean
   runId: string
   /**
+   * Per-run `AbortSignal` sourced from the kernel's per-item `AbortController`.
+   * Flips to `aborted` when an operator-issued cancel reaches the daemon /
+   * scenario runtime for this run. The signal is auto-injected into every
+   * Playwright method that accepts a `signal` option via the `ctx.page(id)`
+   * proxy (see `src/core/kernel/page-proxy.ts`), so in-flight `waitForSelector`
+   * / `click` / `goto` / etc. reject within milliseconds of cancel rather than
+   * blocking on their declared timeout. Workflow handlers can also pass it to
+   * any non-Playwright await that accepts an AbortSignal (`fetch`, `setTimeout`,
+   * custom helpers) for uniform fast cancel.
+   *
+   * The kernel's `Stepper`/error remapper translates the resulting AbortError
+   * into a `CancelledError` so the terminal row carries `step: "cancelled"` and
+   * the daemon's claim loop treats the run as cancelled (browser preserved,
+   * post-cancel reset fires, next item claimed) instead of failed.
+   */
+  signal: AbortSignal
+  /**
    * Capture all open pages as PNGs, emit a `screenshot` tracker event, and
    * return the capture record. Constructed by `makeCtx` via `makeScreenshotFn`.
    */

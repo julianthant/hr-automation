@@ -141,6 +141,12 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
       }
 
       try {
+        // Per-run AbortController (Contract 5). `runWorkflow` is the single-
+        // item path; no daemon claim loop here, so cancel side-channels
+        // (in-process kill, SIGINT) don't drive this controller — it's
+        // wired solely so `ctx.signal` is a real AbortSignal handlers can
+        // pass into AbortSignal-aware awaits if desired.
+        const controller = new AbortController()
         await runWorkflowHandler({
           wf,
           session,
@@ -152,6 +158,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
           itemId: String(itemId),
           trackerDir: opts.trackerDir,
           emitScreenshotEvent: (ev) => emitScreenshotEvent(ev, { dir: opts.trackerDir }),
+          signal: controller.signal,
         })
         completed = true
       } finally {

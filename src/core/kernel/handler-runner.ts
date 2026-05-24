@@ -20,6 +20,9 @@ export interface RunWorkflowHandlerOpts<TData, TSteps extends readonly string[]>
   onPreHandlerError?: (err: unknown) => void
   mapEscapedHandlerError?: (err: unknown) => unknown | void
   skipCancelledScreenshot?: boolean
+  /** Per-run AbortSignal — surfaced as `ctx.signal` and auto-injected
+   *  into Playwright calls via the Page proxy. */
+  signal: AbortSignal
 }
 
 export async function runWorkflowHandler<TData, TSteps extends readonly string[]>(
@@ -34,6 +37,7 @@ export async function runWorkflowHandler<TData, TSteps extends readonly string[]
     itemId: opts.itemId,
     emitScreenshotEvent: opts.emitScreenshotEvent,
     trackerDir: opts.trackerDir,
+    signal: opts.signal,
   })
   opts.stepper.setScreenshotFn(ctx.screenshot)
 
