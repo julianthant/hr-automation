@@ -155,5 +155,19 @@ describe("oath-signature scenario: cancel during transaction", () => {
     const res = await result;
     assert.equal(res.ok, false);
     assert.equal(res.kind, "cancelled");
+
+    // Explicit Contract invariant: cancel MUST NOT mutate the row's display
+    // title. The two snapshots above already lock the literals, but a named
+    // assertion makes the contract loud — a future change that starts
+    // rewriting the title on cancel (e.g. stamping "Cancelled" into the
+    // queue-title field) would fail here even if someone regenerated the
+    // snapshots without noticing the diff.
+    assert.equal(
+      cancelledSnap.title,
+      heldSnap.title,
+      "cancel mutated the row title — Contract: cancel changes status only, never title",
+    );
+    assert.equal(cancelledSnap.subtitle, heldSnap.subtitle, "cancel mutated subtitle");
+    assert.equal(cancelledSnap.archetype, heldSnap.archetype, "cancel mutated archetype");
   });
 });
