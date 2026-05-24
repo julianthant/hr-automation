@@ -158,3 +158,12 @@ await retry.result;
   per-run. A multi-EID scenario that cancels one row cancels all of them.
   Per-run cancel needs a `Map<runId, boolean>` swap + per-run isolation of
   hold latches.
+- **Real Contract 2 retry path is not exercised here.** `retry-after-failure.test.ts`
+  re-enqueues the same itemId with a new runId via two direct `rt.enqueue()`
+  calls — it does NOT go through the control-layer's `reEnqueueEntry`, the
+  SQLite `tasks.original_input_json` lookup, or the `data.__retriedFrom`
+  provenance stamp. That projection-layer drift is locked by the snapshot
+  shape (any rename of those fields fails the test), but the actual Contract 2
+  control path is covered only by `tests/unit/control/retry-uses-original-input.test.ts`.
+  To exercise the real path in a scenario, the runtime would need
+  SQLite-task-store enqueue + claim emulation (essentially an inline daemon).
