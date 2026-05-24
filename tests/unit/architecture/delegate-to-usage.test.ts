@@ -24,7 +24,7 @@ import { test } from "vitest";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { listSourceFiles } from "../../_utils/source-scanner.js";
+import { listSourceFiles, stripCommentsPreserveLines } from "../../_utils/source-scanner.js";
 
 const ROOT = process.cwd();
 const SRC_DIR = join(ROOT, "src");
@@ -60,7 +60,10 @@ test("no direct runWorkflow(..., { parentRunId }) calls inside workflow handlers
   // uses today.
   for (const file of WORKFLOW_FILES) {
     const rel = relative(ROOT, file);
-    const src = readFileSync(file, "utf8");
+    const raw = readFileSync(file, "utf8");
+    // Strip block comments first so `/* runWorkflow(...) */` doesn't
+    // false-positive as a live call site (#17).
+    const src = stripCommentsPreserveLines(raw);
     const lines = src.split("\n");
     lines.forEach((line, idx) => {
       const trimmed = line.trimStart();
@@ -85,7 +88,10 @@ test("no direct ensureDaemonsAndEnqueue(..., { parentRunId }) calls inside workf
   const offenders: Array<{ file: string; line: number; match: string }> = [];
   for (const file of WORKFLOW_FILES) {
     const rel = relative(ROOT, file);
-    const src = readFileSync(file, "utf8");
+    const raw = readFileSync(file, "utf8");
+    // Strip block comments first so `/* ensureDaemonsAndEnqueue(...) */`
+    // doesn't false-positive as a live call site (#17).
+    const src = stripCommentsPreserveLines(raw);
     const lines = src.split("\n");
     lines.forEach((line, idx) => {
       const trimmed = line.trimStart();

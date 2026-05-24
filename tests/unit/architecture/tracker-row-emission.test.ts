@@ -26,7 +26,7 @@ import { test } from "vitest";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { listSourceFiles } from "../../_utils/source-scanner.js";
+import { listSourceFiles, stripCommentsPreserveLines } from "../../_utils/source-scanner.js";
 
 import * as trackerBarrel from "../../../src/tracker/jsonl.js";
 
@@ -103,7 +103,10 @@ test("no new production callers of legacy trackEvent / trackEventForDate", () =>
   for (const file of SRC_FILES) {
     const rel = relative(ROOT, file);
     if (TRACK_EVENT_ALLOWLIST.has(rel)) continue;
-    const src = readFileSync(file, "utf8");
+    const raw = readFileSync(file, "utf8");
+    // Strip block comments so `/* trackEvent(...) */` doesn't
+    // false-positive as a live call site (#17).
+    const src = stripCommentsPreserveLines(raw);
     const lines = src.split("\n");
     lines.forEach((line, idx) => {
       // Skip import lines + JSDoc references.
@@ -134,7 +137,10 @@ test("no direct *.jsonl appendFile writes outside the allow-listed I/O modules",
   for (const file of SRC_FILES) {
     const rel = relative(ROOT, file);
     if (JSONL_WRITE_ALLOWLIST.has(rel)) continue;
-    const src = readFileSync(file, "utf8");
+    const raw = readFileSync(file, "utf8");
+    // Strip block comments so `/* appendFileSync(...jsonl) */` doesn't
+    // false-positive as a live write site (#17).
+    const src = stripCommentsPreserveLines(raw);
     const lines = src.split("\n");
     lines.forEach((line, idx) => {
       const trimmed = line.trimStart();
