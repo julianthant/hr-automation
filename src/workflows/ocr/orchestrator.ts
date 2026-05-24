@@ -14,7 +14,7 @@ import type { ZodType } from "zod/v4";
 import { loadRoster as realLoadRoster, precomputeRoster } from "../../services/matching/index.js";
 import type { RosterRow as MatchRosterRow } from "../../services/matching/match.js";
 import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
-import { emitTrackerRow, dateLocal, type StampedData, type TrackerEntry, type TrackerRowEmission } from "../../tracker/jsonl.js";
+import { emitTrackerRow, dateLocal, stampArchetypeForRow, type TrackerEntry, type TrackerRowEmission } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
@@ -695,13 +695,24 @@ export async function runOcrOrchestrator(
                   taskGroupId: input.sessionId,
                   ...(cachedParentSubject ? { parentSubject: cachedParentSubject } : {}),
                 };
+            // Explicitly stamp archetype via stampArchetypeForRow so the
+            // type-level Contract 1 guarantee is enforced (no unsafe
+            // `as StampedData` cast). The real fan-out below uses
+            // renderAs: "flat" → passive-child via delegateToAllImpl; the
+            // override branch (test-mode / early enqueue) must produce the
+            // same row archetype so dashboard projections classify these
+            // rows identically.
+            const overrideData = stampArchetypeForRow(
+              buildHttpPendingData(eidLookupCrmWorkflow, item, runId),
+              { override: "passive-child" },
+            );
             emitTrackerRow({
               workflow: eidLookupCrmWorkflow.config.name,
               timestamp: new Date().toISOString(),
               id: e.itemId,
               runId: `override-${e.itemId}`,
               status: "pending",
-              data: buildHttpPendingData(eidLookupCrmWorkflow, item, runId) as StampedData,
+              data: overrideData,
               parentRunId: runId,
               input: item,
             }, trackerDir);
