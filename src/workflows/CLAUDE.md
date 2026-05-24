@@ -57,7 +57,7 @@ Add a Commander subcommand in `src/cli.ts`, add npm scripts to `package.json`, f
 
 ### Cancellation — `ctx.page(id)` is signal-aware (Contract 5)
 
-`ctx.page(id)` returns a Playwright Page wrapped in a Proxy that auto-injects `ctx.signal` (a per-run `AbortSignal`) into every method that accepts `signal?: AbortSignal` — `click`, `fill`, `goto`, `waitForSelector`, `waitForFunction`, `evaluate`, `screenshot`, locator methods, keyboard/mouse sub-objects, etc. Operator cancel aborts the per-run controller, the in-flight call rejects within ms, the kernel remaps the error to `CancelledError('cancelled')` + stamps `step: "cancelled"` — no handler-side cancel boilerplate needed.
+`ctx.page(id)` returns a Playwright Page wrapped in a Proxy that auto-injects `ctx.signal` (a per-run `AbortSignal`) into every method that accepts `signal?: AbortSignal` — `click`, `fill`, `goto`, `waitForSelector`, `waitForFunction`, `screenshot`, locator methods, keyboard/mouse sub-objects, etc. `evaluate` / `evaluateHandle` / `$eval` / `$$eval` are intentionally NOT wrapped — their second arg is the page-function's `arg` payload, not an options bag (see `page-proxy.ts`); cancel for those flows through the between-step `isCancelRequested` probe instead. Operator cancel aborts the per-run controller, the in-flight call rejects within ms, the kernel remaps the error to `CancelledError('cancelled')` + stamps `step: "cancelled"` — no handler-side cancel boilerplate needed.
 
 Handlers writing non-Playwright awaits that accept an AbortSignal should pass `ctx.signal` for the same fast-cancel behavior:
 
