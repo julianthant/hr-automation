@@ -13,7 +13,7 @@ export function retryTaskFromAttempt(
   const now = request.now ?? new Date().toISOString()
   return control.transaction(() => {
     const prior = db.prepare(`
-      SELECT a.*, t.workflow, t.item_id, t.input_json, t.original_input_json, t.parent_run_id
+      SELECT a.*, t.workflow, t.item_id, t.original_input_json, t.parent_run_id
       FROM task_attempts a
       JOIN tasks t ON t.id = a.task_id
       WHERE a.run_id = @runId
@@ -21,11 +21,28 @@ export function retryTaskFromAttempt(
     `).get({ runId: request.runId }) as (AttemptDbRow & {
       workflow: string
       item_id: string
-      input_json: string
       original_input_json: string | null
       parent_run_id: string | null
     }) | undefined
     if (!prior) throw new Error(`No task attempt found for runId ${request.runId}`)
+    /**
+     * Contract 2 (Uniform Retry): the new attempt runs against the PRISTINE
+     * original input the task was first enqueued with. Reset input_json to
+     * original_input_json so the daemon's claim path (parseJson(row.input_json))
+     * hands the handler the same payload the first attempt saw, with no
+     * accumulated state from intervening edits or adopt-existing overwrites.
+     *
+     * Legacy rows from before migration 11 have original_input_json = NULL.
+     * The retry path throws hard for those rows instead of silently falling
+     * back to current input_json, because retrying mutated input violates the
+     * Contract 2 replay invariant.
+     */
+    if (prior.original_input_json == null) {
+      throw new Error(
+        `retryTaskFromAttempt: task ${prior.task_id} has no original_input_json (legacy pre-migration-11 row). Contract 2 requires every retryable row to have original_input_json. Either delete the row and re-enqueue, or repair the row manually.`,
+      )
+    }
+    const resetInputJson = prior.original_input_json
     const nextAttemptNo = ((db.prepare(`
       SELECT COALESCE(MAX(attempt_no), 0) AS n
       FROM task_attempts
@@ -50,15 +67,6 @@ export function retryTaskFromAttempt(
       itemId: prior.item_id,
       now,
     })
-    // Contract 2 (Uniform Retry): the new attempt runs against the PRISTINE
-    // original input the task was first enqueued with. Reset input_json to
-    // original_input_json when available so the daemon's claim path
-    // (parseJson(row.input_json)) hands the handler the same payload the
-    // first attempt saw — no accumulated state from intervening edits or
-    // adopt-existing overwrites. Legacy rows (pre-migration 11) have
-    // original_input_json = NULL; for those we leave input_json alone, and
-    // the control layer logs a one-time deprecation warning.
-    const resetInputJson = prior.original_input_json ?? prior.input_json
     db.prepare(`
       UPDATE tasks
       SET control_state = 'queued',
