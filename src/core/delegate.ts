@@ -18,8 +18,9 @@
  * The kernel handles all of the above — call sites in workflow handlers
  * should never reach for `runWorkflow(child, ..., { parentRunId })` or
  * `ensureDaemonsAndEnqueue(child, ..., { parentRunId })` directly. The
- * architecture guard at `tests/unit/architecture/tracker-row-emission.test.ts`
- * blocks new direct callers.
+ * architecture guard at `tests/unit/architecture/delegate-to-usage.test.ts`
+ * blocks new direct callers; `tests/unit/architecture/tracker-row-emission.test.ts`
+ * guards the expected row-emission path.
  *
  * Routing:
  *   - `delegateTo(child, input, opts)` runs the child IN-PROCESS via
