@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
 
-import { openStateDb, closeStateDbForTests } from "../../../src/tracker/state/db.js";
+import { openStateDb, closeStateDbForTests, stateDbPath, runMigrations } from "../../../src/tracker/state/db.js";
+import { openDatabase } from "../../../src/infra/sqlite/index.js";
+import { applyTrackerEntry } from "../../../src/tracker/state/apply.js";
 import { queryProjectionHealth } from "../../../src/tracker/state/queries.js";
 import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
 import { __resetPreflightThrottleForTests } from "../../../src/tracker/dashboard/hono/routes/base.js";
@@ -25,6 +27,56 @@ test("Hono /api/v2/projection/health returns projection metadata", async () => {
     assert.equal(body.ok, true);
     assert.equal(body.dbPath.endsWith("state.db"), true);
   } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Hono projection routes reopen state.db when the file was replaced after server start", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hono-state-replaced-"));
+  const date = "2026-05-24";
+  let replacementDb: ReturnType<typeof openDatabase> | undefined;
+  try {
+    const staleDb = openStateDb(dir);
+    const app = createDashboardHonoApp({
+      dir,
+      stateDb: staleDb,
+      workflow: "oath-signature",
+      projectionReady: true,
+    });
+
+    rmSync(stateDbPath(dir), { force: true });
+    rmSync(`${stateDbPath(dir)}-wal`, { force: true });
+    rmSync(`${stateDbPath(dir)}-shm`, { force: true });
+
+    replacementDb = openDatabase(stateDbPath(dir));
+    runMigrations(replacementDb);
+    applyTrackerEntry(
+      replacementDb,
+      {
+        workflow: "oath-signature",
+        timestamp: "2026-05-24T20:18:41.326Z",
+        id: "ocr-prep-session-1",
+        runId: "prep-run-1",
+        status: "pending",
+        data: { archetype: "batch-parent", mode: "prepare" },
+      },
+      {
+        sourceKind: "tracker",
+        workflow: "oath-signature",
+        trackerDate: date,
+        path: join(dir, `oath-signature-${date}.jsonl`),
+        line: 1,
+        offset: 0,
+      },
+    );
+
+    const res = await app.request(`/api/v2/entries?workflow=oath-signature&date=${date}`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { entries: Array<{ id: string }> };
+    assert.deepEqual(body.entries.map((entry) => entry.id), ["ocr-prep-session-1"]);
+  } finally {
+    replacementDb?.close();
     closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });
   }

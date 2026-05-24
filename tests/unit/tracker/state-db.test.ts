@@ -83,6 +83,45 @@ test("isStateDbReady invalidates the ready cache when the DB file is corrupted",
   }
 });
 
+test("openStateDb reopens when the DB file is replaced under a live process", () => {
+  const dir = tmpTracker();
+  try {
+    const first = openStateDb(dir);
+    first.prepare(`
+      INSERT INTO items (
+        workflow,
+        tracker_date,
+        item_id,
+        latest_run_id,
+        latest_status,
+        latest_ts,
+        updated_at
+      ) VALUES (
+        'stale-workflow',
+        '2026-05-24',
+        'stale-item',
+        'stale-run',
+        'pending',
+        '2026-05-24T12:00:00.000Z',
+        '2026-05-24T12:00:00.000Z'
+      )
+    `).run();
+
+    rmSync(stateDbPath(dir), { force: true });
+    rmSync(`${stateDbPath(dir)}-wal`, { force: true });
+    rmSync(`${stateDbPath(dir)}-shm`, { force: true });
+
+    const second = openStateDb(dir);
+    assert.notEqual(second, first, "replaced DB file must not reuse the stale Database handle");
+    assert.equal(existsSync(stateDbPath(dir)), true, "openStateDb should recreate the replaced file");
+    const count = second.prepare("SELECT COUNT(*) AS n FROM items").get() as { n: number };
+    assert.equal(count.n, 0, "new DB should not expose rows from the stale deleted handle");
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("v6 baseline defines session_events.tracker_date default empty", () => {
   const dir = tmpTracker();
   try {
