@@ -55,6 +55,28 @@ export async function runMyWorkflow(input: MyInput) {
 
 Add a Commander subcommand in `src/cli.ts`, add npm scripts to `package.json`, fill in the schema + handler — no dashboard registry edits needed.
 
+### Cancellation — `ctx.page(id)` is signal-aware (Contract 5)
+
+`ctx.page(id)` returns a Playwright Page wrapped in a Proxy that auto-injects `ctx.signal` (a per-run `AbortSignal`) into every method that accepts `signal?: AbortSignal` — `click`, `fill`, `goto`, `waitForSelector`, `waitForFunction`, `evaluate`, `screenshot`, locator methods, keyboard/mouse sub-objects, etc. Operator cancel aborts the per-run controller, the in-flight call rejects within ms, the kernel remaps the error to `CancelledError('cancelled')` + stamps `step: "cancelled"` — no handler-side cancel boilerplate needed.
+
+Handlers writing non-Playwright awaits that accept an AbortSignal should pass `ctx.signal` for the same fast-cancel behavior:
+
+```ts
+// fetch — uses ctx.signal directly:
+const res = await fetch(url, { signal: ctx.signal });
+
+// Custom long await — wire ctx.signal so cancel breaks it too:
+await new Promise<void>((resolve, reject) => {
+  const t = setTimeout(resolve, 30_000);
+  ctx.signal.addEventListener("abort", () => {
+    clearTimeout(t);
+    reject(new Error("aborted"));
+  }, { once: true });
+});
+```
+
+The kernel preserves caller-supplied signals: passing your own `{ signal: myController.signal }` to `page.click(...)` does NOT clobber `myController.signal` with `ctx.signal` — but `ctx.signal` still aborts your wait via the stepper's between-step probe at the next `ctx.step` boundary.
+
 ### Delegating to a child workflow
 
 Workflows compose like functions via `ctx.delegateTo` and `ctx.delegateToAll` (Contract 3). The kernel owns parentRunId stamping, archetype derivation, the pre-emit pending row, and pristine input persistence. Direct calls to `runWorkflow(child, ..., { parentRunId })` or `ensureDaemonsAndEnqueue(child, ..., { parentRunId })` inside a handler are blocked by the architecture guard.
