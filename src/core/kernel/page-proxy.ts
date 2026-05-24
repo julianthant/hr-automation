@@ -47,6 +47,17 @@ export function wrapPageWithSignal(page: Page, signal: AbortSignal): Page {
 // Playwright Page/Frame/Locator/Keyboard/Mouse type surfaces. Methods missing
 // from this set are passthrough — adding one is a one-line addition here
 // when Playwright extends a method's options shape.
+//
+// NOT in this set: `evaluate`, `evaluateHandle`, `$eval`, `$$eval`. These
+// take `(pageFunction, arg?)` — no options-object slot. The proxy's
+// `mergeSignalIntoArgs` would either (a) append `{signal}` as a phantom
+// 2nd arg the page function would receive as its `arg` parameter, or (b)
+// merge `{signal}` into a caller-provided plain-object `arg` (AbortSignal
+// isn't structurally cloneable across the page boundary, so the call
+// would throw). Cancel for evaluate is covered by the stepper's
+// between-step `isCancelRequested` probe — long-running evaluate bodies
+// are uncommon in this codebase, and operator cancel still surfaces at
+// the next step boundary.
 const SIGNAL_METHODS = new Set<string>([
   // Page-level actions
   'click', 'dblclick', 'tap', 'hover',
@@ -64,8 +75,6 @@ const SIGNAL_METHODS = new Set<string>([
   'waitForNavigation',
   // Capture
   'screenshot', 'pdf',
-  // Eval
-  'evaluate', 'evaluateHandle', '$eval', '$$eval',
   // Locator-only methods that also accept signal
   'count', 'all', 'innerText', 'innerHTML',
   'textContent', 'inputValue',

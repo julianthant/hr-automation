@@ -285,4 +285,37 @@ describe('wrapPageWithSignal', () => {
     const reloadCall = calls.find((c) => c.method === 'reload')
     assert.deepEqual(reloadCall?.args, [{ signal }])
   })
+
+  // Regression: evaluate / evaluateHandle / $eval / $$eval take
+  // `(pageFunction, arg?)`, not `(args..., options)`. The proxy MUST pass
+  // them through unchanged — otherwise we either (a) append a phantom 2nd
+  // arg that the page function receives as its `arg` parameter, or
+  // (b) merge `{signal}` into a plain-object `arg` (AbortSignal isn't
+  // structurally cloneable across the page boundary, so the call would
+  // throw). Cancel for these flows through the between-step probe instead.
+  test('evaluate is passthrough — does NOT receive injected signal (Bug #3 regression)', async () => {
+    const { page, calls } = buildMockPage()
+    const signal = new AbortController().signal
+    const wrapped = wrapPageWithSignal(page, signal)
+
+    // 1. No-arg evaluate: must NOT append a phantom options bag.
+    const fn = () => 1 + 1
+    await wrapped.evaluate(fn)
+    const evalCallNoArg = calls.find((c) => c.method === 'evaluate')
+    assert.ok(evalCallNoArg)
+    assert.deepEqual(evalCallNoArg.args, [fn], 'no phantom signal bag appended for evaluate(fn)')
+
+    // 2. With a plain-object arg: arg must be passed through verbatim,
+    // NOT merged with `{signal}`.
+    const arg = { count: 7 }
+    await wrapped.evaluate((x: { count: number }) => x.count, arg)
+    const evalCallWithArg = [...calls].reverse().find((c) => c.method === 'evaluate')
+    assert.ok(evalCallWithArg)
+    assert.equal(evalCallWithArg.args.length, 2, 'evaluate(fn, arg) keeps exactly 2 args')
+    assert.deepEqual(evalCallWithArg.args[1], { count: 7 }, 'arg not polluted with signal')
+    assert.ok(
+      !(evalCallWithArg.args[1] as Record<string, unknown>).signal,
+      'evaluate arg has no signal property merged in',
+    )
+  })
 })
