@@ -9,6 +9,7 @@
 import { existsSync } from "fs";
 import { listRosters, resolveRosterDirs } from "../../services/matching/roster-loader.js";
 import { byTimestampAsc, emitTrackerRow, readEntries, readEntriesForDate, type TrackerEntry } from "../../tracker/jsonl.js";
+import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { resolveRowArchetype } from "../../domain/row-archetype.js";
 import { enqueueFromHttp } from "../../core/daemon/enqueue-dispatch.js";
 import {
@@ -250,32 +251,53 @@ async function reEnqueueEntry(
   const wf = workflow.trim().replace(/\/+$/, "");
   if (!wf || !id) return { ok: false, error: "workflow and id are required" };
 
-  if (runId && !prefilledData) {
+  // Resolve a missing runId by looking up the latest entry for this item.
+  // Without this, retries that arrive without a runId (e.g. dashboard
+  // shortcuts that don't carry one, or HTTP clients re-firing the same
+  // request) skip the SQLite fast path and fall through to the
+  // "no SQLite task record found" branch — which hard-fails for daemon
+  // workflows. Resolving the runId first means those retries take the
+  // intended pristine-input path.
+  let resolvedRunId = runId;
+  if (!resolvedRunId && !prefilledData) {
+    const latest = findLatestEntryForPredicate({
+      workflow: wf,
+      trackerDir: dir,
+      lookbackDays: 7,
+      predicate: (e) => e.id === id && typeof e.runId === "string" && e.runId.length > 0,
+    });
+    if (latest?.runId) {
+      resolvedRunId = latest.runId;
+      log.step(`[retry] resolved missing runId for ${wf}/${id} → ${resolvedRunId} (latest tracker entry)`);
+    }
+  }
+
+  if (resolvedRunId && !prefilledData) {
     const stores = openControlStores(dir);
-    const task = resolveControlTask(stores.taskStore, wf, id, runId);
+    const task = resolveControlTask(stores.taskStore, wf, id, resolvedRunId);
     if (task) {
       // Contract 2: read the pristine original input from the task record.
       // Stamped at first enqueue (migration 11). Historic rows that predate
       // the column were purged — a null here is a bug, not a legacy state.
-      const originalInput = stores.taskStore.findOriginalInputForRunId(runId);
+      const originalInput = stores.taskStore.findOriginalInputForRunId(resolvedRunId);
       const input = asRecordInput(originalInput);
       if (!input) {
         return {
           ok: false,
-          error: `retry: tasks.original_input_json missing for runId=${runId} — every row must be stamped at enqueue (Contract 2). This is a bug, not a legacy state.`,
+          error: `retry: tasks.original_input_json missing for runId=${resolvedRunId} — every row must be stamped at enqueue (Contract 2). This is a bug, not a legacy state.`,
         };
       }
       // Log the input fields being used so retries are debuggable from
       // operator logs (Contract 2, Step C). Just key names — values can
       // contain PII / huge prefilledData payloads.
       log.step(
-        `[retry] enqueueing ${wf}/${id} from runId=${runId} with pristine original input keys=[${Object.keys(input).sort().join(", ")}]`,
+        `[retry] enqueueing ${wf}/${id} from runId=${resolvedRunId} with pristine original input keys=[${Object.keys(input).sort().join(", ")}]`,
       );
       const resolvedParent =
         requestedParent ??
         task.parentRunId ??
-        extractLatestParentRunId(readEntriesForRetryItem(wf, id, runId, dir, date).scoped);
-      const retried = stores.taskStore.retryTaskFromAttempt({ runId });
+        extractLatestParentRunId(readEntriesForRetryItem(wf, id, resolvedRunId, dir, date).scoped);
+      const retried = stores.taskStore.retryTaskFromAttempt({ runId: resolvedRunId });
       resetRetriedOcrDependencies(stores.taskStore.db, retried.taskId);
       if (resolvedParent) {
         stores.taskStore.db
@@ -288,7 +310,7 @@ async function reEnqueueEntry(
         targetTaskId: retried.taskId,
         targetAttemptId: retried.attemptId,
         state: "completed",
-        payload: { fromRunId: runId, runId: retried.runId },
+        payload: { fromRunId: resolvedRunId, runId: retried.runId },
       });
       appendQueueEnqueueAudit(wf, retried.itemId, input, retried.runId, dir);
       // Inherit archetype from the failed run's latest row so the retry's
@@ -304,7 +326,7 @@ async function reEnqueueEntry(
       // retry's pending row shows up nameless in the dashboard until the
       // daemon claims it and rewrites — the same pattern emitDashboardCancelTrackerRow
       // would have used but applied to retry.
-      const priorRunRows = readEntriesForRetryItem(wf, id, runId, dir, date).scoped;
+      const priorRunRows = readEntriesForRetryItem(wf, id, resolvedRunId, dir, date).scoped;
       const priorEntry = priorRunRows.length > 0 ? priorRunRows[priorRunRows.length - 1] : undefined;
       const priorArchetype = priorEntry ? resolveRowArchetype(priorEntry) : "single";
       const priorData = priorEntry?.data ?? {};
@@ -323,7 +345,7 @@ async function reEnqueueEntry(
           data: {
             ...priorData,
             archetype: priorArchetype,
-            __retriedFrom: runId,
+            __retriedFrom: resolvedRunId,
           },
           ...(resolvedParent ? { parentRunId: resolvedParent } : {}),
         },
