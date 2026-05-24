@@ -37,6 +37,13 @@ export interface BuildWorkflowActionRequestArgs {
   parentItemId?: string;
   formType?: string;
   reason?: string;
+  /**
+   * Current row status — forwarded to `/api/cancel-queued` so the backend
+   * routes a running-row cancel through `buildCancelRunningHandler` instead
+   * of the queued path (which 409s when a daemon already claimed the row).
+   * Contract 5: one cancel route, status discriminates the handler.
+   */
+  status?: "pending" | "running";
 }
 
 export interface WorkflowActionBulkItem {
@@ -107,6 +114,7 @@ export function buildWorkflowActionRequest({
   parentItemId,
   formType,
   reason,
+  status,
 }: BuildWorkflowActionRequestArgs): WorkflowActionHttpRequest {
   const resolvedAction = resolveAction(kind, action, actions);
   const target = resolveTarget(resolvedAction, fallbackTarget);
@@ -140,6 +148,7 @@ export function buildWorkflowActionRequest({
       workflow,
       id,
       runId,
+      status,
       ...actionScopeBody(resolvedAction),
       ocrSessionId,
       parentWorkflow,

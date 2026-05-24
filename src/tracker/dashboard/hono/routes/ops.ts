@@ -132,14 +132,20 @@ type RowCancelRequest = {
   workflow: string;
   id: string;
   runId?: string;
+  status?: "pending" | "running";
   scope: WorkflowActionScope;
 } & Pick<WorkflowActionRequest, "ocrSessionId" | "parentWorkflow" | "parentRunId" | "parentItemId" | "formType" | "reason">;
+
+function parseRowCancelStatus(value: unknown): "pending" | "running" | undefined {
+  return value === "running" || value === "pending" ? value : undefined;
+}
 
 function parseRowCancelRequest(body: Record<string, unknown>): RowCancelRequest {
   return {
     workflow: String(body.workflow ?? ""),
     id: String(body.id ?? ""),
     ...compact({ runId: body.runId ? String(body.runId) : undefined }),
+    ...compact({ status: parseRowCancelStatus(body.status) }),
     scope: parseRowCancelScope(body.scope),
     ...parseOcrCancelContext(body),
   };
@@ -147,6 +153,13 @@ function parseRowCancelRequest(body: Record<string, unknown>): RowCancelRequest 
 
 function buildCancelRoute(deps: DashboardHonoDeps): (c: Context) => Promise<Response> {
   return async (c) => postJson(c, parseRowCancelRequest, async (req) => {
+    // Contract 5 — one cancel mechanism. The single `/api/cancel-queued`
+    // route handles both queued AND running rows: the caller forwards the
+    // row's current `status` so `cancelTarget` routes to the right
+    // low-level handler (queued vs running). When `status` is absent we
+    // default to `"pending"` for backwards compatibility with older
+    // dashboard builds that only ever fired this route for queued rows.
+    const status: "pending" | "running" = req.status ?? "pending";
     const result = await performWorkflowAction({
       action: "cancel",
       scope: req.scope,
@@ -163,13 +176,8 @@ function buildCancelRoute(deps: DashboardHonoDeps): (c: Context) => Promise<Resp
       targets: [{
         workflowId: req.workflow,
         id: req.id,
-        ...compact({
-          runId: req.runId,
-          // Mark queued tasks so cancelTarget routes through the queued
-          // path; cancel of a running row still resolves status from the
-          // tracker projection.
-          status: "pending" as const,
-        }),
+        ...compact({ runId: req.runId }),
+        status,
       }],
     }, { dir: deps.dir });
     return toSingleActionResult(result);
