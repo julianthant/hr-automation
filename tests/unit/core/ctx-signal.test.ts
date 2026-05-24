@@ -5,7 +5,7 @@
  * triggers either the daemon's worker_command path or the in-process
  * cancel handler.
  */
-import { test, describe } from 'vitest'
+import { test, describe, vi } from 'vitest'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -16,6 +16,7 @@ import { Session } from '../../../src/core/kernel/session.js'
 import { Stepper } from '../../../src/core/kernel/stepper.js'
 import { defineWorkflow } from '../../../src/core/index.js'
 import { delegateToImpl } from '../../../src/core/delegate.js'
+import type { Page } from 'playwright'
 
 function buildCtx(controller: AbortController) {
   const session = Session.forTesting({
@@ -190,5 +191,139 @@ describe('in-process delegation propagates parent signal (Finding #7)', () => {
       parentSignal: parentController.signal,
     })
     assert.equal(childCtxSignalAborted, true, 'child sees aborted signal at handler entry when parent pre-aborted')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Finding #16 — ctx.page(id) returns a proxy that injects signal into action
+// methods but leaves evaluate args clean (Bug #3 regression).
+//
+// Motivation: Bug #3 was that evaluate/evaluateHandle/$eval/$$eval were in
+// SIGNAL_METHODS, causing phantom signal injection into the function's arg
+// parameter. These tests pin the correct behavior so a refactor can't silently
+// re-add them.
+// ---------------------------------------------------------------------------
+describe('ctx.page(id) proxy — signal injection', () => {
+  /**
+   * Build a minimal fake Page with vi.fn() stubs for the methods we probe,
+   * wire it into a Session.forTesting browser slot, then get a ctx via
+   * makeCtx so we exercise the full ctx.page() → wrapPageWithSignal() path.
+   */
+  function buildCtxWithFakePage(controller: AbortController) {
+    const fakePage = {
+      click: vi.fn().mockResolvedValue(undefined),
+      evaluate: vi.fn().mockResolvedValue(42),
+      goto: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Page
+
+    // Session.forTesting requires: systems[], browsers Map, readyPromises Map.
+    // SystemSlot shape: { page, context, browser }. We only need page here.
+    const session = Session.forTesting({
+      systems: [{ id: 'ucpath', login: async () => {} }],
+      browsers: new Map([
+        ['ucpath', { page: fakePage, context: {} as never, browser: null }],
+      ]),
+      readyPromises: new Map([['ucpath', Promise.resolve()]]),
+    })
+
+    const stepper = new Stepper({
+      workflow: 'test',
+      itemId: 'proxy-item',
+      runId: 'proxy-run',
+      emitStep: () => {},
+      emitData: () => {},
+      emitFailed: () => {},
+    })
+
+    const ctx = makeCtx({
+      session,
+      stepper,
+      isBatch: false,
+      runId: 'proxy-run',
+      workflow: 'test',
+      itemId: 'proxy-item',
+      emitScreenshotEvent: () => {},
+      signal: controller.signal,
+    })
+
+    return { ctx, fakePage }
+  }
+
+  test('click() injects signal into options arg', async () => {
+    const controller = new AbortController()
+    const { ctx, fakePage } = buildCtxWithFakePage(controller)
+
+    const proxyPage = await ctx.page('ucpath')
+    await proxyPage.click('button')
+
+    assert.equal(fakePage.click.mock.calls.length, 1, 'click was called once')
+    const [, opts] = fakePage.click.mock.calls[0] as [string, { signal?: AbortSignal }]
+    assert.ok(opts && typeof opts === 'object', 'options object was appended')
+    assert.equal(opts.signal, controller.signal, 'ctx.signal was injected into click options')
+  })
+
+  test('goto() injects signal into options arg', async () => {
+    const controller = new AbortController()
+    const { ctx, fakePage } = buildCtxWithFakePage(controller)
+
+    const proxyPage = await ctx.page('ucpath')
+    await proxyPage.goto('about:blank')
+
+    assert.equal(fakePage.goto.mock.calls.length, 1, 'goto was called once')
+    const [, opts] = fakePage.goto.mock.calls[0] as [string, { signal?: AbortSignal }]
+    assert.ok(opts && typeof opts === 'object', 'options object was appended')
+    assert.equal(opts.signal, controller.signal, 'ctx.signal was injected into goto options')
+  })
+
+  test('evaluate(fn) with no second arg — underlying evaluate called with exactly one arg (Bug #3 regression)', async () => {
+    // Bug #3: evaluate was in SIGNAL_METHODS, causing the proxy to append
+    // `{ signal }` as a phantom second arg. The page function would receive
+    // { signal } as its `arg` parameter — misbehavior in every evaluate call.
+    const controller = new AbortController()
+    const { ctx, fakePage } = buildCtxWithFakePage(controller)
+
+    const proxyPage = await ctx.page('ucpath')
+    await proxyPage.evaluate(() => 42)
+
+    assert.equal(fakePage.evaluate.mock.calls.length, 1)
+    const call = fakePage.evaluate.mock.calls[0] as unknown[]
+    assert.equal(call.length, 1, 'evaluate must be called with exactly one arg — no phantom signal injection')
+  })
+
+  test('evaluate(fn, arg) with plain arg — underlying evaluate called with exactly (fn, arg), no signal', async () => {
+    const controller = new AbortController()
+    const { ctx, fakePage } = buildCtxWithFakePage(controller)
+
+    const proxyPage = await ctx.page('ucpath')
+    const fn = (x: number) => x + 1
+    await proxyPage.evaluate(fn, 10)
+
+    assert.equal(fakePage.evaluate.mock.calls.length, 1)
+    const call = fakePage.evaluate.mock.calls[0] as unknown[]
+    assert.equal(call.length, 2, 'evaluate must be called with exactly (fn, arg) — no signal appended as third arg')
+    assert.equal(call[1], 10, 'second arg must be the original arg value, not merged with signal')
+    assert.ok(
+      !call[2],
+      'no third arg must exist (signal must NOT be appended or merged into evaluate args)',
+    )
+  })
+
+  test('caller-provided signal on a SIGNAL_METHOD is not clobbered', async () => {
+    // The proxy must NOT override a caller-supplied signal — callers that
+    // wire their own AbortController for finer-grain control must win.
+    const controller = new AbortController()
+    const { ctx, fakePage } = buildCtxWithFakePage(controller)
+
+    const callerController = new AbortController()
+    const proxyPage = await ctx.page('ucpath')
+    await proxyPage.click('button', { signal: callerController.signal })
+
+    const [, opts] = fakePage.click.mock.calls[0] as [string, { signal?: AbortSignal }]
+    assert.equal(
+      opts.signal,
+      callerController.signal,
+      'caller-provided signal must not be clobbered by ctx.signal',
+    )
+    assert.notEqual(opts.signal, controller.signal)
   })
 })
