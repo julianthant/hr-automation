@@ -177,6 +177,7 @@ interface RetryTaskSnapshot {
   parentRunId: string | null;
   inputJson: string | null;
   originalInputJson: string | null;
+  controlState: string | null;
 }
 
 function findRetryTaskSnapshot(
@@ -192,7 +193,8 @@ function findRetryTaskSnapshot(
       t.item_id AS itemId,
       t.parent_run_id AS parentRunId,
       t.input_json AS inputJson,
-      t.original_input_json AS originalInputJson
+      t.original_input_json AS originalInputJson,
+      t.control_state AS controlState
     FROM task_attempts a
     JOIN tasks t ON t.id = a.task_id
     WHERE a.run_id = @runId
@@ -201,6 +203,15 @@ function findRetryTaskSnapshot(
   if (!row || row.workflow !== workflow || row.itemId !== id) return null;
   return row;
 }
+
+/**
+ * Active states that must block retry. Mirrors the cancel-queued state guard
+ * in `src/control/ops/cancel.ts` — retrying a row that the daemon is actively
+ * processing would reset it to `queued` while the old attempt keeps running,
+ * yielding two concurrent attempts. Cancel the running attempt first
+ * (`/api/cancel-running`) and retry once it terminates.
+ */
+const ACTIVE_STATES_BLOCKING_RETRY = new Set(["claimed", "running", "cancel_requested", "cancelling"]);
 
 /**
  * Merged accumulated `data` for an id across every tracker row (any status).
@@ -308,6 +319,17 @@ async function reEnqueueEntry(
     const stores = openControlStores(dir);
     const task = findRetryTaskSnapshot(stores.taskStore.db, wf, id, resolvedRunId);
     if (task) {
+      // State guard (mirrors cancel.ts:84-96): retry must not race against
+      // an in-flight attempt. `retryTaskFromAttempt` would reset the task to
+      // `queued` even though the daemon is still running the prior attempt,
+      // producing double-execution. The operator must cancel the running
+      // attempt first, then retry once it terminates.
+      if (task.controlState && ACTIVE_STATES_BLOCKING_RETRY.has(task.controlState)) {
+        return {
+          ok: false,
+          error: `item is currently ${task.controlState} — cancel the active attempt before retrying (runId=${resolvedRunId})`,
+        };
+      }
       // Contract 2: read the pristine original input from the task record.
       // Stamped at first enqueue (migration 11). Historic rows that predate
       // the column were purged — a null here is a bug, not a legacy state.
