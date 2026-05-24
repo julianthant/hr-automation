@@ -396,6 +396,10 @@ async function reEnqueueEntry(
         input,
         fallbackArchetype: "single",
         data: { __retriedFrom: resolvedRunId },
+        // SQLite fast-path: prior-row lookup uses indexed runs.run_id
+        // instead of a 30-day JSONL scan. Bulk retry calls this per row;
+        // without the hint, perf is O(K*D*L) on JSONL (Finding #13).
+        db: stores.taskStore.db,
         ...(resolvedParent ? { parentRunId: resolvedParent } : {}),
       });
       return { ok: true };

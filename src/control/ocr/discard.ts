@@ -5,6 +5,7 @@ import {
 } from "../../tracker/ocr-prepare-abort.js";
 import { deleteDelegatedChildrenForRun } from "../ops/delete.js";
 import { emitInheritedRow } from "../ops/emit-inherited.js";
+import { openControlStores } from "../ops/shared.js";
 import { readFormType, readParentRunId } from "../../tracker/dashboard/ocr/shared.js";
 
 const WORKFLOW = "ocr";
@@ -38,6 +39,12 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
     // prior row so this code never has to know about per-workflow archetype
     // declarations beyond what the row itself already carries.
     const trackerDir = opts.trackerDir;
+    // SQLite db handle for fast prior-row lookup inside emitInheritedRow —
+    // OCR discard typically targets a recent session, so the JSONL fallback
+    // would still work, but the indexed lookup avoids the lookbackDays scan
+    // (Finding #13). `openControlStores` uses the shared process DB; close()
+    // is a no-op for the shared connection.
+    const stores = openControlStores(trackerDir ?? ".tracker");
     emitInheritedRow({
       workflow: WORKFLOW,
       trackerDir,
@@ -46,6 +53,7 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
       status: "failed",
       step: "discarded",
       fallbackArchetype: "batch-parent",
+      db: stores.taskStore.db,
       ...(input.reason ? { error: input.reason } : {}),
     });
     // If this OCR session was started from a downstream workflow's run
@@ -72,6 +80,7 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
           status: "failed",
           step: "discarded",
           fallbackArchetype: "batch-parent",
+          db: stores.taskStore.db,
           ...(input.reason ? { error: input.reason } : {}),
         });
         appendLogEntry(

@@ -113,7 +113,9 @@ export function buildCancelQueuedHandler(dir: string) {
       });
       const auditRunId = req.runId ?? task.currentRunId ?? task.runId;
       appendQueueFailedAudit(req.workflow, req.id, auditRunId, DASHBOARD_CANCEL_ERROR, dir);
-      emitDashboardCancelTrackerRow(req.workflow, req.id, auditRunId, dir);
+      // SQLite fast-path hint: bulk cancel goes O(K*D*L) on the prior-row
+      // lookup without it (Finding #13). Single-row callers still benefit.
+      emitDashboardCancelTrackerRow(req.workflow, req.id, auditRunId, dir, stores.taskStore.db);
       return { ok: true as const };
     }
     return {
