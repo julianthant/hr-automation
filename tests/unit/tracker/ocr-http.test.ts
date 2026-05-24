@@ -259,6 +259,62 @@ test("POST /api/ocr/discard-prepare mirrors explicit parent row without OCR hist
   rmSync(dir, { recursive: true, force: true });
 });
 
+// Bug #6 — when the OCR-parent row itself carries `parentRunId` (i.e. the
+// parent workflow was itself spawned as a delegation child of a batch
+// orchestrator), the discard row mirrored onto the parent must inherit that
+// `parentRunId` via emitInheritedRow. Without it, the discard row orphans
+// from the grandparent batch card.
+test("POST /api/ocr/discard-prepare inherits parentRunId on parent-workflow row when parent was itself a delegation child", async () => {
+  const dir = setup();
+  const date = todayLocal();
+  // Pre-emit a prior parent-workflow row that carries `parentRunId` —
+  // models the case where oath-signature is itself a child of a
+  // batch-orchestrator workflow (e.g. oath-upload's fan-out).
+  trackEventForDate(
+    {
+      workflow: "oath-signature",
+      timestamp: new Date().toISOString(),
+      id: "ocr-prep-s-inh",
+      runId: "r-parent-inh",
+      parentRunId: "grandparent-run-inh",
+      status: "running",
+      step: "delegated-to-ocr",
+      data: { archetype: "delegate-child" },
+    },
+    date,
+    dir,
+  );
+
+  const handler = buildOcrDiscardHandler({ trackerDir: dir });
+  const resp = await handler({
+    sessionId: "s-inh",
+    runId: "r-ocr-inh",
+    reason: "Cancelled from oath-upload batch",
+    parentWorkflow: "oath-signature",
+    parentRunId: "r-parent-inh",
+    parentItemId: "ocr-prep-s-inh",
+    formType: "oath",
+  });
+  assert.equal(resp.status, 200);
+
+  const parentFile = join(dir, `oath-signature-${date}.jsonl`);
+  const parentLines = readFileSync(parentFile, "utf-8").split("\n").filter(Boolean);
+  const lastParent = JSON.parse(parentLines[parentLines.length - 1]);
+  assert.equal(lastParent.status, "failed");
+  assert.equal(lastParent.step, "discarded");
+  assert.equal(
+    lastParent.parentRunId,
+    "grandparent-run-inh",
+    "discard row must inherit grandparent parentRunId from prior parent entry (Bug #6)",
+  );
+  assert.equal(
+    lastParent.data?.archetype,
+    "delegate-child",
+    "discard row must inherit the parent's prior archetype (delegate-child)",
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("sweepStuckOcrRows marks running rows failed", () => {
   const dir = setup();
   const file = join(dir, `ocr-${todayLocal()}.jsonl`);
