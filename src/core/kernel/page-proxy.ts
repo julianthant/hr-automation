@@ -129,11 +129,11 @@ function mergeSignalIntoArgs(args: unknown[], signal: AbortSignal): unknown[] {
     if ('signal' in last && last.signal != null) return args
     return [...args.slice(0, -1), { ...last, signal }]
   }
-  // Last arg isn't an options bag — could be a string selector, a function,
-  // or just nothing recognizable. Don't try to invent a slot; passthrough.
-  // If Playwright's method does accept options, the caller can pass them
-  // explicitly to opt into signal merging.
-  return args
+  // Last arg isn't an options bag — append a fresh options bag carrying
+  // only `{ signal }`. Playwright treats a missing options arg as `{}`, so
+  // appending one is safe and the only mechanism by which a caller that
+  // didn't pass options can still get signal injection.
+  return [...args, { signal }]
 }
 
 function wrapFunction(
