@@ -13,6 +13,7 @@ import {
   emitAuthFailed,
 } from '../../tracker/session-events.js'
 import { buildUcpathIdleHooks } from './ucpath-idle-hooks.js'
+import { log } from '../../utils/log.js'
 
 /**
  * Per-system auth duration captured by `createBatchObserver`. `startTs` and
@@ -230,9 +231,18 @@ export async function withBatchLifecycle<TData, R>(
         parentRunId,
       })
       return data
-    } catch {
+    } catch (err) {
       // Bad shape (e.g. input failed schema for stamping helpers) — fall
-      // back to the minimal stamp so the failed row still lands.
+      // back to the minimal stamp so the failed row still lands. Surface
+      // the underlying error first: this fallback reproduces the very
+      // "nameless cancelled card" pathology that Bug 9 added the rich-row
+      // emission to prevent, so a silent swallow hides regressions. Warn
+      // loud and keep moving.
+      log.warn(
+        `[batch-lifecycle] buildRowData fallback for ${opts.wf?.config.name ?? '<unknown>'}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
       return { archetype }
     }
   }
