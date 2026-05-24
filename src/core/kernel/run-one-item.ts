@@ -259,7 +259,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
         id: itemId,
         runId,
         status: 'pending',
-        data: { ...enriched, archetype: deriveRowArchetype(wf.archetype, args.parentRunId) },
+        data: enriched,
         ...(inputForRow ? { input: inputForRow } : {}),
         ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
       },

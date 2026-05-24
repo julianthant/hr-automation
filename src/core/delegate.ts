@@ -133,9 +133,6 @@ function preEmitPendingForChild<TChildData, TChildSteps extends readonly string[
     parentRunId: args.parentRunId,
     useInitialTrackerSeed: true,
     nameIdStamp: "always-on-seed",
-    // We supply the archetype ourselves below; tell pending-data to skip
-    // the default stamp so we can override with the resolved `renderAs`.
-    includeArchetype: false,
   })
   const stamped: StampedData = { ...data, archetype: args.archetype }
   emitTrackerRow(
@@ -384,7 +381,6 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
           useInitialTrackerSeed: true,
           nameIdStamp: "always-on-seed",
           extraData: extras,
-          includeArchetype: false,
         })
         const stamped: StampedData = { ...data, archetype }
         emitTrackerRow(
