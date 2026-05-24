@@ -146,7 +146,7 @@ Every tracker row carries `data.archetype`. The vocabulary is canonical — use 
 | `utility` | `passive-child` only |
 
 - **single** — one item, one row, flat in the queue.
-- **batch-parent** — anchor row over N peers. Stamped via `data.archetype`; `resolveRowArchetype` has legacy fallbacks for older JSONL rows.
+- **batch-parent** — anchor row over N peers. Stamped via `data.archetype` at every emit site; `resolveRowArchetype` throws on unstamped rows (Contract 1 — no legacy heuristics).
 - **batch-member** — peer item under a batch-parent.
 - **dispatch** — terminal-at-enqueue row recording "I delegated to N children in another workflow."
 - **delegate-child** — child run spawned from a parent in a different workflow; holds operator attention.

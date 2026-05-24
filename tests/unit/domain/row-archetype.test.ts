@@ -41,11 +41,16 @@ describe("row-archetype", () => {
     assert.equal(resolveRowArchetype({ parentRunId: "parent-run-1", data: {} }), "delegate-child");
   });
 
-  it("resolveRowArchetype treats invalid data.archetype as missing", () => {
-    assert.equal(resolveRowArchetype({ data: { archetype: "not-a-real-archetype" } }), "single");
-    assert.equal(
-      resolveRowArchetype({ parentRunId: "parent-run-1", data: { archetype: 42 } }),
-      "delegate-child",
+  it("resolveRowArchetype throws when data.archetype is set but invalid", () => {
+    // Production write code can't reach this state (StampedData type contract
+    // on emitTrackerRow). An explicitly-invalid value is a bug worth surfacing.
+    assert.throws(
+      () => resolveRowArchetype({ data: { archetype: "not-a-real-archetype" } }),
+      /data\.archetype is set but not a valid RowArchetype/,
+    );
+    assert.throws(
+      () => resolveRowArchetype({ parentRunId: "parent-run-1", data: { archetype: 42 } }),
+      /data\.archetype is set but not a valid RowArchetype/,
     );
   });
 

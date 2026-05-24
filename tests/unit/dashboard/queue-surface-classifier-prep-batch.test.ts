@@ -12,6 +12,7 @@ function prepParent(overrides: Partial<TrackerEntry> = {}): TrackerEntry {
     status: "running",
     step: "ocr",
     data: {
+      archetype: "batch-parent",
       __name: "Oath Signature · #1234",
       __id: "ocr-prep-abc",
       mode: "prepare",
@@ -135,7 +136,7 @@ test("ocr-workflow awaiting-approval row renders as a group card (batch-parent a
     runId: "ocr-run-x",
     status: "running",
     step: "awaiting-approval",
-    data: { mode: "prepare", formType: "oath" },
+    data: { archetype: "batch-parent", mode: "prepare", formType: "oath" },
   } as TrackerEntry;
   const surfaces = buildQueueSurfaces({
     entries: [ocrRow],

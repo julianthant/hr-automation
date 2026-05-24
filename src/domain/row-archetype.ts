@@ -56,19 +56,34 @@ interface ResolveEntry {
 }
 
 /**
- * Read `data.archetype` when present and valid; otherwise default to
- * `delegate-child` when `parentRunId` is set, or `single` — matching
- * `deriveRowArchetype("single", parentRunId)` in the absence of workflow info.
+ * Read `data.archetype`. Post-Contract-1, every production tracker row is
+ * written through `emitTrackerRow` which requires `StampedData` at the type
+ * level — `archetype` is always present in real data.
+ *
+ * Behavior when the field is not a valid `RowArchetype`:
+ *   - **Missing** (unstamped entry) → return the canonical mapping
+ *     `deriveRowArchetype("single", parentRunId)` (i.e. `"delegate-child"`
+ *     when a parent is set, else `"single"`). This is the same value
+ *     `emitTrackerRow` would have stamped for an unspecified workflow.
+ *   - **Present but invalid string** (e.g. `"nonsense"`) → throw. That's
+ *     a write-side bug worth surfacing — production code can't reach this
+ *     state through the type system, so it's almost certainly a hand-rolled
+ *     entry that meant something else.
+ *
+ * The old legacy heuristics (`mode === "prepare"` → batch-parent,
+ * `taskRole === "utility"` → passive-child, `requestRole === "delegation-dispatch"`
+ * → dispatch) were deleted along with the historic JSONL they were written for.
  */
 export function resolveRowArchetype(entry: ResolveEntry): RowArchetype {
   const stamped = entry.data?.archetype;
+  if (stamped === undefined || stamped === null) {
+    return entry.parentRunId ? "delegate-child" : "single";
+  }
   if (typeof stamped === "string" && isRowArchetype(stamped)) return stamped;
-
-  if (entry.data?.mode === "prepare") return "batch-parent";
-  if (entry.data?.taskRole === "utility") return "passive-child";
-  if (entry.data?.requestRole === "delegation-dispatch") return "dispatch";
-
-  return entry.parentRunId ? "delegate-child" : "single";
+  throw new Error(
+    `resolveRowArchetype: data.archetype is set but not a valid RowArchetype — bug. ` +
+      `Got ${JSON.stringify(stamped)} on parentRunId=${entry.parentRunId ?? "<none>"}.`,
+  );
 }
 
 function isRowArchetype(v: string): v is RowArchetype {

@@ -27,12 +27,11 @@ import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
 import { closeStateDbForTests } from "../../../src/tracker/state/db.js";
 import { trackEvent, readEntries } from "../../../src/tracker/jsonl.js";
-import { buildRetryHandler, __resetLegacyRetryFallbackWarningForTests } from "../../../src/control/ops/retry.js";
+import { buildRetryHandler } from "../../../src/control/ops/retry.js";
 
 let tmp: string;
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), "retry-original-"));
-  __resetLegacyRetryFallbackWarningForTests();
 });
 afterEach(() => {
   closeStateDbForTests(tmp);

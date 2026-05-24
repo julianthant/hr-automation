@@ -67,7 +67,7 @@ describe("buildQueueSurfaces", () => {
       parentRunId: "oath-upload-run-1",
       status: "done",
       step: "approved",
-      data: { mode: "prepare", formType: "oath", pdfOriginalName: "oath.pdf" },
+      data: { archetype: "batch-parent", mode: "prepare", formType: "oath", pdfOriginalName: "oath.pdf" },
     });
     const eid = row({
       workflow: "eid-lookup",
@@ -112,7 +112,7 @@ describe("buildQueueSurfaces", () => {
       parentRunId: "oath-upload-run-single",
       status: "done",
       step: "approved",
-      data: { mode: "prepare", formType: "oath", pdfOriginalName: "single-oath.pdf" },
+      data: { archetype: "batch-parent", mode: "prepare", formType: "oath", pdfOriginalName: "single-oath.pdf" },
     });
     const child = row({
       workflow: "oath-signature",
@@ -243,6 +243,7 @@ describe("buildQueueSurfaces", () => {
       timestamp: "2026-05-12T10:01:00.000Z",
       status: "pending",
       data: {
+        archetype: "passive-child",
         taskRole: "utility",
         originWorkflow: "onboarding",
         parentSubject: "Onboarding: jane@example.edu",
@@ -274,7 +275,7 @@ describe("buildQueueSurfaces", () => {
       runId: "ocr-run-nochildren",
       status: "done",
       step: "approved",
-      data: { mode: "prepare", formType: "oath", pdfOriginalName: "single.pdf" },
+      data: { archetype: "batch-parent", mode: "prepare", formType: "oath", pdfOriginalName: "single.pdf" },
     });
 
     const surfaces = buildQueueSurfaces({
@@ -295,7 +296,7 @@ describe("buildQueueSurfaces", () => {
       runId: "ocr-run-2",
       status: "running",
       step: "awaiting-approval",
-      data: { mode: "prepare", formType: "emergency-contact" },
+      data: { archetype: "batch-parent", mode: "prepare", formType: "emergency-contact" },
     });
 
     const surfaces = buildQueueSurfaces({
@@ -318,7 +319,7 @@ describe("buildQueueSurfaces", () => {
       runId: "ocr-run-3",
       status: "failed",
       step: "discarded",
-      data: { mode: "prepare", formType: "oath" },
+      data: { archetype: "batch-parent", mode: "prepare", formType: "oath" },
     });
 
     const surfaces = buildQueueSurfaces({
@@ -340,7 +341,7 @@ describe("buildQueueSurfaces", () => {
       parentRunId: "oath-upload-run-single",
       status: "running",
       step: "awaiting-approval",
-      data: { mode: "prepare", formType: "oath", pdfOriginalName: "single-oath.pdf" },
+      data: { archetype: "batch-parent", mode: "prepare", formType: "oath", pdfOriginalName: "single-oath.pdf" },
     });
 
     const surfaces = buildQueueSurfaces({
@@ -362,7 +363,7 @@ describe("buildQueueSurfaces", () => {
       parentRunId: "oath-upload-run-batch",
       status: "running",
       step: "awaiting-approval",
-      data: { mode: "prepare", formType: "oath", pdfOriginalName: "first.pdf" },
+      data: { archetype: "batch-parent", mode: "prepare", formType: "oath", pdfOriginalName: "first.pdf" },
     });
     const second = row({
       workflow: "ocr",
@@ -371,7 +372,7 @@ describe("buildQueueSurfaces", () => {
       parentRunId: "oath-upload-run-batch",
       status: "running",
       step: "awaiting-approval",
-      data: { mode: "prepare", formType: "oath", pdfOriginalName: "second.pdf" },
+      data: { archetype: "batch-parent", mode: "prepare", formType: "oath", pdfOriginalName: "second.pdf" },
     });
 
     const surfaces = buildQueueSurfaces({
@@ -401,6 +402,7 @@ describe("buildQueueSurfaces", () => {
         status: "done",
         step: "approved",
         data: {
+          archetype: "batch-parent",
           mode: "prepare",
           formType: origin === "emergency-contact" ? "emergency-contact" : "oath",
         },
