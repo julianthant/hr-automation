@@ -12,6 +12,7 @@ import { byTimestampAsc, emitTrackerRow, readEntries, readEntriesForDate, type T
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { resolveRowArchetype } from "../../domain/row-archetype.js";
 import { enqueueFromHttp } from "../../core/daemon/enqueue-dispatch.js";
+import type { Database } from "../../infra/sqlite/index.js";
 import {
   findRetryInputFromTaskStore,
   readEntriesForRetryItem,
@@ -19,7 +20,6 @@ import {
 } from "../../core/find-input.js";
 import {
   openControlStores,
-  resolveControlTask,
   appendQueueEnqueueAudit,
 } from "./shared.js";
 import { log } from "../../utils/log.js";
@@ -170,6 +170,38 @@ function asRecordInput(input: unknown): Record<string, unknown> | null {
     : null;
 }
 
+interface RetryTaskSnapshot {
+  taskId: string;
+  workflow: string;
+  itemId: string;
+  parentRunId: string | null;
+  inputJson: string | null;
+  originalInputJson: string | null;
+}
+
+function findRetryTaskSnapshot(
+  db: Database,
+  workflow: string,
+  id: string,
+  runId: string,
+): RetryTaskSnapshot | null {
+  const row = db.prepare(`
+    SELECT
+      t.id AS taskId,
+      t.workflow,
+      t.item_id AS itemId,
+      t.parent_run_id AS parentRunId,
+      t.input_json AS inputJson,
+      t.original_input_json AS originalInputJson
+    FROM task_attempts a
+    JOIN tasks t ON t.id = a.task_id
+    WHERE a.run_id = @runId
+    LIMIT 1
+  `).get({ runId }) as RetryTaskSnapshot | undefined;
+  if (!row || row.workflow !== workflow || row.itemId !== id) return null;
+  return row;
+}
+
 /**
  * Merged accumulated `data` for an id across every tracker row (any status).
  * Used by edit-and-resume to seed prefilledData with non-editable fields
@@ -274,7 +306,7 @@ async function reEnqueueEntry(
 
   if (resolvedRunId && !prefilledData) {
     const stores = openControlStores(dir);
-    const task = resolveControlTask(stores.taskStore, wf, id, resolvedRunId);
+    const task = findRetryTaskSnapshot(stores.taskStore.db, wf, id, resolvedRunId);
     if (task) {
       // Contract 2: read the pristine original input from the task record.
       // Stamped at first enqueue (migration 11). Historic rows that predate
@@ -282,6 +314,12 @@ async function reEnqueueEntry(
       const originalInput = stores.taskStore.findOriginalInputForRunId(resolvedRunId);
       const input = asRecordInput(originalInput);
       if (!input) {
+        if (task.originalInputJson === null && task.inputJson === null) {
+          return {
+            ok: false,
+            error: `retry: no original_input_json AND no current input_json for runId=${resolvedRunId} — task row is corrupt and cannot be retried.`,
+          };
+        }
         return {
           ok: false,
           error: `retry: tasks.original_input_json missing for runId=${resolvedRunId} — every row must be stamped at enqueue (Contract 2). This is a bug, not a legacy state.`,
