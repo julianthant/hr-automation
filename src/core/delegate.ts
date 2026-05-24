@@ -239,7 +239,38 @@ export async function delegateToImpl<TChildData, TChildSteps extends readonly st
       trackerDir: args.trackerDir,
       parentRunId: args.parentRunId,
     }).catch((err) => {
-      log.warn(`[delegateTo] fire-and-forget child '${args.child.config.name}/${childItemId}' crashed: ${errorMessage(err)}`)
+      const message = errorMessage(err);
+      log.warn(`[delegateTo] fire-and-forget child '${args.child.config.name}/${childItemId}' crashed: ${message}`)
+      // Bug #5: if `runWorkflow` rejects synchronously (schema-parse
+      // failure, `Session.launch` rejection, handler-wiring throw) BEFORE
+      // `withTrackedWorkflow` installs its lifecycle, the pre-emitted
+      // pending row above never gets a terminal status. Without this
+      // emit, the dashboard shows the child stuck pending forever. Emit
+      // a terminal `failed` row keyed on the same (id, runId, parentRunId)
+      // so the projection collapses the pending row into the failure.
+      try {
+        const failedData: StampedData = {
+          archetype,
+          error: message,
+        };
+        emitTrackerRow(
+          {
+            workflow: args.child.config.name,
+            timestamp: new Date().toISOString(),
+            id: childItemId,
+            runId: childRunId,
+            parentRunId: args.parentRunId,
+            status: "failed",
+            data: failedData,
+            error: message,
+          },
+          args.trackerDir,
+        );
+      } catch (emitErr) {
+        log.warn(
+          `[delegateTo] failed to emit terminal failed row for crashed fire-and-forget child '${args.child.config.name}/${childItemId}': ${errorMessage(emitErr)}`,
+        );
+      }
     })
     return {
       workflow: args.child.config.name,
@@ -395,12 +426,25 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
   )
 
   if (args.fireAndForget) {
-    return expectedItemIds.map<ChildRunResult<TChildData>>((itemId, i) => ({
-      workflow: args.child.config.name,
-      runId: expectedRunIds[i] ?? "",
-      itemId,
-      status: "pending",
-    }))
+    return expectedItemIds.map<ChildRunResult<TChildData>>((itemId, i) => {
+      // Invariant: `onPreEmitPending` pushes one runId per itemId in the
+      // same order, so expectedRunIds[i] MUST be defined here. The prior
+      // `?? ""` defensive default silently corrupted attribution — empty
+      // runId breaks retry-by-runId, dashboard navigation, and
+      // watchChildRuns correlation. Fail loud instead.
+      const runId = expectedRunIds[i];
+      if (!runId) {
+        throw new Error(
+          `delegate: fire-and-forget result has no runId for itemId=${itemId} (index ${i}) — invariant violated, expectedItemIds.length=${expectedItemIds.length} but expectedRunIds.length=${expectedRunIds.length}`,
+        );
+      }
+      return {
+        workflow: args.child.config.name,
+        runId,
+        itemId,
+        status: "pending",
+      };
+    })
   }
 
   const outcomes = await watchChildRuns({
@@ -411,12 +455,23 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
   // Preserve input order in the returned results — watchChildRuns may
   // resolve in completion order.
   const byItem = new Map(outcomes.map((o) => [o.itemId, o]))
-  return expectedItemIds.map<ChildRunResult<TChildData>>((itemId) => {
+  return expectedItemIds.map<ChildRunResult<TChildData>>((itemId, i) => {
     const outcome = byItem.get(itemId)
     if (!outcome) {
+      // Use the runId we assigned at enqueue (Bug #4): emitting an empty
+      // string here would leave the failed row un-retryable from the
+      // dashboard (retry-by-runId / watchChildRuns / navigation all key
+      // off runId). The runId IS known — `onPreEmitPending` filled
+      // expectedRunIds[i] in lockstep with expectedItemIds[i].
+      const runId = expectedRunIds[i];
+      if (!runId) {
+        throw new Error(
+          `delegate: no outcome AND no expected runId for itemId=${itemId} (index ${i}) — invariant violated`,
+        );
+      }
       return {
         workflow: args.child.config.name,
-        runId: "",
+        runId,
         itemId,
         status: "failed",
         error: { message: "watchChildRuns returned no outcome for child" },
