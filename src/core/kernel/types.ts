@@ -465,6 +465,16 @@ export interface RunOpts {
   poolSize?: number
   /** When set, every TrackerEntry emitted for this run carries `parentRunId`. */
   parentRunId?: string
+  /**
+   * Parent run's `AbortSignal`. When provided, the kernel attaches a one-shot
+   * abort listener to it so this child run's own per-run `AbortController`
+   * aborts immediately when the parent's does. Closes the Contract 5 gap for
+   * in-process delegated children (OCR, sharepoint-download) — the
+   * daemon-dispatched delegation path already cancels children via the
+   * worker-command machinery, but the in-process `runInProcessAndCollectResult`
+   * path used to keep running until completion regardless of parent state.
+   */
+  parentSignal?: AbortSignal
 }
 
 // Placeholder types — fully defined in Phase 2 (Task 7). Keep in sync.

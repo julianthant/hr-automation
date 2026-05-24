@@ -88,6 +88,15 @@ interface DelegateCoreArgs<TChildData, TChildSteps extends readonly string[]> {
   fireAndForget: boolean
   itemId?: string
   runId?: string
+  /**
+   * Parent run's `AbortSignal`. Forwarded into `runWorkflow`'s `parentSignal`
+   * opt so the child's per-run controller aborts when the parent cancels —
+   * closes the Contract 5 gap for in-process delegated children (OCR,
+   * sharepoint-download) that previously kept running after parent cancel.
+   * The daemon-dispatched path doesn't need this — `cancel_task` worker
+   * commands reach the daemon directly.
+   */
+  parentSignal?: AbortSignal
 }
 
 /** Map a `renderAs` override to the canonical `RowArchetype` to stamp. */
@@ -158,6 +167,7 @@ async function runInProcessAndCollectResult<TChildData, TChildSteps extends read
       preAssignedRunId: args.runId,
       trackerDir: args.trackerDir,
       parentRunId: args.parentRunId,
+      ...(args.parentSignal ? { parentSignal: args.parentSignal } : {}),
     })
     return {
       workflow: args.child.config.name,
@@ -238,6 +248,7 @@ export async function delegateToImpl<TChildData, TChildSteps extends readonly st
       preAssignedRunId: childRunId,
       trackerDir: args.trackerDir,
       parentRunId: args.parentRunId,
+      ...(args.parentSignal ? { parentSignal: args.parentSignal } : {}),
     }).catch((err) => {
       const message = errorMessage(err);
       log.warn(`[delegateTo] fire-and-forget child '${args.child.config.name}/${childItemId}' crashed: ${message}`)
@@ -324,6 +335,7 @@ async function runInProcessPool<TChildData, TChildSteps extends readonly string[
   renderAs?: DelegateRenderAs
   fireAndForget: boolean
   concurrency?: number
+  parentSignal?: AbortSignal
 }): Promise<ChildRunResult<TChildData>[]> {
   const results: ChildRunResult<TChildData>[] = new Array(args.inputs.length)
   const concurrency = Math.max(1, args.concurrency ?? args.inputs.length)
@@ -339,6 +351,7 @@ async function runInProcessPool<TChildData, TChildSteps extends readonly string[
         input: args.inputs[i],
         renderAs: args.renderAs,
         fireAndForget: args.fireAndForget,
+        ...(args.parentSignal ? { parentSignal: args.parentSignal } : {}),
       })
     }
   })
@@ -508,6 +521,7 @@ export async function delegateToAllImpl<TChildData, TChildSteps extends readonly
   deriveItemId?: (input: TChildData) => string
   buildPendingExtras?: (input: TChildData, itemId: string) => Record<string, unknown>
   onPreparedItems?: (items: Array<{ itemId: string; runId: string; input: TChildData }>) => Promise<void> | void
+  parentSignal?: AbortSignal
 }): Promise<ChildRunResult<TChildData>[]> {
   if (args.inputs.length === 0) return []
   if (isDaemonCapable(args.child.config.name)) {
@@ -524,6 +538,16 @@ export async function delegateToAllImpl<TChildData, TChildSteps extends readonly
 export function buildDelegateApi(parent: {
   runId: string
   trackerDir: string | undefined
+  /**
+   * Parent run's `AbortSignal` (from `ctx.signal`). When provided, every
+   * delegated child receives this as `parentSignal` so an operator cancel
+   * on the parent propagates into in-process children's `runWorkflow`
+   * controller — closes the Contract 5 gap for OCR / sharepoint-download.
+   * Optional for backwards compat with the few call sites that build a
+   * delegate API without a parent signal (scenario runtime in some test
+   * setups).
+   */
+  signal?: AbortSignal
 }): Pick<Ctx<readonly string[], unknown>, "delegateTo" | "delegateToAll"> {
   const delegateTo = <TChildData, TChildSteps extends readonly string[]>(
     child: RegisteredWorkflow<TChildData, TChildSteps>,
@@ -539,6 +563,7 @@ export function buildDelegateApi(parent: {
       fireAndForget: opts.fireAndForget ?? false,
       itemId: opts.itemId,
       runId: opts.runId,
+      ...(parent.signal ? { parentSignal: parent.signal } : {}),
     })
 
   const delegateToAll = <TChildData, TChildSteps extends readonly string[]>(
@@ -554,6 +579,7 @@ export function buildDelegateApi(parent: {
       renderAs: opts.renderAs,
       fireAndForget: opts.fireAndForget ?? false,
       concurrency: opts.concurrency,
+      ...(parent.signal ? { parentSignal: parent.signal } : {}),
     })
 
   return { delegateTo, delegateToAll } as unknown as Pick<
