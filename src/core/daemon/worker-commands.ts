@@ -105,6 +105,16 @@ export function createHandleWorkerCommand<TData, TSteps extends readonly string[
         }
         workerStore.acknowledgeCommand(command.commandId, instanceId)
         state.cancelTarget = { itemId: state.inFlight.itemId, runId: state.inFlight.runId }
+        // Contract 5: aborting the per-run AbortController propagates into
+        // any in-flight Playwright call (via the signal injected by
+        // ctx.page(id)'s proxy), so cancel completes in ms rather than at
+        // the next ctx.step boundary. The stepper still sees `cancelTarget`
+        // set and emits step="cancelled" via its mapEscapedHandlerError
+        // path; without controller.abort() the dashboard would wait up to
+        // ~30s for the active waitForSelector to time out.
+        if (!state.currentRunController?.signal.aborted) {
+          state.currentRunController?.abort(new Error('cancel requested'))
+        }
         workerStore.completeCommand(command.commandId)
         return
       }

@@ -34,5 +34,18 @@ export interface DaemonState {
   workerStore: ControlWorkerStore | null
   exitError: unknown
   cancelTarget: { itemId: string; runId: string } | null
+  /**
+   * The per-run `AbortController` `runOneItem` constructed for the
+   * currently in-flight item (Contract 5). The daemon's `cancel_task`
+   * command handler and the HTTP `/cancel-current` route both call
+   * `.abort()` on this so any in-flight Playwright work rejects within ms
+   * via the signal injected by `ctx.page(id)`'s proxy — uniform fast
+   * cancel without killing chrome.
+   *
+   * Cleared in the daemon claim loop alongside `cancelTarget` after each
+   * item finishes; remains `null` between items so a late command can't
+   * abort the next item by accident.
+   */
+  currentRunController: AbortController | null
   workflowInstanceForCleanup: string | null
 }

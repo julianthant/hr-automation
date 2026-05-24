@@ -121,6 +121,13 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     // in-flight item; cleared after the next item starts. Stepper checks
     // this at every step boundary and throws CancelledError.
     cancelTarget: null,
+    // Per-run AbortController (Contract 5). Set by runOneItem's
+    // `onCancelController` callback at item start; cleared in the claim
+    // loop's per-item cleanup along with cancelTarget. A daemon-side
+    // cancel-task command calls .abort() on this controller, which
+    // propagates into the in-flight Playwright call via the signal the
+    // Page proxy injected.
+    currentRunController: null,
     // Captured from the withBatchLifecycle body callback so the outer
     // finally cleanup can emit `item_cancelled` session events for any
     // in-flight or queued items it marks as cancelled. Stays null if the
@@ -156,7 +163,15 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     getLastActivity: () => state.lastActivity,
     getActiveSession: () => state.activeSession,
     getWorkerStore: () => state.workerStore,
-    setCancelTarget: (target) => { state.cancelTarget = target },
+    setCancelTarget: (target) => {
+      state.cancelTarget = target
+      // Contract 5: aborting the per-run AbortController makes any
+      // in-flight Playwright call reject within ms. Skipped when target is
+      // null (between-item clearing) or the controller is already aborted.
+      if (target && state.currentRunController && !state.currentRunController.signal.aborted) {
+        state.currentRunController.abort(new Error('cancel requested'))
+      }
+    },
     setForceShutdown: (value) => { state.forceShutdown = value },
     setDrainOnlyShutdown: (value) => { state.drainOnlyShutdown = value },
     setShuttingDown: (value) => { state.shuttingDown = value },
@@ -429,6 +444,14 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 authTimings: itemAuthTimings,
                 isCancelRequested: () =>
                   state.cancelTarget?.itemId === item.id && state.cancelTarget?.runId === runId,
+                onCancelController: (controller) => {
+                  // Stash the per-run AbortController so cancel_task /
+                  // /cancel-current can abort in-flight Playwright work
+                  // immediately (Contract 5) instead of waiting on the
+                  // step-boundary probe. Cleared below after the item
+                  // finishes so a late command can't poison the next item.
+                  state.currentRunController = controller
+                },
                 ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
               })
               emitItemComplete(instance, item.id, trackerDir, runId)
@@ -526,6 +549,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 }
               }
               state.cancelTarget = null
+              state.currentRunController = null
               state.inFlight = null
               setPhase('idle')
               emitWorkerHeartbeat()
