@@ -41,6 +41,7 @@ export async function runWorkflowSharedContextPool<TData, TSteps extends readonl
   return withBatchLifecycle(
     {
       workflow: wf.config.name,
+      wf,
       archetype: wf.archetype,
       systems: wf.config.systems,
       perItem: perItem.map(({ item, itemId, runId }) => ({

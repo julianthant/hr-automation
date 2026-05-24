@@ -1,6 +1,7 @@
-import type { SessionObserver, SystemConfig } from './types.js'
-import { emitTrackerRow } from '../../tracker/jsonl.js'
+import type { RegisteredWorkflow, SessionObserver, SystemConfig } from './types.js'
+import { emitTrackerRow, type StampedData } from '../../tracker/jsonl.js'
 import { deriveRowArchetype, type WorkflowArchetype } from '../../domain/row-archetype.js'
+import { buildPendingTrackerData } from '../pending-data.js'
 import {
   generateInstanceName,
   emitWorkflowStart,
@@ -103,7 +104,7 @@ export function createBatchObserver(
   }
 }
 
-export interface BatchLifecycleOpts<_TData = unknown> {
+export interface BatchLifecycleOpts<TData = unknown> {
   /** Workflow name — threaded into `generateInstanceName` and tracker rows. */
   workflow: string
   /**
@@ -113,6 +114,15 @@ export interface BatchLifecycleOpts<_TData = unknown> {
    * rows. Defaults to `"single"` for back-compat with tests that omit it.
    */
   archetype?: WorkflowArchetype
+  /**
+   * Workflow definition — passed so the SIGINT / auth-failure fanout can
+   * build rich `data` (operatorSubject, getName/getId, queue title) for
+   * each synthetic failed row. Without this the row carries only
+   * `{ archetype }` and the dashboard's dedupe surfaces a nameless
+   * cancelled card. Optional only for back-compat with tests that omit
+   * it; production callers always supply it.
+   */
+  wf?: RegisteredWorkflow<TData, readonly string[]>
   /** Systems the workflow will authenticate — used to attribute the auth-
    * failure fanout step (e.g. `auth:ucpath`) when the body throws before any
    * item finishes. Optional for tests that never trigger auth-failure. */
@@ -201,9 +211,37 @@ export async function withBatchLifecycle<TData, R>(
   }
 
   const workflowArchetype: WorkflowArchetype = opts.archetype ?? 'single'
+  // Build a rich data record for each synthetic failed row so the dashboard
+  // dedupe doesn't surface a nameless cancelled card. Use the same
+  // buildPendingTrackerData seed the normal pending emit uses (with
+  // `nameIdStamp: 'always-on-seed'` to force __name/__id stamping even when
+  // the workflow's getName/getId can't extract them from the input alone),
+  // then override `archetype` so it matches the row archetype derived from
+  // the workflow archetype + parentRunId.
+  const buildRowData = (item: unknown, parentRunId: string | undefined): StampedData => {
+    const archetype = deriveRowArchetype(workflowArchetype, parentRunId)
+    if (!opts.wf) {
+      return { archetype }
+    }
+    try {
+      const data = buildPendingTrackerData({
+        workflow: opts.wf,
+        input: item as TData,
+        useInitialTrackerSeed: true,
+        nameIdStamp: 'always-on-seed',
+        parentRunId,
+        includeArchetype: false,
+      })
+      return { ...data, archetype }
+    } catch {
+      // Bad shape (e.g. input failed schema for stamping helpers) — fall
+      // back to the minimal stamp so the failed row still lands.
+      return { archetype }
+    }
+  }
   const fanoutFailed = (errorMessage: string, step?: string): void => {
     const now = new Date().toISOString()
-    for (const { itemId, runId, parentRunId } of opts.perItem) {
+    for (const { item, itemId, runId, parentRunId } of opts.perItem) {
       if (terminated.has(runId)) continue
       terminated.add(runId)
       emitTrackerRow(
@@ -215,7 +253,7 @@ export async function withBatchLifecycle<TData, R>(
           status: 'failed',
           ...(parentRunId ? { parentRunId } : {}),
           ...(step ? { step } : {}),
-          data: { archetype: deriveRowArchetype(workflowArchetype, parentRunId) },
+          data: buildRowData(item, parentRunId),
           error: errorMessage,
         },
         opts.trackerDir,
