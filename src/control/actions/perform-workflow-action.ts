@@ -18,7 +18,6 @@ import {
   buildCancelRunningHandler,
   buildEntryReEnqueueHandler,
   buildDeleteEntryHandler,
-  buildForceStopTaskHandler,
   buildQueueBumpHandler,
 } from "../ops/index.js";
 import { buildOcrDiscardHandler } from "../ocr/discard.js";
@@ -82,14 +81,15 @@ async function cancelTarget(
   t: ResolvedActionTarget,
   deps: PerformWorkflowActionDeps,
 ): Promise<WorkflowActionTargetResult> {
-  if ((req.cancelMode ?? "cooperative") === "force") {
-    const r = await buildForceStopTaskHandler(deps.dir)({
-      workflow: t.workflow,
-      id: t.id,
-      ...(t.runId ? { runId: t.runId } : {}),
-    });
-    return r.ok ? okTarget(t, { commandId: r.commandId }) : failTarget(t, r.error, r.status);
-  }
+  // Contract 5: one cancel mechanism. The kernel's per-run AbortController
+  // + Page proxy makes cancel propagate into in-flight Playwright work
+  // within ms regardless of whether the operator clicked "Cancel" or the
+  // (now-removed) "Force Stop" button. We still split queued vs running
+  // because the SQLite path differs — queued tasks never reach a worker,
+  // so there's no in-flight controller to abort; running tasks dispatch
+  // a `cancel_task` worker command which both flips cancelTarget and
+  // aborts the controller.
+  void req;
   if (t.status === "running") {
     if (!t.runId) {
       return failTarget(t, "runId is required to cancel a running row", 400);

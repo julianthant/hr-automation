@@ -36,7 +36,6 @@ export type { DaemonPhase } from './daemon-types.js'
 import {
   buildShutdownTrackerData,
   createAbortLaunchAndKillSession,
-  createInterruptInFlightWork,
   installDaemonSignalHandlers,
   runDaemonShutdownCleanup,
 } from './shutdown.js'
@@ -152,8 +151,6 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     state,
     abortLaunchAndKillSession,
   }
-  const interruptInFlightWork = createInterruptInFlightWork(wf, () => state.activeSession)
-
   const { listenPromise } = startDaemonHttpServer({
     workflowName: wf.config.name,
     instanceId,
@@ -178,7 +175,6 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     resolveWake: () => { state.wakeResolve?.() },
     resolveShutdown: () => { state.shutdownResolve?.() },
     abortLaunchAndKillSession,
-    interruptInFlightWork,
   })
   const httpHandle = await listenPromise
   const port = httpHandle.port

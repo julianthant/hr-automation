@@ -23,9 +23,12 @@ interface CancelRunningButtonProps {
 }
 
 /**
- * Stop the running item belonging to a daemon. The primary control now uses
- * the force-stop endpoint directly so a single click actually stops the
- * browser-backed run instead of waiting on a cooperative step boundary.
+ * Stop the running item belonging to a daemon. Contract 5 unified soft and
+ * force cancel into a single AbortSignal-based mechanism — the
+ * `cancel-queued` transport now propagates into any in-flight Playwright
+ * call within ms (via the per-run AbortController and the Page proxy in
+ * `src/core/kernel/page-proxy.ts`), so the dashboard's old "Force Stop"
+ * variant is no longer needed.
  */
 export function CancelRunningButton({ workflow, id, runId, subject, entry, actions, className }: CancelRunningButtonProps) {
   const [pending, setPending] = useState(false);
@@ -62,7 +65,7 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, actio
     });
     try {
       const result = await dispatchWorkflowAction<{ ok?: boolean; error?: string }>({
-        transport: "force-stop",
+        transport: "cancel-queued",
         kind: "cancel",
         action: cancelAction,
         fallbackTarget: { workflowId: workflow, id, runId: ocrPrep.ocrRunId },
@@ -96,7 +99,7 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, actio
     const t = toast.loading(`Stopping ${label}…`);
     try {
       const result = await dispatchWorkflowAction<{ ok?: boolean; error?: string }>({
-        transport: "force-stop",
+        transport: "cancel-queued",
         kind: "cancel",
         action: cancelAction,
         fallbackTarget: { workflowId: workflow, id, runId },

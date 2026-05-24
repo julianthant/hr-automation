@@ -116,7 +116,6 @@ test("Hono manifest covers the dashboard public route inventory", () => {
     ["POST", "/api/cancel-queued"],
     ["POST", "/api/cancel-running"],
     ["POST", "/api/cancel-active-bulk"],
-    ["POST", "/api/task/force-stop"],
     ["POST", "/api/browser/kill"],
     ["POST", "/api/worker/drain"],
     ["POST", "/api/worker/stop"],

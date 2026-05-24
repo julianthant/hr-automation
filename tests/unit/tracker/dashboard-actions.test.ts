@@ -55,7 +55,6 @@ describe("performWorkflowAction — cancel scope", () => {
         scope: "row",
         source: "queue-panel",
         workflowId: "separations",
-        cancelMode: "cooperative",
         targets: [{ workflowId: "separations", id: "3930", runId: "run-a", status: "pending" }],
       }, { dir });
 
@@ -80,7 +79,6 @@ describe("performWorkflowAction — cancel scope", () => {
         scope: "visible-view",
         source: "batch-view",
         workflowId: "separations",
-        cancelMode: "cooperative",
         targets: [
           { workflowId: "separations", id: "a", runId: "run-a", status: "pending" },
           { workflowId: "separations", id: "b", runId: "run-b", status: "pending" },

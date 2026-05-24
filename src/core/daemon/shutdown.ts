@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { unlinkSync } from 'node:fs'
 import type { RegisteredWorkflow } from '../kernel/types.js'
-import type { Session } from '../kernel/session.js'
 import { log } from '../../utils/log.js'
 import { findAliveDaemons } from './registry.js'
 import {
@@ -56,39 +55,6 @@ export function createAbortLaunchAndKillSession<TData, TSteps extends readonly s
         }`,
       )
     })
-  }
-}
-
-/**
- * Chrome-preserving interrupt of in-flight Playwright work. Navigates each
- * system's active page to about:blank, which causes any pending await
- * (click, fill, waitForSelector, navigation, etc.) to reject with a
- * navigation/closed error. Browser context (auth/cookies) survives, so
- * the daemon stays usable for the next item. Best-effort: errors
- * swallowed because the caller's only job is "do not let the in-flight
- * work continue silently."
- */
-export function createInterruptInFlightWork<TData, TSteps extends readonly string[]>(
-  wf: RegisteredWorkflow<TData, TSteps>,
-  getActiveSession: () => Session | null,
-): () => void {
-  return (): void => {
-    const session = getActiveSession()
-    if (!session) return
-    for (const sys of wf.config.systems) {
-      ;(async (): Promise<void> => {
-        try {
-          const page = await session.page(sys.id)
-          // 2s timeout — about:blank is essentially instant when chrome is
-          // healthy. Longer waits hold up the cancel response unnecessarily.
-          await page.goto('about:blank', { timeout: 2_000 }).catch(() => {})
-        } catch {
-          /* best-effort */
-        }
-      })().catch(() => {
-        /* best-effort */
-      })
-    }
   }
 }
 

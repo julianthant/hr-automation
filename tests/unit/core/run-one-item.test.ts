@@ -109,7 +109,7 @@ test('runOneItem: without authTimings, no synthetic auth entries are emitted', a
   assert.equal(authEntries.length, 0, 'no synthetic auth entries without authTimings')
 })
 
-test('runOneItem: force-stop requested during a Playwright failure records cancellation, not browser crash', async () => {
+test('runOneItem: cancel requested during a Playwright failure records cancellation, not browser crash', async () => {
   const dir = TMP()
   let cancelRequested = false
   const wf = defineWorkflow({
@@ -147,10 +147,10 @@ test('runOneItem: force-stop requested during a Playwright failure records cance
   assert.deepEqual(result, {
     ok: false,
     kind: 'cancelled',
-    error: "Cancelled by user before step 'force-stop'",
+    error: "Cancelled by user before step 'cancelled'",
   })
   const entries = readTracker(dir, 'force-cancel-test')
   const failed = entries.find((e: any) => e.status === 'failed')
   assert.equal(failed?.step, 'cancelled')
-  assert.equal(failed?.error, "Cancelled by user before step 'force-stop'")
+  assert.equal(failed?.error, "Cancelled by user before step 'cancelled'")
 })

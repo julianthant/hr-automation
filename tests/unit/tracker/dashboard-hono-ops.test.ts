@@ -139,33 +139,6 @@ test("Hono /api/cancel-queued routes OCR discard context through workflow action
   assert.equal(parent.error, "Cancelled from oath-upload queue");
 });
 
-test("Hono /api/task/force-stop routes OCR discard context through workflow actions", async () => {
-  const res = await app().request("/api/task/force-stop", jsonRequest({
-    workflow: "oath-upload",
-    id: "oath-parent-running",
-    runId: "ocr-run-running",
-    ocrSessionId: "ocr-session-running",
-    reason: "Cancelled from oath-upload queue",
-    parentWorkflow: "oath-upload",
-    parentRunId: "parent-run-running",
-    parentItemId: "oath-parent-running",
-    formType: "oath-signature",
-  }));
-
-  assert.equal(res.status, 202);
-  assert.deepEqual(await res.json(), { ok: true, commandId: "" });
-
-  const parentFile = join(dir, `oath-upload-${dateLocal()}.jsonl`);
-  assert.ok(existsSync(parentFile));
-  const parentLines = readFileSync(parentFile, "utf-8").split("\n").filter(Boolean);
-  const parent = JSON.parse(parentLines[parentLines.length - 1]);
-  assert.equal(parent.id, "oath-parent-running");
-  assert.equal(parent.runId, "parent-run-running");
-  assert.equal(parent.status, "failed");
-  assert.equal(parent.step, "discarded");
-  assert.equal(parent.error, "Cancelled from oath-upload queue");
-});
-
 test("Hono /api/cancel-queued returns not-found shape for missing queue item", async () => {
   mkdirSync(join(dir, "daemons"), { recursive: true });
   writeFileSync(queueFilePath("separations", dir), "");

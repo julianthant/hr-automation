@@ -24,7 +24,6 @@ import {
   buildCancelQueuedHandler,
   buildCancelRunningHandler,
   buildDrainWorkerHandler,
-  buildForceStopTaskHandler,
   buildKillBrowserHandler,
   buildQueueBumpHandler,
   buildSaveDataHandler,
@@ -1192,67 +1191,6 @@ describe("buildCancelRunningHandler", () => {
 });
 
 describe("dashboard worker command helpers", () => {
-  it("force-stops a task by terminalizing it as cancelled and killing its browser", async () => {
-    const control = openControlDb({ trackerDir: tmp });
-    const taskStore = createTaskStore(control);
-    const workerStore = createWorkerStore(control);
-    workerStore.registerWorker({
-      workerId: "sep-worker",
-      workflow: "separations",
-      kind: "daemon",
-      pid: 12345,
-      hostname: "test-host",
-      phase: "processing",
-    });
-    const [enqueued] = taskStore.enqueueTasks({
-      workflow: "separations",
-      inputs: [{ docId: "5000" }],
-      deriveItemId: (input) => input.docId,
-      runIds: ["run-force-stop"],
-    });
-    taskStore.claimNextTask({ workflow: "separations", workerId: "sep-worker" });
-    taskStore.markTaskRunning({
-      taskId: enqueued.taskId,
-      attemptId: enqueued.attemptId,
-      workerId: "sep-worker",
-    });
-    const browser = workerStore.upsertBrowserProcess({
-      workerId: "sep-worker",
-      workflow: "separations",
-      taskId: enqueued.taskId,
-      attemptId: enqueued.attemptId,
-      systemId: "ucpath",
-      browserId: "ucpath",
-      pid: 987654,
-    });
-
-    const result = await buildForceStopTaskHandler(tmp)({
-      workflow: "separations",
-      id: "5000",
-      runId: "run-force-stop",
-    });
-
-    assert.equal(result.ok, true);
-    // Chrome-preserving force-stop: enqueues `cancel_task` (not `force_stop_task`);
-    // the daemon's `/force-current` HTTP endpoint navigates pages to about:blank
-    // without killing chrome. Browser process row is unchanged.
-    assert.equal(workerStore.getCommand(result.commandId)?.commandType, "cancel_task");
-    assert.equal(workerStore.getCommand(result.commandId)?.state, "queued");
-    assert.equal(taskStore.getTask(enqueued.taskId)?.state, "cancelled");
-    assert.equal(taskStore.getAttempt(enqueued.attemptId)?.state, "cancelled");
-    assert.notEqual(workerStore.findBrowserProcessById(browser.browserProcessId)?.status, "kill_requested");
-    const trackerFile = readdirSync(tmp).find((file) => /^separations-\d{4}-\d{2}-\d{2}\.jsonl$/.test(file));
-    assert.ok(trackerFile, "force-stop should emit a separations tracker file");
-    const entries = readFileSync(join(tmp, trackerFile), "utf8")
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
-    const cancelled = entries.find((entry) => entry.runId === "run-force-stop" && entry.status === "failed");
-    assert.equal(cancelled?.step, "cancelled");
-    assert.equal(cancelled?.error, "cancelled by user from dashboard");
-    workerStore.close();
-  });
-
   it("kill-browser targets a single browser process", async () => {
     const control = openControlDb({ trackerDir: tmp });
     const workerStore = createWorkerStore(control);

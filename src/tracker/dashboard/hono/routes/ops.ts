@@ -18,7 +18,6 @@ import {
 } from "../../../../control/ops/index.js";
 import { performWorkflowAction } from "../../../../control/actions/perform-workflow-action.js";
 import type {
-  CancelMode,
   WorkflowActionRequest,
   WorkflowActionResult,
   WorkflowActionScope,
@@ -122,23 +121,6 @@ function toSingleActionResult(
   };
 }
 
-/** Single-target variant that preserves force-stop's `commandId` payload. */
-function toForceStopActionResult(
-  result: WorkflowActionResult,
-): { ok: boolean; commandId?: string; error?: string; status?: number } {
-  if (result.error && result.results.length === 0) {
-    return { ok: false, error: result.error, status: 400 };
-  }
-  const first = result.results[0];
-  if (!first) return { ok: false, error: "no action target", status: 400 };
-  if (first.ok) return { ok: true, commandId: String(first.detail?.commandId ?? "") };
-  return {
-    ok: false,
-    error: first.error ?? "force stop failed",
-    ...compact({ status: first.status || undefined }),
-  };
-}
-
 /** Map a {@link WorkflowActionResult} to a bulk route's `{ ok, count, errors }` shape. */
 function toBulkActionResult(
   result: WorkflowActionResult,
@@ -163,14 +145,13 @@ function parseRowCancelRequest(body: Record<string, unknown>): RowCancelRequest 
   };
 }
 
-function buildCancelRoute(cancelMode: CancelMode, deps: DashboardHonoDeps): (c: Context) => Promise<Response> {
+function buildCancelRoute(deps: DashboardHonoDeps): (c: Context) => Promise<Response> {
   return async (c) => postJson(c, parseRowCancelRequest, async (req) => {
     const result = await performWorkflowAction({
       action: "cancel",
       scope: req.scope,
       source: "queue-panel",
       workflowId: req.workflow,
-      cancelMode,
       ...compact({
         ocrSessionId: req.ocrSessionId,
         parentWorkflow: req.parentWorkflow,
@@ -184,14 +165,15 @@ function buildCancelRoute(cancelMode: CancelMode, deps: DashboardHonoDeps): (c: 
         id: req.id,
         ...compact({
           runId: req.runId,
-          status: cancelMode === "cooperative" ? "pending" as const : undefined,
+          // Mark queued tasks so cancelTarget routes through the queued
+          // path; cancel of a running row still resolves status from the
+          // tracker projection.
+          status: "pending" as const,
         }),
       }],
     }, { dir: deps.dir });
-    return cancelMode === "force"
-      ? toForceStopActionResult(result)
-      : toSingleActionResult(result);
-  }, cancelMode === "force" ? 202 : 200);
+    return toSingleActionResult(result);
+  });
 }
 
 export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
@@ -330,7 +312,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
     return jsonResponse(result, result.ok ? 200 : 400);
   });
 
-  app.post("/api/cancel-queued", buildCancelRoute("cooperative", deps));
+  app.post("/api/cancel-queued", buildCancelRoute(deps));
 
   app.post("/api/cancel-running", async (c) => {
     return postJson(c, (body) => {
@@ -365,7 +347,6 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         scope: "visible-view",
         source: "queue-panel",
         workflowId: req.workflow,
-        cancelMode: "cooperative",
         targets: req.items.map((it) => ({
           workflowId: req.workflow,
           id: it.id,
@@ -376,8 +357,6 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       return toBulkActionResult(result);
     }, (result) => bulkMutationHttpStatus(result.count, result.errors.length));
   });
-
-  app.post("/api/task/force-stop", buildCancelRoute("force", deps));
 
   app.post("/api/browser/kill", async (c) => {
     return postJson(c, (body) => ({

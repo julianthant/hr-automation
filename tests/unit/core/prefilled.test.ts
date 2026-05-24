@@ -71,6 +71,7 @@ test('ctx.data: returns a live snapshot of stepper.data', () => {
     workflow: 'test',
     itemId: 't1',
     emitScreenshotEvent: () => {},
+    signal: new AbortController().signal,
   })
   assert.deepEqual(ctx.data, {})
   ctx.updateData({ name: 'Jane' })
@@ -101,6 +102,7 @@ test('ctx.data: each access returns a fresh copy (mutation does not leak back)',
     workflow: 'test',
     itemId: 't1',
     emitScreenshotEvent: () => {},
+    signal: new AbortController().signal,
   })
   ctx.updateData({ name: 'Jane' })
   const snap1 = ctx.data
