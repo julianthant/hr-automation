@@ -6,7 +6,12 @@ import { openDatabase, transaction, type Database } from "../../infra/sqlite/ind
 import { DEFAULT_DIR } from "../jsonl-io.js";
 import { LATEST_SCHEMA_VERSION, MIGRATIONS } from "./schema.js";
 
-const openDbs = new Map<string, Database>();
+interface OpenDbEntry {
+  db: Database;
+  fingerprint: DbFingerprint | null;
+}
+
+const openDbs = new Map<string, OpenDbEntry>();
 
 /**
  * Readiness cache for `isStateDbReady`.
@@ -24,6 +29,7 @@ const openDbs = new Map<string, Database>();
  * A `statSync` is far cheaper than opening a connection + querying.
  */
 interface DbFingerprint {
+  dev: number;
   ino: number;
   size: number;
   mtimeMs: number;
@@ -41,26 +47,42 @@ export function stateDbPath(dir: string = DEFAULT_DIR): string {
 function fingerprintOf(path: string): DbFingerprint | null {
   try {
     const stat = statSync(path);
-    return { ino: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs };
+    return { dev: stat.dev, ino: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs };
   } catch {
     return null;
   }
 }
 
 function fingerprintsMatch(a: DbFingerprint, b: DbFingerprint): boolean {
-  return a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs;
+  return a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs;
+}
+
+function sameFileIdentity(a: DbFingerprint, b: DbFingerprint): boolean {
+  return a.dev === b.dev && a.ino === b.ino;
 }
 
 export function openStateDb(dir: string = DEFAULT_DIR): Database {
   const path = stateDbPath(dir);
   const existing = openDbs.get(path);
-  if (existing) return existing;
+  const currentFingerprint = fingerprintOf(path);
+  if (existing) {
+    if (existing.fingerprint && currentFingerprint && sameFileIdentity(existing.fingerprint, currentFingerprint)) {
+      return existing.db;
+    }
+    try {
+      existing.db.close();
+    } catch {
+      // If the old handle was already invalid, drop it and reopen below.
+    }
+    openDbs.delete(path);
+    if (readyCache?.path === path) readyCache = null;
+  }
 
   const db = openDatabase(path);
   runMigrations(db);
   const fingerprint = fingerprintOf(path);
   readyCache = fingerprint ? { path, fingerprint } : null;
-  openDbs.set(path, db);
+  openDbs.set(path, { db, fingerprint });
   return db;
 }
 
@@ -126,9 +148,9 @@ export function runMigrations(db: Database): void {
 
 export function closeStateDbForTests(dir: string = DEFAULT_DIR): void {
   const path = stateDbPath(dir);
-  const db = openDbs.get(path);
+  const entry = openDbs.get(path);
   if (readyCache?.path === path) readyCache = null;
-  if (!db) return;
-  db.close();
+  if (!entry) return;
+  entry.db.close();
   openDbs.delete(path);
 }

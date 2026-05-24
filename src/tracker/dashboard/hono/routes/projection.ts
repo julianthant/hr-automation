@@ -2,28 +2,31 @@ import type { Hono } from "hono";
 
 import { dateLocal } from "../../../jsonl.js";
 import { queryEntriesPayload, queryProjectionHealth, queryRunsForItem } from "../../../state/queries.js";
-import type { DashboardHonoDeps } from "../context.js";
+import { getProjectionDb, type DashboardHonoDeps } from "../context.js";
 import { jsonResponse } from "../responses.js";
 
 export function registerProjectionRoutes(app: Hono, deps: DashboardHonoDeps): void {
   app.get("/api/v2/projection/health", () => {
-    if (!deps.stateDb) {
+    const stateDb = getProjectionDb(deps);
+    if (!stateDb) {
       return jsonResponse({ ok: false, error: "projection not ready" }, 503);
     }
-    return jsonResponse(queryProjectionHealth(deps.stateDb, deps.dir));
+    return jsonResponse(queryProjectionHealth(stateDb, deps.dir));
   });
 
   app.get("/api/v2/entries", (c) => {
-    if (!deps.stateDb) {
+    const stateDb = getProjectionDb(deps);
+    if (!stateDb) {
       return jsonResponse({ ok: false, error: "projection not ready" }, 503);
     }
     const workflow = c.req.query("workflow") ?? "onboarding";
     const date = c.req.query("date") ?? dateLocal();
-    return jsonResponse(queryEntriesPayload(deps.stateDb, { workflow, date }));
+    return jsonResponse(queryEntriesPayload(stateDb, { workflow, date }));
   });
 
   app.get("/api/v2/runs", (c) => {
-    if (!deps.stateDb) {
+    const stateDb = getProjectionDb(deps);
+    if (!stateDb) {
       return jsonResponse({ ok: false, error: "projection not ready" }, 503);
     }
     const workflow = c.req.query("workflow") ?? "";
@@ -32,6 +35,6 @@ export function registerProjectionRoutes(app: Hono, deps: DashboardHonoDeps): vo
     if (!workflow || !itemId) {
       return jsonResponse({ ok: false, error: "workflow and id are required" }, 400);
     }
-    return jsonResponse(queryRunsForItem(deps.stateDb, { workflow, itemId, date }));
+    return jsonResponse(queryRunsForItem(stateDb, { workflow, itemId, date }));
   });
 }

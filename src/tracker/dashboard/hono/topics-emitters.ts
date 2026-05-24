@@ -23,7 +23,7 @@ import {
   resolveInstanceForRun,
 } from "../session-state.js";
 import { log } from "../../../utils/log.js";
-import { getDefaultWorkflow } from "./context.js";
+import { getDefaultWorkflow, getProjectionDb } from "./context.js";
 import { ttlMemoize } from "./memo.js";
 import { registerTopic, type TopicEmitter } from "./topics.js";
 import { captureStore, serializeCaptureSession } from "../capture-state.js";
@@ -167,9 +167,10 @@ export const entriesTopic: TopicEmitter<{ workflow?: string; date?: string }> = 
   const today = dateLocal();
 
   const tick = () => {
-    if (deps.projectionReady && deps.stateDb) {
+    const stateDb = getProjectionDb(deps);
+    if (stateDb) {
       try {
-        send(getCachedEntriesPayload(deps.stateDb, deps.dir, workflow, date || today));
+        send(getCachedEntriesPayload(stateDb, deps.dir, workflow, date || today));
         return;
       } catch (err) {
         log.warn(
