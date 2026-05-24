@@ -14,6 +14,7 @@ import type { QueueEvent } from "../../core/daemon/types.js";
 import { openControlDb } from "../../core/control-db.js";
 import { createTaskStore, type ControlTaskStore, type TaskRow } from "../../core/task-store/index.js";
 import { createWorkerStore, type ControlWorkerStore } from "../../core/daemon/worker-store.js";
+import type { Database } from "../../infra/sqlite/index.js";
 import { emitInheritedRow } from "./emit-inherited.js";
 
 export const DASHBOARD_CANCEL_ERROR = "cancelled by user from dashboard";
@@ -116,6 +117,14 @@ export function emitDashboardCancelTrackerRow(
   id: string,
   runId: string | undefined,
   dir: string,
+  /**
+   * Optional SQLite handle — when provided, the prior-row lookup inside
+   * `emitInheritedRow` uses the indexed `runs` / `items` projection tables
+   * instead of a 30-day JSONL scan. Bulk cancel paths (cancel-active-bulk,
+   * cancel-bulk-by-runId) MUST pass `stores.taskStore.db`; the JSONL scan
+   * is O(K*D*L) per row otherwise. Single-row operator cancels can omit it.
+   */
+  db?: Database,
 ): void {
   const ts = new Date().toISOString();
   emitInheritedRow({
@@ -127,6 +136,7 @@ export function emitDashboardCancelTrackerRow(
     step: "cancelled",
     fallbackArchetype: "single",
     error: DASHBOARD_CANCEL_ERROR,
+    ...(db ? { db } : {}),
   });
   // Surface the cancellation primarily as a session event (Events tab)
   // instead of a warn-level log line (arrow-icon All tab). Falls back to
