@@ -297,9 +297,17 @@ async function reEnqueueEntry(
       // would default to deriveRowArchetype("single", parentRunId) — wrong
       // for any batch-member retry, which is one of the bugs this contract
       // is designed to prevent.
+      //
+      // Also preserve display metadata (__name, __id, __subject,
+      // __queueTitle, parentSubject, etc.) by merging the prior row's
+      // `data` fields onto the new pending row. Without the merge the
+      // retry's pending row shows up nameless in the dashboard until the
+      // daemon claims it and rewrites — the same pattern emitDashboardCancelTrackerRow
+      // would have used but applied to retry.
       const priorRunRows = readEntriesForRetryItem(wf, id, runId, dir, date).scoped;
       const priorEntry = priorRunRows.length > 0 ? priorRunRows[priorRunRows.length - 1] : undefined;
       const priorArchetype = priorEntry ? resolveRowArchetype(priorEntry) : "single";
+      const priorData = priorEntry?.data ?? {};
       emitTrackerRow(
         {
           workflow: wf,
@@ -308,10 +316,15 @@ async function reEnqueueEntry(
           runId: retried.runId,
           status: "pending",
           input,
-          // Stamp provenance so the dashboard can show "retried from <prior>"
-          // (Contract 2, Step C). The field is a kernel detail — string-typed
-          // to satisfy the StampedData contract.
-          data: { archetype: priorArchetype, __retriedFrom: runId },
+          // Carry prior display fields forward, then overlay computed
+          // archetype + provenance stamp. archetype takes priority over
+          // anything stored in priorData so the inheritance wins
+          // unconditionally.
+          data: {
+            ...priorData,
+            archetype: priorArchetype,
+            __retriedFrom: runId,
+          },
           ...(resolvedParent ? { parentRunId: resolvedParent } : {}),
         },
         dir,
