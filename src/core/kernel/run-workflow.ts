@@ -140,13 +140,38 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
         process.on('SIGINT', sigintHandler)
       }
 
+      // Per-run AbortController (Contract 5). `runWorkflow` is the single-
+      // item path; no daemon claim loop here, so cancel side-channels
+      // (in-process kill, SIGINT) don't drive this controller — it's
+      // wired solely so `ctx.signal` is a real AbortSignal handlers can
+      // pass into AbortSignal-aware awaits if desired.
+      //
+      // When `parentSignal` is supplied (in-process delegation — see
+      // `delegate.ts`'s `runInProcessAndCollectResult`), attach a one-shot
+      // listener so this child's controller aborts when the parent's does.
+      // Without this hook, in-process delegated children (OCR,
+      // sharepoint-download) keep running after the parent is cancelled
+      // because the daemon's `cancel_task` machinery only reaches the
+      // top-level run controller, not nested in-process ones.
+      const controller = new AbortController()
+      let detachParentListener: (() => void) | null = null
+      if (opts.parentSignal) {
+        if (opts.parentSignal.aborted) {
+          // Parent already cancelled before we wired up — abort immediately.
+          controller.abort(opts.parentSignal.reason ?? new Error('parent cancelled'))
+        } else {
+          const onParentAbort = (): void => {
+            if (!controller.signal.aborted) {
+              controller.abort(opts.parentSignal!.reason ?? new Error('parent cancelled'))
+            }
+          }
+          opts.parentSignal.addEventListener('abort', onParentAbort, { once: true })
+          detachParentListener = () => {
+            opts.parentSignal!.removeEventListener('abort', onParentAbort)
+          }
+        }
+      }
       try {
-        // Per-run AbortController (Contract 5). `runWorkflow` is the single-
-        // item path; no daemon claim loop here, so cancel side-channels
-        // (in-process kill, SIGINT) don't drive this controller — it's
-        // wired solely so `ctx.signal` is a real AbortSignal handlers can
-        // pass into AbortSignal-aware awaits if desired.
-        const controller = new AbortController()
         await runWorkflowHandler({
           wf,
           session,
@@ -163,6 +188,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
         completed = true
       } finally {
         if (sigintHandler) process.off('SIGINT', sigintHandler)
+        if (detachParentListener) detachParentListener()
         await session.close()
       }
     } catch (err) {

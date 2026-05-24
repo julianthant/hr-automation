@@ -85,7 +85,7 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     currentStep: () => stepper.getCurrentStep(),
   })
 
-  const delegateApi = buildDelegateApi({ runId, trackerDir })
+  const delegateApi = buildDelegateApi({ runId, trackerDir, signal })
 
   // `ctx.page(id)` returns a Playwright Page wrapped in the kernel's
   // signal-injecting Proxy (see `page-proxy.ts`). The wrapper merges
