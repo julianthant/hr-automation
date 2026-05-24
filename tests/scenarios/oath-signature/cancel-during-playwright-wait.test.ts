@@ -18,8 +18,7 @@ import { oathSignatureWorkflow } from "../../../src/workflows/oath-signature/wor
  * The scenario beat for this test simulates that exact code path: a 30s
  * `setTimeout` that rejects synchronously when `ctx.signal.aborted` flips.
  * We then assert:
- *   1. Cancel-to-terminal latency is well under the simulated wait timeout
- *      (we use a 30s wait and a 2s budget — real cancel should land in ms).
+ *   1. Cancel-to-terminal latency is well under the simulated wait timeout.
  *   2. The terminal row carries the same shape as a cooperative cancel
  *      (status: failed, step: cancelled) — the dashboard sees no difference
  *      between mid-wait and between-step cancel.
@@ -60,12 +59,10 @@ describe("oath-signature scenario: cancel during a Playwright-style wait", () =>
     await rt.waitForTerminal(runId, 5_000);
     const cancelLatency = Date.now() - cancelStart;
 
-    // Generous budget — under 1s is the real-world target; we assert <2s
-    // so a CI hiccup doesn't flake. The key invariant is "well under the
-    // simulated wait timeout" — without AbortSignal propagation, this
-    // would block ~30s.
+    // Contract 5 promises ms-class abort; 300ms catches regression to the
+    // pre-Contract-5 between-step probe budget.
     assert.ok(
-      cancelLatency < 2_000,
+      cancelLatency < 300,
       `cancel should complete fast via AbortSignal — took ${cancelLatency}ms (sim wait was ${SIM_WAIT_MS}ms)`,
     );
 
