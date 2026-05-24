@@ -8,9 +8,8 @@
  */
 import { existsSync } from "fs";
 import { listRosters, resolveRosterDirs } from "../../services/matching/roster-loader.js";
-import { byTimestampAsc, emitTrackerRow, readEntries, readEntriesForDate, type TrackerEntry } from "../../tracker/jsonl.js";
+import { byTimestampAsc, readEntries, readEntriesForDate, type TrackerEntry } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
-import { resolveRowArchetype } from "../../domain/row-archetype.js";
 import { enqueueFromHttp } from "../../core/daemon/enqueue-dispatch.js";
 import type { Database } from "../../infra/sqlite/index.js";
 import {
@@ -22,6 +21,7 @@ import {
   openControlStores,
   appendQueueEnqueueAudit,
 } from "./shared.js";
+import { emitInheritedRow } from "./emit-inherited.js";
 import { log } from "../../utils/log.js";
 
 /**
@@ -364,31 +364,18 @@ async function reEnqueueEntry(
       // retry's pending row shows up nameless in the dashboard until the
       // daemon claims it and rewrites — the same pattern emitDashboardCancelTrackerRow
       // would have used but applied to retry.
-      const priorRunRows = readEntriesForRetryItem(wf, id, resolvedRunId, dir, date).scoped;
-      const priorEntry = priorRunRows.length > 0 ? priorRunRows[priorRunRows.length - 1] : undefined;
-      const priorArchetype = priorEntry ? resolveRowArchetype(priorEntry) : "single";
-      const priorData = priorEntry?.data ?? {};
-      emitTrackerRow(
-        {
-          workflow: wf,
-          timestamp: new Date().toISOString(),
-          id: retried.itemId,
-          runId: retried.runId,
-          status: "pending",
-          input,
-          // Carry prior display fields forward, then overlay computed
-          // archetype + provenance stamp. archetype takes priority over
-          // anything stored in priorData so the inheritance wins
-          // unconditionally.
-          data: {
-            ...priorData,
-            archetype: priorArchetype,
-            __retriedFrom: resolvedRunId,
-          },
-          ...(resolvedParent ? { parentRunId: resolvedParent } : {}),
-        },
-        dir,
-      );
+      emitInheritedRow({
+        workflow: wf,
+        trackerDir: dir,
+        id: retried.itemId,
+        runId: retried.runId,
+        inheritFrom: { id, runId: resolvedRunId },
+        status: "pending",
+        input,
+        fallbackArchetype: "single",
+        data: { __retriedFrom: resolvedRunId },
+        ...(resolvedParent ? { parentRunId: resolvedParent } : {}),
+      });
       return { ok: true };
     }
   }
