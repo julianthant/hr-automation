@@ -109,6 +109,75 @@ test('runOneItem: without authTimings, no synthetic auth entries are emitted', a
   assert.equal(authEntries.length, 0, 'no synthetic auth entries without authTimings')
 })
 
+test('runOneItem: cancel sticks after controller.abort() even when underlying probe clears (daemon resets cancelTarget)', async () => {
+  // Regression: the daemon flips state.cancelTarget back to null after the
+  // first cancel signal lands; subsequent probes returned false even though
+  // the controller's signal was still aborted. The Stepper's between-step
+  // probe then mis-classified the AbortError as `failed` instead of
+  // `cancelled`. The wrapper must OR in `controller.signal.aborted` so
+  // once aborted, stays aborted.
+  //
+  // Two cancel-abort entry points exist (see run-one-item.ts comments):
+  //   1. The wrapper's probe — observed isCancelRequested() === true → abort.
+  //   2. The caller calling controller.abort() directly via onCancelController
+  //      (daemon's cancel-command handler does this).
+  // We exercise path 2 here: the handler triggers the abort mid-step
+  // through the controller, then throws an AbortError. The probe returns
+  // false the whole time (daemon already cleared cancelTarget). Without the
+  // `|| controller.signal.aborted` fall-back the Stepper's post-step probe
+  // returns false and the error is classified as failed, not cancelled.
+  const dir = TMP()
+  let observedController: AbortController | undefined
+  const wf = defineWorkflow({
+    name: 'cancel-sticky-test',
+    systems: [{ id: 'ucpath', login: async () => {} }],
+    steps: ['searching'] as const,
+    schema: z.object({ n: z.string() }),
+    authSteps: false,
+    handler: async (_ctx) => {
+      await _ctx.step('searching', async () => {
+        // Simulate daemon cancel path: abort the controller directly via
+        // the reference captured by onCancelController.
+        if (!observedController) throw new Error('controller not captured')
+        observedController.abort(new Error('daemon cancel'))
+        // Throw a Playwright-shaped AbortError as if a waitForSelector
+        // call had been interrupted by the signal.
+        const err = new Error('Action was interrupted')
+        err.name = 'AbortError'
+        throw err
+      })
+    },
+  })
+
+  const session = Session.forTesting({
+    systems: wf.config.systems,
+    browsers: new Map(),
+    readyPromises: new Map([['ucpath', Promise.resolve()]]),
+  })
+
+  const result = await runOneItem({
+    wf,
+    session,
+    item: { n: 'x' },
+    itemId: 'x',
+    runId: 'run-cancel-sticky',
+    trackerDir: dir,
+    callerPreEmits: false,
+    preAssignedInstance: 'Cancel Sticky Test 1',
+    // Probe ALWAYS returns false — the daemon has already cleared
+    // cancelTarget by the time the handler throws.
+    isCancelRequested: () => false,
+    onCancelController: (c) => { observedController = c },
+  })
+
+  assert.ok(observedController, 'controller exposed to caller')
+  assert.equal(observedController!.signal.aborted, true, 'controller aborted by handler simulating daemon cancel')
+  // The cancel must still classify as `cancelled` — not `failed` —
+  // because the controller's signal is aborted. The wrapper's
+  // `|| controller.signal.aborted` is what makes this true.
+  assert.equal(result.kind, 'cancelled', 'cancel sticks via controller.signal.aborted even when probe returns false')
+})
+
 test('runOneItem: cancel requested during a Playwright failure records cancellation, not browser crash', async () => {
   const dir = TMP()
   let cancelRequested = false
