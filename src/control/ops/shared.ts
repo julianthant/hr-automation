@@ -3,10 +3,9 @@
  * folder. Not part of the public surface — not re-exported from index.ts.
  */
 import { appendFileSync, mkdirSync } from "fs";
-import { appendLogEntry, emitTrackerRow } from "../../tracker/jsonl.js";
+import { appendLogEntry } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { emitItemCancelled } from "../../tracker/session-events.js";
-import { resolveRowArchetype } from "../../domain/row-archetype.js";
 import {
   daemonsDir,
 } from "../../core/daemon/registry.js";
@@ -15,6 +14,7 @@ import type { QueueEvent } from "../../core/daemon/types.js";
 import { openControlDb } from "../../core/control-db.js";
 import { createTaskStore, type ControlTaskStore, type TaskRow } from "../../core/task-store/index.js";
 import { createWorkerStore, type ControlWorkerStore } from "../../core/daemon/worker-store.js";
+import { emitInheritedRow } from "./emit-inherited.js";
 
 export const DASHBOARD_CANCEL_ERROR = "cancelled by user from dashboard";
 
@@ -118,36 +118,16 @@ export function emitDashboardCancelTrackerRow(
   dir: string,
 ): void {
   const ts = new Date().toISOString();
-  // Look up the latest prior row for this (id, runId) so the cancel row
-  // inherits its archetype + parentRunId. Post-Contract 1, archetype is
-  // required at the type level on `emitTrackerRow` — explicit inheritance
-  // keeps the cancel row in the same row type as the run it cancels
-  // (batch-member cancels stay batch-member, etc.). The `?? "single"` only
-  // fires when there is NO prior row at all (cancel of an item that was
-  // never enqueued), which is itself a no-op since the dashboard has
-  // nothing to display.
-  const priorEntry = findLatestEntryForPredicate({
+  emitInheritedRow({
     workflow,
     trackerDir: dir,
-    lookbackDays: 30,
-    predicate: (e) => e.id === id && (runId ? e.runId === runId : true),
+    id,
+    runId,
+    status: "failed",
+    step: "cancelled",
+    fallbackArchetype: "single",
+    error: DASHBOARD_CANCEL_ERROR,
   });
-  const priorArchetype = priorEntry ? resolveRowArchetype(priorEntry) : "single";
-  const priorParentRunId = priorEntry?.parentRunId;
-  emitTrackerRow(
-    {
-      workflow,
-      timestamp: ts,
-      id,
-      ...(runId ? { runId } : {}),
-      ...(priorParentRunId ? { parentRunId: priorParentRunId } : {}),
-      status: "failed",
-      step: "cancelled",
-      data: { archetype: priorArchetype },
-      error: DASHBOARD_CANCEL_ERROR,
-    },
-    dir,
-  );
   // Surface the cancellation primarily as a session event (Events tab)
   // instead of a warn-level log line (arrow-icon All tab). Falls back to
   // the legacy log line when the workflowInstance can't be resolved

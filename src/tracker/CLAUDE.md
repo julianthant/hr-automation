@@ -26,11 +26,11 @@ OCR approve fan-out child → `delegate-child`), pass `{ override:
 "batch-parent" }` instead.
 
 The kernel auto-stamps via `runOneItem`, `cli-adapter`, `pre-emit-helpers`,
-and the OCR orchestrator's `writeTracker` closure. Control-layer cancel /
-retry rows inherit archetype from the prior row via `resolveRowArchetype`
-on the latest matching JSONL entry; if you add a new control-layer write
-site, mirror that inheritance pattern so the cancel/retry row matches the
-row type it's replacing.
+and the OCR orchestrator's `writeTracker` closure. Control-layer
+replacement rows (cancel, retry pending, OCR discard) inherit archetype
+and display metadata from the prior row via `src/control/ops/emit-inherited.ts`;
+if you add a new control-layer write site, use that helper so the row
+matches the row type it's replacing.
 
 `trackEvent` / `trackEventForDate` remain as `@deprecated` shims for the
 tracker module itself + the `tracked-workflow.ts` SIGINT handler (which

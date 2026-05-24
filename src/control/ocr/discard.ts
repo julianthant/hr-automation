@@ -4,6 +4,7 @@ import {
   requestOcrPrepareAbort,
 } from "../../tracker/ocr-prepare-abort.js";
 import { deleteDelegatedChildrenForRun } from "../ops/delete.js";
+import { emitInheritedRow } from "../ops/emit-inherited.js";
 import { readFormType, readParentRunId } from "../../tracker/dashboard/ocr/shared.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { resolveRowArchetype } from "../../domain/row-archetype.js";
@@ -39,26 +40,16 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
     // prior row so this code never has to know about per-workflow archetype
     // declarations beyond what the row itself already carries.
     const trackerDir = opts.trackerDir;
-    const ocrPriorEntry = findLatestEntryForPredicate({
+    emitInheritedRow({
       workflow: WORKFLOW,
       trackerDir,
-      lookbackDays: 30,
-      predicate: (e) => e.id === input.sessionId && e.runId === input.runId,
+      id: input.sessionId,
+      runId: input.runId,
+      status: "failed",
+      step: "discarded",
+      fallbackArchetype: "batch-parent",
+      ...(input.reason ? { error: input.reason } : {}),
     });
-    const ocrArchetype = ocrPriorEntry ? resolveRowArchetype(ocrPriorEntry) : "batch-parent";
-    emitTrackerRow(
-      {
-        workflow: WORKFLOW,
-        timestamp: new Date().toISOString(),
-        id: input.sessionId,
-        runId: input.runId,
-        status: "failed",
-        step: "discarded",
-        data: { archetype: ocrArchetype },
-        ...(input.reason ? { error: input.reason } : {}),
-      },
-      trackerDir,
-    );
     // If this OCR session was started from a downstream workflow's run
     // modal, mirror the discard onto the parent row so it doesn't sit at
     // "delegated-to-ocr running" indefinitely. Parent's downstream
