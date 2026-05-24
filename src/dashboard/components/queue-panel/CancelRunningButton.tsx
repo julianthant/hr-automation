@@ -69,6 +69,9 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, actio
         kind: "cancel",
         action: cancelAction,
         fallbackTarget: { workflowId: workflow, id, runId: ocrPrep.ocrRunId },
+        // OCR prep parents aren't daemon-claimed — route through queued
+        // cancel so discard executes via tracker-side OCR discard handler.
+        status: "pending",
         ocrSessionId: ocrPrep.ocrSessionId,
         reason: `Cancelled from ${workflow} queue`,
         parentWorkflow: workflow,
@@ -103,6 +106,10 @@ export function CancelRunningButton({ workflow, id, runId, subject, entry, actio
         kind: "cancel",
         action: cancelAction,
         fallbackTarget: { workflowId: workflow, id, runId },
+        // Running row — backend must route through buildCancelRunningHandler.
+        // Without this the route hardcodes status:"pending" and the daemon's
+        // already-claimed lease causes a 409 ("use cancel running").
+        status: "running",
       });
       if (result.ok) {
         toast.success(`Stopped ${label}`, {
