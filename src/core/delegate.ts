@@ -499,16 +499,18 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
  * when the child is daemon-capable, in-process pool otherwise.
  *
  * **Orchestrator escape hatch.** The `deriveItemId`, `buildPendingExtras`,
- * and `onPreparedItems` hooks exist for OCR orchestrator's specialized
- * eid-lookup fan-out (deriving stable per-record item IDs, attaching
- * formType/pageNum metadata, and chaining SQLite task dependencies for
- * downstream waits). They are NOT part of the public `ctx.delegateToAll`
- * API and should not be added to it.
+ * and `onPreparedItems` hooks exist for OCR orchestrator-level fan-outs
+ * (deriving stable per-record item IDs, attaching formType/pageNum metadata,
+ * and chaining SQLite task dependencies for downstream waits). They are NOT
+ * part of the public `ctx.delegateToAll` API and should not be added to it.
  *
- * If a second consumer plausibly needs these hooks, that's the signal to
+ * If a non-OCR consumer plausibly needs these hooks, that's the signal to
  * promote them to `ctx.delegateToAll`'s options object — and add explicit
- * tests covering each one. Until then, the only caller is
- * `src/workflows/ocr/orchestrator.ts`.
+ * tests covering each one. Direct callers are limited to OCR by the
+ * `delegate-to-all-impl-callers` architecture guard:
+ *   - `src/workflows/ocr/orchestrator.ts` (main eid-lookup fan-out)
+ *   - `src/workflows/ocr/force-research.ts` (per-record re-research)
+ *   - `src/workflows/ocr/retry-page.ts` (single-page retry)
  */
 export async function delegateToAllImpl<TChildData, TChildSteps extends readonly string[]>(args: {
   parentRunId: string
