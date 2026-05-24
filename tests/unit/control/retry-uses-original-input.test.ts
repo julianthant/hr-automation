@@ -61,7 +61,15 @@ describe("retry uses pristine original input (Contract 2)", () => {
         id: "1234",
         runId: "original-run",
         status: "pending",
-        data: { archetype: "single", emplId: "1234", effectiveDate: "2026-05-01" },
+        data: {
+          archetype: "single",
+          emplId: "1234",
+          effectiveDate: "2026-05-01",
+          __name: "Some Person",
+          __id: "1234",
+          __subject: "Some Person",
+          __queueTitle: "Some Person — work-study",
+        },
         input: { emplId: "1234", effectiveDate: "2026-05-01" },
       },
       tmp,
@@ -74,7 +82,16 @@ describe("retry uses pristine original input (Contract 2)", () => {
         runId: "original-run",
         status: "running",
         step: "transaction",
-        data: { archetype: "single", emplId: "1234", lookedUpEid: "00000099", effectiveDate: "2026-05-01" },
+        data: {
+          archetype: "single",
+          emplId: "1234",
+          lookedUpEid: "00000099",
+          effectiveDate: "2026-05-01",
+          __name: "Some Person",
+          __id: "1234",
+          __subject: "Some Person",
+          __queueTitle: "Some Person — work-study",
+        },
       },
       tmp,
     );
@@ -86,7 +103,17 @@ describe("retry uses pristine original input (Contract 2)", () => {
         runId: "original-run",
         status: "failed",
         step: "transaction:failed",
-        data: { archetype: "single", emplId: "1234", lookedUpEid: "00000099", name: "Some Person", effectiveDate: "2026-05-01" },
+        data: {
+          archetype: "single",
+          emplId: "1234",
+          lookedUpEid: "00000099",
+          name: "Some Person",
+          effectiveDate: "2026-05-01",
+          __name: "Some Person",
+          __id: "1234",
+          __subject: "Some Person",
+          __queueTitle: "Some Person — work-study",
+        },
         error: "submit timeout",
       },
       tmp,
@@ -124,6 +151,20 @@ describe("retry uses pristine original input (Contract 2)", () => {
     // 5. Provenance stamp — the new pending row references the prior runId
     // so the dashboard can show "retried from <prior-run>".
     assert.equal(newPending.data?.__retriedFrom, "original-run");
+
+    // 5a. Display metadata is preserved — without this the retry's pending
+    // row shows up nameless in the dashboard until the daemon claims it
+    // and rewrites. Carry __name / __id / __subject / __queueTitle forward
+    // from the prior row's data field (Contract 1 stamping happens later
+    // when the handler runs ctx.updateData).
+    assert.equal(newPending.data?.__name, "Some Person", "preserve __name on retry pending row");
+    assert.equal(newPending.data?.__id, "1234", "preserve __id on retry pending row");
+    assert.equal(newPending.data?.__subject, "Some Person", "preserve __subject on retry pending row");
+    assert.equal(
+      newPending.data?.__queueTitle,
+      "Some Person — work-study",
+      "preserve __queueTitle on retry pending row",
+    );
 
     // 6. The SQLite task's input_json was ALSO reset to the original input
     // so the daemon's claim path hands the handler the same payload.
