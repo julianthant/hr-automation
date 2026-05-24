@@ -91,20 +91,37 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
   if (opts._enqueueOverride) {
     await opts._enqueueOverride(itemIds, enqueueInputs);
   } else {
-    const { ensureDaemonsAndEnqueue } = await import("../../core/daemon/client.js");
+    // Contract 3 (Finding #23): route through delegateToAllImpl so parentRunId
+    // stamping, archetype derivation, and child pending pre-emit share one
+    // code path with the OCR orchestrator's eid-lookup fan-out. Mirrors the
+    // orchestrator's shape:
+    //   - `renderAs: "flat"` → stamps archetype "passive-child" so children
+    //     render as `delegation-member` rows (OCR runtime policy's
+    //     `utilityChildSurface: "delegation-member"`).
+    //   - `fireAndForget: true` because the `watchChildRuns` call below still
+    //     drives the wait — wrapping a second wait inside delegateToAllImpl
+    //     would double-count.
+    //   - `parentRunId: input.runId` so the OCR session row is the parent of
+    //     each eid-lookup child row.
+    const { delegateToAllImpl } = await import("../../core/delegate.js");
     const { eidLookupCrmWorkflow } = await import("../eid-lookup/index.js");
     const inputToItemId = new Map(
       enqueueInputs.map((inp, idx) => [JSON.stringify(inp), itemIds[idx] ?? ""])
     );
-    await ensureDaemonsAndEnqueue(
-      eidLookupCrmWorkflow,
-      enqueueInputs,
-      {},
-      {
-        trackerDir,
-        deriveItemId: (inp: unknown) => inputToItemId.get(JSON.stringify(inp)) ?? "",
-      },
-    );
+    type EidLookupChildInput = { name: string };
+    await delegateToAllImpl<EidLookupChildInput, readonly string[]>({
+      parentRunId: input.runId,
+      trackerDir,
+      // eidLookupCrmWorkflow's exact generic param doesn't line up with the
+      // narrowed `{ name }` shape used here (it accepts a union of name-only /
+      // emplId-only variants), so cast through unknown — the runtime schema
+      // validates the actual shape.
+      child: eidLookupCrmWorkflow as unknown as Parameters<typeof delegateToAllImpl<EidLookupChildInput, readonly string[]>>[0]["child"],
+      inputs: enqueueInputs,
+      renderAs: "flat",
+      fireAndForget: true,
+      deriveItemId: (inp: EidLookupChildInput) => inputToItemId.get(JSON.stringify(inp)) ?? "",
+    });
   }
 
   const watchFn = opts._watchChildRunsOverride ?? watchChildRuns;

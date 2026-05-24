@@ -18,6 +18,14 @@ const SRC_DIR = join(ROOT, "src");
 
 const ALLOWED_CALLERS = new Set<string>([
   "src/workflows/ocr/orchestrator.ts",
+  // OCR's `force-research` and `retry-page` are operator-driven entrypoints
+  // invoked from HTTP route handlers, not from inside a workflow `ctx`. They
+  // need the same `delegateToAllImpl` escape hatch as the orchestrator for
+  // the eid-lookup fan-out: `fireAndForget: true` (their own watchChildRuns
+  // drives the wait) + `deriveItemId` (stable per-record item IDs so outcome
+  // patching can correlate child results back to OCR records).
+  "src/workflows/ocr/force-research.ts",
+  "src/workflows/ocr/retry-page.ts",
 ]);
 
 const IGNORED_FILES = new Set<string>([
