@@ -21,16 +21,6 @@ export interface DaemonHttpOpts {
   resolveWake: () => void
   resolveShutdown: () => void
   abortLaunchAndKillSession: (reason: string) => void
-  /**
-   * Interrupt any in-flight Playwright work for the current item without
-   * killing chrome. Implementation navigates each system's active page to
-   * `about:blank`, which causes pending awaits (clicks, fills, waits,
-   * navigations) to reject. Browser context, cookies, and auth state are
-   * preserved — the daemon's existing post-cancel `session.reset(sysId)`
-   * loop restores the page to its resetUrl before the next claim.
-   * Best-effort: errors are swallowed by the implementation.
-   */
-  interruptInFlightWork: () => void
 }
 
 export interface DaemonHttpHandle {
@@ -55,7 +45,6 @@ export function startDaemonHttpServer(opts: DaemonHttpOpts): { server: Server; l
     resolveWake,
     resolveShutdown,
     abortLaunchAndKillSession,
-    interruptInFlightWork,
   } = opts
 
   const server: Server = createServer((req, res) => {
@@ -150,62 +139,6 @@ export function startDaemonHttpServer(opts: DaemonHttpOpts): { server: Server; l
         log.warn(
           `[Daemon ${workflowName}/${instanceId}] cancel-current accepted for item=${reqItemId} runId=${reqRunId}`,
         )
-        res.writeHead(200, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({ ok: true, accepted: true }))
-      })
-      return
-    }
-    if (req.method === 'POST' && url === '/force-current') {
-      let body = ''
-      req.on('data', (c) => {
-        body += c
-      })
-      req.on('end', () => {
-        let parsed: { itemId?: unknown; runId?: unknown } = {}
-        try {
-          parsed = body ? (JSON.parse(body) as { itemId?: unknown; runId?: unknown }) : {}
-        } catch {
-          /* malformed body — fall through to 400 below */
-        }
-        if (typeof parsed.itemId !== 'string' || typeof parsed.runId !== 'string') {
-          res.writeHead(400, { 'content-type': 'application/json' })
-          res.end(JSON.stringify({ ok: false, error: 'itemId and runId are required strings' }))
-          return
-        }
-        const reqItemId = parsed.itemId
-        const reqRunId = parsed.runId
-        const inFlight = getInFlight()
-        if (!inFlight || inFlight.itemId !== reqItemId || inFlight.runId !== reqRunId) {
-          res.writeHead(409, { 'content-type': 'application/json' })
-          res.end(
-            JSON.stringify({
-              ok: false,
-              error: 'no matching in-flight item — already finished or claim has rotated',
-            }),
-          )
-          return
-        }
-        // Chrome-preserving force-cancel: set cooperative-cancel flag AND
-        // immediately interrupt in-flight Playwright awaits by navigating
-        // each system's page to about:blank. The browser stays alive (auth
-        // / cookies preserved), the daemon stays alive, the current item
-        // gets reclassified as cancelled by the Stepper's catch block, and
-        // the claim loop continues with the next queued item. No
-        // forceShutdown / shuttingDown — those paths are reserved for
-        // /stop (full daemon shutdown).
-        setCancelTarget({ itemId: reqItemId, runId: reqRunId })
-        log.warn(
-          `[Daemon ${workflowName}/${instanceId}] force-current accepted for item=${reqItemId} runId=${reqRunId} (interrupting work, chrome preserved)`,
-        )
-        try {
-          interruptInFlightWork()
-        } catch (err) {
-          log.warn(
-            `[Daemon ${workflowName}/${instanceId}] force-current interrupt failed: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          )
-        }
         res.writeHead(200, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ ok: true, accepted: true }))
       })

@@ -24,9 +24,6 @@ export type {
   WorkflowActionSource,
 } from "../../domain/workflow-runtime/types.js";
 
-/** Cooperative = step-boundary cancel; force = interrupt the in-flight run. */
-export type CancelMode = "cooperative" | "force";
-
 /**
  * One row an action applies to.
  *
@@ -65,8 +62,6 @@ export interface WorkflowActionRequest {
   parentItemId?: string;
   formType?: string;
   reason?: string;
-  /** Cancel only — cooperative (default) vs force interrupt. */
-  cancelMode?: CancelMode;
 }
 
 export interface WorkflowActionTargetResult {

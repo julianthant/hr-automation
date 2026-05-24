@@ -30,7 +30,6 @@ import { createWorkerStore } from "../../../src/core/daemon/worker-store.js";
 import {
   buildCancelQueuedHandler,
   buildCancelRunningHandler,
-  buildForceStopTaskHandler,
 } from "../../../src/control/ops/index.js";
 import { queueFilePath } from "../../../src/core/daemon/queue.js";
 import {
@@ -363,72 +362,9 @@ describe("buildCancelRunningHandler for active-check tasks", () => {
   });
 });
 
-// ── Supplemental: force-stop for active-check ─────────────────────────────
-//
-// Verifies the /api/task/force-stop path marks the active-check task as
-// cancelled, writes a cooperative cancel_task command, and emits a tracker row.
-
-describe("buildForceStopTaskHandler for active-check tasks", () => {
-  it("marks active-check task cancelled, writes cancel_task command, and emits tracker row", async () => {
-    const control = openControlDb({ trackerDir: tmp });
-    const taskStore = createTaskStore(control);
-    const workerStore = createWorkerStore(control);
-    workerStore.registerWorker({
-      workerId: "ac-pool-worker-2",
-      workflow: "active-check",
-      kind: "daemon",
-      pid: 33333,
-      hostname: "test-host",
-      phase: "processing",
-    });
-    const [enqueued] = taskStore.enqueueTasks({
-      workflow: "active-check",
-      inputs: [{ name: "Park, Susan" }],
-      deriveItemId: (input) => input.name,
-      runIds: ["ac-run-force-stop"],
-    });
-    taskStore.claimNextTask({ workflow: "active-check", workerId: "ac-pool-worker-2" });
-    taskStore.markTaskRunning({
-      taskId: enqueued.taskId,
-      attemptId: enqueued.attemptId,
-      workerId: "ac-pool-worker-2",
-    });
-
-    const result = await buildForceStopTaskHandler(tmp)({
-      workflow: "active-check",
-      id: "Park, Susan",
-      runId: "ac-run-force-stop",
-    });
-
-    assert.equal(result.ok, true);
-    // Task cancelled in SQLite
-    assert.equal(taskStore.getTask(enqueued.taskId)?.state, "cancelled");
-    assert.equal(taskStore.getAttempt(enqueued.attemptId)?.state, "cancelled");
-    // Chrome-preserving force-stop (per operator request 2026-05-08): the
-    // dashboard now enqueues `cancel_task` (not `force_stop_task`) so the
-    // daemon interrupts work via about:blank navigation instead of killing
-    // the browser. The cooperative-cancel command flag still terminalizes
-    // the task in SQLite immediately.
-    const fsCommand = workerStore.getCommand(result.commandId);
-    assert.equal(fsCommand?.commandType, "cancel_task");
-    assert.equal(fsCommand?.state, "queued");
-    // Tracker row emitted with failed/step=cancelled
-    const trackerFile = readdirSync(tmp).find((file) =>
-      /^active-check-\d{4}-\d{2}-\d{2}\.jsonl$/.test(file),
-    );
-    assert.ok(trackerFile, "Expected an active-check tracker file after force-stop");
-    const trackerEntries = readFileSync(join(tmp, trackerFile), "utf8")
-      .trim()
-      .split("\n")
-      .filter(Boolean)
-      .map((l) => JSON.parse(l));
-    const cancelledEntry = trackerEntries.find(
-      (e: { runId?: string; status?: string; step?: string }) =>
-        e.runId === "ac-run-force-stop" && e.status === "failed",
-    );
-    assert.ok(cancelledEntry, "Expected a failed tracker entry for force-stop");
-    assert.equal(cancelledEntry.step, "cancelled");
-    workerStore.close();
-    taskStore.close();
-  });
-});
+// Force-stop test removed as part of Contract 5 (2026-05-23): there is no
+// separate force-stop path now. `buildCancelRunningHandler` (covered above)
+// dispatches a `cancel_task` worker command that — via the kernel's per-run
+// AbortController + Page proxy — propagates into in-flight Playwright work
+// within ms without killing chrome, which is what the old force-stop tried
+// to provide via the about:blank navigation.

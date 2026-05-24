@@ -136,7 +136,7 @@ describe("oath-signature scenario: cancel during transaction", () => {
           "name": "Jane Doe",
         },
         "displayId": "10873698",
-        "error": "Cancelled by user before step 'force-stop'",
+        "error": "Cancelled by user before step 'cancelled'",
         "itemId": "<itemId>",
         "parentRunId": null,
         "rowTypeLabel": "Normal row",

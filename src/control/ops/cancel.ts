@@ -1,10 +1,16 @@
 /**
- * Low-level cancel operations (queued / running / force-stop / bulk).
+ * Low-level cancel operations (queued / running / bulk).
  *
  * These are the primitives behind the central action engine — operator
  * cancels arrive through `actions/perform-workflow-action.ts`, which decides
  * scope and routes here. The handlers stay independently exported so daemon
  * code and tests can call a single primitive directly.
+ *
+ * Contract 5 (2026-05-23) removed the soft/force distinction: there is one
+ * cancel mechanism now. The kernel's per-run AbortController + Page proxy
+ * (see `src/core/kernel/page-proxy.ts`) makes cancel propagate into in-
+ * flight Playwright work within ms, so the legacy `force-stop` HTTP route
+ * + about:blank navigation + page-interrupt machinery are gone.
  */
 import { cancelInProcessRun } from "../../core/daemon/in-process-runs.js";
 import type { BrowserProcessRow, ControlWorkerStore } from "../../core/daemon/worker-store.js";
@@ -41,12 +47,6 @@ export type CancelRunningResult =
   | { ok: true; accepted: true; mode: "in-process"; alreadyCancelled?: boolean }
   | { ok: false; error: string; status?: number };
 
-export interface ForceStopTaskRequest {
-  workflow: string;
-  id: string;
-  runId?: string;
-}
-
 export interface KillBrowserRequest {
   browserProcessId?: string;
   pid?: number;
@@ -57,31 +57,6 @@ function signalBrowserPid(pid: number): void {
     process.kill(pid, "SIGTERM");
   } catch {
     /* best-effort hard-control fallback */
-  }
-}
-
-async function requestDaemonForceCurrent(
-  worker: import("../../core/daemon/worker-store.js").WorkerRow | null,
-  itemId: string,
-  runId: string | undefined,
-): Promise<boolean> {
-  if (!worker?.port || !runId) return false;
-  // Manual AbortController + clearTimeout (not AbortSignal.timeout) so the
-  // timer can't fire after the response completes — see "abort race" lesson.
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 5_000);
-  try {
-    const res = await fetch(`http://127.0.0.1:${worker.port}/force-current`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ itemId, runId }),
-      signal: ctrl.signal,
-    });
-    return res.ok;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -254,62 +229,6 @@ export function buildCancelActiveBulkHandler(dir: string) {
       else errors.push({ id: item.id, error: r.error });
     }
     return { ok: true as const, count, errors };
-  };
-}
-
-export function buildForceStopTaskHandler(dir: string) {
-  return async (
-    req: ForceStopTaskRequest,
-  ): Promise<{ ok: true; commandId: string } | { ok: false; error: string; status?: number }> => {
-    if (!req.workflow || !req.id) return { ok: false, error: "workflow and id are required", status: 400 };
-    const stores = openControlStores(dir);
-    const task = resolveControlTask(stores.taskStore, req.workflow, req.id, req.runId);
-    if (!task) return { ok: false, error: "task not found", status: 404 };
-    const { workerId, attemptId } = currentAttemptWorker(stores.taskStore, stores.workerStore, task);
-    const worker = workerId ? stores.workerStore.getWorker(workerId) : null;
-    const runId = req.runId ?? task.currentRunId ?? task.runId;
-    // Chrome-preserving force-cancel:
-    // - Mark the SQLite task cancelled so the daemon's claim-loop
-    //   precedence check sees it and writes a cancelled tracker row even
-    //   if the in-flight step happens to finish at the same instant.
-    // - Enqueue a `cancel_task` worker command (not `force_stop_task`) so
-    //   the daemon's command handler sets the cooperative-cancel flag
-    //   without triggering shutdown.
-    // - Call the daemon's /force-current HTTP endpoint, which now
-    //   navigates each system's page to about:blank to interrupt
-    //   in-flight Playwright work — chrome and the daemon stay alive,
-    //   just the current item dies. The Stepper's catch block converts
-    //   the resulting Playwright error to CancelledError.
-    // - DO NOT enqueue kill_browser commands or SIGTERM browser PIDs;
-    //   the operator explicitly does not want chrome torn down on a
-    //   per-item cancel.
-    const commandId = stores.workerStore.enqueueWorkerCommand({
-      commandType: "cancel_task",
-      workflow: req.workflow,
-      ...(workerId ? { targetWorkerId: workerId } : {}),
-      targetTaskId: task.taskId,
-      ...(attemptId ? { targetAttemptId: attemptId } : {}),
-      payload: { itemId: req.id, runId, source: "dashboard-force-stop" },
-    });
-    stores.taskStore.markTaskCancelled({
-      taskId: task.taskId,
-      ...(attemptId ? { attemptId } : {}),
-      reason: DASHBOARD_CANCEL_ERROR,
-    });
-    stores.taskStore.markDependencyFromChildTerminal({
-      childTaskId: task.taskId,
-      childState: "cancelled",
-    });
-    appendQueueFailedAudit(req.workflow, req.id, runId, DASHBOARD_CANCEL_ERROR, dir);
-    emitDashboardCancelTrackerRow(req.workflow, req.id, runId, dir);
-    const daemonAccepted = await requestDaemonForceCurrent(worker, req.id, runId);
-    if (!daemonAccepted) {
-      const { log } = await import("../../utils/log.js");
-      log.warn(
-        `[force-stop] task ${req.workflow}/${req.id} could not reach daemon /force-current — marked cancelled in control state; daemon will pick up the worker_command on next poll`,
-      );
-    }
-    return { ok: true, commandId };
   };
 }
 

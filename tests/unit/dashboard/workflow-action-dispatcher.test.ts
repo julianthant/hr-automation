@@ -70,7 +70,11 @@ describe("buildWorkflowActionRequest", () => {
     );
   });
 
-  it("carries descriptor cancel scope for queued and force-stop row requests", () => {
+  it("carries descriptor cancel scope on cancel-queued row requests", () => {
+    // Contract 5: cancel-queued is the single cancel transport now; the
+    // legacy force-stop transport collapsed into it because the kernel's
+    // per-run AbortController + Page proxy makes cancel propagate into
+    // in-flight Playwright work within ms.
     assert.deepEqual(
       buildWorkflowActionRequest({
         transport: "cancel-queued",
@@ -88,30 +92,12 @@ describe("buildWorkflowActionRequest", () => {
         },
       },
     );
-
-    assert.deepEqual(
-      buildWorkflowActionRequest({
-        transport: "force-stop",
-        kind: "cancel",
-        action: treeCancelAction,
-        fallbackTarget: { workflowId: "oath-upload", id: "oath-parent", runId: "parent-run" },
-      }),
-      {
-        path: "/api/task/force-stop",
-        body: {
-          workflow: "oath-upload",
-          id: "oath-parent",
-          runId: "parent-run",
-          scope: "tree",
-        },
-      },
-    );
   });
 
   it("carries OCR discard context on central cancel requests", () => {
     assert.deepEqual(
       buildWorkflowActionRequest({
-        transport: "force-stop",
+        transport: "cancel-queued",
         kind: "cancel",
         fallbackTarget: { workflowId: "oath-upload", id: "oath-parent", runId: "ocr-run" },
         parentRunId: "parent-run",
@@ -122,7 +108,7 @@ describe("buildWorkflowActionRequest", () => {
         reason: "Cancelled from oath-upload queue",
       }),
       {
-        path: "/api/task/force-stop",
+        path: "/api/cancel-queued",
         body: {
           workflow: "oath-upload",
           id: "oath-parent",

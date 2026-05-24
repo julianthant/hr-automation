@@ -11,8 +11,7 @@ import { actionScopeBody, findEnabledAction } from "@/lib/workflow-action-utils"
 export type WorkflowActionTransport =
   | "retry"
   | "delete-entry"
-  | "cancel-queued"
-  | "force-stop";
+  | "cancel-queued";
 
 export type BulkWorkflowActionTransport =
   | "retry-bulk"
@@ -130,26 +129,13 @@ export function buildWorkflowActionRequest({
     };
   }
 
-  if (transport === "cancel-queued") {
-    return {
-      path: "/api/cancel-queued",
-      body: compact({
-        workflow,
-        id,
-        runId,
-        ...actionScopeBody(resolvedAction),
-        ocrSessionId,
-        parentWorkflow,
-        parentRunId,
-        parentItemId,
-        formType,
-        reason,
-      }),
-    };
-  }
-
+  // Contract 5: there is one cancel mechanism now. The legacy `force-stop`
+  // transport routed to `/api/task/force-stop` which set the same cancel
+  // flag as `/api/cancel-queued` plus navigated the page to about:blank;
+  // the AbortSignal-based unified cancel makes both fast, so the transport
+  // collapses into one route.
   return {
-    path: "/api/task/force-stop",
+    path: "/api/cancel-queued",
     body: compact({
       workflow,
       id,
