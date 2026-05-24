@@ -356,32 +356,51 @@ async function reEnqueueEntry(
   }
 
   if (IN_PROCESS_WORKFLOWS.has(wf)) {
-    return reEnqueueInProcessEntry(wf, id, runId, dir, date);
+    return reEnqueueInProcessEntry(wf, id, resolvedRunId, dir, date);
   }
 
-  // Edit-and-resume only: prefilledData carries user edits that need to be
-  // merged with previously-extracted (non-editable) fields like separations'
-  // rawTerminationType. findEntryInput's mergedEntryStrings seeds that prefill
-  // channel — this is NOT a retry fallback, it's the legitimate edit-and-
-  // resume path. A pure retry should never reach here (the SQLite task lookup
-  // above handles all retries); if it does, the prior task row is missing,
-  // which is a bug.
+  // SQLite task row is missing for this (workflow, id, runId). Two
+  // distinct concerns sit under this branch:
+  //   1. **Legacy** — the row was never stamped with original_input_json
+  //      (predates migration 11). That's the fail-loud case handled in the
+  //      inner `if (!input)` branch above with the explicit "this is a bug,
+  //      not a legacy state" error.
+  //   2. **Pruned** — the row WAS stamped, but the task record was deleted
+  //      by `npm run clean:tracker` (which prunes JSONL plus, separately,
+  //      can prune SQLite rows). The JSONL audit/history is often still
+  //      present. Fall back to JSONL reconstruction in this case so the
+  //      operator's retry succeeds. Log a warn so the operator sees that
+  //      the SQLite row was missing — usually a sign of a recent cleanup.
+  //
+  // Edit-and-resume (`prefilledData` present) always lands here regardless;
+  // it intentionally uses JSONL reconstruction so user edits merge with
+  // previously-extracted non-editable fields.
+  const lookup = findEntryInput(wf, id, resolvedRunId, dir, date);
+  if ("error" in lookup) {
+    if (!prefilledData) {
+      return {
+        ok: false,
+        error: `retry: no SQLite task record AND no tracker entries for workflow=${wf} id=${id}${resolvedRunId ? ` runId=${resolvedRunId}` : ""} — cannot reconstruct retry payload.`,
+      };
+    }
+    return { ok: false, error: lookup.error };
+  }
+
   if (!prefilledData) {
-    return {
-      ok: false,
-      error: `retry: no SQLite task record found for workflow=${wf} id=${id}${runId ? ` runId=${runId}` : ""} — pure retries require the task store row (Contract 2).`,
-    };
+    log.warn(
+      `[retry] SQLite task row missing, falling back to JSONL reconstruction — was the tracker pruned? workflow=${wf} id=${id}${resolvedRunId ? ` runId=${resolvedRunId}` : ""}`,
+    );
   }
-  const lookup = findEntryInput(wf, id, runId, dir, date);
-  if ("error" in lookup) return { ok: false, error: lookup.error };
 
-  const input: Record<string, unknown> = {
-    ...lookup.input,
-    prefilledData: {
-      ...lookup.mergedEntryStrings,
-      ...prefilledData,
-    },
-  };
+  const input: Record<string, unknown> = prefilledData
+    ? {
+        ...lookup.input,
+        prefilledData: {
+          ...lookup.mergedEntryStrings,
+          ...prefilledData,
+        },
+      }
+    : { ...lookup.input };
 
   const resolvedParent = requestedParent ?? lookup.latestParentRunId;
   const result = await enqueueFromHttp(wf, [input], {
