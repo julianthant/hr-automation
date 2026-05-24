@@ -1,4 +1,4 @@
-import { emitTrackerRow, appendLogEntry } from "../../tracker/jsonl.js";
+import { appendLogEntry } from "../../tracker/jsonl.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
 import {
   requestOcrPrepareAbort,
@@ -6,8 +6,6 @@ import {
 import { deleteDelegatedChildrenForRun } from "../ops/delete.js";
 import { emitInheritedRow } from "../ops/emit-inherited.js";
 import { readFormType, readParentRunId } from "../../tracker/dashboard/ocr/shared.js";
-import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
-import { resolveRowArchetype } from "../../domain/row-archetype.js";
 
 const WORKFLOW = "ocr";
 
@@ -62,28 +60,20 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
       if (parentWorkflow) {
         const ts = new Date().toISOString();
         const parentItemId = input.parentItemId || `ocr-prep-${input.sessionId}`;
-        const parentPriorEntry = findLatestEntryForPredicate({
+        // Route through emitInheritedRow so the discard row inherits the
+        // parent's prior `parentRunId` (Bug #6 — when the OCR-parent is
+        // itself a delegation child, omitting parentRunId orphans the
+        // discard row from the batch orchestrator's group card).
+        emitInheritedRow({
           workflow: parentWorkflow,
           trackerDir,
-          lookbackDays: 30,
-          predicate: (e) => e.id === parentItemId && e.runId === parentRunId,
+          id: parentItemId,
+          runId: parentRunId,
+          status: "failed",
+          step: "discarded",
+          fallbackArchetype: "batch-parent",
+          ...(input.reason ? { error: input.reason } : {}),
         });
-        const parentArchetype = parentPriorEntry
-          ? resolveRowArchetype(parentPriorEntry)
-          : "batch-parent";
-        emitTrackerRow(
-          {
-            workflow: parentWorkflow,
-            timestamp: ts,
-            id: parentItemId,
-            runId: parentRunId,
-            status: "failed",
-            step: "discarded",
-            data: { archetype: parentArchetype },
-            ...(input.reason ? { error: input.reason } : {}),
-          },
-          trackerDir,
-        );
         appendLogEntry(
           {
             workflow: parentWorkflow,
