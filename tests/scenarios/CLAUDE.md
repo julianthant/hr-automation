@@ -167,3 +167,10 @@ await retry.result;
   control path is covered only by `tests/unit/control/retry-uses-original-input.test.ts`.
   To exercise the real path in a scenario, the runtime would need
   SQLite-task-store enqueue + claim emulation (essentially an inline daemon).
+- **Contract 5 per-run AbortController is not modelled here.** The runtime's
+  `cancelRow` flips `isCancelRequested` (the stepper's synchronous checkpoint)
+  and rejects any active hold. It does NOT construct a real `AbortController`
+  or abort in-flight Playwright calls via the Page proxy. Scenario cancel
+  exercises the between-step probe path only — not the mid-Playwright-call
+  fast abort that Contract 5's `ctx.signal` + Page proxy provides in production.
+  The per-run `AbortController` wiring is tested in `tests/unit/core/ctx-signal.test.ts`.
