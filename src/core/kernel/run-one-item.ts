@@ -51,8 +51,29 @@ export interface RunOneItemOpts<TData, TSteps extends readonly string[]> {
    * `CancelledError` at the next `ctx.step(...)` boundary. When omitted (CLI
    * direct mode, in-process tests), cancellation is never observed — preserves
    * legacy behavior verbatim.
+   *
+   * Contract 5: `runOneItem` ALSO constructs a per-run `AbortController`. The
+   * controller's `signal` is forwarded into `ctx.signal` (and via the Page
+   * proxy, into every Playwright call that accepts an `AbortSignal`), so the
+   * caller's `isCancelRequested` probe and `controller.abort()` are the two
+   * views of the same "operator wants cancel" state. `runOneItem` aborts the
+   * controller as soon as `isCancelRequested()` reports true — see
+   * `onCancelController` for the callback the caller uses to wire its own
+   * cancel side-channel directly into `controller.abort()` (the daemon does
+   * this so a cancel command aborts in-flight Playwright work without waiting
+   * for the next step boundary).
    */
   isCancelRequested?: () => boolean
+  /**
+   * Invoked once with the per-run `AbortController` immediately after it's
+   * constructed. The caller (daemon claim loop, scenario runtime, etc.) can
+   * stash the controller and call `.abort()` directly when its own cancel
+   * signal fires — this is what makes Contract 5's cancel "fast": the abort
+   * propagates into the in-flight Playwright call via the signal injected by
+   * `ctx.page(id)`'s proxy, rather than waiting for `Stepper.step`'s next
+   * boundary check.
+   */
+  onCancelController?: (controller: AbortController) => void
   /**
    * When set, every TrackerEntry emitted for this item carries `parentRunId`.
    * Forwarded from the queue item's `parentRunId` field by the daemon's claim
@@ -114,6 +135,31 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
     )
   }
 
+  // Per-run AbortController (Contract 5). The controller's signal is
+  // surfaced as `ctx.signal` and auto-injected into Playwright methods via
+  // the `ctx.page(id)` proxy. Aborts come from two places:
+  //   1. The caller's `isCancelRequested` probe flipping true — the stepper
+  //      observes this between steps; we also poll it here to keep the
+  //      controller in lockstep so any Playwright call already in flight
+  //      rejects within ms instead of waiting on its declared timeout.
+  //   2. The caller calling `.abort()` directly via the `onCancelController`
+  //      callback (daemon's cancel-command handler does this).
+  const controller = new AbortController()
+  args.onCancelController?.(controller)
+  // Eagerly mirror caller's probe → controller. The stepper itself also
+  // polls `isCancelRequested` between steps as the synchronous checkpoint
+  // (no Playwright in flight to interrupt), so this side-channel only
+  // matters while a Playwright call is awaiting.
+  const isCancelRequestedWithAbort = args.isCancelRequested
+    ? (): boolean => {
+        const v = args.isCancelRequested!()
+        if (v && !controller.signal.aborted) {
+          controller.abort(new Error('cancel requested'))
+        }
+        return v
+      }
+    : undefined
+
   const runInner = async (emitters: {
     setStep: (step: string) => void
     updateData: (data: Record<string, unknown>) => void
@@ -130,7 +176,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       emitData: emitters.updateData,
       emitFailed: emitters.emitFailed,
       emitSkipped: emitters.emitSkipped,
-      isCancelRequested: args.isCancelRequested,
+      isCancelRequested: isCancelRequestedWithAbort,
     })
     await runWorkflowHandler({
       wf,
@@ -145,17 +191,18 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       emitScreenshotEvent: emitters.emitScreenshotEvent,
       preHandler: args.preHandler,
       skipCancelledScreenshot: true,
+      signal: controller.signal,
       onPreHandlerError: (err) => {
-        if (emitters.markCancelledStepOnCancelRequested && args.isCancelRequested?.()) {
+        if (emitters.markCancelledStepOnCancelRequested && isCancelRequestedWithAbort?.()) {
           emitters.setStep('cancelled')
-          throw new CancelledError('force-stop')
+          throw new CancelledError('cancelled')
         }
         throw err
       },
       mapEscapedHandlerError: () => {
-        if (!emitters.markCancelledStepOnCancelRequested || !args.isCancelRequested?.()) return undefined
+        if (!emitters.markCancelledStepOnCancelRequested || !isCancelRequestedWithAbort?.()) return undefined
         emitters.setStep('cancelled')
-        return new CancelledError('force-stop')
+        return new CancelledError('cancelled')
       },
     })
   }

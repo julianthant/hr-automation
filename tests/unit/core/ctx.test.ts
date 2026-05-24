@@ -18,6 +18,7 @@ test('makeCtx returns a Ctx with page/step/parallel/updateData/session bound', (
     emitData: () => {},
     emitFailed: () => {},
   })
+  const controller = new AbortController()
   const ctx = makeCtx({
     session,
     stepper,
@@ -26,6 +27,7 @@ test('makeCtx returns a Ctx with page/step/parallel/updateData/session bound', (
     workflow: 'test',
     itemId: 't1',
     emitScreenshotEvent: () => {},
+    signal: controller.signal,
   })
 
   assert.equal(typeof ctx.page, 'function')
@@ -36,6 +38,8 @@ test('makeCtx returns a Ctx with page/step/parallel/updateData/session bound', (
   assert.equal(ctx.runId, 'r1')
   assert.equal(typeof ctx.session.page, 'function')
   assert.equal(typeof ctx.screenshot, 'function')
+  assert.ok(ctx.signal instanceof AbortSignal, 'ctx.signal is an AbortSignal')
+  assert.equal(ctx.signal.aborted, false)
 })
 
 test('captureAndStampScreenshot captures a form screenshot and stamps first filename', async () => {
@@ -60,6 +64,7 @@ test('captureAndStampScreenshot captures a form screenshot and stamps first file
     workflow: 'test',
     itemId: 't1',
     emitScreenshotEvent: () => {},
+    signal: new AbortController().signal,
   })
   ctx.screenshot = async (opts) => {
     assert.deepEqual(opts, { kind: 'form', label: 'person-org-summary' })
