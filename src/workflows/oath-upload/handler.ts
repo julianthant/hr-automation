@@ -185,9 +185,16 @@ export async function oathUploadHandler(
     });
   }
 
-  const priorTicket = findPriorTicketForRunId(ctx.runId, trackerDir);
+  // Idempotency: probe by stable business identity (`sessionId` / `pdfHash`)
+  // — NOT by `runId`. Contract 2 retry creates a new runId, so a runId-keyed
+  // probe would miss a prior successful ticket and submit a duplicate.
+  // `sessionId` and `pdfHash` are both preserved across retries by the
+  // original input persistence.
+  const priorTicket = findPriorTicketForSession(input.sessionId, input.pdfHash, trackerDir);
   if (priorTicket) {
-    log.warn(`[oath-upload] runId=${ctx.runId} already filed ticket ${priorTicket}; skipping HR form on restart`);
+    log.warn(
+      `[oath-upload] sessionId=${input.sessionId} already filed ticket ${priorTicket}; skipping HR form on restart/retry`,
+    );
     ctx.updateData({ ticketNumber: priorTicket });
     ctx.skipStep("open-hr-form");
     ctx.skipStep("fill-form");
@@ -238,7 +245,22 @@ function isFiledTicketNumber(ticketNumber: string): boolean {
   return /^HRC\d/i.test(ticketNumber);
 }
 
-export function findPriorTicketForRunId(runId: string, trackerDir?: string): string | null {
+/**
+ * Idempotency probe: looks for a prior tracker entry for this `sessionId`
+ * that already wrote a filed ticket number. Keyed on stable business
+ * identity (sessionId / pdfHash) — not `runId` — because Contract 2 retry
+ * assigns a NEW runId for the same logical work, and a runId-keyed lookup
+ * would miss the prior ticket and submit a duplicate.
+ *
+ * `sessionId` matches the tracker row's `id` field (set by
+ * `getId: (d) => d.sessionId` on the workflow). `pdfHash` is used as a
+ * secondary cross-check when the entry carries it.
+ */
+export function findPriorTicketForSession(
+  sessionId: string,
+  pdfHash: string | undefined,
+  trackerDir?: string,
+): string | null {
   let controlDb: ReturnType<typeof openControlDb> | undefined;
   try { controlDb = openControlDb({ trackerDir }); } catch { /* fall through to JSONL */ }
   try {
@@ -246,11 +268,20 @@ export function findPriorTicketForRunId(runId: string, trackerDir?: string): str
       workflow: "oath-upload",
       trackerDir,
       lookbackDays: LOOKBACK_DAYS,
-      ...(controlDb ? { db: controlDb.db, runId } : {}),
-      predicate: (e) =>
-        e.runId === runId &&
-        typeof e.data?.ticketNumber === "string" &&
-        isFiledTicketNumber(e.data.ticketNumber as string),
+      // `itemId` is indexed in SQLite and matches the tracker row `id` (sessionId).
+      ...(controlDb ? { db: controlDb.db, itemId: sessionId } : {}),
+      predicate: (e) => {
+        if (e.id !== sessionId) return false;
+        // If pdfHash is available on the entry and on the input, cross-check
+        // to prevent matching a stale row with the same sessionId but
+        // different pdf contents (defensive — sessionId is operator-scoped
+        // and shouldn't collide across pdfs in practice).
+        if (pdfHash && typeof e.data?.pdfHash === "string" && e.data.pdfHash !== pdfHash) return false;
+        return (
+          typeof e.data?.ticketNumber === "string" &&
+          isFiledTicketNumber(e.data.ticketNumber as string)
+        );
+      },
     });
     if (!match) return null;
     const t = match.data?.ticketNumber;

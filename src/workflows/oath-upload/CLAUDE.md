@@ -112,11 +112,11 @@ the abort, the kernel's failure path emits `failed` step
 
 ## Retry safety
 
-**Known idempotency gap (workflow bug — not a kernel concern).** Contract 2 makes retry a uniform kernel behavior: a retry assigns a NEW runId and replays the handler from step 0 with the pristine original input. The existing **Restart recovery** above keys ticket-skip on `data.ticketNumber` written by the prior run on the same runId — but a retry uses a new runId, so a `findPriorTicketForRunId(ctx.runId)` style probe would miss and the handler would file a SECOND HR ServiceNow ticket.
+**Idempotent across retry (fixed 2026-05-24).** Contract 2 makes retry a uniform kernel behavior: a retry assigns a NEW runId and replays the handler from step 0 with the pristine original input. The pre-submit probe `findPriorTicketForSession(input.sessionId, input.pdfHash, trackerDir)` keys on stable business identity — `sessionId` (which equals the tracker row `id` via `getId: (d) => d.sessionId`) and a defensive `pdfHash` cross-check — both preserved across retries because they come from the original input. If any prior entry for this sessionId carries a filed `data.ticketNumber` (matching `/^HRC\d/i`, excluding the dry-run sentinel), the handler skips `open-hr-form` / `fill-form` / `submit` and stamps the prior ticket on the new row.
 
-The fix lives in this workflow, not the kernel: probe by `sessionId` (`pdfHash` / `ocrSessionId`) — which IS preserved across retry because it comes from the original input — instead of `runId`. Scan all tracker entries for the workflow whose `data.pdfHash` matches, look for any prior entry with `data.ticketNumber`, and skip ServiceNow submission if found.
+Same probe covers both restart-with-same-runId (kernel claim recovery) and retry-with-new-runId (Contract 2). Tests in `tests/unit/workflows/oath-upload/handler-idempotency.test.ts`.
 
-The dashboard duplicate-check banner already surfaces prior runs for the same hash on file select — operators retrying oath-upload are responsible for noting any prior `ticketNumber` in the banner before clicking Retry. The kernel does not gate this — no `supportsRetry` flag, no "not retryable" error; idempotency belongs in the workflow.
+The dashboard duplicate-check banner separately surfaces prior runs for the same hash on file select — that's an operator-facing UX hint, not the safety net. The kernel does not gate retry — no `supportsRetry` flag, no "not retryable" error; idempotency belongs in the workflow.
 
 ## Lessons Learned
 

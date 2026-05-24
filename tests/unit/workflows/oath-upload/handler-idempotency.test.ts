@@ -3,27 +3,27 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { findPriorTicketForRunId } from "../../../../src/workflows/oath-upload/handler.js";
+import { findPriorTicketForSession } from "../../../../src/workflows/oath-upload/handler.js";
 import { dateLocal } from "../../../../src/tracker/jsonl.js";
 
-describe("oath-upload restart idempotency", () => {
-  it("findPriorTicketForRunId returns null when no prior ticketNumber exists", () => {
-    const result = findPriorTicketForRunId("nonexistent", "/tmp/nonexistent-dir-for-test");
+describe("oath-upload retry/restart idempotency — findPriorTicketForSession", () => {
+  it("returns null when no prior ticketNumber exists", () => {
+    const result = findPriorTicketForSession("nonexistent", undefined, "/tmp/nonexistent-dir-for-test");
     assert.equal(result, null);
   });
 
-  it("findPriorTicketForRunId returns null when no prior run exists in any JSONL", () => {
+  it("returns null when no prior run exists in any JSONL", () => {
     const dir = mkdtempSync(join(tmpdir(), "oath-idem-"));
-    const result = findPriorTicketForRunId("no-such-run", dir);
+    const result = findPriorTicketForSession("no-such-session", undefined, dir);
     assert.equal(result, null);
   });
 
-  it("findPriorTicketForRunId returns ticket number when prior run filed one", () => {
+  it("returns ticket number when prior run with same sessionId filed one (same runId)", () => {
     const dir = mkdtempSync(join(tmpdir(), "oath-idem-"));
     const date = dateLocal();
     const line = JSON.stringify({
       workflow: "oath-upload",
-      id: "pdf-1",
+      id: "session-abc",
       runId: "test-run-1",
       ts: new Date().toISOString(),
       status: "done",
@@ -32,16 +32,39 @@ describe("oath-upload restart idempotency", () => {
     });
     writeFileSync(join(dir, `oath-upload-${date}.jsonl`), line + "\n");
 
-    const result = findPriorTicketForRunId("test-run-1", dir);
+    const result = findPriorTicketForSession("session-abc", undefined, dir);
     assert.equal(result, "HRC0123456");
   });
 
-  it("findPriorTicketForRunId ignores dry-run sentinel ticketNumber", () => {
+  it("returns ticket number when retry assigns a NEW runId but same sessionId (Contract 2 retry safety)", () => {
+    // This is the actual Bug #1 regression: prior run filed a ticket with runId-A;
+    // retry runs with new runId-B but same sessionId. The probe must still find
+    // the prior ticket so we don't submit a duplicate.
+    const dir = mkdtempSync(join(tmpdir(), "oath-idem-"));
+    const date = dateLocal();
+    const priorRun = JSON.stringify({
+      workflow: "oath-upload",
+      id: "session-shared",
+      runId: "original-run",
+      ts: new Date().toISOString(),
+      status: "done",
+      step: "submit",
+      data: { ticketNumber: "HRC0987654" },
+    });
+    writeFileSync(join(dir, `oath-upload-${date}.jsonl`), priorRun + "\n");
+
+    // The retry passes the same sessionId but the handler now has a new ctx.runId.
+    // findPriorTicketForSession must still find the ticket.
+    const result = findPriorTicketForSession("session-shared", undefined, dir);
+    assert.equal(result, "HRC0987654");
+  });
+
+  it("ignores dry-run sentinel ticketNumber", () => {
     const dir = mkdtempSync(join(tmpdir(), "oath-idem-"));
     const date = dateLocal();
     const line = JSON.stringify({
       workflow: "oath-upload",
-      id: "pdf-1",
+      id: "session-dry",
       runId: "test-run-dry",
       ts: new Date().toISOString(),
       status: "done",
@@ -50,16 +73,16 @@ describe("oath-upload restart idempotency", () => {
     });
     writeFileSync(join(dir, `oath-upload-${date}.jsonl`), line + "\n");
 
-    const result = findPriorTicketForRunId("test-run-dry", dir);
+    const result = findPriorTicketForSession("session-dry", undefined, dir);
     assert.equal(result, null);
   });
 
-  it("findPriorTicketForRunId ignores rows with empty ticketNumber", () => {
+  it("ignores rows with empty ticketNumber", () => {
     const dir = mkdtempSync(join(tmpdir(), "oath-idem-"));
     const date = dateLocal();
     const line = JSON.stringify({
       workflow: "oath-upload",
-      id: "pdf-1",
+      id: "session-running",
       runId: "test-run-2",
       ts: new Date().toISOString(),
       status: "running",
@@ -68,7 +91,46 @@ describe("oath-upload restart idempotency", () => {
     });
     writeFileSync(join(dir, `oath-upload-${date}.jsonl`), line + "\n");
 
-    const result = findPriorTicketForRunId("test-run-2", dir);
+    const result = findPriorTicketForSession("session-running", undefined, dir);
     assert.equal(result, null);
+  });
+
+  it("rejects entries with mismatched pdfHash even when sessionId matches", () => {
+    // Defensive: protects against an operator reusing a sessionId for a
+    // different pdf (theoretically possible if sessionId generation collides).
+    const dir = mkdtempSync(join(tmpdir(), "oath-idem-"));
+    const date = dateLocal();
+    const line = JSON.stringify({
+      workflow: "oath-upload",
+      id: "session-xyz",
+      runId: "test-run-3",
+      ts: new Date().toISOString(),
+      status: "done",
+      step: "submit",
+      data: { ticketNumber: "HRC0111111", pdfHash: "hash-aaa" },
+    });
+    writeFileSync(join(dir, `oath-upload-${date}.jsonl`), line + "\n");
+
+    // Same sessionId but different hash → no match.
+    const result = findPriorTicketForSession("session-xyz", "hash-bbb", dir);
+    assert.equal(result, null);
+  });
+
+  it("matches when sessionId and pdfHash both align", () => {
+    const dir = mkdtempSync(join(tmpdir(), "oath-idem-"));
+    const date = dateLocal();
+    const line = JSON.stringify({
+      workflow: "oath-upload",
+      id: "session-hashed",
+      runId: "test-run-4",
+      ts: new Date().toISOString(),
+      status: "done",
+      step: "submit",
+      data: { ticketNumber: "HRC0222222", pdfHash: "hash-match" },
+    });
+    writeFileSync(join(dir, `oath-upload-${date}.jsonl`), line + "\n");
+
+    const result = findPriorTicketForSession("session-hashed", "hash-match", dir);
+    assert.equal(result, "HRC0222222");
   });
 });
