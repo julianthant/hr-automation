@@ -10,7 +10,7 @@ export interface TopBarRunButtonProps {
 }
 
 /**
- * Upload / Run-modal launcher for workflows registered in {@link RUN_MODAL_REGISTRY}
+ * Upload-run launcher for workflows registered in {@link RUN_MODAL_REGISTRY}
  * (OCR, emergency-contact, oath-upload, …). Self-gating via {@link isRunModalEnabled}.
  *
  * Mounted from `App` in the queue panel bulk-actions row to the left of Capture and Retry.

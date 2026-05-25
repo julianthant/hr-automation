@@ -2,21 +2,21 @@ import { useState, type FormEvent } from "react";
 import { Play, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { getQuickRunConfig } from "@/lib/quick-run-registry";
+import { getInputRunConfig } from "@/lib/input-run-registry";
 import { RunModal } from "@/components/run-modal/RunModal";
 import { useOptionalBatchQueueParentRunId } from "@/components/hooks/useBatchQueueContext";
 
-interface QuickRunPanelProps {
+interface InputRunPanelProps {
   workflow: string;
 }
 
 /**
- * QuickRunPanel — workflow quick-enqueue input + play button (mounted in
+ * InputRunPanel — workflow input-run text box + play button (mounted in
  * `QueuePanel`'s footer).
  *
  * Visible only for workflows registered in
- * `src/dashboard/lib/quick-run-registry.ts`. Workflows without a quick-run
- * config (e.g. emergency-contact, which needs YAML input) render null.
+ * `src/dashboard/lib/input-run-registry.ts`. Workflows without an input-run
+ * config render null.
  *
  * On submit: parses the text into typed inputs via the registry, POSTs
  * `/api/enqueue`, shows a sonner toast with the result. If no daemon is
@@ -26,8 +26,8 @@ interface QuickRunPanelProps {
  * Bulk retry/stop/delete buttons sit beside the queue sort control in the
  * panel header (`queueBulkActionsSlot` in `App`).
  */
-export function QuickRunPanel({ workflow }: QuickRunPanelProps) {
-  const config = getQuickRunConfig(workflow);
+export function InputRunPanel({ workflow }: InputRunPanelProps) {
+  const config = getInputRunConfig(workflow);
   const batchQueueParentRunId = useOptionalBatchQueueParentRunId();
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);

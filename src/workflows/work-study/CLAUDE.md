@@ -2,7 +2,7 @@
 
 Updates employee position pool and compensation data for work-study awards in UCPath PayPath Actions.
 
-**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflow`. The kernel owns browser launch, UCPath auth, tracker emission, SIGINT cleanup. The handler is a two-step pipeline (`ucpath-auth` → `transaction`) over a single UCPath browser. The **daemon-mode adapter** `runWorkStudyCli` (added 2026-04-22) is what `npm run work-study` actually invokes: it enqueues `{emplId, effectiveDate}` to any alive work-study daemon (or spawns one) via `ensureDaemonsAndEnqueue`.
+**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflow`. The kernel owns browser launch, UCPath auth, tracker emission, SIGINT cleanup. The handler is a two-step pipeline (`ucpath-auth` → `transaction`) over a single UCPath browser. `runWorkStudyCli` remains an internal adapter, but there is no public package-script launch path; add a dashboard input run before exposing this workflow to operators again.
 
 ## Selector intelligence
 
@@ -16,7 +16,7 @@ This workflow touches one system: **ucpath**.
 
 - `schema.ts` — Zod `WorkStudyInput` schema (emplId: 5+ digits, effectiveDate: MM/DD/YYYY)
 - `enter.ts` — Builds `ActionPlan` for the PayPath transaction: navigate → collapse sidebar → search by Empl ID → fill position data (reason "JRL", pool "F") → fill Job Data/Additional Pay comments → save/submit
-- `workflow.ts` — Kernel definition (`workStudyWorkflow`) + CLI adapters (`runWorkStudy`, `runWorkStudyCli`). `runWorkStudyCli` is the daemon-mode entry used by `npm run work-study` — forwards `{emplId, effectiveDate}` to `ensureDaemonsAndEnqueue(workStudyWorkflow, [...], { new, parallel })`. `runWorkStudy` is the in-process path used by tests/scripts.
+- `workflow.ts` — Kernel definition (`workStudyWorkflow`) + adapters (`runWorkStudy`, `runWorkStudyCli`). `runWorkStudyCli` forwards `{emplId, effectiveDate}` to `ensureDaemonsAndEnqueue`; `runWorkStudy` is the in-process path used by tests/scripts.
 - `index.ts` — Barrel exports
 
 ## Kernel Config
@@ -32,11 +32,11 @@ This workflow touches one system: **ucpath**.
 ## Data Flow
 
 ```
-CLI: npm run work-study <emplId> <effectiveDate>                  (daemon mode — default)
-  → runWorkStudyCli — daemon-mode CLI adapter
-    → ensureDaemonsAndEnqueue(workStudyWorkflow, [{emplId, effectiveDate}], { new, parallel })
+Future dashboard input run:
+  → /api/enqueue
+    → ensureDaemonsAndEnqueue(workStudyWorkflow, [{emplId, effectiveDate}])
       - Discovers alive daemons via .tracker/daemons/work-study-*.lock.json + /whoami
-      - Spawns daemon(s) per computeSpawnPlan; validates input; enqueues; POST /wake
+      - Spawns a daemon when none is alive; validates input; enqueues; POST /wake
       - Daemon runs the handler below in a loop (one Session, Duo once, reused across items)
 
 In-process path (tests/scripts — call runWorkStudy directly):
@@ -71,5 +71,6 @@ No workflow-local selectors live here. Use the UCPath selector catalog listed ab
 ## Lessons Learned
 
 - **2026-05-16: Deleted `tracker.ts` (Excel writer).** Convention violation per `src/workflows/CLAUDE.md` — kernel JSONL + dashboard are the only observability. The two `updateWorkStudyTracker` call sites in `workflow.ts` (success-path handler and `runWorkStudy` failure-path catch) were removed along with the file. The `runWorkStudy` catch block now just logs + rethrows.
-- **2026-04-23: Removed tracker-side idempotency cache.** `src/core/idempotency.ts` (hashKey / hasRecentlySucceeded / recordSuccess) was deleted across the repo. The `transaction` step no longer short-circuits on a hashed-key match — re-running `npm run work-study <emplId> <date>` after a crash WILL attempt to re-submit the PayPath transaction. No live-page probe exists for work-study yet; if duplicate submits become a problem in practice, the replacement pattern is a pre-submit scan (see separations' `findExistingTerminationTransaction` against the Smart HR Transactions list).
+- **2026-05-25: Public start path removed until a dashboard input run is added.** `npm run work-study` is retired. Do not re-expose this workflow through package scripts; add an `InputRunPanel` parser if operators need direct work-study starts again.
+- **2026-04-23: Removed tracker-side idempotency cache.** `src/core/idempotency.ts` (hashKey / hasRecentlySucceeded / recordSuccess) was deleted across the repo. The `transaction` step no longer short-circuits on a hashed-key match — re-running the same `{emplId, effectiveDate}` after a crash WILL attempt to re-submit the PayPath transaction. No live-page probe exists for work-study yet; if duplicate submits become a problem in practice, the replacement pattern is a pre-submit scan (see separations' `findExistingTerminationTransaction` against the Smart HR Transactions list).
 - **2026-04-15: Migrated to kernel.** `runWorkStudy` is now a thin wrapper over `runWorkflow(workStudyWorkflow, input)`. Do not reintroduce raw `launchBrowser` / `withTrackedWorkflow` calls in the handler — those live in `src/core/`.

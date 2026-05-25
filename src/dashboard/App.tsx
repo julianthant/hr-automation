@@ -33,8 +33,8 @@ import {
 } from "./components/shared/entry-display";
 import type { TrackerEntry, SearchResultRow, FailureRow } from "./components/shared/types";
 import { WorkflowRail } from "./components/navigation/WorkflowRail";
-import { QuickRunPanel } from "./components/navigation/QuickRunPanel";
-import { getQuickRunConfig } from "./lib/quick-run-registry";
+import { InputRunPanel } from "./components/navigation/InputRunPanel";
+import { getInputRunConfig } from "./lib/input-run-registry";
 import { RetryAllButton } from "./components/queue-panel/RetryAllButton";
 import { StopAllButton } from "./components/queue-panel/StopAllButton";
 import { DeleteAllButton } from "./components/queue-panel/DeleteAllButton";
@@ -635,7 +635,7 @@ export function App() {
             </>
           }
           runControlsSlot={
-            getQuickRunConfig(workflow) ? <QuickRunPanel workflow={workflow} /> : undefined
+            getInputRunConfig(workflow) ? <InputRunPanel workflow={workflow} /> : undefined
           }
         />
         {(() => {

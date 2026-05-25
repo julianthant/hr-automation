@@ -2,11 +2,11 @@
 
 Searches UCPath Person Organizational Summary for employees by name, filters for SDCMP business unit + HDH-accepted departments (Housing / Dining / Hospitality keyword match), with CRM cross-verification.
 
-**Kernel-based (daemon mode only).** One active `defineWorkflow`: `eidLookupCrmWorkflow` (UCPath + CRM). Handler steps: `searching` → `cross-verification` (skipped for `{ emplId }` inputs) → **`active-status`** (Person Org disposition / HDH rules — same outcome derivation as standalone Active Check). This variant is wired to the CLI, daemon registry, and `WORKFLOW_LOADERS`.
+**Kernel-based (daemon mode only).** One active `defineWorkflow`: `eidLookupCrmWorkflow` (UCPath + CRM). Handler steps: `searching` → `cross-verification` (skipped for `{ emplId }` inputs) → **`active-status`** (Person Org disposition / HDH rules — same outcome derivation as standalone Active Check). This variant is wired to dashboard input runs, the daemon registry, and `WORKFLOW_LOADERS`.
 
 Downstream prep flows (OCR orchestrator, etc.) enqueue `{ emplId }` items into this workflow for verify-only lookups — they import `eidLookupCrmWorkflow` / `runEidLookupCli` from this package, not deleted `prepare.ts` shims.
 
-Each CLI invocation enqueues N names as N kernel items to an alive daemon (session is reused so no re-Duo between items). Each name produces its own `pending → running → done/failed` tracker row with per-step timing.
+Each dashboard input run enqueues N names as N kernel items to an alive daemon (session is reused so no re-Duo between items). Each name produces its own `pending → running → done/failed` tracker row with per-step timing.
 
 ## Selector intelligence
 
@@ -51,30 +51,25 @@ No `tracker.ts` — dashboard JSONL only. The xlsx tracker was removed on 2026-0
 ## Data Flow
 
 ```
-CLI: npm run eid-lookup "Last, First Middle" [...] [--new] [--parallel N]
-  → runEidLookupCli (daemon-mode CLI adapter)
-    → prepareNames: normalizeName(n) → dedupeNames (drop + warn on dup post-normalize)
-    → ensureDaemonsAndEnqueue(eidLookupCrmWorkflow, [{name}], { new, parallel })
+InputRunPanel → /api/enqueue
+  → enqueueFromHttp
+    → validate each input with EidLookupItemSchema
+    → ensureDaemonsAndEnqueue(eidLookupCrmWorkflow, [{name}])
       - Discovers alive daemons via .tracker/daemons/eid-lookup-*.lock.json + /whoami liveness
-      - Spawns N additional daemons via computeSpawnPlan(aliveCount, flags) — Duo once per new daemon (UCPath + CRM)
-      - Validates every input with EidLookupItemSchema, fails fast if invalid
+      - Spawns a daemon when none is alive — Duo once per new daemon (UCPath + CRM)
       - Inserts SQLite task rows and appends `enqueue` audit events to .tracker/daemons/eid-lookup.queue.jsonl
       - POST /wake to every alive daemon; daemons race to claim via atomic SQLite transaction
       - Each daemon runs items sequentially under shared-context-pool semantics
 ```
 
-**Commands:**
-- `npm run eid-lookup "Last, First" [more...]` — enqueue to alive daemon (or spawn one).
-- `npm run eid-lookup -- "Last, First" -p 2` — two parallel daemons sharing the queue.
-- `npm run eid-lookup -- "Last, First" -n` — force-spawn a new daemon.
-- `npm run eid-lookup:stop` — soft-stop all alive daemons.
+**Public start path:** dashboard input run with semicolon-separated names.
 
 ## Shared-context pool semantics
 
 - N workers (default `min(names.length, 4)`) share per-system `BrowserContext`s. Each worker opens its own Page on first `ctx.page(id)` call (lazy allocation).
 - Queue-based distribution inside `runWorkflowSharedContextPool` — workers pull items from a shared queue until empty.
 - Per-name failures become `failed` tracker rows via `runOneItem`'s catch; the worker continues to the next queue item.
-- Duplicate names in the CLI input are deduped at the adapter level (warn + drop). Duplicate-name requests would collide on the name-derived `itemId`.
+- Duplicate names in an input run should be deduped before enqueue. Duplicate-name requests would collide on the name-derived `itemId`.
 - JSONL writes (kernel-owned `trackEvent`) need no coordination — `appendFileSync` is atomic per-line.
 
 ## Dashboard integration
@@ -82,7 +77,7 @@ CLI: npm run eid-lookup "Last, First Middle" [...] [--new] [--parallel N]
 - Workflow name: `eid-lookup`
 - Steps (per-item): `auth:ucpath` → `auth:crm` → `searching` → `cross-verification` (skipped when input is `{ emplId }`) → **`active-status`**.
   - `authSteps: true` → the kernel prepends per-system `auth:<systemId>` step labels to the visible pipeline. Actual auth timing is **captured once per batch** by a `SessionObserver` wired via `withBatchLifecycle`, then injected into each item's tracker rows as synthetic pre-handler `running` entries with the real `onAuthStart` timestamp. The pool runs auth ONCE but every per-item row tiles exactly to elapsed with accurate per-system durations.
-- **Batch instance:** Every item in a batch shares a single workflow instance (e.g. `EID Lookup 1`). `runWorkflowSharedContextPool` emits exactly one `workflow_start` + one `workflow_end(done|failed)` per CLI invocation. The dashboard session drawer therefore shows ONE row per batch, not N.
+- **Batch instance:** Every item in a batch shares a single workflow instance (e.g. `EID Lookup 1`). `runWorkflowSharedContextPool` emits exactly one `workflow_start` + one `workflow_end(done|failed)` per input-run batch. The dashboard session drawer therefore shows ONE row per batch, not N.
 - Detail fields: see `detailFields` in `workflow.ts` — excludes `crmMatch` / active-status extras (those are tracker `updateData` fields for orchestration and OCR panes).
 - Item ID on the dashboard = the searched name (deduped). `__name` / `__id` seeded on the initial pending row via `onPreEmitPending` so the row reads correctly before `searching` runs.
 
@@ -117,7 +112,7 @@ No workflow-local selectors live here. Use the UCPath and CRM system selector ca
 
 - **Lesson maintenance rule:** Search this section and the UCPath/CRM system docs before adding EID lookup guidance. Merge old variant/removal notes into the current daemon-only CRM workflow shape.
 - **Runtime policy leaves utility child flattening to OCR.** `EID_LOOKUP_WORKFLOW_RUNTIME_POLICY` uses default row actions and `memberRow.titleSource: "person"`; OCR controls whether utility children render flat via its own runtime policy.
-- **Daemon mode is the only live CLI path.** `runEidLookupCli` enqueues normalized/deduped names into `eidLookupCrmWorkflow`; the removed `--no-crm`, `--i9`, and legacy non-daemon variants should not be restored. If I-9 signer lookup is needed again, add a separate daemon workflow shape.
+- **2026-05-25: Dashboard input run is the public start path.** `npm run eid-lookup` is retired; typed name starts belong in `InputRunPanel` and `/api/enqueue`. The removed `--no-crm`, `--i9`, and legacy non-daemon variants should not be restored. If I-9 signer lookup is needed again, add a separate daemon workflow shape.
 - **Normalize and dedupe names before enqueue.** `normalizeName` title-cases `Last, First Middle` and canonicalizes the separator to `", "`; `prepareNames` drops duplicates after normalization so item ids do not collide.
 - **HDH acceptance is department-level, not BU-level.** SDCMP alone is too broad. `src/systems/ucpath/person-org-summary.ts` filters department descriptions by HDH keywords; rejected SDCMP/non-HDH rows should log why they were ignored so CRM-only fallback can surface the better EID.
-- **Shared-context pool is the current batch model.** One UCPath/CRM auth pair per batch, N worker tabs, one dashboard row per name, one workflow instance per CLI invocation, and synthetic auth timings injected into each item. Excel tracking is gone; JSONL/dashboard are the only observability.
+- **Shared-context pool is the current batch model.** One UCPath/CRM auth pair per batch, N worker tabs, one dashboard row per name, one workflow instance per input-run batch, and synthetic auth timings injected into each item. Excel tracking is gone; JSONL/dashboard are the only observability.

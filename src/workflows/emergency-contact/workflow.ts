@@ -1,9 +1,5 @@
-import path from "node:path";
 import { log } from "../../utils/log.js";
-import { errorMessage } from "../../utils/errors.js";
-import { defineWorkflow, runWorkflowBatch } from "../../core/index.js";
-import { buildCliAdapter } from "../../core/cli-adapter.js";
-import { buildBatchPreEmitPending } from "../../core/pre-emit-helpers.js";
+import { defineWorkflow } from "../../core/index.js";
 import { loginToUCPath } from "../../infra/auth/login.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
@@ -14,8 +10,6 @@ import {
   demoteExistingContact,
 } from "../../systems/ucpath/personal-data.js";
 import { dismissPeopleSoftModalMask } from "../../systems/common/modal.js";
-import { downloadSharePointFile } from "../sharepoint-download/index.js";
-import { verifyBatchAgainstRoster } from "./roster-verify.js";
 import {
   buildEmergencyContactPlan,
   extractEmployeeName,
@@ -23,20 +17,8 @@ import {
   type ContactMatch,
 } from "./enter.js";
 import type { EmergencyContactContext } from "./enter.js";
-import { loadBatch, RecordSchema } from "./schema.js";
-import type { EmergencyContactBatch, EmergencyContactRecord } from "./schema.js";
-import { ROSTERS_DIR } from "./config.js";
-
-export interface EmergencyContactOptions {
-  /** If provided, download the roster from SharePoint and verify EIDs/names before running. */
-  rosterUrl?: string;
-  /** If provided, use this local roster xlsx instead of downloading. */
-  rosterPath?: string;
-  /** Continue even if roster verification reports mismatches. */
-  ignoreRosterMismatch?: boolean;
-  /** Run browser path to the pre-save proof point, then skip UCPath Save. */
-  dryRun?: boolean;
-}
+import { RecordSchema } from "./schema.js";
+import type { EmergencyContactRecord } from "./schema.js";
 
 const WORKFLOW = "emergency-contact";
 
@@ -66,16 +48,6 @@ export function shouldDemoteExistingContactForRun(
   return Boolean(match && !match.isExact && !dryRun);
 }
 
-/**
- * Stable dashboard item ID — `p{NN}-{emplId}` (zero-padded source page + EID).
- * Re-runs with a fixed batch YAML keep the record in context and avoid
- * collisions when EIDs repeat across unrelated pages.
- */
-function recordItemId(r: EmergencyContactRecord): string {
-  const pad = String(r.sourcePage).padStart(2, "0");
-  return `p${pad}-${r.employee.employeeId}`;
-}
-
 export function buildEmergencyContactPendingData(
   record: EmergencyContactRecord,
   batchName: string,
@@ -94,10 +66,10 @@ export function buildEmergencyContactPendingData(
 /**
  * Kernel definition for the emergency-contact batch workflow.
  *
- * Batch mode (`sequential`, `preEmitPending: true`): the kernel pairs each record
- * with a pre-generated runId so the CLI adapter's `onPreEmitPending` callback can
- * emit the initial `pending` row with rich display fields; `withTrackedWorkflow`
- * then reuses that runId and skips its duplicate pending emit.
+ * Batch mode (`sequential`, `preEmitPending: true`): OCR approval prepares the
+ * pending rows with rich display fields before records are claimed by daemons;
+ * `withTrackedWorkflow` then reuses that runId and skips its duplicate pending
+ * emit.
  *
  * `betweenItems: ["reset"]` resets UCPath to `about:blank` between
  * records so a stuck page from record N doesn't leak into record N+1's
@@ -129,10 +101,9 @@ export const emergencyContactWorkflow = defineWorkflow({
     preEmitPending: true,
     betweenItems: ["reset"],
   },
-  // The batch adapter's onPreEmitPending populates all four fields up front
-  // (see runEmergencyContact below) so the dashboard shows rich rows from
-  // the pending state onward. The handler only refreshes employeeName after
-  // the iframe extraction succeeds.
+  // OCR approval populates these fields up front so the dashboard shows rich
+  // rows from the pending state onward. The handler only refreshes employeeName
+  // after the iframe extraction succeeds.
   detailFields: [
     { key: "employeeName", label: "Employee", editable: true },
     { key: "emplId", label: "Empl ID", editable: true },
@@ -266,139 +237,3 @@ export const emergencyContactWorkflow = defineWorkflow({
     });
   },
 });
-
-/**
- * CLI adapter for `npm run emergency-contact <batchYaml>`.
- *
- * Pre-kernel phases live here (not in the kernel handler):
- *   1. Load + validate batch YAML.
- *   2. Dry-run short-circuit: log each record's planned action, exit 0 without
- *      launching a browser.
- *   3. Optional roster preflight: download from SharePoint (if --roster-url) +
- *      verify EIDs/names against the roster. Mismatches abort unless
- *      --ignore-roster-mismatch.
- *   4. Delegate to runWorkflowBatch with onPreEmitPending emitting rich
- *      dashboard fields per record.
- */
-export async function runEmergencyContact(
-  batchYaml: string,
-  options: EmergencyContactOptions = {},
-): Promise<void> {
-  const batch = loadBatch(batchYaml);
-  const records = options.dryRun
-    ? batch.records.map((record) => ({ ...record, dryRun: true }))
-    : batch.records;
-  log.step(`Loaded batch "${batch.batchName}" — ${batch.records.length} records`);
-
-  await runPreflight(batch, options);
-
-  const result = await runWorkflowBatch(emergencyContactWorkflow, records, {
-    // Per-record itemId shape `p{NN}-{emplId}` — the kernel's built-in
-    // deriveItemId only looks at top-level emplId/docId/email, not
-    // `employee.employeeId`, so without this the kernel would hand
-    // withTrackedWorkflow a random UUID that doesn't match the pending row
-    // written by onPreEmitPending below.
-    deriveItemId: (item) => recordItemId(item as EmergencyContactRecord),
-    onPreEmitPending: buildBatchPreEmitPending({
-      workflow: emergencyContactWorkflow,
-      buildPendingData: (item) =>
-        buildEmergencyContactPendingData(item as EmergencyContactRecord, batch.batchName),
-      deriveId: (item) => recordItemId(item as EmergencyContactRecord),
-    }),
-  });
-
-  log.success(
-    `Batch "${batch.batchName}" complete — ${result.succeeded}/${result.total} succeeded, ${result.failed} failed`,
-  );
-  if (result.failed > 0) {
-    const summary = result.errors
-      .slice(0, 3)
-      .map((e) => `  - ${errorMessage(e.error)}`)
-      .join("\n");
-    log.error(`Failures (first 3):\n${summary}`);
-  }
-}
-
-/**
- * Daemon-mode CLI adapter.
- *
- * One invocation reads the whole batch YAML, runs roster preflight in-process
- * (before any daemon work), then enqueues each record 1:1 to the shared
- * SQLite tasks queue and appends JSONL queue audit. Whichever alive daemon
- * finishes its current record first claims the next; `--parallel K` fans
- * out across K daemons (K × UCPath Duo on fresh spawn).
- *
- * Dry-run bypasses the daemon entirely (prints planned fills, exits 0).
- * Roster preflight still runs in-process because the YAML's EID/name
- * verification must gate the whole batch BEFORE any record lands in the
- * queue — a daemon can't block the spawn-plan on roster results without
- * coupling two concerns.
- *
- * Item-ID shape `p{NN}-{emplId}` (via `recordItemId`) matches the existing
- * legacy path — the kernel's default `deriveItemId` only walks top-level
- * fields and the EID is nested under `employee.employeeId`, so we pass a
- * custom deriver to `ensureDaemonsAndEnqueue`.
- */
-export async function runEmergencyContactCli(
-  batchYaml: string,
-  options: EmergencyContactOptions & { new?: boolean; parallel?: number; dryRun?: boolean } = {},
-): Promise<void> {
-  const batch = loadBatch(batchYaml);
-  const records = options.dryRun
-    ? batch.records.map((record) => ({ ...record, dryRun: true }))
-    : batch.records;
-  log.step(`Loaded batch "${batch.batchName}" — ${batch.records.length} records`);
-
-  await runPreflight(batch, options);
-
-  const runEmergencyContactDaemonCli = buildCliAdapter<[EmergencyContactRecord[]], EmergencyContactRecord>({
-    workflow: emergencyContactWorkflow,
-    emptyMessage: "runEmergencyContactCli: no records provided",
-    buildInputs: (inputs) => inputs,
-    deriveItemId: recordItemId,
-    buildPendingData: (record) => buildEmergencyContactPendingData(record, batch.batchName),
-  });
-  await runEmergencyContactDaemonCli(records, { new: options.new, parallel: options.parallel });
-}
-
-async function runPreflight(
-  batch: EmergencyContactBatch,
-  options: EmergencyContactOptions,
-): Promise<void> {
-  let rosterPath = options.rosterPath;
-
-  if (options.rosterUrl) {
-    log.step("Pre-flight: downloading roster from SharePoint...");
-    rosterPath = await downloadSharePointFile({
-      url: options.rosterUrl,
-      outDir: path.resolve(ROSTERS_DIR),
-    });
-  }
-
-  if (!rosterPath) {
-    log.step("Pre-flight: no roster URL or path provided — skipping roster verification");
-    return;
-  }
-
-  log.step(`Pre-flight: verifying batch against roster (${rosterPath})...`);
-  const result = await verifyBatchAgainstRoster(batch, rosterPath);
-  log.step(
-    `Roster check: ${result.matched}/${batch.records.length} matched, ` +
-      `${result.mismatched.length} name mismatches, ${result.missing.length} EIDs not found in roster`,
-  );
-
-  for (const m of result.mismatched) {
-    log.error(
-      `Name mismatch for EID ${m.emplId} (page ${m.sourcePage}): batch="${m.batchName}" roster="${m.rosterName}"`,
-    );
-  }
-  for (const m of result.missing) {
-    log.error(`EID not in roster: ${m.emplId} (page ${m.sourcePage}, name="${m.batchName}")`);
-  }
-
-  if ((result.mismatched.length > 0 || result.missing.length > 0) && !options.ignoreRosterMismatch) {
-    throw new Error(
-      "Roster verification found mismatches — aborting. Fix the batch YAML, or pass --ignore-roster-mismatch to proceed anyway.",
-    );
-  }
-}

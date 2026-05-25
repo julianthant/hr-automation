@@ -6,7 +6,7 @@ This folder is organized by dashboard area. Keep files near the UI surface that 
 
 | Location | Belongs here | Examples |
 |---|---|---|
-| `navigation/` | Navbar, workflow rail, search, failure popover, and top-bar run/capture affordances. | `TopBar.tsx`, `WorkflowRail.tsx`, `SearchBar.tsx`, `FailureBell.tsx`, `QuickRunPanel.tsx` |
+| `navigation/` | Navbar, workflow rail, search, failure popover, and top-bar run/capture affordances. | `TopBar.tsx`, `WorkflowRail.tsx`, `SearchBar.tsx`, `FailureBell.tsx`, `InputRunPanel.tsx` |
 | `queue-panel/` | Queue list, queue grouping surfaces, batch drill-in, shared `GroupRowBase`, and queue surface classification. | `QueuePanel.tsx`, `group-row-base.tsx`, `queue-surface-classifier.ts`, `batch-queue-view.tsx`, `EntryItem.tsx`, `StatPills.tsx`, `QueueItemControls.tsx`, `queue-status.ts` |
 | `log-panel/` | Right detail/log column, run selector, step pipeline, screenshots, and edit/retry data view. | `LogPanel.tsx`, `LogStream.tsx`, `LogLine.tsx`, `StepPipeline.tsx`, `ScreenshotsPanel.tsx` |
 | `terminal-drawer/` | Bottom session/daemon drawer and browser/session chips. | `TerminalDrawer.tsx`, `WorkflowBox.tsx`, `BrowserChip.tsx`, `LiveIndicator.tsx` |

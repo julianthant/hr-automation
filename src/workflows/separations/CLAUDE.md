@@ -2,7 +2,7 @@
 
 Multi-system employee termination: extracts data from Kuali Build, searches Old & New Kronos for timesheets, creates the UCPath termination transaction, fetches Job Summary, and fills Kuali finalization fields.
 
-**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflow` (single-doc) or `src/core/runWorkflowBatch` (multi-doc sequential mode). The kernel owns browser launch, auth-chain orchestration, per-doc tracker entries, SIGINT cleanup, and screenshot-on-failure. The **daemon-mode adapter** `runSeparationCli` is what `npm run separation` actually invokes: it enqueues one or more `{docId}` items to any alive separation daemon (or spawns one) via `ensureDaemonsAndEnqueue`. `runSeparation` and `runSeparationBatch` are preserved for in-process use (tests, scripts).
+**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflow` (single-doc) or `src/core/runWorkflowBatch` (multi-doc sequential mode). The kernel owns browser launch, auth-chain orchestration, per-doc tracker entries, SIGINT cleanup, and screenshot-on-failure. The public start path is dashboard input run (`InputRunPanel` → `/api/enqueue`), which enqueues one or more `{docId}` items to any alive separation daemon (or spawns one). `runSeparation` and `runSeparationBatch` are preserved for in-process use (tests, scripts).
 
 ## What this workflow does
 
@@ -30,7 +30,7 @@ This workflow touches four systems: **kuali**, **ucpath**, **old-kronos**, **new
 
 - `schema.ts` — `SeparationData` Zod schema + helpers (`computeTerminationEffDate`, `buildTerminationComments`, `mapReasonCode`, `getInitials`, `buildDateChangeComments`, `resolveKronosDates`, `computeKronosDateRange`)
 - `config.ts` — URLs, template IDs (`UC_VOL_TERM`, `UC_INVOL_TERM`), 2560x1440 tiling dimensions
-- `workflow.ts` — Kernel definition (`separationsWorkflow`) + CLI adapters (`runSeparation`, `runSeparationBatch`, `runSeparationCli`). `runSeparationCli` is the daemon-mode entry used by `npm run separation` (`-n` / `-p` only) — validates via `SeparationInputSchema` and uses `buildCliAdapter` → `ensureDaemonsAndEnqueue`. `runSeparation` / `runSeparationBatch` are in-process paths for tests/scripts.
+- `workflow.ts` — Kernel definition (`separationsWorkflow`) + adapters (`runSeparation`, `runSeparationBatch`, `runSeparationCli`). `runSeparationCli` is retained for internal callers; public starts should use the dashboard input-run path. `runSeparation` / `runSeparationBatch` are in-process paths for tests/scripts.
 - `index.ts` — Barrel exports (`defineWorkflow` self-registers — no duplicate metadata registration).
 - `KRONOS-SELECTORS.md` — Historical selector notes from the Kronos mapping session
 
@@ -40,7 +40,7 @@ This workflow touches four systems: **kuali**, **ucpath**, **old-kronos**, **new
 |-------|-------|-----|
 | `systems` | `[kuali, old-kronos, new-kronos, ucpath]` — each wraps login fn to throw on failure | 4 independent auth systems, each with its own Duo prompt |
 | `steps` | `["kuali-extraction", "kronos-search", "ucpath-job-summary", "ucpath-transaction", "kuali-finalization"] as const` | Kernel auto-prepends `auth:kuali`, `auth:old-kronos`, `auth:new-kronos`, `auth:ucpath` (see `src/core/CLAUDE.md` for `authSteps`) |
-| `schema` | `SeparationInputSchema = z.object({ docId })` — only docId from CLI | Kuali extraction fills in the rest via `ctx.updateData` |
+| `schema` | `SeparationInputSchema = z.object({ docId })` — only docId from input run | Kuali extraction fills in the rest via `ctx.updateData` |
 | `authChain` | `"parallel-staggered"` | SSO forms pre-filled in parallel; submit clicks stagger so Duo prompts for all four systems can overlap — total wall time ≈ max(Duo) + 3×`staggerMs`, not the sum of four serial Duos. Each `ctx.page(id)` still awaits that system's readiness before Phase-1 work. |
 | `tiling` | `"auto"` | Kernel tiles 4 browsers via `computeTileLayout(i, 4)`. CDP sets window bounds after launch using actual screen dimensions |
 | `batch` | `{ mode: "sequential", betweenItems: ["reset"] }` | Multi-doc runs reuse the same 4 browsers; kernel calls `session.reset(id)` between docs (each system has a `resetUrl`) |
@@ -49,11 +49,11 @@ This workflow touches four systems: **kuali**, **ucpath**, **old-kronos**, **new
 ## Data Flow
 
 ```
-CLI: npm run separation <docId> [<docId2> ...]           (daemon mode — default)
-  → runSeparationCli — daemon-mode CLI adapter
-    → ensureDaemonsAndEnqueue(separationsWorkflow, inputs, { new, parallel })
+InputRunPanel → /api/enqueue
+  → enqueueFromHttp
+    → ensureDaemonsAndEnqueue(separationsWorkflow, inputs)
       - Discovers alive daemons via .tracker/daemons/separations-*.lock.json + /whoami liveness
-      - Spawns N additional daemons via computeSpawnPlan(aliveCount, flags) — Duo once per new daemon
+      - Spawns a daemon when none is alive — Duo once per new daemon
       - Validates every input with SeparationInputSchema (input-time), fails fast if invalid
       - Inserts SQLite task rows and appends `enqueue` audit events to .tracker/daemons/separations.queue.jsonl
       - POST /wake to every alive daemon; daemons race to claim via atomic SQLite transaction
@@ -146,7 +146,8 @@ Selectors used inside this workflow live in the per-system registries: `src/syst
 - **Transaction number must be persisted immediately.** Call `ctx.updateData({ transactionNumber })` at each UCPath success point: existing-transaction branch and fresh-submit branch. Do not rely on the handler's final update, because Kuali finalization can still fail after UCPath accepted the transaction.
 - **Wrong Kuali EID should fail loudly.** Do not auto-correct through Workforce, Person Org Summary, or name search. The workflow should tell the operator to fix Kuali, then retry; EID/date duplicate protection prevents a second submit.
 - **Current auth shape is `parallel-staggered`.** The old interleaved auth and hand-rolled promise chains are historical. `prepareLogin` runs in parallel, submit clicks are staggered so Duo prompts overlap, and `ctx.page(id)` awaits each system's readiness before work starts.
-- **Daemon mode is queue-first.** `runSeparationCli` uses `buildCliAdapter`: validate inputs, enqueue SQLite tasks with pre-assigned run ids, pre-emit pending rows, wake alive daemons, then spawn/await new daemons as needed. JSONL queue files are audit only; SQLite is the authority.
+- **2026-05-25: Dashboard input run is the public start path.** `npm run separation` is retired; typed doc ID starts belong in `InputRunPanel` and `/api/enqueue`.
+- **Daemon mode is queue-first.** Dashboard input runs validate inputs, enqueue SQLite tasks with pre-assigned run ids, pre-emit pending rows, wake alive daemons, then spawn a daemon when needed. JSONL queue files are audit only; SQLite is the authority.
 - **Batch/session lifecycle is kernel-owned.** Sequential batch runs and daemon processing reuse the four browser sessions, run `session.reset(id)` between docs, and emit one workflow instance for the batch/session rather than one instance per doc. Do not call raw `launchBrowser`, `withTrackedWorkflow`, `withLogContext`, or old page-health wrappers from workflow code.
 - **Kronos dates always win when present.** `resolveKronosDates` overrides Kuali dates even when Kronos is earlier. The date search window stays plus/minus one month; the `Date.setMonth()` overflow behavior is pinned by tests.
 - **Phase-1 parallel work uses settled helpers.** Kuali timekeeper fill, UCPath Job Summary, Old Kronos, and New Kronos run in one `ctx.parallel` block. Reuse `settled.ts` (`logSettledRejection`, `unwrapSettled`) for non-fatal branch classification instead of repeating raw `PromiseSettledResult` checks.

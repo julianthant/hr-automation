@@ -9,8 +9,8 @@ Implementation reference: each row says what appears in the queue, what appears 
 ## Source Map
 
 - Workflow registry and loader: `src/workflows/*/workflow.ts`, `src/core/workflow-loaders.ts`
-- Run modal registry: `src/dashboard/lib/run-modal-registry.ts`
-- Quick run registry: `src/dashboard/lib/quick-run-registry.ts`
+- Upload-run registry: `src/dashboard/lib/run-modal-registry.ts`
+- Input-run registry: `src/dashboard/lib/input-run-registry.ts`
 - Queue surface builder: `src/tracker/queue-surfaces.ts`
 - Queue renderer: `src/dashboard/components/queue-panel/QueuePanel.tsx`
 - Flat queue row: `src/dashboard/components/queue-panel/EntryItem.tsx`
@@ -62,8 +62,8 @@ Special Oath rule now: multi-PDF Oath Signature upload is simplified into multip
 
 | Action | Where it appears | Endpoint | Scope now | Effect |
 |---|---|---|---|---|
-| Start from run modal | Oath Signature, Emergency Contact, OCR, Oath Upload. | `/api/ocr/prepare`, `/api/ocr/reupload`, or `/api/oath-upload/start` | The uploaded PDF list and selected form options. | Creates prep/root rows. Oath Signature and Emergency Contact go through OCR prepare first. |
-| Start from quick run | Separations, EID Lookup, Active Check, Oath Signature, CRM Doc Download. | Workflow enqueue endpoint or modal handoff. | Input names/EIDs/doc ids. | Creates normal daemon rows, except empty Oath Signature opens OCR modal. |
+| Start from upload run | Oath Signature, Emergency Contact, OCR, Oath Upload. | `/api/ocr/prepare`, `/api/ocr/reupload`, or `/api/oath-upload/start` | The uploaded PDF list and selected form options. | Creates prep/root rows. Oath Signature and Emergency Contact go through OCR prepare first. |
+| Start from input run | Separations, EID Lookup, Active Check, Oath Signature, CRM Doc Download. | Workflow enqueue endpoint or modal handoff. | Input names/EIDs/doc ids. | Creates normal daemon rows, except empty Oath Signature opens OCR modal. |
 | Cancel queued row | Pending row footer. | `/api/cancel-queued` | One queued task only. | Refuses claimed/running tasks. Marks task attempt cancelled, updates dependency child state as cancelled, writes cancelled/failed tracker audit. |
 | Cancel queued OCR prep row | Pending OCR prep/proxy row footer. | `/api/ocr/discard-prepare` | The OCR prep run and children for that prep run. | Requests OCR abort, deletes delegated children for that OCR run, writes OCR discarded, mirrors discarded to parent when known. |
 | Stop running row | Running row footer. | `/api/task/force-stop` | One running task. | Marks task cancelled immediately, records dependency cancelled, sends daemon `force-current`. Does not kill Chrome. |
@@ -103,18 +103,18 @@ Special Oath rule now: multi-PDF Oath Signature upload is simplified into multip
 
 | Workflow | Archetype | Start paths | Queue row when direct | Delegates to | Batch view members | Notes |
 |---|---|---|---|---|---|---|
-| Oath Signature | `single` | Quick run, OCR approval, Oath Signature modal through OCR. | Normal row for direct person run; OCR prep row before approval. | OCR prep first when using PDF; final work is `oath-signature` per approved person. | PDF prep members, EID lookup members, final person signature rows. | Final signature rows should title by person name and show as delegation members. |
-| Oath Upload | `delegating-batch` | Run modal. | Root batch-parent row using the same row through the whole ServiceNow flow. | OCR, then Oath Signature, then ServiceNow submit. | OCR/signature children under same parent context. | Full mode waits on OCR approval and signature children; upload-only skips them. |
-| OCR | `delegating-batch` | OCR modal, Oath/Emergency modal, retry/reupload. | Approval delegation prep row. | SharePoint roster download, EID Lookup, Active Check, then target workflow after approval. | OCR records/utility children/approved target children depending stage. | Single file should label as single delegation; multiple files group as batch delegation. |
-| Emergency Contact | `batch` | Emergency Contact modal through OCR approval. | OCR prep row first; final rows are emergency-contact daemon rows. | OCR prep, EID/verification utilities, final emergency-contact rows. | Contact/person rows after approval. | Final rows use editable contact detail fields. |
-| EID Lookup | `utility` | Quick run, OCR utility child. | Normal utility row if direct. | None. | If OCR-created, appears as delegation member; OCR fan-out is not promoted to batch group. | Canceling one lookup cancels only that lookup/person. |
-| Active Check | `single` | Quick run, OCR utility child. | Normal row if direct. | None. | If OCR-created, appears as delegation member. | Used for UCPath active status verification. |
-| CRM Doc Download | `utility` | Quick run, daemon loader. | Normal utility row. | None. | Usually none. | Retry uses normal retry path. |
+| Oath Signature | `single` | Input run, OCR approval, Oath Signature upload run through OCR. | Normal row for direct person run; OCR prep row before approval. | OCR prep first when using PDF; final work is `oath-signature` per approved person. | PDF prep members, EID lookup members, final person signature rows. | Final signature rows should title by person name and show as delegation members. |
+| Oath Upload | `delegating-batch` | Upload run. | Root batch-parent row using the same row through the whole ServiceNow flow. | OCR, then Oath Signature, then ServiceNow submit. | OCR/signature children under same parent context. | Full mode waits on OCR approval and signature children; upload-only skips them. |
+| OCR | `delegating-batch` | OCR upload run, Oath/Emergency upload run, retry/reupload. | Approval delegation prep row. | SharePoint roster download, EID Lookup, Active Check, then target workflow after approval. | OCR records/utility children/approved target children depending stage. | Single file should label as single delegation; multiple files group as batch delegation. |
+| Emergency Contact | `batch` | Emergency Contact upload run through OCR approval. | OCR prep row first; final rows are emergency-contact daemon rows. | OCR prep, EID/verification utilities, final emergency-contact rows. | Contact/person rows after approval. | Final rows use editable contact detail fields. |
+| EID Lookup | `utility` | Input run, OCR utility child. | Normal utility row if direct. | None. | If OCR-created, appears as delegation member; OCR fan-out is not promoted to batch group. | Canceling one lookup cancels only that lookup/person. |
+| Active Check | `single` | Input run, OCR utility child. | Normal row if direct. | None. | If OCR-created, appears as delegation member. | Used for UCPath active status verification. |
+| CRM Doc Download | `utility` | Input run, daemon loader. | Normal utility row. | None. | Usually none. | Retry uses normal retry path. |
 | SharePoint Download | `utility` | SharePoint UI/API, OCR roster-download child. | Normal/in-process row if direct. | None. | If OCR-created, passive utility member under OCR prep. | Retry is special-cased by sharepoint download spec id. |
-| Separations | `batch` | Quick run, daemon loader. | Normal rows per separation/doc/person; multiple inputs can group as daemon batch. | None. | Separation rows. | Has editable detail fields and edit-and-resume. |
+| Separations | `batch` | Input run, daemon loader. | Normal rows per separation/doc/person; multiple inputs can group as daemon batch. | None. | Separation rows. | Has editable detail fields and edit-and-resume. |
 | Onboarding | `batch` | Daemon loader/API. | Normal rows per onboarding record; multiple inputs can group as daemon batch. | None. | Onboarding rows. | Multi-system workflow: CRM, UCPath, I-9. |
 | Work Study | `single` | Daemon loader/API. | Normal row. | None. | None unless launched in a batch. | Direct UCPath transaction workflow. |
-| Kronos Reports | `batch` | Workflow exists; not in generic dashboard loader. | Normal/batch rows when run by its own path. | None. | Kronos report rows. | Not currently exposed by run modal or quick run registry. |
+| Kronos Reports | `batch` | Workflow exists; not in generic dashboard loader. | Normal/batch rows when run by its own path. | None. | Kronos report rows. | Not currently exposed by upload-run or input-run registries. |
 
 ## Oath Signature Detailed Flow
 
@@ -122,7 +122,7 @@ Desired mental model:
 
 ```mermaid
 flowchart TD
-  A["Oath Signature request<br/>{ source: quick-run empty input or modal,<br/>unit: PDF file }"]
+  A["Oath Signature request<br/>{ source: empty input run or upload run,<br/>unit: PDF file }"]
   A --> B["OCR prep<br/>{ workflow: ocr,<br/>row: approval delegation,<br/>title: pdf name,<br/>footer: Oath · last4(runId) }"]
   B --> C["OCR utilities<br/>{ workflows: eid-lookup / active-check,<br/>row: delegation member,<br/>not: batch delegated row }"]
   C --> D["OCR approval<br/>{ action: approve selected people,<br/>endpoint: /api/ocr/approve-batch }"]
@@ -221,7 +221,7 @@ Stages: `searching`, `cross-verification`, `active-status`.
 
 | Source | Queue row | Title | Footer/subtitle | Batch view | Cancel/retry |
 |---|---|---|---|---|---|
-| Direct quick run | Normal utility row. | Search input, person, or EID. | Normal footer. | None unless launched as a multi-input daemon batch. | Cancel/retry affects only that lookup. |
+| Direct input run | Normal utility row. | Search input, person, or EID. | Normal footer. | None unless launched as a multi-input daemon batch. | Cancel/retry affects only that lookup. |
 | OCR utility child | Delegation member row, not a batch delegated row. | Person/EID, preferring resolved person/EID over technical OCR retry ids. | Normal child footer. | Appears inside OCR/Oath/Emergency prep context. | Cancel/retry affects only that lookup/person. |
 | Grouped utility children outside OCR special case | Passive or batch group depending shared parent and count. | Parent subject or utility title. | Group footer with no raw parent id. | Member rows for each lookup. | Group retry/delete acts on members. |
 
@@ -231,14 +231,14 @@ Stages: active-status verification in UCPath.
 
 | Source | Queue row | Title | Footer/subtitle | Batch view | Cancel/retry |
 |---|---|---|---|---|---|
-| Direct quick run | Normal row. | Name/EID/search input. | Normal footer. | None unless multi-input batch. | Cancel/retry affects only that check. |
+| Direct input run | Normal row. | Name/EID/search input. | Normal footer. | None unless multi-input batch. | Cancel/retry affects only that check. |
 | OCR utility child | Delegation member row. | Person/EID. | Normal child footer. | Appears inside OCR context. | Cancel/retry affects only that check/person. |
 
 ## CRM Doc Download Workflow
 
 | Source | Queue row | Title | Footer/subtitle | Stages | Cancel/retry |
 |---|---|---|---|---|---|
-| Quick run or daemon loader | Normal utility row; multiple inputs can group as daemon batch. | Email, EID, or person name. | Normal footer. | CRM document download steps from workflow metadata. | Cancel/retry affects one download row; group retry/delete acts on visible members. |
+| Input run or daemon loader | Normal utility row; multiple inputs can group as daemon batch. | Email, EID, or person name. | Normal footer. | CRM document download steps from workflow metadata. | Cancel/retry affects one download row; group retry/delete acts on visible members. |
 
 ## SharePoint Download Workflow
 
@@ -261,7 +261,7 @@ flowchart LR
 
 | Source | Queue row | Title | Footer/subtitle | Batch view | Actions |
 |---|---|---|---|---|---|
-| Quick run / daemon loader | Normal row per separation record; multiple records can show as daemon batch. | Person/name/doc/EID subject. | Normal footer. | Member rows for each separation record. | Cancel/retry/delete per row, group retry/delete, edit-and-resume via `/api/run-with-data` for editable fields. |
+| Input run / daemon loader | Normal row per separation record; multiple records can show as daemon batch. | Person/name/doc/EID subject. | Normal footer. | Member rows for each separation record. | Cancel/retry/delete per row, group retry/delete, edit-and-resume via `/api/run-with-data` for editable fields. |
 
 ## Onboarding Workflow
 
@@ -283,7 +283,7 @@ Stages: `ucpath-auth`, `transaction`.
 
 | Source | Queue row | Title | Footer/subtitle | Batch view | Actions |
 |---|---|---|---|---|---|
-| Workflow-specific runner; not currently in quick-run or run-modal registries. | Normal/batch rows when launched by its own path. | Name/id subject. | Normal footer. | Member rows for each report target when batched. | Cancel/retry/delete per row if surfaced through normal task/tracker paths. |
+| Workflow-specific runner; not currently in input-run or upload-run registries. | Normal/batch rows when launched by its own path. | Name/id subject. | Normal footer. | Member rows for each report target when batched. | Cancel/retry/delete per row if surfaced through normal task/tracker paths. |
 
 ## UI Copy Rules To Preserve
 
@@ -305,7 +305,7 @@ Stages: `ucpath-auth`, `transaction`.
 - OCR utility EID/active-check rows intentionally stay as delegation member rows instead of becoming their own batch delegated row.
 - Multi-PDF Oath Signature now behaves as multiple single-file OCR prep runs grouped for display.
 - Daemon stop is operational control. It stops workers; it is not the same as a clean cancellation decision for every related row.
-- Some workflows exist in metadata but are not exposed through the dashboard run modal or quick-run registry.
+- Some workflows exist in metadata but are not exposed through the dashboard upload-run or input-run registry.
 - Parent dependency behavior depends on policy. Oath Upload signature children use `block_parent` on failure and cascade-capable dependencies, but dashboard buttons still need the correct endpoint to apply tree-wide cancellation.
 
 ## How To Add A New Workflow

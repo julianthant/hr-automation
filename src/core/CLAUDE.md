@@ -23,16 +23,12 @@ This doc includes a user-facing primer below. The rest covers **internals**.
 
 ## Daemon mode
 
-Kernel workflows exposed on the CLI (`npm run separation`, `npm run work-study`, `npm run eid-lookup`, etc.) default to **daemon mode**:
+Kernel workflows started from the dashboard input-run surface default to **daemon mode**:
 
-- **First invocation with no alive daemon** → spawns one detached daemon (`tsx src/cli-daemon.ts <workflow>`), waits for auth (Duo once), enqueues the item. Daemon stays alive after processing.
-- **Subsequent invocations** → insert into the shared SQLite queue (`tasks` in `.tracker/state.db`) and `POST /wake` every alive daemon. No re-Duo. Queue audit: `.tracker/daemons/{workflow}.queue.jsonl`.
+- **First dashboard input run with no alive daemon** → spawns one detached daemon (`tsx src/cli-daemon.ts <workflow>`), waits for auth (Duo once), enqueues the item. Daemon stays alive after processing.
+- **Subsequent input runs** → insert into the shared SQLite queue (`tasks` in `.tracker/state.db`) and `POST /wake` every alive daemon. No re-Duo. Queue audit: `.tracker/daemons/{workflow}.queue.jsonl`.
 - **Multi-daemon dispatch**: all alive daemons for a workflow race to claim the next queued row via a single `UPDATE … RETURNING` against `tasks` indexed by `tasks_control_claimable_idx (workflow, control_state, priority DESC, enqueued_at ASC)`, run inside a `transaction(...)`. Dynamic load balancing without a coordinator.
 - **Keepalive**: every 15 min idle, each daemon runs `session.healthCheck(system)` per system so SAML/Duo sessions don't silently expire between items.
-
-Flags (on supported CLI commands):
-- `-n, --new` — spawn one **additional** daemon even if others are alive.
-- `-p, --parallel <N>` — ensure ≥N daemons are alive before enqueueing (spawns `max(0, N - alive)`).
 
 Lifecycle: `npm run <workflow>:stop` — soft-stop (drain in-flight, re-queue). `-- --force` marks in-flight as failed immediately.
 

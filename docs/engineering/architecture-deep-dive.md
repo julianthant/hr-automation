@@ -37,7 +37,7 @@ The **kernel** (`src/core/`) takes that declaration and handles every piece of i
 
 ```mermaid
 flowchart LR
-    A[CLI command<br/>npm run onboarding] --> B[Workflow adapter<br/>runOnboarding]
+    A[Dashboard<br/>input run / upload run] --> B[Dashboard HTTP route<br/>enqueue / prepare / start]
     B --> C[Kernel<br/>runWorkflow / Batch / Pool]
     C --> D[Handler<br/>your Playwright code]
     D -->|writes JSONL| E[.tracker/*.jsonl]
@@ -538,10 +538,10 @@ Used by: `onboarding` (parallel mode), `old-kronos-reports`.
 
 ### Mode 4: Daemon mode — persistent long-lived worker processes
 
-Production default for all CLI-exposed workflows since 2026-04-22.
+Production default for dashboard-exposed workflows since 2026-04-22.
 
 ```
-Operator runs: npm run onboarding alice@ucsd.edu
+Operator submits an input run from the dashboard
   → No alive daemon? Spawn one detached (tsx src/cli-daemon.ts onboarding)
   → Daemon authenticates once (CRM Duo + UCPath Duo)
   → Item enqueued to SQLite tasks table (.tracker/state.db)
@@ -549,7 +549,7 @@ Operator runs: npm run onboarding alice@ucsd.edu
   → Daemon processes item using runOneItem (same kernel primitive as runWorkflow)
   → Daemon stays alive, polling for next item
 
-Operator runs: npm run onboarding bob@ucsd.edu (daemon already alive)
+Operator submits another input run while the daemon is alive
   → Item enqueued to SQLite tasks table
   → POST /wake to all alive daemons
   → Daemon claims and processes — no re-Duo
@@ -582,12 +582,12 @@ In batch/pool modes, operators want the dashboard to show **all pending items** 
 
 ```mermaid
 sequenceDiagram
-    participant CLI
+    participant DASH as Dashboard
     participant K as Kernel
     participant T as Tracker JSONL
     participant D as Dashboard
 
-    CLI->>K: runWorkflowBatch(wf, [a,b,c])
+    DASH->>K: prepare/enqueue batch [a,b,c]
     K->>K: generate runIds for a, b, c
     K->>T: pending a (runId=α)
     K->>T: pending b (runId=β)
@@ -741,9 +741,14 @@ So the frontend never has to fetch the full log stream to show "started 3m ago, 
 | `SelectorWarningsPanel`               | logs (filtered by "selector fallback triggered") | surface stale selectors                                                                                        |
 | `SearchBar`                           | `/api/search`                                    | cross-workflow search across historical JSONL                                                                  |
 
-### The "⚡ RUN" drawer is gone
+### Dashboard run surfaces
 
-The dashboard used to let you launch workflows from the browser. **Removed 2026-04-18.** The replacement launcher is deliberately TBD — workflows launch from npm scripts or whatever lands later. `TopBar.rightSlot` is preserved for future mounting.
+Workflow starts are dashboard-owned. Operators launch workflows through one of two surfaces:
+
+- **Input runs**: typed item starts through `InputRunPanel`, `INPUT_RUN_REGISTRY`, and `/api/enqueue`.
+- **Upload runs**: file-backed starts through `RunModal`, `RUN_MODAL_REGISTRY`, and workflow-specific prepare/start routes.
+
+Direct package-script workflow starts and YAML/batch-file launch paths are not valid operator surfaces.
 
 ---
 
@@ -862,14 +867,15 @@ The fuzzy search is a pure in-repo scorer (no Fuse.js, no embeddings, no new dep
 
 ---
 
-## 10. End-to-end: one onboarding, step by step
+## 10. End-to-end: one input run, step by step
 
-Let's trace `npm run onboarding jane@ucsd.edu` from CLI to completed transaction.
+Let's trace a dashboard input run for `jane@ucsd.edu` from `/api/enqueue` to completed transaction.
 
 ```mermaid
 sequenceDiagram
-    participant CLI
-    participant RUN as runOnboarding
+    participant DASH as Dashboard
+    participant API as /api/enqueue
+    participant Q as Task store
     participant K as Kernel runWorkflow
     participant SES as Session
     participant STP as Stepper
@@ -877,8 +883,10 @@ sequenceDiagram
     participant T as Tracker JSONL
     participant D as Dashboard
 
-    CLI->>RUN: onboarding jane@ucsd.edu
-    RUN->>K: runWorkflow(onboardingWorkflow, { email })
+    DASH->>API: workflow + parsed input
+    API->>Q: insert task row
+    Q->>K: daemon claims item
+    K->>K: runWorkflow(onboardingWorkflow, { email })
     K->>K: schema.parse({ email }) ✓
     K->>K: itemId = "jane@ucsd.edu"
     K->>T: withLogContext + withTrackedWorkflow<br/>pending

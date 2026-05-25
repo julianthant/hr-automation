@@ -1,10 +1,8 @@
 # Emergency Contact Workflow
 
-Fills the Emergency Contact form in UCPath HR Tasks → Personal Data Related for every record in a batch YAML. Fully autonomous after verification: you verify the YAML once (pre-extracted by Claude reading the handwritten PDF), then the workflow runs unattended for all records.
+Fills the Emergency Contact form in UCPath HR Tasks → Personal Data Related for records approved from the dashboard OCR prep flow.
 
-**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts`. **Default** `npm run emergency-contact` uses **`runEmergencyContactCli`** (`buildCliAdapter` → SQLite queue + daemons). **In-process** path: `runEmergencyContact` → `runWorkflowBatch` (sequential mode, `preEmitPending: true`, `betweenItems: ["reset"]`). The kernel owns browser launch, UCPath auth, per-record tracker entries, SIGINT cleanup.
-
-**CLI:** Default `npm run emergency-contact <batchYaml>` → **`runEmergencyContactCli`** (`buildCliAdapter` in `workflow.ts` after YAML load + optional roster preflight): enqueues each batch record to the shared daemon queue (`deriveItemId: recordItemId` → `p{NN}-{emplId}`). **`runEmergencyContact`** remains the in-process path (`runWorkflowBatch` directly — tests/scripts).
+**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts`. The operator start path is dashboard upload run → `/api/ocr/prepare` with `formType: "emergency-contact"` → OCR approval → daemon enqueue of approved records. The old YAML batch adapter has been removed; Emergency Contact is not an input-run workflow.
 
 **Add-New contact flow is NOT YET IMPLEMENTED** — employees with zero existing emergency contacts fail with `NoExistingContactError`; see Gotchas for the current behavior.
 
@@ -24,7 +22,7 @@ This workflow touches one system: **ucpath** (HR Tasks → Personal Data Related
 - `roster-verify.ts` — Loads an xlsx/csv roster and verifies each batch record's EID + name exists. Co-located with its only consumer (moved from `src/utils/`).
 - Roster + name/address matching primitives live in [`src/services/matching/`](../../services/matching/) — shared with OCR orchestration (`formType: "emergency-contact"`) and other workflows.
 - SharePoint download lives in its own sibling workflow: [`src/workflows/sharepoint-download/`](../sharepoint-download/). Use `import { downloadSharePointFile } from "../sharepoint-download/index.js"`. (Moved out of this directory 2026-04-22 once the dashboard roster-download button made it cross-cutting.)
-- `workflow.ts` — Kernel definition (`emergencyContactWorkflow`) + **`runEmergencyContactCli`** (daemon default) + **`runEmergencyContact`** (in-process batch). Shared helpers: `buildEmergencyContactPendingData`, `recordItemId`, `buildCliAdapter` wiring for daemon enqueue.
+- `workflow.ts` — Kernel definition (`emergencyContactWorkflow`) and shared display helper `buildEmergencyContactPendingData`.
 - `fixtures/test-batch.yaml` — Minimal 2-record fixture with fake EIDs for dry-run smoke testing.
 - `index.ts` — Barrel exports.
 
@@ -47,32 +45,30 @@ No `tracker.ts` — dashboard JSONL only (see `src/workflows/CLAUDE.md`).
 
 | Row                                 | Archetype       | Dashboard surface                |
 |-------------------------------------|-----------------|----------------------------------|
-| Per-record item (single CLI run)    | `batch-member`  | Member chip in batch card        |
+| Per-record item (approved record)   | `batch-member`  | Member chip in batch card        |
 | OCR-prep parent (in OCR workflow)   | `batch-parent`  | Group card (top-level)           |
 | Child run dispatched from OCR-approve | `delegate-child` | Nested under OCR parent card  |
 
 ## Data Flow
 
 ```
-CLI: npm run emergency-contact <batchYaml>   (daemon default — see `src/cli.ts` for `--roster-*`, `--dry-run`, `-n`, `-p`)
-  → runEmergencyContactCli
-    → loadBatch + runPreflight (roster verify — always before enqueue)
-    → buildCliAdapter({ workflow, deriveItemId: recordItemId, buildPendingData })(records, { new, parallel })
-    → ensureDaemonsAndEnqueue → per-record `pending` rows + SQLite queue
+Dashboard upload run:
+  → RunModal posts `/api/ocr/prepare` with `formType: "emergency-contact"`
+  → OCR review/approval derives emergency-contact records
+  → ensureDaemonsAndEnqueue → per-record `pending` rows + SQLite queue
 
-In-process (tests/scripts): `runEmergencyContact` → `runWorkflowBatch` with `deriveItemId` + `buildBatchPreEmitPending` (`src/core/pre-emit-helpers.ts`):
-
-    → Kernel Session.launch: 1 browser, UCPath auth (Duo ×1)
-    → For each record (sequential):
-          - Handler: `navigation` → `fill-form` → `save` (see `workflow.ts`)
-          - Between items: session.reset("ucpath")
+Approved daemon task:
+  → Kernel Session.launch: 1 browser, UCPath auth (Duo ×1)
+  → Handler: `navigation` → `fill-form` → `save` (see `workflow.ts`)
 ```
 
 ## Item ID shape
 
-`p{NN}-{emplId}` — zero-padded source page + EID. Stable across re-runs with the same batch YAML; tolerates EID collisions across pages.
+`p{NN}-{emplId}` — zero-padded source page + EID. Stable across re-runs from the same OCR source; tolerates EID collisions across pages.
 
-## Batch YAML layout
+## Historical Batch YAML Layout
+
+This shape is retained only for fixtures and OCR service transforms. It is not a public dashboard input-run option or exported workflow helper input.
 
 Lives under `.tracker/emergency-contact/` (gitignored — contains PII). Each record:
 
@@ -104,7 +100,7 @@ Optional but recommended. `--roster-url` downloads the latest roster from ShareP
 
 - Finds `Employee ID` column and `Name` column (or `First Name` + `Last Name`) in row 1 headers
 - For each batch record: checks EID exists + name words intersect (case-insensitive, tolerates "Doe, Jane" vs "Jane Doe")
-- Aborts on mismatches unless `--ignore-roster-mismatch`
+- Roster checks belong in the dashboard OCR approval path before records are enqueued.
 
 ## Dashboard integration
 
@@ -194,8 +190,9 @@ Handwritten emergency-contact PDFs are prepped through the **`ocr` workflow** in
 
 - **Lesson maintenance rule:** Search this section and `src/workflows/ocr/CLAUDE.md` before adding emergency-contact prep/batch guidance. Merge old per-workflow prep notes into the current shared-OCR model.
 - **OCR prep is shared.** Dashboard prep/review/approve for emergency-contact PDFs routes through `/api/ocr/*` and the shared OCR handler stack. The removed per-workflow `/api/emergency-contact/*`, `prepare.ts`, and `src/tracker/emergency-contact-http.ts` paths are historical only.
-- **Kernel/daemon shape is current.** Default CLI uses `runEmergencyContactCli` (`buildCliAdapter`) after YAML load and optional roster preflight; `runEmergencyContact` remains only for in-process tests/scripts. Do not reintroduce raw `launchBrowser` or `withTrackedWorkflow` in the handler.
+- **2026-05-25: Dashboard upload run is the public start path.** `npm run emergency-contact <batchYaml>` and the YAML adapters were removed. Operators start Emergency Contact from the dashboard upload run, review OCR, then approve records into daemon rows. Do not expose batch YAML as a package script, dashboard input-run option, or exported workflow helper.
+- **Kernel/daemon shape is current.** Approved OCR records enqueue daemon tasks directly; the workflow module should not grow a separate YAML/in-process start adapter. Do not reintroduce raw `launchBrowser` or `withTrackedWorkflow` in the handler.
 - **Add-New remains deferred.** The Find Existing Value search only finds employees with at least one emergency contact. Zero-contact employees throw `NoExistingContactError`, emit a failed row, and the batch continues.
 - **PeopleSoft modal mask must be dismissed.** `#pt_modalMask` can intercept clicks even with no visible modal; keep `dismissPeopleSoftModalMask(page)` before Search, Add-new-row, Edit Address, OK, and Save clicks.
-- **Roster preflight catches OCR EID errors.** Keep roster verification before browser work; it caught real OCR digit drift (for example `10871272` vs `10871222`) before a transaction ran.
+- **Roster verification catches OCR EID errors.** Keep roster checks in the dashboard OCR approval path before browser work; it caught real OCR digit drift (for example `10871272` vs `10871222`) before a transaction ran.
 - **SharePoint download is cross-cutting.** The roster downloader moved to `src/workflows/sharepoint-download/` once the dashboard queue-header button made it reusable. Emergency-contact preflight and dev scripts may import the helper directly; dashboard-triggered downloads use the sharepoint-download workflow.

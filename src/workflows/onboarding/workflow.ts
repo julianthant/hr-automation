@@ -48,8 +48,8 @@ export const ONBOARDING_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy =
  * Kernel definition for single-mode onboarding.
  *
  * Exports a RegisteredWorkflow. Run it via `runWorkflow(onboardingWorkflow, { email })`
- * or the CLI adapter `runOnboarding` (which handles dry-run and routes to legacy when
- * pre-supplied pages are passed by parallel.ts).
+ * in tests/internal scripts, or expose it through a dashboard input-run parser before
+ * adding an operator start path.
  */
 export const onboardingWorkflow = defineWorkflow({
   name: "onboarding",
@@ -89,13 +89,12 @@ export const onboardingWorkflow = defineWorkflow({
   authChain: "sequential",
   // Pool mode: each worker gets its own Session with 3 browsers (CRM + UCPath +
   // I9), 2 Duos per worker (I9 SSO has no 2FA). Pool size 4 matches the legacy
-  // default; overridable at runtime via `RunOpts.poolSize` from the `--workers N`
-  // CLI flag. `preEmitPending: true` lets in-process pool callers emit the full
+  // default; overridable at runtime via `RunOpts.poolSize`. `preEmitPending: true` lets in-process pool callers emit the full
   // email queue to the dashboard before any worker's auth finishes.
   batch: { mode: "pool", poolSize: 4, preEmitPending: true },
   // Matches pre-subsystem-D WF_CONFIG["onboarding"].detailFields. Dept/Position/
   // Wage/I9-profile are populated after extraction; email is populated from the
-  // CLI input / schema. firstName+lastName drive getName so the dashboard shows
+  // input schema. firstName+lastName drive getName so the dashboard shows
   // "Jane Doe" instead of the raw email.
   detailFields: [
     { key: "email", label: "Email" },
@@ -427,7 +426,7 @@ export const onboardingWorkflow = defineWorkflow({
 });
 
 /**
- * CLI adapter for `npm run onboarding <email>` (single-email path).
+ * Internal single-email adapter.
  * Delegates to the kernel via `runWorkflow(onboardingWorkflow, { email })`.
  *
  * For in-process pool-mode use `runWorkflowBatch(onboardingWorkflow, items)`
@@ -439,9 +438,9 @@ export async function runOnboarding(email: string): Promise<void> {
 }
 
 /**
- * Daemon-mode CLI adapter for `npm run onboarding <email...>`.
+ * Internal daemon-mode adapter.
  *
- * Enqueues one `{email}` item per CLI argument onto any alive `onboarding`
+ * Enqueues one `{email}` item per input onto any alive `onboarding`
  * daemon (or spawns one via `ensureDaemonsAndEnqueue`). Daemons keep
  * CRM + UCPath browsers warm across invocations so repeat onboards don't
  * re-Duo every time — CRM's Duo alone costs ~30-60s per run, so this is
@@ -456,8 +455,7 @@ export async function runOnboarding(email: string): Promise<void> {
  * items across them identically to pool workers, with the added benefit
  * that the daemons survive the batch.
  *
- * Pass emails explicitly on the CLI — `npm run onboarding a@uc b@uc c@uc`
- * fans across alive daemons via the shared SQLite tasks queue.
+ * Public operator starts should go through a dashboard input-run parser.
  */
 export const runOnboardingCli = buildCliAdapter<[string[]], { email: string }>({
   workflow: onboardingWorkflow,

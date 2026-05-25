@@ -82,7 +82,7 @@ export function RetryButton({
   const iconClass = "h-3.5 w-3.5";
 
   // The "md" variant lives in the LogPanel header next to the date-navigator
-  // chevron; mirroring the QuickRunPanel retry-all button (red destructive
+  // chevron; mirroring the InputRunPanel retry-all button (red destructive
   // pill with border) keeps a consistent "retry = destructive action" cue
   // across the navbar + log header. The "sm" inline variant on EntryItem
   // rows stays muted-tone so the queue list isn't a sea of red dots.

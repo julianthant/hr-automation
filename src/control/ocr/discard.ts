@@ -7,6 +7,7 @@ import { deleteDelegatedChildrenForRun } from "../ops/delete.js";
 import { emitInheritedRow } from "../ops/emit-inherited.js";
 import { openControlStores } from "../ops/shared.js";
 import { readFormType, readParentRunId } from "../../tracker/dashboard/ocr/shared.js";
+import { emitDiscarded } from "../../services/ocr/approval-signal.js";
 
 const WORKFLOW = "ocr";
 
@@ -34,6 +35,17 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
       return { status: 400, body: { ok: false, error: "Missing sessionId/runId" } };
     }
     requestOcrPrepareAbort(input.sessionId, input.runId);
+    // Wake any kernel-path handler suspended in `subscribeToApproval`.
+    // Dashboard-path runs (no kernel wrapping) have no subscriber —
+    // emitDiscarded silently no-ops when the listener registry is empty.
+    // Fires BEFORE the JSONL discard row is written so kernel handlers
+    // unwind via OcrDiscardedError immediately, and the orchestrator's
+    // own raceOcrPrepWithDiscard polling loop sees the abort flag set
+    // above and stops emitting.
+    emitDiscarded(
+      { workflow: WORKFLOW, sessionId: input.sessionId },
+      input.reason ?? "operator discarded OCR prep",
+    );
     deleteDelegatedChildrenForRun(opts.trackerDir ?? ".tracker", input.runId);
     // OCR prep parent is always batch-parent. We still resolve from the
     // prior row so this code never has to know about per-workflow archetype

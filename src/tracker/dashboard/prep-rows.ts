@@ -6,20 +6,23 @@ export function isPrepEntry(e: TrackerEntry): boolean {
 }
 
 /**
- * OCR uses `status: "done"` for the preview-ready row (`step: awaiting-approval`)
- * so approve/discard semantics stay orthogonal — use this predicate anywhere a
- * done-looking row still needs operator action.
+ * OCR row in the "preview-ready, waiting for operator" state. Under the
+ * new approval contract (2026-05-25) this is `status="running"` with
+ * `step="awaiting-approval"` — the OCR row only reaches terminal `done`
+ * once the operator approves. (Historical: was `status="done"` +
+ * `step="awaiting-approval"` until the orchestrator stopped emitting the
+ * row as terminal at awaiting-approval; see
+ * `src/services/ocr/approval-signal.ts` for the new contract.)
  */
 export function isOcrAwaitingApprovalEntry(e: TrackerEntry): boolean {
-  return e.workflow === "ocr" && e.status === "done" && e.step === "awaiting-approval";
+  return e.workflow === "ocr" && e.status === "running" && e.step === "awaiting-approval";
 }
 
 /**
  * True when OCR is delegated from another workflow (`parentRunId` set —
- * oath-upload / similar). The tracker step may still be `awaiting-approval`,
- * but the queue sidebar should treat only these rows as "Needs review" /
- * upstream approval surfacing — standalone OCR prep uses the same step
- * without `parentRunId` and renders as ordinary completed prep in the queue.
+ * oath-upload / similar). Used to scope "Needs review" surfacing to
+ * delegated prep — standalone OCR prep awaiting-approval renders as an
+ * ordinary in-flight prep row in the queue.
  */
 export function isDelegatedOcrAwaitingApprovalEntry(e: TrackerEntry): boolean {
   return isOcrAwaitingApprovalEntry(e) && Boolean(e.parentRunId);
@@ -27,6 +30,10 @@ export function isDelegatedOcrAwaitingApprovalEntry(e: TrackerEntry): boolean {
 
 export function isResolvedPrepEntry(e: TrackerEntry): boolean {
   if (e.workflow === "ocr") {
+    // New approval contract: an OCR `done` row IS approved (the kernel
+    // only emits done after operator approves). `status==="failed"
+    // step="discarded"` covers the discard branch.
+    if (e.status === "done") return true;
     return e.status === "failed" && e.step === "discarded";
   }
   if (!isPrepEntry(e)) return false;

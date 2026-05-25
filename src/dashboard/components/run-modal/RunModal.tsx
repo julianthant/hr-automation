@@ -43,7 +43,7 @@ interface RunModalProps {
   /**
    * When set with `workflow="ocr"`: pre-selects the formType, hides the
    * form-type chooser, and skips the `/api/ocr/forms` fetch. Used by the
-   * oath-signature QuickRunPanel to open the modal preset to oath.
+   * oath-signature InputRunPanel to open the modal preset to oath.
    */
   lockedFormType?: string;
 }
@@ -52,7 +52,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
   const config = getRunModalConfig(workflow);
   // Per-workflow registry can lock the form type so the modal hides the
   // picker and force-injects the value on submit. The prop variant is the
-  // QuickRunPanel path; both feed the same `effectiveLockedFormType`.
+  // InputRunPanel path; both feed the same `effectiveLockedFormType`.
   const effectiveLockedFormType = lockedFormTypeProp ?? config?.lockedFormType;
   const showRoster = config?.sections.roster ?? false;
   // When the registry locks the form type, the OCR backend still needs the

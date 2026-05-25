@@ -9,7 +9,7 @@ import type { RegisteredWorkflow } from '../kernel/types.js'
 /**
  * Optional caller-provided callback fired once per input IMMEDIATELY at the
  * top of `ensureDaemonsAndEnqueue`, BEFORE any spawn or task enqueue.
- * Lets CLI adapters / HTTP handlers emit a `pending` tracker row per item
+ * Lets internal adapters / HTTP handlers emit a `pending` tracker row per item
  * so the dashboard's queue panel populates instantly (in <100ms) — even
  * during the 5-10s lockfile-registration window of a fresh daemon spawn.
  *
@@ -136,7 +136,7 @@ export function __resetDaemonSpawnLocksForTests(): void {
 }
 
 /**
- * The ONE function every daemon-mode CLI adapter calls.
+ * The ONE function every daemon-mode enqueue path calls.
  *
  * Discovers alive daemons, validates inputs, spawns additional daemons as
  * dictated by flags, writes SQLite task rows plus JSONL audit events, and
@@ -169,7 +169,7 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
     quiet?: boolean
     /**
      * Caller-provided hook fired per item IMMEDIATELY at the top of this
-     * function, BEFORE any spawn or task enqueue. Lets CLI adapters /
+     * function, BEFORE any spawn or task enqueue. Lets internal adapters /
      * HTTP handlers emit a `pending` tracker row so the dashboard queue panel
      * populates within ~100ms — even during a 5-10s spawn-lockfile window.
      * Exceptions thrown by this callback are caught and logged so a bad

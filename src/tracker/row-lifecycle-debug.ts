@@ -347,7 +347,15 @@ function observeRow(args: ObserveArgs): void {
       cause = "cancel";
     } else if (live.status === "failed" && live.step === "discarded") {
       cause = "discard";
-    } else if (live.status === "done" && live.step === "approved" && archetype === "batch-parent") {
+    } else if (
+      live.status === "done" &&
+      archetype === "batch-parent" &&
+      // New approval contract (2026-05-25): the approve route writes
+      // `done step=approved`; the kernel-path handler also returns,
+      // letting the kernel emit a follow-up `done` with no step. Both
+      // are "the operator approved" — attribute either as ocr-approval.
+      (live.step === "approved" || live.step === undefined)
+    ) {
       cause = "ocr-approval";
     }
   }

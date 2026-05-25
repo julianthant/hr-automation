@@ -66,6 +66,10 @@ export async function applyOcrEidLookupContinuation(args: {
     id: args.parentRun.id,
     ...(args.parentRun.runId ? { runId: args.parentRun.runId } : {}),
     ...(args.parentRun.parentRunId ? { parentRunId: args.parentRun.parentRunId } : {}),
+    // status="running" + step="awaiting-approval" matches the new approval
+    // contract: the OCR row stays running until the operator approves.
+    // Scheduler-driven patches keep updating that running row with the
+    // latest eid-lookup outcomes.
     status: "running",
     step: "awaiting-approval",
     data: {

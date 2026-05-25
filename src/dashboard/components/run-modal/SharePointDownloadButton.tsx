@@ -20,7 +20,7 @@ interface SharePointDownloadOption {
 /**
  * Workflow-agnostic SharePoint roster downloader. Renders an icon button
  * that opens a dropdown of registered spreadsheets. Used in two slots:
- * the TopBar quick-run cluster (mounted via QuickRunPanel) and the
+ * the TopBar input-run cluster (mounted via InputRunPanel) and the
  * QueuePanel header search row. Both copies hit the same
  * `/api/sharepoint-download/{list,run}` endpoints.
  */

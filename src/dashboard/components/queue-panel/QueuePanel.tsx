@@ -92,7 +92,7 @@ interface QueuePanelProps {
    */
   queueBulkActionsSlot?: ReactNode;
   /**
-   * Quick-run enqueue strip (`QuickRunPanel`: text input + play) in the panel
+   * Input-run strip (`InputRunPanel`: text input + play) in the panel
    * footer only — bulk actions live in {@link queueBulkActionsSlot}.
    */
   runControlsSlot?: ReactNode;
@@ -168,7 +168,7 @@ function QueueLoadingSkeleton() {
  *
  *   [ Status filter strip ]    ← top of panel; tab-like pills
  *   [ Entry list ]             ← scrollable
- *   [ Quick-run footer ]       ← input + play only
+ *   [ Input-run footer ]       ← input + play only
  *
  * The cross-workflow search lives in the TopBar (centered) — there is no
  * panel-internal search input. The previous "Search by name, email, or

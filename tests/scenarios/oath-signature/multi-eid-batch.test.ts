@@ -6,8 +6,8 @@ import { oathSignatureWorkflow } from "../../../src/workflows/oath-signature/wor
 import { oathSignatureBeats, maskVolatile } from "./_beats.js";
 
 /**
- * Scenario: operator enqueues N EIDs in one `npm run oath-signature`
- * invocation. Because oath-signature is `archetype: "single"`, each EID
+ * Scenario: operator enqueues N EIDs in one dashboard input run. Because
+ * oath-signature is `archetype: "single"`, each EID
  * becomes its own independent flat queue row — there is no batch-parent
  * card grouping them.
  *

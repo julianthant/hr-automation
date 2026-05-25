@@ -6,12 +6,11 @@ import { z } from "zod";
 import { defineWorkflow, runWorkflowBatch } from "../../../../src/core/index.js";
 import { DEFAULT_DIR, dateLocal } from "../../../../src/tracker/jsonl.js";
 /**
- * Tests covering the onboarding-parallel migration's CLI-adapter contract:
+ * Tests covering the onboarding pool-mode contract:
  * - `runWorkflowBatch` in pool mode pairs `onPreEmitPending` with per-item runIds
  *   so the dashboard shows one row per email keyed on the email itself.
  * - `opts.poolSize` override propagates through `runWorkflowBatch` into
- *   `runWorkflowPool` (covers `npm run onboarding:batch -- --workers <N>` where
- *   `<N>` overrides the workflow's `batch.poolSize = 4` default).
+ *   `runWorkflowPool`.
  *
  * Matches the kronos-reports precedent in
  * `tests/unit/workflows/old-kronos-reports/workflow.test.ts`. Uses a stub

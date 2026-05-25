@@ -92,7 +92,7 @@ export async function runOathUpload(input: OathUploadInput): Promise<void> {
   }
 }
 
-/** Daemon-mode CLI adapter. */
+/** Internal daemon-mode adapter used by the dashboard upload endpoint. */
 export const runOathUploadCli = buildCliAdapter<[OathUploadInput[]], OathUploadInput>({
   workflow: oathUploadWorkflow,
   emptyMessage: "runOathUploadCli: no inputs provided",

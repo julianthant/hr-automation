@@ -197,7 +197,7 @@ src/dashboard/
     capture/                 # capture lightbox, photo tiles, modal chrome/state
     hooks/                   # useEntries (topic `entries`), useLogs / useRunEvents → useSseHistoryStream (`logs`, `runEvents`), useSessions, useDaemons, …
     log-panel/               # LogPanel, LogStream/LogLine, RunSelector, StepPipeline, screenshots, edit-data tab
-    navigation/              # TopBar, WorkflowRail, SearchBar/SearchResults, FailureBell, quick-run/capture buttons
+    navigation/              # TopBar, WorkflowRail, SearchBar/SearchResults, FailureBell, input-run/capture buttons
     oath-upload/             # duplicate-banner helpers
     ocr/                     # OCR review pane, record views, preview pairs, delegation rows
     queue-panel/             # QueuePanel, EntryItem, daemon/batch rows, bulk controls, sort/status/surface helpers
@@ -207,7 +207,7 @@ src/dashboard/
     ui/                      # local shadcn-style primitives + HeroUI Calendar wrapper
   lib/
     ocr-downstream-registry.ts
-    quick-run-registry.ts
+    input-run-registry.ts
     run-modal-registry.ts
     sse-hub.ts
     utils.ts                 # cn() — class merge helper

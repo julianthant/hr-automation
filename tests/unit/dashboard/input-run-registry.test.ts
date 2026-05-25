@@ -2,11 +2,11 @@ import { test } from "vitest";
 import assert from "node:assert/strict";
 
 import {
-  getQuickRunConfig,
+  getInputRunConfig,
   parseActiveCheckInputs,
-} from "../../../src/dashboard/lib/quick-run-registry.js";
+} from "../../../src/dashboard/lib/input-run-registry.js";
 
-test("active-check quick run accepts EIDs and names separated by semicolons", () => {
+test("active-check input run accepts EIDs and names separated by semicolons", () => {
   const parsed = parseActiveCheckInputs("10873698; Battistessa, Johnnie");
 
   assert.deepEqual(parsed, {
@@ -18,22 +18,22 @@ test("active-check quick run accepts EIDs and names separated by semicolons", ()
   });
 });
 
-test("active-check quick run rejects empty input", () => {
+test("active-check input run rejects empty input", () => {
   assert.deepEqual(parseActiveCheckInputs(" ; "), {
     ok: false,
     error: "Enter at least one EID or name",
   });
 });
 
-test("active-check is visible in the dashboard quick-run registry", () => {
-  const config = getQuickRunConfig("active-check");
+test("active-check is visible in the dashboard input-run registry", () => {
+  const config = getInputRunConfig("active-check");
 
   assert.ok(config);
   assert.match(config.placeholder, /EIDs or names/);
 });
 
-test("crm-doc-download quick run accepts EIDs separated by commas", () => {
-  const config = getQuickRunConfig("crm-doc-download");
+test("crm-doc-download input run accepts EIDs separated by commas", () => {
+  const config = getInputRunConfig("crm-doc-download");
 
   assert.ok(config);
   assert.match(config.placeholder, /EIDs/);

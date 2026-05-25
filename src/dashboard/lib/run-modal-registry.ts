@@ -1,12 +1,13 @@
 /**
- * Run-modal registry — declares per-workflow behavior for the file-upload
+ * Upload-run registry — declares per-workflow behavior for the file-upload
  * `RunModal` (PDF picker + roster/form-type/duplicate-check sections +
- * submit dispatch). Mirrors the shape of `quick-run-registry.ts`.
+ * submit dispatch). Mirrors the shape of `input-run-registry.ts`.
  *
- * Adding a file-upload workflow:
+ * Adding an upload-run workflow:
  *   1. Add an entry here with a title / submitUrl /
  *      sections / buildSuccessToast.
- *   2. That's it — `RunModal` and `TopBarRunButton` (queue toolbar) derive their behavior
+ *   2. Add the workflow name to `DASHBOARD_UPLOAD_RUN_WORKFLOWS`.
+ *      That's it — `RunModal` and `TopBarRunButton` (queue toolbar) derive their behavior
  *      and visibility from this map automatically. No edits to either
  *      component file are needed.
  *
@@ -16,6 +17,10 @@
  * misconfigured caller fails loud instead of silently posting to the
  * wrong endpoint.
  */
+
+import { DASHBOARD_UPLOAD_RUN_WORKFLOWS } from "../../domain/dashboard-run-surfaces.js";
+
+type DashboardUploadRunWorkflow = (typeof DASHBOARD_UPLOAD_RUN_WORKFLOWS)[number];
 
 export interface RunModalContext {
   reuploadFor?: { sessionId: string; previousRunId: string };
@@ -75,7 +80,7 @@ export interface RunModalConfig {
   lockedFormType?: string;
 }
 
-export const RUN_MODAL_REGISTRY: Record<string, RunModalConfig> = {
+export const RUN_MODAL_REGISTRY: Record<DashboardUploadRunWorkflow, RunModalConfig> = {
   "emergency-contact": {
     title: () => "Run Emergency Contact",
     srDescription: () =>
@@ -145,7 +150,7 @@ export const RUN_MODAL_REGISTRY: Record<string, RunModalConfig> = {
 };
 
 export function getRunModalConfig(workflow: string): RunModalConfig | undefined {
-  return RUN_MODAL_REGISTRY[workflow];
+  return RUN_MODAL_REGISTRY[workflow as DashboardUploadRunWorkflow];
 }
 
 export function isRunModalEnabled(workflow: string): boolean {

@@ -174,6 +174,28 @@ test("Hono manifest stays in sync with registered app routes", () => {
   assert.deepEqual([...manifestRoutes].sort(), [...appRoutes].sort());
 });
 
+test("dashboard enqueue accepts only input-run workflows", async () => {
+  const dir = makeTempDir("hono-input-runs-");
+  const app = createDashboardHonoApp({
+    workflow: "onboarding",
+    port: 0,
+    dir,
+    stateDb: openStateDb(dir),
+    projectionReady: false,
+  });
+
+  const res = await app.request("/api/enqueue", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workflow: "emergency-contact", inputs: [{}] }),
+  });
+  const body = await res.json() as { ok: boolean; error: string };
+
+  assert.equal(res.status, 400);
+  assert.equal(body.ok, false);
+  assert.match(body.error, /not enabled for dashboard input runs/);
+});
+
 test("dashboard server no longer imports the raw route dispatcher or Hono adapter fallback", () => {
   const source = readFileSync(join(process.cwd(), "src/tracker/dashboard/server.ts"), "utf-8");
   assert.equal(source.includes("./routes/"), false);

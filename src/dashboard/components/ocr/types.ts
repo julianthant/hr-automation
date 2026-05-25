@@ -163,6 +163,14 @@ export function isResolvedPrepRow(e: {
  * A prep row whose operator-resolved state is "approved" — children have been
  * fanned out into the downstream workflow's queue. Drives `DelegationRow`
  * rendering in the QueuePanel.
+ *
+ * New approval contract (2026-05-25): an OCR `status="done"` row IS
+ * approved (the kernel-path handler suspends at `awaiting-approval` and
+ * the orchestrator emits `running` until approve fires; only approve
+ * routes terminate the row with `done`). The approve route also writes
+ * `step="approved"` explicitly for legacy consumers (`waitForOcrApproval`),
+ * but the kernel's auto-emitted terminal `done` row may carry no step —
+ * both classify as approved.
  */
 export function isApprovedPrepRow(e: {
   workflow?: string;
@@ -172,7 +180,11 @@ export function isApprovedPrepRow(e: {
   data?: Record<string, string>;
 }): boolean {
   if (!isPrepareRow(e)) return false;
-  return e.status === "done" && e.step === "approved";
+  if (e.status !== "done") return false;
+  if (e.step === "approved") return true;
+  // OCR `done` without explicit step is the kernel's auto-emitted terminal
+  // row after the approval signal fired. Treat as approved.
+  return e.workflow === "ocr";
 }
 
 /**

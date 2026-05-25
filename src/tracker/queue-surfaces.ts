@@ -16,6 +16,14 @@ function isDiscardedPrepRow(e: TrackerEntry): boolean {
 
 function isApprovedPrepRow(e: TrackerEntry): boolean {
   if (!isBatchParent(e)) return false;
+  // New approval contract (2026-05-25): OCR rows only ever reach
+  // `status="done"` after the operator approves. The kernel-path handler
+  // suspends at `awaiting-approval` and the orchestrator emits `running`
+  // until approve fires — so any OCR `done` row is approved, whether or
+  // not the step was stamped (approve route writes `step=approved`; the
+  // kernel's auto-emitted terminal `done` carries no step).
+  if (e.status === "done" && (e.step === "approved" || e.workflow === "ocr")) return true;
+  // Non-OCR prep rows (today none) keep the explicit step gate.
   return e.status === "done" && e.step === "approved";
 }
 

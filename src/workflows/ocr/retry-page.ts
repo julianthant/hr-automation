@@ -85,7 +85,11 @@ export async function runOcrRetryPage(
   if (row.status === "failed" && row.step === "discarded") {
     throw new RetryPageError("row-not-mutable", `cannot retry discarded row ${input.sessionId}`);
   }
-  if (row.status === "done" && row.step === "approved") {
+  // New approval contract (2026-05-25): an OCR `status="done"` row IS
+  // approved (the orchestrator only ever leaves it `running` until the
+  // approve route resolves the kernel handler's signal). The kernel
+  // emits a bare `done` follow-up — accept that too.
+  if (row.status === "done" && (row.step === "approved" || row.step === undefined)) {
     throw new RetryPageError("row-not-mutable", `cannot retry approved row ${input.sessionId}`);
   }
   const formType = row.data?.formType as unknown as string | undefined;

@@ -27,8 +27,5 @@ export const SCREEN_HEIGHT = SCREEN.height;
 /** Default number of parallel workers. */
 export const DEFAULT_WORKERS = 4;
 
-/** Batch file containing employee IDs. */
-export const BATCH_FILE = join(__dirname, "batch.yaml");
-
 /** Tracker Excel file path. */
 export const TRACKER_PATH = join(__dirname, "kronos-tracker.xlsx");

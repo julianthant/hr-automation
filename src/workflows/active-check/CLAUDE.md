@@ -2,7 +2,7 @@
 
 Checks UCPath **Person Organizational Summary** for active/inactive HR status by employee **name** or **8-digit EID**, using `searchByName` / `searchByEid` (`src/systems/ucpath/person-org-summary.js`) with outcome derivation in `deriveActiveCheckOutcome` (`src/domain/active-check-outcome.ts`). Name search uses `keepNonHdh: true` so non-HDH rows can surface for operator review; EID search drills a single row set.
 
-**Kernel-based (daemon mode by default)** — `activeCheckWorkflow` in `workflow.ts`, CLI via `runActiveCheckCli` (`buildCliAdapter`).
+**Kernel-based (dashboard input run by default)** — `activeCheckWorkflow` in `workflow.ts`; dashboard input runs enqueue through `/api/enqueue`.
 
 ## Selector intelligence
 
@@ -30,16 +30,15 @@ This workflow touches **ucpath** only.
 | `batch` | `{ mode: "shared-context-pool", poolSize: 4, preEmitPending: true }` |
 | `detailFields` | `name`, `emplId`, `hrStatus`, `effdt`, `terminationDate`, `department` |
 
-## Data flow / CLI
+## Data Flow / Dashboard Input Run
 
 ```
-npm run active-check "Last, First Middle" [more names or EIDs...] [--new] [--parallel N]
-npm run active-check 10873698
-npm run active-check:stop
+InputRunPanel → /api/enqueue
+  body: { workflow: "active-check", inputs: [{ name }] | [{ emplId }] }
 ```
 
-- Positional tokens: strings of digits (after normalize) that look like an 8-digit EID are treated as **EID**; otherwise **name** (see `buildActiveCheckCliInput`).
-- Multi-item CLI uses a shared parent run id + `batchDisplayOrdinal` for dashboard batch grouping (`allocateLowestBatchDisplayOrdinal`).
+- Input tokens: strings of digits (after normalize) that look like an 8-digit EID are treated as **EID**; otherwise **name** (see `buildActiveCheckCliInput`).
+- Multi-item input runs use a shared parent run id + `batchDisplayOrdinal` for dashboard batch grouping (`allocateLowestBatchDisplayOrdinal`).
 - Daemons claim work via the shared SQLite queue like other daemon-mode workflows (see `src/core/CLAUDE.md`).
 
 ## Inputs and outputs
@@ -57,4 +56,5 @@ Same topology as **eid-lookup**: up to 4 workers share UCPath browser contexts; 
 
 ## Lessons Learned
 
-- **2026-05-20: Runtime policy mirrors eid-lookup utility defaults.** `ACTIVE_CHECK_WORKFLOW_RUNTIME_POLICY` spreads the shared default policy and sets `memberRow.titleSource: "person"` for OCR utility children. Direct `npm run active-check` rows stay normal surfaces; OCR fan-out flatness comes from the OCR parent policy's `utilityChildWorkflows` list.
+- **2026-05-25: Dashboard input run is the public start path.** `npm run active-check` is retired; typed name/EID starts belong in `InputRunPanel` and `/api/enqueue`.
+- **2026-05-20: Runtime policy mirrors eid-lookup utility defaults.** `ACTIVE_CHECK_WORKFLOW_RUNTIME_POLICY` spreads the shared default policy and sets `memberRow.titleSource: "person"` for OCR utility children. Direct input-run rows stay normal surfaces; OCR fan-out flatness comes from the OCR parent policy's `utilityChildWorkflows` list.
