@@ -127,11 +127,12 @@ export const RUN_MODAL_REGISTRY: Record<string, RunModalConfig> = {
     title: () => "Upload Oath PDF",
     srDescription: ({ oathUploadMode }) =>
       oathUploadMode === "upload-only"
-        ? "Upload a paper oath PDF for ServiceNow filing only — OCR and signature delegation are skipped."
-        : "Upload a paper oath PDF; choose roster source for delegated OCR and signatures, duplicate check, dry run, and full versus upload-only mode.",
+        ? "Upload a paper oath PDF for ServiceNow filing only — OCR and signature delegation are skipped. The workflow files an HR ticket with the PDF attached and nothing else."
+        : "Upload a paper oath PDF. Full process dispatches OCR + per-signer signatures into the Oath Signature tab (where the operator approves OCR and the per-signer batch runs); after every signer completes, oath-upload files the HR ticket. Pick roster source, duplicate check, and dry run.",
     submitUrl: () => "/api/oath-upload/start",
-    // Roster picker is required because oath-upload delegates to OCR, which needs
-    // a roster to match the OCR'd names → EIDs before fanning out oath-signature.
+    // Roster picker is required for Full process because oath-upload's dispatch
+    // step starts an OCR + signature batch in the oath-signature tab, which
+    // needs a roster to match the OCR'd names → EIDs before fanning out.
     sections: { roster: true, duplicateCheck: true, dryRun: true, oathUploadMode: true },
     allowMultipleFiles: true,
     buildSuccessToast: (resp, file) => ({
