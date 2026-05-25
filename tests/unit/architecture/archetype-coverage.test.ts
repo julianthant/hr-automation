@@ -30,10 +30,13 @@ for (const dir of workflowDirs()) {
   if (!src.includes("defineWorkflow(")) continue;
 
   test(`${dir}/workflow.ts declares archetype in defineWorkflow`, () => {
+    const hasLiteralArchetype = /archetype:\s*["'](single|batch|delegating|delegating-batch|utility)["']/.test(src);
+    const hasResolverArchetype = /archetype:\s*(\([^)]*\)|[a-zA-Z_$][\w$]*)\s*=>/.test(src);
     assert.ok(
-      src.includes("archetype:"),
+      hasLiteralArchetype || hasResolverArchetype,
       `src/workflows/${dir}/workflow.ts calls defineWorkflow but does not declare 'archetype:'. ` +
-        `Add 'archetype: "single"|"batch"|"delegating"|"delegating-batch"|"utility"' to the config object.`,
+        `Add 'archetype: "single"|"batch"|"delegating"|"delegating-batch"|"utility"' to the config object ` +
+        `(or a resolver: 'archetype: (input) => ...').`,
     );
   });
 }

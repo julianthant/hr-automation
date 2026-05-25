@@ -92,6 +92,72 @@ function isRowArchetype(v: string): v is RowArchetype {
 }
 
 /**
+ * `WorkflowConfig.archetype` accepts either a literal `WorkflowArchetype` or
+ * a resolver function that decides the archetype from the validated input.
+ * The resolver form lets a workflow declare different row shapes for
+ * different input variants (e.g. oath-signature is `batch` when called with
+ * `{ kind: "pdf" }` and `single` when called with `{ kind: "signer" }`).
+ *
+ * Use `resolveArchetype(config, input)` (or `resolveArchetypeFromValue`) at
+ * every read site rather than reading `config.archetype` / `wf.archetype`
+ * directly — the helpers fail loud if a resolver returns a value that is
+ * not a valid `WorkflowArchetype`.
+ */
+export type ArchetypeResolver<TInput> = (input: TInput) => WorkflowArchetype;
+export type WorkflowArchetypeOrResolver<TInput> =
+  | WorkflowArchetype
+  | ArchetypeResolver<TInput>;
+
+const VALID_WORKFLOW_ARCHETYPES = new Set<string>([
+  "single",
+  "batch",
+  "delegating",
+  "delegating-batch",
+  "utility",
+]);
+
+function isWorkflowArchetype(v: unknown): v is WorkflowArchetype {
+  return typeof v === "string" && VALID_WORKFLOW_ARCHETYPES.has(v);
+}
+
+export function resolveArchetypeFromValue<TInput>(
+  archetype: WorkflowArchetypeOrResolver<TInput>,
+  input: TInput,
+  workflowName: string,
+): WorkflowArchetype {
+  if (typeof archetype === "function") {
+    const result = archetype(input);
+    if (!isWorkflowArchetype(result)) {
+      throw new Error(
+        `resolveArchetype: workflow '${workflowName}' archetype resolver returned ${JSON.stringify(result)}, ` +
+          `which is not a valid WorkflowArchetype (expected one of: single, batch, delegating, delegating-batch, utility).`,
+      );
+    }
+    return result;
+  }
+  if (!isWorkflowArchetype(archetype)) {
+    throw new Error(
+      `resolveArchetype: workflow '${workflowName}' has invalid literal archetype ${JSON.stringify(archetype)} ` +
+        `(expected one of: single, batch, delegating, delegating-batch, utility).`,
+    );
+  }
+  return archetype;
+}
+
+export function resolveArchetype<TInput>(
+  config: { name: string; archetype?: WorkflowArchetypeOrResolver<TInput> },
+  input: TInput,
+): WorkflowArchetype {
+  if (config.archetype === undefined) {
+    throw new Error(
+      `resolveArchetype: workflow '${config.name}' has no archetype declared; ` +
+        `defineWorkflow should have substituted a default before this point.`,
+    );
+  }
+  return resolveArchetypeFromValue(config.archetype, input, config.name);
+}
+
+/**
  * Derive the RowArchetype for a single tracker row given the workflow's
  * declared WorkflowArchetype and whether the row has a parent run.
  * Used by pre-emit write sites that don't go through withTrackedWorkflow.
