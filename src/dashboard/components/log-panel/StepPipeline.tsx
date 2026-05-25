@@ -311,10 +311,14 @@ export function StepPipeline({ steps, currentStep, status, stepDurations }: Step
   const currentIdx = isFailed && resolvedIdx < 0 ? 0 : resolvedIdx;
 
   const awaitingIdx = steps.indexOf("awaiting-approval");
+  // New approval contract (2026-05-25): OCR awaiting-approval is
+  // `status="running" step="awaiting-approval"`. Old contract emitted
+  // `status="done"` at that step; legacy rows may still surface that
+  // shape, so accept both.
   const gateAwaitingApproval =
     awaitingIdx >= 0 &&
-    status === "done" &&
-    normalizedStep === "awaiting-approval";
+    normalizedStep === "awaiting-approval" &&
+    (status === "running" || status === "done");
 
   // Build StepView array for all steps
   const stepViews: StepView[] = steps.map((step, i) => {

@@ -3,7 +3,7 @@
 Add a new **Oath Signature Date** row to a UCPath Person Profile for one or
 more employees.
 
-**Kernel-based + daemon-mode.** Declared via `defineWorkflow` in `workflow.ts` and enqueued via `runOathSignatureCli` (`buildCliAdapter` → `ensureDaemonsAndEnqueue`). Supports N EIDs per invocation — each becomes its own queue item. `npm run oath-signature` exposes `-n`, `-p`, optional `--date`, and `--dry-run` (see `src/cli.ts`).
+**Kernel-based + daemon-mode.** Declared via `defineWorkflow` in `workflow.ts` and enqueued from dashboard input runs (`InputRunPanel` → `/api/enqueue`) or OCR approval. Supports N EIDs per input run — each becomes its own queue item.
 
 **OCR / prep:** Paper-roster flows run through the **`ocr`** workflow (dashboard TopBar → form type **`oath`**) — see `src/workflows/ocr/CLAUDE.md` and `src/services/ocr/forms/oath.ts` for schemas + hybrid match. Approved OCR runs pre-emit child rows and enqueue this workflow per `{ emplId, date? }`.
 
@@ -11,7 +11,7 @@ more employees.
 
 ## What this workflow does
 
-Given one or more EIDs (plus an optional `--date MM/DD/YYYY`), for each EID:
+Given one or more EIDs, for each EID:
 
 1. Navigate to Person Profiles (direct URL).
 2. Search by Empl ID (lands directly on the profile — EID is unique).
@@ -78,20 +78,20 @@ builder before changing handler step structure — drift will fail snapshots.
 
 | Row                                  | Archetype         | Dashboard surface                |
 |--------------------------------------|-------------------|----------------------------------|
-| Direct CLI run per-EID               | `single`          | Flat queue row                   |
+| Direct input run per-EID             | `single`          | Flat queue row                   |
 | Child run dispatched from oath-upload | `delegate-child`  | Nested under oath-upload's card  |
 | Child run dispatched from OCR-approve | `delegate-child`  | Nested under OCR parent card     |
 
 ## Data Flow
 
 ```
-CLI: npm run oath-signature <emplId...> [--date …] [--dry-run]   (daemon — default)
-  → runOathSignatureCli (`buildCliAdapter`)
+InputRunPanel → /api/enqueue
+  → enqueueFromHttp
     → ensureDaemonsAndEnqueue(…)
       - Validates every {emplId, date?} via schema
       - Inserts one SQLite task row per EID and appends enqueue audit to .tracker/daemons/oath-signature.queue.jsonl
       - Pre-emits `pending` tracker row per EID (dashboard populates instantly)
-      - Wakes alive daemons; spawns new ones up to --parallel N (Duo 1×/daemon)
+      - Wakes alive daemons; spawns one when none is alive (Duo 1×/daemon)
       - Each daemon pulls from the queue:
           • reset browser to about:blank (betweenItems)
           • handler → plan.execute() → add oath → OK → Save → return-to-search
@@ -148,6 +148,7 @@ OCR handlers import **`src/services/matching/`** for roster load + name match �
 ## Lessons Learned
 
 - **Lesson maintenance rule:** Search this section, `src/workflows/ocr/CLAUDE.md`, and `src/systems/ucpath/LESSONS.md` before adding oath-signature guidance. Merge old OCR-prep notes into the current shared-OCR model instead of preserving obsolete grouped-upload behavior.
+- **2026-05-25: Dashboard input/upload runs are the public start paths.** `npm run oath-signature` is retired. Typed EID starts belong in `InputRunPanel`; paper-roster starts belong in the upload run / shared OCR path.
 - **Person Profiles direct URL can preserve stale detail state.** After skipping an existing oath and returning to search, the next direct navigation may still render the prior profile. `navigateToPersonProfiles` / `returnToSearch` must verify the Empl ID search textbox and recover by clicking Return to Search when needed.
 - **Paper-roster prep is owned by the shared OCR workflow.** Oath form type (`formType: "oath"`) routes through `/api/ocr/*` and `src/services/ocr/forms/oath.ts`. This folder no longer owns `prepare.ts` or `preview-schema.ts`; approved OCR rows enqueue `{ emplId, date? }` into this workflow.
 - **Duplicate protection is live-page only.** Tracker-side idempotency is gone. If the profile shows the "no oath signature date" sentinel, add/save; otherwise skip as existing. A retry converges on the live profile state.

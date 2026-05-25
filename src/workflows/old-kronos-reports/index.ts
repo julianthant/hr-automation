@@ -9,8 +9,6 @@ export {
 } from "./workflow.js";
 export type { KronosItem } from "./workflow.js";
 
-export { runParallelKronos, loadBatchFile } from "./parallel.js";
-
 export { EmployeeIdSchema, KronosInputSchema } from "./schema.js";
 export type { KronosInput } from "./schema.js";
 
@@ -29,5 +27,4 @@ export {
   DEFAULT_START_DATE,
   DEFAULT_END_DATE,
   DEFAULT_WORKERS,
-  BATCH_FILE,
 } from "./config.js";

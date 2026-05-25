@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 
+import { isDashboardInputRunWorkflow } from "../../../../domain/dashboard-run-surfaces.js";
 import {
   enqueueFromHttp,
   validateEnqueueRequest,
@@ -21,6 +22,14 @@ export function registerEnqueueRoute(app: Hono, deps: DashboardHonoDeps): void {
       const input = parsed.body as { workflow?: string; inputs?: unknown[]; parentRunId?: unknown };
       const workflow = input.workflow?.trim();
       if (!workflow) return jsonResponse({ ok: false, error: "workflow is required" }, 400);
+      if (!isDashboardInputRunWorkflow(workflow)) {
+        return jsonResponse({
+          ok: false,
+          workflow,
+          enqueued: 0,
+          error: `workflow is not enabled for dashboard input runs: ${workflow}`,
+        }, 400);
+      }
       if (!Array.isArray(input.inputs) || input.inputs.length === 0) {
         return jsonResponse({ ok: false, error: "inputs must be a non-empty array" }, 400);
       }

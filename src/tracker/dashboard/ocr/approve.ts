@@ -9,6 +9,7 @@ import { readQueueTitle, rootQueueTitleData } from "../../../domain/queue-title.
 import { findLatestEntryForPredicate } from "../../find-latest-entry.js";
 import { deriveRowArchetype } from "../../../domain/row-archetype.js";
 import { readFormType, readParentRunId, readDryRun, readOriginWorkflow } from "./shared.js";
+import { emitApproved } from "../../../services/ocr/approval-signal.js";
 
 const WORKFLOW = "ocr";
 const SESSION_LOOKBACK_DAYS = 7;
@@ -205,6 +206,12 @@ export function buildOcrApproveHandler(
 
         // Write approved row AFTER successful enqueue so restart recovery
         // can trust that fannedOutItemIds are all present in task_store.
+        // Under the new approval contract this row IS the OCR row's
+        // terminal `done`: the orchestrator now emits `running
+        // step=awaiting-approval` (not `done`) and the kernel-path handler
+        // suspends on `subscribeToApproval` until the matching
+        // `emitApproved` call below wakes it. Dashboard path has no
+        // kernel wrapping — this row is the only `done` emit.
         emitTrackerRow(
           {
             workflow: WORKFLOW,
@@ -228,6 +235,14 @@ export function buildOcrApproveHandler(
             },
           },
           trackerDir,
+        );
+        // Wake any kernel-path handler subscribed via
+        // `subscribeToApproval`. Dashboard-path runs (no kernel wrapping)
+        // have no subscriber — emitApproved silently no-ops when the
+        // listener registry is empty for this sessionId.
+        emitApproved(
+          { workflow: WORKFLOW, sessionId: input.sessionId },
+          { records: input.records, fannedOutItemIds: enqueuedIds },
         );
         if (parentRunId) {
           writeOriginParentApproved({

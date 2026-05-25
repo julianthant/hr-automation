@@ -7,14 +7,14 @@ import { defineWorkflow, runWorkflowBatch } from "../../../../src/core/index.js"
 import { DEFAULT_DIR, dateLocal } from "../../../../src/tracker/jsonl.js";
 
 /**
- * Tests covering the kronos-reports migration's CLI-adapter contract:
+ * Tests covering the kronos-reports pool-mode contract:
  * - `runWorkflowBatch` in pool mode pairs `onPreEmitPending` with per-item runIds
  *   (the dashboard's "show the queue before auth finishes" shape).
  * - `opts.poolSize` override propagates through `runWorkflowBatch` into
- *   `runWorkflowPool` (covers the `npm run kronos -- --workers N` flag).
+ *   `runWorkflowPool`.
  *
  * These sit alongside `tests/unit/core/pool.test.ts` but verify the shape the
- * real kronos CLI adapter uses, not just the direct `runWorkflowPool` path.
+ * retired kronos adapter used, not just the direct `runWorkflowPool` path.
  */
 
 function fakeSlot() {

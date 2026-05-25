@@ -2,11 +2,11 @@
 
 Downloads Time Detail PDF reports from Old Kronos (UKG) for multiple employees in parallel; validates downloaded PDFs; tracks status in an Excel tracker.
 
-**Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflowBatch` (pool mode, `preEmitPending: true`, `poolSize: 4`). The kernel owns browser launch, UKG auth, per-employee tracker entries, SIGINT cleanup, and worker-queue fan-out. The CLI adapter `runParallelKronos` in `parallel.ts` owns the pre-kernel phases: batch YAML load, mutex setup, and a `launchFn` that assigns a unique `ukg_session_workerN` sessionDir per worker (UKG uses Playwright persistent contexts — workers sharing one sessionDir would collide on the lock).
+**Kernel-based but not currently operator-launched.** Declared via `defineWorkflow` in `workflow.ts` for kernel metadata/tests. A future dashboard-owned runner must initialize the pre-kernel runtime state (tracker mutex, report mutex, dates, reports dir, and per-worker `launchFn`) before calling `src/core/runWorkflowBatch`. The old `batch.yaml` adapter was removed; this workflow is not a public package script or dashboard run surface.
 
 ## What this workflow does
 
-Given a `batch.yaml` with employee IDs, the kernel launches N worker Sessions (default 4, overridable via **`npm run kronos -- --workers N`** → `RunOpts.poolSize`, or `DEFAULT_WORKERS` in `config.ts`); each worker authenticates to UKG with its own Duo MFA, then the pool fans out employee IDs across workers, running queue-based Time Detail downloads with mutex-serialized Reports navigation and `ctx.retry`-wrapped flaky iframe loads. Each PDF is validated (size, no-data check, name/ID match) and a row is appended to the Excel tracker.
+Given an explicit list of employee IDs from a future dashboard-owned runner, the kernel launches N worker Sessions (default 4 via `DEFAULT_WORKERS` in `config.ts`); each worker authenticates to UKG with its own Duo MFA, then the pool fans out employee IDs across workers, running queue-based Time Detail downloads with mutex-serialized Reports navigation and `ctx.retry`-wrapped flaky iframe loads. Each PDF is validated (size, no-data check, name/ID match) and a row is appended to the Excel tracker.
 
 ## Selector intelligence
 
@@ -19,13 +19,11 @@ This workflow touches one system: **old-kronos** (UKG, Genies iframe).
 ## Files
 
 - `schema.ts` — Input schema: `EmployeeIdSchema` (5+ digit numeric string). `KronosItemSchema` wraps it as the kernel's per-item TData.
-- `config.ts` — Constants: `REPORTS_DIR` (`PATHS.reportsDir`), `SESSION_DIR` (base for per-worker dirs), default dates, `DEFAULT_WORKERS`, `BATCH_FILE`, `TRACKER_PATH`.
+- `config.ts` — Constants: `REPORTS_DIR` (`PATHS.reportsDir`), `SESSION_DIR` (base for per-worker dirs), default dates, `DEFAULT_WORKERS`, `TRACKER_PATH`.
 - `validate.ts` — PDF validation: non-zero size, "No Data Returned" substring, name/ID extraction (regex `/^(.+?)\s+ID:\s*(\d+)/`), expected-employee match.
 - `tracker.ts` — `kronos-tracker.xlsx` writer (Excel-only; JSONL events handled by the kernel). Preserved per `src/workflows/CLAUDE.md` grandfather clause.
 - `workflow.ts` — Kernel definition (`kronosReportsWorkflow`). Handler runs `searching → extracting → downloading` per employee. Module-scoped runtime (`setKronosRuntime` / `clearKronosRuntime`) holds the tracker mutex, report-lock mutex, date range, and reports dir — they can't ride on Zod-validated TData. A `WeakSet<Page>` tracks which worker pages have had the date range set so we only `setDateRange` once per worker.
-- `parallel.ts` — CLI adapter (`runParallelKronos`). Loads batch YAML, initializes module runtime, builds a per-worker `launchFn` closure that increments a counter and assigns `${SESSION_DIR}_workerN` to each worker's Playwright persistent context, delegates to `runWorkflowBatch(kronosReportsWorkflow, items, { poolSize, launchFn, onPreEmitPending, deriveItemId })`, and cleans up session dirs after. `loadBatchFile` is exported for testing.
 - `index.ts` — Barrel exports. **`defineWorkflow` auto-registers** dashboard metadata from the kernel definition — no duplicate registration needed.
-- `batch.yaml` — Input list of employee IDs (5+ digit numeric strings, one per line).
 
 ## Kernel Config
 
@@ -33,12 +31,12 @@ This workflow touches one system: **old-kronos** (UKG, Genies iframe).
 |-------|-------|
 | `name` | `"kronos-reports"` — matches the pre-migration dashboard registration + JSONL filename prefix. NOT `"old-kronos-reports"` (the directory name). |
 | `label` | `"Kronos Reports"` |
-| `systems` | `[{ id: "old-kronos", login: loginToUKG-wrapped }]` — sessionDir NOT set on the SystemConfig; parallel.ts injects it per-worker via `opts.launchFn` |
+| `systems` | `[{ id: "old-kronos", login: loginToUKG-wrapped }]` — sessionDir NOT set on the SystemConfig; a future dashboard-owned runner must inject it per-worker via `opts.launchFn` |
 | `steps` | `["searching", "extracting", "downloading"] as const` |
 | `schema` | `KronosItemSchema = z.object({ employeeId })` — each queue entry |
 | `tiling` | `"single"` — each worker Session has one browser |
 | `authChain` | `"sequential"` — one system per worker, sequential by definition |
-| `batch` | `{ mode: "pool", poolSize: 4, preEmitPending: true }` — CLI `--workers N` sets `RunOpts.poolSize` at runtime |
+| `batch` | `{ mode: "pool", poolSize: 4, preEmitPending: true }` — programmatic callers can override with `RunOpts.poolSize` |
 | `detailFields` | `[{ key: "name", label: "Employee" }, { key: "id", label: "ID" }]` |
 | `getName` | `(d) => d.name ?? ""` |
 | `getId` | `(d) => d.id ?? ""` |
@@ -46,36 +44,34 @@ This workflow touches one system: **old-kronos** (UKG, Genies iframe).
 ## Data Flow
 
 ```
-CLI: npm run kronos [-- --start-date ... --end-date ...]
-  → runParallelKronos (CLI adapter)
-    → loadBatchFile (Zod validate each ID)
-    → else:
-      → mkdirSync REPORTS_DIR
-      → setKronosRuntime({ trackerMutex, reportMutex, startDate, endDate, reportsDir, writeTracker })
-      → runWorkflowBatch(kronosReportsWorkflow, items, {
-          poolSize: actualWorkers,
-          launchFn: per-worker counter closure → ukg_session_workerN sessionDir,
-          deriveItemId: item => item.employeeId,
-          onPreEmitPending: (item, runId) => trackEvent(pending, { id: employeeId }),
-        })
-        → Kernel launches N Sessions in parallel; each worker auths to UKG (Duo ×N).
-        → Workers pull items from a shared queue until empty.
-        → For each item:
-          - Kernel emits `pending` via onPreEmitPending (already written above)
-          - withTrackedWorkflow wraps the handler, reuses pre-emitted runId
-          - Handler: await ctx.page → ensureDateRangeSet (first item on this worker)
-          - Step "searching" → searchEmployee + row-exists check → early return + tracker "Done" on no-match
-          - Step "extracting" → clickEmployeeRow → updateData({ name })
-          - Step "downloading" → ctx.retry(reportMutex.acquire → clickGoToReports → handleReportsPage → goBackToMain)
-            → validateAndRecordTracker on success / "Failed" row on exhausted attempts
-      → clearKronosRuntime + rm -rf per-worker session dirs
-      → Batch result summary: "N/M succeeded, K failed"
+Future dashboard-owned runner:
+  → parse dashboard input list
+  → mkdirSync REPORTS_DIR
+  → setKronosRuntime({ trackerMutex, reportMutex, startDate, endDate, reportsDir, writeTracker })
+  → runWorkflowBatch(kronosReportsWorkflow, items, {
+      poolSize: actualWorkers,
+      launchFn: per-worker counter closure → ukg_session_workerN sessionDir,
+      deriveItemId: item => item.employeeId,
+      onPreEmitPending: (item, runId) => trackEvent(pending, { id: employeeId }),
+    })
+    → Kernel launches N Sessions in parallel; each worker auths to UKG (Duo ×N).
+    → Workers pull items from a shared queue until empty.
+    → For each item:
+      - Kernel emits `pending` via onPreEmitPending (already written above)
+      - withTrackedWorkflow wraps the handler, reuses pre-emitted runId
+      - Handler: await ctx.page → ensureDateRangeSet (first item on this worker)
+      - Step "searching" → searchEmployee + row-exists check → early return + tracker "Done" on no-match
+      - Step "extracting" → clickEmployeeRow → updateData({ name })
+      - Step "downloading" → ctx.retry(reportMutex.acquire → clickGoToReports → handleReportsPage → goBackToMain)
+        → validateAndRecordTracker on success / "Failed" row on exhausted attempts
+  → clearKronosRuntime + rm -rf per-worker session dirs
+  → Batch result summary: "N/M succeeded, K failed"
 ```
 
 ## Parallel execution model
 
 - **Pool mode via kernel**: `runWorkflowPool` launches N Sessions (one Duo each), each with its own `Page` and `BrowserContext` via our `launchFn`. All Sessions pull from a single shared queue. `poolSize` is read from `RunOpts.poolSize ?? wf.config.batch.poolSize ?? 4`.
-- **Per-worker sessionDir**: a counter closure in `runParallelKronos` assigns `${SESSION_DIR}_workerN` to each `launchFn` invocation so each persistent Playwright context keeps its own dir (UKG session state survives across runs, and the dir's lockfile prevents cross-worker races).
+- **Per-worker sessionDir**: a future dashboard-owned runner must assign `${SESSION_DIR}_workerN` to each `launchFn` invocation so each persistent Playwright context keeps its own dir (UKG session state survives across runs, and the dir's lockfile prevents cross-worker races).
 - **`reportMutex` (cross-worker)**: `ctx.retry` wraps `reportMutex.acquire() → clickGoToReports → handleReportsPage → goBackToMain`. UKG serializes report generation server-side; the mutex avoids two workers' downloads racing.
 - **`trackerMutex` (cross-worker Excel write)**: `updateKronosTracker` is wrapped with `createLockedTracker` so concurrent Excel writes don't corrupt the xlsx file.
 - **`ctx.retry` (per-worker)**: 2 attempts × 3s linear backoff around the Reports flow. Replaces the old inline 2-attempt loop.
@@ -83,13 +79,13 @@ CLI: npm run kronos [-- --start-date ... --end-date ...]
 
 ## Worker count
 
-Default pool size: `4` (from `wf.config.batch.poolSize`). **`npm run kronos -- --workers N`** passes `N` into `runParallelKronos` → `RunOpts.poolSize` (overrides default for that invocation). Programmatic callers can pass `poolSize` on `runWorkflowBatch` the same way. To change the default when no flag is passed, edit `DEFAULT_WORKERS` in `config.ts`.
+Default pool size: `4` (from `wf.config.batch.poolSize`). Programmatic callers can pass `poolSize` on `runWorkflowBatch`. To change the default, edit `DEFAULT_WORKERS` in `config.ts`.
 
 ## Gotchas
 
 - **Session dirs**: `${PATHS.ukgSessionBase}_workerN` — cleaned up after all workers finish. If the process is SIGKILLed mid-run the dirs leak; the next run reassigns them.
 - **`reportMutex` is cross-worker**: "Go To → Reports → run → download → back" must not interleave across workers (UKG server-side session conflicts).
-- **Module-scoped runtime**: `setKronosRuntime` is called by the CLI adapter before `runWorkflowBatch`; `clearKronosRuntime` in finally. If the kernel were invoked directly (tests, future sub-runner) without the adapter, the handler would throw `Kronos runtime not initialized`.
+- **Module-scoped runtime**: `setKronosRuntime` must be called before `runWorkflowBatch`; `clearKronosRuntime` belongs in finally. If the kernel is invoked directly without the runtime setup, the handler throws `Kronos runtime not initialized`.
 - **`loginToUKG` in SystemConfig**: returns `boolean` — true ⇒ auth or already-logged-in; false ⇒ failure. Wrapped to throw on false so the kernel's retry loop in `Session.launch` can catch and retry.
 - **`WeakSet<Page>` date-range guard**: the kernel's per-worker Session keeps the same `Page` object across items — we use a WeakSet to skip `setDateRange` after the first item per worker.
 - **PDF validation** checks substring `"No Data Returned"` (case-sensitive).
@@ -100,9 +96,9 @@ Default pool size: `4` (from `wf.config.batch.poolSize`). **`npm run kronos -- -
 
 ## Retry safety
 
-**Dashboard retry is not currently supported for this workflow.** kronos-reports runs exclusively through `runParallelKronos` (it's intentionally NOT in `WORKFLOW_LOADERS` — see the table in `src/workflows/CLAUDE.md`), which sets module-scoped runtime (`setKronosRuntime` with `trackerMutex`, `reportMutex`, date range, reports dir, tracker writer) BEFORE the kernel handler executes. The dashboard retry path goes through `enqueueFromHttp` → daemon claim → kernel `runOneItem`, which has no opportunity to invoke `runParallelKronos` first and therefore no opportunity to call `setKronosRuntime`. A dashboard-issued retry would throw `Kronos runtime not initialized` from the handler's first action.
+**Dashboard retry is not currently supported for this workflow.** kronos-reports is intentionally NOT in `WORKFLOW_LOADERS` — see the table in `src/workflows/CLAUDE.md`. A future dashboard-owned runner must set module-scoped runtime (`setKronosRuntime` with `trackerMutex`, `reportMutex`, date range, reports dir, tracker writer) BEFORE the kernel handler executes. The dashboard retry path goes through `enqueueFromHttp` → daemon claim → kernel `runOneItem`, which has no opportunity to call `setKronosRuntime`. A dashboard-issued retry would throw `Kronos runtime not initialized` from the handler's first action.
 
-Contract 2 (Uniform Retry) does not gate this — there's no per-workflow opt-out. The fix lives in this workflow: decouple the per-run state from a module-scoped singleton (e.g. carry the mutexes/dates/tracker through `ctx.runtime` or via a workflow-local registry keyed by `instance`) so the handler can be invoked outside the CLI adapter's setup. Until then, retry kronos-reports failures by re-running `npm run kronos` (which re-enters `runParallelKronos`), not from the dashboard.
+Contract 2 (Uniform Retry) does not gate this — there's no per-workflow opt-out. The fix lives in this workflow: decouple the per-run state from a module-scoped singleton (e.g. carry the mutexes/dates/tracker through `ctx.runtime` or via a workflow-local registry keyed by `instance`) so the handler can be invoked from a real dashboard run surface.
 
 ## Verified Selectors
 
@@ -110,6 +106,7 @@ UKG selectors live in `src/systems/old-kronos/selectors.ts`. This workflow uses 
 
 ## Lessons Learned
 
-- **2026-05-16: Deleted `runKronosForEmployee` + removed `DEFAULT_START_DATE`/`DEFAULT_END_DATE` re-exports from `workflow.ts`.** `runKronosForEmployee` was a pre-migration helper preserved for "external callers" — grep confirmed zero callers outside the module. `validateAndRecordTracker` (the shared post-download validation helper) was NOT deleted — it is still used by the kernel handler's `downloading` step. The date constant re-exports through `workflow.ts` were dead; `parallel.ts` imports both names directly from `./config.ts`.
-- **2026-04-17: Migrated to kernel (pool mode).** `runParallelKronos` is now a CLI adapter over `runWorkflowBatch(kronosReportsWorkflow, items, { poolSize, launchFn, onPreEmitPending })`. Per-worker sessionDir is handled via `opts.launchFn` injection — the kernel's public surface is unchanged. Module-scoped `kronosRuntime` carries the mutexes + date range + reports dir because Zod can't validate `Mutex` instances. Dashboard metadata auto-registers from `defineWorkflow` (the obsolete standalone registration call was removed from `index.ts`). `ctx.retry` replaces the old inline 2-attempt Reports-nav retry. Workflow name stays `"kronos-reports"` (the directory is `old-kronos-reports` but the workflow name matches existing JSONL filenames). **Live-run pending user verification** — 4 parallel Duo approvals can't be exercised this session; only dry-runs + tests validate the migration. Don't reintroduce raw `launchBrowser` / `withTrackedWorkflow` / `withLogContext` in the workflow or CLI adapter — those live in the kernel now.
-- **2026-04-17 / 2026-05-16: Worker count configuration.** `RunOpts.poolSize` lets callers override the workflow's `batch.poolSize` default. **`npm run kronos -- --workers N`** maps to that override via `src/cli.ts`. `runWorkflowPool` reads `opts.poolSize ?? wf.config.batch?.poolSize ?? 4`. Covered by tests in `tests/unit/core/pool.test.ts` + `tests/unit/workflows/old-kronos-reports/workflow.test.ts`.
+- **2026-05-16: Deleted `runKronosForEmployee` + removed `DEFAULT_START_DATE`/`DEFAULT_END_DATE` re-exports from `workflow.ts`.** `runKronosForEmployee` was a pre-migration helper preserved for "external callers" — grep confirmed zero callers outside the module. `validateAndRecordTracker` (the shared post-download validation helper) was NOT deleted — it is still used by the kernel handler's `downloading` step. The date constant re-exports through `workflow.ts` were dead.
+- **2026-05-25: `npm run kronos` and the batch-file adapter were removed.** Old Kronos `batch.yaml` is no longer a valid operator launch path. Keep any future start path dashboard-owned; do not reintroduce `runParallelKronos`, `BATCH_FILE`, or checked-in batch input files.
+- **2026-04-17: Migrated to kernel (pool mode).** `runParallelKronos` became an adapter over `runWorkflowBatch(kronosReportsWorkflow, items, { poolSize, launchFn, onPreEmitPending })`. Per-worker sessionDir is handled via `opts.launchFn` injection — the kernel's public surface is unchanged. Module-scoped `kronosRuntime` carries the mutexes + date range + reports dir because Zod can't validate `Mutex` instances. Dashboard metadata auto-registers from `defineWorkflow` (the obsolete standalone registration call was removed from `index.ts`). `ctx.retry` replaces the old inline 2-attempt Reports-nav retry. Workflow name stays `"kronos-reports"` (the directory is `old-kronos-reports` but the workflow name matches existing JSONL filenames). **Live-run pending user verification** — 4 parallel Duo approvals can't be exercised this session; only dry-runs + tests validate the migration. Don't reintroduce raw `launchBrowser`, `withTrackedWorkflow`, or `withLogContext` in the workflow — those live in the kernel now.
+- **2026-04-17 / 2026-05-16: Worker count configuration.** `RunOpts.poolSize` lets callers override the workflow's `batch.poolSize` default. `runWorkflowPool` reads `opts.poolSize ?? wf.config.batch?.poolSize ?? 4`. Covered by tests in `tests/unit/core/pool.test.ts` + `tests/unit/workflows/old-kronos-reports/workflow.test.ts`.

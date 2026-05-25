@@ -22,7 +22,7 @@ import {
 
 const steps = ["checking"] as const;
 
-/** Direct CLI runs use normal defaults; OCR fan-out children title by person/EID. */
+/** Direct input runs use normal defaults; OCR fan-out children title by person/EID. */
 export const ACTIVE_CHECK_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
   ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
   memberRow: {

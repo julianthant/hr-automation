@@ -1,7 +1,7 @@
 /**
  * EID Lookup workflow: search employees by name in parallel tabs.
  *
- * Kernel-based (shared-context-pool mode). Each CLI invocation launches one
+ * Kernel-based (shared-context-pool mode). Each input-run batch launches one
  * UCPath browser (+ CRM browser in CRM mode), authenticates once per system,
  * then fans out N names across N tabs in each shared BrowserContext. Each
  * name is a separate kernel item so the dashboard shows one row per name.
@@ -44,7 +44,7 @@ export interface LookupResult {
 
 const stepsCrm = ["searching", "cross-verification", "active-status"] as const;
 
-/** Direct CLI runs use normal utility defaults; OCR fan-out children title by person/EID. */
+/** Direct input runs use normal utility defaults; OCR fan-out children title by person/EID. */
 export const EID_LOOKUP_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
   ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
   memberRow: {
@@ -399,9 +399,9 @@ export function deriveEidLookupItemId(input: EidLookupItem): string {
 }
 
 /**
- * Daemon-mode CLI adapter for `npm run eid-lookup <names...>`.
+ * Internal daemon-mode adapter.
  *
- * Mirrors `runSeparationCli` / `runWorkStudyCli`: enqueues one `{name}` or
+ * Enqueues one `{name}` or
  * `{emplId}` item per unique, normalized input to any alive `eid-lookup`
  * daemon (or spawns one via `ensureDaemonsAndEnqueue`). Keeps the UCPath +
  * CRM browser session warm across batches so subsequent names don't re-Duo.

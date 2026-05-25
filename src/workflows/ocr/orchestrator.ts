@@ -6,8 +6,14 @@
  * Phases (each emits a tracker `running` event with `step` set):
  *   loading-roster → ocr → matching → disambiguating → eid-lookup → verification → awaiting-approval
  *
- * Returns when the row reaches `awaiting-approval`. The user's approve /
- * discard / reupload click is handled via separate HTTP endpoints.
+ * Returns when the row reaches `awaiting-approval`. The OCR row stays
+ * `running step=awaiting-approval` (not `done`) — the row only becomes
+ * terminal when the operator approves (via the approve route or via the
+ * kernel handler's approval-signal wait) or discards.
+ *
+ * The user's approve / discard / reupload click is handled via separate
+ * HTTP endpoints; see `src/tracker/dashboard/ocr/approve.ts` and
+ * `src/control/ocr/discard.ts`.
  */
 import { basename, join } from "node:path";
 import type { ZodType } from "zod/v4";
@@ -73,6 +79,14 @@ export interface OcrOrchestratorOpts {
   date?: string;
   /** Hard timeout for eid-lookup phase. Default 1h. */
   eidLookupTimeoutMs?: number;
+  /**
+   * Optional per-run AbortSignal. Kernel-path callers thread `ctx.signal`
+   * through so an operator cancel propagates without waiting on the
+   * existing OCR-discard polling loop. Today this is informational only
+   * (the orchestrator's internal raceOcrPrepWithDiscard already covers
+   * its own polling); the field is reserved for future cancel paths.
+   */
+  signal?: AbortSignal;
 
   // ─── Test escape hatches ──────────────────────────────
   _emitOverride?: (entry: TrackerEntry) => void;
@@ -116,10 +130,21 @@ export interface OcrOrchestratorOpts {
   _skipSharepointDispatch?: boolean;
 }
 
+/**
+ * Outcome of `runOcrOrchestrator`. `"awaiting-approval"` means the row
+ * is in `running step=awaiting-approval` and a downstream consumer (the
+ * kernel handler or an HTTP poll) should wait on the approval signal.
+ * `"discarded"` means the operator discarded mid-run; the orchestrator
+ * already stopped emitting and the discard route owns the terminal row.
+ */
+export type OcrOrchestratorOutcome =
+  | { status: "awaiting-approval" }
+  | { status: "discarded" };
+
 export async function runOcrOrchestrator(
   input: OcrInput,
   opts: OcrOrchestratorOpts,
-): Promise<void> {
+): Promise<OcrOrchestratorOutcome> {
   const spec = getFormSpec(input.formType);
   if (!spec) {
     throw new Error(`OCR: unknown formType "${input.formType}"`);
@@ -835,23 +860,30 @@ export async function runOcrOrchestrator(
     // still running in the background. The operator can start reviewing
     // immediately; lookup outcomes will patch records into this row's
     // tracker entries as they arrive.
+    //
+    // Status is `running` (not `done`) under the new approval contract:
+    // the OCR row becomes terminal ONLY when the operator approves
+    // (→ `done step=approved` via the approve route, or kernel-emitted
+    // `done` after the handler's approval-signal resolves) or discards
+    // (→ `failed step=discarded`). See `src/services/ocr/approval-signal.ts`.
     log.success(`[ocr] preparation complete — awaiting operator approval (${records.length} record(s), ${verifiedCount} verified now)`);
-    emitSnapshot(records, "awaiting-approval", "done", {
+    emitSnapshot(records, "awaiting-approval", "running", {
       failedPages,
       emptyPages,
       pageStatusSummary,
     });
+    return { status: "awaiting-approval" };
   } catch (err) {
     if (isOperatorDiscardAbortError(err)) {
       log.step(`[ocr] preparation stopped (${input.sessionId}) — operator discarded while prep was running`);
-      return;
+      return { status: "discarded" };
     }
     try {
       writeTracker("failed", { formType: input.formType, sessionId: input.sessionId }, undefined, errorMessage(err));
     } catch (innerE) {
       if (isOperatorDiscardAbortError(innerE)) {
         // Discard fired while recording failure — both unwind to finally below.
-        return;
+        return { status: "discarded" };
       }
       throw innerE;
     }

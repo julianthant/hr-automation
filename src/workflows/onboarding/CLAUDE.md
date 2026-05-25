@@ -2,7 +2,7 @@
 
 Automates full UC employee hiring: extracts data from ACT CRM, validates with Zod, searches UCPath for duplicates, searches I9 before creating a profile, creates Smart HR transactions.
 
-**Kernel-based (daemon mode default).** CLI is `npm run onboarding <email> [<email> ...]` → `runOnboardingCli` (`buildCliAdapter` in `workflow.ts`) → shared SQLite queue + daemon claim. Each alive daemon is one long-lived single-worker Session (3 browsers: CRM + UCPath + I9; 2 Duos since I9 is SSO no-2FA) that claims emails from the shared SQLite `tasks` queue via an atomic transaction. `.tracker/daemons/onboarding.queue.jsonl` is append-only audit/history — not read for state (queue authority is SQLite). Multiple alive daemons race for items — that's how parallelism works in daemon mode (no re-Duo between items). For N-way throughput, start N daemons with `-p N`.
+**Kernel-based (daemon mode default).** Each alive daemon is one long-lived single-worker Session (3 browsers: CRM + UCPath + I9; 2 Duos since I9 is SSO no-2FA) that claims emails from the shared SQLite `tasks` queue via an atomic transaction. `.tracker/daemons/onboarding.queue.jsonl` is append-only audit/history — not read for state (queue authority is SQLite). There is no public package-script launch path right now; add a dashboard input run before exposing this workflow to operators again.
 
 The kernel owns browser launch, auth chain, per-item `withTrackedWorkflow` wrapping, SIGINT cleanup, screenshot on failure. Daemon mode wraps the same `runOneItem` primitive — per-item tracker output is byte-identical to single-mode `runWorkflow`.
 
@@ -26,7 +26,7 @@ This workflow touches three systems: **crm**, **ucpath**, **i9**.
 - `extract.ts` — CRM field extraction from UCPath Entry Sheet using `FIELD_MAP` label mapping; also extracts dept/recruitment numbers from record page
 - `enter.ts` — Builds `ActionPlan` for the 14-step Smart HR transaction (personal data, job data, comments, save/submit)
 - `config.ts` — Constants: `UC_FULL_HIRE` template, `UCHRLY` comp rate code, `JOB_END_DATE` sourced from `ANNUAL_DATES.jobEndDate` (override via `ANNUAL_DATES_END` env var)
-- `workflow.ts` — CRM extraction, passive delegation to `crm-doc-download`, UCPath/I-9 onboarding transaction. Kernel definition (`onboardingWorkflow`) + CLI adapters: `runOnboarding` (in-process single — for tests/scripts), `runOnboardingCli` (daemon-mode default — `buildCliAdapter`). Handler runs phases across CRM / UCPath / I9 with `ctx.step` wrapping.
+- `workflow.ts` — CRM extraction, passive delegation to `crm-doc-download`, UCPath/I-9 onboarding transaction. Kernel definition (`onboardingWorkflow`) + adapters: `runOnboarding` (in-process single — for tests/scripts), `runOnboardingCli` (internal daemon adapter). Handler runs phases across CRM / UCPath / I9 with `ctx.step` wrapping.
 - `index.ts` — Barrel exports
 
 ## Kernel Config
@@ -36,19 +36,18 @@ This workflow touches three systems: **crm**, **ucpath**, **i9**.
 | `systems` | `[crm, ucpath, i9]` — each wraps its login fn to throw on false | 3 independent auth systems |
 | `steps` | `["crm-auth", "crm-search", "extraction", "pdf-download", "ucpath-auth", "person-search", "i9-creation", "transaction"] as const` — matches `onboardingSteps` in `workflow.ts` |
 | `authChain` | `"sequential"` | CRM work completes before UCPath auth runs; I9 has no Duo (SSO). |
-| `batch` | `{ mode: "pool", poolSize: 4, preEmitPending: true }` | Enables in-process `runWorkflowBatch(onboardingWorkflow, items)` (tests, scripts, or custom callers) → `runWorkflowPool`. **Not** used by default `npm run onboarding` daemon path (each daemon is one worker). Single-item `runWorkflow` ignores `batch`. |
+| `batch` | `{ mode: "pool", poolSize: 4, preEmitPending: true }` | Enables in-process `runWorkflowBatch(onboardingWorkflow, items)` (tests, scripts, or custom callers) → `runWorkflowPool`. Daemon processing uses one worker per daemon. Single-item `runWorkflow` ignores `batch`. |
 | `tiling` | `"auto"` (kernel picks for multi-system) | 3 browsers tiled then fullscreened; bringToFront per system during auth |
 | `detailFields` | `email`, `departmentNumber`, `positionNumber`, `wage`, `effectiveDate`, `i9ProfileId` (see `workflow.ts`) + `getName`/`getId` | Detail panel populated via `ctx.updateData(...)` across phases |
 
 ## Data Flow
 
-**Daemon mode (default):**
+**Future dashboard input run:**
 ```
-CLI: npm run onboarding <email> [<email2> ...]   (flags: `-n`, `-p` only — see `src/cli.ts`)
-  → runOnboardingCli (`buildCliAdapter`)
-    → ensureDaemonsAndEnqueue(onboardingWorkflow, [{email}, ...], { new, parallel })
+InputRunPanel → /api/enqueue
+  → ensureDaemonsAndEnqueue(onboardingWorkflow, [{email}, ...])
       - Discovers alive daemons via .tracker/daemons/onboarding-*.lock.json + /whoami liveness
-      - Spawns N additional daemons per computeSpawnPlan — Duo once per new daemon (CRM + UCPath)
+      - Spawns a daemon when none is alive — Duo once per new daemon (CRM + UCPath)
       - Inserts SQLite task rows and appends enqueue audit events to .tracker/daemons/onboarding.queue.jsonl
       - POST /wake to every alive daemon; daemons race to claim via atomic SQLite transaction
       - Each daemon runs the handler below in a loop (one Session, Duos once, reused)
@@ -69,7 +68,7 @@ runWorkflow(onboardingWorkflow, { email })
 ## Daemon Mode Notes
 
 - **One daemon = one worker, 2 Duos once.** A daemon holds 3 browsers + a Session across invocations. First launch costs CRM Duo + UCPath Duo (≈1-2 min); every subsequent email skips both. Biggest wall-clock savings of any converted workflow.
-- **Parallelism = N daemons.** The workflow's `batch: { mode: "pool", poolSize: 4 }` is for in-process pool callers (`runWorkflowBatch` → `runWorkflowPool`). Under **daemon** mode, each daemon is a single-worker process; the shared SQLite tasks queue + atomic claim distribute items. Run `npm run onboarding a@uc b@uc c@uc -- -p 3` to spawn 3 daemons the first time, or combine: `-p 1` first, then `-n` on later invocations to add capacity on demand.
+- **Parallelism = N daemons.** The workflow's `batch: { mode: "pool", poolSize: 4 }` is for in-process pool callers (`runWorkflowBatch` → `runWorkflowPool`). Under **daemon** mode, each daemon is a single-worker process; the shared SQLite tasks queue + atomic claim distribute items.
 - **Rehire short-circuit still works.** Daemon handler is the same `onboardingWorkflow` handler; rehire detection in the `person-search` step returns early with `status: "Rehire"` before I-9/transaction. The daemon stays alive for the next email.
 - **Tracker byte-parity.** Per-item JSONL emissions are identical between daemon mode and in-process single mode — the daemon calls `runOneItem` under `withBatchLifecycle({ ownSigint: false })`, so instance/run IDs, `authTimings`, and step entries all flow through the same code path.
 
@@ -127,7 +126,8 @@ Visualforce table layout — `<tr>` with `<th class="labelCol">` label followed 
 
 - **Lesson maintenance rule:** Search this section plus CRM/UCPath/I9 system docs before adding onboarding lessons. Merge old retry/kernel/selector notes into the current daemon + kernel model instead of preserving obsolete `retryStep` history.
 - **No tracker-side cache/idempotency.** CRM extraction re-scrapes on retry, and UCPath Smart HR submit has no tracker-side duplicate guard. If duplicate submits become a real issue, add a live Smart HR transaction-list probe like separations; do not restore `stepCacheGet`, `hasRecentlySucceeded`, or `recordSuccess`.
-- **Daemon mode is the default CLI path.** `runOnboardingCli` enqueues into the shared SQLite tasks queue; each daemon is one worker with 3 browsers and 2 Duos. In-process pool mode remains for tests/programmatic callers only.
+- **2026-05-25: Public start path removed until a dashboard input run is added.** `npm run onboarding` is retired. Do not re-expose this workflow through package scripts; add an `InputRunPanel` parser if operators need direct onboarding starts again.
+- **Daemon mode is the queue path.** `runOnboardingCli` enqueues into the shared SQLite tasks queue for internal callers; each daemon is one worker with 3 browsers and 2 Duos. In-process pool mode remains for tests/programmatic callers only.
 - **Pool/batch lifecycle is kernel-owned.** `runWorkflowPool` runs inside `withBatchLifecycle`; each worker snapshots auth timings after awaiting every declared system page, then passes those timings into `runOneItem` so per-email rows show real auth durations.
 - **iDocs PDF download should use direct fetch.** Extract `h` and document count from the PDF.js iframe URL, then fetch `/iDocsForSalesforceDocumentServer?i=<idx>&h=<hash>` with `page.context().request.get(url)`. Do not drive the PDF.js UI for downloads.
 - **I-9 creation is real and search-first.** Search by SSN before creating; duplicate-profile dialogs require selecting the first row, clicking View/Edit, and navigating with `?saveAndContinue=true`. Wait for `/employee/profile/{id}` before reading `profileId`.

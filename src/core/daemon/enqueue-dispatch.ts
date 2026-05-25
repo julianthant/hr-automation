@@ -6,11 +6,11 @@
  * item so the dashboard queue populates instantly (before the daemon's
  * Duo completes).
  *
- * Per-workflow CLI adapters (`runSeparationCli`, etc.) have their own
- * hand-rolled `onPreEmitPending` bodies — they predate this dispatcher
- * and are kept as-is. This dispatcher is the "scalable" path: adding a
- * new workflow to the dashboard's Run panel requires only registering
- * it in `workflow-loaders.ts` plus a frontend registry entry; no
+ * Older per-workflow adapters (`runSeparationCli`, etc.) have their own
+ * hand-rolled `onPreEmitPending` bodies and are kept for internal callers.
+ * This dispatcher is the public dashboard path: adding a new input-run
+ * workflow requires registering it in `workflow-loaders.ts`, the shared
+ * dashboard run-surface allowlist, and the frontend input-run registry; no
  * workflow-specific backend wiring.
  */
 import { randomUUID } from "node:crypto";
@@ -71,7 +71,7 @@ export async function validateEnqueueRequest(
 /**
  * Shape tracker row `data` from an arbitrary input object. Only primitive
  * top-level fields are carried over — nested objects collapse to their
- * JSON form, which matches how legacy CLI adapters serialize identifiers
+ * JSON form, which matches how legacy adapters serialize identifiers
  * (e.g. separations stores `{docId}` as a string). Skips undefined/null.
  */
 function serializeInputForTracker(input: unknown): Record<string, string> {

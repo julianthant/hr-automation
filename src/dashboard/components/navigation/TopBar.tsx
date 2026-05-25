@@ -44,7 +44,7 @@ interface TopBarProps {
  * bar at the bottom right — the dashboard reserves its right edge for
  * "ambient state" indicators (clock, live), and the navbar for navigation.
  *
- * Quick-run enqueue (`QuickRunPanel`) lives in the QueuePanel footer. PDF upload
+ * Input-run enqueue (`InputRunPanel`) lives in the QueuePanel footer. PDF upload
  * (`TopBarRunButton`) and photo Capture (`TopBarCaptureButton`) mount in the queue
  * toolbar beside Retry when enabled for the active workflow.
  */

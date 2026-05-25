@@ -156,9 +156,8 @@ export const oathSignatureWorkflow = defineWorkflow({
 });
 
 /**
- * CLI adapter for legacy in-process runs. Single EID only — multi-EID
- * in-process batches aren't supported here (daemon mode covers that case).
- * Use `--direct` from the CLI to reach this path.
+ * Internal in-process adapter. Single EID only — multi-EID in-process batches
+ * aren't supported here (daemon mode covers that case).
  */
 export async function runOathSignature(input: OathSignatureInput): Promise<void> {
   try {
@@ -185,17 +184,16 @@ function buildOathSignaturePendingData(item: OathSignatureInput): Record<string,
 }
 
 /**
- * Daemon-mode CLI adapter.
+ * Internal daemon-mode adapter.
  *
- * One invocation can carry N EIDs — they enqueue 1:1 to the shared daemon
+ * One input batch can carry N EIDs — they enqueue 1:1 to the shared daemon
  * queue, and whichever alive daemon finishes its current item first claims
- * the next. With `--parallel K`, K daemons process in parallel.
+ * the next.
  *
- * Matches the shape of `runSeparationCli` / `runWorkStudyCli`:
+ * Matches the shape of the shared internal adapters:
  *   - Validates inputs via the workflow schema inside ensureDaemonsAndEnqueue.
  *   - Pre-emits `pending` tracker rows per EID so the dashboard Queue panel
  *     populates before any Duo clears.
- *   - `new` / `parallel` flags are forwarded to the spawn-plan math.
  */
 export const runOathSignatureCli = buildCliAdapter<[OathSignatureInput[]], OathSignatureInput>({
   workflow: oathSignatureWorkflow,

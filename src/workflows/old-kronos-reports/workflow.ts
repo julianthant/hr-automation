@@ -28,10 +28,11 @@ import type { KronosTrackerRow } from "./tracker.js";
 import { EmployeeIdSchema } from "./schema.js";
 
 /**
- * Module-scoped runtime state, initialized by `runParallelKronos` in `parallel.ts`
- * before `runWorkflowBatch` launches any workers. The kernel's per-item handler
- * reads from this state (tracker mutex, report-navigation mutex, date range,
- * reports dir) without needing each of them on the TData or in the Ctx.
+ * Module-scoped runtime state. Old Kronos is not exposed through the dashboard
+ * until a dashboard-owned runner can initialize this state before launching a
+ * kernel batch. The per-item handler reads from this state (tracker mutex,
+ * report-navigation mutex, date range, reports dir) without needing each of
+ * them on the TData or in the Ctx.
  *
  * Why module-scoped? Zod can't validate `Mutex` instances (and `schema.parse`
  * strips unknown keys), so the mutexes can't live on `KronosItemSchema`. Pool
@@ -49,7 +50,7 @@ interface KronosRuntime {
 
 let runtime: KronosRuntime | null = null;
 
-/** Called by `runParallelKronos` before launching the kernel batch. */
+/** Called by a future dashboard-owned runner before launching the kernel batch. */
 export function setKronosRuntime(r: KronosRuntime): void {
   runtime = r;
 }
@@ -62,7 +63,7 @@ export function clearKronosRuntime(): void {
 function requireRuntime(): KronosRuntime {
   if (!runtime) {
     throw new Error(
-      "Kronos runtime not initialized — runParallelKronos must call setKronosRuntime before the kernel launches",
+      "Kronos runtime not initialized — a dashboard-owned runner must call setKronosRuntime before the kernel launches",
     );
   }
   return runtime;
@@ -83,7 +84,7 @@ async function ensureDateRangeSet(page: Page, iframe: Frame): Promise<void> {
   dateRangeSet.add(page);
 }
 
-/** Kernel item shape — one entry per employee ID from batch.yaml. */
+/** Kernel item shape — one entry per employee ID. */
 export const KronosItemSchema = z.object({ employeeId: EmployeeIdSchema });
 export type KronosItem = z.infer<typeof KronosItemSchema>;
 
@@ -147,15 +148,15 @@ async function validateAndRecordTracker(
  * Kernel definition for the kronos-reports batch workflow.
  *
  * Pool mode: the kernel launches N workers (each with its own Session and
- * persistent UKG sessionDir — see parallel.ts's launchFn injection). All
- * workers pull from a shared queue; each item's handler runs the per-employee
- * UKG pipeline with `ctx.retry` around the flaky Reports navigation.
+ * persistent UKG sessionDir). All workers pull from a shared queue; each
+ * item's handler runs the per-employee UKG pipeline with `ctx.retry` around the
+ * flaky Reports navigation.
  *
- * Mutex + date-range state lives in module-scoped `runtime` (initialized by
- * runParallelKronos) — Zod can't validate `Mutex` so it can't ride on TData.
+ * Mutex + date-range state lives in module-scoped `runtime` — Zod can't
+ * validate `Mutex` so it can't ride on TData.
  *
- * `preEmitPending: true` pairs with the CLI adapter's `onPreEmitPending`
- * callback so the dashboard shows the full employee queue before auth finishes.
+ * `preEmitPending: true` is kept for a future dashboard-owned batch runner so
+ * the dashboard can show the full employee queue before auth finishes.
  *
  * **Name is `"kronos-reports"`** (not `"old-kronos-reports"`) to match the
  * existing dashboard registration and JSONL filenames from the legacy era.
@@ -173,9 +174,10 @@ export const kronosReportsWorkflow = defineWorkflow({
         const ok = await loginToUKG(page, instance, context?.abortSignal);
         if (!ok) throw new Error("UKG authentication failed");
       },
-      // sessionDir intentionally omitted here — parallel.ts injects a per-worker
-      // sessionDir via opts.launchFn so each worker gets its own Playwright
-      // persistent context (workers sharing one dir would conflict on the lock).
+      // sessionDir intentionally omitted here. A future dashboard-owned runner
+      // should inject a per-worker sessionDir via opts.launchFn so each worker
+      // gets its own Playwright persistent context (workers sharing one dir
+      // would conflict on the lock).
     },
   ],
   authSteps: false,

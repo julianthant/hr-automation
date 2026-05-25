@@ -2,7 +2,7 @@ import { createContext, useContext, type ReactNode } from "react";
 
 /**
  * When non-null, the queue is in **batch queue mode** scoped to this id
- * (OCR prep `runId`, or a dashboard multi-enqueue batch UUID). Quick run,
+ * (OCR prep `runId`, or a dashboard multi-enqueue batch UUID). Input run,
  * retry, and run-with-data pick this up so new work stays in the batch.
  */
 const BatchQueueParentRunIdContext = createContext<string | null>(null);

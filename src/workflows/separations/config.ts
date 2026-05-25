@@ -1,10 +1,4 @@
-import { join } from "path";
-import { fileURLToPath } from "url";
-import { dirname } from "path";
 import { KUALI_SPACE_URL as _KUALI_SPACE_URL, NEW_KRONOS_URL as _NEW_KRONOS_URL, SCREEN } from "../../config.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 // ─── Re-exported from central config ────────────────────────
 
@@ -19,9 +13,6 @@ export const SCREEN_WIDTH = SCREEN.width;
 export const SCREEN_HEIGHT = SCREEN.height;
 
 // ─── Workflow-specific values ────────────────────────────────
-
-/** Batch file containing Kuali document numbers. */
-export const BATCH_FILE = join(__dirname, "batch.yaml");
 
 /** UCPath termination templates. */
 export const UC_VOL_TERM_TEMPLATE = "UC_VOL_TERM";

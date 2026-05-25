@@ -56,7 +56,7 @@ export const WORKFLOW_LOADERS: Record<string, () => Promise<AnyRegisteredWorkflo
 /**
  * Resolve a workflow name to its registered kernel workflow. Returns
  * `null` for unknown names — callers decide whether to surface a 400 or
- * a CLI exit 1.
+ * an internal dispatch error.
  */
 export async function loadWorkflow(name: string): Promise<AnyRegisteredWorkflow | null> {
   const loader = WORKFLOW_LOADERS[name];

@@ -1,14 +1,19 @@
+import { DASHBOARD_INPUT_RUN_WORKFLOWS } from "../../domain/dashboard-run-surfaces.js";
+
+type DashboardInputRunWorkflow = (typeof DASHBOARD_INPUT_RUN_WORKFLOWS)[number];
+
 /**
- * Quick-run registry — maps a workflow name to a text-box parser + UI
- * hints for the QuickRunPanel's top-of-queue "Run" row. Workflows not in
- * this registry have their Run row hidden.
+ * Input-run registry — maps a workflow name to a text-box parser + UI
+ * hints for the InputRunPanel's top-of-queue "Run" row. Workflows not in
+ * this registry do not get a dashboard input-run affordance.
  *
  * Adding a workflow:
  *   1. Register its backend loader in `src/core/workflow-loaders.ts`
  *      (the dashboard's POST /api/enqueue uses that).
  *   2. Add an entry here with a `placeholder` and a `parseInput` that
  *      maps the operator's free-form text into typed workflow inputs.
- *   3. That's it — the QuickRunPanel will appear automatically.
+ *   3. Add the workflow name to `DASHBOARD_INPUT_RUN_WORKFLOWS`.
+ *      That's it — the InputRunPanel will appear automatically.
  *
  * Input-format conventions:
  *   - Comma-separated single-field workflows (separations / onboarding /
@@ -21,17 +26,17 @@
  *     "10877384 04/23/2026, 10877384 04/24/2026".
  */
 
-export interface QuickRunParseOk {
+export interface InputRunParseOk {
   ok: true;
   inputs: Array<Record<string, unknown>>;
 }
-export interface QuickRunParseErr {
+export interface InputRunParseErr {
   ok: false;
   error: string;
 }
-export type QuickRunParseResult = QuickRunParseOk | QuickRunParseErr;
+export type InputRunParseResult = InputRunParseOk | InputRunParseErr;
 
-export interface QuickRunConfig {
+export interface InputRunConfig {
   /** Text shown inside the text box when it's empty. */
   placeholder: string;
   /**
@@ -40,12 +45,12 @@ export interface QuickRunConfig {
    * clear error message on invalid input — the message surfaces
    * verbatim in the toast.
    */
-  parseInput: (raw: string) => QuickRunParseResult;
+  parseInput: (raw: string) => InputRunParseResult;
   /**
-   * Optional: when set, clicking Run with an empty text box opens a
+   * Optional: when set, clicking Run with an empty text box opens the
    * RunModal instead of being a no-op. Use for workflows whose Run
-   * affordance has both a quick-input path (typed IDs) and a
-   * file-upload path (e.g. PDF → OCR → fan-out).
+   * affordance has both an input-run path (typed IDs) and an
+   * upload-run path (e.g. PDF → OCR → fan-out).
    */
   runEmptyAction?: {
     /** Pass-through to RunModal's `workflow` prop. */
@@ -66,7 +71,7 @@ export function parseCommaSeparated(
   fieldName: string,
   validate?: { regex: RegExp; message: string },
 ) {
-  return (raw: string): QuickRunParseResult => {
+  return (raw: string): InputRunParseResult => {
     const pieces = raw
       .split(",")
       .map((s) => s.trim())
@@ -96,7 +101,7 @@ export function parseCommaSeparated(
  * drops empties.
  */
 export function parseSemicolonSeparated(fieldName: string) {
-  return (raw: string): QuickRunParseResult => {
+  return (raw: string): InputRunParseResult => {
     const pieces = raw
       .split(";")
       .map((s) => s.trim())
@@ -111,7 +116,7 @@ export function parseSemicolonSeparated(fieldName: string) {
   };
 }
 
-export function parseActiveCheckInputs(raw: string): QuickRunParseResult {
+export function parseActiveCheckInputs(raw: string): InputRunParseResult {
   const pieces = raw
     .split(";")
     .map((s) => s.trim())
@@ -128,7 +133,7 @@ export function parseActiveCheckInputs(raw: string): QuickRunParseResult {
   };
 }
 
-export const QUICK_RUN_REGISTRY: Record<string, QuickRunConfig> = {
+export const INPUT_RUN_REGISTRY: Record<DashboardInputRunWorkflow, InputRunConfig> = {
   separations: {
     placeholder: "Enter doc IDs, comma-separated (e.g. 3930, 3929)",
     parseInput: parseCommaSeparated("docId"),
@@ -158,6 +163,6 @@ export const QUICK_RUN_REGISTRY: Record<string, QuickRunConfig> = {
   },
 };
 
-export function getQuickRunConfig(workflow: string): QuickRunConfig | undefined {
-  return QUICK_RUN_REGISTRY[workflow];
+export function getInputRunConfig(workflow: string): InputRunConfig | undefined {
+  return INPUT_RUN_REGISTRY[workflow as DashboardInputRunWorkflow];
 }

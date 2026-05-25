@@ -1,6 +1,6 @@
 # CRM Doc Download Workflow
 
-Downloads **ACT CRM iDocs PDFs** for an onboarding record: search the CRM onboarding list, open the latest row, then download configured documents to a folder on disk. Invoked standalone via `npm run crm-doc-download` (positional emails → daemon queue) or **as a delegation target** from **onboarding** (and any other workflow that enqueues `crm-doc-download` with `originWorkflow` / parent lineage fields).
+Downloads **ACT CRM iDocs PDFs** for an onboarding record: search the CRM onboarding list, open the latest row, then download configured documents to a folder on disk. Invoked from the dashboard input-run surface (EIDs) or **as a delegation target** from **onboarding** (and any other workflow that enqueues `crm-doc-download` with `originWorkflow` / parent lineage fields).
 
 **Kernel-based** — `crmDocDownloadWorkflow` in `workflow.ts`; CRM-only auth; pool batch mode.
 
@@ -35,14 +35,14 @@ This workflow touches **crm** only.
 1. **`search-record`** — `searchCrmOnboardingRecords` with the resolved query (email or emplId), then `selectLatestResult` (retries wired via `ctx.retry`).
 2. **`download`** — `downloadCrmIdocsDocuments` into `resolveCrmDocDownloadFolder` (default under `~/Downloads/onboarding/` when names are present; see `workflow.ts`). Updates `pdfDownload` / `pdfFolder` on the tracker row.
 
-## CLI
+## Dashboard Input Run
 
 ```bash
-npm run crm-doc-download <email> [email...] [--new] [--parallel N]
-npm run crm-doc-download:stop
+InputRunPanel → /api/enqueue
+  body: { workflow: "crm-doc-download", inputs: [{ emplId }] }
 ```
 
-Daemon spawn/enqueue matches other converted workflows (`src/core/cli-adapter.ts` + `cli-daemon.ts` registration).
+Daemon spawn/enqueue matches other dashboard input-run workflows (`src/core/daemon/enqueue-dispatch.ts` + `cli-daemon.ts` registration).
 
 ## Inputs and outputs
 
@@ -55,9 +55,9 @@ When **onboarding** (or another parent) runs this workflow in-process or via que
 
 ## Operator notes
 
-- **`onPreEmitFailed`** on the CLI adapter writes a failed tracker row if daemon spawn/enqueue dies before work starts (see `workflow.ts`).
+- **`onPreEmitFailed`** on the adapter writes a failed tracker row if daemon spawn/enqueue dies before work starts (see `workflow.ts`).
 - For CRM system quirks (frames, search behavior), read `src/systems/crm/CLAUDE.md` before changing steps.
 
 ## Lessons Learned
 
-*(None yet.)*
+- **2026-05-25: Dashboard input run is the public start path.** `npm run crm-doc-download` is retired; typed starts belong in `InputRunPanel` and `/api/enqueue`.

@@ -2,43 +2,32 @@
 
 Extended guides extracted from `src/workflows/CLAUDE.md`. See that file for orientation, archetype vocabulary, and the existing-workflows table.
 
-## Daemon-mode conversion
+## Dashboard input-run conversion
 
-As of 2026-04-22, CLI-driven workflows should default to **daemon mode** (see `src/core/CLAUDE.md`). This avoids re-Duo per invocation and enables shared-queue load balancing across multiple alive daemons.
+As of 2026-05-25, operator workflow starts are dashboard-only. Typed starts use the dashboard input-run surface (`InputRunPanel` → `/api/enqueue`), and file/PDF starts use upload runs (`RunModal` → workflow-specific upload endpoints). Do not add new `npm run <workflow>` launch commands or YAML/batch-file launch paths.
 
-As of 2026-05-16, use `buildCliAdapter` from `src/core/cli-adapter.ts` for CLI-driven daemon adapters. It centralizes the `ensureDaemonsAndEnqueue` call, pre-emits pending tracker rows with operator-subject fields, and exposes narrow hooks for workflow-specific shapes:
+The reusable enqueue mechanics still live in `buildCliAdapter` / `ensureDaemonsAndEnqueue`; the public operator entry is now the dashboard. `src/core/daemon/enqueue-dispatch.ts` centralizes the dashboard HTTP path and pre-emits pending tracker rows with operator-subject fields.
 
 - `buildPendingData(input, itemId)` — required pending-row fields.
 - `pendingExtras(input, itemId, runId, parentRunId)` — optional per-row fields such as batch display ordinals.
 - `onPreEmitFailed(input, runId, error, itemId)` — optional failure cleanup for rows that were pre-emitted before daemon spawn/enqueue failed.
 
-Converting a workflow is mechanical — five edits:
+Adding a dashboard input-run workflow is mechanical:
 
-1. **Add a `runXxxCli` adapter** to `workflow.ts` using `buildCliAdapter`:
-   ```ts
-   export const runXxxCli = buildCliAdapter<[string[]], XxxInput>({
-     workflow: xxxWorkflow,
-     emptyMessage: "runXxxCli: no inputs provided",
-     buildInputs: (ids) => ids.map((id) => ({ id })),
-     deriveItemId: (input) => input.id,
-     buildPendingData: (input) => ({ id: input.id }),
-   });
-   ```
-   Do **not** remove the existing `runXxx` / `runXxxBatch` functions — they stay for in-process use (tests, composed workflows that spawn workflows from inside their handler).
-2. **Re-export `runXxxCli` from the workflow's `index.ts`** barrel so the CLI and `cli-daemon.ts` can import it.
-3. **Register the workflow in `src/cli-daemon.ts`**'s `WORKFLOWS` map (lazy-import loader). The daemon process exec's `tsx src/cli-daemon.ts <workflow>` — this map is how it finds the `defineWorkflow` result.
-4. **Update the workflow's Commander subcommand in `src/cli.ts`** to call `runXxxCli` by default and expose `-n, --new` and `-p, --parallel <count>` options.
-5. **Add `npm run <workflow>:stop` script** in `package.json` (thin wrapper over `daemon-stop` from `src/cli.ts`).
+1. Register the workflow in `src/core/workflow-loaders.ts` so daemon spawn and `/api/enqueue` can resolve it.
+2. Add the workflow to `DASHBOARD_INPUT_RUN_WORKFLOWS` in `src/domain/dashboard-run-surfaces.ts`.
+3. Add parser/placeholder config in `src/dashboard/lib/input-run-registry.ts`.
+4. Add or preserve a `npm run <workflow>:stop` script only if the workflow owns long-lived daemons.
 
 Workflows where daemon mode is **not** appropriate (do NOT convert):
 - **Non-CLI workflows** like `sharepoint-download` (dashboard button, fire-and-forget `runWorkflow`) — daemon mode solves "avoid re-Duo on repeated CLI runs," which doesn't apply when the dashboard holds one long-lived session.
 - **Workflows invoked programmatically from other workflows** — daemon mode is client/daemon IPC; an in-process caller should keep using `runWorkflow` / `runWorkflowBatch` directly.
 
-Daemon-capable workflows (lazy-imported in `src/core/workflow-loaders.ts` for daemon spawn and dashboard `/api/enqueue`): `separations`, `work-study`, `eid-lookup`, `onboarding`, **`crm-doc-download`**, `oath-signature`, `emergency-contact`, `oath-upload`, `active-check`.
+Daemon-capable workflows (lazy-imported in `src/core/workflow-loaders.ts` for daemon spawn and dashboard `/api/enqueue` internals): `separations`, `work-study`, `eid-lookup`, `onboarding`, **`crm-doc-download`**, `oath-signature`, `emergency-contact`, `oath-upload`, `active-check`.
 
-**Not** in `WORKFLOW_LOADERS`: **`old-kronos-reports`** (the `npm run kronos` / `runParallelKronos` path is pool-only in-process + not wired to daemon spawn). No behavior change intended for converted workflows — daemon mode wraps the same `runOneItem` kernel primitive, so per-item tracker output matches the in-process path.
+**Not** in `WORKFLOW_LOADERS`: **`old-kronos-reports`**. Its old batch-file adapter was removed; it is not a valid dashboard run surface.
 
-**Emergency-contact note** — default `npm run emergency-contact` uses `runEmergencyContactCli` (`buildCliAdapter` in `workflow.ts`): load YAML + roster preflight in-process, then enqueue each record with `deriveItemId: recordItemId` (`p{NN}-{emplId}`) because the EID lives under `input.employee.employeeId`, not a top-level field. In-process batch without daemon remains `runEmergencyContact` → `runWorkflowBatch`.
+**Emergency-contact note** — operator starts go through the dashboard upload run (`RunModal` → `/api/ocr/prepare` with `formType: "emergency-contact"`). Do not expose YAML batch input as a package script, dashboard input-run option, or exported workflow helper.
 
 **Onboarding note** — one alive daemon = one single-worker session with 3 browsers (CRM + UCPath + I9) and 2 Duos (I9 is SSO no-2FA). Heaviest per-daemon cost of any converted workflow, but biggest savings per repeat invocation (CRM Duo alone is ~30-60s). Daemon-mode parallelism comes from running N daemons (`-p N`), each a single worker claiming off the shared SQLite tasks queue.
 

@@ -27,47 +27,20 @@ Before non-trivial tasks:
 ## Commands
 
 ```bash
-# Onboarding (daemon mode by default)
-npm run onboarding <email> [<email> ...]     # Enqueue each email as a separate queue item; daemon processes one at a time. Use `-p N` to spawn N daemons for parallel fan-out.
-npm run onboarding:stop                      # Soft-stop all daemons
-
-# Separations (daemon mode by default)
-npm run separation <docId> [docId ...] # Enqueue to an alive daemon or spawn one
-npm run separation:stop                # Soft-stop all daemons (drain in-flight)
-
-# Kronos Reports
-npm run kronos                         # Download Time Detail PDFs (kernel pool mode, default 4 workers — edit DEFAULT_WORKERS in config.ts to change)
-
-# Work Study (daemon mode by default)
-npm run work-study <emplId> <date>     # Enqueue to an alive daemon or spawn one
-npm run work-study:stop                # Soft-stop all daemons
-
-# Emergency Contact (daemon mode by default)
-npm run emergency-contact <batchYaml>      # Load YAML → preflight → enqueue each record to an alive daemon
-npm run emergency-contact:stop             # Soft-stop all daemons
-# Flags: --roster-url "<sp-url>" | --roster-path <xlsx> | --ignore-roster-mismatch | -p <N> | -n
-
-# EID Lookup (daemon mode by default)
-npm run eid-lookup "Last, First Middle"    # Enqueue to an alive daemon or spawn one (CRM-on variant)
-npm run eid-lookup:stop                    # Soft-stop all daemons
-
-# Active Check (daemon mode by default)
-npm run active-check "Last, First Middle"  # Check UCPath Person Org Summary active status by name
-npm run active-check 10873698               # Same check by EID (8-digit)
-npm run active-check:stop                   # Soft-stop all daemons
-
-# Oath Signature (daemon mode by default)
-npm run oath-signature <emplId> [emplId ...]     # Enqueue to an alive daemon or spawn one (UCPath only)
-npm run oath-signature:stop                      # Soft-stop all daemons
-
-# Oath Upload (daemon mode by default)
-npm run oath-upload <pdfPath> [pdfPath ...]      # Upload paper-oath PDF; OCR → fan out signatures → file HR ticket
-npm run oath-upload:stop                         # Soft-stop all daemons
-
-# Dashboard (separate terminal — auto-updates as workflows run)
+# Dashboard (canonical workflow launch surface)
 npm run dashboard            # SSE backend (:3838) + Vite dev (:5173) — open http://localhost:5173
 npm run dashboard:watch      # Same as `dashboard`, but tsx watch restarts the SSE backend process on src/ changes (full restart, not HMR)
 npm run dashboard:prod       # Serve pre-built dashboard from SSE only
+
+# Daemon stops (lifecycle only; workflow starts happen in the dashboard)
+npm run onboarding:stop
+npm run separation:stop
+npm run work-study:stop
+npm run emergency-contact:stop
+npm run eid-lookup:stop
+npm run active-check:stop
+npm run oath-signature:stop
+npm run oath-upload:stop
 
 # Export / Utilities
 tsx --env-file=.env src/cli.ts export <workflow>   # Dump JSONL tracker to xlsx
@@ -86,7 +59,7 @@ npm run test:architecture                          # Static architecture/convent
 npm run build:dashboard                            # Single-file dashboard build
 ```
 
-All runtime scripts use `tsx --env-file=.env`. Fallback if `npm run` is blocked: `./node_modules/.bin/tsx --env-file=.env src/cli.ts <command>`; if tsx binary is blocked: `node --import tsx/esm --env-file=.env src/cli.ts <command>`.
+All runtime scripts use `tsx --env-file=.env`. Workflow starts are dashboard-only: use an upload run (`RunModal`) for PDF/file-backed workflows or an input run (`InputRunPanel`) for typed IDs/names. Do not add new `npm run <workflow>` launch scripts or revive YAML/batch-file launch paths.
 
 ## Architecture
 
@@ -148,7 +121,7 @@ Duo MFA is manual — the automation pauses and polls until you approve on your 
 
 ## Dashboard
 
-`npm run dashboard` starts SSE backend (`:3838`) + Vite frontend (`:5173`). Observation-only: workflows launched via npm scripts, dashboard displays live queue and logs.
+`npm run dashboard` starts SSE backend (`:3838`) + Vite frontend (`:5173`). Workflow starts are centralized here: upload runs use `RunModal` / `RUN_MODAL_REGISTRY`, and typed input runs use `InputRunPanel` / `INPUT_RUN_REGISTRY`.
 
 Workflows emit JSONL to `.tracker/{workflow}-{YYYY-MM-DD}.jsonl`; SSE server streams to React SPA. All UI metadata (label, steps, detailFields) comes from server-side kernel registry — no frontend edits needed when adding workflows.
 

@@ -21,7 +21,8 @@ export const WORK_STUDY_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy =
  * Kernel definition for the work-study PayPath workflow.
  *
  * Exports a RegisteredWorkflow. Run it via `runWorkflow(workStudyWorkflow, input)`
- * or invoke the CLI adapter `runWorkStudy` below.
+ * in tests/internal scripts, or expose it through a dashboard input-run parser
+ * before adding an operator start path.
  */
 export const workStudyWorkflow = defineWorkflow({
   name: "work-study",
@@ -80,7 +81,7 @@ export const workStudyWorkflow = defineWorkflow({
 });
 
 /**
- * CLI adapter. Real runs delegate to the kernel.
+ * Internal adapter. Real runs delegate to the kernel.
  */
 export async function runWorkStudy(input: WorkStudyInput): Promise<void> {
   try {
@@ -93,16 +94,13 @@ export async function runWorkStudy(input: WorkStudyInput): Promise<void> {
 }
 
 /**
- * Daemon-mode CLI adapter. Dispatches a single work-study item through the
+ * Internal daemon-mode adapter. Dispatches a single work-study item through the
  * shared daemon queue instead of running an in-process single-item kernel
  * call: first call spawns a detached daemon (1 Duo), subsequent calls
  * enqueue + wake alive daemons.
  *
- * See `src/core/daemon-client.ts::ensureDaemonsAndEnqueue` for flag
- * semantics and `src/workflows/work-study/CLAUDE.md` ("Daemon mode") for
- * user-facing docs. `runWorkStudy` above remains untouched so tests and
- * scripting can still run the work-study workflow directly without the
- * daemon.
+ * `runWorkStudy` above remains untouched so tests and internal scripts can
+ * still run the work-study workflow directly without the daemon.
  */
 export const runWorkStudyCli = buildCliAdapter<[string, string], WorkStudyInput>({
   workflow: workStudyWorkflow,

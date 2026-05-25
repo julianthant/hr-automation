@@ -119,7 +119,7 @@ All production workflows are kernel-based as of 2026-04-17. New workflows must f
 ```
 src/workflows/{name}/
   schema.ts      # Zod input validation + any data-transform helpers
-  workflow.ts    # defineWorkflow(...) + CLI adapter (runMyWorkflow)
+  workflow.ts    # defineWorkflow(...) + optional internal adapter
   enter.ts       # ActionPlan builder (UCPath workflows) — optional
   config.ts      # Workflow-specific constants
   index.ts       # Barrel exports
@@ -195,13 +195,17 @@ Before adding a helper in a workflow folder, check whether the same behavior alr
 
 If the helper would be useful to another workflow, add or extend the shared module instead. Keep compatibility exports only as migration shims.
 
-## CLI Integration
+## Dashboard Start Integration
 
-Add a Commander subcommand to `src/cli.ts` invoking your workflow's CLI adapter. Add the normal and `:stop` scripts to `package.json`.
+Do not add Commander subcommands or `npm run <workflow>` launch scripts. Public operator starts belong in the dashboard:
+
+- **Input runs:** add the workflow to `DASHBOARD_INPUT_RUN_WORKFLOWS`, add parser config in `src/dashboard/lib/input-run-registry.ts`, and ensure `src/core/workflow-loaders.ts` can resolve it for `/api/enqueue`.
+- **Upload runs:** add the workflow to `DASHBOARD_UPLOAD_RUN_WORKFLOWS` and configure `src/dashboard/lib/run-modal-registry.ts`.
+- **Daemon lifecycle:** add a `:stop` script only when the workflow owns long-lived daemons.
 
 ## Daemon-mode conversion
 
-Use `buildCliAdapter` from `src/core/cli-adapter.ts` for all new daemon CLI adapters. Daemon-capable workflows (in `src/core/workflow-loaders.ts`): `separations`, `work-study`, `eid-lookup`, `onboarding`, `crm-doc-download`, `oath-signature`, `emergency-contact`, `oath-upload`, `active-check`. **Not** daemon-capable: `old-kronos-reports`, `sharepoint-download`, `ocr`. Do NOT convert in-process callers (workflows spawned from inside other workflow handlers).
+Use the dashboard enqueue path for new daemon-capable workflow starts. Daemon-capable workflows (in `src/core/workflow-loaders.ts`): `separations`, `work-study`, `eid-lookup`, `onboarding`, `crm-doc-download`, `oath-signature`, `emergency-contact`, `oath-upload`, `active-check`. **Not** daemon-capable: `old-kronos-reports`, `sharepoint-download`, `ocr`. Do NOT convert in-process callers (workflows spawned from inside other workflow handlers).
 
 → Full guide: `docs/engineering/workflow-patterns.md#daemon-mode-conversion`
 
@@ -213,20 +217,20 @@ The dashboard's "Edit Data" tab + kernel `prefilledData` channel let an operator
 
 ## Existing Workflows
 
-Representative CLI workflows (flags and full command list: `src/cli.ts`).
+Representative workflows. Operator starts are dashboard-only: input runs use `InputRunPanel` / `/api/enqueue`, upload runs use `RunModal` / upload endpoints. CLI commands are lifecycle/support only.
 
-| Workflow | CLI | Systems | Kernel? | Parallelism |
+| Workflow | Dashboard start surface | Systems | Kernel? | Parallelism |
 |---|---|---|---|---|
-| onboarding | `npm run onboarding` (positional emails; `-n` / `-p` only) | CRM, UCPath, I9 | Yes | Single-worker daemon per spawn; scale with N daemons (`-p N`) on the shared SQLite queue |
-| crm-doc-download | `npm run crm-doc-download` (emails; `-n` / `-p`) | CRM | Yes | Pool batch config; daemon mode reuses CRM like other loaders |
-| separations | `npm run separation` (`-n` / `-p`) | Kuali, Old Kronos, New Kronos, UCPath | Yes (per-doc handler; daemon default) | 4 tiled browsers, **`authChain: "parallel-staggered"`** (Duos overlap — see `separations/workflow.ts`); `ctx.parallel` Phase-1 4-way fan-out |
-| eid-lookup | `npm run eid-lookup` (`-n` / `-p`) | UCPath + CRM | Yes | **`batch.mode: "shared-context-pool"`** — one Duo per system per batch, N worker tabs |
-| active-check | `npm run active-check` (`-n` / `-p`) | UCPath | Yes | Same shared-context pool pattern as eid-lookup |
-| old-kronos-reports | `npm run kronos` (**`--workers N`** overrides pool size) | UKG | Yes | Pool mode (N workers); **not** in `WORKFLOW_LOADERS` |
-| work-study | `npm run work-study` (`-n` / `-p`) | UCPath | Yes | Single |
-| emergency-contact | `npm run emergency-contact` | UCPath | Yes (batch, `preEmitPending`) | Single browser, one record at a time; daemon via `runEmergencyContactCli` |
-| oath-signature | `npm run oath-signature <emplId...>` | UCPath | Yes (daemon default; sequential batch + `preEmitPending`) | Single browser; N daemons via `-p N` |
-| oath-upload | `npm run oath-upload` | ServiceNow + delegated OCR / oath-signature | Yes | Sequential steps + child-run waits; daemon default |
+| onboarding | Not currently exposed in input-run registry | CRM, UCPath, I9 | Yes | Single-worker daemon per spawn on the shared SQLite queue |
+| crm-doc-download | Input run (EIDs) | CRM | Yes | Pool batch config; daemon mode reuses CRM like other loaders |
+| separations | Input run (doc IDs) | Kuali, Old Kronos, New Kronos, UCPath | Yes (per-doc handler; daemon default) | 4 tiled browsers, **`authChain: "parallel-staggered"`** (Duos overlap — see `separations/workflow.ts`); `ctx.parallel` Phase-1 4-way fan-out |
+| eid-lookup | Input run (names) | UCPath + CRM | Yes | **`batch.mode: "shared-context-pool"`** — one Duo per system per batch, N worker tabs |
+| active-check | Input run (names or EIDs) | UCPath | Yes | Same shared-context pool pattern as eid-lookup |
+| old-kronos-reports | Not exposed; retired batch-file adapter is not a valid dashboard run surface | UKG | Yes | Pool mode (N workers); **not** in `WORKFLOW_LOADERS` |
+| work-study | Not currently exposed in input-run registry | UCPath | Yes | Single |
+| emergency-contact | Upload run through OCR prep | UCPath | Yes (batch, `preEmitPending`) | Single browser, one record at a time; daemon via OCR approval |
+| oath-signature | Input run (EIDs) or upload run through OCR prep | UCPath | Yes (daemon default; sequential batch + `preEmitPending`) | Single browser |
+| oath-upload | Upload run | ServiceNow + delegated OCR / oath-signature | Yes | Sequential steps + child-run waits; daemon default |
 | sharepoint-download | _Dashboard button_ (fire-and-forget) — canonical entry is `src/workflows/sharepoint-download/`; legacy wrapper `src/workflows/emergency-contact/scripts/download-roster.ts` still exists for direct CLI invocation | SharePoint | Yes (single-item, module-level URL injection) | Single (headed browser, gated by Duo) |
 | ocr | _Dashboard Run button_ (HTTP only — no CLI, no daemon) | _none_ | Yes (`systems: []`, `authSteps: false`) | In-process (single fire-and-forget via `/api/ocr/prepare`) |
 
@@ -241,5 +245,6 @@ Kernel workflow (since 2026-04-22), but with two non-standard wrinkles documente
 ## Lessons Learned
 
 - **2026-04-10: Batch mode pattern for sequential processing** — For workflows that reuse browser sessions across multiple items (e.g. separations, emergency-contact), the pattern is: (1) pre-emit `pending` for all items with pre-assigned `runId`s (kernel: `preEmitPending: true` + `onPreEmitPending` callback), (2) auth once, (3) process each item sequentially. The kernel's `runWorkflowBatch` does this declaratively; legacy workflows wire `preAssignedRunId` into `withTrackedWorkflow` manually.
-- **2026-05-16: `buildCliAdapter` is the canonical daemon CLI pattern.** Workflow CLI adapters now use `buildCliAdapter` instead of hand-rolled `ensureDaemonsAndEnqueue` calls when their job is "shape CLI args → enqueue typed inputs → pre-emit pending rows." Keep workflow-specific pending data in small `buildPendingData` helpers when it is reused by in-process batch paths (emergency-contact is the current example). Separations previously rebuilt its adapter per call to dodge a TDZ cycle; the safe hoist required exporting CLI runners from `src/workflows/separations/index.ts` directly instead of re-exporting them from `workflow.ts`.
+- **2026-05-25: Dashboard run surfaces are the public start paths.** New operator starts must be either input runs or upload runs. Do not add `npm run <workflow>` launch scripts or YAML/batch-file starts; keep CLI adapters internal when tests or composed workflows still need them.
+- **2026-05-16: `buildCliAdapter` remains the internal daemon adapter pattern.** Existing adapters use `buildCliAdapter` instead of hand-rolled `ensureDaemonsAndEnqueue` calls when their job is "shape inputs → enqueue typed items → pre-emit pending rows." Keep workflow-specific pending data in small `buildPendingData` helpers when it is reused by in-process batch paths (emergency-contact is the current example). Separations previously rebuilt its adapter per call to dodge a TDZ cycle; the safe hoist required exporting CLI runners from `src/workflows/separations/index.ts` directly instead of re-exporting them from `workflow.ts`.
 - **`ensurePageHealthy` is gone.** Pre-kernel workflows used it before each phase; removed 2026-04-18 when all workflows moved to the kernel. Use `ctx.session.healthCheck(id)` for an explicit mid-handler probe if needed.

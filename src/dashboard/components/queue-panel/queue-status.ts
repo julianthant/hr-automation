@@ -11,6 +11,15 @@ export function isQueueLikeEntry(entry: TrackerEntry): boolean {
   return entry.status === "pending" || entry.status === "skipped" || isAuthRunningEntry(entry);
 }
 
+/**
+ * Under the new approval contract (2026-05-25) the OCR `awaiting-approval`
+ * row carries `status="running"`, so `entry.status === "running"` already
+ * pulls it into the "Active" pill bucket. The legacy `isOcrAwaitingApprovalEntry`
+ * branches below remain as belt-and-suspenders — they still match the new
+ * shape (running + awaiting-approval) and were previously needed for the
+ * old `status="done" step="awaiting-approval"` shape that the orchestrator
+ * no longer emits.
+ */
 export function entryMatchesStatusFilter(entry: TrackerEntry, statusFilter: string | null): boolean {
   if (!statusFilter) return true;
   if (statusFilter === "pending") return isQueueLikeEntry(entry);

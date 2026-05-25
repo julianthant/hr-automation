@@ -178,3 +178,13 @@ export {
   type OcrLookupKind,
 } from "./eid-lookup-results.js";
 export { resolveParentSubject } from "./parent-subject.js";
+export {
+  subscribeToApproval,
+  emitApproved,
+  emitDiscarded,
+  OcrDiscardedError,
+  OcrApprovalCancelledError,
+  type ApprovalKey,
+  type ApprovedPayload,
+  type SubscribeOpts,
+} from "./approval-signal.js";
