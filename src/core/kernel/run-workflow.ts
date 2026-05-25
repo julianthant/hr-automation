@@ -6,7 +6,7 @@ import { withTrackedWorkflow, emitScreenshotEvent } from '../../tracker/jsonl.js
 import { makeScreenshotFn } from './screenshot.js'
 import { withLogContext } from '../../utils/log.js'
 import { registerInProcessRun, unregisterInProcessRun } from '../daemon/in-process-runs.js'
-import { deriveRowArchetype } from '../../domain/row-archetype.js'
+import { deriveRowArchetype, resolveArchetype } from '../../domain/row-archetype.js'
 import { runWorkflowHandler } from './handler-runner.js'
 import {
   splitPrefilled,
@@ -248,7 +248,10 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
         initialData: Object.keys(seedData).length > 0 ? seedData : undefined,
         ...(inputForRow ? { input: inputForRow } : {}),
         ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
-        archetype: deriveRowArchetype(wf.archetype, opts.parentRunId),
+        archetype: deriveRowArchetype(
+          resolveArchetype(wf.config, handlerInput),
+          opts.parentRunId,
+        ),
       },
     )
   }, opts.trackerDir)

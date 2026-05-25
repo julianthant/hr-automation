@@ -16,7 +16,7 @@ import {
   type StampedData,
 } from '../../tracker/jsonl.js'
 import { buildHttpPendingData, buildTrackerDataForInput } from './enqueue-dispatch.js'
-import { deriveRowArchetype } from '../../domain/row-archetype.js'
+import { deriveRowArchetype, resolveArchetype } from '../../domain/row-archetype.js'
 import { isStateDbReady, openStateDb } from '../../tracker/state/db.js'
 import type { ControlTaskStore } from '../task-store/index.js'
 import { emitItemCancelled } from '../../tracker/session-events.js'
@@ -37,7 +37,10 @@ export function buildShutdownTrackerData<TData, TSteps extends readonly string[]
       }`,
     )
     const data = buildTrackerDataForInput(input)
-    data.archetype = deriveRowArchetype(wf.archetype, parentRunId)
+    data.archetype = deriveRowArchetype(
+      resolveArchetype(wf.config, input as TData),
+      parentRunId,
+    )
     return data
   }
 }

@@ -62,7 +62,7 @@ import type {
 } from "./kernel/types.js"
 import { runWorkflow } from "./kernel/run-workflow.js"
 import type { RowArchetype } from "../domain/row-archetype.js"
-import { deriveRowArchetype } from "../domain/row-archetype.js"
+import { deriveRowArchetype, resolveArchetype } from "../domain/row-archetype.js"
 import { listWorkflowNames } from "./workflow-loaders.js"
 import { ensureDaemonsAndEnqueue } from "./daemon/client.js"
 import { watchChildRuns, type ChildOutcome } from "../tracker/delegation/watch-child-runs.js"
@@ -102,12 +102,13 @@ interface DelegateCoreArgs<TChildData, TChildSteps extends readonly string[]> {
 /** Map a `renderAs` override to the canonical `RowArchetype` to stamp. */
 function resolveDelegateArchetype<TData, TSteps extends readonly string[]>(
   child: RegisteredWorkflow<TData, TSteps>,
+  input: TData,
   parentRunId: string,
   renderAs?: DelegateRenderAs,
 ): RowArchetype {
   if (renderAs === "flat") return "passive-child"
   if (renderAs === "batch" || renderAs === "preview") return "delegate-child"
-  return deriveRowArchetype(child.archetype, parentRunId)
+  return deriveRowArchetype(resolveArchetype(child.config, input), parentRunId)
 }
 
 function isDaemonCapable(workflowName: string): boolean {
@@ -210,7 +211,7 @@ export async function delegateToImpl<TChildData, TChildSteps extends readonly st
     ?? args.child.config.deriveItemId?.(args.input)
     ?? `delegate-${randomUUID().slice(0, 8)}`
   const childRunId = args.runId ?? randomUUID()
-  const archetype = resolveDelegateArchetype(args.child, args.parentRunId, args.renderAs)
+  const archetype = resolveDelegateArchetype(args.child, args.input, args.parentRunId, args.renderAs)
 
   // Route daemon-capable, non-fire-and-forget children through the daemon
   // path so SQLite `tasks.original_input_json` lands (Contract 2 tier 1).
@@ -382,7 +383,6 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
 }): Promise<ChildRunResult<TChildData>[]> {
   if (args.inputs.length === 0) return []
 
-  const archetype = resolveDelegateArchetype(args.child, args.parentRunId, args.renderAs)
   const expectedItemIds: string[] = []
   // Parallel to expectedItemIds: index → assigned childRunId from the
   // daemon enqueue path. Captured here so the fire-and-forget branch can
@@ -411,6 +411,12 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
       onPreEmitPending: (item, childRunId, parentRunIdFwd, itemId) => {
         expectedItemIds.push(itemId)
         expectedRunIds.push(childRunId)
+        const archetype = resolveDelegateArchetype(
+          args.child,
+          item as TChildData,
+          args.parentRunId,
+          args.renderAs,
+        )
         const extras = args.buildPendingExtras?.(item as TChildData, itemId) ?? {}
         const data = buildPendingTrackerData({
           workflow: args.child,

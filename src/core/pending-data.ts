@@ -1,6 +1,6 @@
 import type { RegisteredWorkflow } from "./kernel/types.js";
 import { buildInitialTrackerData } from "./kernel/workflow.js";
-import { deriveRowArchetype } from "../domain/row-archetype.js";
+import { deriveRowArchetype, resolveArchetype } from "../domain/row-archetype.js";
 import { operatorSubjectData } from "../domain/operator-subject.js";
 import { rootQueueTitleData } from "../domain/queue-title.js";
 import type { StampedData } from "../tracker/jsonl.js";
@@ -85,7 +85,10 @@ export function buildPendingTrackerData<TInput>(
     Object.assign(data, rootQueueTitleData(opts.parentSubject));
   }
 
-  data.archetype = deriveRowArchetype(wf.archetype, opts.parentRunId);
+  data.archetype = deriveRowArchetype(
+    resolveArchetype(wf.config, opts.input),
+    opts.parentRunId,
+  );
 
   return data as StampedData;
 }

@@ -7,7 +7,7 @@ import {
 } from "../jsonl.js";
 import type { StampedData, TrackerEntry } from "../jsonl.js";
 import { loadWorkflow } from "../../core/workflow-loaders.js";
-import { deriveRowArchetype } from "../../domain/row-archetype.js";
+import { deriveRowArchetype, resolveArchetype } from "../../domain/row-archetype.js";
 import { log } from "../../utils/log.js";
 import { detectFailurePattern } from "../alerts/failure-detector.js";
 import { notify } from "../alerts/notify.js";
@@ -183,7 +183,6 @@ export async function scanOrphanedQueueItems(dir = DEFAULT_DIR): Promise<void> {
       // return null for in-process workflows (ocr, sharepoint-download)
       // that don't show up in the daemon queue anyway.
       const loadedWf = await loadWorkflow(wf).catch(() => null);
-      const wfArchetype = loadedWf?.archetype;
       try {
         const taskStore = createTaskStore(controlDb);
         for (const item of stale) {
@@ -209,9 +208,12 @@ export async function scanOrphanedQueueItems(dir = DEFAULT_DIR): Promise<void> {
             // Otherwise the failed row's barer `data` overrides the pending
             // row in the dashboard's latest-per-id dedupe and the user's
             // edits disappear from the detail grid.
+            const concreteArchetype = loadedWf
+              ? resolveArchetype(loadedWf.config, item.input)
+              : "single";
             const data: StampedData = {
               ...buildTrackerDataForInput(item.input),
-              archetype: deriveRowArchetype(wfArchetype ?? "single", item.parentRunId),
+              archetype: deriveRowArchetype(concreteArchetype, item.parentRunId),
             };
             emitTrackerRow(
               {

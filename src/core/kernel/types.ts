@@ -2,7 +2,7 @@ import type { Page } from 'playwright'
 import type { ZodType } from 'zod'
 import type { OperatorSubject } from '../../domain/operator-subject.js'
 import type { log } from '../../utils/log.js'
-import type { WorkflowArchetype } from '../../domain/row-archetype.js'
+import type { WorkflowArchetype, WorkflowArchetypeOrResolver } from '../../domain/row-archetype.js'
 import type { WorkflowRuntimePolicy } from '../../domain/workflow-runtime/types.js'
 
 export interface SystemConfig {
@@ -108,7 +108,7 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   /** Human-readable workflow label for the dashboard (e.g. "Onboarding"). */
   label?: string
   /** Declarative row shape. Defaults to "batch" if `batch` is set, else "single". */
-  archetype?: WorkflowArchetype
+  archetype?: WorkflowArchetypeOrResolver<TData>
   /**
    * Display category for the dashboard's `WorkflowRail` grouping
    * (e.g. "Onboarding", "Separations", "Utils"). Workflows with the same
@@ -422,7 +422,7 @@ export interface WorkflowMetadata {
 export interface RegisteredWorkflow<TData, TSteps extends readonly string[]> {
   config: WorkflowConfig<TData, TSteps>
   metadata: WorkflowMetadata
-  archetype: WorkflowArchetype
+  archetype: WorkflowArchetypeOrResolver<TData>
 }
 
 export interface BatchResult {
