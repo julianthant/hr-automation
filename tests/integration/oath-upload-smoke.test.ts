@@ -18,9 +18,9 @@ import { OathUploadInputSchema } from "../../src/workflows/oath-upload/schema.js
  * `Session.forTesting`. This exercises:
  *  - Real Stepper / ctx.step / ctx.updateData / ctx.skipStep flow
  *  - Real `withTrackedWorkflow` JSONL emit
- *  - Real archetype stamping (`delegating-batch` → `batch-parent`)
- *  - Real handler orchestration body (delegate-ocr → wait-ocr-approval →
- *    delegate-signatures → wait-signatures → open-hr-form → fill-form → submit)
+ *  - Real archetype stamping (`single`)
+ *  - Real handler orchestration body (dispatch → wait-signatures →
+ *    servicenow-auth → open-hr-form → fill-form → submit)
  *
  * What it does NOT exercise (stubbed by escape hatches):
  *  - Playwright / real ServiceNow browser interaction
@@ -47,7 +47,7 @@ test(
     const testWorkflow = defineWorkflow({
       name: "oath-upload-smoke-test",
       label: "Oath Upload Smoke",
-      archetype: "delegating-batch",
+      archetype: "single",
       systems: [
         {
           id: "servicenow",
@@ -62,17 +62,18 @@ test(
       getName: (d) => d.pdfOriginalName ?? "",
       getId: (d) => d.sessionId ?? "",
       handler: async (ctx, input) => {
-        ctx.markStep("servicenow-auth");
         await oathUploadHandler(ctx, input, {
           trackerDir: dir,
-          _runOcrOverride: async () => {
-            // Stub OCR dispatch — no real child workflow
-          },
+          _prepareOverride: async () => ({
+            status: 202 as const,
+            body: { ok: true as const, sessionId: "smoke-sid", runId: "smoke-rid", parentRunId: "smoke-parent" },
+          }),
           _waitForOcrApprovalOverride: async () => ({
             step: "approved" as const,
             fannedOutItemIds: [],
           }),
           _watchChildRunsOverride: async () => [],
+          _loginOverride: async () => true,
           _gotoOverride: async () => {},
           _verifyOverride: async () => {},
           _fillFormOverride: async () => {},
@@ -146,11 +147,11 @@ test(
       "data.ticketNumber should match the stub return value",
     );
 
-    // Archetype stamping: root row should carry batch-parent (delegating-batch workflow).
+    // Archetype stamping: root row is stamped `single` (workflow archetype).
     assert.equal(
       doneRow.data?.archetype,
-      "batch-parent",
-      "root oath-upload row should be stamped batch-parent",
+      "single",
+      "root oath-upload row should be stamped single",
     );
 
     // The submit step should appear as a running row with step=submit in the

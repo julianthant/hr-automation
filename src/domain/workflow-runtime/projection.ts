@@ -133,6 +133,9 @@ function fallbackEntrySubtitle(entry: TrackerEntry, policy: WorkflowRuntimePolic
   if (entry.parentRunId && policy.memberRow?.subtitle) {
     return policy.memberRow.subtitle;
   }
+  if (policy.subtitleTemplate && !entry.parentRunId && !isPrepRow(entry)) {
+    return interpolateTemplate(policy.subtitleTemplate, entry);
+  }
   const archetype = resolveRowArchetype(entry);
   if (archetype === "dispatch") {
     return firstNonBlank(data.__queueSubtitle, data.__queueRootTitle, data.parentSubject, data.__id, entry.id)

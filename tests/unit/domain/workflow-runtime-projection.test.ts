@@ -366,7 +366,11 @@ describe("workflow runtime projection adapters", () => {
     assert.equal(projection.actions.find((action) => action.kind === "cancel")?.scope, "row");
   });
 
-  it("keeps the Oath Upload root projection anchored to the same root row", () => {
+  it("renders the Oath Upload row as a single-row card with no nested children", () => {
+    // Oath Upload is `archetype: "single"` and does NOT parent OCR / signature
+    // children — the OCR + per-signer batch lives under a synthesized
+    // batch-parent in the oath-signature tab. oath-upload just watches the
+    // batch from afar and files the ServiceNow ticket when done.
     const root = entry({
       workflow: "oath-upload",
       id: "upload-session-1",
@@ -374,56 +378,23 @@ describe("workflow runtime projection adapters", () => {
       status: "running",
       step: "wait-signatures",
       data: {
-        archetype: "batch-parent",
+        archetype: "single",
         pdfOriginalName: "upload-packet.pdf",
-        __queueTitle: "Oath Upload · 0001",
-        __queueTitleKind: "batch",
       },
-    });
-    const ocrChild = entry({
-      workflow: "ocr",
-      id: "ocr-session-1",
-      runId: "ocr-run-1",
-      parentRunId: "oath-upload-run-1",
-      status: "running",
-      step: "awaiting-approval",
-      data: {
-        archetype: "batch-parent",
-        mode: "prepare",
-        pdfOriginalName: "upload-packet.pdf",
-        formType: "oath",
-      },
-    });
-    const signatureChild = entry({
-      workflow: "oath-signature",
-      id: "10000001",
-      runId: "signature-run-1",
-      parentRunId: "oath-upload-run-1",
-      status: "failed",
-      data: {
-        archetype: "delegate-child",
-        name: "Jane Doe",
-        emplId: "10000001",
-      },
-    });
-    const surfaces = buildTrackerQueueSurfaces({
-      entries: [root],
-      delegationSourceEntries: [root, ocrChild, signatureChild],
-      runtimePolicies: phase4Policies,
     });
 
-    const projection = buildProjectionFromQueueSurface(surfaces.groupRows[0]!, {
+    const projection = buildWorkflowRunProjection(root, {
       runtimePolicies: phase4Policies,
     });
 
     assert.equal(projection.workflowId, "oath-upload");
     assert.equal(projection.runId, "oath-upload-run-1");
     assert.equal(projection.itemId, "upload-session-1");
-    assert.equal(projection.actions.find((action) => action.kind === "cancel")?.scope, "tree");
-    assert.deepEqual(projection.batchMembers.map((member) => member.runId), [
-      "ocr-run-1",
-      "signature-run-1",
-    ]);
+    assert.equal(projection.actions.find((action) => action.kind === "cancel")?.scope, "row");
+    // Subtitle interpolates `Oath · <last4 run id>` from the workflow policy.
+    assert.equal(projection.subtitle, "Oath · un-1");
+    // No batch members — single archetype row.
+    assert.equal(projection.batchMembers.length, 0);
   });
 });
 

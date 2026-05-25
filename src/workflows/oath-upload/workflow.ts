@@ -2,12 +2,8 @@ import { defineWorkflow, runWorkflow } from "../../core/index.js";
 import { buildCliAdapter } from "../../core/cli-adapter.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
-import { loginToServiceNow } from "../../infra/auth/login.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
-import {
-  DEFAULT_WORKFLOW_RUNTIME_POLICY,
-  workflowAction,
-} from "../../domain/workflow-runtime/default-policy.js";
+import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { OathUploadInputSchema, type OathUploadInput } from "./schema.js";
 import { oathUploadHandler, oathUploadSteps } from "./handler.js";
@@ -15,21 +11,21 @@ import { oathUploadHandler, oathUploadSteps } from "./handler.js";
 /**
  * Oath Upload runtime policy.
  *
- * The root Oath Upload row is the same tracker row through every child
- * delegation (OCR prep → signatures → ServiceNow submit). Approval
- * dependencies use `block_parent`, so a failed signature child blocks
- * the parent until retried or cancelled. Tree-wide cancel must be
- * explicit — group/row cancel never reaches descendant signature rows.
+ * The Oath Upload row is a single, top-level row in the oath-upload tab. Its
+ * `dispatch` step kicks off the OCR + per-signer signature batch via the
+ * `/api/ocr/prepare` `originWorkflow: "oath-signature"` mechanism, which
+ * synthesizes a batch-parent row in the oath-signature tab. OCR and per-signer
+ * rows nest under that synthesized row — they do NOT nest under the oath-upload
+ * row. Oath-upload waits for every signer to complete, then files the HR
+ * ticket.
+ *
+ * `subtitleTemplate` mirrors the synthesized oath-signature batch row's
+ * subtitle pattern (`Oath · <last4 run id>`) so operators can visually
+ * correlate the two rows across tabs.
  */
 export const OATH_UPLOAD_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
   ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
-  rowActions: [
-    workflowAction("cancel", "tree", "queue-panel", "Cancel workflow tree"),
-  ],
-  delegation: {
-    rootRowPersistsThroughChildren: true,
-    failedChildBlocksParent: true,
-  },
+  subtitleTemplate: "Oath · <last4 run id>",
 };
 
 const WORKFLOW = "oath-upload";
@@ -39,16 +35,19 @@ export { oathUploadSteps, type OathUploadSteps } from "./handler.js";
 export const oathUploadWorkflow = defineWorkflow({
   name: WORKFLOW,
   label: "Oath Upload",
-  archetype: "delegating-batch",
+  archetype: "single",
   category: "Onboarding",
   iconName: "UploadCloud",
   systems: [
     {
       id: "servicenow",
-      login: async (page, instance, context) => {
-        const ok = await loginToServiceNow(page, instance, context?.abortSignal);
-        if (!ok) throw new Error("ServiceNow authentication failed");
-      },
+      // No-op at session-launch time. We defer real ServiceNow authentication
+      // until the handler's `servicenow-auth` step, AFTER `dispatch` and
+      // `wait-signatures` complete — so we don't hold an authenticated SAML
+      // session open across the (potentially multi-day) operator-approval +
+      // per-signer wait, and so authentication failures don't kill the
+      // workflow before the delegation can even start.
+      login: async () => {},
     },
   ],
   authSteps: false,
@@ -78,8 +77,6 @@ export const oathUploadWorkflow = defineWorkflow({
       prefix: "Oath Upload",
     }),
   handler: async (ctx, input) => {
-    ctx.markStep("servicenow-auth");
-    await ctx.page("servicenow");
     await oathUploadHandler(ctx, input);
   },
 });

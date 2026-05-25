@@ -52,11 +52,14 @@ describe("workflow runtime policies", () => {
     assert.equal(policy?.rowActions.find((action) => action.kind === "cancel")?.scope, "row");
   });
 
-  it("registers Oath Upload blocking dependency and tree cancel", () => {
+  it("registers Oath Upload subtitle template and inherits default row cancel", () => {
     const policy = oathUploadWorkflow.metadata.runtimePolicy;
-    assert.equal(policy?.delegation?.rootRowPersistsThroughChildren, true);
-    assert.equal(policy?.delegation?.failedChildBlocksParent, true);
-    assert.equal(policy?.rowActions.find((action) => action.kind === "cancel")?.scope, "tree");
+    // No children nest under oath-upload — the OCR + signature batch lives in
+    // the oath-signature tab. oath-upload just polls.
+    assert.equal(policy?.delegation?.rootRowPersistsThroughChildren, undefined);
+    assert.equal(policy?.delegation?.failedChildBlocksParent, undefined);
+    assert.equal(policy?.subtitleTemplate, "Oath · <last4 run id>");
+    assert.equal(policy?.rowActions.find((action) => action.kind === "cancel")?.scope, "row");
   });
 
   it("registers Emergency Contact OCR-prep and member-row rules", () => {

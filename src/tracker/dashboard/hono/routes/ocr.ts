@@ -14,7 +14,7 @@ import {
 import { buildOcrDiscardHandler } from "../../../../control/ocr/discard.js";
 import { registerLocalFile } from "../../../files/files.js";
 import { ensurePdfPageCache } from "../../../files/pdf-cache.js";
-import type { DashboardHonoDeps } from "../context.js";
+import { getProjectionDb, type DashboardHonoDeps } from "../context.js";
 import { readMultipartRequest } from "../multipart.js";
 import { jsonResponse, readJsonRequest } from "../responses.js";
 import { log } from "../../../../utils/log.js";
@@ -139,8 +139,14 @@ async function handlePrepare(
   const dryRun = fields.dryRun === "true" || fields.dryRun === "1";
   const pdfOriginalName = file.filename ?? pdfFilename;
   let pdfFileId: string | undefined;
-  if (deps.stateDb && sessionId) {
-    const registered = registerLocalFile(deps.stateDb, {
+  // Resolve the projection DB handle per-request (mirrors the projection
+  // routes — see context.ts:getProjectionDb). The cached `deps.stateDb` can
+  // outlive a `.tracker/state.db` delete/recreate; using it directly would
+  // throw on the next write and Hono would return a plain-text 500 the
+  // browser reports as "Network error".
+  const stateDb = getProjectionDb(deps);
+  if (stateDb && sessionId) {
+    const registered = registerLocalFile(stateDb, {
       kind: "pdf",
       mimeType: "application/pdf",
       path: pdfPath,
@@ -150,7 +156,7 @@ async function handlePrepare(
       itemId: sessionId,
     });
     pdfFileId = registered.fileId;
-    void ensurePdfPageCache(deps.stateDb, {
+    void ensurePdfPageCache(stateDb, {
       trackerDir: deps.dir,
       fileId: registered.fileId,
       pdfPath,

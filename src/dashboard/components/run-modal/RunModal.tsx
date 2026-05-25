@@ -413,14 +413,14 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
                   active={oathUploadMode === "full"}
                   disabled={submitting}
                   label="Full process"
-                  hint="OCR, signatures, then HR ticket"
+                  hint="Dispatch OCR + signatures into Oath Signature, then file HR ticket"
                   onClick={() => setOathUploadMode("full")}
                 />
                 <ModeButton
                   active={oathUploadMode === "upload-only"}
                   disabled={submitting}
                   label="Upload only"
-                  hint="HR ticket only"
+                  hint="Skip OCR and signatures — file HR ticket only"
                   onClick={() => setOathUploadMode("upload-only")}
                 />
               </div>

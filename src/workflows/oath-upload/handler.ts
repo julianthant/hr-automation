@@ -1,10 +1,15 @@
 import type { Ctx } from "../../core/kernel/types.js";
-import { ocrWorkflow } from "../ocr/index.js";
 import { watchChildRuns } from "../../tracker/delegation/watch-child-runs.js";
 import { log } from "../../utils/log.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { openControlDb } from "../../core/control-db.js";
 import { createTaskStore } from "../../core/task-store/index.js";
+import {
+  buildOcrPrepareHandler,
+  type PrepareInput,
+  type PrepareResponse,
+} from "../../tracker/dashboard/ocr/prepare.js";
+import { loginToServiceNow } from "../../infra/auth/login.js";
 import {
   fillHrInquiryForm,
   submitAndCaptureTicketNumber,
@@ -15,22 +20,22 @@ import {
 } from "../../systems/servicenow/navigate.js";
 import { waitForOcrApproval, SEVEN_DAYS_MS } from "./wait-ocr-approval.js";
 import type { OathUploadInput } from "./schema.js";
-import { OcrInputSchema } from "../ocr/schema.js";
 
+/**
+ * Step list — `dispatch` and `wait-signatures` run BEFORE the ServiceNow
+ * browser is launched so we don't hold an authenticated session open across
+ * the (potentially multi-day) operator-approval + per-signer wait.
+ */
 export const oathUploadStepList = [
-  "delegate-ocr",
-  "wait-ocr-approval",
-  "delegate-signatures",
+  "dispatch",
   "wait-signatures",
+  "servicenow-auth",
   "open-hr-form",
   "fill-form",
   "submit",
 ] as const;
 
-export const oathUploadSteps = [
-  "servicenow-auth",
-  ...oathUploadStepList,
-] as const;
+export const oathUploadSteps = oathUploadStepList;
 
 export type OathUploadSteps = typeof oathUploadSteps;
 
@@ -41,12 +46,15 @@ const HR_FORM_VALUES = {
   category: "Payroll",
 } as const;
 
+type PrepareHandler = (input: PrepareInput) => Promise<PrepareResponse>;
+
 export interface OathUploadHandlerOpts {
   trackerDir?: string;
   // Test escape hatches.
-  _runOcrOverride?: (input: OathUploadInput, ocrSessionId: string, parentRunId: string) => Promise<void>;
+  _prepareOverride?: PrepareHandler;
   _waitForOcrApprovalOverride?: typeof waitForOcrApproval;
   _watchChildRunsOverride?: typeof watchChildRuns;
+  _loginOverride?: typeof loginToServiceNow;
   _gotoOverride?: typeof gotoHrInquiryForm;
   _verifyOverride?: typeof verifyOnInquiryForm;
   _fillFormOverride?: typeof fillHrInquiryForm;
@@ -83,73 +91,59 @@ export async function oathUploadHandler(
   const priorApproval = rawPriorApproval
     ? (verifyEnqueuedSignerIds(rawPriorApproval.fannedOutItemIds, trackerDir) !== null ? rawPriorApproval : null)
     : null;
+
   if (input.mode === "upload-only") {
-    log.step("[oath-upload] upload-only mode: skipping OCR and oath-signature delegation");
-    ctx.skipStep("delegate-ocr");
-    ctx.skipStep("wait-ocr-approval");
-    ctx.skipStep("delegate-signatures");
+    log.step("[oath-upload] upload-only mode: skipping OCR and signature delegation");
+    ctx.skipStep("dispatch");
     ctx.skipStep("wait-signatures");
     ctx.updateData({ signerCount: "skipped" });
   } else if (priorApproval) {
     log.step(
-      `[oath-upload] recovery: prior approved OCR found for ${ocrSessionId}; skipping delegate-ocr + wait-ocr-approval`,
+      `[oath-upload] recovery: prior approved OCR for ${ocrSessionId}; skipping dispatch`,
     );
-    ctx.skipStep("delegate-ocr");
-    ctx.skipStep("wait-ocr-approval");
+    ctx.skipStep("dispatch");
     fannedOutItemIds = priorApproval.fannedOutItemIds;
     ctx.updateData({ signerCount: String(fannedOutItemIds.length) });
   } else {
-    await ctx.step("delegate-ocr", async () => {
-      if (opts._runOcrOverride) {
-        await opts._runOcrOverride(input, ocrSessionId, ctx.runId);
-        return;
-      }
-      // Validate the OCR child input synchronously so schema failures
-      // surface immediately as a delegate-ocr step failure rather than
-      // being swallowed by the kernel's later validation throw.
-      const ocrInputRaw = {
+    await ctx.step("dispatch", async () => {
+      // Trigger OCR + signature batch the same way the oath-signature TopBar
+      // Run modal does. `originWorkflow: "oath-signature"` makes the prepare
+      // handler synthesize a batch-parent row in the oath-signature tab; the
+      // OCR row + per-signer signature rows nest under that synthesized
+      // parent. No children nest under THIS oath-upload row.
+      const prepare: PrepareHandler =
+        opts._prepareOverride ?? buildOcrPrepareHandler({ trackerDir });
+      const prepareInput: PrepareInput = {
         pdfPath: input.pdfPath,
         pdfOriginalName: input.pdfOriginalName,
-        pdfFileId: input.pdfFileId,
+        ...(input.pdfFileId ? { pdfFileId: input.pdfFileId } : {}),
         formType: "oath",
-        sessionId: ocrSessionId,
         rosterMode: input.rosterMode,
-        rosterPath: input.rosterPath,
-        dryRun: input.dryRun,
-        // `parentRunId` + `originWorkflow` ride on the OCR input schema for
-        // legacy reasons (OCR's orchestrator still reads them off the input
-        // for parentSubject resolution + tracker JSONL emits). ctx.delegateTo
-        // ALSO stamps parentRunId on the tracker row independently; keeping
-        // both keeps OCR's existing behaviour unchanged.
-        parentRunId: ctx.runId,
-        originWorkflow: "oath-upload",
+        ...(input.rosterPath ? { rosterPath: input.rosterPath } : {}),
+        sessionId: ocrSessionId,
+        ...(input.dryRun ? { dryRun: input.dryRun } : {}),
+        originWorkflow: "oath-signature",
       };
-      const ocrParsed = OcrInputSchema.safeParse(ocrInputRaw);
-      if (!ocrParsed.success) {
-        throw new Error(`oath-upload: OCR child input invalid — ${ocrParsed.error.message}`);
+      const result = await prepare(prepareInput);
+      if (result.status !== 202 || result.body.ok === false) {
+        const detail = result.body.ok === false
+          ? result.body.error
+          : `OCR prepare returned status ${result.status}`;
+        throw new Error(`oath-upload: OCR prepare failed — ${detail}`);
       }
-      // OCR is `delegating-batch` and surfaces its preview pane via the
-      // approval-delegation surface. `renderAs: "preview"` keeps the
-      // existing row archetype stamping consistent with how OCR rows
-      // already appear in the dashboard.
-      const result = await ctx.delegateTo(ocrWorkflow, ocrParsed.data, {
-        renderAs: "preview",
-        // Pin the OCR child's itemId to ocrSessionId so the wait-ocr-approval
-        // watcher (and restart-recovery probe) keep finding the same row.
-        itemId: ocrSessionId,
-      });
-      if (result.status === "failed" || result.status === "cancelled") {
-        throw new Error(
-          `oath-upload: OCR delegation ${result.status}${result.error ? ` — ${result.error.message}` : ""}`,
-        );
+      if (result.body.parentRunId) {
+        // Stash the synthesized oath-signature batch parent's runId on
+        // oath-upload's row data for cross-tab correlation + debugging.
+        ctx.updateData({ signaturesParentRunId: result.body.parentRunId });
       }
-    });
 
-    await ctx.step("wait-ocr-approval", async () => {
+      // Wait for the OCR row (workflow="ocr", id=ocrSessionId) to reach
+      // step="approved". The OCR approve handler stamps fannedOutItemIds on
+      // that row's approved entry.
       const fn = opts._waitForOcrApprovalOverride ?? waitForOcrApproval;
       const r = await fn({
         sessionId: ocrSessionId,
-        trackerDir,
+        ...(trackerDir ? { trackerDir } : {}),
         timeoutMs: SEVEN_DAYS_MS,
         abortIfRowState: {
           workflow: "oath-upload",
@@ -164,15 +158,16 @@ export async function oathUploadHandler(
   }
 
   if (input.mode !== "upload-only") {
-    ctx.markStep("delegate-signatures");
-
     await ctx.step("wait-signatures", async () => {
-      ctx.updateData({ status: "waiting-signatures", signerItemIds: fannedOutItemIds.join(", ") });
+      ctx.updateData({
+        status: "waiting-signatures",
+        signerItemIds: fannedOutItemIds.join(", "),
+      });
       const fn = opts._watchChildRunsOverride ?? watchChildRuns;
       await fn({
         workflow: "oath-signature",
         expectedItemIds: fannedOutItemIds,
-        trackerDir,
+        ...(trackerDir ? { trackerDir } : {}),
         timeoutMs: SEVEN_DAYS_MS,
         isTerminal: (e) => e.status === "done",
         abortIfRowState: {
@@ -188,14 +183,13 @@ export async function oathUploadHandler(
   // Idempotency: probe by stable business identity (`sessionId` / `pdfHash`)
   // — NOT by `runId`. Contract 2 retry creates a new runId, so a runId-keyed
   // probe would miss a prior successful ticket and submit a duplicate.
-  // `sessionId` and `pdfHash` are both preserved across retries by the
-  // original input persistence.
   const priorTicket = findPriorTicketForSession(input.sessionId, input.pdfHash, trackerDir);
   if (priorTicket) {
     log.warn(
       `[oath-upload] sessionId=${input.sessionId} already filed ticket ${priorTicket}; skipping HR form on restart/retry`,
     );
     ctx.updateData({ ticketNumber: priorTicket });
+    ctx.skipStep("servicenow-auth");
     ctx.skipStep("open-hr-form");
     ctx.skipStep("fill-form");
     ctx.skipStep("submit");
@@ -203,6 +197,13 @@ export async function oathUploadHandler(
   }
 
   const page = await ctx.page("servicenow");
+  await ctx.step("servicenow-auth", async () => {
+    // ServiceNow auth is deferred from session launch to right before we use
+    // the page, so the daemon doesn't hold a SAML session open across the
+    // dispatch + signature waits.
+    const ok = await (opts._loginOverride ?? loginToServiceNow)(page, undefined, ctx.signal);
+    if (!ok) throw new Error("ServiceNow authentication failed");
+  });
 
   await ctx.step("open-hr-form", async () => {
     await (opts._gotoOverride ?? gotoHrInquiryForm)(page);
@@ -251,10 +252,6 @@ function isFiledTicketNumber(ticketNumber: string): boolean {
  * identity (sessionId / pdfHash) — not `runId` — because Contract 2 retry
  * assigns a NEW runId for the same logical work, and a runId-keyed lookup
  * would miss the prior ticket and submit a duplicate.
- *
- * `sessionId` matches the tracker row's `id` field (set by
- * `getId: (d) => d.sessionId` on the workflow). `pdfHash` is used as a
- * secondary cross-check when the entry carries it.
  */
 export function findPriorTicketForSession(
   sessionId: string,
@@ -268,14 +265,9 @@ export function findPriorTicketForSession(
       workflow: "oath-upload",
       trackerDir,
       lookbackDays: LOOKBACK_DAYS,
-      // `itemId` is indexed in SQLite and matches the tracker row `id` (sessionId).
       ...(controlDb ? { db: controlDb.db, itemId: sessionId } : {}),
       predicate: (e) => {
         if (e.id !== sessionId) return false;
-        // If pdfHash is available on the entry and on the input, cross-check
-        // to prevent matching a stale row with the same sessionId but
-        // different pdf contents (defensive — sessionId is operator-scoped
-        // and shouldn't collide across pdfs in practice).
         if (pdfHash && typeof e.data?.pdfHash === "string" && e.data.pdfHash !== pdfHash) return false;
         return (
           typeof e.data?.ticketNumber === "string" &&
@@ -298,7 +290,6 @@ function verifyEnqueuedSignerIds(ids: string[], trackerDir: string | undefined):
     const taskStore = createTaskStore(db);
     const allTasks = taskStore.listTasksForWorkflow("oath-signature");
     db.close();
-    // If no oath-signature tasks exist at all, this is a pre-SQLite run — trust the JSONL.
     if (allTasks.length === 0) return ids;
     const taskItemIds = new Set(allTasks.map((t) => t.itemId));
     const missing = ids.filter((id) => !taskItemIds.has(id));
@@ -308,7 +299,6 @@ function verifyEnqueuedSignerIds(ids: string[], trackerDir: string | undefined):
     );
     return null;
   } catch {
-    // task_store unavailable — trust the prior approval (backward compat)
     return ids;
   }
 }

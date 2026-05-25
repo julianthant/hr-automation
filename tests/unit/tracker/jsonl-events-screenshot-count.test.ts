@@ -31,7 +31,10 @@ test("buildJsonlEventsPayload uses SQLite screenshot_count when projection DB is
   }
 });
 
-test("buildJsonlEventsPayload includes Oath Upload delegated child context", () => {
+test("buildJsonlEventsPayload returns only the oath-upload root row (no children nest under it)", () => {
+  // Oath Upload no longer parents OCR / signature children. The synthesized
+  // oath-signature batch row owns those children, so the oath-upload events
+  // payload should contain just the single root row.
   const dir = mkdtempSync(join(tmpdir(), "jsonl-events-oath-context-"));
   try {
     openStateDb(dir);
@@ -43,14 +46,16 @@ test("buildJsonlEventsPayload includes Oath Upload delegated child context", () 
       runId: "oath-upload-run",
       status: "running",
       step: "wait-signatures",
-      data: { archetype: "batch-parent", pdfOriginalName: "oath.pdf" },
+      data: { archetype: "single", pdfOriginalName: "oath.pdf" },
     }, date, dir);
+    // Children parented to the synthesized oath-signature row (different runId)
+    // — these should NOT appear in oath-upload's events payload.
     trackEventForDate({
       workflow: "ocr",
       timestamp: "2026-05-20T10:01:00.000Z",
       id: "ocr-session",
       runId: "ocr-run",
-      parentRunId: "oath-upload-run",
+      parentRunId: "synthesized-oath-signature-run",
       status: "done",
       step: "approved",
       data: { archetype: "batch-parent", mode: "prepare", formType: "oath" },
@@ -60,7 +65,7 @@ test("buildJsonlEventsPayload includes Oath Upload delegated child context", () 
       timestamp: "2026-05-20T10:02:00.000Z",
       id: "10000001",
       runId: "signature-run",
-      parentRunId: "oath-upload-run",
+      parentRunId: "synthesized-oath-signature-run",
       status: "pending",
       data: { archetype: "delegate-child", name: "Jane Doe", emplId: "10000001" },
     }, date, dir);
@@ -71,11 +76,7 @@ test("buildJsonlEventsPayload includes Oath Upload delegated child context", () 
       payload.entries
         .map((entry) => [entry.workflow, entry.id, entry.parentRunId ?? "root"])
         .sort((a, b) => `${a[0]}:${a[1]}`.localeCompare(`${b[0]}:${b[1]}`)),
-      [
-        ["oath-signature", "10000001", "oath-upload-run"],
-        ["oath-upload", "upload-session", "root"],
-        ["ocr", "ocr-session", "oath-upload-run"],
-      ].sort((a, b) => `${a[0]}:${a[1]}`.localeCompare(`${b[0]}:${b[1]}`)),
+      [["oath-upload", "upload-session", "root"]],
     );
   } finally {
     closeStateDbForTests(dir);

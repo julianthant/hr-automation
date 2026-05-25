@@ -152,4 +152,11 @@ export interface WorkflowRuntimePolicy {
   memberRow?: WorkflowMemberRowPolicy;
   /** OCR prep file row title/subtitle rules. */
   prepRow?: WorkflowPrepRowPolicy;
+  /**
+   * Subtitle template for top-level rows that aren't prep rows or
+   * delegation members — e.g. oath-upload's single-row card. Template
+   * supports `<last4 run id>` interpolation. Lower priority than
+   * `prepRow.subtitleTemplate` and `memberRow.subtitle`.
+   */
+  subtitleTemplate?: string;
 }
