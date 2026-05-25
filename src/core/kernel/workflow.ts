@@ -1,4 +1,5 @@
 import type { WorkflowConfig, RegisteredWorkflow, WorkflowMetadata, RunOpts, BatchResult } from './types.js'
+import type { WorkflowArchetype, WorkflowArchetypeOrResolver } from '../../domain/row-archetype.js'
 import { register, autoLabel, normalizeDetailField } from './registry.js'
 import { setWorkflowRuntimePolicy } from '../../domain/workflow-runtime/registry.js'
 import { Session } from './session.js'
@@ -28,11 +29,16 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
   const authPrefix =
     config.authSteps === false ? [] : config.systems.map((s) => `auth:${s.id}`)
   const effectiveSteps: readonly string[] = [...authPrefix, ...config.steps]
-  const archetype = config.archetype ?? (config.batch ? 'batch' : 'single')
+  const archetype: WorkflowArchetypeOrResolver<TData> =
+    config.archetype ?? (config.batch ? 'batch' : 'single')
+  const metadataArchetype: WorkflowArchetype =
+    typeof archetype === 'function'
+      ? (config.batch ? 'batch' : 'single')
+      : archetype
   const metadata: WorkflowMetadata = {
     name: config.name,
     label: config.label ?? autoLabel(config.name),
-    archetype,
+    archetype: metadataArchetype,
     steps: effectiveSteps,
     systems: config.systems.map((s) => s.id),
     detailFields: (config.detailFields ?? []).map(normalizeDetailField),
@@ -46,7 +52,7 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
     setWorkflowRuntimePolicy(config.name, config.runtimePolicy)
   }
   register(metadata)
-  return { config, metadata, archetype }
+  return { config: { ...config, archetype }, metadata, archetype }
 }
 
 export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(

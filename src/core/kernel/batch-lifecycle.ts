@@ -1,6 +1,11 @@
 import type { RegisteredWorkflow, SessionObserver, SystemConfig } from './types.js'
 import { emitTrackerRow, type StampedData } from '../../tracker/jsonl.js'
-import { deriveRowArchetype, type WorkflowArchetype } from '../../domain/row-archetype.js'
+import {
+  deriveRowArchetype,
+  resolveArchetypeFromValue,
+  type WorkflowArchetype,
+  type WorkflowArchetypeOrResolver,
+} from '../../domain/row-archetype.js'
 import { buildPendingTrackerData } from '../pending-data.js'
 import {
   generateInstanceName,
@@ -112,9 +117,10 @@ export interface BatchLifecycleOpts<TData = unknown> {
    * Workflow-level archetype — stamped onto the per-item `failed` rows the
    * SIGINT / auth-failure fanout emits. Required so the dashboard's
    * row-archetype resolver gets a stamped value even on synthetic terminal
-   * rows.
+   * rows. Accepts a literal or a resolver function; resolver form is
+   * evaluated per-item against `perItem[i].item`.
    */
-  archetype: WorkflowArchetype
+  archetype: WorkflowArchetypeOrResolver<TData>
   /**
    * Workflow definition — passed so the SIGINT / auth-failure fanout can
    * build rich `data` (operatorSubject, getName/getId, queue title) for
@@ -211,14 +217,17 @@ export async function withBatchLifecycle<TData, R>(
     emitWorkflowEnd(instance, status, opts.trackerDir)
   }
 
-  const workflowArchetype: WorkflowArchetype = opts.archetype
   // Build a rich data record for each synthetic failed row so the dashboard
   // dedupe doesn't surface a nameless cancelled card. Use the same
   // buildPendingTrackerData seed the normal pending emit uses (with
   // `nameIdStamp: 'always-on-seed'` to force __name/__id stamping even when
   // the workflow's getName/getId can't extract them from the input alone).
   const buildRowData = (item: unknown, parentRunId: string | undefined): StampedData => {
-    const archetype = deriveRowArchetype(workflowArchetype, parentRunId)
+    const concreteArchetype: WorkflowArchetype =
+      typeof opts.archetype === 'function'
+        ? resolveArchetypeFromValue(opts.archetype, item as TData, opts.workflow)
+        : opts.archetype
+    const archetype = deriveRowArchetype(concreteArchetype, parentRunId)
     if (!opts.wf) {
       return { archetype }
     }
