@@ -1,7 +1,7 @@
 import type { RegisteredWorkflow } from './types.js'
 import { CancelledError } from './types.js'
 import { buildPendingTrackerData } from '../pending-data.js'
-import { deriveRowArchetype } from '../../domain/row-archetype.js'
+import { deriveRowArchetype, resolveArchetype } from '../../domain/row-archetype.js'
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
 import { emitTrackerRow, withTrackedWorkflow, emitScreenshotEvent } from '../../tracker/jsonl.js'
@@ -284,7 +284,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
           runId,
           status: 'running',
           step: `auth:${systemId}`,
-          data: { ...stringifiedSeed, archetype: deriveRowArchetype(wf.archetype, args.parentRunId) },
+          data: { ...stringifiedSeed, archetype: deriveRowArchetype(resolveArchetype(wf.config, handlerInput), args.parentRunId) },
         },
         trackerDir,
       )
@@ -316,7 +316,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
           // input is already on that row — no need to re-stamp.
           ...(callerPreEmits ? {} : (inputForRow ? { input: inputForRow } : {})),
           ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
-          archetype: deriveRowArchetype(wf.archetype, args.parentRunId),
+          archetype: deriveRowArchetype(resolveArchetype(wf.config, handlerInput), args.parentRunId),
         },
       )
     }, trackerDir)

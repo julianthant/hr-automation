@@ -6,7 +6,7 @@ import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { runWorkflowBatch } from "../../core/index.js";
 import { emitTrackerRow } from "../../tracker/jsonl.js";
-import { deriveRowArchetype } from "../../domain/row-archetype.js";
+import { deriveRowArchetype, resolveArchetype } from "../../domain/row-archetype.js";
 import { operatorSubjectData } from "../../domain/operator-subject.js";
 import { launchBrowser } from "../../infra/browser/launch.js";
 import { SCREEN } from "../../config.js";
@@ -163,7 +163,10 @@ export async function runParallelKronos(
               // kronos-reports is "batch" — the batch-parent anchor row is
               // implicit (it's an Excel-only workflow), but each item is a
               // batch-member in the dashboard.
-              archetype: deriveRowArchetype(kronosReportsWorkflow.archetype, undefined),
+              archetype: deriveRowArchetype(
+                resolveArchetype(kronosReportsWorkflow.config, item as KronosItem),
+                undefined,
+              ),
             },
           });
         },

@@ -7,7 +7,7 @@ import { createTaskStore } from "../../../core/task-store/index.js";
 import { buildHttpPendingData } from "../../../core/daemon/enqueue-dispatch.js";
 import { readQueueTitle, rootQueueTitleData } from "../../../domain/queue-title.js";
 import { findLatestEntryForPredicate } from "../../find-latest-entry.js";
-import { deriveRowArchetype } from "../../../domain/row-archetype.js";
+import { deriveRowArchetype, resolveArchetype } from "../../../domain/row-archetype.js";
 import { readFormType, readParentRunId, readDryRun, readOriginWorkflow } from "./shared.js";
 
 const WORKFLOW = "ocr";
@@ -186,7 +186,10 @@ export function buildOcrApproveHandler(
                     data: {
                       ...buildHttpPendingData(childWf, item, passedParentRunId ?? parentRunId),
                       ...rootQueueTitleData(readParentSubjectFromInput(item)),
-                      archetype: deriveRowArchetype(childWf.archetype, passedParentRunId ?? parentRunId),
+                      archetype: deriveRowArchetype(
+                        resolveArchetype(childWf.config, item),
+                        passedParentRunId ?? parentRunId,
+                      ),
                     },
                     ...(passedParentRunId ? { parentRunId: passedParentRunId } : {}),
                     ...(childInput ? { input: childInput } : {}),
