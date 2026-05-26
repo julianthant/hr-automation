@@ -98,14 +98,19 @@ export const RUN_MODAL_REGISTRY: Record<DashboardUploadRunWorkflow, RunModalConf
   "oath-signature": {
     title: () => "Run Oath Signature",
     srDescription: () =>
-      "Upload a PDF for oath preparation, choose roster source, optionally enable dry run, then submit to run OCR.",
+      "Upload a PDF for oath preparation. Each PDF becomes one oath-signature run that delegates to OCR (you'll approve the extracted rows in the OCR queue) and then fans out one signer per approved record.",
+    // Plan A Commit 3: PDF uploads enqueue a `{ kind: "pdf" }`
+    // oath-signature daemon item directly. The handler delegates to OCR
+    // (which suspends until operator approval) and then fans out signer
+    // children via ctx.delegateToAll. Reupload still goes through the
+    // OCR HTTP route — Commit 4/5 collapse the reupload path.
     submitUrl: ({ reuploadFor }) =>
-      reuploadFor ? "/api/ocr/reupload" : "/api/ocr/prepare",
+      reuploadFor ? "/api/ocr/reupload" : "/api/oath-signature/start",
     sections: { roster: true, dryRun: true },
     lockedFormType: "oath",
     allowMultipleFiles: true,
     buildSuccessToast: (_resp, file) => ({
-      title: "Preparation started",
+      title: "Oath signature queued",
       description: file.name,
     }),
   },

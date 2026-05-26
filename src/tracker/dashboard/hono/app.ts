@@ -10,6 +10,7 @@ import { registerDaemonStopRoute } from "./routes/daemon-stop.js";
 import { registerEnqueueRoute } from "./routes/enqueue.js";
 import { registerHubRoute } from "./routes/hub.js";
 import { registerFileRoutes } from "./routes/files.js";
+import { registerOathSignatureRoutes } from "./routes/oath-signature.js";
 import { registerOathUploadRoutes } from "./routes/oath-upload.js";
 import { registerOcrRoutes } from "./routes/ocr.js";
 import { registerOpsRoutes } from "./routes/ops.js";
@@ -53,6 +54,7 @@ export function createDashboardHonoApp(deps: DashboardHonoDeps): Hono {
   registerDaemonStopRoute(app, deps);
   registerOpsRoutes(app, deps);
   registerOcrRoutes(app, deps);
+  registerOathSignatureRoutes(app, deps);
   registerOathUploadRoutes(app, deps);
   registerCaptureRoutes(app, deps);
   registerHubRoute(app, deps);

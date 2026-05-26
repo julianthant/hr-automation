@@ -135,6 +135,7 @@ test("Hono manifest covers the dashboard public route inventory", () => {
     ["GET", "/api/oath-upload/check-duplicate"],
     ["POST", "/api/oath-upload/cancel"],
     ["POST", "/api/oath-upload/start"],
+    ["POST", "/api/oath-signature/start"],
     ["POST", "/api/capture/start"],
     ["GET", "/capture/:token"],
     ["GET", "/api/capture/manifest/:token"],
