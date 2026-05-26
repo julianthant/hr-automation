@@ -147,7 +147,6 @@ describe("buildQueueSurfaces", () => {
       data: {
         searchName: "Barahona Martell, Carlos D",
         taskRole: "child",
-        originWorkflow: "ocr",
         parentSubject: "Oath · 1234",
       },
     });
@@ -245,7 +244,6 @@ describe("buildQueueSurfaces", () => {
       data: {
         archetype: "passive-child",
         taskRole: "utility",
-        originWorkflow: "onboarding",
         parentSubject: "Onboarding: jane@example.edu",
       },
     });

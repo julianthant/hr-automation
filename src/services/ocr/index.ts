@@ -177,7 +177,6 @@ export {
   patchOcrRecordUnresolved,
   type OcrLookupKind,
 } from "./eid-lookup-results.js";
-export { resolveParentSubject } from "./parent-subject.js";
 export {
   subscribeToApproval,
   emitApproved,

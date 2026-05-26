@@ -297,12 +297,6 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
             fd.append("sessionId", reuploadFor.sessionId);
             fd.append("previousRunId", reuploadFor.previousRunId);
           }
-          // Tell the backend which workflow originated this upload. When the
-          // operator opens the run modal from the OCR queue → originWorkflow="ocr"
-          // and the row is standalone. Other workflows synthesize their own
-          // parent row. Each uploaded PDF is an independent single-file run —
-          // multi-file selection just fires N standalone prepare requests.
-          if (workflow !== "ocr") fd.append("originWorkflow", workflow);
           const xhr = new XMLHttpRequest();
           xhr.open("POST", fullSubmitUrl);
           xhr.upload.addEventListener("progress", (ev) => {

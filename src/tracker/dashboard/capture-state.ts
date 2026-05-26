@@ -94,8 +94,7 @@ export function makeCaptureFinalize(trackerDir: string) {
 
     // Plan A Commit 3: oath-signature captures enqueue directly into the
     // oath-signature daemon as a `{ kind: "pdf" }` item. Emergency-contact
-    // and standalone OCR captures still go through the OCR prepare path
-    // (they get the originWorkflow-synthesized parent row treatment).
+    // and standalone OCR captures still go through the OCR prepare path.
     if (session.workflow === "oath-signature") {
       try {
         await enqueueOathSignaturePdf({

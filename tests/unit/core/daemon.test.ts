@@ -201,7 +201,6 @@ test('runWorkflowDaemon: queued shutdown-cancel rows preserve title and row arch
       schema: z.object({
         emplId: z.string(),
         parentSubject: z.string().optional(),
-        originWorkflow: z.string().optional(),
       }),
       steps: ['run'],
       systems: [{ id: 'ucpath', login: async () => {} }],
@@ -215,7 +214,7 @@ test('runWorkflowDaemon: queued shutdown-cancel rows preserve title and row arch
     })
     await enqueueItems(
       'dint-stop-queued-display',
-      [{ emplId: '10424984', parentSubject: 'Oath · 4248', originWorkflow: 'ocr' }],
+      [{ emplId: '10424984', parentSubject: 'Oath · 4248' }],
       (d) => d.emplId,
       dir,
       undefined,
@@ -493,7 +492,6 @@ test('runWorkflowDaemon: in-flight shutdown-cancel rows preserve title and row a
       schema: z.object({
         emplId: z.string(),
         parentSubject: z.string().optional(),
-        originWorkflow: z.string().optional(),
       }),
       steps: ['work'],
       systems: [{ id: 'ucpath', login: async () => {} }],
@@ -527,7 +525,7 @@ test('runWorkflowDaemon: in-flight shutdown-cancel rows preserve title and row a
 
     await enqueueItems(
       'dint-stop-running-display',
-      [{ emplId: '10424984', parentSubject: 'Oath · 4248', originWorkflow: 'ocr' }],
+      [{ emplId: '10424984', parentSubject: 'Oath · 4248' }],
       (d) => d.emplId,
       dir,
       undefined,

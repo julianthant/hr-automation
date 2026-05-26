@@ -35,20 +35,6 @@ function isPassiveDelegationMember(entry: TrackerEntry): boolean {
   return resolveRowArchetype(entry) === "passive-child";
 }
 
-/** Policy-declared utility fan-out children stay as flat delegation member rows. */
-function isPolicyUtilityDelegationMember(
-  entry: TrackerEntry,
-  runtimePolicies?: WorkflowRuntimePolicyLookup,
-): boolean {
-  if (resolveRowArchetype(entry) !== "delegate-child") return false;
-  const originWorkflow = entry.data?.originWorkflow;
-  if (typeof originWorkflow !== "string" || !originWorkflow) return false;
-  const policy = getWorkflowRuntimePolicy(originWorkflow, runtimePolicies);
-  if (policy.delegation?.utilityChildSurface !== "delegation-member") return false;
-  const workflows = policy.delegation.utilityChildWorkflows ?? [];
-  return workflows.includes(entry.workflow);
-}
-
 function runIdFor(entry: Pick<TrackerEntry, "id" | "runId">): string {
   return entry.runId ?? entry.id;
 }
@@ -218,9 +204,7 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
     if (approvalParentRunIds.has(parentRunId)) continue;
     if (members.length === 1) {
       const only = members[0]!;
-      if (isPolicyUtilityDelegationMember(only, input.runtimePolicies)) {
-        singleDelegationEntries.push(only);
-      } else if (isPassiveDelegationMember(only)) {
+      if (isPassiveDelegationMember(only)) {
         groupRows.push({
           kind: "passive-delegation",
           parentRunId,
@@ -230,10 +214,6 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
       } else {
         singleDelegationEntries.push(only);
       }
-      continue;
-    }
-    if (members.every((member) => isPolicyUtilityDelegationMember(member, input.runtimePolicies))) {
-      singleDelegationEntries.push(...members);
       continue;
     }
     const passive = members.every(isPassiveDelegationMember);

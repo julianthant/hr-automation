@@ -24,7 +24,6 @@ test("crm-doc-download schema accepts delegated display fields", () => {
     lastName: "Doe",
     middleName: "A",
     parentSubject: "Onboarding: jane@example.edu",
-    originWorkflow: "onboarding",
     taskGroupId: "parent-run-1",
     docIndices: [0, 2],
   });

@@ -32,10 +32,10 @@ function emergencyContactPreviewRecord(employeeId: string, employeeName: string)
   };
 }
 
-test("approve-batch preserves parent __name on done row + threads parentSubject into kernel inputs", async () => {
+test("approve-batch threads OCR parentSubject into kernel inputs", async () => {
   const dir = mkdtempSync(join(tmpdir(), "approve-name-"));
   try {
-    // Seed: OCR session row with parentRunId.
+    // Seed: OCR session row with parentRunId and explicit parentSubject.
     appendFileSync(
       join(dir, `ocr-${todayLocal()}.jsonl`),
       JSON.stringify({
@@ -46,23 +46,11 @@ test("approve-batch preserves parent __name on done row + threads parentSubject 
         parentRunId: "parent-1234",
         status: "done",
         step: "awaiting-approval",
-        data: { formType: "emergency-contact", sessionId: "sess-x", __name: "Emergency Contact · #1234", parentRunId: "parent-1234", dryRun: "false" },
-      }) + "\n",
-    );
-    // Emergency-contact parent prep row.
-    appendFileSync(
-      join(dir, `emergency-contact-${todayLocal()}.jsonl`),
-      JSON.stringify({
-        workflow: "emergency-contact",
-        timestamp: new Date().toISOString(),
-        id: "ocr-prep-sess-x",
-        runId: "parent-1234",
-        status: "running",
         data: {
-          __name: "Emergency Contact · #1234",
-          __id: "ocr-prep-sess-x",
-          mode: "prepare",
-          pdfOriginalName: "x.pdf",
+          formType: "emergency-contact",
+          sessionId: "sess-x",
+          parentSubject: "Emergency Contact · #1234",
+          dryRun: "false",
         },
       }) + "\n",
     );
@@ -85,13 +73,13 @@ test("approve-batch preserves parent __name on done row + threads parentSubject 
     // Sleep briefly to let the fire-and-forget dispatch complete.
     await new Promise((r) => setTimeout(r, 250));
 
-    // Parent row's __name preserved on the approved row.
-    const ecRows = readJsonl(join(dir, `emergency-contact-${todayLocal()}.jsonl`));
-    const approved = ecRows.find(
+    // OCR approved row keeps the explicit parentSubject for later re-reads.
+    const ocrRows = readJsonl(join(dir, `ocr-${todayLocal()}.jsonl`));
+    const approved = ocrRows.find(
       (r) => (r as { step?: string }).step === "approved",
     ) as { data: Record<string, string> } | undefined;
     assert.ok(approved, "approved row should exist");
-    assert.equal(approved!.data.__name, "Emergency Contact · #1234");
+    assert.equal(approved!.data.parentSubject, "Emergency Contact · #1234");
 
     // Captured kernel input carries parentSubject.
     assert.ok(captured.length >= 1, "at least one input captured");

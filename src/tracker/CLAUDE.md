@@ -43,7 +43,7 @@ Tracker/log/session rows should preserve readable messages and carry structured 
 
 Tracker rows may include:
 - `data.__subject` / `data.__subjectKind` from `WorkflowConfig.operatorSubject`.
-- Task display fields such as `taskRole`, `originWorkflow`, and `taskGroupId`.
+- Task display fields such as `taskRole`, `parentSubject`, and `taskGroupId`.
 - Structured log fields such as `category`, `occasion`, `subject`, `system`, `step`, `attempt`, `childWorkflow`, or `durationMs`.
 
 ## `TrackerEntry.parentRunId`

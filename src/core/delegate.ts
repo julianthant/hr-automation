@@ -36,11 +36,8 @@
  *     from the per-run resolved/rejected promise.
  *
  * `renderAs` overrides:
- *   - "flat"    → child renders as a flat `delegation-member` surface row
- *                 (equivalent to OCR's existing `runtimePolicy.delegation
- *                 .utilityChildSurface = "delegation-member"` pattern).
- *                 Stamps `archetype: "passive-child"` so projections render
- *                 it under the parent without promoting to a group card.
+ *   - "flat"    → stamps `archetype: "passive-child"` so projections render
+ *                 the child through the passive-delegation surface model.
  *   - "preview" → child renders as an `approval-delegation` preview row.
  *                 Stamps the child's natural archetype (`delegate-child`
  *                 for non-utility children); the preview affordance comes

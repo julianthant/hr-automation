@@ -1,6 +1,6 @@
 # CRM Doc Download Workflow
 
-Downloads **ACT CRM iDocs PDFs** for an onboarding record: search the CRM onboarding list, open the latest row, then download configured documents to a folder on disk. Invoked from the dashboard input-run surface (EIDs) or **as a delegation target** from **onboarding** (and any other workflow that enqueues `crm-doc-download` with `originWorkflow` / parent lineage fields).
+Downloads **ACT CRM iDocs PDFs** for an onboarding record: search the CRM onboarding list, open the latest row, then download configured documents to a folder on disk. Invoked from the dashboard input-run surface (EIDs) or **as a delegation target** from **onboarding** (and any other workflow that enqueues `crm-doc-download` with parent lineage fields).
 
 **Kernel-based** — `crmDocDownloadWorkflow` in `workflow.ts`; CRM-only auth; pool batch mode.
 
@@ -14,7 +14,7 @@ This workflow touches **crm** only.
 
 ## Files
 
-- `schema.ts` — `CrmDocDownloadInputSchema`: `email` or `emplId` required; optional `firstName`/`lastName`/`middleName` for download path, `folderPath` override, `docIndices`, delegation fields (`originWorkflow`, `parentRunId`, …).
+- `schema.ts` — `CrmDocDownloadInputSchema`: `email` or `emplId` required; optional `firstName`/`lastName`/`middleName` for download path, `folderPath` override, `docIndices`, delegation fields (`parentRunId`, `parentSubject`, …).
 - `workflow.ts` — `defineWorkflow`, `runCrmDocDownload`, `runCrmDocDownloadCli`.
 - `index.ts` — Barrel exports.
 
@@ -28,7 +28,7 @@ This workflow touches **crm** only.
 | `authSteps` | `true` — visible pipeline includes `auth:crm` before business steps |
 | `authChain` | `"sequential"` |
 | `batch` | `{ mode: "pool", poolSize: 4, preEmitPending: true }` |
-| `detailFields` | `emplId`, `email`, `pdfDownload`, `pdfFolder`, `originWorkflow` |
+| `detailFields` | `emplId`, `email`, `pdfDownload`, `pdfFolder` |
 
 ## Step pipeline
 
@@ -47,11 +47,11 @@ Daemon spawn/enqueue matches other dashboard input-run workflows (`src/core/daem
 ## Inputs and outputs
 
 - **Inputs:** At minimum **`email` or `emplId`**. Optional path and doc index controls live on `CrmDocDownloadInput` (see `schema.ts`).
-- **Outputs:** Tracker fields include download counts, folder path, `taskRole` (`utility` when `originWorkflow` is set, else `root`), plus delegation metadata when enqueued by a parent workflow.
+- **Outputs:** Tracker fields include download counts, folder path, and delegation metadata when enqueued by a parent workflow.
 
 ## Delegation (onboarding)
 
-When **onboarding** (or another parent) runs this workflow in-process or via queue, inputs may carry `originWorkflow`, `parentRunId`, `parentSubject`, `taskGroupId` so the dashboard and logs show lineage. The handler stamps `taskRole: "utility"` when `originWorkflow` is present.
+When **onboarding** (or another parent) runs this workflow in-process or via queue, inputs may carry `parentRunId`, `parentSubject`, and `taskGroupId` so the dashboard and logs show lineage.
 
 ## Operator notes
 
@@ -61,3 +61,4 @@ When **onboarding** (or another parent) runs this workflow in-process or via que
 ## Lessons Learned
 
 - **2026-05-25: Dashboard input run is the public start path.** `npm run crm-doc-download` is retired; typed starts belong in `InputRunPanel` and `/api/enqueue`.
+- **2026-05-26: Parent lineage fields are explicit.** Delegated CRM document downloads use `parentRunId`, `parentSubject`, and `taskGroupId`; the old source-workflow marker is not part of the schema or tracker detail fields.

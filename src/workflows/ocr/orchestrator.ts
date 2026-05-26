@@ -35,7 +35,6 @@ import {
 } from "../../services/ocr/eid-lookup-results.js";
 import { flattenForData } from "../../services/ocr/tracker-data.js";
 import { countVerified } from "../../services/ocr/records-stats.js";
-import { resolveParentSubject } from "../../services/ocr/parent-subject.js";
 import type { AnyOcrFormSpec, RosterRow as OcrRosterRow } from "./types.js";
 import { extractOcrRecordEid, extractOcrRecordName } from "./record-helpers.js";
 import type { OcrInput } from "./schema.js";
@@ -104,8 +103,8 @@ export interface OcrOrchestratorOpts {
       emplId?: string;
       itemId: string;
       taskRole?: string;
-      originWorkflow?: string;
       taskGroupId?: string;
+      parentSubject?: string;
     }>,
   ) => Promise<void>;
   _lookupSuggestionOverride?: (input: {
@@ -185,13 +184,10 @@ export async function runOcrOrchestrator(
     };
   });
 
-  // Resolved once per orchestrator run — scanning the parent workflow's JSONL
-  // file on every writeTracker call would be O(emits × file-size).
-  const cachedParentSubject = resolveParentSubject({
-    parentRunId: input.parentRunId,
-    originWorkflow: input.originWorkflow,
-    trackerDir,
-  });
+  const cachedParentSubject =
+    typeof input.parentSubject === "string" && input.parentSubject.trim()
+      ? input.parentSubject.trim()
+      : undefined;
 
   let lastAnnouncedPhase: string | undefined;
   const writeTracker = (
@@ -696,7 +692,6 @@ export async function runOcrOrchestrator(
                     ? { name: targetName(e, spec) }
                     : { emplId: lookupEnqueueEmplId(e) }),
                   itemId: e.itemId,
-                  originWorkflow: "ocr",
                   taskGroupId: input.sessionId,
                   ...(cachedParentSubject ? { parentSubject: cachedParentSubject } : {}),
                 })),
@@ -709,14 +704,12 @@ export async function runOcrOrchestrator(
             const item = e.kind === "name"
               ? {
                   name: targetName(e, spec),
-                  originWorkflow: "ocr",
                   taskGroupId: input.sessionId,
                   ...(cachedParentSubject ? { parentSubject: cachedParentSubject } : {}),
                 }
               : {
                   emplId: lookupEnqueueEmplId(e),
                   keepNonHdh: true,
-                  originWorkflow: "ocr",
                   taskGroupId: input.sessionId,
                   ...(cachedParentSubject ? { parentSubject: cachedParentSubject } : {}),
                 };
@@ -764,14 +757,12 @@ export async function runOcrOrchestrator(
             e.kind === "name"
               ? {
                   name: targetName(e, spec),
-                  originWorkflow: "ocr",
                   taskGroupId: input.sessionId,
                   ...(cachedParentSubject ? { parentSubject: cachedParentSubject } : {}),
                 }
               : {
                   emplId: lookupEnqueueEmplId(e),
                   keepNonHdh: true,
-                  originWorkflow: "ocr",
                   taskGroupId: input.sessionId,
                   ...(cachedParentSubject ? { parentSubject: cachedParentSubject } : {}),
                 },
@@ -1196,4 +1187,3 @@ function disambigQueryFromRecord(record: unknown): string {
   if (employee && typeof employee.name === "string") return employee.name.trim();
   return "";
 }
-

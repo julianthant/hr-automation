@@ -135,7 +135,6 @@ async function handlePrepare(
   const rosterPath = fields.rosterPath?.trim() || undefined;
   const sessionId = requestedSessionId ?? (isReupload ? undefined : randomUUID());
   const previousRunId = fields.previousRunId?.trim() || undefined;
-  const originWorkflow = fields.originWorkflow?.trim() || undefined;
   const dryRun = fields.dryRun === "true" || fields.dryRun === "1";
   const pdfOriginalName = file.filename ?? pdfFilename;
   let pdfFileId: string | undefined;
@@ -173,7 +172,6 @@ async function handlePrepare(
     sessionId,
     previousRunId,
     isReupload,
-    originWorkflow,
     dryRun,
   });
   return jsonResponse(result.body, result.status);

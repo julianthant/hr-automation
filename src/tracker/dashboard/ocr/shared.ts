@@ -43,14 +43,6 @@ export function readParentRunId(sessionId: string, trackerDir: string | undefine
   return e?.parentRunId;
 }
 
-export function readOriginWorkflow(sessionId: string, trackerDir: string | undefined): string | undefined {
-  const e = walkOcrJsonl(sessionId, trackerDir, (row) => {
-    const v = row.data?.originWorkflow as unknown;
-    return typeof v === "string" && v.length > 0;
-  });
-  return e ? (e.data!.originWorkflow as string) : undefined;
-}
-
 export function readDryRun(sessionId: string, trackerDir: string | undefined): boolean {
   const e = walkOcrJsonl(sessionId, trackerDir, (row) => {
     const v = row.data?.dryRun;

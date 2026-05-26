@@ -99,7 +99,7 @@ const results = await ctx.delegateToAll(
 ```
 
 `renderAs` overrides the child's row archetype (and therefore its dashboard surface):
-- `"flat"` → stamps `passive-child`; renders as `delegation-member` flat row (OCR's utility children).
+- `"flat"` → stamps `passive-child`; renders through the passive-delegation surface model.
 - `"preview"` → stamps `delegate-child`; renders as `approval-delegation` preview card (OCR under an oath-signature PDF run).
 - `"batch"` → stamps `delegate-child`; renders as `batch-delegation` group member (signature fan-out under a parent).
 
