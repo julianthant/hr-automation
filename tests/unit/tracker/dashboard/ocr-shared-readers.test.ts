@@ -6,7 +6,6 @@ import { join } from "node:path";
 import {
   readFormType,
   readParentRunId,
-  readOriginWorkflow,
   readDryRun,
 } from "../../../../src/tracker/dashboard/ocr/shared.js";
 
@@ -26,7 +25,6 @@ function makeOcrRow(id: string, overrides: Record<string, unknown> = {}): string
     step: "awaiting-approval",
     data: {
       formType: "oath",
-      originWorkflow: "oath-upload",
       dryRun: "false",
     },
     parentRunId: "parent-run-abc",
@@ -50,16 +48,6 @@ describe("ocr shared readers — cross-day JSONL walk", () => {
     try {
       appendFileSync(join(dir, `ocr-${yesterdayLocal()}.jsonl`), makeOcrRow("sess-2") + "\n");
       assert.equal(readParentRunId("sess-2", dir), "parent-run-abc");
-    } finally {
-      rmSync(dir, { recursive: true });
-    }
-  });
-
-  test("readOriginWorkflow finds session written to yesterday's JSONL", () => {
-    const dir = mkdtempSync(join(tmpdir(), "ocr-shared-"));
-    try {
-      appendFileSync(join(dir, `ocr-${yesterdayLocal()}.jsonl`), makeOcrRow("sess-3") + "\n");
-      assert.equal(readOriginWorkflow("sess-3", dir), "oath-upload");
     } finally {
       rmSync(dir, { recursive: true });
     }

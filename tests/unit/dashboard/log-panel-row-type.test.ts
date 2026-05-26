@@ -77,7 +77,6 @@ test("OCR EID lookup child remains a delegation member projection", () => {
     status: "done",
     data: {
       archetype: "delegate-child",
-      originWorkflow: "ocr",
       searchName: "Doe, Jane",
       emplId: "10000001",
     },

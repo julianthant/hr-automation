@@ -9,7 +9,7 @@ export const OcrInputSchema = z.object({
   rosterPath:       z.string().optional(),
   rosterMode:       z.enum(["existing", "download"]).default("existing"),
   parentRunId:      z.string().optional(),
-  originWorkflow:   z.string().optional(),
+  parentSubject:    z.string().optional(),
   previousRunId:    z.string().optional(),
   forceResearchAll: z.boolean().optional(),
   dryRun:           z.boolean().optional(),

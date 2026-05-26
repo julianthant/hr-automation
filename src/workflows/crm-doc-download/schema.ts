@@ -8,7 +8,6 @@ export const CrmDocDownloadInputSchema = z.object({
   middleName: z.string().optional(),
   folderPath: z.string().min(1).optional(),
   docIndices: z.array(z.number().int().min(0)).nonempty().optional(),
-  originWorkflow: z.string().min(1).optional(),
   parentSubject: z.string().min(1).optional(),
   parentRunId: z.string().min(1).optional(),
   taskGroupId: z.string().min(1).optional(),

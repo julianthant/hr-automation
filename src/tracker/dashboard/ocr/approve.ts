@@ -1,14 +1,14 @@
-import { emitTrackerRow, appendLogEntry } from "../../jsonl.js";
+import { emitTrackerRow } from "../../jsonl.js";
 import { log } from "../../../utils/log.js";
 import { errorMessage } from "../../../utils/errors.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
 import { openControlDb } from "../../../core/control-db.js";
 import { createTaskStore } from "../../../core/task-store/index.js";
 import { buildHttpPendingData } from "../../../core/daemon/enqueue-dispatch.js";
-import { readQueueTitle, rootQueueTitleData } from "../../../domain/queue-title.js";
+import { rootQueueTitleData } from "../../../domain/queue-title.js";
 import { findLatestEntryForPredicate } from "../../find-latest-entry.js";
 import { deriveRowArchetype, resolveArchetype } from "../../../domain/row-archetype.js";
-import { readFormType, readParentRunId, readDryRun, readOriginWorkflow } from "./shared.js";
+import { readFormType, readParentRunId, readDryRun } from "./shared.js";
 import { emitApproved } from "../../../services/ocr/approval-signal.js";
 
 const WORKFLOW = "ocr";
@@ -65,16 +65,10 @@ export function buildOcrApproveHandler(
 
     const approveTo = spec.approveTo;
     const parentRunId = readParentRunId(input.sessionId, trackerDir);
-    const originWorkflow = readOriginWorkflow(input.sessionId, trackerDir);
     const dryRun = readDryRun(input.sessionId, trackerDir);
     const latestReviewData = readLatestOcrReviewData(input.sessionId, input.runId, trackerDir);
     const parentSubject = parentRunId && approveTo
-      ? readParentSubjectFromParentRow(
-          originWorkflow ?? approveTo.workflow,
-          originWorkflow ? undefined : `ocr-prep-${input.sessionId}`,
-          parentRunId,
-          trackerDir,
-        )
+      ? readParentSubjectFromReviewData(latestReviewData)
       : undefined;
 
     const selectedRecords = input.records.filter(isSelectedRecord);
@@ -254,16 +248,6 @@ export function buildOcrApproveHandler(
           { workflow: WORKFLOW, sessionId: input.sessionId },
           { records: input.records, fannedOutItemIds: enqueuedIds },
         );
-        if (approveTo && parentRunId) {
-          writeOriginParentApproved({
-            originWorkflow: originWorkflow ?? approveTo.workflow,
-            parentItemId: originWorkflow ? undefined : `ocr-prep-${input.sessionId}`,
-            parentRunId,
-            fannedOutCount: enqueuedIds.length,
-            trackerDir,
-          });
-        }
-
         if (approveTo && parentRunId && dispatchResult?.enqueued) {
           createApprovalDependencyRows({
             trackerDir,
@@ -291,36 +275,6 @@ export function buildOcrApproveHandler(
           },
           trackerDir,
         );
-        if (approveTo && parentRunId) {
-          const ts = new Date().toISOString();
-          const parentItemId = `ocr-prep-${input.sessionId}`;
-          emitTrackerRow(
-            {
-              workflow: approveTo.workflow,
-              timestamp: ts,
-              id: parentItemId,
-              runId: parentRunId,
-              status: "failed",
-              step: "approve-failed",
-              // Origin parent row is batch-parent (oath-upload root, or
-              // synthetic ocr-prep-* anchor row).
-              data: { archetype: "batch-parent" },
-              error: msg,
-            },
-            trackerDir,
-          );
-          appendLogEntry(
-            {
-              workflow: approveTo.workflow,
-              itemId: parentItemId,
-              runId: parentRunId,
-              level: "error",
-              message: `Approve dispatch failed — daemon spawn or enqueue errored: ${msg}`,
-              ts,
-            },
-            trackerDir,
-          );
-        }
       }
     })();
 
@@ -378,101 +332,9 @@ function readParentSubjectFromInput(input: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-/**
- * Emit the terminal step transition on the origin parent row when OCR is
- * approved. Keep the parent tagged as `mode=prepare` so the dashboard can
- * fold it together with delegated daemon children under one queue row.
- */
-function writeOriginParentApproved(args: {
-  originWorkflow: string;
-  /** When set, used directly. When absent, look up the item id via parentRunId. */
-  parentItemId: string | undefined;
-  parentRunId: string;
-  fannedOutCount: number;
-  trackerDir?: string;
-}): void {
-  const ts = new Date().toISOString();
-  // Resolve the parent's item id. When `originWorkflow` is a kernel-managed
-  // daemon workflow (e.g. "oath-upload"), the item id is on the tracker row
-  // not predictable from the OCR session id — look it up by runId.
-  let parentItemId = args.parentItemId;
-  if (!parentItemId) {
-    const originEntry = findLatestEntryForPredicate({
-      workflow: args.originWorkflow,
-      trackerDir: args.trackerDir,
-      lookbackDays: 7,
-      predicate: (e) => e.runId === args.parentRunId,
-    });
-    parentItemId = originEntry?.id ?? args.parentRunId;
-  }
-  const latestParentData = readLatestEntryData(args.originWorkflow, parentItemId, args.parentRunId, args.trackerDir);
-  // For prep-anchor rows (ocr-prep-* in approveTo.workflow) mark done/approved.
-  // For kernel-daemon origin rows (e.g. oath-upload) emit a running status update so
-  // the daemon's in-progress row shows OCR approval progress without prematurely
-  // flipping to "done".
-  const isKernelDaemonParent = args.parentItemId === undefined;
-  // Both branches are batch-parent rows: the synthetic ocr-prep-* anchor
-  // is the OCR batch row; the kernel-daemon origin (oath-upload) is also
-  // a batch-parent at the top level of its tree.
-  emitTrackerRow(
-    {
-      workflow: args.originWorkflow,
-      timestamp: ts,
-      id: parentItemId,
-      runId: args.parentRunId,
-      status: isKernelDaemonParent ? "running" : "done",
-      step: isKernelDaemonParent ? "wait-ocr-approval" : "approved",
-      data: {
-        ...latestParentData,
-        ...(isKernelDaemonParent ? { approvedOcr: "true" } : { mode: "prepare" }),
-        fannedOutCount: String(args.fannedOutCount),
-        archetype: "batch-parent",
-      },
-    },
-    args.trackerDir,
-  );
-  appendLogEntry(
-    {
-      workflow: args.originWorkflow,
-      itemId: parentItemId,
-      runId: args.parentRunId,
-      level: "success",
-      message: `OCR approved · ${args.fannedOutCount} record${args.fannedOutCount === 1 ? "" : "s"} fanned out to the daemon.`,
-      ts,
-    },
-    args.trackerDir,
-  );
-}
-
-function readLatestEntryData(
-  workflow: string,
-  id: string,
-  runId: string,
-  trackerDir?: string,
-): Record<string, string> {
-  return readLatestEntryDataWithLookback(workflow, id, runId, trackerDir);
-}
-
-function readParentSubjectFromParentRow(
-  workflow: string,
-  parentItemId: string | undefined,
-  parentRunId: string,
-  trackerDir?: string,
-): string | undefined {
-  let data: Record<string, string>;
-  if (parentItemId) {
-    data = readLatestEntryData(workflow, parentItemId, parentRunId, trackerDir);
-  } else {
-    const entry = findLatestEntryForPredicate({
-      workflow,
-      trackerDir,
-      lookbackDays: 7,
-      predicate: (e) => e.runId === parentRunId,
-    });
-    data = entry?.data ? { ...entry.data } : {};
-  }
-  const name = readQueueTitle(data) ?? data.__name;
-  return typeof name === "string" && name.length > 0 ? name : undefined;
+function readParentSubjectFromReviewData(data: Record<string, string>): string | undefined {
+  const value = data.parentSubject ?? data.__queueRootTitle;
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function isSelectedRecord(record: unknown): boolean {

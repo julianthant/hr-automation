@@ -259,7 +259,6 @@ describe("buildTrackerQueueSurfaces", () => {
       status: "pending",
       data: {
         archetype: "delegate-child",
-        originWorkflow: "ocr",
         parentSubject: "Oath · 1234",
       },
     });
@@ -284,7 +283,6 @@ describe("buildTrackerQueueSurfaces", () => {
       data: {
         archetype: "passive-child",
         taskRole: "utility",
-        originWorkflow: "onboarding",
         parentSubject: "Onboarding: jane@ucsd.edu",
       },
     });

@@ -140,7 +140,6 @@ describe("workflow runtime projection adapters", () => {
       status: "pending",
       data: {
         archetype: "delegate-child",
-        originWorkflow: "ocr",
         __queueTitle: "Doe, Jane",
         __queueTitleKind: "single",
       },
@@ -305,7 +304,7 @@ describe("workflow runtime projection adapters", () => {
     );
   });
 
-  it("keeps OCR utility EID and active-check rows flat under policy", () => {
+  it("folds passive OCR utility rows by row archetype", () => {
     const lookup = entry({
       workflow: "eid-lookup",
       id: "lookup-1",
@@ -313,8 +312,7 @@ describe("workflow runtime projection adapters", () => {
       parentRunId: "ocr-run-1",
       status: "pending",
       data: {
-        archetype: "delegate-child",
-        originWorkflow: "ocr",
+        archetype: "passive-child",
         searchName: "Doe, Jane",
       },
     });
@@ -325,8 +323,7 @@ describe("workflow runtime projection adapters", () => {
       parentRunId: "ocr-run-1",
       status: "pending",
       data: {
-        archetype: "delegate-child",
-        originWorkflow: "ocr",
+        archetype: "passive-child",
         emplId: "10000001",
       },
     });
@@ -337,8 +334,9 @@ describe("workflow runtime projection adapters", () => {
       runtimePolicies: phase4Policies,
     });
 
-    assert.equal(surfaces.groupRows.length, 0);
-    assert.deepEqual(surfaces.flatEntries.map((row) => row.id), ["lookup-1", "active-1"]);
+    assert.equal(surfaces.groupRows.length, 1);
+    assert.equal(surfaces.groupRows[0]?.kind, "passive-delegation");
+    assert.deepEqual(surfaces.groupRows[0]?.members.map((row) => row.id), ["lookup-1", "active-1"]);
   });
 
   it("projects final Oath Signature rows as person-titled delegation members", () => {
@@ -456,7 +454,6 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       status: "done",
       data: {
         archetype: "delegate-child",
-        originWorkflow: "ocr",
         searchName: "Jane Doe",
         emplId: "10000001",
       },
@@ -477,7 +474,6 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       status: "pending",
       data: {
         archetype: "delegate-child",
-        originWorkflow: "ocr",
         searchName: "Jane Doe",
         emplId: "10000001",
       },
@@ -551,7 +547,6 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       status: "running",
       data: {
         archetype: "passive-child",
-        originWorkflow: "ocr",
         label: "Onboarding Roster",
         parentSubject: "Emergency Contact · 5678",
       },

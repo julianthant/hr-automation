@@ -34,7 +34,7 @@ Two execution paths share the same `OcrResult<T[]>` contract:
 - `types.ts` — `OcrRequest`, `OcrResult`, `OcrProvider`, error classes.
 - `rotation.ts` — per-key state machine + persisted state (used by
   the whole-PDF path; per-page path has its own simpler retry loop).
-- `eid-lookup-results.ts` / `parent-subject.ts` / `records-stats.ts` / `tracker-data.ts` — shared OCR helpers (records patching, parent-subject resolution, verified-count, tracker `data` flattening) consumed by workflow code (`orchestrator`, `retry-page`, `force-research`, `oath-upload`, `eid-lookup`). See `index.ts` for the public barrel.
+- `eid-lookup-results.ts` / `records-stats.ts` / `tracker-data.ts` — shared OCR helpers (records patching, verified-count, tracker `data` flattening) consumed by workflow code (`orchestrator`, `retry-page`, `force-research`, `oath-upload`, `eid-lookup`). See `index.ts` for the public barrel.
 - `prompts.ts` — schema → Gemini prompt template.
 - `providers/gemini.ts` — Gemini 2.5 Flash multi-modal call.
 

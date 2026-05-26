@@ -1,8 +1,7 @@
 /**
  * HTTP handler for /api/oath-signature/start.
  *
- * Replaces the old "POST /api/ocr/prepare with originWorkflow=oath-signature"
- * launch path. Under Plan A Commit 3, an operator uploading a PDF from the
+ * Under Plan A Commit 3, an operator uploading a PDF from the
  * Run Oath Signature modal enqueues a single `{ kind: "pdf" }`
  * oath-signature daemon item; that item's kernel handler delegates to the
  * `ocr` workflow (which suspends until operator approval) and then fans

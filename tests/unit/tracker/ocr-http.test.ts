@@ -699,20 +699,8 @@ test("buildOcrApproveHandler provides downstream pre-emit hook before daemon aut
       data: {
         formType: "emergency-contact",
         sessionId: "session-preemit-approve",
+        parentSubject: "Emergency Contact · #1234",
         records: JSON.stringify([]),
-      },
-    }) + "\n", "utf-8");
-    writeFileSync(ecFile, JSON.stringify({
-      workflow: "emergency-contact",
-      id: "ocr-prep-session-preemit-approve",
-      runId: "parent-preemit-approve",
-      status: "running",
-      step: "ocr",
-      timestamp: "2026-05-01T00:00:00Z",
-      data: {
-        __name: "Emergency Contact · #1234",
-        __id: "ocr-prep-session-preemit-approve",
-        mode: "prepare",
       },
     }) + "\n", "utf-8");
 
@@ -741,75 +729,6 @@ test("buildOcrApproveHandler provides downstream pre-emit hook before daemon aut
     assert.equal(childPending.parentRunId, "parent-preemit-approve");
     assert.match(childPending.data.employee, /10874100/);
     assert.equal(childPending.data.parentSubject, "Emergency Contact · #1234");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("buildOcrApproveHandler preserves origin parent prep metadata when marking approved", async () => {
-  const dir = join(tmpdir(), `ocr-approve-origin-parent-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
-  try {
-    const parentRunId = "origin-parent-run";
-    const sessionId = "session-origin-parent";
-    const runId = "run-origin-parent";
-    const parentItemId = `ocr-prep-${sessionId}`;
-    const parentFile = join(dir, `emergency-contact-${dateLocalForTest()}.jsonl`);
-    writeFileSync(parentFile, JSON.stringify({
-      workflow: "emergency-contact",
-      id: parentItemId,
-      runId: parentRunId,
-      status: "running",
-      step: "ocr",
-      timestamp: "2026-05-01T00:00:00Z",
-      data: {
-        __name: "Emergency Contact · #-run",
-        __id: parentItemId,
-        mode: "prepare",
-        pdfOriginalName: "fake.pdf",
-        ocrSessionId: sessionId,
-        ocrRunId: runId,
-      },
-    }) + "\n", "utf-8");
-
-    const ocrFile = join(dir, `ocr-${dateLocalForTest()}.jsonl`);
-    writeFileSync(ocrFile, JSON.stringify({
-      workflow: "ocr",
-      id: sessionId,
-      runId,
-      status: "done",
-      step: "awaiting-approval",
-      timestamp: "2026-05-01T00:00:00Z",
-      parentRunId,
-      data: {
-        formType: "emergency-contact",
-        pdfPath: "/tmp/fake.pdf",
-        pdfOriginalName: "fake.pdf",
-        sessionId,
-        records: JSON.stringify([]),
-      },
-    }) + "\n", "utf-8");
-
-    const handler = buildOcrApproveHandler({
-      trackerDir: dir,
-      ensureDaemonsAndEnqueueOverride: async () => {},
-    });
-
-    const resp = await handler({
-      sessionId,
-      runId,
-      records: [emergencyContactPreviewRecord("10000001", "Alice One")],
-    });
-
-    assert.equal(resp.status, 200);
-    const parentLines = readFileSync(parentFile, "utf-8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
-    const approvedParent = parentLines[parentLines.length - 1] as { status: string; step?: string; data?: Record<string, string> };
-    assert.equal(approvedParent.status, "done");
-    assert.equal(approvedParent.step, "approved");
-    assert.equal(approvedParent.data?.mode, "prepare");
-    assert.equal(approvedParent.data?.ocrSessionId, sessionId);
-    assert.equal(approvedParent.data?.ocrRunId, runId);
-    assert.equal(approvedParent.data?.fannedOutCount, "1");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

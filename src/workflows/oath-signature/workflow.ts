@@ -287,6 +287,7 @@ async function runPdfBranch(
         sessionId: input.sessionId,
         rosterMode: input.rosterMode ?? "download",
         ...(input.rosterPath ? { rosterPath: input.rosterPath } : {}),
+        ...(input.parentSubject ? { parentSubject: input.parentSubject } : {}),
         ...(input.dryRun ? { dryRun: input.dryRun } : {}),
       },
       {
