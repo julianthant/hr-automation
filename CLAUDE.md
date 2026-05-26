@@ -69,6 +69,8 @@ Full walkthrough: `docs/engineering/architecture-deep-dive.md`. File-by-file ker
 
 Observability: `.tracker/{workflow}-{YYYY-MM-DD}.jsonl` + `*-logs.jsonl`, streamed to the dashboard. Debug lifecycle artifacts at `.tracker/debug/`.
 
+OCR approval fan-out is form-spec driven: `OcrFormSpec.approveTo` means `/api/ocr/approve-batch` enqueues downstream daemon rows (emergency-contact); omitting `approveTo` means approval only terminates OCR and the owning workflow consumes approved records itself (oath-signature PDF branch).
+
 ## Where to Find Things
 
 | Need | Location | Method |

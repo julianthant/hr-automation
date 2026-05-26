@@ -14,10 +14,28 @@ function readJsonl(p: string): Array<Record<string, unknown>> {
   return readFileSync(p, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 }
 
-test("approve-batch preserves parent __name 'Oath Signature · #...' on done row + threads parentSubject into kernel inputs", async () => {
+function emergencyContactPreviewRecord(employeeId: string, employeeName: string): Record<string, unknown> {
+  return {
+    sourcePage: 1,
+    employee: { name: employeeName, employeeId },
+    emergencyContact: {
+      name: `${employeeName} Contact`,
+      relationship: "Parent",
+      primary: true,
+      sameAddressAsEmployee: true,
+      cellPhone: "(555) 555-0100",
+    },
+    notes: [],
+    selected: true,
+    matchState: "matched",
+    warnings: [],
+  };
+}
+
+test("approve-batch preserves parent __name on done row + threads parentSubject into kernel inputs", async () => {
   const dir = mkdtempSync(join(tmpdir(), "approve-name-"));
   try {
-    // Seed: OCR session row (sessionId=sess-x, runId=ocr-run-x, parentRunId=parent-1234, formType=oath).
+    // Seed: OCR session row with parentRunId.
     appendFileSync(
       join(dir, `ocr-${todayLocal()}.jsonl`),
       JSON.stringify({
@@ -28,20 +46,20 @@ test("approve-batch preserves parent __name 'Oath Signature · #...' on done row
         parentRunId: "parent-1234",
         status: "done",
         step: "awaiting-approval",
-        data: { formType: "oath", sessionId: "sess-x", __name: "Oath Signature · #1234", parentRunId: "parent-1234", dryRun: "false" },
+        data: { formType: "emergency-contact", sessionId: "sess-x", __name: "Emergency Contact · #1234", parentRunId: "parent-1234", dryRun: "false" },
       }) + "\n",
     );
-    // Oath-signature parent prep row.
+    // Emergency-contact parent prep row.
     appendFileSync(
-      join(dir, `oath-signature-${todayLocal()}.jsonl`),
+      join(dir, `emergency-contact-${todayLocal()}.jsonl`),
       JSON.stringify({
-        workflow: "oath-signature",
+        workflow: "emergency-contact",
         timestamp: new Date().toISOString(),
         id: "ocr-prep-sess-x",
         runId: "parent-1234",
         status: "running",
         data: {
-          __name: "Oath Signature · #1234",
+          __name: "Emergency Contact · #1234",
           __id: "ocr-prep-sess-x",
           mode: "prepare",
           pdfOriginalName: "x.pdf",
@@ -60,7 +78,7 @@ test("approve-batch preserves parent __name 'Oath Signature · #...' on done row
     const res = await handler({
       sessionId: "sess-x",
       runId: "ocr-run-x",
-      records: [{ selected: true, employeeId: "10874100", printedName: "X" }],
+      records: [emergencyContactPreviewRecord("10874100", "Alice One")],
     });
     assert.equal(res.status, 200);
 
@@ -68,18 +86,18 @@ test("approve-batch preserves parent __name 'Oath Signature · #...' on done row
     await new Promise((r) => setTimeout(r, 250));
 
     // Parent row's __name preserved on the approved row.
-    const oathRows = readJsonl(join(dir, `oath-signature-${todayLocal()}.jsonl`));
-    const approved = oathRows.find(
+    const ecRows = readJsonl(join(dir, `emergency-contact-${todayLocal()}.jsonl`));
+    const approved = ecRows.find(
       (r) => (r as { step?: string }).step === "approved",
     ) as { data: Record<string, string> } | undefined;
     assert.ok(approved, "approved row should exist");
-    assert.equal(approved!.data.__name, "Oath Signature · #1234");
+    assert.equal(approved!.data.__name, "Emergency Contact · #1234");
 
     // Captured kernel input carries parentSubject.
     assert.ok(captured.length >= 1, "at least one input captured");
-    const first = captured[0] as { parentSubject?: string; emplId?: string };
-    assert.equal(first.parentSubject, "Oath Signature · #1234");
-    assert.equal(first.emplId, "10874100");
+    const first = captured[0] as { parentSubject?: string; employee?: { employeeId?: string } };
+    assert.equal(first.parentSubject, "Emergency Contact · #1234");
+    assert.equal(first.employee?.employeeId, "10874100");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -98,7 +116,7 @@ test("approve-batch omits parentSubject when no parent row found", async () => {
         runId: "ocr-run-y",
         status: "done",
         step: "awaiting-approval",
-        data: { formType: "oath", sessionId: "sess-y" },
+        data: { formType: "emergency-contact", sessionId: "sess-y" },
       }) + "\n",
     );
     let captured: unknown[] = [];
@@ -112,7 +130,7 @@ test("approve-batch omits parentSubject when no parent row found", async () => {
     const res = await handler({
       sessionId: "sess-y",
       runId: "ocr-run-y",
-      records: [{ selected: true, employeeId: "10874100", printedName: "X" }],
+      records: [emergencyContactPreviewRecord("10874100", "Alice One")],
     });
     assert.equal(res.status, 200);
     await new Promise((r) => setTimeout(r, 250));

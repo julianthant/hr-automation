@@ -121,20 +121,24 @@ test("carryForwardKey uses employee name normalized", async () => {
 });
 
 test("approveTo.deriveInput returns RecordSchema-compatible shape", async () => {
+  const approveTo = emergencyContactOcrFormSpec.approveTo;
+  assert.ok(approveTo);
   const r = {
     sourcePage: 1,
     employee: { name: "Maria Garcia", employeeId: "10001234" },
     emergencyContact: { name: "Sara Garcia", relationship: "Sister", primary: true, sameAddressAsEmployee: true, cellPhone: "(555) 123-4567" },
     notes: [],
   } as any;
-  const input = emergencyContactOcrFormSpec.approveTo.deriveInput(r);
+  const input = approveTo.deriveInput(r);
   assert.equal(input.employee.employeeId, "10001234");
   assert.equal(input.emergencyContact.name, "Sara Garcia");
 });
 
 test("approveTo.deriveItemId: deterministic", async () => {
+  const approveTo = emergencyContactOcrFormSpec.approveTo;
+  assert.ok(approveTo);
   const r = { sourcePage: 5, employee: { employeeId: "10001234" } } as any;
-  const id = emergencyContactOcrFormSpec.approveTo.deriveItemId(r, "parent-xyz", 2);
+  const id = approveTo.deriveItemId(r, "parent-xyz", 2);
   assert.match(id, /^ocr-ec-/);
   assert.match(id, /parent-xyz/);
   assert.match(id, /r2$/);

@@ -93,7 +93,7 @@ builder before changing handler step structure — drift will fail snapshots.
 | Field         | Value                                                                          | Why                                                                                   |
 | ------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
 | `systems`     | `[ucpath]`                                                                     | One auth domain, one Duo.                                                             |
-| `steps`       | `["ocr", "ucpath-auth", "transaction"]` — `ocr` is **`ctx.markStep` only** (timeline marker for OCR-sourced items); live work is `ucpath-auth` + `transaction` |
+| `steps`       | `["ocr", "fan-out", "ucpath-auth", "transaction"]` — PDF runs exercise `ocr` + `fan-out`; signer runs skip those and perform `ucpath-auth` + `transaction` |
 | `schema`      | `{ emplId, date?, dryRun?, … }` — see `schema.ts`                                                            |
 | `batch`       | `{ mode: "sequential", preEmitPending: true, betweenItems: ["reset"] }` | Daemon reuses the browser across items; `reset` prevents page-state leak.   |
 | `tiling`      | `"single"`                                                                     | One browser window.                                                                   |
@@ -107,7 +107,7 @@ builder before changing handler step structure — drift will fail snapshots.
 |--------------------------------------|-------------------|----------------------------------|
 | Direct input run per-EID             | `single`          | Flat queue row                   |
 | Child run dispatched from oath-upload | `delegate-child`  | Nested under oath-upload's card  |
-| Child run dispatched from OCR-approve | `delegate-child`  | Nested under OCR parent card     |
+| Child run dispatched from PDF branch fan-out | `delegate-child` | Nested under oath-signature PDF row |
 
 ## Data Flow
 
@@ -141,13 +141,13 @@ Single guard (tracker-side idempotency removed 2026-04-23):
 
 ## Capture integration (mobile-photo entry)
 
-`makeCaptureFinalize(trackerDir)` (`src/tracker/dashboard/capture-state.ts`) maps `workflow: "oath-signature"` to OCR **`formType: "oath"`** and invokes **`buildOcrPrepareHandler`** — same HTTP implementation as `/api/ocr/prepare` (`src/tracker/dashboard/hono/routes/ocr.ts`), with the PDF path coming from bundled photos under `.tracker/uploads/`.
+`makeCaptureFinalize(trackerDir)` (`src/tracker/dashboard/capture-state.ts`) maps `workflow: "oath-signature"` to `enqueueOathSignaturePdf`, the same `{ kind: "pdf" }` enqueue helper behind `/api/oath-signature/start`. The PDF path comes from bundled photos under `.tracker/uploads/`.
 
 ## Dashboard — OCR prepare + approve (oath form type)
 
-Paper-roster **prep** is not separate HTTP under this folder anymore. Select workflow **`oath-signature`** in the TopBar Run modal (or finish a **Capture** session — see above); the dashboard POSTs to **`/api/ocr/prepare`** and related routes in **`src/tracker/dashboard/hono/routes/ocr.ts`** with `formType: "oath"`. Orchestration, roster match, eid-lookup fan-out, `/api/ocr/approve-batch`, and stuck-row sweeps live under `src/tracker/dashboard/ocr/` + `src/tracker/ocr-http.ts` (see **`src/workflows/ocr/CLAUDE.md`**).
+Paper-roster **prep** is not separate HTTP under this folder anymore. Select workflow **`oath-signature`** in the TopBar Run modal (or finish a **Capture** session — see above); the dashboard POSTs to **`/api/oath-signature/start`** with a PDF, which enqueues one `{ kind: "pdf" }` oath-signature run. That PDF branch delegates to shared OCR with `formType: "oath"`. Orchestration, roster match, eid-lookup fan-out, `/api/ocr/approve-batch`, and stuck-row sweeps live under `src/tracker/dashboard/ocr/` + `src/tracker/ocr-http.ts` (see **`src/workflows/ocr/CLAUDE.md`**).
 
-Approve still fans out **`oath-signature`** daemon queue items (`{ emplId, date? }`). Parent prep rows use `data.mode === "prepare"`; eid-lookup delegation uses item ids prefixed **`oath-prep-`** so they do not collide with emergency-contact prep.
+Oath OCR approve does **not** fan out from the approve route. The approve route only writes the terminal OCR row (`done step=approved`) and wakes this workflow's PDF branch; the PDF branch reads the approved records and `ctx.delegateToAll`s `{ kind: "signer", emplId, name?, date? }` children. Parent prep rows use `data.mode === "prepare"`; eid-lookup delegation uses item ids prefixed **`oath-prep-`** so they do not collide with emergency-contact prep.
 
 ### Shared roster + match primitives
 
@@ -175,10 +175,11 @@ OCR handlers import **`src/services/matching/`** for roster load + name match �
 ## Lessons Learned
 
 - **Lesson maintenance rule:** Search this section, `src/workflows/ocr/CLAUDE.md`, and `src/systems/ucpath/LESSONS.md` before adding oath-signature guidance. Merge old OCR-prep notes into the current shared-OCR model instead of preserving obsolete grouped-upload behavior.
-- **2026-05-25: Discriminated `{ kind: "signer" | "pdf" }` input.** Plan A Commit 3 collapsed the old "PDF upload → originWorkflow synthesized parent → OCR approve fans out signer rows" chain into a single workflow with two input variants. PDF uploads enqueue one oath-signature daemon item; its kernel handler delegates to OCR (suspends until approval), reads records, and fans out signer children via `ctx.delegateToAll`. Signer-branch CLI tests and the oath OCR form spec inject `kind: "signer"` automatically — bare `{ emplId, ... }` shapes get wrapped at the adapter boundary. NOTE: today's OCR approve route ALSO fans out signer rows (legacy path). Until Commit 5 gates approve-fan-out by form-type, a PDF-branch run that completes will end up emitting BOTH the in-handler fan-out AND the approve-route fan-out — operators will see duplicate signer rows. Real fix lands in Commit 5.
+- **2026-05-26: Oath approve-side fan-out retired.** Oath's OCR form spec intentionally omits `approveTo`. `/api/ocr/approve-batch` writes the terminal OCR row and emits the approval signal only; it does not enqueue `oath-signature` signer rows, mirror origin rows, or create dependency rows. The PDF branch's `ctx.delegateToAll(oathSignatureWorkflow, signerInputs, { renderAs: "batch" })` is now the sole producer of signer children, which removes the duplicate-signer-batch hazard from the Plan A Commit 3 transition. Emergency-contact still uses approve-route fan-out through its own `approveTo`.
+- **2026-05-25: Discriminated `{ kind: "signer" | "pdf" }` input.** Plan A Commit 3 collapsed the old "PDF upload → originWorkflow synthesized parent → OCR approve fans out signer rows" chain into a single workflow with two input variants. PDF uploads enqueue one oath-signature daemon item; its kernel handler delegates to OCR (suspends until approval), reads records, and fans out signer children via `ctx.delegateToAll`. Bare `{ emplId, ... }` shapes get wrapped at the adapter boundary for legacy in-process callers, while PDF fan-out children are explicitly `{ kind: "signer", ... }`.
 - **2026-05-25: Dashboard input/upload runs are the public start paths.** `npm run oath-signature` is retired. Typed EID starts belong in `InputRunPanel`; paper-roster starts belong in the upload run / shared OCR path.
 - **Person Profiles direct URL can preserve stale detail state.** After skipping an existing oath and returning to search, the next direct navigation may still render the prior profile. `navigateToPersonProfiles` / `returnToSearch` must verify the Empl ID search textbox and recover by clicking Return to Search when needed.
-- **Paper-roster prep is owned by the shared OCR workflow.** Oath form type (`formType: "oath"`) routes through `/api/ocr/*` and `src/services/ocr/forms/oath.ts`. This folder no longer owns `prepare.ts` or `preview-schema.ts`; approved OCR rows enqueue `{ emplId, date? }` into this workflow.
+- **Paper-roster prep is owned by the shared OCR workflow.** Oath form type (`formType: "oath"`) routes through OCR and `src/services/ocr/forms/oath.ts`. This folder no longer owns `prepare.ts` or `preview-schema.ts`; the oath-signature PDF branch consumes approved OCR rows and enqueues `{ kind: "signer", emplId, date? }` children.
 - **Duplicate protection is live-page only.** Tracker-side idempotency is gone. If the profile shows the "no oath signature date" sentinel, add/save; otherwise skip as existing. A retry converges on the live profile state.
 - **Multi-file upload is N independent single-file runs.** Selecting N PDFs fires N separate `/api/ocr/prepare` requests with no shared parent id. Each PDF gets its own top-level prep row/card titled by PDF name; do not reintroduce `originBatchRunId`, `originBatchSubject`, or a grouped upload card.
 - **Prep rows do not need synthetic request members.** The main prep row already represents the OCR handoff in the queue panel. OCR-to-EID fan-out stays as delegation member rows; final oath-signature work rows are person rows titled by name when known, falling back to EID.

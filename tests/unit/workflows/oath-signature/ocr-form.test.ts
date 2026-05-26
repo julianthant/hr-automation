@@ -1,6 +1,7 @@
 import { test } from "vitest";
 import assert from "node:assert";
 import { oathOcrFormSpec, normalizeOathDate } from "../../../../src/services/ocr/forms/oath.js";
+import { buildOathSignerInputFromApprovedRecord } from "../../../../src/workflows/oath-signature/workflow.js";
 import type { RosterRow } from "../../../../src/workflows/ocr/types.js";
 
 const roster: RosterRow[] = [
@@ -168,45 +169,41 @@ test("applyCarryForward inherits resolved EID + verification + selection", async
   assert.deepEqual(merged.verification?.state, "verified");
 });
 
-test("approveTo.deriveInput: matched record → OathSignatureInput shape", async () => {
-  const r = {
+test("oath OCR form spec leaves approve fan-out to oath-signature PDF handler", () => {
+  assert.equal(oathOcrFormSpec.approveTo, undefined);
+});
+
+test("buildOathSignerInputFromApprovedRecord: matched selected record → signer input", () => {
+  const input = buildOathSignerInputFromApprovedRecord({
+    selected: true,
     employeeId: "10000001",
     printedName: "Doe, Jane",
     dateSigned: "05/01/2026",
-  } as any;
-  const input = oathOcrFormSpec.approveTo.deriveInput(r);
-  assert.equal(input.kind, "signer");
-  if (input.kind !== "signer") throw new Error("expected signer-shaped input");
-  assert.equal(input.emplId, "10000001");
-  assert.equal(input.name, "Doe, Jane");
-  assert.equal(input.date, "05/01/2026");
+  });
+  assert.deepEqual(input, {
+    kind: "signer",
+    emplId: "10000001",
+    name: "Doe, Jane",
+    date: "05/01/2026",
+  });
 });
 
-test("approveTo.deriveInput: OCR uppercase names are normalized for queue display", async () => {
-  const comma = oathOcrFormSpec.approveTo.deriveInput({
+test("buildOathSignerInputFromApprovedRecord normalizes OCR uppercase names for queue display", () => {
+  const comma = buildOathSignerInputFromApprovedRecord({
+    selected: true,
     employeeId: "10000001",
     printedName: "ABUTIN, JASON, L",
     dateSigned: "05/01/2026",
-  } as any);
-  const natural = oathOcrFormSpec.approveTo.deriveInput({
+  });
+  const natural = buildOathSignerInputFromApprovedRecord({
+    selected: true,
     employeeId: "10000002",
     printedName: "CORREA DINORA",
     dateSigned: "05/15/2003",
-  } as any);
+  });
 
-  if (comma.kind !== "signer" || natural.kind !== "signer") {
-    throw new Error("expected signer-shaped inputs from approveTo.deriveInput");
-  }
-  assert.equal(comma.name, "Abutin, Jason, L");
-  assert.equal(natural.name, "Correa Dinora");
-});
-
-test("approveTo.deriveItemId: deterministic shape", async () => {
-  const r = {} as any;
-  const id = oathOcrFormSpec.approveTo.deriveItemId(r, "parent-run-xyz", 3);
-  assert.match(id, /^ocr-oath-/);
-  assert.match(id, /parent-run-xyz/);
-  assert.match(id, /r3$/);
+  assert.equal(comma?.name, "Abutin, Jason, L");
+  assert.equal(natural?.name, "Correa Dinora");
 });
 
 test("normalizeOathDate: handwritten formats coerce to MM/DD/YYYY", () => {
@@ -238,24 +235,22 @@ test("normalizeOathDate: invalid or absent input returns null", () => {
   assert.equal(normalizeOathDate("4-23-2026-extra"), null);
 });
 
-test("approveTo.deriveInput: 2-digit-year handwritten dateSigned normalizes", () => {
-  const r = {
+test("buildOathSignerInputFromApprovedRecord normalizes 2-digit-year handwritten dateSigned", () => {
+  const input = buildOathSignerInputFromApprovedRecord({
+    selected: true,
     employeeId: "10000001",
     dateSigned: "4-23-26",
-  } as any;
-  const input = oathOcrFormSpec.approveTo.deriveInput(r);
-  if (input.kind !== "signer") throw new Error("expected signer-shaped input");
-  assert.equal(input.emplId, "10000001");
-  assert.equal(input.date, "04/23/2026");
+  });
+  assert.equal(input?.emplId, "10000001");
+  assert.equal(input?.date, "04/23/2026");
 });
 
-test("approveTo.deriveInput: unparseable date is dropped (workflow falls back to today)", () => {
-  const r = {
+test("buildOathSignerInputFromApprovedRecord drops unparseable date", () => {
+  const input = buildOathSignerInputFromApprovedRecord({
+    selected: true,
     employeeId: "10000001",
     dateSigned: "next tuesday",
-  } as any;
-  const input = oathOcrFormSpec.approveTo.deriveInput(r);
-  if (input.kind !== "signer") throw new Error("expected signer-shaped input");
-  assert.equal(input.emplId, "10000001");
-  assert.equal(input.date, undefined);
+  });
+  assert.equal(input?.emplId, "10000001");
+  assert.equal(input?.date, undefined);
 });

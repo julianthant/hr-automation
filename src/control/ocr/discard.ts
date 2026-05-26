@@ -71,12 +71,13 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
     // If this OCR session was started from a downstream workflow's run
     // modal, mirror the discard onto the parent row so it doesn't sit at
     // "delegated-to-ocr running" indefinitely. Parent's downstream
-    // workflow is derived from formType → spec.approveTo.workflow.
+    // workflow is derived from formType → spec.approveTo.workflow when the
+    // form delegates from the approve route.
     const parentRunId = input.parentRunId || readParentRunId(input.sessionId, opts.trackerDir);
     if (parentRunId) {
       const formType = input.formType || readFormType(input.sessionId, opts.trackerDir);
       const spec = formType ? getFormSpec(formType) : null;
-      const parentWorkflow = input.parentWorkflow || spec?.approveTo.workflow;
+      const parentWorkflow = input.parentWorkflow || spec?.approveTo?.workflow;
       if (parentWorkflow) {
         const ts = new Date().toISOString();
         const parentItemId = input.parentItemId || `ocr-prep-${input.sessionId}`;

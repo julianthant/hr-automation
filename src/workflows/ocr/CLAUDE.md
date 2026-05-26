@@ -3,8 +3,10 @@
 The "prep phase" of any form-based workflow. Operator uploads a PDF → OCR
 runs the per-form Zod-bound LLM extraction → roster match → eid-lookup +
 verification → preview row in the OCR tab → operator approves/discards/
-reuploads → on approve, fans out to the form-type's downstream daemon
-(oath-signature or emergency-contact).
+reuploads → on approve, writes the terminal OCR row. Form specs with
+`approveTo` (currently emergency-contact) also fan out downstream daemon rows
+from the approve route; form specs without `approveTo` (currently oath) let
+the owning workflow consume the approved row and fan out itself.
 
 **Kernel-registered, NOT daemon-mode.** No browsers, no Duo. Runs in the
 dashboard's Node process via fire-and-forget `runWorkflow` from
@@ -21,7 +23,7 @@ workflow children render under the prep/root context.
 | OCR prep parent (awaiting-approval) | `batch-parent`    | OCR group card (top-level)     |
 | `eid-lookup` utility children (archetype `utility`) | `passive-child` | Flat `delegation-member` surface rows |
 | `active-check` utility children (archetype `single`) | `delegate-child` | Flat `delegation-member` surface rows |
-| Approved downstream children       | `delegate-child`  | Nested under parent card       |
+| Approved downstream children (`approveTo` forms only) | `delegate-child` | Nested under parent card       |
 
 Note: `eid-lookup` and `active-check` both render flat as the `delegation-member` **surface type** (controlled by the OCR runtime policy's `delegation.utilityChildSurface`). However their RowArchetype differs: `eid-lookup` declares `archetype: "utility"` so `deriveRowArchetype` stamps `passive-child`; `active-check` declares `archetype: "single"` so children with a `parentRunId` resolve to `delegate-child`.
 
@@ -63,7 +65,8 @@ finishes.
 ## Adding a new form type
 
 1. Create `src/workflows/<consumer>/ocr-form.ts` exporting an
-   `OcrFormSpec` object. Mirror oath/EC for prompt + match + fan-out.
+   `OcrFormSpec` object. Mirror oath/EC for prompt + match. Add `approveTo`
+   only if the OCR approve route should enqueue downstream daemon rows.
 2. Add a record renderer component in `src/dashboard/components/ocr/`
    (e.g. `MyFormRecordView.tsx`).
 3. Add the spec to `FORM_SPECS` in `form-registry.ts`.
@@ -72,6 +75,7 @@ finishes.
 ## Lessons Learned
 
 - **Lesson maintenance rule:** Search this section plus the downstream form workflow docs before adding OCR lessons. Merge old per-form prep behavior into the current shared OCR orchestration model.
+- **2026-05-26: `approveTo` is optional and controls approve-route fan-out.** Emergency-contact still declares `approveTo`, so `/api/ocr/approve-batch` enqueues downstream daemon rows and writes dependency rows. Oath omits `approveTo`; approve only emits `done step=approved` for OCR and wakes the `oath-signature` PDF handler, which reads the approved records and runs `ctx.delegateToAll` itself. Do not gate this behavior by form-type string in the approve handler — the presence of `spec.approveTo` is the contract.
 - **2026-05-23: eid-lookup fan-out routes through `delegateToAllImpl`.** The orchestrator's `realEnqueue` used to call `ensureDaemonsAndEnqueue(eidLookupCrmWorkflow, ..., { parentRunId: runId, ... })` directly; Contract 3 moves that to `delegateToAllImpl({ child: eidLookupCrmWorkflow, renderAs: "flat", fireAndForget: true, onPreparedItems, deriveItemId, buildPendingExtras })`. The kernel owns parentRunId stamping + archetype derivation (`renderAs: "flat"` stamps `passive-child`, matching the runtime policy's `utilityChildSurface: "delegation-member"`). `fireAndForget: true` because the orchestrator's own `watchChildRuns` (`waitForChildRuns`) still drives the wait — wrapping a second wait inside `delegateToAllImpl` would double-count. SQLite task-dependency batch creation still hangs off the `onPreparedItems` hook, forwarded verbatim through the kernel primitive.
 - **2026-05-24: `force-research.ts` + `retry-page.ts` also route through `delegateToAllImpl` (Finding #23).** They previously called `ensureDaemonsAndEnqueue` directly from HTTP entrypoints (no parent `ctx`), and were the only two surviving entries in `tests/unit/architecture/delegate-to-usage.test.ts`'s orchestrator allow-list. Both now follow the orchestrator's shape — `renderAs: "flat"` + `fireAndForget: true` + `deriveItemId` + `parentRunId: input.runId` — so the OCR session is the parent of every eid-lookup child, and child pending rows stamp `passive-child` via the kernel's archetype derivation. The two files remain on `delegate-to-all-impl-callers.test.ts`'s allow-list alongside the orchestrator (they need direct access to `delegateToAllImpl` because they run outside a workflow `ctx`); the `delegate-to-usage` allow-list is gone.
 - **Runtime policy owns OCR preview behavior.** `ocrWorkflow.metadata.runtimePolicy` declares preview labels, file-scope cancel behavior, and utility-child surfaces. Queue projections should read policy instead of adding workflow-id checks; EID Lookup / Active Check utility rows stay flat delegation members.
