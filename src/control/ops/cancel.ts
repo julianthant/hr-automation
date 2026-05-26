@@ -11,8 +11,16 @@
  * (see `src/core/kernel/page-proxy.ts`) makes cancel propagate into in-
  * flight Playwright work within ms, so the legacy `force-stop` HTTP route
  * + about:blank navigation + page-interrupt machinery are gone.
+ *
+ * Phase 1 (2026-05-26): in-process cancels route through `runRegistry.cancel`
+ * — the same unified entry point the daemon's worker-command path eventually
+ * reaches. Pre-Phase-1, in-process cancel called `killChromeHard` directly
+ * (no AbortController abort), so a stuck-on-Duo `sharepoint-download` took
+ * seconds to surface a generic "Browser closed" failure row. Phase 1
+ * aborts the controller first; the watchdog inside `runRegistry.cancel`
+ * falls back to `killChromeHard` only when nothing observes the signal.
  */
-import { cancelInProcessRun } from "../../core/daemon/in-process-runs.js";
+import { runRegistry } from "../../core/run-registry.js";
 import type { BrowserProcessRow, ControlWorkerStore } from "../../core/daemon/worker-store.js";
 import {
   DASHBOARD_CANCEL_ERROR,
@@ -160,10 +168,16 @@ export function buildCancelRunningHandler(dir: string) {
       return { ok: true, accepted: true, mode: "worker-command", commandId };
     }
 
-    const inProcess = await cancelInProcessRun({
-      workflow: req.workflow,
-      itemId: req.id,
-      runId: req.runId,
+    // Phase 1: in-process cancel routes through `runRegistry.cancel`,
+    // which aborts the per-run AbortController (so any in-flight
+    // Playwright call rejects within ms via the Page proxy) and schedules
+    // a watchdog `killChromeHard` fallback for the rare case where
+    // nothing observes the signal (pre-handler launch hang, e.g. stuck on
+    // Duo). Awaited so the HTTP response reflects whether the watchdog
+    // fired — but the watchdog itself is best-effort; failures don't
+    // propagate.
+    const inProcess = await runRegistry.cancel(req.runId, {
+      reason: "dashboard_in_process",
     });
     if (inProcess.ok) {
       emitDashboardCancelRequestedLog(req.workflow, req.id, req.runId, dir);

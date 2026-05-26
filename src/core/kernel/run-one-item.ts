@@ -9,6 +9,7 @@ import { withLogContext } from '../../utils/log.js'
 import { classifyError } from '../../utils/errors.js'
 import { splitPrefilled, buildInitialTrackerData, buildTrackerOpts, toRecord } from './workflow.js'
 import { runWorkflowHandler } from './handler-runner.js'
+import { runRegistry, type RunHandle } from '../run-registry.js'
 
 export interface RunOneItemOpts<TData, TSteps extends readonly string[]> {
   wf: RegisteredWorkflow<TData, TSteps>
@@ -80,6 +81,21 @@ export interface RunOneItemOpts<TData, TSteps extends readonly string[]> {
    * loop so delegation children link back to their OCR parent run.
    */
   parentRunId?: string
+  /**
+   * Daemon-side queue identity for the unified `RunHandle` registered with
+   * `runRegistry`. The daemon's claim loop passes these so `cancel_task`
+   * worker commands and shutdown sweeps can correlate runId ↔ taskId.
+   * Absent for tests and scenario-runtime callers.
+   */
+  taskId?: string
+  attemptId?: string
+  /**
+   * Debug/audit tag for `RunHandle.source`. Defaults to `'daemon'` since
+   * `runOneItem` is the daemon claim-loop entry point; the scenario
+   * runtime and direct test calls inherit the same value (cancel does not
+   * branch on source).
+   */
+  runHandleSource?: 'daemon' | 'in-process'
 }
 
 /**
@@ -137,36 +153,56 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
 
   // Per-run AbortController (Contract 5). The controller's signal is
   // surfaced as `ctx.signal` and auto-injected into Playwright methods via
-  // the `ctx.page(id)` proxy. Aborts come from two places:
+  // the `ctx.page(id)` proxy. Aborts come from three places:
   //   1. The caller's `isCancelRequested` probe flipping true — the stepper
   //      observes this between steps; we also poll it here to keep the
   //      controller in lockstep so any Playwright call already in flight
   //      rejects within ms instead of waiting on its declared timeout.
   //   2. The caller calling `.abort()` directly via the `onCancelController`
-  //      callback (daemon's cancel-command handler does this).
+  //      callback (the scenario-test runtime does this).
+  //   3. `runRegistry.cancel(runId, ...)` — the unified entry point for the
+  //      daemon's `cancel_task` worker-command handler, the dashboard's
+  //      HTTP cancel route for in-process runs, the browser-disconnect
+  //      handler, and the daemon shutdown sweep.
   const controller = new AbortController()
   args.onCancelController?.(controller)
-  // Eagerly mirror caller's probe → controller. The stepper itself also
-  // polls `isCancelRequested` between steps as the synchronous checkpoint
-  // (no Playwright in flight to interrupt), so this side-channel only
-  // matters while a Playwright call is awaiting.
-  const isCancelRequestedWithAbort = args.isCancelRequested
-    ? (): boolean => {
-        const v = args.isCancelRequested!()
-        if (v && !controller.signal.aborted) {
-          controller.abort(new Error('cancel requested'))
-        }
-        // Once aborted, stay aborted. The daemon may clear `state.cancelTarget`
-        // back to null after the first cancel signal lands (per-run cancel
-        // commands flip cancelTarget transiently), so a subsequent probe on
-        // the underlying `args.isCancelRequested()` returns false even though
-        // the controller's signal is still aborted. Without this fall-back,
-        // the Stepper's between-step probe stops recognizing the cancel and
-        // the AbortError escapes mapEscapedHandlerError as `failed` instead
-        // of `cancelled`.
-        return v || controller.signal.aborted
-      }
-    : undefined
+
+  // Register with the unified `runRegistry` so an external `cancel(runId)`
+  // call (worker-command, HTTP route, shutdown) can abort this controller
+  // without going through any daemon-internal state. Unregister in `finally`
+  // below to keep the registry's `list()` view in lockstep with what's
+  // actually in flight.
+  const runHandle: RunHandle = {
+    runId,
+    itemId,
+    workflow: wf.config.name,
+    controller,
+    session,
+    startedAt: Date.now(),
+    source: args.runHandleSource ?? 'daemon',
+    ...(args.taskId ? { taskId: args.taskId } : {}),
+    ...(args.attemptId ? { attemptId: args.attemptId } : {}),
+  }
+  runRegistry.register(runHandle)
+  // Unified between-step cancel probe — `controller.signal.aborted` is the
+  // single source of truth post-Phase 1, fed by every cancel trigger
+  // (daemon worker-command `cancel_task`, HTTP `/cancel-current`,
+  // dashboard-in-process route, browser-disconnect, daemon shutdown sweep,
+  // scenario-test direct controller.abort()) via `runRegistry.cancel`.
+  // The caller's optional `args.isCancelRequested` is mirrored into the
+  // same controller so a daemon that hasn't yet re-fetched the active run
+  // can still surface cancel intent through its own probe — but the
+  // controller wins in both directions, so a probe that flickers
+  // false→true→false stays sticky after the first true (the AbortError
+  // would otherwise escape `mapEscapedHandlerError` as `failed` instead of
+  // `cancelled`).
+  const isCancelRequestedWithAbort = (): boolean => {
+    const callerSays = args.isCancelRequested?.() ?? false
+    if (callerSays && !controller.signal.aborted) {
+      controller.abort(new Error('cancel requested'))
+    }
+    return controller.signal.aborted
+  }
 
   const runInner = async (emitters: {
     setStep: (step: string) => void
@@ -230,6 +266,8 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
         return { ok: false, kind: 'cancelled', error: err.message }
       }
       return { ok: false, error: classifyError(err) }
+    } finally {
+      runRegistry.unregister(runId)
     }
   }
 
@@ -326,5 +364,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       return { ok: false, kind: 'cancelled', error: err.message }
     }
     return { ok: false, error: classifyError(err) }
+  } finally {
+    runRegistry.unregister(runId)
   }
 }
