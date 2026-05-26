@@ -32,7 +32,9 @@ import { createWorkerStore } from './worker-store.js'
 import { startDaemonHttpServer } from './http.js'
 import { runKeepaliveTick } from './keepalive.js'
 import type { DaemonPhase, DaemonState } from './daemon-types.js'
+import { daemonInFlight } from './daemon-types.js'
 export type { DaemonPhase } from './daemon-types.js'
+import { runRegistry, type RunHandle } from '../run-registry.js'
 import {
   buildShutdownTrackerData,
   createAbortLaunchAndKillSession,
@@ -101,7 +103,14 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     forceShutdown: false,
     drainOnlyShutdown: false,
     shuttingDown: false,
-    inFlight: null,
+    // Contract 5 Phase 1 — `activeRun` collapses the legacy
+    // `inFlight` / `cancelTarget` / `currentRunController` triple into a
+    // single `RunHandle` reference. The daemon's claim loop sets this
+    // alongside `runRegistry.register(handle)` on each claim and clears
+    // it alongside `runRegistry.unregister(handle.runId)` in the per-item
+    // finally — the registry's `list()` view is the global source of
+    // truth; `state.activeRun` is the daemon's local fast-path lookup.
+    activeRun: null,
     queueDepthCache: 0,
     lastActivity: Date.now(),
     phase: 'launching',
@@ -115,18 +124,6 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     launchAbort: new AbortController(),
     workerStore: null,
     exitError: null,
-    // Cooperative-cancel signal for the in-flight item. Set by the
-    // POST /cancel-current handler when itemId+runId match the current
-    // in-flight item; cleared after the next item starts. Stepper checks
-    // this at every step boundary and throws CancelledError.
-    cancelTarget: null,
-    // Per-run AbortController (Contract 5). Set by runOneItem's
-    // `onCancelController` callback at item start; cleared in the claim
-    // loop's per-item cleanup along with cancelTarget. A daemon-side
-    // cancel-task command calls .abort() on this controller, which
-    // propagates into the in-flight Playwright call via the signal the
-    // Page proxy injected.
-    currentRunController: null,
     // Captured from the withBatchLifecycle body callback so the outer
     // finally cleanup can emit `item_cancelled` session events for any
     // in-flight or queued items it marks as cancelled. Stays null if the
@@ -146,29 +143,38 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   const abortLaunchAndKillSession = createAbortLaunchAndKillSession(wf, instanceId, state)
 
   /**
-   * Centralized cancel-request entry point — all three triggers
-   * (HTTP /cancel-current, worker `cancel_task` command, browser-disconnect)
-   * MUST flow through here so they cannot drift. Drops a `cancelTarget` on
-   * the state (the between-step probe reads it) AND aborts the per-run
-   * `AbortController` so any in-flight Playwright call rejects within ms
-   * instead of waiting on its declared timeout (Contract 5).
+   * Centralized cancel-request entry point (Contract 5 Phase 1). All three
+   * triggers — HTTP `/cancel-current`, worker-command `cancel_task`, and
+   * browser-disconnect — funnel through `runRegistry.cancel`, which:
+   *   - aborts the active run's per-run `AbortController` (so any in-flight
+   *     Playwright call rejects within ms via the Page proxy's
+   *     signal-injection), and
+   *   - schedules a watchdog that hard-kills chromium after
+   *     `hardKillAfterMs` if the run hasn't unregistered by then (covers
+   *     the rare case where nothing observes the signal — pre-handler
+   *     launch hang, evaluate-only steps).
    *
-   * Pre-Contract-5-cleanup the browser-disconnect handler only set
-   * `cancelTarget` and skipped the controller abort, causing disconnect
-   * during a `waitForSelector` to wait the full ~30s timeout. This helper
-   * collapses the three paths so that gap can't reappear.
-   *
-   * `target` of null clears the cancelTarget without touching the controller
-   * (used by the per-item finalize sweep so the next item starts clean).
+   * Fire-and-forget: the worker-command poller marks `complete` immediately
+   * so the heartbeat tick isn't blocked by the watchdog window. The
+   * cancelled tracker row is emitted by the claim loop's per-item
+   * cancellation branch once the controller's signal propagates through
+   * the stepper.
    */
   const requestCancel = (
     target: { itemId: string; runId: string } | null,
     reason: 'http' | 'worker-command' | 'browser-disconnect',
   ): void => {
-    state.cancelTarget = target
-    if (target && state.currentRunController && !state.currentRunController.signal.aborted) {
-      state.currentRunController.abort(new Error(`cancel requested (${reason})`))
-    }
+    if (!target) return
+    if (state.activeRun?.runId !== target.runId) return
+    void runRegistry
+      .cancel(target.runId, { reason: `daemon_${reason.replace('-', '_')}` })
+      .catch((err) => {
+        log.warn(
+          `[Daemon ${wf.config.name}/${instanceId}] requestCancel failed for runId=${target.runId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      })
   }
   const workerCtx: WorkerCommandContext<TData, TSteps> = {
     wf,
@@ -183,7 +189,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     instanceId,
     getPhase: () => state.phase,
     getQueueDepthCache: () => state.queueDepthCache,
-    getInFlight: () => state.inFlight,
+    getInFlight: () => daemonInFlight(state.activeRun),
     getLastActivity: () => state.lastActivity,
     getActiveSession: () => state.activeSession,
     getWorkerStore: () => state.workerStore,
@@ -381,17 +387,16 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
             `[Daemon ${wf.config.name}/${instanceId}] browser disconnected (${systemId}); shutting down`,
           )
           state.shuttingDown = true
-          if (state.inFlight) {
-            // Set cancelTarget so the stepper reclassifies the in-flight step
-            // as cancelled rather than failed; the outer finally still writes
-            // the cancelled row. Route through `requestCancel` so the per-run
-            // AbortController is also aborted — without this, a disconnect
-            // during a `waitForSelector` waited the full timeout instead of
-            // failing fast.
+          if (state.activeRun) {
+            // Route through `requestCancel` so the per-run AbortController
+            // is aborted via `runRegistry.cancel(runId)`. Without this, a
+            // disconnect during a `waitForSelector` waited the full timeout
+            // instead of failing fast. The stepper's catch then reclassifies
+            // the AbortError as a cancelled outcome.
             requestCancel(
               {
-                itemId: state.inFlight.itemId,
-                runId: state.inFlight.runId,
+                itemId: state.activeRun.itemId,
+                runId: state.activeRun.runId,
               },
               'browser-disconnect',
             )
@@ -435,12 +440,15 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 throw new Error(`Queue invariant violated: task ${item.id} missing runId at claim time`)
               }
               const runId = item.runId
-              state.inFlight = {
-                itemId: item.id,
-                runId,
-                ...(item.taskId ? { taskId: item.taskId } : {}),
-                ...(item.attemptId ? { attemptId: item.attemptId } : {}),
-              }
+              // Pre-build the `RunHandle` and register with `runRegistry`
+              // BEFORE `runOneItem` runs so a `cancel_task` worker command
+              // that arrives between claim and handler-start can still
+              // reach the controller. `runOneItem` constructs its own
+              // controller internally and registers the same runId; the
+              // second `register` overwrites the first, leaving the
+              // canonical handle (with the controller the stepper observes)
+              // in place. We keep `state.activeRun` pointing at the
+              // post-runOneItem handle by reading back from the registry.
               if (item.taskId && item.attemptId) {
                 taskStore.markTaskRunning({
                   taskId: item.taskId,
@@ -448,6 +456,19 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                   workerId: instanceId,
                 })
               }
+              const preHandle: RunHandle = {
+                runId,
+                itemId: item.id,
+                workflow: wf.config.name,
+                controller: new AbortController(),
+                session,
+                startedAt: Date.now(),
+                source: 'daemon',
+                ...(item.taskId ? { taskId: item.taskId } : {}),
+                ...(item.attemptId ? { attemptId: item.attemptId } : {}),
+              }
+              runRegistry.register(preHandle)
+              state.activeRun = preHandle
               registerBrowserProcesses()
               emitWorkerHeartbeat()
               state.lastActivity = Date.now()
@@ -467,17 +488,31 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                   callerPreEmits: false,
                   preAssignedInstance: instance,
                   authTimings: itemAuthTimings,
-                  isCancelRequested: () =>
-                    state.cancelTarget?.itemId === item.id && state.cancelTarget?.runId === runId,
-                  onCancelController: (controller) => {
-                    // Stash the per-run AbortController so cancel_task /
-                    // /cancel-current can abort in-flight Playwright work
-                    // immediately (Contract 5) instead of waiting on the
-                    // step-boundary probe. Cleared below after the item
-                    // finishes so a late command can't poison the next item.
-                    state.currentRunController = controller
-                  },
+                  // Contract 5 Phase 1: the controller is the source of truth.
+                  // `runOneItem` constructs its own + re-registers the handle
+                  // with the registry; the worker-command path and HTTP
+                  // /cancel-current call `runRegistry.cancel(runId)` which
+                  // aborts that controller. The stepper's between-step probe
+                  // reads `controller.signal.aborted` instead of a daemon
+                  // state field.
                   ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
+                  ...(item.taskId ? { taskId: item.taskId } : {}),
+                  ...(item.attemptId ? { attemptId: item.attemptId } : {}),
+                  runHandleSource: 'daemon',
+                  onCancelController: (controller) => {
+                    // Keep `state.activeRun` in sync with the controller
+                    // `runOneItem` actually uses inside its stepper. The
+                    // pre-registered handle (above) is replaced by the
+                    // registry when `runOneItem` re-registers; mirror that
+                    // into `state.activeRun` so cancel paths read the same
+                    // controller everywhere.
+                    const fresh = runRegistry.get(runId)
+                    if (fresh) {
+                      state.activeRun = fresh
+                    } else {
+                      state.activeRun = { ...preHandle, controller }
+                    }
+                  },
                 })
                 emitItemComplete(instance, item.id, trackerDir, runId)
                 if (wf.config.systems.some((s) => s.id === 'ucpath')) {
@@ -486,16 +521,16 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 markTerminated(runId)
                 const taskStateAfterRun = item.taskId ? taskStore.getTask(item.taskId)?.state : null
               // Cancellation precedence: if a cancel was requested at any
-              // point during the run (via cancelTarget OR SQLite task state
-              // transition), the item is cancelled — regardless of whether
-              // the step happened to finish successfully or threw an
-              // unrelated error. Without this, a step that completes in
-              // the same instant as the user clicks cancel races: r.ok=true
-              // → marked Done → cancelled tracker row from the dashboard
-              // gets overwritten. Cancel always wins over both done and
-              // failure.
+              // point during the run (signaled by the per-run controller
+              // being aborted, OR by a SQLite task-state transition), the
+              // item is cancelled — regardless of whether the step happened
+              // to finish successfully or threw an unrelated error. Without
+              // this, a step that completes in the same instant as the user
+              // clicks cancel races: r.ok=true → marked Done → cancelled
+              // tracker row from the dashboard gets overwritten. Cancel
+              // always wins over both done and failure.
                 const cancelRequestedForThisItem =
-                  (state.cancelTarget?.itemId === item.id && state.cancelTarget?.runId === runId) ||
+                  state.activeRun?.controller.signal.aborted === true ||
                   taskStateAfterRun === 'cancelled' ||
                   taskStateAfterRun === 'cancel_requested' ||
                   taskStateAfterRun === 'cancelling'
@@ -577,21 +612,18 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 // Per-item cleanup MUST run on both happy and throw paths
                 // (Finding #9). If `runOneItem` throws — e.g. the schema
                 // validation error at run-one-item.ts that fires BEFORE the
-                // controller setup — these fields would otherwise stay
+                // controller setup — `state.activeRun` would otherwise stay
                 // populated, and a late `/cancel-current` would abort the
-                // dead controller from the previous item and stamp a stale
-                // `cancelTarget`. Only null the cancelTarget if it was for
-                // THIS just-finished item; a cancel that arrived for a
-                // future run (unlikely given single-claim semantics, but
-                // robust) is preserved.
-                if (
-                  state.cancelTarget?.itemId === item.id
-                  && state.cancelTarget?.runId === runId
-                ) {
-                  state.cancelTarget = null
-                }
-                state.currentRunController = null
-                state.inFlight = null
+                // dead controller from the previous item.
+                //
+                // `runOneItem`'s own finally also calls
+                // `runRegistry.unregister(runId)`; calling it again here is
+                // idempotent (Map.delete on a missing key is a no-op) and
+                // covers the pre-handler-throw case where `runOneItem`
+                // rejected before reaching its register/unregister window
+                // and our pre-registered handle is still in the registry.
+                runRegistry.unregister(runId)
+                state.activeRun = null
               }
               setPhase('idle')
               emitWorkerHeartbeat()

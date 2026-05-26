@@ -5,7 +5,7 @@ import { Stepper } from './stepper.js'
 import { withTrackedWorkflow, emitScreenshotEvent } from '../../tracker/jsonl.js'
 import { makeScreenshotFn } from './screenshot.js'
 import { withLogContext } from '../../utils/log.js'
-import { registerInProcessRun, unregisterInProcessRun } from '../daemon/in-process-runs.js'
+import { runRegistry, type RunHandle } from '../run-registry.js'
 import { deriveRowArchetype, resolveArchetype } from '../../domain/row-archetype.js'
 import { runWorkflowHandler } from './handler-runner.js'
 import {
@@ -99,18 +99,49 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
       emitSkipped,
     })
 
-    // Register for in-process cancellation BEFORE auth starts. `onReady`
-    // fires synchronously after Session construction and before any browser
-    // launches, so the dashboard's `/api/cancel-running` endpoint can find
-    // this run and hard-kill chromium even while it's stuck waiting on Duo.
-    // Unregistration lives in an outer try/finally so a `Session.launch`
-    // throw (auth-failure-after-3-retries, browser launch failure) still
-    // cleans up. See `src/core/in-process-runs.ts`.
-    const cancelIdent = { workflow: wf.config.name, itemId: String(itemId), runId }
+    // Per-run AbortController (Contract 5). Constructed BEFORE
+    // `Session.launch` so the run can be registered with `runRegistry`
+    // ahead of any browser launch — the dashboard's HTTP cancel route
+    // resolves a stuck-on-Duo in-process run by `runRegistry.cancel(runId)`
+    // which aborts this controller; the watchdog falls back to
+    // `killChromeHard` when there is no in-flight Playwright call to
+    // observe the abort.
+    //
+    // When `parentSignal` is supplied (in-process delegation — see
+    // `delegate.ts`'s `runInProcessAndCollectResult`), attach a one-shot
+    // listener so this child's controller aborts when the parent's does.
+    // Without this hook, in-process delegated children (OCR,
+    // sharepoint-download) keep running after the parent is cancelled
+    // because the daemon's `cancel_task` machinery only reaches the
+    // top-level run controller, not nested in-process ones.
+    const controller = new AbortController()
+    let detachParentListener: (() => void) | null = null
+    if (opts.parentSignal) {
+      if (opts.parentSignal.aborted) {
+        // Parent already cancelled before we wired up — abort immediately.
+        controller.abort(opts.parentSignal.reason ?? new Error('parent cancelled'))
+      } else {
+        const onParentAbort = (): void => {
+          if (!controller.signal.aborted) {
+            controller.abort(opts.parentSignal!.reason ?? new Error('parent cancelled'))
+          }
+        }
+        opts.parentSignal.addEventListener('abort', onParentAbort, { once: true })
+        detachParentListener = () => {
+          opts.parentSignal!.removeEventListener('abort', onParentAbort)
+        }
+      }
+    }
+
+    // Register an in-process control row in SQLite (best-effort) before
+    // Session.launch so the unified `RunHandle.control` carries the audit
+    // identifiers — `runRegistry.cancel` writes the cancel_task + kill_browser
+    // worker_commands when control is present, mirroring the legacy
+    // `markSqliteInProcessCancel` behavior.
     const inProcessControl = opts.trackerStub
       ? null
       : registerInProcessControl(wf, handlerInput, String(itemId), runId, opts.trackerDir)
-    let cancelRegistered = false
+    let registryRegistered = false
     let completed = false
     let terminalWritten = false
     try {
@@ -119,8 +150,25 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
         launchFn: opts.launchFn,
         observer,
         onReady: (sess) => {
-          registerInProcessRun(cancelIdent, sess, inProcessControl ?? undefined)
-          cancelRegistered = true
+          // Register with the unified RunRegistry as early as possible —
+          // `onReady` fires synchronously after Session construction and
+          // before any browser launches, so the dashboard's
+          // `/api/cancel-running` endpoint can find this run and abort it
+          // even while it's stuck on Duo. The watchdog inside
+          // `runRegistry.cancel` falls back to `killChromeHard` when the
+          // abort signal has no observer (pre-handler launch hang).
+          const handle: RunHandle = {
+            runId,
+            itemId: String(itemId),
+            workflow: wf.config.name,
+            controller,
+            session: sess,
+            startedAt: Date.now(),
+            source: 'in-process',
+            ...(inProcessControl ? { control: inProcessControl } : {}),
+          }
+          runRegistry.register(handle)
+          registryRegistered = true
           onSessionReady?.(sess, runId, stepper, opts.trackerDir)
         },
       })
@@ -140,37 +188,6 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
         process.on('SIGINT', sigintHandler)
       }
 
-      // Per-run AbortController (Contract 5). `runWorkflow` is the single-
-      // item path; no daemon claim loop here, so cancel side-channels
-      // (in-process kill, SIGINT) don't drive this controller — it's
-      // wired solely so `ctx.signal` is a real AbortSignal handlers can
-      // pass into AbortSignal-aware awaits if desired.
-      //
-      // When `parentSignal` is supplied (in-process delegation — see
-      // `delegate.ts`'s `runInProcessAndCollectResult`), attach a one-shot
-      // listener so this child's controller aborts when the parent's does.
-      // Without this hook, in-process delegated children (OCR,
-      // sharepoint-download) keep running after the parent is cancelled
-      // because the daemon's `cancel_task` machinery only reaches the
-      // top-level run controller, not nested in-process ones.
-      const controller = new AbortController()
-      let detachParentListener: (() => void) | null = null
-      if (opts.parentSignal) {
-        if (opts.parentSignal.aborted) {
-          // Parent already cancelled before we wired up — abort immediately.
-          controller.abort(opts.parentSignal.reason ?? new Error('parent cancelled'))
-        } else {
-          const onParentAbort = (): void => {
-            if (!controller.signal.aborted) {
-              controller.abort(opts.parentSignal!.reason ?? new Error('parent cancelled'))
-            }
-          }
-          opts.parentSignal.addEventListener('abort', onParentAbort, { once: true })
-          detachParentListener = () => {
-            opts.parentSignal!.removeEventListener('abort', onParentAbort)
-          }
-        }
-      }
       try {
         await runWorkflowHandler({
           wf,
@@ -197,7 +214,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
       throw err
     } finally {
       if (completed && !terminalWritten) markInProcessControlTerminal(inProcessControl, true)
-      if (cancelRegistered) unregisterInProcessRun(cancelIdent)
+      if (registryRegistered) runRegistry.unregister(runId)
       inProcessControl?.controlDb.close()
     }
   }

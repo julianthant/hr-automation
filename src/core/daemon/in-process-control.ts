@@ -5,7 +5,7 @@ import { log } from '../../utils/log.js'
 import { openControlDb } from '../control-db.js'
 import { createTaskStore } from '../task-store/index.js'
 import { createWorkerStore } from './worker-store.js'
-import type { InProcessRunControl } from './in-process-runs.js'
+import type { RunControlAudit } from '../run-registry.js'
 
 function swallowSqliteErr<T>(label: string, fn: () => T, fallback: T): T {
   try {
@@ -22,7 +22,7 @@ export function registerInProcessControl<TData>(
   itemId: string,
   runId: string,
   trackerDir: string | undefined,
-): InProcessRunControl | null {
+): RunControlAudit | null {
   if (!trackerDir) return null
   const workerId = `dashboard:${process.pid}`
   return swallowSqliteErr(`in-process control registration for ${wf.config.name}/${itemId}`, () => {
@@ -74,7 +74,7 @@ export function registerInProcessControl<TData>(
 export function registerInProcessBrowsers<TData>(
   wf: RegisteredWorkflow<TData, readonly string[]>,
   session: Session,
-  control: InProcessRunControl | null,
+  control: RunControlAudit | null,
 ): void {
   if (!control) return
   swallowSqliteErr(`in-process browser registration for ${wf.config.name}`, () => {
@@ -95,7 +95,7 @@ export function registerInProcessBrowsers<TData>(
 }
 
 export function markInProcessControlTerminal(
-  control: InProcessRunControl | null,
+  control: RunControlAudit | null,
   ok: boolean,
   error?: unknown,
 ): void {
