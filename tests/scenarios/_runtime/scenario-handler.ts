@@ -1,4 +1,4 @@
-import type { RegisteredWorkflow } from "../../../src/core/kernel/types.js";
+import type { Ctx, RegisteredWorkflow } from "../../../src/core/kernel/types.js";
 
 /**
  * One beat in a scripted scenario handler. Each beat maps 1:1 to a kernel
@@ -59,22 +59,50 @@ export interface ScriptHooks {
 }
 
 /**
+ * Optional override that completely replaces the scripted-beats handler
+ * body with arbitrary test-supplied code. Use when a scenario needs to
+ * call real kernel primitives that the beat vocabulary doesn't cover
+ * (e.g. `ctx.delegateTo`, `ctx.delegateToAll`). The hooks (`onStepReached`,
+ * `holdAt`) are still wired through so `waitForStepStart` / `cancelRow`
+ * remain available.
+ */
+export type CustomScenarioHandler<TData, TSteps extends readonly string[]> =
+  (args: {
+    ctx: Ctx<TSteps, TData>;
+    input: TData;
+    hooks: ScriptHooks;
+  }) => Promise<void>;
+
+/**
  * Build a workflow clone whose handler runs a scripted sequence of beats
  * against the real kernel `ctx` (real `ctx.step` / `markStep` / `updateData`
  * emissions, real tracker JSONL). The cloned workflow keeps the original
  * `name` so the dashboard projection + runtime-policy lookups behave
  * identically to production.
+ *
+ * Pass `customHandler` to bypass the beat interpreter entirely and run a
+ * test-authored handler body — used for scenarios that need to drive real
+ * `ctx.delegateTo` / `ctx.delegateToAll` calls (PDF-branch tests).
  */
 export function cloneWithScript<TData, TSteps extends readonly string[]>(
   workflow: RegisteredWorkflow<TData, TSteps>,
   beats: ScenarioBeat[],
   hooks: ScriptHooks = {},
+  customHandler?: CustomScenarioHandler<TData, TSteps>,
 ): RegisteredWorkflow<TData, TSteps> {
   return {
     ...workflow,
     config: {
       ...workflow.config,
-      handler: async (ctx) => {
+      handler: async (ctx, input) => {
+        if (customHandler) {
+          await customHandler({
+            ctx: ctx as Ctx<TSteps, TData>,
+            input,
+            hooks,
+          });
+          return;
+        }
         for (const beat of beats) {
           if (beat.kind === "markStep") {
             ctx.markStep(beat.name);

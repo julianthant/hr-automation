@@ -3,11 +3,38 @@
 Add a new **Oath Signature Date** row to a UCPath Person Profile for one or
 more employees.
 
-**Kernel-based + daemon-mode.** Declared via `defineWorkflow` in `workflow.ts` and enqueued from dashboard input runs (`InputRunPanel` → `/api/enqueue`) or OCR approval. Supports N EIDs per input run — each becomes its own queue item.
+**Kernel-based + daemon-mode.** Declared via `defineWorkflow` in `workflow.ts` and enqueued from dashboard input runs (`InputRunPanel` → `/api/enqueue`) or PDF upload (`RunModal` → `/api/oath-signature/start`).
 
-**OCR / prep:** Paper-roster flows run through the **`ocr`** workflow (dashboard TopBar → form type **`oath`**) — see `src/workflows/ocr/CLAUDE.md` and `src/services/ocr/forms/oath.ts` for schemas + hybrid match. Approved OCR runs pre-emit child rows and enqueue this workflow per `{ emplId, date? }`.
+## Dual input shape (Plan A Commit 3)
 
-**Synthetic `ocr` step:** `workflow.ts` declares **`"ocr"`** as the first step; the handler calls `ctx.markStep("ocr")` (no browser work — a timeline marker so rows show upload → OCR → UCPath).
+The workflow's schema is a `z.discriminatedUnion("kind", [...])`:
+
+  - **`{ kind: "signer", emplId, name?, date?, dryRun? }`** — per-EID flow.
+    One row, one UCPath transaction. Each input is independent — daemon
+    mode enqueues 1:1 and processes sequentially on one browser. Input-run
+    typing or fan-out children from a PDF run produce these.
+  - **`{ kind: "pdf", pdfPath, pdfOriginalName, sessionId, rosterMode?, rosterPath?, dryRun? }`** —
+    paper-roster flow. The handler delegates to the `ocr` workflow (which
+    suspends until operator approval under the clean-terminal contract),
+    reads the approved records, and `delegateToAll`s back into this workflow
+    with N `kind: "signer"` inputs. The discriminator gates the recursion —
+    fan-out children always enter the signer branch.
+
+`archetype` is a resolver: `batch` for `kind: "pdf"`, `single` for
+`kind: "signer"`. The PDF row renders as a batch parent in this workflow's
+tab; signer rows live in the same tab as either single rows (N=1) or batch
+members under the PDF row's batch (N≥2).
+
+## Step list
+
+Both branches share `["ocr", "fan-out", "ucpath-auth", "transaction"]` and use
+`ctx.skipStep` for the steps they don't exercise:
+
+  - Signer branch: skips `ocr` + `fan-out`; runs `ucpath-auth` (markStep) +
+    `transaction` (real PeopleSoft work).
+  - PDF branch: runs `ocr` (`ctx.delegateTo(ocrWorkflow, ...)`) + `fan-out`
+    (`ctx.delegateToAll(oathSignatureWorkflow, signerInputs, { renderAs: "batch" })`);
+    skips `ucpath-auth` + `transaction`.
 
 ## What this workflow does
 
@@ -148,6 +175,7 @@ OCR handlers import **`src/services/matching/`** for roster load + name match �
 ## Lessons Learned
 
 - **Lesson maintenance rule:** Search this section, `src/workflows/ocr/CLAUDE.md`, and `src/systems/ucpath/LESSONS.md` before adding oath-signature guidance. Merge old OCR-prep notes into the current shared-OCR model instead of preserving obsolete grouped-upload behavior.
+- **2026-05-25: Discriminated `{ kind: "signer" | "pdf" }` input.** Plan A Commit 3 collapsed the old "PDF upload → originWorkflow synthesized parent → OCR approve fans out signer rows" chain into a single workflow with two input variants. PDF uploads enqueue one oath-signature daemon item; its kernel handler delegates to OCR (suspends until approval), reads records, and fans out signer children via `ctx.delegateToAll`. Signer-branch CLI tests and the oath OCR form spec inject `kind: "signer"` automatically — bare `{ emplId, ... }` shapes get wrapped at the adapter boundary. NOTE: today's OCR approve route ALSO fans out signer rows (legacy path). Until Commit 5 gates approve-fan-out by form-type, a PDF-branch run that completes will end up emitting BOTH the in-handler fan-out AND the approve-route fan-out — operators will see duplicate signer rows. Real fix lands in Commit 5.
 - **2026-05-25: Dashboard input/upload runs are the public start paths.** `npm run oath-signature` is retired. Typed EID starts belong in `InputRunPanel`; paper-roster starts belong in the upload run / shared OCR path.
 - **Person Profiles direct URL can preserve stale detail state.** After skipping an existing oath and returning to search, the next direct navigation may still render the prior profile. `navigateToPersonProfiles` / `returnToSearch` must verify the Empl ID search textbox and recover by clicking Return to Search when needed.
 - **Paper-roster prep is owned by the shared OCR workflow.** Oath form type (`formType: "oath"`) routes through `/api/ocr/*` and `src/services/ocr/forms/oath.ts`. This folder no longer owns `prepare.ts` or `preview-schema.ts`; approved OCR rows enqueue `{ emplId, date? }` into this workflow.
