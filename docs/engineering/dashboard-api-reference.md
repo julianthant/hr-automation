@@ -131,7 +131,7 @@ Current consumption:
 | `work-study` | `single` | empl ID | `data.name` | ucpath-auth → transaction | Empl ID, Effective Date |
 | `emergency-contact` | `batch` | `p{NN}-{emplId}` | `data.employeeName` | navigation → fill-form → save | Employee, Empl ID, Contact, Relationship |
 | `oath-signature` | `single` | empl ID | `data.name` | ocr → ucpath-auth → transaction | Employee, Empl ID, Signature Date |
-| `oath-upload` | `delegating-batch` | session ID | (PDF filename / hash) | servicenow-auth → delegate-ocr → wait-ocr-approval → delegate-signatures → wait-signatures → open-hr-form → fill-form → submit | PDF, OCR session, Signers, HR ticket #, Filed, Status |
+| `oath-upload` | `single` | session ID | (PDF filename / hash) | delegate-signatures → servicenow-auth → open-hr-form → fill-form → submit | PDF, Signers, HR ticket #, Filed, Status |
 | `ocr` | `delegating-batch` | session ID | (PDF filename) | upload → ocr → matching → disambiguating → awaiting-approval → approved/discarded | PDF, Form type, Pages, Records |
 | `crm-doc-download` | `delegating` | email or doc ID | `data.name` | crm-auth → download | Employee, Email, Doc URL |
 | `sharepoint-download` | `single` | URL or label | (file label) | login → download | Label, Output path |

@@ -11,17 +11,9 @@ import { oathUploadHandler, oathUploadSteps } from "./handler.js";
 /**
  * Oath Upload runtime policy.
  *
- * The Oath Upload row is a single, top-level row in the oath-upload tab. Its
- * `dispatch` step kicks off the OCR + per-signer signature batch via the
- * `/api/ocr/prepare` `originWorkflow: "oath-signature"` mechanism, which
- * synthesizes a batch-parent row in the oath-signature tab. OCR and per-signer
- * rows nest under that synthesized row — they do NOT nest under the oath-upload
- * row. Oath-upload waits for every signer to complete, then files the HR
- * ticket.
- *
- * `subtitleTemplate` mirrors the synthesized oath-signature batch row's
- * subtitle pattern (`Oath · <last4 run id>`) so operators can visually
- * correlate the two rows across tabs.
+ * The Oath Upload row is a single, top-level row in the oath-upload tab.
+ * Its `delegate-signatures` step delegates one PDF run to oath-signature,
+ * then files the HR ticket after the delegated batch completes.
  */
 export const OATH_UPLOAD_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
   ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
@@ -42,8 +34,8 @@ export const oathUploadWorkflow = defineWorkflow({
     {
       id: "servicenow",
       // No-op at session-launch time. We defer real ServiceNow authentication
-      // until the handler's `servicenow-auth` step, AFTER `dispatch` and
-      // `wait-signatures` complete — so we don't hold an authenticated SAML
+      // until the handler's `servicenow-auth` step, AFTER signature delegation
+      // completes — so we don't hold an authenticated SAML
       // session open across the (potentially multi-day) operator-approval +
       // per-signer wait, and so authentication failures don't kill the
       // workflow before the delegation can even start.
@@ -62,7 +54,6 @@ export const oathUploadWorkflow = defineWorkflow({
   },
   detailFields: [
     { key: "pdfOriginalName", label: "PDF" },
-    { key: "ocrSessionId",    label: "OCR session" },
     { key: "signerCount",     label: "Signers" },
     { key: "ticketNumber",    label: "HR ticket #" },
     { key: "submittedAt",     label: "Filed" },

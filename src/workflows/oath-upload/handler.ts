@@ -1,14 +1,7 @@
 import type { Ctx } from "../../core/kernel/types.js";
-import { watchChildRuns } from "../../tracker/delegation/watch-child-runs.js";
 import { log } from "../../utils/log.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { openControlDb } from "../../core/control-db.js";
-import { createTaskStore } from "../../core/task-store/index.js";
-import {
-  buildOcrPrepareHandler,
-  type PrepareInput,
-  type PrepareResponse,
-} from "../../tracker/dashboard/ocr/prepare.js";
 import { loginToServiceNow } from "../../infra/auth/login.js";
 import {
   fillHrInquiryForm,
@@ -18,17 +11,16 @@ import {
   gotoHrInquiryForm,
   verifyOnInquiryForm,
 } from "../../systems/servicenow/navigate.js";
-import { waitForOcrApproval, SEVEN_DAYS_MS } from "./wait-ocr-approval.js";
+import { oathSignatureWorkflow } from "../oath-signature/index.js";
 import type { OathUploadInput } from "./schema.js";
 
 /**
- * Step list — `dispatch` and `wait-signatures` run BEFORE the ServiceNow
- * browser is launched so we don't hold an authenticated session open across
- * the (potentially multi-day) operator-approval + per-signer wait.
+ * Step list — `delegate-signatures` runs BEFORE the ServiceNow browser is
+ * launched so we don't hold an authenticated session open across the
+ * potentially multi-day operator-approval + per-signer wait.
  */
 export const oathUploadStepList = [
-  "dispatch",
-  "wait-signatures",
+  "delegate-signatures",
   "servicenow-auth",
   "open-hr-form",
   "fill-form",
@@ -46,14 +38,12 @@ const HR_FORM_VALUES = {
   category: "Payroll",
 } as const;
 
-type PrepareHandler = (input: PrepareInput) => Promise<PrepareResponse>;
+type DelegateTo = Ctx<OathUploadSteps, OathUploadInput>["delegateTo"];
 
 export interface OathUploadHandlerOpts {
   trackerDir?: string;
   // Test escape hatches.
-  _prepareOverride?: PrepareHandler;
-  _waitForOcrApprovalOverride?: typeof waitForOcrApproval;
-  _watchChildRunsOverride?: typeof watchChildRuns;
+  _delegateToOverride?: DelegateTo;
   _loginOverride?: typeof loginToServiceNow;
   _gotoOverride?: typeof gotoHrInquiryForm;
   _verifyOverride?: typeof verifyOnInquiryForm;
@@ -79,104 +69,40 @@ export async function oathUploadHandler(
     ...(input.dryRun ? { dryRun: true } : {}),
   });
 
-  const ocrSessionId = `oath-upload-${ctx.runId}-ocr`;
-  if (input.mode !== "upload-only") {
-    ctx.updateData({ ocrSessionId });
-  }
-
-  let fannedOutItemIds: string[] = [];
-  const rawPriorApproval = input.mode === "upload-only" ? null : readPriorOcrApproval(ocrSessionId, trackerDir);
-  // Verify prior approval's fanned-out ids are actually in task_store. If any are
-  // missing (enqueue failed before the approved row was written), treat as no recovery.
-  const priorApproval = rawPriorApproval
-    ? (verifyEnqueuedSignerIds(rawPriorApproval.fannedOutItemIds, trackerDir) !== null ? rawPriorApproval : null)
-    : null;
-
   if (input.mode === "upload-only") {
     log.step("[oath-upload] upload-only mode: skipping OCR and signature delegation");
-    ctx.skipStep("dispatch");
-    ctx.skipStep("wait-signatures");
+    ctx.skipStep("delegate-signatures");
     ctx.updateData({ signerCount: "skipped" });
-  } else if (priorApproval) {
-    log.step(
-      `[oath-upload] recovery: prior approved OCR for ${ocrSessionId}; skipping dispatch`,
-    );
-    ctx.skipStep("dispatch");
-    fannedOutItemIds = priorApproval.fannedOutItemIds;
-    ctx.updateData({ signerCount: String(fannedOutItemIds.length) });
   } else {
-    await ctx.step("dispatch", async () => {
-      // Trigger OCR + signature batch the same way the oath-signature TopBar
-      // Run modal does. `originWorkflow: "oath-signature"` makes the prepare
-      // handler synthesize a batch-parent row in the oath-signature tab; the
-      // OCR row + per-signer signature rows nest under that synthesized
-      // parent. No children nest under THIS oath-upload row.
-      const prepare: PrepareHandler =
-        opts._prepareOverride ?? buildOcrPrepareHandler({ trackerDir });
-      const prepareInput: PrepareInput = {
-        pdfPath: input.pdfPath,
-        pdfOriginalName: input.pdfOriginalName,
-        ...(input.pdfFileId ? { pdfFileId: input.pdfFileId } : {}),
-        formType: "oath",
-        rosterMode: input.rosterMode,
-        ...(input.rosterPath ? { rosterPath: input.rosterPath } : {}),
-        sessionId: ocrSessionId,
-        ...(input.dryRun ? { dryRun: input.dryRun } : {}),
-        originWorkflow: "oath-signature",
-      };
-      const result = await prepare(prepareInput);
-      if (result.status !== 202 || result.body.ok === false) {
-        const detail = result.body.ok === false
-          ? result.body.error
-          : `OCR prepare returned status ${result.status}`;
-        throw new Error(`oath-upload: OCR prepare failed — ${detail}`);
-      }
-      if (result.body.parentRunId) {
-        // Stash the synthesized oath-signature batch parent's runId on
-        // oath-upload's row data for cross-tab correlation + debugging.
-        ctx.updateData({ signaturesParentRunId: result.body.parentRunId });
-      }
-
-      // Wait for the OCR row (workflow="ocr", id=ocrSessionId) to reach
-      // step="approved". The OCR approve handler stamps fannedOutItemIds on
-      // that row's approved entry.
-      const fn = opts._waitForOcrApprovalOverride ?? waitForOcrApproval;
-      const r = await fn({
-        sessionId: ocrSessionId,
-        ...(trackerDir ? { trackerDir } : {}),
-        timeoutMs: SEVEN_DAYS_MS,
-        abortIfRowState: {
-          workflow: "oath-upload",
-          id: input.sessionId,
-          step: "cancel-requested",
-          status: "cancelled",
-        },
-      });
-      fannedOutItemIds = r.fannedOutItemIds;
-      ctx.updateData({ signerCount: String(fannedOutItemIds.length) });
-    });
-  }
-
-  if (input.mode !== "upload-only") {
-    await ctx.step("wait-signatures", async () => {
+    await ctx.step("delegate-signatures", async () => {
       ctx.updateData({
         status: "waiting-signatures",
-        signerItemIds: fannedOutItemIds.join(", "),
       });
-      const fn = opts._watchChildRunsOverride ?? watchChildRuns;
-      await fn({
-        workflow: "oath-signature",
-        expectedItemIds: fannedOutItemIds,
-        ...(trackerDir ? { trackerDir } : {}),
-        timeoutMs: SEVEN_DAYS_MS,
-        isTerminal: (e) => e.status === "done",
-        abortIfRowState: {
-          workflow: "oath-upload",
-          id: input.sessionId,
-          step: "cancel-requested",
-          status: "cancelled",
+      const delegateTo = opts._delegateToOverride ?? ctx.delegateTo;
+      const result = await delegateTo(
+        oathSignatureWorkflow,
+        {
+          kind: "pdf",
+          pdfPath: input.pdfPath,
+          pdfOriginalName: input.pdfOriginalName,
+          ...(input.pdfFileId ? { pdfFileId: input.pdfFileId } : {}),
+          sessionId: input.sessionId,
+          pdfHash: input.pdfHash,
+          rosterMode: input.rosterMode,
+          ...(input.rosterPath ? { rosterPath: input.rosterPath } : {}),
+          ...(input.dryRun ? { dryRun: input.dryRun } : {}),
         },
-      });
+        { itemId: input.sessionId },
+      );
+      if (result.status !== "done") {
+        throw new Error(
+          `oath-upload: delegated oath-signature PDF run ended with status=${result.status}` +
+            (result.error?.message ? ` — ${result.error.message}` : ""),
+        );
+      }
+      if (typeof result.data?.fannedOutCount === "string") {
+        ctx.updateData({ signerCount: result.data.fannedOutCount });
+      }
     });
   }
 
@@ -200,7 +126,7 @@ export async function oathUploadHandler(
   await ctx.step("servicenow-auth", async () => {
     // ServiceNow auth is deferred from session launch to right before we use
     // the page, so the daemon doesn't hold a SAML session open across the
-    // dispatch + signature waits.
+    // delegated signature wait.
     const ok = await (opts._loginOverride ?? loginToServiceNow)(page, undefined, ctx.signal);
     if (!ok) throw new Error("ServiceNow authentication failed");
   });
@@ -281,63 +207,4 @@ export function findPriorTicketForSession(
   } finally {
     controlDb?.close();
   }
-}
-
-function verifyEnqueuedSignerIds(ids: string[], trackerDir: string | undefined): string[] | null {
-  if (ids.length === 0) return ids;
-  try {
-    const db = openControlDb({ trackerDir });
-    const taskStore = createTaskStore(db);
-    const allTasks = taskStore.listTasksForWorkflow("oath-signature");
-    db.close();
-    if (allTasks.length === 0) return ids;
-    const taskItemIds = new Set(allTasks.map((t) => t.itemId));
-    const missing = ids.filter((id) => !taskItemIds.has(id));
-    if (missing.length === 0) return ids;
-    log.warn(
-      `[oath-upload] recovery: ${missing.length}/${ids.length} fanned-out signer ids missing from task_store — re-running dispatch`,
-    );
-    return null;
-  } catch {
-    return ids;
-  }
-}
-
-function readPriorOcrApproval(
-  ocrSessionId: string,
-  trackerDir: string | undefined,
-): { fannedOutItemIds: string[] } | null {
-  let controlDb: ReturnType<typeof openControlDb> | undefined;
-  try { controlDb = openControlDb({ trackerDir }); } catch { /* fall through to JSONL */ }
-  let entry: ReturnType<typeof findLatestEntryForPredicate>;
-  try {
-    entry = findLatestEntryForPredicate({
-      workflow: "ocr",
-      trackerDir,
-      lookbackDays: LOOKBACK_DAYS,
-      ...(controlDb ? { db: controlDb.db, itemId: ocrSessionId } : {}),
-      predicate: (e) =>
-        e.id === ocrSessionId &&
-        e.step === "approved" &&
-        typeof e.data?.fannedOutItemIds === "string",
-    });
-  } finally {
-    controlDb?.close();
-  }
-  if (!entry || typeof entry.data?.fannedOutItemIds !== "string") return null;
-  let ids: unknown;
-  try {
-    ids = JSON.parse(entry.data.fannedOutItemIds);
-  } catch (e) {
-    throw new Error(
-      `oath-upload: malformed fannedOutItemIds JSON in prior OCR approval (ocrSessionId=${ocrSessionId}): ${e instanceof Error ? e.message : String(e)}`,
-      { cause: e },
-    );
-  }
-  if (!Array.isArray(ids) || !ids.every((s) => typeof s === "string")) {
-    throw new Error(
-      `oath-upload: prior OCR approval has non-array fannedOutItemIds for ocrSessionId=${ocrSessionId} (got ${Array.isArray(ids) ? "non-string-array" : typeof ids})`,
-    );
-  }
-  return { fannedOutItemIds: ids as string[] };
 }

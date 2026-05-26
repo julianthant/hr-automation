@@ -168,9 +168,9 @@ export function isResolvedPrepRow(e: {
  * approved (the kernel-path handler suspends at `awaiting-approval` and
  * the orchestrator emits `running` until approve fires; only approve
  * routes terminate the row with `done`). The approve route also writes
- * `step="approved"` explicitly for legacy consumers (`waitForOcrApproval`),
- * but the kernel's auto-emitted terminal `done` row may carry no step —
- * both classify as approved.
+ * `step="approved"` explicitly for dashboard readers that key on the
+ * operator action, but the kernel's auto-emitted terminal `done` row may
+ * carry no step — both classify as approved.
  */
 export function isApprovedPrepRow(e: {
   workflow?: string;
