@@ -122,16 +122,21 @@ export function oathPdfBeats(
 
 /**
  * Convenience masking helper — replaces volatile fields (per-run identifiers,
- * instance counter) with stable placeholders so `toMatchInlineSnapshot()`
- * locks the shape across runs, not the specific id values.
+ * instance counter, last-4-runId subtitle suffix) with stable placeholders so
+ * `toMatchInlineSnapshot()` locks the shape across runs, not the specific id
+ * values.
  */
-export function maskVolatile<T extends { runId: string; itemId: string; data: Record<string, string> }>(
+export function maskVolatile<T extends { runId: string; itemId: string; data: Record<string, string>; subtitle?: string | undefined }>(
   snap: T,
 ): T {
+  const subtitle = typeof snap.subtitle === "string"
+    ? snap.subtitle.replace(/^Oath · [0-9a-f]{4}$/, "Oath · <last4>")
+    : snap.subtitle;
   return {
     ...snap,
     runId: "<runId>",
     itemId: "<itemId>",
+    ...(subtitle !== undefined ? { subtitle } : {}),
     data: { ...snap.data, instance: "<instance>" },
   };
 }

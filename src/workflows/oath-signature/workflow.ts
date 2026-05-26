@@ -104,17 +104,48 @@ export const oathSignatureWorkflow = defineWorkflow({
     { key: "emplId", label: "Empl ID" },
     { key: "date", label: "Signature Date" },
   ],
-  getName: (d) => {
-    if (d && typeof d === "object" && "kind" in d && d.kind === "pdf") {
-      return d.pdfOriginalName ?? "";
+  // Seed identifying fields so the kernel's pending-row stamping has
+  // something to read in `getName` / `getId`. Without these, a `kind: "pdf"`
+  // run would have empty `__name` / `__id` on its initial pending row
+  // because `buildInitialTrackerData`'s seed drops fields not produced by
+  // `initialData` / `operatorSubject`.
+  initialData: (input) => {
+    if (input.kind === "pdf") {
+      return {
+        pdfOriginalName: input.pdfOriginalName,
+        sessionId: input.sessionId,
+      };
     }
-    return (d && typeof d === "object" && "name" in d ? (d.name as string | undefined) : undefined) ?? "";
+    return {
+      emplId: input.emplId,
+      ...(input.name ? { name: input.name } : {}),
+    };
+  },
+  // getName / getId are called against both the raw input AND a
+  // stringified seed that drops fields not produced by `initialData` /
+  // `operatorSubject`. The discriminator `kind` survives only on the raw
+  // input — the seed-time call must fall back to the presence of
+  // `pdfOriginalName` / `sessionId` (PDF) vs `emplId` (signer) to pick
+  // the right branch.
+  getName: (d) => {
+    if (d && typeof d === "object") {
+      const r = d as Record<string, unknown>;
+      if (r.kind === "pdf" || typeof r.pdfOriginalName === "string") {
+        return typeof r.pdfOriginalName === "string" ? r.pdfOriginalName : "";
+      }
+      if (typeof r.name === "string") return r.name;
+    }
+    return "";
   },
   getId: (d) => {
-    if (d && typeof d === "object" && "kind" in d && d.kind === "pdf") {
-      return d.sessionId ?? "";
+    if (d && typeof d === "object") {
+      const r = d as Record<string, unknown>;
+      if (r.kind === "pdf" || typeof r.sessionId === "string") {
+        return typeof r.sessionId === "string" ? r.sessionId : "";
+      }
+      if (typeof r.emplId === "string") return r.emplId;
     }
-    return (d && typeof d === "object" && "emplId" in d ? (d.emplId as string | undefined) : undefined) ?? "";
+    return "";
   },
   operatorSubject: (input) => {
     if (input.kind === "pdf") {
@@ -222,6 +253,8 @@ async function runPdfBranch(
   input: Extract<OathSignatureInput, { kind: "pdf" }>,
 ): Promise<void> {
   ctx.updateData({
+    __name: input.pdfOriginalName,
+    __id: input.sessionId,
     pdfOriginalName: input.pdfOriginalName,
     sessionId: input.sessionId,
     ...(input.pdfHash ? { pdfHash: input.pdfHash } : {}),

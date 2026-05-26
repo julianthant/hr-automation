@@ -7,7 +7,11 @@ import { Session } from "../../../src/core/kernel/session.js";
 import { runOneItem } from "../../../src/core/kernel/workflow.js";
 import type { RegisteredWorkflow } from "../../../src/core/kernel/types.js";
 
-import { cloneWithScript, type ScenarioBeat } from "./scenario-handler.js";
+import {
+  cloneWithScript,
+  type CustomScenarioHandler,
+  type ScenarioBeat,
+} from "./scenario-handler.js";
 
 export interface ScenarioRunHandle {
   runId: string;
@@ -16,14 +20,14 @@ export interface ScenarioRunHandle {
   result: Promise<{ ok: boolean; kind?: string; error?: string }>;
 }
 
-export interface ScenarioRuntime<TData> {
+export interface ScenarioRuntime<TData, TSteps extends readonly string[] = readonly string[]> {
   /** Temp tracker dir for this scenario — removed by `cleanup()`. */
   trackerDir: string;
   /** Workflow name (matches `workflow.config.name`). */
   workflow: string;
 
   /** Enqueue an item — kicks off `runOneItem` in the background. */
-  enqueue: (input: TData, opts?: EnqueueOpts) => ScenarioRunHandle;
+  enqueue: (input: TData, opts?: EnqueueOpts<TData, TSteps>) => ScenarioRunHandle;
 
   /** Resolves once the named step is in flight (kernel `running` row already written). */
   waitForStepStart: (stepName: string, timeoutMs?: number) => Promise<void>;
@@ -46,7 +50,7 @@ export interface ScenarioRuntime<TData> {
   cleanup: () => void;
 }
 
-export interface EnqueueOpts {
+export interface EnqueueOpts<TData = unknown, TSteps extends readonly string[] = readonly string[]> {
   itemId?: string;
   runId?: string;
   /**
@@ -55,6 +59,12 @@ export interface EnqueueOpts {
    * and any test where each run needs its own throw / hold script.
    */
   beats?: ScenarioBeat[];
+  /**
+   * Test escape hatch — replace the entire scripted-beats handler body
+   * with arbitrary code that gets the real kernel `ctx`. Use for scenarios
+   * exercising `ctx.delegateTo` / `ctx.delegateToAll` (PDF-branch tests).
+   */
+  customHandler?: CustomScenarioHandler<TData, TSteps>;
 }
 
 export interface CreateScenarioRuntimeOpts<TData, TSteps extends readonly string[]> {
@@ -74,7 +84,7 @@ export interface CreateScenarioRuntimeOpts<TData, TSteps extends readonly string
  */
 export async function createScenarioRuntime<TData, TSteps extends readonly string[]>(
   opts: CreateScenarioRuntimeOpts<TData, TSteps>,
-): Promise<ScenarioRuntime<TData>> {
+): Promise<ScenarioRuntime<TData, TSteps>> {
   const trackerDir = mkdtempSync(join(tmpdir(), "hrauto-scenario-"));
 
   // Step-start synchronization. Promises are created lazily so test code that
@@ -155,7 +165,7 @@ export async function createScenarioRuntime<TData, TSteps extends readonly strin
     return promise;
   };
 
-  const enqueue: ScenarioRuntime<TData>["enqueue"] = (input, enqueueOpts) => {
+  const enqueue: ScenarioRuntime<TData, TSteps>["enqueue"] = (input, enqueueOpts) => {
     const itemId = enqueueOpts?.itemId
       ?? opts.workflow.config.deriveItemId?.(input)
       ?? `scenario-${randomUUID().slice(0, 8)}`;
@@ -163,7 +173,12 @@ export async function createScenarioRuntime<TData, TSteps extends readonly strin
     const beatsForRun = enqueueOpts?.beats ?? opts.beats ?? [];
     // Per-enqueue clone with this run's scripted handler. Shared hooks wire
     // step-start + hold latches back to the runtime-level state.
-    const registered = cloneWithScript(opts.workflow, beatsForRun, scriptHooks);
+    const registered = cloneWithScript(
+      opts.workflow,
+      beatsForRun,
+      scriptHooks,
+      enqueueOpts?.customHandler,
+    );
     ensureTerminalPromise(runId);
     const result = runOneItem({
       wf: registered,

@@ -1,0 +1,32 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`oath-signature scenario: pdf branch happy path > pdf-branch row completes through ocr + fan-out 1`] = `
+{
+  "archetype": "batch-parent",
+  "data": {
+    "__id": "scenario-pdf-001",
+    "__name": "oath-test.pdf",
+    "__queueTitle": "Oath Signature oath-test.pdf",
+    "__queueTitleKind": "single",
+    "__subject": "Oath Signature oath-test.pdf",
+    "__subjectKind": "pdf",
+    "archetype": "batch-parent",
+    "instance": "<instance>",
+    "pdfOriginalName": "oath-test.pdf",
+    "sessionId": "scenario-pdf-001",
+  },
+  "displayId": "scenario-pdf-001",
+  "itemId": "<itemId>",
+  "parentRunId": null,
+  "rowTypeLabel": "Normal row",
+  "runId": "<runId>",
+  "status": "done",
+  "statusLabel": "Done",
+  "step": undefined,
+  "subtitle": "Oath · <last4>",
+  "surfacePlacement": "grouped",
+  "surfaceType": "normal",
+  "title": "Oath Signature oath-test.pdf",
+  "workflow": "oath-signature",
+}
+`;
