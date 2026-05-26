@@ -3,7 +3,7 @@ import { ActionPlan } from "../../systems/ucpath/action-plan.js";
 import { oathSignature } from "../../systems/ucpath/selectors.js";
 import { log } from "../../utils/log.js";
 import { UCPATH_PERSON_PROFILES_URL } from "./config.js";
-import type { OathSignatureInput } from "./schema.js";
+import type { OathSignerInput } from "./schema.js";
 
 /** Mutable context populated during plan execution. */
 export interface OathSignatureContext {
@@ -17,7 +17,7 @@ export interface OathSignaturePlanOptions {
 }
 
 export function shouldCommitOathSignature(
-  input: OathSignatureInput,
+  input: OathSignerInput,
   ctx: Pick<OathSignatureContext, "alreadyHasOath">,
 ): boolean {
   return !input.dryRun && !ctx.alreadyHasOath;
@@ -210,7 +210,7 @@ export async function returnToSearch(page: Page, frame: FrameLocator): Promise<v
  *  8. Return to search (so the daemon reuses this browser for the next EID)
  */
 export function buildOathSignaturePlan(
-  input: OathSignatureInput,
+  input: OathSignerInput,
   page: Page,
   ctx: OathSignatureContext,
   options: OathSignaturePlanOptions = {},

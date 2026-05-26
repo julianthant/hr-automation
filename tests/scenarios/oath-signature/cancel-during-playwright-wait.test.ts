@@ -28,7 +28,8 @@ describe("oath-signature scenario: cancel during a Playwright-style wait", () =>
     const SIM_WAIT_MS = 30_000;
     const beats: ScenarioBeat[] = [
       { kind: "updateData", data: { emplId: "10873698", name: "Jane Doe" } },
-      { kind: "markStep", name: "ocr" },
+      { kind: "skipStep", name: "ocr" },
+      { kind: "skipStep", name: "fan-out" },
       { kind: "markStep", name: "ucpath-auth" },
       // Long-wait beat (simulates page.waitForSelector with a 30s timeout
       // that observes the per-run AbortSignal). Cancel must interrupt this.
@@ -46,6 +47,7 @@ describe("oath-signature scenario: cancel during a Playwright-style wait", () =>
     t.onTestFinished(() => rt.cleanup());
 
     const { runId, result } = rt.enqueue({
+      kind: "signer",
       emplId: "10873698",
       name: "Jane Doe",
     });

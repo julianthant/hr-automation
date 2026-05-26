@@ -35,12 +35,12 @@ describe("oath-signature scenario: cancel during transaction", () => {
       // at the top before any step boundary, which seeds emplId/name onto
       // every subsequent `running` row.
       { kind: "updateData", data: { emplId: "10873698", name: "Jane Doe" } },
-      // The first two steps are `ctx.markStep` only — no real work, just
-      // timeline markers (OCR completed upstream, UCPath auth handled by
-      // Session.launch in production).
-      { kind: "markStep", name: "ocr" },
+      // PDF-branch-only steps are skipped on a signer run; ucpath-auth is a
+      // synthetic `markStep` marker (auth handled by Session.launch in
+      // production). The real transaction step is held until cancel.
+      { kind: "skipStep", name: "ocr" },
+      { kind: "skipStep", name: "fan-out" },
       { kind: "markStep", name: "ucpath-auth" },
-      // The real transaction step — held until the test injects cancel.
       { kind: "step", name: "transaction", hold: true },
     ];
 
@@ -51,6 +51,7 @@ describe("oath-signature scenario: cancel during transaction", () => {
     t.onTestFinished(() => rt.cleanup());
 
     const { runId, result } = rt.enqueue({
+      kind: "signer",
       emplId: "10873698",
       name: "Jane Doe",
     });

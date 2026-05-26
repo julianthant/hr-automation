@@ -23,9 +23,9 @@ describe("oath-signature scenario: multi-EID batch", () => {
     t.onTestFinished(() => rt.cleanup());
 
     const inputs = [
-      { emplId: "10000001", name: "Alice Smith" },
-      { emplId: "10000002", name: "Bob Jones" },
-      { emplId: "10000003", name: "Carol Lee" },
+      { kind: "signer" as const, emplId: "10000001", name: "Alice Smith" },
+      { kind: "signer" as const, emplId: "10000002", name: "Bob Jones" },
+      { kind: "signer" as const, emplId: "10000003", name: "Carol Lee" },
     ];
 
     const handles = inputs.map((input) =>

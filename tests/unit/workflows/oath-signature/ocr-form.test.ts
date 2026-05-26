@@ -175,6 +175,8 @@ test("approveTo.deriveInput: matched record → OathSignatureInput shape", async
     dateSigned: "05/01/2026",
   } as any;
   const input = oathOcrFormSpec.approveTo.deriveInput(r);
+  assert.equal(input.kind, "signer");
+  if (input.kind !== "signer") throw new Error("expected signer-shaped input");
   assert.equal(input.emplId, "10000001");
   assert.equal(input.name, "Doe, Jane");
   assert.equal(input.date, "05/01/2026");
@@ -192,6 +194,9 @@ test("approveTo.deriveInput: OCR uppercase names are normalized for queue displa
     dateSigned: "05/15/2003",
   } as any);
 
+  if (comma.kind !== "signer" || natural.kind !== "signer") {
+    throw new Error("expected signer-shaped inputs from approveTo.deriveInput");
+  }
   assert.equal(comma.name, "Abutin, Jason, L");
   assert.equal(natural.name, "Correa Dinora");
 });
@@ -239,6 +244,7 @@ test("approveTo.deriveInput: 2-digit-year handwritten dateSigned normalizes", ()
     dateSigned: "4-23-26",
   } as any;
   const input = oathOcrFormSpec.approveTo.deriveInput(r);
+  if (input.kind !== "signer") throw new Error("expected signer-shaped input");
   assert.equal(input.emplId, "10000001");
   assert.equal(input.date, "04/23/2026");
 });
@@ -249,6 +255,7 @@ test("approveTo.deriveInput: unparseable date is dropped (workflow falls back to
     dateSigned: "next tuesday",
   } as any;
   const input = oathOcrFormSpec.approveTo.deriveInput(r);
+  if (input.kind !== "signer") throw new Error("expected signer-shaped input");
   assert.equal(input.emplId, "10000001");
   assert.equal(input.date, undefined);
 });

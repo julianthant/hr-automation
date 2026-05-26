@@ -15,6 +15,7 @@ import type { RegisteredWorkflow } from "../../../src/core/kernel/types.js";
  */
 export type ScenarioBeat =
   | { kind: "markStep"; name: string }
+  | { kind: "skipStep"; name: string }
   | {
       kind: "step";
       name: string;
@@ -77,6 +78,9 @@ export function cloneWithScript<TData, TSteps extends readonly string[]>(
         for (const beat of beats) {
           if (beat.kind === "markStep") {
             ctx.markStep(beat.name);
+            hooks.onStepReached?.(beat.name);
+          } else if (beat.kind === "skipStep") {
+            ctx.skipStep(beat.name);
             hooks.onStepReached?.(beat.name);
           } else if (beat.kind === "step") {
             await ctx.step(beat.name, async () => {

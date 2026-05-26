@@ -398,6 +398,7 @@ export const oathOcrFormSpec: OcrFormSpec<
       const normalizedDate = normalizeOathDate(record.dateSigned ?? null);
       const displayName = displayPersonName(record.printedName);
       return {
+        kind: "signer",
         emplId: record.employeeId,
         ...(displayName ? { name: displayName } : {}),
         ...(normalizedDate ? { date: normalizedDate } : {}),
