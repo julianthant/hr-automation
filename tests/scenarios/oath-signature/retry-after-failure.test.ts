@@ -23,7 +23,7 @@ describe("oath-signature scenario: retry after failure", () => {
     const rt = await createScenarioRuntime({ workflow: oathSignatureWorkflow });
     t.onTestFinished(() => rt.cleanup());
 
-    const input = { emplId: "10873698", name: "Person 905" };
+    const input = { kind: "signer" as const, emplId: "10873698", name: "Person 905" };
 
     // ── First run: scripted to throw inside transaction ──
     const first = rt.enqueue(input, {

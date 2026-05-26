@@ -21,7 +21,7 @@ describe("oath-signature scenario: fail during transaction", () => {
     const rt = await createScenarioRuntime({ workflow: oathSignatureWorkflow });
     t.onTestFinished(() => rt.cleanup());
 
-    const input = { emplId: "10873698", name: "Person 905" };
+    const input = { kind: "signer" as const, emplId: "10873698", name: "Person 905" };
     const failError = new Error("UCPath Save button was not visible after 10s");
     const { runId, result } = rt.enqueue(input, {
       itemId: input.emplId,
