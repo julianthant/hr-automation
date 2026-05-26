@@ -8,9 +8,11 @@ import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath } from "../../infra/auth/login.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { rootQueueTitleData } from "../../domain/queue-title.js";
+import { displayPersonName } from "../../domain/identity/person-name.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
+import { normalizeOathDate } from "../../services/ocr/forms/oath.js";
 import { ocrWorkflow } from "../ocr/index.js";
 import { buildOathSignaturePlan, type OathSignatureContext } from "./enter.js";
 import {
@@ -357,6 +359,29 @@ interface ReadApprovedArgs {
   dryRun?: boolean;
 }
 
+export function buildOathSignerInputFromApprovedRecord(
+  rec: unknown,
+  opts: { parentSubject?: string; dryRun?: boolean } = {},
+): OathSignerInput | null {
+  if (!rec || typeof rec !== "object") return null;
+  const r = rec as Record<string, unknown>;
+  if (r.selected !== true) return null;
+  const emplId = typeof r.employeeId === "string" ? r.employeeId : "";
+  if (!/^\d{5,}$/.test(emplId)) return null;
+  const printedName = typeof r.printedName === "string" ? r.printedName : "";
+  const displayName = displayPersonName(printedName);
+  const dateSigned = typeof r.dateSigned === "string" ? r.dateSigned : null;
+  const normalizedDate = normalizeOathDate(dateSigned);
+  return {
+    kind: "signer",
+    emplId,
+    ...(displayName ? { name: displayName } : {}),
+    ...(normalizedDate ? { date: normalizedDate } : {}),
+    ...(opts.dryRun ? { dryRun: true } : {}),
+    ...(opts.parentSubject ? { parentSubject: opts.parentSubject } : {}),
+  };
+}
+
 function readApprovedSignerInputs(args: ReadApprovedArgs): OathSignerInput[] {
   const approvedRow = findLatestEntryForPredicate({
     workflow: "ocr",
@@ -394,22 +419,11 @@ function readApprovedSignerInputs(args: ReadApprovedArgs): OathSignerInput[] {
   }
   const signerInputs: OathSignerInput[] = [];
   for (const rec of parsed) {
-    if (!rec || typeof rec !== "object") continue;
-    const r = rec as Record<string, unknown>;
-    if (r.selected !== true) continue;
-    const emplId = typeof r.employeeId === "string" ? r.employeeId : "";
-    if (!/^\d{5,}$/.test(emplId)) continue;
-    const printedName = typeof r.printedName === "string" ? r.printedName.trim() : "";
-    const dateSigned = typeof r.dateSigned === "string" ? r.dateSigned : "";
-    const dateMatch = /^\d{2}\/\d{2}\/\d{4}$/.test(dateSigned);
-    signerInputs.push({
-      kind: "signer",
-      emplId,
-      ...(printedName ? { name: printedName } : {}),
-      ...(dateMatch ? { date: dateSigned } : {}),
-      ...(args.dryRun ? { dryRun: true } : {}),
+    const signerInput = buildOathSignerInputFromApprovedRecord(rec, {
+      ...(args.dryRun ? { dryRun: args.dryRun } : {}),
       ...(args.parentSubject ? { parentSubject: args.parentSubject } : {}),
     });
+    if (signerInput) signerInputs.push(signerInput);
   }
   return signerInputs;
 }

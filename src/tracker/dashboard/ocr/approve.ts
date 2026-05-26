@@ -63,152 +63,159 @@ export function buildOcrApproveHandler(
       return { status: 400, body: { ok: false, error: `Unknown formType "${formType}"` } };
     }
 
+    const approveTo = spec.approveTo;
     const parentRunId = readParentRunId(input.sessionId, trackerDir);
     const originWorkflow = readOriginWorkflow(input.sessionId, trackerDir);
     const dryRun = readDryRun(input.sessionId, trackerDir);
     const latestReviewData = readLatestOcrReviewData(input.sessionId, input.runId, trackerDir);
-    const parentSubject = parentRunId
+    const parentSubject = parentRunId && approveTo
       ? readParentSubjectFromParentRow(
-          originWorkflow ?? spec.approveTo.workflow,
+          originWorkflow ?? approveTo.workflow,
           originWorkflow ? undefined : `ocr-prep-${input.sessionId}`,
           parentRunId,
           trackerDir,
         )
       : undefined;
 
-    // Only fan out records the operator selected in the preview pane.
-    // Unsigned rows / unverified rows / unknown-doc rows are kept in the
-    // tracker payload for context but should never become daemon work.
-    const fannedOut: Array<{ workflow: string; itemId: string }> = [];
-    const enqueueInputs: unknown[] = [];
-    const itemIds: string[] = [];
-    input.records.forEach((rec, index) => {
-      if (!isSelectedRecord(rec)) return;
-      const baseFanInput = spec.approveTo.deriveInput(rec as never);
-      const fanInput =
-        baseFanInput && typeof baseFanInput === "object"
-          ? {
-              ...(baseFanInput as Record<string, unknown>),
-              ...(dryRun ? { dryRun: true } : {}),
-              ...(parentSubject ? { parentSubject } : {}),
-            }
-          : baseFanInput;
-      const itemId = spec.approveTo.deriveItemId(rec as never, input.runId, index);
-      enqueueInputs.push(fanInput);
-      itemIds.push(itemId);
-      fannedOut.push({ workflow: spec.approveTo.workflow, itemId });
-    });
-
-    if (enqueueInputs.length === 0) {
+    const selectedRecords = input.records.filter(isSelectedRecord);
+    if (selectedRecords.length === 0) {
       return {
         status: 400,
         body: { ok: false, error: "No selected records to approve" },
       };
     }
 
-    // Dispatch runs in the background. The "approved" JSONL row is written
-    // AFTER the enqueue succeeds so that the restart-recovery path in
-    // oath-upload only trusts fannedOutItemIds that are actually in task_store.
-    // Failures during dispatch surface as `failed step=approve-failed`.
+    const fannedOut: Array<{ workflow: string; itemId: string }> = [];
+    const enqueueInputs: unknown[] = [];
+    const itemIds: string[] = [];
+    if (approveTo) {
+      // Only fan out records the operator selected in the preview pane.
+      // Unsigned rows / unverified rows / unknown-doc rows are kept in the
+      // tracker payload for context but should never become daemon work.
+      input.records.forEach((rec, index) => {
+        if (!isSelectedRecord(rec)) return;
+        const baseFanInput = approveTo.deriveInput(rec as never);
+        const fanInput =
+          baseFanInput && typeof baseFanInput === "object"
+            ? {
+                ...(baseFanInput as Record<string, unknown>),
+                ...(dryRun ? { dryRun: true } : {}),
+                ...(parentSubject ? { parentSubject } : {}),
+              }
+            : baseFanInput;
+        const itemId = approveTo.deriveItemId(rec as never, input.runId, index);
+        enqueueInputs.push(fanInput);
+        itemIds.push(itemId);
+        fannedOut.push({ workflow: approveTo.workflow, itemId });
+      });
+    }
+
+    // Approval finalization runs in the background. For specs with approveTo,
+    // write the terminal row after enqueue succeeds so fannedOutItemIds only
+    // names task_store-backed children. Specs without approveTo simply write
+    // the terminal OCR row and wake the owning workflow to fan out itself.
+    // Failures surface as `failed step=approve-failed`.
     void (async () => {
       try {
-        let dispatchResult: void | { enqueued?: Array<{ id: string; taskId?: string; runId?: string }> };
-        const emitFallbackChildPending = (
-          item: unknown,
-          childRunId: string,
-          passedParentRunId: string | undefined,
-          itemId: string,
-        ): void => {
-          const childInput =
-            item && typeof item === "object" && !Array.isArray(item)
-              ? (item as Record<string, unknown>)
-              : undefined;
-          emitTrackerRow(
-            {
-              workflow: spec.approveTo.workflow,
-              timestamp: new Date().toISOString(),
-              id: itemId,
-              runId: childRunId,
-              status: "pending",
-              data: {
-                ...buildFallbackPendingData(item),
-                ...rootQueueTitleData(readParentSubjectFromInput(item)),
-                archetype: "delegate-child",
+        let dispatchResult: void | { enqueued?: Array<{ id: string; taskId?: string; runId?: string }> } = undefined;
+        if (approveTo) {
+          const emitFallbackChildPending = (
+            item: unknown,
+            childRunId: string,
+            passedParentRunId: string | undefined,
+            itemId: string,
+          ): void => {
+            const childInput =
+              item && typeof item === "object" && !Array.isArray(item)
+                ? (item as Record<string, unknown>)
+                : undefined;
+            emitTrackerRow(
+              {
+                workflow: approveTo.workflow,
+                timestamp: new Date().toISOString(),
+                id: itemId,
+                runId: childRunId,
+                status: "pending",
+                data: {
+                  ...buildFallbackPendingData(item),
+                  ...rootQueueTitleData(readParentSubjectFromInput(item)),
+                  archetype: "delegate-child",
+                },
+                ...(passedParentRunId ? { parentRunId: passedParentRunId } : {}),
+                ...(childInput ? { input: childInput } : {}),
               },
-              ...(passedParentRunId ? { parentRunId: passedParentRunId } : {}),
-              ...(childInput ? { input: childInput } : {}),
-            },
-            trackerDir,
-          );
-        };
-        if (opts.ensureDaemonsAndEnqueueOverride) {
-          dispatchResult = await opts.ensureDaemonsAndEnqueueOverride(
-            spec.approveTo.workflow,
-            enqueueInputs,
-            (_inp, idx) => itemIds[idx],
-            {
-              ...(parentRunId ? { parentRunId } : {}),
-              onPreEmitPending: emitFallbackChildPending,
-            },
-          );
-        } else {
-          const { ensureDaemonsAndEnqueue } = await import("../../../core/daemon/client.js");
-          const { loadWorkflow } = await import("../../../core/workflow-loaders.js");
-          const childWf = await loadWorkflow(spec.approveTo.workflow);
-          if (!childWf) {
-            log.error(
-              `[ocr-http] approve-batch: unknown approveTo workflow "${spec.approveTo.workflow}" — items not enqueued`,
-            );
-            return;
-          }
-          const inputToItemId = new Map(
-            enqueueInputs.map((inp, idx) => [JSON.stringify(inp), itemIds[idx] ?? `ocr-fallback-${input.runId}-r${idx}`])
-          );
-          dispatchResult = await ensureDaemonsAndEnqueue(
-            childWf,
-            enqueueInputs as never,
-            {},
-            {
               trackerDir,
-              deriveItemId: (inp: unknown) => inputToItemId.get(JSON.stringify(inp)) ?? `ocr-fallback-${input.runId}-r0`,
-              ...(parentRunId ? { parentRunId } : {}),
-              onPreEmitPending: (item, childRunId, passedParentRunId, itemId) => {
-                const childInput =
-                  item && typeof item === "object" && !Array.isArray(item)
-                    ? (item as Record<string, unknown>)
-                    : undefined;
-                emitTrackerRow(
-                  {
-                    workflow: childWf.config.name,
-                    timestamp: new Date().toISOString(),
-                    id: itemId,
-                    runId: childRunId,
-                    status: "pending",
-                    data: {
-                      ...buildHttpPendingData(childWf, item, passedParentRunId ?? parentRunId),
-                      ...rootQueueTitleData(readParentSubjectFromInput(item)),
-                      archetype: deriveRowArchetype(
-                        resolveArchetype(childWf.config, item),
-                        passedParentRunId ?? parentRunId,
-                      ),
-                    },
-                    ...(passedParentRunId ? { parentRunId: passedParentRunId } : {}),
-                    ...(childInput ? { input: childInput } : {}),
-                  },
-                  trackerDir,
-                );
+            );
+          };
+          if (opts.ensureDaemonsAndEnqueueOverride) {
+            dispatchResult = await opts.ensureDaemonsAndEnqueueOverride(
+              approveTo.workflow,
+              enqueueInputs,
+              (_inp, idx) => itemIds[idx],
+              {
+                ...(parentRunId ? { parentRunId } : {}),
+                onPreEmitPending: emitFallbackChildPending,
               },
-            },
-          );
+            );
+          } else {
+            const { ensureDaemonsAndEnqueue } = await import("../../../core/daemon/client.js");
+            const { loadWorkflow } = await import("../../../core/workflow-loaders.js");
+            const childWf = await loadWorkflow(approveTo.workflow);
+            if (!childWf) {
+              log.error(
+                `[ocr-http] approve-batch: unknown approveTo workflow "${approveTo.workflow}" — items not enqueued`,
+              );
+              return;
+            }
+            const inputToItemId = new Map(
+              enqueueInputs.map((inp, idx) => [JSON.stringify(inp), itemIds[idx] ?? `ocr-fallback-${input.runId}-r${idx}`])
+            );
+            dispatchResult = await ensureDaemonsAndEnqueue(
+              childWf,
+              enqueueInputs as never,
+              {},
+              {
+                trackerDir,
+                deriveItemId: (inp: unknown) => inputToItemId.get(JSON.stringify(inp)) ?? `ocr-fallback-${input.runId}-r0`,
+                ...(parentRunId ? { parentRunId } : {}),
+                onPreEmitPending: (item, childRunId, passedParentRunId, itemId) => {
+                  const childInput =
+                    item && typeof item === "object" && !Array.isArray(item)
+                      ? (item as Record<string, unknown>)
+                      : undefined;
+                  emitTrackerRow(
+                    {
+                      workflow: childWf.config.name,
+                      timestamp: new Date().toISOString(),
+                      id: itemId,
+                      runId: childRunId,
+                      status: "pending",
+                      data: {
+                        ...buildHttpPendingData(childWf, item, passedParentRunId ?? parentRunId),
+                        ...rootQueueTitleData(readParentSubjectFromInput(item)),
+                        archetype: deriveRowArchetype(
+                          resolveArchetype(childWf.config, item),
+                          passedParentRunId ?? parentRunId,
+                        ),
+                      },
+                      ...(passedParentRunId ? { parentRunId: passedParentRunId } : {}),
+                      ...(childInput ? { input: childInput } : {}),
+                    },
+                    trackerDir,
+                  );
+                },
+              },
+            );
+          }
         }
         // Capture the actually-enqueued item ids from the dispatch result.
         const enqueuedIds: string[] =
-          dispatchResult && "enqueued" in dispatchResult && Array.isArray(dispatchResult.enqueued)
+          approveTo && dispatchResult && "enqueued" in dispatchResult && Array.isArray(dispatchResult.enqueued)
             ? (dispatchResult.enqueued as Array<{ id: string }>).map((e) => e.id)
-            : itemIds;
+            : approveTo
+              ? itemIds
+              : [];
 
-        // Write approved row AFTER successful enqueue so restart recovery
-        // can trust that fannedOutItemIds are all present in task_store.
         // Under the new approval contract this row IS the OCR row's
         // terminal `done`: the orchestrator now emits `running
         // step=awaiting-approval` (not `done`) and the kernel-path handler
@@ -247,9 +254,9 @@ export function buildOcrApproveHandler(
           { workflow: WORKFLOW, sessionId: input.sessionId },
           { records: input.records, fannedOutItemIds: enqueuedIds },
         );
-        if (parentRunId) {
+        if (approveTo && parentRunId) {
           writeOriginParentApproved({
-            originWorkflow: originWorkflow ?? spec.approveTo.workflow,
+            originWorkflow: originWorkflow ?? approveTo.workflow,
             parentItemId: originWorkflow ? undefined : `ocr-prep-${input.sessionId}`,
             parentRunId,
             fannedOutCount: enqueuedIds.length,
@@ -257,11 +264,11 @@ export function buildOcrApproveHandler(
           });
         }
 
-        if (parentRunId && dispatchResult?.enqueued) {
+        if (approveTo && parentRunId && dispatchResult?.enqueued) {
           createApprovalDependencyRows({
             trackerDir,
             parentRunId,
-            childWorkflow: spec.approveTo.workflow,
+            childWorkflow: approveTo.workflow,
             children: dispatchResult.enqueued,
           });
         }
@@ -284,12 +291,12 @@ export function buildOcrApproveHandler(
           },
           trackerDir,
         );
-        if (parentRunId) {
+        if (approveTo && parentRunId) {
           const ts = new Date().toISOString();
           const parentItemId = `ocr-prep-${input.sessionId}`;
           emitTrackerRow(
             {
-              workflow: spec.approveTo.workflow,
+              workflow: approveTo.workflow,
               timestamp: ts,
               id: parentItemId,
               runId: parentRunId,
@@ -304,7 +311,7 @@ export function buildOcrApproveHandler(
           );
           appendLogEntry(
             {
-              workflow: spec.approveTo.workflow,
+              workflow: approveTo.workflow,
               itemId: parentItemId,
               runId: parentRunId,
               level: "error",
@@ -399,7 +406,7 @@ function writeOriginParentApproved(args: {
     parentItemId = originEntry?.id ?? args.parentRunId;
   }
   const latestParentData = readLatestEntryData(args.originWorkflow, parentItemId, args.parentRunId, args.trackerDir);
-  // For prep-anchor rows (ocr-prep-* in spec.approveTo.workflow) mark done/approved.
+  // For prep-anchor rows (ocr-prep-* in approveTo.workflow) mark done/approved.
   // For kernel-daemon origin rows (e.g. oath-upload) emit a running status update so
   // the daemon's in-progress row shows OCR approval progress without prematurely
   // flipping to "done".

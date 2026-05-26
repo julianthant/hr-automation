@@ -23,7 +23,7 @@ export interface RosterRow {
 
 export type LookupKind = "name" | "verify" | "verify-only" | null;
 
-export interface OcrFormSpec<TOcr, TPreview, TFanOut> {
+export interface OcrFormSpec<TOcr, TPreview, TFanOut = unknown> {
   /** Stable id matching the form-type picker value. e.g. "oath", "emergency-contact". */
   formType: string;
 
@@ -71,8 +71,11 @@ export interface OcrFormSpec<TOcr, TPreview, TFanOut> {
   /** Whether v1's `forceResearch` flag was set on the matched record (skips carry-forward). */
   isForceResearchFlag(record: TPreview): boolean;
 
-  /** Approve fan-out target. */
-  approveTo: {
+  /**
+   * Approve fan-out target. Omit when the form's owner workflow consumes the
+   * approved OCR row and performs its own fan-out.
+   */
+  approveTo?: {
     workflow: string;                                              // "oath-signature", "emergency-contact"
     deriveInput: (record: TPreview) => TFanOut;
     deriveItemId: (record: TPreview, parentRunId: string, index: number) => string;

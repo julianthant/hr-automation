@@ -9,12 +9,8 @@ import { z } from "zod/v4";
 import { matchAgainstRoster } from "../../matching/index.js";
 import { log } from "../../../utils/log.js";
 import { normalizeUcpathEmployeeId } from "../../../domain/identity/eid.js";
-import {
-  displayPersonName,
-  normalizePersonNameForCompare,
-} from "../../../domain/identity/person-name.js";
+import { normalizePersonNameForCompare } from "../../../domain/identity/person-name.js";
 import type { OcrFormSpec, LookupKind } from "../../../workflows/ocr/types.js";
-import type { OathSignatureInput } from "../../../workflows/oath-signature/schema.js";
 import { LLM_HIGH_CONFIDENCE, MatchStateSchema, VerificationSchema } from "./shared.js";
 
 // ─── OCR-pass record (one row of a paper roster) ──────────
@@ -111,8 +107,7 @@ const OCR_NAME_CONFIDENCE_DISAMBIG_SKIP = 0.85;
 
 export const oathOcrFormSpec: OcrFormSpec<
   OathRosterOcrRecord,
-  OathPreviewRecord,
-  OathSignatureInput
+  OathPreviewRecord
 > = {
   formType: "oath",
   label: "Oath signature",
@@ -390,23 +385,6 @@ export const oathOcrFormSpec: OcrFormSpec<
 
   isForceResearchFlag(record): boolean {
     return record.forceResearch === true;
-  },
-
-  approveTo: {
-    workflow: "oath-signature",
-    deriveInput(record): OathSignatureInput {
-      const normalizedDate = normalizeOathDate(record.dateSigned ?? null);
-      const displayName = displayPersonName(record.printedName);
-      return {
-        kind: "signer",
-        emplId: record.employeeId,
-        ...(displayName ? { name: displayName } : {}),
-        ...(normalizedDate ? { date: normalizedDate } : {}),
-      };
-    },
-    deriveItemId(_record, parentRunId, index): string {
-      return `ocr-oath-${parentRunId}-r${index}`;
-    },
   },
 
   recordRendererId: "OathRecordView",
