@@ -57,12 +57,13 @@ test("queueGroupMatchesStatusFilter shows batch when any member matches", () => 
 });
 
 test("OCR awaiting-approval rows count under Active, not Done", () => {
+  // New approval contract (2026-05-25): awaiting-approval is status="running".
   const ocrAwaiting: TrackerEntry = {
     workflow: "ocr",
     id: "ocr-session-1",
     runId: "ocr-run-1",
     timestamp: "2026-05-12T12:00:00.000Z",
-    status: "done",
+    status: "running",
     step: "awaiting-approval",
     data: { mode: "prepare" },
   };
@@ -73,12 +74,13 @@ test("OCR awaiting-approval rows count under Active, not Done", () => {
 });
 
 test("entryMatchesStatusFilter maps OCR awaiting-approval to Active pill, not Done", () => {
+  // New approval contract (2026-05-25): awaiting-approval is status="running".
   const ocrAwaiting: TrackerEntry = {
     workflow: "ocr",
     id: "ocr-session-2",
     runId: "ocr-run-2",
     timestamp: "2026-05-12T12:00:00.000Z",
-    status: "done",
+    status: "running",
     step: "awaiting-approval",
     data: {},
   };

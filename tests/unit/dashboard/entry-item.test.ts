@@ -36,7 +36,8 @@ test("delegated OCR needs-review rows keep normal retry delete and timer footer 
     id: "ocr-oath-85507a76-r0",
     runId: "ocr-run-1",
     parentRunId: "oath-upload-run-1",
-    status: "done",
+    // New approval contract (2026-05-25): awaiting-approval is status="running".
+    status: "running",
     step: "awaiting-approval",
     timestamp: "2026-05-19T12:54:08.000Z",
     firstLogTs: "2026-05-19T12:53:20.000Z",
