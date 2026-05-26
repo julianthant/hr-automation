@@ -100,7 +100,7 @@ const results = await ctx.delegateToAll(
 
 `renderAs` overrides the child's row archetype (and therefore its dashboard surface):
 - `"flat"` → stamps `passive-child`; renders as `delegation-member` flat row (OCR's utility children).
-- `"preview"` → stamps `delegate-child`; renders as `approval-delegation` preview card (OCR under oath-upload).
+- `"preview"` → stamps `delegate-child`; renders as `approval-delegation` preview card (OCR under an oath-signature PDF run).
 - `"batch"` → stamps `delegate-child`; renders as `batch-delegation` group member (signature fan-out under a parent).
 
 Omit `renderAs` to use the child workflow's declared archetype.
@@ -152,7 +152,7 @@ Valid `WorkflowArchetype` values:
 - `single` — one item, one row (e.g. work-study, active-check).
 - `batch` — N peer items under a batch-parent (e.g. emergency-contact).
 - `delegating` — emits a `dispatch` row and N `delegate-child` runs in other workflows.
-- `delegating-batch` — batch-parent that delegates each member to another workflow (e.g. oath-upload).
+- `delegating-batch` — batch-parent that delegates each member to another workflow (legacy/currently OCR).
 - `utility` — child-only workflow that holds no operator attention (e.g. eid-lookup as a passive child).
 
 ### Row vocabulary
@@ -230,7 +230,7 @@ Representative workflows. Operator starts are dashboard-only: input runs use `In
 | work-study | Not currently exposed in input-run registry | UCPath | Yes | Single |
 | emergency-contact | Upload run through OCR prep | UCPath | Yes (batch, `preEmitPending`) | Single browser, one record at a time; daemon via OCR approval |
 | oath-signature | Input run (EIDs) or upload run through OCR prep | UCPath | Yes (daemon default; sequential batch + `preEmitPending`) | Single browser |
-| oath-upload | Upload run | ServiceNow + delegated OCR / oath-signature | Yes | Sequential steps + child-run waits; daemon default |
+| oath-upload | Upload run | ServiceNow + delegated oath-signature PDF run | Yes | Delegates signatures first, then files ServiceNow; daemon default |
 | sharepoint-download | _Dashboard button_ (fire-and-forget) — canonical entry is `src/workflows/sharepoint-download/`; legacy wrapper `src/workflows/emergency-contact/scripts/download-roster.ts` still exists for direct CLI invocation | SharePoint | Yes (single-item, module-level URL injection) | Single (headed browser, gated by Duo) |
 | ocr | _Dashboard Run button_ (HTTP only — no CLI, no daemon) | _none_ | Yes (`systems: []`, `authSteps: false`) | In-process (single fire-and-forget via `/api/ocr/prepare`) |
 

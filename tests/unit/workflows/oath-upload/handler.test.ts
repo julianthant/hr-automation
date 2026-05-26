@@ -1,212 +1,148 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { oathUploadHandler } from "../../../../src/workflows/oath-upload/handler.js";
-import { trackEvent, dateLocal } from "../../../../src/tracker/jsonl.js";
+import {
+  oathUploadHandler,
+  type OathUploadHandlerOpts,
+} from "../../../../src/workflows/oath-upload/handler.js";
 
-test("oathUploadHandler: walks dispatch → wait-signatures → open-hr-form → fill-form → submit", async () => {
+function makeFakeCtx() {
+  const stepCalls: string[] = [];
+  const updates: Record<string, unknown>[] = [];
+  const ctx = {
+    runId: "oath-upload-run-1",
+    data: {} as Record<string, unknown>,
+    page: async () => ({ url: () => "x", title: async () => "x" }),
+    step: async (name: string, fn: () => Promise<void>) => {
+      stepCalls.push(name);
+      await fn();
+    },
+    markStep: (name: string) => {
+      stepCalls.push(`mark:${name}`);
+    },
+    skipStep: (name: string) => {
+      stepCalls.push(`skip:${name}`);
+    },
+    updateData: (d: Record<string, unknown>) => {
+      updates.push(d);
+      Object.assign(ctx.data, d);
+    },
+    screenshot: async () => undefined,
+  };
+  return { ctx, stepCalls, updates };
+}
+
+test("oathUploadHandler: walks delegate-signatures → open-hr-form → fill-form → submit", async () => {
   const dir = mkdtempSync(join(tmpdir(), "oath-upload-handler-"));
   try {
-    const stepCalls: string[] = [];
-    const updates: Record<string, unknown>[] = [];
-    let prepareCalled = false;
-    let waitOcrCalled = false;
-    let watchChildCalled = false;
+    const { ctx, stepCalls, updates } = makeFakeCtx();
+    let delegateWorkflow = "";
+    let delegateInput: unknown;
+    let delegateOpts: unknown;
     let fillFormCalled = false;
     let submitCalled = false;
     let gotoCalled = false;
     let verifyCalled = false;
 
-    const fakeCtx = {
-      runId: "oath-upload-run-1",
-      data: {} as Record<string, unknown>,
-      page: async () => ({ url: () => "x", title: async () => "x" }),
-      step: async (name: string, fn: () => Promise<void>) => {
-        stepCalls.push(name);
-        await fn();
-      },
-      markStep: (name: string) => { stepCalls.push(`mark:${name}`); },
-      skipStep: (name: string) => { stepCalls.push(`skip:${name}`); },
-      updateData: (d: Record<string, unknown>) => {
-        updates.push(d);
-        Object.assign(fakeCtx.data, d);
-      },
-      screenshot: async () => undefined,
-    };
+    const delegateOverride: NonNullable<OathUploadHandlerOpts["_delegateToOverride"]> =
+      async (child, input, opts) => {
+        delegateWorkflow = child.config.name;
+        delegateInput = input;
+        delegateOpts = opts;
+        return {
+          workflow: child.config.name,
+          runId: "sig-run",
+          itemId: "session-1",
+          status: "done" as const,
+          data: { fannedOutCount: "3" },
+        };
+      };
 
-    await oathUploadHandler(fakeCtx as never, {
+    await oathUploadHandler(ctx as never, {
       pdfPath: "/tmp/test.pdf",
       pdfOriginalName: "test.pdf",
+      pdfFileId: "file-1",
       sessionId: "session-1",
       pdfHash: "a".repeat(64),
       mode: "full",
-      rosterMode: "download",
+      rosterMode: "existing",
+      rosterPath: "/tmp/roster.csv",
     }, {
       trackerDir: dir,
-      _prepareOverride: async () => {
-        prepareCalled = true;
-        return {
-          status: 202 as const,
-          body: { ok: true as const, sessionId: "synth-sid", runId: "synth-rid", parentRunId: "synth-parent-rid" },
-        };
-      },
-      _waitForOcrApprovalOverride: async () => {
-        waitOcrCalled = true;
-        return { step: "approved" as const, fannedOutItemIds: ["a", "b", "c"] };
-      },
-      _watchChildRunsOverride: async () => {
-        watchChildCalled = true;
-        return [];
-      },
+      _delegateToOverride: delegateOverride,
       _loginOverride: async () => true,
-      _gotoOverride: async () => { gotoCalled = true; },
-      _verifyOverride: async () => { verifyCalled = true; },
-      _fillFormOverride: async () => { fillFormCalled = true; },
-      _submitOverride: async () => { submitCalled = true; return "HRC0123456"; },
+      _gotoOverride: async () => {
+        gotoCalled = true;
+      },
+      _verifyOverride: async () => {
+        verifyCalled = true;
+      },
+      _fillFormOverride: async () => {
+        fillFormCalled = true;
+      },
+      _submitOverride: async () => {
+        submitCalled = true;
+        return "HRC0123456";
+      },
     });
 
-    assert.ok(prepareCalled, "dispatch step should call the OCR prepare override");
-    assert.ok(waitOcrCalled, "dispatch step should call the OCR-approval wait override");
-    assert.ok(watchChildCalled, "wait-signatures should call the watchChildRuns override");
+    assert.equal(delegateWorkflow, "oath-signature");
+    assert.deepEqual(delegateInput, {
+      kind: "pdf",
+      pdfPath: "/tmp/test.pdf",
+      pdfOriginalName: "test.pdf",
+      pdfFileId: "file-1",
+      sessionId: "session-1",
+      pdfHash: "a".repeat(64),
+      rosterMode: "existing",
+      rosterPath: "/tmp/roster.csv",
+    });
+    assert.deepEqual(delegateOpts, { itemId: "session-1" });
     assert.ok(gotoCalled, "open-hr-form should call goto");
     assert.ok(verifyCalled, "open-hr-form should call verify");
     assert.ok(fillFormCalled, "fill-form should call the form-fill override");
     assert.ok(submitCalled, "submit should call the submit override");
 
-    assert.ok(stepCalls.includes("dispatch"));
-    assert.ok(stepCalls.includes("wait-signatures"));
+    assert.ok(stepCalls.includes("delegate-signatures"));
+    assert.ok(!stepCalls.includes("dispatch"));
+    assert.ok(!stepCalls.includes("wait-signatures"));
     assert.ok(stepCalls.includes("servicenow-auth"));
     assert.ok(stepCalls.includes("open-hr-form"));
     assert.ok(stepCalls.includes("fill-form"));
     assert.ok(stepCalls.includes("submit"));
 
-    const ticket = updates.find((u) => u.ticketNumber);
-    assert.equal(ticket?.ticketNumber, "HRC0123456");
-    const signers = updates.find((u) => u.signerCount);
-    assert.equal(signers?.signerCount, "3");
-    const parentRun = updates.find((u) => u.signaturesParentRunId);
-    assert.equal(parentRun?.signaturesParentRunId, "synth-parent-rid");
-    const filed = updates.find((u) => u.status === "filed");
-    assert.ok(filed, "expected an updateData call setting status: 'filed'");
-    const submittedAtUpdate = updates.find((u) => typeof u.submittedAt === "string");
-    assert.ok(submittedAtUpdate, "expected an updateData call setting submittedAt ISO string");
+    assert.equal(updates.find((u) => u.signerCount)?.signerCount, "3");
+    assert.equal(updates.find((u) => u.ticketNumber)?.ticketNumber, "HRC0123456");
+    assert.ok(updates.some((u) => u.status === "waiting-signatures"));
+    assert.ok(updates.some((u) => u.status === "filed"));
+    assert.ok(updates.some((u) => typeof u.submittedAt === "string"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("oathUploadHandler: skips dispatch when prior approved OCR entry exists", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "oath-upload-handler-restart-"));
-  try {
-    const stepCalls: string[] = [];
-    const updates: Record<string, unknown>[] = [];
-
-    // The handler computes ocrSessionId = `oath-upload-${ctx.runId}-ocr`.
-    const runId = "oath-upload-run-X";
-    const ocrSessionId = `oath-upload-${runId}-ocr`;
-
-    // Pre-write the OCR approved tracker entry with fannedOutItemIds.
-    trackEvent({
-      workflow: "ocr",
-      timestamp: new Date().toISOString(),
-      id: ocrSessionId,
-      runId: "ocr-prior-run",
-      status: "done",
-      step: "approved",
-      data: { fannedOutItemIds: JSON.stringify(["x", "y"]) },
-    }, dir);
-
-    let prepareCalled = false;
-    let waitOcrCalled = false;
-
-    const fakeCtx = {
-      runId,
-      data: {} as Record<string, unknown>,
-      page: async () => ({ url: () => "x", title: async () => "x" }),
-      step: async (name: string, fn: () => Promise<void>) => {
-        stepCalls.push(name);
-        await fn();
-      },
-      markStep: (name: string) => { stepCalls.push(`mark:${name}`); },
-      skipStep: (name: string) => { stepCalls.push(`skip:${name}`); },
-      updateData: (d: Record<string, unknown>) => {
-        updates.push(d);
-        Object.assign(fakeCtx.data, d);
-      },
-      screenshot: async () => undefined,
-    };
-
-    await oathUploadHandler(fakeCtx as never, {
-      pdfPath: "/tmp/x.pdf",
-      pdfOriginalName: "x.pdf",
-      sessionId: "session-X",
-      pdfHash: "a".repeat(64),
-      mode: "full",
-      rosterMode: "download",
-    }, {
-      trackerDir: dir,
-      _prepareOverride: async () => {
-        prepareCalled = true;
-        return {
-          status: 202 as const,
-          body: { ok: true as const, sessionId: "ignored", runId: "ignored" },
-        };
-      },
-      _waitForOcrApprovalOverride: async () => {
-        waitOcrCalled = true;
-        return { step: "approved" as const, fannedOutItemIds: [] };
-      },
-      _watchChildRunsOverride: async () => [],
-      _loginOverride: async () => true,
-      _gotoOverride: async () => undefined,
-      _verifyOverride: async () => undefined,
-      _fillFormOverride: async () => undefined,
-      _submitOverride: async () => "HRC0000111",
-    });
-
-    assert.ok(!prepareCalled, "OCR prepare override should NOT have been called when a prior approved OCR exists");
-    assert.ok(!waitOcrCalled, "OCR-approval wait override should NOT have been called when a prior approved OCR exists");
-    // Recovery should skip the dispatch step explicitly.
-    assert.ok(stepCalls.includes("skip:dispatch"), `expected skip:dispatch in: ${stepCalls.join(",")}`);
-    // Downstream steps must still fire.
-    assert.ok(stepCalls.includes("wait-signatures"), `expected wait-signatures in: ${stepCalls.join(",")}`);
-    assert.ok(stepCalls.includes("submit"));
-    // signerCount should reflect the prior approval's fannedOutItemIds (2 ids).
-    const signers = updates.find((u) => u.signerCount);
-    assert.equal(signers?.signerCount, "2");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("oathUploadHandler: dryRun propagates to OCR and skips ServiceNow submit", async () => {
+test("oathUploadHandler: dryRun propagates to delegated PDF run and skips ServiceNow submit", async () => {
   const dir = mkdtempSync(join(tmpdir(), "oath-upload-handler-dry-run-"));
   try {
-    const stepCalls: string[] = [];
-    const updates: Record<string, unknown>[] = [];
-    let prepareDryRun: boolean | undefined;
+    const { ctx, stepCalls, updates } = makeFakeCtx();
+    let delegateInput: unknown;
     let submitCalled = false;
 
-    const fakeCtx = {
-      runId: "oath-upload-run-dry",
-      data: {} as Record<string, unknown>,
-      page: async () => ({ url: () => "x", title: async () => "x" }),
-      step: async (name: string, fn: () => Promise<void>) => {
-        stepCalls.push(name);
-        await fn();
-      },
-      markStep: (name: string) => { stepCalls.push(`mark:${name}`); },
-      skipStep: (name: string) => { stepCalls.push(`skip:${name}`); },
-      updateData: (d: Record<string, unknown>) => {
-        updates.push(d);
-        Object.assign(fakeCtx.data, d);
-      },
-      screenshot: async (_opts: { label: string }) => undefined,
-    };
+    const delegateOverride: NonNullable<OathUploadHandlerOpts["_delegateToOverride"]> =
+      async (child, input) => {
+        delegateInput = input;
+        return {
+          workflow: child.config.name,
+          runId: "sig-run-dry",
+          itemId: "session-dry",
+          status: "done" as const,
+          data: { fannedOutCount: "1" },
+        };
+      };
 
-    await oathUploadHandler(fakeCtx as never, {
+    await oathUploadHandler(ctx as never, {
       pdfPath: "/tmp/dry.pdf",
       pdfOriginalName: "dry.pdf",
       sessionId: "session-dry",
@@ -216,18 +152,7 @@ test("oathUploadHandler: dryRun propagates to OCR and skips ServiceNow submit", 
       dryRun: true,
     }, {
       trackerDir: dir,
-      _prepareOverride: async (prepareInput) => {
-        prepareDryRun = prepareInput.dryRun;
-        return {
-          status: 202 as const,
-          body: { ok: true as const, sessionId: "dry-sid", runId: "dry-rid" },
-        };
-      },
-      _waitForOcrApprovalOverride: async () => ({
-        step: "approved" as const,
-        fannedOutItemIds: ["10706431"],
-      }),
-      _watchChildRunsOverride: async () => [],
+      _delegateToOverride: delegateOverride,
       _loginOverride: async () => true,
       _gotoOverride: async () => undefined,
       _verifyOverride: async () => undefined,
@@ -238,8 +163,17 @@ test("oathUploadHandler: dryRun propagates to OCR and skips ServiceNow submit", 
       },
     });
 
-    assert.equal(prepareDryRun, true);
+    assert.deepEqual(delegateInput, {
+      kind: "pdf",
+      pdfPath: "/tmp/dry.pdf",
+      pdfOriginalName: "dry.pdf",
+      sessionId: "session-dry",
+      pdfHash: "a".repeat(64),
+      rosterMode: "download",
+      dryRun: true,
+    });
     assert.equal(submitCalled, false);
+    assert.ok(stepCalls.includes("delegate-signatures"));
     assert.ok(stepCalls.includes("submit"));
     assert.ok(updates.some((u) => u.status === "dry-run-complete"));
     assert.ok(updates.some((u) => u.ticketNumber === "DRY RUN - not submitted"));
@@ -248,35 +182,15 @@ test("oathUploadHandler: dryRun propagates to OCR and skips ServiceNow submit", 
   }
 });
 
-test("oathUploadHandler: upload-only mode skips OCR and signature delegation then submits ServiceNow", async () => {
+test("oathUploadHandler: upload-only mode skips signature delegation then submits ServiceNow", async () => {
   const dir = mkdtempSync(join(tmpdir(), "oath-upload-handler-upload-only-"));
   try {
-    const stepCalls: string[] = [];
-    const updates: Record<string, unknown>[] = [];
-    let prepareCalled = false;
-    let waitOcrCalled = false;
-    let watchChildCalled = false;
+    const { ctx, stepCalls, updates } = makeFakeCtx();
+    let delegateCalled = false;
     let fillFormCalled = false;
     let submitCalled = false;
 
-    const fakeCtx = {
-      runId: "oath-upload-run-upload-only",
-      data: {} as Record<string, unknown>,
-      page: async () => ({ url: () => "x", title: async () => "x" }),
-      step: async (name: string, fn: () => Promise<void>) => {
-        stepCalls.push(name);
-        await fn();
-      },
-      markStep: (name: string) => { stepCalls.push(`mark:${name}`); },
-      skipStep: (name: string) => { stepCalls.push(`skip:${name}`); },
-      updateData: (d: Record<string, unknown>) => {
-        updates.push(d);
-        Object.assign(fakeCtx.data, d);
-      },
-      screenshot: async () => undefined,
-    };
-
-    await oathUploadHandler(fakeCtx as never, {
+    await oathUploadHandler(ctx as never, {
       pdfPath: "/tmp/upload-only.pdf",
       pdfOriginalName: "upload-only.pdf",
       sessionId: "session-upload-only",
@@ -285,112 +199,34 @@ test("oathUploadHandler: upload-only mode skips OCR and signature delegation the
       rosterMode: "download",
     }, {
       trackerDir: dir,
-      _prepareOverride: async () => {
-        prepareCalled = true;
-        return {
-          status: 202 as const,
-          body: { ok: true as const, sessionId: "x", runId: "x" },
-        };
-      },
-      _waitForOcrApprovalOverride: async () => {
-        waitOcrCalled = true;
-        return { step: "approved" as const, fannedOutItemIds: ["should-not-run"] };
-      },
-      _watchChildRunsOverride: async () => {
-        watchChildCalled = true;
-        return [];
+      _delegateToOverride: async () => {
+        delegateCalled = true;
+        throw new Error("should not be called");
       },
       _loginOverride: async () => true,
       _gotoOverride: async () => undefined,
       _verifyOverride: async () => undefined,
-      _fillFormOverride: async () => { fillFormCalled = true; },
+      _fillFormOverride: async () => {
+        fillFormCalled = true;
+      },
       _submitOverride: async () => {
         submitCalled = true;
         return "HRC0099999";
       },
     });
 
-    assert.equal(prepareCalled, false);
-    assert.equal(waitOcrCalled, false);
-    assert.equal(watchChildCalled, false);
+    assert.equal(delegateCalled, false);
     assert.equal(fillFormCalled, true);
     assert.equal(submitCalled, true);
-    assert.ok(stepCalls.includes("skip:dispatch"));
-    assert.ok(stepCalls.includes("skip:wait-signatures"));
+    assert.ok(stepCalls.includes("skip:delegate-signatures"));
+    assert.ok(!stepCalls.includes("dispatch"));
+    assert.ok(!stepCalls.includes("wait-signatures"));
     assert.ok(stepCalls.includes("open-hr-form"));
     assert.ok(stepCalls.includes("fill-form"));
     assert.ok(stepCalls.includes("submit"));
     assert.equal(updates.find((u) => u.ticketNumber)?.ticketNumber, "HRC0099999");
     assert.equal(updates.find((u) => u.uploadMode)?.uploadMode, "upload-only");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("oathUploadHandler: reads prior OCR approval from yesterday's JSONL file (cross-day recovery)", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "oath-upload-crossday-"));
-  try {
-    const runId = "crossday-run-1";
-    const ocrSessionId = `oath-upload-${runId}-ocr`;
-
-    // Write the approved OCR entry into yesterday's tracker file.
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayFile = join(dir, `ocr-${dateLocal(yesterday)}.jsonl`);
-    const entry = {
-      workflow: "ocr",
-      ts: yesterday.toISOString(),
-      id: ocrSessionId,
-      runId: "ocr-prior-run",
-      status: "done",
-      step: "approved",
-      data: { fannedOutItemIds: JSON.stringify(["p", "q", "r"]) },
-    };
-    writeFileSync(yesterdayFile, JSON.stringify(entry) + "\n", "utf-8");
-
-    const stepCalls: string[] = [];
-    const fakeCtx = {
-      runId,
-      data: {} as Record<string, unknown>,
-      page: async () => ({ url: () => "x", title: async () => "x" }),
-      step: async (name: string, fn: () => Promise<void>) => { stepCalls.push(name); await fn(); },
-      markStep: (name: string) => { stepCalls.push(`mark:${name}`); },
-      skipStep: (name: string) => { stepCalls.push(`skip:${name}`); },
-      updateData: (d: Record<string, unknown>) => { Object.assign(fakeCtx.data, d); },
-      screenshot: async () => undefined,
-    };
-
-    let prepareCalled = false;
-    await oathUploadHandler(fakeCtx as never, {
-      pdfPath: "/tmp/x.pdf",
-      pdfOriginalName: "x.pdf",
-      sessionId: "session-crossday",
-      pdfHash: "b".repeat(64),
-      mode: "full",
-      rosterMode: "download",
-    }, {
-      trackerDir: dir,
-      _prepareOverride: async () => {
-        prepareCalled = true;
-        return {
-          status: 202 as const,
-          body: { ok: true as const, sessionId: "x", runId: "x" },
-        };
-      },
-      _waitForOcrApprovalOverride: async () => { throw new Error("should not be called"); },
-      _watchChildRunsOverride: async () => [],
-      _loginOverride: async () => true,
-      _gotoOverride: async () => undefined,
-      _verifyOverride: async () => undefined,
-      _fillFormOverride: async () => undefined,
-      _submitOverride: async () => "HRC-CROSSDAY",
-    });
-
-    assert.ok(!prepareCalled, "dispatch must be skipped when prior approval found in yesterday's file");
-    assert.ok(stepCalls.includes("skip:dispatch"), `steps: ${stepCalls.join(",")}`);
-    assert.ok(stepCalls.includes("wait-signatures"), `steps: ${stepCalls.join(",")}`);
-    // signerCount comes from the 3 IDs in yesterday's entry
-    assert.equal((fakeCtx.data as Record<string, unknown>).signerCount, "3");
+    assert.equal(updates.find((u) => u.signerCount)?.signerCount, "skipped");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

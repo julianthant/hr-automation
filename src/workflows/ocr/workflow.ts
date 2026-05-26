@@ -125,9 +125,9 @@ async function ocrKernelHandler(ctx: Ctx<typeof ocrSteps, OcrInput>, input: OcrI
   // Mirror approve route's payload into accumulated tracker data so the
   // kernel's auto-emitted terminal `done` carries records / fannedOutItemIds.
   // The approve route's `done step=approved` row was written BEFORE this
-  // signal fired, so consumers that key on `step === "approved"` (e.g.
-  // `waitForOcrApproval`) already have what they need; this update is
-  // belt-and-suspenders for the kernel's later bare-`done` row.
+  // signal fired, so consumers that key on `step === "approved"` already
+  // have what they need; this update is belt-and-suspenders for the
+  // kernel's later bare-`done` row.
   const update: Record<string, unknown> = {
     records: JSON.stringify(payload.records),
     recordCount: String(payload.records.length),
