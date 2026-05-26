@@ -8,6 +8,7 @@ import {
 import type { CaptureSession } from "../../services/capture/sessions.js";
 import { log } from "../../utils/log.js";
 import { buildOcrPrepareHandler } from "./ocr/index.js";
+import { enqueueOathSignaturePdf } from "./oath-signature/http.js";
 
 export const captureStore: CaptureSessionStore = createSessionStore();
 export const CAPTURE_PHOTOS_DIR = ".tracker/captures";
@@ -75,19 +76,6 @@ export function makeCaptureFinalize(trackerDir: string) {
       return;
     }
 
-    let formType: string;
-    if (session.workflow === "oath-signature") {
-      formType = "oath";
-    } else if (session.workflow === "emergency-contact") {
-      formType = "emergency-contact";
-    } else if (session.workflow === "ocr" && session.formType) {
-      formType = session.formType;
-    } else {
-      log.warn(`[capture] no OCR form type mapping for workflow ${session.workflow}`);
-      return;
-    }
-
-    const handler = buildOcrPrepareHandler({ trackerDir });
     const rosterDirs = [
       resolve(process.cwd(), ".tracker/rosters"),
       resolve(process.cwd(), "src/data"),
@@ -102,11 +90,45 @@ export function makeCaptureFinalize(trackerDir: string) {
     }
 
     const pdfOriginalName = `capture-${session.sessionId.slice(0, 8)}.pdf`;
+    const rosterMode: "existing" | "download" = rosterPath ? "existing" : "download";
+
+    // Plan A Commit 3: oath-signature captures enqueue directly into the
+    // oath-signature daemon as a `{ kind: "pdf" }` item. Emergency-contact
+    // and standalone OCR captures still go through the OCR prepare path
+    // (they get the originWorkflow-synthesized parent row treatment).
+    if (session.workflow === "oath-signature") {
+      try {
+        await enqueueOathSignaturePdf({
+          pdfPath: session.pdfPath,
+          pdfOriginalName,
+          sessionId: session.sessionId,
+          rosterMode,
+          ...(rosterPath ? { rosterPath } : {}),
+        });
+      } catch (err) {
+        log.warn(
+          `[capture] oath-signature enqueue failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      return;
+    }
+
+    let formType: string;
+    if (session.workflow === "emergency-contact") {
+      formType = "emergency-contact";
+    } else if (session.workflow === "ocr" && session.formType) {
+      formType = session.formType;
+    } else {
+      log.warn(`[capture] no OCR form type mapping for workflow ${session.workflow}`);
+      return;
+    }
+
+    const handler = buildOcrPrepareHandler({ trackerDir });
     const result = await handler({
       pdfPath: session.pdfPath,
       pdfOriginalName,
       formType,
-      rosterMode: rosterPath ? "existing" : "download",
+      rosterMode,
       rosterPath,
       sessionId: session.sessionId,
     });
