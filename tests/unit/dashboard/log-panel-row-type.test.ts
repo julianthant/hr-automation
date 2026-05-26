@@ -10,7 +10,8 @@ function ocrPrep(overrides: Partial<TrackerEntry> = {}): TrackerEntry {
     timestamp: "2026-05-19T18:00:00.000Z",
     id: "ocr-session-1",
     runId: "ocr-run-1",
-    status: "done",
+    // New approval contract (2026-05-25): awaiting-approval is status="running".
+    status: "running",
     step: "awaiting-approval",
     data: {
       archetype: "batch-parent",

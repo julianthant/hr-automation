@@ -43,13 +43,18 @@ function renderDelegationRow(
 }
 
 test("prep-only approval-delegation card shows duration and row retry/delete footer", () => {
+  // New approval contract (2026-05-25): the OCR row stays status="running"
+  // step="awaiting-approval" until operator approves. While running, the
+  // batch timer is live; while live, the rendered label uses useElapsed
+  // (computed against `now`). Test asserts only the static affordances —
+  // retry/delete footer + a numeric duration somewhere in the output.
   const html = renderDelegationRow(
     {
       workflow: "ocr",
       timestamp: "2026-05-19T12:54:08.000Z",
       id: "ocr-session",
       runId: "ocr-run-1",
-      status: "done",
+      status: "running",
       step: "awaiting-approval",
       firstLogTs: "2026-05-19T12:53:20.000Z",
       lastLogTs: "2026-05-19T12:54:08.000Z",
@@ -60,7 +65,8 @@ test("prep-only approval-delegation card shows duration and row retry/delete foo
     "OCR",
   );
 
-  assert.match(html, /0m 48s/);
+  // Live duration tick (running state). Either "Nm Ns" or just "Ns".
+  assert.match(html, /\d+m \d+s|\d+s/);
   assert.match(html, /aria-label="Retry this run"/);
   assert.match(html, /aria-label="Delete this (entry|run) permanently"/);
 });

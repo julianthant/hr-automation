@@ -148,7 +148,11 @@ test("queryEntriesPayload wfCounts carries emplId from earlier events when lates
   }
 });
 
-test("queryEntriesPayload wfCounts includes OCR rows approved after prep (not resolved_prep)", () => {
+test("queryEntriesPayload wfCounts excludes approved OCR prep rows (new approval contract)", () => {
+  // New approval contract (2026-05-25): OCR `done` is the terminal
+  // "operator approved" state, so approved prep rows are resolved-prep and
+  // drop out of the sidebar wfCounts — only awaiting-approval (running) or
+  // unresolved rows count.
   const dir = tmpTracker();
   try {
     openStateDb(dir);
@@ -162,7 +166,7 @@ test("queryEntriesPayload wfCounts includes OCR rows approved after prep (not re
           runId: `${id}#1`,
           status: "done",
           step: "approved",
-          data: { mode: "prepare", pdfOriginalName: `${id}.pdf` },
+          data: { mode: "prepare", pdfOriginalName: `${id}.pdf`, archetype: "batch-parent" },
         },
         dir,
       );
@@ -170,9 +174,9 @@ test("queryEntriesPayload wfCounts includes OCR rows approved after prep (not re
     const db = openStateDb(dir);
     const payload = queryEntriesPayload(db, { workflow: "ocr", date: day });
     assert.equal(
-      payload.wfCounts.ocr,
-      3,
-      "approved OCR prep stays in sidebar wfCounts until discarded",
+      payload.wfCounts.ocr ?? 0,
+      0,
+      "approved OCR prep is resolved-prep and excluded from sidebar wfCounts",
     );
   } finally {
     closeStateDbForTests(dir);

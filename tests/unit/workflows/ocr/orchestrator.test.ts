@@ -273,11 +273,14 @@ test("orchestrator waits for eid-lookup results before completing awaiting-appro
   );
 
   assert.equal(watcherCalled, true);
-  const doneApproval = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
-    (entry) => entry.status === "done" && entry.step === "awaiting-approval",
+  // New approval contract (2026-05-25): awaiting-approval row carries
+  // status="running" until the operator approves; it never reaches "done"
+  // from the orchestrator.
+  const approval = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
+    (entry) => entry.status === "running" && entry.step === "awaiting-approval",
   );
-  assert.ok(doneApproval, "awaiting-approval should be marked done after child lookup returns");
-  const records = JSON.parse(doneApproval.data?.records ?? "[]") as Array<Record<string, unknown>>;
+  assert.ok(approval, "awaiting-approval row should be emitted as running after child lookup returns");
+  const records = JSON.parse(approval.data?.records ?? "[]") as Array<Record<string, unknown>>;
   assert.equal(records[0]?.employeeId, "10873698");
   assert.deepEqual((records[0]?.verification as Record<string, unknown>)?.state, "verified");
   rmSync(dir, { recursive: true, force: true });
@@ -335,11 +338,12 @@ test("orchestrator patches child outcomes once when progress and final outcomes 
     },
   );
 
-  const doneApproval = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
-    (entry) => entry.status === "done" && entry.step === "awaiting-approval",
+  // New approval contract (2026-05-25): awaiting-approval row is status="running".
+  const approval = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
+    (entry) => entry.status === "running" && entry.step === "awaiting-approval",
   );
-  assert.ok(doneApproval, "awaiting-approval should be marked done after child lookup returns");
-  const records = JSON.parse(doneApproval.data?.records ?? "[]") as Array<{ warnings?: string[] }>;
+  assert.ok(approval, "awaiting-approval row should be emitted as running after child lookup returns");
+  const records = JSON.parse(approval.data?.records ?? "[]") as Array<{ warnings?: string[] }>;
   assert.equal(records[0]?.warnings?.filter((warning) => warning === "eid-lookup failed").length, 1);
   rmSync(dir, { recursive: true, force: true });
 });
@@ -399,7 +403,8 @@ test("orchestrator pre-emits delegated eid-lookup pending rows before daemon aut
   const pending = entries.find((entry: any) => entry.status === "pending" && entry.id === "ocr-oath-run-preemit-eid-r0");
   assert.ok(pending, "expected pre-emitted pending eid-lookup row");
   assert.equal(pending.data.searchName, "Barahona Martell, Carlos D");
-  assert.equal(writtenEntries.some((entry: any) => entry.status === "done" && entry.step === "awaiting-approval"), true);
+  // New approval contract (2026-05-25): awaiting-approval is status="running".
+  assert.equal(writtenEntries.some((entry: any) => entry.status === "running" && entry.step === "awaiting-approval"), true);
   rmSync(dir, { recursive: true, force: true });
 });
 

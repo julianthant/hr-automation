@@ -65,7 +65,10 @@ test("countSidebarRowsFromTrackerHistory: merges + excludes resolved prep", () =
   assert.equal(n, 1, "prep row excluded; two active-check rows collapse to one");
 });
 
-test("countSidebarRowsFromTrackerHistory: approved OCR review rows stay visible", () => {
+test("countSidebarRowsFromTrackerHistory: approved OCR review rows are resolved and hidden", () => {
+  // New approval contract (2026-05-25): OCR `done` is only emitted after
+  // operator approves, so approved rows are resolved-prep — they drop out
+  // of the active sidebar count, just like discarded rows do.
   const raw: TrackerEntry[] = [
     {
       workflow: "ocr",
@@ -78,7 +81,7 @@ test("countSidebarRowsFromTrackerHistory: approved OCR review rows stay visible"
       data: { archetype: "batch-parent", mode: "prepare", formType: "oath" },
     },
   ];
-  assert.equal(countSidebarRowsFromTrackerHistory(raw, isResolvedPrepEntry), 1);
+  assert.equal(countSidebarRowsFromTrackerHistory(raw, isResolvedPrepEntry), 0);
 });
 
 test("countSidebarRowsFromTrackerHistory: discarded OCR review rows are hidden", () => {
