@@ -27,7 +27,7 @@ exports[`oath-signature scenario: pdf branch — single signer > N=1 → pdf row
     "subtitle": "Oath · <last4>",
     "surfacePlacement": "grouped",
     "surfaceType": "normal",
-    "title": "Oath Signature oath-single.pdf",
+    "title": "oath-single.pdf",
     "workflow": "oath-signature",
   },
   {

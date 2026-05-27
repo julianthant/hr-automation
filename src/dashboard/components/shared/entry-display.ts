@@ -55,7 +55,9 @@ export function resolveEntryName(
   const fromMap = displayNames?.get(entry.id);
   if (fromMap) return fromMap;
   const d = entry.data ?? {};
-  if (d.mode === "prepare" && d.pdfOriginalName) return d.pdfOriginalName;
+  if ((d.mode === "prepare" || resolveRowArchetype(entry) === "batch-parent") && d.pdfOriginalName) {
+    return d.pdfOriginalName;
+  }
   if (entry.parentRunId) {
     const personName = resolveEmployeeLabel(d);
     if (personName) return personName;
@@ -164,7 +166,7 @@ export function buildDisplayNameMap(
 ): Map<string, string> {
   const displayFor = (e: TrackerEntry): { base: string; ordinal: boolean; explicitWorkflowName: boolean } => {
     const d = e.data ?? {};
-    if (d.mode === "prepare" && d.pdfOriginalName) {
+    if ((d.mode === "prepare" || resolveRowArchetype(e) === "batch-parent") && d.pdfOriginalName) {
       return { base: d.pdfOriginalName, ordinal: false, explicitWorkflowName: false };
     }
     const personName = resolveEmployeeLabel(d);

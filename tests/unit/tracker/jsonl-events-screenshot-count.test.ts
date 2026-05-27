@@ -32,9 +32,8 @@ test("buildJsonlEventsPayload uses SQLite screenshot_count when projection DB is
 });
 
 test("buildJsonlEventsPayload returns only the oath-upload root row (no children nest under it)", () => {
-  // Oath Upload no longer parents OCR / signature children. The synthesized
-  // oath-signature batch row owns those children, so the oath-upload events
-  // payload should contain just the single root row.
+  // Oath Upload delegates one oath-signature PDF stage and waits for it; it
+  // does not inline OCR or per-signer descendants into the upload row payload.
   const dir = mkdtempSync(join(tmpdir(), "jsonl-events-oath-context-"));
   try {
     openStateDb(dir);
@@ -48,7 +47,7 @@ test("buildJsonlEventsPayload returns only the oath-upload root row (no children
       step: "wait-signatures",
       data: { archetype: "single", pdfOriginalName: "oath.pdf" },
     }, date, dir);
-    // Children parented to the synthesized oath-signature row (different runId)
+    // Children parented to the delegated oath-signature run (different runId)
     // — these should NOT appear in oath-upload's events payload.
     trackEventForDate({
       workflow: "ocr",

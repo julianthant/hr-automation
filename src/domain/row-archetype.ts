@@ -32,7 +32,7 @@ export type WorkflowArchetype =
   | "batch"
   /** Emits `single` + `dispatch` + N delegate-children. Examples: ocr (parent), separations (when delegating). */
   | "delegating"
-  /** Emits batch-parent that delegates each member to another workflow. Examples: oath-upload. */
+  /** Emits a batch-parent that delegates child work to another workflow. Examples: ocr. */
   | "delegating-batch"
   /** Child-only workflow that holds no operator attention; always rendered as `passive-child`. Examples: eid-lookup (as passive child). */
   | "utility";
@@ -165,7 +165,7 @@ export function resolveArchetype<TInput>(
  * Mapping:
  *   parentRunId present + utility  → "passive-child"  (EID lookup, active-check children)
  *   parentRunId present + other    → "delegate-child" (OCR under oath-upload, oath-sig fan-out)
- *   no parentRunId + delegating-batch → "batch-parent" (oath-upload root row)
+ *   no parentRunId + delegating-batch → "batch-parent" (OCR prep row)
  *   no parentRunId + batch         → "batch-parent"   (anchor row — members carry parentRunId)
  *   no parentRunId + everything else → "single"
  */

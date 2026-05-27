@@ -366,9 +366,8 @@ describe("workflow runtime projection adapters", () => {
 
   it("renders the Oath Upload row as a single-row card with no nested children", () => {
     // Oath Upload is `archetype: "single"` and does NOT parent OCR / signature
-    // children — the OCR + per-signer batch lives under a synthesized
-    // batch-parent in the oath-signature tab. oath-upload just watches the
-    // batch from afar and files the ServiceNow ticket when done.
+    // descendants directly. It delegates one oath-signature PDF stage, waits,
+    // and files the ServiceNow ticket when the delegated stage is done.
     const root = entry({
       workflow: "oath-upload",
       id: "upload-session-1",
