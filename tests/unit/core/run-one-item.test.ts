@@ -267,6 +267,7 @@ test('runOneItem: cancel sticks after controller.abort() even when underlying pr
   // The cancel must still classify as `cancelled` — not `failed` —
   // because the controller's signal is aborted. The wrapper's
   // `|| controller.signal.aborted` is what makes this true.
+  assert.equal(result.ok, false)
   assert.equal(result.kind, 'cancelled', 'cancel sticks via controller.signal.aborted even when probe returns false')
 })
 

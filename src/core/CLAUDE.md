@@ -87,6 +87,7 @@ Key rules: (1) every per-item row carries `runId` + `workflowInstance`; `filterE
 
 - **Lesson maintenance rule:** Before adding a core/kernel lesson, search this section for the same run mode, daemon lifecycle, or tracker contract. Merge dated migration notes into the current invariant whenever possible.
 - **Daemon shutdown rows must preserve display metadata.** Cancellation/terminal rows emitted during daemon/browser shutdown need the same pending-row data (`buildHttpPendingData`), `data.archetype`, and `parentRunId`; sparse terminal rows overwrite rich rows in dashboard dedupe.
+- **2026-05-27: Direct input-run batches force normal batch-member archetypes.** Utility workflows may still stamp delegated children as `passive-child`, but `/api/enqueue` multi-value input-bar runs add an internal `__runtimeOptions.rowArchetype="delegate-child"` marker so N typed values render as one normal batch row. Single typed values remain unparented single rows.
 - **Task-store corruption should fail loud.** Malformed `tasks.input_json` must throw from `parseJson` with a raw-prefix diagnostic instead of coercing to `{}` and surfacing confusing workflow schema errors.
 - **Queue SQLite + JSONL audit share one transaction boundary.** Wrap SQLite state mutation + audit append in one `ControlDb.transaction(...)` with a shared timestamp.
 - **Claim recovery is lease-based.** `claim_expires_at <= now` is recoverable even if the worker still heartbeats; pending cancel/force-stop commands block recovery.

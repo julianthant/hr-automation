@@ -116,7 +116,7 @@ export function resolveJobSummaryResult(
 export const separationsWorkflow = defineWorkflow({
   name: "separations",
   label: "Separations",
-  archetype: "batch",
+  archetype: "single",
   category: "Separations",
   iconName: "UserMinus",
   systems: [

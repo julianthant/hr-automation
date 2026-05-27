@@ -4,6 +4,7 @@ import { z } from "zod";
 import { defineWorkflow } from "../../../src/core/index.js";
 import { buildHttpPendingData } from "../../../src/core/daemon/enqueue-dispatch.js";
 import { eidLookupCrmWorkflow } from "../../../src/workflows/eid-lookup/workflow.js";
+import { separationsWorkflow } from "../../../src/workflows/separations/workflow.js";
 
 test("buildHttpPendingData: EID lookup HTTP enqueue seeds normalized display data", () => {
   const data = buildHttpPendingData(eidLookupCrmWorkflow, { name: "zaw, hein thant" });
@@ -30,6 +31,25 @@ test("buildHttpPendingData preserves workflow queue title metadata", () => {
 
   assert.equal(data.__queueTitle, "Doe, Jane");
   assert.equal(data.__queueTitleKind, "single");
+});
+
+test("buildHttpPendingData stamps a single separation enqueue as a single row", () => {
+  const data = buildHttpPendingData(separationsWorkflow, { docId: "4025" });
+
+  assert.equal(data.docId, "4025");
+  assert.equal(data.__subject, "Separation 4025");
+  assert.equal(data.archetype, "single");
+});
+
+test("buildHttpPendingData honors direct input-run batch row archetype override", () => {
+  const data = buildHttpPendingData(
+    eidLookupCrmWorkflow,
+    { name: "Doe, Jane", __runtimeOptions: { rowArchetype: "delegate-child" } },
+    "input-run-batch-1",
+  );
+
+  assert.equal(data.searchName, "Doe, Jane");
+  assert.equal(data.archetype, "delegate-child");
 });
 
 test("eidLookupCrmWorkflow exposes the stable itemId deriver for HTTP enqueue", () => {

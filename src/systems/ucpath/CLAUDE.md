@@ -48,7 +48,7 @@ Position number fill in `fillJobData` triggers a page refresh that **changes gri
 7. `fillComments` — both Comments and Initiator Comments textareas
 8. `clickJobDataTab` / `fillJobData` — position, classification, comp rate, rate value, end date
 9. `clickEarnsDistTab` / `clickEmployeeExperienceTab` — visit only (no fill)
-10. `clickSaveAndSubmit` — extracts transaction number from confirmation text
+10. `clickSaveAndSubmit` — after confirmation OK, reopens the Smart HR row, scrolls to the lower readback area, and extracts the `T...` transaction number
 
 ## Gotchas
 
@@ -60,7 +60,7 @@ Position number fill in `fillJobData` triggers a page refresh that **changes gri
 - `parsePayRate("$17.75 per hour")` → `"17.75"`
 - Phone/email grid indices hardcoded: `$6` for phone type, `$7` for email type
 - SSN is optional (international students), address is required
-- Transaction number extraction: regex for 7+ digit number in confirmation text
+- Transaction number extraction: parse the reopened Smart HR readback page, accepting both `Transaction ID: T...` and the approval strip `Transaction: T...`; scroll to that lower section before workflow screenshots
 
 ## Verified Selectors
 
@@ -96,6 +96,7 @@ Auto-correction via cross-source name matching is a correctness risk: names aren
 ## Lessons Learned
 
 - **2026-05-27: Smart HR Transactions sidebar selector must be exact.** UCPath renders both "Smart HR Transactions" and "SS Smart HR Transactions" under Smart HR Templates; loose `getByText("Smart HR Transactions")` matches both and fails strict mode before separations can create transactions. Keep `hrTasks.smartHRTransactionsLink` on an exact link role selector.
+- **2026-05-27: Transaction readback lives below the fold.** The submitted Smart HR readback page shows `Transaction ID: T...` and the approval strip below the comments/save area. `readLatestTransactionNumber` scrolls to that section before parsing, and separations captures `ucpath-transaction-submitted-missing-number` if UCPath accepted the submit but no T-number was parsed.
 - **2026-05-15: Person Org Summary name lookup moved to a registry selector.** `person-org-summary.ts` now reads `personOrgSummary.personNameValue` before falling back to generic leaf-text heuristics. Do not add personal names to skip lists; if the name readback fails, fix or extend the selector chain and record a selector lesson.
 - **2026-05-15: UCPath driver interactions use `safeClick`/`safeFill`.** Registry-locator clicks/fills in UCPath system modules should stay wrapped so the dashboard selector health panel can aggregate fallback/stall warnings by label. JS-eval and element-handle escape hatches remain documented inline.
 - **2026-04-23: `page.screenshot` outlier removed from `transaction.ts`.** `clickSaveAndSubmit` no longer captures its own ad-hoc `.screenshots/save-disabled-*.png` on waitForSaveEnabled timeout. Workflow handlers that want diagnostic captures call `ctx.screenshot({ kind: 'error', label: ... })` from their catch block — keeps the system module ctx-free and routes the image through the structured tracker pipeline.

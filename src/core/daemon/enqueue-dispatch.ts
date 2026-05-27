@@ -18,6 +18,7 @@ import { loadWorkflow } from "../workflow-loaders.js";
 import type { RegisteredWorkflow } from "../kernel/types.js";
 import { splitPrefilled } from "../kernel/workflow.js";
 import { buildPendingTrackerData } from "../pending-data.js";
+import type { RowArchetype } from "../../domain/row-archetype.js";
 import { allocateLowestBatchDisplayOrdinal } from "../../tracker/batch-display-ordinal.js";
 import { DEFAULT_DIR, emitTrackerRow, type StampedData } from "../../tracker/jsonl.js";
 import { log } from "../../utils/log.js";
@@ -119,6 +120,22 @@ export function buildTrackerDataForInput(input: unknown): Record<string, string>
   return data;
 }
 
+function mergeRuntimeOptions(input: unknown, runtimeOptions: Record<string, unknown>): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  const current = (input as { __runtimeOptions?: unknown }).__runtimeOptions;
+  const currentRuntimeOptions =
+    current && typeof current === "object" && !Array.isArray(current)
+      ? current as Record<string, unknown>
+      : {};
+  return {
+    ...(input as Record<string, unknown>),
+    __runtimeOptions: {
+      ...currentRuntimeOptions,
+      ...runtimeOptions,
+    },
+  };
+}
+
 /**
  * Full pending-row data for dashboard-sourced enqueue requests. This layers
  * the generic serialized input with the same workflow hooks the kernel uses
@@ -132,7 +149,7 @@ export function buildHttpPendingData<TData, TSteps extends readonly string[]>(
   parentRunId?: string,
 ): StampedData {
   const baseData = buildTrackerDataForInput(input);
-  const { cleaned } = splitPrefilled(input);
+  const { cleaned, runtimeOptions } = splitPrefilled(input);
   const handlerInput = wf.config.schema.parse(cleaned) as TData;
   return buildPendingTrackerData({
     workflow: wf,
@@ -141,6 +158,7 @@ export function buildHttpPendingData<TData, TSteps extends readonly string[]>(
     useInitialTrackerSeed: true,
     nameIdStamp: "if-truthy-on-merged",
     parentRunId,
+    ...(runtimeOptions?.rowArchetype ? { rowArchetype: runtimeOptions.rowArchetype } : {}),
   });
 }
 
@@ -175,15 +193,22 @@ export async function enqueueFromHttp(
   const resolvedTrackerDir = trackerDir ?? DEFAULT_DIR;
   let effectiveParentRunId = parentRunId;
   let batchDisplayOrdinal: number | undefined;
-  if (inputs.length > 1 && !effectiveParentRunId) {
+  const isDirectInputRunBatch = inputs.length > 1 && !effectiveParentRunId;
+  if (isDirectInputRunBatch) {
     effectiveParentRunId = randomUUID();
     batchDisplayOrdinal = allocateLowestBatchDisplayOrdinal(workflowName, resolvedTrackerDir);
   }
+  const rowArchetypeOverride: RowArchetype | undefined = isDirectInputRunBatch
+    ? "delegate-child"
+    : undefined;
+  const queuedInputs = rowArchetypeOverride
+    ? inputs.map((input) => mergeRuntimeOptions(input, { rowArchetype: rowArchetypeOverride }))
+    : inputs;
 
   // Fail-fast schema validation here (ensureDaemonsAndEnqueue also does this,
   // but surfacing it early lets us return 400 with a precise message instead
   // of a generic 500 for schema mismatches).
-  for (const input of inputs) {
+  for (const input of queuedInputs) {
     // Strip the kernel-level prefilledData channel before validating so
     // strict()-mode workflow schemas don't reject it as unknown. The
     // channel rides through to the daemon via the SQLite task input (also
@@ -213,7 +238,7 @@ export async function enqueueFromHttp(
   try {
     await ensureDaemonsAndEnqueue(
       wf,
-      inputs,
+      queuedInputs,
       {},
       {
         trackerDir,
@@ -284,5 +309,5 @@ export async function enqueueFromHttp(
     return { ok: false, workflow: workflowName, enqueued: 0, error: message };
   }
 
-  return { ok: true, workflow: workflowName, enqueued: inputs.length };
+  return { ok: true, workflow: workflowName, enqueued: queuedInputs.length };
 }
