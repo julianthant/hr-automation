@@ -145,6 +145,28 @@ test("delegated OCR prep rows use PDF name as title and inherited Oath title as 
   assert.equal(resolveEntryId(entry as never), "Oath · 1234");
 });
 
+test("delegated oath-signature PDF batch rows use the PDF name instead of the workflow-prefixed queue title", () => {
+  const row = {
+    workflow: "oath-signature",
+    id: "oath-session-1",
+    runId: "oath-pdf-run-1",
+    parentRunId: "oath-upload-run-1",
+    timestamp: "2026-05-18T12:00:00.000Z",
+    status: "running",
+    data: {
+      archetype: "batch-parent",
+      pdfOriginalName: "upload-packet.pdf",
+      __name: "upload-packet.pdf",
+      __id: "oath-session-1",
+      __queueTitle: "Oath Signature upload-packet.pdf",
+      __queueTitleKind: "single",
+    },
+  } as const;
+
+  const names = buildDisplayNameMap([row], "Oath Signature");
+  assert.equal(resolveEntryName(row as never, names), "upload-packet.pdf");
+});
+
 test("dispatch rows can show an explicit queue subtitle", () => {
   const entry = {
     workflow: "oath-signature",

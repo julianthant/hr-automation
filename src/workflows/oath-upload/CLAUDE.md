@@ -68,7 +68,7 @@ Before mapping a new selector, run `npm run selector:search "<intent>"`.
 | Row | Workflow tab | Row primitive | Notes |
 | --- | --- | --- | --- |
 | Oath-upload daemon item | oath-upload | single row | Files the HR ticket after delegation completes |
-| Delegated oath-signature PDF run | oath-signature | delegated batch | Owns OCR approval and signer fan-out |
+| Delegated oath-signature PDF run | oath-signature | delegated batch | Owns OCR approval and signer fan-out; the oath-upload handler delegates one `{ kind: "pdf" }` input and does not duplicate the oath-signature internals |
 | Oath-signature signer rows | oath-signature | batch members when N >= 2; single row when N = 1 | Produced by the delegated PDF run |
 | ServiceNow ticket | oath-upload | same single row | Terminal data update; no new row |
 
@@ -107,6 +107,7 @@ a retry after a submitted ticket does not file a duplicate HR inquiry.
 ## Lessons Learned
 
 - **Lesson maintenance rule:** Search this section and `src/workflows/oath-signature/CLAUDE.md` before adding oath-upload delegation lessons. Keep the local model aligned with `docs/engineering/workflow-vocabulary.md`.
+- **2026-05-27: Oath Upload delegates to oath-signature, not OCR/signature internals.** Full-mode uploads delegate one `{ kind: "pdf" }` child to oath-signature and wait for that delegated batch-stage row to finish. Oath-signature owns its normal PDF branch after that: OCR preview, EID lookup/verification, approval, and signer fan-out. Do not preserve the child as a natural `batch-parent` from oath-upload; the parented row is delegated work.
 - **2026-05-26: Oath Upload collapsed onto kernel delegation.** Plan A Commit 4 removed the local OCR prepare call, `waitForOcrApproval`, and `watchChildRuns` polling from the handler. Full-mode uploads now run one `delegate-signatures` step that delegates `{ kind: "pdf", ... }` to oath-signature with `itemId: input.sessionId`; oath-signature owns OCR approval and signer fan-out. Oath-upload only resumes to file ServiceNow after the delegated run is terminal.
 - **2026-05-24: Oath Upload is a single row.** The row stays flat in the oath-upload tab. Delegated signature work appears in oath-signature's tab; do not nest children under the oath-upload row.
 - **OCR-delegating workflows need the roster picker.** Any Run modal for a workflow that depends on OCR roster matching must expose the same roster controls as the OCR modal. Never hardcode `rosterMode` at the dispatch site; thread `rosterMode` and `rosterPath` into the delegated PDF input.

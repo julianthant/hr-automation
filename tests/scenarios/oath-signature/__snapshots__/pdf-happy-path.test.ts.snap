@@ -26,7 +26,7 @@ exports[`oath-signature scenario: pdf branch happy path > pdf-branch row complet
   "subtitle": "Oath · <last4>",
   "surfacePlacement": "grouped",
   "surfaceType": "normal",
-  "title": "Oath Signature oath-test.pdf",
+  "title": "oath-test.pdf",
   "workflow": "oath-signature",
 }
 `;

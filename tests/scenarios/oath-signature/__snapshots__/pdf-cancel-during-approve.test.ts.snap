@@ -27,7 +27,7 @@ exports[`oath-signature scenario: pdf branch — cancel during ocr approval > ca
   "subtitle": "Oath · <last4>",
   "surfacePlacement": "grouped",
   "surfaceType": "normal",
-  "title": "Oath Signature oath-cancel.pdf",
+  "title": "oath-cancel.pdf",
   "workflow": "oath-signature",
 }
 `;

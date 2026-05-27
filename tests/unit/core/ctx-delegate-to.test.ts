@@ -131,6 +131,54 @@ test("ctx.delegateTo with renderAs: 'flat' stamps passive-child archetype", asyn
   assert.equal((pending!.data as { archetype?: string }).archetype, "passive-child");
 });
 
+test("ctx.delegateTo stamps a natural batch child as delegated when it has a parent", async (t) => {
+  const trackerDir = mkdtempSync(join(tmpdir(), "ctx-delegate-batch-child-"));
+  t.onTestFinished(() => rmSync(trackerDir, { recursive: true, force: true }));
+
+  const child = defineWorkflow({
+    name: "deleg-child-batch-natural",
+    archetype: "batch",
+    systems: [],
+    authSteps: false,
+    steps: ["work"] as const,
+    schema: z.object({ pdfOriginalName: z.string(), sessionId: z.string() }),
+    detailFields: [{ key: "pdfOriginalName", label: "PDF" }],
+    getName: (d) => d.pdfOriginalName ?? "",
+    getId: (d) => d.sessionId ?? "",
+    handler: async (ctx, input) => {
+      ctx.updateData({
+        pdfOriginalName: input.pdfOriginalName,
+        sessionId: input.sessionId,
+      });
+      await ctx.step("work", async () => {});
+    },
+  });
+  const parent = makeParentWorkflow({
+    name: "deleg-parent-batch-natural",
+    onCtx: async (ctx) => {
+      const c = ctx as { delegateTo: (...args: unknown[]) => Promise<unknown> };
+      await c.delegateTo(child, {
+        pdfOriginalName: "oath-batch.pdf",
+        sessionId: "oath-session-1",
+      });
+    },
+  });
+
+  await runWorkflow(parent, { parentPayload: "p" }, { trackerDir });
+
+  const lines = readWorkflowLines(trackerDir, "deleg-child-batch-natural");
+  const pending = lines.find((l) => l.status === "pending");
+  const done = lines.find((l) => l.status === "done");
+  assert.ok(pending, "child pending row must be emitted");
+  assert.equal((pending!.data as { archetype?: string }).archetype, "delegate-child");
+  assert.deepEqual(pending!.input, {
+    pdfOriginalName: "oath-batch.pdf",
+    sessionId: "oath-session-1",
+  });
+  assert.ok(done, "child done row must be emitted");
+  assert.equal((done!.data as { archetype?: string }).archetype, "delegate-child");
+});
+
 test("delegateToAllImpl with concurrency: 1 runs children sequentially", async (t) => {
   const trackerDir = mkdtempSync(join(tmpdir(), "ctx-delegate-pool-"));
   t.onTestFinished(() => rmSync(trackerDir, { recursive: true, force: true }));
