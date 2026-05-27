@@ -71,6 +71,36 @@ Observability: `.tracker/{workflow}-{YYYY-MM-DD}.jsonl` + `*-logs.jsonl`, stream
 
 OCR approval fan-out is form-spec driven: `OcrFormSpec.approveTo` means `/api/ocr/approve-batch` enqueues downstream daemon rows (emergency-contact); omitting `approveTo` means approval only terminates OCR and the owning workflow consumes approved records itself (oath-signature PDF branch).
 
+### Row archetypes (target model)
+
+Every tracker row carries `data.archetype`. Queue rendering, log-panel labels, and display-name resolution all dispatch on this field plus `parentRunId`. **Scope** (root vs delegated) is `parentRunId`, not a separate archetype family. **Child presentation and wait gates** (e.g. OCR blocking approval until eid-lookup finishes) belong on the **parent workflow** (`runtimePolicy` + orchestrator), not on the child row type.
+
+**Operator mental model** (how we describe rows in design docs and prompts):
+
+```
+Root workflows (no parentRunId)
+├── single          work-study, separations doc, direct eid-lookup
+└── batch           emergency-contact root, OCR prep, oath-signature PDF when top-level
+    └── batch-member × N
+
+Delegated work (always has parentRunId)
+├── delegate-child (single)     oath-upload → one PDF run; OCR → one eid-lookup
+└── delegate-child (batch)      oath-signature PDF fan-out anchor under oath-upload
+    └── delegate-batch-member × N   signers under that PDF run
+```
+
+**Stamped `data.archetype`** (three shapes — migration in progress; see spec):
+
+| Concept | `data.archetype` | `parentRunId` |
+|---|---|---|
+| Root single | `single` | — |
+| Root batch anchor | `batch` | — |
+| Batch peer (root or under delegated batch) | `batch-member` | anchor's `runId` |
+| Delegated single child | `single` | set |
+| Delegated batch anchor | `batch` | set |
+
+Legacy stamps (`batch-parent`, `passive-child`, `delegate-child`, `dispatch`) are being removed; `resolveRowArchetype` aliases them at read time until JSONL ages out. Implementation spec: `docs/superpowers/specs/2026-05-27-row-archetype-simplification.md`. Glossary + `defineWorkflow` archetypes: `src/workflows/CLAUDE.md`. Types: `src/domain/row-archetype.ts`.
+
 ## Where to Find Things
 
 | Need | Location | Method |
@@ -79,6 +109,7 @@ OCR approval fan-out is form-spec driven: `OcrFormSpec.approveTo` means `/api/oc
 | Lessons from past selector failures | `src/systems/<system>/LESSONS.md` | Search first; update/merge stale or contradictory entries before adding new ones |
 | Workflow implementation example | `src/workflows/work-study/` or `src/workflows/onboarding/` | Reference minimal (work-study) or complex (onboarding) example |
 | Selector registry, intelligence artifacts, playwright-cli guide | `src/systems/CLAUDE.md` | All systems' selectors.ts layout, SELECTORS.md, LESSONS.md, selector discovery workflow |
+| Row archetype tree (root vs delegated) | Root `CLAUDE.md` → Row archetypes; `src/domain/row-archetype.ts` | Shape = `single` / `batch` / `batch-member`; scope = `parentRunId` |
 | New workflow guide + archetype glossary | `src/workflows/CLAUDE.md` | Writing a new workflow, archetypes, daemon conversion template |
 | Kernel API (defineWorkflow, Ctx, etc.) | `src/core/CLAUDE.md` | User-facing primer, Ctx methods, run modes, dupe-protection |
 | Daemon mode (queues, health checks, etc.) | `src/core/CLAUDE.md` | Queue mechanics, flags, daemon conversion guide |
