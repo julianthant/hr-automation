@@ -102,6 +102,40 @@ export type WorkflowQueueTitleConfig<TData> =
   | { kind: 'single' }
   | { kind: 'batch'; label?: string; labelFromInput?: (input: TData) => string | undefined }
 
+/**
+ * Named "run mode" preset for a workflow. Surfaced in the dashboard's input-run
+ * gear menu so the operator can pick a non-default execution profile (e.g.
+ * "Transactions only" → skip Kronos search + UCPath Job Summary). The kernel
+ * routes the selected `skipSteps` through `ctx.shouldSkipStep(name)`; handlers
+ * must explicitly OR the check into their existing skip branches.
+ *
+ * The implicit default preset (no skips, label "Full") is synthesized by the
+ * dashboard when this list is non-empty — workflow files only declare the
+ * non-default presets. Empty/omitted `presets` → no gear icon for that workflow.
+ *
+ * Each `skipSteps` entry must be a member of `WorkflowConfig.steps` (the
+ * workflow's declared handler-step list, NOT auth steps). Enforced at type
+ * level via `TSteps[number]` and at runtime via the registry validator.
+ */
+export interface WorkflowStepPreset<TSteps extends readonly string[]> {
+  /** Stable identifier (e.g. "transactions-only"). Used as `data.__preset` and over the wire. */
+  id: string
+  /** Operator-facing label (e.g. "Transactions only"). */
+  label: string
+  /** Steps the handler should treat as skipped when this preset is active. */
+  skipSteps: ReadonlyArray<TSteps[number]>
+  /** Optional one-line tooltip / description rendered under the label. */
+  description?: string
+}
+
+/** Wire-shape preset (post-registry normalization). `skipSteps` is plain `string[]`. */
+export interface WorkflowStepPresetMetadata {
+  id: string
+  label: string
+  skipSteps: string[]
+  description?: string
+}
+
 export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   name: string
   version?: string
@@ -192,6 +226,14 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
    * receives this through workflow metadata.
    */
   runtimePolicy?: WorkflowRuntimePolicy
+  /**
+   * Optional named "run mode" presets surfaced in the dashboard's input-run
+   * gear menu. Empty/omitted → no gear icon. The implicit default "Full"
+   * preset (no skips) is synthesized by the dashboard when this is non-empty.
+   * The handler must opt into honoring each preset's `skipSteps` entry via
+   * `ctx.shouldSkipStep(name)`; the kernel only carries the selection.
+   */
+  presets?: ReadonlyArray<WorkflowStepPreset<TSteps>>
   /**
    * Derive a stable tracker/queue item id from raw workflow input. The kernel
    * has a generic top-level id/docId/email fallback, but dashboard HTTP
@@ -305,6 +347,24 @@ export interface Ctx<TSteps extends readonly string[], TData> {
    */
   skipStep(name: TSteps[number]): void
   /**
+   * True when the caller (dashboard step-preset gear, future CLI flag, etc.)
+   * requested this step be skipped via the `runtimeOptions.skipSteps` channel.
+   * Pair with `ctx.skipStep(name)` inside the handler's existing skip branches:
+   *
+   *   if (somePrefillCheck || ctx.shouldSkipStep("kronos-search")) {
+   *     ctx.skipStep("kronos-search")
+   *     // ...provide fallback values for any downstream code...
+   *   } else {
+   *     await ctx.step("kronos-search", () => ...)
+   *   }
+   *
+   * The kernel does NOT auto-bypass `ctx.step(name, fn)` calls — handlers are
+   * responsible for substituting fallback values (e.g. carrying the field
+   * forward from a prior step) because step bodies frequently set closure
+   * variables that downstream code consumes.
+   */
+  shouldSkipStep(name: TSteps[number]): boolean
+  /**
    * Snapshot of the accumulated tracker data as written so far via
    * `updateData(...)`. Includes anything the kernel pre-merged from the
    * input's `prefilledData` channel (edit-and-resume), so handlers can
@@ -417,6 +477,12 @@ export interface WorkflowMetadata {
   hasOperatorSubject?: boolean
   /** Serializable row/action policy consumed by workflow runtime projections. */
   runtimePolicy?: WorkflowRuntimePolicy
+  /**
+   * Named run-mode presets surfaced in the dashboard's input-run gear menu.
+   * Omitted when the workflow declared none. The implicit "Full" preset is
+   * synthesized client-side and never appears here.
+   */
+  presets?: WorkflowStepPresetMetadata[]
 }
 
 export interface RegisteredWorkflow<TData, TSteps extends readonly string[]> {

@@ -73,6 +73,98 @@ test('runOneItem: authTimings emitted as synthetic pre-handler tracker entries a
   assert.equal(done?.data?.instance, 'Auth Inject Test 1', 'instance stamped')
 })
 
+test('runOneItem: __runtimeOptions.skipSteps surfaces as ctx.shouldSkipStep + stamps data.__preset', async () => {
+  const dir = TMP()
+  const calls: { skipsA: boolean; skipsB: boolean; ranB: boolean; preset: unknown } = {
+    skipsA: false,
+    skipsB: false,
+    ranB: false,
+    preset: undefined,
+  }
+  const wf = defineWorkflow({
+    name: 'skipsteps-test',
+    systems: [{ id: 'ucpath', login: async () => {} }],
+    steps: ['step-a', 'step-b'] as const,
+    schema: z.object({ docId: z.string() }),
+    authSteps: false,
+    handler: async (ctx) => {
+      calls.skipsA = ctx.shouldSkipStep('step-a')
+      calls.skipsB = ctx.shouldSkipStep('step-b')
+      // step-a unconditionally skipped — kernel does NOT auto-skip;
+      // handler decides what to do with the answer.
+      if (ctx.shouldSkipStep('step-a')) ctx.skipStep('step-a')
+      else await ctx.step('step-a', async () => {})
+      if (!ctx.shouldSkipStep('step-b')) {
+        await ctx.step('step-b', async () => { calls.ranB = true })
+      }
+    },
+  })
+
+  const session = Session.forTesting({
+    systems: wf.config.systems,
+    browsers: new Map(),
+    readyPromises: new Map([['ucpath', Promise.resolve()]]),
+  })
+
+  await runOneItem({
+    wf,
+    session,
+    item: {
+      docId: 'd1',
+      __runtimeOptions: { skipSteps: ['step-a'], preset: 'my-preset' },
+    },
+    itemId: 'd1',
+    runId: 'run-skip',
+    trackerDir: dir,
+    callerPreEmits: false,
+  })
+
+  assert.equal(calls.skipsA, true, 'shouldSkipStep("step-a") true')
+  assert.equal(calls.skipsB, false, 'shouldSkipStep("step-b") false')
+  assert.equal(calls.ranB, true, 'step-b body ran')
+
+  const entries = readTracker(dir, 'skipsteps-test')
+  // data.__preset stamped on the pending row from runtimeOptions.preset.
+  const pending = entries.find((e: any) => e.status === 'pending')
+  assert.ok(pending, 'pending emitted')
+  calls.preset = pending?.data?.__preset
+  assert.equal(calls.preset, 'my-preset', 'data.__preset stamped from preset id')
+  // A `skipped` row exists for step-a.
+  const skippedA = entries.find((e: any) => e.status === 'skipped' && e.step === 'step-a')
+  assert.ok(skippedA, 'step-a skipped row emitted')
+})
+
+test('runOneItem: __runtimeOptions.skipSteps with unknown step name throws (validation)', async () => {
+  const dir = TMP()
+  const wf = defineWorkflow({
+    name: 'skipsteps-unknown',
+    systems: [{ id: 'ucpath', login: async () => {} }],
+    steps: ['a'] as const,
+    schema: z.object({}),
+    authSteps: false,
+    handler: async () => {},
+  })
+  const session = Session.forTesting({
+    systems: wf.config.systems,
+    browsers: new Map(),
+    readyPromises: new Map([['ucpath', Promise.resolve()]]),
+  })
+  await assert.rejects(
+    () =>
+      runOneItem({
+        wf,
+        session,
+        item: { __runtimeOptions: { skipSteps: ['typo-step'] } },
+        itemId: 'x',
+        runId: 'run-bad-skip',
+        trackerDir: dir,
+        callerPreEmits: false,
+        trackerStub: true,
+      }),
+    /skipSteps contains unknown step name/,
+  )
+})
+
 test('runOneItem: without authTimings, no synthetic auth entries are emitted', async () => {
   const dir = TMP()
   const wf = defineWorkflow({

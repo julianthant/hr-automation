@@ -29,6 +29,129 @@ test('defineWorkflow: registers metadata on construction', () => {
   assert.equal(wf.metadata.name, 'test-wf')
 })
 
+test('defineWorkflow: presets surface on metadata with normalized shape', () => {
+  clear()
+  const wf = defineWorkflow({
+    name: 'preset-meta',
+    systems: [{ id: 'ucpath', login: async () => {} }],
+    steps: ['extraction', 'verify', 'transaction', 'finalize'] as const,
+    schema: z.object({ id: z.string() }),
+    presets: [
+      {
+        id: 'transactions-only',
+        label: 'Transactions only',
+        skipSteps: ['verify'],
+        description: 'Skips verify',
+      },
+      {
+        id: 'finalize-only',
+        label: 'Finalize only',
+        skipSteps: ['extraction', 'verify', 'transaction'],
+      },
+    ],
+    handler: async () => {},
+  })
+  assert.deepEqual(wf.metadata.presets, [
+    {
+      id: 'transactions-only',
+      label: 'Transactions only',
+      skipSteps: ['verify'],
+      description: 'Skips verify',
+    },
+    {
+      id: 'finalize-only',
+      label: 'Finalize only',
+      skipSteps: ['extraction', 'verify', 'transaction'],
+    },
+  ])
+})
+
+test('defineWorkflow: rejects preset with unknown step name', () => {
+  clear()
+  assert.throws(
+    () =>
+      defineWorkflow({
+        name: 'bad-preset',
+        systems: [],
+        steps: ['a', 'b'] as const,
+        schema: z.object({}),
+        presets: [
+          // @ts-expect-error — 'c' is not in steps; compile-time error pinned here
+          { id: 'bad', label: 'Bad', skipSteps: ['c'] },
+        ],
+        handler: async () => {},
+      }),
+    /unknown step/,
+  )
+})
+
+test('defineWorkflow: rejects duplicate preset ids', () => {
+  clear()
+  assert.throws(
+    () =>
+      defineWorkflow({
+        name: 'dup-preset',
+        systems: [],
+        steps: ['a'] as const,
+        schema: z.object({}),
+        presets: [
+          { id: 'p', label: 'P1', skipSteps: ['a'] },
+          { id: 'p', label: 'P2', skipSteps: ['a'] },
+        ],
+        handler: async () => {},
+      }),
+    /duplicate preset id/,
+  )
+})
+
+test('defineWorkflow: rejects reserved preset id "full"', () => {
+  clear()
+  assert.throws(
+    () =>
+      defineWorkflow({
+        name: 'reserved-preset',
+        systems: [],
+        steps: ['a'] as const,
+        schema: z.object({}),
+        presets: [
+          { id: 'full', label: 'Full', skipSteps: ['a'] },
+        ],
+        handler: async () => {},
+      }),
+    /'full' is reserved/,
+  )
+})
+
+test('defineWorkflow: rejects preset with empty skipSteps', () => {
+  clear()
+  assert.throws(
+    () =>
+      defineWorkflow({
+        name: 'empty-skip',
+        systems: [],
+        steps: ['a'] as const,
+        schema: z.object({}),
+        presets: [
+          { id: 'noop', label: 'No-op', skipSteps: [] },
+        ],
+        handler: async () => {},
+      }),
+    /must be a non-empty array/,
+  )
+})
+
+test('defineWorkflow: omitted presets → metadata.presets absent', () => {
+  clear()
+  const wf = defineWorkflow({
+    name: 'no-presets',
+    systems: [],
+    steps: ['only'] as const,
+    schema: z.object({}),
+    handler: async () => {},
+  })
+  assert.equal(wf.metadata.presets, undefined)
+})
+
 test('defineWorkflow: step tuple is typed — typo would be a compile error', () => {
   // This test exists to document the intent; the actual check happens at compile time.
   const wf = defineWorkflow({

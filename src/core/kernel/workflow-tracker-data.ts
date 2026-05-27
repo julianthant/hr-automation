@@ -21,32 +21,59 @@ export function toRecord(input: unknown): Record<string, unknown> | null {
 }
 
 /**
- * Split a `prefilledData` channel out of an arbitrary input object without
- * mutating the original. Used by the kernel's edit-and-resume path: the
- * dashboard re-enqueues an item with `prefilledData: <user-edited fields>`,
- * the kernel strips the channel before handing the input to the workflow's
- * Zod schema (so the schema doesn't need to know about it), and merges the
- * stripped values into `ctx.data` via `updateData(...)` BEFORE the handler
- * runs. Handlers gate their extraction step on data presence (e.g.
- * `if (!ctx.data.foo) await ctx.step("extraction", ...)`) to opt in.
+ * Split the kernel-level `prefilledData` and `runtimeOptions` channels out of
+ * an arbitrary input object without mutating the original.
  *
- * Returns `{ cleaned, prefilled }`. `prefilled` is null when the input has
- * no `prefilledData` field or it's not an object — both are "no-op" cases.
+ * - `prefilledData` (edit-and-resume) — the dashboard re-enqueues an item with
+ *   user-edited fields under this key; they're merged into `ctx.data` via
+ *   `updateData(...)` BEFORE the handler runs, so handlers can gate
+ *   extraction on data presence (`if (!ctx.data.foo) ...`).
+ * - `runtimeOptions.skipSteps` (step presets) — the dashboard's input-run
+ *   gear menu passes the chosen preset's skip set under this key; the kernel
+ *   exposes it as `ctx.shouldSkipStep(name)` for handlers to OR into their
+ *   existing skip branches.
+ *
+ * The kernel strips both channels before handing the input to the workflow's
+ * Zod schema so workflow files don't have to know about either contract.
+ *
+ * Returns `{ cleaned, prefilled, runtimeOptions }`. Each channel field is
+ * `null` when the input has no such key or it's not an object (no-op case).
  */
-export function splitPrefilled(input: unknown): {
+export interface SplitInput {
   cleaned: unknown
   prefilled: Record<string, unknown> | null
-} {
+  runtimeOptions: { skipSteps?: string[]; preset?: string } | null
+}
+
+export function splitPrefilled(input: unknown): SplitInput {
   if (!isPlainObject(input)) {
-    return { cleaned: input, prefilled: null }
+    return { cleaned: input, prefilled: null, runtimeOptions: null }
   }
-  if (!('prefilledData' in input)) return { cleaned: input, prefilled: null }
-  const { prefilledData, ...rest } = input
-  const prefilled =
-    isPlainObject(prefilledData)
-      ? prefilledData
-      : null
-  return { cleaned: rest, prefilled }
+  const hasPrefilled = 'prefilledData' in input
+  const hasRuntimeOptions = '__runtimeOptions' in input
+  if (!hasPrefilled && !hasRuntimeOptions) {
+    return { cleaned: input, prefilled: null, runtimeOptions: null }
+  }
+  const { prefilledData, __runtimeOptions, ...rest } = input as Record<string, unknown>
+  const prefilled = isPlainObject(prefilledData) ? prefilledData : null
+  const runtimeOptions = isPlainObject(__runtimeOptions)
+    ? normalizeRuntimeOptions(__runtimeOptions)
+    : null
+  return { cleaned: rest, prefilled, runtimeOptions }
+}
+
+function normalizeRuntimeOptions(
+  raw: Record<string, unknown>,
+): { skipSteps?: string[]; preset?: string } | null {
+  const out: { skipSteps?: string[]; preset?: string } = {}
+  const skipSteps = raw.skipSteps
+  if (Array.isArray(skipSteps) && skipSteps.every((s): s is string => typeof s === 'string')) {
+    if (skipSteps.length > 0) out.skipSteps = [...skipSteps]
+  }
+  if (typeof raw.preset === 'string' && raw.preset.length > 0) {
+    out.preset = raw.preset
+  }
+  return Object.keys(out).length > 0 ? out : null
 }
 
 /**
