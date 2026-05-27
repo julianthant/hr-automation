@@ -212,6 +212,36 @@ test('session.launch (parallel-staggered): maxConcurrentDuos=2 queues additional
   await s.close()
 })
 
+test('session.launch (parallel-staggered): default Duo cap serializes pending prompts', async () => {
+  const LOGIN_DURATION = 60
+  const events: Array<{ id: string; phase: 'start' | 'done'; at: number }> = []
+  const start = Date.now()
+  const mkSys = (id: string): SystemConfig => ({
+    id,
+    login: async () => {
+      events.push({ id, phase: 'start', at: Date.now() - start })
+      await new Promise((r) => setTimeout(r, LOGIN_DURATION))
+      events.push({ id, phase: 'done', at: Date.now() - start })
+    },
+  })
+
+  const s = await Session.launch([mkSys('a'), mkSys('b')], {
+    staggerMs: 0,
+    settleMs: 0,
+    launchFn: fakeLaunch,
+  })
+
+  await Promise.all([s.page('a'), s.page('b')])
+
+  const aDone = events.find((e) => e.id === 'a' && e.phase === 'done')!
+  const bStart = events.find((e) => e.id === 'b' && e.phase === 'start')!
+  assert.ok(
+    bStart.at >= aDone.at,
+    `default cap should wait for a Duo slot to free before b starts; a done at ${aDone.at}ms, b started at ${bStart.at}ms`,
+  )
+  await s.close()
+})
+
 test('session.launch (parallel-staggered): one auth failure does not block siblings', async () => {
   const completed: string[] = []
   const systems: SystemConfig[] = [

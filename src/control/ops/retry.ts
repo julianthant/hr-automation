@@ -11,6 +11,7 @@ import { listRosters, resolveRosterDirs } from "../../services/matching/roster-l
 import { byTimestampAsc, readEntries, readEntriesForDate, type TrackerEntry } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { enqueueFromHttp } from "../../core/daemon/enqueue-dispatch.js";
+import { ensureDaemonsAvailable } from "../../core/daemon/client.js";
 import type { Database } from "../../infra/sqlite/index.js";
 import {
   findRetryInputFromTaskStore,
@@ -402,6 +403,7 @@ async function reEnqueueEntry(
         db: stores.taskStore.db,
         ...(resolvedParent ? { parentRunId: resolvedParent } : {}),
       });
+      await ensureDaemonsAvailable(wf, {}, { trackerDir: dir });
       return { ok: true };
     }
   }
