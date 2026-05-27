@@ -56,8 +56,8 @@ export interface LaunchOpts {
    */
   settleMs?: number
   /**
-   * Max concurrent in-flight Duo submits. Defaults to 2 so the operator's
-   * phone never queues more than 2 prompts at a time; additional systems
+   * Max concurrent in-flight Duo submits. Defaults to 1 so the operator's
+   * phone never queues more than 1 prompt at a time; additional systems
    * wait until a slot frees. Set to systems.length to disable the cap
    * (every Duo pends in parallel). Only meaningful with ≥2 systems.
    */
@@ -240,7 +240,7 @@ export class Session {
     } else if (systems.length > 1) {
       const STAGGER_MS = opts.staggerMs ?? 5_000
       const SETTLE_MS = opts.settleMs ?? 2_000
-      const MAX_INFLIGHT = Math.max(1, opts.maxConcurrentDuos ?? 2)
+      const MAX_INFLIGHT = Math.max(1, opts.maxConcurrentDuos ?? 1)
 
       // Semaphore: limits in-flight Duos to MAX_INFLIGHT. Slot ownership
       // transfers directly from release → next waiter so we never double-

@@ -13,23 +13,71 @@
  */
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
+import { createServer, type Server } from "node:http";
 import { mkdtempSync, rmSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
+import {
+  __resetDaemonSpawnLocksForTests,
+  __setSpawnDaemonImplForTests,
+} from "../../../src/core/daemon/client.js";
+import {
+  ensureDaemonsDir,
+  lockfilePath,
+  writeLockfile,
+} from "../../../src/core/daemon/registry.js";
 import { closeStateDbForTests } from "../../../src/tracker/state/db.js";
 import { buildRetryHandler } from "../../../src/control/ops/retry.js";
 
 let tmp: string;
+const servers: Server[] = [];
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), "retry-state-guard-"));
 });
-afterEach(() => {
+afterEach(async () => {
+  __setSpawnDaemonImplForTests(null);
+  __resetDaemonSpawnLocksForTests();
+  for (const server of servers.splice(0)) {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
   closeStateDbForTests(tmp);
   if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
 });
+
+function stubDaemonSpawn(): void {
+  ensureDaemonsDir(tmp);
+  __setSpawnDaemonImplForTests(async (workflow, trackerDir) => {
+    const instanceId = "retry-state-guard";
+    const server = createServer((req, res) => {
+      if (req.url === "/whoami" && req.method === "GET") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ workflow, instanceId, pid: process.pid, version: 1 }));
+        return;
+      }
+      if (req.url === "/wake" && req.method === "POST") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end('{"ok":true}');
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    servers.push(server);
+    const addr = server.address();
+    const port = typeof addr === "object" && addr ? addr.port : 0;
+    const startedAt = new Date().toISOString();
+    const path = lockfilePath(workflow, instanceId, trackerDir);
+    writeLockfile(
+      { workflow, instanceId, pid: process.pid, port, startedAt, hostname: "host", version: 1 },
+      path,
+    );
+    return { workflow, instanceId, pid: process.pid, port, startedAt, lockfilePath: path };
+  });
+}
 
 describe("retry state guard — blocks retry against active attempts", () => {
   it("returns structured error when task is in `claimed` state", async () => {
@@ -139,6 +187,7 @@ describe("retry state guard — blocks retry against active attempts", () => {
   });
 
   it("allows retry against a `failed` task (terminal — guard does not fire)", async () => {
+    stubDaemonSpawn();
     const control = openControlDb({ trackerDir: tmp });
     const taskStore = createTaskStore(control);
 

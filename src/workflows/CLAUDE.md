@@ -222,7 +222,7 @@ Representative workflows. Operator starts are dashboard-only: input runs use `In
 |---|---|---|---|---|
 | onboarding | Not currently exposed in input-run registry | CRM, UCPath, I9 | Yes | Single-worker daemon per spawn on the shared SQLite queue |
 | crm-doc-download | Input run (EIDs) | CRM | Yes | Pool batch config; daemon mode reuses CRM like other loaders |
-| separations | Input run (doc IDs) | Kuali, Old Kronos, New Kronos, UCPath | Yes (per-doc handler; daemon default) | 4 tiled browsers; global parallel-staggered auth (2-Duo cap + 2s settle + 5s stagger); `ctx.parallel` Phase-1 4-way fan-out |
+| separations | Input run (doc IDs) | Kuali, Old Kronos, New Kronos, UCPath | Yes (per-doc handler; daemon default) | 4 tiled browsers; global parallel-staggered auth (1-Duo cap + 2s settle + 5s stagger); `ctx.parallel` Phase-1 4-way fan-out |
 | eid-lookup | Input run (names) | UCPath + CRM | Yes | **`batch.mode: "shared-context-pool"`** — one Duo per system per batch, N worker tabs |
 | active-check | Input run (names or EIDs) | UCPath | Yes | Same shared-context pool pattern as eid-lookup |
 | old-kronos-reports | Not exposed; retired batch-file adapter is not a valid dashboard run surface | UKG | Yes | Pool mode (N workers); **not** in `WORKFLOW_LOADERS` |

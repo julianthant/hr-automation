@@ -135,6 +135,88 @@ export function __resetDaemonSpawnLocksForTests(): void {
   daemonSpawnChains.clear()
 }
 
+async function wakeDaemons(daemons: Daemon[]): Promise<void> {
+  await Promise.all(
+    daemons.map(async (d) => {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 2_000)
+      try {
+        await fetch(`http://127.0.0.1:${d.port}/wake`, {
+          method: 'POST',
+          signal: ctrl.signal,
+        })
+      } catch {
+        /* ignore — wake is best-effort (incl. AbortError on timeout) */
+      } finally {
+        clearTimeout(timer)
+      }
+    }),
+  )
+}
+
+/**
+ * Ensure at least one daemon is alive for a workflow, then wake every alive
+ * daemon. Used by enqueue paths and by retry paths that requeue an existing
+ * SQLite task instead of inserting a new one through ensureDaemonsAndEnqueue.
+ */
+export async function ensureDaemonsAvailable(
+  workflow: string,
+  flags: DaemonFlags = {},
+  opts: { trackerDir?: string; quiet?: boolean } = {},
+): Promise<Daemon[]> {
+  const { trackerDir, quiet } = opts
+  const daemons = await withDaemonSpawnLock(workflow, trackerDir, async () => {
+    invalidateAliveDaemonsCache(workflow, trackerDir)
+    const alive = await findAliveDaemons(workflow, trackerDir)
+    const spawnCount = computeSpawnPlan(alive.length, flags)
+
+    if (spawnCount > 0) {
+      try {
+        const killed = await killOrphanedChromiumProcesses()
+        if (killed > 0 && !quiet) {
+          log.step(`[Daemon] Killed ${killed} orphaned Chromium process(es) before spawn.`)
+        }
+      } catch (err) {
+        log.warn(
+          `[Daemon] Orphan-chromium cleanup failed (continuing): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      }
+    }
+
+    if (!quiet && spawnCount > 0) {
+      const why =
+        flags.parallel !== undefined
+          ? flags.new
+            ? `--parallel ${flags.parallel} --new (${alive.length} alive)`
+            : `--parallel ${flags.parallel} (${alive.length} alive)`
+          : flags.new
+            ? `--new (${alive.length} alive)`
+            : `no alive daemons`
+      log.step(`[Daemon] Spawning ${spawnCount} new ${workflow} daemon(s) (${why}).`)
+      log.step('[Daemon] Approve Duo(s) in the new browser window(s); this takes 30s–2min.')
+    } else if (!quiet && alive.length > 0) {
+      log.step(`[Daemon] Reusing ${alive.length} alive ${workflow} daemon(s); no spawn needed.`)
+    }
+
+    const spawned: Daemon[] = []
+    for (let i = 0; i < spawnCount; i++) {
+      const d = await spawnDaemonImpl(workflow, trackerDir)
+      spawned.push(d)
+      invalidateAliveDaemonsCache(workflow, trackerDir)
+    }
+
+    return [...alive, ...spawned]
+  })
+
+  if (daemons.length === 0) {
+    throw new Error('ensureDaemonsAvailable: expected at least one daemon after spawn phase')
+  }
+  await wakeDaemons(daemons)
+  return daemons
+}
+
 /**
  * The ONE function every daemon-mode enqueue path calls.
  *
@@ -284,7 +366,7 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
   }
 
   // From here, any thrown error MUST notify onPreEmitFailed so the caller
-	  // can mark the pending rows as failed (no task row exists yet).
+  // can mark the pending rows as failed (no task row exists yet).
   const handleSpawnFailure = (err: unknown): never => {
     const message = err instanceof Error ? err.message : String(err)
     if (onPreEmitFailed) {
@@ -313,95 +395,11 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
     // withDaemonSpawnLock serializes the section so the second caller
     // re-discovers AFTER the first's spawn registers, finds that daemon, and
     // computeSpawnPlan returns 0 for it — it reuses the existing daemon.
-    const daemons = await withDaemonSpawnLock(wf.config.name, trackerDir, async () => {
-      // Discover fresh INSIDE the lock — invalidate the alive-daemons TTL
-      // cache first so a predecessor lock-holder's just-spawned daemon is
-      // always visible (a stale `[]` cache entry would defeat the dedup).
-      invalidateAliveDaemonsCache(wf.config.name, trackerDir)
-      const alive = await findAliveDaemons(wf.config.name, trackerDir)
-      const spawnCount = computeSpawnPlan(alive.length, flags)
+    const daemons = await ensureDaemonsAvailable(wf.config.name, flags, { trackerDir, quiet })
 
-      // Step 3: kill orphan chromium before spawning. Skipped when
-      // spawnCount === 0 (nothing is about to spawn).
-      if (spawnCount > 0) {
-        try {
-          const killed = await killOrphanedChromiumProcesses()
-          if (killed > 0 && !quiet) {
-            log.step(`[Daemon] Killed ${killed} orphaned Chromium process(es) before spawn.`)
-          }
-        } catch (err) {
-          // Non-fatal: orphan cleanup is best-effort. A failure here would
-          // typically be a missing pgrep/ps binary; the daemon spawn is
-          // still attempted so the user isn't blocked.
-          log.warn(
-            `[Daemon] Orphan-chromium cleanup failed (continuing): ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          )
-        }
-      }
+    // Step 5 wake is handled inside ensureDaemonsAvailable.
 
-      // Step 4: spawn additional daemons if needed (serial — Duo can't be
-      // approved in parallel). After this step every requested daemon is
-      // lockfile-registered (spawnDaemon blocks until /whoami responds).
-      if (!quiet && spawnCount > 0) {
-        const why =
-          flags.parallel !== undefined
-            ? flags.new
-              ? `--parallel ${flags.parallel} --new (${alive.length} alive)`
-              : `--parallel ${flags.parallel} (${alive.length} alive)`
-            : flags.new
-              ? `--new (${alive.length} alive)`
-              : `no alive daemons`
-        log.step(`[Daemon] Spawning ${spawnCount} new ${wf.config.name} daemon(s) (${why}).`)
-        log.step('[Daemon] Approve Duo(s) in the new browser window(s); this takes 30s–2min.')
-      } else if (!quiet && alive.length > 0) {
-        // The reuse path the spawn lock guarantees — surface it so a rapid
-        // double-action visibly reuses one daemon instead of spawning two.
-        log.step(
-          `[Daemon] Reusing ${alive.length} alive ${wf.config.name} daemon(s); no spawn needed.`,
-        )
-      }
-
-      const spawned: Daemon[] = []
-      for (let i = 0; i < spawnCount; i++) {
-        const d = await spawnDaemonImpl(wf.config.name, trackerDir)
-        spawned.push(d)
-        invalidateAliveDaemonsCache(wf.config.name, trackerDir)
-      }
-
-      return [...alive, ...spawned]
-    })
-
-    if (daemons.length === 0) {
-      throw new Error('ensureDaemonsAndEnqueue: expected at least one daemon after spawn phase')
-    }
-
-    // Step 5: wake every alive daemon (alive ∪ spawned). Fire-and-forget;
-    // a wake failure on one daemon doesn't block the others. The 2s timeout
-    // bounds the wait when a daemon's event loop is wedged — without it,
-    // a hung daemon would block this Promise.all until the OS times out
-    // the socket (typically ~120s), pegging the dashboard's enqueue path.
-    // Manual AbortController + clearTimeout (not AbortSignal.timeout) so the
-    // timer can't fire after the response completes — see "abort race" lesson.
-    await Promise.all(
-      daemons.map(async (d) => {
-        const ctrl = new AbortController()
-        const timer = setTimeout(() => ctrl.abort(), 2_000)
-        try {
-          await fetch(`http://127.0.0.1:${d.port}/wake`, {
-            method: 'POST',
-            signal: ctrl.signal,
-          })
-        } catch {
-          /* ignore — wake is best-effort (incl. AbortError on timeout) */
-        } finally {
-          clearTimeout(timer)
-        }
-      }),
-    )
-
-	    // Step 6: write task rows + queue audit. Now safe — at least one daemon is registered
+    // Step 6: write task rows + queue audit. Now safe — at least one daemon is registered
     // for this workflow, so the orphan sweep won't false-positive on these
     // items in the spawn-in-flight window.
     // Use the pre-computed ids[] rather than idFn directly — idFn's fallback

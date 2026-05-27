@@ -740,11 +740,11 @@ export const hrTasks = {
     page.getByText("Smart HR Templates"),
 
   /**
-   * Sidebar leaf under Smart HR Templates: Smart HR Transactions. verified 2026-03-16
+   * Sidebar leaf under Smart HR Templates: Smart HR Transactions; exact link role avoids matching "SS Smart HR Transactions". verified 2026-05-27
    * @tags sidebar, smart-hr, transactions, link, hr-tasks
    */
   smartHRTransactionsLink: (page: Page): Locator =>
-    page.getByText("Smart HR Transactions"),
+    page.getByRole("link", { name: "Smart HR Transactions", exact: true }),
 
   /**
    * Sidebar leaf under Smart HR Templates: SS Smart HR Transactions
