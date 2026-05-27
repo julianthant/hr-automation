@@ -43,7 +43,6 @@ export const workStudyWorkflow = defineWorkflow({
   steps: workStudySteps,
   schema: WorkStudyInputSchema,
   runtimePolicy: WORK_STUDY_WORKFLOW_RUNTIME_POLICY,
-  authChain: "sequential",
   // Matches pre-subsystem-D WF_CONFIG["work-study"].detailFields:
   // Employee/EmplId are rendered by the dashboard from name + id; Started/Elapsed
   // are synthesized from firstLogTs/lastLogTs. Only `emplId` is a raw data key

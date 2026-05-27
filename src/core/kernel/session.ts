@@ -43,13 +43,25 @@ interface SessionState {
 }
 
 export interface LaunchOpts {
-  authChain?: 'sequential' | 'interleaved' | 'parallel-staggered'
   /**
-   * Override the inter-submit stagger for `parallel-staggered` authChain.
+   * Override the inter-submit stagger between consecutive Submit clicks.
    * Defaults to 5000ms. Lowered to a small value in unit tests so the
-   * stagger doesn't dominate test wall time.
+   * stagger doesn't dominate test wall time. Only meaningful with ≥2 systems.
    */
   staggerMs?: number
+  /**
+   * Override the post-prepare settle delay — wall-clock pause between every
+   * SSO form being filled and the first Submit click. Defaults to 2000ms.
+   * Set to 0 in tests to skip. Only meaningful with ≥2 systems.
+   */
+  settleMs?: number
+  /**
+   * Max concurrent in-flight Duo submits. Defaults to 2 so the operator's
+   * phone never queues more than 2 prompts at a time; additional systems
+   * wait until a slot frees. Set to systems.length to disable the cap
+   * (every Duo pends in parallel). Only meaningful with ≥2 systems.
+   */
+  maxConcurrentDuos?: number
   /** Injection point for tests. */
   launchFn?: (opts: LaunchOneOpts) => Promise<SystemSlot>
   /** Observability bundle — see SessionObserver in types.ts. */
@@ -125,7 +137,6 @@ export class Session {
   }
 
   static async launch(systems: SystemConfig[], opts: LaunchOpts = {}): Promise<Session> {
-    const authChain = opts.authChain ?? (systems.length > 1 ? 'interleaved' : 'sequential')
     const launchOne = opts.launchFn ?? defaultLaunchOne
     const abortSignal = opts.abortSignal
 
@@ -190,51 +201,99 @@ export class Session {
       ), abortSignal)
     }
 
-    if (authChain === 'sequential') {
-      for (const s of systems) {
-        throwIfAborted(abortSignal)
-        const slot = browsers.get(s.id)!
-        await slot.page.bringToFront()
-        opts.observer?.onAuthStart?.(s.id, s.id)
-        await loginWithRetry(
-          s, slot.page, opts.observer?.instance,
-          () => opts.observer?.onAuthFailed?.(s.id, s.id),
-          abortSignal,
-        )
-        opts.observer?.onAuthComplete?.(s.id, s.id)
-      }
-      systems.forEach((s) => readyPromises.set(s.id, Promise.resolve()))
-    } else if (authChain === 'parallel-staggered') {
-      // Parallel-staggered: every system's login fires in its own promise,
-      // each one waiting i*5s before clicking submit so that Duo prompts
-      // arrive ~5s apart on the user's phone (avoids the multi-prompt
-      // collision documented in src/infra/auth/CLAUDE.md while still letting all
-      // Duos pend in parallel — total auth time is max(single Duo) + (N-1)*5s
-      // instead of sum(all Duos)). The IIFEs are constructed and registered
-      // in `readyPromises` synchronously, so `Session.launch` returns
-      // immediately and per-system handlers can proceed via `ctx.page(id)`
-      // as each Duo clears (in user-approval order, not click order).
+    // Auth strategy — one shape for every workflow:
+    //
+    //   • 1 system  → fast path: bringToFront → login → done. No semaphore,
+    //     no settle, no stagger. Behaviorally equivalent to the legacy
+    //     "sequential" chain when there was only one system to wait on.
+    //
+    //   • ≥2 systems → parallel-staggered: every SSO form has already been
+    //     navigated + filled by the `prepareLogin` phase above. Now click
+    //     Submit on each one with three guarantees:
+    //       1. SETTLE_MS pause between "all forms filled" and the first
+    //          Submit so the operator can look at the phone first.
+    //       2. STAGGER_MS gap between consecutive Submit clicks so Duo push
+    //          notifications arrive evenly spaced (avoids the multi-prompt
+    //          collision documented in src/infra/auth/CLAUDE.md).
+    //       3. At most MAX_INFLIGHT Duos pending at once — additional systems
+    //          wait until a slot frees on approval, so the operator never
+    //          sees more than `maxConcurrentDuos` queued prompts.
+    //     Total auth time with N systems is roughly:
+    //       ceil(N / MAX_INFLIGHT) × max(single Duo) + (MAX_INFLIGHT - 1) × STAGGER_MS
+    //     IIFEs are constructed and registered in `readyPromises`
+    //     synchronously, so `Session.launch` returns immediately and per-
+    //     system handlers can proceed via `ctx.page(id)` as each Duo clears
+    //     (in user-approval order, not click order).
+    if (systems.length === 1) {
+      const sys = systems[0]
+      const slot = browsers.get(sys.id)!
+      throwIfAborted(abortSignal)
+      await slot.page.bringToFront()
+      opts.observer?.onAuthStart?.(sys.id, sys.id)
+      await loginWithRetry(
+        sys, slot.page, opts.observer?.instance,
+        () => opts.observer?.onAuthFailed?.(sys.id, sys.id),
+        abortSignal,
+      )
+      opts.observer?.onAuthComplete?.(sys.id, sys.id)
+      readyPromises.set(sys.id, Promise.resolve())
+    } else if (systems.length > 1) {
       const STAGGER_MS = opts.staggerMs ?? 5_000
+      const SETTLE_MS = opts.settleMs ?? 2_000
+      const MAX_INFLIGHT = Math.max(1, opts.maxConcurrentDuos ?? 2)
+
+      // Semaphore: limits in-flight Duos to MAX_INFLIGHT. Slot ownership
+      // transfers directly from release → next waiter so we never double-
+      // increment, and a microtask race between release and a new acquire
+      // can't over-count.
+      let inFlight = 0
+      const waiters: Array<() => void> = []
+      const acquireSlot = async (): Promise<void> => {
+        if (inFlight < MAX_INFLIGHT) { inFlight++; return }
+        await new Promise<void>((resolve) => waiters.push(resolve))
+        // Slot was handed over by the releasing system — don't re-increment.
+      }
+      const releaseSlot = (): void => {
+        const next = waiters.shift()
+        if (next) { next(); return }
+        inFlight--
+      }
+
+      const settleEndTs = Date.now() + SETTLE_MS
+      let nextEligibleSubmitTs = settleEndTs
       const submitPromises: Promise<void>[] = []
       for (let i = 0; i < systems.length; i++) {
         const sys = systems[i]
         const slot = browsers.get(sys.id)!
         const p = (async () => {
           throwIfAborted(abortSignal)
-          // Each system fires `i * STAGGER_MS` after t=0. System 0 fires
-          // immediately; system 1 after STAGGER_MS; system 2 after 2*STAGGER_MS;
-          // etc. This accumulates so concurrent Duos arrive evenly spaced
-          // on the user's phone, not back-to-back per IIFE.
-          if (i > 0) await abortableDelay(i * STAGGER_MS, abortSignal)
-          throwIfAborted(abortSignal)
-          await slot.page.bringToFront()
-          opts.observer?.onAuthStart?.(sys.id, sys.id)
-          await loginWithRetry(
-            sys, slot.page, opts.observer?.instance,
-            () => opts.observer?.onAuthFailed?.(sys.id, sys.id),
-            abortSignal,
-          )
-          opts.observer?.onAuthComplete?.(sys.id, sys.id)
+          await acquireSlot()
+          try {
+            // Reserve a submit slot synchronously before any awaits — this
+            // prevents the race where multiple systems wake at the same
+            // moment and all read the same stale `lastSubmitTs`. Each
+            // system locks in its own submit timestamp atomically; the
+            // mySubmitTs computation is `max(now, settleEnd, lastSubmit+stagger)`
+            // so settle and stagger are enforced together. After the cap
+            // queue (semaphore wait), `now` typically exceeds the prior
+            // submit + stagger, so cap-queued systems fire without extra
+            // stagger wait once their slot frees.
+            const mySubmitTs = Math.max(Date.now(), nextEligibleSubmitTs)
+            nextEligibleSubmitTs = mySubmitTs + STAGGER_MS
+            const waitFor = mySubmitTs - Date.now()
+            if (waitFor > 0) await abortableDelay(waitFor, abortSignal)
+            throwIfAborted(abortSignal)
+            await slot.page.bringToFront()
+            opts.observer?.onAuthStart?.(sys.id, sys.id)
+            await loginWithRetry(
+              sys, slot.page, opts.observer?.instance,
+              () => opts.observer?.onAuthFailed?.(sys.id, sys.id),
+              abortSignal,
+            )
+            opts.observer?.onAuthComplete?.(sys.id, sys.id)
+          } finally {
+            releaseSlot()
+          }
         })()
         // Prevent unhandled-rejection warnings if nobody consumes this
         // promise; per-system handlers consume it via `await ctx.page(id)`,
@@ -243,47 +302,12 @@ export class Session {
         readyPromises.set(sys.id, p)
         submitPromises.push(p)
       }
-      // Don't await all submitPromises here — `Session.launch` resolves once
-      // every system has its `readyPromise` registered, matching the shape
-      // used by `interleaved`. Auth failures surface via the observer's
-      // `onAuthFailed` (kernel emits a `failed` tracker row attributed to
-      // `auth:<systemId>`), not by throwing out of Session.launch.
+      // Don't await all submitPromises here — `Session.launch` resolves
+      // once every system has its `readyPromise` registered. Auth failures
+      // surface via the observer's `onAuthFailed` (kernel emits a `failed`
+      // tracker row attributed to `auth:<systemId>`), not by throwing out
+      // of Session.launch.
       void Promise.allSettled(submitPromises)
-    } else {
-      // Interleaved: auth system[0] blocking; chain the rest in background.
-      throwIfAborted(abortSignal)
-      const firstSlot = browsers.get(systems[0].id)!
-      await firstSlot.page.bringToFront()
-      opts.observer?.onAuthStart?.(systems[0].id, systems[0].id)
-      await loginWithRetry(
-        systems[0], firstSlot.page, opts.observer?.instance,
-        () => opts.observer?.onAuthFailed?.(systems[0].id, systems[0].id),
-        abortSignal,
-      )
-      opts.observer?.onAuthComplete?.(systems[0].id, systems[0].id)
-      readyPromises.set(systems[0].id, Promise.resolve())
-
-      let prev: Promise<void> = Promise.resolve()
-      for (let i = 1; i < systems.length; i++) {
-        const sys = systems[i]
-        const slot = browsers.get(sys.id)!
-        // Each chain step ignores predecessor failure so one bad auth doesn't block the next.
-        const p = prev
-          .catch(() => {})
-          .then(() => { throwIfAborted(abortSignal) })
-          .then(() => slot.page.bringToFront())
-          .then(() => { opts.observer?.onAuthStart?.(sys.id, sys.id) })
-          .then(() => loginWithRetry(
-            sys, slot.page, opts.observer?.instance,
-            () => opts.observer?.onAuthFailed?.(sys.id, sys.id),
-            abortSignal,
-          ))
-          .then(() => { opts.observer?.onAuthComplete?.(sys.id, sys.id) })
-        // Prevent unhandled rejection warnings if nobody consumes this promise.
-        p.catch(() => {})
-        readyPromises.set(sys.id, p)
-        prev = p
-      }
     }
 
     session.applyUcpathIdleOpts(opts.ucpathIdleRefresh)

@@ -67,7 +67,6 @@ export const ocrWorkflow = defineWorkflow({
     kind: "batch",
     labelFromInput: (input) => input.formType === "emergency-contact" ? "Emergency Contact" : "Oath",
   },
-  authChain: "sequential",
   detailFields: [{ key: "recordCount", label: "Records" }],
   getName: (d) => d.pdfOriginalName ?? "",
   getId:   (d) => d.sessionId ?? "",

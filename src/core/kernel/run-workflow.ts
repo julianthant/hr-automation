@@ -115,7 +115,6 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
     let terminalWritten = false
     try {
       const session = await Session.launch(wf.config.systems, {
-        authChain: wf.config.authChain,
         launchFn: opts.launchFn,
         observer,
         onReady: (sess) => {

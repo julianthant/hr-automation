@@ -132,7 +132,6 @@ export const sharepointDownloadWorkflow: RegisteredWorkflow<
   steps: sharepointDownloadSteps,
   schema: SharePointDownloadInputSchema,
   runtimePolicy: SHAREPOINT_DOWNLOAD_WORKFLOW_RUNTIME_POLICY,
-  authChain: "sequential",
   detailFields: [
     { key: "label", label: "Spreadsheet" },
     { key: "filename", label: "File" },

@@ -95,7 +95,6 @@ export const oathSignatureWorkflow = defineWorkflow({
   schema: OathSignatureInputSchema,
   runtimePolicy: OATH_SIGNATURE_WORKFLOW_RUNTIME_POLICY,
   queueTitle: { kind: "single" },
-  authChain: "sequential",
   batch: {
     mode: "sequential",
     preEmitPending: true,

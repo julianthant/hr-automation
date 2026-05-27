@@ -191,7 +191,6 @@ export const separationsWorkflow = defineWorkflow({
         "Skips Kronos date verification and UCPath Job Summary. Assumes the Kuali form already has Last Day Worked, Separation Date, Dept, and Payroll Code filled correctly.",
     },
   ],
-  authChain: "parallel-staggered",
   batch: {
     mode: "sequential",
     betweenItems: ["reset"],

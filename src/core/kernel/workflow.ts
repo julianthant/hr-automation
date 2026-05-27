@@ -159,7 +159,6 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
     async ({ instance, markTerminated, makeObserver }) => {
       const { observer, getAuthTimings } = makeObserver('1')
       const session = await Session.launch(wf.config.systems, {
-        authChain: wf.config.authChain,
         launchFn: opts.launchFn,
         observer,
       })

@@ -35,7 +35,6 @@ This workflow touches three systems: **crm**, **ucpath**, **i9**.
 |-------|-------|-----|
 | `systems` | `[crm, ucpath, i9]` — each wraps its login fn to throw on false | 3 independent auth systems |
 | `steps` | `["crm-auth", "crm-search", "extraction", "pdf-download", "ucpath-auth", "person-search", "i9-creation", "transaction"] as const` — matches `onboardingSteps` in `workflow.ts` |
-| `authChain` | `"sequential"` | CRM work completes before UCPath auth runs; I9 has no Duo (SSO). |
 | `batch` | `{ mode: "pool", poolSize: 4, preEmitPending: true }` | Enables in-process `runWorkflowBatch(onboardingWorkflow, items)` (tests, scripts, or custom callers) → `runWorkflowPool`. Daemon processing uses one worker per daemon. Single-item `runWorkflow` ignores `batch`. |
 | `tiling` | `"auto"` (kernel picks for multi-system) | 3 browsers tiled then fullscreened; bringToFront per system during auth |
 | `detailFields` | `email`, `departmentNumber`, `positionNumber`, `wage`, `effectiveDate`, `i9ProfileId` (see `workflow.ts`) + `getName`/`getId` | Detail panel populated via `ctx.updateData(...)` across phases |
