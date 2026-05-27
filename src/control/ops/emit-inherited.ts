@@ -1,6 +1,6 @@
 import { emitTrackerRow, type TrackerEntry } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
-import { resolveRowArchetype, type RowArchetype } from "../../domain/row-archetype.js";
+import { resolveRowArchetype, type TrackerRowArchetype } from "../../domain/row-archetype.js";
 import type { Database } from "../../infra/sqlite/index.js";
 
 export interface EmitInheritedRowArgs {
@@ -13,7 +13,7 @@ export interface EmitInheritedRowArgs {
   error?: string;
   input?: TrackerEntry["input"];
   data?: Record<string, string>;
-  fallbackArchetype: RowArchetype;
+  fallbackArchetype: TrackerRowArchetype;
   parentRunId?: string;
   inheritFrom?: {
     id?: string;

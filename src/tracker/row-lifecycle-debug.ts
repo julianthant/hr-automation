@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { resolveRowArchetype, type RowArchetype } from "../domain/row-archetype.js";
+import { resolveRowArchetype, type TrackerRowArchetype } from "../domain/row-archetype.js";
 import { log } from "../utils/log.js";
 import { buildTrackerQueueSurfaces } from "./queue-surfaces.js";
 import { DEFAULT_DIR, dateLocal, listWorkflows, readEntries } from "./jsonl-io.js";
@@ -55,7 +55,7 @@ export interface RowSnapshot {
   step?: string;
   /** Resolved queue surface: `card:*` / `member:*` / `flat` / `discarded` / `hidden`. */
   surface: string;
-  archetype: RowArchetype;
+  archetype: TrackerRowArchetype;
   /** `self` — the row's own tracker line; `sibling` — reclassified by another row's change. */
   trigger: "self" | "sibling";
   cause?: RowCause;
@@ -83,7 +83,7 @@ export interface RowLifecycle {
   id: string;
   subject?: string;
   subjectKind?: string;
-  archetype: RowArchetype;
+  archetype: TrackerRowArchetype;
   firstSeen: string;
   lastSeen: string;
   /** Every run attempt, in order — a retry appends a new runId under the same id. */
@@ -120,7 +120,7 @@ export interface TransitionTrailLine {
   cause: RowCause | null;
   from: { status: string; step: string | null; surface: string } | null;
   to: { status: string; step: string | null; surface: string };
-  archetype: RowArchetype;
+  archetype: TrackerRowArchetype;
   memberCount: number;
   dataChanged: string[];
 }

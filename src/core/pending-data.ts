@@ -1,6 +1,6 @@
 import type { RegisteredWorkflow } from "./kernel/types.js";
 import { buildInitialTrackerData } from "./kernel/workflow.js";
-import { deriveRowArchetype, resolveArchetype, type RowArchetype } from "../domain/row-archetype.js";
+import { deriveRowArchetype, resolveArchetype, type TrackerRowArchetype } from "../domain/row-archetype.js";
 import { operatorSubjectData } from "../domain/operator-subject.js";
 import { rootQueueTitleData } from "../domain/queue-title.js";
 import type { StampedData } from "../tracker/jsonl.js";
@@ -21,7 +21,7 @@ export interface BuildPendingTrackerDataOpts<TInput> {
   /** Bypass the internal `buildInitialTrackerData` call when the caller has already computed the seed. Only consulted when `useInitialTrackerSeed === true`. */
   precomputedSeed?: Record<string, string>;
   nameIdStamp?: NameIdStamp;
-  rowArchetype?: RowArchetype;
+  rowArchetype?: TrackerRowArchetype;
 }
 
 function stringifyExtra(extra: Record<string, unknown>): Record<string, string> {
