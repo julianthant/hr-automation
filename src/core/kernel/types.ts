@@ -163,7 +163,6 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   systems: SystemConfig[]
   steps: TSteps
   schema: ZodType<TData>
-  authChain?: 'sequential' | 'interleaved' | 'parallel-staggered'
   batch?: BatchConfig
   /**
    * When true (default), the kernel auto-prepends `auth:<id>` step names to

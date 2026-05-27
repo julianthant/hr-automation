@@ -48,6 +48,10 @@ adding scenarios for a new workflow.
 
 Static convention guards live in `tests/unit/architecture/`. Add guards when a rule is mechanical: import boundaries, default exports, signal-listener misuse, console logging outside allowed surfaces, workflow ownership leaks, and **src filename patterns** (kebab-case outside `src/dashboard/`; PascalCase components / `use*` hooks / kebab modules inside the dashboard — see `docs/engineering/codebase-conventions.md`).
 
+## Lessons Learned
+
+- **2026-05-27: Architecture guards should avoid shell-only tool assumptions.** The origin-workflow lineage guard now scans with Node filesystem APIs instead of spawning `rg`, because Codex sessions can expose ripgrep through a shell path that is not executable from Vitest's `spawnSync`.
+
 ## What belongs here
 
 Pure-logic modules: schemas, date math, mapping tables, reducers, regex classifiers, worker-pool queueing, JSONL I/O, grid layout math, small string helpers.

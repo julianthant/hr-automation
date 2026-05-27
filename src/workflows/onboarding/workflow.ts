@@ -86,7 +86,6 @@ export const onboardingWorkflow = defineWorkflow({
   steps: onboardingSteps,
   schema: OnboardingInputSchema,
   runtimePolicy: ONBOARDING_WORKFLOW_RUNTIME_POLICY,
-  authChain: "sequential",
   // Pool mode: each worker gets its own Session with 3 browsers (CRM + UCPath +
   // I9), 2 Duos per worker (I9 SSO has no 2FA). Pool size 4 matches the legacy
   // default; overridable at runtime via `RunOpts.poolSize`. `preEmitPending: true` lets in-process pool callers emit the full

@@ -39,7 +39,6 @@ No `tracker.ts` — dashboard JSONL only. The xlsx tracker was removed on 2026-0
 | `steps` | `["searching", "cross-verification", "active-status"]` |
 | `schema` | `EidLookupItemSchema` — `{ name, ... }` **or** `{ emplId, ... }` |
 | `authSteps` | `true` — kernel prepends `auth:ucpath`, `auth:crm` |
-| `authChain` | `"sequential"` |
 | `tiling` | `"auto"` |
 | `batch` | `{ mode: "shared-context-pool", poolSize: 4, preEmitPending: true }` |
 | `detailFields` | `searchName`, `emplId`, `department`, `hrStatus`, `effdt`, `terminationDate` (declared keys — see `workflow.ts`) |

@@ -354,7 +354,6 @@ export const eidLookupCrmWorkflow = defineWorkflow({
   schema: EidLookupItemSchema,
   runtimePolicy: EID_LOOKUP_WORKFLOW_RUNTIME_POLICY,
   queueTitle: { kind: "single" },
-  authChain: "sequential",
   batch: { mode: "shared-context-pool", poolSize: 4, preEmitPending: true },
   detailFields: [
     { key: "searchName", label: "Search" },

@@ -315,7 +315,6 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         let session: Session
         try {
           session = await launchFn(wf.config.systems, {
-            authChain: wf.config.authChain,
             observer,
             abortSignal: state.launchAbort.signal,
             onReady: (readySession) => {

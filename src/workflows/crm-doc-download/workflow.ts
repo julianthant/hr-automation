@@ -43,7 +43,6 @@ export const crmDocDownloadWorkflow = defineWorkflow({
   steps: crmDocDownloadSteps,
   schema: CrmDocDownloadInputSchema,
   runtimePolicy: CRM_DOC_DOWNLOAD_WORKFLOW_RUNTIME_POLICY,
-  authChain: "sequential",
   batch: { mode: "pool", poolSize: 4, preEmitPending: true },
   detailFields: [
     { key: "emplId", label: "EID" },

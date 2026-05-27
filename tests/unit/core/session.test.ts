@@ -63,21 +63,26 @@ test('session.page: unknown id throws', async () => {
   await assert.rejects(() => s.page('nope'), /unknown system/i)
 })
 
-test('session.launch (sequential): awaits each login in order', async () => {
+test('session.launch (1 system): fast path — no settle, no stagger, just one login', async () => {
   const order: string[] = []
-  const makeSys = (id: string): SystemConfig => ({
-    id,
+  const start = Date.now()
+  const sys: SystemConfig = {
+    id: 'solo',
     login: async () => {
       await new Promise((r) => setTimeout(r, 10))
-      order.push(id)
+      order.push('solo')
     },
-  })
+  }
 
-  const s = await Session.launch(
-    [makeSys('a'), makeSys('b'), makeSys('c')],
-    { authChain: 'sequential', launchFn: fakeLaunch },
-  )
-  assert.deepEqual(order, ['a', 'b', 'c'])
+  const s = await Session.launch([sys], {
+    // Pass settle/stagger to prove the 1-system path ignores them.
+    settleMs: 5_000,
+    staggerMs: 5_000,
+    launchFn: fakeLaunch,
+  })
+  const elapsed = Date.now() - start
+  assert.deepEqual(order, ['solo'])
+  assert.ok(elapsed < 1_000, `1-system fast path should not apply settle (took ${elapsed}ms)`)
   await s.close()
 })
 
@@ -94,7 +99,6 @@ test('session.launch: abortSignal rejects an in-progress login without waiting f
   }
 
   const launched = Session.launch([sys], {
-    authChain: 'sequential',
     launchFn: fakeLaunch,
     abortSignal: controller.signal,
   })
@@ -110,43 +114,18 @@ test('session.launch: abortSignal rejects an in-progress login without waiting f
   )
 })
 
-test('session.launch (interleaved): first login blocks; subsequent logins resolve as chain progresses', async () => {
-  const logins: Array<{ id: string; at: number }> = []
-  let t = 0
-  const mkSys = (id: string): SystemConfig => ({
-    id,
-    login: async () => {
-      await new Promise((r) => setTimeout(r, 5))
-      logins.push({ id, at: ++t })
-    },
-  })
-
-  const systems = [mkSys('a'), mkSys('b'), mkSys('c')]
-  const s = await Session.launch(systems, { authChain: 'interleaved', launchFn: fakeLaunch })
-
-  // First system must be fully authed when launch returns.
-  const pageA = await s.page('a')
-  assert.ok(pageA)
-  // b and c may or may not be done yet — await them.
-  await Promise.all([s.page('b'), s.page('c')])
-  // Order of completion: a first, then b, then c.
-  assert.equal(logins[0].id, 'a')
-  assert.deepEqual(logins.map((l) => l.id), ['a', 'b', 'c'])
-  await s.close()
-})
-
-test('session.launch (parallel-staggered): submits fire `staggerMs` apart, Duos pend in parallel', async () => {
-  // Use staggerMs: 50 in tests so wall time is bounded; production default
-  // is 5_000ms (mirrors the user-visible behavior of "Duo prompts arrive
-  // ~5s apart on phone, all pending in parallel until approved").
+test('session.launch (parallel-staggered): submits fire `staggerMs` apart, settle delays the first', async () => {
+  // Use small ms in tests so wall time is bounded; production defaults are
+  // staggerMs=5_000 and settleMs=2_000.
   const STAGGER_MS = 50
+  const SETTLE_MS = 30
   const completed: Array<{ id: string; at: number }> = []
   const start = Date.now()
   const mkSys = (id: string): SystemConfig => ({
     id,
     login: async () => {
-      // Simulated Duo wait — varies per system so we can also verify
-      // completion order tracks user-approval order, not click order.
+      // Simulated Duo wait — equal per system so completion order tracks
+      // click order.
       await new Promise((r) => setTimeout(r, 20))
       completed.push({ id, at: Date.now() - start })
     },
@@ -154,35 +133,86 @@ test('session.launch (parallel-staggered): submits fire `staggerMs` apart, Duos 
 
   const systems = [mkSys('a'), mkSys('b'), mkSys('c')]
   const s = await Session.launch(systems, {
-    authChain: 'parallel-staggered',
     staggerMs: STAGGER_MS,
+    settleMs: SETTLE_MS,
+    // Disable the cap so we measure stagger between every submit, not the
+    // semaphore queueing behavior.
+    maxConcurrentDuos: 3,
     launchFn: fakeLaunch,
   })
 
-  // Session.launch returns immediately — readyPromises are registered but
-  // not awaited (matching interleaved's shape). Per-system completion
-  // happens in `await ctx.page(id)` calls.
   await Promise.all([s.page('a'), s.page('b'), s.page('c')])
 
-  // Equal-duration logins: completion order matches click order (a, b, c).
+  // Equal-duration logins: completion order matches click order.
   assert.deepEqual(completed.map((c) => c.id), ['a', 'b', 'c'])
-  // 'a' completes after its 20ms login. 'b' completes only after a 50ms
-  // stagger + 20ms login (≥50ms). 'c' completes after 2*50ms + 20ms login.
+  // 'a' fires at SETTLE_MS, completes after +20ms (≥30ms).
   assert.ok(
-    completed[1].at >= STAGGER_MS,
-    `expected b completion ≥${STAGGER_MS}ms (post-stagger), got ${completed[1].at}ms`,
+    completed[0].at >= SETTLE_MS,
+    `expected a completion ≥${SETTLE_MS}ms (post-settle), got ${completed[0].at}ms`,
   )
+  // 'b' fires at SETTLE_MS + STAGGER_MS, completes ≥(30+50)ms.
   assert.ok(
-    completed[2].at >= 2 * STAGGER_MS,
-    `expected c completion ≥${2 * STAGGER_MS}ms (post-2x-stagger), got ${completed[2].at}ms`,
+    completed[1].at >= SETTLE_MS + STAGGER_MS,
+    `expected b completion ≥${SETTLE_MS + STAGGER_MS}ms, got ${completed[1].at}ms`,
+  )
+  // 'c' fires at SETTLE_MS + 2*STAGGER_MS, completes ≥(30+100)ms.
+  assert.ok(
+    completed[2].at >= SETTLE_MS + 2 * STAGGER_MS,
+    `expected c completion ≥${SETTLE_MS + 2 * STAGGER_MS}ms, got ${completed[2].at}ms`,
+  )
+  await s.close()
+})
+
+test('session.launch (parallel-staggered): maxConcurrentDuos=2 queues additional systems', async () => {
+  // With 4 systems and cap=2, only 2 logins run at once. System #3 cannot
+  // start its login until either #1 or #2 has completed.
+  const STAGGER_MS = 10
+  const SETTLE_MS = 10
+  const LOGIN_DURATION = 80
+  const events: Array<{ id: string; phase: 'start' | 'done'; at: number }> = []
+  const start = Date.now()
+  const mkSys = (id: string): SystemConfig => ({
+    id,
+    login: async () => {
+      events.push({ id, phase: 'start', at: Date.now() - start })
+      await new Promise((r) => setTimeout(r, LOGIN_DURATION))
+      events.push({ id, phase: 'done', at: Date.now() - start })
+    },
+  })
+
+  const systems = [mkSys('a'), mkSys('b'), mkSys('c'), mkSys('d')]
+  const s = await Session.launch(systems, {
+    staggerMs: STAGGER_MS,
+    settleMs: SETTLE_MS,
+    maxConcurrentDuos: 2,
+    launchFn: fakeLaunch,
+  })
+
+  await Promise.all([s.page('a'), s.page('b'), s.page('c'), s.page('d')])
+
+  // a and b start in the first batch. c and d must wait for a slot to free.
+  const aStart = events.find((e) => e.id === 'a' && e.phase === 'start')!
+  const bStart = events.find((e) => e.id === 'b' && e.phase === 'start')!
+  const cStart = events.find((e) => e.id === 'c' && e.phase === 'start')!
+  const dStart = events.find((e) => e.id === 'd' && e.phase === 'start')!
+
+  // a and b fire promptly under the cap (settle + small stagger between).
+  assert.ok(aStart.at < LOGIN_DURATION, `a should start in first batch, got ${aStart.at}ms`)
+  assert.ok(bStart.at < LOGIN_DURATION, `b should start in first batch, got ${bStart.at}ms`)
+  // c only fires after one of {a, b} has completed (≈LOGIN_DURATION).
+  assert.ok(
+    cStart.at >= LOGIN_DURATION,
+    `c should wait for cap slot to free (≥${LOGIN_DURATION}ms), got ${cStart.at}ms`,
+  )
+  // d also fires only after another slot frees.
+  assert.ok(
+    dStart.at >= LOGIN_DURATION,
+    `d should wait for cap slot to free (≥${LOGIN_DURATION}ms), got ${dStart.at}ms`,
   )
   await s.close()
 })
 
 test('session.launch (parallel-staggered): one auth failure does not block siblings', async () => {
-  // Mirrors the equivalent interleaved-mode test: a mid-chain failure
-  // surfaces via that system's readyPromise rejecting, but NOT through
-  // Session.launch itself, and NOT by blocking other systems' logins.
   const completed: string[] = []
   const systems: SystemConfig[] = [
     { id: 'a', login: async () => { completed.push('a') } },
@@ -190,29 +220,13 @@ test('session.launch (parallel-staggered): one auth failure does not block sibli
     { id: 'c', login: async () => { completed.push('c') } },
   ]
   const s = await Session.launch(systems, {
-    authChain: 'parallel-staggered',
     staggerMs: 10,
+    settleMs: 0,
+    maxConcurrentDuos: 3,
     launchFn: fakeLaunch,
   })
 
   await assert.rejects(() => s.page('b'), /b login failed/)
-  const pageC = await s.page('c')
-  assert.ok(pageC)
-  assert.deepEqual(completed, ['a', 'c'])
-  await s.close()
-})
-
-test('session.launch (interleaved): failed auth on system N does not block system N+1', async () => {
-  const completed: string[] = []
-  const systems: SystemConfig[] = [
-    { id: 'a', login: async () => { completed.push('a') } },
-    { id: 'b', login: async () => { throw new Error('b login failed') } },
-    { id: 'c', login: async () => { completed.push('c') } },
-  ]
-  const s = await Session.launch(systems, { authChain: 'interleaved', launchFn: fakeLaunch })
-
-  await assert.rejects(() => s.page('b'), /b login failed/)
-  // c should still resolve.
   const pageC = await s.page('c')
   assert.ok(pageC)
   assert.deepEqual(completed, ['a', 'c'])
@@ -449,7 +463,12 @@ function fakeLaunch() {
   return Promise.resolve({ page, context, browser })
 }
 
-test('session.launch: observer hooks fire in correct order (sequential, success)', async () => {
+test('session.launch: observer hooks fire in correct per-system order (success)', async () => {
+  // With parallel-staggered (≥2 systems) per-system events interleave with
+  // the other system. So we assert the per-system relative order
+  // (browser → authStart → login → authComplete) rather than a strict
+  // global event sequence. Settle/stagger are zeroed so this test stays
+  // fast.
   const events: string[] = []
   const loginsReceived: Array<string | undefined> = []
   const mkSys = (id: string): SystemConfig => ({
@@ -470,19 +489,27 @@ test('session.launch: observer hooks fire in correct order (sequential, success)
 
   const s = await Session.launch(
     [mkSys('a'), mkSys('b')],
-    { authChain: 'sequential', launchFn: fakeLaunch, observer },
+    {
+      launchFn: fakeLaunch,
+      observer,
+      staggerMs: 0,
+      settleMs: 0,
+      maxConcurrentDuos: 2,
+    },
   )
+  await Promise.all([s.page('a'), s.page('b')])
 
-  assert.deepEqual(events, [
-    'browser:a:a',
-    'browser:b:b',
-    'authStart:a:a',
-    'login:a',
-    'authComplete:a:a',
-    'authStart:b:b',
-    'login:b',
-    'authComplete:b:b',
-  ])
+  for (const id of ['a', 'b']) {
+    const browserIdx = events.indexOf(`browser:${id}:${id}`)
+    const authStartIdx = events.indexOf(`authStart:${id}:${id}`)
+    const loginIdx = events.indexOf(`login:${id}`)
+    const authCompleteIdx = events.indexOf(`authComplete:${id}:${id}`)
+    assert.ok(browserIdx >= 0, `${id}: browser event missing`)
+    assert.ok(
+      browserIdx < authStartIdx && authStartIdx < loginIdx && loginIdx < authCompleteIdx,
+      `${id}: events not in browser → authStart → login → authComplete order; got ${events.join(', ')}`,
+    )
+  }
   assert.deepEqual(loginsReceived, ['Test 1', 'Test 1'])
   await s.close()
 })

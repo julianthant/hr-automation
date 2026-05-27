@@ -12,7 +12,6 @@ test("kernel runs a workflow with empty systems[]", async () => {
     authSteps: false,
     steps: ["work"] as const,
     schema: z.object({ value: z.string() }),
-    authChain: "sequential",
     detailFields: [{ key: "value", label: "Value" }],
     getName: (d) => d.value ?? "",
     getId:   (d) => d.value ?? "",

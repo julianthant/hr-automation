@@ -95,7 +95,6 @@ export const emergencyContactWorkflow = defineWorkflow({
   schema: RecordSchema,
   runtimePolicy: EMERGENCY_CONTACT_WORKFLOW_RUNTIME_POLICY,
   queueTitle: { kind: "single" },
-  authChain: "sequential",
   batch: {
     mode: "sequential",
     preEmitPending: true,
