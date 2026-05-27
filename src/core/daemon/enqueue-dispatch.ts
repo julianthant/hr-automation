@@ -18,7 +18,7 @@ import { loadWorkflow } from "../workflow-loaders.js";
 import type { RegisteredWorkflow } from "../kernel/types.js";
 import { splitPrefilled } from "../kernel/workflow.js";
 import { buildPendingTrackerData } from "../pending-data.js";
-import type { RowArchetype } from "../../domain/row-archetype.js";
+import type { TrackerRowArchetype } from "../../domain/row-archetype.js";
 import { allocateLowestBatchDisplayOrdinal } from "../../tracker/batch-display-ordinal.js";
 import { DEFAULT_DIR, emitTrackerRow, type StampedData } from "../../tracker/jsonl.js";
 import { log } from "../../utils/log.js";
@@ -198,7 +198,7 @@ export async function enqueueFromHttp(
     effectiveParentRunId = randomUUID();
     batchDisplayOrdinal = allocateLowestBatchDisplayOrdinal(workflowName, resolvedTrackerDir);
   }
-  const rowArchetypeOverride: RowArchetype | undefined = isDirectInputRunBatch
+  const rowArchetypeOverride: TrackerRowArchetype | undefined = isDirectInputRunBatch
     ? "delegate-child"
     : undefined;
   const queuedInputs = rowArchetypeOverride

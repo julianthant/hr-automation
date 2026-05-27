@@ -55,7 +55,7 @@ const ocrSteps = [
 export const ocrWorkflow = defineWorkflow({
   name: "ocr",
   label: "OCR",
-  archetype: "delegating-batch",
+  archetype: "batch",
   category: "Utils",
   iconName: "FileScan",
   systems: [],

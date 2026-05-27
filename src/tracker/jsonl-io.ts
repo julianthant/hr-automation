@@ -4,7 +4,7 @@ import { createInterface } from "node:readline";
 
 import { log } from "../utils/log.js";
 import type { StructuredLogEvent } from "../domain/log-events.js";
-import { deriveRowArchetype, type RowArchetype, type WorkflowArchetype } from "../domain/row-archetype.js";
+import { deriveRowArchetype, type TrackerRowArchetype, type WorkflowArchetype } from "../domain/row-archetype.js";
 import { appendJsonlWithSource } from "./state/jsonl-source.js";
 import { applyLogEntryLive, applySessionEventLive, applyTrackerEntryLive } from "./state/runtime.js";
 import { getSessionsFilePathForDate, type ScreenshotSessionEvent } from "./session-events.js";
@@ -232,7 +232,7 @@ export interface TrackerEntry {
  * `tests/unit/architecture/tracker-row-emission.test.ts` guard fails the
  * build if any new caller bypasses the helper.
  */
-export type StampedData = Record<string, string> & { archetype: RowArchetype };
+export type StampedData = Record<string, string> & { archetype: TrackerRowArchetype };
 
 /** A tracker row emission with archetype-stamped `data` required at the type level. */
 export interface TrackerRowEmission {
@@ -261,7 +261,7 @@ export interface TrackerRowEmission {
  */
 export function stampArchetypeForRow(
   data: Record<string, string>,
-  args: { workflowArchetype: WorkflowArchetype; parentRunId?: string } | { override: RowArchetype },
+  args: { workflowArchetype: WorkflowArchetype; parentRunId?: string } | { override: TrackerRowArchetype },
 ): StampedData {
   if ("override" in args) {
     return { ...data, archetype: args.override };

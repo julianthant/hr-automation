@@ -1,8 +1,8 @@
 /**
  * All workflow.ts files that contain a defineWorkflow call must declare an
  * explicit `archetype:` field. The kernel auto-assigns "single" or "batch"
- * from the batch config shape, but explicit declarations make the intent
- * visible and prevent misclassifying delegating / utility workflows.
+ * from the batch config shape, but explicit declarations make the root row
+ * shape visible.
  */
 import { test } from "vitest";
 import assert from "node:assert/strict";
@@ -30,12 +30,12 @@ for (const dir of workflowDirs()) {
   if (!src.includes("defineWorkflow(")) continue;
 
   test(`${dir}/workflow.ts declares archetype in defineWorkflow`, () => {
-    const hasLiteralArchetype = /archetype:\s*["'](single|batch|delegating|delegating-batch|utility)["']/.test(src);
+    const hasLiteralArchetype = /archetype:\s*["'](single|batch)["']/.test(src);
     const hasResolverArchetype = /archetype:\s*(\([^)]*\)|[a-zA-Z_$][\w$]*)\s*=>/.test(src);
     assert.ok(
       hasLiteralArchetype || hasResolverArchetype,
       `src/workflows/${dir}/workflow.ts calls defineWorkflow but does not declare 'archetype:'. ` +
-        `Add 'archetype: "single"|"batch"|"delegating"|"delegating-batch"|"utility"' to the config object ` +
+        `Add 'archetype: "single"|"batch"' to the config object ` +
         `(or a resolver: 'archetype: (input) => ...').`,
     );
   });

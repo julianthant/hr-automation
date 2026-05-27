@@ -9,15 +9,17 @@ export type RowArchetype =
   /** One item, one row. Flat in the queue. Workflows: work-study, oath-signature (direct CLI run), active-check. */
   | "single"
   /** Anchor row over N peers. Emitted by OCR prep, oath-upload root. */
+  | "batch"
+  /** Peer item under a batch anchor. Emitted by emergency-contact records, oath-signature batch members. */
+  | "batch-member";
+
+export type LegacyRowArchetype =
   | "batch-parent"
-  /** Peer item under a batch-parent. Emitted by emergency-contact records, oath-signature batch members. */
-  | "batch-member"
-  /** Terminal-at-enqueue row recording "I delegated to N children in another workflow." */
   | "dispatch"
-  /** Child run spawned from a parent in a different workflow; holds operator attention. */
   | "delegate-child"
-  /** Collapsed delegate-child rendered as a sub-row inside its parent's card; never holds operator attention. */
   | "passive-child";
+
+export type TrackerRowArchetype = RowArchetype | LegacyRowArchetype;
 
 /**
  * Workflow-level archetype. Declared on every `defineWorkflow({...})` call.
@@ -28,22 +30,13 @@ export type RowArchetype =
 export type WorkflowArchetype =
   /** Emits `single` rows only. Examples: work-study, active-check. */
   | "single"
-  /** Emits a batch-parent over N batch-member rows. Examples: emergency-contact, oath-signature. */
-  | "batch"
-  /** Emits `single` + `dispatch` + N delegate-children. Examples: ocr (parent), separations (when delegating). */
-  | "delegating"
-  /** Emits a batch-parent that delegates child work to another workflow. Examples: ocr. */
-  | "delegating-batch"
-  /** Child-only workflow that holds no operator attention; always rendered as `passive-child`. Examples: eid-lookup (as passive child). */
-  | "utility";
+  /** Emits a batch anchor over N batch-member rows. Examples: emergency-contact, oath-signature. */
+  | "batch";
 
 const LABELS: Record<RowArchetype, string> = {
   "single": "Single",
-  "batch-parent": "Batch parent",
+  "batch": "Batch",
   "batch-member": "Batch member",
-  "dispatch": "Dispatch",
-  "delegate-child": "Delegated",
-  "passive-child": "Passive",
 };
 
 export function archetypeRowTypeLabel(archetype: RowArchetype): string {
@@ -55,31 +48,35 @@ interface ResolveEntry {
   data?: Record<string, unknown> | null;
 }
 
+const LEGACY_ALIASES: Record<LegacyRowArchetype, RowArchetype> = {
+  "batch-parent": "batch",
+  "passive-child": "single",
+  "delegate-child": "single",
+  "dispatch": "single",
+};
+
 /**
  * Read `data.archetype`. Post-Contract-1, every production tracker row is
  * written through `emitTrackerRow` which requires `StampedData` at the type
  * level — `archetype` is always present in real data.
  *
  * Behavior when the field is not a valid `RowArchetype`:
- *   - **Missing** (unstamped entry) → return the canonical mapping
- *     `deriveRowArchetype("single", parentRunId)` (i.e. `"delegate-child"`
- *     when a parent is set, else `"single"`). This is the same value
- *     `emitTrackerRow` would have stamped for an unspecified workflow.
+ *   - **Missing** (unstamped entry) → return `"single"`. Parentage is
+ *     expressed by `parentRunId`, not by a separate row archetype.
  *   - **Present but invalid string** (e.g. `"nonsense"`) → throw. That's
  *     a write-side bug worth surfacing — production code can't reach this
  *     state through the type system, so it's almost certainly a hand-rolled
  *     entry that meant something else.
- *
- * The old legacy heuristics (`mode === "prepare"` → batch-parent,
- * `taskRole === "utility"` → passive-child, `requestRole === "delegation-dispatch"`
- * → dispatch) were deleted along with the historic JSONL they were written for.
  */
-export function resolveRowArchetype(entry: ResolveEntry): RowArchetype {
+export function resolveRowArchetype(entry: ResolveEntry): TrackerRowArchetype {
   const stamped = entry.data?.archetype;
   if (stamped === undefined || stamped === null) {
-    return entry.parentRunId ? "delegate-child" : "single";
+    return "single";
   }
   if (typeof stamped === "string" && isRowArchetype(stamped)) return stamped;
+  if (isLegacyRowArchetype(stamped)) {
+    return LEGACY_ALIASES[stamped];
+  }
   throw new Error(
     `resolveRowArchetype: data.archetype is set but not a valid RowArchetype — bug. ` +
       `Got ${JSON.stringify(stamped)} on parentRunId=${entry.parentRunId ?? "<none>"}.`,
@@ -87,8 +84,15 @@ export function resolveRowArchetype(entry: ResolveEntry): RowArchetype {
 }
 
 export function isRowArchetype(v: string): v is RowArchetype {
-  return v === "single" || v === "batch-parent" || v === "batch-member"
-    || v === "dispatch" || v === "delegate-child" || v === "passive-child";
+  return v === "single" || v === "batch" || v === "batch-member";
+}
+
+export function isLegacyRowArchetype(v: unknown): v is LegacyRowArchetype {
+  return typeof v === "string" && v in LEGACY_ALIASES;
+}
+
+export function isTrackerRowArchetype(v: string): v is TrackerRowArchetype {
+  return isRowArchetype(v) || isLegacyRowArchetype(v);
 }
 
 /**
@@ -111,9 +115,6 @@ export type WorkflowArchetypeOrResolver<TInput> =
 const VALID_WORKFLOW_ARCHETYPES = new Set<string>([
   "single",
   "batch",
-  "delegating",
-  "delegating-batch",
-  "utility",
 ]);
 
 function isWorkflowArchetype(v: unknown): v is WorkflowArchetype {
@@ -130,7 +131,7 @@ export function resolveArchetypeFromValue<TInput>(
     if (!isWorkflowArchetype(result)) {
       throw new Error(
         `resolveArchetype: workflow '${workflowName}' archetype resolver returned ${JSON.stringify(result)}, ` +
-          `which is not a valid WorkflowArchetype (expected one of: single, batch, delegating, delegating-batch, utility).`,
+          `which is not a valid WorkflowArchetype (expected one of: single, batch).`,
       );
     }
     return result;
@@ -138,7 +139,7 @@ export function resolveArchetypeFromValue<TInput>(
   if (!isWorkflowArchetype(archetype)) {
     throw new Error(
       `resolveArchetype: workflow '${workflowName}' has invalid literal archetype ${JSON.stringify(archetype)} ` +
-        `(expected one of: single, batch, delegating, delegating-batch, utility).`,
+        `(expected one of: single, batch).`,
     );
   }
   return archetype;
@@ -163,21 +164,18 @@ export function resolveArchetype<TInput>(
  * Used by pre-emit write sites that don't go through withTrackedWorkflow.
  *
  * Mapping:
- *   parentRunId present + utility  → "passive-child"  (EID lookup, active-check children)
- *   parentRunId present + other    → "delegate-child" (OCR under oath-upload, oath-sig fan-out)
- *   no parentRunId + delegating-batch → "batch-parent" (OCR prep row)
- *   no parentRunId + batch         → "batch-parent"   (anchor row — members carry parentRunId)
- *   no parentRunId + everything else → "single"
+ *   member option                  → "batch-member"
+ *   workflowArchetype === "batch"  → "batch"
+ *   everything else                → "single"
+ *
+ * `parentRunId` does not affect the stamped archetype. It only determines
+ * whether the row is scoped as root or delegated at projection time.
  */
 export function deriveRowArchetype(
   workflowArchetype: WorkflowArchetype,
-  parentRunId?: string,
+  _parentRunId?: string,
+  opts?: { member?: boolean },
 ): RowArchetype {
-  if (parentRunId) {
-    return workflowArchetype === "utility" ? "passive-child" : "delegate-child";
-  }
-  if (workflowArchetype === "delegating-batch" || workflowArchetype === "batch") {
-    return "batch-parent";
-  }
-  return "single";
+  if (opts?.member) return "batch-member";
+  return workflowArchetype === "batch" ? "batch" : "single";
 }

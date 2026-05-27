@@ -3,7 +3,7 @@ import { normalizeDetailField } from './registry.js'
 import type { WithTrackedWorkflowOpts } from '../../tracker/jsonl.js'
 import { operatorSubjectData } from '../../domain/operator-subject.js'
 import { queueTitleData } from '../../domain/queue-title.js'
-import { isRowArchetype, type RowArchetype } from '../../domain/row-archetype.js'
+import { isTrackerRowArchetype, type TrackerRowArchetype } from '../../domain/row-archetype.js'
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
@@ -46,7 +46,7 @@ export function toRecord(input: unknown): Record<string, unknown> | null {
 export interface SplitInput {
   cleaned: unknown
   prefilled: Record<string, unknown> | null
-  runtimeOptions: { skipSteps?: string[]; preset?: string; rowArchetype?: RowArchetype } | null
+  runtimeOptions: { skipSteps?: string[]; preset?: string; rowArchetype?: TrackerRowArchetype } | null
 }
 
 export function splitPrefilled(input: unknown): SplitInput {
@@ -68,8 +68,8 @@ export function splitPrefilled(input: unknown): SplitInput {
 
 function normalizeRuntimeOptions(
   raw: Record<string, unknown>,
-): { skipSteps?: string[]; preset?: string; rowArchetype?: RowArchetype } | null {
-  const out: { skipSteps?: string[]; preset?: string; rowArchetype?: RowArchetype } = {}
+): { skipSteps?: string[]; preset?: string; rowArchetype?: TrackerRowArchetype } | null {
+  const out: { skipSteps?: string[]; preset?: string; rowArchetype?: TrackerRowArchetype } = {}
   const skipSteps = raw.skipSteps
   if (Array.isArray(skipSteps) && skipSteps.every((s): s is string => typeof s === 'string')) {
     if (skipSteps.length > 0) out.skipSteps = [...skipSteps]
@@ -77,7 +77,7 @@ function normalizeRuntimeOptions(
   if (typeof raw.preset === 'string' && raw.preset.length > 0) {
     out.preset = raw.preset
   }
-  if (typeof raw.rowArchetype === 'string' && isRowArchetype(raw.rowArchetype)) {
+  if (typeof raw.rowArchetype === 'string' && isTrackerRowArchetype(raw.rowArchetype)) {
     out.rowArchetype = raw.rowArchetype
   }
   return Object.keys(out).length > 0 ? out : null

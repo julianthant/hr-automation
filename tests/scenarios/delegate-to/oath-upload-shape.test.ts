@@ -41,7 +41,7 @@ describe("oath-upload-shape scenario via ctx.delegateTo(oath-signature PDF)", ()
 
     const ocrLikeChild = defineWorkflow({
       name: "scen-ocr-like",
-      archetype: "delegating-batch",
+      archetype: "batch",
       systems: [],
       authSteps: false,
       steps: ["prep"] as const,

@@ -60,7 +60,7 @@ import type {
   DelegateRenderAs,
 } from "./kernel/types.js"
 import { runWorkflow } from "./kernel/run-workflow.js"
-import type { RowArchetype } from "../domain/row-archetype.js"
+import type { TrackerRowArchetype } from "../domain/row-archetype.js"
 import {
   deriveRowArchetype,
   resolveArchetype,
@@ -107,7 +107,7 @@ function resolveDelegateArchetype<TData, TSteps extends readonly string[]>(
   input: TData,
   parentRunId: string,
   renderAs?: DelegateRenderAs,
-): RowArchetype {
+): TrackerRowArchetype {
   if (renderAs === "flat") return "passive-child"
   if (renderAs === "batch" || renderAs === "preview") return "delegate-child"
   return deriveRowArchetype(resolveArchetype(child.config, input), parentRunId)
@@ -117,13 +117,13 @@ function defaultDelegatedRunArchetype<TData, TSteps extends readonly string[]>(
   child: RegisteredWorkflow<TData, TSteps>,
   input: TData,
   parentRunId: string,
-): RowArchetype {
+): TrackerRowArchetype {
   return deriveRowArchetype(resolveArchetype(child.config, input), parentRunId)
 }
 
 function mergeRuntimeRowArchetype<TData>(
   input: TData,
-  rowArchetype: RowArchetype,
+  rowArchetype: TrackerRowArchetype,
 ): TData {
   if (!input || typeof input !== "object" || Array.isArray(input)) return input
   const current = (input as { __runtimeOptions?: unknown }).__runtimeOptions
@@ -144,7 +144,7 @@ function inputForDelegatedRun<TData, TSteps extends readonly string[]>(args: {
   child: RegisteredWorkflow<TData, TSteps>
   input: TData
   parentRunId: string
-  archetype: RowArchetype
+  archetype: TrackerRowArchetype
 }): TData {
   return args.archetype === defaultDelegatedRunArchetype(args.child, args.input, args.parentRunId)
     ? args.input
@@ -169,7 +169,7 @@ function preEmitPendingForChild<TChildData, TChildSteps extends readonly string[
   parentRunId: string
   itemId: string
   runId: string
-  archetype: RowArchetype
+  archetype: TrackerRowArchetype
   trackerDir: string | undefined
 }): void {
   const data = buildPendingTrackerData({
