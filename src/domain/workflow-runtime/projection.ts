@@ -3,7 +3,10 @@ import {
   resolveRowArchetype,
 } from "../row-archetype.js";
 import type { TrackerEntry } from "../../tracker/jsonl.js";
-import { buildTrackerQueueSurfaces } from "../../tracker/queue-surfaces.js";
+import {
+  buildTrackerQueueSurfaces,
+  classifyTrackerRow,
+} from "../../tracker/queue-surfaces.js";
 import type { TrackerQueueGroupSurface } from "../../tracker/queue-surfaces.js";
 import {
   getWorkflowRuntimePolicy,
@@ -93,7 +96,7 @@ function resolveEmployeeLabel(data: Record<string, string>): string {
 
 function isPrepRow(entry: TrackerEntry): boolean {
   const data = entry.data ?? {};
-  return resolveRowArchetype(entry) === "batch-parent" && (
+  return classifyTrackerRow(entry).shape === "batch" && (
     data.mode === "prepare" || Boolean(data.pdfOriginalName)
   );
 }
@@ -149,7 +152,7 @@ function fallbackEntrySubtitle(entry: TrackerEntry, policy: WorkflowRuntimePolic
 }
 
 function rowSurfaceType(entry: TrackerEntry): WorkflowSurfaceType {
-  return entry.parentRunId ? "delegation-member" : "normal";
+  return classifyTrackerRow(entry).scope === "delegated" ? "delegation-member" : "normal";
 }
 
 function rowTypeLabelFor(

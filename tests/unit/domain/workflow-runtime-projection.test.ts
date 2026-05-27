@@ -304,7 +304,19 @@ describe("workflow runtime projection adapters", () => {
     );
   });
 
-  it("folds passive OCR utility rows by row archetype", () => {
+  it("keeps OCR utility rows flat by parent runtime policy", () => {
+    const ocr = entry({
+      workflow: "ocr",
+      id: "ocr-session-1",
+      runId: "ocr-run-1",
+      status: "running",
+      step: "awaiting-approval",
+      data: {
+        archetype: "batch",
+        mode: "prepare",
+        formType: "oath",
+      },
+    });
     const lookup = entry({
       workflow: "eid-lookup",
       id: "lookup-1",
@@ -312,7 +324,7 @@ describe("workflow runtime projection adapters", () => {
       parentRunId: "ocr-run-1",
       status: "pending",
       data: {
-        archetype: "passive-child",
+        archetype: "single",
         searchName: "Doe, Jane",
       },
     });
@@ -323,20 +335,19 @@ describe("workflow runtime projection adapters", () => {
       parentRunId: "ocr-run-1",
       status: "pending",
       data: {
-        archetype: "passive-child",
+        archetype: "single",
         emplId: "10000001",
       },
     });
 
     const surfaces = buildTrackerQueueSurfaces({
       entries: [],
-      delegationSourceEntries: [lookup, active],
+      delegationSourceEntries: [ocr, lookup, active],
       runtimePolicies: phase4Policies,
     });
 
-    assert.equal(surfaces.groupRows.length, 1);
-    assert.equal(surfaces.groupRows[0]?.kind, "passive-delegation");
-    assert.deepEqual(surfaces.groupRows[0]?.members.map((row) => row.id), ["lookup-1", "active-1"]);
+    assert.equal(surfaces.groupRows.length, 0);
+    assert.deepEqual(surfaces.flatEntries.map((row) => row.id), ["lookup-1", "active-1"]);
   });
 
   it("projects final Oath Signature rows as person-titled delegation members", () => {
@@ -537,7 +548,7 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
     ]);
   });
 
-  it("folds SharePoint roster downloads under OCR as passive delegation", () => {
+  it("projects a single SharePoint roster download child as a delegation member", () => {
     const roster = entry({
       workflow: "sharepoint-download",
       id: "onboarding-roster",
@@ -545,7 +556,7 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       parentRunId: "ocr-run-1",
       status: "running",
       data: {
-        archetype: "passive-child",
+        archetype: "single",
         label: "Onboarding Roster",
         parentSubject: "Emergency Contact · 5678",
       },
@@ -555,12 +566,12 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       delegationSourceEntries: [roster],
       runtimePolicies: phase5Policies,
     });
-    assert.equal(surfaces.groupRows.length, 1);
-    assert.equal(surfaces.groupRows[0]?.kind, "passive-delegation");
-    const projection = buildProjectionFromQueueSurface(surfaces.groupRows[0]!, {
+    assert.equal(surfaces.groupRows.length, 0);
+    assert.deepEqual(surfaces.flatEntries.map((row) => row.id), ["onboarding-roster"]);
+    const projection = buildWorkflowRunProjection(surfaces.flatEntries[0]!, {
       runtimePolicies: phase5Policies,
     });
-    assert.equal(projection.surfaceType, "passive-delegation");
-    assert.equal(projection.title, "Emergency Contact · 5678");
+    assert.equal(projection.surfaceType, "delegation-member");
+    assert.equal(projection.title, "onboarding-roster");
   });
 });

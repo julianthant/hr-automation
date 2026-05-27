@@ -251,6 +251,14 @@ describe("buildTrackerQueueSurfaces", () => {
   });
 
   it("surfaces OCR eid lookup fan-out as flat delegation member rows", () => {
+    const ocr = entry({
+      workflow: "ocr",
+      id: "ocr-session-1",
+      runId: "ocr-run-1",
+      status: "running",
+      step: "awaiting-approval",
+      data: { archetype: "batch", mode: "prepare", formType: "oath" },
+    });
     const child = entry({
       workflow: "eid-lookup",
       id: "lookup-1",
@@ -258,14 +266,14 @@ describe("buildTrackerQueueSurfaces", () => {
       parentRunId: "ocr-run-1",
       status: "pending",
       data: {
-        archetype: "delegate-child",
+        archetype: "single",
         parentSubject: "Oath · 1234",
       },
     });
 
     const result = buildTrackerQueueSurfaces({
       entries: [],
-      delegationSourceEntries: [child],
+      delegationSourceEntries: [ocr, child],
       runtimePolicies: phase4Policies,
     });
 
@@ -273,27 +281,45 @@ describe("buildTrackerQueueSurfaces", () => {
     assert.deepEqual(result.flatEntries.map((e) => e.id), ["lookup-1"]);
   });
 
-  it("surfaces passive-child archetype members as passive-delegation cards", () => {
-    const child = entry({
-      workflow: "crm-doc-download",
-      id: "jane@ucsd.edu",
-      runId: "child-run-1",
-      parentRunId: "parent-run-1",
+  it("uses OCR parent policy to keep multiple lookup children flat", () => {
+    const ocr = entry({
+      workflow: "ocr",
+      id: "ocr-session-2",
+      runId: "ocr-run-2",
+      status: "running",
+      step: "awaiting-approval",
+      data: { archetype: "batch", mode: "prepare", formType: "oath" },
+    });
+    const lookup = entry({
+      workflow: "eid-lookup",
+      id: "lookup-2",
+      runId: "lookup-run-2",
+      parentRunId: "ocr-run-2",
       status: "pending",
       data: {
-        archetype: "passive-child",
-        taskRole: "utility",
-        parentSubject: "Onboarding: jane@ucsd.edu",
+        archetype: "single",
+        parentSubject: "Oath · 5678",
+      },
+    });
+    const active = entry({
+      workflow: "active-check",
+      id: "active-2",
+      runId: "active-run-2",
+      parentRunId: "ocr-run-2",
+      status: "pending",
+      data: {
+        archetype: "single",
+        parentSubject: "Oath · 5678",
       },
     });
 
     const result = buildTrackerQueueSurfaces({
       entries: [],
-      delegationSourceEntries: [child],
+      delegationSourceEntries: [ocr, lookup, active],
+      runtimePolicies: phase4Policies,
     });
 
-    assert.equal(result.groupRows.length, 1);
-    assert.equal(result.groupRows[0]?.kind, "passive-delegation");
-    assert.equal(result.groupRows[0]?.titleOverride, "Onboarding: jane@ucsd.edu");
+    assert.equal(result.groupRows.length, 0);
+    assert.deepEqual(result.flatEntries.map((e) => e.id), ["lookup-2", "active-2"]);
   });
 });

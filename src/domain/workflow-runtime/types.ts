@@ -71,19 +71,16 @@ export interface WorkflowRunProjection {
  */
 export interface WorkflowDelegationPolicy {
   /**
-   * OCR utility fan-out (EID Lookup, Active Check spawned by an OCR prep
-   * row) must stay as `delegation-member` rows even when 2+ children share
-   * one parentRunId — they should never be promoted to a batch-delegation
-   * group. Default: "delegation-member".
+   * Child workflows spawned by this parent that should stay as flat
+   * `delegation-member` rows even when 2+ children share one parentRunId.
+   * OCR uses this for EID Lookup / Active Check fan-out.
    */
-  utilityChildSurface?: "delegation-member" | "batch-delegation";
+  flatMemberChildWorkflows?: string[];
   /**
-   * Workflows that count as utility children for `utilityChildSurface`.
-   * OCR uses this to keep EID Lookup / Active Check fan-out flat while
-   * still allowing approved target workflow rows to render as normal
-   * delegation members or groups.
+   * Surface to use for `flatMemberChildWorkflows`. Only
+   * `delegation-member` is supported today.
    */
-  utilityChildWorkflows?: string[];
+  flatMemberSurface?: "delegation-member";
   /**
    * One failed approval-dependency child blocks the parent task until the
    * child is retried/cancelled. Mirrors the `block_parent` setting that

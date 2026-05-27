@@ -40,8 +40,8 @@ describe("workflow runtime policies", () => {
   it("registers OCR file-scope prep and utility child rules", () => {
     const policy = ocrWorkflow.metadata.runtimePolicy;
     assert.equal(policy?.preview?.rowTypeLabelSuffix, "Preview");
-    assert.equal(policy?.delegation?.utilityChildSurface, "delegation-member");
-    assert.deepEqual(policy?.delegation?.utilityChildWorkflows, ["eid-lookup", "active-check"]);
+    assert.equal(policy?.delegation?.flatMemberSurface, "delegation-member");
+    assert.deepEqual(policy?.delegation?.flatMemberChildWorkflows, ["eid-lookup", "active-check"]);
   });
 
   it("registers Oath Signature file prep and person member rules", () => {

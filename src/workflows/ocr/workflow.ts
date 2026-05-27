@@ -30,8 +30,8 @@ import { CancelledError } from "../../core/kernel/types.js";
 export const OCR_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
   ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
   delegation: {
-    utilityChildSurface: "delegation-member",
-    utilityChildWorkflows: ["eid-lookup", "active-check"],
+    flatMemberChildWorkflows: ["eid-lookup", "active-check"],
+    flatMemberSurface: "delegation-member",
   },
   preview: {
     rowTypeLabelSuffix: "Preview",

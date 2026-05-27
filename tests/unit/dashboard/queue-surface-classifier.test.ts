@@ -59,15 +59,15 @@ describe("buildQueueSurfaces", () => {
     ]);
   });
 
-  it("keeps approved OCR approval delegation visible and folds passive children underneath", () => {
+  it("keeps OCR policy utility children as flat delegation members", () => {
     const ocr = row({
       workflow: "ocr",
       id: "ocr-session-1",
       runId: "ocr-run-1",
       parentRunId: "oath-upload-run-1",
-      status: "done",
-      step: "approved",
-      data: { archetype: "batch-parent", mode: "prepare", formType: "oath", pdfOriginalName: "oath.pdf" },
+      status: "running",
+      step: "awaiting-approval",
+      data: { archetype: "batch", mode: "prepare", formType: "oath", pdfOriginalName: "oath.pdf" },
     });
     const eid = row({
       workflow: "eid-lookup",
@@ -75,7 +75,7 @@ describe("buildQueueSurfaces", () => {
       runId: "eid-run-1",
       parentRunId: "ocr-run-1",
       status: "done",
-      data: { searchName: "Doe, Jane", emplId: "10000001" },
+      data: { archetype: "single", searchName: "Doe, Jane", emplId: "10000001" },
     });
     const active = row({
       workflow: "active-check",
@@ -83,7 +83,7 @@ describe("buildQueueSurfaces", () => {
       runId: "active-run-1",
       parentRunId: "ocr-run-1",
       status: "done",
-      data: { searchName: "Doe, Jane", emplId: "10000001" },
+      data: { archetype: "single", searchName: "Doe, Jane", emplId: "10000001" },
     });
 
     const surfaces = buildQueueSurfaces({
@@ -91,17 +91,15 @@ describe("buildQueueSurfaces", () => {
       delegationSourceEntries: [ocr, eid, active],
       workflow: "ocr",
       workflowLabel: "OCR",
+      runtimePolicies,
     });
 
-    assert.equal(surfaces.groupRows.length, 1);
-    assert.equal(surfaces.groupRows[0]?.kind, "approval-delegation");
-    assert.equal(surfaces.groupRows[0]?.parentRunId, "ocr-run-1");
-    assert.equal(surfaces.groupRows[0]?.approvalState, "approved");
-    assert.deepEqual(surfaces.groupRows[0]?.members.map((entry) => entry.id), [
+    assert.equal(surfaces.groupRows.length, 0);
+    assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), [
       "ocr-session-1-r0",
       "ocr-session-1-r0-active",
+      "ocr-session-1",
     ]);
-    assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), []);
   });
 
   it("keeps a one-child approved OCR delegation as a group card", () => {
@@ -225,7 +223,7 @@ describe("buildQueueSurfaces", () => {
     assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), []);
   });
 
-  it("surfaces one passive utility child as a single passive-delegation group card", () => {
+  it("surfaces one delegated utility child as a flat delegation row", () => {
     const parent = row({
       workflow: "onboarding",
       id: "jane@example.edu",
@@ -242,7 +240,7 @@ describe("buildQueueSurfaces", () => {
       timestamp: "2026-05-12T10:01:00.000Z",
       status: "pending",
       data: {
-        archetype: "passive-child",
+        archetype: "single",
         taskRole: "utility",
         parentSubject: "Onboarding: jane@example.edu",
       },
@@ -255,12 +253,10 @@ describe("buildQueueSurfaces", () => {
       workflowLabel: "Onboarding",
     });
 
-    assert.equal(surfaces.groupRows.length, 1);
-    assert.equal(surfaces.groupRows[0]?.kind, "passive-delegation");
-    assert.deepEqual(surfaces.groupRows[0]?.members.map((entry) => entry.id), ["jane@example.edu"]);
+    assert.equal(surfaces.groupRows.length, 0);
     assert.deepEqual(
       new Set(surfaces.flatEntries.map((entry) => entry.runId)),
-      new Set(["parent-run-1"]),
+      new Set(["parent-run-1", "child-run-1"]),
     );
   });
 
