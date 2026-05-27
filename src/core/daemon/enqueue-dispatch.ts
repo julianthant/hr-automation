@@ -115,6 +115,7 @@ export function buildTrackerDataForInput(input: unknown): Record<string, string>
       ? { ...serializeInputForTracker(prefilled), ...baseData }
       : baseData;
   delete data.prefilledData;
+  delete data.__runtimeOptions;
   return data;
 }
 

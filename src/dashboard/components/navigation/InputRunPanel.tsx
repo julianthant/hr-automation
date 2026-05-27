@@ -5,6 +5,8 @@ import { cn } from "@/lib/utils";
 import { getInputRunConfig } from "@/lib/input-run-registry";
 import { RunModal } from "@/components/run-modal/RunModal";
 import { useOptionalBatchQueueParentRunId } from "@/components/hooks/useBatchQueueContext";
+import { useWorkflow } from "@/lib/workflows-context";
+import { StepPresetMenu, FULL_PRESET_ID } from "./StepPresetMenu";
 
 interface InputRunPanelProps {
   workflow: string;
@@ -28,12 +30,18 @@ interface InputRunPanelProps {
  */
 export function InputRunPanel({ workflow }: InputRunPanelProps) {
   const config = getInputRunConfig(workflow);
+  const workflowDef = useWorkflow(workflow);
+  const presets = workflowDef?.presets ?? [];
   const batchQueueParentRunId = useOptionalBatchQueueParentRunId();
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  // Per-page-load ephemeral preset selection — resets to "Full" on reload.
+  const [presetId, setPresetId] = useState<string>(FULL_PRESET_ID);
 
   if (!config) return null;
+
+  const selectedPreset = presetId === FULL_PRESET_ID ? null : presets.find((p) => p.id === presetId);
 
   async function submit() {
     if (submitting) return;
@@ -60,6 +68,9 @@ export function InputRunPanel({ workflow }: InputRunPanelProps) {
           workflow,
           inputs: parsed.inputs,
           ...(parentRunId ? { parentRunId } : {}),
+          ...(selectedPreset
+            ? { skipSteps: selectedPreset.skipSteps, preset: selectedPreset.id }
+            : {}),
         }),
       });
       const body = (await res.json().catch(() => ({}))) as {
@@ -69,9 +80,11 @@ export function InputRunPanel({ workflow }: InputRunPanelProps) {
       };
       if (res.status === 202 && body.ok) {
         const n = body.enqueued ?? parsed.inputs.length;
+        const description = selectedPreset
+          ? `Run mode: ${selectedPreset.label}. If no session was running, one is starting — approve Duo in the new browser window.`
+          : "If no session was running, one is starting — approve Duo in the new browser window.";
         toast.success(`Added ${n} ${n === 1 ? "item" : "items"} to ${workflow}`, {
-          description:
-            "If no session was running, one is starting — approve Duo in the new browser window.",
+          description,
           duration: 6000,
         });
         setValue("");
@@ -137,6 +150,14 @@ export function InputRunPanel({ workflow }: InputRunPanelProps) {
           <Play aria-hidden className="w-3.5 h-3.5" />
         )}
       </button>
+      {presets.length > 0 && (
+        <StepPresetMenu
+          presets={presets}
+          selectedId={presetId}
+          onSelect={setPresetId}
+          workflowLabel={workflowDef?.label ?? workflow}
+        />
+      )}
       {config.runEmptyAction && (
         <RunModal
           open={modalOpen}

@@ -104,6 +104,7 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     step: <R>(name: string, fn: () => Promise<R>) => stepper.step(name, fn),
     markStep: (name: string) => stepper.markStep(name),
     skipStep: (name: string) => stepper.skipStep(name),
+    shouldSkipStep: (name: string) => stepper.shouldSkipStep(name),
     parallel: <T extends Record<string, () => Promise<unknown>>>(tasks: T) => stepper.parallel(tasks),
     parallelAll: <T extends Record<string, () => Promise<unknown>>>(tasks: T) => stepper.parallelAll(tasks),
     retry,

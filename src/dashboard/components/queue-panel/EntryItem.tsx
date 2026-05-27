@@ -222,6 +222,10 @@ function EntryItemImpl({
     : "";
 
   const subject = typeof entry.data?.__subject === "string" ? entry.data.__subject : undefined;
+  // Run-mode preset chip — present only when the row was started with a
+  // non-default preset via the InputRunPanel gear menu. Read from the kernel-
+  // stamped `data.__preset` (set at runOneItem startup).
+  const presetId = typeof entry.data?.__preset === "string" ? entry.data.__preset : undefined;
   const footerSecondaryId = projection?.subtitle ?? subtitle ?? resolveEntryId(entry);
   const showLiveRow =
     (isFailed && Boolean(entry.error)) ||
@@ -272,6 +276,14 @@ function EntryItemImpl({
               </span>
             </div>
             <div className="flex items-center gap-1.5 flex-shrink-0">
+              {presetId && (
+                <span
+                  title={`Run mode: ${presetId}`}
+                  className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md font-sans bg-primary/15 text-primary"
+                >
+                  {presetId}
+                </span>
+              )}
               {activeCheckTag && (
                 <span
                   title={activeCheckTag.title}
