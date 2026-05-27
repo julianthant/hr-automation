@@ -1,21 +1,37 @@
-import { resolveRowArchetype } from "../domain/row-archetype.js";
+import { resolveRowArchetype, type RowArchetype } from "../domain/row-archetype.js";
 import {
   getWorkflowRuntimePolicy,
   type WorkflowRuntimePolicyLookup,
 } from "../domain/workflow-runtime/registry.js";
 import type { TrackerEntry } from "./jsonl.js";
 
-function isBatchParent(e: TrackerEntry): boolean {
-  return resolveRowArchetype(e) === "batch-parent";
+export interface TrackerRowClassification {
+  shape: RowArchetype;
+  scope: "root" | "delegated";
+}
+
+export function classifyTrackerRow(entry: TrackerEntry): TrackerRowClassification {
+  return {
+    shape: resolveRowArchetype(entry) as RowArchetype,
+    scope: entry.parentRunId ? "delegated" : "root",
+  };
+}
+
+function isBatchAnchor(entry: TrackerEntry): boolean {
+  return classifyTrackerRow(entry).shape === "batch";
+}
+
+function entryKey(entry: Pick<TrackerEntry, "workflow" | "id" | "runId">): string {
+  return `${entry.workflow}\0${entry.id}\0${entry.runId ?? ""}`;
 }
 
 function isDiscardedPrepRow(e: TrackerEntry): boolean {
-  if (!isBatchParent(e)) return false;
+  if (!isBatchAnchor(e)) return false;
   return e.status === "failed" && e.step === "discarded";
 }
 
 function isApprovedPrepRow(e: TrackerEntry): boolean {
-  if (!isBatchParent(e)) return false;
+  if (!isBatchAnchor(e)) return false;
   // New approval contract (2026-05-25): OCR rows only ever reach
   // `status="done"` after the operator approves. The kernel-path handler
   // suspends at `awaiting-approval` and the orchestrator emits `running`
@@ -27,12 +43,8 @@ function isApprovedPrepRow(e: TrackerEntry): boolean {
   return e.status === "done" && e.step === "approved";
 }
 
-function isBatchParentAnchor(e: TrackerEntry): boolean {
-  return isBatchParent(e) && !isDiscardedPrepRow(e);
-}
-
-function isPassiveDelegationMember(entry: TrackerEntry): boolean {
-  return resolveRowArchetype(entry) === "passive-child";
+function isVisibleBatchAnchor(e: TrackerEntry): boolean {
+  return isBatchAnchor(e) && !isDiscardedPrepRow(e);
 }
 
 function runIdFor(entry: Pick<TrackerEntry, "id" | "runId">): string {
@@ -45,7 +57,7 @@ function rootPersistingParentRunIds(
 ): Set<string> {
   const runIds = new Set<string>();
   for (const entry of entries) {
-    if (!isBatchParentAnchor(entry)) continue;
+    if (!isVisibleBatchAnchor(entry)) continue;
     const policy = getWorkflowRuntimePolicy(entry.workflow, runtimePolicies);
     if (policy.delegation?.rootRowPersistsThroughChildren) {
       runIds.add(runIdFor(entry));
@@ -54,14 +66,41 @@ function rootPersistingParentRunIds(
   return runIds;
 }
 
+function buildEntriesByRunId(entries: TrackerEntry[]): Map<string, TrackerEntry> {
+  const map = new Map<string, TrackerEntry>();
+  for (const entry of entries) {
+    map.set(runIdFor(entry), entry);
+  }
+  return map;
+}
+
+function isPolicyFlatMemberChild(
+  entry: TrackerEntry,
+  entriesByRunId: ReadonlyMap<string, TrackerEntry>,
+  runtimePolicies?: WorkflowRuntimePolicyLookup,
+): boolean {
+  const classification = classifyTrackerRow(entry);
+  if (classification.shape !== "single" || classification.scope !== "delegated") return false;
+  if (!entry.parentRunId) return false;
+  const parent = entriesByRunId.get(entry.parentRunId);
+  if (!parent) return false;
+  const policy = getWorkflowRuntimePolicy(parent.workflow, runtimePolicies);
+  const delegation = policy.delegation;
+  if (!delegation?.flatMemberChildWorkflows?.includes(entry.workflow)) return false;
+  return (delegation.flatMemberSurface ?? "delegation-member") === "delegation-member";
+}
+
 function buildMembersByParentRunId(
   entries: TrackerEntry[],
   rootPersistingRunIds: Set<string>,
+  entriesByRunId: ReadonlyMap<string, TrackerEntry>,
+  runtimePolicies?: WorkflowRuntimePolicyLookup,
 ): Map<string, TrackerEntry[]> {
   const map = new Map<string, TrackerEntry[]>();
   for (const entry of entries) {
     if (!entry.parentRunId) continue;
-    if (isBatchParent(entry) && !rootPersistingRunIds.has(entry.parentRunId)) continue; // batch-parent rows are anchors, not members
+    if (isPolicyFlatMemberChild(entry, entriesByRunId, runtimePolicies)) continue;
+    if (isBatchAnchor(entry) && !rootPersistingRunIds.has(entry.parentRunId)) continue; // batch rows are anchors, not members
     const list = map.get(entry.parentRunId) ?? [];
     list.push(entry);
     map.set(entry.parentRunId, list);
@@ -69,7 +108,7 @@ function buildMembersByParentRunId(
   return map;
 }
 
-function groupPendingDelegatedBatchParents(
+function groupPendingDelegatedBatchAnchors(
   entries: TrackerEntry[],
   rootPersistingRunIds: Set<string>,
 ): Map<string, TrackerEntry[]> {
@@ -77,7 +116,7 @@ function groupPendingDelegatedBatchParents(
   for (const entry of entries) {
     if (!entry.parentRunId) continue;
     if (rootPersistingRunIds.has(entry.parentRunId)) continue;
-    if (!isBatchParentAnchor(entry)) continue;
+    if (!isVisibleBatchAnchor(entry)) continue;
     if (isApprovedPrepRow(entry)) continue;
     const list = map.get(entry.parentRunId) ?? [];
     list.push(entry);
@@ -89,7 +128,7 @@ function groupPendingDelegatedBatchParents(
 function uniqueFlatEntries(entries: TrackerEntry[]): TrackerEntry[] {
   const byKey = new Map<string, TrackerEntry>();
   for (const entry of entries) {
-    byKey.set(`${entry.workflow}\0${entry.id}\0${entry.runId ?? ""}`, entry);
+    byKey.set(entryKey(entry), entry);
   }
   return [...byKey.values()];
 }
@@ -145,21 +184,30 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
   const visibleSources = input.delegationSourceEntries.filter(
     (entry) => !isDiscardedPrepRow(entry),
   );
+  const entriesByRunId = buildEntriesByRunId(visibleSources);
   const rootPersistingRunIds = rootPersistingParentRunIds(visibleSources, input.runtimePolicies);
-  const membersByParentRunId = buildMembersByParentRunId(visibleSources, rootPersistingRunIds);
-  const batchParentAnchors = visibleEntries.filter(isBatchParentAnchor);
-  const batchParentAnchorRunIds = new Set(batchParentAnchors.map((entry) => entry.runId ?? entry.id));
-  const approvalParentRunIds = new Set([...batchParentAnchorRunIds]);
-  const pendingDelegatedBatchParentsByParentRunId =
-    groupPendingDelegatedBatchParents(batchParentAnchors, rootPersistingRunIds);
-  const pendingDelegatedBatchParentRunIds = new Set<string>();
+  const membersByParentRunId = buildMembersByParentRunId(
+    visibleSources,
+    rootPersistingRunIds,
+    entriesByRunId,
+    input.runtimePolicies,
+  );
+  const batchAnchors = visibleEntries.filter(isVisibleBatchAnchor);
+  const batchAnchorRunIds = new Set(batchAnchors.map((entry) => entry.runId ?? entry.id));
+  const approvalParentRunIds = new Set([...batchAnchorRunIds]);
+  const pendingDelegatedBatchAnchorsByParentRunId =
+    groupPendingDelegatedBatchAnchors(batchAnchors, rootPersistingRunIds);
+  const pendingDelegatedBatchAnchorRunIds = new Set<string>();
   const singleDelegationEntries: TrackerEntry[] = [];
+  const flatDelegationMemberEntries = visibleSources.filter((entry) =>
+    isPolicyFlatMemberChild(entry, entriesByRunId, input.runtimePolicies),
+  );
 
   const groupRows: TrackerQueueGroupSurface[] = [];
 
-  for (const [parentRunId, members] of pendingDelegatedBatchParentsByParentRunId) {
+  for (const [parentRunId, members] of pendingDelegatedBatchAnchorsByParentRunId) {
     for (const member of members) {
-      pendingDelegatedBatchParentRunIds.add(member.runId ?? member.id);
+      pendingDelegatedBatchAnchorRunIds.add(member.runId ?? member.id);
     }
     if (members.length === 1) {
       singleDelegationEntries.push(members[0]!);
@@ -173,9 +221,9 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
     });
   }
 
-  for (const parent of batchParentAnchors) {
+  for (const parent of batchAnchors) {
     const parentRunId = parent.runId ?? parent.id;
-    if (pendingDelegatedBatchParentRunIds.has(parentRunId)) continue;
+    if (pendingDelegatedBatchAnchorRunIds.has(parentRunId)) continue;
     const members = membersByParentRunId.get(parentRunId) ?? [];
     const approved = isApprovedPrepRow(parent);
 
@@ -187,7 +235,7 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
       continue;
     }
 
-    // A prep/upload batch-parent represents one operator upload action, so
+    // A prep/upload batch anchor represents one operator upload action, so
     // it stays an approval-delegation card regardless of approval state and
     // signer count. A single-signer PDF must not collapse into a flat row
     // after OCR approval — that would change the row type mid-lifecycle.
@@ -204,30 +252,19 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
     if (approvalParentRunIds.has(parentRunId)) continue;
     if (members.length === 1) {
       const only = members[0]!;
-      if (isPassiveDelegationMember(only)) {
-        groupRows.push({
-          kind: "passive-delegation",
-          parentRunId,
-          members,
-          titleOverride: only.data?.parentSubject,
-        });
-      } else {
-        singleDelegationEntries.push(only);
-      }
+      singleDelegationEntries.push(only);
       continue;
     }
-    const passive = members.every(isPassiveDelegationMember);
     groupRows.push({
-      kind: passive ? "passive-delegation" : "batch",
+      kind: "batch",
       parentRunId,
       members,
-      titleOverride: passive ? members[0]?.data?.parentSubject : undefined,
     });
   }
 
   const groupedParentRunIds = new Set(groupRows.map((surface) => surface.parentRunId));
   const visibleFlatEntries = visibleEntries.filter((entry) => {
-    if (isBatchParentAnchor(entry)) {
+    if (isVisibleBatchAnchor(entry)) {
       if (isApprovedPrepRow(entry)) {
         // Suppress the approved prep row only when its members are rendered
         // elsewhere (single-delegation entry or group card). With 0 visible
@@ -243,6 +280,7 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
     return true;
   });
   const flatEntries = uniqueFlatEntries([
+    ...flatDelegationMemberEntries,
     ...singleDelegationEntries,
     ...visibleFlatEntries,
   ]);

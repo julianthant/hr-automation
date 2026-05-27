@@ -57,4 +57,4 @@ Same topology as **eid-lookup**: up to 4 workers share UCPath browser contexts; 
 ## Lessons Learned
 
 - **2026-05-25: Dashboard input run is the public start path.** `npm run active-check` is retired; typed name/EID starts belong in `InputRunPanel` and `/api/enqueue`.
-- **2026-05-20: Runtime policy mirrors eid-lookup utility defaults.** `ACTIVE_CHECK_WORKFLOW_RUNTIME_POLICY` spreads the shared default policy and sets `memberRow.titleSource: "person"` for OCR utility children. Direct input-run rows stay normal surfaces; OCR fan-out flatness comes from the OCR parent policy's `utilityChildWorkflows` list.
+- **2026-05-20: Runtime policy mirrors eid-lookup utility defaults.** `ACTIVE_CHECK_WORKFLOW_RUNTIME_POLICY` spreads the shared default policy and sets `memberRow.titleSource: "person"` for OCR utility children. Direct input-run rows stay normal surfaces; OCR fan-out flatness comes from the OCR parent policy's `flatMemberChildWorkflows` list.
