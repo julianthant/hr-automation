@@ -125,7 +125,7 @@ function buildMockPage(): { page: Page; calls: CallRecord[] } {
     // Sub-objects — must be proxied lazily on access.
     keyboard,
     mouse,
-    mainFrame,
+    mainFrame: () => mainFrame,
   } as unknown as Page
   return { page, calls }
 }
@@ -175,7 +175,11 @@ describe('wrapPageWithSignal', () => {
     const callerController = new AbortController()
     const wrapped = wrapPageWithSignal(page, ctxController.signal)
 
-    await wrapped.click('button', { signal: callerController.signal, timeout: 500 })
+    const callerOptions = {
+      signal: callerController.signal,
+      timeout: 500,
+    } as Parameters<Page['click']>[1] & { signal: AbortSignal }
+    await wrapped.click('button', callerOptions)
     assert.equal(lastOptions(calls)?.signal, callerController.signal, 'caller signal wins')
     assert.equal(lastOptions(calls)?.timeout, 500)
   })
@@ -244,12 +248,12 @@ describe('wrapPageWithSignal', () => {
     const signal = new AbortController().signal
     const wrapped = wrapPageWithSignal(page, signal)
 
-    await wrapped.mainFrame.waitForSelector('#foo', { state: 'visible' })
+    await wrapped.mainFrame().waitForSelector('#foo', { state: 'visible' })
     const wait = calls.find((c) => c.method === 'frame.waitForSelector')
     assert.equal((wait?.args[wait.args.length - 1] as Record<string, unknown>)?.signal, signal)
 
     // Frame.locator chain still wraps.
-    await wrapped.mainFrame.locator('#x').click({})
+    await wrapped.mainFrame().locator('#x').click({})
     const click = [...calls].reverse().find((c) => c.method === 'locator.click')
     assert.equal((click?.args[click.args.length - 1] as Record<string, unknown>)?.signal, signal)
   })

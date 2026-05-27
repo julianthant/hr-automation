@@ -14,7 +14,12 @@ import { log } from '../../utils/log.js'
 export interface RunOneItemOpts<TData, TSteps extends readonly string[]> {
   wf: RegisteredWorkflow<TData, TSteps>
   session: Session
-  item: TData
+  /**
+   * Raw queued input. It may include kernel-only channels such as
+   * `prefilledData` or `__runtimeOptions`; `runOneItem` strips those channels
+   * and validates the cleaned value before invoking the typed handler.
+   */
+  item: unknown
   itemId: string
   runId: string
   trackerStub?: boolean
@@ -258,6 +263,8 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
   // row before the first step runs; withTrackedWorkflow skips its own pending
   // emit when preAssignedRunId is provided.
   const stringifiedSeed = buildInitialTrackerData(wf, handlerInput)
+  const rowArchetype = runtimeOptions?.rowArchetype
+    ?? deriveRowArchetype(resolveArchetype(wf.config, handlerInput), args.parentRunId)
   // Stamp the run-mode preset id on the seed so it's visible from the very
   // first tracker row (pending). The dashboard reads `data.__preset` to render
   // a small chip next to the row; absent on the implicit "Full" preset.
@@ -282,6 +289,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       precomputedSeed: stringifiedSeed,
       nameIdStamp: 'always-on-seed',
       parentRunId: args.parentRunId,
+      rowArchetype,
     })
     emitTrackerRow(
       {
@@ -315,7 +323,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
           runId,
           status: 'running',
           step: `auth:${systemId}`,
-          data: { ...stringifiedSeed, archetype: deriveRowArchetype(resolveArchetype(wf.config, handlerInput), args.parentRunId) },
+          data: { ...stringifiedSeed, archetype: rowArchetype },
         },
         trackerDir,
       )
@@ -347,7 +355,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
           // input is already on that row — no need to re-stamp.
           ...(callerPreEmits ? {} : (inputForRow ? { input: inputForRow } : {})),
           ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
-          archetype: deriveRowArchetype(resolveArchetype(wf.config, handlerInput), args.parentRunId),
+          archetype: rowArchetype,
         },
       )
     }, trackerDir)

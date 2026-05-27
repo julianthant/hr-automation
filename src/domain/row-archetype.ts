@@ -86,7 +86,7 @@ export function resolveRowArchetype(entry: ResolveEntry): RowArchetype {
   );
 }
 
-function isRowArchetype(v: string): v is RowArchetype {
+export function isRowArchetype(v: string): v is RowArchetype {
   return v === "single" || v === "batch-parent" || v === "batch-member"
     || v === "dispatch" || v === "delegate-child" || v === "passive-child";
 }

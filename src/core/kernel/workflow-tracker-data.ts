@@ -3,6 +3,7 @@ import { normalizeDetailField } from './registry.js'
 import type { WithTrackedWorkflowOpts } from '../../tracker/jsonl.js'
 import { operatorSubjectData } from '../../domain/operator-subject.js'
 import { queueTitleData } from '../../domain/queue-title.js'
+import { isRowArchetype, type RowArchetype } from '../../domain/row-archetype.js'
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
@@ -32,6 +33,9 @@ export function toRecord(input: unknown): Record<string, unknown> | null {
  *   gear menu passes the chosen preset's skip set under this key; the kernel
  *   exposes it as `ctx.shouldSkipStep(name)` for handlers to OR into their
  *   existing skip branches.
+ * - `runtimeOptions.rowArchetype` (dashboard direct input batches) — internal
+ *   row-shape override for utility workflows that should render typed
+ *   multi-value runs as normal batch rows rather than passive delegation.
  *
  * The kernel strips both channels before handing the input to the workflow's
  * Zod schema so workflow files don't have to know about either contract.
@@ -42,7 +46,7 @@ export function toRecord(input: unknown): Record<string, unknown> | null {
 export interface SplitInput {
   cleaned: unknown
   prefilled: Record<string, unknown> | null
-  runtimeOptions: { skipSteps?: string[]; preset?: string } | null
+  runtimeOptions: { skipSteps?: string[]; preset?: string; rowArchetype?: RowArchetype } | null
 }
 
 export function splitPrefilled(input: unknown): SplitInput {
@@ -64,14 +68,17 @@ export function splitPrefilled(input: unknown): SplitInput {
 
 function normalizeRuntimeOptions(
   raw: Record<string, unknown>,
-): { skipSteps?: string[]; preset?: string } | null {
-  const out: { skipSteps?: string[]; preset?: string } = {}
+): { skipSteps?: string[]; preset?: string; rowArchetype?: RowArchetype } | null {
+  const out: { skipSteps?: string[]; preset?: string; rowArchetype?: RowArchetype } = {}
   const skipSteps = raw.skipSteps
   if (Array.isArray(skipSteps) && skipSteps.every((s): s is string => typeof s === 'string')) {
     if (skipSteps.length > 0) out.skipSteps = [...skipSteps]
   }
   if (typeof raw.preset === 'string' && raw.preset.length > 0) {
     out.preset = raw.preset
+  }
+  if (typeof raw.rowArchetype === 'string' && isRowArchetype(raw.rowArchetype)) {
+    out.rowArchetype = raw.rowArchetype
   }
   return Object.keys(out).length > 0 ? out : null
 }

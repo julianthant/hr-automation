@@ -99,3 +99,10 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Selector:** `hrTasks.smartHRTransactionsLink` in `selectors.ts`
 **References:** separations docs 3917 and 4025 failed on 2026-05-27 with `ucpath-transaction-failed` after this strict-mode collision.
 **Tags:** smart-hr, transactions, sidebar, strict-mode, exact, role, ss-smart-hr
+
+## 2026-05-27 — Submitted transaction ID is below the visible viewport
+
+**Tried:** Reopening the submitted Smart HR transaction and taking the normal workflow screenshot from the top of the Enter Transaction Information page.
+**Failed because:** The `Transaction ID: T...` field and the approval strip (`Transaction: T..., ID: ...`) are below the comments/save area. A top-positioned screenshot hides the usable T-number, and a failed parse returned before any submitted-page evidence screenshot was captured.
+**Fix:** Scroll the Smart HR iframe to transaction readback markers before parsing and before workflow screenshots. Parse both lower-page shapes via `extractSmartHrTransactionNumber`, and capture `ucpath-transaction-submitted-missing-number` when UCPath accepted the submit but parsing still returns empty.
+**Tags:** transaction, readback, screenshot, scroll, smart-hr, separations

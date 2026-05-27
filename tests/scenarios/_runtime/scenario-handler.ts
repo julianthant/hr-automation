@@ -113,7 +113,9 @@ export function cloneWithScript<TData, TSteps extends readonly string[]>(
           } else if (beat.kind === "step") {
             await ctx.step(beat.name, async () => {
               hooks.onStepReached?.(beat.name);
-              if (beat.updateData) ctx.updateData(beat.updateData);
+              if (beat.updateData) {
+                ctx.updateData(beat.updateData as Partial<TData & Record<string, unknown>>);
+              }
               if (beat.hold) await hooks.holdAt?.(beat.name);
               if (typeof beat.signalWaitMs === "number") {
                 // Simulate a long AbortSignal-aware Playwright wait. If the
@@ -137,7 +139,7 @@ export function cloneWithScript<TData, TSteps extends readonly string[]>(
               if (beat.throw) throw beat.throw;
             });
           } else {
-            ctx.updateData(beat.data);
+            ctx.updateData(beat.data as Partial<TData & Record<string, unknown>>);
           }
         }
       },
